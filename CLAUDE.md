@@ -352,6 +352,17 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+**Sesion:** 2026-08-25 (`metrik-one--actas` → producto: **actas automaticas de reunion — generacion LLM + envio por email y cron diario, arranca en modo borrador**). PR **#391** mergeado y desplegado a produccion. Migracion `actas_generadas` aplicada.
+
+- **Pipeline nuevo en `src/lib/actas/`:** `calendario.ts` (listado Google Calendar del dia) → `seleccion.ts` (filtra por duracion REAL de transcripcion ≥45 min, no la agendada; clasifica interna/externa por dominio; siempre devuelve el motivo de descarte) → `transcripcion.ts` (parseo del doc de Meet) → `generacion.ts` (Gemini 2.5-flash, `responseSchema` forzado a `{resumen, decisiones[], compromisos: {responsable, tarea, fecha_limite}[]}`) → `envio.ts` (Resend, mismo patron de `send-cuenta-cobro.ts`) → cron `src/app/api/crons/actas-diarias/route.ts` (`0 0 * * *` UTC = 19:00 Bogota, `CRON_SECRET`, try/catch por candidata para que una reunion rota no tumbe el resto).
+- **⚠️ El cron dispara a las 00:00 UTC = 19:00 Bogota del dia ANTERIOR.** `new Date(iso).getDate()` lee la zona del RUNTIME, no Bogota — hay que desplazar por el offset fijo (-5, sin DST) y leer componentes UTC, mismo patron que `listarReunionesDelDia` de `calendario.ts`. Bug propio detectado y corregido antes de commitear, no llego a produccion.
+- **Arranca en modo `revision` (constante `MODO_ENVIO_DEFAULT` en `envio.ts`):** primera semana los correos salen `[BORRADOR]` solo a mauricio.moreno@metrik.com.co, nunca a los participantes reales. El pipeline completo corre igual en ambos modos (genera, persiste, intenta enviar) — lo unico que cambia es el destinatario. Pasar a `produccion` es un cambio manual explicito en codigo, pendiente de que Mauricio valide la calidad de los primeros borradores. Patron capturado como regla reusable: `cerebro/reglas/automatizacion-arranca-en-revision.md`.
+- **Idempotencia por `transcript_file_id` UNIQUE** en `actas_generadas` — si el cron corre dos veces sobre la misma reunion, no duplica el acta ni el envio.
+- **No verificado contra APIs reales** (Resend/Gemini) — 62/62 tests con `fetch` mockeado, sin dry-run en vivo todavia.
+- **Fuera de alcance de esta version** (spec completa en `proyectos/metrik/one/2026-08-18_brief-max-actas-automaticas.md`): §8bis vincular el acta a un proyecto con compromisos accionables, §8ter deteccion de prospecto + pregunta de creacion de negocio al iniciar sesion.
+
+---
+
 **Sesion:** 2026-08-18 (`soena--ve` → producto: **la plata del cliente se imputa con UNA regla, y anular deja de depender del tipo de cobro**). PRs **#301**, **#307**, **#310** y **#314** mergeados y desplegados.
 
 - **⚠️⚠️ Habia DOS reglas de imputacion del dinero conviviendo, con $24,7M de diferencia.** El motor (`repartirPagoTarifaHonorario`) cubria la **tarifa primero**; la vista del P&L (`v_cobro_valor`) imputaba por escalones **honorario, tarifa, honorario**. Sobre los mismos 111 cobros de SOENA, una llamaba tarifa a $53,3M y la otra a $28,4M. **Decision de Mauricio: primero honorario, siempre** ("sin eso no detona lo demas"). Gana la de la vista y queda UNA, en `src/lib/upme/imputacion-pago.ts` (puro): `escalonesDelNegocio` espeja los techos de `v_negocio_valor` (tramo1 = honorario del plan, tarifa, tramo2 = resto) e `imputarPago` reparte contra ellos contando lo ya recaudado. `repartirPagoTarifaHonorario` **borrada**.
