@@ -40,12 +40,16 @@ const LINEA = '34a0fa6b-9ed3-4652-a419-42601132d1a8'
 const FUENTE = 'historico_iva_2026_07'
 const ASSIGNED_BY = '8b60b7aa-b62a-4beb-a6b8-d2ba1d96282b' // profiles.id (Jessica) — solo para negocio_responsables.assigned_by
 
-/** Bloques donde viven los 4 documentos fuente. */
+/** Bloques donde viven los documentos fuente. */
 const DOC = {
-  factura: 'f2227f75-37e0-4ff9-8e78-0038f0c9c4c6', // Validación
-  rut:     'b734032c-19ca-4084-8664-ed2e3036b648', // Documentación
-  upme:    '989f3bca-3d72-4470-94c9-9e1da7f267eb', // Certificación
-  cert:    '5d744172-172f-406b-8da6-4a126eb70ed3', // Anexos (se movió el 2026-07-24)
+  factura:   'f2227f75-37e0-4ff9-8e78-0038f0c9c4c6', // Validación
+  rut:       'b734032c-19ca-4084-8664-ed2e3036b648', // Documentación
+  upme:      '989f3bca-3d72-4470-94c9-9e1da7f267eb', // Certificación
+  cert:      '5d744172-172f-406b-8da6-4a126eb70ed3', // Anexos (se movió el 2026-07-24)
+  // Los dos de Inclusión: solo los traen los casos que entran por esa etapa, porque
+  // son justo lo que la UPME pide para incluir un vehículo que aún no está registrado.
+  ficha:     '4821f586-742c-4f05-a463-1c9fe0a4c19a', // Inclusión — ficha técnica
+  emisiones: 'c730288e-a974-4bd4-a075-b5467df6f92e', // Inclusión — certificado de emisiones (CEPD)
 }
 /** Bloques de datos que gobiernan gates y routing. */
 const DATO = {
@@ -60,6 +64,12 @@ const DATO = {
   vehiculos:            'fc3550b7-68c3-4d7f-80f5-7cca876072fc',
   solicitantes:         'b753555b-ad88-4955-a983-ad45da35f920',
   radicado_cert:        'a338513e-fdd4-41a6-8ded-ec11cb91690c',
+  // El radicado de INCLUSIÓN no es el de certificación: son dos trámites y dos bloques.
+  // Meter el de inclusión en `radicado_cert` deja el dato en una etapa que el caso no ha
+  // alcanzado (Cargue, orden 7) y deja vacío el gate que sí está abierto.
+  decision_inclusion:   'c7a8959b-e105-4109-b49b-c23eb8f47036',
+  radicado_incl:        '90a12ede-7310-4f41-b2ce-7c850bd0326c',
+  servicio_contratado:  '20ede2cd-9647-4c8f-b149-fd49be53620e',
   confirmacion_cargue:  'b9d634bd-584c-4c83-ae57-a730cec402b6',
   comprobante_pago:     'e306f492-890a-47be-a223-c83ea62ef917',
   propuesta:            '7620b095-3b47-475f-9f95-b6bb3df8607a',
@@ -127,12 +137,22 @@ type Fila = {
   id_hubspot: string; nombre: string; nombre_negocio: string; codigo: string
   celular: string; correo: string; cedula: string
   rut: string | null; factura: string | null; upme: string | null; cert_bancario: string | null
+  ficha?: string | null; emisiones?: string | null
   marca: string | null; linea: string | null; anio: string | number | null
   comercial: string | null; responsable_staff_id: string | null; responsable_nombre: string | null
   tarifa_con_iva: number | null; primer_pago: number | null; ref_anticipo: string
   segundo_pago: number | null; ref_segundo: string
   radicado_upme: string | null; seccional: string | null; fecha_cita: string | null
   etapa: string; etapa_id: string; etapa_orden: number; stage: string; motivo_etapa: string
+  /**
+   * Campos opcionales para los casos que NO entran ya avanzados. Omitidos, el script se
+   * comporta igual que en el cargue de julio/agosto (vehículo ya registrado en UPME,
+   * servicio completo), que es lo que traían esos 189 casos.
+   */
+  cargado_upme?: 'si' | 'no'
+  servicio?: 'completo' | 'solo_upme' | 'solo_iva'
+  decision_incluir?: 'si' | 'no'
+  radicado_inclusion?: string | null
 }
 
 const mimeOf = (p: string) => { const l = p.toLowerCase(); return l.endsWith('.png') ? 'image/png' : (l.endsWith('.jpg') || l.endsWith('.jpeg')) ? 'image/jpeg' : 'application/pdf' }
@@ -247,7 +267,7 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
 
   // 1. descargar + extraer los documentos que tenga
   const local: Record<string, string> = {}
-  for (const k of ['rut', 'factura', 'upme', 'cert_bancario'] as const) {
+  for (const k of ['rut', 'factura', 'upme', 'cert_bancario', 'ficha', 'emisiones'] as const) {
     const rp = f[k]; if (!rp) continue
     const lp = join(dir, `${k}.${rp.split('.').pop()!.replace(/[^a-zA-Z0-9]/g, '') || 'pdf'}`)
     if (!existsSync(lp)) descargar(rp, lp)
@@ -338,14 +358,21 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
   // El certificado bancario se vence a los 30 días (decisión 2026-07-24): se sube el
   // archivo para no perderlo, pero queda PENDIENTE — un humano valida vigencia.
   if (local.cert_bancario) await subir(DOC.cert, local.cert_bancario, 'Certificado bancario.pdf', cert, 'pendiente')
+  if (local.ficha) await subir(DOC.ficha, local.ficha, 'Ficha técnica.pdf', null)
+  if (local.emisiones) await subir(DOC.emisiones, local.emisiones, 'Certificado de emisiones.pdf', null)
 
   // 6. bloques de datos que gobiernan gates y routing
+  const servicio = f.servicio ?? 'completo'
   const filas: Array<Record<string, unknown>> = [
-    migrado(negocioId, DATO.registro_upme, { cargado_upme: 'si' }),
+    migrado(negocioId, DATO.registro_upme, { cargado_upme: f.cargado_upme ?? 'si' }),
     migrado(negocioId, DATO.numero_solicitantes, { numero_solicitantes: /[/]|\by\b/i.test(f.nombre) ? 2 : 1 }),
     migrado(negocioId, DATO.tipo_de_solicitante, { tipo_persona: 'natural' }),
-    migrado(negocioId, DATO.certificacion_upme, { requiere_certificacion_upme: true }),
-    migrado(negocioId, DATO.devolucion_de_iva, { requiere_devolucion_iva: true }),
+    // `servicio_contratado` es la fuente: los dos toggles de abajo están declarados con
+    // `lock_when` sobre él. Sin este bloque la pantalla los muestra derivados de nada, que
+    // es la deuda que dejó el cargue de julio (ver 2026-08-03_9-casos-sin-servicio-contratado).
+    migrado(negocioId, DATO.servicio_contratado, { servicio }),
+    migrado(negocioId, DATO.certificacion_upme, { requiere_certificacion_upme: servicio !== 'solo_iva' }),
+    migrado(negocioId, DATO.devolucion_de_iva, { requiere_devolucion_iva: servicio !== 'solo_upme' }),
     migrado(negocioId, DATO.titularidad, { modalidad_solicitante: 'unico' }),
     migrado(negocioId, DATO.cita_dian_requerida, { seccional_display: f.seccional ?? null, requiere_cita_dian: ['Bogota', 'Medellin', 'Cali', 'Bucaramanga'].includes(noac(f.seccional ?? '').replace(/^\w/, (c) => c.toUpperCase())) }),
     migrado(negocioId, DATO.confirmar_tarifa),
@@ -354,6 +381,8 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
     migrado(negocioId, DATO.comprobante_pago),
   ]
   if (f.radicado_upme) filas.push(migrado(negocioId, DATO.radicado_cert, { radicado_certificacion: f.radicado_upme }))
+  if (f.decision_incluir) filas.push(migrado(negocioId, DATO.decision_inclusion, { decision_incluir: f.decision_incluir }))
+  if (f.radicado_inclusion) filas.push(migrado(negocioId, DATO.radicado_incl, { radicado_inclusion: f.radicado_inclusion }))
   if (fac) filas.push(migrado(negocioId, DATO.vehiculos, {
     tipo_vehiculo: val(fac, 'tipo_vehiculo'), marca: val(fac, 'marca'), linea: val(fac, 'linea'),
     modelo: val(fac, 'modelo') ?? f.anio, cantidad: val(fac, 'cantidad') ?? 1,
@@ -392,8 +421,9 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
 }
 
 function plan(f: Fila) {
-  const docs = (['factura', 'rut', 'upme', 'cert_bancario'] as const).filter((k) => f[k])
-  console.log(`${f.codigo}  ${f.nombre_negocio.slice(0, 42).padEnd(42)} → ${f.etapa.padEnd(14)} ${(f.seccional ?? '?').padEnd(12)} resp=${(f.responsable_nombre ?? '—').padEnd(16)} docs=[${docs.join(',')}]`)
+  const docs = (['factura', 'rut', 'upme', 'cert_bancario', 'ficha', 'emisiones'] as const).filter((k) => f[k])
+  const upme = `upme=${f.cargado_upme ?? 'si'}`
+  console.log(`${f.codigo}  ${f.nombre_negocio.slice(0, 42).padEnd(42)} → ${f.etapa.padEnd(14)} ${(f.seccional ?? '?').padEnd(12)} resp=${(f.responsable_nombre ?? '—').padEnd(16)} ${(f.servicio ?? 'completo').padEnd(9)} ${upme.padEnd(8)} docs=[${docs.join(',')}]`)
   if (docs.length < 3) console.log(`        ⚠ solo ${docs.length} documentos`)
 }
 
