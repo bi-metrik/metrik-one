@@ -14,7 +14,7 @@ export interface CasillaMeta {
 // Orden = orden de render. grupo = sección visual.
 const CASILLAS_010: CasillaMeta[] = [
   // Identificación del solicitante (fuente: RUT)
-  { slug: 'tipo_documento', label: 'Tipo de documento', grupo: 'Solicitante', casilla: '5' },
+  { slug: 'tipo_documento', label: 'Tipo de documento', grupo: 'Solicitante', casilla: '20' },
   { slug: 'nit', label: 'Número de identificación', grupo: 'Solicitante', casilla: '6' },
   { slug: 'dv', label: 'DV', grupo: 'Solicitante', casilla: '6' },
   { slug: 'primer_apellido', label: 'Primer apellido', grupo: 'Solicitante', casilla: '7' },
@@ -59,7 +59,7 @@ const CASILLAS_010: CasillaMeta[] = [
 ]
 
 const CASILLAS_1668: CasillaMeta[] = [
-  { slug: 'tipo_documento', label: 'Tipo de documento', grupo: 'Titular' },
+  { slug: 'tipo_documento', label: 'Tipo de documento', grupo: 'Titular', casilla: '20' },
   { slug: 'numero_identificacion', label: 'Número de identificación', grupo: 'Titular' },
   { slug: 'dv', label: 'DV', grupo: 'Titular' },
   { slug: 'primer_apellido', label: 'Primer apellido', grupo: 'Titular' },

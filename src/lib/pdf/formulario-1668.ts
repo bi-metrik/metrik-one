@@ -2,6 +2,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
 import { drawCells, drawFixed, type Cell } from './acroform'
+import { TIPO_DOCUMENTO_DIAN } from '@/lib/dian/tipo-documento'
 
 // Overlay sobre el PDF oficial de la DIAN (Formato 1668 — Información /
 // Constancia de Titularidad de Cuenta Bancaria). El fondo no se modifica.
@@ -33,7 +34,7 @@ export interface Formulario1668Datos {
 }
 
 export interface Formulario1668Constantes {
-  tipo_documento: string // casilla 20 + 1002 — "13" (Cédula de Ciudadanía)
+  tipo_documento: string // casilla 20 — SIN USO: el render fija "31" (NIT). Ver línea ~152
   cod_representacion: string // casilla 1005 — "01"
 }
 
@@ -149,7 +150,7 @@ export async function generarFormulario1668(
   // Tipo de documento (casilla 20): DETERMINISTA "31" (NIT). Decisión de Mauricio
   // (2026-07-16): el titular se identifica con "31", no con "13" (CC). Se fija en el
   // código (como la casilla 1002 = "CC") y NO se toma de constantes.tipo_documento.
-  fixed('31', INFO.tipo_documento)
+  fixed(TIPO_DOCUMENTO_DIAN.nit, INFO.tipo_documento)
   // Datos del titular (variables, editables). numero_identificacion y dv se
   // reutilizan en la sección de firma → mismo nombre de campo, queda sincronizado.
   edit('numero_identificacion', datos.numero_identificacion, INFO.numero_identificacion)

@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { uploadFileToDrive, setFilePublicByLink, createSubfolderPath } from '@/lib/google-drive'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
+import { TIPO_DOCUMENTO_DIAN } from '@/lib/dian/tipo-documento'
 import { generarFormulario1668, type Formulario1668Datos, type Formulario1668Constantes } from '@/lib/pdf/formulario-1668'
 import DeclaracionJuramentadaPDF from '@/lib/pdf/declaracion-juramentada-pdf'
 import CartaAutorizacionPDF from '@/lib/pdf/carta-autorizacion-pdf'
@@ -169,6 +170,14 @@ function aplicarDeterministas(
   overrides: Record<string, string | null>,
 ): void {
   const usaDv = template === 'formulario-010' || template === 'formulario-1668'
+  // Tipo de documento (casilla 20) — DETERMINISTA "31" (NIT) en los dos formularios
+  // DIAN. Decisión de Mauricio (2026-07-16, reafirmada 2026-08-25): el solicitante se
+  // identifica con "31", nunca con "13" (CC). Va AQUÍ y no solo en el renderer porque
+  // la pantalla de edición lee esta misma función: mientras el valor no llegara a la
+  // UI, la casilla se veía VACÍA y el operador la llenaba a mano — así salieron con
+  // "13" los formularios de V0098, V0187, V0214 y V0243. Ignora el override a
+  // propósito: es la única casilla del 010 sin grados de libertad.
+  if (usaDv) datosFinal.tipo_documento = TIPO_DOCUMENTO_DIAN.nit
   // Solo un override con VALOR (no vacío) gana; un override "" no debe dejar el DV
   // en blanco, se recalcula. El DV se calcula sobre la cédula base completa (módulo
   // 11); no se usa separarNitDv aquí a propósito: la identificación del solicitante
@@ -623,6 +632,8 @@ export interface CasillaEditable {
   es_constante: boolean
   faltante: boolean
   editado: boolean
+  /** Determinista: la calcula el sistema y NO se edita (casilla 20 = NIT 31). */
+  fijo?: boolean
 }
 
 export interface FormularioVersionItem {
@@ -704,6 +715,10 @@ export async function resolverFormularioParaEdicion(
   // generará (misma lógica que la generación real).
   aplicarDeterministas(template, datosEd, overrides)
   valorBase.dv = datosEd.dv ?? valorBase.dv
+  // Sin esta linea la casilla 20 se ve VACIA aunque el PDF estampe 31: no tiene
+  // campos_fuente ni constante, asi que su unico valor viene del determinista.
+  // Una casilla vacia en pantalla es justo lo que invita a llenarla a mano.
+  valorBase.tipo_documento = datosEd.tipo_documento ?? valorBase.tipo_documento
   valorBase.codigo_pais = datosEd.codigo_pais ?? valorBase.codigo_pais
   valorBase.codigo_departamento = datosEd.codigo_departamento ?? valorBase.codigo_departamento
   valorBase.codigo_municipio = datosEd.codigo_municipio ?? valorBase.codigo_municipio
@@ -724,7 +739,11 @@ export async function resolverFormularioParaEdicion(
     // Un override vacío de 'dv' NO se muestra en blanco: el DV es determinista y la
     // generación lo recalcula, así que la UI debe reflejar el calculado (evita el
     // drift display⟺generación). Mismo criterio que aplicarDeterministas.
-    const editado = Object.prototype.hasOwnProperty.call(overrides, slug)
+    // La casilla 20 es determinista: un override viejo NO se muestra ni se marca
+    // como editado, o la pantalla diria "13" mientras el PDF estampa "31".
+    const fijo = slug === 'tipo_documento' && (template === 'formulario-010' || template === 'formulario-1668')
+    const editado = !fijo
+      && Object.prototype.hasOwnProperty.call(overrides, slug)
       && !(slug === 'dv' && (rawOverride ?? '').trim() === '')
     const value = editado ? (rawOverride ?? '') : (valorBase[slug] ?? '')
     return {
@@ -736,6 +755,7 @@ export async function resolverFormularioParaEdicion(
       es_constante: esConstante[slug],
       faltante: !esConstante[slug] && !value && faltantes.includes(slug),
       editado,
+      fijo,
     }
   })
 

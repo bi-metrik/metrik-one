@@ -4,6 +4,7 @@ import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { formatearTelefonoFijo } from '@/lib/dian/indicativos'
 import { drawFixed, drawCells, type Cell, type CellGroup } from './acroform'
+import { TIPO_DOCUMENTO_DIAN } from '@/lib/dian/tipo-documento'
 
 // Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
 // TODAS las casillas (datos variables + deterministas) se ESTAMPAN como texto
@@ -280,10 +281,11 @@ export async function generarFormulario010(
     .join(' ')
   const nombreTitular = nombreCompleto || datos.razon_social
 
-  // Casilla 20 (tipo de documento del solicitante). Default "31" (NIT) — el ejemplo
-  // real de Deisy (persona natural) va con "31", no con cédula. HONRA el override
-  // del operador si lo cambia a otro código.
-  const tipoDocSolicitante = (datos.tipo_documento && datos.tipo_documento.trim()) || '31'
+  // Casilla 20 (tipo de documento del solicitante) — DETERMINISTA "31" (NIT), igual
+  // que el 1668. NO honra override: el operador escribiendo "13" a mano es el defecto
+  // que esto cierra. `datos.tipo_documento` llega ya forzado desde aplicarDeterministas;
+  // el literal aquí protege a los llamadores directos (scripts de cargue, regen).
+  const tipoDocSolicitante = TIPO_DOCUMENTO_DIAN.nit
 
   // ── PÁGINA 1 ──────────────────────────────────────────────────────────────
   // Concepto (casilla 2) — DETERMINISTA, Bold. DOS cuadros: un dígito por cuadro,
@@ -299,8 +301,7 @@ export async function generarFormulario010(
     )
   }
 
-  // Datos solicitante (casilla 20). Default "13" (Cédula); override del operador
-  // manda. Ver `tipoDocSolicitante` arriba.
+  // Datos solicitante (casilla 20). Ver `tipoDocSolicitante` arriba: fijo en "31".
   fixed1(tipoDocSolicitante, P1.tipo_documento)
   edit1('nit', datos.nit, P1.nit)
   edit1('dv', datos.dv, P1.dv)
