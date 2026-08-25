@@ -446,10 +446,23 @@ function aplicarNormalizaciones(
   resultado: Record<string, CampoResultado>,
 ): void {
   // Pasada 1: nit_sin_dv (deja el NIT base sin el DV pegado).
+  //
+  // ⚠️ `nitSinDv` ADIVINA si el valor trae DV (ver el aviso de ÁMBITO en
+  // `@/lib/dian/nit`): cuando el último dígito resulta ser el DV válido de los
+  // anteriores, recorta — acierte o no. Sobre una identificación limpia eso borra
+  // un dígito REAL ~1 de cada 11 veces. Por eso, cuando de verdad recorta, se
+  // deja rastro en el log: la mutilación dejó de ser silenciosa (así se colaron
+  // 14 cédulas mutiladas antes de que alguien lo notara).
   for (const campo of campos) {
     if (campo.normalizar === 'nit_sin_dv') {
       const cr = resultado[campo.slug]
-      if (cr?.value) cr.value = nitSinDv(cr.value)
+      if (cr?.value) {
+        const antes = cr.value
+        cr.value = nitSinDv(antes)
+        if (cr.value !== antes) {
+          console.warn(`[documento] nit_sin_dv RECORTÓ ${campo.slug}: "${antes}" → "${cr.value}"`)
+        }
+      }
     }
   }
   // Pasada 2: dv_desde_nit (recalcula el DV desde el NIT base ya normalizado).

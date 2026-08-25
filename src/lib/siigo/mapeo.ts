@@ -10,7 +10,7 @@
 // ============================================================
 
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
-import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
+import { calcularDvNit } from '@/lib/dian/nit'
 import type { SiigoConfig } from './client'
 
 /** Campos del bloque `rut` tal como los deja la extracción con IA. */
@@ -78,6 +78,7 @@ export interface Borrador<T> {
 }
 
 const limpiar = (s: string | null | undefined): string => (s ?? '').trim()
+const soloDigitos = (s: string | null | undefined): string => (s ?? '').replace(/\D/g, '')
 
 /**
  * ¿Esto se parece a un correo? Es la única validación que ONE hace sobre el email
@@ -155,10 +156,15 @@ export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borr
   const idType = codigoTipoDocumento(rut)
   const esEmpresa = idType === '31'
 
-  // `nitSinDv` y `calcularDvNit` devuelven null cuando el dato no sirve. Se
-  // colapsa a cadena vacia y se declara faltante: el payload debe seguir siendo
-  // mostrable en pantalla para que lo corrijan, no romperse a medio armar.
-  const identification = nitSinDv(limpiar(rut.numero_identificacion) || limpiar(rut.nit)) ?? ''
+  // La identificacion se toma TAL CUAL viene del RUT, solo sin separadores. NO se
+  // pasa por `nitSinDv`: esa heuristica adivina si el ultimo digito es un DV y
+  // borra un digito real cuando acierta por azar (~1 de cada 11). Aqui el dato es
+  // la casilla 26 (cedula limpia) o la casilla 5 (NIT base), ninguna trae DV
+  // pegado. Ver el aviso de AMBITO en `@/lib/dian/nit` y `nit.test.ts`.
+  // `calcularDvNit` devuelve null cuando el dato no sirve: se colapsa a cadena
+  // vacia y se declara faltante, el payload debe seguir siendo mostrable en
+  // pantalla para que lo corrijan, no romperse a medio armar.
+  const identification = soloDigitos(limpiar(rut.numero_identificacion) || limpiar(rut.nit))
   if (!identification) faltantes.push('identificación')
 
   // El DV del RUT se respeta; si no vino, se calcula (módulo 11, determinista).
