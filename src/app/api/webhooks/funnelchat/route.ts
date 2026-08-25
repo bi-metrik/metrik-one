@@ -1,16 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { aplicarEtiqueta } from '@/lib/funnelchat/aplicar-etiqueta'
 
 export const dynamic = 'force-dynamic'
 
 // Receptor de lo que FunnelChat manda hacia ONE.
 //
-// Estado: es una BITACORA, no todavia una integracion. Registra lo que llega y no
-// escribe nada del negocio. Existe para resolver por envio real una contradiccion
-// que el soporte no resolvio: el 2026-08-14 FunnelChat respondio que no puede
-// enviar datos salientes desde las automatizaciones de los flujos (nota del
-// 2026-05-04), mientras su documentacion describe un paso de peticion HTTP dentro
-// de los flujos. Si una fila aparece aqui, la funcion existe.
+// Nacio como BITACORA para resolver por envio real una contradiccion que el soporte
+// no resolvio: el 2026-08-14 FunnelChat respondio que no puede enviar datos
+// salientes desde las automatizaciones de los flujos (nota del 2026-05-04),
+// mientras su documentacion describe un paso de peticion HTTP dentro de los flujos.
+// La prueba se gano: desde el 2026-08-24 llegan eventos `tag_agregado` autenticados.
+//
+// Hoy ademas ACTUA: una etiqueta puesta en FunnelChat mueve el status de gestion
+// del contacto en ONE (`contactos.segmento`). Esa es toda la integracion de
+// entrada. Los negocios no se tocan —una etiqueta de WhatsApp dice algo de la
+// conversacion, no del tramite— y la traduccion etiqueta -> status vive en
+// `config_extra.funnelchat.mapa_segmentos`, no aqui.
+//
+// La bitacora NO desaparece: se sigue escribiendo la fila primero y la accion
+// despues, y lo que se hizo (o por que no se hizo nada) queda en `resultado`.
 //
 // ⚠️ Se registra ANTES de validar el token. Un 401 que no deja rastro vuelve
 // indistinguibles "no llego nada" y "llego y lo rechace", y esa ambiguedad es
@@ -114,11 +123,30 @@ async function registrar(request: NextRequest, crudo: string) {
     .select('id')
     .single()
 
+  const eventoId = (fila as { id: string } | null)?.id ?? null
+
+  // Sin workspace no se actua: el token es lo unico que dice de quien es el
+  // contacto, y escribir "al workspace que parezca" seria peor que no escribir.
+  const resultado = workspaceId
+    ? await aplicarEtiqueta(supabase, workspaceId, payload)
+    : { accion: 'ignorado' as const, motivo: 'sin_workspace' }
+
+  // El resultado se pega a la fila que ya existe en vez de retrasar el insert: si
+  // esto falla, la constancia de que el evento llego ya esta guardada.
+  if (eventoId) {
+    const { error } = await supabase
+      .from('funnelchat_eventos')
+      .update({ resultado })
+      .eq('id', eventoId)
+    if (error) console.error('[funnelchat] no se guardo el resultado:', error.message)
+  }
+
   return {
     ok: true,
     autenticado: workspaceId !== null,
     motivo,
-    evento_id: (fila as { id: string } | null)?.id ?? null,
+    evento_id: eventoId,
+    resultado,
   }
 }
 
