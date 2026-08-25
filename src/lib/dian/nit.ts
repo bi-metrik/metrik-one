@@ -11,6 +11,28 @@
  * El DV es determinista (algoritmo módulo 11 de la DIAN), así que no dependemos
  * de cómo venga la extracción: si el valor trae el DV pegado lo detectamos y
  * separamos; si viene limpio, lo calculamos para el formato con guion.
+ *
+ * ⚠️ ÁMBITO — LEER ANTES DE APLICARLO A UN CAMPO NUEVO.
+ *
+ * `separarNitDv` no LEE si el valor trae DV: lo ADIVINA, viendo si el último
+ * dígito resulta ser el DV válido de los anteriores. Esa condición se cumple por
+ * azar ~1 de cada 11 veces sobre cualquier identificador limpio, y entonces
+ * borra un dígito REAL. No es hipotético, y no se limita a las cédulas:
+ *
+ *  - Sobre CÉDULAS: `nit_sin_dv` estuvo aplicado a `rut.nit` (casilla 5) y mutiló
+ *    14 de 290 RUT. Uno de esos Formularios 010 (caso V0206, una cédula de 8
+ *    dígitos que quedó en 7) se radicó así ante la DIAN. La casilla 5 nunca trae
+ *    el DV: el RUT lo imprime aparte, en la casilla 6.
+ *  - Sobre NIT DE EMPRESA limpios — el uso para el que se escribió: el NIT de
+ *    Bancolombia (890903938, DV 8 impreso aparte) queda recortado a 89090393,
+ *    porque 8 es también el DV de 89090393. Medido: 1 de 14 NIT públicos, y 2
+ *    NIT de proveedor recortados en la Factura (casos V0086 y V0024).
+ *
+ * Conclusión: solo tiene sentido donde la extracción DEMOSTRADAMENTE entrega el
+ * DV pegado y el dato no puede leerse con su separador. Si el documento imprime
+ * el DV en su propia casilla —como el RUT—, se extrae de ahí, no se adivina.
+ * `nit.test.ts` fija esta trampa a propósito: si un test de esos "se arregla"
+ * cambiando el valor esperado, el defecto vuelve.
  */
 
 // Pesos (números primos) del algoritmo DV de la DIAN, aplicados a los dígitos
@@ -45,6 +67,9 @@ export function calcularDvNit(base: string | null | undefined): string | null {
  * todo el valor es la base y calcula su DV.
  *
  * Devuelve null si no hay dígitos suficientes (no es un NIT/cédula reconocible).
+ *
+ * ⚠️ Heurística, no lectura: ver el aviso de ÁMBITO al inicio del archivo antes
+ * de aplicarla a cualquier campo nuevo.
  */
 export function separarNitDv(raw: string | null | undefined): { base: string; dv: string | null } | null {
   const d = soloDigitos(raw)
@@ -62,6 +87,10 @@ export function separarNitDv(raw: string | null | undefined): { base: string; dv
 /**
  * NIT base SIN dígito de verificación. Lo que se envía/keyea a la DIAN.
  * Si no logra interpretarlo, devuelve el valor original tal cual.
+ *
+ * ⚠️ Solo para NIT de empresa con el DV pegado por la extracción. Sobre una
+ * cédula BORRA UN DÍGITO REAL cuando el último resulta ser un DV válido —
+ * ver el aviso de ÁMBITO al inicio del archivo.
  */
 export function nitSinDv(raw: string | null | undefined): string | null {
   if (raw == null) return null

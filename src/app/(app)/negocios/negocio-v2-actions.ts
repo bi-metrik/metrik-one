@@ -1570,7 +1570,10 @@ export async function getNegocioDetalle(id: string): Promise<{
         if (val != null && val !== '' && campos[slug] == null) campos[slug] = String(val)
       }
     }
-    const numId = campos.numero_identificacion ?? nitSinDv(campos.nit ?? '') ?? null
+    // Sin `nitSinDv`: la casilla 5 del RUT no trae el DV pegado (el RUT lo imprime
+    // aparte, en la 6) y esa heuristica borra un digito real cuando el ultimo
+    // resulta ser un DV valido. Ver el aviso de AMBITO en `@/lib/dian/nit`.
+    const numId = campos.numero_identificacion ?? ((campos.nit ?? '').replace(/\D/g, '') || null)
     let email: string | null = null
     let telefono: string | null = null
     if (negocioTyped.contacto_id) {
