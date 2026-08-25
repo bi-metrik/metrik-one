@@ -6567,12 +6567,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         }
 
         // Excluir solo si todo esta vacio: sin data persistida, sin auto_fill
-        // resuelto, y la instancia esta pendiente. Excepcion: un bloque REACTIVADO
-        // esta vacio por definicion — es justo el que hay que mostrar.
+        // resuelto, y la instancia esta pendiente. Dos excepciones, por la misma razon:
+        //  - REACTIVADO: esta vacio por definicion — es justo el que hay que mostrar.
+        //  - `editable_siempre`: el flag declara que el bloque debe poder llenarse
+        //    DESPUES de que su etapa paso. Esconderlo por estar vacio niega el flag
+        //    justo en el unico caso donde hace falta: vacio ES la razon para abrirlo.
+        //    Medido en V0089 (RUT en `pendiente` con `data: {}`, negocio ya en Cargue):
+        //    se le habilito `editable_siempre` al RUT para que se pudiera recargar y el
+        //    bloque seguia sin aparecer en el historial, porque este `continue` lo
+        //    sacaba antes de que el flag llegara a la pantalla.
         const esReactivado = reactivables.has(cfg.id as string)
+        const editableSiempreCfg = (ce as { editable_siempre?: boolean }).editable_siempre === true
         const dataEmpty = !inst.data || Object.keys(inst.data).length === 0
         const autoFillEmpty = Object.keys(autoFillHist).length === 0
-        if (dataEmpty && autoFillEmpty && inst.estado === 'pendiente' && !esReactivado) continue
+        if (dataEmpty && autoFillEmpty && inst.estado === 'pendiente' && !esReactivado && !editableSiempreCfg) continue
 
         const ceBase = esReactivado ? { ...ce, _reactivable: true } : ce
         const ceEnrichedBase = autoFillEmpty ? ceBase : { ...ceBase, _auto_fill: autoFillHist }
