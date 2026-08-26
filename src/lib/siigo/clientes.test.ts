@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { debeCrearClienteSiigo } from './clientes'
+import { debeCrearClienteSiigo, marcaSigueValida } from './clientes'
 import { borradorCliente, type RutExtraido } from './mapeo'
 
 describe('debeCrearClienteSiigo', () => {
@@ -121,5 +121,33 @@ describe('lo que Siigo exige al CREAR, que no es lo que devuelve al leer', () =>
   it('un teléfono nacional normal sí viaja', () => {
     expect(borradorCliente(base, { email: 'a@b.co', telefono: '+57 314 3195520' }).payload.phones)
       .toEqual([{ number: '3143195520' }])
+  })
+})
+
+/**
+ * El caso real: V0189 quedó marcado con 8081571 cuando su RUT dice 80815711, y
+ * la factura FV-2-244 salió con la cédula mutilada porque el atajo devolvía la
+ * marca sin compararla. Estas pruebas fijan que ya no puede volver a pasar.
+ */
+describe('marcaSigueValida', () => {
+  it('una marca vieja de antes de #394 ya NO sirve', () => {
+    expect(marcaSigueValida('8081571', '80815711')).toBe(false)
+  })
+
+  it('la marca que coincide con el RUT sigue mandando (no se re-crea el tercero)', () => {
+    expect(marcaSigueValida('80815711', '80815711')).toBe(true)
+  })
+
+  it('sin marca no hay atajo', () => {
+    expect(marcaSigueValida(null, '80815711')).toBe(false)
+    expect(marcaSigueValida(undefined, '80815711')).toBe(false)
+    expect(marcaSigueValida('', '80815711')).toBe(false)
+  })
+
+  it('si hoy el RUT no da identificación, la marca manda', () => {
+    // Un RUT que se dañó DESPUÉS no puede invalidar un tercero que ya existe en
+    // Siigo: eso mandaría a re-crear terceros buenos.
+    expect(marcaSigueValida('80815711', '')).toBe(true)
+    expect(marcaSigueValida('80815711', null)).toBe(true)
   })
 })
