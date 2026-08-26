@@ -81,6 +81,7 @@ export async function generarVersionGuia(
   let nit = ''
   let dv = ''
   let tipoPersona = ''
+  let seccionalRut = ''
   let fechaCitaIso: string | null = null
 
   // Identifica cada bloque fuente por slug (preferido) o nombre (fallback legacy).
@@ -101,6 +102,7 @@ export async function generarVersionGuia(
       nit = String(campos.nit?.value ?? '')
       dv = String(campos.dv?.value ?? '')
       tipoPersona = String(campos.tipo_persona?.value ?? '')
+      seccionalRut = String(campos.direccion_seccional?.value ?? '')
     } else if (esFechaCita(slug, nombre)) {
       // El bloque de fecha existe en DOS etapas: agendamiento directo (la registra
       // operaciones) y confirmación por PQR (la registra el comercial con la fecha
@@ -111,7 +113,15 @@ export async function generarVersionGuia(
   }
 
   // 3. Resolver seccional. Precedencia:
-  //   override manual (en la Guía)  >  seccional del negocio (negocios.metadata.seccional)
+  //   override manual  >  seccional del negocio (`metadata.seccional`)  >  RUT
+  //
+  // El RUT va DESPUÉS de `metadata.seccional` porque esa puede ser una corrección
+  // manual hecha en el 010 (se escribe con `pisar: true`), y una corrección no la
+  // pisa el dato crudo. Pero va, y no es un adorno: `metadata.seccional` la siembra
+  // el auto-init SOLO en la rama de cita DIAN, así que un negocio con el RUT cargado
+  // cuya rama no aplica se queda sin ella. Medido en SOENA el 2026-08-25: 4 casos
+  // abiertos tienen la seccional en el RUT y el negocio en null. Sin este escalón, la
+  // Guía se la pediría a mano teniéndola delante.
   //
   // ⚠️ NO cae a la ciudad de la factura. La seccional es la del SOLICITANTE (la que
   // vive en el RUT y quedó canonizada en `metadata.seccional`), no la de la ciudad
@@ -132,12 +142,15 @@ export async function generarVersionGuia(
   if (!seccional && seccional010Label) {
     seccional = seccionalDesdeRut(seccional010Label, tipoPersona)
   }
+  if (!seccional && seccionalRut) {
+    seccional = seccionalDesdeRut(seccionalRut, tipoPersona)
+  }
   if (!seccional) {
     return {
       ok: false,
       error:
-        'Este negocio todavía no tiene seccional DIAN registrada. Selecciónala en el ' +
-        'campo "Seccional DIAN" de este bloque y vuelve a generar.',
+        'Este negocio no tiene seccional DIAN ni en sus datos ni en el RUT. ' +
+        'Selecciónala en el campo "Seccional DIAN" de este bloque y vuelve a generar.',
     }
   }
 
