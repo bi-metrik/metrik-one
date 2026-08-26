@@ -212,11 +212,25 @@ export interface ComercialVentaDia {
   ventas: number
 }
 
+/**
+ * El mismo conteo diario, sin colapsar la persona.
+ *
+ * Existe para que la grafica "Ventas por dia" se pueda recortar a un vendedor SIN una
+ * segunda consulta. Suma exactamente lo mismo que `porDia`, asi que la version filtrada
+ * nunca puede pasarse de la sin filtrar. `responsable_id` null = sin comercial atribuido.
+ */
+export interface ComercialVentaDiaVendedor {
+  dia: string
+  responsable_id: string | null
+  ventas: number
+}
+
 export interface ComercialMesResponse {
   anio: number
   mes: number
   kpis: ComercialKpisMes
   porDia: ComercialVentaDia[]
+  porDiaVendedor: ComercialVentaDiaVendedor[]
   porVendedor: ComercialVendedorMes[]
 }
 
@@ -270,6 +284,39 @@ export interface ComercialSerieSeccionalPunto {
 
 export interface ComercialSerieSeccionalResponse {
   serie: ComercialSerieSeccionalPunto[]
+}
+
+/**
+ * El mismo punto del historico, pero de UN vendedor.
+ *
+ * Gemela de `ComercialSerieSeccionalPunto` y con el mismo contrato: no trae `label`
+ * porque el eje lo define la serie total, y aqui solo vienen los meses donde esa
+ * persona tuvo algo. Quien los consume los monta sobre ese eje rellenando en cero los
+ * que faltan — un mes sin ventas tiene que DIBUJARSE como el cero que es.
+ *
+ * `responsable_id` null es el bucket de los negocios sin comercial atribuido: va aparte
+ * y visible, nunca repartido entre los demas.
+ */
+export interface ComercialSerieVendedorPunto {
+  anio: number
+  mes: number
+  responsable_id: string | null
+  nombre: string
+  num_ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  honorario_recaudado: number
+  primer_pago: number
+  segundo_pago: number
+  tarifa_recaudada: number
+  /** Los negocios que suman las cifras de VENTA de esta fila. */
+  negocio_ids: string[]
+  /** Los cobros que suman las cifras de RECAUDO de esta fila. */
+  cobro_ids: string[]
+}
+
+export interface ComercialSerieVendedorResponse {
+  serie: ComercialSerieVendedorPunto[]
 }
 
 /** Fila de meta para la mini UI de edicion (staff_id null = meta global). */

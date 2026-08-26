@@ -12,6 +12,7 @@ import type {
   ComercialPerdido,
   ComercialSeccionalFila,
   ComercialSerieSeccionalResponse,
+  ComercialSerieVendedorResponse,
   ComercialSeccionalMes,
   ComercialPlanPagoFila,
   ComercialPlanPagoMes,
@@ -118,6 +119,31 @@ export async function getComercialSerieSeccional(
     return null
   }
   return (data as ComercialSerieSeccionalResponse) ?? null
+}
+
+/**
+ * El historico abierto por vendedor, para recortar las cuatro graficas.
+ *
+ * Va aparte de `getComercialSerie` por la misma razon que la de seccional: si esta
+ * falla, el historico se sigue dibujando completo y lo unico que se pierde es el
+ * filtro. La RPC se construye sobre las MISMAS CTE que la serie total, asi que la
+ * suma de los vendedores da exactamente la barra que dicen recortar.
+ */
+export async function getComercialSerieVendedor(
+  meses = 12,
+): Promise<ComercialSerieVendedorResponse | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_serie_vendedor_soena', {
+    p_workspace_id: workspaceId,
+    p_meses: meses,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudo traer el historico por vendedor:', rpcError)
+    return null
+  }
+  return (data as ComercialSerieVendedorResponse) ?? null
 }
 
 /** Metas del mes (global + por vendedor) para la mini UI de edicion. */
@@ -314,9 +340,30 @@ export async function getComercialPagosMes(input: {
  * para que la pantalla pueda callar en vez de pintar ceros: un cero aquí se leería
  * como "ninguna venta vino de Meta", que es una afirmación, no una ausencia.
  */
+/**
+ * Recorte por comercial, comun a los tres cortes del mes.
+ *
+ * Son TRES estados y no dos: sin filtro / esta persona / los negocios sin comercial
+ * atribuido. Por eso `sinResponsable` va aparte del id — un id nulo ya significa "sin
+ * filtro", asi que no puede significar tambien "los que no tienen a nadie".
+ */
+export interface RecorteVendedor {
+  responsableId?: string | null
+  sinResponsable?: boolean
+}
+
+/** Los dos parametros que toda RPC de corte del mes entiende. Una sola traduccion. */
+function paramsVendedor(r?: RecorteVendedor) {
+  return {
+    p_responsable_id: r?.sinResponsable ? null : r?.responsableId ?? null,
+    p_sin_responsable: r?.sinResponsable ?? false,
+  }
+}
+
 export async function getComercialOrigenMes(
   anio: number,
   mes: number,
+  recorte?: RecorteVendedor,
 ): Promise<ComercialOrigenMes | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
@@ -325,6 +372,7 @@ export async function getComercialOrigenMes(
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
+    ...paramsVendedor(recorte),
   })
   if (rpcError) {
     console.error('[comercial] no se pudo traer el origen del mes:', rpcError)
@@ -385,6 +433,7 @@ function canonizar(cruda: string | null | undefined): string | null {
 export async function getComercialSeccionalMes(
   anio: number,
   mes: number,
+  recorte?: RecorteVendedor,
 ): Promise<ComercialSeccionalMes | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
@@ -393,6 +442,7 @@ export async function getComercialSeccionalMes(
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
+    ...paramsVendedor(recorte),
   })
   if (rpcError) {
     console.error('[comercial] no se pudo traer el corte por seccional:', rpcError)
@@ -455,6 +505,7 @@ export async function getComercialSeccionalMes(
 export async function getComercialPlanPagoMes(
   anio: number,
   mes: number,
+  recorte?: RecorteVendedor,
 ): Promise<ComercialPlanPagoMes | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
@@ -463,6 +514,7 @@ export async function getComercialPlanPagoMes(
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
+    ...paramsVendedor(recorte),
   })
   if (rpcError) {
     console.error('[comercial] no se pudo traer el corte por plan de pago:', rpcError)
