@@ -37,6 +37,12 @@ type Supabase = SupabaseClient<EsquemaSinGenerar>;
  * `link_bloque_slug` dice de QUE bloque sale el `{link}` del copy. Es opt-in y no tiene
  * default a proposito: sin el, un copy que promete un documento se omite en vez de
  * mandar el que la base devuelva primero.
+ *
+ * `plantilla` es el NOMBRE de la plantilla aprobada de WhatsApp que FunnelChat debe
+ * mandar para esta etapa. Sin ella FunnelChat solo puede mandar texto libre, y Meta
+ * bota el texto libre con el error 131047 cuando el cliente no ha escrito en 24 horas,
+ * que es el caso normal de un aviso de tramite. Va por NOMBRE y no por posicion de
+ * etapa porque renombrar una etapa no puede romper un envio en silencio.
  */
 type AvisoCliente = {
   email?: boolean;
@@ -44,6 +50,7 @@ type AvisoCliente = {
   titulo?: string;
   mensaje?: string;
   link_bloque_slug?: string;
+  plantilla?: string;
 };
 
 /** Las columnas del negocio que leen los avisos al cliente. */
@@ -492,9 +499,13 @@ async function enviarAlCliente(
  * `whatsapp_disparado` y no como "enviado": un 200 de FunnelChat dice que el disparo se
  * recibió, no que el mensaje le llegó a nadie. Está preguntado (pregunta 3 del mensaje a
  * Daniela) y hasta que se responda, afirmar "avisado" sería exactamente la pantalla que
- * miente. Del mismo tamaño es la pregunta de las plantillas de Meta: fuera de la ventana
- * de 24 horas, WhatsApp solo entrega plantillas aprobadas, y un aviso de avance de
- * trámite casi siempre cae fuera de esa ventana.
+ * miente.
+ *
+ * ⚠️ Fuera de la ventana de 24 horas WhatsApp solo entrega PLANTILLAS aprobadas, y un
+ * aviso de avance de trámite casi siempre cae fuera de esa ventana: medido en SOENA, el
+ * texto libre volvía con el error 131047 de Meta. Por eso la etapa declara `plantilla` y
+ * viaja en el disparo. Una etapa con `whatsapp: true` y sin `plantilla` deja el envío en
+ * manos del texto libre, o sea: le llega solo al cliente que escribió hace poco.
  */
 async function enviarWhatsAppAlCliente(
   supabase: Supabase,
@@ -547,7 +558,8 @@ async function enviarWhatsAppAlCliente(
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
-  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null));
+  const datos = await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null);
+  const resuelto = aplicarDatosDelCopy(base, datos);
   if (resuelto.falta) {
     // El dato que el copy prometia no existe. Se omite y se dice cual: mandarlo a
     // medias deja al cliente peor que no mandarlo, y en el log parece un exito.
@@ -566,6 +578,22 @@ async function enviarWhatsAppAlCliente(
         codigo_caso: negocio.codigo ?? '',
         etapa: etapaNombre,
         mensaje: cuerpo,
+        // Qué plantilla mandar, y con qué llenar sus variables.
+        //
+        // Las variables de una plantilla de FunnelChat NO son argumentos del disparo:
+        // cada una queda amarrada a un CAMPO del contacto, y el disparador las llena
+        // antes de mandar. Por eso `link` y `fecha_cita` viajan sueltos aunque ya vayan
+        // interpolados dentro de `mensaje`: dentro del texto FunnelChat no los puede
+        // sacar, y la plantilla saldría con las casillas vacías.
+        //
+        // Van en blanco cuando la etapa no los usa. Un campo vacío en el contacto es
+        // correcto para una plantilla que no lo referencia; lo que nunca puede pasar es
+        // que la plantilla lo referencie y el dato no exista, y de eso ya se encarga
+        // arriba `aplicarDatosDelCopy`: si el copy promete un dato que no está, se
+        // omite el aviso completo en vez de mandarlo a medias.
+        plantilla: cfg.plantilla ?? '',
+        link: datos.link ?? '',
+        fecha_cita: datos.fecha_cita ?? '',
         // Viaja el comercial para que FunnelChat pueda asignarle la conversación. El
         // cruce entre plataformas es por CORREO: es la única llave estable entre una
         // persona de ONE y un agente de FunnelChat.
