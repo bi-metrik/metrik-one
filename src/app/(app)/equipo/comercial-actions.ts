@@ -11,6 +11,7 @@ import type {
   ComercialOrigenMes,
   ComercialPerdido,
   ComercialSeccionalFila,
+  ComercialSerieSeccionalResponse,
   ComercialSeccionalMes,
   ComercialPlanPagoFila,
   ComercialPlanPagoMes,
@@ -93,6 +94,30 @@ export async function getComercialSerie(meses = 12): Promise<ComercialSerieRespo
     p_meses: meses,
   })
   return (data as ComercialSerieResponse) ?? null
+}
+
+/**
+ * El historico abierto por seccional, para filtrar las cuatro graficas.
+ *
+ * Va aparte de `getComercialSerie` a proposito: si esta falla, el historico se sigue
+ * dibujando completo, sin filtro. La seccional se canoniza aqui —el catalogo vive en
+ * TypeScript, no en SQL— con la misma funcion que usa el corte del mes.
+ */
+export async function getComercialSerieSeccional(
+  meses = 12,
+): Promise<ComercialSerieSeccionalResponse | null> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId || !supabase) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_serie_seccional_soena', {
+    p_workspace_id: workspaceId,
+    p_meses: meses,
+  })
+  if (rpcError) {
+    console.error('[comercial] no se pudo traer el historico por seccional:', rpcError)
+    return null
+  }
+  return (data as ComercialSerieSeccionalResponse) ?? null
 }
 
 /** Metas del mes (global + por vendedor) para la mini UI de edicion. */

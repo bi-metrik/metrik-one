@@ -18,6 +18,7 @@ import type {
   ComercialResumenRow,
   ComercialMesResponse,
   ComercialSerieResponse,
+  ComercialSerieSeccionalResponse,
   ComercialOrigenMes,
   ComercialSeccionalMes,
   ComercialPlanPagoMes,
@@ -51,6 +52,8 @@ export interface ComercialNegociosBundle {
   planPagoInicial: ComercialPlanPagoMes | null
   capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
+  /** El mismo histórico abierto por seccional, para el filtro. `null` = sin filtro. */
+  serieSeccional: ComercialSerieSeccionalResponse | null
   metasIniciales: MetaComercial[]
   anioInicial: number
   mesNumInicial: number
@@ -188,6 +191,7 @@ export default function TablerosClient({
             planPagoInicial={initialComercialNegocios.planPagoInicial}
             capacidad={initialComercialNegocios.capacidad}
             serie={initialComercialNegocios.serie}
+            serieSeccional={initialComercialNegocios.serieSeccional}
             metasIniciales={initialComercialNegocios.metasIniciales}
             anioInicial={initialComercialNegocios.anioInicial}
             mesNumInicial={initialComercialNegocios.mesNumInicial}
