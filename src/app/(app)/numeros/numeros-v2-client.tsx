@@ -322,28 +322,6 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
             />
           </div>
 
-          {/* P5: ¿Cuánto aguanto? (full width) */}
-          <QuestionCard
-            questionNumber={5}
-            title="¿Cuánto aguanto?"
-            value={data.runwayMeses}
-            valueFormat="months"
-            trend={data.runwayMeses > 6 ? 'up' : data.runwayMeses < 3 ? 'down' : 'stable'}
-            trendIsPositive={data.runwayMeses > 3}
-            barType="gauge"
-            barData={{
-              value: data.runwayMeses,
-              zones: [
-                { start: 0, end: 3, color: '#EF4444' },
-                { start: 3, end: 6, color: '#F59E0B' },
-                { start: 6, end: 12, color: '#10B981' },
-              ],
-            }}
-            onClick={() => setActiveDrill(5)}
-            isEmpty={monthType === 'future' || data.rentabilidadComercialMode}
-            emptyHint={data.rentabilidadComercialMode ? 'Se activa al conectar Siesa' : undefined}
-            monthType={monthType}
-          />
         </>
       )}
 
