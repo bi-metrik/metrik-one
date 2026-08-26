@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useTransition } from 'react'
+import { Fragment, useMemo, useState, useTransition } from 'react'
 import { ChevronLeft, ChevronRight, Target } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
@@ -13,6 +13,8 @@ import type {
   ComercialSerieResponse,
   ComercialOrigenMes,
   ComercialSeccionalFila,
+  ComercialSerieSeccionalResponse,
+  ComercialSerieSeccionalPunto,
   ComercialSeccionalMes,
   ComercialPlanPagoFila,
   ComercialPlanPagoMes,
@@ -28,6 +30,7 @@ import {
   getComercialPlanPagoMes,
 } from '../../equipo/comercial-actions'
 import MetasModal from '../../equipo/metas-modal'
+import { canonizarSeccional } from '@/lib/dian/seccionales'
 import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
 import { PagosDrawer, type MesSeleccionado } from './pagos-drawer'
@@ -107,6 +110,11 @@ export interface TabComercialSoenaProps {
    */
   capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
+  /**
+   * El mismo historico abierto por seccional DIAN. `null` = no se pudo traer y el
+   * filtro sencillamente no se dibuja; las graficas siguen mostrando el total.
+   */
+  serieSeccional: ComercialSerieSeccionalResponse | null
   metasIniciales: MetaComercial[]
   anioInicial: number
   mesNumInicial: number
@@ -130,6 +138,7 @@ export function TabComercialSoena({
   planPagoInicial,
   capacidad,
   serie,
+  serieSeccional,
   metasIniciales,
   anioInicial,
   mesNumInicial,
@@ -153,6 +162,12 @@ export function TabComercialSoena({
   // Que mes de recaudo se abrio. Va aparte de `cifra` porque su unidad es el COBRO y no
   // el negocio: mezclarlos obligaria al panel a adivinar cual de las dos listas pintar.
   const [pagosDe, setPagosDe] = useState<MesSeleccionado | null>(null)
+  /**
+   * Que seccional se esta mirando en el historico. `undefined` = todas (el default);
+   * `null` = el bucket "sin registrar", que es una respuesta legitima y no la ausencia
+   * de filtro. Por eso son tres estados y no dos.
+   */
+  const [filtroSeccional, setFiltroSeccional] = useState<string | null | undefined>(undefined)
 
   /** Salta a un mes concreto. El navegador de flechas y el histórico usan lo mismo. */
   function irAlMes(na: number, nm: number) {
@@ -240,7 +255,100 @@ export function TabComercialSoena({
   const totalTarifa = equipo.reduce((s, v) => s + v.tarifa_recaudada, 0)
   const totalAprobado = equipo.reduce((s, v) => s + v.valor_aprobado, 0)
 
-  const serieData = serie?.serie ?? []
+  // En `useMemo` y no suelto: `?? []` crea un arreglo nuevo en cada render, y como es
+  // dependencia de la serie filtrada, sin memo esa se recalcularia siempre.
+  const serieTotal = useMemo(() => serie?.serie ?? [], [serie])
+
+  /**
+   * El historico por seccional, ya canonizado y agrupado.
+   *
+   * La RPC devuelve la seccional CRUDA a proposito: el catalogo canonico vive en
+   * TypeScript (`canonizarSeccional`) y copiarlo a SQL crearia una segunda fuente que se
+   * desincroniza el dia que la DIAN cambie una. Aqui se colapsa, igual que hace el corte
+   * del mes. Un texto que el catalogo no reconoce se conserva tal cual en vez de caer al
+   * bucket de "sin registrar": no saber como se llama una seccional no es lo mismo que
+   * no tenerla, y mezclarlas escondería el caso raro justo donde hay que verlo.
+   */
+  const historicoSeccional = useMemo(() => {
+    const filas = serieSeccional?.serie ?? []
+    const porClave = new Map<string, ComercialSerieSeccionalPunto & { clave: string | null }>()
+    for (const f of filas) {
+      const canonica = f.seccional_cruda === null
+        ? null
+        : canonizarSeccional(f.seccional_cruda) ?? f.seccional_cruda
+      const clave = `${f.anio}-${f.mes}-${canonica ?? ''}`
+      const previo = porClave.get(clave)
+      if (!previo) {
+        porClave.set(clave, { ...f, clave: canonica, negocio_ids: [...f.negocio_ids], cobro_ids: [...f.cobro_ids] })
+        continue
+      }
+      previo.num_ventas += f.num_ventas
+      previo.valor_sin_iva += f.valor_sin_iva
+      previo.valor_con_iva += f.valor_con_iva
+      previo.honorario_recaudado += f.honorario_recaudado
+      previo.primer_pago += f.primer_pago
+      previo.segundo_pago += f.segundo_pago
+      previo.tarifa_recaudada += f.tarifa_recaudada
+      previo.negocio_ids.push(...f.negocio_ids)
+      previo.cobro_ids.push(...f.cobro_ids)
+    }
+    return [...porClave.values()]
+  }, [serieSeccional])
+
+  /**
+   * Las seccionales que se pueden elegir, ordenadas por peso historico.
+   *
+   * "Sin registrar" va SIEMPRE de ultima y nunca se esconde ni se reparte entre las
+   * demas: es la misma regla que cerro Mauricio el 2026-08-22 para el corte del mes.
+   */
+  const opcionesSeccional = useMemo(() => {
+    const acumulado = new Map<string, { clave: string | null; ventas: number }>()
+    for (const f of historicoSeccional) {
+      const k = f.clave ?? ''
+      const previo = acumulado.get(k) ?? { clave: f.clave, ventas: 0 }
+      previo.ventas += f.num_ventas
+      acumulado.set(k, previo)
+    }
+    return [...acumulado.values()].sort((a, b) => {
+      if (a.clave === null) return 1
+      if (b.clave === null) return -1
+      return b.ventas - a.ventas || (a.clave ?? '').localeCompare(b.clave ?? '')
+    })
+  }, [historicoSeccional])
+
+  const hayFiltro = filtroSeccional !== undefined
+  const etiquetaFiltro = filtroSeccional === null ? 'Sin seccional registrada' : filtroSeccional ?? ''
+
+  /** La fila de la seccional elegida en un mes concreto, si la hubo. */
+  const filaDelMes = (a: number, m: number) =>
+    hayFiltro
+      ? historicoSeccional.find((f) => f.anio === a && f.mes === m && f.clave === filtroSeccional) ?? null
+      : null
+
+  /**
+   * Lo que dibujan las cuatro graficas.
+   *
+   * El EJE lo sigue definiendo la serie total: si se recortara a los meses en que esa
+   * seccional tuvo movimiento, un mes en cero desapareceria del grafico en vez de
+   * dibujarse como el cero que es, y "Bogota no vendio en junio" se leeria igual que
+   * "junio no existe".
+   */
+  const serieData = useMemo(() => {
+    if (!hayFiltro) return serieTotal
+    return serieTotal.map((p) => {
+      const f = historicoSeccional.find((x) => x.anio === p.anio && x.mes === p.mes && x.clave === filtroSeccional)
+      return {
+        ...p,
+        num_ventas: f?.num_ventas ?? 0,
+        valor_sin_iva: f?.valor_sin_iva ?? 0,
+        valor_con_iva: f?.valor_con_iva ?? 0,
+        honorario_recaudado: f?.honorario_recaudado ?? 0,
+        primer_pago: f?.primer_pago ?? 0,
+        segundo_pago: f?.segundo_pago ?? 0,
+        tarifa_recaudada: f?.tarifa_recaudada ?? 0,
+      }
+    })
+  }, [hayFiltro, serieTotal, historicoSeccional, filtroSeccional])
 
   // Clic en cualquier punto del histórico = ir a ese mes. El `label` es lo único que
   // recharts devuelve al hacer clic, así que se resuelve contra la serie en vez de
@@ -274,6 +382,19 @@ export function TabComercialSoena({
       irAlMes(punto.anio, punto.mes)
       return
     }
+    // Con filtro puesto la barra ya NO es el mes entero, asi que abrir "todas las del
+    // mes" contradiria la cifra en la que se hizo clic. Se abren los negocios exactos que
+    // sumaron la barra — el mismo contrato de `negocioIds` que usa el corte del mes.
+    const fila = filaDelMes(punto.anio, punto.mes)
+    if (hayFiltro) {
+      if (!fila || fila.negocio_ids.length === 0) return
+      abrirVentas({
+        titulo: `Ventas · ${MESES_ES[mes - 1]} ${anio}`,
+        negocioIds: fila.negocio_ids,
+        alcance: etiquetaFiltro,
+      })
+      return
+    }
     // Se reusa el mismo abridor que la cifra de "ventas del mes" de arriba, no una copia:
     // asi la barra y el KPI no pueden abrir dos listas distintas con el mismo nombre.
     // Cuando es `undefined` el mes no tuvo ventas y no se abre nada — un panel vacio se
@@ -296,6 +417,14 @@ export function TabComercialSoena({
       irAlMes(punto.anio, punto.mes)
       return
     }
+    // Con filtro puesto se abren los cobros exactos que sumaron la barra, por la misma
+    // razon que en ventas: la lista no puede sumar algo distinto de la cifra.
+    if (hayFiltro) {
+      const fila = filaDelMes(punto.anio, punto.mes)
+      if (!fila || fila.cobro_ids.length === 0) return
+      setPagosDe({ anio, mes, cobroIds: fila.cobro_ids, alcance: etiquetaFiltro })
+      return
+    }
     // El panel se abre aunque el mes no tenga recaudo propio: puede haber entrado plata
     // que sea toda tarifa de terceros, y ese caso es precisamente el que hay que poder
     // mirar. Si no entro NADA, el panel lo dice con sus palabras.
@@ -314,13 +443,22 @@ export function TabComercialSoena({
     const punto = serieData.find((p) => p.label === String(label))
     const esElMesEnPantalla = punto ? punto.anio === anio && punto.mes === mes : false
     if (!esElMesEnPantalla) return `${label} — clic para verlo arriba`
+    if (hayFiltro) {
+      const fila = punto ? filaDelMes(punto.anio, punto.mes) : null
+      return fila && fila.negocio_ids.length > 0 ? `${label} — clic para ver los negocios` : String(label)
+    }
     return kpis && kpis.num_ventas > 0 ? `${label} — clic para ver los negocios` : String(label)
   }
 
   const pistaDeRecaudo = (label: unknown) => {
     const punto = serieData.find((p) => p.label === String(label))
     const esElMesEnPantalla = punto ? punto.anio === anio && punto.mes === mes : false
-    return esElMesEnPantalla ? `${label} — clic para ver los pagos` : `${label} — clic para verlo arriba`
+    if (!esElMesEnPantalla) return `${label} — clic para verlo arriba`
+    if (hayFiltro) {
+      const fila = punto ? filaDelMes(punto.anio, punto.mes) : null
+      return fila && fila.cobro_ids.length > 0 ? `${label} — clic para ver los pagos` : String(label)
+    }
+    return `${label} — clic para ver los pagos`
   }
 
   return (
@@ -657,19 +795,53 @@ export function TabComercialSoena({
         <section className="mb-8">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-gray-900">Historico mensual</h2>
+              <h2 className="text-sm font-bold text-gray-900">
+                Historico mensual{hayFiltro ? ` · ${etiquetaFiltro}` : ''}
+              </h2>
               <p className="text-[11px] text-gray-400">
                 Clic en un mes para verlo en detalle arriba; un segundo clic sobre ese mes abre
                 lo que hay detras — los negocios en «Ventas» y «Valor de negocio», los pagos en
                 los dos de recaudo.
               </p>
             </div>
-            {serie?.tasa_recaudo_global !== null && serie?.tasa_recaudo_global !== undefined && (
+            {/* La tasa de recaudo global es de TODA la linea. Con una seccional elegida
+                seguiria diciendo el mismo numero al lado de unas barras que ya no son
+                las suyas, asi que se retira en vez de repetirse fuera de contexto. */}
+            {!hayFiltro && serie?.tasa_recaudo_global !== null && serie?.tasa_recaudo_global !== undefined && (
               <span className="text-xs text-gray-500">
                 Tasa de recaudo global: <span className="font-semibold text-gray-700">{serie.tasa_recaudo_global}%</span>
               </span>
             )}
           </div>
+          {/* Filtro por seccional. Va en fichas y no en un <select> porque en el celular
+              —de donde viene la mayor parte del uso— un desplegable nativo tapa el
+              grafico entero mientras se elige, y aqui la gracia es ver como cambia.
+              Cada ficha pasa los 44px de alto tactil con el padding vertical. */}
+          {opcionesSeccional.length > 1 && (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              <FichaSeccional
+                activa={!hayFiltro}
+                onClick={() => setFiltroSeccional(undefined)}
+                label="Todas"
+              />
+              {opcionesSeccional.map((o) => (
+                <FichaSeccional
+                  key={o.clave ?? '__sin__'}
+                  activa={hayFiltro && filtroSeccional === o.clave}
+                  onClick={() => setFiltroSeccional(o.clave)}
+                  label={o.clave ?? 'Sin registrar'}
+                  ventas={o.ventas}
+                  atenuada={o.clave === null}
+                />
+              ))}
+            </div>
+          )}
+          {hayFiltro && (
+            <p className="mb-3 text-[11px] text-gray-500">
+              Solo {etiquetaFiltro}. Los meses sin movimiento de esta seccional se dibujan en
+              cero, no se saltan.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Ventas por mes">
               <ResponsiveContainer width="100%" height={220}>
@@ -1273,6 +1445,39 @@ function SeccionSeccional({ datos, mesLabel, onAbrir }: {
         </p>
       )}
     </section>
+  )
+}
+
+/**
+ * Una ficha del filtro por seccional del historico.
+ *
+ * `atenuada` es para "Sin registrar": se ve distinta de una seccional real porque no lo
+ * es —es la ausencia del dato— pero sigue siendo elegible, que es justo lo que permite
+ * ir a ver cuales son y arreglarlos.
+ */
+function FichaSeccional({ activa, onClick, label, ventas, atenuada }: {
+  activa: boolean
+  onClick: () => void
+  label: string
+  ventas?: number
+  atenuada?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={activa}
+      className={`rounded-full border px-3 py-2 text-[11px] leading-none transition-colors ${
+        activa
+          ? 'border-gray-900 bg-gray-900 font-semibold text-white'
+          : atenuada
+            ? 'border-gray-200 bg-white italic text-gray-400 hover:border-gray-300'
+            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+      }`}
+    >
+      {label}
+      {ventas !== undefined && <span className="ml-1 opacity-60">{ventas}</span>}
+    </button>
   )
 }
 

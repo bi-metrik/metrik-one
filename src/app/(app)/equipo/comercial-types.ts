@@ -239,6 +239,39 @@ export interface ComercialSerieResponse {
   tasa_recaudo_global: number | null
 }
 
+/**
+ * El mismo punto del historico, pero de UNA seccional.
+ *
+ * `seccional_cruda` viene tal cual esta guardada en `negocios.metadata.seccional`; hay
+ * que pasarla por `canonizarSeccional` antes de mostrarla o agrupar, igual que hace el
+ * corte del mes. `null` es el bucket "sin registrar", que va aparte y VISIBLE — nunca
+ * repartido entre las demas.
+ *
+ * No trae `label`: la etiqueta del mes sale de la serie total, que es la que define el
+ * eje. Aqui solo vienen los meses donde esa seccional tuvo algo, y quien consume los
+ * monta sobre ese eje rellenando en cero los que faltan.
+ */
+export interface ComercialSerieSeccionalPunto {
+  anio: number
+  mes: number
+  seccional_cruda: string | null
+  num_ventas: number
+  valor_sin_iva: number
+  valor_con_iva: number
+  honorario_recaudado: number
+  primer_pago: number
+  segundo_pago: number
+  tarifa_recaudada: number
+  /** Los negocios que suman las cifras de VENTA de esta fila. */
+  negocio_ids: string[]
+  /** Los cobros que suman las cifras de RECAUDO de esta fila. */
+  cobro_ids: string[]
+}
+
+export interface ComercialSerieSeccionalResponse {
+  serie: ComercialSerieSeccionalPunto[]
+}
+
 /** Fila de meta para la mini UI de edicion (staff_id null = meta global). */
 export interface MetaComercial {
   id: string

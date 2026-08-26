@@ -37,6 +37,14 @@ const MESES_ES = [
 export interface MesSeleccionado {
   anio: number
   mes: number
+  /**
+   * Los cobros exactos a mostrar. Lo usa el histórico cuando está filtrado por
+   * seccional: el conjunto lo calculó quien pintó la barra, así que la lista es la que
+   * sumó y no una consulta paralela que podría discrepar. `null`/ausente = todo el mes.
+   */
+  cobroIds?: string[] | null
+  /** De quién es el recorte, para decirlo en el encabezado. */
+  alcance?: string | null
 }
 
 function fmtCOP(n: number): string {
@@ -86,7 +94,11 @@ export function PagosDrawer({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const filas = pagos ?? []
+  // El recorte se hace aquí y no en la consulta: la RPC ya trae el mes entero con su
+  // `cobro_id`, y filtrar sobre lo que ya llegó garantiza que la lista sea un
+  // subconjunto exacto de la cifra, sin un segundo criterio que se pueda desalinear.
+  const permitidos = periodo.cobroIds ? new Set(periodo.cobroIds) : null
+  const filas = (pagos ?? []).filter(p => !permitidos || permitidos.has(p.cobro_id))
   const suma = (f: (p: ComercialPagoMes) => number) => filas.reduce((s, p) => s + f(p), 0)
   const honorario = suma(p => p.honorario)
   const tramo1 = suma(p => p.a_tramo1)
@@ -116,6 +128,7 @@ export function PagosDrawer({
             <div className="min-w-0">
               <h2 className="truncate text-sm font-bold" style={{ color: CARBON }}>
                 Pagos · {MESES_ES[periodo.mes - 1]} {periodo.anio}
+                {periodo.alcance ? ` · ${periodo.alcance}` : ''}
               </h2>
               <p className="mt-0.5 truncate text-[11px]" style={{ color: GRIS }}>
                 lo que entró en el mes, sin importar de qué venta viene
