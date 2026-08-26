@@ -255,6 +255,23 @@ export function TabComercialSoena({
   const totalTarifa = equipo.reduce((s, v) => s + v.tarifa_recaudada, 0)
   const totalAprobado = equipo.reduce((s, v) => s + v.valor_aprobado, 0)
 
+  /**
+   * Las ventas del MES en pantalla, por vendedor, para poder abrirlas desde su tarjeta.
+   *
+   * La tarjeta cuenta TODO el histórico y el panel de detalle está atado a un mes. Sin
+   * este dato el clic abriría una lista que no suma lo que la tarjeta dice, que es
+   * justo la forma de que el tablero deje de creerse. Por eso la tarjeta declara aparte
+   * cuántas ventas hizo ese vendedor ESTE mes, y eso —solo eso— es lo que abre.
+   *
+   * La dependencia es `mesData` y no `porVendedor`: `?? []` crea un arreglo nuevo en
+   * cada render y el memo no memorizaría nada.
+   */
+  const ventasDelMesPorVendedor = useMemo(() => {
+    const m = new Map<string, ComercialVendedorMes>()
+    for (const v of mesData?.porVendedor ?? []) m.set(v.responsable_id ?? 'sin-responsable', v)
+    return m
+  }, [mesData])
+
   // En `useMemo` y no suelto: `?? []` crea un arreglo nuevo en cada render, y como es
   // dependencia de la serie filtrada, sin memo esa se recalcularia siempre.
   const serieTotal = useMemo(() => serie?.serie ?? [], [serie])
@@ -922,34 +939,67 @@ export function TabComercialSoena({
           <ResumenTotal label="Honorario recaudado" value={fmtCOP(totalHonorario)} color={GREEN} />
           <ResumenTotal label="Tarifa UPME (terceros)" value={fmtCOP(totalTarifa)} muted />
         </div>
-        <h2 className="mb-3 text-sm font-bold text-gray-900">Embudo por vendedor (todo el historico)</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {equipoEjecuta.map((v) => (
-            <div
-              key={v.responsable_id ?? 'sin-responsable'}
-              className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
-            >
-              <div className="mb-4">
-                <p className="truncate font-semibold text-gray-900">
-                  {v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)}
-                </p>
-                <p className="truncate text-xs text-gray-400">
+        <h2 className="text-sm font-bold text-gray-900">Embudo por vendedor (todo el historico)</h2>
+        {/* El alcance se declara ARRIBA de las tarjetas y no dentro de cada una: lo que
+            cuenta la tarjeta y lo que abre el clic son dos periodos distintos, y esa es
+            la única frase que evita leer la lista como si desmintiera la cifra. */}
+        <p className="mb-3 mt-1 text-xs text-gray-400">
+          Las cifras son de todo el histórico. El clic abre las ventas de {MESES_ES[mes - 1]} {anio}, que es hasta donde
+          llega el detalle por vendedor.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {equipoEjecuta.map((v) => {
+            const clave = v.responsable_id ?? 'sin-responsable'
+            const etiqueta = v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)
+            const ventasEsteMes = ventasDelMesPorVendedor.get(clave)?.num_ventas ?? 0
+            // Sin ventas en el mes la tarjeta NO es clicable: abrir un panel vacío se
+            // lee como una falla del tablero y no como el dato que es.
+            const abrir = ventasEsteMes > 0
+              ? () => abrirVentas({
+                  titulo: `Ventas de ${etiqueta} · ${MESES_ES[mes - 1]} ${anio}`,
+                  responsableId: v.responsable_id,
+                  sinResponsable: v.sin_responsable,
+                  alcance: v.sin_responsable ? 'sin comercial atribuido' : etiqueta,
+                })
+              : undefined
+            return (
+              <div
+                key={clave}
+                role={abrir ? 'button' : undefined}
+                tabIndex={abrir ? 0 : undefined}
+                onClick={abrir}
+                onKeyDown={abrir
+                  ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir() } }
+                  : undefined}
+                className={`rounded-2xl border border-gray-100 bg-white p-3 shadow-sm ${
+                  abrir ? 'cursor-pointer transition hover:border-gray-300 hover:shadow-md' : ''
+                }`}
+              >
+                <p className="truncate text-sm font-semibold text-gray-900">{etiqueta}</p>
+                <p className="truncate text-[11px] text-gray-400">
                   {v.sin_responsable ? 'Negocios sin asignar' : v.position ?? 'Comercial'}
                 </p>
+                <div className="my-2.5 grid grid-cols-3 gap-1.5">
+                  <StageCount label="Venta" n={v.en_venta} />
+                  <StageCount label="Ejecucion" n={v.en_ejecucion} />
+                  <StageCount label="Cobro" n={v.en_cobro} />
+                </div>
+                <div className="space-y-1 border-t border-gray-50 pt-2">
+                  <Row label="Negocios activos" value={String(v.negocios_abiertos)} />
+                  <Row label="Aprobado (sin IVA)" value={fmtCOP(v.valor_aprobado)} />
+                  <Row label="Honorario recaudado" value={fmtCOP(v.honorario_recaudado)} strong color={GREEN} />
+                  <Row label="Tarifa UPME" value={fmtCOP(v.tarifa_recaudada)} muted />
+                </div>
+                <p className={`mt-2 border-t border-gray-50 pt-2 text-[11px] ${
+                  abrir ? 'font-semibold text-gray-600' : 'text-gray-400'
+                }`}>
+                  {abrir
+                    ? `${MESES_ES[mes - 1]}: ${ventasEsteMes} ${ventasEsteMes === 1 ? 'venta' : 'ventas'} · clic para verlas`
+                    : `Sin ventas en ${MESES_ES[mes - 1]}`}
+                </p>
               </div>
-              <div className="mb-4 grid grid-cols-3 gap-2">
-                <StageCount label="Venta" n={v.en_venta} />
-                <StageCount label="Ejecucion" n={v.en_ejecucion} />
-                <StageCount label="Cobro" n={v.en_cobro} />
-              </div>
-              <div className="space-y-2 border-t border-gray-50 pt-3">
-                <Row label="Negocios activos" value={String(v.negocios_abiertos)} />
-                <Row label="Valor aprobado (sin IVA)" value={fmtCOP(v.valor_aprobado)} />
-                <Row label="Honorario recaudado" value={fmtCOP(v.honorario_recaudado)} strong color={GREEN} />
-                <Row label="Tarifa UPME (terceros)" value={fmtCOP(v.tarifa_recaudada)} muted />
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Los casos de quienes lideran no se esconden: sin esta linea, la suma de las
@@ -1347,9 +1397,9 @@ function ResumenTotal({ label, value, color, muted }: { label: string; value: st
 
 function StageCount({ label, n }: { label: string; n: number }) {
   return (
-    <div className="rounded-lg bg-gray-50 py-2 text-center">
-      <p className="text-lg font-bold leading-none tabular-nums text-gray-900">{n}</p>
-      <p className="mt-1 text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
+    <div className="rounded-lg bg-gray-50 py-1.5 text-center">
+      <p className="text-base font-bold leading-none tabular-nums text-gray-900">{n}</p>
+      <p className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
     </div>
   )
 }
