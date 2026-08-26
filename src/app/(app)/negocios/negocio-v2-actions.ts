@@ -6931,12 +6931,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
       const fechaCitaData = datosGuiaPorSlug['fecha_cita_dian'] ?? datosGuiaPorNombre['fecha cita dian'] ?? {}
       const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
-      // La seccional sugerida sale SOLO de `negocios.metadata.seccional`, para que la
-      // Guía y el 010 muestren lo mismo. No cae a la ciudad de la factura: es la del
-      // solicitante, no la del lugar de compra (ver `guia-devolucion-actions`). Sin
-      // ella el selector queda vacío y el operador la elige.
+      // Misma precedencia que la generación (`guia-devolucion-actions`), y por eso
+      // mismo orden aquí: `metadata.seccional` > RUT. No cae a la ciudad de la factura:
+      // la seccional es la del solicitante, no la del lugar de compra. Si el preview
+      // sugiriera algo distinto de lo que genera, el operador vería una seccional en
+      // pantalla y recibiría otra en el PDF.
       const seccional010Label = seccional010DelNegocio
-      const seccional = seccional010Label ? seccionalDesdeRut(seccional010Label, tipoPersona) : null
+      const seccional =
+        (seccional010Label ? seccionalDesdeRut(seccional010Label, tipoPersona) : null) ??
+        seccionalDesdeRut((rutData.direccion_seccional as string) ?? '', tipoPersona)
       enrichedConfigExtra._guia_preview = {
         nombre: razonSocial || null,
         nit: nit ? (dv ? `${nit}-${dv}` : nit) : null,
