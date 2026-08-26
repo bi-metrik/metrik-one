@@ -39,6 +39,7 @@ import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoN
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { resolverDestinoCompartido } from '@/lib/negocios/casilla-compartida'
@@ -6237,17 +6238,27 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const documentoDataPorEtapaNombre = new Map<string, Record<string, unknown>>()
   // Índice por slug estable del bloque documento origen (vía preferida).
   const documentoDataPorSlug = new Map<string, Record<string, unknown>>()
+  // Config del ORIGEN, no solo su data: hay capacidades que la copia heredada tiene que
+  // heredar además del archivo. Ver `devolucion_habilitada` más abajo.
+  const documentoConfigPorSlug = new Map<string, Record<string, unknown>>()
   {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: docBlocks } = await (db(supabase) as any)
       .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, slug, etapa_id, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
+      .select('data, bloque_configs!inner(nombre, slug, etapa_id, config_extra, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
       .eq('negocio_id', id)
       .eq('bloque_configs.bloque_definitions.tipo', 'documento')
     if (docBlocks) {
       for (const db_ of (docBlocks as Record<string, unknown>[])) {
         const cfg = db_.bloque_configs as Record<string, unknown>
         const etapa = cfg.etapas_negocio as { orden: number } | undefined
+        // La config se indexa aunque el bloque venga vacío: la capacidad de devolver no
+        // depende de que el documento ya esté cargado.
+        {
+          const slugCfg = cfg.slug as string | null
+          const ce = cfg.config_extra as Record<string, unknown> | null
+          if (slugCfg && ce) documentoConfigPorSlug.set(slugCfg, ce)
+        }
         if (!etapa || !db_.data) continue
         const defNombre = (cfg.bloque_definitions as { nombre?: string } | undefined)?.nombre ?? ''
         const cfgNombre = (cfg.nombre as string | null) ?? defNombre
@@ -6855,6 +6866,21 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const invitadoAEsteBloque = ((configExtra.areas_editoras ?? []) as Area[])
       .some(a => areasEfectivasUsuario.has(a))
     if (areaReadonly && !invitadoAEsteBloque) enrichedConfigExtra._areaReadonly = true
+    // Devolución en la copia heredada: la capacidad la declara el bloque ORIGINAL una sola
+    // vez y la copia la hereda junto con el archivo. Declararla en cada copia sería
+    // declarar lo mismo cuatro veces y garantizar que se desincronicen, con un síntoma
+    // mudo: el botón desaparece justo de la etapa donde alguien tenía que devolver. El
+    // servidor redirige la devolución al origen, así que la copia solo necesita saber que
+    // el original la admite.
+    {
+      const srcSlugDevolucion = origenDeCopiaHeredada(configExtra)
+      if (
+        srcSlugDevolucion
+        && documentoConfigPorSlug.get(srcSlugDevolucion)?.devolucion_habilitada === true
+      ) {
+        enrichedConfigExtra.devolucion_habilitada = true
+      }
+    }
     // Corrección del valor aprobado: capacidad declarada por persona en el
     // workspace, NO derivada del rol (ver `corregirAprobacion`). Se resuelve
     // en el servidor y viaja como flag para que el bloque sepa si mostrar el
