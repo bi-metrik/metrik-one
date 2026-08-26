@@ -50,6 +50,36 @@ export function debeCrearClienteSiigo(
   return etapaNumeroDestino > desde
 }
 
+/**
+ * ¿La marca que ya tiene el negocio sigue sirviendo, o quedó vieja?
+ *
+ * El atajo por marca existía para no volver a preguntarle a Siigo por un tercero
+ * que ya se creó. El problema es que devolvía la identificación GUARDADA sin
+ * mirarla, y por ahí se coló el daño de `nit_sin_dv` (#394): las marcas escritas
+ * antes de ese arreglo guardaron la cédula SIN su último dígito, porque la
+ * heurística lo adivinaba como DV (acierta por azar ~1 de cada 11). Como el atajo
+ * salía antes de leer el RUT, arreglar la extracción no las alcanzó y la factura
+ * siguió saliendo con la cédula mutilada.
+ *
+ * Medido el 2026-08-26 sobre SOENA: 21 marcas así, y FV-2-244 ya rechazada por la
+ * DIAN — se facturó a 8081571 cuando el RUT dice 80815711, que es exactamente
+ * "la información no coincide con el RUT".
+ *
+ * Comparar contra el RUT convierte ese backfill en autocorrección: el caso se
+ * repara solo la próxima vez que alguien intente facturarlo.
+ *
+ * Sin identificación de hoy la marca MANDA: un RUT que se dañó después no puede
+ * invalidar un tercero que ya existe en Siigo.
+ */
+export function marcaSigueValida(
+  identificacionMarcada: string | null | undefined,
+  identificacionDelRut: string | null | undefined,
+): boolean {
+  if (!identificacionMarcada) return false
+  if (!identificacionDelRut) return true
+  return identificacionMarcada === identificacionDelRut
+}
+
 export type ResultadoCliente =
   /** Creado ahora en Siigo. */
   | { estado: 'creado'; identificacion: string; siigo_id: string | null }
@@ -160,9 +190,6 @@ export async function asegurarClienteSiigo(
   const negocio = negRaw as NegocioParaCliente
 
   const yaMarcado = (negocio.metadata?.siigo_cliente ?? null) as MarcaCliente | null
-  if (yaMarcado?.identificacion) {
-    return { estado: 'ya_existia', identificacion: yaMarcado.identificacion, siigo_id: yaMarcado.siigo_id }
-  }
 
   // `borradorDelNegocio` LANZA si la consulta del RUT falla (para no confundir un
   // error de base con "no hay RUT"). Se atrapa aquí y no más arriba: esta función
@@ -172,9 +199,21 @@ export async function asegurarClienteSiigo(
   try {
     borrador = await borradorDelNegocio(negocioId, negocio.contacto_id)
   } catch (e) {
+    // Un caso YA marcado no se convierte en error porque hoy no se pueda releer
+    // su RUT: eso ya estaba resuelto y la marca sigue siendo la respuesta.
+    if (yaMarcado?.identificacion) {
+      return { estado: 'ya_existia', identificacion: yaMarcado.identificacion, siigo_id: yaMarcado.siigo_id }
+    }
     return { estado: 'error', mensaje: (e as Error).message }
   }
   const { payload, faltantes } = borrador.borrador
+
+  // La marca vale mientras siga coincidiendo con el RUT; si no, se rehace el
+  // camino completo (buscar en Siigo por la identificación buena, crear si no
+  // está, y re-marcar). Ver `marcaSigueValida`.
+  if (yaMarcado && marcaSigueValida(yaMarcado.identificacion, payload.identification)) {
+    return { estado: 'ya_existia', identificacion: yaMarcado.identificacion, siigo_id: yaMarcado.siigo_id }
+  }
 
   // Lo que ONE no pudo resolver se declara, no se rellena. El caso aparece en la
   // cola de facturación con esta misma lista y alguien la completa.
