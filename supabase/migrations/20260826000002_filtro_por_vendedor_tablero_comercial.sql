@@ -490,3 +490,27 @@ AS $function$
     ), '[]'::jsonb)
   );
 $function$;
+
+-- ── Permisos ────────────────────────────────────────────────────────────────
+--
+-- El DROP de las tres versiones de 3 argumentos se llevo por delante sus grants, y
+-- toda funcion nace ejecutable por PUBLIC —de donde `anon` la alcanza—. Sin esto, un
+-- cliente sin sesion podria invocar los cortes del mes; el `guard` de cada una lo
+-- devolveria vacio, pero la superficie no tiene por que estar abierta para empezar.
+-- `get_comercial_kpis_mes_soena` conserva los suyos porque no cambio de firma; se
+-- reafirman igual, para que el permiso de las cinco se lea en un solo sitio.
+
+revoke execute on function public.get_comercial_origen_mes_soena(uuid, integer, integer, uuid, boolean) from public, anon;
+grant  execute on function public.get_comercial_origen_mes_soena(uuid, integer, integer, uuid, boolean) to authenticated;
+
+revoke execute on function public.get_comercial_seccional_mes_soena(uuid, integer, integer, uuid, boolean) from public, anon;
+grant  execute on function public.get_comercial_seccional_mes_soena(uuid, integer, integer, uuid, boolean) to authenticated;
+
+revoke execute on function public.get_comercial_plan_pago_mes_soena(uuid, integer, integer, uuid, boolean) from public, anon;
+grant  execute on function public.get_comercial_plan_pago_mes_soena(uuid, integer, integer, uuid, boolean) to authenticated;
+
+revoke execute on function public.get_comercial_kpis_mes_soena(uuid, integer, integer) from public, anon;
+grant  execute on function public.get_comercial_kpis_mes_soena(uuid, integer, integer) to authenticated;
+
+revoke execute on function public.get_comercial_serie_vendedor_soena(uuid, integer) from public, anon;
+grant  execute on function public.get_comercial_serie_vendedor_soena(uuid, integer) to authenticated;
