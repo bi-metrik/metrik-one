@@ -25,13 +25,28 @@ export default async function AppLayout({
     redirect('/login')
   }
 
-  // Get user profile + workspace
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('full_name, role, workspace_id')
-    .eq('id', user.id)
-    .single()
+  // Todo lo que solo necesita al usuario se pide de una sola vez. Antes eran CUATRO
+  // rondas seguidas a la base —perfil, getWorkspace, admin de plataforma y
+  // notificaciones— y este layout corre en TODAS las pantallas del producto: cada
+  // navegacion las pagaba una detras de otra antes de pintar nada. En produccion cada
+  // ida y vuelta cuesta entre 60 y 180 ms (medido 2026-08-26 sobre pg_stat_statements),
+  // asi que la FILA pesaba mas que el tamaño de cada consulta.
+  //
+  // Son independientes: ninguna usa el resultado de otra. `getNotificaciones` llama a
+  // `getWorkspace` por dentro, pero los dos pasan por el mismo `cache()` de React
+  // (`getWorkspaceCached`), asi que comparten la promesa en vuelo — no duplica lecturas.
+  const [profileResult, workspaceCtx, platformAdminState, notificaciones] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('full_name, role, workspace_id')
+      .eq('id', user.id)
+      .single(),
+    getWorkspace(),
+    getPlatformAdminState(),
+    getNotificaciones(),
+  ])
 
+  const profile = profileResult.data
   if (!profile) {
     // Usuario sin perfil — creacion centralizada en MeTRIK
     redirect('/sin-espacio')
@@ -41,18 +56,7 @@ export default async function AppLayout({
   // = rol real del profile → ningún cambio para usuarios normales. Necesario para que
   // el nav del sidebar refleje el rol impersonado (antes usaba el rol real del owner →
   // al impersonar un operator seguía mostrando Configuración y demás items).
-  const { role: rolEfectivo } = await getWorkspace()
-  const navRole = rolEfectivo ?? profile.role
-
-  // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
-  // rol (fallback en AppShell). Fuente unica de "como se llama el puesto"
-  // (2026-06-04: se elimino el campo separado "Nombre personalizado").
-  const { data: staffSelf } = await supabase
-    .from('staff')
-    .select('position')
-    .eq('profile_id', user.id)
-    .eq('workspace_id', profile.workspace_id)
-    .maybeSingle()
+  const navRole = workspaceCtx.role ?? profile.role
 
   // Dev workspace override: cookie __dev_ws=<slug> impersona cualquier workspace
   let activeWorkspaceId: string = profile.workspace_id
@@ -95,7 +99,17 @@ export default async function AppLayout({
     modules: Record<string, boolean> | null
     config_extra: Record<string, unknown> | null
   }
-  const [workspaceResult, lineasResult] = await Promise.all([
+  const [staffSelfResult, workspaceResult, lineasResult] = await Promise.all([
+    // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
+    // rol (fallback en AppShell). Fuente unica de "como se llama el puesto"
+    // (2026-06-04: se elimino el campo separado "Nombre personalizado"). Va aqui y no
+    // antes porque necesita `profile.workspace_id`, igual que las otras dos.
+    supabase
+      .from('staff')
+      .select('position')
+      .eq('profile_id', user.id)
+      .eq('workspace_id', profile.workspace_id)
+      .maybeSingle(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (activeClient.from('workspaces') as any)
       .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra')
@@ -109,6 +123,7 @@ export default async function AppLayout({
       .eq('is_active', true),
   ])
 
+  const staffSelf = staffSelfResult.data
   const workspace = workspaceResult.data
   if (!workspace) {
     redirect('/sin-espacio')
@@ -141,12 +156,11 @@ export default async function AppLayout({
     conciliacionPendientes = typeof cnt === 'number' ? cnt : 0
   }
 
-  const platformAdminState = await getPlatformAdminState()
-
   // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
   // el contador en el primer render. Antes el componente arrancaba vacío y solo
-  // consultaba al abrir el panel → el badge siempre marcaba cero.
-  const { items: notificacionesIniciales, total: notificacionesTotal } = await getNotificaciones()
+  // consultaba al abrir el panel → el badge siempre marcaba cero. Se piden arriba,
+  // junto con el resto de lo que solo depende del usuario.
+  const { items: notificacionesIniciales, total: notificacionesTotal } = notificaciones
 
   return (
     <>
