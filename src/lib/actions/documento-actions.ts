@@ -17,6 +17,7 @@ import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { resolverDestino } from '@/lib/negocios/casilla-compartida'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
+import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
 
 const BUCKET = 've-documentos'
 
@@ -788,6 +789,11 @@ export async function procesarDocumento(
         .eq('id', bloqueId)
     }
 
+
+    // La seccional del caso nace aquí, con el RUT, no cuando una rama concreta del flujo
+    // se activa. Nunca lanza: el documento ya se guardó bien.
+    await sembrarSeccionalDesdeRut(supabase, { negocioId, bloqueId, campos: camposResult })
+
     // ── 11. Cierre automatico + revalidar ───────────────────────────────
 
   // La factura puede aparecer DESPUES de que el caso llego a su etapa de cierre: ese es
@@ -929,6 +935,10 @@ export async function reprocesarDocumento(
         updated_at: now,
       })
       .eq('id', bloqueId)
+
+    // La seccional del caso nace aquí, con el RUT, no cuando una rama concreta del flujo
+    // se activa. Nunca lanza: el documento ya se guardó bien.
+    await sembrarSeccionalDesdeRut(supabase, { negocioId, bloqueId, campos: mergedCampos })
 
     revalidatePath(`/negocios/${negocioId}`)
 
@@ -1072,6 +1082,10 @@ export async function actualizarCampoDocumento(
     })
   }
 
+
+  // Corregir a mano la seccional del RUT también la siembra en el negocio, si aún no
+  // la tiene. No pisa una ya establecida: esa pudo elegirse en el 010.
+  await sembrarSeccionalDesdeRut(supabase, { negocioId, bloqueId, campos })
 
   // La factura puede aparecer DESPUES de que el caso llego a su etapa de cierre: ese es
   // justo el escenario para el que existe la bandeja de Facturacion. El helper descarta en
