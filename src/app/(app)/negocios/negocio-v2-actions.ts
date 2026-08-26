@@ -12,7 +12,7 @@ import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
-import { mapCiudadASeccional, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
+import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
@@ -590,7 +590,7 @@ export async function getNegociosV2(
       cedula_bloque?: string; cedula_campo?: string
       radicado_bloque?: string; radicado_campo?: string
       factura_bloque?: string; factura_campo?: string } | undefined
-  const vehiculoPorNeg: Record<string, { label: string | null; seccional: string | null; ciudad: string | null }> = {}
+  const vehiculoPorNeg: Record<string, { label: string | null; ciudad: string | null }> = {}
   // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
   const cedulaPorNeg: Record<string, string | null> = {}
   // Radicado de certificación (bloque DA22, config-driven). Para tarjeta + búsqueda.
@@ -633,9 +633,6 @@ export async function getNegociosV2(
         const ciudad = val(negId, cardCfg.vehiculo_bloque, cardCfg.ciudad_campo)
         vehiculoPorNeg[negId] = {
           label: parts.length ? parts.join(' ') : null,
-          // SOENA = 100% personas naturales; para Bogota esto resuelve a la
-          // seccional de naturales.
-          seccional: ciudad ? (mapCiudadASeccional(ciudad, 'natural')?.label ?? null) : null,
           ciudad,
         }
       }
@@ -6934,16 +6931,19 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const ciudadVenta = (facturaData.ciudad_venta as string) ?? ''
       const fechaCitaData = datosGuiaPorSlug['fecha_cita_dian'] ?? datosGuiaPorNombre['fecha cita dian'] ?? {}
       const fechaCita = (fechaCitaData.fecha_cita_dian as string) ?? null
-      // La seccional (y la ciudad que se muestra) heredan lo SELECCIONADO en el 010
-      // (negocios.metadata.seccional): así la Guía y el 010 muestran lo mismo. Si el
-      // 010 quedó en "Otras seccionales" o sin selección, cae a la ciudad de la factura.
+      // La seccional sugerida sale SOLO de `negocios.metadata.seccional`, para que la
+      // Guía y el 010 muestren lo mismo. No cae a la ciudad de la factura: es la del
+      // solicitante, no la del lugar de compra (ver `guia-devolucion-actions`). Sin
+      // ella el selector queda vacío y el operador la elige.
       const seccional010Label = seccional010DelNegocio
-      const seccional010 = seccional010Label ? mapCiudadASeccional(seccional010Label, tipoPersona) : null
-      const seccional = seccional010 ?? mapCiudadASeccional(ciudadVenta, tipoPersona)
+      const seccional = seccional010Label ? seccionalDesdeRut(seccional010Label, tipoPersona) : null
       enrichedConfigExtra._guia_preview = {
         nombre: razonSocial || null,
         nit: nit ? (dv ? `${nit}-${dv}` : nit) : null,
-        ciudad_venta: (seccional010 ? seccional010Label : ciudadVenta) || null,
+        // La ciudad de la factura, tal cual: es lo que dice su etiqueta. Antes esta
+        // casilla mostraba la SECCIONAL cuando el negocio la tenía, bajo un rótulo que
+        // decía "Ciudad factura".
+        ciudad_venta: ciudadVenta || null,
         fecha_cita: fechaCita,
         seccional_sugerida_slug: seccional?.slug ?? null,
       }

@@ -169,7 +169,7 @@ export default function BloqueGuiaDevolucion({
           <MapPin className="inline h-3 w-3 mr-1" />
           Seccional DIAN
           {preview?.seccional_sugerida_slug && !seccionalOverride && (
-            <span className="ml-2 text-[9px] text-green-600 normal-case">auto-detectada desde factura</span>
+            <span className="ml-2 text-[9px] text-green-600 normal-case">heredada del negocio</span>
           )}
         </label>
         <select
@@ -177,7 +177,7 @@ export default function BloqueGuiaDevolucion({
           onChange={e => setSeccionalOverride(e.target.value)}
           className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm"
         >
-          <option value="">— Auto-detectar desde factura —</option>
+          <option value="">— Usar la del negocio —</option>
           <optgroup label="Requieren cita previa">
             {SECCIONALES_CON_CITA.map(s => (
               <option key={s.slug} value={s.slug}>{s.label}</option>

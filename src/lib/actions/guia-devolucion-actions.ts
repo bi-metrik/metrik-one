@@ -14,7 +14,7 @@ import { revalidatePath } from 'next/cache'
 import { renderGuiaDevolucion } from '@/lib/pdf/pdf-render-client'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import {
-  mapCiudadASeccional,
+  seccionalDesdeRut,
   getSeccionalBySlug,
   type SeccionalDIAN,
 } from '@/lib/dian/seccionales'
@@ -81,13 +81,10 @@ export async function generarVersionGuia(
   let nit = ''
   let dv = ''
   let tipoPersona = ''
-  let ciudadVenta = ''
   let fechaCitaIso: string | null = null
 
   // Identifica cada bloque fuente por slug (preferido) o nombre (fallback legacy).
   const esRut = (slug: string, nombre: string) => slug === 'rut' || nombre === 'rut'
-  const esFactura = (slug: string, nombre: string) =>
-    slug === 'factura_venta_vehiculo' || nombre === 'factura venta vehiculo' || nombre === 'factura de venta'
   const esFechaCita = (slug: string, nombre: string) =>
     slug === 'fecha_cita_dian' || nombre === 'fecha cita dian'
 
@@ -104,9 +101,6 @@ export async function generarVersionGuia(
       nit = String(campos.nit?.value ?? '')
       dv = String(campos.dv?.value ?? '')
       tipoPersona = String(campos.tipo_persona?.value ?? '')
-    } else if (esFactura(slug, nombre)) {
-      const campos = (bnData.campos ?? {}) as Record<string, { value?: unknown }>
-      ciudadVenta = String(campos.ciudad_venta?.value ?? '')
     } else if (esFechaCita(slug, nombre)) {
       // El bloque de fecha existe en DOS etapas: agendamiento directo (la registra
       // operaciones) y confirmación por PQR (la registra el comercial con la fecha
@@ -117,8 +111,15 @@ export async function generarVersionGuia(
   }
 
   // 3. Resolver seccional. Precedencia:
-  //   override manual (en la Guía)  >  seccional del 010 (negocios.metadata.seccional)  >  ciudad de la factura
-  // Heredar la del 010 hace que la Guía muestre lo mismo que se seleccionó allí.
+  //   override manual (en la Guía)  >  seccional del negocio (negocios.metadata.seccional)
+  //
+  // ⚠️ NO cae a la ciudad de la factura. La seccional es la del SOLICITANTE (la que
+  // vive en el RUT y quedó canonizada en `metadata.seccional`), no la de la ciudad
+  // donde compró el vehículo: son distintas cada vez que compra fuera de su ciudad, y
+  // ahí la Guía mandaba al cliente a una seccional mientras el 010 llevaba la otra.
+  // Sin seccional se PIDE, que es honesto; adivinarla con la ciudad acertaba a veces y
+  // el resto mandaba al cliente a hacer una fila a la ciudad equivocada.
+  // El selector del bloque ofrece las 35, así que siempre hay salida.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: negRow } = await (supabase as any)
     .from('negocios').select('metadata').eq('id', negocioId).maybeSingle()
@@ -129,15 +130,14 @@ export async function generarVersionGuia(
     seccional = getSeccionalBySlug(input.seccional_slug_override)
   }
   if (!seccional && seccional010Label) {
-    seccional = mapCiudadASeccional(seccional010Label, tipoPersona)
-  }
-  if (!seccional) {
-    seccional = mapCiudadASeccional(ciudadVenta, tipoPersona)
+    seccional = seccionalDesdeRut(seccional010Label, tipoPersona)
   }
   if (!seccional) {
     return {
       ok: false,
-      error: `No se pudo resolver la seccional DIAN (ni del 010 ni de la ciudad "${ciudadVenta || 'vacía'}"). Selecciónala manualmente.`,
+      error:
+        'Este negocio todavía no tiene seccional DIAN registrada. Selecciónala en el ' +
+        'campo "Seccional DIAN" de este bloque y vuelve a generar.',
     }
   }
 
