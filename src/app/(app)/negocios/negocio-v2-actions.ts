@@ -5732,14 +5732,100 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const { supabase, workspaceId, role, areas, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
-  // Cargar negocio base
-  const base = await getNegocioDetalle(id)
+  // ── Todo lo que solo necesita el id del negocio, de una sola vez ──────────
+  //
+  // Esta es la pantalla mas pesada del producto y antes pedia estas trece cosas en
+  // fila india: cada consulta esperaba a que terminara la anterior sin necesitar su
+  // resultado. Medido el 2026-08-26 sobre `pg_stat_statements` (ventana de 29 dias):
+  // en produccion cada ida y vuelta cuesta entre 60 y 180 ms, mientras que corridas
+  // solas y calientes las mismas consultas tardan 20-60 ms. Lo que pesa es la FILA,
+  // no el tamaño de cada una.
+  //
+  // Ninguna de estas usa el resultado de otra: se resuelven con `id`, `workspaceId`
+  // y el rol que ya trajo `getWorkspace`. Lo que SI depende del negocio cargado
+  // (`base`) sigue mas abajo, en el mismo orden de siempre.
+  const [
+    base,
+    negMetaRes,
+    wsRes,
+    respRes,
+    profilesRes,
+    userRes,
+    staffRes,
+    cobrosRes,
+    gastosDirectosRes,
+    gastosMixtaRes,
+    horasRes,
+    cotizacionesRes,
+    actividadRes,
+  ] = await Promise.all([
+    getNegocioDetalle(id),
+    // Seccional seleccionada en el 010 (negocios.metadata.seccional): la Guía de
+    // Devolución la hereda para mostrar los mismos valores que el 010.
+    db(supabase).from('negocios').select('metadata').eq('id', id).maybeSingle(),
+    // UNA sola lectura de `workspaces`: antes eran DOS al MISMO registro, una para
+    // el gate del honorario y otra para modules/config_extra.
+    db(supabase).from('workspaces').select('modules, config_extra').eq('id', workspaceId).single(),
+    // Visibilidad de operator: solo se pregunta cuando el rol lo exige.
+    role === 'operator'
+      ? db(supabase).from('negocio_responsables').select('staff_id').eq('negocio_id', id)
+      : Promise.resolve({ data: null }),
+    supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('workspace_id', workspaceId)
+      .order('full_name', { ascending: true }),
+    getCachedUser(),
+    supabase
+      .from('staff')
+      .select('id, full_name, salary')
+      .eq('workspace_id', workspaceId),
+    db(supabase)
+      .from('cobros')
+      .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', id)
+      .order('created_at', { ascending: true }),
+    // Gastos: honra centro_costos (decisión Santiago + centro-costos sprint
+    // 2026-05-30). Directos/legacy por un lado, mixtos con split por el otro; el
+    // merge y el prorrateo se hacen en memoria mas abajo.
+    db(supabase)
+      .from('gastos')
+      .select('id, descripcion, monto, categoria, fecha, centro_costos, split_json')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', id)
+      .or('centro_costos.eq.directa_negocio,centro_costos.is.null')
+      .order('fecha', { ascending: false }),
+    db(supabase)
+      .from('gastos')
+      .select('id, descripcion, monto, categoria, fecha, centro_costos, split_json')
+      .eq('workspace_id', workspaceId)
+      .eq('centro_costos', 'mixta')
+      .not('split_json', 'is', null),
+    db(supabase)
+      .from('horas')
+      .select('id, horas, descripcion, fecha, staff_id')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', id)
+      .order('fecha', { ascending: false }),
+    supabase
+      .from('cotizaciones')
+      .select('id, consecutivo, modo, estado, valor_total, descripcion, created_at')
+      .eq('negocio_id' as never, id)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('activity_log')
+      .select('id, tipo, autor_id, contenido, created_at')
+      .eq('workspace_id', workspaceId)
+      .eq('entidad_tipo', 'negocio')
+      .eq('entidad_id', id)
+      .order('created_at', { ascending: false })
+      .limit(50),
+  ])
+
   if (!base) return null
 
-  // Seccional seleccionada en el 010 (negocios.metadata.seccional): la Guía de
-  // Devolución la hereda para mostrar los mismos valores que el 010.
-  const { data: negMetaRow } = await db(supabase)
-    .from('negocios').select('metadata').eq('id', id).maybeSingle()
+  const negMetaRow = negMetaRes.data
   const seccional010DelNegocio = (negMetaRow?.metadata as Record<string, unknown> | null)?.seccional as string | undefined
 
   // ¿El usuario actual es responsable? Comparación por staff.id (no profile.id):
@@ -5763,10 +5849,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // consultarla ahí sería una segunda consulta por la misma fila.
   let lineaConfigExtra: Record<string, unknown> | null = null
   if (base.negocio.linea_id) {
-    const [lineaCobroRes, wsCobroRes] = await Promise.all([
-      db(supabase).from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle(),
-      db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle(),
-    ])
+    const lineaCobroRes = await db(supabase)
+      .from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle()
     lineaConfigExtra = (lineaCobroRes.data as { config_extra?: Record<string, unknown> } | null)?.config_extra ?? null
     // Un honorario en cero puede ser una DECISION (propuesta aprobada regalando
     // el servicio) y no un dato que falta. El criterio no se reimplementa acá:
@@ -5790,7 +5874,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       precioAprobado: base.negocio.precio_aprobado,
       estado: base.negocio.estado,
       configLinea: (lineaCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
-      configWorkspace: (wsCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
+      configWorkspace: (wsRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
       ceroDeliberado,
     })
   }
@@ -5798,20 +5882,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Visibilidad: operator solo accede al detalle de negocios donde es responsable
   // (espejo del filtro de la lista; cierra el acceso por URL a negocios ajenos).
   if (role === 'operator') {
-    const { data: resp } = await db(supabase)
-      .from('negocio_responsables')
-      .select('staff_id')
-      .eq('negocio_id', id)
-    const ids = ((resp ?? []) as { staff_id: string }[]).map((r) => r.staff_id)
+    const ids = ((respRes.data ?? []) as { staff_id: string }[]).map((r) => r.staff_id)
     if (!staffId || !ids.includes(staffId)) return null
   }
 
   // Feature flag pausa_enabled
-  const { data: wsRow } = await db(supabase)
-    .from('workspaces')
-    .select('modules, config_extra')
-    .eq('id', workspaceId)
-    .single()
+  const wsRow = wsRes.data
   const wsModules = (wsRow as { modules: Record<string, unknown> | null } | null)?.modules ?? {}
   const pausaEnabled = wsModules.pausa_enabled === true
 
@@ -5856,19 +5932,6 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
-  // Cargar profiles + staff del workspace + currentUserId
-  const [profilesRes, userRes, staffRes] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('workspace_id', workspaceId)
-      .order('full_name', { ascending: true }),
-    getCachedUser(),
-    supabase
-      .from('staff')
-      .select('id, full_name, salary')
-      .eq('workspace_id', workspaceId),
-  ])
   const profilesData = profilesRes.data
   const currentUserId = userRes.user?.id ?? null
 
@@ -5878,13 +5941,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     staffMap[s.id] = s.full_name ?? s.id.slice(-6)
   }
 
-  // Cargar cobros del negocio (db() para evitar type errors en columnas nuevas)
-  const { data: cobrosData } = await db(supabase)
-    .from('cobros')
-    .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json')
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', id)
-    .order('created_at', { ascending: true })
+  const cobrosData = cobrosRes.data
 
   // Cargar gastos del negocio para costosEjecutados + historial
   //
@@ -5895,24 +5952,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   //   - Gastos con centro_costos='distribuible_one' o 'distribuible_clarity' → NO
   //
   // Implementación: 2 queries y merge en memoria. Más simple que un OR complejo
-  // en PostgREST sobre jsonb.
-
-  const [gastosDirectosRes, gastosMixtaRes] = await Promise.all([
-    db(supabase)
-      .from('gastos')
-      .select('id, descripcion, monto, categoria, fecha, centro_costos, split_json')
-      .eq('workspace_id', workspaceId)
-      .eq('negocio_id', id)
-      // Filtrar: directa_negocio o legacy (centro_costos null)
-      .or('centro_costos.eq.directa_negocio,centro_costos.is.null')
-      .order('fecha', { ascending: false }),
-    db(supabase)
-      .from('gastos')
-      .select('id, descripcion, monto, categoria, fecha, centro_costos, split_json')
-      .eq('workspace_id', workspaceId)
-      .eq('centro_costos', 'mixta')
-      .not('split_json', 'is', null),
-  ])
+  // en PostgREST sobre jsonb. Las dos consultas salen arriba, en la ola inicial;
+  // aquí queda el merge.
 
   // Filtrar mixta que tengan split a este negocio específico
   const splitKey = `negocio:${id}`
@@ -5951,24 +5992,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     ...gastosMixtaParcial,
   ].sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''))
 
-  // Cargar horas del negocio
-
-  const { data: horasData } = await db(supabase)
-    .from('horas')
-    .select('id, horas, descripcion, fecha, staff_id')
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', id)
-    .order('fecha', { ascending: false })
+  const horasData = horasRes.data
 
   // Cotización ahora vive en negocio_bloques.data del bloque cotizacion (sin tabla separada)
   const cotizacion = null
 
-  // Cargar cotizaciones del sistema de cotizaciones (tabla cotizaciones con negocio_id)
-  const cotizacionesRes = await supabase
-    .from('cotizaciones')
-    .select('id, consecutivo, modo, estado, valor_total, descripcion, created_at')
-    .eq('negocio_id' as never, id)
-    .order('created_at', { ascending: false })
   const cotizacionesNegocio: CotizacionResumen[] = ((cotizacionesRes.data ?? []) as Record<string, unknown>[]).map(c => ({
     id: c.id as string,
     consecutivo: c.consecutivo as string | null,
@@ -6021,15 +6049,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
-  // Cargar actividad del negocio
-  const { data: actividadData } = await supabase
-    .from('activity_log')
-    .select('id, tipo, autor_id, contenido, created_at')
-    .eq('workspace_id', workspaceId)
-    .eq('entidad_tipo', 'negocio')
-    .eq('entidad_id', id)
-    .order('created_at', { ascending: false })
-    .limit(50)
+  const actividadData = actividadRes.data
 
   const actividad = ((actividadData ?? []) as Record<string, unknown>[]).map(a => ({
     id: a.id as string,
