@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { EtapaRow, Bloque, InputOutput, Gate } from './actions'
+import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
 interface Props {
   etapas: EtapaRow[]
@@ -9,9 +10,9 @@ interface Props {
 
 const FASE_ORDER = ['venta', 'ejecucion', 'cobro']
 const FASE_LABELS: Record<string, string> = {
-  venta:    'Venta',
-  ejecucion: 'Ejecución',
-  cobro:    'Cobro',
+  venta:    STAGE_LABEL.venta,
+  ejecucion: STAGE_LABEL.ejecucion,
+  cobro:    STAGE_LABEL.cobro,
 }
 const FASE_COLORS: Record<string, string> = {
   venta:    'bg-blue-50 border-blue-200 text-blue-800',

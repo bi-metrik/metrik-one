@@ -12,6 +12,7 @@ import type { Empresa } from '@/types/database'
 import NotesSection from '@/components/notes-section'
 import RutUploadCard from '@/components/rut-upload-card'
 import RutDataDisplay from '@/components/rut-data-display'
+import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
 interface NegocioRow {
   id: string
@@ -25,9 +26,9 @@ interface NegocioRow {
 }
 
 const STAGE_CHIP: Record<string, { label: string; class: string }> = {
-  venta: { label: 'Venta', class: 'bg-blue-50 text-blue-700' },
-  ejecucion: { label: 'Ejecución', class: 'bg-orange-50 text-orange-700' },
-  cobro: { label: 'Cobro', class: 'bg-green-50 text-green-700' },
+  venta: { label: STAGE_LABEL.venta, class: 'bg-blue-50 text-blue-700' },
+  ejecucion: { label: STAGE_LABEL.ejecucion, class: 'bg-orange-50 text-orange-700' },
+  cobro: { label: STAGE_LABEL.cobro, class: 'bg-green-50 text-green-700' },
   cierre: { label: 'Cierre', class: 'bg-slate-100 text-slate-700' },
 }
 

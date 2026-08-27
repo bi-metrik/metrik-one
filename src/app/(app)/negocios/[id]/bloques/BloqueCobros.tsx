@@ -216,11 +216,22 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
   // tapaba, que es la peor forma de un dato faltante — nadie va a buscar lo que el
   // sistema afirma que no existe.
   //
-  // El residuo de redondeo NO cuenta como saldo a favor: se compara contra el piso de
-  // materialidad, la misma vara que usan los gates y el motor de avance. Sin eso, un
-  // negocio que pagó $120 de más quedaría marcado en la tarjeta como si hubiera que
-  // devolverle algo.
-  const haySaldoAFavor = saldoPendiente < 0 && !saldoCuadrado(saldoPendiente)
+  // ⚠️ La tolerancia decide la ALARMA, nunca la CIFRA.
+  //
+  // `saldoCuadrado` existe para que un residuo de redondeo no retenga un caso: es el piso
+  // de materialidad que usan los gates y el motor de avance. Pero acá se estaba usando
+  // también para decidir qué número pintar, y con `Math.max(0, saldoPendiente)` un negocio
+  // con $120 a favor del cliente mostraba "Saldo $0". El propio módulo de tolerancia dice
+  // que el residuo "sigue existiendo en los datos y sigue siendo visible": la pantalla lo
+  // estaba tapando, que es justo lo que no debía pasar. Medido en SOENA: V0276, $120 sobre
+  // $1.051.880, invisible en la tarjeta.
+  //
+  // Por eso son dos preguntas distintas:
+  //   - `saldoAFavor`  → ¿hacia qué lado cae? Decide la etiqueta y el número. Sin piso.
+  //   - `haySaldoAFavor` → ¿es material? Decide si se pinta en ámbar. Con piso.
+  // Un residuo se ve, en gris, sin gritar. Uno material se ve y además avisa.
+  const saldoAFavor = saldoPendiente < 0
+  const haySaldoAFavor = saldoAFavor && !saldoCuadrado(saldoPendiente)
   const programadosVencidos = programados.filter(c => c.vencido).length
   const bloqueaHandoff = pendienteHandoff != null && pendienteHandoff.pendienteTotal > 0
   const plan = modeloDinero?.aprobado_plan
@@ -291,10 +302,10 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
             }
           >
             <p className={haySaldoAFavor ? 'text-[10px] font-medium text-[#B45309]' : 'text-[10px] font-medium text-[#6B7280]'}>
-              {haySaldoAFavor ? 'A favor del cliente' : 'Saldo'}
+              {saldoAFavor ? 'A favor del cliente' : 'Saldo'}
             </p>
             <p className={haySaldoAFavor ? 'text-sm font-bold text-[#B45309] tabular-nums' : 'text-sm font-bold text-[#1A1A1A] tabular-nums'}>
-              {fmt(haySaldoAFavor ? -saldoPendiente : Math.max(0, saldoPendiente))}
+              {fmt(saldoAFavor ? -saldoPendiente : saldoPendiente)}
             </p>
           </div>
         </div>

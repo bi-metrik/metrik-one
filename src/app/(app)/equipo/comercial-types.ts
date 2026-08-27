@@ -133,12 +133,7 @@ export interface ComercialPerfil {
 }
 
 /** Etiqueta legible por stage. */
-export const STAGE_LABEL: Record<string, string> = {
-  venta: 'En venta',
-  ejecucion: 'En ejecucion',
-  cobro: 'En cobro',
-  cerrado: 'Cerrado',
-}
+export { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
 // ── Iteracion 2: paridad Sheet SOENA (tabla por vendedor del mes, KPIs, series) ──
 
