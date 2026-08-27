@@ -1,0 +1,27 @@
+-- Borrar `negocio_bloques_campos(uuid[], text[], text[])`, que quedo sin ningun
+-- caller.
+--
+-- La reemplazo `negocio_bloques_campos_json(uuid[], jsonb)` en el PR #419
+-- (`20260827000002_negocio_bloques_campos_json.sql`). La vieja devolvia una fila
+-- por (negocio, bloque, campo) y la respuesta REST se cortaba antes del final:
+-- 3.316 filas por carga de la lista en soena, con las de `servicio` empezando en
+-- la posicion 2.890. La lista mostraba 3 negocios donde habia 75.
+--
+-- No se borro en ese mismo PR a proposito. La base es compartida entre `main` y
+-- cualquier rama, asi que una migracion pega en produccion al instante aunque su
+-- codigo no este desplegado: borrarla ahi habria dejado la lista de /negocios
+-- rota en la ventana entre la migracion y el deploy. Es el paso (3) del
+-- procedimiento que CLAUDE.md documenta para cambiar una RPC con consumidores
+-- vivos — ampliar, desplegar el consumidor, y recien entonces borrar lo viejo.
+--
+-- Esa ventana ya cerro: #419 esta mergeado y desplegado, y el unico caller
+-- (`src/app/(app)/negocios/negocio-v2-actions.ts`) invoca la version `_json`.
+-- Verificado con grep sobre `origin/main` en `src/` y `scripts/`: cero
+-- referencias a la firma vieja fuera de comentarios historicos y de su propia
+-- migracion.
+--
+-- La firma va completa a proposito: `negocio_bloques_campos_json` tiene otro
+-- nombre y otra firma (uuid[], jsonb), pero nombrar los tipos deja explicito que
+-- lo que se borra es exactamente la sobrecarga huerfana y nada mas.
+
+drop function if exists public.negocio_bloques_campos(uuid[], text[], text[]);
