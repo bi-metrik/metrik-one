@@ -65,7 +65,7 @@ import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-nego
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
-import { indexarCamposDeBloques, leerCampo, type FilaCampo } from '@/lib/negocios/campos-de-bloques'
+import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores } from '@/lib/negocios/campos-de-bloques'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -613,32 +613,35 @@ export async function getNegociosV2(
   const facturaPorNeg: Record<string, string | null> = {}
   // Servicio contratado (bloque config-driven). Para el chip de la tarjeta y el filtro.
   const servicioPorNeg: Record<string, string | null> = {}
-  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque, cardCfg?.factura_bloque, cardCfg?.servicio_bloque].filter(Boolean) as string[]
-  const cardCampos = [
-    ...(cardCfg?.vehiculo_campos ?? []),
-    cardCfg?.ciudad_campo,
-    cardCfg?.cedula_campo,
-    cardCfg?.radicado_campo,
-    cardCfg?.factura_campo,
-    cardCfg?.servicio_campo,
-  ].filter(Boolean) as string[]
-  if (cardBloqueNombres.length > 0 && cardCampos.length > 0 && negocioIds.length > 0) {
-    // La extraccion vive en Postgres (`negocio_bloques_campos`). Antes esto se
+  // Se piden PARES (bloque, campo), no todos los campos contra todos los bloques:
+  // el producto cartesiano traia combinaciones que nadie lee y multiplicaba el
+  // tamano de la respuesta hasta cortarla. Ver la migracion
+  // `20260827000002_negocio_bloques_campos_json`.
+  const cardPares = paresDeCampos([
+    { bloque: cardCfg?.vehiculo_bloque, campos: [...(cardCfg?.vehiculo_campos ?? []), cardCfg?.ciudad_campo] },
+    { bloque: cardCfg?.cedula_bloque, campos: [cardCfg?.cedula_campo] },
+    { bloque: cardCfg?.radicado_bloque, campos: [cardCfg?.radicado_campo] },
+    { bloque: cardCfg?.factura_bloque, campos: [cardCfg?.factura_campo] },
+    { bloque: cardCfg?.servicio_bloque, campos: [cardCfg?.servicio_campo] },
+  ])
+  if (cardPares.length > 0 && negocioIds.length > 0) {
+    // La extraccion vive en Postgres (`negocio_bloques_campos_json`). Antes esto se
     // traia la columna `data` COMPLETA de cada bloque para leerle cuatro cadenas
     // cortas: medido en soena el 2026-08-21, 1.153 kB de jsonb por carga de la
-    // lista para producir 24 kB utiles. La funcion devuelve solo los pares
-    // (campo, valor) pedidos.
-    const { data: filas } = await db(supabase).rpc('negocio_bloques_campos', {
+    // lista para producir 24 kB utiles. La funcion devuelve UNA FILA POR NEGOCIO
+    // con solo los pares pedidos; la version anterior devolvia una fila por
+    // (negocio, bloque, campo) y en soena pasaba de tres mil, tantas que la
+    // respuesta se cortaba y los ultimos campos desaparecian sin dar error.
+    const { data: filas } = await db(supabase).rpc('negocio_bloques_campos_json', {
       p_negocio_ids: negocioIds,
-      p_bloques: cardBloqueNombres,
-      p_campos: cardCampos,
+      p_pares: cardPares,
     })
 
     // El indice y la regla de "la primera con valor gana" viven en
     // `lib/negocios/campos-de-bloques`, con pruebas: es logica que se puede
     // equivocar en silencio (quedarse con la copia vacia = tarjeta sin cedula y
     // busqueda que no encuentra, sin ningun error visible).
-    const indice = indexarCamposDeBloques((filas ?? []) as FilaCampo[])
+    const indice = indexarValoresDeBloques((filas ?? []) as FilaValores[])
     const val = (negId: string, bloque: string | undefined, campo: string | undefined) =>
       leerCampo(indice, negId, bloque, campo)
 

@@ -1,72 +1,77 @@
 import { describe, it, expect } from 'vitest'
-import { indexarCamposDeBloques, leerCampo, type FilaCampo } from './campos-de-bloques'
+import {
+  indexarValoresDeBloques,
+  leerCampo,
+  paresDeCampos,
+} from './campos-de-bloques'
 
-const fila = (p: Partial<FilaCampo>): FilaCampo => ({
-  negocio_id: 'n1',
-  bloque_nombre: 'RUT',
-  campo: 'numero_identificacion',
-  valor: '79876543',
-  ...p,
+describe('paresDeCampos', () => {
+  it('arma un par por cada campo del bloque', () => {
+    expect(paresDeCampos([{ bloque: 'Factura', campos: ['marca', 'linea'] }])).toEqual([
+      { bloque: 'Factura', campo: 'marca' },
+      { bloque: 'Factura', campo: 'linea' },
+    ])
+  })
+
+  it('descarta bloques y campos sin configurar', () => {
+    expect(paresDeCampos([
+      { bloque: undefined, campos: ['marca'] },
+      { bloque: 'RUT', campos: [undefined] },
+    ])).toEqual([])
+  })
+
+  it('no repite el mismo par', () => {
+    expect(paresDeCampos([
+      { bloque: 'RUT', campos: ['cedula', 'cedula'] },
+      { bloque: 'RUT', campos: ['cedula'] },
+    ])).toEqual([{ bloque: 'RUT', campo: 'cedula' }])
+  })
+
+  it('el mismo campo en dos bloques son dos pares distintos', () => {
+    expect(paresDeCampos([
+      { bloque: 'RUT', campos: ['numero'] },
+      { bloque: 'Factura', campos: ['numero'] },
+    ])).toHaveLength(2)
+  })
 })
 
-describe('indexarCamposDeBloques', () => {
+describe('indexarValoresDeBloques', () => {
   it('indexa por negocio, bloque y campo', () => {
-    const i = indexarCamposDeBloques([fila({})])
-    expect(leerCampo(i, 'n1', 'RUT', 'numero_identificacion')).toBe('79876543')
-  })
-
-  it('la primera instancia con valor gana sobre las copias posteriores', () => {
-    const i = indexarCamposDeBloques([
-      fila({ valor: '79876543' }),
-      fila({ valor: '11111111' }),
+    const i = indexarValoresDeBloques([
+      { negocio_id: 'n1', valores: { RUT: { numero_identificacion: '79876543' } } },
     ])
     expect(leerCampo(i, 'n1', 'RUT', 'numero_identificacion')).toBe('79876543')
   })
 
-  it('una copia vacia no tapa el valor que viene despues', () => {
-    const i = indexarCamposDeBloques([
-      fila({ valor: '   ' }),
-      fila({ valor: '79876543' }),
+  it('recorta espacios y descarta valores vacios', () => {
+    const i = indexarValoresDeBloques([
+      { negocio_id: 'n1', valores: { RUT: { cedula: '  79876543  ', otro: '   ' } } },
     ])
-    expect(leerCampo(i, 'n1', 'RUT', 'numero_identificacion')).toBe('79876543')
+    expect(leerCampo(i, 'n1', 'RUT', 'cedula')).toBe('79876543')
+    expect(leerCampo(i, 'n1', 'RUT', 'otro')).toBeNull()
   })
 
-  it('recorta los espacios del valor', () => {
-    const i = indexarCamposDeBloques([fila({ valor: '  FISA000011232  ' })])
-    expect(leerCampo(i, 'n1', 'RUT', 'numero_identificacion')).toBe('FISA000011232')
-  })
-
-  it('no mezcla negocios distintos', () => {
-    const i = indexarCamposDeBloques([
-      fila({ negocio_id: 'n1', valor: 'aaa' }),
-      fila({ negocio_id: 'n2', valor: 'bbb' }),
+  it('un negocio sin valores no rompe ni contamina el indice', () => {
+    const i = indexarValoresDeBloques([
+      { negocio_id: 'n1', valores: null },
+      { negocio_id: 'n2', valores: { RUT: { cedula: 'bbb' } } },
     ])
-    expect(leerCampo(i, 'n1', 'RUT', 'numero_identificacion')).toBe('aaa')
-    expect(leerCampo(i, 'n2', 'RUT', 'numero_identificacion')).toBe('bbb')
+    expect(leerCampo(i, 'n1', 'RUT', 'cedula')).toBeNull()
+    expect(leerCampo(i, 'n2', 'RUT', 'cedula')).toBe('bbb')
   })
 
-  it('no mezcla campos del mismo nombre en bloques distintos', () => {
-    const i = indexarCamposDeBloques([
-      fila({ bloque_nombre: 'RUT', campo: 'numero', valor: 'del-rut' }),
-      fila({ bloque_nombre: 'Factura emitida', campo: 'numero', valor: 'de-la-factura' }),
+  it('no mezcla el mismo campo entre bloques distintos', () => {
+    const i = indexarValoresDeBloques([
+      { negocio_id: 'n1', valores: { RUT: { numero: 'del-rut' }, Factura: { numero: 'de-la-factura' } } },
     ])
     expect(leerCampo(i, 'n1', 'RUT', 'numero')).toBe('del-rut')
-    expect(leerCampo(i, 'n1', 'Factura emitida', 'numero')).toBe('de-la-factura')
+    expect(leerCampo(i, 'n1', 'Factura', 'numero')).toBe('de-la-factura')
   })
 
-  it('ignora filas incompletas en vez de indexar basura', () => {
-    const i = indexarCamposDeBloques([
-      { negocio_id: '', bloque_nombre: 'RUT', campo: 'x', valor: 'v' },
-      { negocio_id: 'n1', bloque_nombre: '', campo: 'x', valor: 'v' },
-      { negocio_id: 'n1', bloque_nombre: 'RUT', campo: '', valor: 'v' },
+  it('el servicio contratado llega igual que cualquier otro campo', () => {
+    const i = indexarValoresDeBloques([
+      { negocio_id: 'n1', valores: { 'Servicio contratado': { servicio: 'solo_upme' } } },
     ])
-    expect(i).toEqual({})
-  })
-
-  it('un bloque o campo sin configurar devuelve null, no revienta', () => {
-    const i = indexarCamposDeBloques([fila({})])
-    expect(leerCampo(i, 'n1', undefined, 'numero_identificacion')).toBeNull()
-    expect(leerCampo(i, 'n1', 'RUT', undefined)).toBeNull()
-    expect(leerCampo(i, 'desconocido', 'RUT', 'numero_identificacion')).toBeNull()
+    expect(leerCampo(i, 'n1', 'Servicio contratado', 'servicio')).toBe('solo_upme')
   })
 })
