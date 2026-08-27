@@ -1327,8 +1327,20 @@ function BloqueRenderer({
   function getBloqueMode(): 'editable' | 'visible' {
     // editable_siempre: formularios (010/1668) regenerables aun completados o
     // heredados — la DIAN devuelve requerimientos tras avanzar de etapa.
+    //
+    // `documento` entra por la misma puerta y por la misma razón: hay documentos
+    // que aparecen DESPUÉS de que su etapa pasó. La factura emitida es el caso —
+    // en los negocios cuya factura se hizo antes de que ONE facturara, el PDF se
+    // baja de Siigo y hay que cargarlo desde donde esté el caso hoy (etapa 8 a 19),
+    // no volviéndolo a Cargue. Sin esto el bloque se ve pero no recibe el archivo,
+    // y la salida era emitir una segunda factura por lo mismo.
+    //
+    // Vale también sobre una copia `visible` (por eso va ANTES de esa línea): es
+    // justo la copia que el usuario tiene enfrente. El flag es explícito por
+    // bloque, así que no abre ningún otro documento heredado, y el gate de rol
+    // sigue siendo supervisor+.
     if (
-      tipo === 'formulario' &&
+      (tipo === 'formulario' || tipo === 'documento') &&
       (configExtra as { editable_siempre?: boolean }).editable_siempre === true &&
       SUPERVISOR_UP.includes(userRole)
     ) return 'editable'

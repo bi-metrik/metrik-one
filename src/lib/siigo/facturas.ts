@@ -19,6 +19,8 @@ import { resolverConceptoDeNegocio } from './concepto-negocio'
 import { asegurarClienteSiigo, corregirContactoParaFactura } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
+import { numeroFacturaEnData } from './factura-cargada'
+import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 
@@ -168,6 +170,36 @@ export interface MarcaFactura {
   producto_code?: string
 }
 
+/**
+ * Busca en TODAS las copias del bloque, no solo en la nativa: el PDF se carga desde
+ * la etapa donde esté el caso hoy, y cada copia guarda en su propia fila. Ver
+ * `idsDeCopiasDelBloque`.
+ *
+ * Sin slug o sin línea no hay dónde mirar y responde null: la emisión queda como
+ * estaba, con la marca como única señal.
+ */
+async function numeroFacturaCargado(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  negocioId: string,
+  lineaId: string | null,
+  slugBloque: string | undefined,
+): Promise<string | null> {
+  if (!slugBloque || !lineaId) return null
+  const copias = await idsDeCopiasDelBloque(svc, lineaId, slugBloque)
+  if (copias.length === 0) return null
+  const { data } = await svc
+    .from('negocio_bloques')
+    .select('data')
+    .eq('negocio_id', negocioId)
+    .in('bloque_config_id', copias)
+  for (const fila of ((data ?? []) as Array<{ data?: unknown }>)) {
+    const numero = numeroFacturaEnData(fila.data ?? null)
+    if (numero) return numero
+  }
+  return null
+}
+
 interface DatosNegocio {
   id: string
   precio_aprobado: number | null
@@ -201,10 +233,15 @@ export async function emitirFacturaNegocio(
   const negocio = negRaw as DatosNegocio & { linea_id: string | null }
 
   // ── 1. ¿ONE ya sabe que está facturado? ───────────────────────────────────
+  // Dos señales, porque hay dos maneras de llegar a estar facturado. La marca solo
+  // existe cuando la factura salió DESDE aquí; la otra vía es el bloque, donde
+  // alguien cargó el PDF que bajó de Siigo.
   const yaFacturado = (negocio.metadata?.siigo_factura ?? null) as MarcaFactura | null
   if (yaFacturado?.numero) {
     return { ok: false, motivo: 'ya_facturado_en_one', numero: yaFacturado.numero }
   }
+  const cargada = await numeroFacturaCargado(svc, negocioId, negocio.linea_id, opciones.bloqueFacturaSlug)
+  if (cargada) return { ok: false, motivo: 'ya_facturado_en_one', numero: cargada }
 
   // ── 2. Saldo ──────────────────────────────────────────────────────────────
   // Solo se factura con el honorario cubierto. El faltante se mide contra el
