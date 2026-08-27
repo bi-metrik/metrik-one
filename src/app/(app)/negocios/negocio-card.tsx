@@ -11,6 +11,7 @@ import { MARCAS_CONDICION, type MarcaCondicion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
+import { STAGE_LABEL_UPPER } from '@/lib/negocios/stage-label'
 
 export type StaffAsignable = { id: string; full_name: string }
 
@@ -28,11 +29,7 @@ const fmtShort = (v: number) => {
   return fmt(v)
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  venta: 'VENTA',
-  ejecucion: 'EJECUCION',
-  cobro: 'COBRO',
-}
+const STAGE_LABELS = STAGE_LABEL_UPPER
 
 const CIERRE_ICONS = {
   exitoso: CheckCircle2,

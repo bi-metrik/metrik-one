@@ -12,6 +12,7 @@ import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-llegada'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { NegocioResumen } from './negocio-v2-actions'
+import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
 type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
@@ -127,17 +128,17 @@ const ALL_FASES: FaseSpec[] = [
   },
   {
     key: 'venta',
-    label: 'Venta',
+    label: STAGE_LABEL.venta,
     active: { bg: 'bg-[#10B981]/10', text: 'text-[#059669]', border: 'border-[#10B981]' },
   },
   {
     key: 'ejecucion',
-    label: 'Ejecucion',
+    label: STAGE_LABEL.ejecucion,
     active: { bg: 'bg-[#FFF7ED]', text: 'text-[#C2410C]', border: 'border-[#FED7AA]' },
   },
   {
     key: 'cobro',
-    label: 'Cobro',
+    label: STAGE_LABEL.cobro,
     active: { bg: 'bg-[#EFF6FF]', text: 'text-[#2563EB]', border: 'border-[#BFDBFE]' },
   },
   {

@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { SECCIONALES_DIAN, canonizarSeccional } from '@/lib/dian/seccionales'
 import { resumirCartera } from '@/lib/negocios/cartera'
+import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 import type {
   ComercialData, OperativoData, FinancieroData,
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
@@ -398,7 +399,7 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
   // Pipeline by stage (solo negocios abiertos en venta)
   const STAGE_ORDER = ['venta', 'ejecucion', 'cobro', 'cierre']
   const STAGE_LABELS: Record<string, string> = {
-    venta: 'En venta', ejecucion: 'Ejecucion', cobro: 'Cobro', cierre: 'Cierre',
+    ...STAGE_LABEL,
   }
   const stageMap = new Map<string, { count: number; valor: number }>()
   for (const stage of STAGE_ORDER) {
@@ -573,7 +574,7 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
 
   // Negocios por stage
   const STAGE_LABELS_OP: Record<string, string> = {
-    venta: 'En venta', ejecucion: 'Ejecucion', cobro: 'Cobro', cierre: 'Cierre',
+    ...STAGE_LABEL,
   }
   const stageMap = new Map<string, number>()
   for (const n of negociosActivos) {
