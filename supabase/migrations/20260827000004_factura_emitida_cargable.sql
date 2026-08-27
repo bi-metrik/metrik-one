@@ -1,4 +1,5 @@
 -- "Factura emitida" pasa a ser cargable desde donde este el caso, no solo en Cargue.
+-- YA APLICADA EN PRODUCCION el 2026-08-27 (13 configuraciones actualizadas).
 --
 -- El problema: hay negocios cuya factura se hizo ANTES de que ONE facturara. La
 -- factura correcta existe, se baja de Siigo en PDF, y hay que meterla al expediente.
