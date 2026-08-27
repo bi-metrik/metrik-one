@@ -1,7 +1,8 @@
 'use client'
 
 import { Fragment, useMemo, useState, useTransition } from 'react'
-import { ChevronLeft, ChevronRight, Target } from 'lucide-react'
+import Link from 'next/link'
+import { ChevronLeft, ChevronRight, Target, X } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
   Tooltip, CartesianGrid, LabelList,
@@ -15,6 +16,8 @@ import type {
   ComercialSeccionalFila,
   ComercialSerieSeccionalResponse,
   ComercialSerieSeccionalPunto,
+  ComercialSerieVendedorResponse,
+  ComercialSerieVendedorPunto,
   ComercialSeccionalMes,
   ComercialPlanPagoFila,
   ComercialPlanPagoMes,
@@ -28,6 +31,7 @@ import {
   getComercialOrigenMes,
   getComercialSeccionalMes,
   getComercialPlanPagoMes,
+  type RecorteVendedor,
 } from '../../equipo/comercial-actions'
 import MetasModal from '../../equipo/metas-modal'
 import { canonizarSeccional } from '@/lib/dian/seccionales'
@@ -35,6 +39,13 @@ import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
 import { PagosDrawer, type MesSeleccionado } from './pagos-drawer'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
+
+/**
+ * El vendedor elegido en la tabla. `id` null + `sinResponsable` true es el bucket de los
+ * negocios sin comercial atribuido, que es una respuesta legitima y no la ausencia de
+ * filtro — por eso son dos campos y no uno.
+ */
+type VendedorSel = { id: string | null; nombre: string; sinResponsable: boolean }
 
 const GREEN = '#059669'
 const BLUE = '#2563EB'
@@ -115,6 +126,11 @@ export interface TabComercialSoenaProps {
    * filtro sencillamente no se dibuja; las graficas siguen mostrando el total.
    */
   serieSeccional: ComercialSerieSeccionalResponse | null
+  /**
+   * El mismo historico abierto por vendedor. `null` = no se pudo traer y el filtro por
+   * persona sencillamente no recorta las graficas; la tabla se sigue dibujando.
+   */
+  serieVendedor: ComercialSerieVendedorResponse | null
   metasIniciales: MetaComercial[]
   anioInicial: number
   mesNumInicial: number
@@ -139,6 +155,7 @@ export function TabComercialSoena({
   capacidad,
   serie,
   serieSeccional,
+  serieVendedor,
   metasIniciales,
   anioInicial,
   mesNumInicial,
@@ -168,9 +185,29 @@ export function TabComercialSoena({
    * de filtro. Por eso son tres estados y no dos.
    */
   const [filtroSeccional, setFiltroSeccional] = useState<string | null | undefined>(undefined)
+  /**
+   * Que vendedor se esta mirando. `null` = todo el equipo.
+   *
+   * Es el mando del tablero: la fila elegida en la tabla recorta TODO lo que va debajo.
+   * Guarda el nombre y no solo el id porque la etiqueta tiene que sobrevivir un cambio
+   * de mes — si el vendedor no vendio en el mes nuevo, su fila desaparece de la tabla y
+   * el filtro se quedaria sin como llamarse.
+   */
+  const [filtroVendedor, setFiltroVendedor] = useState<VendedorSel | null>(null)
 
-  /** Salta a un mes concreto. El navegador de flechas y el histórico usan lo mismo. */
-  function irAlMes(na: number, nm: number) {
+  /**
+   * Salta a un mes concreto, con el recorte por vendedor que este puesto.
+   *
+   * `recorte` viaja como argumento y no se lee del estado: `setFiltroVendedor` no ha
+   * surtido efecto todavia cuando el clic en una fila dispara la recarga, asi que leer
+   * `filtroVendedor` aqui traeria el filtro ANTERIOR y la pantalla quedaria un mes
+   * entero mostrando el corte de otra persona.
+   *
+   * `getComercialMes` va SIN recorte a proposito: es quien alimenta la tabla que hace de
+   * mando. Filtrarla dejaria una sola fila en pantalla y no habria forma de cambiar de
+   * vendedor ni de quitar el filtro.
+   */
+  function irAlMes(na: number, nm: number, recorte?: RecorteVendedor) {
     setMes(nm)
     setAnio(na)
     const prev = nm === 1 ? { a: na - 1, m: 12 } : { a: na, m: nm - 1 }
@@ -180,12 +217,56 @@ export function TabComercialSoena({
       const [d, p, o, sec, plan] = await Promise.all([
         getComercialMes(na, nm),
         getComercialMes(prev.a, prev.m),
-        getComercialOrigenMes(na, nm),
-        getComercialSeccionalMes(na, nm),
-        getComercialPlanPagoMes(na, nm),
+        getComercialOrigenMes(na, nm, recorte),
+        getComercialSeccionalMes(na, nm, recorte),
+        getComercialPlanPagoMes(na, nm, recorte),
       ])
       setMesData(d)
       setMesPrevio(p)
+      setOrigen(o)
+      setSeccional(sec)
+      setPlanPago(plan)
+    })
+  }
+
+  /** Si esta fila de la tabla es la que esta recortando el tablero. */
+  const esteVendedorFiltra = (v: ComercialVendedorMes) =>
+    filtroVendedor !== null
+    && filtroVendedor.id === v.responsable_id
+    && filtroVendedor.sinResponsable === v.sin_responsable
+
+  /** El recorte vigente, en la forma que entienden las acciones. */
+  const recorteActual: RecorteVendedor | undefined = filtroVendedor
+    ? { responsableId: filtroVendedor.id, sinResponsable: filtroVendedor.sinResponsable }
+    : undefined
+
+  /**
+   * Elige (o suelta) un vendedor y recarga los tres cortes del mes con ese recorte.
+   *
+   * Volver a hacer clic en la fila que ya estaba elegida SUELTA el filtro: sin eso, la
+   * unica salida seria el aspa, y quien acaba de hacer clic en una fila espera que el
+   * segundo clic la deshaga.
+   *
+   * Elegir vendedor SUELTA la seccional, y viceversa. No es una limitacion de pantalla:
+   * el historico llega abierto por seccional Y abierto por vendedor, pero nunca por la
+   * combinacion de las dos, asi que cruzarlas obligaria a inventar un dato que nadie
+   * calculo. Antes que mentir con un cruce inventado, se sostiene un filtro a la vez.
+   */
+  function elegirVendedor(sel: VendedorSel | null) {
+    const mismo = sel !== null && filtroVendedor !== null
+      && filtroVendedor.id === sel.id && filtroVendedor.sinResponsable === sel.sinResponsable
+    const siguiente = mismo ? null : sel
+    setFiltroVendedor(siguiente)
+    if (siguiente) setFiltroSeccional(undefined)
+    const recorte: RecorteVendedor | undefined = siguiente
+      ? { responsableId: siguiente.id, sinResponsable: siguiente.sinResponsable }
+      : undefined
+    startTransition(async () => {
+      const [o, sec, plan] = await Promise.all([
+        getComercialOrigenMes(anio, mes, recorte),
+        getComercialSeccionalMes(anio, mes, recorte),
+        getComercialPlanPagoMes(anio, mes, recorte),
+      ])
       setOrigen(o)
       setSeccional(sec)
       setPlanPago(plan)
@@ -197,12 +278,27 @@ export function TabComercialSoena({
     let na = anio
     if (nm < 1) { nm = 12; na -= 1 }
     if (nm > 12) { nm = 1; na += 1 }
-    irAlMes(na, nm)
+    irAlMes(na, nm, recorteActual)
   }
 
   const kpis = mesData?.kpis
   const kpisPrev = mesPrevio?.kpis
-  const ventasPorDia = mesData?.porDia ?? []
+  // Sin filtro se usa `porDia` tal cual. Con filtro se reconstruye desde el desglose
+  // por persona, que suma exactamente lo mismo: la barra recortada nunca puede pasarse
+  // de la barra entera. Los dias sin ventas de esa persona se mantienen EN CERO y no se
+  // borran — un dia que desaparece del eje se lee como "ese dia no existio".
+  const ventasPorDia = useMemo(() => {
+    const todos = mesData?.porDia ?? []
+    if (!filtroVendedor) return todos
+    const suyas = new Map<string, number>()
+    for (const d of mesData?.porDiaVendedor ?? []) {
+      const esSuyo = filtroVendedor.sinResponsable
+        ? d.responsable_id === null
+        : d.responsable_id === filtroVendedor.id
+      if (esSuyo) suyas.set(d.dia, (suyas.get(d.dia) ?? 0) + d.ventas)
+    }
+    return todos.map((d) => ({ ...d, ventas: suyas.get(d.dia) ?? 0 }))
+  }, [mesData, filtroVendedor])
 
   // El mes en curso va a medias: su comparación contra un mes cerrado siempre pierde.
   // No se oculta el delta, se declara — esconderlo obligaría a adivinar por qué el mes
@@ -242,35 +338,16 @@ export function TabComercialSoena({
   const filaPlan1 = planPago?.filas.find((f) => f.plan_pago === 1) ?? null
   const mesSinVentas5050 = filaPlan1 !== null && filaPlan1.ventas === 0
 
-  // Quien lidera el equipo toma casos especiales pero no compite: va listado aparte,
-  // debajo, para no mezclarlo con la comparacion entre quienes ejecutan. Sus cifras
-  // SI cuentan en los totales del equipo, que son del equipo entero.
+  // Quien lidera el equipo toma casos especiales pero no compite: va listado aparte, al
+  // pie de la tabla, para no mezclarlo con la comparacion entre quienes ejecutan. Sus
+  // cifras SI cuentan en el TOTAL, que es el del equipo entero.
   const porVendedor = mesData?.porVendedor ?? []
   const vendedoresMes = porVendedor.filter((v) => !v.es_lider)
   const lideresMes = porVendedor.filter((v) => v.es_lider)
-  const equipoEjecuta = equipo.filter((v) => !v.es_lider)
-  const equipoLidera = equipo.filter((v) => v.es_lider)
 
   const totalHonorario = equipo.reduce((s, v) => s + v.honorario_recaudado, 0)
   const totalTarifa = equipo.reduce((s, v) => s + v.tarifa_recaudada, 0)
   const totalAprobado = equipo.reduce((s, v) => s + v.valor_aprobado, 0)
-
-  /**
-   * Las ventas del MES en pantalla, por vendedor, para poder abrirlas desde su tarjeta.
-   *
-   * La tarjeta cuenta TODO el histórico y el panel de detalle está atado a un mes. Sin
-   * este dato el clic abriría una lista que no suma lo que la tarjeta dice, que es
-   * justo la forma de que el tablero deje de creerse. Por eso la tarjeta declara aparte
-   * cuántas ventas hizo ese vendedor ESTE mes, y eso —solo eso— es lo que abre.
-   *
-   * La dependencia es `mesData` y no `porVendedor`: `?? []` crea un arreglo nuevo en
-   * cada render y el memo no memorizaría nada.
-   */
-  const ventasDelMesPorVendedor = useMemo(() => {
-    const m = new Map<string, ComercialVendedorMes>()
-    for (const v of mesData?.porVendedor ?? []) m.set(v.responsable_id ?? 'sin-responsable', v)
-    return m
-  }, [mesData])
 
   // En `useMemo` y no suelto: `?? []` crea un arreglo nuevo en cada render, y como es
   // dependencia de la serie filtrada, sin memo esa se recalcularia siempre.
@@ -333,14 +410,48 @@ export function TabComercialSoena({
     })
   }, [historicoSeccional])
 
-  const hayFiltro = filtroSeccional !== undefined
-  const etiquetaFiltro = filtroSeccional === null ? 'Sin seccional registrada' : filtroSeccional ?? ''
+  /**
+   * Elegir seccional SUELTA el vendedor, por la misma razon que al reves: el historico
+   * no llega abierto por la combinacion de los dos. Ademas hay que devolver los cortes
+   * del mes a su version entera — si no, el tablero diria "todas las seccionales"
+   * mientras las cifras de abajo siguen siendo las de una sola persona.
+   */
+  function elegirSeccional(clave: string | null | undefined) {
+    setFiltroSeccional(clave)
+    if (filtroVendedor) elegirVendedor(null)
+  }
 
-  /** La fila de la seccional elegida en un mes concreto, si la hubo. */
-  const filaDelMes = (a: number, m: number) =>
-    hayFiltro
-      ? historicoSeccional.find((f) => f.anio === a && f.mes === m && f.clave === filtroSeccional) ?? null
-      : null
+  /**
+   * El historico por vendedor, indexado por mes.
+   *
+   * No hay nada que canonizar aqui —a diferencia de la seccional, la clave es un id— asi
+   * que solo se agrupa. Cada punto ya trae `negocio_ids` y `cobro_ids`, que son los
+   * conjuntos EXACTOS que suman sus cifras: el drill abre eso y no una consulta paralela.
+   */
+  const historicoVendedor = useMemo(() => serieVendedor?.serie ?? [], [serieVendedor])
+
+  const hayFiltroSeccional = filtroSeccional !== undefined
+  const hayFiltroVendedor = filtroVendedor !== null
+  // Los dos nunca estan puestos a la vez (`elegirVendedor` y `elegirSeccional` se sueltan
+  // mutuamente), asi que de aqui para abajo el resto del tablero solo necesita saber si
+  // HAY filtro y cual es su fila del mes — le da igual de que tipo sea.
+  const hayFiltro = hayFiltroSeccional || hayFiltroVendedor
+  const etiquetaFiltro = hayFiltroVendedor
+    ? filtroVendedor.nombre
+    : filtroSeccional === null ? 'Sin seccional registrada' : filtroSeccional ?? ''
+
+  /** La fila del filtro vigente en un mes concreto, si la hubo. Sirve para los dos. */
+  const filaDelMes = (a: number, m: number): { negocio_ids: string[]; cobro_ids: string[] } | null => {
+    if (hayFiltroVendedor) {
+      return historicoVendedor.find((f) => f.anio === a && f.mes === m && (
+        filtroVendedor.sinResponsable ? f.responsable_id === null : f.responsable_id === filtroVendedor.id
+      )) ?? null
+    }
+    if (hayFiltroSeccional) {
+      return historicoSeccional.find((f) => f.anio === a && f.mes === m && f.clave === filtroSeccional) ?? null
+    }
+    return null
+  }
 
   /**
    * Lo que dibujan las cuatro graficas.
@@ -352,8 +463,14 @@ export function TabComercialSoena({
    */
   const serieData = useMemo(() => {
     if (!hayFiltro) return serieTotal
+    const recorte = (p: { anio: number; mes: number }): ComercialSerieVendedorPunto | ComercialSerieSeccionalPunto | undefined =>
+      filtroVendedor
+        ? historicoVendedor.find((x) => x.anio === p.anio && x.mes === p.mes && (
+            filtroVendedor.sinResponsable ? x.responsable_id === null : x.responsable_id === filtroVendedor.id
+          ))
+        : historicoSeccional.find((x) => x.anio === p.anio && x.mes === p.mes && x.clave === filtroSeccional)
     return serieTotal.map((p) => {
-      const f = historicoSeccional.find((x) => x.anio === p.anio && x.mes === p.mes && x.clave === filtroSeccional)
+      const f = recorte(p)
       return {
         ...p,
         num_ventas: f?.num_ventas ?? 0,
@@ -365,7 +482,7 @@ export function TabComercialSoena({
         tarifa_recaudada: f?.tarifa_recaudada ?? 0,
       }
     })
-  }, [hayFiltro, serieTotal, historicoSeccional, filtroSeccional])
+  }, [hayFiltro, serieTotal, historicoSeccional, filtroSeccional, historicoVendedor, filtroVendedor])
 
   // Clic en cualquier punto del histórico = ir a ese mes. El `label` es lo único que
   // recharts devuelve al hacer clic, así que se resuelve contra la serie en vez de
@@ -609,6 +726,160 @@ export function TabComercialSoena({
         </div>
       )}
 
+      {/* La tabla por vendedor. Es el MANDO del tablero y por eso va arriba del todo:
+          el nombre lleva al perfil de la persona y la fila recorta todo lo que sigue.
+          Debajo de las graficas —donde vivia— el filtro quedaba fuera de la vista de
+          quien ya habia bajado a mirarlas, que es justo cuando se quiere usar. */}
+      <section className="mb-8">
+        <h2 className="mb-3 text-sm font-bold text-gray-900">
+          Por vendedor · {MESES_ES[mes - 1]} {anio}
+        </h2>
+        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                  <th className="px-4 py-3 text-left">Vendedor</th>
+                  <th className="px-4 py-3 text-right">Ventas</th>
+                  <th className="px-4 py-3 text-right">Valor (sin IVA)</th>
+                  <th className="hidden px-4 py-3 text-right md:table-cell">Valor (con IVA)</th>
+                  <th className="hidden px-4 py-3 text-right sm:table-cell">1er pago</th>
+                  <th className="hidden px-4 py-3 text-right sm:table-cell">2o pago</th>
+                  <th className="px-4 py-3 text-right" title="Ventas que pasaron el umbral del proceso: es la cifra que bonifica">Bonificables</th>
+                  <th className="hidden px-4 py-3 text-right md:table-cell" title="Ventas cuyo honorario aprobado ya quedó cubierto por el recaudo">Hon. cubierto</th>
+                  <th className="hidden px-4 py-3 text-right sm:table-cell">Particip.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vendedoresMes.map((v) => (
+                  <FilaVendedor
+                    key={v.responsable_id ?? 'sin'}
+                    v={v}
+                    seleccionado={esteVendedorFiltra(v)}
+                    onElegir={() => elegirVendedor({
+                      id: v.responsable_id,
+                      nombre: v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre),
+                      sinResponsable: v.sin_responsable,
+                    })}
+                    onAbrir={(alcanceCelda) => setCifra({
+                      anio, mes,
+                      titulo: `${TITULO_CELDA[alcanceCelda]} · ${MESES_ES[mes - 1]} ${anio}`,
+                      responsableId: v.responsable_id,
+                      sinResponsable: v.sin_responsable,
+                      soloCompletos: alcanceCelda === 'completos' ? true : null,
+                      soloBonificables: alcanceCelda === 'bonificables' ? true : null,
+                      alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
+                    })}
+                  />
+                ))}
+                {lideresMes.length > 0 && (
+                  <tr className="border-b border-gray-50 bg-gray-50/40">
+                    <td colSpan={9} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                      Lideres · fuera de la comparacion
+                    </td>
+                  </tr>
+                )}
+                {lideresMes.map((v) => (
+                  <FilaVendedor
+                    key={v.responsable_id ?? 'sin-lider'}
+                    v={v}
+                    seleccionado={esteVendedorFiltra(v)}
+                    onElegir={() => elegirVendedor({
+                      id: v.responsable_id,
+                      nombre: v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre),
+                      sinResponsable: v.sin_responsable,
+                    })}
+                    onAbrir={(alcanceCelda) => setCifra({
+                      anio, mes,
+                      titulo: `${TITULO_CELDA[alcanceCelda]} · ${MESES_ES[mes - 1]} ${anio}`,
+                      responsableId: v.responsable_id,
+                      sinResponsable: v.sin_responsable,
+                      soloCompletos: alcanceCelda === 'completos' ? true : null,
+                      soloBonificables: alcanceCelda === 'bonificables' ? true : null,
+                      alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
+                    })}
+                  />
+                ))}
+                {porVendedor.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-400">
+                      Sin ventas registradas este mes.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {kpis && porVendedor.length > 0 && (
+                                <tfoot>
+                  {/* La fila de totales abre las ventas del mes entero, sin filtrar por
+                      vendedor: es exactamente el conjunto que suma. Y con un filtro puesto
+                      es tambien la salida — TOTAL es, literalmente, "todos". */}
+                  <tr
+                    className={`border-t border-gray-100 bg-gray-50/40 font-bold text-gray-900 ${
+                      hayFiltroVendedor ? 'cursor-pointer hover:bg-gray-100' : ''
+                    }`}
+                    onClick={hayFiltroVendedor ? () => elegirVendedor(null) : undefined}
+                    title={hayFiltroVendedor ? 'Clic para volver a todo el equipo' : undefined}
+                  >
+                    <td className="px-4 py-3">TOTAL</td>
+                    <CeldaAbrible className="px-4 py-3 text-right tabular-nums"
+                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
+                      {kpis.num_ventas}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="px-4 py-3 text-right tabular-nums" style={{ color: GREEN }}
+                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
+                      {fmtCOP(kpis.valor_sin_iva)}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums md:table-cell"
+                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
+                      {fmtCOP(kpis.valor_con_iva)}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums sm:table-cell"
+                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
+                      {fmtCOP(kpis.primer_pago)}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums sm:table-cell"
+                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
+                      {fmtCOP(kpis.segundo_pago)}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="px-4 py-3 text-right tabular-nums"
+                      onAbrir={abrirBonificablesDelMes} title="Ver las ventas que pasaron el umbral del proceso">
+                      {kpis.bonificables === null ? <span className="text-gray-300">—</span> : kpis.bonificables}
+                    </CeldaAbrible>
+                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums md:table-cell"
+                      onAbrir={abrirCompletosDelMes} title="Ver los casos con el honorario cubierto">
+                      {kpis.casos_completos}
+                    </CeldaAbrible>
+                    <td className="hidden px-4 py-3 text-right tabular-nums sm:table-cell">100%</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* Que el tablero esta recortado se dice UNA vez, aqui, y no en cada seccion: es
+          el sitio por donde se pasa al bajar desde la tabla que puso el filtro. Lo que
+          NO se recorta se declara en la misma frase — una seccion que se queda entera
+          sin avisar es exactamente como el tablero deja de creerse. */}
+      {hayFiltroVendedor && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
+          <span className="text-sm text-emerald-900">
+            Todo lo que sigue es solo de <span className="font-bold">{filtroVendedor.nombre}</span>.
+          </span>
+          <span className="text-[11px] text-emerald-800/80">
+            El panel de cifras de arriba y «Capacidad por seccional» siguen siendo de toda la linea.
+          </span>
+          <button
+            type="button"
+            onClick={() => elegirVendedor(null)}
+            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
+          >
+            <X className="h-3.5 w-3.5" /> Ver todo el equipo
+          </button>
+        </div>
+      )}
+
       {/* De dónde vinieron las ventas (punto #23). El origen decide la comisión. */}
       {origen && origen.total > 0 && (
         <SeccionOrigen
@@ -654,117 +925,7 @@ export function TabComercialSoena({
 
       {/* Capacidad por seccional (punto #43). No depende del mes elegido: es una
           ventana propia, porque la pregunta es "cuánto cabe", no "cuánto se vendió". */}
-      {capacidad && <SeccionCapacidad cap={capacidad} />}
-
-      {/* Tabla por vendedor del mes */}
-      <section className="mb-8">
-        <h2 className="mb-3 text-sm font-bold text-gray-900">
-          Por vendedor · {MESES_ES[mes - 1]} {anio}
-        </h2>
-        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50/60 text-[11px] font-bold uppercase tracking-wide text-gray-400">
-                  <th className="px-4 py-3 text-left">Vendedor</th>
-                  <th className="px-4 py-3 text-right">Ventas</th>
-                  <th className="px-4 py-3 text-right">Valor (sin IVA)</th>
-                  <th className="hidden px-4 py-3 text-right md:table-cell">Valor (con IVA)</th>
-                  <th className="hidden px-4 py-3 text-right sm:table-cell">1er pago</th>
-                  <th className="hidden px-4 py-3 text-right sm:table-cell">2o pago</th>
-                  <th className="px-4 py-3 text-right" title="Ventas que pasaron el umbral del proceso: es la cifra que bonifica">Bonificables</th>
-                  <th className="hidden px-4 py-3 text-right md:table-cell" title="Ventas cuyo honorario aprobado ya quedó cubierto por el recaudo">Hon. cubierto</th>
-                  <th className="hidden px-4 py-3 text-right sm:table-cell">Particip.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vendedoresMes.map((v) => (
-                  <FilaVendedor
-                    key={v.responsable_id ?? 'sin'}
-                    v={v}
-                    onAbrir={(alcanceCelda) => setCifra({
-                      anio, mes,
-                      titulo: `${TITULO_CELDA[alcanceCelda]} · ${MESES_ES[mes - 1]} ${anio}`,
-                      responsableId: v.responsable_id,
-                      sinResponsable: v.sin_responsable,
-                      soloCompletos: alcanceCelda === 'completos' ? true : null,
-                      soloBonificables: alcanceCelda === 'bonificables' ? true : null,
-                      alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
-                    })}
-                  />
-                ))}
-                {lideresMes.length > 0 && (
-                  <tr className="border-b border-gray-50 bg-gray-50/40">
-                    <td colSpan={9} className="px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
-                      Lideres · fuera de la comparacion
-                    </td>
-                  </tr>
-                )}
-                {lideresMes.map((v) => (
-                  <FilaVendedor
-                    key={v.responsable_id ?? 'sin-lider'}
-                    v={v}
-                    onAbrir={(alcanceCelda) => setCifra({
-                      anio, mes,
-                      titulo: `${TITULO_CELDA[alcanceCelda]} · ${MESES_ES[mes - 1]} ${anio}`,
-                      responsableId: v.responsable_id,
-                      sinResponsable: v.sin_responsable,
-                      soloCompletos: alcanceCelda === 'completos' ? true : null,
-                      soloBonificables: alcanceCelda === 'bonificables' ? true : null,
-                      alcance: v.sin_responsable ? 'sin comercial atribuido' : nombreCorto(v.nombre),
-                    })}
-                  />
-                ))}
-                {porVendedor.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-400">
-                      Sin ventas registradas este mes.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-              {kpis && porVendedor.length > 0 && (
-                                <tfoot>
-                  {/* La fila de totales abre las ventas del mes entero, sin filtrar por
-                      vendedor: es exactamente el conjunto que suma. */}
-                  <tr className="border-t border-gray-100 bg-gray-50/40 font-bold text-gray-900">
-                    <td className="px-4 py-3">TOTAL</td>
-                    <CeldaAbrible className="px-4 py-3 text-right tabular-nums"
-                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
-                      {kpis.num_ventas}
-                    </CeldaAbrible>
-                    <CeldaAbrible className="px-4 py-3 text-right tabular-nums" style={{ color: GREEN }}
-                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
-                      {fmtCOP(kpis.valor_sin_iva)}
-                    </CeldaAbrible>
-                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums md:table-cell"
-                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
-                      {fmtCOP(kpis.valor_con_iva)}
-                    </CeldaAbrible>
-                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums sm:table-cell"
-                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
-                      {fmtCOP(kpis.primer_pago)}
-                    </CeldaAbrible>
-                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums sm:table-cell"
-                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
-                      {fmtCOP(kpis.segundo_pago)}
-                    </CeldaAbrible>
-                    <CeldaAbrible className="px-4 py-3 text-right tabular-nums"
-                      onAbrir={abrirBonificablesDelMes} title="Ver las ventas que pasaron el umbral del proceso">
-                      {kpis.bonificables === null ? <span className="text-gray-300">—</span> : kpis.bonificables}
-                    </CeldaAbrible>
-                    <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums md:table-cell"
-                      onAbrir={abrirCompletosDelMes} title="Ver los casos con el honorario cubierto">
-                      {kpis.casos_completos}
-                    </CeldaAbrible>
-                    <td className="hidden px-4 py-3 text-right tabular-nums sm:table-cell">100%</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </div>
-      </section>
+      {capacidad && <SeccionCapacidad cap={capacidad} sinRecorte={hayFiltroVendedor} />}
 
       {/* Ventas por dia del mes (Daniela: "diariamente cuantas ventas llevamos") */}
       {ventasPorDia.length > 0 && (
@@ -837,15 +998,15 @@ export function TabComercialSoena({
           {opcionesSeccional.length > 1 && (
             <div className="mb-3 flex flex-wrap gap-1.5">
               <FichaSeccional
-                activa={!hayFiltro}
-                onClick={() => setFiltroSeccional(undefined)}
+                activa={!hayFiltroSeccional}
+                onClick={() => elegirSeccional(undefined)}
                 label="Todas"
               />
               {opcionesSeccional.map((o) => (
                 <FichaSeccional
                   key={o.clave ?? '__sin__'}
-                  activa={hayFiltro && filtroSeccional === o.clave}
-                  onClick={() => setFiltroSeccional(o.clave)}
+                  activa={hayFiltroSeccional && filtroSeccional === o.clave}
+                  onClick={() => elegirSeccional(o.clave)}
                   label={o.clave ?? 'Sin registrar'}
                   ventas={o.ventas}
                   atenuada={o.clave === null}
@@ -855,8 +1016,14 @@ export function TabComercialSoena({
           )}
           {hayFiltro && (
             <p className="mb-3 text-[11px] text-gray-500">
-              Solo {etiquetaFiltro}. Los meses sin movimiento de esta seccional se dibujan en
-              cero, no se saltan.
+              Solo {etiquetaFiltro}. Los meses sin movimiento {hayFiltroVendedor ? 'de esta persona' : 'de esta seccional'} se
+              dibujan en cero, no se saltan.
+            </p>
+          )}
+          {hayFiltroVendedor && !serieVendedor && (
+            <p className="mb-3 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+              No se pudo traer el historico abierto por vendedor: estas cuatro graficas siguen
+              siendo las de toda la linea, no las de {etiquetaFiltro}.
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -932,94 +1099,15 @@ export function TabComercialSoena({
         </section>
       )}
 
-      {/* Totales historicos + embudo por vendedor */}
+      {/* Totales historicos de toda la linea. El desglose por persona ya no vive
+          aqui: la tabla de arriba lo dice del mes, y el nombre abre el perfil, que
+          es donde estaba el embudo por etapas con TODO su historico. */}
       <section>
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <ResumenTotal label="Valor aprobado historico (sin IVA)" value={fmtCOP(totalAprobado)} />
           <ResumenTotal label="Honorario recaudado" value={fmtCOP(totalHonorario)} color={GREEN} />
           <ResumenTotal label="Tarifa UPME (terceros)" value={fmtCOP(totalTarifa)} muted />
         </div>
-        <h2 className="text-sm font-bold text-gray-900">Embudo por vendedor (todo el historico)</h2>
-        {/* El alcance se declara ARRIBA de las tarjetas y no dentro de cada una: lo que
-            cuenta la tarjeta y lo que abre el clic son dos periodos distintos, y esa es
-            la única frase que evita leer la lista como si desmintiera la cifra. */}
-        <p className="mb-3 mt-1 text-xs text-gray-400">
-          Las cifras son de todo el histórico. El clic abre las ventas de {MESES_ES[mes - 1]} {anio}, que es hasta donde
-          llega el detalle por vendedor.
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {equipoEjecuta.map((v) => {
-            const clave = v.responsable_id ?? 'sin-responsable'
-            const etiqueta = v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)
-            const ventasEsteMes = ventasDelMesPorVendedor.get(clave)?.num_ventas ?? 0
-            // Sin ventas en el mes la tarjeta NO es clicable: abrir un panel vacío se
-            // lee como una falla del tablero y no como el dato que es.
-            const abrir = ventasEsteMes > 0
-              ? () => abrirVentas({
-                  titulo: `Ventas de ${etiqueta} · ${MESES_ES[mes - 1]} ${anio}`,
-                  responsableId: v.responsable_id,
-                  sinResponsable: v.sin_responsable,
-                  alcance: v.sin_responsable ? 'sin comercial atribuido' : etiqueta,
-                })
-              : undefined
-            return (
-              <div
-                key={clave}
-                role={abrir ? 'button' : undefined}
-                tabIndex={abrir ? 0 : undefined}
-                onClick={abrir}
-                onKeyDown={abrir
-                  ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir() } }
-                  : undefined}
-                className={`rounded-2xl border border-gray-100 bg-white p-3 shadow-sm ${
-                  abrir ? 'cursor-pointer transition hover:border-gray-300 hover:shadow-md' : ''
-                }`}
-              >
-                <p className="truncate text-sm font-semibold text-gray-900">{etiqueta}</p>
-                <p className="truncate text-[11px] text-gray-400">
-                  {v.sin_responsable ? 'Negocios sin asignar' : v.position ?? 'Comercial'}
-                </p>
-                <div className="my-2.5 grid grid-cols-3 gap-1.5">
-                  <StageCount label="Venta" n={v.en_venta} />
-                  <StageCount label="Ejecucion" n={v.en_ejecucion} />
-                  <StageCount label="Cobro" n={v.en_cobro} />
-                </div>
-                <div className="space-y-1 border-t border-gray-50 pt-2">
-                  <Row label="Negocios activos" value={String(v.negocios_abiertos)} />
-                  <Row label="Aprobado (sin IVA)" value={fmtCOP(v.valor_aprobado)} />
-                  <Row label="Honorario recaudado" value={fmtCOP(v.honorario_recaudado)} strong color={GREEN} />
-                  <Row label="Tarifa UPME" value={fmtCOP(v.tarifa_recaudada)} muted />
-                </div>
-                <p className={`mt-2 border-t border-gray-50 pt-2 text-[11px] ${
-                  abrir ? 'font-semibold text-gray-600' : 'text-gray-400'
-                }`}>
-                  {abrir
-                    ? `${MESES_ES[mes - 1]}: ${ventasEsteMes} ${ventasEsteMes === 1 ? 'venta' : 'ventas'} · clic para verlas`
-                    : `Sin ventas en ${MESES_ES[mes - 1]}`}
-                </p>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Los casos de quienes lideran no se esconden: sin esta linea, la suma de las
-            tarjetas no coincide con los totales de arriba y nadie sabe por que. */}
-        {equipoLidera.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">
-              Casos que llevan los lideres · fuera de la comparacion
-            </p>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-              {equipoLidera.map((v) => (
-                <span key={v.responsable_id ?? 'lider'} className="text-gray-600">
-                  {nombreCorto(v.nombre)}{' '}
-                  <span className="font-semibold text-gray-900 tabular-nums">{v.negocios_abiertos}</span>
-                  <span className="text-gray-400"> activos · {fmtCOP(v.honorario_recaudado)}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
 
       {/* `key` por cifra: al pasar de una celda a otra el panel se remonta y arranca
@@ -1097,101 +1185,128 @@ function CeldaAbrible({ children, onAbrir, title, className, style }: {
 export type AlcanceCelda = 'todas' | 'completos' | 'bonificables'
 
 /** Fila de la tabla por vendedor. Compartida por la lista de ejecutores y la de lideres. */
-function FilaVendedor({ v, onAbrir }: {
+/**
+ * Una fila de la tabla por vendedor. Hace TRES cosas distintas y cada una en su sitio.
+ *
+ * - El NOMBRE lleva al perfil de la persona. Es donde vive su embudo por etapas y todo
+ *   su historico, que es justo lo que dejo de estar en esta pestaña.
+ * - Las cifras subrayadas abren la lista de casos que hay detras de ese numero.
+ * - El RESTO de la fila recorta el tablero entero a esa persona.
+ *
+ * Las dos primeras cortan la propagacion: sin eso, abrir la lista de alguien ademas
+ * recortaria el tablero a esa persona, y son dos intenciones distintas sobre el mismo
+ * pixel. Las columnas de dinero, que antes abrian la MISMA lista que «Ventas», ya no son
+ * clicables — no perdieron nada y a cambio le devuelven a la fila el area que necesita
+ * para ser un boton de verdad, sobre todo con el dedo.
+ */
+function FilaVendedor({ v, seleccionado, onElegir, onAbrir }: {
   v: ComercialVendedorMes
+  /** Esta fila es la que esta recortando el tablero. */
+  seleccionado: boolean
+  /** Pone (o suelta) el recorte por esta persona. */
+  onElegir: () => void
   /** Abre los casos de este vendedor, con el subconjunto de la celda. */
   onAbrir: (alcance: AlcanceCelda) => void
 }) {
-  // Todas las columnas de dinero describen las MISMAS ventas de la fila, así que
-  // abren la misma lista. Sin ventas no hay nada que abrir.
   const abrirTodas = v.num_ventas > 0 ? () => onAbrir('todas') : undefined
+  const detener = (e: React.MouseEvent | React.KeyboardEvent) => e.stopPropagation()
+  const etiqueta = v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)
+  // El perfil del bucket sin responsable existe: la ruta entiende ese literal y la RPC lo
+  // traduce a "los negocios que no tienen comercial atribuido".
+  const perfil = `/equipo/comercial/${v.sin_responsable ? 'sin-responsable' : v.responsable_id}`
   return (
-    <tr className="border-b border-gray-50 hover:bg-gray-50/50">
-
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-gray-900">
-                        {v.sin_responsable ? 'Sin responsable' : nombreCorto(v.nombre)}
-                      </span>
-                    </td>
-                    <CeldaAbrible
-                      className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums"
-                      onAbrir={abrirTodas}
-                      title="Ver estas ventas"
-                    >
-                      {v.num_ventas}
-                      {v.meta_num_ventas ? <span className="ml-1 text-[10px] text-gray-400">/{v.meta_num_ventas}</span> : null}
-                    </CeldaAbrible>
-                    <CeldaAbrible
-                      className="px-4 py-3 text-right font-semibold tabular-nums"
-                      style={{ color: GREEN }}
-                      onAbrir={abrirTodas}
-                      title="Ver las ventas que suman este valor"
-                    >
-                      {fmtCOP(v.valor_sin_iva)}
-                    </CeldaAbrible>
-                    <CeldaAbrible
-                      className="hidden px-4 py-3 text-right text-gray-500 tabular-nums md:table-cell"
-                      onAbrir={abrirTodas}
-                      title="Ver las ventas que suman este valor"
-                    >
-                      {fmtCOP(v.valor_con_iva)}
-                    </CeldaAbrible>
-                    <CeldaAbrible
-                      className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell"
-                      onAbrir={abrirTodas}
-                      title="Ver las ventas de las que salió este recaudo"
-                    >
-                      {fmtCOP(v.primer_pago)}
-                    </CeldaAbrible>
-                    <CeldaAbrible
-                      className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell"
-                      onAbrir={abrirTodas}
-                      title="Ver las ventas de las que salió este recaudo"
-                    >
-                      {fmtCOP(v.segundo_pago)}
-                    </CeldaAbrible>
-                    {/* Bonificables: la columna que decide el bono (#13/#31). Raya
-                        cuando la línea no declaró umbral — un 0 diría "no completó
-                        ninguna", que es una afirmación que nadie midió. */}
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-700">
-                      {v.bonificables === null ? (
-                        <span className="text-gray-300" title="La línea de estos negocios no declaró desde qué etapa una venta bonifica: no se pudo medir">—</span>
-                      ) : v.bonificables > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => onAbrir('bonificables')}
-                          className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
-                          title="Ver las ventas que pasaron el umbral del proceso"
-                        >
-                          {v.bonificables}
-                        </button>
-                      ) : (
-                        v.bonificables
-                      )}
-                    </td>
-                    <td className="hidden px-4 py-3 text-right tabular-nums text-gray-700 md:table-cell">
-                      {v.casos_completos > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => onAbrir('completos')}
-                          className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
-                          title="Ver los casos con el honorario cubierto"
-                        >
-                          {v.casos_completos}
-                        </button>
-                      ) : (
-                        v.casos_completos
-                      )}
-                      <span className="ml-1 text-[10px] text-gray-400">{pct(v.tasa_casos_completos)}</span>
-                    </td>
-                    <CeldaAbrible
-                      className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell"
-                      onAbrir={abrirTodas}
-                      title="Ver las ventas que dan esta participación"
-                    >
-                      {pct(v.participacion_pct)}
-                    </CeldaAbrible>
-                  </tr>
+    <tr
+      role="button"
+      tabIndex={0}
+      aria-pressed={seleccionado}
+      onClick={onElegir}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onElegir() } }}
+      title={seleccionado ? 'Clic para dejar de filtrar por esta persona' : `Clic para ver todo el tablero solo de ${etiqueta}`}
+      className={`cursor-pointer border-b border-gray-50 transition ${
+        seleccionado ? 'bg-emerald-50/70 hover:bg-emerald-50' : 'hover:bg-gray-50/50'
+      }`}
+    >
+      <td className="px-4 py-3">
+        <span className="flex items-center gap-2">
+          {/* La barrita verde es lo unico que distingue la fila elegida cuando la tabla
+              se lee en una pantalla angosta y el fondo casi no se ve. */}
+          <span className={`h-4 w-1 rounded-full ${seleccionado ? 'bg-[#059669]' : 'bg-transparent'}`} />
+          <Link
+            href={perfil}
+            onClick={detener}
+            onKeyDown={detener}
+            className="font-medium text-gray-900 underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            title={`Ver el perfil de ${etiqueta}`}
+          >
+            {etiqueta}
+          </Link>
+        </span>
+      </td>
+      <td className="px-4 py-3 text-right font-semibold text-gray-900 tabular-nums">
+        {abrirTodas ? (
+          <button
+            type="button"
+            onClick={(e) => { detener(e); abrirTodas() }}
+            className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            title="Ver estas ventas"
+          >
+            {v.num_ventas}
+          </button>
+        ) : (
+          v.num_ventas
+        )}
+        {v.meta_num_ventas ? <span className="ml-1 text-[10px] text-gray-400">/{v.meta_num_ventas}</span> : null}
+      </td>
+      <td className="px-4 py-3 text-right font-semibold tabular-nums" style={{ color: GREEN }}>
+        {fmtCOP(v.valor_sin_iva)}
+      </td>
+      <td className="hidden px-4 py-3 text-right text-gray-500 tabular-nums md:table-cell">
+        {fmtCOP(v.valor_con_iva)}
+      </td>
+      <td className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell">
+        {fmtCOP(v.primer_pago)}
+      </td>
+      <td className="hidden px-4 py-3 text-right text-gray-600 tabular-nums sm:table-cell">
+        {fmtCOP(v.segundo_pago)}
+      </td>
+      {/* Bonificables: la columna que decide el bono (#13/#31). Raya cuando la línea no
+          declaró umbral — un 0 diría "no completó ninguna", que es una afirmación que
+          nadie midió. */}
+      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+        {v.bonificables === null ? (
+          <span className="text-gray-300" title="La línea de estos negocios no declaró desde qué etapa una venta bonifica: no se pudo medir">—</span>
+        ) : v.bonificables > 0 ? (
+          <button
+            type="button"
+            onClick={(e) => { detener(e); onAbrir('bonificables') }}
+            className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            title="Ver las ventas que pasaron el umbral del proceso"
+          >
+            {v.bonificables}
+          </button>
+        ) : (
+          v.bonificables
+        )}
+      </td>
+      <td className="hidden px-4 py-3 text-right tabular-nums text-gray-700 md:table-cell">
+        {v.casos_completos > 0 ? (
+          <button
+            type="button"
+            onClick={(e) => { detener(e); onAbrir('completos') }}
+            className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            title="Ver los casos con el honorario cubierto"
+          >
+            {v.casos_completos}
+          </button>
+        ) : (
+          v.casos_completos
+        )}
+        <span className="ml-1 text-[10px] text-gray-400">{pct(v.tasa_casos_completos)}</span>
+      </td>
+      <td className="hidden px-4 py-3 text-right tabular-nums text-gray-600 sm:table-cell">
+        {pct(v.participacion_pct)}
+      </td>
+    </tr>
   )
 }
 
@@ -1391,29 +1506,6 @@ function ResumenTotal({ label, value, color, muted }: { label: string; value: st
       <p className={`mt-1 text-xl tabular-nums ${muted ? 'font-semibold text-gray-500' : 'font-bold text-gray-900'}`} style={color ? { color } : undefined}>
         {value}
       </p>
-    </div>
-  )
-}
-
-function StageCount({ label, n }: { label: string; n: number }) {
-  return (
-    <div className="rounded-lg bg-gray-50 py-1.5 text-center">
-      <p className="text-base font-bold leading-none tabular-nums text-gray-900">{n}</p>
-      <p className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
-    </div>
-  )
-}
-
-function Row({ label, value, strong, muted, color }: { label: string; value: string; strong?: boolean; muted?: boolean; color?: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-xs text-gray-500">{label}</span>
-      <span
-        className={`tabular-nums whitespace-nowrap ${strong ? 'font-bold' : muted ? 'text-sm text-gray-400' : 'text-sm font-semibold text-gray-900'}`}
-        style={color ? { color } : undefined}
-      >
-        {value}
-      </span>
     </div>
   )
 }
@@ -1707,7 +1799,7 @@ function FilaPlanPago({ f, onAbrir }: {
  * todas iguales. La de certificados CON ERROR no se dibuja: no hay un solo registro, y
  * una línea en cero se leería como "calidad perfecta".
  */
-function SeccionCapacidad({ cap }: { cap: CapacidadSeccional }) {
+function SeccionCapacidad({ cap, sinRecorte }: { cap: CapacidadSeccional; sinRecorte?: boolean }) {
   // Los meses que de verdad tienen algún dato, en orden. No se rellenan los vacíos:
   // un mes sin citas y un mes sin medir se verían igual, y no son lo mismo.
   const meses = [...new Set([
@@ -1742,6 +1834,15 @@ function SeccionCapacidad({ cap }: { cap: CapacidadSeccional }) {
         Cuántas citas da la DIAN y cuántos certificados salen cada mes en cada seccional.
         Es el techo de lo que el equipo comercial puede vender ahí.
       </p>
+      {/* Se dice donde se lee la tabla, y no solo en el aviso de arriba: quien llega
+          hasta aqui desplazandose ya perdio de vista aquella frase, y una tabla que
+          parece filtrada y no lo esta es peor que una que no filtra. */}
+      {sinRecorte && (
+        <p className="mb-3 text-xs text-amber-800">
+          Esta seccion NO se recorta por vendedor: mide la agenda de la DIAN, que no es de
+          nadie del equipo en particular.
+        </p>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">

@@ -3,7 +3,8 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import {
-  getComercialResumen, getComercialMes, getComercialSerie, getComercialSerieSeccional, getMetasComerciales,
+  getComercialResumen, getComercialMes, getComercialSerie, getComercialSerieSeccional,
+  getComercialSerieVendedor, getMetasComerciales,
   getComercialOrigenMes, getComercialSeccionalMes, getComercialPlanPagoMes, getCapacidadSeccional,
 } from '../equipo/comercial-actions'
 import { getOperacionesBono } from './operaciones-actions'
@@ -83,7 +84,7 @@ export default async function TablerosPage() {
       const d = new Date(Date.UTC(anioSel, mesSel - 1 + meses, 1))
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
     }
-    const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serie, serieSeccional, metas] = await Promise.all([
+    const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serie, serieSeccional, serieVendedor, metas] = await Promise.all([
       getComercialResumen(),
       getComercialMes(anioSel, mesSel),
       getComercialMes(prev.anio, prev.mes),
@@ -93,6 +94,7 @@ export default async function TablerosPage() {
       getCapacidadSeccional(ventana(-5), ventana(3)),
       getComercialSerie(12),
       getComercialSerieSeccional(12),
+      getComercialSerieVendedor(12),
       getMetasComerciales(anioSel, mesSel),
     ])
     comercialNegocios = {
@@ -105,6 +107,7 @@ export default async function TablerosPage() {
       capacidad,
       serie,
       serieSeccional,
+      serieVendedor,
       metasIniciales: metas,
       anioInicial: anioSel,
       mesNumInicial: mesSel,
