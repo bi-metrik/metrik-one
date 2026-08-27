@@ -30,6 +30,8 @@ import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
 import { descuadreConciliacion, tarifaConfirmadaPorNegocio } from '@/lib/upme/modelo-dinero'
 import { casoListoParaFacturar } from '@/lib/facturacion/caso-listo'
+import { numeroFacturaEnData } from '@/lib/siigo/factura-cargada'
+import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
 import { revalidatePath } from 'next/cache'
 // La ventana vive en su propio módulo: este archivo es `'use server'` y exportar
 // una constante desde aquí anula TODOS los exports en el build.
@@ -173,11 +175,15 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   // Los conceptos se resuelven POR LÍNEA: cada una vende cosas distintas y su
   // catálogo de Siigo no tiene por qué coincidir.
   const conceptosPorLinea = new Map<string, ConceptosConfig>()
+  // Dónde vive el bloque de la factura en cada línea. Se usa para saber si el caso
+  // ya tiene una factura CARGADA, que es distinto de emitida desde aquí.
+  const facturaSlugPorLinea = new Map<string, string>()
   for (const l of ((lineas ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null }>)) {
     const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
     if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
-    const s = (l.config_extra?.siigo ?? {}) as { conceptos?: ConceptosConfig }
+    const s = (l.config_extra?.siigo ?? {}) as { conceptos?: ConceptosConfig; bloque_factura_slug?: string }
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
+    if (s.bloque_factura_slug) facturaSlugPorLinea.set(l.id, s.bloque_factura_slug)
   }
   if (desde == null) {
     return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
@@ -238,8 +244,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
       const v = num(campos.valor_pagado?.value)
       if (v && v > 0) upmePorNegocio.set(b.negocio_id, v)
     } else if (slug === 'factura_emitida') {
-      const n = String(campos.numero_factura?.value ?? '').trim()
-      if (n) facturadoPorNegocio.add(b.negocio_id)
+      if (numeroFacturaEnData(b.data)) facturadoPorNegocio.add(b.negocio_id)
     } else if (slug === 'servicio_contratado') {
       // Plano, no bajo `campos`. Conserva la primera instancia con valor: el
       // bloque vive en Negociación y se hereda de solo lectura aguas abajo.
@@ -326,6 +331,26 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     facturaDocumentId: 0, reciboDocumentId: 0, sellerId: 0,
     productoCode: '', ivaId: 0, facturaPaymentId: 0, reciboPaymentId: 0,
   }
+  // La factura que se cargó a mano NO tiene por qué estar en la copia nativa del
+  // bloque: se sube desde la etapa donde esté el caso, y cada copia guarda en su
+  // propia fila. Sin leerlas todas, un negocio con su factura ya cargada adentro
+  // vuelve a la cola como si nunca se hubiera facturado. Ver `idsDeCopiasDelBloque`.
+  const copiasFactura: string[] = []
+  for (const [lineaId, slugFactura] of facturaSlugPorLinea) {
+    copiasFactura.push(...(await idsDeCopiasDelBloque(svc, lineaId, slugFactura)))
+  }
+  if (copiasFactura.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: filasFactura } = await (svc as any)
+      .from('negocio_bloques')
+      .select('negocio_id, data')
+      .in('negocio_id', ids)
+      .in('bloque_config_id', copiasFactura)
+    for (const f of ((filasFactura ?? []) as Array<{ negocio_id: string; data: unknown }>)) {
+      if (numeroFacturaEnData(f.data)) facturadoPorNegocio.add(f.negocio_id)
+    }
+  }
+
   // Fecha del documento fiscal. Va a Siigo, asi que es el dia civil de Bogota y no
   // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
   const hoy = todayBogotaISO()
