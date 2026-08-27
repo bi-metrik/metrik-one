@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { CardLink } from '@/components/card-link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
@@ -526,6 +526,20 @@ export default function NegocioCard({
               >
                 {origenBadge.value === 'meta' && <Megaphone className="h-2.5 w-2.5" />}
                 {origenBadge.label}
+              </span>
+            )}
+            {/* Servicio contratado (config-driven, ej. SOENA: completo / solo IVA /
+                solo certificado UPME). Cambia el trabajo que hay que hacer y por
+                dónde va el caso, así que se lee sin abrir el negocio. Un tinte
+                único para los tres: distingue el eje "servicio" de los demás
+                badges; el texto distingue el valor. Sin dato, no se pinta nada. */}
+            {negocio.servicio_label && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#EEF2FF] px-2 py-0.5 text-[10px] font-medium text-[#4338CA]"
+                title={`Servicio contratado: ${negocio.servicio_label}`}
+              >
+                <FileCheck className="h-2.5 w-2.5" />
+                {negocio.servicio_label}
               </span>
             )}
             {/* Reproceso: relleno sólido, no tinte suave como los demás. Un caso

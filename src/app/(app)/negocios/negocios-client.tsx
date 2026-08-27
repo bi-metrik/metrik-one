@@ -41,6 +41,8 @@ type FiltrosLista = {
   responsable: string
   /** Valor de ORIGENES_NEGOCIO, 'todos', o 'sin_origen' (negocios previos a la captura). */
   origen: string
+  /** Valor crudo del servicio contratado, 'todos', o 'sin_servicio' (aún no se preguntó). */
+  servicio: string
   term: string
   /** Solo negocios que pasaron el SLA de su etapa (etapas sin SLA nunca entran). */
   soloAtrasados: boolean
@@ -48,6 +50,14 @@ type FiltrosLista = {
 
 /** Valor del filtro para los negocios que no tienen origen registrado. */
 const SIN_ORIGEN = 'sin_origen'
+
+/**
+ * Valor del filtro para los negocios sin servicio contratado registrado. No son un
+ * error: el bloque que lo pregunta vive en una etapa concreta del workflow, así que
+ * todo lo que va antes lo tiene vacío por diseño. Los que YA la pasaron y siguen
+ * vacíos son justo los que hay que poder aislar.
+ */
+const SIN_SERVICIO = 'sin_servicio'
 
 /**
  * Orden de la lista. Default: por llegada a la etapa, agrupado por dia.
@@ -101,10 +111,15 @@ function aplicarFiltros(lista: NegocioResumen[], f: FiltrosLista): NegocioResume
       f.origen === SIN_ORIGEN ? !origenEfectivo(n) : origenEfectivo(n) === f.origen,
     )
   }
+  if (f.servicio !== 'todos') {
+    res = res.filter((n) =>
+      f.servicio === SIN_SERVICIO ? !n.servicio : n.servicio === f.servicio,
+    )
+  }
   if (f.term) {
     res = res.filter((n) => {
       const hay = [n.codigo, n.nombre, n.empresa_nombre, n.contacto_nombre, n.vehiculo_label,
-        n.cedula, n.radicado, n.numero_factura, n.seccional_label,
+        n.cedula, n.radicado, n.numero_factura, n.seccional_label, n.servicio_label,
         origenNegocioLabel(origenEfectivo(n)), n.aliado_nombre,
         ...n.marcas.map((m) => marcaCondicionLabel(m.tipo)),
         ...n.responsables.map((r) => r.full_name)]
@@ -198,6 +213,7 @@ export default function NegociosClient({
   const [seccional, setSeccional] = useEstadoUrl<string>('seccional', 'todas', inicialDe('seccional', 'todas'))
   const [responsable, setResponsable] = useEstadoUrl<string>('responsable', 'todos', inicialDe('responsable', 'todos'))
   const [origen, setOrigen] = useEstadoUrl<string>('origen', 'todos', inicialDe('origen', 'todos'))
+  const [servicio, setServicio] = useEstadoUrl<string>('servicio', 'todos', inicialDe('servicio', 'todos'))
   const [soloAtrasados, setSoloAtrasados] = useEstadoUrl<boolean>('atrasados', false, inicialDe('atrasados', false))
   const [sortBy, setSortBy] = useEstadoUrl<SortKey>('orden', 'reciente', inicialDe('orden', 'reciente' as SortKey, SORT_VALIDOS))
 
@@ -240,8 +256,8 @@ export default function NegociosClient({
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo, celular, cédula, radicado) + filtro de seccional DIAN
   const term = q.trim().toLowerCase()
   const filtros = useMemo<FiltrosLista>(
-    () => ({ seccional, responsable, origen, term, soloAtrasados }),
-    [seccional, responsable, origen, term, soloAtrasados],
+    () => ({ seccional, responsable, origen, servicio, term, soloAtrasados }),
+    [seccional, responsable, origen, servicio, term, soloAtrasados],
   )
 
   // Lista + contadores de etapa salen de la misma segmentación: el contador de una etapa
@@ -326,6 +342,27 @@ export default function NegociosClient({
       const ib = b.value === SIN_ORIGEN ? 999 : orden.indexOf(b.value)
       return ia - ib
     })
+  }, [negocios, cerrados])
+
+  // Servicios contratados presentes en la lista (abiertos + cerrados), con su conteo.
+  // Se filtra por el valor CRUDO (`servicio`) y se muestra la etiqueta corta: si mañana
+  // cambia el rótulo en la config, los enlaces guardados siguen apuntando a lo mismo.
+  const serviciosDisponibles = useMemo(() => {
+    const conteo = new Map<string, { label: string; count: number }>()
+    for (const n of [...negocios, ...cerrados]) {
+      const key = n.servicio ?? SIN_SERVICIO
+      const label =
+        key === SIN_SERVICIO ? 'Sin servicio definido' : (n.servicio_label ?? key)
+      const prev = conteo.get(key)
+      conteo.set(key, { label, count: (prev?.count ?? 0) + 1 })
+    }
+    return Array.from(conteo, ([value, { label, count }]) => ({ value, label, count })).sort(
+      // 'Sin servicio definido' de último: es el residuo, no una categoría más.
+      (a, b) =>
+        a.value === SIN_SERVICIO ? 1
+        : b.value === SIN_SERVICIO ? -1
+        : a.label.localeCompare(b.label, 'es'),
+    )
   }, [negocios, cerrados])
 
   // Fases visibles (según stages activos del workspace + si hay cerrados).
@@ -457,6 +494,23 @@ export default function NegociosClient({
           <option value="todos">Todos los orígenes</option>
           {origenesDisponibles.map((o) => (
             <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
+          ))}
+        </select>
+      )}
+
+      {/* Filtro por servicio contratado (solo si el ws lo captura y hay más de un
+          valor distinto: con uno solo el desplegable no separa nada). */}
+      {serviciosDisponibles.filter((s) => s.value !== SIN_SERVICIO).length > 0 &&
+        serviciosDisponibles.length > 1 && (
+        <select
+          value={servicio}
+          onChange={(e) => setServicio(e.target.value)}
+          aria-label="Filtrar por servicio contratado"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+        >
+          <option value="todos">Todos los servicios</option>
+          {serviciosDisponibles.map((s) => (
+            <option key={s.value} value={s.value}>{s.label} ({s.count})</option>
           ))}
         </select>
       )}
