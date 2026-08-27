@@ -70,4 +70,8 @@ as $function$
    group by b.negocio_id;
 $function$;
 
+-- Nace ejecutable por PUBLIC y anon la alcanza por ahi; solo la sesion autenticada
+-- debe poder llamarla. Es SECURITY INVOKER: las RLS de `negocio_bloques` siguen
+-- decidiendo que ve cada quien.
+revoke execute on function public.negocio_bloques_campos_json(uuid[], jsonb) from public, anon;
 grant execute on function public.negocio_bloques_campos_json(uuid[], jsonb) to authenticated, service_role;
