@@ -274,6 +274,15 @@ export type NegocioResumen = {
   radicado: string | null
   // Número de factura emitida (bloque "Factura emitida", config-driven) — búsqueda
   numero_factura: string | null
+  // ── Servicio contratado (bloque config-driven, ej. SOENA "Servicio contratado") ──
+  /**
+   * Valor crudo de lo que contrató el cliente (`completo`, `solo_iva`, `solo_upme`
+   * en SOENA). Es la CLAVE del filtro de la lista: estable aunque cambie la etiqueta.
+   * null = el negocio todavía no pasó por el bloque que lo pregunta, o el ws no lo configura.
+   */
+  servicio: string | null
+  /** Etiqueta corta para la tarjeta (`servicio_labels` del config). Cae al valor crudo si falta. */
+  servicio_label: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
@@ -589,7 +598,12 @@ export async function getNegociosV2(
     { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string
       cedula_bloque?: string; cedula_campo?: string
       radicado_bloque?: string; radicado_campo?: string
-      factura_bloque?: string; factura_campo?: string } | undefined
+      factura_bloque?: string; factura_campo?: string
+      // Servicio contratado: de qué bloque/campo sale y cómo se rotula en la tarjeta.
+      // `servicio_labels` mapea valor crudo → etiqueta corta; un valor sin entrada
+      // se muestra tal cual (mejor el valor crudo que un hueco silencioso).
+      servicio_bloque?: string; servicio_campo?: string
+      servicio_labels?: Record<string, string> } | undefined
   const vehiculoPorNeg: Record<string, { label: string | null; ciudad: string | null }> = {}
   // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
   const cedulaPorNeg: Record<string, string | null> = {}
@@ -597,13 +611,16 @@ export async function getNegociosV2(
   const radicadoPorNeg: Record<string, string | null> = {}
   // Número de factura emitida (bloque documento "Factura emitida", config-driven). Para búsqueda.
   const facturaPorNeg: Record<string, string | null> = {}
-  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque, cardCfg?.factura_bloque].filter(Boolean) as string[]
+  // Servicio contratado (bloque config-driven). Para el chip de la tarjeta y el filtro.
+  const servicioPorNeg: Record<string, string | null> = {}
+  const cardBloqueNombres = [cardCfg?.vehiculo_bloque, cardCfg?.cedula_bloque, cardCfg?.radicado_bloque, cardCfg?.factura_bloque, cardCfg?.servicio_bloque].filter(Boolean) as string[]
   const cardCampos = [
     ...(cardCfg?.vehiculo_campos ?? []),
     cardCfg?.ciudad_campo,
     cardCfg?.cedula_campo,
     cardCfg?.radicado_campo,
     cardCfg?.factura_campo,
+    cardCfg?.servicio_campo,
   ].filter(Boolean) as string[]
   if (cardBloqueNombres.length > 0 && cardCampos.length > 0 && negocioIds.length > 0) {
     // La extraccion vive en Postgres (`negocio_bloques_campos`). Antes esto se
@@ -639,6 +656,7 @@ export async function getNegociosV2(
       cedulaPorNeg[negId] = val(negId, cardCfg?.cedula_bloque, cardCfg?.cedula_campo)
       radicadoPorNeg[negId] = val(negId, cardCfg?.radicado_bloque, cardCfg?.radicado_campo)
       facturaPorNeg[negId] = val(negId, cardCfg?.factura_bloque, cardCfg?.factura_campo)
+      servicioPorNeg[negId] = val(negId, cardCfg?.servicio_bloque, cardCfg?.servicio_campo)
     }
   }
 
@@ -692,6 +710,12 @@ export async function getNegociosV2(
       cedula: cedulaPorNeg[id] ?? null,
       radicado: radicadoPorNeg[id] ?? null,
       numero_factura: facturaPorNeg[id] ?? null,
+      servicio: servicioPorNeg[id] ?? null,
+      servicio_label: (() => {
+        const v = servicioPorNeg[id]
+        if (!v) return null
+        return cardCfg?.servicio_labels?.[v] ?? v
+      })(),
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
       reproceso: (() => {
