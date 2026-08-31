@@ -235,10 +235,20 @@ function Indicadores({
           alarma={dias !== null && dias > 30}
         />
         <Indicador
-          valor={String(tablero.vigilancia_continua)}
+          valor={
+            tablero.vigilancia_por_vencer > 0 || tablero.vigilancia_vencida > 0
+              ? `${tablero.vigilancia_continua - tablero.vigilancia_por_vencer - tablero.vigilancia_vencida} · ${tablero.vigilancia_por_vencer + tablero.vigilancia_vencida}`
+              : String(tablero.vigilancia_continua)
+          }
           label={ETIQUETAS.vigilancia_continua.titulo}
-          nota="Consultadas y sin hallazgo."
-          alarma={false}
+          nota={
+            tablero.vigilancia_vencida > 0
+              ? `${tablero.vigilancia_vencida} pasaron su fecha de revalidación.`
+              : tablero.vigilancia_por_vencer > 0
+                ? `${tablero.vigilancia_por_vencer} por vencer en 30 días.`
+                : 'Consultadas y sin hallazgo.'
+          }
+          alarma={tablero.vigilancia_vencida > 0}
         />
       </div>
 
@@ -252,6 +262,14 @@ function Indicadores({
         <p className="text-xs text-[#B45309]">
           La bandeja alcanzó el techo de lectura y no está mostrando todas las consultas del
           workspace.
+        </p>
+      )}
+      {tablero.vigilancia_sin_vigencia > 0 && (
+        <p className="text-xs text-[#6B7280]">
+          {tablero.vigilancia_sin_vigencia} contraparte(s) limpias no tienen fecha de
+          revalidación: se consultaron antes de que se configurara la periodicidad. No cuentan
+          como vencidas, pero tampoco están programadas. Vuelven a entrar al ciclo con su
+          próxima consulta.
         </p>
       )}
       {cobertura && cobertura.consultas_con_fuente_desconocida > 0 && (

@@ -14,7 +14,10 @@ import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { cargarCatalogoTierVigente } from './compliance-tier-catalogo';
-import { clasificarConsulta, verificarCeroSupresion } from '@/lib/compliance/tier-fuentes';
+import { clasificarConsulta, verificarCeroSupresion, type TierResuelto } from '@/lib/compliance/tier-fuentes';
+import { cargarConfigPeriodicidad } from './compliance-periodicidad';
+import { calcularVigencia } from '@/lib/compliance/periodicidad';
+import { todayBogotaISO } from '@/lib/dates/bogota';
 
 // `||` (no `??`): una env vacia ("") debe caer al default igual que si estuviera ausente.
 // Vercel puede inyectar VALIDA_API_BASE="" y `??` la dejaria pasar -> URL relativa rota.
@@ -529,6 +532,12 @@ export type DualHistorialItem = {
    */
   segmento_nombre: string | null;
   segmento_universo: UniversoSegmentacion | null;
+  /**
+   * Hasta cuándo cubre esta consulta (R2). null en las anteriores a la
+   * periodicidad: la pantalla lo muestra como "sin vigencia", que no es lo mismo
+   * que vencida.
+   */
+  vigente_hasta: string | null;
 };
 
 export type DualHistorialFiltros = {
@@ -655,6 +664,12 @@ export async function consultaDualPersistente(
   // lado para poder medirlo, y no decide nada hasta el bloque B.
   const clasificacion = await clasificarParaGuardar(r.data.matches);
 
+  // R2: hasta cuándo cubre esta consulta. Se calcula al guardar con la config
+  // vigente HOY y se congela en la fila: si el oficial cambia la política mañana,
+  // las consultas viejas conservan la vigencia con la que se emitieron. Derivarla
+  // al leer reescribiría el pasado cada vez que alguien ajusta un número.
+  const vigencia = await calcularVigenciaParaGuardar(workspaceId, clasificacion);
+
   const { data: row, error: errIns } = await svc
     .from('consultas_listas_dual')
     .insert({
@@ -665,6 +680,7 @@ export async function consultaDualPersistente(
       total_matches: r.data.total_matches,
       matches: r.data.matches,
       ...clasificacion,
+      ...vigencia,
     })
     .select('id')
     .single();
@@ -768,6 +784,48 @@ async function clasificarParaGuardar(
 }
 
 /**
+ * Traduce la clasificación guardada a la vigencia de la consulta (R2).
+ *
+ * Se apoya en `tier_maximo` y `tier_sin_clasificar` en vez de volver a clasificar:
+ * la fila y su vigencia tienen que hablar de lo mismo. Si alguna vez difieren,
+ * el historial diría un tier y una fecha calculada con otro.
+ *
+ * Nunca lanza. Una consulta ya pagada no se pierde porque falló el cálculo de
+ * una fecha; se guarda sin vigencia, que la pantalla muestra como tal.
+ */
+async function calcularVigenciaParaGuardar(
+  workspaceId: string,
+  clasificacion: ClasificacionPersistida,
+): Promise<{ vigente_hasta: string | null; vigencia_meses: number | null; vigencia_nivel: string | null }> {
+  try {
+    const config = await cargarConfigPeriodicidad(workspaceId);
+
+    // `tiersPresentes` reducido a lo que la fila guarda. Se agrega
+    // `sin_clasificar` cuando la marca está puesta aunque el tier máximo sea
+    // otro: la fuente desconocida tiene que poder ganar la vigencia más corta.
+    const presentes: TierResuelto[] = [];
+    if (clasificacion.tier_maximo) presentes.push(clasificacion.tier_maximo as TierResuelto);
+    if (clasificacion.tier_sin_clasificar && !presentes.includes('sin_clasificar')) {
+      presentes.push('sin_clasificar');
+    }
+
+    const v = calcularVigencia(
+      todayBogotaISO(),
+      presentes,
+      config,
+      clasificacion.tier_opera === true,
+    );
+    return {
+      vigente_hasta: v.vigente_hasta,
+      vigencia_meses: v.meses,
+      vigencia_nivel: v.nivel,
+    };
+  } catch {
+    return { vigente_hasta: null, vigencia_meses: null, vigencia_nivel: null };
+  }
+}
+
+/**
  * El segmento de una consulta nueva es obligatorio, tiene que existir en el
  * catálogo del workspace y tiene que estar activo. Los tres casos fallan con
  * mensaje propio: "no lo mandaste", "no existe" y "está desactivado" mandan a
@@ -825,7 +883,7 @@ export async function listarHistorialDual(
   let q: any = svc
     .from('consultas_listas_dual')
     .select(
-      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at, created_by, segmento_id',
+      'id, dual_id, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, titulo_lote, lote_id, error_mensaje, created_at, created_by, segmento_id, vigente_hasta',
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })

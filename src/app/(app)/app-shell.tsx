@@ -5,6 +5,7 @@ import { TZ, formatBogotaFechaLarga } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
   FileSpreadsheet,
+  Timer,
   BarChart3,
   QrCode,
   LayoutDashboard,
@@ -173,6 +174,10 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   // muestra quien quedo reportado en listas restrictivas. Lo que circula por la
   // organizacion es el PDF de autorizacion, no esta pantalla.
   { href: '/compliance/liberaciones', label: 'Liberaciones', icon: ShieldCheck, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // Periodicidad de revalidacion (R2): politica de riesgo del OBLIGADO, no de
+  // MeTRIK. El cuadro 12/6/3 es criterio del oficial y no tiene fuente normativa
+  // verificada (dictamen Lucia 2026-08-24), por eso es configurable y no constante.
+  { href: '/compliance/periodicidad', label: 'Periodicidad', icon: Timer, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Auditoria de contrataciones (R5): control CORRECTIVO. Cruza la base de
   // compras del periodo contra lo que el oficial sabia y habia decidido ESE DIA.
   // Misma restriccion de confidencialidad que Liberaciones: el informe nombra a
