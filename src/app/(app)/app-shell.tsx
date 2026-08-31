@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { TZ, formatBogotaFechaLarga } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
+  FileSpreadsheet,
   BarChart3,
   QrCode,
   LayoutDashboard,
@@ -172,6 +173,11 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   // muestra quien quedo reportado en listas restrictivas. Lo que circula por la
   // organizacion es el PDF de autorizacion, no esta pantalla.
   { href: '/compliance/liberaciones', label: 'Liberaciones', icon: ShieldCheck, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // Auditoria de contrataciones (R5): control CORRECTIVO. Cruza la base de
+  // compras del periodo contra lo que el oficial sabia y habia decidido ESE DIA.
+  // Misma restriccion de confidencialidad que Liberaciones: el informe nombra a
+  // quien compro, a quien consulto y a quien libero.
+  { href: '/compliance/auditoria-compras', label: 'Auditoría de contrataciones', icon: FileSpreadsheet, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Comparativa interna MeTRIK — solo workspace metrik
   { href: '/compliance/comparativa-informa', label: 'Comparativa Informa', icon: Scale, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_audit', value: true } },
 ]
