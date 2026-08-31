@@ -314,16 +314,6 @@ export interface ComercialSerieVendedorResponse {
   serie: ComercialSerieVendedorPunto[]
 }
 
-/** Fila de meta para la mini UI de edicion (staff_id null = meta global). */
-export interface MetaComercial {
-  id: string
-  staff_id: string | null
-  anio: number
-  mes: number
-  meta_num_ventas: number | null
-  meta_valor: number | null
-}
-
 export const MESES_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
