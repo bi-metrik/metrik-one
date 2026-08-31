@@ -402,8 +402,19 @@ verify_jwt = false
 # Sin este flag, un redeploy aplica el default true y Meta recibe 401.
 verify_jwt = false
 
-# Nota: wa-alerts y evaluar-reglas se dejan en el default (verify_jwt = true)
-# a proposito: las invocan crons/triggers internos con service key.
+[functions.wa-alerts]
+# Crons de alertas proactivas (w25, w29, w33, streak_eval). Estuvo en el default
+# `verify_jwt = true` con la nota de que "la invocan crons internos con service
+# key": ese supuesto dejo de ser cierto. El gateway ya no acepta la key legacy y
+# los cuatro disparos volvian con 401 UNAUTHORIZED_LEGACY_JWT en silencio
+# (medido el 2026-08-31). Se autentica con secreto compartido dentro de la
+# funcion (WA_ALERTS_SECRET), igual que cardumen-cron y notificar-etapa.
+verify_jwt = false
+
+# Nota: evaluar-reglas sigue en el default (verify_jwt = true) y la app la llama
+# con la anon key legacy. Es el mismo riesgo que tenia wa-alerts, PERO no esta
+# medido: no hay trafico reciente que lo confirme ni lo descarte. No se toca a
+# ciegas — se mide primero, provocando una evaluacion de reglas y mirando el log.
 
 # Experimental features may be deprecated any time
 [experimental]
