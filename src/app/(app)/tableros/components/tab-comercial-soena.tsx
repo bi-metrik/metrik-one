@@ -23,7 +23,6 @@ import type {
   ComercialPlanPagoMes,
   CapacidadPunto,
   CapacidadSeccional,
-  MetaComercial,
 } from '../../equipo/comercial-types'
 import { MESES_ES, planPagoLabel } from '../../equipo/comercial-types'
 import {
@@ -33,7 +32,7 @@ import {
   getComercialPlanPagoMes,
   type RecorteVendedor,
 } from '../../equipo/comercial-actions'
-import MetasModal from '../../equipo/metas-modal'
+import MetasAnioModal from './metas-anio-modal'
 import { canonizarSeccional } from '@/lib/dian/seccionales'
 import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
@@ -131,7 +130,6 @@ export interface TabComercialSoenaProps {
    * persona sencillamente no recorta las graficas; la tabla se sigue dibujando.
    */
   serieVendedor: ComercialSerieVendedorResponse | null
-  metasIniciales: MetaComercial[]
   anioInicial: number
   mesNumInicial: number
   /**
@@ -156,7 +154,6 @@ export function TabComercialSoena({
   serie,
   serieSeccional,
   serieVendedor,
-  metasIniciales,
   anioInicial,
   mesNumInicial,
   mesEnCurso,
@@ -607,7 +604,7 @@ export function TabComercialSoena({
             onClick={() => setMetasModalOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
           >
-            <Target className="h-4 w-4" /> Metas del mes
+            <Target className="h-4 w-4" /> Metas del año
           </button>
         )}
       </div>
@@ -1138,12 +1135,14 @@ export function TabComercialSoena({
         />
       )}
 
+      {/* Metas del AÑO: carga sus propias cifras por año y alcance. El modal
+          anterior recibía el mes desde el estado de esta pantalla y las cifras
+          desde el servidor, cargadas solo para el mes en curso: al navegar de
+          mes, guardaba las metas de un mes encima de otro. */}
       {metasModalOpen && (
-        <MetasModal
-          anio={anio}
-          mes={mes}
+        <MetasAnioModal
+          anioInicial={anio}
           equipo={equipo}
-          metasIniciales={metasIniciales}
           onClose={() => setMetasModalOpen(false)}
         />
       )}
