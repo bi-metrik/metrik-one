@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fuenteDeLaTarifa } from './tarifa-propuesta'
+import { fuenteDeLaTarifa, faltaConfirmarTarifa } from './tarifa-propuesta'
 
 const base = { confirmada: 0, editadaAMano: null as number | null, autoCalculoHabilitado: false }
 
@@ -49,5 +49,38 @@ describe('fuenteDeLaTarifa', () => {
     expect(fuenteDeLaTarifa({ ...base, confirmada: Number.NaN })).toBe('ninguna')
     expect(fuenteDeLaTarifa({ ...base, confirmada: -50 })).toBe('ninguna')
     expect(fuenteDeLaTarifa({ ...base, editadaAMano: -1 })).toBe('ninguna')
+  })
+})
+
+describe('faltaConfirmarTarifa', () => {
+  const tarifado = { usaModeloTarifa: true, servicioNiegaTarifa: false, tarifaUpme: 0 }
+
+  it('frena cuando el caso lleva tarifa y todavia no la confirman', () => {
+    expect(faltaConfirmarTarifa(tarifado)).toBe(true)
+  })
+
+  it('NO frena a un solo IVA: su tarifa en cero es la respuesta correcta', () => {
+    // El caso que motiva la funcion. Antes de subir `servicio_contratado` a Propuesta
+    // este escenario no podia existir: el bloque vivia una etapa despues y siempre
+    // llegaba vacio, asi que todo cero se leia como dato faltante.
+    expect(faltaConfirmarTarifa({ ...tarifado, servicioNiegaTarifa: true })).toBe(false)
+  })
+
+  it('no frena cuando la tarifa ya esta confirmada', () => {
+    expect(faltaConfirmarTarifa({ ...tarifado, tarifaUpme: 701_812 })).toBe(false)
+  })
+
+  it('un workspace sin modelo de tarifa nunca se frena', () => {
+    expect(faltaConfirmarTarifa({ ...tarifado, usaModeloTarifa: false })).toBe(false)
+  })
+
+  it('una tarifa no finita o negativa no cuenta como confirmada', () => {
+    expect(faltaConfirmarTarifa({ ...tarifado, tarifaUpme: Number.NaN })).toBe(true)
+    expect(faltaConfirmarTarifa({ ...tarifado, tarifaUpme: -1 })).toBe(true)
+  })
+
+  it('el servicio que niega la tarifa manda sobre el valor: no frena aunque venga en cero', () => {
+    expect(faltaConfirmarTarifa({ usaModeloTarifa: true, servicioNiegaTarifa: true, tarifaUpme: 0 }))
+      .toBe(false)
   })
 })

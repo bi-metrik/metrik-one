@@ -26,8 +26,14 @@ import { clausulasAHtml, normalizarTerminos } from '@/lib/propuesta/terminos'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
-import { tarifaConfirmadaPorNegocio, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
-import { fuenteDeLaTarifa } from '@/lib/upme/tarifa-propuesta'
+import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
+import { fuenteDeLaTarifa, faltaConfirmarTarifa } from '@/lib/upme/tarifa-propuesta'
+import {
+  bloqueTieneRespuesta,
+  faltanRequisitos,
+  nombresDeRequisitos,
+  type RequisitoBloque,
+} from '@/lib/negocios/requisitos-bloque'
 import { uvtDelAnio } from '@/lib/upme/uvt'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
@@ -313,7 +319,13 @@ async function loadBloqueContext(
   let tarifaDetalle: TarifaUpmeDetalle | null = null
   const tarifaEditada = data.tarifa_upme_editada === true
 
-  const [confRes, certRes] = await Promise.all([
+  // Bloques que deben estar respondidos ANTES de emitir. Se declaran en la config del
+  // bloque de propuesta (`requiere_bloques`), el mismo vocabulario que ya usan los
+  // formularios; aquí el caso es "Servicio contratado", que decide si la tarifa UPME
+  // entra al documento y bajo qué cláusulas de alcance.
+  const requiereBloques = (configExtra.requiere_bloques ?? []) as RequisitoBloque[]
+
+  const [confRes, certRes, reqRes] = await Promise.all([
     supabase
       .from('negocio_bloques')
       .select('negocio_id, data, bloque_configs!inner(config_extra)')
@@ -324,11 +336,44 @@ async function loadBloqueContext(
       .select('negocio_id, data, bloque_configs!inner(slug)')
       .eq('negocio_id', b.negocio_id)
       .eq('bloque_configs.slug', 'servicio_contratado'),
+    requiereBloques.length > 0
+      ? supabase
+          .from('negocio_bloques')
+          .select('data, bloque_configs!inner(slug)')
+          .eq('negocio_id', b.negocio_id)
+          .in('bloque_configs.slug', requiereBloques.map(r => r.slug))
+      : Promise.resolve({ data: [] as unknown[] }),
   ])
+
+  // Un slug puede traer varias filas (las copias readonly heredadas viajan con el
+  // negocio entre etapas): gana la que tenga respuesta, no la primera que llegue.
+  const presentes = new Map<string, Record<string, unknown> | null>()
+  for (const fila of ((reqRes.data ?? []) as Array<{
+    data: Record<string, unknown> | null
+    bloque_configs: { slug: string } | null
+  }>)) {
+    const slug = fila.bloque_configs?.slug
+    if (!slug) continue
+    const previo = presentes.get(slug)
+    if (previo && bloqueTieneRespuesta(previo)) continue
+    presentes.set(slug, fila.data)
+  }
+  const requisitosFaltantes = faltanRequisitos(requiereBloques, presentes)
   const tarifaConfirmada = tarifaConfirmadaPorNegocio(
     (confRes.data ?? []) as FilaBloqueTarifa[],
     (certRes.data ?? []) as FilaBloqueTarifa[],
   ).get(b.negocio_id as string) ?? 0
+
+  // ⚠️ Una tarifa en 0 tiene DOS causas que no son lo mismo: que todavía no se haya
+  // confirmado en Validación, o que este servicio no la lleve. Al primero hay que
+  // frenarlo; al segundo hay que emitirle su propuesta, sin línea de tarifa. Antes no
+  // había que distinguirlas porque `servicio_contratado` vivía DESPUÉS de esta etapa y
+  // siempre llegaba vacío; al subirlo a Propuesta, un "solo IVA" da 0 legítimamente.
+  // La fuente es `servicio_contratado`, no el campo derivado, y la regla se reusa —
+  // `niegaCertificacionUpme` es la misma que aplican la conciliación y la facturación.
+  const servicioNiegaTarifa = ((certRes.data ?? []) as FilaBloqueTarifa[]).some(f =>
+    niegaCertificacionUpme(f.data),
+  )
 
   const fuenteTarifa = fuenteDeLaTarifa({
     confirmada: tarifaConfirmada,
@@ -386,6 +431,13 @@ async function loadBloqueContext(
      * nunca habló de tarifa y se sigue generando igual.
      */
     usaModeloTarifa: (confRes.data ?? []).length > 0,
+    /**
+     * true si el SERVICIO contratado declara que este caso no lleva tarifa UPME
+     * (hoy: `solo_iva`). Su tarifa en 0 es correcta, no un dato faltante.
+     */
+    servicioNiegaTarifa,
+    /** Bloques declarados en `requiere_bloques` que aún no tienen respuesta. */
+    requisitosFaltantes,
   }
 }
 
@@ -419,13 +471,33 @@ export async function generarVersionPropuesta(
   if (!ctx.precioBase || ctx.precioBase <= 0) {
     return { ok: false, error: 'Precio base no disponible — verifica el servicio asociado' }
   }
+  // ⚠️ Sin saber QUÉ contrató el cliente no se emite. El documento no solo imprime un
+  // precio: decide con el servicio si la línea de tarifa UPME entra y qué alcance
+  // promete. Mientras `servicio_contratado` vivió en Negociación —una etapa DESPUÉS de
+  // esta— la consulta volvía siempre vacía y toda propuesta salía asumiendo el paquete
+  // completo, así que a un cliente de solo IVA se le cobraba la tarifa igual.
+  if (ctx.requisitosFaltantes.length > 0) {
+    return {
+      ok: false,
+      error: `Falta declarar antes: ${nombresDeRequisitos(ctx.requisitosFaltantes)}. La propuesta cobra y promete distinto según lo que el cliente haya contratado.`,
+    }
+  }
+
   // ⚠️ Sin tarifa NO se genera, y no es una decisión de formato: el documento habla de
   // la tarifa en CINCO puntos más allá del cuadro de precio, incluidos los términos
   // legales (mandato de recaudo, desistimiento). Una propuesta que en la letra dice
   // que el cliente paga la tarifa UPME pero no dice cuánto es peor que no emitirla.
   // Solo aplica a negocios que operan bajo el modelo de tarifa: un workspace sin el
   // bloque de confirmación nunca habló de tarifa y no cambia en nada.
-  if (ctx.usaModeloTarifa && !(ctx.tarifaUpme > 0)) {
+  //
+  // ⚠️ Y tampoco aplica cuando el SERVICIO declara que este caso no lleva tarifa
+  // (`solo_iva`): ahí el 0 es la respuesta correcta, no un dato que falte. Frenarlo
+  // con "falta confirmar la tarifa" sería mandar a corregir algo que ya está bien.
+  if (faltaConfirmarTarifa({
+    usaModeloTarifa: ctx.usaModeloTarifa,
+    servicioNiegaTarifa: ctx.servicioNiegaTarifa,
+    tarifaUpme: ctx.tarifaUpme,
+  })) {
     return {
       ok: false,
       error: 'Falta confirmar la tarifa UPME en Validación. La propuesta la cobra en sus términos, así que no puede emitirse sin ese valor.',
