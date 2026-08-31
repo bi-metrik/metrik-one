@@ -28,7 +28,14 @@ import {
   type Cobertura,
   type LiberacionConNombres,
   type LiberacionInput,
+  type MotivoCobertura,
 } from '@/lib/compliance/liberaciones';
+import {
+  calcularIndicadores,
+  etiquetaDeContraparte,
+  type EtiquetaBandeja,
+  type IndicadoresBandeja,
+} from '@/lib/compliance/bandeja';
 import type { InformaMatch } from './compliance-dual';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -45,6 +52,14 @@ const COLUMNAS_LIBERACION =
  * pantalla pide decidir de nuevo, nunca da por cubierto a quien no verificó.
  */
 const LIMITE_BITACORA = 2000;
+
+/**
+ * Techo de consultas que se leen para armar la bandeja. Igual que el de la
+ * bitácora, se toman las más recientes. Si se alcanza, la bandeja lo DICE en
+ * pantalla: un techo silencioso se lee como "esto es todo", y aquí lo que
+ * faltaría son hallazgos sin decidir.
+ */
+const LIMITE_CONSULTAS = 5000;
 
 // ─── Guards ────────────────────────────────────────────────────────────────
 
@@ -259,24 +274,61 @@ export type HallazgoSinDocumento = {
 };
 
 export type TableroLiberaciones = {
-  /** Contrapartes con hallazgo SIN liberación vigente. Es la cola del oficial. */
-  pendientes: ContraparteConHallazgo[];
-  /** Contrapartes con hallazgo YA cubiertas por una liberación vigente. */
-  cubiertas: ContraparteConHallazgo[];
+  /** Las cinco poblaciones del dictamen, en el orden en que se muestran. */
+  sin_cobertura_vigente: ContraparteConHallazgo[];
+  hallazgos_sin_decidir: ContraparteConHallazgo[];
+  excepciones_vigentes: ContraparteConHallazgo[];
+  rechazadas: ContraparteConHallazgo[];
+  /**
+   * Vigilancia continua es un CONTADOR, no una lista: nadie necesita ver los
+   * nombres de las contrapartes que están bien (regla 1 de interfaz del
+   * dictamen). "Por vencer" no se puede calcular todavía — depende de
+   * `vigente_hasta` por consulta, que lo produce R2.
+   */
+  vigilancia_continua: number;
   /**
    * Hallazgos que quedan fuera del mecanismo. NO se ocultan: una fila que
    * desaparece en silencio es indistinguible de una que no existe, y aquí lo
    * que desaparecería es un hallazgo sin resolver.
    */
   sin_documento: HallazgoSinDocumento[];
+  /**
+   * Contrapartes cuya última consulta falló (`severidad='error'`). No son
+   * limpias ni reportadas: no se sabe. Contarlas como vigilancia continua sería
+   * repetir el falso negativo de agosto en otra capa.
+   */
+  sin_resultado: number;
+  indicadores: IndicadoresBandeja;
+  /** El techo de lectura se alcanzó: la bandeja no está mostrando todo. */
+  truncado: boolean;
+};
+
+/** Fila cruda de `consultas_listas_dual` que la bandeja necesita. */
+type ConsultaBandeja = {
+  id: string;
+  nombre_consultado: string | null;
+  documento_tipo: string | null;
+  documento_numero: string | null;
+  severidad: string;
+  total_matches: number;
+  matches: InformaMatch[];
+  created_at: string;
 };
 
 /**
- * El tablero del oficial. Los estados se DERIVAN, no se guardan.
+ * La bandeja del oficial. Los estados se DERIVAN, no se guardan.
  *
- * `con hallazgo` = consulta con severidad='alto' sin liberación vigente que la
- * cubra. Guardar ese estado en una columna invita a que se desincronice: la
- * vigencia vence sola con el calendario y ninguna columna se entera.
+ * Cinco poblaciones (dictamen Lucía 2026-08-24), que salen de cruzar dos cosas
+ * que ya están en producción: si la ÚLTIMA consulta de la contraparte trajo
+ * hallazgo, y qué devuelve `coberturaDeContraparte()` (R4). Guardar el estado en
+ * una columna invita a que se desincronice: la vigencia vence sola con el
+ * calendario y ninguna columna se entera.
+ *
+ * Antes esto devolvía dos grupos —cubiertas y no cubiertas— y ese corte metía en
+ * el mismo cajón a la que nunca pasó por el oficial, a la que está operando con
+ * el permiso caducado y a la que fue rechazada. Son tres cosas distintas, y la
+ * del medio es la única donde la empresa está expuesta sin que nadie lo haya
+ * decidido así.
  */
 export async function listarTableroLiberaciones(): Promise<Result<TableroLiberaciones>> {
   const guard = await guardOficial();
@@ -285,12 +337,15 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
 
+  // Se leen TODAS las consultas, no solo las de severidad 'alto': sin las
+  // limpias no se puede contar vigilancia continua, y sin las de error no se
+  // puede distinguir "salió limpia" de "no se supo".
   const { data: consultasRaw, error: errConsultas } = await svc
     .from('consultas_listas_dual')
-    .select('id, nombre_consultado, documento_tipo, documento_numero, total_matches, matches, created_at')
+    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at')
     .eq('workspace_id', guard.workspaceId)
-    .eq('severidad', 'alto')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(LIMITE_CONSULTAS);
 
   if (errConsultas) return { ok: false, error: errConsultas.message };
 
@@ -303,52 +358,66 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
 
   if (errLiberaciones) return { ok: false, error: errLiberaciones.message };
 
+  const hoy = todayBogotaISO();
   const coberturas = indexarCoberturas(
     (liberacionesRaw ?? []) as ComplianceLiberacion[],
-    todayBogotaISO(),
+    hoy,
   );
 
+  const consultas = (consultasRaw ?? []) as ConsultaBandeja[];
   const porClave = new Map<string, ContraparteConHallazgo>();
+  /** Severidad de la consulta más reciente CONCLUYENTE de cada contraparte. */
+  const ultimaConcluyente = new Map<string, string>();
   const sinDocumento: HallazgoSinDocumento[] = [];
 
-  for (const c of (consultasRaw ?? []) as Array<Record<string, unknown>>) {
-    const documentoTipo = (c.documento_tipo as string | null) ?? null;
-    const documentoNumero = (c.documento_numero as string | null) ?? null;
-    const clave = claveContraparte(documentoTipo, documentoNumero);
+  for (const c of consultas) {
+    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
 
-    const hallazgo: HallazgoDeConsulta = {
-      consulta_id: c.id as string,
-      created_at: c.created_at as string,
-      total_matches: (c.total_matches as number) ?? 0,
-      matches: Array.isArray(c.matches) ? (c.matches as InformaMatch[]) : [],
-    };
-
+    // Sin documento no hay a qué atar la vigencia: la liberación cuelga de la
+    // contraparte y la contraparte se identifica por documento. Solo se
+    // reportan las que además traen hallazgo — una consulta limpia por nombre
+    // no deja nada pendiente.
     if (!clave) {
-      sinDocumento.push({
-        consulta_id: hallazgo.consulta_id,
-        nombre: (c.nombre_consultado as string | null) ?? null,
-        created_at: hallazgo.created_at,
-        total_matches: hallazgo.total_matches,
-      });
+      if (c.severidad === 'alto') {
+        sinDocumento.push({
+          consulta_id: c.id,
+          nombre: c.nombre_consultado ?? null,
+          created_at: c.created_at,
+          total_matches: c.total_matches ?? 0,
+        });
+      }
       continue;
     }
+
+    // Las consultas vienen ordenadas desc: la primera concluyente que aparece
+    // por contraparte es la que decide su población.
+    if (!ultimaConcluyente.has(clave) && (c.severidad === 'alto' || c.severidad === 'sin_hallazgo')) {
+      ultimaConcluyente.set(clave, c.severidad);
+    }
+
+    if (c.severidad !== 'alto') continue;
+
+    const hallazgo: HallazgoDeConsulta = {
+      consulta_id: c.id,
+      created_at: c.created_at,
+      total_matches: c.total_matches ?? 0,
+      matches: Array.isArray(c.matches) ? c.matches : [],
+    };
 
     const existente = porClave.get(clave);
     if (existente) {
       existente.consultas.push(hallazgo);
       // El nombre puede faltar en una consulta y estar en otra de la misma
       // contraparte: se conserva el primero que aparezca.
-      existente.nombre = existente.nombre ?? ((c.nombre_consultado as string | null) ?? null);
+      existente.nombre = existente.nombre ?? (c.nombre_consultado ?? null);
       continue;
     }
 
-    // La primera que llega es la más reciente (la consulta viene ordenada desc),
-    // y es sobre la que el oficial decide.
     porClave.set(clave, {
       clave,
-      documento_tipo: documentoTipo as string,
-      documento_numero: documentoNumero as string,
-      nombre: (c.nombre_consultado as string | null) ?? null,
+      documento_tipo: c.documento_tipo as string,
+      documento_numero: c.documento_numero as string,
+      nombre: c.nombre_consultado ?? null,
       consultas: [hallazgo],
       consulta_vigente_id: hallazgo.consulta_id,
       ultima_consulta_fecha: hallazgo.created_at,
@@ -361,13 +430,61 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
     });
   }
 
-  const todas = Array.from(porClave.values());
+  const buckets: Record<EtiquetaBandeja, ContraparteConHallazgo[]> = {
+    sin_cobertura_vigente: [],
+    hallazgos_sin_decidir: [],
+    excepciones_vigentes: [],
+    rechazadas: [],
+    vigilancia_continua: [],
+  };
+
+  for (const contraparte of porClave.values()) {
+    // Una contraparte que volvió a consultarse y salió limpia deja de estar en
+    // una bandeja de hallazgo, aunque conserve consultas viejas con
+    // coincidencias: lo que define la población es la ÚLTIMA consulta.
+    const tieneHallazgo = ultimaConcluyente.get(contraparte.clave) === 'alto';
+    const motivo: MotivoCobertura = contraparte.cobertura.motivo;
+    buckets[etiquetaDeContraparte(tieneHallazgo, motivo)].push(contraparte);
+  }
+
+  // La cola se ordena por ANTIGÜEDAD (la más vieja arriba), no por severidad:
+  // lo que se mide acá es cuánto lleva la empresa sabiendo algo sin decidir.
+  buckets.hallazgos_sin_decidir.sort((a, b) =>
+    a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
+  buckets.sin_cobertura_vigente.sort((a, b) =>
+    a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
+
+  // Vigilancia continua se cuenta sobre TODAS las contrapartes concluyentes sin
+  // hallazgo, no solo las que alguna vez lo tuvieron.
+  let limpias = 0;
+  for (const [, severidad] of ultimaConcluyente) {
+    if (severidad !== 'alto') limpias++;
+  }
+
+  // Contrapartes con documento cuya única evidencia es un error: no se sabe.
+  const clavesConDocumento = new Set<string>();
+  for (const c of consultas) {
+    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
+    if (clave) clavesConDocumento.add(clave);
+  }
+  const sinResultado = clavesConDocumento.size - ultimaConcluyente.size;
+
   return {
     ok: true,
     data: {
-      pendientes: todas.filter((c) => !c.cobertura.cubierta),
-      cubiertas: todas.filter((c) => c.cobertura.cubierta),
+      sin_cobertura_vigente: buckets.sin_cobertura_vigente,
+      hallazgos_sin_decidir: buckets.hallazgos_sin_decidir,
+      excepciones_vigentes: buckets.excepciones_vigentes,
+      rechazadas: buckets.rechazadas,
+      vigilancia_continua: limpias,
       sin_documento: sinDocumento,
+      sin_resultado: sinResultado,
+      indicadores: calcularIndicadores(
+        buckets.hallazgos_sin_decidir.map((c) => c.ultima_consulta_fecha),
+        buckets.sin_cobertura_vigente.length,
+        hoy,
+      ),
+      truncado: consultas.length >= LIMITE_CONSULTAS,
     },
   };
 }

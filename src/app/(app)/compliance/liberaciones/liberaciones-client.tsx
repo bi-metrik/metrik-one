@@ -27,6 +27,7 @@ import {
   type LiberacionDecision,
   type MotivoCobertura,
 } from '@/lib/compliance/liberaciones';
+import { ETIQUETAS, diasEntreISO } from '@/lib/compliance/bandeja';
 import { formatBogotaFechaCortaAno, formatBogotaFechaHora, todayBogotaISO } from '@/lib/dates/bogota';
 
 const ESTILO_MOTIVO: Record<MotivoCobertura, string> = {
@@ -111,11 +112,14 @@ export default function LiberacionesClient({
         </div>
       )}
 
+      <Indicadores tablero={tablero} />
+
       <Seccion
-        titulo="Pendientes de decisión"
-        descripcion="Con hallazgo y sin liberación vigente. Una liberación vencida vuelve aquí sola, sin que nadie tenga que marcarla."
-        vacio="Ninguna contraparte con hallazgo está esperando decisión."
-        contrapartes={tablero.pendientes}
+        titulo={ETIQUETAS.sin_cobertura_vigente.titulo}
+        descripcion={ETIQUETAS.sin_cobertura_vigente.descripcion}
+        vacio="Ninguna contraparte está operando con la cobertura vencida."
+        alarma
+        contrapartes={tablero.sin_cobertura_vigente}
         abierta={abierta}
         onAbrir={setAbierta}
         onDecidir={decidir}
@@ -124,10 +128,35 @@ export default function LiberacionesClient({
       />
 
       <Seccion
-        titulo="Con liberación vigente"
-        descripcion="Cubiertas hasta la fecha indicada. Al vencer regresan a pendientes."
+        titulo={ETIQUETAS.hallazgos_sin_decidir.titulo}
+        descripcion={ETIQUETAS.hallazgos_sin_decidir.descripcion}
+        vacio="Ningún hallazgo está esperando decisión."
+        mostrarAntiguedad
+        contrapartes={tablero.hallazgos_sin_decidir}
+        abierta={abierta}
+        onAbrir={setAbierta}
+        onDecidir={decidir}
+        controles={controles}
+        pending={pending}
+      />
+
+      <Seccion
+        titulo={ETIQUETAS.excepciones_vigentes.titulo}
+        descripcion={ETIQUETAS.excepciones_vigentes.descripcion}
         vacio="Todavía no hay contrapartes liberadas."
-        contrapartes={tablero.cubiertas}
+        contrapartes={tablero.excepciones_vigentes}
+        abierta={abierta}
+        onAbrir={setAbierta}
+        onDecidir={decidir}
+        controles={controles}
+        pending={pending}
+      />
+
+      <Seccion
+        titulo={ETIQUETAS.rechazadas.titulo}
+        descripcion={ETIQUETAS.rechazadas.descripcion}
+        vacio="Ninguna contraparte ha sido rechazada."
+        contrapartes={tablero.rechazadas}
         abierta={abierta}
         onAbrir={setAbierta}
         onDecidir={decidir}
@@ -166,10 +195,91 @@ export default function LiberacionesClient({
   );
 }
 
+/**
+ * Los dos números que un supervisor pide primero, y el contador de vigilancia
+ * continua. Van arriba de las listas porque son el resumen del riesgo asumido.
+ *
+ * "Por vencer" todavía no se puede mostrar: depende de una fecha de
+ * revalidación por consulta, que hoy no existe. Se deja fuera en vez de
+ * aproximarlo — un indicador que mide algo distinto de lo que dice medir es
+ * peor que no tenerlo.
+ */
+function Indicadores({ tablero }: { tablero: TableroLiberaciones }) {
+  const { indicadores } = tablero;
+  const expuestas = indicadores.sin_cobertura_vigente;
+  const dias = indicadores.antiguedad_max_sin_decidir_dias;
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Indicador
+          valor={String(expuestas)}
+          label="Operando sin cobertura vigente"
+          nota="El objetivo es cero."
+          alarma={expuestas > 0}
+        />
+        <Indicador
+          valor={dias === null ? '—' : `${dias} d`}
+          label="Hallazgo sin decidir más antiguo"
+          nota={dias === null ? 'Nada represado.' : 'Cuánto lleva la empresa sabiendo sin decidir.'}
+          alarma={dias !== null && dias > 30}
+        />
+        <Indicador
+          valor={String(tablero.vigilancia_continua)}
+          label={ETIQUETAS.vigilancia_continua.titulo}
+          nota="Consultadas y sin hallazgo."
+          alarma={false}
+        />
+      </div>
+
+      {tablero.sin_resultado > 0 && (
+        <p className="text-xs text-[#B45309]">
+          {tablero.sin_resultado} contraparte(s) con la última consulta fallida: no salieron
+          limpias, no se supo. Hay que volver a consultarlas.
+        </p>
+      )}
+      {tablero.truncado && (
+        <p className="text-xs text-[#B45309]">
+          La bandeja alcanzó el techo de lectura y no está mostrando todas las consultas del
+          workspace.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Indicador({
+  valor,
+  label,
+  nota,
+  alarma,
+}: {
+  valor: string;
+  label: string;
+  nota: string;
+  alarma: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-lg border p-4 ${
+        alarma ? 'bg-[#FEF2F2] border-[#EF4444]/40' : 'bg-white border-[#E5E7EB]'
+      }`}
+    >
+      <div className={`text-2xl font-bold ${alarma ? 'text-[#B91C1C]' : 'text-[#1A1A1A]'}`}>
+        {valor}
+      </div>
+      <div className="text-sm font-semibold text-[#1A1A1A] mt-0.5">{label}</div>
+      <div className="text-xs text-[#6B7280] mt-0.5">{nota}</div>
+    </div>
+  );
+}
+
 function Seccion({
   titulo,
   descripcion,
   vacio,
+  alarma = false,
+  mostrarAntiguedad = false,
   contrapartes,
   abierta,
   onAbrir,
@@ -180,6 +290,10 @@ function Seccion({
   titulo: string;
   descripcion: string;
   vacio: string;
+  /** La alarma se pinta distinto y nunca se colapsa: es el único estado expuesto. */
+  alarma?: boolean;
+  /** La cola muestra cuántos días lleva cada hallazgo esperando decisión. */
+  mostrarAntiguedad?: boolean;
   contrapartes: ContraparteConHallazgo[];
   abierta: string | null;
   onAbrir: (clave: string | null) => void;
@@ -193,10 +307,21 @@ function Seccion({
   controles: ControlParaLiberacion[];
   pending: boolean;
 }) {
+  const hoy = todayBogotaISO();
+
   return (
-    <div className="space-y-3">
+    <div
+      className={`space-y-3 ${
+        alarma && contrapartes.length > 0
+          ? 'rounded-lg border border-[#EF4444]/40 bg-[#FEF2F2] p-4'
+          : ''
+      }`}
+    >
       <div>
-        <h2 className="text-base font-bold text-[#1A1A1A]">
+        <h2 className="text-base font-bold text-[#1A1A1A] flex items-center gap-2">
+          {alarma && contrapartes.length > 0 && (
+            <AlertTriangle className="h-4 w-4 text-[#B91C1C]" />
+          )}
           {titulo} ({contrapartes.length})
         </h2>
         <p className="text-sm text-[#6B7280]">{descripcion}</p>
@@ -212,6 +337,11 @@ function Seccion({
             <FilaContraparte
               key={c.clave}
               contraparte={c}
+              diasEsperando={
+                mostrarAntiguedad
+                  ? diasEntreISO(c.ultima_consulta_fecha.slice(0, 10), hoy)
+                  : null
+              }
               expandida={abierta === c.clave}
               onToggle={() => onAbrir(abierta === c.clave ? null : c.clave)}
               onDecidir={onDecidir}
@@ -227,6 +357,7 @@ function Seccion({
 
 function FilaContraparte({
   contraparte,
+  diasEsperando,
   expandida,
   onToggle,
   onDecidir,
@@ -234,6 +365,8 @@ function FilaContraparte({
   pending,
 }: {
   contraparte: ContraparteConHallazgo;
+  /** Días que lleva el hallazgo esperando decisión. Solo en la cola de trabajo. */
+  diasEsperando: number | null;
   expandida: boolean;
   onToggle: () => void;
   onDecidir: (
@@ -270,6 +403,18 @@ function FilaContraparte({
             {formatBogotaFechaCortaAno(contraparte.ultima_consulta_fecha)}
           </p>
         </div>
+        {diasEsperando !== null && (
+          <span
+            className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border ${
+              diasEsperando > 30
+                ? 'bg-[#FEF2F2] text-[#B91C1C] border-[#EF4444]/30'
+                : 'bg-[#F5F4F2] text-[#6B7280] border-[#E5E7EB]'
+            }`}
+            title="Días que lleva este hallazgo esperando decisión"
+          >
+            {diasEsperando} d
+          </span>
+        )}
         <span
           className={`shrink-0 text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full border ${ESTILO_MOTIVO[cobertura.motivo]}`}
         >
