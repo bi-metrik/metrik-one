@@ -1,4 +1,5 @@
 -- A1 SOENA — "Servicio contratado" y "Titularidad" suben a Propuesta, antes de emitirla.
+-- YA APLICADA EN PRODUCCION el 2026-08-31 (2 bloques mudados, 22 referencias reapuntadas).
 --
 -- EL DEFECTO QUE CIERRA
 -- `generarVersionPropuesta` ya consultaba `servicio_contratado` para decidir si la
