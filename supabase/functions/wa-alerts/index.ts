@@ -36,6 +36,30 @@ Deno.serve(async (req) => {
     return new Response('Method not allowed', { status: 405 });
   }
 
+  // ── Autenticacion: secreto compartido, no el JWT del gateway ───────────────
+  //
+  // Esto vivia con `verify_jwt = true` y los crons mandaban la service role key
+  // legacy. El gateway dejo de aceptarla y TODOS los disparos volvian con 401
+  // (`UNAUTHORIZED_LEGACY_JWT`) sin que nadie lo notara: el cron no reintenta y
+  // nada en la app queda peor, simplemente el equipo deja de recibir sus avisos.
+  // Medido el 2026-08-31: los 3 disparos de las ultimas 24 h fallaron.
+  //
+  // Mismo patron que `cardumen-cron` y `notificar-etapa`, que ya pasaron por
+  // esto: `verify_jwt = false` en config.toml y el secreto se verifica AQUI. El
+  // secreto vive en el vault de Postgres (`WA_ALERTS_SECRET`), no en el comando
+  // del cron: asi no queda legible en `cron.job` para quien pueda leer la tabla.
+  const expected = Deno.env.get('WA_ALERTS_SECRET');
+  if (!expected) {
+    return new Response(
+      JSON.stringify({ error: 'server_misconfigured', detail: 'WA_ALERTS_SECRET' }),
+      { status: 500 },
+    );
+  }
+  const auth = req.headers.get('authorization');
+  if (!auth?.startsWith('Bearer ') || auth.slice(7).trim() !== expected) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+  }
+
   try {
     const { action } = await req.json();
     const supabase = getServiceClient();
