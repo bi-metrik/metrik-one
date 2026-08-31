@@ -46,35 +46,43 @@ alter table backup_bloque_configs_a1_20260831 enable row level security;
 revoke all on table backup_bloque_configs_a1_20260831 from public, anon, authenticated;
 
 -- ── 2. Los dos bloques se mudan a Propuesta, ANTES del bloque de propuesta ──────
-with propuesta as (
-  select id from etapas_negocio
-  where linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8' and orden = 4
-),
-negociacion as (
-  select id from etapas_negocio
-  where linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8' and orden = 5
-)
-update bloque_configs bc
-set etapa_id = (select id from propuesta),
-    orden    = case bc.slug when 'titularidad' then 1 else 2 end
-from negociacion n
-where bc.etapa_id = n.id
-  and bc.slug in ('titularidad', 'servicio_contratado');
+-- ⚠️ EL ORDEN DE LAS OPERACIONES NO ES INTERCAMBIABLE. Existe
+-- `bloque_configs_etapa_ws_defn_orden_key` sobre (etapa, workspace, definition, orden),
+-- y `servicio_contratado` es tipo `datos` igual que `pagos_e4`, que ocupaba el orden 2
+-- de Propuesta. Mudar primero y reordenar despues revienta con duplicate key: primero
+-- se abre el espacio, y solo entonces entran los dos bloques.
+-- (Se descubrio aplicando: el primer intento aborto entero y la base quedo intacta.)
 
--- El bloque de propuesta baja a 3: se responde DESPUES de las dos preguntas que
--- deciden que promete y que cobra.
+-- 2a. Se abre espacio en Propuesta. El bloque de propuesta baja a 3: se responde
+-- DESPUES de las dos preguntas que deciden que promete y que cobra.
 update bloque_configs bc
-set orden = case bc.slug
-              when 'propuesta_economica' then 3
-              when 'pagos_e4'  then 4
-              when 'cobros_e4' then 5
-              else bc.orden
-            end
+set orden = 4
+from etapas_negocio e
+where e.id = bc.etapa_id and e.linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8'
+  and e.orden = 4 and bc.slug = 'pagos_e4';
+
+update bloque_configs bc
+set orden = 5
+from etapas_negocio e
+where e.id = bc.etapa_id and e.linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8'
+  and e.orden = 4 and bc.slug = 'cobros_e4';
+
+update bloque_configs bc
+set orden = 3
+from etapas_negocio e
+where e.id = bc.etapa_id and e.linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8'
+  and e.orden = 4 and bc.slug = 'propuesta_economica';
+
+-- 2b. Ahora si, los dos bloques entran a Propuesta.
+update bloque_configs bc
+set etapa_id = (select id from etapas_negocio
+                where linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8' and orden = 4),
+    orden    = case bc.slug when 'titularidad' then 1 else 2 end
 from etapas_negocio e
 where e.id = bc.etapa_id
   and e.linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8'
-  and e.orden = 4
-  and bc.slug in ('propuesta_economica', 'pagos_e4', 'cobros_e4');
+  and e.orden = 5
+  and bc.slug in ('titularidad', 'servicio_contratado');
 
 -- ── 3. La propuesta NO se emite sin saber que contrato el cliente ───────────────
 -- `requiere_bloques` es el mismo vocabulario que ya usan los formularios. Sin este
