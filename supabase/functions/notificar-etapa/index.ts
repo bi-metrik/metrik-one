@@ -19,7 +19,26 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
-type Payload = { negocio_id: string };
+/**
+ * `prueba` manda el MISMO correo que recibiria el cliente a otras direcciones, para
+ * poder verlo antes de que un cliente real lo reciba.
+ *
+ * Se renderiza el mismo HTML, con el mismo remitente, el mismo `reply_to` y los datos
+ * reales del negocio: si se armara un correo aparte "de ejemplo", lo que se aprueba no
+ * seria lo que sale. Lo unico que cambia: el destinatario, un aviso arriba diciendo a
+ * quien le habria llegado, y el asunto con `[PRUEBA]` delante.
+ *
+ * Una prueba NO manda WhatsApp, NO avisa al equipo, NO deja traza y NO copia al
+ * comercial: nada de lo que hace debe verse despues como si el cliente hubiera sido
+ * avisado.
+ *
+ * `etapa_id` permite ver el copy de una etapa por la que el negocio no esta pasando
+ * ahora (para revisar los dos avisos con un solo negocio).
+ */
+type Payload = {
+  negocio_id: string;
+  prueba?: { to: string[]; etapa_id?: string };
+};
 
 // Las edge functions no tienen el `Database` generado, y sin el supabase-js
 // resuelve TODA fila como `never`: probado con `deno check`, son 13 errores de
@@ -51,6 +70,50 @@ type AvisoCliente = {
   mensaje?: string;
   link_bloque_slug?: string;
   plantilla?: string;
+};
+
+/**
+ * Lo que paso con el correo al cliente, en la forma que la traza necesita.
+ *
+ * `enviadoA` es a quien LE LLEGO de verdad y por eso queda vacio en una prueba;
+ * `destinatarioReal` es a quien le habria llegado, que es lo que hay que poder mostrar
+ * al revisar el envio. Separarlos evita el unico error grave posible aqui: registrar
+ * un ensayo como si el cliente hubiera sido avisado.
+ */
+type ResultadoCorreo = {
+  estado: 'enviado' | 'omitido' | 'fallido';
+  enviadoA: string | null;
+  destinatarioReal: string | null;
+  omitidoPor: string | null;
+  respondeA: string | null;
+  copiaA: string | null;
+  titulo: string | null;
+  proveedorId: string | null;
+};
+
+const CORREO_VACIO: ResultadoCorreo = {
+  estado: 'omitido',
+  enviadoA: null,
+  destinatarioReal: null,
+  omitidoPor: null,
+  respondeA: null,
+  copiaA: null,
+  titulo: null,
+  proveedorId: null,
+};
+
+/**
+ * Lo que paso con el WhatsApp.
+ *
+ * ⚠️ Su estado bueno es `disparado`, no `enviado`, y no es un matiz de redaccion: un
+ * 200 de FunnelChat dice que el disparo se recibio, no que el mensaje le llego a nadie
+ * — y fuera de la ventana de 24 h Meta bota el texto libre con el 131047. El canal
+ * tiene su propio estado para que nadie pueda contar disparos como avisos entregados.
+ */
+type ResultadoWhatsApp = {
+  estado: 'disparado' | 'omitido' | 'fallido';
+  disparadoA: string | null;
+  omitidoPor: string | null;
 };
 
 /** Las columnas del negocio que leen los avisos al cliente. */
@@ -85,6 +148,15 @@ Deno.serve(async (req: Request) => {
   }
   if (!body?.negocio_id) return json({ error: 'negocio_id requerido' }, 400);
 
+  // El modo prueba manda correo de verdad, asi que su destinatario se valida aqui y no
+  // dentro del envio: un `to` mal formado tiene que ser un 400, no un correo a nadie.
+  const prueba = body.prueba;
+  if (prueba) {
+    const destinos = Array.isArray(prueba.to) ? prueba.to.filter((d) => typeof d === 'string' && d.includes('@')) : [];
+    if (destinos.length === 0) return json({ error: 'prueba.to requerido' }, 400);
+    prueba.to = destinos;
+  }
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
@@ -99,11 +171,18 @@ Deno.serve(async (req: Request) => {
 
   if (!negocio) return json({ error: 'negocio_no_encontrado' }, 404);
 
+  // En una prueba se puede pedir el copy de OTRA etapa: asi los dos avisos de la linea
+  // se revisan con un solo negocio, sin tener que buscar uno parado en cada etapa.
   const { data: etapa } = await supabase
     .from('etapas_negocio')
-    .select('nombre, config_extra')
-    .eq('id', negocio.etapa_actual_id)
+    .select('id, nombre, config_extra')
+    .eq('id', prueba?.etapa_id ?? negocio.etapa_actual_id)
     .maybeSingle();
+
+  // Solo se exige en una prueba, que es donde la etapa la pidio una persona y un id
+  // equivocado tiene que decirlo. En el camino normal la ausencia se sigue tratando
+  // como "esta etapa no declara aviso", que es como se comporto siempre.
+  if (prueba && !etapa) return json({ error: 'etapa_no_encontrada' }, 404);
 
   const cfgEtapa = etapa?.config_extra as Record<string, unknown> | null;
 
@@ -122,6 +201,27 @@ Deno.serve(async (req: Request) => {
   const quiereInterno = aviso?.email === true;
   const quiereCliente = avisoCliente?.email === true;
   const quiereClienteWa = avisoCliente?.whatsapp === true;
+  // ── Una prueba se corta aquí ───────────────────────────────────────────────
+  // Manda el correo del cliente a quien lo pidió y no toca nada más: ni WhatsApp, ni
+  // el aviso al equipo, ni la traza. Un ensayo no puede quedar registrado como un
+  // cliente avisado.
+  if (prueba) {
+    if (!quiereCliente) {
+      return json({ ok: true, prueba: true, skipped: 'etapa_sin_aviso_por_correo', etapa: etapa?.nombre ?? null });
+    }
+    const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente!, prueba.to);
+    return json({
+      ok: true,
+      prueba: true,
+      etapa: etapa?.nombre ?? null,
+      enviado_a: r.estado === 'enviado' ? prueba.to : null,
+      destinatario_real: r.destinatarioReal,
+      titulo: r.titulo,
+      omitido: r.omitidoPor,
+      responde_a: r.respondeA,
+    });
+  }
+
   if (!quiereInterno && !quiereCliente && !quiereClienteWa) {
     return json({ ok: true, skipped: 'sin_aviso_email' });
   }
@@ -133,11 +233,23 @@ Deno.serve(async (req: Request) => {
   let clienteOmitido: string | null = null;
   // A dónde contesta el cliente. Se reporta para poder verificarlo sin abrir el correo.
   let clienteRespondeA: string | null = null;
+  // A quién se le copió el correo (el comercial del negocio).
+  let clienteCopiaA: string | null = null;
   if (quiereCliente) {
     const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente!);
     clienteEnviado = r.enviadoA;
     clienteOmitido = r.omitidoPor;
-    clienteRespondeA = r.respondeA ?? null;
+    clienteRespondeA = r.respondeA;
+    clienteCopiaA = r.copiaA;
+    await registrarAviso(supabase, negocio, etapa, {
+      canal: 'email',
+      estado: r.estado,
+      destino: r.enviadoA ?? r.destinatarioReal,
+      copia_a: r.copiaA,
+      motivo: r.omitidoPor,
+      titulo: r.titulo,
+      proveedor_id: r.proveedorId,
+    });
   }
 
   // ── El aviso al cliente por WHATSAPP ───────────────────────────────────────
@@ -149,6 +261,15 @@ Deno.serve(async (req: Request) => {
     const r = await enviarWhatsAppAlCliente(supabase, negocio, etapa?.nombre ?? '', avisoCliente!);
     waDisparado = r.disparadoA;
     waOmitido = r.omitidoPor;
+    await registrarAviso(supabase, negocio, etapa, {
+      canal: 'whatsapp',
+      estado: r.estado,
+      destino: r.disparadoA,
+      copia_a: null,
+      motivo: r.omitidoPor,
+      titulo: null,
+      proveedor_id: null,
+    });
   }
 
   if (!quiereInterno) {
@@ -157,6 +278,7 @@ Deno.serve(async (req: Request) => {
       cliente: clienteEnviado,
       cliente_omitido: clienteOmitido,
       responde_a: clienteRespondeA,
+      copia_a: clienteCopiaA,
       whatsapp_disparado: waDisparado,
       whatsapp_omitido: waOmitido,
     });
@@ -253,10 +375,52 @@ Deno.serve(async (req: Request) => {
     cliente: clienteEnviado,
     cliente_omitido: clienteOmitido,
     responde_a: clienteRespondeA,
+    copia_a: clienteCopiaA,
     whatsapp_disparado: waDisparado,
     whatsapp_omitido: waOmitido,
   });
 });
+
+
+// ── La traza ─────────────────────────────────────────────────────────────────
+
+/**
+ * Asienta lo que paso con UN aviso al cliente, en UN canal.
+ *
+ * Existe porque hasta hoy esto vivia solo en los logs de esta funcion, que duran dias:
+ * nadie podia responder "¿a este cliente le avisamos?" sin adivinar. Se escribe tanto
+ * el envio como la omision con su motivo, porque la pregunta operativa que sigue es
+ * "¿y por que a este no?" — y un motivo como `sin_correo` o `sin_fecha_cita` es
+ * exactamente el trabajo que el equipo tiene que ir a hacer.
+ *
+ * ⚠️ Nunca propaga su error. Si la traza fallara, el cliente YA recibio el aviso: hacer
+ * fallar la respuesta haria que pg_net registre un error sobre un envio exitoso, y el
+ * equipo saldria a buscar un correo que si salio. El fallo queda en el log, que es
+ * donde se puede ver sin mentirle a nadie.
+ */
+async function registrarAviso(
+  supabase: Supabase,
+  negocio: Negocio,
+  etapa: { id?: string; nombre?: string } | null,
+  fila: {
+    canal: 'email' | 'whatsapp';
+    estado: 'enviado' | 'disparado' | 'omitido' | 'fallido';
+    destino: string | null;
+    copia_a: string | null;
+    motivo: string | null;
+    titulo: string | null;
+    proveedor_id: string | null;
+  },
+): Promise<void> {
+  const { error } = await supabase.from('avisos_cliente').insert({
+    workspace_id: negocio.workspace_id,
+    negocio_id: negocio.id,
+    etapa_id: etapa?.id ?? null,
+    etapa_nombre: etapa?.nombre ?? null,
+    ...fila,
+  });
+  if (error) console.error('[notificar-etapa] no se pudo dejar traza:', negocio.codigo, fila.canal, error.message);
+}
 
 
 // ── Datos que el copy puede citar ────────────────────────────────────────────
@@ -396,6 +560,10 @@ function aplicarDatosDelCopy(texto: string, datos: DatosCopy): { texto: string; 
  *
  * El destinatario lo resuelve `email_cliente_negocio` en la base, que es la unica
  * definicion de "cual es el correo de este cliente" (contacto -> RUT).
+ *
+ * @param pruebaTo si viene, el correo se manda a estas direcciones EN VEZ del cliente,
+ *   con `[PRUEBA]` en el asunto y un aviso arriba diciendo a quien habria ido. No copia
+ *   al comercial: una prueba no puede aparecerle como un caso avisado.
  */
 async function enviarAlCliente(
   supabase: Supabase,
@@ -403,13 +571,18 @@ async function enviarAlCliente(
   negocio: Negocio,
   etapaNombre: string,
   cfg: AvisoCliente,
-): Promise<{ enviadoA: string | null; omitidoPor: string | null; respondeA?: string | null }> {
+  pruebaTo?: string[],
+): Promise<ResultadoCorreo> {
+  const esPrueba = Array.isArray(pruebaTo) && pruebaTo.length > 0;
   const { data: email } = await supabase.rpc('email_cliente_negocio', { p_negocio_id: negocio.id });
-  if (!email || typeof email !== 'string') {
+  const destinatarioReal = typeof email === 'string' && email ? email : null;
+  // En una prueba la falta de correo del cliente NO corta el envio: justamente sirve
+  // para ver como sale el correo, y el aviso de arriba lo dice.
+  if (!destinatarioReal && !esPrueba) {
     // Sin correo no se inventa un destinatario. Queda en el log para que el equipo
     // pueda pedirle el dato al cliente.
     console.warn('[notificar-etapa] sin correo de cliente:', negocio.codigo);
-    return { enviadoA: null, omitidoPor: 'sin_correo' };
+    return { ...CORREO_VACIO, estado: 'omitido', omitidoPor: 'sin_correo' };
   }
 
   const { data: ws } = await supabase
@@ -426,9 +599,20 @@ async function enviarAlCliente(
   // el correo NO invita a responder: prometer una respuesta que cae en un buzón sin
   // dueño es peor que no ofrecerla. (Medido en SOENA: 244 de 254 negocios abiertos
   // tienen comercial con cuenta.)
-  const replyTo = (await comercialDelNegocio(supabase, negocio.id))?.email
+  const comercial = await comercialDelNegocio(supabase, negocio.id);
+  const replyTo = comercial?.email
     ?? (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta
     ?? null;
+
+  // ── La copia al comercial ──────────────────────────────────────────────────
+  // El comercial recibe el MISMO correo que el cliente, para tener la trazabilidad de
+  // lo que se le dijo y cuando, sin depender de que el cliente le reenvie nada.
+  //
+  // Va en **bcc** y no en cc: el cliente ya ve esa direccion en el `reply_to`, asi que
+  // repetirla como destinatario no le agrega nada y hace ver el correo como una cadena
+  // interna. En una prueba no se copia a nadie — quien la pidio es el unico que la
+  // tiene que ver.
+  const copiaA = esPrueba ? null : (comercial?.email ?? null);
 
   const titulo = (cfg.titulo ?? 'Tu tramite avanzo')
     .replaceAll('{etapa}', etapaNombre)
@@ -443,13 +627,23 @@ async function enviarAlCliente(
   const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null));
   if (resuelto.falta) {
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
-    return { enviadoA: null, omitidoPor: `sin_${resuelto.falta}` };
+    return { ...CORREO_VACIO, estado: 'omitido', omitidoPor: `sin_${resuelto.falta}`, destinatarioReal, respondeA: replyTo };
   }
   const cuerpo = resuelto.texto;
+
+  // El aviso de prueba va DENTRO de la tarjeta y arriba de todo: si fuera al pie, en un
+  // correo largo se leeria despues del mensaje que se esta revisando.
+  const avisoPrueba = esPrueba
+    ? `<p style="margin:0 0 18px;padding:10px 12px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;font-size:12px;line-height:1.5;color:#92400E">
+      <strong>Correo de prueba.</strong> Asi lo recibe el cliente del caso ${escapar(negocio.codigo ?? negocio.nombre ?? '')}.
+      En un envio real habria llegado a ${escapar(destinatarioReal ?? 'nadie: ese negocio no tiene correo registrado')}.
+    </p>`
+    : '';
 
   const html = `<!DOCTYPE html>
 <html lang="es"><body style="margin:0;padding:24px;background:#F5F4F2;font-family:Helvetica,Arial,sans-serif;color:#1A1A1A">
   <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:28px">
+    ${avisoPrueba}
     <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(marca)}</p>
     <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
     <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151">${escapar(cuerpo)}</p>
@@ -467,18 +661,30 @@ async function enviarAlCliente(
     headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: `${marca} (via MeTRIK) <noreply@metrikone.co>`,
-      to: [email],
+      to: esPrueba ? pruebaTo : [destinatarioReal],
+      ...(copiaA ? { bcc: [copiaA] } : {}),
       ...(replyTo ? { reply_to: replyTo } : {}),
-      subject: titulo,
+      subject: esPrueba ? `[PRUEBA] ${titulo}` : titulo,
       html,
     }),
   });
 
   if (!res.ok) {
     console.error('[notificar-etapa] Resend fallo con el cliente:', res.status, await res.text());
-    return { enviadoA: null, omitidoPor: `resend_${res.status}` };
+    return { ...CORREO_VACIO, estado: 'fallido', omitidoPor: `resend_${res.status}`, destinatarioReal, respondeA: replyTo, titulo, copiaA };
   }
-  return { enviadoA: email, omitidoPor: null, respondeA: replyTo };
+  // El id de Resend es la llave para ir a buscar despues un rebote o una queja.
+  const enviado = await res.json().catch(() => null) as { id?: string } | null;
+  return {
+    estado: 'enviado',
+    enviadoA: esPrueba ? null : destinatarioReal,
+    destinatarioReal,
+    omitidoPor: null,
+    respondeA: replyTo,
+    copiaA,
+    titulo,
+    proveedorId: enviado?.id ?? null,
+  };
 }
 
 /**
@@ -512,7 +718,7 @@ async function enviarWhatsAppAlCliente(
   negocio: Negocio,
   etapaNombre: string,
   cfg: AvisoCliente,
-): Promise<{ disparadoA: string | null; omitidoPor: string | null }> {
+): Promise<ResultadoWhatsApp> {
   const { data: ws } = await supabase
     .from('workspaces')
     .select('config_extra')
@@ -524,7 +730,7 @@ async function enviarWhatsAppAlCliente(
   if (!url) {
     // El workspace no declaró disparador. No es un error: es un workspace que no usa
     // WhatsApp, y en ese caso la etapa no debería tener el interruptor encendido.
-    return { disparadoA: null, omitidoPor: 'sin_trigger_url' };
+    return { estado: 'omitido', disparadoA: null, omitidoPor: 'sin_trigger_url' };
   }
 
   // La URL viene de la base, así que un admin podría escribir cualquier cosa ahí y esta
@@ -534,10 +740,10 @@ async function enviarWhatsAppAlCliente(
     const u = new URL(url);
     host = u.hostname;
     if (u.protocol !== 'https:' || !host.endsWith('.funnelchat.app')) {
-      return { disparadoA: null, omitidoPor: 'trigger_url_no_permitida' };
+      return { estado: 'omitido', disparadoA: null, omitidoPor: 'trigger_url_no_permitida' };
     }
   } catch {
-    return { disparadoA: null, omitidoPor: 'trigger_url_invalida' };
+    return { estado: 'omitido', disparadoA: null, omitidoPor: 'trigger_url_invalida' };
   }
 
   const { data: telefono } = await supabase.rpc('telefono_cliente_negocio', {
@@ -547,7 +753,7 @@ async function enviarWhatsAppAlCliente(
     // Sin número no se inventa un destinatario. Queda en el log para que el equipo
     // pueda pedirle el dato al cliente. Medido en SOENA: pasa en 12 de 254 abiertos.
     console.warn('[notificar-etapa] sin telefono de cliente:', negocio.codigo);
-    return { disparadoA: null, omitidoPor: 'sin_telefono' };
+    return { estado: 'omitido', disparadoA: null, omitidoPor: 'sin_telefono' };
   }
 
   const comercial = await comercialDelNegocio(supabase, negocio.id);
@@ -564,7 +770,7 @@ async function enviarWhatsAppAlCliente(
     // El dato que el copy prometia no existe. Se omite y se dice cual: mandarlo a
     // medias deja al cliente peor que no mandarlo, y en el log parece un exito.
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
-    return { disparadoA: null, omitidoPor: `sin_${resuelto.falta}` };
+    return { estado: 'omitido', disparadoA: null, omitidoPor: `sin_${resuelto.falta}` };
   }
   const cuerpo = resuelto.texto;
 
@@ -607,12 +813,12 @@ async function enviarWhatsAppAlCliente(
 
     if (!res.ok) {
       console.error('[notificar-etapa] FunnelChat fallo:', res.status, await res.text());
-      return { disparadoA: null, omitidoPor: `funnelchat_${res.status}` };
+      return { estado: 'fallido', disparadoA: null, omitidoPor: `funnelchat_${res.status}` };
     }
-    return { disparadoA: telefono, omitidoPor: null };
+    return { estado: 'disparado', disparadoA: telefono, omitidoPor: null };
   } catch (e) {
     console.error('[notificar-etapa] FunnelChat inalcanzable:', e);
-    return { disparadoA: null, omitidoPor: 'funnelchat_sin_respuesta' };
+    return { estado: 'fallido', disparadoA: null, omitidoPor: 'funnelchat_sin_respuesta' };
   }
 }
 
