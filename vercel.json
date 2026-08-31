@@ -39,6 +39,10 @@
     {
       "path": "/api/crons/actas-diarias",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/crons/compliance-monitoreo",
+      "schedule": "0 9 * * *"
     }
   ]
 }

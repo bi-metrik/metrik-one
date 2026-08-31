@@ -174,3 +174,36 @@ describe('calcularIndicadores', () => {
     expect(calcularIndicadores([], 3, HOY).sin_cobertura_vigente).toBe(3);
   });
 });
+
+// ─── R3: el delta rompe la premisa de la liberación ────────────────────────
+
+describe('etiquetaDeContraparte — premisa cambiada (R3)', () => {
+  it('sin delta, una liberación vigente sigue siendo excepción vigente', () => {
+    expect(etiquetaDeContraparte(true, 'vigente', false)).toBe('excepciones_vigentes');
+  });
+
+  it('con delta posterior, vuelve a la cola del oficial', () => {
+    // "Una decisión tomada sobre 10 reportes no cubre 20" (Yessica, 2026-08-18).
+    expect(etiquetaDeContraparte(true, 'vigente', true)).toBe('hallazgos_sin_decidir');
+  });
+
+  it('el parámetro es opcional: los llamadores sin barridos no cambian', () => {
+    expect(etiquetaDeContraparte(true, 'vigente')).toBe('excepciones_vigentes');
+  });
+
+  it('la premisa no toca las otras cuatro combinaciones', () => {
+    // Un delta sobre una rechazada NO puede moverla de bandeja: subirla a la
+    // cola del oficial la volvería a poner bajo mirada activa, que es lo que el
+    // §3 del concepto de Emilio prohíbe.
+    expect(etiquetaDeContraparte(true, 'rechazada', true)).toBe('rechazadas');
+    expect(etiquetaDeContraparte(true, 'vencida', true)).toBe('sin_cobertura_vigente');
+    expect(etiquetaDeContraparte(true, 'sin_registro', true)).toBe('hallazgos_sin_decidir');
+    expect(etiquetaDeContraparte(false, 'vigente', true)).toBe('vigilancia_continua');
+  });
+
+  it('una contraparte que vuelve a liberarse deja de estar en la cola', () => {
+    // No hay marca que apagar: la premisa se deriva comparando fechas, así que
+    // una liberación nueva (posterior al delta) devuelve la fila a reposo sola.
+    expect(etiquetaDeContraparte(true, 'vigente', false)).toBe('excepciones_vigentes');
+  });
+});

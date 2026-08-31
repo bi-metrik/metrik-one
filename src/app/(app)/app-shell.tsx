@@ -6,6 +6,7 @@ import Link from 'next/link'
 import {
   FileSpreadsheet,
   Timer,
+  Radar,
   BarChart3,
   QrCode,
   LayoutDashboard,
@@ -178,6 +179,7 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   // MeTRIK. El cuadro 12/6/3 es criterio del oficial y no tiene fuente normativa
   // verificada (dictamen Lucia 2026-08-24), por eso es configurable y no constante.
   { href: '/compliance/periodicidad', label: 'Periodicidad', icon: Timer, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  { href: '/compliance/monitoreo', label: 'Monitoreo', icon: Radar, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Auditoria de contrataciones (R5): control CORRECTIVO. Cruza la base de
   // compras del periodo contra lo que el oficial sabia y habia decidido ESE DIA.
   // Misma restriccion de confidencialidad que Liberaciones: el informe nombra a

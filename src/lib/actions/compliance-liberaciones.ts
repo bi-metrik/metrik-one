@@ -264,6 +264,12 @@ export type ContraparteConHallazgo = {
   ultima_consulta_fecha: string;
   total_matches: number;
   cobertura: Cobertura;
+  /**
+   * R3: el barrido encontró un cambio despues de la liberacion vigente. La fila
+   * sigue teniendo su liberacion, pero el hecho sobre el que se firmo cambio, y
+   * por eso la etiqueta la devuelve a la cola del oficial.
+   */
+  premisa_cambiada: boolean;
 };
 
 /** Consulta con hallazgo que NO se puede liberar porque se hizo solo por nombre. */
@@ -369,6 +375,25 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
 
   if (errLiberaciones) return { ok: false, error: errLiberaciones.message };
 
+  // R3: deltas encontrados por el barrido. Solo interesa el mas reciente por
+  // contraparte: si ese es posterior a la liberacion vigente, la premisa de la
+  // decision cambio. Se lee la tabla de barridos y no una columna de estado
+  // —los estados se derivan, regla que fijo R4— y por eso una liberacion nueva
+  // vuelve a cubrir sin que nadie tenga que ir a apagar una marca.
+  const { data: deltasRaw } = await svc
+    .from('compliance_barrido_items')
+    .select('documento_tipo, documento_numero, created_at')
+    .eq('workspace_id', guard.workspaceId)
+    .eq('delta', true)
+    .order('created_at', { ascending: false })
+    .limit(LIMITE_BITACORA);
+
+  const ultimoDelta = new Map<string, string>();
+  for (const d of (deltasRaw ?? []) as { documento_tipo: string | null; documento_numero: string | null; created_at: string }[]) {
+    const k = claveContraparte(d.documento_tipo, d.documento_numero);
+    if (k && !ultimoDelta.has(k)) ultimoDelta.set(k, d.created_at);
+  }
+
   const hoy = todayBogotaISO();
   const coberturas = indexarCoberturas(
     (liberacionesRaw ?? []) as ComplianceLiberacion[],
@@ -441,6 +466,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
         motivo: 'sin_registro',
         liberacion: null,
       },
+      premisa_cambiada: false,
     });
   }
 
@@ -458,7 +484,14 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
     // coincidencias: lo que define la población es la ÚLTIMA consulta.
     const tieneHallazgo = ultimaConcluyente.get(contraparte.clave) === 'alto';
     const motivo: MotivoCobertura = contraparte.cobertura.motivo;
-    buckets[etiquetaDeContraparte(tieneHallazgo, motivo)].push(contraparte);
+    // Solo cuenta el delta POSTERIOR a la decision vigente. Uno anterior ya
+    // estaba a la vista del oficial cuando firmo: tratarlo como novedad
+    // devolveria a la cola casos que el ya resolvio sabiendo lo que sabia.
+    const firmada = contraparte.cobertura.liberacion?.created_at ?? null;
+    const delta = ultimoDelta.get(contraparte.clave) ?? null;
+    contraparte.premisa_cambiada = !!firmada && !!delta && delta > firmada;
+    buckets[etiquetaDeContraparte(tieneHallazgo, motivo, contraparte.premisa_cambiada)]
+      .push(contraparte);
   }
 
   // La cola se ordena por ANTIGÜEDAD (la más vieja arriba), no por severidad:
