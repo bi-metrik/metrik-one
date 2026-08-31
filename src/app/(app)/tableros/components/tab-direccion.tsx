@@ -109,7 +109,7 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
               </tr>
             ))}
             <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
-              <td className="px-4 py-2.5">Cartera abierta</td>
+              <td className="px-4 py-2.5">Total en el proceso</td>
               {COLUMNAS_DIRECTIVO.map(col => (
                 <td key={col} className="px-3 py-2.5 text-right tabular-nums">
                   {datos.operaciones.reduce((s, f) => s + f.columnas[col], 0)}
@@ -123,8 +123,9 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
       <p className="mt-2 mb-8 text-xs text-gray-500">
         Es una foto de dónde está parado cada caso hoy, no un acumulado del mes — igual que el
         Sheet. La última fila recoge las etapas que el Sheet no nombra (las cinco comerciales,
-        Precobro, Cobro y Entrega) para que la matriz sume la cartera completa en vez de perder
-        casos en silencio.
+        Precobro, Cobro y Entrega) para que la matriz sume todo en vez de perder casos en
+        silencio. El total son los casos abiertos más los que ya terminaron el proceso; los
+        perdidos y los cancelados no entran, por eso no coincide con los abiertos de Negocios.
       </p>
 
       {/* ── Citas ─────────────────────────────────────────────────────────── */}
@@ -160,8 +161,8 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
         <p className="mb-1 font-semibold">Tres bloques del Sheet no están aquí, y no es un olvido:</p>
         <ul className="list-disc space-y-1 pl-4">
-          <li><strong>Certificados UPME erróneos</strong> y <strong>devoluciones de la DIAN</strong>: Deisy
-            <strong>ya los registra en ONE</strong> —el primero es del 13 de agosto—, pero esta pantalla
+          <li><strong>Certificados UPME erróneos</strong> y <strong>devoluciones de la DIAN</strong>:{' '}
+            Deisy <strong>ya los registra en ONE</strong> —el primero es del 13 de agosto—, pero esta pantalla
             todavía no los trae. Falta traerlos, no capturarlos.</li>
           <li><strong>Inversión de marketing y CAC por campaña</strong>: se teclean desde Meta Ads; no hay
             integración que los traiga.</li>
