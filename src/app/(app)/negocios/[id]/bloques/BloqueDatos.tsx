@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
+import { resolverPlantillaCampo } from '@/lib/negocios/plantilla-campo'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion } from '../../negocio-v2-actions'
@@ -147,16 +148,9 @@ function CopyValueButton({ value }: { value: string | number | null | undefined 
 
 // Resuelve {{slug}} en la plantilla con el valor del campo correspondiente del bloque.
 // Si falta un valor, deja un marcador legible [slug] para que el operador lo complete.
-function resolverPlantilla(template: string, values: Record<string, unknown>): string {
-  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, slug: string) => {
-    const v = values[slug]
-    return v !== null && v !== undefined && v !== '' ? String(v) : `[${slug}]`
-  })
-}
-
 function PlantillaCorreo({ field, values }: { field: DatosField; values: Record<string, unknown> }) {
   const [copied, setCopied] = useState(false)
-  const texto = resolverPlantilla(field.template ?? '', values)
+  const texto = resolverPlantillaCampo(field.template ?? '', values)
   const copiar = async () => {
     try {
       await navigator.clipboard.writeText(texto)
