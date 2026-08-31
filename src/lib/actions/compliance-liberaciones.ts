@@ -36,6 +36,7 @@ import {
   type EtiquetaBandeja,
   type IndicadoresBandeja,
 } from '@/lib/compliance/bandeja';
+import { estadoDeVigencia } from '@/lib/compliance/periodicidad';
 import type { InformaMatch } from './compliance-dual';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -282,10 +283,19 @@ export type TableroLiberaciones = {
   /**
    * Vigilancia continua es un CONTADOR, no una lista: nadie necesita ver los
    * nombres de las contrapartes que están bien (regla 1 de interfaz del
-   * dictamen). "Por vencer" no se puede calcular todavía — depende de
-   * `vigente_hasta` por consulta, que lo produce R2.
+   * dictamen).
    */
   vigilancia_continua: number;
+  /** De esas, cuántas están dentro de los 30 días de aviso (R2). */
+  vigilancia_por_vencer: number;
+  /** De esas, cuántas ya pasaron su fecha de revalidación (R2). */
+  vigilancia_vencida: number;
+  /**
+   * De esas, cuántas no tienen fecha de revalidación: son las consultas
+   * anteriores a R2. NO se cuentan como vencidas — aplanarlas inflaría la alarma
+   * con historia y taparía las que sí vencieron.
+   */
+  vigilancia_sin_vigencia: number;
   /**
    * Hallazgos que quedan fuera del mecanismo. NO se ocultan: una fila que
    * desaparece en silencio es indistinguible de una que no existe, y aquí lo
@@ -313,6 +323,7 @@ type ConsultaBandeja = {
   total_matches: number;
   matches: InformaMatch[];
   created_at: string;
+  vigente_hasta: string | null;
 };
 
 /**
@@ -342,7 +353,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
   // puede distinguir "salió limpia" de "no se supo".
   const { data: consultasRaw, error: errConsultas } = await svc
     .from('consultas_listas_dual')
-    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at')
+    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at, vigente_hasta')
     .eq('workspace_id', guard.workspaceId)
     .order('created_at', { ascending: false })
     .limit(LIMITE_CONSULTAS);
@@ -368,6 +379,8 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
   const porClave = new Map<string, ContraparteConHallazgo>();
   /** Severidad de la consulta más reciente CONCLUYENTE de cada contraparte. */
   const ultimaConcluyente = new Map<string, string>();
+  /** `vigente_hasta` de esa misma consulta. */
+  const vigenciaUltima = new Map<string, string | null>();
   const sinDocumento: HallazgoSinDocumento[] = [];
 
   for (const c of consultas) {
@@ -393,6 +406,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
     // por contraparte es la que decide su población.
     if (!ultimaConcluyente.has(clave) && (c.severidad === 'alto' || c.severidad === 'sin_hallazgo')) {
       ultimaConcluyente.set(clave, c.severidad);
+      vigenciaUltima.set(clave, c.vigente_hasta ?? null);
     }
 
     if (c.severidad !== 'alto') continue;
@@ -457,8 +471,21 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
   // Vigilancia continua se cuenta sobre TODAS las contrapartes concluyentes sin
   // hallazgo, no solo las que alguna vez lo tuvieron.
   let limpias = 0;
-  for (const [, severidad] of ultimaConcluyente) {
-    if (severidad !== 'alto') limpias++;
+  let porVencer = 0;
+  let vencidas = 0;
+  let sinVigencia = 0;
+  for (const [clave, severidad] of ultimaConcluyente) {
+    if (severidad === 'alto') continue;
+    limpias++;
+    // La vigencia solo se lee sobre las limpias: una contraparte con hallazgo ya
+    // está en una bandeja que pide acción, y decir además que "está por vencer"
+    // agregaría ruido sobre algo que ya se está mirando.
+    switch (estadoDeVigencia(vigenciaUltima.get(clave) ?? null, hoy)) {
+      case 'por_vencer': porVencer++; break;
+      case 'vencida': vencidas++; break;
+      case 'sin_vigencia': sinVigencia++; break;
+      default: break;
+    }
   }
 
   // Contrapartes con documento cuya única evidencia es un error: no se sabe.
@@ -477,6 +504,9 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
       excepciones_vigentes: buckets.excepciones_vigentes,
       rechazadas: buckets.rechazadas,
       vigilancia_continua: limpias,
+      vigilancia_por_vencer: porVencer,
+      vigilancia_vencida: vencidas,
+      vigilancia_sin_vigencia: sinVigencia,
       sin_documento: sinDocumento,
       sin_resultado: sinResultado,
       indicadores: calcularIndicadores(

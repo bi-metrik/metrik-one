@@ -1,5 +1,12 @@
 'use client';
 
+import {
+  ESTADO_VIGENCIA_LABEL,
+  estadoDeVigencia,
+  type EstadoVigencia,
+} from '@/lib/compliance/periodicidad';
+import { todayBogotaISO } from '@/lib/dates/bogota';
+
 import { Fragment, useCallback, useEffect, useState, useTransition } from 'react';
 import {
   AlertTriangle,
@@ -125,6 +132,18 @@ function SelectorSegmento({
     </div>
   );
 }
+
+/**
+ * Estado de vigencia de la consulta (R2). `sin_vigencia` es gris a propósito: no
+ * es una alarma, son las consultas anteriores a la configuración de periodicidad
+ * y pintarlas de rojo llenaría el historial de alarmas por historia.
+ */
+const ESTADO_VIGENCIA_CLASS: Record<EstadoVigencia, string> = {
+  vigente: 'bg-[#ECFDF5] text-[#059669]',
+  por_vencer: 'bg-[#FFFBEB] text-[#B45309]',
+  vencida: 'bg-[#FEF2F2] text-[#B91C1C]',
+  sin_vigencia: 'bg-[#F5F4F2] text-[#6B7280]',
+};
 
 const SEVERIDAD_CLASS: Record<DualSeveridad, string> = {
   alto: 'bg-[#EF4444] text-white',
@@ -1370,6 +1389,9 @@ function HistorialTablaDual({
                 Severidad
               </th>
               <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                Vigencia
+              </th>
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
                 Soporte
               </th>
             </tr>
@@ -1379,6 +1401,7 @@ function HistorialTablaDual({
               const isOpen = expanded.has(c.id);
               const canExpand = c.total_matches > 0 || c.error_mensaje;
               const seg = etiquetaSegmento(c.segmento_id, c.segmento_nombre);
+              const vigencia = estadoDeVigencia(c.vigente_hasta, todayBogotaISO());
               return (
                 <Fragment key={c.id}>
                   <tr
@@ -1434,6 +1457,18 @@ function HistorialTablaDual({
                         {SEVERIDAD_LABEL[c.severidad]}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      <span
+                        className={`${ESTADO_VIGENCIA_CLASS[vigencia]} text-[10px] font-bold px-2 py-0.5 rounded uppercase`}
+                        title={
+                          c.vigente_hasta
+                            ? `Revalidar antes del ${c.vigente_hasta}`
+                            : 'Consulta anterior a la configuración de periodicidad'
+                        }
+                      >
+                        {ESTADO_VIGENCIA_LABEL[vigencia]}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 text-center">
                       {c.severidad !== 'error' && (
                         <a
@@ -1454,7 +1489,7 @@ function HistorialTablaDual({
                     <tr className="border-b border-[#E5E7EB] bg-[#F5F4F2]/40">
                       <td />
                       <td />
-                      <td colSpan={9} className="px-4 py-4">
+                      <td colSpan={10} className="px-4 py-4">
                         {c.error_mensaje && (
                           <div className="mb-3 text-xs text-[#B91C1C]">
                             Error: {c.error_mensaje}
