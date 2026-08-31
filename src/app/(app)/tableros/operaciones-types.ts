@@ -27,7 +27,14 @@ export interface IndicadorCorrecciones {
   /** null = no se pudo calcular: sin radicaciones, o sin evidencia que lo respalde. */
   pct: number | null
   radicaciones: number
+  /** Devoluciones DIAN por **error propio**. Son las unicas que bajan el indicador. */
   correcciones: number
+  /**
+   * Devoluciones atribuidas a la persona que NO castigan porque su causa es
+   * `criterio_tercero`. Se exponen para que un 100% con devoluciones a la vista se
+   * pueda explicar; sin este dato solo se podria leer como "no hubo devoluciones".
+   */
+  terceros?: number
   /**
    * false = nadie registro la evidencia que este indicador necesita, asi que
    * "cero correcciones" no significa trabajo impecable. Es la misma distincion
@@ -129,6 +136,8 @@ export interface OperacionesBonoData {
   /** false = sin la evidencia que pide `correcciones_cobertura`; el indicador no se calcula. */
   correcciones_medida: boolean
   devoluciones_mes: number
+  /** De esas, cuantas son por error propio. Las demas no bajan el indicador de nadie. */
+  devoluciones_error_propio?: number
   /**
    * Asignaciones del workspace con `rol` sin declarar (deuda #57). No es del mes: es el
    * pasivo completo. Son invisibles para el motor, asi que un caso asignado solo asi se

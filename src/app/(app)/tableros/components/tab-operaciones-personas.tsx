@@ -233,8 +233,10 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
               de {P.horas_desde_certificado} h del certificado bancario y al
               menos {P.horas_antes_cita} h antes de la cita.
               {P.peso_envio === 0 && ' Hoy no se está juzgando: no suma ni resta.'}</li>
-            <li>· <strong>Correcciones ({P.peso_correcciones * 100} pts):</strong> radicaciones ante
-              la DIAN contra correcciones que pide la DIAN.</li>
+            <li>· <strong>Correcciones ({P.peso_correcciones === 0 ? 'suspendido' : `${P.peso_correcciones * 100} pts`}):</strong> radicaciones
+              ante la DIAN contra las devoluciones que la DIAN pide por <strong>error
+              propio</strong>. Las marcadas como criterio de un tercero se ven, pero no
+              bajan el indicador. Es el mismo criterio que usa calidad.</li>
           </ul>
           {techoReducido && (
             <p className="mb-3">Con {suspendidos.length === 1 ? 'ese indicador suspendido' : 'esos indicadores suspendidos'} el
@@ -299,13 +301,18 @@ function FilaPersona({ p, periodo, P, maximo }: {
         detalle={p.envio.pct === null
           ? (p.envio.eventos > 0 ? 'sin fecha de cita' : 'sin casos')
           : `${pct(p.envio.pct)} · ${p.envio.a_tiempo}/${p.envio.medibles}`} />
+      {/* Lo que el indicador descarto va aparte del resultado: un 100% con
+          devoluciones a la vista necesita explicarse, o se lee como que no hubo. */}
       <ScoreCelda score={p.score_correcciones}
         suspendido={P.peso_correcciones === 0}
         detalle={!p.correcciones.medida
           ? 'sin medir'
           : p.correcciones.pct === null
             ? 'sin radicaciones'
-            : `${p.correcciones.correcciones}/${p.correcciones.radicaciones}`} />
+            : `${p.correcciones.correcciones}/${p.correcciones.radicaciones} por error propio`}
+        nota={p.correcciones.terceros
+          ? `${p.correcciones.terceros} de terceros, no cuenta${p.correcciones.terceros === 1 ? '' : 'n'}`
+          : undefined} />
       <td className="px-3 py-3 text-center">
         <div className="font-semibold" style={{ color: CARBON }}>
           {(p.puntaje * 100).toFixed(0)}%
