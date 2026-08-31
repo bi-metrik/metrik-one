@@ -8,14 +8,15 @@
  * Uso: npx tsx scripts/cargue-iva-batch.ts /tmp/wave1.json
  * Mapping: [{ id, nombre, celular, codigo, rut, factura, cert, upme }]  (rutas SOE035)
  */
-import { readFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '../src/lib/ai/extract-fields'
 import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '../src/lib/google-drive'
-import { generarFormularioCore } from '../src/lib/actions/formulario-actions'
-import { asignarResponsable } from '../src/lib/negocios/responsable-rol'
+// `formulario-actions` y `responsable-rol` se importan DENTRO del camino que escribe.
+// Arriba arrastran la cadena de `get-workspace`, que espera el runtime de Next y no
+// resuelve fuera de el: el `--dry` no escribe nada y no tiene por que cargarla.
 
 for (const line of readFileSync(join(process.cwd(), '.env.local'), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
@@ -83,11 +84,59 @@ const C_UPME: CampoExtraccion[] = [
 ]
 
 type Campos = Record<string, CampoResultado>
+
+/**
+ * `--dry` extrae los 4 documentos y NO escribe nada: ni contacto, ni negocio, ni archivos
+ * en Drive. Es el paso previo obligatorio del cargue masivo — en julio los errores de
+ * extraccion se descubrieron con los negocios ya creados.
+ */
+const DRY = process.argv.includes('--dry')
+
+/**
+ * El dato minimo que cada documento tiene que entregar para que el caso sea cargable.
+ * Sin identificacion no hay contacto; sin IVA no hay valor que reclamar; sin cuenta no hay
+ * donde consignar la devolucion; sin radicado no hay como amarrar el caso al de la UPME.
+ * Un caso al que le falte alguno sale marcado en el dry-run, no se descubre despues.
+ */
+const MINIMOS: Array<[string, string]> = [
+  ['rut', 'numero_identificacion'],
+  ['fac', 'valor_iva'],
+  ['cert', 'numero_cuenta'],
+  ['upme', 'numero_caso_upme'],
+]
 type Caso = { id:string; nombre:string; celular:string; codigo:string; rut:string; factura:string; cert:string; upme:string; seccional?:string; existente?:string }
 const mimeOf = (p:string) => { const l=p.toLowerCase(); return l.endsWith('.png')?'image/png':(l.endsWith('.jpg')||l.endsWith('.jpeg'))?'image/jpeg':'application/pdf' }
 
-function descargar(remotePath:string, localPath:string) {
-  execFileSync('rclone', ['copyto', `gdrive:${remotePath}`, localPath, '--drive-root-folder-id', ARCHIVE], { stdio:'pipe' })
+/**
+ * Un id de Drive no lleva separador de ruta. Es lo unico que distingue las dos formas del
+ * mapping, y por eso la comprobacion es esa y no un largo fijo: los ids no tienen largo
+ * garantizado.
+ */
+const esFileId = (v:string) => !v.includes('/')
+
+/**
+ * Descarga por la API de Drive, con la misma credencial que usa la app.
+ *
+ * ⚠️ POR QUE NO SIRVE `rclone` SOLO. La receta de julio bajaba por ruta con un remoto
+ * `gdrive:` configurado a mano en la maquina de quien corrio el cargue. Esa configuracion
+ * no viaja con el repo, asi que el script no se puede correr en otro lado — y una ruta es
+ * ademas fragil: basta que alguien renombre una carpeta del archivo del cliente. El id del
+ * archivo no cambia con el nombre.
+ */
+async function descargarPorId(fileId:string, localPath:string) {
+  const { getAccessToken } = await import('../src/lib/google-drive')
+  const token = await getAccessToken(WS)
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) throw new Error(`descarga de Drive (${fileId}): ${res.status} ${await res.text()}`)
+  writeFileSync(localPath, Buffer.from(await res.arrayBuffer()))
+}
+
+async function descargar(remote:string, localPath:string) {
+  if (esFileId(remote)) return descargarPorId(remote, localPath)
+  execFileSync('rclone', ['copyto', `gdrive:${remote}`, localPath, '--drive-root-folder-id', ARCHIVE], { stdio:'pipe' })
 }
 const PY_DECRYPT = `import sys
 try:
@@ -134,8 +183,13 @@ async function procesar(c:Caso) {
   const local:Record<string,string> = {}
   for (const k of ['rut','factura','cert','upme'] as const) {
     const rp = (c as Record<string,string>)[k]; if (!rp) throw new Error(`falta ruta ${k}`)
-    const lp = join(dir, `${k}.${rp.split('.').pop()}`)
-    if (!existsSync(lp)) descargar(rp, lp); local[k] = lp
+    // La extension decide el mime con el que se manda a extraer (`mimeOf`). Una ruta la
+    // trae; un id de Drive no, y ahi el mapping la declara aparte (`<k>_ext`). Sin esto
+    // todo id se leeria como PDF y una foto del documento fallaria la extraccion.
+    const ext = esFileId(rp) ? ((c as Record<string,string>)[`${k}_ext`] ?? 'pdf') : rp.split('.').pop()
+    const lp = join(dir, `${k}.${ext}`)
+    if (!existsSync(lp)) await descargar(rp, lp)
+    local[k] = lp
   }
   const rut = await extraer(local.rut, C_RUT)
   const fac = await extraer(local.factura, C_FACTURA)
@@ -145,6 +199,33 @@ async function procesar(c:Caso) {
   const dp = noac(rut.departamento?.value || ''); if (DIVIPOLA[dp]) rut.codigo_departamento = { value:DIVIPOLA[dp], confidence:1, manual:false }
   if (cert.entidad_financiera?.value) cert.entidad_financiera.value = cert.entidad_financiera.value.replace(/\s*S\.?\s*A\.?S?\.?\s*$/i,'').trim()
   console.log(`  RUT ${rut.numero_identificacion?.value} · tel ${rut.telefono?.value} · IVA ${fac.valor_iva?.value} · ${cert.entidad_financiera?.value} ${cert.numero_cuenta?.value}`)
+
+  // DRY-RUN: corta AQUI, despues de la extraccion y antes de la primera escritura.
+  //
+  // El corte vive dentro de este script y no en uno aparte a proposito: lo que hay que
+  // validar es la extraccion REAL —los mismos campos, el mismo fallback de PDF cifrado con
+  // la cedula, el mismo fallback a PNG—, y una copia paralela se separa de esta con el
+  // primer arreglo que se le haga a una sola de las dos.
+  if (DRY) {
+    const faltan = MINIMOS.filter(([doc, campo]) =>
+      !({ rut, fac, cert, upme } as Record<string, Campos>)[doc]?.[campo]?.value,
+    ).map(([doc, campo]) => `${doc}.${campo}`)
+    if (faltan.length) console.log(`  ⚠ sin dato: ${faltan.join(', ')}`)
+    return {
+      codigo: c.codigo, nombre: c.nombre, id: c.id, faltan,
+      identificacion: rut.numero_identificacion?.value ?? null,
+      telefono: rut.telefono?.value ?? null,
+      email: rut.email?.value ?? null,
+      seccional: rut.direccion_seccional?.value ?? null,
+      marca: fac.marca?.value ?? null,
+      iva: fac.valor_iva?.value ?? null,
+      banco: cert.entidad_financiera?.value ?? null,
+      cuenta: cert.numero_cuenta?.value ?? null,
+      cert_fecha: cert.fecha_expedicion?.value ?? null,
+      radicado_upme: upme.numero_caso_upme?.value ?? null,
+      titular_upme: upme.nombre_certificado?.value ?? null,
+    }
+  }
 
   const marca = fac.marca?.value ?? ''
   let negocioId:string
@@ -170,6 +251,7 @@ async function procesar(c:Caso) {
     if (nerr) throw new Error(`negocio: ${nerr.message}`)
     negocioId = (neg as {id:string}).id
     // Con rol derivado del área: una fila sin rol no recibe avisos (ver responsable-rol.ts)
+    const { asignarResponsable } = await import('../src/lib/negocios/responsable-rol')
     await asignarResponsable(supabase, { negocioId, staffId:JESSICA_STAFF, assignedBy:JESSICA_PROFILE })
   }
 
@@ -200,6 +282,7 @@ async function procesar(c:Caso) {
     const initData = (ES_010.has(cfg) && c.seccional) ? { seccional: c.seccional } : {}
     const { data: inst, error } = await supabase.from('negocio_bloques').insert({ negocio_id:negocioId, bloque_config_id:cfg, estado:'pendiente', data:initData }).select('id').single()
     if (error) { console.error('   instancia:', error.message); continue }
+    const { generarFormularioCore } = await import('../src/lib/actions/formulario-actions')
     const r = await generarFormularioCore(supabase, WS, JESSICA_PROFILE, (inst as {id:string}).id, negocioId)
     if (r.success) ok++; else console.error('   gen ✗', r.error)
   }
@@ -212,14 +295,31 @@ async function procesar(c:Caso) {
 }
 
 async function main() {
-  const casos:Caso[] = JSON.parse(readFileSync(process.argv[2], 'utf8'))
-  console.log(`Cargue IVA · ${casos.length} casos`)
+  const mapping = process.argv.find((a, i) => i >= 2 && !a.startsWith('--'))
+  if (!mapping) { console.error('falta el JSON de mapping'); process.exit(1) }
+  const casos:Caso[] = JSON.parse(readFileSync(mapping, 'utf8'))
+  console.log(`Cargue IVA · ${casos.length} casos${DRY ? ' · DRY-RUN, no se escribe nada' : ''}`)
   const res=[]
   for (const c of casos) {
     try { res.push(await procesar(c)) }
     catch (e) { console.error(`❌ ${c.codigo} ${c.nombre}:`, e instanceof Error?e.message:e); res.push({ codigo:c.codigo, error:String(e) }) }
   }
   console.log('\n=== RESUMEN ===')
+  if (DRY) {
+    // El detalle va a un JSON al lado del mapping: 68 casos por 10 campos no se revisan
+    // leyendo la consola, y el archivo es lo que se compara contra el Sheet del equipo.
+    const out = mapping.replace(/\.json$/, '') + '_out.json'
+    writeFileSync(out, JSON.stringify(res, null, 1))
+    const conError = res.filter((r) => 'error' in r)
+    const conHueco = res.filter((r) => !('error' in r) && (r as { faltan?:string[] }).faltan?.length)
+    console.log(`  extraidos sin novedad: ${res.length - conError.length - conHueco.length}`)
+    console.log(`  con algun campo minimo vacio: ${conHueco.length}`)
+    console.log(`  fallaron: ${conError.length}`)
+    for (const r of conHueco) console.log(`   ⚠ ${r.codigo} ${(r as {nombre?:string}).nombre} — ${(r as {faltan:string[]}).faltan.join(', ')}`)
+    for (const r of conError) console.log(`   ❌ ${r.codigo} — ${(r as {error:string}).error}`)
+    console.log(`\n  detalle: ${out}`)
+    return
+  }
   for (const r of res) console.log(' ', r.codigo, 'error' in r ? '❌ '+r.error : `✓ ${r.ok}/8`)
 }
 main().catch((e)=>{ console.error(e); process.exit(1) })
