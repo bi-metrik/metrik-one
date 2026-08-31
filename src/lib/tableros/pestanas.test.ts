@@ -10,6 +10,7 @@ import {
 
 /** Todo lo que el servidor puede traer llego. Aisla el efecto de los modulos. */
 const CON_DATOS: DatosTableros = {
+  direccion: true,
   comercialNegocios: true,
   procesoSeccional: true,
   operacionesBono: true,
@@ -17,6 +18,7 @@ const CON_DATOS: DatosTableros = {
 }
 
 const SIN_DATOS: DatosTableros = {
+  direccion: false,
   comercialNegocios: false,
   procesoSeccional: false,
   operacionesBono: false,
@@ -42,8 +44,8 @@ const claves = (mod: ModulosWorkspace, datos: DatosTableros = CON_DATOS) =>
   pestanasDeTableros(mod, datos).map(p => p.key)
 
 describe('pestanasDeTableros', () => {
-  it('SOENA ve exactamente dos pestanas: Comercial y Operaciones', () => {
-    expect(claves(SOENA)).toEqual(['comercial_negocios', 'operaciones'])
+  it('SOENA ve tres pestanas: Direccion, Comercial y Operaciones', () => {
+    expect(claves(SOENA)).toEqual(['direccion', 'comercial_negocios', 'operaciones'])
   })
 
   it('un workspace con business y sin modulos propios conserva las tres genericas', () => {
@@ -67,7 +69,7 @@ describe('pestanasDeTableros', () => {
     // utilizacion ni el financiero sin saldos.
     expect(claves({ business: true, proceso_semanal: true })).toEqual(['operaciones'])
     expect(claves({ business: true, operaciones_bonos: true })).toEqual(['operaciones'])
-    expect(claves({ business: true, comercial_negocios: true })).toEqual(['comercial_negocios'])
+    expect(claves({ business: true, comercial_negocios: true })).toEqual(['direccion', 'comercial_negocios'])
   })
 
   it('los modulos propios NO dependen de business: gate propio, como Cumplimiento', () => {
@@ -75,7 +77,7 @@ describe('pestanasDeTableros', () => {
     // ademas el menu lateral, el FAB, Caja y Mi negocio, asi que apagarlo para
     // quitar una pestana rompia la aplicacion entera.
     const sinBusiness = { proceso_semanal: true, operaciones_bonos: true, comercial_negocios: true }
-    expect(claves(sinBusiness)).toEqual(['comercial_negocios', 'operaciones'])
+    expect(claves(sinBusiness)).toEqual(['direccion', 'comercial_negocios', 'operaciones'])
   })
 
   it('rentabilidad_comercial sigue excluyendo a las genericas', () => {
@@ -87,7 +89,9 @@ describe('pestanasDeTableros', () => {
   it('un modulo encendido sin datos no dibuja su pestana', () => {
     // Caso real: un rol no gerencial en SOENA no recibe el tablero comercial.
     // Queda con Operaciones, no con las genericas de vuelta.
-    const soloComercialSinDatos = { ...CON_DATOS, comercialNegocios: false }
+    // Direccion se apaga con el: comparten el gate de rol gerencial en `page.tsx`,
+    // asi que un rol no gerencial no recibe ninguno de los dos.
+    const soloComercialSinDatos = { ...CON_DATOS, comercialNegocios: false, direccion: false }
     expect(claves(SOENA, soloComercialSinDatos)).toEqual(['operaciones'])
 
     expect(claves(SOENA, SIN_DATOS)).toEqual([])

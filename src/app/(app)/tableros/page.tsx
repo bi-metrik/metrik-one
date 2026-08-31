@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
+import { getDirectivo } from './directivo-actions'
 import {
   getComercialResumen, getComercialMes, getComercialSerie, getComercialSerieSeccional,
   getComercialSerieVendedor, getMetasComerciales,
@@ -119,6 +120,14 @@ export default async function TablerosPage() {
     }
   }
 
+  // Pestana Direccion: la replica del Sheet que JD lleva a mano. Mismo gate que el
+  // tablero comercial (modulo + rol gerencial), porque son las mismas cifras agregadas
+  // de toda la operacion vistas desde arriba.
+  const [anioDir, mesDir] = bogotaYearMonth().split('-')
+  const directivo = puedeVerComercialNegocios
+    ? await getDirectivo(Number(anioDir), Number(mesDir))
+    : null
+
   // Calidad de llamadas: dinero, embudo de cobro y riesgo. Gateado por su
   // propio flag Y por el permiso de dinero — es la unica superficie del modulo
   // que lleva plata, y `canViewNumbers` no alcanza: un supervisor lo tiene.
@@ -145,6 +154,7 @@ export default async function TablerosPage() {
 
   return (
     <TablerosClient
+      initialDirectivo={directivo}
       initialOperaciones={operaciones}
       initialProcesoSeccional={procesoSeccional}
       initialComercial={comercial}
