@@ -64,12 +64,10 @@ export async function getComercialPerfil(
 
 // ── Iteracion 2: KPIs del mes, series, metas ──
 
-import { revalidatePath } from 'next/cache'
 import type {
   ComercialMesResponse,
   ComercialPagoMes,
   ComercialSerieResponse,
-  MetaComercial,
 } from './comercial-types'
 
 /** KPIs + tabla por vendedor de un mes (default: mes actual Bogota). */
@@ -146,21 +144,6 @@ export async function getComercialSerieVendedor(
   return (data as ComercialSerieVendedorResponse) ?? null
 }
 
-/** Metas del mes (global + por vendedor) para la mini UI de edicion. */
-export async function getMetasComerciales(anio: number, mes: number): Promise<MetaComercial[]> {
-  const { supabase, workspaceId } = await getWorkspace()
-  if (!workspaceId || !supabase) return []
-  // metas_comerciales aun no esta en database.ts generado -> cast puntual (mismo patron que otras tablas nuevas).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any)
-    .from('metas_comerciales')
-    .select('id, staff_id, anio, mes, meta_num_ventas, meta_valor')
-    .eq('workspace_id', workspaceId)
-    .eq('anio', anio)
-    .eq('mes', mes)
-  return (data as MetaComercial[]) ?? []
-}
-
 /**
  * Mapa staff_id -> meta_num_ventas para un PERIODO, para el ranking de cumplimiento.
  *
@@ -195,48 +178,6 @@ export async function getMetasPorVendedorPeriodo(
     out.set(row.staff_id, (out.get(row.staff_id) ?? 0) + row.meta_num_ventas)
   }
   return out
-}
-
-// Editar metas: misma puerta que conciliacion (owner/admin/supervisor).
-const ROLES_EDITAN_METAS = ['owner', 'admin', 'supervisor']
-
-/**
- * Upsert de una meta (staffId null = meta global del equipo). Gate de rol
- * server-side. Valores null limpian la meta. Conflicto por (workspace, staff,
- * anio, mes) via indice unico NULLS NOT DISTINCT.
- */
-export async function guardarMetaComercial(input: {
-  staffId: string | null
-  anio: number
-  mes: number
-  metaNumVentas: number | null
-  metaValor: number | null
-}): Promise<{ ok: boolean; error?: string }> {
-  const { supabase, workspaceId, role, userId } = await getWorkspace()
-  if (!workspaceId || !supabase) return { ok: false, error: 'Sin sesion' }
-  if (!ROLES_EDITAN_METAS.includes(role ?? '')) {
-    return { ok: false, error: 'Solo un supervisor, administrador o dueno puede editar metas.' }
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any)
-    .from('metas_comerciales')
-    .upsert(
-      {
-        workspace_id: workspaceId,
-        staff_id: input.staffId,
-        anio: input.anio,
-        mes: input.mes,
-        meta_num_ventas: input.metaNumVentas,
-        meta_valor: input.metaValor,
-        created_by: userId ?? null,
-        updated_at: new Date().toISOString(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any,
-      { onConflict: 'workspace_id,staff_id,anio,mes' },
-    )
-  if (error) return { ok: false, error: error.message }
-  revalidatePath('/equipo')
-  return { ok: true }
 }
 
 /**
