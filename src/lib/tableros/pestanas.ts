@@ -8,6 +8,7 @@
  */
 
 export type TableroKey =
+  | 'direccion'
   | 'rentabilidad_comercial'
   | 'comercial_negocios'
   | 'operaciones'
@@ -30,6 +31,8 @@ export type ModulosWorkspace = Record<string, boolean>
  * en blanco se lee como un error del producto.
  */
 export interface DatosTableros {
+  /** Pestana Direccion: la replica del Sheet de JD. Gate propio, ver abajo. */
+  direccion: boolean
   comercialNegocios: boolean
   procesoSeccional: boolean
   operacionesBono: boolean
@@ -39,6 +42,9 @@ export interface DatosTableros {
 /** Las dos vistas de la pestana Operaciones. */
 export type VistaOperaciones = 'casos' | 'personas'
 
+// Va primera: es la vista con la que la direccion abre la pantalla, y de ahi baja al
+// detalle de cada area en las siguientes.
+const DIRECCION_TAB: PestanaTablero = { key: 'direccion', label: 'Dirección' }
 const RENTABILIDAD_TAB: PestanaTablero = {
   key: 'rentabilidad_comercial',
   label: 'Rentabilidad Comercial',
@@ -115,6 +121,7 @@ export function pestanasDeTableros(
 ): PestanaTablero[] {
   const tabs: PestanaTablero[] = []
 
+  if (mod.comercial_negocios && datos.direccion) tabs.push(DIRECCION_TAB)
   if (mod.rentabilidad_comercial) tabs.push(RENTABILIDAD_TAB)
   if (mod.comercial_negocios && datos.comercialNegocios) tabs.push(COMERCIAL_NEGOCIOS_TAB)
   if (vistasDeOperaciones(mod, datos).length > 0) tabs.push(OPERACIONES_TAB)

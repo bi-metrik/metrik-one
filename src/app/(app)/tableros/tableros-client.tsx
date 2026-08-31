@@ -13,6 +13,8 @@ import type { OperacionesBonoData } from './operaciones-types'
 import type { DuenoData } from '../calidad/types'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { pestanasDeTableros, type TableroKey } from '@/lib/tableros/pestanas'
+import TabDireccion from './components/tab-direccion'
+import type { DirectivoData } from './directivo-actions'
 import { ShieldCheck, LayoutDashboard } from 'lucide-react'
 import type {
   ComercialResumenRow,
@@ -72,6 +74,7 @@ interface TablerosClientProps {
   initialRentabilidad?: RentabilidadComercialData | null
   initialComercialNegocios?: ComercialNegociosBundle | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
+  initialDirectivo?: DirectivoData | null
   initialOperaciones?: OperacionesBonoData | null
   /** Null si el workspace no tiene el modulo o si el rol no ve dinero. */
   initialCalidad?: DuenoData | null
@@ -85,6 +88,7 @@ export default function TablerosClient({
   initialRentabilidad,
   initialComercialNegocios,
   initialProcesoSeccional,
+  initialDirectivo,
   initialOperaciones,
   initialCalidad,
   modules,
@@ -93,6 +97,7 @@ export default function TablerosClient({
   // Sin `useMemo`: armar una lista de seis elementos no justifica mantener un
   // arreglo de dependencias que hay que acordarse de ampliar con cada modulo.
   const tabs = pestanasDeTableros(mod, {
+    direccion: Boolean(initialDirectivo),
     comercialNegocios: Boolean(initialComercialNegocios),
     procesoSeccional: Boolean(initialProcesoSeccional),
     operacionesBono: Boolean(initialOperaciones),
@@ -181,6 +186,8 @@ export default function TablerosClient({
       {/* Content */}
       <div className={`transition-opacity duration-200 ${isPending ? 'opacity-50' : 'opacity-100'}`}>
         {activeTab === null && <SinTableros />}
+        {activeTab === 'direccion' && initialDirectivo && <TabDireccion inicial={initialDirectivo} />}
+
         {activeTab === 'calidad' && initialCalidad && <TabCalidad datos={initialCalidad} />}
         {activeTab === 'rentabilidad_comercial' && rentabilidad && <TabRentabilidadComercial data={rentabilidad} />}
         {activeTab === 'comercial_negocios' && initialComercialNegocios && (
