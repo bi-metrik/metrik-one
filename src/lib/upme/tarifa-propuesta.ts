@@ -39,3 +39,33 @@ export function fuenteDeLaTarifa(e: EntradaFuenteTarifa): FuenteTarifaPropuesta 
   if (e.autoCalculoHabilitado) return 'auto'
   return 'ninguna'
 }
+
+export interface EntradaGuardiaTarifa {
+  /** El negocio opera bajo el modelo de tarifa (existe el bloque de confirmación). */
+  usaModeloTarifa: boolean
+  /** El SERVICIO contratado declara que este caso no lleva tarifa (hoy: `solo_iva`). */
+  servicioNiegaTarifa: boolean
+  /** Tarifa resuelta por `fuenteDeLaTarifa`. */
+  tarifaUpme: number
+}
+
+/**
+ * ¿Hay que FRENAR la emisión de la propuesta porque falta confirmar la tarifa?
+ *
+ * ⚠️ Una tarifa en 0 tiene dos causas que no son la misma, y hasta ahora no había que
+ * distinguirlas: `servicio_contratado` vivía en Negociación, una etapa DESPUÉS de donde
+ * se genera la propuesta, así que su consulta volvía siempre vacía y todo 0 significaba
+ * "falta confirmarla". Al subir ese bloque a Propuesta, un caso de **solo IVA** empieza a
+ * dar 0 legítimamente — y frenarlo con "falta confirmar la tarifa UPME en Validación"
+ * sería mandar a corregir un dato que ya está bien, sobre un caso que sí puede recibir su
+ * propuesta (sin línea de tarifa, que es lo que el PDF ya hace con tarifa 0).
+ *
+ * Se frena solo cuando el negocio opera bajo el modelo de tarifa, su servicio SÍ la
+ * lleva, y aun así no hay valor: ahí el documento hablaría de una tarifa en cinco puntos
+ * legales sin decir cuánto.
+ */
+export function faltaConfirmarTarifa(e: EntradaGuardiaTarifa): boolean {
+  if (!e.usaModeloTarifa) return false
+  if (e.servicioNiegaTarifa) return false
+  return !(Number.isFinite(e.tarifaUpme) && e.tarifaUpme > 0)
+}
