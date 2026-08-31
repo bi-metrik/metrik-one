@@ -5,7 +5,7 @@ import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadC
 import { getDirectivo } from './directivo-actions'
 import {
   getComercialResumen, getComercialMes, getComercialSerie, getComercialSerieSeccional,
-  getComercialSerieVendedor, getMetasComerciales,
+  getComercialSerieVendedor,
   getComercialOrigenMes, getComercialSeccionalMes, getComercialPlanPagoMes, getCapacidadSeccional,
 } from '../equipo/comercial-actions'
 import { getOperacionesBono } from './operaciones-actions'
@@ -166,7 +166,7 @@ async function cargarComercialNegocios(role: string | null) {
     const d = new Date(Date.UTC(anioSel, mesSel - 1 + meses, 1))
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
   }
-  const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serie, serieSeccional, serieVendedor, metas] = await Promise.all([
+  const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serie, serieSeccional, serieVendedor] = await Promise.all([
     getComercialResumen(),
     getComercialMes(anioSel, mesSel),
     getComercialMes(prev.anio, prev.mes),
@@ -177,7 +177,6 @@ async function cargarComercialNegocios(role: string | null) {
     getComercialSerie(12),
     getComercialSerieSeccional(12),
     getComercialSerieVendedor(12),
-    getMetasComerciales(anioSel, mesSel),
   ])
   return {
     equipo,
@@ -190,7 +189,6 @@ async function cargarComercialNegocios(role: string | null) {
     serie,
     serieSeccional,
     serieVendedor,
-    metasIniciales: metas,
     anioInicial: anioSel,
     mesNumInicial: mesSel,
     // El mes en curso se resuelve en el SERVIDOR y en hora de Bogotá: calcularlo en

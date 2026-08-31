@@ -26,7 +26,6 @@ import type {
   ComercialSeccionalMes,
   ComercialPlanPagoMes,
   CapacidadSeccional,
-  MetaComercial,
 } from '../equipo/comercial-types'
 
 // Que pestanas ve cada workspace lo decide `@/lib/tableros/pestanas`: la misma
@@ -58,7 +57,6 @@ export interface ComercialNegociosBundle {
   /** El mismo histórico abierto por seccional, para el filtro. `null` = sin filtro. */
   serieSeccional: ComercialSerieSeccionalResponse | null
   serieVendedor: ComercialSerieVendedorResponse | null
-  metasIniciales: MetaComercial[]
   anioInicial: number
   mesNumInicial: number
   /** 'YYYY-MM' del mes en curso en Bogotá, resuelto en el servidor. */
@@ -202,7 +200,6 @@ export default function TablerosClient({
             serie={initialComercialNegocios.serie}
             serieSeccional={initialComercialNegocios.serieSeccional}
             serieVendedor={initialComercialNegocios.serieVendedor}
-            metasIniciales={initialComercialNegocios.metasIniciales}
             anioInicial={initialComercialNegocios.anioInicial}
             mesNumInicial={initialComercialNegocios.mesNumInicial}
             mesEnCurso={initialComercialNegocios.mesEnCurso}
