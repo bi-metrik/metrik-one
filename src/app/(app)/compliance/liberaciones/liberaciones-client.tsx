@@ -28,6 +28,7 @@ import {
   type MotivoCobertura,
 } from '@/lib/compliance/liberaciones';
 import { ETIQUETAS, diasEntreISO } from '@/lib/compliance/bandeja';
+import type { CoberturaCatalogo } from '@/lib/actions/compliance-tier-catalogo';
 import { formatBogotaFechaCortaAno, formatBogotaFechaHora, todayBogotaISO } from '@/lib/dates/bogota';
 
 const ESTILO_MOTIVO: Record<MotivoCobertura, string> = {
@@ -40,9 +41,12 @@ const ESTILO_MOTIVO: Record<MotivoCobertura, string> = {
 export default function LiberacionesClient({
   inicial,
   controles,
+  cobertura,
 }: {
   inicial: TableroLiberaciones;
   controles: ControlParaLiberacion[];
+  /** Cobertura del catálogo de tier en los últimos 90 días (C5). */
+  cobertura: CoberturaCatalogo | null;
 }) {
   const [tablero, setTablero] = useState(inicial);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +116,7 @@ export default function LiberacionesClient({
         </div>
       )}
 
-      <Indicadores tablero={tablero} />
+      <Indicadores tablero={tablero} cobertura={cobertura} />
 
       <Seccion
         titulo={ETIQUETAS.sin_cobertura_vigente.titulo}
@@ -204,7 +208,13 @@ export default function LiberacionesClient({
  * aproximarlo — un indicador que mide algo distinto de lo que dice medir es
  * peor que no tenerlo.
  */
-function Indicadores({ tablero }: { tablero: TableroLiberaciones }) {
+function Indicadores({
+  tablero,
+  cobertura,
+}: {
+  tablero: TableroLiberaciones;
+  cobertura: CoberturaCatalogo | null;
+}) {
   const { indicadores } = tablero;
   const expuestas = indicadores.sin_cobertura_vigente;
   const dias = indicadores.antiguedad_max_sin_decidir_dias;
@@ -242,6 +252,14 @@ function Indicadores({ tablero }: { tablero: TableroLiberaciones }) {
         <p className="text-xs text-[#B45309]">
           La bandeja alcanzó el techo de lectura y no está mostrando todas las consultas del
           workspace.
+        </p>
+      )}
+      {cobertura && cobertura.consultas_con_fuente_desconocida > 0 && (
+        <p className="text-xs text-[#B45309]">
+          {cobertura.consultas_con_fuente_desconocida} consulta(s) de los últimos 90 días trajeron
+          una fuente que el catálogo no reconoce ({cobertura.fuentes.join(', ')}). Esas consultas
+          quedan en el canal de mayor exigencia hasta que se clasifique la fuente: no se pierde
+          nada, pero hay trabajo pendiente de catálogo.
         </p>
       )}
     </div>

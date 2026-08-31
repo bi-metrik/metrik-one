@@ -8,8 +8,13 @@
  * en lista vinculante, y la mitad son menciones de prensa.
  *
  * Qué NO hace, a propósito: no emite veredicto, no decide bandeja y no toca
- * `DualSeveridad`. Esa parte del dictamen (§10/§11) depende de la firma jurídica
- * de Emilio. Esto clasifica y mide; todavía no decide nada en producción.
+ * `DualSeveridad`.
+ *
+ * Desde el 2026-08-31 la clasificación SÍ se persiste y se mide (concepto de
+ * Emilio, bloque A). Sigue sin decidir nada: que el tier tenga efecto sobre una
+ * contratación es el bloque B, y exige instrumentos contractuales que hoy no
+ * existen. `puedeEmitirVeredicto` y `canalDeExigencia` están acá para que ese
+ * día nadie pueda saltarse el gate por descuido.
  *
  * Vive fuera de los archivos `'use server'` porque esos solo pueden exportar
  * funciones async, y porque la regla tiene que poder probarse sin base de datos
@@ -417,3 +422,78 @@ export const TIER_LABEL: Record<TierResuelto, string> = {
   medios: 'Mención en medios',
   sin_clasificar: ETIQUETA_SIN_CLASIFICAR,
 };
+
+// ─── Gate de veredicto (C2 del concepto de Emilio, 2026-08-31) ─────────────
+
+/**
+ * ¿Este catálogo puede sustentar un veredicto sobre una contratación?
+ *
+ * Solo si está `vigente`, que es el estado que exige firma jurídica del
+ * representante legal (lo garantiza un CHECK en la base). Hoy la versión 1 está
+ * en `validada_tecnica`: tiene la firma técnica de Lucía y le falta la otra, así
+ * que esta función devuelve false y todo tiene que ir al canal de mayor
+ * exigencia.
+ *
+ * Existe HOY, antes de que exista función alguna de veredicto, precisamente para
+ * que el día que se escriba no haya que acordarse de poner el gate. Un catálogo
+ * sin firma clasificando en pantalla es medición; decidiendo sobre una
+ * contratación sería MéTRIK afirmando derecho sin que nadie lo respalde.
+ */
+export function puedeEmitirVeredicto(catalogo: {
+  opera: boolean;
+} | null | undefined): boolean {
+  return catalogo?.opera === true;
+}
+
+/**
+ * Canal al que va una consulta clasificada.
+ *
+ * `maxima` es el canal que exige revisión del oficial sin excepción. Se llega
+ * por tres caminos distintos, y los tres tienen la misma consecuencia:
+ *
+ *   1. El catálogo no está firmado (C2). No sabemos con qué autoridad clasificar.
+ *   2. Alguna fuente no está catalogada (C4). No sabemos qué es.
+ *   3. Hay Tier 1, que es la obligación misma.
+ *
+ * Cualquier otra cosa va a `ordinario`, que NO significa "no mirar": significa
+ * que el orden lo fija el tier. La supresión no existe en ningún camino: las dos
+ * bandejas juntas contienen el cien por ciento de lo devuelto (C3).
+ */
+export type CanalExigencia = 'maxima' | 'ordinario';
+
+export function canalDeExigencia(clasificada: {
+  opera: boolean;
+  tierMaximo: TierResuelto | null;
+  haySinClasificar: boolean;
+}): CanalExigencia {
+  if (!clasificada.opera) return 'maxima';
+  if (clasificada.haySinClasificar) return 'maxima';
+  if (clasificada.tierMaximo === 'tier_1') return 'maxima';
+  return 'ordinario';
+}
+
+// ─── Cero supresión (C3) ───────────────────────────────────────────────────
+
+/**
+ * Verifica que la clasificación no perdió ni una coincidencia.
+ *
+ * La igualdad que tiene que cumplirse siempre:
+ *
+ *     hallazgos + duplicados === coincidencias devueltas por el proveedor
+ *
+ * Es un invariante de `clasificarConsulta` por construcción (cada match cae en
+ * uno de los dos arreglos y en ninguno más), y por eso mismo vale comprobarlo:
+ * un invariante que nadie verifica es una suposición. Si alguna vez esto es
+ * falso, la clasificación está escondiendo un hallazgo, que es exactamente lo
+ * que el dictamen prohíbe.
+ *
+ * El llamador decide qué hacer cuando falla. En la persistencia se guarda la
+ * consulta SIN clasificación y marcada como sin clasificar: se cae al canal de
+ * mayor exigencia y nunca se pierde la consulta, que ya se pagó.
+ */
+export function verificarCeroSupresion(
+  clasificada: { hallazgos: readonly unknown[]; duplicados: readonly unknown[] },
+  totalDevueltoPorLaFuente: number,
+): boolean {
+  return clasificada.hallazgos.length + clasificada.duplicados.length === totalDevueltoPorLaFuente;
+}

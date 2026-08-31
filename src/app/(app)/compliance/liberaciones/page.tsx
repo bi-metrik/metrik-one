@@ -6,6 +6,7 @@ import {
   listarControlesParaLiberacion,
 } from '@/lib/actions/compliance-liberaciones';
 import { puedeLiberarContrapartes } from '@/lib/compliance/liberaciones';
+import { coberturaDelCatalogo } from '@/lib/actions/compliance-tier-catalogo';
 import LiberacionesClient from './liberaciones-client';
 
 export const dynamic = 'force-dynamic';
@@ -28,9 +29,16 @@ export default async function LiberacionesPage() {
   // restrictivas, que es justo lo que no debe circular por el workspace.
   if (!puedeLiberarContrapartes(role)) redirect('/compliance/listas');
 
-  const [tablero, controles] = await Promise.all([
+  // Ventana del indicador de cobertura del catálogo (C5 del concepto de Emilio):
+  // los últimos 90 días. Es una lectura de calidad del catálogo, no del riesgo
+  // de una contraparte, y por eso no sigue el periodo que el oficial audita.
+  const hasta = new Date();
+  const desde = new Date(hasta.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+  const [tablero, controles, cobertura] = await Promise.all([
     listarTableroLiberaciones(),
     listarControlesParaLiberacion(),
+    coberturaDelCatalogo(desde.toISOString(), hasta.toISOString()),
   ]);
 
   if (!tablero.ok) {
@@ -41,6 +49,7 @@ export default async function LiberacionesPage() {
     <LiberacionesClient
       inicial={tablero.data}
       controles={controles.ok ? controles.data : []}
+      cobertura={cobertura}
     />
   );
 }
