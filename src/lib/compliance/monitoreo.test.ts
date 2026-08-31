@@ -14,6 +14,21 @@
  *      sobre esa población no son preferencias de producto: son el fallo del
  *      §3 del concepto de Emilio (2026-08-31). Romperlas no rompe una pantalla,
  *      convierte el registro de ALMA en una lista negra propia.
+ *
+ * VERIFICADO POR MUTACIÓN (2026-08-31) — cada mutación tumbó pruebas:
+ *   - quitar la guarda de costo (re-consultar a quien exige acción) → caen 3
+ *   - mirar la vigencia antes que el horizonte de Rechazadas → cae 1
+ *   - una rechazada con delta notifica → caen 2
+ *   - el tope no registra que cortó → caen 2
+ *   - delta = cualquier cambio de conteo (menos reportes también alerta) → caen 2
+ *   - sin tope adoptado igual ejecuta → caen 3
+ *   - la premisa cambiada no mueve de bandeja (en `bandeja.ts`) → cae 1
+ *
+ * La mutación del orden de las guardas NO tumbó nada en la primera pasada: con
+ * vigencia vencida las dos versiones excluyen igual, así que la prueba coincidía
+ * por casualidad. El caso que sí las separa es la rechazada SIN vigencia —la
+ * anterior a R2—, que con el orden invertido entra al barrido para siempre. Esa
+ * prueba se agregó después y es la que ahora cae.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -117,6 +132,21 @@ describe('evaluarCandidato — el horizonte de Rechazadas (Emilio §3)', () => {
     // una rechazada vieja entraría al barrido para siempre.
     expect(evaluarCandidato(rechazada('2024-01-01'), HOY, CONFIG))
       .toEqual({ barrer: false, motivo: 'horizonte_agotado' });
+  });
+
+  it('agotado el horizonte sale AUNQUE nunca haya tenido vigencia', () => {
+    // El caso que decide el orden de las guardas, y el único donde equivocarlo
+    // cuesta plata: una rechazada anterior a R2 no tiene `vigente_hasta`, así
+    // que mirar la vigencia primero la manda a barrer para siempre. Con las
+    // otras combinaciones el resultado coincide por casualidad —ambas excluyen—
+    // y la prueba no distingue una implementación de la otra.
+    expect(evaluarCandidato(rechazada('2024-01-01', null), HOY, CONFIG))
+      .toEqual({ barrer: false, motivo: 'horizonte_agotado' });
+  });
+
+  it('dentro del horizonte y sin vigencia sí entra', () => {
+    expect(evaluarCandidato(rechazada('2026-06-01', null), HOY, CONFIG))
+      .toEqual({ barrer: true, motivo: 'sin_vigencia' });
   });
 
   it('sin fecha de decisión se trata como agotada, no como eterna', () => {
