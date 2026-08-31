@@ -32,6 +32,10 @@
 -- intensificación de su propia diligencia, y por eso el concepto de Emilio la
 -- puso en el bloque A y no en el B.
 
+-- server-only: la periodicidad es la politica de riesgo del obligado y la fija
+-- solo el oficial de cumplimiento. Se lee y se escribe por server actions que
+-- validan el rol antes de tocar nada; ningun cliente la consulta directo. Mismo
+-- criterio que el catalogo de tier.
 create table if not exists compliance_periodicidad_config (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
@@ -75,6 +79,11 @@ begin
   new.updated_at := now();
   return new;
 end $$;
+
+-- Toda funcion nace ejecutable por PUBLIC y `anon` la alcanza por ahi. El default
+-- de la base no lo evita: hay que revocarlo a mano.
+revoke execute on function public.tg_periodicidad_touch() from public;
+revoke execute on function public.tg_periodicidad_touch() from anon;
 
 drop trigger if exists trg_periodicidad_touch on compliance_periodicidad_config;
 create trigger trg_periodicidad_touch
