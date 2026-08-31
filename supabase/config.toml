@@ -411,10 +411,11 @@ verify_jwt = false
 # funcion (WA_ALERTS_SECRET), igual que cardumen-cron y notificar-etapa.
 verify_jwt = false
 
-# Nota: evaluar-reglas sigue en el default (verify_jwt = true) y la app la llama
-# con la anon key legacy. Es el mismo riesgo que tenia wa-alerts, PERO no esta
-# medido: no hay trafico reciente que lo confirme ni lo descarte. No se toca a
-# ciegas — se mide primero, provocando una evaluacion de reglas y mirando el log.
+# Nota: evaluar-reglas se queda en el default (verify_jwt = true) y la app la
+# llama con la anon key legacy. MEDIDO el 2026-08-31, no supuesto: un GET con esa
+# misma anon key devuelve 405 (Method not allowed), o sea que el gateway la deja
+# pasar y la peticion llega al codigo. Lo que el gateway dejo de aceptar fue el
+# token con el que llamaban los crons de wa-alerts, no toda credencial legacy.
 
 # Experimental features may be deprecated any time
 [experimental]
