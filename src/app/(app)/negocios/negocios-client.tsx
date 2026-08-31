@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
 import BusquedaInput from '@/components/busqueda-input'
+import BarraFiltros from '@/components/barra-filtros'
 import EmptyState from '@/components/empty-state'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
@@ -11,6 +12,7 @@ import { segmentarNegocios } from '@/lib/negocios/segmentador'
 import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-llegada'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
+import type { CampoFiltro } from '@/lib/filtros/campos'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
@@ -365,6 +367,59 @@ export default function NegociosClient({
     )
   }, [negocios, cerrados])
 
+  // Los cuatro filtros secundarios, ya en la forma que dibuja `BarraFiltros`.
+  // Un campo con la lista de opciones vacía no se dibuja: es la misma regla de
+  // antes (no ofrecer un desplegable que no separa nada), dicha una sola vez.
+  const camposFiltro = useMemo<CampoFiltro[]>(() => {
+    // Con un solo servicio real el desplegable no separa nada, y si el workspace
+    // no captura servicio la única entrada sería 'Sin servicio definido'.
+    const hayServicioReal = serviciosDisponibles.some((s) => s.value !== SIN_SERVICIO)
+    return [
+      {
+        clave: 'seccional',
+        etiqueta: 'Seccional',
+        valor: seccional,
+        porDefecto: 'todas',
+        etiquetaTodos: 'Todas las seccionales DIAN',
+        opciones: seccionalesDisponibles.map((s) => ({ value: s, label: s })),
+        onChange: setSeccional,
+      },
+      {
+        clave: 'origen',
+        etiqueta: 'Origen',
+        valor: origen,
+        porDefecto: 'todos',
+        etiquetaTodos: 'Todos los orígenes',
+        opciones: origenesDisponibles.length > 1 ? origenesDisponibles : [],
+        onChange: setOrigen,
+      },
+      {
+        clave: 'servicio',
+        etiqueta: 'Servicio',
+        valor: servicio,
+        porDefecto: 'todos',
+        etiquetaTodos: 'Todos los servicios',
+        opciones:
+          hayServicioReal && serviciosDisponibles.length > 1 ? serviciosDisponibles : [],
+        onChange: setServicio,
+      },
+      {
+        clave: 'responsable',
+        etiqueta: 'Responsable',
+        valor: responsable,
+        porDefecto: 'todos',
+        etiquetaTodos: 'Todos los responsables',
+        opciones: responsablesDisponibles.map((r) => ({ value: r.id, label: r.full_name })),
+        onChange: setResponsable,
+      },
+    ]
+  }, [
+    seccional, setSeccional, seccionalesDisponibles,
+    origen, setOrigen, origenesDisponibles,
+    servicio, setServicio, serviciosDisponibles,
+    responsable, setResponsable, responsablesDisponibles,
+  ])
+
   // Fases visibles (según stages activos del workspace + si hay cerrados).
   const fases = ALL_FASES.filter((f) =>
     f.key === 'todos'
@@ -468,72 +523,11 @@ export default function NegociosClient({
         ariaLabel="Buscar negocios"
       />
 
-      {/* Filtro por seccional DIAN (solo si hay seccionales en los negocios) */}
-      {seccionalesDisponibles.length > 0 && (
-        <select
-          value={seccional}
-          onChange={(e) => setSeccional(e.target.value)}
-          aria-label="Filtrar por seccional DIAN"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
-        >
-          <option value="todas">Todas las seccionales DIAN</option>
-          {seccionalesDisponibles.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      )}
-
-      {/* Filtro por origen del negocio (solo si hay más de un origen distinto) */}
-      {origenesDisponibles.length > 1 && (
-        <select
-          value={origen}
-          onChange={(e) => setOrigen(e.target.value)}
-          aria-label="Filtrar por origen del negocio"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
-        >
-          <option value="todos">Todos los orígenes</option>
-          {origenesDisponibles.map((o) => (
-            <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
-          ))}
-        </select>
-      )}
-
-      {/* Filtro por servicio contratado (solo si el ws lo captura y hay más de un
-          valor distinto: con uno solo el desplegable no separa nada). */}
-      {serviciosDisponibles.filter((s) => s.value !== SIN_SERVICIO).length > 0 &&
-        serviciosDisponibles.length > 1 && (
-        <select
-          value={servicio}
-          onChange={(e) => setServicio(e.target.value)}
-          aria-label="Filtrar por servicio contratado"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
-        >
-          <option value="todos">Todos los servicios</option>
-          {serviciosDisponibles.map((s) => (
-            <option key={s.value} value={s.value}>{s.label} ({s.count})</option>
-          ))}
-        </select>
-      )}
-
-      {/* Filtro por responsable asignado (solo si hay responsables en los negocios) */}
-      {responsablesDisponibles.length > 0 && (
-        <select
-          value={responsable}
-          onChange={(e) => setResponsable(e.target.value)}
-          aria-label="Filtrar por responsable asignado"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
-        >
-          <option value="todos">Todos los responsables</option>
-          {responsablesDisponibles.map((r) => (
-            <option key={r.id} value={r.id}>{r.full_name}</option>
-          ))}
-        </select>
-      )}
-
-      {/* Atrasados + orden. El toggle solo aparece si hay algo atrasado que
-          mostrar (etapas sin SLA nunca cuentan como atraso). */}
-      {(atrasadosCount > 0 || soloAtrasados) && (
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Filtros secundarios (colapsados) + atrasados + orden en una sola fila.
+          Antes eran cuatro desplegables a ancho completo apilados: en el celular
+          empujaban el primer negocio fuera de la pantalla. Ver `BarraFiltros`. */}
+      <BarraFiltros campos={camposFiltro}>
+        {(atrasadosCount > 0 || soloAtrasados) && (
           <button
             type="button"
             onClick={() => setSoloAtrasados((v) => !v)}
@@ -554,18 +548,18 @@ export default function NegociosClient({
               {atrasadosCount}
             </span>
           </button>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
-            aria-label="Ordenar negocios"
-            className="rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-      )}
+        )}
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortKey)}
+          aria-label="Ordenar negocios"
+          className="ml-auto rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </BarraFiltros>
 
       {/* Sub-filtros Cerrados (motivo) */}
       {fase === 'cerrados' && cerrados.length > 0 && (
