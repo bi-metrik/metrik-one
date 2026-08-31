@@ -62,14 +62,37 @@ type Supabase = SupabaseClient<EsquemaSinGenerar>;
  * bota el texto libre con el error 131047 cuando el cliente no ha escrito en 24 horas,
  * que es el caso normal de un aviso de tramite. Va por NOMBRE y no por posicion de
  * etapa porque renombrar una etapa no puede romper un envio en silencio.
+ *
+ * ── Los tres copys y por que son tres ──────────────────────────────────────────
+ * `mensaje` es el copy que se basta solo: cuenta la novedad completa. Es el unico
+ * obligatorio y el unico que existia antes.
+ *
+ * `mensaje_email` es el copy propio del correo. Existe porque el correo NO tiene la
+ * restriccion que si tiene WhatsApp: fuera de la ventana de 24 horas Meta solo entrega
+ * plantillas aprobadas, cortas y con casillas fijas, mientras que un correo admite
+ * varios parrafos y el nombre de quien lo recibe. Si la etapa no lo declara, el correo
+ * usa `mensaje` y se comporta igual que siempre.
+ *
+ * `mensaje_whatsapp` es el copy que remite al correo ("te llego un correo con..."), y
+ * lo usa el WhatsApp SOLO cuando el correo efectivamente salio. Es lo que convierte al
+ * correo en la fuente de verdad sin obligar a mantener el mismo detalle en dos textos
+ * que se desincronizarian. Cuando el correo no sale —el cliente no tiene correo
+ * registrado, o el copy se omitio por falta de dato— WhatsApp vuelve a `mensaje`, que
+ * si se basta solo: avisar de un correo que nunca va a llegar es peor que no avisar.
+ *
+ * `campos_copy` declara de que bloque y de que campos salen los datos OPCIONALES del
+ * copy (en SOENA, el vehiculo de la factura). Ver `datosOpcionales`.
  */
 type AvisoCliente = {
   email?: boolean;
   whatsapp?: boolean;
   titulo?: string;
   mensaje?: string;
+  mensaje_email?: string;
+  mensaje_whatsapp?: string;
   link_bloque_slug?: string;
   plantilla?: string;
+  campos_copy?: CamposCopy;
 };
 
 /**
@@ -258,7 +281,11 @@ Deno.serve(async (req: Request) => {
   let waDisparado: string | null = null;
   let waOmitido: string | null = null;
   if (quiereClienteWa) {
-    const r = await enviarWhatsAppAlCliente(supabase, negocio, etapa?.nombre ?? '', avisoCliente!);
+    // Le pasa si el correo SALIO de verdad (no si la etapa lo pedia): es lo que decide
+    // si el WhatsApp puede remitir al correo o tiene que contar la novedad el mismo.
+    const r = await enviarWhatsAppAlCliente(
+      supabase, negocio, etapa?.nombre ?? '', avisoCliente!, clienteEnviado !== null,
+    );
     waDisparado = r.disparadoA;
     waOmitido = r.omitidoPor;
     await registrarAviso(supabase, negocio, etapa, {
@@ -547,6 +574,161 @@ function aplicarDatosDelCopy(texto: string, datos: DatosCopy): { texto: string; 
   return { texto: out, falta: null };
 }
 
+
+// ── Datos OPCIONALES del copy ────────────────────────────────────────────────
+// El nombre de quien recibe el aviso y, si la etapa lo declara, el objeto del tramite
+// (en SOENA el vehiculo de la factura). Sirven para que el correo hable como una
+// persona y no como un sistema.
+//
+// ⚠️ La diferencia con `datosDelCopy` es TODA la logica de este bloque: lo que falta
+// aqui NO omite el aviso. `{fecha_cita}` y `{link}` SON el aviso — sin ellos no hay
+// nada que decir y mandarlo a medias es peor que no mandarlo. El nombre y el vehiculo
+// solo lo hacen cercano: cancelar el aviso de los 21 negocios abiertos de SOENA cuya
+// factura no trae marca cambiaria un correo impersonal por NINGUN correo, que es peor
+// para el cliente y ademas se ve como exito en el log.
+//
+// Por eso el copy los envuelve en corchetes y el segmento entero desaparece cuando el
+// dato no esta (ver `aplicarOpcionales`).
+
+/** De que bloque y de que campos sale cada dato opcional, declarado por la etapa. */
+type CamposCopy = Record<string, { bloque_slug: string; campos: string[] }>;
+
+type Opcionales = Record<string, string | null>;
+
+const CLAVE_CLIENTE = 'cliente';
+
+/**
+ * Marcas de razon social. Un "contacto" que es una empresa no se saluda por su nombre:
+ * "Hola Inversiones." es peor que "Hola.". Medido en SOENA: 4 de 382 negocios abiertos
+ * tienen una razon social en el contacto (dos SAS, una LTDA, una CIA).
+ */
+const PARECE_EMPRESA = /(^|[\s.])(s\.?a\.?s?|ltda|cia|e\.?u\.?|leasing|banco|inversiones|sucursal)([\s.]|$)/i;
+
+/**
+ * "LINA ROSENDA BONILLA RUEDA" -> "Lina".
+ *
+ * Solo el primer nombre: es como saluda una persona, y el nombre completo en mayusculas
+ * suena a carta de cobro. Devuelve null cuando no hay a quien saludar (vacio, razon
+ * social, o una inicial suelta), y entonces el saludo se acomoda en vez de quedar a
+ * medias.
+ */
+function primerNombre(nombre: string | null): string | null {
+  const limpio = (nombre ?? '').trim().replace(/\s+/g, ' ');
+  if (!limpio || PARECE_EMPRESA.test(limpio)) return null;
+  const primero = limpio.split(' ')[0];
+  if (primero.length < 2) return null;
+  return primero.charAt(0).toUpperCase() + primero.slice(1).toLowerCase();
+}
+
+/**
+ * Resuelve los datos opcionales que el copy realmente usa.
+ *
+ * Si el copy no nombra ninguno, no consulta nada: un workspace que no declare
+ * `campos_copy` ni escriba `{cliente}` no paga una sola consulta de mas.
+ *
+ * @param texto el copy tal como lo declara la etapa, para saber que hace falta buscar.
+ */
+async function datosOpcionales(
+  supabase: Supabase,
+  negocio: Negocio,
+  camposCopy: CamposCopy,
+  texto: string,
+): Promise<Opcionales> {
+  const out: Opcionales = {};
+  const usadas = [CLAVE_CLIENTE, ...Object.keys(camposCopy)].filter((k) => texto.includes(`{${k}}`));
+  if (usadas.length === 0) return out;
+
+  if (usadas.includes(CLAVE_CLIENTE)) {
+    // El nombre sale del CONTACTO del negocio, que es tambien la primera fuente del
+    // correo en `email_cliente_negocio`: se saluda a quien recibe. Medido en SOENA:
+    // los 382 negocios abiertos tienen nombre de contacto.
+    const { data } = await supabase
+      .from('negocios')
+      .select('contactos(nombre)')
+      .eq('id', negocio.id)
+      .maybeSingle();
+    const nombre = (data?.contactos as { nombre?: string } | null)?.nombre ?? null;
+    out[CLAVE_CLIENTE] = primerNombre(nombre);
+  }
+
+  const declaradas = usadas.filter((k) => k !== CLAVE_CLIENTE);
+  if (declaradas.length === 0) return out;
+
+  // Mismo cuidado que en `datosDelCopy`: se piden los slugs concretos y no todos los
+  // bloques del negocio, porque Postgres descomprime el jsonb `data` entero por fila.
+  const slugs = [...new Set(declaradas.map((k) => camposCopy[k].bloque_slug).filter(Boolean))];
+  const { data: filas } = slugs.length > 0
+    ? await supabase
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocio.id)
+      .in('bloque_configs.slug', slugs)
+    : { data: [] };
+
+  const camposPorSlug = new Map<string, Record<string, unknown>>();
+  for (const fila of filas ?? []) {
+    const slug = (fila?.bloque_configs as { slug?: string } | null)?.slug;
+    if (!slug) continue;
+    const data = (fila?.data ?? {}) as { campos?: Record<string, unknown> };
+    camposPorSlug.set(slug, data.campos ?? {});
+  }
+
+  for (const clave of declaradas) {
+    const decl = camposCopy[clave];
+    const bag = camposPorSlug.get(decl.bloque_slug);
+    const valores = (decl.campos ?? []).map((c) => {
+      const v = (bag?.[c] as { value?: unknown } | undefined)?.value;
+      return typeof v === 'string' ? v.trim() : '';
+    });
+    // El PRIMER campo declarado es el ancla: sin el no hay nada que nombrar. Los demas
+    // se suman si estan. Con ["marca","linea","modelo"] eso da "TOYOTA RAV4" cuando
+    // falta el modelo, y nada cuando falta la marca.
+    //
+    // Los valores van TAL CUAL vienen de la factura, sin arreglarles las mayusculas:
+    // media marca del mercado es una sigla (BYD, KIA, MG, BMW, GAC, JAC) y "capitalizar"
+    // las convierte en Byd, Bmw, Jac. Un modelo en mayusculas se lee raro; una marca
+    // deformada se lee mal.
+    out[clave] = valores[0] ? valores.filter(Boolean).join(' ') : null;
+  }
+  return out;
+}
+
+/**
+ * Mete los datos opcionales en el copy y resuelve los segmentos entre corchetes.
+ *
+ * Un segmento `[...]` se conserva solo si TODOS los datos opcionales que nombra tienen
+ * valor; si falta alguno desaparece el segmento completo, con su texto fijo y sus
+ * espacios. Asi el copy se escribe UNA vez y se lee bien en los dos casos:
+ *
+ *   "Hola[ {cliente}]. Tu certificado[ de tu {vehiculo}] esta listo."
+ *     con los dos datos -> "Hola Lina. Tu certificado de tu TOYOTA RAV4 2026 esta listo."
+ *     sin ninguno       -> "Hola. Tu certificado esta listo."
+ *
+ * Un dato opcional FUERA de corchetes se reemplaza por vacio y el espacio sobrante se
+ * colapsa: es la red para un copy mal escrito, deja una frase pobre y nunca una rota.
+ *
+ * ⚠️ `{fecha_cita}` y `{link}` NO van dentro de corchetes: los resuelve
+ * `aplicarDatosDelCopy`, que corre antes y omite el aviso si faltan. Meterlos aqui
+ * convertiria una omision deliberada en una frase incompleta.
+ */
+function aplicarOpcionales(texto: string, datos: Opcionales): string {
+  const claves = Object.keys(datos);
+  if (claves.length === 0) return texto;
+
+  const sinSegmentosMuertos = texto.replace(/\[([^\][]*)\]/g, (_todo, dentro: string) =>
+    claves.some((k) => !datos[k] && dentro.includes(`{${k}}`)) ? '' : dentro
+  );
+
+  let out = sinSegmentosMuertos;
+  for (const clave of claves) out = out.replaceAll(`{${clave}}`, datos[clave] ?? '');
+
+  return out
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([,.;:!?])/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
+
 /**
  * Aviso de avance al CLIENTE.
  *
@@ -620,7 +802,10 @@ async function enviarAlCliente(
   const cuerpoDefault = replyTo
     ? 'Te contamos que tu tramite paso a la etapa "{etapa}". Cualquier duda, responde a este correo.'
     : 'Te contamos que tu tramite paso a la etapa "{etapa}".';
-  const base = (cfg.mensaje ?? cuerpoDefault)
+  // El correo prefiere su PROPIO copy. Es el canal sin restriccion de plantilla, asi que
+  // es donde tiene sentido escribir mas de una linea y saludar por el nombre. Sin
+  // `mensaje_email` declarado cae a `mensaje` y nada cambia para los demas workspaces.
+  const base = (cfg.mensaje_email ?? cfg.mensaje ?? cuerpoDefault)
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
@@ -629,7 +814,27 @@ async function enviarAlCliente(
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
     return { ...CORREO_VACIO, estado: 'omitido', omitidoPor: `sin_${resuelto.falta}`, destinatarioReal, respondeA: replyTo };
   }
-  const cuerpo = resuelto.texto;
+  // Los opcionales se resuelven DESPUES de los obligatorios, a proposito: asi la
+  // decision de omitir el aviso se toma sobre el copy tal como lo escribio la etapa, sin
+  // que un segmento retirado pueda cambiarla.
+  const cuerpo = aplicarOpcionales(
+    resuelto.texto,
+    await datosOpcionales(supabase, negocio, cfg.campos_copy ?? {}, base),
+  );
+
+
+  // El copy del correo puede traer varios parrafos, separados por una linea en blanco.
+  // Sin esto se pegarian todos en un bloque: el HTML ignora los saltos de linea del
+  // texto, y un correo de cuatro frases seguidas es justo lo que este cambio evita.
+  const parrafos: string[] = cuerpo.split(/\n{2,}/).map((t: string) => t.trim()).filter(Boolean);
+  const cuerpoHtml = parrafos
+    .map((t: string, i: number) => {
+      const abajo = i === parrafos.length - 1 ? 20 : 14;
+      return `<p style="margin:0 0 ${abajo}px;font-size:14px;line-height:1.6;color:#374151">${
+        escapar(t).replaceAll('\n', '<br>')
+      }</p>`;
+    })
+    .join('\n    ');
 
   // El aviso de prueba va DENTRO de la tarjeta y arriba de todo: si fuera al pie, en un
   // correo largo se leeria despues del mensaje que se esta revisando.
@@ -646,7 +851,7 @@ async function enviarAlCliente(
     ${avisoPrueba}
     <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(marca)}</p>
     <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
-    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151">${escapar(cuerpo)}</p>
+    ${cuerpoHtml}
     ${negocio.codigo ? `<p style="margin:0 0 22px;font-size:13px;color:#6B7280">Radicado: <strong style="color:#1A1A1A">${escapar(negocio.codigo)}</strong></p>` : ''}
     <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">
       Recibes este aviso porque ${escapar(marca)} gestiona un tramite a tu nombre.${
@@ -718,6 +923,7 @@ async function enviarWhatsAppAlCliente(
   negocio: Negocio,
   etapaNombre: string,
   cfg: AvisoCliente,
+  correoEnviado: boolean,
 ): Promise<ResultadoWhatsApp> {
   const { data: ws } = await supabase
     .from('workspaces')
@@ -758,9 +964,22 @@ async function enviarWhatsAppAlCliente(
 
   const comercial = await comercialDelNegocio(supabase, negocio.id);
 
-  // El mismo copy del correo, con los mismos reemplazos: si los dos canales dijeran
-  // cosas distintas sobre el mismo hecho, el cliente creería la peor de las dos.
-  const base = (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}".')
+  // ── Que copy manda ────────────────────────────────────────────────────────
+  // Cuando la etapa declara `mensaje_whatsapp`, el correo es la fuente de verdad y el
+  // WhatsApp solo avisa que llego. Eso evita mantener el mismo detalle en dos textos
+  // que se desincronizarian, y deja el detalle donde cabe: el correo no tiene la
+  // restriccion de plantilla que Meta le impone al WhatsApp.
+  //
+  // ⚠️ Pero ese aviso solo es CIERTO si el correo salio. Si no salio —el cliente no
+  // tiene correo registrado (27 de 382 abiertos en SOENA tienen celular y no correo), o
+  // el copy del correo se omitio por falta de dato, o la etapa no manda correo— se usa
+  // `mensaje`, que se basta solo. Decirle "te escribimos al correo" a quien no va a
+  // recibir ningun correo lo deja esperando algo que no existe, y en el log se ve como
+  // un cliente avisado.
+  const copy = (correoEnviado && cfg.mensaje_whatsapp)
+    ? cfg.mensaje_whatsapp
+    : (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}".');
+  const base = copy
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
@@ -772,7 +991,10 @@ async function enviarWhatsAppAlCliente(
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
     return { estado: 'omitido', disparadoA: null, omitidoPor: `sin_${resuelto.falta}` };
   }
-  const cuerpo = resuelto.texto;
+  const cuerpo = aplicarOpcionales(
+    resuelto.texto,
+    await datosOpcionales(supabase, negocio, cfg.campos_copy ?? {}, base),
+  );
 
   try {
     const res = await fetch(url, {
@@ -788,9 +1010,10 @@ async function enviarWhatsAppAlCliente(
         //
         // Las variables de una plantilla de FunnelChat NO son argumentos del disparo:
         // cada una queda amarrada a un CAMPO del contacto, y el disparador las llena
-        // antes de mandar. Por eso `link` y `fecha_cita` viajan sueltos aunque ya vayan
-        // interpolados dentro de `mensaje`: dentro del texto FunnelChat no los puede
-        // sacar, y la plantilla saldría con las casillas vacías.
+        // antes de mandar. Por eso `link` y `fecha_cita` viajan sueltos aunque el texto
+        // libre ya los traiga (o ya no los nombre, cuando el copy remite al correo):
+        // dentro del texto FunnelChat no los puede sacar, y la plantilla saldría con las
+        // casillas vacías.
         //
         // Van en blanco cuando la etapa no los usa. Un campo vacío en el contacto es
         // correcto para una plantilla que no lo referencia; lo que nunca puede pasar es
