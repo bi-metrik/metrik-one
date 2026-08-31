@@ -13,11 +13,12 @@ import type { UniversoSegmentacion } from '@/lib/valida/segmentacion-presets';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import { getCachedUser } from '@/lib/supabase/auth-user'
-import { cargarCatalogoTierVigente } from './compliance-tier-catalogo';
-import { clasificarConsulta, verificarCeroSupresion, type TierResuelto } from '@/lib/compliance/tier-fuentes';
-import { cargarConfigPeriodicidad } from './compliance-periodicidad';
-import { calcularVigencia } from '@/lib/compliance/periodicidad';
-import { todayBogotaISO } from '@/lib/dates/bogota';
+import {
+  mapListItem,
+  mapMetrics,
+  type DualRowCruda,
+  type DualMetricsCrudas,
+} from '@/lib/compliance/dual-mapeo';
 import {
   clasificarParaGuardar,
   calcularVigenciaParaGuardar,
@@ -31,12 +32,24 @@ const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metri
 
 export type DualMode = 'documento' | 'nombre';
 export type DualTipo = 'natural' | 'juridica';
+/**
+ * Los siete valores del enum `clasificacion_dual` en la base de Valida
+ * (`db/migrations/0004_consultas_dual.sql`). Antes esta lista decia
+ * `match_match` y `pendiente`, que no existen: el filtro no podia acertar
+ * nunca y los dos casos que SI hay que auditar de verdad
+ * (`ambos_misma_entidad` y `ambos_distinta_entidad`) no eran nombrables.
+ */
 export type DualClasificacion =
   | 'zero_zero'
-  | 'match_match'
   | 'solo_informa'
   | 'solo_valida'
-  | 'pendiente';
+  | 'ambos_misma_entidad'
+  | 'ambos_distinta_entidad'
+  | 'error_informa'
+  | 'error_valida';
+
+/** `masiva` solo aparece en filas ya guardadas; no se puede pedir desde la UI. */
+export type DualModoRegistrado = DualMode | 'masiva';
 
 export type DualDecision =
   | 'valida_correcto'
@@ -110,8 +123,8 @@ export type DualListItem = {
   dual_id: string;
   workspace_origen: string;
   fecha: string;
-  modo: DualMode;
-  tipo: DualTipo;
+  modo: DualModoRegistrado;
+  tipo: DualTipo | null;
   identificacion: string | null;
   nombre: string | null;
   count_informa: number;
@@ -119,6 +132,8 @@ export type DualListItem = {
   clasificacion: DualClasificacion;
   auditada: boolean;
   decision: DualDecision | null;
+  /** Informa respondio con datos sembrados: la comparacion no mide nada. */
+  stub_mode: boolean;
 };
 
 export type DualListResponse = {
@@ -132,14 +147,15 @@ export type DualDetail = {
   dual_id: string;
   workspace_origen: string;
   fecha: string;
-  modo: DualMode;
-  tipo: DualTipo;
+  modo: DualModoRegistrado;
+  tipo: DualTipo | null;
   identificacion: string | null;
   nombre: string | null;
   clasificacion: DualClasificacion;
   auditada: boolean;
   decision: DualDecision | null;
   notas: string | null;
+  stub_mode: boolean;
   informa: {
     total_matches: number;
     matches: InformaMatch[];
@@ -154,6 +170,9 @@ export type DualDetail = {
 
 export type DualMetrics = {
   total_consultas: number;
+  /** Consultas con Informa en stub que quedaron fuera del calculo. */
+  stub_excluidas: number;
+  incluye_stub: boolean;
   pct_zero_zero: number;
   pct_divergencia: number;
   pendientes_auditoria: number;
@@ -162,8 +181,11 @@ export type DualMetrics = {
   precision: number | null;
   cumple_umbral_vera: boolean;
   veredictos: Record<DualDecision, number>;
+  contadores_por_clasificacion: Partial<Record<DualClasificacion, number>>;
   por_lista: Array<{
     lista: string;
+    /** Quien nombro esa lista: `informa`, `valida` o ambos. No se fusionan. */
+    origen: string;
     positivos_auditados: number;
     recall: number | null;
     precision: number | null;
@@ -396,10 +418,12 @@ export type DualListFilters = {
   page?: number;
   pageSize?: number;
   clasificacion?: DualClasificacion[];
-  workspace?: string; // slug
+  workspace?: string; // slug; vacio = todos
   desde?: string; // ISO date
   hasta?: string; // ISO date
   auditada?: 'true' | 'false' | 'all';
+  /** Por defecto la bitacora esconde el stub: no es evidencia de nada. */
+  stub?: 'true' | 'false' | 'all';
 };
 
 async function ensureWorkspaceMetrik(): Promise<Result<{ slug: 'metrik' }>> {
@@ -410,17 +434,30 @@ async function ensureWorkspaceMetrik(): Promise<Result<{ slug: 'metrik' }>> {
   return { ok: true, data: { slug: 'metrik' } };
 }
 
+function auditHeaders(): Record<string, string> {
+  return {
+    Authorization: `Bearer ${getApiKey()}`,
+    'x-metrik-audit': getAuditSecret(),
+  };
+}
+
 export async function listarConsultasDuales(
   filters: DualListFilters = {}
 ): Promise<Result<DualListResponse>> {
   const guard = await ensureWorkspaceMetrik();
   if (!guard.ok) return guard;
 
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.min(500, Math.max(1, filters.pageSize ?? 50));
+
   try {
     const url = new URL(`${VALIDA_API_BASE}/api/v1/compliance/dual/list`);
-    url.searchParams.set('workspace', filters.workspace ?? 'all');
-    url.searchParams.set('page', String(filters.page ?? 1));
-    url.searchParams.set('page_size', String(filters.pageSize ?? 50));
+    // La API pagina con limit/offset. Mandarle page/page_size no le decia nada:
+    // devolvia siempre las primeras 50 y la UI se quedaba sin controles.
+    url.searchParams.set('limit', String(pageSize));
+    url.searchParams.set('offset', String((page - 1) * pageSize));
+    const ws = filters.workspace?.trim();
+    if (ws) url.searchParams.set('workspace', ws);
     if (filters.clasificacion?.length) {
       url.searchParams.set('clasificacion', filters.clasificacion.join(','));
     }
@@ -429,19 +466,48 @@ export async function listarConsultasDuales(
     if (filters.auditada && filters.auditada !== 'all') {
       url.searchParams.set('auditada', filters.auditada);
     }
+    if (filters.stub && filters.stub !== 'all') {
+      url.searchParams.set('stub', filters.stub);
+    }
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${getApiKey()}`,
-        'x-metrik-audit': getAuditSecret(),
+    const res = await fetch(url.toString(), { headers: auditHeaders(), cache: 'no-store' });
+    const r = await jsonOrError<{ total: number; items: DualRowCruda[] }>(res);
+    if (!r.ok) return r;
+
+    return {
+      ok: true,
+      data: {
+        total: r.data.total ?? 0,
+        page,
+        page_size: pageSize,
+        // El mapeador devuelve los valores tal como vienen del enum de Postgres,
+        // como `string`. El estrechamiento a la union se afirma aqui, en el borde:
+        // si Valida agrega un valor al enum, la UI lo muestra crudo en vez de
+        // romperse, que es el comportamiento que queremos en un instrumento.
+        items: (r.data.items ?? []).map(x => mapListItem(x) as DualListItem),
       },
-      cache: 'no-store',
-    });
-    return jsonOrError<DualListResponse>(res);
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
   }
 }
+
+type DualDetalleCrudo = DualRowCruda & {
+  informa_raw: unknown;
+  informa_entidades: Array<{
+    lista?: string | null;
+    nombre?: string | null;
+    documento?: string | null;
+    fundamento?: string | null;
+  }> | null;
+  valida_entidades: Array<{
+    lista_slug?: string | null;
+    nombre_principal?: string | null;
+    score_final?: number | null;
+  }> | null;
+  valida_raw?: unknown;
+  auditor_notas: string | null;
+};
 
 export async function obtenerConsultaDual(dualId: string): Promise<Result<DualDetail>> {
   const guard = await ensureWorkspaceMetrik();
@@ -449,13 +515,45 @@ export async function obtenerConsultaDual(dualId: string): Promise<Result<DualDe
 
   try {
     const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/${dualId}`, {
-      headers: {
-        Authorization: `Bearer ${getApiKey()}`,
-        'x-metrik-audit': getAuditSecret(),
-      },
+      headers: auditHeaders(),
       cache: 'no-store',
     });
-    return jsonOrError<DualDetail>(res);
+    const r = await jsonOrError<DualDetalleCrudo>(res);
+    if (!r.ok) return r;
+    const d = r.data;
+    const base = mapListItem(d) as DualListItem;
+
+    // `fundamento` solo existe en filas guardadas despues de que Valida empezo a
+    // persistirlo. En las viejas queda null y el auditor tiene que ir al raw.
+    const informaMatches: InformaMatch[] = (d.informa_entidades ?? []).map(e => ({
+      lista: e.lista ?? '—',
+      nombre: e.nombre ?? '—',
+      documento: e.documento ?? null,
+      fundamento: e.fundamento ?? null,
+    }));
+    const validaMatches: ValidaMatchSummary[] = (d.valida_entidades ?? []).map(e => ({
+      lista_slug: e.lista_slug ?? '—',
+      nombre_principal: e.nombre_principal ?? '—',
+      score_final: e.score_final ?? 0,
+    }));
+
+    return {
+      ok: true,
+      data: {
+        ...base,
+        notas: d.auditor_notas ?? null,
+        informa: {
+          total_matches: d.informa_match_count ?? informaMatches.length,
+          matches: informaMatches,
+          raw: d.informa_raw ?? null,
+        },
+        valida: {
+          total_matches: d.valida_match_count ?? validaMatches.length,
+          matches: validaMatches,
+          raw: d.valida_raw ?? null,
+        },
+      },
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
   }
@@ -470,38 +568,50 @@ export async function registrarVeredicto(input: {
   if (!guard.ok) return guard;
 
   try {
+    // Un veredicto sin firma no es auditoria. `getCachedUser` da el usuario real
+    // incluso bajo "Ver como": quien responde por el juicio es quien lo emite.
+    const { user } = await getCachedUser();
+    const notas = input.notas?.trim();
+
+    const body: Record<string, unknown> = { decision: input.decision };
+    if (notas) body.notas = notas;
+    if (user?.id) body.auditor_id = user.id;
+
     const res = await fetch(
       `${VALIDA_API_BASE}/api/v1/compliance/dual/${input.dualId}/audit`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getApiKey()}`,
-          'x-metrik-audit': getAuditSecret(),
-        },
-        body: JSON.stringify({ decision: input.decision, notas: input.notas ?? null }),
+        headers: { 'Content-Type': 'application/json', ...auditHeaders() },
+        body: JSON.stringify(body),
         cache: 'no-store',
       }
     );
-    return jsonOrError<{ ok: true }>(res);
+    const r = await jsonOrError<unknown>(res);
+    return r.ok ? { ok: true, data: { ok: true } } : r;
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
   }
 }
 
-export async function obtenerMetricsDuales(): Promise<Result<DualMetrics>> {
+export async function obtenerMetricsDuales(
+  incluirStub = false
+): Promise<Result<DualMetrics>> {
   const guard = await ensureWorkspaceMetrik();
   if (!guard.ok) return guard;
 
   try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/compliance/dual/metrics`, {
-      headers: {
-        Authorization: `Bearer ${getApiKey()}`,
-        'x-metrik-audit': getAuditSecret(),
-      },
-      cache: 'no-store',
-    });
-    return jsonOrError<DualMetrics>(res);
+    const url = new URL(`${VALIDA_API_BASE}/api/v1/compliance/dual/metrics`);
+    if (incluirStub) url.searchParams.set('incluir_stub', 'true');
+
+    const res = await fetch(url.toString(), { headers: auditHeaders(), cache: 'no-store' });
+    const r = await jsonOrError<DualMetricsCrudas>(res);
+    if (!r.ok) return r;
+    const m = r.data;
+
+    // La API anida recall/precision bajo `metricas` y no aplana los veredictos.
+    // Leerlo plano devolvia `undefined` y el tablero reventaba en el primer
+    // `.toString()`. Cada campo se completa con su neutro, no con `undefined`.
+    return { ok: true, data: mapMetrics(m) as DualMetrics };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
   }
