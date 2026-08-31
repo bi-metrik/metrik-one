@@ -70,5 +70,9 @@ jobs:
         env:
           BASE_REF: origin/${{ github.base_ref }}
         run: |
-          git fetch origin "${{ github.base_ref }}" --depth=1 --quiet
+          # Sin --depth: el checkout ya trajo la historia completa y un fetch
+          # superficial la RECORTA, dejando la base sin ancestro comun con la
+          # rama en cuanto main avanza. El sintoma es "no merge base", que se
+          # lee como un problema del PR y es del propio check.
+          git fetch origin "${{ github.base_ref }}" --quiet
           node scripts/lint-lineas-cambiadas.mjs "$BASE_REF"
