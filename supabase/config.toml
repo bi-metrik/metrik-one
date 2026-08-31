@@ -440,3 +440,13 @@ verify_jwt = false
 # Disparada por el trigger `trg_avisar_entrada_etapa` via pg_net: NO lleva JWT
 # de Supabase. Se autentica con secret compartido (NOTIFICAR_ETAPA_SECRET).
 verify_jwt = false
+
+[functions.wa-canal-propio]
+# Webhook del canal de WhatsApp PROPIO de MeTRIK (numero corporativo via
+# Coexistence, app de Meta DEDICADA y separada del bot — decision 6 de la spec
+# 2026-08-20). Meta NO envia JWT de Supabase: la autenticidad se valida dentro
+# de la funcion con la firma HMAC-SHA256 (x-hub-signature-256 con
+# WA_CANAL_PROPIO_APP_SECRET) + el handshake GET con
+# WA_CANAL_PROPIO_VERIFY_TOKEN. Sin este flag, un redeploy aplica el default
+# true y Meta recibe 401 antes de que corra el codigo.
+verify_jwt = false
