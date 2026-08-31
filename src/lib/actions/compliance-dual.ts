@@ -13,6 +13,8 @@ import type { UniversoSegmentacion } from '@/lib/valida/segmentacion-presets';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { cargarCatalogoTierVigente } from './compliance-tier-catalogo';
+import { clasificarConsulta, verificarCeroSupresion } from '@/lib/compliance/tier-fuentes';
 
 // `||` (no `??`): una env vacia ("") debe caer al default igual que si estuviera ausente.
 // Vercel puede inyectar VALIDA_API_BASE="" y `??` la dejaria pasar -> URL relativa rota.
@@ -647,6 +649,12 @@ export async function consultaDualPersistente(
 
   const severidad: DualSeveridad = r.data.total_matches > 0 ? 'alto' : 'sin_hallazgo';
 
+  // Clasificación por tier en modo OBSERVABLE (concepto Emilio 2026-08-31, C1).
+  // `severidad` NO se toca: sigue siendo el único campo del que dependen la
+  // bandeja del oficial y la auditoría de contrataciones. El tier se guarda al
+  // lado para poder medirlo, y no decide nada hasta el bloque B.
+  const clasificacion = await clasificarParaGuardar(r.data.matches);
+
   const { data: row, error: errIns } = await svc
     .from('consultas_listas_dual')
     .insert({
@@ -656,6 +664,7 @@ export async function consultaDualPersistente(
       severidad,
       total_matches: r.data.total_matches,
       matches: r.data.matches,
+      ...clasificacion,
     })
     .select('id')
     .single();
@@ -673,6 +682,88 @@ export async function consultaDualPersistente(
       segmento_id: segmento.data.id,
       segmento_nombre: segmento.data.nombre,
     },
+  };
+}
+
+/** Las columnas de clasificación que se escriben junto a la consulta. */
+export type ClasificacionPersistida = {
+  tier_catalogo_version: number | null;
+  tier_maximo: string | null;
+  tier_sin_clasificar: boolean;
+  tier_fuentes_sin_clasificar: string[] | null;
+  tier_hallazgos: number | null;
+  tier_duplicados: number | null;
+  tier_opera: boolean | null;
+};
+
+/**
+ * Clasifica las coincidencias para guardarlas junto a la consulta.
+ *
+ * Tres caminos de fallo, y los tres caen del mismo lado:
+ *
+ *   - Sin catálogo sembrado: no se clasifica y se marca `tier_sin_clasificar`.
+ *   - El catálogo no resuelve alguna fuente (C4): se clasifica y se marca igual.
+ *   - La verificación de cero supresión falla (C3): se DESCARTA la clasificación
+ *     entera y se marca igual.
+ *
+ * `tier_sin_clasificar` es lo que enruta al canal de mayor exigencia. Que los
+ * tres caminos terminen ahí no es pereza: los tres significan lo mismo, que no
+ * sabemos qué es lo que la fuente devolvió, y ante esa duda el lado correcto es
+ * el que exige más.
+ *
+ * Nunca lanza. La consulta ya se pagó contra la cuenta del cliente: perderla por
+ * un problema de clasificación sería cambiar un dato incompleto por ninguno.
+ */
+async function clasificarParaGuardar(
+  matches: InformaMatch[] | null | undefined,
+): Promise<ClasificacionPersistida> {
+  const sinClasificacion: ClasificacionPersistida = {
+    tier_catalogo_version: null,
+    tier_maximo: null,
+    tier_sin_clasificar: true,
+    tier_fuentes_sin_clasificar: null,
+    tier_hallazgos: null,
+    tier_duplicados: null,
+    tier_opera: null,
+  };
+
+  // Una consulta sin coincidencias no tiene nada que clasificar, y marcarla
+  // como sin clasificar sería mandar al canal de mayor exigencia a una
+  // contraparte que salió limpia.
+  if (!matches || matches.length === 0) {
+    return { ...sinClasificacion, tier_sin_clasificar: false };
+  }
+
+  let catalogo;
+  try {
+    catalogo = await cargarCatalogoTierVigente();
+  } catch {
+    return sinClasificacion;
+  }
+  if (!catalogo) return sinClasificacion;
+
+  const clasificada = clasificarConsulta(matches, catalogo);
+
+  // C3: si la clasificación perdió una coincidencia, no se guarda. Un conteo que
+  // esconde un hallazgo es peor que no tener conteo.
+  if (!verificarCeroSupresion(clasificada, matches.length)) {
+    console.error(
+      '[tier] cero_supresion_violada',
+      { devueltas: matches.length, hallazgos: clasificada.hallazgos.length, duplicados: clasificada.duplicados.length },
+    );
+    return { ...sinClasificacion, tier_catalogo_version: catalogo.version };
+  }
+
+  return {
+    tier_catalogo_version: catalogo.version,
+    tier_maximo: clasificada.tierMaximo,
+    tier_sin_clasificar: clasificada.haySinClasificar,
+    tier_fuentes_sin_clasificar: clasificada.fuentesSinClasificar.length > 0
+      ? clasificada.fuentesSinClasificar
+      : null,
+    tier_hallazgos: clasificada.hallazgos.length,
+    tier_duplicados: clasificada.duplicados.length,
+    tier_opera: clasificada.opera,
   };
 }
 
