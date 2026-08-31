@@ -138,11 +138,25 @@ export const ETIQUETAS_ORDENADAS: readonly DefinicionEtiqueta[] =
 export function etiquetaDeContraparte(
   tieneHallazgo: boolean,
   motivo: MotivoCobertura,
+  /**
+   * R3: el barrido encontró un cambio POSTERIOR a la liberación vigente.
+   *
+   * "Una decisión tomada sobre 10 reportes no cubre 20" —Yessica, 2026-08-18—.
+   * La liberación no se toca: sigue vigente y sigue en la bitácora. Lo que deja
+   * de ser cierto es el hecho sobre el que se firmó, y por eso la contraparte
+   * vuelve a la cola del oficial en vez de quedarse en reposo.
+   *
+   * Se recibe como parámetro y no se consulta acá: sigue siendo derivación, no
+   * estado guardado, y la función se prueba sin base de datos. Opcional para no
+   * obligar a los llamadores que no tienen barridos —la auditoría de compras de
+   * R5, entre ellos— a inventarse un valor.
+   */
+  premisaCambiada: boolean = false,
 ): EtiquetaBandeja {
   if (!tieneHallazgo) return 'vigilancia_continua';
   switch (motivo) {
     case 'vigente':
-      return 'excepciones_vigentes';
+      return premisaCambiada ? 'hallazgos_sin_decidir' : 'excepciones_vigentes';
     case 'rechazada':
       return 'rechazadas';
     case 'vencida':
