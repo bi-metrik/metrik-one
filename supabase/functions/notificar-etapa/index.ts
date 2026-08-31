@@ -647,7 +647,12 @@ async function datosOpcionales(
       .select('contactos(nombre)')
       .eq('id', negocio.id)
       .maybeSingle();
-    const nombre = (data?.contactos as { nombre?: string } | null)?.nombre ?? null;
+    // PostgREST devuelve la relacion a-uno como objeto, pero segun la version del
+    // esquema la misma consulta puede volver como arreglo de uno. Sin contemplar las dos
+    // formas el saludo se degrada a "Hola." sin que nada falle: el correo sale, se ve
+    // bien, y le falta justo lo que este cambio vino a poner.
+    const rel = data?.contactos as { nombre?: string } | Array<{ nombre?: string }> | null;
+    const nombre = (Array.isArray(rel) ? rel[0]?.nombre : rel?.nombre) ?? null;
     out[CLAVE_CLIENTE] = primerNombre(nombre);
   }
 
