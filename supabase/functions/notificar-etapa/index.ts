@@ -683,14 +683,45 @@ async function datosOpcionales(
     // El PRIMER campo declarado es el ancla: sin el no hay nada que nombrar. Los demas
     // se suman si estan. Con ["marca","linea","modelo"] eso da "TOYOTA RAV4" cuando
     // falta el modelo, y nada cuando falta la marca.
-    //
-    // Los valores van TAL CUAL vienen de la factura, sin arreglarles las mayusculas:
-    // media marca del mercado es una sigla (BYD, KIA, MG, BMW, GAC, JAC) y "capitalizar"
-    // las convierte en Byd, Bmw, Jac. Un modelo en mayusculas se lee raro; una marca
-    // deformada se lee mal.
-    out[clave] = valores[0] ? valores.filter(Boolean).join(' ') : null;
+    out[clave] = valores[0] ? unir(valores.filter(Boolean)) : null;
   }
   return out;
+}
+
+/**
+ * Une los campos de un dato opcional sin repetir lo que ya se dijo.
+ *
+ * Los valores van TAL CUAL vienen del documento, sin arreglarles las mayusculas: media
+ * marca del mercado es una sigla (BYD, KIA, MG, BMW, GAC, JAC) y "capitalizar" las
+ * convierte en Byd, Bmw, Jac. Un modelo en mayusculas se lee raro; una marca deformada
+ * se lee mal.
+ *
+ * Lo que si hay que resolver es la repeticion, porque quien digita la factura suele
+ * escribir la marca otra vez dentro de la linea. Medido en SOENA: pasa en 37 de los 362
+ * negocios abiertos con marca — marca "FORESTER" y linea "FORESTER TOURING S-HEV" darian
+ * "FORESTER FORESTER TOURING S-HEV" en un correo al cliente. Tres casos:
+ *
+ *   · el siguiente EMPIEZA con lo que ya se dijo -> lo reemplaza (es la version larga)
+ *   · lo que ya se dijo YA CONTIENE al siguiente -> se descarta
+ *   · nada en comun -> se agrega
+ *
+ * La comparacion exige PALABRA COMPLETA, y por eso marca "MG" con linea "MG3 HYBRID"
+ * queda como "MG MG3 HYBRID" en vez de "MG3 HYBRID": es redundante, pero un prefijo
+ * suelto no distingue esa repeticion de una marca que apenas se parece al inicio de la
+ * linea, y ahi se perderia la marca. Redundante se lee mal; incompleto dice otra cosa.
+ */
+function unir(valores: string[]): string {
+  let texto = '';
+  for (const bruto of valores) {
+    const v = bruto.replace(/\s+/g, ' ').trim();
+    if (!v) continue;
+    if (!texto) { texto = v; continue; }
+    const a = texto.toUpperCase();
+    const b = v.toUpperCase();
+    if (b === a || b.startsWith(`${a} `)) texto = v;
+    else if (!` ${a} `.includes(` ${b} `)) texto = `${texto} ${v}`;
+  }
+  return texto;
 }
 
 /**
