@@ -344,28 +344,30 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(1);
-    expect(r.data.pendientes[0].cobertura.motivo).toBe('sin_registro');
-    expect(r.data.cubiertas).toHaveLength(0);
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(1);
+    expect(r.data.hallazgos_sin_decidir[0].cobertura.motivo).toBe('sin_registro');
+    expect(r.data.excepciones_vigentes).toHaveLength(0);
   });
 
-  it('con liberación vigente pasa a cubiertas', async () => {
+  it('con liberación vigente pasa a excepciones vigentes', async () => {
     fixtures.compliance_liberaciones = [liberacion()];
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(0);
-    expect(r.data.cubiertas).toHaveLength(1);
-    expect(r.data.cubiertas[0].cobertura.motivo).toBe('vigente');
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(0);
+    expect(r.data.excepciones_vigentes).toHaveLength(1);
+    expect(r.data.excepciones_vigentes[0].cobertura.motivo).toBe('vigente');
   });
 
-  it('con la liberación vencida vuelve a pendientes sin que nadie la toque', async () => {
+  it('la liberación vencida cae en la alarma sola, sin que nadie la toque', async () => {
     fixtures.compliance_liberaciones = [liberacion({ vigente_hasta: '2026-08-20' })];
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(1);
-    expect(r.data.pendientes[0].cobertura.motivo).toBe('vencida');
+    expect(r.data.sin_cobertura_vigente).toHaveLength(1);
+    expect(r.data.sin_cobertura_vigente[0].cobertura.motivo).toBe('vencida');
+    // La vencida NO se mezcla con la cola de trabajo: es la alarma.
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(0);
   });
 
   it('un rechazo posterior deja la contraparte pendiente, no cubierta', async () => {
@@ -381,8 +383,10 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(1);
-    expect(r.data.pendientes[0].cobertura.motivo).toBe('rechazada');
+    expect(r.data.rechazadas).toHaveLength(1);
+    expect(r.data.rechazadas[0].cobertura.motivo).toBe('rechazada');
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(0);
+    expect(r.data.sin_cobertura_vigente).toHaveLength(0);
   });
 
   it('la liberación cubre aunque la consulta escriba el documento distinto', async () => {
@@ -391,7 +395,7 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.cubiertas).toHaveLength(1);
+    expect(r.data.excepciones_vigentes).toHaveLength(1);
   });
 
   it('agrupa varias consultas de la misma contraparte y decide sobre la más reciente', async () => {
@@ -402,10 +406,10 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(1);
-    expect(r.data.pendientes[0].consultas).toHaveLength(2);
-    expect(r.data.pendientes[0].consulta_vigente_id).toBe('consulta-nueva');
-    expect(r.data.pendientes[0].total_matches).toBe(5);
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(1);
+    expect(r.data.hallazgos_sin_decidir[0].consultas).toHaveLength(2);
+    expect(r.data.hallazgos_sin_decidir[0].consulta_vigente_id).toBe('consulta-nueva');
+    expect(r.data.hallazgos_sin_decidir[0].total_matches).toBe(5);
   });
 
   it('un hallazgo sin documento se reporta aparte, NO se descarta en silencio', async () => {
@@ -423,7 +427,7 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     if (!r.ok) throw new Error('inalcanzable');
     expect(r.data.sin_documento).toHaveLength(1);
     expect(r.data.sin_documento[0].nombre).toBe('Deloitte');
-    expect(r.data.pendientes).toHaveLength(1);
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(1);
   });
 
   it('las liberaciones de otro workspace no cubren nada aquí', async () => {
@@ -431,7 +435,7 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(1);
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(1);
   });
 
   it('las consultas de otro workspace no aparecen', async () => {
@@ -439,7 +443,92 @@ describe('listarTableroLiberaciones — el estado se deriva', () => {
     const r = await listarTableroLiberaciones();
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('inalcanzable');
-    expect(r.data.pendientes).toHaveLength(0);
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(0);
+    expect(r.data.vigilancia_continua).toBe(0);
+  });
+});
+
+// ─── Las cinco poblaciones ─────────────────────────────────────────────────
+
+describe('bandeja — las cinco poblaciones no se mezclan', () => {
+  it('las tres sin cobertura caen en tres bandejas distintas', async () => {
+    fixtures.consultas_listas_dual = [
+      consulta({ id: 'c-nunca', documento_numero: '900000001' }),
+      consulta({ id: 'c-vencida', documento_numero: '900000002' }),
+      consulta({ id: 'c-rechazada', documento_numero: '900000003' }),
+    ];
+    fixtures.compliance_liberaciones = [
+      liberacion({ id: 'l-vencida', documento_numero: '900000002', vigente_hasta: '2026-08-20' }),
+      liberacion({
+        id: 'l-rechazada', documento_numero: '900000003',
+        decision: 'rechazada', vigente_hasta: null,
+      }),
+    ];
+    const r = await listarTableroLiberaciones();
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('inalcanzable');
+    expect(r.data.hallazgos_sin_decidir.map((c) => c.documento_numero)).toEqual(['900000001']);
+    expect(r.data.sin_cobertura_vigente.map((c) => c.documento_numero)).toEqual(['900000002']);
+    expect(r.data.rechazadas.map((c) => c.documento_numero)).toEqual(['900000003']);
+  });
+
+  // Regla del dictamen: la población la define la ÚLTIMA consulta. Una
+  // contraparte que se re-consultó y salió limpia deja de pedir decisión.
+  it('re-consultada y limpia sale de la cola, aunque conserve el hallazgo viejo', async () => {
+    fixtures.consultas_listas_dual = [
+      consulta({ id: 'c-vieja', created_at: '2026-06-01T10:00:00.000Z' }),
+      consulta({
+        id: 'c-nueva', created_at: '2026-08-20T10:00:00.000Z',
+        severidad: 'sin_hallazgo', total_matches: 0, matches: [],
+      }),
+    ];
+    const r = await listarTableroLiberaciones();
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('inalcanzable');
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(0);
+    expect(r.data.vigilancia_continua).toBe(1);
+  });
+
+  // El falso negativo de agosto, en otra capa: una consulta que FALLÓ no dice
+  // que la contraparte esté limpia. Contarla como vigilancia continua sería
+  // presentar "no se supo" como "sin hallazgo".
+  it('una consulta con error no cuenta como limpia', async () => {
+    fixtures.consultas_listas_dual = [
+      consulta({ id: 'c-error', severidad: 'error', total_matches: 0, matches: [] }),
+    ];
+    const r = await listarTableroLiberaciones();
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('inalcanzable');
+    expect(r.data.vigilancia_continua).toBe(0);
+    expect(r.data.sin_resultado).toBe(1);
+    expect(r.data.hallazgos_sin_decidir).toHaveLength(0);
+  });
+
+  it('la cola se ordena por antigüedad: el hallazgo más viejo arriba', async () => {
+    fixtures.consultas_listas_dual = [
+      consulta({ id: 'c-nueva', documento_numero: '900000001', created_at: '2026-08-20T10:00:00.000Z' }),
+      consulta({ id: 'c-vieja', documento_numero: '900000002', created_at: '2026-05-01T10:00:00.000Z' }),
+    ];
+    const r = await listarTableroLiberaciones();
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('inalcanzable');
+    expect(r.data.hallazgos_sin_decidir.map((c) => c.documento_numero))
+      .toEqual(['900000002', '900000001']);
+  });
+
+  it('los indicadores miden represamiento y exposición', async () => {
+    fixtures.consultas_listas_dual = [
+      consulta({ id: 'c-vieja', documento_numero: '900000002', created_at: '2026-05-01T10:00:00.000Z' }),
+      consulta({ id: 'c-vencida', documento_numero: '900000003' }),
+    ];
+    fixtures.compliance_liberaciones = [
+      liberacion({ id: 'l-v', documento_numero: '900000003', vigente_hasta: '2026-08-20' }),
+    ];
+    const r = await listarTableroLiberaciones();
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('inalcanzable');
+    expect(r.data.indicadores.sin_cobertura_vigente).toBe(1);
+    expect(r.data.indicadores.antiguedad_max_sin_decidir_dias).toBeGreaterThan(100);
   });
 });
 
