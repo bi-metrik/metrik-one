@@ -29,13 +29,25 @@ import { formatFecha } from '@/lib/dates/bogota'
 
 type TabKey = 'cronologico' | 'dashboard';
 
-const CLASIFICACIONES: Array<{ value: DualClasificacion; label: string; color: string }> = [
-  { value: 'zero_zero', label: 'Sin matches', color: 'bg-[#10B981]/10 text-[#065F46] border-[#10B981]/30' },
-  { value: 'match_match', label: 'Ambos coinciden', color: 'bg-[#1A1A1A] text-white border-[#1A1A1A]' },
-  { value: 'solo_informa', label: 'Solo Informa', color: 'bg-[#F59E0B]/10 text-[#92400E] border-[#F59E0B]/30' },
-  { value: 'solo_valida', label: 'Solo Valida', color: 'bg-[#3B82F6]/10 text-[#1E40AF] border-[#3B82F6]/30' },
-  { value: 'pendiente', label: 'Pendiente', color: 'bg-[#6B7280]/10 text-[#374151] border-[#6B7280]/30' },
+// Los siete valores del enum en la base de Valida. `auditable` marca los que un
+// humano tiene que mirar: `zero_zero` es volumen y `error_*` es una llamada que
+// nunca llego a comparar nada.
+const CLASIFICACIONES: Array<{
+  value: DualClasificacion;
+  label: string;
+  color: string;
+  auditable: boolean;
+}> = [
+  { value: 'zero_zero', label: 'Sin matches', color: 'bg-[#10B981]/10 text-[#065F46] border-[#10B981]/30', auditable: false },
+  { value: 'ambos_misma_entidad', label: 'Ambos — misma entidad', color: 'bg-[#1A1A1A] text-white border-[#1A1A1A]', auditable: true },
+  { value: 'ambos_distinta_entidad', label: 'Ambos — distinta entidad', color: 'bg-[#8B5CF6]/10 text-[#5B21B6] border-[#8B5CF6]/30', auditable: true },
+  { value: 'solo_informa', label: 'Solo Informa', color: 'bg-[#F59E0B]/10 text-[#92400E] border-[#F59E0B]/30', auditable: true },
+  { value: 'solo_valida', label: 'Solo Valida', color: 'bg-[#3B82F6]/10 text-[#1E40AF] border-[#3B82F6]/30', auditable: true },
+  { value: 'error_informa', label: 'Error Informa', color: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30', auditable: false },
+  { value: 'error_valida', label: 'Error Valida', color: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30', auditable: false },
 ];
+
+const AUDITABLES = CLASIFICACIONES.filter(c => c.auditable).map(c => c.value);
 
 const DECISIONES: Array<{ value: DualDecision; label: string; descripcion: string }> = [
   { value: 'valida_correcto', label: 'Valida correcto', descripcion: 'Coincide con Informa o ambos sin matches válidos' },
@@ -104,6 +116,10 @@ function CronologicoTab() {
   const [clasificacionFilter, setClasificacionFilter] = useState<DualClasificacion[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState('');
   const [auditadaFilter, setAuditadaFilter] = useState<'all' | 'true' | 'false'>('all');
+  // Por defecto la bitacora esconde el stub. Una comparacion contra datos
+  // sembrados no dice nada sobre Valida, y mezclada con las reales solo engorda
+  // el conteo.
+  const [stubFilter, setStubFilter] = useState<'all' | 'true' | 'false'>('false');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -119,6 +135,7 @@ function CronologicoTab() {
         desde: desde || undefined,
         hasta: hasta || undefined,
         auditada: auditadaFilter,
+        stub: stubFilter,
       });
       if (r.ok) setData(r.data);
       else setError(r.error);
@@ -129,7 +146,7 @@ function CronologicoTab() {
     cargar(1);
     setPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clasificacionFilter, workspaceFilter, auditadaFilter, desde, hasta]);
+  }, [clasificacionFilter, workspaceFilter, auditadaFilter, stubFilter, desde, hasta]);
 
   function toggleClasificacion(v: DualClasificacion) {
     setClasificacionFilter(prev => (prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]));
@@ -147,7 +164,21 @@ function CronologicoTab() {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setClasificacionFilter(prev =>
+                AUDITABLES.every(v => prev.includes(v)) && prev.length === AUDITABLES.length
+                  ? []
+                  : [...AUDITABLES]
+              )
+            }
+            className="px-3 py-1.5 rounded-full text-xs font-bold border border-[#10B981] text-[#065F46] bg-[#10B981]/10 hover:bg-[#10B981]/20 transition-colors"
+          >
+            Solo auditables
+          </button>
+          <span className="h-4 w-px bg-[#E5E7EB]" />
           {CLASIFICACIONES.map(c => {
             const active = clasificacionFilter.includes(c.value);
             return (
@@ -167,7 +198,7 @@ function CronologicoTab() {
           })}
         </div>
 
-        <div className="grid sm:grid-cols-4 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
               Workspace
@@ -216,7 +247,28 @@ function CronologicoTab() {
               <option value="false">Pendientes</option>
             </select>
           </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+              Informa
+            </label>
+            <select
+              value={stubFilter}
+              onChange={e => setStubFilter(e.target.value as 'all' | 'true' | 'false')}
+              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm bg-white"
+            >
+              <option value="false">Solo reales</option>
+              <option value="true">Solo stub</option>
+              <option value="all">Reales y stub</option>
+            </select>
+          </div>
         </div>
+
+        {stubFilter !== 'false' && (
+          <p className="text-xs text-[#92400E] bg-[#F59E0B]/10 border border-[#F59E0B]/30 rounded-lg px-3 py-2">
+            Estas viendo consultas con Informa en modo stub: la respuesta es sembrada, la
+            comparacion no mide a Valida.
+          </p>
+        )}
       </div>
 
       {error && (
@@ -228,7 +280,9 @@ function CronologicoTab() {
       <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
         <div className="p-3 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
           <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
-            {data ? `${data.total} consultas` : 'Cargando…'}
+            {data
+              ? `${data.total} consultas · mostrando ${data.items.length}`
+              : 'Cargando…'}
           </p>
           <button
             type="button"
@@ -254,12 +308,13 @@ function CronologicoTab() {
                 <Th>Clasificación</Th>
                 <Th align="center">Auditada</Th>
                 <Th>Decisión</Th>
+                <Th align="center">Informa</Th>
               </tr>
             </thead>
             <tbody>
               {!data || data.items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-sm text-[#6B7280]">
+                  <td colSpan={10} className="px-4 py-12 text-center text-sm text-[#6B7280]">
                     {pending ? 'Cargando…' : 'Sin consultas con los filtros actuales.'}
                   </td>
                 </tr>
@@ -375,6 +430,18 @@ function ConsultaRow({
       <td className="px-4 py-2.5 text-[#6B7280] text-xs max-w-[180px] truncate">
         {decisionLabel ?? '—'}
       </td>
+      <td className="px-4 py-2.5 text-center">
+        {item.stub_mode ? (
+          <span
+            className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase border bg-[#F59E0B]/10 text-[#92400E] border-[#F59E0B]/30"
+            title="Informa respondio con datos sembrados: esta comparacion no mide a Valida."
+          >
+            Stub
+          </span>
+        ) : (
+          <span className="text-[10px] text-[#6B7280]">real</span>
+        )}
+      </td>
     </tr>
   );
 }
@@ -451,10 +518,14 @@ function DetalleContent({
 
   return (
     <div className="p-5 space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Stat label="Workspace" value={detail.workspace_origen} />
         <Stat label="Modo" value={detail.modo} />
         <Stat label="Tipo" value={detail.tipo} />
+        <Stat
+          label="Clasificación"
+          value={CLASIFICACIONES.find(c => c.value === detail.clasificacion)?.label ?? detail.clasificacion}
+        />
         <Stat label="Auditada" value={detail.auditada ? 'Sí' : 'No'} />
       </div>
 
@@ -469,6 +540,16 @@ function DetalleContent({
           {formatFecha(detail.fecha, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </p>
       </div>
+
+      {detail.stub_mode && (
+        <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#92400E] text-sm flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            <strong>Informa en modo stub:</strong> la respuesta de la izquierda es sembrada.
+            Un veredicto sobre esta fila no dice nada sobre Valida.
+          </span>
+        </div>
+      )}
 
       {divergencia && (
         <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#92400E] text-sm flex items-start gap-2">
@@ -575,11 +656,11 @@ function EmptyMatches() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="p-3 rounded-lg bg-[#F5F4F2] border border-[#E5E7EB]">
       <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold">{label}</p>
-      <p className="text-sm font-bold text-[#1A1A1A] mt-0.5">{value}</p>
+      <p className="text-sm font-bold text-[#1A1A1A] mt-0.5">{value ?? '—'}</p>
     </div>
   );
 }
@@ -692,21 +773,22 @@ function AuditForm({
 function DashboardTab() {
   const [metrics, setMetrics] = useState<DualMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [incluirStub, setIncluirStub] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  function cargar() {
+  function cargar(stub = incluirStub) {
     setError(null);
     startTransition(async () => {
-      const r = await obtenerMetricsDuales();
+      const r = await obtenerMetricsDuales(stub);
       if (r.ok) setMetrics(r.data);
       else setError(r.error);
     });
   }
 
   useEffect(() => {
-    cargar();
-
-  }, []);
+    cargar(incluirStub);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incluirStub]);
 
   return (
     <div className="space-y-5">
@@ -714,15 +796,26 @@ function DashboardTab() {
         <p className="text-sm text-[#6B7280]">
           Métricas agregadas — alimentan los umbrales de validación de Vera.
         </p>
+        <div className="flex items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#6B7280] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={incluirStub}
+              onChange={e => setIncluirStub(e.target.checked)}
+              className="h-3.5 w-3.5 accent-[#F59E0B]"
+            />
+            Incluir consultas en stub
+          </label>
         <button
           type="button"
-          onClick={cargar}
+          onClick={() => cargar()}
           disabled={pending}
           className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[#E5E7EB] text-xs font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-50 transition-colors"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${pending ? 'animate-spin' : ''}`} />
           Refrescar
         </button>
+        </div>
       </div>
 
       {error && (
@@ -742,6 +835,7 @@ function DashboardTab() {
 
 function DashboardContent({ metrics }: { metrics: DualMetrics }) {
   const cumple = metrics.cumple_umbral_vera;
+  const faltan = Math.max(0, 100 - metrics.positivos_auditados);
   const formatPct = (n: number | null) => (n === null ? '—' : `${(n * 100).toFixed(1)}%`);
   const veredictosArray = useMemo(
     () =>
@@ -773,8 +867,37 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
           <p className="text-xs mt-0.5">
             Umbral Vera agregado: ≥100 positivos auditados, recall global ≥95% y precision ≥95%.
           </p>
+          {!cumple && (
+            <p className="text-xs mt-1 font-semibold">
+              {faltan > 0
+                ? `Faltan ${faltan} positivos auditados para poder siquiera medir: van ${metrics.positivos_auditados} de 100.`
+                : 'Hay muestra suficiente, pero recall o precision estan por debajo del 95%.'}
+            </p>
+          )}
         </div>
       </div>
+
+      {metrics.stub_excluidas > 0 && !metrics.incluye_stub && (
+        <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#92400E] text-xs flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            <strong>{metrics.stub_excluidas} consultas con Informa en stub quedaron fuera.</strong>{' '}
+            Comparan contra respuestas sembradas: sumarlas inflaría el denominador con
+            evidencia falsa. Todo lo de abajo se calculó sobre {metrics.total_consultas}{' '}
+            consultas reales.
+          </span>
+        </div>
+      )}
+
+      {metrics.incluye_stub && (
+        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-xs flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            <strong>Las consultas en stub están incluidas.</strong> Estos números sirven para
+            revisar el tubo, no para decidir si Valida reemplaza a Informa.
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard label="Total consultas" value={metrics.total_consultas.toString()} />
@@ -824,13 +947,17 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
           </p>
         </div>
         {metrics.por_lista.length === 0 ? (
-          <p className="p-6 text-center text-sm text-[#6B7280]">Sin datos por lista.</p>
+          <p className="p-6 text-center text-sm text-[#6B7280]">
+            Sin datos por lista: no hay ningún veredicto registrado todavía. Esta tabla se
+            llena a medida que el auditor decide en la pestaña Cronológico.
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
                   <Th>Lista</Th>
+                  <Th align="center">Nombrada por</Th>
                   <Th align="center">Positivos auditados</Th>
                   <Th align="center">Recall</Th>
                   <Th align="center">Precision</Th>
@@ -841,6 +968,7 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
                 {metrics.por_lista.map(l => (
                   <tr key={l.lista} className="border-b border-[#E5E7EB] last:border-0">
                     <td className="px-4 py-2.5 text-[#1A1A1A] font-semibold text-sm">{l.lista}</td>
+                    <td className="px-4 py-2.5 text-center text-[#6B7280] text-xs">{l.origen}</td>
                     <td className="px-4 py-2.5 text-center text-[#1A1A1A]">{l.positivos_auditados}</td>
                     <td className="px-4 py-2.5 text-center text-[#1A1A1A]">{formatPct(l.recall)}</td>
                     <td className="px-4 py-2.5 text-center text-[#1A1A1A]">{formatPct(l.precision)}</td>
@@ -878,6 +1006,11 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
           <li>
             <strong>Umbral agregado:</strong> ≥100 positivos auditados, recall global y precision ≥95%.
             Define si Valida está lista para sustituir Informa.
+          </li>
+          <li>
+            <strong>Los nombres de lista no se cruzan:</strong> Informa y Valida no comparten
+            nomenclatura. La columna &quot;Nombrada por&quot; dice cuál de los dos usó ese nombre;
+            equipararlos sería inventar una equivalencia que nadie fijó.
           </li>
         </ul>
       </div>
