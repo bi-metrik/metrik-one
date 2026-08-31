@@ -143,10 +143,17 @@ export interface GastoAnomalo {
 
 export interface ProyectoCartera {
   nombre: string
-  facturado: number
-  cobrado: number
-  cartera: number
-  diasAtraso: number
+  /**
+   * Honorario aprobado y lo recaudado contra el. Se llamaban `facturado` y
+   * `cobrado`: el primero era falso (no hay facturas, esto sale de
+   * `v_cartera_negocio`) y el segundo estaba clavado en 0 duro. Un nombre
+   * mentiroso es lo que dejo pasar el defecto.
+   */
+  honorario: number
+  recaudado: number
+  saldo: number
+  /** Dias desde que nacio el negocio, no vencimiento de factura: no hay factura. */
+  dias: number
 }
 
 export interface ImpuestosEstimados {

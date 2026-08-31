@@ -31,6 +31,9 @@ export interface FilaCartera {
 export interface ItemCartera {
   negocioNombre: string
   negocioCodigo: string
+  /** Honorario aprobado. Se llama honorario y no "facturado" porque no hay factura. */
+  honorario: number
+  recaudado: number
   saldo: number
   /** Dias desde que nacio el negocio, no vencimiento de factura: no hay factura. */
   dias: number
@@ -67,6 +70,8 @@ export function resumirCartera(filas: FilaCartera[]): ResumenCartera {
     .map(f => ({
       negocioNombre: f.nombre ?? 'Sin nombre',
       negocioCodigo: f.codigo ?? 'Sin codigo',
+      honorario: Number(f.honorario),
+      recaudado: Number(f.honorario_recaudado),
       saldo: Number(f.saldo),
       dias: f.dias ?? 0,
     }))

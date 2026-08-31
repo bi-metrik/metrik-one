@@ -76,7 +76,6 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     gastosHistRes,
     gastosFijosRes,
     staffRes,
-    proyectosFinRes,
     fiscalRes,
     gastosPrevRes,
     gastosCurrRes,
@@ -120,14 +119,6 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
       .select('salary')
       .eq('workspace_id', workspaceId)
       .eq('is_active', true),
-
-    // Negocios completados (for cartera proxy)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
-      .from('negocios')
-      .select('nombre, precio_aprobado, estado, closed_at, cierre_no_facturable')
-      .eq('workspace_id', workspaceId)
-      .eq('estado', 'completado'),
 
     // Fiscal profile
     supabase
@@ -176,8 +167,6 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
   const gastosHist = gastosHistRes.data || []
   const gastosFijos = gastosFijosRes.data || []
   const staff = staffRes.data || []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const negociosCerrados: any[] = proyectosFinRes.data || []
 
   // Saldo
   const saldoActual = Number(saldo?.saldo_real || 0)
@@ -246,30 +235,42 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
   const gastoTotalMensual = gastoPromedioMensual + costosFijos
   const runwayMeses = gastoTotalMensual > 0 ? saldoActual / gastoTotalMensual : 99
 
-  // Cartera pendiente — simplified using negocios completados
-  // Un cierre no facturable NO es cartera: se cerro a proposito sin factura, asi
-  // que su precio aprobado (que se conserva como historia comercial) no es plata
-  // por cobrar. Sin este filtro, la excepcion inflaria la cartera del tablero.
-  const now = new Date()
-  const carteraPendiente: ProyectoCartera[] = negociosCerrados
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((n: any) => n.cierre_no_facturable !== true)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((n: any) => {
-      const precioAprobado = Number(n.precio_aprobado || 0)
-      const diasAtraso = n.closed_at
-        ? Math.max(0, Math.round((now.getTime() - new Date(n.closed_at as string).getTime()) / (1000 * 60 * 60 * 24)))
-        : 0
-      return { nombre: n.nombre || '', facturado: precioAprobado, cobrado: 0, cartera: precioAprobado, diasAtraso }
-    })
-    .filter((p: ProyectoCartera) => p.cartera > 0)
-    .sort((a: ProyectoCartera, b: ProyectoCartera) => b.cartera - a.cartera)
+  // Cartera pendiente — el top-5 y el total salen de la MISMA cuenta.
+  //
+  // Antes el detalle se armaba desde `negocios` completados con `cobrado: 0`
+  // fijo y `cartera = precio_aprobado`, o sea que llamaba deuda a lo ya cobrado:
+  // medido en SOENA el 2026-08-31, los cinco que salian tenian saldo real CERO
+  // ($2.868.000 de cartera inventada) y ninguno coincidia con los cinco que de
+  // verdad deben. Y el total de la misma tarjeta, que si venia de `resumirCartera`,
+  // decia otra cosa — una tarjeta que se contradice a si misma.
+  //
+  // `resumirCartera` aplica el piso de materialidad de /conciliacion, el mismo
+  // que usa /numeros: las tres pantallas dicen la misma cifra o no dicen nada.
+  // Su `detalle` ya viene ordenado por antiguedad (el monto solo desempata,
+  // PR #325), asi que el top-5 son sus cinco primeros: los mas viejos, no los
+  // mas grandes.
+  //
+  // ⚠️ Limite conocido: un cierre no facturable con un abono encima SI puede
+  // aparecer como deuda. La version vieja lo filtraba aca; ya no, porque el
+  // filtro tenia que vivir tambien en /numeros y /conciliacion o las tres
+  // pantallas vuelven a decir cifras distintas — que es el defecto que esto
+  // corrige. Medido en SOENA el 2026-08-31: de 3 cierres no facturables, 2
+  // tienen pagos y llegan a la vista, y **ninguno** con saldo sobre el piso de
+  // materialidad, asi que hoy no cambia una sola cifra. Si alguna vez lo hace,
+  // el arreglo va en `v_cartera_negocio`, no aca.
+  const resumen = resumirCartera(carteraRes.data || [])
+  const carteraPendiente: ProyectoCartera[] = resumen.detalle
     .slice(0, 5)
+    .map(d => ({
+      nombre: d.negocioNombre,
+      honorario: d.honorario,
+      recaudado: d.recaudado,
+      saldo: d.saldo,
+      dias: d.dias,
+    }))
 
   // Posicion neta de caja
-  // `resumirCartera` aplica el piso de materialidad de /conciliacion, el mismo
-  // que usa /numeros: las dos pantallas dicen la misma cifra o no dicen nada.
-  const totalCarteraCobrar = resumirCartera(carteraRes.data || []).carteraPendiente
+  const totalCarteraCobrar = resumen.carteraPendiente
   const totalGastosPorPagar = (gastosPorPagarRes.data || []).reduce((s, g) => s + Number(g.monto || 0), 0)
   const posicionNetaCaja = totalCarteraCobrar - totalGastosPorPagar
 
