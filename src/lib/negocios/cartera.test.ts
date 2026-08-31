@@ -96,6 +96,30 @@ describe('resumirCartera', () => {
     expect(r.carteraVencida).toBe(0)
   })
 
+  it('un negocio cobrado por completo NO entra en la lista de deudores', () => {
+    // Este era el top-5 del tablero financiero hasta el 2026-08-31: se armaba
+    // desde `negocios` con `cobrado: 0` fijo y `cartera = precio_aprobado`, asi
+    // que mostraba como deuda lo ya cobrado. Los 5 que salian en SOENA tenian
+    // saldo real CERO — $2.868.000 de cartera inventada — mientras el total de
+    // la misma tarjeta, que si venia de aca, decia otra cosa.
+    const r = resumirCartera([
+      fila({ codigo: 'V0253', honorario: 637_500, honorario_recaudado: 637_500, saldo: 0, dias: 300 }),
+      fila({ codigo: 'V0415', honorario: 699_975, honorario_recaudado: 100_000, saldo: 599_975, dias: 195 }),
+    ])
+    expect(r.detalle.map(d => d.negocioCodigo)).toEqual(['V0415'])
+    expect(r.detalle.reduce((s, d) => s + d.saldo, 0)).toBe(r.carteraPendiente)
+  })
+
+  it('el detalle trae honorario y recaudado, para que la tarjeta no los invente', () => {
+    // La columna "Cobrado" del tablero estaba en cero duro. Si el dato no viaja
+    // con la fila, quien pinta se lo tiene que inventar — y se lo invento.
+    const r = resumirCartera([
+      fila({ honorario: '765000', honorario_recaudado: '350906', saldo: '414094', dias: 174 }),
+    ])
+    expect(r.detalle[0]).toMatchObject({ honorario: 765_000, recaudado: 350_906, saldo: 414_094 })
+    expect(r.detalle[0].honorario - r.detalle[0].recaudado).toBe(r.detalle[0].saldo)
+  })
+
   it('un workspace sin negocios con precio aprobado no debe nada', () => {
     const r = resumirCartera([])
     expect(r).toEqual({

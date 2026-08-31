@@ -127,28 +127,28 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
 
       {/* F4 — Cartera pendiente */}
       {data.carteraPendiente.length > 0 && (
-        <ChartCard title="Cartera pendiente" subtitle="Proyectos con saldo por cobrar" accentColor="#F59E0B">
+        <ChartCard title="Cartera pendiente" subtitle="Los cinco saldos mas viejos por cobrar" accentColor="#F59E0B">
           <MiniTable
             columns={[
-              { key: 'nombre', label: 'Proyecto' },
+              { key: 'nombre', label: 'Negocio' },
               {
-                key: 'facturado',
-                label: 'Facturado',
+                key: 'honorario',
+                label: 'Honorario',
                 align: 'right',
                 render: (v: number) => (
                   <span className="hidden sm:inline">{formatCOP(v)}</span>
                 ),
               },
               {
-                key: 'cobrado',
-                label: 'Cobrado',
+                key: 'recaudado',
+                label: 'Recaudado',
                 align: 'right',
                 render: (v: number) => (
                   <span className="hidden sm:inline">{formatCOP(v)}</span>
                 ),
               },
               {
-                key: 'cartera',
+                key: 'saldo',
                 label: 'Pendiente',
                 align: 'right',
                 render: (v: number) => (
@@ -156,7 +156,7 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
                 ),
               },
               {
-                key: 'diasAtraso',
+                key: 'dias',
                 label: 'Antiguedad',
                 align: 'right',
                 render: (v: number) => (
