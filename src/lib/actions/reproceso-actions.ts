@@ -27,7 +27,13 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
+import { createServiceClient } from '@/lib/supabase/server'
 import { getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
+import {
+  resolverAtribucionReproceso,
+  type CausaReproceso,
+  type TipoReproceso,
+} from '@/lib/negocios/atribucion-reproceso'
 
 /**
  * Los tipos generados de Supabase van por detrás del esquema real: `negocios.metadata`
@@ -40,15 +46,10 @@ function db(supabase: unknown): any {
   return supabase
 }
 
-export type TipoReproceso = 'certificacion_upme' | 'devolucion_dian'
-
-/**
- * La causa decide si el reproceso cuenta como falla de calidad. Regla dura de la
- * reunión con Deisy: si la DIAN devuelve porque el funcionario interpretó distinto
- * el procedimiento, no es culpa nuestra y NO penaliza el bono; si nos equivocamos
- * en un valor o en el procedimiento, sí.
- */
-export type CausaReproceso = 'error_propio' | 'criterio_tercero'
+// Los tipos y la atribucion viven en `@/lib/negocios/atribucion-reproceso`, que
+// tambien consume el script de backfill. Se re-exportan para no partir a quien ya
+// los importaba de aqui (`reproceso-control.tsx`).
+export type { TipoReproceso, CausaReproceso }
 
 export type ReprocesoMarca = {
   activo: boolean
@@ -90,34 +91,6 @@ async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
  * por el otro da cero silencioso: `negocios.responsable_id` SI es `staff.id`, y
  * confundirlos es facil.
  */
-const BLOQUE_DEL_TRAMO: Record<TipoReproceso, string> = {
-  certificacion_upme: 'radicado_de_certificacion',
-  devolucion_dian: 'confirmacion_envio_a_dian',
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function resolverAtribucion(supabase: any, negocioId: string, tipo: TipoReproceso): Promise<string | null> {
-  const slug = BLOQUE_DEL_TRAMO[tipo]
-  const { data } = await db(supabase)
-    .from('negocio_bloques')
-    .select('completado_por, completado_at, bloque_configs!inner(slug)')
-    .eq('negocio_id', negocioId)
-    .eq('bloque_configs.slug', slug)
-    .not('completado_por', 'is', null)
-    .order('completado_at', { ascending: false })
-    .limit(1)
-
-  const profileId = ((data ?? []) as Array<{ completado_por: string | null }>)[0]?.completado_por
-  if (!profileId) return null
-
-  const { data: st } = await db(supabase)
-    .from('staff')
-    .select('id')
-    .eq('profile_id', profileId)
-    .maybeSingle()
-  return (st as { id: string } | null)?.id ?? null
-}
-
 /**
  * Devuelve el negocio a la etapa que corresponda al tipo de reproceso, archivando
  * el ciclo anterior y dejando marca visible.
@@ -299,8 +272,23 @@ export async function reprocesarNegocio(
   // Si no se puede resolver —trabajo que entro por cargue masivo, sin autor— se
   // deja en NULL y el tablero lo cuenta como "sin atribuir" en vez de colgarselo
   // a alguien por descarte.
-  const atribuidoA = await resolverAtribucion(supabase, negocioId, input.tipo)
-  const { error: errEvento } = await db(supabase).from('reproceso_eventos').insert({
+  //
+  // ⚠️ El hecho se escribe con `service_role`, no con el cliente de la sesion.
+  // `reproceso_eventos` le revoca la escritura a `authenticated` A PROPOSITO —
+  // de este insumo cuelga el 40% del bono, asi que quien reprocesa no puede
+  // insertar ni borrar eventos por su cuenta desde PostgREST, donde el guard de
+  // este server action no lo protege. `devolucion_eventos` tomo la misma
+  // decision y su escritor si usa `service_role`.
+  //
+  // Esta linea usaba el cliente de la sesion, o sea que el insert devolvia
+  // **42501 `permission denied for table reproceso_eventos`** en cada reproceso
+  // y el `console.error` de abajo se lo tragaba. Medido el 2026-08-31: la tabla
+  // tenia **0 filas** con **7 reprocesos reales** ya abiertos por la supervisora
+  // entre el 13 y el 27 de agosto. La politica estaba bien; el que se quedo
+  // atras fue el escritor.
+  const admin = createServiceClient()
+  const atribuidoA = await resolverAtribucionReproceso(supabase, negocioId, input.tipo)
+  const { error: errEvento } = await db(admin).from('reproceso_eventos').insert({
     workspace_id: workspaceId,
     negocio_id: negocioId,
     ciclo,
@@ -311,7 +299,23 @@ export async function reprocesarNegocio(
     abierto_por: staffId ?? null,
     abierto_at: archivadoAt,
   })
-  if (errEvento) console.error('[reproceso] no se pudo asentar el evento de calidad:', errEvento)
+  // Si el hecho no se asienta, el reproceso NO se deshace: el caso ya volvio a su
+  // etapa y eso es lo que el equipo necesita. Pero el fallo deja de ser mudo — la
+  // primera vez costo 7 eventos de calidad. El aviso va al timeline del negocio,
+  // que es donde alguien lo puede ver; un `console.error` no lo mira nadie.
+  if (errEvento) {
+    console.error('[reproceso] no se pudo asentar el evento de calidad:', errEvento)
+    await db(admin).from('activity_log').insert({
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId ?? null,
+      contenido:
+        `⚠️ El reproceso ${ciclo} se aplico, pero NO quedo registrado en el indicador ` +
+        `de calidad. Avisale a MeTRIK para que lo reponga.`,
+    })
+  }
 
   // ── Traza: es el insumo del indicador de calidad ──────────────────────
   //
@@ -319,8 +323,10 @@ export async function reprocesarNegocio(
   // ahí** (la lista es: comentario, cambio, sistema, cambio_etapa, cambio_estado,
   // solicitud_conciliacion, conciliacion_atendida). Esta línea decía `'reproceso'`, así
   // que el insert fallaba y la traza del reproceso nunca se escribía. No se había notado
-  // porque no se ha corrido ningún reproceso todavía (0 en producción al 2026-08-03) y
-  // porque el error del insert no se miraba. Un tipo fuera del CHECK falla EN SILENCIO:
+  // porque no se había corrido ningún reproceso todavía (0 en producción al 2026-08-03) y
+  // porque el error del insert no se miraba. ⚠️ Ese "todavía" caducó: al 2026-08-31 hay
+  // **7 reprocesos reales**, y el evento de calidad de arriba se estaba perdiendo en cada
+  // uno por el mismo descuido. Un tipo fuera del CHECK falla EN SILENCIO:
   // es la cuarta vez que muerde. Se usa `cambio_etapa`, que es lo que de verdad ocurre.
   if (staffId) {
     const { error: errLog } = await supabase.from('activity_log').insert({
@@ -410,7 +416,12 @@ export async function cerrarReproceso(
   // El hecho ya quedo asentado al abrirlo; aqui solo se le pone fecha de cierre.
   // El indicador de calidad cuenta por `abierto_at`, asi que cerrar un reproceso
   // NO lo borra del mes en que ocurrio: el certificado malo ya paso.
-  await db(supabase)
+  //
+  // Con `service_role` por la misma razon que el insert de `reprocesarNegocio`:
+  // `authenticated` solo tiene SELECT sobre esta tabla, asi que este UPDATE
+  // tambien venia fallando con 42501 — y sin `await` sobre el error, ni siquiera
+  // dejaba rastro en la consola.
+  await db(createServiceClient())
     .from('reproceso_eventos')
     .update({ cerrado_at: cerradoAt })
     .eq('negocio_id', negocioId)

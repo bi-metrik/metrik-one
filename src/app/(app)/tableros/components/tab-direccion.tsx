@@ -19,6 +19,12 @@ const fmtCOP = (n: number) =>
  * Lo que el Sheet tiene y esta pantalla NO puede tener todavia sale declarado abajo,
  * en la nota. No se dibuja en cero: un cero en "certificados con error" se leeria como
  * calidad perfecta, que es justo lo que nadie puede afirmar hoy.
+ *
+ * ⚠️ Para los reprocesos, ese "no puede" caduco el 2026-08-31: la razon era que
+ * `reproceso_eventos` estaba vacia, y estaba vacia porque el insert fallaba con 42501,
+ * no porque no hubiera reprocesos — habia 7. Repuestos por
+ * `scripts/backfill-reproceso-eventos.ts`. Lo que falta ahora es que la RPC
+ * `get_directivo_soena` los devuelva y esta pantalla los dibuje; el dato ya existe.
  */
 export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
   const [datos, setDatos] = useState(inicial)
@@ -154,9 +160,9 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
         <p className="mb-1 font-semibold">Tres bloques del Sheet no están aquí, y no es un olvido:</p>
         <ul className="list-disc space-y-1 pl-4">
-          <li><strong>Certificados UPME erróneos</strong> y <strong>devoluciones de la DIAN</strong>: hoy se
-            registran en el cuaderno de Deisy. En ONE la tabla de reprocesos está vacía, y dibujar
-            un cero diría que no hubo ninguno.</li>
+          <li><strong>Certificados UPME erróneos</strong> y <strong>devoluciones de la DIAN</strong>: Deisy
+            <strong>ya los registra en ONE</strong> —el primero es del 13 de agosto—, pero esta pantalla
+            todavía no los trae. Falta traerlos, no capturarlos.</li>
           <li><strong>Inversión de marketing y CAC por campaña</strong>: se teclean desde Meta Ads; no hay
             integración que los traiga.</li>
           <li><strong>Bonos y comisiones</strong>: la mecánica comercial sigue pendiente de cerrar.</li>
