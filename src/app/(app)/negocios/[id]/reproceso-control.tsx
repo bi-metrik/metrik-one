@@ -14,7 +14,8 @@
 import { useState, useTransition } from 'react'
 import { RotateCcw, AlertTriangle, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { reprocesarNegocio, cerrarReproceso, type TipoReproceso, type CausaReproceso } from '@/lib/actions/reproceso-actions'
+import { reprocesarNegocio, cerrarReproceso } from '@/lib/actions/reproceso-actions'
+import type { TipoReproceso, CausaReproceso } from '@/lib/negocios/atribucion-reproceso'
 
 const GERENCIAL = ['owner', 'admin', 'supervisor']
 

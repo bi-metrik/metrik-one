@@ -46,10 +46,11 @@ function db(supabase: unknown): any {
   return supabase
 }
 
-// Los tipos y la atribucion viven en `@/lib/negocios/atribucion-reproceso`, que
-// tambien consume el script de backfill. Se re-exportan para no partir a quien ya
-// los importaba de aqui (`reproceso-control.tsx`).
-export type { TipoReproceso, CausaReproceso }
+// Los tipos viven en `@/lib/negocios/atribucion-reproceso`. NO re-exportarlos desde
+// aqui: en un archivo 'use server' el build de produccion convierte cada export en
+// referencia de runtime, y un `export type { X }` de un simbolo importado queda
+// apuntando a una variable que no existe (ReferenceError al evaluar el modulo).
+// Los tipos declarados en este archivo (como ReprocesoMarca) si se erasan bien.
 
 export type ReprocesoMarca = {
   activo: boolean
