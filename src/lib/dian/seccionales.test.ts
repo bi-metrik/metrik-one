@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { requiereCitaDian, seccionalDesdeRut, mapCiudadASeccional, SECCIONALES_DIAN, presetKeySeccional, presetKeySeccionalExacta, resolverSeccionalOficial } from './seccionales'
+import {
+  requiereCitaDian,
+  seccionalDesdeRut,
+  mapCiudadASeccional,
+  SECCIONALES_DIAN,
+  presetKeySeccional,
+  presetKeySeccionalExacta,
+  resolverSeccionalOficial,
+  ciudadesConCitaDian,
+  textoCiudadesConCitaDian,
+} from './seccionales'
 
 /**
  * Los textos de entrada son los valores REALES que la extracción del RUT
@@ -150,5 +160,25 @@ describe('preset del 010 vs seccional real (casilla 12)', () => {
 
   it('"Otras seccionales" NO resuelve a ninguna seccional del catalogo', () => {
     expect(resolverSeccionalOficial('Otras seccionales', null)).toBeNull()
+  })
+})
+
+describe('ciudadesConCitaDian', () => {
+  it('deriva las ciudades del catalogo, sin repetir Bogota', () => {
+    // Bogota vive dos veces en el catalogo (naturales y juridicas, correos
+    // distintos). Lo que la ayuda lista son CIUDADES: si Bogota saliera dos
+    // veces, el texto se leeria como si hubiera cinco.
+    expect(ciudadesConCitaDian()).toEqual(['Bogotá', 'Medellín', 'Cali', 'Bucaramanga'])
+  })
+
+  it('cada ciudad listada tiene efectivamente cita en el catalogo', () => {
+    // La comprobacion se calcula desde el catalogo, no desde la lista literal:
+    // si alguien agrega una seccional con cita, este test la exige en la ayuda.
+    const conCita = SECCIONALES_DIAN.filter(s => s.cita).map(s => s.label.split('—')[0].trim())
+    expect(new Set(ciudadesConCitaDian())).toEqual(new Set(conCita))
+  })
+
+  it('se lee dentro de una frase, con la "y" antes de la ultima', () => {
+    expect(textoCiudadesConCitaDian()).toBe('Bogotá, Medellín, Cali y Bucaramanga')
   })
 })

@@ -425,3 +425,47 @@ export function requiereCitaDian(
   const seccional = seccionalDesdeRut(direccionSeccionalRut, tipo_persona)
   return { seccional, requiere_cita: seccional ? seccional.cita : null }
 }
+
+/**
+ * Las ciudades cuyas seccionales exigen cita previa, derivadas del catalogo.
+ *
+ * Existe porque esa lista estaba TRANSCRITA A MANO en el texto de ayuda del bloque
+ * de Cita DIAN ("Solo Bogota, Medellin, Cali y Bucaramanga exigen cita previa").
+ * Una transcripcion no se entera de que el catalogo cambio: el dia que la DIAN
+ * mueva una seccional, el motor decide con el flag `cita` y la pantalla sigue
+ * diciendo lo viejo — y el operador, que es quien confirma la respuesta, le cree a
+ * la pantalla. Medido el 2026-08-31: hoy coinciden (5 entradas con `cita: true`
+ * sobre 39 seccionales), asi que esto no corrige una mentira vigente, cierra la
+ * puerta a una futura.
+ *
+ * Bogota aparece dos veces en el catalogo (naturales y juridicas, con correos
+ * distintos) y aqui vale UNA: lo que se lista son ciudades, no entradas.
+ *
+ * Puro: no toca DB, red ni reloj.
+ */
+export function ciudadesConCitaDian(): string[] {
+  const vistas = new Set<string>()
+  const out: string[] = []
+  for (const s of SECCIONALES_DIAN) {
+    if (!s.cita) continue
+    // El label trae el desglose ("Bogota — Personas naturales"); la ciudad es lo
+    // que va antes del guion largo.
+    const ciudad = s.label.split('—')[0].trim()
+    const clave = ciudad.toLowerCase()
+    if (vistas.has(clave)) continue
+    vistas.add(clave)
+    out.push(ciudad)
+  }
+  return out
+}
+
+/**
+ * La misma lista, redactada para leerse dentro de una frase:
+ * "Bogota, Medellin, Cali y Bucaramanga".
+ */
+export function textoCiudadesConCitaDian(): string {
+  const c = ciudadesConCitaDian()
+  if (c.length === 0) return 'ninguna seccional'
+  if (c.length === 1) return c[0]
+  return `${c.slice(0, -1).join(', ')} y ${c[c.length - 1]}`
+}
