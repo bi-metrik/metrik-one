@@ -32,11 +32,18 @@
 begin;
 
 -- ── 1. Respaldo ────────────────────────────────────────────────────────────────
+-- server-only: es la foto de la configuracion ANTES de esta migracion, para poder
+-- revertirla. Nadie la consulta desde la app y no debe aparecer en PostgREST: su
+-- unico lector legitimo es quien restaure a mano. RLS queda encendida y sin
+-- politicas, que es la forma de decir "ningun cliente entra aqui".
 create table if not exists backup_bloque_configs_a1_20260831 as
 select bc.*, now() as respaldado_at
 from bloque_configs bc
 join etapas_negocio e on e.id = bc.etapa_id
 where e.linea_id = '34a0fa6b-9ed3-4652-a419-42601132d1a8';
+
+alter table backup_bloque_configs_a1_20260831 enable row level security;
+revoke all on table backup_bloque_configs_a1_20260831 from public, anon, authenticated;
 
 -- ── 2. Los dos bloques se mudan a Propuesta, ANTES del bloque de propuesta ──────
 with propuesta as (
@@ -111,6 +118,11 @@ returns jsonb language sql immutable as $$
     else p
   end
 $$;
+
+-- Toda funcion nace ejecutable por PUBLIC y `anon` la alcanza por ahi; el default de
+-- la base no lo puede evitar (ALTER DEFAULT PRIVILEGES no alcanza el EXECUTE). Vive
+-- solo dentro de esta transaccion, pero mientras existe es alcanzable.
+revoke execute on function public._a1_reapuntar(jsonb, text[], int, int) from public, anon;
 
 update bloque_configs bc
 set config_extra = public._a1_reapuntar(
