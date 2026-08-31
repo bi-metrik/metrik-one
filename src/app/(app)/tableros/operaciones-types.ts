@@ -54,7 +54,11 @@ export interface PersonaOperaciones {
   score_envio: number | null
   score_correcciones: number | null
   puntaje: number
-  /** true solo si los cuatro indicadores tuvieron con que calcularse. */
+  /**
+   * true solo si todo indicador que debia medirse tuvo con que calcularse. Un
+   * indicador SUSPENDIDO (peso 0) no cuenta como faltante: no es que falte su
+   * dato, es que la politica decidio no juzgarlo.
+   */
   completo: boolean
   /** Solo llega si quien mira puede ver este dinero. Ver `filtrarDinero`. */
   bono?: number | null
@@ -137,6 +141,13 @@ export interface OperacionesBonoData {
    * pantalla lo advierte cuando el periodo consultado se pasa de ese anio.
    */
   festivos_hasta_anio?: number | null
+  /**
+   * Techo real del mes: la suma de los pesos vigentes. Suspender un indicador NO
+   * reparte su peso entre los demas, asi que el maximo alcanzable baja y con el
+   * baja el bono maximo. Sin este dato la pantalla mostraria "58%" sin decir
+   * sobre cuanto, que es justo la clase de media verdad que este tablero evita.
+   */
+  puntaje_maximo?: number
   personas: PersonaOperaciones[]
   supervisor: SupervisorOperaciones | null
 }

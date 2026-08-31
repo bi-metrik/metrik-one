@@ -62,6 +62,18 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
   const festivosHasta = data.festivos_hasta_anio ?? null
   const festivosVencidos = festivosHasta !== null && periodo.anio > festivosHasta
   const relojHabil = (P.radicacion_reloj ?? 'habil') === 'habil'
+  // Un indicador con peso 0 esta SUSPENDIDO: no se juzga este mes. Se dibuja gris
+  // y con la palabra, nunca como un 0 rojo, que significa lo contrario ("se midio
+  // y no cumplio"). Es la misma regla que ya separa "sin medir" de "en cero".
+  const suspendidos = [
+    P.peso_radicacion === 0 ? 'Radicación' : null,
+    P.peso_envio === 0 ? 'Envío' : null,
+    P.peso_correcciones === 0 ? 'Correcciones' : null,
+  ].filter(Boolean) as string[]
+  // Suspender NO reparte el peso entre los demas indicadores: el techo baja.
+  const maximo = data.puntaje_maximo
+    ?? (P.calidad_base + P.calidad_tramo + P.peso_radicacion + P.peso_envio + P.peso_correcciones)
+  const techoReducido = maximo > 0 && maximo < 1
 
   return (
     <div className={isPending ? 'opacity-50' : ''}>
@@ -91,6 +103,11 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
           cuerpo={`${data.devoluciones_mes === 0
             ? `No se registro ninguna devolucion de la DIAN en ${MESES[periodo.mes - 1]}.`
             : 'Falta la evidencia que exige la configuracion del indicador.'} Las radicaciones si se cuentan solas, pero las correcciones salen de los reprocesos marcados en el sistema: sin ellos, "ninguna correccion" no quiere decir trabajo impecable. El indicador pesa el ${P.peso_correcciones * 100}% del bono y por eso aqui aparece en blanco y no en ${P.peso_correcciones * 100} puntos.`} />
+      )}
+      {suspendidos.length > 0 && (
+        <Aviso tono="info"
+          titulo={`${suspendidos.join(' y ')} ${suspendidos.length === 1 ? 'está suspendido' : 'están suspendidos'} este mes`}
+          cuerpo={`${suspendidos.length === 1 ? 'Ese indicador no se juzga' : 'Esos indicadores no se juzgan'}: no suma${suspendidos.length === 1 ? '' : 'n'} ni resta${suspendidos.length === 1 ? '' : 'n'}, y por eso aparece${suspendidos.length === 1 ? '' : 'n'} en gris y no en cero. Suspender no reparte los puntos entre los demás indicadores: el máximo del mes baja a ${(maximo * 100).toFixed(0)} puntos, así que el bono más alto posible deja de ser el ${P.bono_max_pct * 100}% del salario y pasa al ${(P.bono_max_pct * maximo * 100).toFixed(0)}%. Repartir esos puntos es una decisión aparte y se hace moviendo los pesos.`} />
       )}
       {sinSalarios && (
         <Aviso tono="info"
@@ -130,13 +147,16 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
                   Calidad<br /><span className="text-[10px]">{(P.calidad_base + P.calidad_tramo) * 100} pts</span>
                 </th>
                 <th className="px-3 py-2 font-medium text-center">
-                  Radicación<br /><span className="text-[10px]">{P.peso_radicacion * 100} pts</span>
+                  Radicación<br /><span className="text-[10px]">
+                    {P.peso_radicacion === 0 ? 'suspendido' : `${P.peso_radicacion * 100} pts`}</span>
                 </th>
                 <th className="px-3 py-2 font-medium text-center">
-                  Envío<br /><span className="text-[10px]">{P.peso_envio * 100} pts</span>
+                  Envío<br /><span className="text-[10px]">
+                    {P.peso_envio === 0 ? 'suspendido' : `${P.peso_envio * 100} pts`}</span>
                 </th>
                 <th className="px-3 py-2 font-medium text-center">
-                  Correcciones<br /><span className="text-[10px]">{P.peso_correcciones * 100} pts</span>
+                  Correcciones<br /><span className="text-[10px]">
+                    {P.peso_correcciones === 0 ? 'suspendido' : `${P.peso_correcciones * 100} pts`}</span>
                 </th>
                 <th className="px-3 py-2 font-medium text-center">Puntaje</th>
                 <th className="px-4 py-2 font-medium text-right">Bono</th>
@@ -144,7 +164,9 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
               </tr>
             </thead>
             <tbody>
-              {data.personas.map(p => <FilaPersona key={p.staff_id} p={p} periodo={periodo} />)}
+              {data.personas.map(p => (
+                <FilaPersona key={p.staff_id} p={p} periodo={periodo} P={P} maximo={maximo} />
+              ))}
               {data.personas.length === 0 && (
                 <tr><td colSpan={8} className="px-4 py-8 text-center" style={{ color: GRIS }}>
                   No hay personas asignadas al área de operaciones.
@@ -169,9 +191,12 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
           </div>
           <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-5 gap-3">
             <Celda etiqueta="Calidad" valor={pts(data.supervisor.aportes.calidad)} sufijo=" pts" />
-            <Celda etiqueta="Radicación" valor={pts(data.supervisor.aportes.radicacion)} sufijo=" pts" />
-            <Celda etiqueta="Envío" valor={pts(data.supervisor.aportes.envio)} sufijo=" pts" />
-            <Celda etiqueta="Correcciones" valor={pts(data.supervisor.aportes.correcciones)} sufijo=" pts" />
+            <Celda etiqueta="Radicación" valor={pts(data.supervisor.aportes.radicacion)} sufijo=" pts"
+              nota={P.peso_radicacion === 0 ? 'suspendido' : undefined} />
+            <Celda etiqueta="Envío" valor={pts(data.supervisor.aportes.envio)} sufijo=" pts"
+              nota={P.peso_envio === 0 ? 'suspendido' : undefined} />
+            <Celda etiqueta="Correcciones" valor={pts(data.supervisor.aportes.correcciones)} sufijo=" pts"
+              nota={P.peso_correcciones === 0 ? 'suspendido' : undefined} />
             <Celda etiqueta="Puntaje"
               valor={`${(data.supervisor.puntaje * 100).toFixed(0)}%`}
               destacado
@@ -204,12 +229,20 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
             <li>· <strong>Radicación ({P.peso_radicacion * 100} pts):</strong> radicar dentro
               de {P.horas_radicacion} horas {relojHabil ? 'hábiles' : 'corridas'} desde que se
               asigna el caso.</li>
-            <li>· <strong>Envío ({P.peso_envio * 100} pts):</strong> dentro
+            <li>· <strong>Envío ({P.peso_envio === 0 ? 'suspendido' : `${P.peso_envio * 100} pts`}):</strong> dentro
               de {P.horas_desde_certificado} h del certificado bancario y al
-              menos {P.horas_antes_cita} h antes de la cita.</li>
+              menos {P.horas_antes_cita} h antes de la cita.
+              {P.peso_envio === 0 && ' Hoy no se está juzgando: no suma ni resta.'}</li>
             <li>· <strong>Correcciones ({P.peso_correcciones * 100} pts):</strong> radicaciones ante
               la DIAN contra correcciones que pide la DIAN.</li>
           </ul>
+          {techoReducido && (
+            <p className="mb-3">Con {suspendidos.length === 1 ? 'ese indicador suspendido' : 'esos indicadores suspendidos'} el
+              puntaje máximo del mes es <strong>{(maximo * 100).toFixed(0)} puntos</strong>, no 100:
+              los puntos suspendidos <strong>no</strong> se reparten entre los demás. El bono más alto
+              posible queda en el <strong>{(P.bono_max_pct * maximo * 100).toFixed(0)}%</strong> del
+              salario, no en el {P.bono_max_pct * 100}%.</p>
+          )}
           <p className="mb-1" style={{ color: CARBON }}><strong>Supuestos que hay que confirmar</strong></p>
           <ul className="space-y-1">
             <li>· El piso de <strong>{P.piso_operativo * 100}%</strong> no es proporcional: por debajo
@@ -239,7 +272,12 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
   )
 }
 
-function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: number; mes: number } }) {
+function FilaPersona({ p, periodo, P, maximo }: {
+  p: PersonaOperaciones
+  periodo: { anio: number; mes: number }
+  P: OperacionesBonoData['parametros']
+  maximo: number
+}) {
   return (
     <tr className="border-t" style={{ borderColor: BORDE }}>
       <td className="px-4 py-3">
@@ -249,6 +287,7 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
       <ScoreCelda score={p.score_calidad}
         detalle={p.calidad_medida ? `${p.malos} ${p.malos === 1 ? 'malo' : 'malos'}` : 'sin medir'} />
       <ScoreCelda score={p.score_radicacion}
+        suspendido={P.peso_radicacion === 0}
         detalle={p.radicacion.pct === null
           ? (p.radicacion.eventos > 0 ? 'sin fecha de asignación' : 'sin casos')
           : `${pct(p.radicacion.pct)} · ${p.radicacion.a_tiempo}/${p.radicacion.medibles}`}
@@ -256,10 +295,12 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
           ? `${p.radicacion.sin_rol} sin área declarada`
           : undefined} />
       <ScoreCelda score={p.score_envio}
+        suspendido={P.peso_envio === 0}
         detalle={p.envio.pct === null
           ? (p.envio.eventos > 0 ? 'sin fecha de cita' : 'sin casos')
           : `${pct(p.envio.pct)} · ${p.envio.a_tiempo}/${p.envio.medibles}`} />
       <ScoreCelda score={p.score_correcciones}
+        suspendido={P.peso_correcciones === 0}
         detalle={!p.correcciones.medida
           ? 'sin medir'
           : p.correcciones.pct === null
@@ -269,6 +310,11 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
         <div className="font-semibold" style={{ color: CARBON }}>
           {(p.puntaje * 100).toFixed(0)}%
         </div>
+        {/* Con un indicador suspendido el techo deja de ser 100. Mostrar el
+            porcentaje a secas dejaria creer que le faltan puntos que ya no existen. */}
+        {maximo < 1 && (
+          <div className="text-[10px]" style={{ color: GRIS }}>de {(maximo * 100).toFixed(0)}</div>
+        )}
         {!p.completo && <div className="text-[10px]" style={{ color: AMBAR }}>incompleto</div>}
       </td>
       <td className="px-4 py-3 text-right">
@@ -291,14 +337,26 @@ function FilaPersona({ p, periodo }: { p: PersonaOperaciones; periodo: { anio: n
 }
 
 /**
- * Un score sin dato se pinta con raya y en gris; un score en cero se pinta rojo.
- * Son dos cosas distintas y la pantalla no las puede confundir.
+ * Tres estados, no dos, y la pantalla no los puede confundir:
+ *   · suspendido  -> gris, con la palabra. La politica decidio no juzgarlo.
+ *   · sin dato    -> gris, con raya. No hubo con que calcularlo.
+ *   · en cero     -> rojo. Se midio y no cumplio.
+ * El caso que obliga a separarlos: un indicador suspendido pintado como 0 rojo se
+ * lee como un incumplimiento de la persona, que es exactamente lo contrario.
  */
-function ScoreCelda({ score, detalle, nota }: {
-  score: number | null; detalle: string; nota?: string
+function ScoreCelda({ score, detalle, nota, suspendido = false }: {
+  score: number | null; detalle: string; nota?: string; suspendido?: boolean
 }) {
   const sinDato = score === null
   const enCero = score === 0
+  if (suspendido) {
+    return (
+      <td className="px-3 py-3 text-center">
+        <div className="font-semibold" style={{ color: '#D1D5DB' }}>—</div>
+        <div className="text-[10px]" style={{ color: GRIS }}>suspendido</div>
+      </td>
+    )
+  }
   return (
     <td className="px-3 py-3 text-center">
       <div className="font-semibold"
