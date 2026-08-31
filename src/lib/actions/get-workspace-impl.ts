@@ -8,6 +8,24 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 const VALID_AREAS = ['comercial', 'operaciones', 'financiera', 'direccion'] as const
 
 /**
+ * Aviso de "staff en otro workspace": una vez por (profile, workspace) por
+ * instancia del servidor. El caso se repite en CADA request del usuario
+ * afectado, y el log repetido era justo el sintoma que este aviso reemplaza.
+ */
+const staffAjenoAvisado = new Set<string>()
+function avisarStaffEnOtroWorkspace(profileId: string, workspaceId: string) {
+  const clave = `${profileId}:${workspaceId}`
+  if (staffAjenoAvisado.has(clave)) return
+  staffAjenoAvisado.add(clave)
+  console.warn(
+    `[getWorkspace] el profile ${profileId} ya tiene staff en OTRO workspace; ` +
+      `staffId queda null en ${workspaceId}. No se crea uno nuevo (el unique ` +
+      `staff_profile_id_key es GLOBAL por profile_id) ni se devuelve el ajeno ` +
+      `(staff.id es FK de activity_log y negocio_responsables de otro tenant).`,
+  )
+}
+
+/**
  * Resuelve las áreas (staff_areas) de un staff. Vacío si no tiene.
  */
 async function resolverAreas(
@@ -106,42 +124,76 @@ async function getWorkspaceImpl() {
 
   // Auto-crear registro staff si el usuario autenticado no tiene uno vinculado.
   if (!staffRecord) {
-    const rolMap: Record<string, string> = {
-      owner: 'dueno',
-      admin: 'administrador',
-      operator: 'operativo',
-      supervisor: 'supervisor',
-      read_only: 'operativo',
-      contador: 'operativo',
-    }
-    const { data: created, error: createError } = await supabase
+    // La lectura de arriba pasa por RLS (`staff_ws`: workspace_id =
+    // current_user_workspace_id()) y ademas filtra `is_active`, asi que hay DOS
+    // clases de registro que existen y no ve: el inactivo de este workspace, y
+    // el que vive en OTRO workspace. `staff_profile_id_key` es UNIQUE (profile_id)
+    // GLOBAL — no por workspace — asi que un platform_admin que cambio de
+    // workspace ("Ver como"/switch) tiene su staff en el workspace de origen:
+    // invisible para toda lectura con RLS, pero choca igual en el insert
+    // (23505 en cada request; medido en produccion 2026-08-31: 1 profile en toda
+    // la base con staff en un workspace distinto al de su profile). Por eso la
+    // resolucion se hace con el service client, por profile_id a secas.
+    const svc = createServiceClient()
+    const { data: existente } = await svc
       .from('staff')
-      .insert({
-        workspace_id: profile.workspace_id,
-        full_name: (profile as { full_name?: string }).full_name ?? 'Usuario',
-        profile_id: user.id,
-        rol_plataforma: rolMap[profile.role ?? 'owner'] ?? 'dueno',
-        is_active: true,
-      })
-      .select('id')
-      .single()
-    // La lectura de arriba filtra `is_active`, asi que un registro INACTIVO no se encuentra
-    // y este insert choca contra `staff_profile_id_key` (unique por profile_id). Tambien
-    // chocan dos requests concurrentes del mismo usuario. En ambos casos el registro EXISTE:
-    // releerlo sin filtro es correcto y evita devolver `staffId = null`, que degrada permisos
-    // y responsables en silencio. Medido: 113 conflictos en 3 horas en produccion.
-    if (created) {
-      staffRecord = created
+      .select('id, workspace_id')
+      .eq('profile_id', user.id)
+      .maybeSingle()
+
+    if (existente && existente.workspace_id === profile.workspace_id) {
+      // Existe en este workspace (activo o inactivo): un registro inactivo sigue
+      // identificando a la persona, y devolver null degradaria permisos y
+      // responsables en silencio (criterio del PR #180, ahora sin chocar el insert).
+      staffRecord = { id: existente.id as string }
+    } else if (existente) {
+      // Existe pero en OTRO workspace. No se mueve de workspace en silencio
+      // (arrastraria responsables, areas e historicos) y no se devuelve ese id:
+      // seria autoria cross-tenant. Tampoco se intenta el insert — es el choque
+      // 23505 garantizado. staffId queda null, que era el resultado efectivo de
+      // antes, ahora sin error repetido en el log.
+      avisarStaffEnOtroWorkspace(user.id, profile.workspace_id as string)
     } else {
-      const { data: existente } = await supabase
+      const rolMap: Record<string, string> = {
+        owner: 'dueno',
+        admin: 'administrador',
+        operator: 'operativo',
+        supervisor: 'supervisor',
+        read_only: 'operativo',
+        contador: 'operativo',
+      }
+      // Upsert con ignoreDuplicates (ON CONFLICT (profile_id) DO NOTHING): dos
+      // requests concurrentes del mismo usuario ya no producen 23505 — el que
+      // pierde la carrera recibe 0 filas y relee abajo con el service client.
+      const { data: created, error: createError } = await supabase
         .from('staff')
+        .upsert(
+          {
+            workspace_id: profile.workspace_id,
+            full_name: (profile as { full_name?: string }).full_name ?? 'Usuario',
+            profile_id: user.id,
+            rol_plataforma: rolMap[profile.role ?? 'owner'] ?? 'dueno',
+            is_active: true,
+          },
+          { onConflict: 'profile_id', ignoreDuplicates: true },
+        )
         .select('id')
-        .eq('profile_id', user.id)
         .maybeSingle()
-      if (existente) {
-        staffRecord = existente
+      if (created) {
+        staffRecord = created
       } else {
-        console.error('[getWorkspace] no se pudo crear ni encontrar el staff:', createError)
+        const { data: trasCarrera } = await svc
+          .from('staff')
+          .select('id, workspace_id')
+          .eq('profile_id', user.id)
+          .maybeSingle()
+        if (trasCarrera && trasCarrera.workspace_id === profile.workspace_id) {
+          staffRecord = { id: trasCarrera.id as string }
+        } else if (trasCarrera) {
+          avisarStaffEnOtroWorkspace(user.id, profile.workspace_id as string)
+        } else {
+          console.error('[getWorkspace] no se pudo crear ni encontrar el staff:', createError)
+        }
       }
     }
   }
@@ -211,3 +263,8 @@ async function getWorkspaceImpl() {
  * y solo puede exportar funciones async (gotcha ya documentado en CLAUDE.md).
  */
 export const getWorkspaceCached = cache(getWorkspaceImpl)
+
+// Exportado SOLO para pruebas: el `cache()` de React memoiza por request y
+// volveria no determinista un test que necesita invocar el flujo varias veces.
+// El producto consume siempre `getWorkspaceCached`.
+export { getWorkspaceImpl as __getWorkspaceImplParaPruebas }
