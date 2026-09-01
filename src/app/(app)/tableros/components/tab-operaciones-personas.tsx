@@ -233,10 +233,13 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
               de {P.horas_desde_certificado} h del certificado bancario y al
               menos {P.horas_antes_cita} h antes de la cita.
               {P.peso_envio === 0 && ' Hoy no se está juzgando: no suma ni resta.'}</li>
-            <li>· <strong>Correcciones ({P.peso_correcciones === 0 ? 'suspendido' : `${P.peso_correcciones * 100} pts`}):</strong> radicaciones
-              ante la DIAN contra las devoluciones que la DIAN pide por <strong>error
-              propio</strong>. Las marcadas como criterio de un tercero se ven, pero no
-              bajan el indicador. Es el mismo criterio que usa calidad.</li>
+            <li>· <strong>Correcciones ({P.peso_correcciones === 0 ? 'suspendido' : `${P.peso_correcciones * 100} pts`}):</strong> cada
+              caso que <strong>pasa la etapa de envío</strong> cuenta como una radicación
+              ante la DIAN, porque ahí se asegura que la información está completa para
+              que el cliente radique. Contra eso se miden las devoluciones que la DIAN
+              pide por <strong>error propio</strong>. Las marcadas como criterio de un
+              tercero se ven, pero no bajan el indicador: es el mismo criterio que usa
+              calidad.</li>
           </ul>
           {techoReducido && (
             <p className="mb-3">Con {suspendidos.length === 1 ? 'ese indicador suspendido' : 'esos indicadores suspendidos'} el
@@ -309,7 +312,7 @@ function FilaPersona({ p, periodo, P, maximo }: {
           ? 'sin medir'
           : p.correcciones.pct === null
             ? 'sin radicaciones'
-            : `${p.correcciones.correcciones}/${p.correcciones.radicaciones} por error propio`}
+            : `${p.correcciones.correcciones}/${p.correcciones.radicaciones} radicaciones`}
         nota={p.correcciones.terceros
           ? `${p.correcciones.terceros} de terceros, no cuenta${p.correcciones.terceros === 1 ? '' : 'n'}`
           : undefined} />
