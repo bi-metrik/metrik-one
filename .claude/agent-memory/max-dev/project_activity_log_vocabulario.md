@@ -16,7 +16,7 @@ puede importar de `src/`).
 
 ## ⚠️ 754 son FILAS de bloque; 311 son EVENTOS de aprobación
 
-La confusión que los comentarios del #475 dejaron escrita y el PR #477 corrigió:
+La confusión que los comentarios del #475 dejaron escrita y el PR #478 corrigió:
 
 - **754** = filas de `negocio_bloques` con `data->>'aprobado_at'` no nulo.
 - La misma aprobación está **copiada** en el bloque "Propuesta económica" de **cada etapa**
@@ -40,7 +40,7 @@ no por filas.
 
 - PR **#475** (squash `239f8d0`) mergeado, migración del CHECK **aplicada** en producción.
 - Backfill de las **311** aprobaciones: **aplicado** el 2026-09-01.
-- PR **#477**: corrección de la cifra en los tres comentarios que la repetían
+- PR **#478**: corrección de la cifra en los tres comentarios que la repetían
   (la migración, `registrar-actividad.ts` y `eslint.config.mjs`) + cuerpo del #475 editado.
 
 ⚠️ El estado de "aplicado" llegó en el encargo de la sesión principal; **desde el subagente
