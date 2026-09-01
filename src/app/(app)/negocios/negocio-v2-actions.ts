@@ -6273,6 +6273,28 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  // ── Servicio contratado vigente del negocio ────────────────────────────────
+  // Lo consume el bloque de la propuesta para contrastar contra `aprobado_servicio`,
+  // el snapshot congelado al aprobar. Que difieran NO es un error a corregir solo:
+  // significa que la propuesta se emitio prometiendo una cosa y hoy el caso declara
+  // otra, y esconderlo es lo que dejaba al PDF firmado sin respaldo de que se contrato.
+  // Se lee su bloque, no el campo derivado (misma regla que `niegaCertificacionUpme`).
+  let servicioVigenteNeg: string | null = null
+  {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: servBlocks } = await (db(supabase) as any)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', id)
+      .eq('bloque_configs.slug', 'servicio_contratado')
+    // Un negocio trae varias filas del bloque (las copias readonly viajan con el entre
+    // etapas): gana la que tenga respuesta, no la primera que llegue.
+    for (const sb_ of ((servBlocks ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
+      const v = sb_.data?.servicio
+      if (typeof v === 'string' && v !== '') { servicioVigenteNeg = v; break }
+    }
+  }
+
   // ── Cargar data de bloques documento del negocio (para herencia readonly)
   // Indexado por (etapa_orden + nombre normalizado) porque hay multiples documentos
   // por etapa (Factura, RUT, Cedula, Comprobante, etc.) y el matching para herencia
@@ -6647,8 +6669,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         // lo que hace falta cuando el caso ya avanzo — pero el flag solo se ponia en la
         // rama de la etapa actual, asi que se perdia en silencio. Medido en V0318, que al
         // avanzar a Cargue se quedo sin el boton. La action revalida el permiso.
-        const ceEnriched = def?.tipo === 'propuesta_economica' && puedeCorregirPrecioWs
-          ? { ...ceEnrichedBase, _puedeCorregirPrecio: true }
+        const ceEnriched = def?.tipo === 'propuesta_economica'
+          ? {
+              ...ceEnrichedBase,
+              ...(puedeCorregirPrecioWs ? { _puedeCorregirPrecio: true } : {}),
+              _servicioVigente: servicioVigenteNeg,
+            }
           : ceEnrichedBase
 
         bloquesEtapasPrevias.push({
@@ -6943,6 +6969,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true
+    }
+    if (defTipo === 'propuesta_economica') {
+      enrichedConfigExtra._servicioVigente = servicioVigenteNeg
     }
     // Sin honorario confirmado el cobro está frenado, así que la propuesta tiene
     // que quedar alcanzable AUNQUE el caso ya haya avanzado de etapa — incluso

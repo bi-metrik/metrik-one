@@ -28,6 +28,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
 import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
 import { fuenteDeLaTarifa, faltaConfirmarTarifa } from '@/lib/upme/tarifa-propuesta'
+import { descuentoImplicito, motivoDescuentoRechazado } from '@/lib/propuesta/gate-descuento'
 import {
   bloqueTieneRespuesta,
   faltanRequisitos,
@@ -45,6 +46,13 @@ export type PropuestaVersion = {
   valor_final_plan1: number       // HONORARIO plan 1
   valor_final_plan2: number       // HONORARIO plan 2
   tarifa_upme?: number            // tarifa (pasante) vigente al generar la versión
+  /**
+   * Servicio contratado con el que se EMITIÓ esta versión (`completo`, `solo_upme`,
+   * `solo_iva`). No es contexto: el documento promete alcance distinto según el
+   * servicio y cobra o no la tarifa UPME por él, así que forma parte de lo que se le
+   * mandó al cliente. `null` en versiones anteriores a 2026-09-01.
+   */
+  servicio?: string | null
   pdf_drive_id: string | null
   pdf_url: string | null
   generated_at: string
@@ -91,6 +99,20 @@ export type PropuestaData = {
   // inflado ingresos, margen y EBITDA).
   aprobado_honorario?: number | null
   aprobado_tarifa_upme?: number | null
+  /**
+   * Servicio congelado al aprobar, al lado de `aprobado_plan`.
+   *
+   * ⚠️ `servicio_contratado` sigue siendo editable después de que la propuesta se
+   * aprueba. Sin este snapshot, cambiarlo deja el PDF firmado y el precio sin
+   * respaldo de QUÉ se contrató, y nadie se entera: el bloque de la propuesta no
+   * guardaba el dato en ninguna parte (medido el 2026-09-01, `aprobado_servicio` no
+   * existía en el código y ninguna versión lo registraba).
+   *
+   * Que difiera de `servicio_contratado` NO es un error a corregir en silencio: es la
+   * señal de que la propuesta se emitió prometiendo una cosa y hoy el caso declara
+   * otra. Se muestra, y re-congelarlo es una corrección deliberada.
+   */
+  aprobado_servicio?: string | null
 }
 
 // ── Helpers de calculo ──────────────────────────────────────────────────────
@@ -375,6 +397,14 @@ async function loadBloqueContext(
     niegaCertificacionUpme(f.data),
   )
 
+  // El servicio en sí, no solo su efecto sobre la tarifa. La consulta ya está hecha
+  // arriba; lo único que faltaba era exponerlo para poder congelarlo al aprobar.
+  // Un negocio puede traer varias filas del bloque (las copias readonly heredadas
+  // viajan con él entre etapas): gana la que tenga respuesta, no la primera que llegue.
+  const servicioContratado = ((certRes.data ?? []) as FilaBloqueTarifa[])
+    .map(f => (f.data as Record<string, unknown> | null)?.servicio)
+    .find(v => typeof v === 'string' && v !== '') as string | undefined ?? null
+
   const fuenteTarifa = fuenteDeLaTarifa({
     confirmada: tarifaConfirmada,
     editadaAMano: tarifaEditada && typeof data.tarifa_upme === 'number' ? data.tarifa_upme : null,
@@ -436,6 +466,8 @@ async function loadBloqueContext(
      * (hoy: `solo_iva`). Su tarifa en 0 es correcta, no un dato faltante.
      */
     servicioNiegaTarifa,
+    /** Servicio contratado declarado hoy (`completo` | `solo_upme` | `solo_iva`). */
+    servicioContratado,
     /** Bloques declarados en `requiere_bloques` que aún no tienen respuesta. */
     requisitosFaltantes,
   }
@@ -695,6 +727,7 @@ export async function generarVersionPropuesta(
     valor_final_plan1: calc.plan1_valor,
     valor_final_plan2: calc.plan2_valor,
     tarifa_upme: ctx.tarifaUpme,
+    servicio: ctx.servicioContratado,
     pdf_drive_id: pdfDriveId,
     pdf_url: pdfUrl,
     generated_at: ahora.toISOString(),
@@ -720,6 +753,7 @@ export async function generarVersionPropuesta(
     aprobado_plan: ctx.data.aprobado_plan ?? null,
     aprobado_honorario: ctx.data.aprobado_honorario ?? null,
     aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
+    aprobado_servicio: ctx.data.aprobado_servicio ?? null,
   }
 
   // Escribe siempre en la fila ORIGEN (`ctx.bloque.id`), nunca en `bloqueId` tal cual
@@ -768,21 +802,26 @@ export async function aprobarVersionPropuesta(
 
   const descPlan = plan === 1 ? version.descuento_pct_plan1 : version.descuento_pct_plan2
 
-  // Gate de aprobación: descuentos sobre el umbral requieren rol gerencial.
-  const APRUEBAN_DESCUENTO_ALTO = ['owner', 'admin', 'supervisor']
-  if (ctx.umbralAprobacion != null && descPlan > ctx.umbralAprobacion
-      && !APRUEBAN_DESCUENTO_ALTO.includes(role ?? '')) {
-    return {
-      ok: false,
-      error: `El descuento del Plan ${plan} (${descPlan}%) supera ${ctx.umbralAprobacion}% — requiere aprobación de un supervisor, administrador o dueño.`,
-    }
-  }
+  // Gate de aprobación: descuentos sobre el umbral requieren rol gerencial. La regla
+  // vive en `gate-descuento` porque `corregirAprobacion` fija el mismo honorario por
+  // otra puerta y tiene que exigir exactamente lo mismo — dos copias se desincronizan.
+  const rechazo = motivoDescuentoRechazado({
+    descuentoPct: descPlan,
+    cap: ctx.capDescuento,
+    umbral: ctx.umbralAprobacion,
+    role,
+    etiqueta: `El Plan ${plan}`,
+  })
+  if (rechazo) return { ok: false, error: rechazo }
 
   // Honorario del plan elegido (los planes 50/50 vs único aplican al HONORARIO).
   const honorarioElegido = plan === 1 ? version.valor_final_plan1 : version.valor_final_plan2
   // Tarifa (pasante) congelada al aprobar: la de la versión (snapshot) con fallback
   // a la vigente en ctx (compat con versiones viejas sin tarifa persistida).
   const tarifaElegida = version.tarifa_upme ?? ctx.tarifaUpme ?? 0
+  // Servicio congelado al aprobar: el de la versión (lo que el PDF prometió) con
+  // fallback al vigente, para las versiones anteriores a que se persistiera.
+  const servicioElegido = version.servicio ?? ctx.servicioContratado ?? null
   // precio_aprobado = HONORARIO (ingreso). La tarifa UPME (pasante) NO entra al
   // precio del negocio: se confirma aparte en Validación y solo compone el
   // valor_a_recaudar (honorario + tarifa) aguas abajo. Rediseño 2026-07-16 (GO Vera),
@@ -808,6 +847,7 @@ export async function aprobarVersionPropuesta(
     aprobado_plan: plan,
     aprobado_honorario: honorarioElegido,
     aprobado_tarifa_upme: tarifaElegida,
+    aprobado_servicio: servicioElegido,
   }
 
   // Marcar bloque completo + setear precio_aprobado del negocio (en transaccion ligera)
@@ -981,6 +1021,7 @@ export async function revertirAprobacionPropuesta(
     aprobado_plan: null,
     aprobado_honorario: null,
     aprobado_tarifa_upme: null,
+    aprobado_servicio: null,
   }
 
   const { error: errBlq } = await sb
@@ -1077,6 +1118,7 @@ export async function crearV1Automatica(
     aprobado_plan: null,
     aprobado_honorario: null,
     aprobado_tarifa_upme: null,
+    aprobado_servicio: null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1155,6 +1197,7 @@ export async function actualizarTarifaUpmePropuesta(
     aprobado_plan: ctx.data.aprobado_plan ?? null,
     aprobado_honorario: ctx.data.aprobado_honorario ?? null,
     aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
+    aprobado_servicio: ctx.data.aprobado_servicio ?? null,
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1212,15 +1255,25 @@ function nombrePlan(plan: 1 | 2 | undefined): string {
   return 'sin plan'
 }
 
+function nombreServicio(servicio: string | null | undefined): string {
+  if (servicio === 'completo') return 'Certificación UPME + devolución de IVA'
+  if (servicio === 'solo_upme') return 'Solo certificación UPME'
+  if (servicio === 'solo_iva') return 'Solo devolución de IVA'
+  return servicio || 'sin servicio'
+}
+
 function resumenCorreccion(x: {
   cambiaHonorario: boolean
   cambiaPlan: boolean
+  cambiaServicio: boolean
   nuevo: number
   planNuevo: 1 | 2 | undefined
+  servicioNuevo: string | null
 }): string {
   const partes: string[] = []
   if (x.cambiaHonorario) partes.push(`el valor aprobado cambió a ${formatCOP(x.nuevo)}`)
   if (x.cambiaPlan) partes.push(`el plan cambió a ${nombrePlan(x.planNuevo)}`)
+  if (x.cambiaServicio) partes.push(`el servicio quedó en ${nombreServicio(x.servicioNuevo)}`)
   return partes.join(' y ')
 }
 
@@ -1229,6 +1282,16 @@ export interface CambiosAprobacion {
   honorario?: number
   /** Plan correcto: 1 (tarifa plena, 50/50) o 2 (pago anticipado). */
   plan?: 1 | 2
+  /**
+   * Servicio a re-congelar en `aprobado_servicio`.
+   *
+   * ⚠️ Solo se acepta el valor que `servicio_contratado` declara HOY. La propuesta
+   * congela una decisión que se toma en otro bloque; dejar que se escriba otra cosa
+   * aquí abriría una segunda verdad sobre qué contrató el cliente, y la que decide
+   * el enrutamiento del caso seguiría siendo la otra. El servicio se corrige donde
+   * se declara; esto solo vuelve a fotografiarlo.
+   */
+  servicio?: string
 }
 
 export async function corregirAprobacion(
@@ -1244,8 +1307,9 @@ export async function corregirAprobacion(
 
   const pidePlan = cambios?.plan !== undefined
   const pideHonorario = cambios?.honorario !== undefined
-  if (!pidePlan && !pideHonorario) {
-    return { ok: false, error: 'Indica qué se corrige: el valor, el plan, o los dos' }
+  const pideServicio = cambios?.servicio !== undefined
+  if (!pidePlan && !pideHonorario && !pideServicio) {
+    return { ok: false, error: 'Indica qué se corrige: el valor, el plan o el servicio' }
   }
   if (pidePlan && cambios.plan !== 1 && cambios.plan !== 2) {
     return { ok: false, error: 'El plan debe ser 1 o 2' }
@@ -1285,20 +1349,57 @@ export async function corregirAprobacion(
   // plan válido (`anticipoCubiertoPorSaldo`), así que dejar copias divergentes hace
   // que el gate dependa del orden en que vuelvan las filas. Las `versiones[]` NO se
   // tocan: son el registro de lo que se le mandó al cliente.
-  const { data: instancias } = await sb
-    .from('negocio_bloques')
-    .select('id, data, bloque_configs!inner(bloque_definitions!inner(tipo))')
-    .eq('negocio_id', negocioId)
+  const [{ data: instancias }, { data: filasServicio }] = await Promise.all([
+    sb
+      .from('negocio_bloques')
+      .select('id, data, bloque_configs!inner(config_extra, bloque_definitions!inner(tipo))')
+      .eq('negocio_id', negocioId),
+    // El servicio vigente, para poder re-congelarlo. Se lee su bloque, no el reflejo
+    // derivado: la misma regla que aplica `niegaCertificacionUpme`.
+    sb
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+      .eq('bloque_configs.slug', 'servicio_contratado'),
+  ])
 
-  const filas = ((instancias ?? []) as Array<{
+  type FilaPropuesta = {
     id: string
     data: Record<string, unknown>
-    bloque_configs?: { bloque_definitions?: { tipo?: string } }
-  }>).filter(
-    inst =>
-      inst.bloque_configs?.bloque_definitions?.tipo === 'propuesta_economica' &&
-      Object.prototype.hasOwnProperty.call(inst.data ?? {}, 'aprobado_honorario'),
+    bloque_configs?: {
+      config_extra?: Record<string, unknown> | null
+      bloque_definitions?: { tipo?: string }
+    }
+  }
+  const dePropuesta = ((instancias ?? []) as FilaPropuesta[]).filter(
+    inst => inst.bloque_configs?.bloque_definitions?.tipo === 'propuesta_economica',
   )
+  const filas = dePropuesta.filter(inst =>
+    Object.prototype.hasOwnProperty.call(inst.data ?? {}, 'aprobado_honorario'),
+  )
+
+  // Cap y umbral salen de la config del bloque ORIGEN (el que no es copia readonly).
+  // Las copias heredan la misma config hoy, pero leer el origen es lo que hace el
+  // resto del motor y no depende de que sigan sincronizadas.
+  const cfgOrigen = (dePropuesta.find(f => f.bloque_configs?.config_extra?.readonly !== true)
+    ?? dePropuesta[0])?.bloque_configs?.config_extra ?? {}
+  const capDescuento = Number(cfgOrigen.cap_descuento_pct ?? 50)
+  const umbralAprobacion = cfgOrigen.umbral_aprobacion_pct != null
+    ? Number(cfgOrigen.umbral_aprobacion_pct)
+    : null
+
+  const servicioVigente = ((filasServicio ?? []) as Array<{ data: Record<string, unknown> | null }>)
+    .map(f => f.data?.servicio)
+    .find(v => typeof v === 'string' && v !== '') as string | undefined ?? null
+
+  if (pideServicio && cambios.servicio !== servicioVigente) {
+    return {
+      ok: false,
+      error: servicioVigente
+        ? `El servicio se corrige en el bloque "Servicio contratado", no aquí. Hoy declara: ${nombreServicio(servicioVigente)}.`
+        : 'Este negocio todavía no declara qué contrató el cliente. Respóndelo en el bloque "Servicio contratado" y vuelve.',
+    }
+  }
 
   // Estado vigente. El plan se lee con el MISMO criterio que el motor (primera
   // instancia con un plan válido) para no corregir contra una lectura distinta de
@@ -1323,16 +1424,65 @@ export async function corregirAprobacion(
     if (Number.isFinite(derivado) && (derivado as number) > 0) nuevo = Math.round(derivado as number)
   }
 
+  const servicioAnterior =
+    filas.map(f => f.data?.aprobado_servicio).find(v => typeof v === 'string' && v !== '') as
+      | string
+      | undefined ?? null
+  const servicioNuevo = pideServicio ? (cambios.servicio as string) : servicioAnterior
+
   const cambiaHonorario = nuevo !== anterior
   const cambiaPlan = pidePlan && planNuevo !== planAnterior
-  if (!cambiaHonorario && !cambiaPlan) {
+  const cambiaServicio = pideServicio && servicioNuevo !== servicioAnterior
+  if (!cambiaHonorario && !cambiaPlan && !cambiaServicio) {
     return { ok: false, error: 'Los valores son los mismos que ya están registrados' }
+  }
+
+  // ⚠️ El MISMO gate que exige la aprobación. Corregir un dato mal registrado y regalar
+  // un descuento se escriben igual en la base: sin esto, quien está en
+  // `correccion_precio.staff_ids` podía dejar el honorario en cualquier cifra saltándose
+  // el umbral que sí lo frena al aprobar. La base viene de la instancia origen; si la
+  // propuesta no la trae (bloques viejos), `descuentoImplicito` devuelve null y el gate
+  // no frena, porque ahí falta configuración, no falta una decisión de precio.
+  if (cambiaHonorario) {
+    let precioBase = Number(
+      filas.map(f => f.data?.precio_base_con_iva).find(v => Number(v) > 0) ?? 0,
+    )
+    // ⚠️ 184 de las 302 propuestas aprobadas de SOENA no traen `precio_base_con_iva`
+    // (medido el 2026-09-01): son las del cargue historico, que nacieron aprobadas sin
+    // pasar por `generarVersionPropuesta`. Sin base no hay descuento que medir y el gate
+    // se quedaria mudo justo en la mayoria de los casos. Se deriva del servicio de la
+    // linea, que es EXACTAMENTE el mismo fallback que aplica `loadBloqueContext` al
+    // generar: no se inventa una base, se usa la misma que usaria la creacion.
+    if (precioBase <= 0) {
+      const autoPropuesta = (cfgOrigen.auto_propuesta ?? null) as { servicio_id?: string } | null
+      const servicioId = (cfgOrigen.servicio_id as string | undefined) ?? autoPropuesta?.servicio_id
+      if (servicioId) {
+        const { data: servicio } = await sb
+          .from('servicios')
+          .select('precio_estandar, tarifa_iva')
+          .eq('id', servicioId)
+          .single()
+        if (servicio) {
+          const iva = Number(servicio.tarifa_iva ?? 0.19)
+          precioBase = Math.round(Number(servicio.precio_estandar ?? 0) * (1 + iva))
+        }
+      }
+    }
+    const rechazo = motivoDescuentoRechazado({
+      descuentoPct: descuentoImplicito(nuevo, precioBase),
+      cap: capDescuento,
+      umbral: umbralAprobacion,
+      role,
+      etiqueta: `El valor corregido (${formatCOP(nuevo)})`,
+    })
+    if (rechazo) return { ok: false, error: rechazo }
   }
 
   for (const inst of filas) {
     const data = { ...inst.data }
     if (cambiaHonorario) data.aprobado_honorario = nuevo
     if (cambiaPlan) data.aprobado_plan = planNuevo
+    if (cambiaServicio) data.aprobado_servicio = servicioNuevo
     await sb
       .from('negocio_bloques')
       .update({ data, updated_at: new Date().toISOString() })
@@ -1370,6 +1520,14 @@ export async function corregirAprobacion(
       contenido: `Plan aprobado corregido: ${nombrePlan(planAnterior)} → ${nombrePlan(planNuevo)}. ${razon}`.slice(0, 280),
     })
   }
+  if (cambiaServicio) {
+    eventos.push({
+      campo_modificado: 'aprobado_servicio',
+      valor_anterior: servicioAnterior ?? '',
+      valor_nuevo: String(servicioNuevo),
+      contenido: `Servicio de la propuesta actualizado: ${nombreServicio(servicioAnterior)} → ${nombreServicio(servicioNuevo)}. ${razon}`.slice(0, 280),
+    })
+  }
   for (const evento of eventos) {
     await sb.from('activity_log').insert({
       workspace_id: workspaceId,
@@ -1399,8 +1557,10 @@ export async function corregirAprobacion(
         p_contenido: `${negocio.codigo ?? 'Negocio'}: ${resumenCorreccion({
           cambiaHonorario,
           cambiaPlan,
+          cambiaServicio,
           nuevo,
           planNuevo,
+          servicioNuevo,
         })}`.slice(0, 280),
         p_entidad_tipo: 'negocio',
         p_entidad_id: negocioId,
@@ -1410,6 +1570,8 @@ export async function corregirAprobacion(
           nuevo,
           plan_anterior: planAnterior ?? null,
           plan_nuevo: planNuevo ?? null,
+          servicio_anterior: servicioAnterior,
+          servicio_nuevo: servicioNuevo,
           motivo: razon,
         },
         p_permitir_repetidas: true,
