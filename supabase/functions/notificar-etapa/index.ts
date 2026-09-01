@@ -63,6 +63,10 @@ type Supabase = SupabaseClient<EsquemaSinGenerar>;
  * que es el caso normal de un aviso de tramite. Va por NOMBRE y no por posicion de
  * etapa porque renombrar una etapa no puede romper un envio en silencio.
  *
+ * Viaja SOLO si el correo salio, igual que `mensaje_whatsapp` y por la misma razon: el
+ * texto aprobado de las plantillas de SOENA remite al correo, y FunnelChat las manda sin
+ * volver a preguntar. Declararla no basta para que salga.
+ *
  * ── Los tres copys y por que son tres ──────────────────────────────────────────
  * `mensaje` es el copy que se basta solo: cuenta la novedad completa. Es el unico
  * obligatorio y el unico que existia antes.
@@ -952,7 +956,9 @@ async function enviarAlCliente(
  * aviso de avance de trámite casi siempre cae fuera de esa ventana: medido en SOENA, el
  * texto libre volvía con el error 131047 de Meta. Por eso la etapa declara `plantilla` y
  * viaja en el disparo. Una etapa con `whatsapp: true` y sin `plantilla` deja el envío en
- * manos del texto libre, o sea: le llega solo al cliente que escribió hace poco.
+ * manos del texto libre, o sea: le llega solo al cliente que escribió hace poco. Lo mismo
+ * pasa cuando la etapa SI la declara pero el correo no salió, y ahí es a propósito: ver
+ * la nota de `plantilla` en el cuerpo del POST.
  */
 async function enviarWhatsAppAlCliente(
   supabase: Supabase,
@@ -1012,6 +1018,11 @@ async function enviarWhatsAppAlCliente(
   // `mensaje`, que se basta solo. Decirle "te escribimos al correo" a quien no va a
   // recibir ningun correo lo deja esperando algo que no existe, y en el log se ve como
   // un cliente avisado.
+  //
+  // `correoEnviado` decide DOS cosas, no una: este copy y la `plantilla` que viaja mas
+  // abajo en el cuerpo del POST. Son las dos mitades del mismo aviso, dicen lo mismo por
+  // canales distintos, y por eso se deciden con el mismo dato. Separarlas deja pasar la
+  // promesa por el lado que quedo sin guardia.
   const copy = (correoEnviado && cfg.mensaje_whatsapp)
     ? cfg.mensaje_whatsapp
     : (cfg.mensaje ?? 'Te contamos que tu tramite paso a la etapa "{etapa}".');
@@ -1056,7 +1067,19 @@ async function enviarWhatsAppAlCliente(
         // que la plantilla lo referencie y el dato no exista, y de eso ya se encarga
         // arriba `aplicarDatosDelCopy`: si el copy promete un dato que no está, se
         // omite el aviso completo en vez de mandarlo a medias.
-        plantilla: cfg.plantilla ?? '',
+        //
+        // ⚠️ Y va en blanco cuando el correo NO salio, aunque la etapa la declare. El
+        // texto que Meta aprobo dice "te enviamos un correo con...", asi que la plantilla
+        // solo es cierta si hubo correo. A diferencia del copy de arriba, aca FunnelChat
+        // no vuelve a preguntar: recibe el nombre y manda. Dejarla viajar sin correo le
+        // promete al cliente algo que nunca le va a llegar, que es exactamente el fallo
+        // que `copy` ya cierra para el texto libre.
+        //
+        // Sin plantilla el disparo cae al texto libre de `mensaje`, que se basta solo:
+        // dentro de las 24 h llega, y fuera de ellas Meta lo bota con el 131047. Que no
+        // llegue nada es el resultado correcto; el par de filas de `avisos_cliente`
+        // (`email/omitido/sin_correo` + `whatsapp/disparado`) deja ver por que.
+        plantilla: correoEnviado ? (cfg.plantilla ?? '') : '',
         link: datos.link ?? '',
         fecha_cita: datos.fecha_cita ?? '',
         // Viaja el comercial para que FunnelChat pueda asignarle la conversación. El
