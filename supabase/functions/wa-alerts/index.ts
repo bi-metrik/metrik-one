@@ -145,7 +145,7 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
       msg += `📄 ${d.codigo} — ${bold(d.nombre)}\n`;
       msg += `💰 Saldo: ${formatCOP(d.saldo)} · ${d.dias}d`;
 
-      await sendTextMessage(phone, msg);
+      await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId, intent: 'W25' });
       await logMessage(supabase, phone, 'outbound', workspaceId, 'W25', `Saldo ${d.codigo} vencido`);
     }
   }
@@ -174,7 +174,7 @@ async function runW29ResumenSemanal(supabase: ReturnType<typeof getServiceClient
 
     try {
       const msg = await buildWeeklySummary(supabase, ws.id);
-      await sendTextMessage(phone, msg);
+      await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'W29' });
       await logMessage(supabase, phone, 'outbound', ws.id, 'W29', 'Resumen semanal');
     } catch (err) {
       console.error(`[wa-alerts] W29 error for workspace ${ws.id}:`, err);
@@ -405,7 +405,7 @@ async function runW33PushSaldo(supabase: ReturnType<typeof getServiceClient>): P
       ? `Hola ${nombre}, tu saldo del banco tiene ${dias} días sin actualizar. ¿Cuál es tu saldo hoy?\n\nResponde con el monto y lo registro.`
       : `Hola ${nombre}, aún no has registrado tu saldo bancario. ¿Cuál es tu saldo hoy?\n\nResponde con el monto y lo registro.`;
 
-    await sendTextMessage(phone, msg);
+    await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'W33' });
     await logMessage(supabase, phone, 'outbound', ws.id, 'W33', `Push saldo (${dias} días)`);
   }
 }
@@ -516,7 +516,7 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
     }
     msg += `\n\nEscríbeme "llamé a [nombre]" o "reunión con [nombre]" para actualizar.`;
 
-    await sendTextMessage(phone, msg);
+    await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'stale_opps' });
     await logMessage(supabase, phone, 'outbound', ws.id, 'stale_opps', `${staleNeg.length} negocios estancados`);
   }
 }
@@ -577,7 +577,7 @@ async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): P
     const msg = `⚠️ Recaudo del mes al ${pctMeta.toFixed(0)}% de la meta\n\n💰 Cobrado: ${formatCOP(totalCobros)} de ${formatCOP(metaRecaudo)}\n📅 Quedan ${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate()} días del mes\n\nRevisa tu cartera con "¿quién me debe?"`;
 
 
-    await sendTextMessage(phone, msg);
+    await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'recaudo_check' });
     await logMessage(supabase, phone, 'outbound', ws.id, 'recaudo_check', `${pctMeta.toFixed(0)}% de meta`);
   }
 }

@@ -4,6 +4,10 @@
 
 import { splitMessage } from './wa-format.ts';
 import { aEspanolNeutro } from './es-neutro.ts';
+import { registrarEnvio, resumenPayload } from './wa-envios.ts';
+import type { EnvioCtx } from './wa-envios.ts';
+
+export type { EnvioCtx } from './wa-envios.ts';
 
 const META_API_VERSION = 'v21.0';
 
@@ -24,7 +28,7 @@ function getHeaders(): Record<string, string> {
  * Pasa por el guard de espanol neutro: TODO lo que sale de cualquier bot de MeTRIK va en
  * tuteo colombiano, y eso se garantiza aqui y no en el prompt (ver es-neutro.ts).
  */
-export async function sendTextMessage(phone: string, text: string): Promise<void> {
+export async function sendTextMessage(phone: string, text: string, ctx: EnvioCtx = {}): Promise<void> {
   const neutro = aEspanolNeutro(text);
   if (neutro.correcciones.length) {
     console.warn(`[wa-respond] voseo corregido antes de enviar: ${neutro.correcciones.join(', ')}`);
@@ -38,15 +42,20 @@ export async function sendTextMessage(phone: string, text: string): Promise<void
       to: phone,
       type: 'text',
       text: { body: chunk },
-    });
+    }, ctx);
   }
 }
 
 /** Send a numbered list as text (for menus with > 3 options) */
-export async function sendNumberedMenu(phone: string, header: string, options: string[]): Promise<void> {
+export async function sendNumberedMenu(
+  phone: string,
+  header: string,
+  options: string[],
+  ctx: EnvioCtx = {},
+): Promise<void> {
   const numbered = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join('\n');
   const text = `${header}\n\n${numbered}\n\nResponde con el número.`;
-  await sendTextMessage(phone, text);
+  await sendTextMessage(phone, text, ctx);
 }
 
 /** Send interactive buttons (max 3 buttons) */
@@ -54,6 +63,7 @@ export async function sendButtons(
   phone: string,
   body: string,
   buttons: Array<{ id: string; title: string }>,
+  ctx: EnvioCtx = {},
 ): Promise<void> {
   await postMessage(phone, {
     messaging_product: 'whatsapp',
@@ -69,7 +79,7 @@ export async function sendButtons(
         })),
       },
     },
-  });
+  }, ctx);
 }
 
 /**
@@ -82,6 +92,7 @@ export async function sendCtaUrl(
   body: string,
   displayText: string,
   url: string,
+  ctx: EnvioCtx = {},
 ): Promise<void> {
   await postMessage(phone, {
     messaging_product: 'whatsapp',
@@ -95,7 +106,7 @@ export async function sendCtaUrl(
         parameters: { display_text: displayText.slice(0, 20), url },
       },
     },
-  });
+  }, ctx);
 }
 
 /**
@@ -110,6 +121,7 @@ export async function sendFlow(
   flowToken: string,
   firstScreen: string,
   mode: 'draft' | 'published' = 'published',
+  ctx: EnvioCtx = {},
 ): Promise<void> {
   await postMessage(phone, {
     messaging_product: 'whatsapp',
@@ -131,7 +143,50 @@ export async function sendFlow(
         },
       },
     },
-  });
+  }, ctx);
+}
+
+/**
+ * Los `components` de una plantilla de Meta: el relleno de las variables del header, del
+ * cuerpo y de los botones. Se tipa la envoltura, que es lo estable, y no cada parametro:
+ * su forma depende del tipo (`text`, `currency`, `date_time`, `image`, ...) y cambia con
+ * la version de la API. Ver docs de Cloud API, "Template Messages".
+ */
+export interface TemplateComponent {
+  type: 'header' | 'body' | 'button';
+  sub_type?: string;
+  index?: string;
+  parameters?: Array<Record<string, unknown>>;
+}
+
+/**
+ * Envia una plantilla aprobada. Es el unico camino permitido para escribirle a alguien
+ * FUERA de la ventana de 24h (contratos, avisos de cobro, primer contacto).
+ *
+ * Existe porque hasta ahora esos envios se hacian a mano contra la Graph API, por fuera
+ * del codigo, y por eso no quedaba constancia de ninguno: el contrato de TERMOTECH SAS
+ * (2026-08-31) salio asi. Mandarlo por aqui lo deja en `wa_envios` con su acuse.
+ *
+ * Devuelve el wamid, o null si Meta lo rechazo (plantilla no aprobada, pausada, numero
+ * invalido). Un null aqui NO es un detalle de log: significa que el cliente no recibio nada.
+ */
+export async function sendTemplate(
+  phone: string,
+  templateName: string,
+  languageCode: string,
+  components: TemplateComponent[] = [],
+  ctx: EnvioCtx = {},
+): Promise<string | null> {
+  return await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      ...(components.length ? { components } : {}),
+    },
+  }, { ...ctx, origen: ctx.origen ?? 'template', templateName });
 }
 
 /** Mark message as read */
@@ -220,14 +275,19 @@ const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Es el camino por defecto para hablarle a una persona; `sendTextMessage` queda para
  * avisos del sistema y para cuando la inmediatez es lo correcto.
  */
-export async function sendTextWithRhythm(phone: string, text: string, opts: RitmoOpts = {}): Promise<void> {
+export async function sendTextWithRhythm(
+  phone: string,
+  text: string,
+  opts: RitmoOpts = {},
+  ctx: EnvioCtx = {},
+): Promise<void> {
   if (opts.sinRitmo || Deno.env.get('WA_RITMO_HUMANO') === 'off') {
-    await sendTextMessage(phone, text);
+    await sendTextMessage(phone, text, ctx);
     return;
   }
   if (opts.waMessageId) await sendTypingIndicator(opts.waMessageId);
   await dormir(calcularPausaMs(text, opts));
-  await sendTextMessage(phone, text);
+  await sendTextMessage(phone, text, ctx);
 }
 
 /**
@@ -244,7 +304,12 @@ export function enBackground(p: Promise<unknown>): void {
 }
 
 /** Envia una tarjeta de contacto (vCard) para que el usuario pueda reenviarla con un toque. */
-export async function sendContact(phone: string, displayName: string, contactPhone: string): Promise<void> {
+export async function sendContact(
+  phone: string,
+  displayName: string,
+  contactPhone: string,
+  ctx: EnvioCtx = {},
+): Promise<void> {
   const digits = (contactPhone || '').replace(/\D/g, '');
   if (!digits) return;
   await postMessage(phone, {
@@ -255,11 +320,11 @@ export async function sendContact(phone: string, displayName: string, contactPho
       name: { formatted_name: displayName, first_name: displayName },
       phones: [{ phone: `+${digits}`, type: 'WORK', wa_id: digits }],
     }],
-  });
+  }, ctx);
 }
 
 /** Pide la ubicacion con el boton nativo "Enviar ubicacion" de WhatsApp (in-chat). */
-export async function sendLocationRequest(phone: string, body: string): Promise<void> {
+export async function sendLocationRequest(phone: string, body: string, ctx: EnvioCtx = {}): Promise<void> {
   await postMessage(phone, {
     messaging_product: 'whatsapp',
     to: phone,
@@ -269,19 +334,53 @@ export async function sendLocationRequest(phone: string, body: string): Promise<
       body: { text: (body || '').slice(0, 1024) },
       action: { name: 'send_location' },
     },
-  });
+  }, ctx);
 }
 
 // --- Internal ---
 
-async function postMessage(phone: string, payload: Record<string, unknown>): Promise<void> {
-  const res = await fetch(getMetaUrl(), {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    console.error(`[wa-respond] Failed to send to ${phone}: ${res.status} ${err}`);
+/**
+ * Unica puerta de salida a la Graph API, y por eso el unico lugar sensato para dejar
+ * constancia: un sender nuevo queda auditado sin que su autor se acuerde de hacerlo.
+ *
+ * Devuelve el wamid porque es la llave con la que despues se cruzan los acuses
+ * ('sent' / 'delivered' / 'read' / 'failed') que Meta manda al webhook. Antes esta
+ * funcion leia la respuesta solo cuando fallaba y botaba el id: sin el, un acuse que
+ * llega no tiene contra que cruzarse y no dice de que mensaje habla.
+ */
+async function postMessage(
+  phone: string,
+  payload: Record<string, unknown>,
+  ctx: EnvioCtx = {},
+): Promise<string | null> {
+  const preview = resumenPayload(payload);
+  let res: Response;
+  try {
+    res = await fetch(getMetaUrl(), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    // Se registra el intento fallido ANTES de propagar: el error sigue subiendo como
+    // siempre, pero ya no se va sin dejar rastro.
+    await registrarEnvio(phone, null, preview, ctx);
+    throw err;
   }
+
+  const cuerpo = await res.text();
+  if (!res.ok) {
+    console.error(`[wa-respond] Failed to send to ${phone}: ${res.status} ${cuerpo}`);
+    await registrarEnvio(phone, null, preview, ctx);
+    return null;
+  }
+
+  let waMessageId: string | null = null;
+  try {
+    waMessageId = JSON.parse(cuerpo)?.messages?.[0]?.id ?? null;
+  } catch {
+    console.error(`[wa-respond] respuesta de Meta sin JSON para ${phone}: ${cuerpo.slice(0, 200)}`);
+  }
+  await registrarEnvio(phone, waMessageId, preview, ctx);
+  return waMessageId;
 }

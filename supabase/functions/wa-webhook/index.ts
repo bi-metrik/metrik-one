@@ -6,12 +6,14 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
-import { sendTextMessage, sendButtons, sendCtaUrl, sendFlow } from '../_shared/wa-respond.ts';
+import { sendTextMessage, sendButtons, sendCtaUrl, sendFlow, enBackground } from '../_shared/wa-respond.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { resolverEstudioChat, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
+import { aplicarStatuses } from '../_shared/wa-envios.ts';
+import type { StatusEntrega } from '../_shared/wa-envios.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleActividad } from '../_shared/handlers/actividad.ts';
@@ -47,10 +49,26 @@ Deno.serve(async (req) => {
 
       const payload = JSON.parse(body);
 
+      // Acuses de entrega. Van primero y no compiten con los mensajes: un webhook trae
+      // `messages` o `statuses`, nunca los dos. Antes caian en el `return 200` de abajo
+      // y se perdian, que es la razon de que no se supiera si un contrato llego.
+      const statuses = extractStatuses(payload);
+      if (statuses.length > 0) {
+        // `enBackground` y no un `.catch` suelto: sin `waitUntil` el worker puede
+        // reciclarse a mitad y el acuse se pierde, que es justo lo que paso con
+        // meta-leads-webhook (18 de 153 leads). Un acuse perdido devuelve el agujero.
+        enBackground(
+          procesarStatuses(statuses).catch((err) =>
+            console.error('[wa-webhook] Status error:', err)
+          ),
+        );
+        return new Response('OK', { status: 200 });
+      }
+
       // Extract message from Meta webhook format
       const message = extractMessage(payload);
       if (!message) {
-        return new Response('OK', { status: 200 }); // Status updates, etc.
+        return new Response('OK', { status: 200 }); // Otros eventos (plantillas, cuenta, etc.)
       }
 
       // Process async — respond 200 immediately (Meta expects < 20s)
@@ -67,6 +85,77 @@ Deno.serve(async (req) => {
 
   return new Response('Method not allowed', { status: 405 });
 });
+
+// ============================================================
+// Numeros que no reconocemos
+// ============================================================
+
+/** Marca con la que estas conversaciones quedan buscables en `wa_message_log`. */
+const INTENT_DESCONOCIDO = 'numero_desconocido';
+
+/**
+ * Alguien que no esta registrado le escribio al bot.
+ *
+ * Antes solo se le contestaba "no te reconozco" y ahi moria: el mensaje no se guardaba y
+ * nadie se enteraba. Si un cliente responde por WhatsApp a un contrato o a un cobro, cae
+ * justo por aca, y su respuesta se perdia.
+ *
+ * Dos cosas, en este orden: queda registrado SIEMPRE, y se avisa a quien pueda contestar.
+ */
+async function atenderDesconocido(
+  supabase: ReturnType<typeof getServiceClient>,
+  message: IncomingMessage,
+): Promise<void> {
+  const preview = (message.text || '').trim() || `[${message.type}]`;
+
+  // Se decide ANTES de insertar: si se consulta despues, la fila recien escrita apaga
+  // su propio aviso y no se notifica nunca.
+  const avisar = !(await avisoReciente(supabase, message.phone));
+
+  await logMessage(supabase, message.phone, 'inbound', undefined, INTENT_DESCONOCIDO, preview);
+
+  await sendTextMessage(message.phone,
+    'Hola, no reconozco este número todavía.\n\nSi aún no tienes cuenta, puedes crearla en metrikone.co. Si ya usas MéTRIK ONE, pídele a tu admin que registre este número en Configuración → Equipo.');
+
+  if (!avisar) return;
+
+  const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
+  if (!admin) {
+    console.warn(`[wa-webhook] ${message.phone} no reconocido y sin avisar: falta WA_ADMIN_NOTIFY_PHONE`);
+    return;
+  }
+
+  // Sale como texto libre, asi que Meta solo lo entrega si la ventana de 24h con este
+  // numero esta abierta. Cuando no lo este, el rechazo queda en `wa_envios` con su codigo
+  // de error: el aviso puede fallar, pero ya no falla en silencio.
+  await sendTextMessage(
+    admin,
+    `📵 Un número no registrado le escribió al bot.\n\nDe: +${message.phone}\nDice: ${preview.slice(0, 200)}\n\nNo hay a quién enrutarlo. Si es un cliente, contéstale desde tu WhatsApp.`,
+    { origen: 'interno', intent: INTENT_DESCONOCIDO },
+  );
+}
+
+/** True si a este numero ya se le abrio un aviso en las ultimas 24h. Evita que un spammer
+ *  con veinte mensajes se convierta en veinte notificaciones. */
+async function avisoReciente(
+  supabase: ReturnType<typeof getServiceClient>,
+  phone: string,
+): Promise<boolean> {
+  const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from('wa_message_log')
+    .select('*', { count: 'exact', head: true })
+    .eq('phone', phone)
+    .eq('intent', INTENT_DESCONOCIDO)
+    .gte('created_at', desde);
+
+  // Si la consulta falla se avisa igual: perder un aviso es peor que repetirlo.
+  if (error) {
+    console.error('[wa-webhook] no se pudo revisar el aviso previo:', error.message);
+    return false;
+  }
+  return (count ?? 0) > 0;
+}
 
 // ============================================================
 // Core Processing Pipeline
@@ -196,8 +285,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   // 1. Identify user by phone number
   const user = await identifyUser(supabase, message.phone);
   if (!user) {
-    await sendTextMessage(message.phone,
-      'Hola, no reconozco este número todavía.\n\nSi aún no tienes cuenta, puedes crearla en metrikone.co. Si ya usas MéTRIK ONE, pídele a tu admin que registre este número en Configuración → Equipo.');
+    await atenderDesconocido(supabase, message);
     return;
   }
 
@@ -597,16 +685,82 @@ type MetaMensaje = {
   location?: { latitude: number; longitude: number; name?: string; address?: string };
 };
 
+// Acuse de entrega de un mensaje que MeTRIK mando. Llega por el mismo webhook que los
+// mensajes entrantes, en `value.statuses` en vez de `value.messages`.
+type MetaStatus = {
+  id?: string;            // wamid del mensaje NUESTRO al que se refiere
+  status?: string;        // sent | delivered | read | failed
+  timestamp?: string;     // epoch en segundos, como string
+  recipient_id?: string;  // telefono del destinatario
+  errors?: Array<{ code?: number; title?: string; message?: string }>;
+};
+
 type MetaWebhookPayload = {
   entry?: Array<{
     changes?: Array<{
       value?: {
         metadata?: { phone_number_id?: string; display_phone_number?: string };
         messages?: MetaMensaje[];
+        statuses?: MetaStatus[];
       };
     }>;
   }>;
 };
+
+/** Los unicos que la tabla `wa_envios` acepta. Ver el CHECK de la migracion 20260901000003. */
+const STATUS_CONOCIDOS = ['sent', 'delivered', 'read', 'failed'];
+
+/**
+ * Saca los acuses de entrega del payload.
+ *
+ * Recorre TODAS las entries y changes, no solo la primera: Meta agrupa varios acuses en
+ * un mismo webhook cuando salieron varios mensajes seguidos (un texto largo se parte en
+ * chunks y cada chunk trae el suyo). Quedarse con `[0]`, como hace `extractMessage` para
+ * los mensajes entrantes, perderia el resto en silencio.
+ */
+function extractStatuses(payload: MetaWebhookPayload): StatusEntrega[] {
+  const salida: StatusEntrega[] = [];
+  const propio = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+  try {
+    for (const entry of payload?.entry ?? []) {
+      for (const change of entry?.changes ?? []) {
+        const value = change?.value;
+        if (!value?.statuses?.length) continue;
+
+        // Mismo criterio que extractMessage: lo que sea de otro numero (Mi Bolsillo) no es nuestro.
+        const recibido = value?.metadata?.phone_number_id;
+        if (propio && recibido && recibido !== propio) continue;
+
+        for (const st of value.statuses) {
+          if (!st?.id || !st?.status) continue;
+          // La tabla acota los estados con un CHECK. Un valor que Meta agregue manana
+          // haria fallar el insert entero, asi que aqui se filtra y se deja dicho en el
+          // log: mejor un acuse que no se entiende visible, que un error de constraint.
+          if (!STATUS_CONOCIDOS.includes(st.status)) {
+            console.warn(`[wa-webhook] status desconocido de Meta: ${st.status} (${st.id})`);
+            continue;
+          }
+          const err = st.errors?.[0];
+          salida.push({
+            waMessageId: st.id,
+            status: st.status,
+            statusAt: st.timestamp ? new Date(Number(st.timestamp) * 1000).toISOString() : undefined,
+            phone: st.recipient_id,
+            errorCode: err?.code,
+            errorTitle: err?.title ?? err?.message,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[wa-webhook] no se pudieron leer los statuses:', err);
+  }
+  return salida;
+}
+
+async function procesarStatuses(statuses: StatusEntrega[]): Promise<void> {
+  await aplicarStatuses(getServiceClient(), statuses);
+}
 
 function extractMessage(payload: MetaWebhookPayload): IncomingMessage | null {
   try {
