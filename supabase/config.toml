@@ -441,6 +441,13 @@ verify_jwt = false
 # de Supabase. Se autentica con secret compartido (NOTIFICAR_ETAPA_SECRET).
 verify_jwt = false
 
+[functions.alertas-plazo]
+# Cron diario que avisa por correo cuando un negocio cumple un plazo en dias
+# habiles (SOENA: los 15 y los 50 dias de la devolucion de IVA). Lo llama pg_cron
+# via pg_net, que NO manda JWT de Supabase: se autentica con el mismo secreto
+# compartido de `notificar-etapa`, que es el otro emisor de correo interno.
+verify_jwt = false
+
 [functions.wa-canal-propio]
 # Webhook del canal de WhatsApp PROPIO de MeTRIK (numero corporativo via
 # Coexistence, app de Meta DEDICADA y separada del bot — decision 6 de la spec
