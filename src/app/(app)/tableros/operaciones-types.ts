@@ -26,6 +26,7 @@ export interface IndicadorRango {
 export interface IndicadorCorrecciones {
   /** null = no se pudo calcular: sin radicaciones, o sin evidencia que lo respalde. */
   pct: number | null
+  /** Casos que pasaron la etapa de envio en el periodo. */
   radicaciones: number
   /** Devoluciones DIAN por **error propio**. Son las unicas que bajan el indicador. */
   correcciones: number
@@ -104,6 +105,12 @@ export interface ParametrosBono {
   peso_correcciones: number
   /** Que evidencia exige el indicador de correcciones para calcularse. */
   correcciones_cobertura: 'devolucion_dian' | 'cualquier_reproceso'
+  /**
+   * Orden de la etapa cuya salida hacia adelante cuenta como una radicacion ante
+   * la DIAN. Colgar el denominador de la etapa y no de un bloque es lo que evita
+   * que el indicador se rompa en silencio cada vez que el proceso se reacomoda.
+   */
+  etapa_radicacion_dian_orden?: number
   piso_operativo: number
   techo_operativo: number
   horas_radicacion: number
