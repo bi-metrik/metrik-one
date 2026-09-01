@@ -18,6 +18,8 @@ interface PropuestaVersion {
   descuento_pct_plan2: number
   valor_final_plan1: number
   valor_final_plan2: number
+  /** Servicio con el que se emitio esta version. null en versiones previas a 2026-09-01. */
+  servicio?: string | null
   pdf_drive_id: string | null
   pdf_url: string | null
   generated_at: string
@@ -41,6 +43,8 @@ interface PropuestaData {
    *  cuando quedó mal registrado; las `versiones[]` conservan lo que se le envió
    *  al cliente y no se tocan. */
   aprobado_honorario?: number | null
+  /** Servicio congelado al aprobar, al lado de `aprobado_plan`. */
+  aprobado_servicio?: string | null
 }
 
 interface ConfigExtra {
@@ -62,6 +66,12 @@ interface ConfigExtra {
    * bloque ya es copia de solo lectura.
    */
   _puedeRevertirAprobacion?: boolean
+  /**
+   * Lo resuelve el servidor: el servicio que `servicio_contratado` declara HOY.
+   * Se contrasta contra `aprobado_servicio` (el congelado al aprobar) para poder
+   * mostrar la divergencia en vez de esconderla.
+   */
+  _servicioVigente?: string | null
 }
 
 interface BloqueInstancia {
@@ -93,6 +103,16 @@ function pctStr(n: number): string {
   return String(pct2(n))
 }
 
+// Nombres de los servicios de la linea. Si llega uno que no esta mapeado se imprime
+// crudo antes que esconderlo: un slug feo en pantalla se corrige; un servicio invisible
+// devuelve el bloque al estado que motivo este cambio.
+function nombreServicio(servicio: string | null | undefined): string {
+  if (servicio === 'completo') return 'Certificación UPME + devolución de IVA'
+  if (servicio === 'solo_upme') return 'Solo certificación UPME'
+  if (servicio === 'solo_iva') return 'Solo devolución de IVA'
+  return servicio || 'sin declarar'
+}
+
 export default function BloquePropuestaEconomica({
   negocioBloqueId,
   negocioId,
@@ -104,8 +124,12 @@ export default function BloquePropuestaEconomica({
   // Corrección del valor aprobado (no genera versión ni PDF: ver la action).
   const [corrigiendoValor, setCorrigiendoValor] = useState(false)
   const [valorCorregido, setValorCorregido] = useState('')
+  // El % de la correccion vive aparte del precio, igual que en `PlanEditor`: los dos
+  // se editan y cada uno reescribe al otro, y el que se teclea conserva su texto.
+  const [descCorregidoStr, setDescCorregidoStr] = useState('')
   const [motivoCorreccion, setMotivoCorreccion] = useState('')
   const [planCorregido, setPlanCorregido] = useState<1 | 2 | null>(null)
+  const [reCongelarServicio, setReCongelarServicio] = useState(false)
   // Reversión de la aprobación (sí reabre el bloque: ver la action).
   const [revirtiendo, setRevirtiendo] = useState(false)
   const [motivoReversion, setMotivoReversion] = useState('')
@@ -261,20 +285,61 @@ export default function BloquePropuestaEconomica({
       ? versiones.find(v => v.n === data.aprobado_version) ?? ultimaVersion
       : ultimaVersion
     const planAprobado = data.aprobado_plan
-    const valorAprobado = versionMostrar
+    // Lo que dice la VERSION para el plan aprobado: es lo que imprimio el PDF que
+    // recibio el cliente, y no cambia nunca.
+    const valorVersion = versionMostrar
       ? planAprobado === 1
         ? versionMostrar.valor_final_plan1
         : versionMostrar.valor_final_plan2
       : null
+    // Lo APROBADO manda. `aprobado_honorario` es lo que `corregirAprobacion` escribe y
+    // lo que el motor de plata cobra (`modelo-dinero`); el valor de la version es solo
+    // el fallback para aprobaciones viejas que no lo persistieron.
+    //
+    // ⚠️ Antes esta pantalla recalculaba SIEMPRE desde la version e ignoraba el campo.
+    // Resultado medido el 2026-09-01: cuatro negocios (V0048, V0259, V0422, V0445)
+    // mostrando una cifra distinta de la que se les cobra, y una correccion que se
+    // guardaba bien pero se veia como si no hubiera tomado.
+    const valorAprobado = data.aprobado_honorario ?? valorVersion
+    const corregido =
+      valorAprobado !== null && valorVersion !== null && valorAprobado !== valorVersion
+    const servicioAprobado = data.aprobado_servicio ?? null
+    const servicioVigente = configExtra._servicioVigente ?? null
+    const servicioDivergente =
+      !!servicioAprobado && !!servicioVigente && servicioAprobado !== servicioVigente
     return (
       <div className="space-y-3">
         {aprobada && versionMostrar && (
-          <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
-            <CheckCircle2 className="h-4 w-4" />
+          <div className="space-y-1 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>
+                Aprobada v{data.aprobado_version} — Plan {planAprobado} ·{' '}
+                <strong>{valorAprobado !== null ? formatCOP(valorAprobado) : ''}</strong>
+                {data.aprobado_at && ` · ${formatFechaCorta(data.aprobado_at)}`}
+              </span>
+            </div>
+            {/* El servicio congelado al aprobar. El documento promete alcance distinto
+                segun cual sea, asi que forma parte de lo aprobado, no del contexto. */}
+            <p className="pl-6 text-xs text-green-800">
+              Servicio: <strong>{nombreServicio(servicioAprobado)}</strong>
+              {!servicioAprobado && ' (aprobada antes de que se congelara)'}
+            </p>
+            {corregido && (
+              <p className="pl-6 text-xs text-green-800">
+                Corregido después de emitir: el PDF v{data.aprobado_version} dice{' '}
+                {formatCOP(valorVersion!)}.
+              </p>
+            )}
+          </div>
+        )}
+        {servicioDivergente && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Aprobada v{data.aprobado_version} — Plan {planAprobado} ·{' '}
-              <strong>{valorAprobado !== null ? formatCOP(valorAprobado) : ''}</strong>
-              {data.aprobado_at && ` · ${formatFechaCorta(data.aprobado_at)}`}
+              La propuesta se aprobó con <strong>{nombreServicio(servicioAprobado)}</strong> y
+              hoy el negocio declara <strong>{nombreServicio(servicioVigente)}</strong>. El
+              alcance y la tarifa que promete el PDF salieron del primero.
             </span>
           </div>
         )}
@@ -283,6 +348,7 @@ export default function BloquePropuestaEconomica({
             versiones={versiones}
             aprobadaN={data.aprobado_version}
             planAprobado={data.aprobado_plan ?? null}
+            honorarioAprobado={data.aprobado_honorario ?? null}
           />
         ) : (
           <p className="text-sm text-muted-foreground">Sin versiones generadas.</p>
@@ -316,8 +382,11 @@ export default function BloquePropuestaEconomica({
             <button
               type="button"
               onClick={() => {
-                setValorCorregido(String(data.aprobado_honorario ?? valorAprobado ?? ''))
+                const v = data.aprobado_honorario ?? valorAprobado ?? null
+                setValorCorregido(v !== null ? String(v) : '')
+                setDescCorregidoStr(v !== null ? pctStr(descDeValor(v)) : '')
                 setPlanCorregido(planAprobado ?? null)
+                setReCongelarServicio(false)
                 setCorrigiendoValor(true)
               }}
               className="inline-flex items-center gap-1.5 rounded-md border border-muted-foreground/30 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
@@ -369,24 +438,48 @@ export default function BloquePropuestaEconomica({
         )}
 
         {corrigiendoValor && (() => {
-          // Valor que la versión aprobada declara para cada plan: al cambiar de plan
-          // se precarga, para que el número que se guarda sea el que la persona ve.
+          // Valor que la version aprobada declara para cada plan: al cambiar de plan
+          // se precarga, para que el numero que se guarda sea el que la persona ve.
           const valorDePlan = (p: 1 | 2) =>
             versionMostrar ? (p === 1 ? versionMostrar.valor_final_plan1 : versionMostrar.valor_final_plan2) : null
           const valorNum = Number(valorCorregido)
           const valorValido = Number.isFinite(valorNum) && valorNum > 0
           const cambiaValor = valorValido && valorNum !== (data.aprobado_honorario ?? valorAprobado ?? 0)
           const cambiaPlan = !!planCorregido && planCorregido !== (planAprobado ?? null)
+          const cambiaServicio = reCongelarServicio && !!servicioVigente
+          // ⚠️ El MISMO gate que exige la aprobacion, evaluado aqui para no ofrecer un
+          // boton que el servidor va a rechazar. La regla vive en el servidor
+          // (`gate-descuento`): esto es el aviso, no el control.
+          const descCorregido = valorValido && precioBase > 0 ? descDeValor(valorNum) : null
+          const fueraDeRango = descCorregido !== null && (descCorregido < 0 || descCorregido > cap)
+          const sobreUmbral =
+            descCorregido !== null && umbralAprobacion != null && descCorregido > umbralAprobacion
+          const bloqueadoPorUmbral = sobreUmbral && !puedeAprobarAlto
           const PLANES: Array<{ n: 1 | 2; label: string }> = [
             { n: 1, label: 'Plan 1 · 50/50' },
             { n: 2, label: 'Plan 2 · pago anticipado' },
           ]
+          // Editar el % reescribe el precio y viceversa, como en la creacion.
+          const onValorCorr = (raw: string) => {
+            setValorCorregido(raw)
+            const v = Number(raw)
+            setDescCorregidoStr(Number.isFinite(v) && precioBase > 0 ? pctStr(descDeValor(v)) : '')
+          }
+          const onDescCorr = (raw: string) => {
+            setDescCorregidoStr(raw)
+            const d = Number(raw)
+            if (Number.isFinite(d) && precioBase > 0) setValorCorregido(String(valorDeDesc(d)))
+          }
+          const puedeGuardar =
+            !!motivoCorreccion.trim()
+            && (cambiaValor || cambiaPlan || cambiaServicio)
+            && !(cambiaValor && (fueraDeRango || bloqueadoPorUmbral))
           return (
           <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs text-amber-900">
               Corrige lo que quedó mal registrado. No genera propuesta nueva ni cambia el PDF
-              que ya recibió el cliente. Queda registrado con tu nombre y se le avisa al
-              comercial del negocio.
+              que ya recibió el cliente. Rige los mismos topes que la aprobación, queda
+              registrado con tu nombre y se le avisa al comercial del negocio.
             </p>
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-amber-900">Plan aprobado</span>
@@ -398,7 +491,7 @@ export default function BloquePropuestaEconomica({
                     onClick={() => {
                       setPlanCorregido(p.n)
                       const v = valorDePlan(p.n)
-                      if (v !== null && v > 0) setValorCorregido(String(v))
+                      if (v !== null && v > 0) onValorCorr(String(v))
                     }}
                     className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
                       planCorregido === p.n
@@ -418,38 +511,110 @@ export default function BloquePropuestaEconomica({
                 </span>
               )}
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                type="number"
-                value={valorCorregido}
-                onChange={e => setValorCorregido(e.target.value)}
-                placeholder="Valor correcto"
-                className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm sm:w-40"
-              />
-              <input
-                type="text"
-                value={motivoCorreccion}
-                onChange={e => setMotivoCorreccion(e.target.value)}
-                placeholder="¿Por qué se corrige?"
-                className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm"
-              />
+
+            {/* Valor y descuento sincronizados, con el mismo rango que la creacion:
+                corregir un dato mal registrado y regalar un descuento se escriben
+                igual en la base, y lo unico que los separa es este tope. */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-amber-900">Valor aprobado</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-amber-900/60">$</span>
+                  <input
+                    type="number"
+                    step="1000"
+                    inputMode="numeric"
+                    value={valorCorregido}
+                    onChange={e => onValorCorr(e.target.value)}
+                    placeholder="Valor correcto"
+                    className={`w-40 rounded-md border bg-white py-1.5 pl-5 pr-2 text-sm ${
+                      fueraDeRango ? 'border-red-500' : 'border-amber-300'
+                    }`}
+                  />
+                </div>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={descCorregidoStr}
+                    onChange={e => onDescCorr(e.target.value)}
+                    className={`w-24 rounded-md border bg-white py-1.5 pl-2 pr-6 text-sm ${
+                      fueraDeRango ? 'border-red-500' : 'border-amber-300'
+                    }`}
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-amber-900/60">%</span>
+                </div>
+              </div>
+              {precioBase > 0 && (
+                <span className="text-[11px] text-amber-800">
+                  Rango {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+                </span>
+              )}
+              {fueraDeRango && (
+                <span className="text-[11px] font-medium text-red-700">
+                  Fuera del rango permitido por la línea.
+                </span>
+              )}
+              {bloqueadoPorUmbral && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-red-700">
+                  <Lock className="h-3 w-3 shrink-0" />
+                  {pct2(descCorregido!)}% supera {umbralAprobacion}% — requiere un supervisor,
+                  administrador o dueño, igual que al aprobar.
+                </span>
+              )}
+              {sobreUmbral && puedeAprobarAlto && (
+                <span className="text-[11px] text-amber-800">
+                  {pct2(descCorregido!)}% supera el umbral de {umbralAprobacion}%; tu rol lo
+                  autoriza.
+                </span>
+              )}
             </div>
+
+            {/* El servicio NO se elige aqui: se declara en su bloque y esto solo vuelve
+                a fotografiarlo. Dos lugares para decidir que contrato el cliente serian
+                dos verdades, y la que decide la ruta del caso seguiria siendo la otra. */}
+            {servicioDivergente && (
+              <label className="flex items-start gap-2 rounded-md border border-amber-300 bg-white px-2.5 py-2 text-[11px] text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={reCongelarServicio}
+                  onChange={e => setReCongelarServicio(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Actualizar el servicio de la propuesta a{' '}
+                  <strong>{nombreServicio(servicioVigente)}</strong>, que es lo que el negocio
+                  declara hoy (quedó congelado como {nombreServicio(servicioAprobado)}).
+                </span>
+              </label>
+            )}
+
+            <input
+              type="text"
+              value={motivoCorreccion}
+              onChange={e => setMotivoCorreccion(e.target.value)}
+              placeholder="¿Por qué se corrige?"
+              className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm"
+            />
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={isPending || !motivoCorreccion.trim() || (!cambiaValor && !cambiaPlan)}
+                disabled={isPending || !puedeGuardar}
                 onClick={() => startTransition(async () => {
-                  // El honorario viaja siempre que el campo tenga un número válido: lo
-                  // que se guarda es lo que la persona está viendo, no una derivación
+                  // El honorario viaja siempre que el campo tenga un numero valido: lo
+                  // que se guarda es lo que la persona esta viendo, no una derivacion
                   // que el servidor haga por su cuenta.
-                  const cambios: { honorario?: number; plan?: 1 | 2 } = {}
+                  const cambios: { honorario?: number; plan?: 1 | 2; servicio?: string } = {}
                   if (valorValido) cambios.honorario = valorNum
                   if (cambiaPlan) cambios.plan = planCorregido!
+                  if (cambiaServicio) cambios.servicio = servicioVigente!
                   const r = await corregirAprobacion(negocioId, cambios, motivoCorreccion)
                   if (!r.ok) { toast.error(r.error ?? 'No se pudo corregir'); return }
-                  toast.success(cambiaPlan && cambiaValor ? 'Plan y valor corregidos' : cambiaPlan ? 'Plan corregido' : 'Valor corregido')
+                  toast.success('Corrección guardada')
                   setCorrigiendoValor(false)
                   setMotivoCorreccion('')
+                  setReCongelarServicio(false)
                 })}
                 className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
@@ -458,7 +623,11 @@ export default function BloquePropuestaEconomica({
               </button>
               <button
                 type="button"
-                onClick={() => { setCorrigiendoValor(false); setMotivoCorreccion('') }}
+                onClick={() => {
+                  setCorrigiendoValor(false)
+                  setMotivoCorreccion('')
+                  setReCongelarServicio(false)
+                }}
                 className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900"
               >
                 Cancelar
@@ -636,6 +805,7 @@ export default function BloquePropuestaEconomica({
             versiones={versiones}
             aprobadaN={data.aprobado_version}
             planAprobado={data.aprobado_plan ?? null}
+            honorarioAprobado={data.aprobado_honorario ?? null}
           />
         </div>
       )}
@@ -714,21 +884,28 @@ function VersionList({
   versiones,
   aprobadaN,
   planAprobado,
+  honorarioAprobado = null,
 }: {
   versiones: PropuestaVersion[]
   aprobadaN?: number | null
   planAprobado: 1 | 2 | null
+  /** `aprobado_honorario`: manda sobre el valor de la version cuando existe. */
+  honorarioAprobado?: number | null
 }) {
   return (
     <ul className="space-y-1.5">
       {versiones.map(v => {
         const isAprobada = aprobadaN === v.n
-        const valorAprobado =
+        const valorVersion =
           isAprobada && planAprobado
             ? planAprobado === 1
               ? v.valor_final_plan1
               : v.valor_final_plan2
             : null
+        // Igual que el banner: lo aprobado manda, la version es el fallback.
+        const valorAprobado = isAprobada ? honorarioAprobado ?? valorVersion : null
+        const corregido =
+          valorAprobado !== null && valorVersion !== null && valorAprobado !== valorVersion
         return (
           <li
             key={v.n}
@@ -743,6 +920,11 @@ function VersionList({
               {isAprobada && valorAprobado !== null ? (
                 <p className="font-medium">
                   Plan {planAprobado} · {formatCOP(valorAprobado)}
+                  {corregido && (
+                    <span className="ml-1.5 font-normal text-muted-foreground">
+                      (el PDF dice {formatCOP(valorVersion!)})
+                    </span>
+                  )}
                 </p>
               ) : (
                 <p className="font-medium">
