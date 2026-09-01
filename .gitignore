@@ -46,3 +46,9 @@ supabase/.temp/
 # Solo la carpeta de worktrees: el resto de .claude/ SI se versiona
 # (settings.json, launch.json, agent-memory/).
 .claude/worktrees/
+
+# Deno genera esto al correr `deno check` sobre supabase/functions/. No se
+# versiona a proposito: las edge functions se despliegan SIN lockfile
+# (`supabase functions deploy` resuelve en el momento), asi que fijarlo en CI
+# dejaria el check verde contra dependencias que el deploy no usa.
+deno.lock
