@@ -464,7 +464,11 @@ function regexParse(text: string): ParseResult {
 
   // GASTO — "gasté", "pagué", "compré" + monto. También monto + "en/para"
   if (/gast[eé]|pagu[eé]|compr[eé]|invert[ií]/i.test(lower)) {
-    const amount = parseAmount(lower);
+    // `?? undefined`: parseAmount devuelve null cuando no encuentra monto, y en
+    // ParsedFields "sin monto" se representa con el campo AUSENTE, no con null.
+    // Sin esto el objeto se arma con amount: null, que es lo que obligo al guard
+    // `!== null` de injectAmount y lo que dejaba sesiones persistidas con null.
+    const amount = parseAmount(lower) ?? undefined;
     const conceptMatch = lower.match(/(?:en|de)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,2})(?:\s+(?:para|con|del?|a)\b|$)/i);
     const concept = conceptMatch ? conceptMatch[1].trim() : undefined;
     return {

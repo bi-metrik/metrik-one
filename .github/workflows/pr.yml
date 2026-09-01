@@ -48,6 +48,45 @@ jobs:
       - name: Build de produccion
         run: npx next build
 
+  edge-functions:
+    name: Tipos de edge functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # `supabase/functions/` corre en Deno, no en Next: el `tsc` del job de
+      # arriba lo EXCLUYE por tsconfig, asi que hasta ahora las edge functions
+      # se desplegaban sin ningun chequeo de tipos. Ya dejo pasar dos
+      # regresiones completas (el `negocio.etapa_actual_id` del #377, y el
+      # `amount: number | null` que este PR arregla), y las dos se detectaron
+      # a mano semanas despues.
+      #
+      # `--node-modules-dir=none` NO es cosmetico: sin el, Deno ve el
+      # `node_modules/` del repo (que es de npm, para Next) y cambia a
+      # resolucion por node-modules, con lo que `notificar-etapa` falla al
+      # resolver su `jsr:@supabase/supabase-js@2`. En CI no hay node_modules en
+      # este job, asi que sin el flag el check pasaria aqui y fallaria en la
+      # maquina de quien corra `npm ci` — un check que solo falla en local es
+      # peor que no tenerlo. Con el flag, ambos resuelven como Deno Deploy.
+      #
+      # Se chequean los 53 .ts, no solo los `*/index.ts`: asi entran tambien
+      # los modulos de `_shared/` que ningun entry point importe todavia.
+      #
+      # `find` y no un glob `**`: bash NO trae `globstar` activo por defecto, y
+      # sin el `**` se comporta como `*`. Medido en este repo: el glob cubre
+      # 26 de 53 archivos y deja fuera todo lo anidado dos niveles
+      # (`handlers/registro/`, `cardumen/`, `venezuela/`, `customer/`), incluido
+      # `handlers/registro/gasto.ts`, que es el consumidor de `fields.amount`.
+      # Un check que aparenta cubrir todo y cubre la mitad es peor que ninguno.
+      #
+      # Nace VERDE: el arbol quedo limpio en este mismo PR antes de agregar el
+      # job, y se lo vio FALLAR reintroduciendo el bug exacto que arregla.
+      # Un check que nace rojo entrena a ignorarlo.
+      - name: deno check
+        run: find supabase/functions -name '*.ts' -print0 | xargs -0 deno check --node-modules-dir=none
+
   lint:
     name: Lint de lo que cambia
     runs-on: ubuntu-latest
