@@ -132,6 +132,12 @@ export interface ParametrosBono {
   bono_max_pct_director: number
   piso_director: number
   techo_director: number
+  /**
+   * true = este mes tiene politica propia guardada; false = esta siguiendo la de por
+   * defecto. La pantalla tiene que poder decirlo: sin eso nadie sabe si lo que ve es
+   * lo acordado para ESE mes o lo que quedo configurado en general.
+   */
+  es_del_mes?: boolean
 }
 
 export interface OperacionesBonoData {
