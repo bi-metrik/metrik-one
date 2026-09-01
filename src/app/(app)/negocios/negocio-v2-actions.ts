@@ -8058,8 +8058,9 @@ export async function agregarResponsable(
   /** Nombre de quien ocupaba ese puesto y quedó desplazado, para poder decirlo en pantalla. */
   desplazado?: string | null
 }> {
-  // userId = profile.id (para assigned_by, FK a profiles). staffId = staff.id (para activity_log.autor_id).
-  const { supabase, workspaceId, role, userId, staffId, error } = await getWorkspace()
+  // userId = profile.id, que es lo que `assigned_by` exige (FK a profiles). El staff.id
+  // del autor lo traduce `asignarResponsable` al anotar, acotado al workspace del negocio.
+  const { supabase, workspaceId, role, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   const allowed = ['owner', 'admin', 'supervisor']
@@ -8098,35 +8099,14 @@ export async function agregarResponsable(
 
   await sincronizarResponsablePrincipal(supabase, negocioId, workspaceId)
 
-  // Nombre del desplazado: se resuelve DESPUÉS de asignar, pero el id se capturó antes
-  // de liberar el puesto (después de liberarlo ya no hay a quién preguntarle).
-  let desplazadoNombre: string | null = null
-  if (asignacion.desplazado) {
-    const { data: previo } = await db(supabase)
-      .from('staff')
-      .select('full_name')
-      .eq('id', asignacion.desplazado)
-      .maybeSingle()
-    desplazadoNombre = (previo as { full_name: string | null } | null)?.full_name ?? null
-  }
-
-  if (staffId) {
-    const nombre = (staff as { full_name: string | null }).full_name ?? 'Sin nombre'
-    const comoRol = asignacion.rol ? ` como ${asignacion.rol}` : ' (sin área: no recibe avisos de etapa)'
-    const relevo = desplazadoNombre ? `, en reemplazo de ${desplazadoNombre}` : ''
-    await registrarActividad(db(supabase), {
-      workspace_id: workspaceId,
-      entidad_tipo: 'negocio',
-      entidad_id: negocioId,
-      tipo: 'cambio_sistema',
-      autor_id: staffId,
-      contenido: `Responsable agregado: ${nombre}${comoRol}${relevo}`,
-    }, 'agregarResponsable')
-  }
+  // El registro en el timeline lo hace `asignarResponsable`, no esta acción: los otros
+  // cuatro caminos de asignación entran por el mismo helper y también tienen que
+  // anotar. El nombre del desplazado viene ya resuelto de ahí — se captura antes de
+  // liberar el puesto, porque después ya no hay a quién preguntarle.
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
-  return { error: null, rol: asignacion.rol, desplazado: desplazadoNombre }
+  return { error: null, rol: asignacion.rol, desplazado: asignacion.desplazadoNombre }
 }
 
 export async function quitarResponsable(
