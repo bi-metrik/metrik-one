@@ -11,6 +11,7 @@
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
 - [Git en worktree aislado](project_worktree_git_bloqueado.md) — git fuera de mi worktree se bloquea (incluye otros repos); dentro del propio worktree commit/push/PR si funcionan
 - [R4 liberación de contrapartes](project_r4_liberaciones.md) — PR #343: la regla de cobertura, por qué cuelga de la contraparte, y qué quedó para R3/R5
+- [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
 
 ## Referencias
 
