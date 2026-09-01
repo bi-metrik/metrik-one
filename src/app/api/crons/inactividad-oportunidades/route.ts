@@ -53,20 +53,25 @@ export async function GET(req: NextRequest) {
   const { data: actividad } = await supabase.rpc('negocios_ultima_actividad', {
     p_ids: negocios.map(n => n.id),
   })
-  const ultimaPorNegocio = new Map(
-    ((actividad ?? []) as Array<{ negocio_id: string; ultima_actividad: string | null }>)
-      .map(a => [a.negocio_id, a.ultima_actividad]),
+  const diasPorNegocio = new Map(
+    ((actividad ?? []) as Array<{ negocio_id: string; dias_habiles: number | null }>)
+      .map(a => [a.negocio_id, a.dias_habiles]),
   )
 
   for (const negocio of negocios) {
     procesadas++
 
-    // Sin fila en el mapa el negocio ya no existe: se salta en vez de inventarle fecha.
-    const ultima = ultimaPorNegocio.get(negocio.id)
-    if (!ultima) continue
-
-    const ultimaActividad = new Date(ultima)
-    const diasSinActividad = Math.floor((now.getTime() - ultimaActividad.getTime()) / (1000 * 60 * 60 * 24))
+    // El reloj también vive en SQL, y en días HÁBILES: `negocios_ultima_actividad` los
+    // cuenta con `horas_habiles_entre`, el mismo que mide el SLA de cada etapa, así que
+    // descuenta sábados, domingos y festivos de Colombia. Antes se contaban días corridos
+    // acá y el umbral se cumplía solo con el fin de semana: medido el 2026-09-01 (martes),
+    // el día de última actividad más frecuente entre los negocios abiertos en venta era
+    // el viernes anterior, y 351 de 373 superaban el umbral por calendario contra 180
+    // por días hábiles.
+    //
+    // Sin número el negocio ya no existe: se salta en vez de inventarle uno.
+    const diasSinActividad = diasPorNegocio.get(negocio.id)
+    if (diasSinActividad == null) continue
 
     if (diasSinActividad < 3) continue
 
@@ -81,8 +86,8 @@ export async function GET(req: NextRequest) {
     if (!nivelActual) continue
 
     const textoBase = diasSinActividad >= 15
-      ? `"${negocio.nombre}" lleva ${diasSinActividad} días sin gestión — ¿cerrar como perdido?`
-      : `"${negocio.nombre}" lleva ${diasSinActividad} días sin actividad`
+      ? `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin gestión — ¿cerrar como perdido?`
+      : `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin actividad`
 
     const destinatarios = new Set<string>()
     const cfg = await getConfigNotificaciones(supabase, negocio.workspace_id, configCache)
