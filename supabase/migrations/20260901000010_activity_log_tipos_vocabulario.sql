@@ -9,8 +9,13 @@
 -- forma de saber que falta.
 --
 -- Medido en producción (yfjqscvvxetobiidnepa) antes de escribir esta migración:
--- **754 aprobaciones de propuesta sobre 311 negocios desde el 2026-04-15, y CERO
--- filas `propuesta_aprobada` en `activity_log`.** El conteo real de la tabla por tipo
+-- **311 aprobaciones de propuesta desde el 2026-04-15 —una por negocio— y CERO
+-- filas `propuesta_aprobada` en `activity_log`.** Ojo con el grano: las **754** filas
+-- de `negocio_bloques` con `data->>'aprobado_at'` no son 754 eventos. La misma
+-- aprobación queda COPIADA en el bloque "Propuesta económica" de cada etapa por la que
+-- pasa el negocio (~2,4 filas por negocio), así que los eventos distintos, contados por
+-- el par `(negocio_id, aprobado_at)`, son **311, exactamente uno por negocio**. De esas
+-- 311, **195 no tienen `aprobado_por`** registrado. El conteo real de la tabla por tipo
 -- solo devuelve los 7 del CHECK. Caso que lo destapó: V0429 de SOENA
 -- (1e7458e9-7412-4ecb-8285-aeadef38a5d0), Plan 2 con descuento 100% aprobado el
 -- 2026-08-26 17:58 y ausente de su propia historia; la reversión posterior sí aparece,

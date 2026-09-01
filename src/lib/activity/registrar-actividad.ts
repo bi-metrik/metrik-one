@@ -11,8 +11,11 @@ import type { ActivityLogTipo } from './tipos'
  * parte**. El síntoma es indistinguible del caso sano: el timeline simplemente no
  * muestra ese evento, y nadie tiene motivo para sospechar que falta.
  *
- * Medido en producción el 2026-09-01: **754 aprobaciones de propuesta sobre 311
- * negocios desde el 2026-04-15, y CERO filas `propuesta_aprobada` en `activity_log`.**
+ * Medido en producción el 2026-09-01: **311 aprobaciones de propuesta desde el
+ * 2026-04-15 —una por negocio— y CERO filas `propuesta_aprobada` en `activity_log`.**
+ * (Las **754** filas de `negocio_bloques` con `aprobado_at` no son 754 eventos: la
+ * misma aprobación queda copiada en el bloque de cada etapa por la que pasa el negocio,
+ * ~2,4 por negocio; los eventos distintos por `(negocio_id, aprobado_at)` son 311.)
  * La aprobación que fijó el honorario de cada uno de esos negocios no existe en su
  * historia. El caso que lo destapó es V0429 de SOENA: la aprobación del 2026-08-26 no
  * aparece, y la reversión posterior sí, porque esa usa `tipo: 'cambio'`.
