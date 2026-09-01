@@ -13,7 +13,7 @@ const eslintConfig = defineConfig([
       ],
       // Escribir en `activity_log` sin pasar por `registrarActividad` deja el insert
       // sin nadie que lea su `error`: Postgres rechaza la fila y el evento desaparece
-      // sin ruido. Eso es lo que borro 754 aprobaciones de propuesta del timeline.
+      // sin ruido. Eso es lo que borro 311 aprobaciones de propuesta del timeline.
       // La regla es lo unico que impide que el patron vuelva a entrar: convertir los
       // ~60 sitios no sirve de nada si el 61 se escribe a mano.
       "no-restricted-syntax": [
