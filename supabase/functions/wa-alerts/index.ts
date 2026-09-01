@@ -5,8 +5,7 @@
 // ============================================================
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
-import { sendTextMessage } from '../_shared/wa-respond.ts';
-import { checkOutboundAlertLimit, logMessage } from '../_shared/wa-rate-limit.ts';
+import { enviarAlerta } from '../_shared/wa-alerta.ts';
 import {
   formatCOP, formatCOPShort, bold, formatDate, daysSince, formatAgo,
 } from '../_shared/wa-format.ts';
@@ -132,12 +131,13 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
     const phone = await getOwnerPhone(supabase, workspaceId);
     if (!phone) continue;
 
-    if (!(await checkOutboundAlertLimit(supabase, phone))) {
-      console.log(`[wa-alerts] W25: Rate limit reached for ${phone}`);
-      continue;
-    }
-
-    // Send one message per overdue balance (max 3 per run).
+    // Un mensaje por saldo vencido (tope 3 por corrida).
+    //
+    // ⚠️ El cupo se consulta DENTRO del bucle. Antes se consultaba una sola vez, arriba, y
+    // despues salian hasta tres mensajes: el tope de 2 al dia no frenaba nada, y con varios
+    // workspaces del mismo dueno era 3 por cada uno. Medido el 2026-09-01: tres W25 seguidas
+    // al mismo numero con el tope en 2. Ahora lo consulta `enviarAlerta`, una vez por envio.
+    //
     // El nombre viene en la misma fila: se van las dos consultas por deuda que
     // hacia la version anterior para resolver negocio/proyecto.
     for (const d of deudas.slice(0, 3)) {
@@ -145,8 +145,17 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
       msg += `📄 ${d.codigo} — ${bold(d.nombre)}\n`;
       msg += `💰 Saldo: ${formatCOP(d.saldo)} · ${d.dias}d`;
 
-      await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId, intent: 'W25' });
-      await logMessage(supabase, phone, 'outbound', workspaceId, 'W25', `Saldo ${d.codigo} vencido`);
+      const { enviada } = await enviarAlerta(supabase, {
+        phone, intent: 'W25', texto: msg, workspaceId,
+        variables: {
+          codigo: d.codigo,
+          negocio: d.nombre,
+          saldo: formatCOP(d.saldo),
+          dias: d.dias,
+        },
+      });
+      // Sin cupo para esta, tampoco lo hay para las que siguen: son del mismo numero.
+      if (!enviada) break;
     }
   }
 }
@@ -170,12 +179,13 @@ async function runW29ResumenSemanal(supabase: ReturnType<typeof getServiceClient
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
 
-    if (!(await checkOutboundAlertLimit(supabase, phone))) continue;
-
     try {
       const msg = await buildWeeklySummary(supabase, ws.id);
-      await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'W29' });
-      await logMessage(supabase, phone, 'outbound', ws.id, 'W29', 'Resumen semanal');
+      // Sin `variables`: el resumen es un texto ya compuesto. Una plantilla para W29 solo
+      // puede tener cuerpo fijo hasta que `buildWeeklySummary` devuelva sus cifras sueltas.
+      await enviarAlerta(supabase, {
+        phone, intent: 'W29', texto: msg, workspaceId: ws.id,
+      });
     } catch (err) {
       console.error(`[wa-alerts] W29 error for workspace ${ws.id}:`, err);
     }
@@ -387,8 +397,6 @@ async function runW33PushSaldo(supabase: ReturnType<typeof getServiceClient>): P
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
 
-    if (!(await checkOutboundAlertLimit(supabase, phone))) continue;
-
     // Get user name
     const { data: staff } = await supabase
       .from('staff')
@@ -405,8 +413,19 @@ async function runW33PushSaldo(supabase: ReturnType<typeof getServiceClient>): P
       ? `Hola ${nombre}, tu saldo del banco tiene ${dias} días sin actualizar. ¿Cuál es tu saldo hoy?\n\nResponde con el monto y lo registro.`
       : `Hola ${nombre}, aún no has registrado tu saldo bancario. ¿Cuál es tu saldo hoy?\n\nResponde con el monto y lo registro.`;
 
-    await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'W33' });
-    await logMessage(supabase, phone, 'outbound', ws.id, 'W33', `Push saldo (${dias} días)`);
+    // Dos intents y no uno: "lleva N dias sin actualizar" y "nunca registraste saldo" son
+    // avisos distintos, y con un solo `{{dias}}` el segundo diria "tiene 0 dias sin
+    // actualizar". Separarlos deja que cada uno tenga su plantilla — o ninguna.
+    //
+    // `nombre` se pasa crudo: si el staff no tiene `full_name`, la variable llega vacia y
+    // el aviso cae a texto libre en vez de saludar a nadie.
+    await enviarAlerta(supabase, {
+      phone,
+      intent: dias > 0 ? 'W33' : 'W33_sin_saldo',
+      texto: msg,
+      workspaceId: ws.id,
+      variables: dias > 0 ? { nombre, dias } : { nombre },
+    });
   }
 }
 
@@ -505,7 +524,6 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
 
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
-    if (!(await checkOutboundAlertLimit(supabase, phone))) continue;
 
     let msg = `⚠️ Negocios en venta sin movimiento:\n`;
     for (const n of staleNeg) {
@@ -516,8 +534,10 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
     }
     msg += `\n\nEscríbeme "llamé a [nombre]" o "reunión con [nombre]" para actualizar.`;
 
-    await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'stale_opps' });
-    await logMessage(supabase, phone, 'outbound', ws.id, 'stale_opps', `${staleNeg.length} negocios estancados`);
+    await enviarAlerta(supabase, {
+      phone, intent: 'stale_opps', texto: msg, workspaceId: ws.id,
+      variables: { cuantos: staleNeg.length, detalle: staleNeg.map((n) => n.nombre).join(', ') },
+    });
   }
 }
 
@@ -572,13 +592,18 @@ async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): P
 
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
-    if (!(await checkOutboundAlertLimit(supabase, phone))) continue;
 
     const msg = `⚠️ Recaudo del mes al ${pctMeta.toFixed(0)}% de la meta\n\n💰 Cobrado: ${formatCOP(totalCobros)} de ${formatCOP(metaRecaudo)}\n📅 Quedan ${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate()} días del mes\n\nRevisa tu cartera con "¿quién me debe?"`;
 
 
-    await sendTextMessage(phone, msg, { origen: 'alerta', workspaceId: ws.id, intent: 'recaudo_check' });
-    await logMessage(supabase, phone, 'outbound', ws.id, 'recaudo_check', `${pctMeta.toFixed(0)}% de meta`);
+    await enviarAlerta(supabase, {
+      phone, intent: 'recaudo_check', texto: msg, workspaceId: ws.id,
+      variables: {
+        pct: `${pctMeta.toFixed(0)}%`,
+        cobrado: formatCOP(totalCobros),
+        meta: formatCOP(metaRecaudo),
+      },
+    });
   }
 }
 

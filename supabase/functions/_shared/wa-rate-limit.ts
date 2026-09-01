@@ -1,11 +1,11 @@
 // ============================================================
-// Rate Limiting (D97: 30 msg/hr inbound, 2 alerts/day outbound)
+// Rate Limiting (D97: 30 msg/hr inbound)
+// El tope de alertas salientes vive en `wa-alerta.ts` — ver la nota de abajo.
 // ============================================================
 
 import type { SupabaseClient } from './types.ts';
 
 const INBOUND_LIMIT = 30;  // per user per hour
-const OUTBOUND_ALERT_LIMIT = 2; // per user per day
 
 /** Check if inbound message is within rate limit. Returns true if allowed. */
 export async function checkInboundLimit(supabase: SupabaseClient, phone: string): Promise<boolean> {
@@ -21,23 +21,13 @@ export async function checkInboundLimit(supabase: SupabaseClient, phone: string)
   return (count ?? 0) < INBOUND_LIMIT;
 }
 
-/** Check if outbound alert is within daily limit. Returns true if allowed. */
-export async function checkOutboundAlertLimit(
-  supabase: SupabaseClient,
-  phone: string,
-): Promise<boolean> {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
-  const { count } = await supabase
-    .from('wa_message_log')
-    .select('*', { count: 'exact', head: true })
-    .eq('phone', phone)
-    .eq('direction', 'outbound')
-    .gte('created_at', startOfDay.toISOString());
-
-  return (count ?? 0) < OUTBOUND_ALERT_LIMIT;
-}
+// ⚠️ `checkOutboundAlertLimit` vivia aqui y contaba `wa_message_log.direction='outbound'`.
+// Se movio a `wa-alerta.ts` como `hayCupoDeAlerta` y ahora cuenta `wa_envios`, que si sabe
+// como termino cada mensaje. El motivo esta escrito alla; el resumen es que las tres W25
+// del 2026-09-01 las rechazo Meta con 131047, nadie las recibio, y consumieron cupo igual.
+//
+// No dejar aqui un contador contra `wa_message_log`: esa tabla ya no la escribe nadie en
+// direccion 'outbound', asi que un tope construido sobre ella no frena nada nunca.
 
 export interface LogTelemetry {
   parser_source?: 'fast_path' | 'gemini' | 'regex';

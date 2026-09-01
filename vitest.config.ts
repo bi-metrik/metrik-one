@@ -6,7 +6,10 @@ import path from 'node:path'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `supabase/functions/**` entra aqui a proposito: hasta hoy las edge functions no las
+    // verificaba ningun check de CI (solo `deno check` a mano). Solo se recogen modulos
+    // PUROS — los que tocan `Deno.env` o la red no se pueden colectar desde node.
+    include: ['src/**/*.test.ts', 'supabase/functions/**/*.test.ts'],
   },
   resolve: {
     alias: {
