@@ -85,7 +85,13 @@ jobs:
       # job, y se lo vio FALLAR reintroduciendo el bug exacto que arregla.
       # Un check que nace rojo entrena a ignorarlo.
       - name: deno check
-        run: find supabase/functions -name '*.ts' -print0 | xargs -0 deno check --node-modules-dir=none
+        # `-not -name '*.test.ts'`: las pruebas de los modulos puros de esta
+        # carpeta corren en vitest (node), no en Deno Deploy, asi que importan
+        # `vitest` por npm y no llevan la extension `.ts` en sus imports. Deno
+        # no puede resolver ninguna de las dos cosas y falla con TS2307. No se
+        # pierde cobertura: lo que este check protege es lo que se DESPLIEGA, y
+        # un `.test.ts` no se despliega. Quien las verifica es `npm test`.
+        run: find supabase/functions -name '*.ts' -not -name '*.test.ts' -print0 | xargs -0 deno check --node-modules-dir=none
 
   lint:
     name: Lint de lo que cambia
