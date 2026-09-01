@@ -27,6 +27,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
 import { canEditHeader, getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // ── Tipos ────────────────────────────────────────────────────────────
 
@@ -203,7 +204,7 @@ export async function cerrarNegocioPerdido(
 
   // Activity log
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -211,7 +212,7 @@ export async function cerrarNegocioPerdido(
       autor_id: staffId,
       contenido: `Negocio cerrado como perdido. Razon: ${payload.razon.trim()}`,
       valor_nuevo: 'perdido',
-    })
+    }, 'cerrarNegocioPerdido')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -303,7 +304,7 @@ export async function cerrarNegocioCancelado(
 
   // Activity log
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -313,7 +314,7 @@ export async function cerrarNegocioCancelado(
         payload.manejoPagos ? ` · Manejo de pagos: ${payload.manejoPagos.trim()}` : ''
       }`,
       valor_nuevo: 'cancelado',
-    })
+    }, 'cerrarNegocioCancelado')
   }
 
   // Notificar al owner del workspace

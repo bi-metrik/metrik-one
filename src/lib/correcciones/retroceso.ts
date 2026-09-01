@@ -24,6 +24,7 @@ import {
   type EtapaCandidata,
   type AvisoRecaudoCambiado,
 } from '@/lib/negocios/retroceso-financiero'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any {
@@ -173,14 +174,14 @@ export async function resolverAviso(params: {
   if (error) return { error: (error as { message: string }).message }
 
   if (staffId) {
-    await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio_sistema',
       autor_id: staffId,
       contenido: `Aviso de recaudo cambiado (ref ${previo.referencia}) resuelto: ${motivo.trim()}`.slice(0, 280),
-    })
+    }, 'resolverAviso')
   }
 
   return { error: null }
@@ -236,7 +237,7 @@ export async function ejecutarRetroceso(params: {
   const destino = recorridas.find(e => e.id === destinoEtapaId)
 
   if (staffId) {
-    await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -245,19 +246,19 @@ export async function ejecutarRetroceso(params: {
       contenido: destinoEtapaId
         ? `Retroceso financiero: ${etapaActual.nombre} → ${destino?.nombre ?? 'etapa anterior'}. Motivo: ${motivo.trim()}`.slice(0, 280)
         : `Retroceso financiero evaluado sin mover de etapa. Motivo: ${motivo.trim()}`.slice(0, 280),
-    })
+    }, 'ejecutarRetroceso')
   }
 
   // La marca financiera va en el evento, para que el cómputo de calidad de operaciones
   // pueda excluirlo. NO se reusa `reproceso_eventos`: ahí adentro, este caso contaría.
-  await db(supabase).from('activity_log').insert({
+  await registrarActividad(db(supabase), {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
     entidad_id: negocioId,
     tipo: 'cambio_sistema',
     autor_id: staffId,
     contenido: `[retroceso_financiero] origen=financiera causa=${params.causa} destino=${destino?.nombre ?? 'sin movimiento'}`.slice(0, 280),
-  })
+  }, 'ejecutarRetroceso')
 
   return { ok: true, movido: Boolean(destinoEtapaId) }
 }

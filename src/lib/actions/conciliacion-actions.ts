@@ -38,6 +38,7 @@ import type {
   PropuestaRetroceso,
 } from '@/lib/negocios/retroceso-financiero'
 import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -293,14 +294,14 @@ async function repartirPagoCore(
   if (origen === 'comercial' && staffId) {
     for (const id of negocioIds) {
       try {
-        await db(supabase).from('activity_log').insert({
+        await registrarActividad(db(supabase), {
           workspace_id: workspaceId,
           entidad_tipo: 'negocio',
           entidad_id: id,
           tipo: 'comentario',
           autor_id: staffId,
           contenido: `Reparto de pago propuesto por el comercial — Ref ${referencia}. Pendiente de confirmar por el área financiera.`,
-        })
+        }, 'repartirPagoCore')
       } catch { /* no bloquear por el log */ }
     }
   }
@@ -1305,11 +1306,11 @@ export async function registrarPagoEnNegocio(
   const logFabOrigen = async (refTxt: string) => {
     if (origen !== 'fab' || !staffId) return
     try {
-      await db(supabase).from('activity_log').insert({
+      await registrarActividad(db(supabase), {
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: negocioId,
         tipo: 'comentario', autor_id: staffId,
         contenido: `Pago registrado desde el FAB global (origen: fab) — Ref ${refTxt}, fuente ${input.fuente === 'otra' ? (input.fuente_nombre ?? 'otra') : input.fuente}.`,
-      })
+      }, 'registrarPagoEnNegocio')
     } catch { /* no bloquear por el log */ }
   }
 
@@ -1732,11 +1733,11 @@ export async function aceptarRepartoComercial(
 
     if (staffId) {
       try {
-        await db(supabase).from('activity_log').insert({
+        await registrarActividad(db(supabase), {
           workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: id,
           tipo: 'comentario', autor_id: staffId,
           contenido: `Pago conciliado por el área financiera (referencia ${ref}).`,
-        })
+        }, 'aceptarRepartoComercial')
       } catch { /* no bloquear por el log */ }
     }
   }
@@ -1825,14 +1826,14 @@ export async function rechazarRepartoComercial(
     const notaTxt = (nota ?? '').trim().slice(0, 300)
     for (const id of negociosTocados) {
       try {
-        await db(supabase).from('activity_log').insert({
+        await registrarActividad(db(supabase), {
           workspace_id: workspaceId,
           entidad_tipo: 'negocio',
           entidad_id: id,
           tipo: 'comentario',
           autor_id: staffId,
           contenido: `El área financiera rechazó el reparto propuesto para la referencia ${ref}.${notaTxt ? ` Nota: ${notaTxt}` : ' Vuelve a registrarlo.'}`,
-        })
+        }, 'rechazarRepartoComercial')
       } catch { /* no bloquear por el log */ }
     }
   }
@@ -2024,14 +2025,14 @@ export async function redistribuirReferencia(input: {
       const detalle = cambio
         ? `${fmtCop(cambio.montoAnterior)} → ${fmtCop(cambio.montoNuevo)}`
         : 'ajustado'
-      await db(supabase).from('activity_log').insert({
+      await registrarActividad(db(supabase), {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
         tipo: 'cambio_sistema',
         autor_id: staffId,
         contenido: `Recaudo redistribuido por el área financiera (ref ${ref}): ${detalle}. Motivo: ${motivo}`.slice(0, 280),
-      })
+      }, 'redistribuirReferencia')
     }
   }
 

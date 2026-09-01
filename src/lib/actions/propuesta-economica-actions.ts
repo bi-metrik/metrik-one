@@ -36,6 +36,7 @@ import {
   type RequisitoBloque,
 } from '@/lib/negocios/requisitos-bloque'
 import { uvtDelAnio } from '@/lib/upme/uvt'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -868,14 +869,14 @@ export async function aprobarVersionPropuesta(
   const contenidoLog = tarifaElegida > 0
     ? `Propuesta económica v${versionN} aprobada — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} (precio) + tarifa UPME ref. ${formatCOP(tarifaElegida)} → valor a recaudar ${formatCOP(honorarioElegido + tarifaElegida)}`
     : `Propuesta económica v${versionN} aprobada — Plan ${plan} — honorario ${formatCOP(valorElegido)}`
-  await sb.from('activity_log').insert({
+  await registrarActividad(sb, {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
     entidad_id: ctx.negocioId,
     tipo: 'propuesta_aprobada',
     autor_id: staffId,
     contenido: contenidoLog,
-  })
+  }, 'aprobarVersionPropuesta')
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
   return { ok: true }
@@ -1040,7 +1041,7 @@ export async function revertirAprobacionPropuesta(
 
   // `autor_id` es FK → staff(id), NO profiles. Un id equivocado hace fallar el insert
   // en silencio y la reversión quedaría sin rastro.
-  await sb.from('activity_log').insert({
+  await registrarActividad(sb, {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
     entidad_id: ctx.negocioId,
@@ -1050,7 +1051,7 @@ export async function revertirAprobacionPropuesta(
     valor_anterior: precioAnterior != null ? String(precioAnterior) : null,
     valor_nuevo: null,
     contenido: `Aprobación revertida (v${versionAnterior ?? '?'}, Plan ${planAnterior ?? '?'}, ${precioAnterior != null ? formatCOP(Number(precioAnterior)) : 'sin valor'}). ${razon}`.slice(0, 280),
-  })
+  }, 'revertirAprobacionPropuesta')
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
   return { ok: true }
@@ -1529,14 +1530,14 @@ export async function corregirAprobacion(
     })
   }
   for (const evento of eventos) {
-    await sb.from('activity_log').insert({
+    await registrarActividad(sb, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio',
       autor_id: staffId,
       ...evento,
-    })
+    }, 'corregirAprobacion')
   }
 
   // Aviso al comercial responsable: le cambió la aprobación de SU negocio y no fue

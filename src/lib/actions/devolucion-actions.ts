@@ -27,6 +27,7 @@ import {
   type MarcaDevolucion,
   type MotivoDevolucion,
 } from '@/lib/negocios/devolucion'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 /**
  * Mismo escape de tipos que usa `reproceso-actions`: `negocio_bloques.data` y las tablas
@@ -304,7 +305,7 @@ export async function devolverBloque(
     } else {
       movidoA = etapaOrigen.nombre
       if (staffId) {
-        await db(supabase).from('activity_log').insert({
+        await registrarActividad(db(supabase), {
           workspace_id: workspaceId,
           entidad_tipo: 'negocio',
           entidad_id: b.negocio_id,
@@ -314,7 +315,7 @@ export async function devolverBloque(
           valor_anterior: etapaAlDevolver,
           valor_nuevo: etapaOrigen.nombre,
           contenido: `Volvió a ${etapaOrigen.nombre ?? 'la etapa de origen'} por devolución de "${bloqueNombre}".`.slice(0, 280),
-        })
+        }, 'devolverBloque')
       }
     }
   }
@@ -325,7 +326,7 @@ export async function devolverBloque(
   // fuera de la lista falla EN SILENCIO y la traza no se escribe. Se usa `cambio`, que es
   // lo que ocurre, con `campo_modificado` estable para poder contarlo sin leer el texto.
   if (staffId) {
-    const { error: errLog } = await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: b.negocio_id,
@@ -335,8 +336,7 @@ export async function devolverBloque(
       valor_anterior: bloqueNombre,
       valor_nuevo: input.motivo,
       contenido: `Devolvió "${bloqueNombre}": ${LABEL_MOTIVO[input.motivo]}.${movidoA ? ` El caso volvió a ${movidoA}.` : ''}${nota ? ` ${nota}` : ''}`.slice(0, 280),
-    })
-    if (errLog) console.error('[devolucion] no se pudo escribir la traza:', errLog)
+    }, 'devolverBloque')
   }
 
   // ── Aviso al área dueña del bloque ────────────────────────────────────

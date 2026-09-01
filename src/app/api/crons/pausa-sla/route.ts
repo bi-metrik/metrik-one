@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // Cron de SLA de pausa de negocios
 // - Reactiva negocios cuya fecha de reapertura llega
@@ -76,14 +77,14 @@ export async function GET(req: NextRequest) {
     reactivados++
 
     // Log en activity_log
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: n.workspace_id,
       entidad_tipo: 'negocio',
       entidad_id: n.id,
       tipo: 'cambio_estado',
       contenido: `Negocio reactivado automaticamente (fecha de reapertura: ${n.pausado_hasta})`,
       valor_nuevo: 'activo',
-    })
+    }, 'GET')
 
     // Notificar al responsable
     if (n.responsable_id) {

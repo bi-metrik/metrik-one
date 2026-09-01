@@ -1,6 +1,11 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
+// Solo el tipo, e **importado** — nunca re-exportado. En un archivo `'use server'` un
+// `export type { X }` de un símbolo importado revienta en producción y no en dev
+// (ver el gotcha del PR #452 en CLAUDE.md).
+import type { ActivityLogTipo } from '@/lib/activity/tipos'
 
 export async function getActivityLog(entidadTipo: string, entidadId: string, oportunidadId?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -47,35 +52,35 @@ export async function addComment(
   const staffIds = [...new Set(menciones?.staffIds ?? [])]
   const areas = [...new Set(menciones?.areas ?? [])]
 
-  const { data: log, error: insertError } = await supabase
-    .from('activity_log')
-    .insert({
-      workspace_id: workspaceId,
-      entidad_tipo: entidadTipo,
-      entidad_id: entidadId,
-      tipo: 'comentario',
-      autor_id: staffId,
-      contenido: contenido.trim(),
-      // Se conserva para que el timeline siga mostrando a quién se mencionó.
-      // Ya NO es la fuente del aviso: de eso se encarga `activity_menciones`.
-      mencion_id: mencionId || staffIds[0] || null,
-      link_url: linkUrl?.trim() || null,
-    })
-    .select('id')
-    .single()
+  const log = await registrarActividad(supabase, {
+    workspace_id: workspaceId,
+    entidad_tipo: entidadTipo,
+    entidad_id: entidadId,
+    tipo: 'comentario',
+    autor_id: staffId,
+    contenido: contenido.trim(),
+    // Se conserva para que el timeline siga mostrando a quién se mencionó.
+    // Ya NO es la fuente del aviso: de eso se encarga `activity_menciones`.
+    mencion_id: mencionId || staffIds[0] || null,
+    link_url: linkUrl?.trim() || null,
+  }, 'addComment')
 
-  if (insertError) return { error: insertError.message }
+  // Aquí sí se corta: el comentario ES la operación, no su rastro. Si no entró, no
+  // hay nada que reportarle al usuario como guardado.
+  if (!log.ok) return { error: log.motivo }
+  if (!log.id) return { error: 'El comentario no devolvió identificador' }
+  const logId = log.id
 
   const filas = [
     ...staffIds.map(sid => ({
       workspace_id: workspaceId,
-      activity_log_id: (log as { id: string }).id,
+      activity_log_id: logId,
       staff_id: sid,
       area: null as string | null,
     })),
     ...areas.map(a => ({
       workspace_id: workspaceId,
-      activity_log_id: (log as { id: string }).id,
+      activity_log_id: logId,
       staff_id: null as string | null,
       area: a,
     })),
@@ -113,7 +118,13 @@ export async function deleteActivity(activityId: string) {
   return { success: true }
 }
 
-/** Log a system change (called from other server actions) */
+/**
+ * Registra un cambio del sistema. La invocan otras server actions.
+ *
+ * `opts.tipo` estaba tipado como `string`, o sea que cualquier llamador podía pedir
+ * un tipo que el CHECK rechaza y el insert se perdía sin ruido. Ahora está acotado al
+ * catálogo (`ActivityLogTipo`): un valor inventado no compila.
+ */
 export async function logSystemChange(
   workspaceId: string,
   entidadTipo: 'oportunidad' | 'proyecto' | 'negocio',
@@ -122,12 +133,12 @@ export async function logSystemChange(
   valorAnterior: string | null,
   valorNuevo: string | null,
   autorStaffId?: string | null,
-  opts?: { tipo?: string; contenido?: string },
+  opts?: { tipo?: ActivityLogTipo; contenido?: string },
 ) {
   const { supabase, error } = await getWorkspace()
   if (error) return
 
-  await supabase.from('activity_log').insert({
+  await registrarActividad(supabase, {
     workspace_id: workspaceId,
     entidad_tipo: entidadTipo,
     entidad_id: entidadId,
@@ -137,5 +148,5 @@ export async function logSystemChange(
     valor_anterior: valorAnterior,
     valor_nuevo: valorNuevo,
     ...(opts?.contenido ? { contenido: opts.contenido } : {}),
-  })
+  }, 'logSystemChange')
 }

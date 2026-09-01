@@ -4,6 +4,7 @@ import type { EmailOtpType } from '@supabase/supabase-js'
 import type { User } from '@supabase/supabase-js'
 import { landingForWorkspace } from '@/lib/auth/landing'
 import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // Slugs reservados — mismo set que middleware.ts
 const RESERVED_SLUGS = ['www', 'api', 'admin', 'app', 'test', 'demo', 'staging', 'mail', 'ftp']
@@ -70,14 +71,18 @@ export async function GET(request: Request) {
           if (!profile.home_workspace_id) updates.home_workspace_id = profile.workspace_id
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await svc.from('profiles').update(updates as any).eq('id', user.id)
-          await svc.from('activity_log').insert({
+          // `autor_id` NULL: es FK a staff(id) y `user.id` es un auth/profiles id.
+          // Pasarlo violaba la FK, así que este audit log fallaba por el CHECK del
+          // tipo Y por la FK, sin ruido en ninguno de los dos casos. La identidad va
+          // en el texto (mismo criterio que `switchWorkspace`).
+          await registrarActividad(svc, {
             workspace_id: hostWs.id,
             entidad_tipo: 'workspace',
             entidad_id: hostWs.id,
             tipo: 'platform_admin_enter',
-            autor_id: user.id,
-            contenido: `Platform admin entro al workspace via subdomain ${hostSlug}.${baseDomain}`,
-          })
+            autor_id: null,
+            contenido: `Platform admin (${user.email ?? user.id}) entro al workspace via subdomain ${hostSlug}.${baseDomain}`,
+          }, 'routeAfterAuth')
           // Reapuntar destino al subdomain del host (que es donde queremos quedar)
           profile.workspace_id = hostWs.id
         }

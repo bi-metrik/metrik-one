@@ -39,6 +39,7 @@ import {
 import { camposDeDecision, type RoutingEtapa } from '@/lib/negocios/dato-de-decision'
 import { aplicaSaltoPorSaldo } from '@/lib/negocios/salto-etapa'
 import { LABEL_CAUSA, type CausaCorreccion } from './causas'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: unknown): any {
@@ -411,7 +412,7 @@ export async function ejecutarReversa(params: {
   // `activity_log`; 'cambio_etapa' está.
   if (staffId) {
     const omitidas = propuesta.omitidas.map(o => o.nombre).join(', ')
-    const { error: errLog } = await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -424,8 +425,7 @@ export async function ejecutarReversa(params: {
         `Vuelve a ${propuesta.destino.nombre}: al corregir el dato que decide la ruta en ` +
         `${propuesta.decision.nombre}, el caso quedó saltándose ${omitidas}. Motivo: ${motivo}.`
           .slice(0, 280),
-    })
-    if (errLog) console.error('[reversa] no se pudo escribir el evento del timeline:', errLog)
+    }, 'ejecutarReversa')
   }
 
   // ── Avisar a quien vigila el proceso ──────────────────────────────────
@@ -484,7 +484,7 @@ export async function descartarPropuesta(params: {
   if (!previa) return { error: 'No hay una propuesta pendiente' }
 
   if (staffId) {
-    const { error } = await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -495,8 +495,7 @@ export async function descartarPropuesta(params: {
       valor_nuevo: null,
       contenido:
         `Se descartó devolver el caso a ${previa.destino.nombre}. Motivo: ${motivo}.`.slice(0, 280),
-    })
-    if (error) console.error('[reversa] no se pudo registrar el descarte:', error)
+    }, 'descartarPropuesta')
   }
   return { error: null }
 }

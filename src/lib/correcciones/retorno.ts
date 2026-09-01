@@ -26,6 +26,7 @@ import {
   type EtapaRetorno,
 } from '@/lib/negocios/retorno-decision'
 import { LABEL_CAUSA, type CausaCorreccion } from './causas'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: unknown): any {
@@ -470,7 +471,7 @@ export async function ejecutarRetorno(params: {
     // Y el `tipo` tiene que existir en el CHECK de `activity_log` — 'cambio_etapa' está;
     // 'reproceso' NO (por eso la traza del reproceso nunca llegó a escribirse).
     if (staffId) {
-      const { error: errLog } = await db(supabase).from('activity_log').insert({
+      await registrarActividad(db(supabase), {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
@@ -482,8 +483,7 @@ export async function ejecutarRetorno(params: {
         contenido:
           `Vuelve a ${retorno.etapaNombre} para volver a decidir: se corrigió «${retorno.campoDecisor}». ` +
           `Causa: ${LABEL_CAUSA[causa]}.`,
-      })
-      if (errLog) console.error('[retorno] no se pudo escribir el evento del timeline', errLog)
+      }, 'ejecutarRetorno')
     }
 
     // ── Notificar, igual que el reproceso ─────────────────────────────────

@@ -17,6 +17,7 @@
 // ============================================================
 
 import { createDriveFolder } from '@/lib/google-drive'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // Estructura canónica de subcarpetas — el operador y el cliente
 // ven los compartimentos desde el primer día, aunque no haya archivos.
@@ -109,13 +110,13 @@ export async function ensureNegocioDriveFolder(
   // Sin padre → NO crear (esto reemplaza el skip silencioso del código inline).
   if (!driveFolderId) {
     try {
-      await supabase.from('activity_log').insert({
+      await registrarActividad(supabase, {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
         tipo: 'drive_folder_skipped',
         contenido: 'sin drive_folder_id padre (linea/workspace)',
-      })
+      }, 'ensureNegocioDriveFolder')
     } catch (logErr) {
       console.error('[ensureNegocioDriveFolder] no se pudo registrar drive_folder_skipped:', logErr)
     }
@@ -156,13 +157,13 @@ export async function ensureNegocioDriveFolder(
       msg,
     )
     try {
-      await supabase.from('activity_log').insert({
+      await registrarActividad(supabase, {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
         tipo: 'drive_folder_failed',
         contenido: `Error creando carpeta en Drive: ${msg.slice(0, 500)}`,
-      })
+      }, 'ensureNegocioDriveFolder')
     } catch (logErr) {
       console.error('[ensureNegocioDriveFolder] no se pudo registrar drive_folder_failed:', logErr)
     }
