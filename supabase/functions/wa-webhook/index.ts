@@ -12,6 +12,7 @@ import { resolverEstudioChat, hasOpenCardumenChat, startCardumenChat, continueCa
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
+import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
 import { aplicarStatuses } from '../_shared/wa-envios.ts';
 import type { StatusEntrega } from '../_shared/wa-envios.ts';
 import { handleRegistro } from '../_shared/handlers/registro/index.ts';
@@ -125,13 +126,18 @@ async function atenderDesconocido(
     return;
   }
 
-  // Sale como texto libre, asi que Meta solo lo entrega si la ventana de 24h con este
-  // numero esta abierta. Cuando no lo este, el rechazo queda en `wa_envios` con su codigo
-  // de error: el aviso puede fallar, pero ya no falla en silencio.
-  await sendTextMessage(
+  // Pasa por el resolvedor de plantillas: si `WA_ALERT_TEMPLATES` declara una para este
+  // intent, sale como plantilla y llega con la ventana de 24 h cerrada. Si no, sale como
+  // texto libre — o sea como hoy — y Meta lo entrega solo si el admin le escribio al bot
+  // en las ultimas 24 h. El rechazo (131047) queda en `wa_envios` con su codigo.
+  //
+  // Ojo con la ventana de quien: la abre el ADMIN al escribirle al bot, no el desconocido
+  // que disparo el aviso. Que el desconocido acabe de escribir no habilita nada aqui.
+  await enviarAvisoInterno(
     admin,
+    INTENT_DESCONOCIDO,
     `📵 Un número no registrado le escribió al bot.\n\nDe: +${message.phone}\nDice: ${preview.slice(0, 200)}\n\nNo hay a quién enrutarlo. Si es un cliente, contéstale desde tu WhatsApp.`,
-    { origen: 'interno', intent: INTENT_DESCONOCIDO },
+    { telefono: `+${message.phone}`, mensaje: preview.slice(0, 200) },
   );
 }
 
