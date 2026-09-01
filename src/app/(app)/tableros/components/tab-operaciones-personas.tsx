@@ -1,10 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, ChevronRight, Info } from 'lucide-react'
+import { AlertTriangle, ChevronRight, Info, SlidersHorizontal } from 'lucide-react'
 import type { OperacionesBonoData, PersonaOperaciones } from '../operaciones-types'
 import { getOperacionesBono } from '../operaciones-actions'
+import { puedeConfigurarBono } from '../operaciones-config-actions'
+import { BonoConfigModal } from './bono-config-modal'
+import { BonoDetalleDrawer, type IndicadorBono } from './bono-detalle-drawer'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
 const VERDE = '#10B981'
@@ -38,15 +41,31 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
   const [data, setData] = useState(inicial)
   const [isPending, startTransition] = useTransition()
   const [verParametros, setVerParametros] = useState(false)
+  const [verConfig, setVerConfig] = useState(false)
+  const [puedeConfigurar, setPuedeConfigurar] = useState(false)
+  // Que puntaje se abrio en el panel lateral. La persona viaja entera (no su id)
+  // porque el encabezado del panel muestra la cifra que se hizo clic, y buscarla otra
+  // vez por id abriria la puerta a que el panel diga algo distinto de la celda.
+  const [detalle, setDetalle] = useState<{ persona: PersonaOperaciones; indicador: IndicadorBono } | null>(null)
 
   const { periodo, parametros: P } = data
 
-  function cambiarMes(delta: number) {
-    const d = new Date(periodo.anio, periodo.mes - 1 + delta, 1)
+  useEffect(() => {
+    let vivo = true
+    void puedeConfigurarBono().then(v => { if (vivo) setPuedeConfigurar(v) })
+    return () => { vivo = false }
+  }, [])
+
+  function recargar(anio: number, mes: number) {
     startTransition(async () => {
-      const nuevo = await getOperacionesBono(d.getFullYear(), d.getMonth() + 1)
+      const nuevo = await getOperacionesBono(anio, mes)
       if (nuevo) setData(nuevo)
     })
+  }
+
+  function cambiarMes(delta: number) {
+    const d = new Date(periodo.anio, periodo.mes - 1 + delta, 1)
+    recargar(d.getFullYear(), d.getMonth() + 1)
   }
 
   const hayAlguienIncompleto = data.personas.some(p => !p.completo)
@@ -88,7 +107,28 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
         <button onClick={() => cambiarMes(1)}
           className="px-3 py-1.5 text-sm rounded-lg border hover:bg-gray-50"
           style={{ borderColor: BORDE, color: GRIS }}>→</button>
+
+        {puedeConfigurar && (
+          <button onClick={() => setVerConfig(true)}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-gray-50"
+            style={{ borderColor: BORDE, color: GRIS }}>
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Configurar {MESES[periodo.mes - 1]}
+          </button>
+        )}
       </div>
+
+      {/* Que politica esta rigiendo este mes. Sin esta linea, quien mira no sabe si
+          lo que ve es lo acordado para ESE mes o lo que quedo configurado en general,
+          y esa diferencia es justo lo que separa un mes liquidado de uno que todavia
+          se mueve cuando alguien cambia la politica. */}
+      {puedeConfigurar && P.es_del_mes !== undefined && (
+        <p className="-mt-3 mb-5 text-[11px]" style={{ color: GRIS }}>
+          {P.es_del_mes
+            ? `${MESES[periodo.mes - 1]} tiene política propia: cambiar la general ya no lo mueve.`
+            : `${MESES[periodo.mes - 1]} sigue la política general. Al guardarle una propia queda fijo.`}
+        </p>
+      )}
 
       {/* Avisos de cobertura. Van ARRIBA de los numeros a proposito: quien mira
           tiene que saber que le falta al dato ANTES de leer el resultado. */}
@@ -165,7 +205,8 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
             </thead>
             <tbody>
               {data.personas.map(p => (
-                <FilaPersona key={p.staff_id} p={p} periodo={periodo} P={P} maximo={maximo} />
+                <FilaPersona key={p.staff_id} p={p} periodo={periodo} P={P} maximo={maximo}
+                  onAbrir={i => setDetalle({ persona: p, indicador: i })} />
               ))}
               {data.personas.length === 0 && (
                 <tr><td colSpan={8} className="px-4 py-8 text-center" style={{ color: GRIS }}>
@@ -273,15 +314,40 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
           </ul>
         </div>
       )}
+
+      {/* Panel lateral: los casos detras del puntaje. Se remonta por persona (`key`)
+          para que el estado de carga arranque limpio; cambiar de indicador dentro del
+          panel NO lo remonta, porque la consulta ya trajo los cuatro. */}
+      {detalle && (
+        <BonoDetalleDrawer
+          key={detalle.persona.staff_id}
+          persona={detalle.persona}
+          indicador={detalle.indicador}
+          periodo={periodo}
+          parametros={P}
+          onClose={() => setDetalle(null)}
+          onCambiarIndicador={i => setDetalle(d => (d ? { ...d, indicador: i } : d))}
+        />
+      )}
+
+      {verConfig && (
+        <BonoConfigModal
+          periodo={periodo}
+          parametros={P}
+          onClose={() => setVerConfig(false)}
+          onGuardado={() => { setVerConfig(false); recargar(periodo.anio, periodo.mes) }}
+        />
+      )}
     </div>
   )
 }
 
-function FilaPersona({ p, periodo, P, maximo }: {
+function FilaPersona({ p, periodo, P, maximo, onAbrir }: {
   p: PersonaOperaciones
   periodo: { anio: number; mes: number }
   P: OperacionesBonoData['parametros']
   maximo: number
+  onAbrir: (indicador: IndicadorBono) => void
 }) {
   return (
     <tr className="border-t" style={{ borderColor: BORDE }}>
@@ -289,9 +355,9 @@ function FilaPersona({ p, periodo, P, maximo }: {
         <div className="font-medium" style={{ color: CARBON }}>{p.nombre}</div>
         <div className="text-xs" style={{ color: GRIS }}>{p.cargo}</div>
       </td>
-      <ScoreCelda score={p.score_calidad}
+      <ScoreCelda score={p.score_calidad} onAbrir={() => onAbrir('calidad')}
         detalle={p.calidad_medida ? `${p.malos} ${p.malos === 1 ? 'malo' : 'malos'}` : 'sin medir'} />
-      <ScoreCelda score={p.score_radicacion}
+      <ScoreCelda score={p.score_radicacion} onAbrir={() => onAbrir('radicacion')}
         suspendido={P.peso_radicacion === 0}
         detalle={p.radicacion.pct === null
           ? (p.radicacion.eventos > 0 ? 'sin fecha de asignación' : 'sin casos')
@@ -299,14 +365,14 @@ function FilaPersona({ p, periodo, P, maximo }: {
         nota={p.radicacion.sin_rol
           ? `${p.radicacion.sin_rol} sin área declarada`
           : undefined} />
-      <ScoreCelda score={p.score_envio}
+      <ScoreCelda score={p.score_envio} onAbrir={() => onAbrir('envio')}
         suspendido={P.peso_envio === 0}
         detalle={p.envio.pct === null
           ? (p.envio.eventos > 0 ? 'sin fecha de cita' : 'sin casos')
           : `${pct(p.envio.pct)} · ${p.envio.a_tiempo}/${p.envio.medibles}`} />
       {/* Lo que el indicador descarto va aparte del resultado: un 100% con
           devoluciones a la vista necesita explicarse, o se lee como que no hubo. */}
-      <ScoreCelda score={p.score_correcciones}
+      <ScoreCelda score={p.score_correcciones} onAbrir={() => onAbrir('correcciones')}
         suspendido={P.peso_correcciones === 0}
         detalle={!p.correcciones.medida
           ? 'sin medir'
@@ -354,29 +420,38 @@ function FilaPersona({ p, periodo, P, maximo }: {
  * El caso que obliga a separarlos: un indicador suspendido pintado como 0 rojo se
  * lee como un incumplimiento de la persona, que es exactamente lo contrario.
  */
-function ScoreCelda({ score, detalle, nota, suspendido = false }: {
+function ScoreCelda({ score, detalle, nota, suspendido = false, onAbrir }: {
   score: number | null; detalle: string; nota?: string; suspendido?: boolean
+  onAbrir: () => void
 }) {
   const sinDato = score === null
   const enCero = score === 0
-  if (suspendido) {
-    return (
-      <td className="px-3 py-3 text-center">
-        <div className="font-semibold" style={{ color: '#D1D5DB' }}>—</div>
-        <div className="text-[10px]" style={{ color: GRIS }}>suspendido</div>
-      </td>
-    )
-  }
+  // El puntaje se abre SIEMPRE, incluido el suspendido y el que no se pudo medir:
+  // ahi es justo donde alguien pregunta por que, y una celda muerta lo deja sin
+  // respuesta. El panel explica el estado en vez de no aparecer.
   return (
-    <td className="px-3 py-3 text-center">
-      <div className="font-semibold"
-        style={{ color: sinDato ? '#D1D5DB' : enCero ? ROJO : VERDE }}>
-        {sinDato ? '—' : `${(score * 100).toFixed(0)}`}
-      </div>
-      <div className="text-[10px]" style={{ color: GRIS }}>{detalle}</div>
-      {/* Casos que quedaron fuera del cálculo, no incumplidos. Van aparte del
-          detalle para que no se lean como parte del porcentaje. */}
-      {nota && <div className="text-[10px]" style={{ color: AMBAR }}>{nota}</div>}
+    <td className="px-0 py-0 text-center">
+      <button type="button" onClick={onAbrir}
+        className="w-full px-3 py-3 transition-colors hover:bg-[#F9FAFB]"
+        title="Ver los casos detrás de este puntaje">
+        {suspendido ? (
+          <>
+            <div className="font-semibold" style={{ color: '#D1D5DB' }}>—</div>
+            <div className="text-[10px]" style={{ color: GRIS }}>suspendido</div>
+          </>
+        ) : (
+          <>
+            <div className="font-semibold"
+              style={{ color: sinDato ? '#D1D5DB' : enCero ? ROJO : VERDE }}>
+              {sinDato ? '—' : `${(score * 100).toFixed(0)}`}
+            </div>
+            <div className="text-[10px]" style={{ color: GRIS }}>{detalle}</div>
+            {/* Casos que quedaron fuera del cálculo, no incumplidos. Van aparte del
+                detalle para que no se lean como parte del porcentaje. */}
+            {nota && <div className="text-[10px]" style={{ color: AMBAR }}>{nota}</div>}
+          </>
+        )}
+      </button>
     </td>
   )
 }

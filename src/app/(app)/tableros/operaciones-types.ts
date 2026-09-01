@@ -208,9 +208,46 @@ export interface ReprocesoDetalle {
   abierto_at: string
 }
 
+export interface EnvioDetalle {
+  negocio_id: string
+  codigo: string | null
+  nombre: string | null
+  envio: string
+  /** null = el bloque del certificado bancario no se marco. */
+  cert_bancario: string | null
+  /** Fecha de la cita DIAN, anclada a Bogota. null = no esta registrada. */
+  cita: string | null
+  horas_desde_cert: number | null
+  horas_antes_cita: number | null
+  /** null = no se pudo juzgar porque falta una de las dos referencias. */
+  a_tiempo: boolean | null
+  /**
+   * Cual de las dos condiciones fallo, o cual referencia falta. Sin esto un caso
+   * incumplido obliga a rehacer las dos cuentas a mano para saber por que lo es.
+   */
+  motivo: string | null
+}
+
+export interface RadicacionDianDetalle {
+  negocio_id: string
+  codigo: string | null
+  nombre: string | null
+  /** Cuando el caso salio hacia adelante de la etapa de envio. */
+  momento: string
+  etapa_destino: string | null
+  /**
+   * `null` = no volvio devuelto. `error_propio` = baja el indicador.
+   * `criterio_tercero` = volvio pero no castiga, igual que en calidad.
+   */
+  devuelto: 'error_propio' | 'criterio_tercero' | null
+}
+
 export interface OperacionesDetalleData {
   staff_id: string
   nombre: string
   radicaciones: RadicacionDetalle[]
+  envios: EnvioDetalle[]
+  /** El DENOMINADOR de correcciones: cada caso que paso la etapa de envio. */
+  radicaciones_dian: RadicacionDianDetalle[]
   reprocesos: ReprocesoDetalle[]
 }
