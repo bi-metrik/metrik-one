@@ -9,7 +9,8 @@ import {
 // N7 — Cron de inactividad en negocios (etapa ejecución)
 // Con routing por responsable: responsable de operaciones desde el día 2,
 // supervisor del área a partir del día configurado. Sin el flag: legacy (día 5 -> owner).
-// Señales que reinician el reloj: horas, gastos, comentario
+// Señales que reinician el reloj: las que declare `ultima_actividad_negocio` en SQL,
+// que es la misma función con la que el resolver cierra estos avisos.
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   const { data: negocios } = await supabase
     .from('negocios')
-    .select('id, workspace_id, nombre, stage_actual, created_at, updated_at')
+    .select('id, workspace_id, nombre, stage_actual')
     .eq('estado', 'abierto')
     .eq('stage_actual', 'ejecucion')
 
@@ -39,44 +40,31 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, procesadas: 0, notificaciones: 0 })
   }
 
+  // Una sola definición de "actividad" para todo el sistema. Esta RPC es la MISMA que
+  // usa `resolver_notificaciones_obsoletas` para cerrar estos avisos, y esa es toda la
+  // corrección: antes el cron tenía su definición (solo `comentario`) y el resolver la
+  // suya (cualquier fila de `activity_log`), así que editar un bloque cerraba el aviso a
+  // las 12:45 sin reiniciar este reloj y el aviso volvía a nacer a las 13:00. Medido el
+  // 2026-09-01: 658 avisos sobre 213 negocios en 30 días, uno de ellos 10 veces.
+  //
+  // ⚠️ La lista de lo que cuenta como gestión vive en `ultima_actividad_negocio` y en
+  // ningún otro lado. Volver a escribirla acá es volver a abrir el bucle.
+  const { data: actividad } = await supabase.rpc('negocios_ultima_actividad', {
+    p_ids: negocios.map(n => n.id),
+  })
+  const ultimaPorNegocio = new Map(
+    ((actividad ?? []) as Array<{ negocio_id: string; ultima_actividad: string | null }>)
+      .map(a => [a.negocio_id, a.ultima_actividad]),
+  )
+
   for (const negocio of negocios) {
     procesadas++
 
-    const [horasRes, gastosRes, activityRes] = await Promise.all([
-      supabase
-        .from('horas')
-        .select('created_at')
-        .eq('negocio_id', negocio.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from('gastos')
-        .select('created_at')
-        .eq('negocio_id', negocio.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from('activity_log')
-        .select('created_at')
-        .eq('entidad_tipo', 'negocio')
-        .eq('entidad_id', negocio.id)
-        .eq('tipo', 'comentario')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ])
+    // Sin fila en el mapa el negocio ya no existe: se salta en vez de inventarle fecha.
+    const ultima = ultimaPorNegocio.get(negocio.id)
+    if (!ultima) continue
 
-    const fechas = [
-      horasRes.data?.created_at,
-      gastosRes.data?.created_at,
-      activityRes.data?.created_at,
-      negocio.updated_at,
-      negocio.created_at,
-    ].filter(Boolean) as string[]
-
-    const ultimaActividad = new Date(fechas.sort().reverse()[0])
+    const ultimaActividad = new Date(ultima)
     const diasSinActividad = Math.floor((now.getTime() - ultimaActividad.getTime()) / (1000 * 60 * 60 * 24))
 
     if (diasSinActividad < 2) continue
