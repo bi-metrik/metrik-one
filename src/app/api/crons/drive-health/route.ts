@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getAccessToken } from '@/lib/google-drive'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // Cron de health check diario sobre Drive de cada workspace.
 //
@@ -105,13 +106,13 @@ async function checkWorkspace(
   const ok = token_refresh_ok && folder_accessible
   if (!ok) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any).from('activity_log').insert({
+    await registrarActividad((supabase as any), {
       workspace_id: ws.id,
       entidad_tipo: 'workspace',
       entidad_id: ws.id,
       tipo: 'drive_health_failed',
       contenido: `Drive health check fallo (${oauth_mode}): ${error_code} — ${error_message?.slice(0, 200) ?? ''}`,
-    })
+    }, 'checkWorkspace')
   }
 
   return { ok, oauth_mode, folder_accessible }

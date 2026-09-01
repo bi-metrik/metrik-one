@@ -3,6 +3,7 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // ============================================================
 // Tipos compartidos (cliente + servidor)
@@ -177,15 +178,22 @@ export async function switchWorkspace(targetWorkspaceId: string) {
   if (updateError) return { error: updateError.message }
 
   // Audit log en el workspace al que ENTRA — cualquier owner del tenant podra
-  // ver la actividad del platform admin en su activity feed
-  await svc.from('activity_log').insert({
+  // ver la actividad del platform admin en su activity feed.
+  //
+  // ⚠️ `autor_id` va NULL a proposito. Es FK a **staff(id)** y aqui solo tenemos un
+  // `profiles.id`: pasarlo violaba la FK (23503) ademas del CHECK del tipo, asi que
+  // este audit log fallaba por DOS razones y ninguna se veia. Y el platform admin no
+  // tiene (ni debe tener) staff en el workspace ajeno — darle uno seria autoria
+  // cross-tenant, que este repo ya descarto en el PR #453. La identidad va en el
+  // texto, que es donde el owner del tenant la lee.
+  await registrarActividad(svc, {
     workspace_id: targetWorkspaceId,
     entidad_tipo: 'workspace',
     entidad_id: targetWorkspaceId,
     tipo: 'platform_admin_enter',
-    autor_id: profile.id,
-    contenido: 'Platform admin de MeTRIK entró en este workspace para soporte/debugging',
-  })
+    autor_id: null,
+    contenido: `Platform admin de MeTRIK (${ctx.email}) entró en este workspace para soporte/debugging`,
+  }, 'switchWorkspace')
 
   const targetSlug = (target as { slug: string }).slug
   // Genera magic link al subdomain destino para sembrar sesion alli (cookies host-only).
@@ -223,15 +231,16 @@ export async function returnHome() {
     .single()
   if (!home) return { error: 'Home workspace ya no existe' }
 
-  // Audit log en el workspace que ABANDONA
-  await svc.from('activity_log').insert({
+  // Audit log en el workspace que ABANDONA. `autor_id` NULL por el mismo motivo que
+  // en `switchWorkspace`: la FK apunta a staff(id) y aquí solo hay un profiles.id.
+  await registrarActividad(svc, {
     workspace_id: profile.workspace_id,
     entidad_tipo: 'workspace',
     entidad_id: profile.workspace_id,
     tipo: 'platform_admin_exit',
-    autor_id: profile.id,
-    contenido: 'Platform admin de MeTRIK regresó a su workspace home',
-  })
+    autor_id: null,
+    contenido: `Platform admin de MeTRIK (${ctx.email}) regresó a su workspace home`,
+  }, 'returnHome')
 
   const { error: updateError } = await svc
     .from('profiles')

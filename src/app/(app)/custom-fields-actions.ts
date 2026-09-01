@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createClient } from '@/lib/supabase/server'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 type Entidad = 'oportunidad' | 'proyecto' | 'contacto' | 'empresa'
 
@@ -72,7 +73,7 @@ async function applyAutoTransition(
   }
 
   // Registrar en activity_log
-  await supabase.from('activity_log').insert({
+  await registrarActividad(supabase, {
     workspace_id: workspaceId,
     entidad_tipo: entidadTipo,
     entidad_id: entidadId,
@@ -81,7 +82,7 @@ async function applyAutoTransition(
     valor_anterior: etapaAnterior,
     valor_nuevo: nuevoSlug,
     contenido: `Transición automática: ${etapaAnterior} → ${nuevoSlug} (regla de flujo aplicada)`,
-  })
+  }, 'applyAutoTransition')
 }
 
 export async function getCustomFields(entidad: Entidad) {

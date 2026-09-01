@@ -17,6 +17,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { siigoRequest, SiigoError } from './client'
 import { borradorCliente, emailPlausible, type BorradorCliente, type RutExtraido } from './mapeo'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 /** Config opt-in por línea: `lineas_negocio.config_extra.siigo`. */
 export interface SiigoLineaConfig {
@@ -326,15 +327,14 @@ async function anotar(
   if (!staffId) return
   const svc = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (svc as any).from('activity_log').insert({
+  await registrarActividad((svc as any), {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
     entidad_id: negocioId,
     tipo: 'sistema',
     autor_id: staffId,
     contenido,
-  })
-  if (error) console.error('[siigo] no se pudo anotar en activity_log:', error.message)
+  }, 'anotar')
 }
 
 /** Datos que la financiera puede corregir en la pantalla de revisión. */

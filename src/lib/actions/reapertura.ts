@@ -20,6 +20,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
 import { getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
@@ -171,7 +172,7 @@ export async function reabrirNegocio(
 
   // Activity log
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -180,7 +181,7 @@ export async function reabrirNegocio(
       contenido: `Negocio reabierto desde cierre ${n.cierre_motivo}. Etapa: ${etapaNombre ?? 'inicial'}.`,
       valor_anterior: 'cerrado',
       valor_nuevo: 'abierto',
-    })
+    }, 'reabrirNegocio')
   }
 
   // Si era cancelado, notificar owner (regla 11)
@@ -308,22 +309,22 @@ export async function crearNegocioDesdeCerrado(
 
   // Activity log en origen
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'comentario',
       autor_id: staffId,
       contenido: `Se creo el negocio ${nuevoId} como reapertura con nuevas condiciones desde este cerrado (${o.cierre_motivo}).`,
-    })
-    await supabase.from('activity_log').insert({
+    }, 'crearNegocioDesdeCerrado')
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: nuevoId,
       tipo: 'comentario',
       autor_id: staffId,
       contenido: `Negocio creado como reapertura desde ${o.codigo ?? negocioId} (${o.cierre_motivo}) con nuevas condiciones.`,
-    })
+    }, 'crearNegocioDesdeCerrado')
   }
 
   revalidatePath('/negocios')

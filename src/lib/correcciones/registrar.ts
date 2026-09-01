@@ -27,6 +27,7 @@ import { STAGE_TO_AREA, type Stage } from '@/lib/permissions/can-edit'
  */
 
 import { LABEL_CAUSA, type CausaCorreccion } from './causas'
+import { registrarActividad, actualizarActividad } from '@/lib/activity/registrar-actividad'
 
 export { esCausaValida, type CausaCorreccion } from './causas'
 
@@ -208,36 +209,34 @@ export async function registrarCorrecciones(params: {
           .eq('id', existente.id)
 
         if (existente.activity_log_id) {
-          await db(supabase)
-            .from('activity_log')
-            .update({ valor_nuevo: despues, contenido: contenido.slice(0, 280) })
-            .eq('id', existente.activity_log_id)
+          await actualizarActividad(
+            supabase,
+            existente.activity_log_id,
+            { valor_nuevo: despues, contenido: contenido.slice(0, 280) },
+            'correcciones',
+          )
         }
         registradas++
         continue
       }
 
-      // `tipo` debe existir en el CHECK de activity_log: se usa 'cambio', que ya está
-      // permitido. Un tipo fuera del CHECK hace fallar el insert EN SILENCIO.
-      const { data: evento, error: errEvento } = await db(supabase)
-        .from('activity_log')
-        .insert({
-          workspace_id: workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: ctx.negocioId,
-          tipo: 'cambio',
-          // staff.id, NO profile.id (ver el comentario del parámetro).
-          autor_id: staffId ?? null,
-          campo_modificado: campo.slug,
-          valor_anterior: antes,
-          valor_nuevo: despues,
-          contenido: contenido.slice(0, 280),
-        })
-        .select('id')
-        .maybeSingle()
-      // Sin esto el fallo es mudo: la corrección queda registrada en la tabla y
-      // ausente del timeline, que es donde la gente la busca.
-      if (errEvento) console.error('[correcciones] no se pudo escribir el evento:', errEvento)
+      // `tipo` sale del catálogo (`ACTIVITY_LOG_TIPOS`), así que un valor fuera del
+      // CHECK ya no compila; y `registrarActividad` lee el error, así que si Postgres
+      // rechaza la fila por otra razón (la FK de `autor_id`, RLS) tampoco se pierde en
+      // silencio: la corrección quedaría en su tabla y ausente del timeline, que es
+      // donde la gente la busca.
+      const evento = await registrarActividad(supabase, {
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: ctx.negocioId,
+        tipo: 'cambio',
+        // staff.id, NO profile.id (ver el comentario del parámetro).
+        autor_id: staffId ?? null,
+        campo_modificado: campo.slug,
+        valor_anterior: antes,
+        valor_nuevo: despues,
+        contenido: contenido.slice(0, 280),
+      }, 'correcciones')
 
       const { error: errIns } = await db(supabase)
         .from('bloque_correcciones')
@@ -258,7 +257,7 @@ export async function registrarCorrecciones(params: {
           sesion_id: sesionId,
           corregido_por: userId ?? null,
           corregido_por_nombre: nombre,
-          activity_log_id: (evento as { id?: string } | null)?.id ?? null,
+          activity_log_id: evento.id,
         })
 
       if (!errIns) registradas++

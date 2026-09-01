@@ -39,6 +39,7 @@ import { revalidatePath } from 'next/cache'
 // abierta desde antes seguiría mostrando la acción, y un barrido masivo sobre
 // plata no puede depender de que el cliente esté actualizado.
 import { DESCARTE_FACTURACION_HASTA, ventanaDescarteAbierta } from '@/lib/facturacion/ventana-descarte'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 export interface CasoPorFacturar {
   negocio_id: string
@@ -506,14 +507,14 @@ export async function descartarDeFacturacion(
     // `tipo` DEBE estar en el CHECK de activity_log o el insert falla en silencio
     // (ya pasó cuatro veces en este repo). 'sistema' está en el catálogo.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (svc as any).from('activity_log').insert({
+    await registrarActividad((svc as any), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId, // FK a staff(id), NO a profiles
       contenido: `Descartado de la cola de facturación${marca.motivo ? `. Motivo: ${marca.motivo}` : ''}`,
-    })
+    }, 'descartarDeFacturacion')
   }
 
   revalidatePath('/conciliacion')
@@ -543,14 +544,14 @@ export async function restaurarEnFacturacion(negocioId: string): Promise<{ ok: b
 
   if (staffId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (svc as any).from('activity_log').insert({
+    await registrarActividad((svc as any), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId,
       contenido: 'Devuelto a la cola de facturación',
-    })
+    }, 'restaurarEnFacturacion')
   }
 
   revalidatePath('/conciliacion')
@@ -705,7 +706,7 @@ export async function emitirFacturaDeNegocio(
     // `tipo` DEBE estar en el CHECK de activity_log o el insert falla en silencio.
     // `autor_id` es FK a staff(id), NO a profiles.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: errLog } = await (svc as any).from('activity_log').insert({
+    await registrarActividad((svc as any), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -714,8 +715,7 @@ export async function emitirFacturaDeNegocio(
       contenido: r.emitida
         ? `Factura ${r.numero} emitida en Siigo`
         : `Factura ${r.numero} creada en Siigo SIN radicar ante la DIAN`,
-    })
-    if (errLog) console.error('[siigo] factura emitida pero sin registro en el timeline:', errLog.message)
+    }, 'emitirFacturaDeNegocio')
   }
 
   revalidatePath('/conciliacion')

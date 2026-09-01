@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
 import { revalidatePath } from 'next/cache'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 type SupabaseDeWorkspace = Awaited<ReturnType<typeof getWorkspace>>['supabase']
 
@@ -43,21 +44,20 @@ async function registrarCambioSegmento(
     console.error('[registrarCambioSegmento] cambio de segmento SIN autor', { contactoId, workspaceId })
   }
 
-  const { error } = await supabase.from('activity_log').insert({
+  // `registrarActividad` lee el error y lo reporta con entidad, tipo y motivo — el
+  // `if (error) console.error(...)` que vivia aqui era esa misma comprobacion escrita
+  // a mano, y era la excepcion: los otros ~55 sitios no la tenian.
+  await registrarActividad(supabase, {
     workspace_id: workspaceId,
     entidad_tipo: 'contacto',
     entidad_id: contactoId,
-    // 'cambio' es uno de los valores del CHECK de `tipo`. Uno que no este en la
-    // lista hace fallar el insert sin ruido.
     tipo: 'cambio',
     // staff.id, NO profile.id: es la FK que declara `activity_log_autor_id_fkey`.
     autor_id: staffId,
     campo_modificado: 'segmento',
     valor_anterior: anterior,
     valor_nuevo: nuevo,
-  })
-
-  if (error) console.error('[registrarCambioSegmento] no se registro el cambio:', error)
+  }, 'registrarCambioSegmento')
 }
 
 // ── Contactos ─────────────────────────────────────────────

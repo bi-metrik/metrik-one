@@ -8,6 +8,7 @@ import {
   type Candidato,
 } from '@/lib/funnelchat/evento'
 import { decidirSegmento, extraerEtiqueta, type DecisionSegmento } from '@/lib/funnelchat/segmento'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,7 +163,7 @@ async function registrar(request: NextRequest, crudo: string) {
       } else {
         // Mismo rastro que deja un humano moviendo el chip en el directorio, para
         // que el historial del contacto no tenga cambios sin autor ni origen.
-        const { error: errorLog } = await supabase.from('activity_log').insert({
+        const rastro = await registrarActividad(supabase, {
           workspace_id: workspaceId,
           entidad_tipo: 'contacto',
           entidad_id: resolucion.contacto.id,
@@ -172,11 +173,13 @@ async function registrar(request: NextRequest, crudo: string) {
           valor_anterior: decision.anterior,
           valor_nuevo: decision.nuevo,
           contenido: `FunnelChat — etiqueta: ${decision.etiqueta}`,
-        })
-        if (errorLog) {
+        }, 'funnelchat/registrar')
+        if (!rastro.ok) {
           // El segmento YA quedo escrito. Decir que fallo seria mentir al reves,
-          // asi que se reporta que el rastro es lo que falta.
-          sincronizacion = { ...decision, sin_rastro: errorLog.message } as typeof sincronizacion
+          // asi que se reporta que el rastro es lo que falta. Este sitio es el unico
+          // que NO se conforma con el console.error del helper: el motivo viaja en la
+          // respuesta del webhook, que es donde el proveedor lo ve.
+          sincronizacion = { ...decision, sin_rastro: rastro.motivo } as typeof sincronizacion
         }
       }
     }

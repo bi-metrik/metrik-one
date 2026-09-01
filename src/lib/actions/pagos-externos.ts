@@ -53,6 +53,7 @@ import {
   MOTIVO_ANULACION_MIN,
 } from '@/lib/cobros/anulacion'
 import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // Los tipos generados de `cobros` no declaran `split_json` ni las columnas nuevas de
 // anulacion/soporte (ver la nota de tipos stale en `lib/negocios/recaudo-confirmado.ts`).
@@ -1089,7 +1090,7 @@ async function registrarEnTimeline(
 ) {
   if (!negocioId || !staffId) return
   try {
-    await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -1097,7 +1098,7 @@ async function registrarEnTimeline(
       // activity_log.autor_id es FK a staff(id), NO a profiles. Campo minado conocido.
       autor_id: staffId,
       contenido: contenido.slice(0, 1000),
-    })
+    }, 'registrarEnTimeline')
   } catch {
     /* el registro ya quedo: un fallo del log no lo revierte */
   }

@@ -34,6 +34,7 @@ import {
   type CausaReproceso,
   type TipoReproceso,
 } from '@/lib/negocios/atribucion-reproceso'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 /**
  * Los tipos generados de Supabase van por detrás del esquema real: `negocios.metadata`
@@ -306,7 +307,7 @@ export async function reprocesarNegocio(
   // que es donde alguien lo puede ver; un `console.error` no lo mira nadie.
   if (errEvento) {
     console.error('[reproceso] no se pudo asentar el evento de calidad:', errEvento)
-    await db(admin).from('activity_log').insert({
+    await registrarActividad(db(admin), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -315,7 +316,7 @@ export async function reprocesarNegocio(
       contenido:
         `⚠️ El reproceso ${ciclo} se aplico, pero NO quedo registrado en el indicador ` +
         `de calidad. Avisale a MeTRIK para que lo reponga.`,
-    })
+    }, 'reprocesarNegocio')
   }
 
   // ── Traza: es el insumo del indicador de calidad ──────────────────────
@@ -330,7 +331,7 @@ export async function reprocesarNegocio(
   // uno por el mismo descuido. Un tipo fuera del CHECK falla EN SILENCIO:
   // es la cuarta vez que muerde. Se usa `cambio_etapa`, que es lo que de verdad ocurre.
   if (staffId) {
-    const { error: errLog } = await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -343,8 +344,7 @@ export async function reprocesarNegocio(
         `Vuelve a ${destino.nombre}. ${detalle}`,
       valor_anterior: etapaActual.nombre,
       valor_nuevo: destino.nombre,
-    })
-    if (errLog) console.error('[reproceso] no se pudo escribir el evento del timeline:', errLog)
+    }, 'reprocesarNegocio')
   }
 
   // ── Notificar a supervisores y owner, sin excepción ───────────────────
@@ -431,15 +431,14 @@ export async function cerrarReproceso(
 
   if (staffId) {
     // `sistema`: cerrar el reproceso no mueve la etapa. Ver la nota del CHECK arriba.
-    const { error: errLog } = await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId,
       contenido: `Reproceso ${marca.ciclo} cerrado — ${LABEL_TIPO[marca.tipo]}.`,
-    })
-    if (errLog) console.error('[reproceso] no se pudo escribir el cierre en el timeline:', errLog)
+    }, 'cerrarReproceso')
   }
 
   revalidatePath(`/negocios/${negocioId}`)

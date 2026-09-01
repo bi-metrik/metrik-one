@@ -66,6 +66,7 @@ import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores } from '@/lib/negocios/campos-de-bloques'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -1943,14 +1944,14 @@ export async function crearNegocio(input: {
   // eso queda escrita: es lo único que después distingue un segundo vehículo
   // legítimo de un duplicado que nadie quiso crear.
   if (input.confirmar_duplicado && input.contacto_id && staffId) {
-    await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioData.id,
       tipo: 'cambio_sistema',
       autor_id: staffId,
       contenido: 'Negocio creado con otro(s) ya existente(s) para el mismo contacto, confirmado por quien lo creó',
-    })
+    }, 'crearNegocio')
   }
 
   // ── Auto-asignar al creador como responsable si es operator ──
@@ -2882,14 +2883,14 @@ async function autocompletarGatesAnticipoPorSaldo(
 
     if (staffId) {
       try {
-        await db(supabase).from('activity_log').insert({
+        await registrarActividad(db(supabase), {
           workspace_id: workspaceId,
           entidad_tipo: 'negocio',
           entidad_id: negocioId,
           tipo: 'comentario',
           autor_id: staffId,
           contenido: 'Anticipo cubierto por el saldo del negocio (reparto/otro pago); gate cerrado automáticamente.',
-        })
+        }, 'autocompletarGatesAnticipoPorSaldo')
       } catch { /* no bloquear por el log */ }
     }
   }
@@ -2968,14 +2969,14 @@ export async function recalcularNegocioPorCambioDeRecaudo(
 
     if (staffId) {
       try {
-        await db(supabase).from('activity_log').insert({
+        await registrarActividad(db(supabase), {
           workspace_id: workspaceId,
           entidad_tipo: 'negocio',
           entidad_id: negocioId,
           tipo: 'comentario',
           autor_id: staffId,
           contenido: `Gate de anticipo REABIERTO: se había cerrado solo porque el saldo lo cubría, y ese saldo cambió (${motivo}).`,
-        })
+        }, 'recalcularNegocioPorCambioDeRecaudo')
       } catch { /* no bloquear por el log */ }
     }
   }
@@ -3378,7 +3379,7 @@ export async function cambiarEtapaNegocioConGate(
           // El rastro va al timeline. `autor_id` es staff.id (campo minado ya
           // documentado: no confundir con profile.id).
           try {
-            await db(supabase).from('activity_log').insert({
+            await registrarActividad(db(supabase), {
               workspace_id: workspaceId,
               entidad_tipo: 'negocio',
               entidad_id: negocioId,
@@ -3386,7 +3387,7 @@ export async function cambiarEtapaNegocioConGate(
               autor_id: staffId,
               campo_modificado: 'bloque_datos',
               contenido: `Bloque "${p.nombre ?? 'sin nombre'}" quedó en "${marca.label}" al avanzar de etapa`,
-            })
+            }, 'cambiarEtapaNegocioConGate')
           } catch (e) { console.error('[cambiarEtapa] no se pudo registrar la omisión en el timeline:', e) }
         }
         return null
@@ -4068,7 +4069,7 @@ export async function cambiarEtapaNegocioConGate(
   // El cierre automático deja su propia línea en el timeline: un negocio que aparece cerrado
   // sin que nadie lo cerrara es un misterio para quien lo lea después.
   if (camposCierreAuto && staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -4078,7 +4079,7 @@ export async function cambiarEtapaNegocioConGate(
       valor_anterior: 'abierto',
       valor_nuevo: 'completado',
       contenido: MOTIVO_CIERRE_AUTOMATICO,
-    })
+    }, 'cambiarEtapaNegocioConGate')
   }
 
   // Quién aceptó entregar el caso queda escrito. Sin esto no hay forma de saber si el
@@ -4086,14 +4087,14 @@ export async function cambiarEtapaNegocioConGate(
   // control viene a evitar. `autor_id` es staff.id (campo minado ya documentado).
   if (pideConfirmar && confirmado && staffId) {
     try {
-      await db(supabase).from('activity_log').insert({
+      await registrarActividad(db(supabase), {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
         tipo: 'cambio_etapa',
         autor_id: staffId,
         contenido: `Confirmó el paso a ${nuevaEtapaNombre} sabiendo que el caso sale del proceso comercial.`.slice(0, 280),
-      })
+      }, 'cambiarEtapaNegocioConGate')
     } catch (e) {
       // El caso ya se movió: no convertir el rastro en un fallo del avance.
       console.error('[cambiarEtapa] no se pudo registrar la confirmación:', e)
@@ -4107,19 +4108,17 @@ export async function cambiarEtapaNegocioConGate(
 
   // Registrar en activity_log
   if (staffId) {
-    await supabase
-      .from('activity_log')
-      .insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'cambio_etapa',
-        autor_id: staffId,
-        campo_modificado: 'etapa',
-        valor_anterior: etapaActualNombre,
-        valor_nuevo: nuevaEtapaNombre,
-        contenido: motivoOverride ? `Override: ${motivoOverride}` : null,
-      })
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio_etapa',
+      autor_id: staffId,
+      campo_modificado: 'etapa',
+      valor_anterior: etapaActualNombre,
+      valor_nuevo: nuevaEtapaNombre,
+      contenido: motivoOverride ? `Override: ${motivoOverride}` : null,
+    }, 'cambiarEtapaNegocioConGate')
   }
 
   // El tercero de Siigo se crea al superar la etapa donde se captura el RUT.
@@ -4373,17 +4372,15 @@ export async function marcarBloqueCompleto(
       const detalle = changedFields.length > 0
         ? `Bloque "${bloqueNombre}" completado (${changedFields.join(', ')})`
         : `Bloque "${bloqueNombre}" completado`
-      await supabase
-        .from('activity_log')
-        .insert({
-          workspace_id: workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: bloque.negocio_id,
-          tipo: 'cambio',
-          autor_id: staffId,
-          campo_modificado: 'bloque_datos',
-          contenido: detalle,
-        })
+      await registrarActividad(supabase, {
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: bloque.negocio_id,
+        tipo: 'cambio',
+        autor_id: staffId,
+        campo_modificado: 'bloque_datos',
+        contenido: detalle,
+      }, 'marcarBloqueCompleto')
     }
   }
 
@@ -5101,17 +5098,15 @@ export async function marcarBloqueItem(
 
       const negocioId = (bloqueInfo as { negocio_id: string } | null)?.negocio_id
       if (negocioId) {
-        await supabase
-          .from('activity_log')
-          .insert({
-            workspace_id: workspaceId,
-            entidad_tipo: 'negocio',
-            entidad_id: negocioId,
-            tipo: 'cambio',
-            autor_id: staffId,
-            campo_modificado: 'checklist_item',
-            contenido: completado ? `"${item.label}" marcado como completado` : `"${item.label}" desmarcado`,
-          })
+        await registrarActividad(supabase, {
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'cambio',
+          autor_id: staffId,
+          campo_modificado: 'checklist_item',
+          contenido: completado ? `"${item.label}" marcado como completado` : `"${item.label}" desmarcado`,
+        }, 'marcarBloqueItem')
       }
     }
   }
@@ -5489,17 +5484,15 @@ export async function confirmarPagoCobro(
     const negocioId = cobro.negocio_id
     if (negocioId) {
       const montoFinal = valorParcial ?? cobro.monto
-      await supabase
-        .from('activity_log')
-        .insert({
-          workspace_id: workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: negocioId,
-          tipo: 'cambio',
-          autor_id: staffId,
-          campo_modificado: 'cobro_confirmado',
-          contenido: `Pago confirmado: ${cobro.notas ?? 'Cobro'} por $${montoFinal.toLocaleString('es-CO')}`,
-        })
+      await registrarActividad(supabase, {
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio',
+        autor_id: staffId,
+        campo_modificado: 'cobro_confirmado',
+        contenido: `Pago confirmado: ${cobro.notas ?? 'Cobro'} por $${montoFinal.toLocaleString('es-CO')}`,
+      }, 'confirmarPagoCobro')
 
       await reevaluarBloquesCobros(negocioId)
     }
@@ -5538,19 +5531,17 @@ export async function actualizarPrecioAprobado(
 
   // Registrar en activity_log
   if (staffId) {
-    await supabase
-      .from('activity_log')
-      .insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'cambio',
-        autor_id: staffId,
-        campo_modificado: 'precio_aprobado',
-        valor_anterior: precioAnterior != null ? String(precioAnterior) : null,
-        valor_nuevo: String(precio),
-        contenido: `Precio aprobado actualizado a $${precio.toLocaleString('es-CO')}`,
-      })
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: 'precio_aprobado',
+      valor_anterior: precioAnterior != null ? String(precioAnterior) : null,
+      valor_nuevo: String(precio),
+      contenido: `Precio aprobado actualizado a $${precio.toLocaleString('es-CO')}`,
+    }, 'actualizarPrecioAprobado')
   }
 
   await reevaluarBloquesCobros(negocioId)
@@ -5613,18 +5604,16 @@ export async function actualizarAprobacion(
     const contenido = data.comentario
       ? `Aprobación: ${estadoLabel}. ${data.comentario}`
       : `Aprobación: ${estadoLabel}`
-    await supabase
-      .from('activity_log')
-      .insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'cambio',
-        autor_id: staffId,
-        campo_modificado: 'aprobacion',
-        valor_nuevo: estadoLabel,
-        contenido,
-      })
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: 'aprobacion',
+      valor_nuevo: estadoLabel,
+      contenido,
+    }, 'actualizarAprobacion')
   }
 
   if (negocioId) revalidatePath(`/negocios/${negocioId}`)
@@ -7221,7 +7210,7 @@ export async function actualizarNombreNegocio(
   if (updErr) return { error: (updErr as { message: string }).message }
 
   if (staffId && (nombreAnterior ?? '') !== nuevo) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -7230,7 +7219,7 @@ export async function actualizarNombreNegocio(
       campo_modificado: 'nombre',
       valor_anterior: nombreAnterior ?? null,
       valor_nuevo: nuevo,
-    })
+    }, 'actualizarNombreNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -7269,19 +7258,17 @@ export async function actualizarCarpetaUrlNegocio(
 
   // Registrar en activity_log solo si cambió
   if (staffId && (urlAnterior ?? '') !== (url || '')) {
-    await supabase
-      .from('activity_log')
-      .insert({
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'cambio',
-        autor_id: staffId,
-        campo_modificado: 'carpeta_url',
-        valor_anterior: urlAnterior ?? null,
-        valor_nuevo: url || null,
-        contenido: url ? 'Carpeta Drive actualizada' : 'Carpeta Drive eliminada',
-      })
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: 'carpeta_url',
+      valor_anterior: urlAnterior ?? null,
+      valor_nuevo: url || null,
+      contenido: url ? 'Carpeta Drive actualizada' : 'Carpeta Drive eliminada',
+    }, 'actualizarCarpetaUrlNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -7338,7 +7325,7 @@ export async function perderNegocio(
   // Log en activity_log
   const razonLabel = RAZONES_PERDIDA_NEGOCIO.find(r => r.value === razon)?.label ?? razon
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -7346,7 +7333,7 @@ export async function perderNegocio(
       autor_id: staffId,
       contenido: `Negocio perdido. Motivo: ${razonLabel}`,
       valor_nuevo: 'perdido',
-    })
+    }, 'perderNegocio')
   }
 
   // Perder el negocio ya NO marca el contacto. Antes pasaba a 'inactivo' cuando era
@@ -7430,7 +7417,7 @@ export async function pausarNegocio(
     if (updErr) return { error: (updErr as { message: string }).message }
 
     if (staffId) {
-      await supabase.from('activity_log').insert({
+      await registrarActividad(supabase, {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
@@ -7438,7 +7425,7 @@ export async function pausarNegocio(
         autor_id: staffId,
         contenido: `Negocio auto-perdido: ${MAX_PAUSAS} pausas sin conversion`,
         valor_nuevo: 'perdido',
-      })
+      }, 'pausarNegocio')
     }
     revalidatePath(`/negocios/${negocioId}`)
     revalidatePath('/negocios')
@@ -7490,7 +7477,7 @@ export async function pausarNegocio(
 
   const motivoLabel = MOTIVOS_PAUSA.find(m => m.value === motivo)?.label ?? motivo
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -7498,7 +7485,7 @@ export async function pausarNegocio(
       autor_id: staffId,
       contenido: `Pausado hasta ${fechaReapertura}. Motivo: ${motivoLabel}${detalle ? ` — ${detalle}` : ''}`,
       valor_nuevo: `pausado:${motivo}`,
-    })
+    }, 'pausarNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -7555,7 +7542,7 @@ export async function reactivarNegocio(
   if (updErr) return { error: (updErr as { message: string }).message }
 
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -7563,7 +7550,7 @@ export async function reactivarNegocio(
       autor_id: staffId,
       contenido: decrementar ? 'Negocio reactivado (safety-net 24h: pausa no consumida)' : 'Negocio reactivado',
       valor_nuevo: 'activo',
-    })
+    }, 'reactivarNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -7616,7 +7603,7 @@ export async function cancelarNegocio(
 
   const motivoLabel = MOTIVOS_CANCELACION.find(m => m.value === motivo)?.label ?? motivo
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -7624,7 +7611,7 @@ export async function cancelarNegocio(
       autor_id: staffId,
       contenido: `Proyecto cancelado. Motivo: ${motivoLabel}`,
       valor_nuevo: 'cancelado',
-    })
+    }, 'cancelarNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -7860,7 +7847,7 @@ export async function cerrarNegocioSiQuedaResuelto(
   if (errCierre) return false
 
   if (staffId) {
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -7870,7 +7857,7 @@ export async function cerrarNegocioSiQuedaResuelto(
       valor_anterior: 'abierto',
       valor_nuevo: 'completado',
       contenido: MOTIVO_CIERRE_AUTOMATICO,
-    })
+    }, 'cerrarNegocioSiQuedaResuelto')
   }
   return true
 }
@@ -7991,7 +7978,7 @@ export async function completarNegocio(
       otro: 'Otro',
     }
     const motivoLabel = motivosLabel[motivoNoFacturable ?? '']
-    await supabase.from('activity_log').insert({
+    await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
@@ -8002,7 +7989,7 @@ export async function completarNegocio(
         ? `Proyecto completado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
         : 'Proyecto completado',
       valor_nuevo: 'completado',
-    })
+    }, 'completarNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -8127,14 +8114,14 @@ export async function agregarResponsable(
     const nombre = (staff as { full_name: string | null }).full_name ?? 'Sin nombre'
     const comoRol = asignacion.rol ? ` como ${asignacion.rol}` : ' (sin área: no recibe avisos de etapa)'
     const relevo = desplazadoNombre ? `, en reemplazo de ${desplazadoNombre}` : ''
-    await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio_sistema',
       autor_id: staffId,
       contenido: `Responsable agregado: ${nombre}${comoRol}${relevo}`,
-    })
+    }, 'agregarResponsable')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -8177,14 +8164,14 @@ export async function quitarResponsable(
       .select('full_name')
       .eq('id', staffMiembroId)
       .single()
-    await db(supabase).from('activity_log').insert({
+    await registrarActividad(db(supabase), {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
       entidad_id: negocioId,
       tipo: 'cambio_sistema',
       autor_id: staffId,
       contenido: `Responsable removido: ${(staff as { full_name: string | null } | null)?.full_name ?? 'Sin nombre'}`,
-    })
+    }, 'quitarResponsable')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
