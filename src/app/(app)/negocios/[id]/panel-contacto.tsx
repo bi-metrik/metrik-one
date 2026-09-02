@@ -56,6 +56,8 @@ export type EmpresaPanel = {
   tipo_documento: string | null
   municipio: string | null
   departamento: string | null
+  telefono: string | null
+  email_fiscal: string | null
 }
 
 interface Props {
@@ -240,6 +242,20 @@ function Cuerpo({ contacto, empresa, campanas }: Omit<Props, 'variant'>) {
             {(empresa.municipio?.trim() || empresa.departamento?.trim()) && (
               <Fila label="Ciudad">
                 {[empresa.municipio?.trim(), empresa.departamento?.trim()].filter(Boolean).join(', ')}
+              </Fila>
+            )}
+            {/* Datos de la empresa, no de la persona: solo aparecen en el bloque
+                de empresa real, y solo si el RUT los dejó. */}
+            {empresa.telefono?.trim() && (
+              <Fila label="Teléfono">
+                <a href={`tel:${telDesdeTelefono(empresa.telefono) ?? empresa.telefono}`} className="tabular-nums hover:underline">
+                  {empresa.telefono}
+                </a>
+              </Fila>
+            )}
+            {empresa.email_fiscal?.trim() && (
+              <Fila label="Correo">
+                <a href={`mailto:${empresa.email_fiscal}`} className="hover:underline">{empresa.email_fiscal}</a>
               </Fila>
             )}
           </dl>

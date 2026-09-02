@@ -52,7 +52,10 @@ export function telDesdeTelefono(raw: string | null | undefined): string | null 
   if (!digitos) return null
   const wa = whatsappDesdeTelefono(raw)
   if (wa) return `+${wa}`
-  // No es un móvil colombiano, pero puede ser un fijo válido: se ofrece igual
-  // para llamar, con el texto tal cual lo escribió quien lo capturó.
-  return digitos.length >= 7 ? digitos : null
+  // No es un móvil colombiano, pero puede ser un fijo o un número de otro país:
+  // se ofrece igual para LLAMAR (no para WhatsApp). Medido en producción hay
+  // dos contactos con número de EE. UU. (`+1313…`, `+1316…`); si se les quita el
+  // `+` que traían, el enlace marca un número local que no existe.
+  if (digitos.length < 7) return null
+  return sinDecimal.trimStart().startsWith('+') ? `+${digitos}` : digitos
 }

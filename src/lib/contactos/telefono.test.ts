@@ -50,6 +50,14 @@ describe('telDesdeTelefono', () => {
     expect(telDesdeTelefono('601 743 0000')).toBe('6017430000')
   })
 
+  it('un número de otro país CONSERVA su +, o el enlace marca un local que no existe', () => {
+    // Los dos casos reales de producción: contactos con número de EE. UU.
+    expect(telDesdeTelefono('+13132308977')).toBe('+13132308977')
+    expect(telDesdeTelefono('+1 316 792 2637')).toBe('+13167922637')
+    // …y siguen sin botón de WhatsApp: la regla es el móvil colombiano.
+    expect(whatsappDesdeTelefono('+13132308977')).toBeNull()
+  })
+
   it('un texto sin dígitos suficientes no es un enlace', () => {
     expect(telDesdeTelefono('@juanperez')).toBeNull()
     expect(telDesdeTelefono('123')).toBeNull()

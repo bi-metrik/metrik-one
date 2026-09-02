@@ -2422,7 +2422,9 @@ export default function NegocioDetailClient({
             `sticky` para que siga visible al bajar hasta el ActivityLog. No es
             `fixed` y vive fuera del header con `backdrop-blur`, así que no lo
             atrapa ningún containing block. */}
-        <aside className="hidden lg:block lg:sticky lg:top-4">
+        {/* `lg:items-start` en el grid es lo que hace que `sticky` funcione: sin
+            eso el item se estira a la altura de la fila y nunca se despega. */}
+        <aside className="hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <PanelContacto
             variant="rail"
             contacto={negocio.contactos}
