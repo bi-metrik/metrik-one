@@ -6,6 +6,8 @@ import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
 import { revalidatePath } from 'next/cache'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { buscarContactoDuplicado, mensajeDuplicado } from '@/lib/contactos/dedup'
+import { traerTodo } from '@/lib/supabase/paginar'
+import { acumularCampana, ordenarCampanas } from '@/lib/contactos/campanas'
 
 type SupabaseDeWorkspace = Awaited<ReturnType<typeof getWorkspace>>['supabase']
 
@@ -93,19 +95,75 @@ export interface ContactoConMeta {
   origen: OrigenContacto | null
   responsable_id: string | null
   responsable_nombre: string | null
+  /**
+   * Cuantas interacciones de Meta tiene el contacto: un formulario de lead = una
+   * interaccion. Medido en SOENA el 2026-09-02, de 651 contactos con Meta hay 605
+   * con exactamente 1 — por eso la tarjeta solo pinta el numero cuando pasa de 1
+   * (un "1" repetido 605 veces empuja hacia abajo lo que si se lee) y la vista de
+   * lista si lo lleva como columna fija, donde una columna se escanea de un vistazo.
+   */
+  interacciones_meta: number
+  /**
+   * Campanas del contacto, de la mas vieja a la mas nueva y sin repetir.
+   *
+   * Sale de las MISMAS filas que `interacciones_meta` (las de `fuente = 'meta'`),
+   * no de todas las interacciones: asi los dos numeros no se pueden contradecir.
+   * Contar campanas sobre un conjunto mas amplio que el de formularios permitiria
+   * pintar "1 formulario / 2 campanas", que se lee como un defecto.
+   *
+   * Se deduplica: dos formularios de la misma campana son DOS interacciones y UNA
+   * campana. Son dos preguntas distintas y el equipo las confunde si el mismo
+   * numero responde las dos.
+   *
+   * ⚠️ `campanas[0]` NO es la fuente del primer toque. `custom_data.origen` sigue
+   * siendo el first-touch inmutable que graba el webhook, y manda cuando los dos
+   * existen y no coinciden (misma regla que `ResumenCampanas` en el detalle).
+   * Medido: 1 contacto de 988 discrepa hoy.
+   */
+  campanas: string[]
 }
 
 export async function getContactos(): Promise<ContactoConMeta[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
+  // ⚠️ Las dos consultas de aqui van paginadas: PostgREST corta en 1.000 filas
+  // (`max_rows` medido en esta instancia el 2026-09-02) y NO avisa — devuelve 200
+  // con la lista recortada. Traer todo "de una" ya no alcanza: SOENA tiene **988
+  // contactos**, o sea doce de margen, y **703 interacciones** creciendo al ritmo
+  // de la pauta (la campana de septiembre sumo 49 en seis dias). El dia que
+  // cualquiera de las dos cruce el techo, unos contactos desaparecen del directorio
+  // y otros pierden su marca de Meta y su conteo de formularios, sin error y sin
+  // forma de distinguirlo de "no hay mas". `traerTodo` o devuelve el resultado
+  // completo o lanza; una lista a medias con cara de entera es peor que un error.
+  //
+  // El orden es compuesto a proposito: `created_at` no es unico (los cargues
+  // masivos comparten marca de tiempo al segundo) y sin desempate por `id` la
+  // pagina 2 no continua donde termino la 1 — se repiten filas y se pierden otras.
   // responsable_id aun no esta en database.ts generado (migracion reciente) → cast.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: contactos } = await (supabase as any)
-    .from('contactos')
-    .select('id, nombre, telefono, email, fuente_adquisicion, rol, segmento, comision_porcentaje, created_at, custom_data, responsable_id')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
+  const contactos = await traerTodo<{
+    id: string
+    nombre: string
+    telefono: string | null
+    email: string | null
+    fuente_adquisicion: string | null
+    rol: string | null
+    segmento: string | null
+    comision_porcentaje: number | null
+    created_at: string | null
+    custom_data: { origen?: OrigenContacto } | null
+    responsable_id: string | null
+  }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (supabase as any)
+      .from('contactos')
+      .select('id, nombre, telefono, email, fuente_adquisicion, rol, segmento, comision_porcentaje, created_at, custom_data, responsable_id')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'directorio/contactos' },
+  )
 
   const rows = (contactos ?? []) as Array<{
     id: string
@@ -131,21 +189,44 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
     ((staffRows ?? []) as Array<{ id: string; full_name: string }>).map((s) => [s.id, s.full_name]),
   )
 
-  // Agregado de interacciones por contacto (a 95 contactos, un solo fetch + reduce
-  // en memoria es suficiente; no amerita columnas cacheadas ni triggers).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: inters } = await (supabase as any)
-    .from('contacto_interacciones')
-    .select('contacto_id, fuente, ocurrida_at, created_at')
-    .eq('workspace_id', workspaceId)
+  // Agregado de interacciones por contacto: un solo recorrido en memoria sobre el
+  // fetch de arriba, sin columnas cacheadas ni triggers. `payload` entra al select
+  // porque de ahi sale `campaign_name` (703 de 703 interacciones lo traen).
+  const inters = await traerTodo<{
+    contacto_id: string
+    fuente: string
+    payload: Record<string, unknown> | null
+    ocurrida_at: string | null
+    created_at: string | null
+  }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (supabase as any)
+      .from('contacto_interacciones')
+      .select('contacto_id, fuente, payload, ocurrida_at, created_at')
+      .eq('workspace_id', workspaceId)
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'directorio/contacto_interacciones' },
+  )
 
-  const agg = new Map<string, { last: string | null; lastMeta: string | null; meta: boolean }>()
-  for (const it of (inters ?? []) as Array<{ contacto_id: string; fuente: string; ocurrida_at: string | null; created_at: string | null }>) {
+  const agg = new Map<string, {
+    last: string | null
+    lastMeta: string | null
+    meta: boolean
+    nMeta: number
+    // campana → primera vez que se vio. La clave deduplica y el valor ordena.
+    campanas: Map<string, string>
+  }>()
+  for (const it of inters) {
     const when = it.ocurrida_at ?? it.created_at
-    const cur = agg.get(it.contacto_id) ?? { last: null, lastMeta: null, meta: false }
+    const cur = agg.get(it.contacto_id) ?? { last: null, lastMeta: null, meta: false, nMeta: 0, campanas: new Map<string, string>() }
     if (when && (!cur.last || when > cur.last)) cur.last = when
     if (it.fuente === 'meta') {
       cur.meta = true
+      cur.nMeta += 1
+      // La dedup y el orden de las campanas viven en el modulo puro para poder
+      // probarse contra las filas reales de produccion sin levantar Supabase.
+      acumularCampana(cur.campanas, it.payload, when)
       if (when && (!cur.lastMeta || when > cur.lastMeta)) cur.lastMeta = when
     }
     agg.set(it.contacto_id, cur)
@@ -169,6 +250,8 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
       origen: c.custom_data?.origen ?? null,
       responsable_id: c.responsable_id,
       responsable_nombre: c.responsable_id ? (staffMap.get(c.responsable_id) ?? null) : null,
+      interacciones_meta: a?.nMeta ?? 0,
+      campanas: ordenarCampanas(a?.campanas),
     }
   })
 }

@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import { CardLink } from '@/components/card-link'
 import {
   Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle,
-  Plus, X, Loader2, CheckSquare, Square,
+  Plus, X, Loader2, CheckSquare, Square, LayoutGrid, List,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, STATUS_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
@@ -20,6 +20,14 @@ import {
   type ContactoConMeta,
   type StaffOption,
 } from '../actions'
+import {
+  atribucionDesdeCampanas,
+  contactoEnCampana,
+  opcionesDeCampana,
+  contarVariasCampanas,
+  CAMPANA_TODAS,
+  CAMPANA_VARIAS,
+} from '@/lib/contactos/campanas'
 
 interface Props {
   contactos: ContactoConMeta[]
@@ -230,18 +238,62 @@ function responsableFilterInicial(miStaffId: string | null, miRol: string | null
 }
 
 // Orden de la vista general. Default: ultima interaccion (cualquiera).
-type SortKey = 'ultima_interaccion' | 'ultima_interaccion_meta' | 'alfabetico' | 'creacion'
+type SortKey = 'ultima_interaccion' | 'ultima_interaccion_meta' | 'interacciones_meta' | 'alfabetico' | 'creacion'
 // Valores admisibles desde la URL: un `?orden=basura` debe caer al orden por defecto,
 // no dejar la lista sin ordenar.
 const SORT_VALIDOS: readonly SortKey[] = [
-  'ultima_interaccion', 'ultima_interaccion_meta', 'alfabetico', 'creacion',
+  'ultima_interaccion', 'ultima_interaccion_meta', 'interacciones_meta', 'alfabetico', 'creacion',
 ]
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ultima_interaccion', label: 'Ultima interaccion' },
   { value: 'ultima_interaccion_meta', label: 'Ultima interaccion de Meta' },
+  { value: 'interacciones_meta', label: 'Mas formularios' },
   { value: 'alfabetico', label: 'Alfabetico (A-Z)' },
   { value: 'creacion', label: 'Fecha de creacion' },
 ]
+
+// Vista de la lista. Default `tarjetas`: quien ya usa la pantalla no debe
+// encontrarsela cambiada.
+type Vista = 'tarjetas' | 'lista'
+const VISTAS_VALIDAS: readonly Vista[] = ['tarjetas', 'lista']
+
+/**
+ * ¿Hay ancho para una tabla? (breakpoint `md` de Tailwind, 768 px)
+ *
+ * La página es `max-w-2xl` y mobile-first a propósito: una tabla de seis columnas
+ * no cabe en 375 px, y las dos salidas conocidas —scroll horizontal y columnas
+ * que se esconden solas— son las dos formas de volverla ilegible. Por debajo de
+ * `md` se pintan tarjetas **aunque la URL diga `vista=lista`**.
+ *
+ * Se resuelve con `useSyncExternalStore` y no con un `useState` + effect: el
+ * snapshot de servidor es `false`, así que el HTML llega con tarjetas y el
+ * cliente hidrata con tarjetas — sin desajuste de hidratación — y recién después
+ * cambia a la tabla si hay ancho. Mismo patrón que `workflow-diagram.tsx`.
+ *
+ * Decidirlo en JS y no con clases de Tailwind es deliberado: con CSS habría que
+ * renderizar los DOS árboles (988 tarjetas + 988 filas) y esconder uno.
+ */
+const CONSULTA_MD = '(min-width: 768px)'
+
+function suscribirMedia(alCambiar: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const mql = window.matchMedia(CONSULTA_MD)
+  mql.addEventListener('change', alCambiar)
+  return () => mql.removeEventListener('change', alCambiar)
+}
+
+function anchoMdCliente(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia(CONSULTA_MD).matches
+}
+
+function anchoMdServidor(): boolean {
+  return false
+}
+
+function useAnchoMd(): boolean {
+  return useSyncExternalStore(suscribirMedia, anchoMdCliente, anchoMdServidor)
+}
 
 // Centinela del chip de Meta. Vive en el mismo estado que el filtro de status
 // para que "Todos" y los filtros de rol lo limpien sin lógica extra; el matcher
@@ -272,6 +324,11 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
   const [rolFilter, setRolFilter] = useEstadoUrl<string | null>('rol', null, inicialDe<string | null>('rol', null))
   const [segmentoFilter, setSegmentoFilter] = useEstadoUrl<string | null>('estatus', null, inicialDe<string | null>('estatus', null))
   const [sortBy, setSortBy] = useEstadoUrl<SortKey>('orden', 'ultima_interaccion', inicialDe('orden', 'ultima_interaccion' as SortKey, SORT_VALIDOS))
+  // Filtro de campaña. Sin `admisibles`: los nombres los pone Meta y no hay lista
+  // cerrada que declarar. Un valor que no esté en los datos se agrega como opción
+  // (ver `opcionesDeCampana`) en vez de dejar el selector mostrando otra cosa.
+  const [campanaFilter, setCampanaFilter] = useEstadoUrl<string>('campana', CAMPANA_TODAS, inicialDe('campana', CAMPANA_TODAS))
+  const [vista, setVista] = useEstadoUrl<Vista>('vista', 'tarjetas', inicialDe('vista', 'tarjetas' as Vista, VISTAS_VALIDAS))
   // Filtro de responsable. Quien ejecuta entra pre-filtrado a "Mis contactos";
   // quien coordina (owner/admin/supervisor) entra en Todos y puede acotar. Ese valor
   // por rol sigue siendo el default: la URL solo manda cuando alguien eligió otra cosa.
@@ -287,6 +344,11 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
   const [destinoMasivo, setDestinoMasivo] = useState('')
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
+  const anchoMd = useAnchoMd()
+  // La tabla solo existe donde cabe. Por debajo de `md` se pintan tarjetas aunque
+  // la URL traiga `vista=lista`: el estado se conserva (al volver a un monitor
+  // vuelve la tabla), lo que no ocurre es el render.
+  const mostrarTabla = vista === 'lista' && anchoMd
 
   const getFuenteLabel = (value: string | null) =>
     FUENTES_ADQUISICION.find(f => f.value === value)?.label ?? value ?? ''
@@ -358,6 +420,10 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
       .filter(s => s.count > 0)
   })()
 
+  // Opciones y conteos del filtro de campaña, derivados de TODOS los contactos.
+  const campanaOpciones = opcionesDeCampana(contactos, campanaFilter)
+  const variasCampanasCount = contarVariasCampanas(contactos)
+
   // El buscador cubre las cuatro llaves con las que el equipo busca de verdad:
   // nombre, telefono, correo y campana de origen. El termino se normaliza sin
   // tildes (los nombres de Meta llegan acentuados y nadie los teclea con tilde)
@@ -385,7 +451,11 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
     const matchResponsable =
       responsableFilter === RESP_TODOS ||
       (responsableFilter === RESP_SIN ? c.responsable_id === null : c.responsable_id === responsableFilter)
-    return matchSearch && matchRol && matchSegmento && matchResponsable
+    // Empata contra CUALQUIERA de sus campañas, no solo la de origen: quien filtra
+    // por "CAMPAÑA SEP DANIELA" espera ver a todos los que la llenaron, no solo a
+    // los que llegaron por ella la primera vez.
+    const matchCampana = contactoEnCampana(c, campanaFilter)
+    return matchSearch && matchRol && matchSegmento && matchResponsable && matchCampana
   })
 
   // Orden. Fechas ISO comparadas como string (mismo formato timestamptz) — nulls al final.
@@ -401,6 +471,14 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
         return byDateDesc(a.ultima_interaccion_at, b.ultima_interaccion_at)
       case 'ultima_interaccion_meta':
         return byDateDesc(a.ultima_interaccion_meta_at, b.ultima_interaccion_meta_at)
+      case 'interacciones_meta':
+        // Desempate por última interacción: 605 de 651 contactos con Meta tienen
+        // exactamente 1 formulario, así que sin él la mayor parte de la lista
+        // quedaría en un orden arbitrario.
+        return (
+          b.interacciones_meta - a.interacciones_meta ||
+          byDateDesc(a.ultima_interaccion_at, b.ultima_interaccion_at)
+        )
       case 'alfabetico':
         return a.nombre.localeCompare(b.nombre, 'es')
       case 'creacion':
@@ -499,6 +577,57 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
           </select>
         </div>
       </div>
+
+      {/* Filtro de campaña + toggle de vista.
+
+          Las opciones salen de los datos, no de una constante: cuando Meta lance
+          otra campaña aparece sola. Los conteos se calculan sobre `contactos`
+          (todos) y NO sobre `sorted`, para que elegir una campaña no mande a cero
+          a las demás y el selector siga sirviendo para saltar entre ellas. */}
+      {campanaOpciones.length > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Megaphone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#1877F2]" />
+            <select
+              value={campanaFilter}
+              onChange={e => setCampanaFilter(e.target.value)}
+              className="w-full appearance-none rounded-lg border bg-background py-2 pl-9 pr-3 text-sm font-medium"
+              aria-label="Filtrar por campana"
+            >
+              <option value={CAMPANA_TODAS}>Todas las campanas</option>
+              {variasCampanasCount > 0 && (
+                <option value={CAMPANA_VARIAS}>Mas de una campana ({variasCampanasCount})</option>
+              )}
+              {campanaOpciones.map(o => (
+                <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Solo desde `md`: por debajo la pantalla siempre pinta tarjetas, asi
+              que ofrecer el cambio seria ofrecer algo que no pasa. */}
+          <div className="hidden shrink-0 items-center rounded-lg border bg-background p-0.5 md:inline-flex">
+            {([
+              { value: 'tarjetas' as const, label: 'Tarjetas', Icon: LayoutGrid },
+              { value: 'lista' as const, label: 'Lista', Icon: List },
+            ]).map(({ value, label, Icon }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setVista(value)}
+                aria-pressed={vista === value}
+                title={`Ver en ${label.toLowerCase()}`}
+                className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                  vista === value ? 'bg-[#1A1A1A] text-white' : 'text-[#6B7280] hover:bg-[#F5F4F2]'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filtro de responsable. Default segun rol: gerencial entra en Todos,
           el resto en "Mis contactos" (la opcion sigue disponible para todos). */}
@@ -652,7 +781,20 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
         </div>
       )}
 
-      {/* Cards (calcado del patron de /negocios) */}
+      {/* Lista (solo con ancho de escritorio — ver `mostrarTabla`).
+
+          Las dos vistas se excluyen en el render, no con clases de Tailwind: con
+          CSS habría que montar los dos árboles (988 tarjetas mas 988 filas) para
+          esconder uno. */}
+      {mostrarTabla ? (
+        <TablaContactos
+          contactos={sorted}
+          getSegmentoLabel={getSegmentoLabel}
+          getSegmentoChip={getSegmentoChip}
+          fechaCorta={fechaCorta}
+        />
+      ) : (
+      /* Cards (calcado del patron de /negocios) */
       <div className="space-y-2">
         {sorted.map(c => {
           const segLabel = getSegmentoLabel(c.segmento)
@@ -703,10 +845,20 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                     {c.es_meta && (
                       <span
                         className="inline-flex items-center gap-1 rounded-full bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-medium text-[#1877F2]"
-                        title="Contacto que llego desde Meta (Facebook/Instagram)"
+                        title={
+                          c.interacciones_meta > 1
+                            ? `Llego desde Meta y ha llenado ${c.interacciones_meta} formularios`
+                            : 'Contacto que llego desde Meta (Facebook/Instagram)'
+                        }
                       >
                         <Megaphone className="h-2.5 w-2.5" />
                         Meta
+                        {/* El conteo solo cuando pasa de 1: 605 de 651 contactos con
+                            Meta dicen "1", y repetirlo en 605 tarjetas empuja hacia
+                            abajo lo que si se lee. En la tabla si va como columna. */}
+                        {c.interacciones_meta > 1 && (
+                          <span className="font-semibold tabular-nums"> · {c.interacciones_meta} formularios</span>
+                        )}
                       </span>
                     )}
                     {rolLabel && (
@@ -746,6 +898,15 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                       {campana && <span className="font-medium text-[#1A1A1A]"> · {campana}</span>}
                       {c.origen?.platform && (
                         <span className="uppercase text-[#6B7280]/70"> ({c.origen.platform})</span>
+                      )}
+                      {/* La tabla con las campanas es solo de escritorio, asi que en
+                          celular esta es la unica pista de que el contacto toco mas
+                          de una. Sin ella, filtrar por "Mas de una campana" desde el
+                          telefono devuelve una lista que no se puede interpretar. */}
+                      {c.campanas.length > 1 && (
+                        <span className="text-[#6B7280]/70" title={c.campanas.join(' → ')}>
+                          {' '}· +{c.campanas.length - 1} campana{c.campanas.length - 1 !== 1 ? 's' : ''}
+                        </span>
                       )}
                     </p>
                   )}
@@ -798,6 +959,105 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
           </p>
         )}
       </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Vista de lista: las mismas filas que las tarjetas, en tabla compacta.
+ *
+ * Recibe `contactos` YA filtrados y ordenados; no vuelve a decidir nada sobre el
+ * conjunto. Solo se monta con ancho de escritorio (ver `mostrarTabla`).
+ */
+function TablaContactos({
+  contactos,
+  getSegmentoLabel,
+  getSegmentoChip,
+  fechaCorta,
+}: {
+  contactos: ContactoConMeta[]
+  getSegmentoLabel: (v: string | null) => string
+  getSegmentoChip: (v: string | null) => string
+  fechaCorta: (v: string | null) => string | undefined
+}) {
+  const router = useRouter()
+
+  if (contactos.length === 0) {
+    return <p className="py-8 text-center text-sm text-muted-foreground">No se encontraron contactos</p>
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-sm">
+      <table className="w-full table-fixed text-left text-xs">
+        <thead className="border-b border-[#E5E7EB] bg-[#F5F4F2] text-[10px] uppercase tracking-wide text-[#6B7280]">
+          <tr>
+            <th scope="col" className="w-[26%] px-3 py-2 font-medium">Contacto</th>
+            <th scope="col" className="w-[13%] px-3 py-2 font-medium">Estatus</th>
+            <th scope="col" className="w-[9%] px-3 py-2 text-right font-medium">Formularios</th>
+            <th scope="col" className="w-[21%] px-3 py-2 font-medium">Primera campana</th>
+            <th scope="col" className="w-[21%] px-3 py-2 font-medium">Ultima campana</th>
+            <th scope="col" className="w-[10%] px-3 py-2 text-right font-medium">Ult. interaccion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {contactos.map(c => {
+            const segLabel = getSegmentoLabel(c.segmento)
+            const { primera, ultima } = atribucionDesdeCampanas(c)
+            return (
+              <tr
+                key={c.id}
+                onClick={() => router.push(`/directorio/contacto/${c.id}`)}
+                // La fila navega igual que la tarjeta. `role`/`tabIndex`/Enter
+                // reponen lo que daría un ancla, que aquí no se puede usar: un
+                // `<a>` dentro de `<tr>` no es HTML válido.
+                role="link"
+                tabIndex={0}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') router.push(`/directorio/contacto/${c.id}`)
+                }}
+                className="cursor-pointer border-b border-[#E5E7EB] last:border-0 transition-colors hover:bg-[#F5F4F2] focus:bg-[#F5F4F2] focus:outline-none"
+              >
+                <td className="px-3 py-2">
+                  <span className="block truncate font-semibold text-[#1A1A1A]" title={c.nombre}>
+                    {c.nombre}
+                  </span>
+                  {c.telefono && (
+                    <span className="block truncate text-[10px] text-[#6B7280]">{c.telefono}</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {segLabel && (
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${getSegmentoChip(c.segmento)}`}>
+                      {segLabel}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-medium text-[#1A1A1A]">
+                  {c.interacciones_meta}
+                </td>
+                {/* Los nombres reales llegan a 34 caracteres: `truncate` mas el
+                    `title` completo, que es lo que deja leerlos sin ensanchar. */}
+                <td className="px-3 py-2">
+                  <span className="block truncate text-[#1A1A1A]" title={primera ?? undefined}>
+                    {primera ?? <span className="text-[#6B7280]/60">—</span>}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  {/* Vacia cuando coincide con la primera (647 de 673 contactos):
+                      repetir el mismo texto gasta el ancho que necesita el nombre. */}
+                  <span className="block truncate text-[#6B7280]" title={ultima ?? undefined}>
+                    {ultima ?? ''}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-[10px] text-[#6B7280]">
+                  {fechaCorta(c.ultima_interaccion_at ?? c.created_at)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
