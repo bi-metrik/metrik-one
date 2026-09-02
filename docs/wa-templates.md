@@ -360,10 +360,46 @@ plantilla. Las dos salidas, y hay que elegir una:
 Mientras no se decida, W29 sigue como texto libre y **solo llega si la ventana esta abierta**.
 Declarar una plantilla para `W29` en el secreto ya funciona: no hace falta tocar codigo.
 
+### Crearlas por API — un solo comando (`scripts/crear-plantillas-wa.ts`)
+
+**El script es la fuente unica del literal.** Los bloques de copy de arriba estan para
+leerse; si hay que cambiar una frase, se cambia **en el script** y se vuelve a correr. El
+motivo es el mismo que originó todo este frente: el orden de `params` en el secreto tiene
+que ser exactamente el orden de los `{{n}}` del cuerpo aprobado, y si se escriben en dos
+lados terminan discrepando. Una alerta con los valores corridos —un saldo donde va la
+fecha— **Meta la entrega igual**, porque para Meta son cadenas en orden.
+
+```bash
+export WHATSAPP_ACCESS_TOKEN=...            # el del bot, esta en .credentials.md
+npx tsx scripts/crear-plantillas-wa.ts <WABA_ID>            # ensayo, no escribe
+npx tsx scripts/crear-plantillas-wa.ts <WABA_ID> --commit   # crea las que falten
+npx tsx scripts/crear-plantillas-wa.ts --registro           # solo el JSON del secreto
+```
+
+Es **idempotente**: consulta lo que ya existe y solo crea lo que falta, asi que se puede
+volver a correr para ver en que estado quedo cada una. Una ya aprobada no se toca (editarla
+la manda de vuelta a revision) y una **rechazada se reporta en vez de reintentarse** —
+reintentar la misma copy gasta cuota de creacion sin cambiar nada.
+
+Antes de hablar con Meta valida **todas** las definiciones y aborta si alguna esta mal
+(nombre con mayusculas, `{{n}}` que no son correlativos, sample vacio): media tanda creada
+y media no es el peor estado posible, porque la corrida siguiente tiene que adivinar donde
+se quedo.
+
+⚠️ **Falta el WABA id, y es el unico bloqueo.** No esta en `.credentials.md` ni en el repo,
+y con el token del bot **no se puede sacar por API**: tiene `whatsapp_business_management`
+(que alcanza para crear plantillas) pero no `business_management`, asi que no puede
+enumerar el portafolio. Comprobado contra Meta: `assigned_whatsapp_business_accounts`
+devuelve vacio, `owned_`/`client_whatsapp_business_accounts` piden el permiso que falta, y
+los ids del portafolio no responden al edge `message_templates`. Se lee en **Meta Business
+Manager → WhatsApp Manager → Configuracion**; **pasarselo a Kaori** la primera vez.
+
 ### El secreto, una vez aprobadas
 
 Se llama **`WA_ALERT_TEMPLATES`** y vive en los secretos de Edge Functions. Un JSON
 `{intent: {name, lang, params}}`, donde `params` es el orden de las variables del cuerpo:
+
+El JSON lo **imprime el script** (`--registro`), no se teclea:
 
 ```json
 {
