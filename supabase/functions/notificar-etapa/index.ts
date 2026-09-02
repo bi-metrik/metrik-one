@@ -9,8 +9,16 @@
 //      cubierto solo el camino que se enganchó.
 //   3. La RESEND_API_KEY vive en los secretos de la edge function, no en SQL.
 //
-// Quién dispara esto: el trigger `trg_avisar_entrada_etapa` sobre `negocios`,
-// vía pg_net (mismo patrón que los crons de wa-alerts).
+// Quién dispara esto: dos triggers, vía pg_net (mismo patrón que los crons de
+// wa-alerts).
+//
+//   · `trg_avisar_entrada_etapa` sobre `negocios` — el negocio entró a una etapa que
+//     declara aviso. Es el camino original.
+//   · `trg_avisar_documento_cargado` sobre `negocio_bloques` — llegó el documento de un
+//     bloque que declara aviso, y manda además el `bloque_config_id`. Existe porque hay
+//     novedades que no coinciden con ningún cambio de etapa: la factura de SOENA se sube
+//     desde 10 etapas distintas y en 142 de 185 casos el negocio ya no vuelve a moverse
+//     después de recibirla (migración 20260902000006).
 //
 // La notificación IN-APP ya la creó el trigger. Esto es el refuerzo por correo:
 // el comercial puede estar sin la plataforma abierta.
@@ -33,11 +41,24 @@ const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
  * avisado.
  *
  * `etapa_id` permite ver el copy de una etapa por la que el negocio no esta pasando
- * ahora (para revisar los dos avisos con un solo negocio).
+ * ahora (para revisar los dos avisos con un solo negocio). `bloque_config_id` hace lo
+ * mismo con el copy que declara un BLOQUE.
  */
 type Payload = {
   negocio_id: string;
-  prueba?: { to: string[]; etapa_id?: string };
+  /**
+   * De donde sale el aviso al cliente. Lo decide QUIEN disparo:
+   *
+   *   · ausente -> la ETAPA, via `trg_avisar_entrada_etapa`. Es el camino de siempre.
+   *   · presente -> el BLOQUE, via `trg_avisar_documento_cargado`. El evento ahi es
+   *     "llego el documento", que no coincide con ningun cambio de etapa: en SOENA la
+   *     factura se sube desde 10 etapas distintas y en 142 de 185 casos el negocio ya
+   *     no vuelve a moverse despues de recibirla.
+   *
+   * El aviso INTERNO al equipo no tiene version por bloque: sigue colgando de la etapa.
+   */
+  bloque_config_id?: string;
+  prueba?: { to: string[]; etapa_id?: string; bloque_config_id?: string };
 };
 
 // Las edge functions no tienen el `Database` generado, y sin el supabase-js
@@ -213,14 +234,34 @@ Deno.serve(async (req: Request) => {
 
   const cfgEtapa = etapa?.config_extra as Record<string, unknown> | null;
 
+  // ── El aviso que declara un BLOQUE ─────────────────────────────────────────
+  // Se lee por id y no por slug: el trigger manda el `bloque_config_id` de la fila que
+  // se acaba de escribir, o sea el bloque ORIGEN. Un slug obligaria a resolverlo otra
+  // vez y abriria la puerta a leer una copia readonly, que es el fallo que ya cerro
+  // `link_bloque_slug` (PR #395).
+  const bloqueId = body.bloque_config_id ?? prueba?.bloque_config_id ?? null;
+  const { data: bloque } = bloqueId
+    ? await supabase
+      .from('bloque_configs')
+      .select('id, nombre, config_extra')
+      .eq('id', bloqueId)
+      .maybeSingle()
+    : { data: null };
+  if (bloqueId && !bloque) return json({ error: 'bloque_no_encontrado' }, 404);
+
   const avisoRaw = cfgEtapa?.avisar_al_entrar as
     | { email?: boolean; activo?: boolean; titulo?: string; mensaje?: string; areas?: string[] }
     | undefined;
   // `activo: false` apaga el aviso interno conservando su texto (ver la migración
   // 20260813000001). Ausente = encendido, que es como se comportó siempre.
-  const aviso = avisoRaw?.activo === false ? undefined : avisoRaw;
+  //
+  // Un disparo por bloque NO lleva aviso interno: quien subió el documento es justamente
+  // la persona a la que el aviso interno le diría que lo suba.
+  const aviso = bloque ? undefined : (avisoRaw?.activo === false ? undefined : avisoRaw);
 
-  const avisoCliente = cfgEtapa?.avisar_al_cliente as AvisoCliente | undefined;
+  const avisoCliente = (bloque
+    ? (bloque.config_extra as Record<string, unknown> | null)?.avisar_al_cliente
+    : cfgEtapa?.avisar_al_cliente) as AvisoCliente | undefined;
 
   // Dos destinos independientes, y el del cliente tiene dos canales que también son
   // independientes: se puede querer WhatsApp sin correo. Si nadie pide nada no hay
@@ -234,13 +275,20 @@ Deno.serve(async (req: Request) => {
   // cliente avisado.
   if (prueba) {
     if (!quiereCliente) {
-      return json({ ok: true, prueba: true, skipped: 'etapa_sin_aviso_por_correo', etapa: etapa?.nombre ?? null });
+      return json({
+        ok: true,
+        prueba: true,
+        skipped: bloque ? 'bloque_sin_aviso_por_correo' : 'etapa_sin_aviso_por_correo',
+        etapa: etapa?.nombre ?? null,
+        bloque: bloque?.nombre ?? null,
+      });
     }
     const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente!, prueba.to);
     return json({
       ok: true,
       prueba: true,
       etapa: etapa?.nombre ?? null,
+      bloque: bloque?.nombre ?? null,
       enviado_a: r.estado === 'enviado' ? prueba.to : null,
       destinatario_real: r.destinatarioReal,
       titulo: r.titulo,
@@ -268,7 +316,7 @@ Deno.serve(async (req: Request) => {
     clienteOmitido = r.omitidoPor;
     clienteRespondeA = r.respondeA;
     clienteCopiaA = r.copiaA;
-    await registrarAviso(supabase, negocio, etapa, {
+    await registrarAviso(supabase, negocio, etapa, bloqueId, {
       canal: 'email',
       estado: r.estado,
       destino: r.enviadoA ?? r.destinatarioReal,
@@ -292,7 +340,7 @@ Deno.serve(async (req: Request) => {
     );
     waDisparado = r.disparadoA;
     waOmitido = r.omitidoPor;
-    await registrarAviso(supabase, negocio, etapa, {
+    await registrarAviso(supabase, negocio, etapa, bloqueId, {
       canal: 'whatsapp',
       estado: r.estado,
       destino: r.disparadoA,
@@ -433,6 +481,10 @@ async function registrarAviso(
   supabase: Supabase,
   negocio: Negocio,
   etapa: { id?: string; nombre?: string } | null,
+  // De que bloque salio, cuando el evento fue "llego el documento". La etapa se sigue
+  // guardando igual: es DONDE estaba el caso cuando el documento llego, que es la
+  // pregunta que sigue despues de "¿le avisamos?".
+  bloqueConfigId: string | null,
   fila: {
     canal: 'email' | 'whatsapp';
     estado: 'enviado' | 'disparado' | 'omitido' | 'fallido';
@@ -448,6 +500,7 @@ async function registrarAviso(
     negocio_id: negocio.id,
     etapa_id: etapa?.id ?? null,
     etapa_nombre: etapa?.nombre ?? null,
+    bloque_config_id: bloqueConfigId,
     ...fila,
   });
   if (error) console.error('[notificar-etapa] no se pudo dejar traza:', negocio.codigo, fila.canal, error.message);
