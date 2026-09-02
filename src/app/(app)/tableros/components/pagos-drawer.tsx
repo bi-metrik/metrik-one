@@ -150,7 +150,7 @@ export function PagosDrawer({
           {pagos !== null && filas.length > 0 && (
             <div className="shrink-0 border-b px-4 py-3" style={{ borderColor: BORDE }}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[11px]" style={{ color: GRIS }}>Honorario (es la barra)</span>
+                <span className="text-[11px]" style={{ color: GRIS }}>Honorario cobrado (con IVA)</span>
                 <span className="text-sm font-bold tabular-nums" style={{ color: VERDE }}>
                   {fmtCOP(honorario)}
                 </span>
@@ -179,6 +179,14 @@ export function PagosDrawer({
                   <span className="font-semibold tabular-nums" style={{ color: CARBON }}>{fmtCOP(entro)}</span>
                 </div>
               </div>
+              {/* Este panel es la EXCEPCION del tablero: aqui las cifras van brutas porque es
+                  con lo que se concilia contra el banco y contra ePayco. La barra del tablero
+                  mide ingreso y va sin IVA, asi que no coincide con esta suma, y decirlo aqui
+                  es mas barato que dejar que alguien lo descubra restando. */}
+              <p className="mt-2 text-[11px]" style={{ color: GRIS }}>
+                Estas cifras van con IVA: son las que se concilian contra el banco. En el tablero
+                el honorario va sin IVA, así que la barra es menor.
+              </p>
               {deOtrosMeses > 0 && (
                 <p className="mt-2 text-[11px]" style={{ color: AZUL }}>
                   {deOtrosMeses} de {filas.length} abonan a ventas de otros meses.

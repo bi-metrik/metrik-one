@@ -77,6 +77,12 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
           </tbody>
         </table>
       </div>
+      <p className="mt-2 text-xs text-gray-500">
+        Las tres cifras de dinero van <strong>sin IVA</strong>: es lo que queda como ingreso, no
+        lo que entró a la cuenta. El IVA se recauda para la DIAN y se previsiona aparte. La meta
+        de ventas también está declarada sin IVA, así que el cumplimiento compara lo mismo contra
+        lo mismo.
+      </p>
       <p className="mb-8 text-xs text-gray-500">
         El Sheet parte estas cifras por ciudad. Aquí no: la seccional aparece con el RUT, en
         Documentación, y un lead recién entrado todavía no tiene ninguna. Repartirlos sería
