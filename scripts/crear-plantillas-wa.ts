@@ -55,8 +55,22 @@ interface Definicion {
 }
 
 // ── Las plantillas ────────────────────────────────────────────────────────────────────
-// Copy espejo de `docs/wa-templates.md`. Sin emojis y sin CTA promocional: es la
-// convencion que ese documento fijo para no arriesgar el rechazo en categoria Utility.
+// Copy espejo de `docs/wa-templates.md`. Sin emojis y sin CTA promocional.
+//
+// ⚠️ Esa convencion NO alcanza, y se midio: el 2026-09-02 se crearon las seis pidiendo
+// `UTILITY` y Meta le puso MARKETING a tres en el momento de crearlas. Con grupo de
+// control (mismo autor, misma WABA, mismo dia, tres pasaron y tres no) lo que las separa
+// NO es el CTA —`push_saldo` dice "Respondeme con el monto" y paso— sino DE QUE HABLAN:
+// Utility aguanta cuando el mensaje es sobre un REGISTRO CONCRETO DEL DESTINATARIO que
+// cambio de estado, y se cae cuando es un agregado, una meta, un pipeline o un tercero.
+// Por eso los tres cuerpos reclasificados se reescribieron como novedad de la cuenta y
+// se les quito la meta ("de la meta"), el lenguaje de pipeline ("en venta") y el CTA.
+// Es inferencia sobre tres casos, no politica publicada de Meta: la mejor evidencia
+// disponible, no una garantia. Al escribir una plantilla nueva, aplicar la misma regla.
+//
+// ⚠️ Y una plantilla NO puede empezar ni terminar en `{{n}}` (Meta la rechaza con
+// "Las variables no pueden estar al principio ni al final de la plantilla"). Por eso los
+// tres cierran con texto. Lo comprueba `validar()` antes de hablar con Meta.
 const PLANTILLAS: Definicion[] = [
   {
     intent: 'W25',
@@ -93,7 +107,7 @@ const PLANTILLAS: Definicion[] = [
     intent: 'stale_opps',
     name: 'metrik_alerta_negocios_estancados',
     lang: 'es_CO',
-    body: 'Hola, tienes {{1}} negocios en venta sin movimiento: {{2}}.\n\nEscribeme "llame a [nombre]" para actualizar.',
+    body: 'Actualizacion de tu cuenta en MeTRIK ONE: {{1}} negocios no registran movimiento. Son: {{2}}. Corte de hoy.',
     params: [
       { nombre: 'cuantos', sample: '3' },
       { nombre: 'detalle', sample: 'Kaeser, Textiles del Norte, Happy Nails' },
@@ -103,7 +117,7 @@ const PLANTILLAS: Definicion[] = [
     intent: 'recaudo_check',
     name: 'metrik_alerta_recaudo_bajo',
     lang: 'es_CO',
-    body: 'Hola, el recaudo del mes va en {{1}} de la meta: {{2}} de {{3}}.\n\nRevisa tu cartera con "quien me debe".',
+    body: 'Actualizacion de tu cuenta en MeTRIK ONE. Vas en {{1}} del recaudo del mes: {{2}} de {{3}}. Corte de hoy.',
     params: [
       { nombre: 'pct', sample: '38%' },
       { nombre: 'cobrado', sample: '$4.200.000' },
@@ -116,7 +130,7 @@ const PLANTILLAS: Definicion[] = [
     intent: 'numero_desconocido',
     name: 'metrik_alerta_numero_desconocido',
     lang: 'es_CO',
-    body: 'Un numero no registrado le escribio al bot: {{1}}.\n\nDice: {{2}}. No hay a quien enrutarlo.',
+    body: 'Aviso de tu cuenta en MeTRIK ONE: se recibio un mensaje de {{1}} que no corresponde a ningun contacto registrado.\n\nContenido: {{2}}. Queda sin asignar.',
     params: [
       { nombre: 'telefono', sample: '+573001234567' },
       { nombre: 'mensaje', sample: 'Buenas, quiero informacion' },
@@ -139,6 +153,16 @@ function validar(d: Definicion): string[] {
       `los {{n}} del cuerpo son [${encontrados.join(', ')}] y los params son [${esperados.join(', ')}]: ` +
       'tienen que ser correlativos desde 1 y en el mismo orden',
     );
+  }
+  // Meta rechaza el cuerpo que empieza o termina en variable. El error que devuelve es un
+  // `(#100)` generico con el texto de la regla, asi que sin esta comprobacion se descubre
+  // recien al crear la plantilla —y para entonces ya se gasto un intento de la tanda.
+  const cuerpo = d.body.trim();
+  if (/^\{\{\d+\}\}/.test(cuerpo)) {
+    fallas.push('el cuerpo EMPIEZA con una variable, y Meta no lo acepta: antepone texto');
+  }
+  if (/\{\{\d+\}\}$/.test(cuerpo)) {
+    fallas.push('el cuerpo TERMINA en una variable, y Meta no lo acepta: cierra con texto');
   }
   for (const p of d.params) {
     if (!p.sample.trim()) fallas.push(`el param "${p.nombre}" no tiene sample, y Meta lo exige`);
