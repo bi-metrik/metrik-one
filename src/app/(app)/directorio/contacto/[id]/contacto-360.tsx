@@ -49,6 +49,8 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
     nombre: contacto.nombre,
     telefono: contacto.telefono ?? '',
     email: contacto.email ?? '',
+    // Aún no está en los tipos generados; lectura defensiva como responsable_id.
+    usuario_whatsapp: (contacto as { usuario_whatsapp?: string | null }).usuario_whatsapp ?? '',
     fuente_adquisicion: contacto.fuente_adquisicion ?? '',
     rol: contacto.rol ?? '',
     segmento: contacto.segmento ?? 'sin_contactar',
@@ -119,6 +121,17 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
             <PhoneInput
               value={form.telefono}
               onChange={v => setForm(p => ({ ...p, telefono: v }))}
+            />
+          </div>
+          <div>
+            {/* El teléfono ya no admite un usuario de WhatsApp: este es su sitio.
+                Ver migración 20260902230000. */}
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Usuario de WhatsApp</label>
+            <input
+              value={form.usuario_whatsapp}
+              onChange={e => setForm(p => ({ ...p, usuario_whatsapp: e.target.value }))}
+              placeholder="@usuario"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             />
           </div>
           <div>

@@ -313,6 +313,10 @@ export async function createContacto(formData: FormData) {
       nombre: nombre.trim().toUpperCase(),
       telefono,
       email,
+      // Casa propia del usuario de WhatsApp. Sin este campo, rechazar `@doritasrg`
+      // en el teléfono no arregla nada: quien lo escribió ahí lo hizo porque no
+      // tenía otro sitio, y lo volvería a hacer. Ver migración 20260902230000.
+      usuario_whatsapp: (formData.get('usuario_whatsapp') as string)?.trim() || null,
       fuente_adquisicion: (formData.get('fuente_adquisicion') as string) || null,
       fuente_detalle: (formData.get('fuente_detalle') as string)?.trim() || null,
       rol: (formData.get('rol') as string) || null,
@@ -335,7 +339,7 @@ export async function updateContacto(id: string, formData: FormData) {
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const updates: Record<string, unknown> = {}
-  const fields = ['nombre', 'telefono', 'email', 'fuente_adquisicion', 'fuente_detalle', 'rol', 'segmento'] as const
+  const fields = ['nombre', 'telefono', 'email', 'usuario_whatsapp', 'fuente_adquisicion', 'fuente_detalle', 'rol', 'segmento'] as const
   for (const f of fields) {
     const v = formData.get(f) as string | null
     if (v !== null) {

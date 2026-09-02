@@ -469,6 +469,32 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
     first_at: firstAtOrigen,
   };
 
+  // ¿Lo que Meta manda como teléfono es un teléfono?
+  //
+  // `contactos.telefono` ya no admite otra cosa (trigger de la migración
+  // 20260902230000). Si un formulario manda ahí un usuario de WhatsApp, insertar
+  // a ciegas haría reventar el lead, el webhook devolvería error y Meta lo
+  // reintentaría para siempre sin que entrara nunca. **Perder un lead es peor**:
+  // se guarda el número si lo es, y si no, el valor se conserva en
+  // `usuario_whatsapp`, que es lo que de verdad es.
+  //
+  // La pregunta se le hace a la base (`telefono_utilizable`) y no se responde
+  // aquí, por lo mismo que el dedup: una segunda copia de la regla en Deno se
+  // desincroniza en el primer cambio. Si la consulta falla, el lead sigue con lo
+  // que venga y que decida el trigger.
+  let telefonoLimpio: string | null = null;
+  let usuarioWhatsapp: string | null = null;
+  if (telefonoRaw) {
+    const { data: tel } = await supabase.rpc('telefono_utilizable', { p_telefono: telefonoRaw });
+    telefonoLimpio = (tel as string | null) ?? null;
+    if (!telefonoLimpio) {
+      usuarioWhatsapp = telefonoRaw;
+      console.warn(
+        `[meta-leads] telefono que no es telefono ws=${workspaceId} valor="${telefonoRaw}" -> usuario_whatsapp`,
+      );
+    }
+  }
+
   // 3. Dedup de contacto — EMAIL-first. El email identifica mejor a una persona
   //    que el teléfono (un teléfono se comparte entre familiares/empresa). Reglas:
   //    a) hay email y matchea un contacto → fusiona con ese contacto.
@@ -517,8 +543,8 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
   }
 
   // Sin match por correo, se intenta por teléfono.
-  if (!contactoId && telefonoRaw) {
-    const encontrado = await buscarDuplicado({ telefono: telefonoRaw });
+  if (!contactoId && telefonoLimpio) {
+    const encontrado = await buscarDuplicado({ telefono: telefonoLimpio });
     if (encontrado) {
       const emailContacto = norm(encontrado.email);
       // Conflicto: teléfono igual pero correo distinto → dos personas, un teléfono.
@@ -541,7 +567,8 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
       .insert({
         workspace_id: workspaceId,
         nombre: nombreUpper,
-        telefono: telefonoRaw ?? null,
+        telefono: telefonoLimpio,
+        usuario_whatsapp: usuarioWhatsapp,
         email: emailRaw ?? null,
         fuente_adquisicion: cc.fuente_adquisicion ?? null,
         fuente_detalle: cc.fuente_detalle ?? null,
