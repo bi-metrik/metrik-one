@@ -5,6 +5,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
 import { revalidatePath } from 'next/cache'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { buscarContactoDuplicado, mensajeDuplicado } from '@/lib/contactos/dedup'
 
 type SupabaseDeWorkspace = Awaited<ReturnType<typeof getWorkspace>>['supabase']
 
@@ -209,14 +210,26 @@ export async function createContacto(formData: FormData) {
   const nombre = formData.get('nombre') as string
   if (!nombre?.trim()) return { success: false, error: 'Nombre requerido' }
 
+  const telefono = (formData.get('telefono') as string)?.trim() || null
+  const email = (formData.get('email') as string)?.trim() || null
+
+  // Una persona, un contacto: si el telefono o el correo ya son de alguien, esto
+  // no se crea. Se devuelve QUIEN es y su id, porque un bloqueo sin salida hace
+  // que el comercial invente un dato para poder seguir, y eso ensucia mas que el
+  // duplicado que se queria evitar.
+  const duplicado = await buscarContactoDuplicado(supabase, workspaceId, { telefono, email })
+  if (duplicado) {
+    return { success: false, error: mensajeDuplicado(duplicado), duplicado }
+  }
+
   const { data, error: dbError } = await supabase
     .from('contactos')
     .insert({
       workspace_id: workspaceId,
       // Nombres de contacto en MAYUSCULAS (homogeneo con negocios).
       nombre: nombre.trim().toUpperCase(),
-      telefono: (formData.get('telefono') as string)?.trim() || null,
-      email: (formData.get('email') as string)?.trim() || null,
+      telefono,
+      email,
       fuente_adquisicion: (formData.get('fuente_adquisicion') as string) || null,
       fuente_detalle: (formData.get('fuente_detalle') as string)?.trim() || null,
       rol: (formData.get('rol') as string) || null,
@@ -248,6 +261,20 @@ export async function updateContacto(id: string, formData: FormData) {
       updates[f] = f === 'nombre' && val ? val.toUpperCase() : val
     }
   }
+  // Editar tambien abre la puerta al duplicado: escribirle a un contacto el
+  // telefono de otro deja dos filas con el mismo numero igual que crearlo de
+  // cero. Se comprueba con el MISMO guardian, excluyendo el contacto que se
+  // edita para que no choque consigo mismo.
+  if (updates.telefono !== undefined || updates.email !== undefined) {
+    const duplicado = await buscarContactoDuplicado(
+      supabase,
+      workspaceId,
+      { telefono: updates.telefono as string | null, email: updates.email as string | null },
+      id,
+    )
+    if (duplicado) return { success: false, error: mensajeDuplicado(duplicado), duplicado }
+  }
+
   if (formData.get('comision_porcentaje') !== null) {
     const raw = formData.get('comision_porcentaje') as string
     updates.comision_porcentaje = raw ? parseFloat(raw) : null

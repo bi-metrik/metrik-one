@@ -67,6 +67,7 @@ import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores } from '@/lib/negocios/campos-de-bloques'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -1757,6 +1758,12 @@ export async function crearNegocio(input: {
   error: string | null
   /** Presente solo cuando la creación se detuvo esperando confirmación. */
   duplicados?: NegocioDelMismoContacto[]
+  /**
+   * Nombre del contacto que ya existia y se reuso en vez de crear uno nuevo.
+   * La pantalla lo dice: el comercial tecleo un nombre y termino en OTRA ficha,
+   * y callarlo lo dejaria creyendo que escribio mal.
+   */
+  contacto_reusado?: string | null
 }> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
@@ -1799,19 +1806,37 @@ export async function crearNegocio(input: {
   const lineaId = input.linea_id ?? (wsConfig as { stages_activos: string[]; linea_activa_id: string | null } | null)?.linea_activa_id
   if (!lineaId) return { negocio_id: null, error: 'No hay línea de negocio configurada' }
 
-  // Crear contacto inline si no existe
+  // Crear contacto inline si no existe.
+  //
+  // ⚠️ Esta es la puerta por la que mas duplicados entraban: crear el negocio y
+  // el contacto de un tiron es lo que hace el comercial con el cliente al
+  // telefono, y no pasaba por el directorio, asi que nunca veia que esa persona
+  // ya estaba. Ahora comprueba contra el mismo guardian que el directorio y,
+  // si el telefono ya es de alguien, NO crea una segunda ficha: **reusa la que
+  // existe**. Frenar aqui seria peor que el duplicado, porque el comercial
+  // perderia el negocio que estaba creando; reusar lo ata a la historia real.
   let contactoId = input.contacto_id
+  let contactoReusado: string | null = null
   if (!contactoId && input.contacto_nombre?.trim()) {
-    const { data: newContact } = await supabase
-      .from('contactos')
-      .insert({
-        workspace_id: workspaceId,
-        nombre: input.contacto_nombre.trim(),
-        telefono: input.contacto_telefono?.trim() || null,
-      })
-      .select('id')
-      .single()
-    contactoId = (newContact as { id: string } | null)?.id
+    const telefonoInline = input.contacto_telefono?.trim() || null
+    const yaExiste = await buscarContactoDuplicado(supabase, workspaceId, { telefono: telefonoInline })
+    if (yaExiste) {
+      contactoId = yaExiste.id
+      contactoReusado = yaExiste.nombre
+    } else {
+      const { data: newContact } = await supabase
+        .from('contactos')
+        .insert({
+          workspace_id: workspaceId,
+          // MAYUSCULAS, homogeneo con el resto del directorio: esta puerta era la
+          // unica que guardaba el nombre como lo tecleaban.
+          nombre: input.contacto_nombre.trim().toUpperCase(),
+          telefono: telefonoInline,
+        })
+        .select('id')
+        .single()
+      contactoId = (newContact as { id: string } | null)?.id
+    }
   }
 
   // ── Ya existe un negocio a nombre de este contacto ──
@@ -1823,10 +1848,14 @@ export async function crearNegocio(input: {
   //
   // Solo aplica cuando el contacto YA existía: uno recién creado aquí arriba no
   // puede tener negocios previos, así que ni se consulta.
-  if (input.contacto_id && contactoId && !input.confirmar_duplicado) {
+  // Se consulta tambien cuando el contacto se REUSO arriba: para el comercial ese
+  // contacto era "nuevo", y es justo el caso en el que mas falta le hace ver que
+  // esa persona ya tiene un negocio abierto. Un contacto recien insertado no
+  // puede tener negocios previos, asi que ese caso sigue sin consultar.
+  if ((input.contacto_id || contactoReusado) && contactoId && !input.confirmar_duplicado) {
     const previos = await negociosDelContacto(supabase, workspaceId, contactoId)
     if (previos.length > 0) {
-      return { negocio_id: null, error: null, duplicados: previos }
+      return { negocio_id: null, error: null, duplicados: previos, contacto_reusado: contactoReusado }
     }
   }
 

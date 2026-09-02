@@ -20,9 +20,20 @@ export default function NuevoContactoForm() {
       if (res.success) {
         toast.success('Contacto creado')
         router.back()
-      } else {
-        toast.error(res.error)
+        return
       }
+      // Bloqueado por duplicado: el aviso lleva a la ficha que ya existe. Decir
+      // solo "ya existe" obliga a salir a buscarlo a mano, y quien tiene el
+      // cliente en el telefono no hace eso: cambia un digito y sigue.
+      const dup = 'duplicado' in res ? res.duplicado : null
+      if (dup) {
+        toast.error(res.error, {
+          duration: 10000,
+          action: { label: 'Abrir', onClick: () => router.push(`/directorio/contacto/${dup.id}`) },
+        })
+        return
+      }
+      toast.error(res.error)
     })
   }
 
@@ -58,6 +69,19 @@ export default function NuevoContactoForm() {
             name="telefono"
             type="tel"
             placeholder="+57 300 123 4567"
+            className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
+          />
+        </div>
+        {/* El correo no estaba en este formulario, asi que la unica via para
+            registrarlo era abrir el contacto y editarlo. Ahora que el correo
+            tambien frena duplicados, pedirlo aqui es lo que hace real la regla
+            en la puerta por la que entra la gente. */}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">Correo</label>
+          <input
+            name="email"
+            type="email"
+            placeholder="nombre@correo.com"
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           />
         </div>

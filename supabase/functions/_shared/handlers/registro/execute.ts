@@ -114,6 +114,27 @@ async function executeW06(ctx: HandlerContext): Promise<void> {
   const { supabase, user, session } = ctx;
   const fields = session.context.parsed_fields || {};
 
+  // Una persona, un contacto. Esta puerta es la mas facil de olvidar (se crea por
+  // WhatsApp, sin pantalla que muestre el directorio), y por eso comprueba contra
+  // la MISMA funcion de la base que usa la app: `buscar_contacto_duplicado`.
+  // Reimplementar aqui la comparacion de telefonos crearia una segunda verdad.
+  const { data: dupRows, error: dupErr } = await supabase.rpc('buscar_contacto_duplicado', {
+    p_workspace_id: user.workspace_id,
+    p_telefono: fields.phone || null,
+    p_email: null,
+    p_excluir_id: null,
+  });
+  // Un fallo al comprobar NO es permiso para crear: se corta y se avisa.
+  if (dupErr) throw dupErr;
+  const dup = ((dupRows ?? []) as Array<{ nombre: string }>)[0];
+  if (dup) {
+    await ctx.sendMessage(
+      `⚠️ Ese telefono ya es de ${bold(dup.nombre)}. No cree el contacto para no duplicarlo. ` +
+      `Si de verdad son dos personas distintas, registralo desde la app.`,
+    );
+    return;
+  }
+
   const { error } = await supabase.from('contactos').insert({
     workspace_id: user.workspace_id,
     nombre: fields.name,
