@@ -5,10 +5,15 @@ import {
   supervisoresDeArea,
   type ConfigNotificaciones,
 } from '@/lib/notificaciones/routing'
+import {
+  DISTANCIA_ESCALAMIENTO,
+  diaEscalarSupervisor,
+} from '@/lib/notificaciones/escalamiento-inactividad'
 
 // N7 — Cron de inactividad en negocios (etapa ejecución)
-// Con routing por responsable: responsable de operaciones desde el día 2,
-// supervisor del área a partir del día configurado. Sin el flag: legacy (día 5 -> owner).
+// Con routing por responsable: responsable de operaciones desde el umbral, supervisor
+// del área a partir del día configurado. Sin el flag: legacy (umbral +3 -> owner).
+// El umbral sale del SLA de la etapa; con SLA sin declarar son los 2 días de siempre.
 // Señales que reinician el reloj: las que declare `ultima_actividad_negocio` en SQL,
 // que es la misma función con la que el resolver cierra estos avisos.
 
@@ -52,26 +57,36 @@ export async function GET(req: NextRequest) {
   const { data: actividad } = await supabase.rpc('negocios_ultima_actividad', {
     p_ids: negocios.map(n => n.id),
   })
-  const diasPorNegocio = new Map(
-    ((actividad ?? []) as Array<{ negocio_id: string; dias_habiles: number | null }>)
-      .map(a => [a.negocio_id, a.dias_habiles]),
+  const porNegocio = new Map(
+    (
+      (actividad ?? []) as Array<{
+        negocio_id: string
+        dias_habiles: number | null
+        umbral_dias: number | null
+        debe_alertar: boolean | null
+      }>
+    ).map(a => [a.negocio_id, a]),
   )
 
   for (const negocio of negocios) {
     procesadas++
 
-    // El reloj también vive en SQL, y en días HÁBILES: `negocios_ultima_actividad` los
-    // cuenta con `horas_habiles_entre`, el mismo que mide el SLA de cada etapa, así que
-    // descuenta sábados, domingos y festivos de Colombia. Antes se contaban días corridos
-    // acá y el umbral se cumplía solo con el fin de semana: medido el 2026-09-01 (martes),
-    // 48 de 74 negocios en ejecución superaban el umbral
-    // por calendario contra 46 por días hábiles.
+    // El MOTIVO del aviso lo decide SQL: `debe_alertar` sale de
+    // `debe_alertar_inactividad`, la misma función que el resolver consulta a las 12:45
+    // para cerrar estos avisos. Reescribir el criterio acá reabre el bucle que cerró la
+    // migración 20260901000011 — cerrado a las 12:45, vuelto a nacer a las 13:00.
     //
-    // Sin número el negocio ya no existe: se salta en vez de inventarle uno.
-    const diasSinActividad = diasPorNegocio.get(negocio.id)
-    if (diasSinActividad == null) continue
+    // El umbral ya no es el 2 fijo: es el piso del stage ALARGADO por el `sla_horas` de
+    // la etapa (`umbral_inactividad_negocio`). Cita concede 7 días hábiles para una cita
+    // que agenda la DIAN, y avisaba a los 2 sobre sus 26 negocios abiertos. El SLA solo
+    // puede alargar el umbral, nunca acortarlo: ningún aviso se adelanta respecto de hoy.
+    //
+    // Los números de abajo son solo para el texto y el escalamiento.
+    const act = porNegocio.get(negocio.id)
+    if (!act?.debe_alertar) continue
 
-    if (diasSinActividad < 2) continue
+    const diasSinActividad = act.dias_habiles ?? 0
+    const umbral = act.umbral_dias ?? 2
 
     const contenido = `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin actividad`
 
@@ -88,7 +103,7 @@ export async function GET(req: NextRequest) {
         if (d.profile_id) destinatarios.add(d.profile_id)
       }
 
-      if (diasSinActividad >= cfg.escalar_supervisor_dias) {
+      if (diasSinActividad >= diaEscalarSupervisor(umbral, cfg.escalar_supervisor_dias)) {
         for (const id of await supervisoresDeArea(supabase, negocio.workspace_id, 'operaciones')) {
           destinatarios.add(id)
         }
@@ -107,16 +122,14 @@ export async function GET(req: NextRequest) {
       const admin = perfiles.find(p => p.role === 'admin')
       const owner = perfiles.find(p => p.role === 'owner')
 
-      if (diasSinActividad >= 2) {
-        if (supervisorOperaciones) {
-          destinatarios.add(supervisorOperaciones.id)
-        } else if (admin) {
-          destinatarios.add(admin.id)
-        } else if (owner) {
-          destinatarios.add(owner.id)
-        }
+      if (supervisorOperaciones) {
+        destinatarios.add(supervisorOperaciones.id)
+      } else if (admin) {
+        destinatarios.add(admin.id)
+      } else if (owner) {
+        destinatarios.add(owner.id)
       }
-      if (diasSinActividad >= 5 && owner) {
+      if (diasSinActividad >= umbral + DISTANCIA_ESCALAMIENTO.ownerEjecucion && owner) {
         destinatarios.add(owner.id)
       }
     }
