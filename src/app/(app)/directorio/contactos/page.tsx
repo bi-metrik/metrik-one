@@ -26,11 +26,12 @@ export default async function ContactosPage({
   // ofrecer un control que fallaría. La barrera real está en la action.
   const canAsignar = getRolePermissions(yo.role ?? 'read_only').canAssignResponsable
 
-  // Con `vista=lista` el contenedor se ensancha, pero SOLO en `lg:`: la tabla de
-  // seis columnas necesita aire y por debajo de ese ancho la pantalla pinta
-  // tarjetas de todos modos. Es el único cambio de ancho, y va aquí porque este
-  // archivo es quien pone el `max-w-2xl` mobile-first del directorio.
-  const anchoLista = sp.vista === 'lista' ? 'max-w-2xl lg:max-w-5xl' : 'max-w-2xl'
+  // Con `vista=lista` el contenedor se ensancha desde `md:`, el MISMO punto en el
+  // que aparecen el toggle de vista y la tabla (`CONSULTA_MD`, 768 px). Ensanchar
+  // solo en `lg:` dejaba la franja 768-1024 px con la tabla ya pintada dentro de
+  // 672 px, y ahí los nombres de campaña se cortaban. Es el único cambio de ancho,
+  // y va aquí porque este archivo es quien pone el `max-w-2xl` mobile-first.
+  const anchoLista = sp.vista === 'lista' ? 'max-w-2xl md:max-w-5xl' : 'max-w-2xl'
 
   return (
     <div className={`mx-auto ${anchoLista} space-y-4 px-4 py-6`}>
