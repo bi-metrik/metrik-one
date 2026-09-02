@@ -300,21 +300,6 @@ function norm(v: string | null | undefined): string | null {
   return t.length ? t : null;
 }
 
-// Normaliza un teléfono para dedup: solo dígitos (quita espacios, guiones,
-// paréntesis, '+'). Así "+57 314 536 2841", "3145362841" y "+573145362841"
-// deduplican igual. Devuelve null si no queda ningún dígito.
-function normTel(v: string | null | undefined): string | null {
-  const digits = (v ?? '').replace(/\D/g, '');
-  return digits.length ? digits : null;
-}
-
-// Escapa los comodines de PostgREST `ilike` ('%' y '_') para que un email con
-// esos caracteres (p.ej. la parte local "a_b@x.com") no active un patrón amplio
-// y matchee un contacto ajeno. '\' se escapa primero para no romper los demás.
-function escapeLike(v: string): string {
-  return v.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-}
-
 // Graba el ORIGEN de primer toque en el contacto (custom_data.origen) si aun no
 // lo tiene. Es first-touch INMUTABLE: la campana por la que el contacto llego la
 // primera vez. Nunca pisa un origen existente (un contacto dedup que ya tenia
@@ -398,12 +383,61 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
     return null;
   };
 
+  // Red de seguridad del mapa. `getField` exige que el nombre del campo COINCIDA
+  // exacto, y en agosto de 2026 eso costó 97 leads: un formulario nuevo empezó a
+  // mandar 'nombre_completo' y 'correo_electrónico' donde el mapa esperaba
+  // 'full_name' y 'email'. El webhook respondía 200, el contacto nacía vacío y el
+  // dato quedaba enterrado en el payload. Nadie se enteró en dos semanas.
+  //
+  // Por eso, si el mapa no acierta, se busca por PARECIDO del nombre del campo:
+  // sin tildes, en minúsculas, por subcadena. 'número_de_teléfono' contiene
+  // 'tel'; 'nombre_completo' contiene 'nombre'. Cubre español e inglés sin que
+  // nadie tenga que anticipar cómo bautizaron el campo en Meta.
+  //
+  // El parecido NO reemplaza al mapa, lo respalda: el mapa sigue mandando cuando
+  // acierta, porque es el único que sabe desempatar entre dos campos parecidos.
+  const sinTildes = (v: string) =>
+    v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const porParecido = (fragmentos: string[]): string | null => {
+    for (const fd of fieldData) {
+      const n = sinTildes(fd.name ?? '');
+      if (fragmentos.some((f) => n.includes(f)) && fd.values?.length) return fd.values[0];
+    }
+    return null;
+  };
+  // El correo además se reconoce por su forma, que no admite confusión. Es la
+  // última red: sirve aunque el campo se llame 'contacto' o '¿dónde te escribimos?'.
+  const porFormaDeEmail = (): string | null =>
+    fieldData.find((fd) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((fd.values?.[0] ?? '').trim()))
+      ?.values?.[0] ?? null;
+
   const fm = cfg.field_map ?? {};
-  const nombre = getField(fm.nombre ?? ['full_name', 'nombre', 'name']) ?? 'Lead sin nombre';
-  const emailRaw = getField(fm.email ?? ['email', 'correo', 'correo_electronico']);
-  const telefonoRaw = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone']);
+  const nombre = getField(fm.nombre ?? ['full_name', 'nombre', 'name'])
+    ?? porParecido(['nombre', 'name'])
+    ?? 'Lead sin nombre';
+  const emailRaw = getField(fm.email ?? ['email', 'correo', 'correo_electronico'])
+    ?? porParecido(['email', 'correo', 'mail'])
+    ?? porFormaDeEmail();
+  // Nada de adivinar el teléfono por su forma: una cédula también son diez
+  // dígitos. Solo por el nombre del campo, que en un formulario de Meta siempre
+  // dice de qué se trata.
+  const telefonoRaw = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone'])
+    ?? porParecido(['tel', 'phone', 'celular', 'movil', 'whatsapp']);
   const email = norm(emailRaw);
-  const telefono = normTel(telefonoRaw); // solo dígitos, para dedup robusto
+
+  // Si ni el mapa ni el parecido sacaron NADA, el formulario trae campos que este
+  // workspace no conoce. Eso no es un lead sin datos: es un mapa desactualizado, y
+  // el log tiene que decir cuál es el formulario y cómo se llaman sus campos, para
+  // que arreglarlo sea una edición de `config_extra.meta_leads.field_map` y no una
+  // investigación.
+  const sinMapeo = !emailRaw && !telefonoRaw && nombre === 'Lead sin nombre';
+  if (sinMapeo) {
+    console.error(
+      `[meta-leads] FORMULARIO SIN MAPEAR ws=${workspaceId} ` +
+      `form_id=${c.form_id ?? lead.form_id ?? '?'} ` +
+      `campos=[${fieldData.map((fd) => fd.name).join(', ')}]`,
+    );
+  }
 
   // Defaults del contacto creado desde el lead (opt-in): fuente = pauta digital,
   // rol = decisor si el lead es persona natural. Solo aplican al CREAR el contacto;
@@ -446,32 +480,51 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
   let contactoId: string | null = null;
   let estadoInteraccion = 'nueva';
 
-  // Buscar por email normalizado. El email es la llave dura del dedup. Se escapan
-  // los comodines de `ilike` ('%' y '_') para que un email con esos caracteres
-  // válidos en la parte local (ej. "a_b@x.com") no active un patrón amplio y
-  // fusione dos contactos distintos (merge automático → sin falsos positivos).
-  if (email) {
-    const { data } = await supabase
-      .from('contactos').select('id, email').eq('workspace_id', workspaceId).ilike('email', escapeLike(email)).maybeSingle();
-    contactoId = (data as { id: string } | null)?.id ?? null;
+  // La comparación la hace `buscar_contacto_duplicado` (migración 20260902000007),
+  // la MISMA función que usan las puertas de creación de la app. Antes se hacía
+  // aquí con dos consultas propias, y las dos fallaban en producción:
+  //
+  //   · la de email usaba `maybeSingle()`, que ante dos contactos con el mismo
+  //     correo devuelve error y deja pasar el duplicado. Con 5 correos repetidos
+  //     en el workspace, eso ya estaba ocurriendo.
+  //   · la de teléfono se traía TODOS los contactos del workspace para comparar
+  //     en memoria, contra el techo de 1.000 filas de PostgREST. Este workspace
+  //     tiene 1.030 contactos: la lista ya llega recortada y el duplicado pasa.
+  //
+  // Dos verdades sobre lo que es "la misma persona" se desincronizan en el primer
+  // cambio. Ahora hay una, en SQL, indexada, y este webhook la consulta.
+  const buscarDuplicado = async (
+    datos: { telefono?: string | null; email?: string | null },
+  ): Promise<{ id: string; email: string | null } | null> => {
+    const { data, error } = await supabase.rpc('buscar_contacto_duplicado', {
+      p_workspace_id: workspaceId,
+      p_telefono: datos.telefono ?? null,
+      p_email: datos.email ?? null,
+      p_excluir_id: null,
+    });
+    // Sin respuesta no se sabe si es duplicado, y crear a ciegas es justo lo que
+    // llenó el directorio de repetidos. Se propaga para que el lead falle y Meta
+    // lo reintente, en vez de resolverlo creando.
+    if (error) throw new Error(`dedup: ${error.message}`);
+    const filas = (data ?? []) as Array<{ id: string; email: string | null }>;
+    return filas[0] ?? null;
+  };
+
+  // Email primero: identifica a una persona mejor que el teléfono, que se comparte
+  // entre familia y empresa. Si el correo coincide, es la misma persona y se fusiona.
+  if (emailRaw) {
+    contactoId = (await buscarDuplicado({ email: emailRaw }))?.id ?? null;
   }
 
-  // Sin match por email → intentar por teléfono normalizado. La columna `telefono`
-  // guarda el valor con formato ("+57 314 …"), así que no se puede normalizar en
-  // la query PostgREST: traemos los candidatos del workspace y comparamos por solo
-  // dígitos en memoria. Así "+57 314 536 2841", "3145362841" y "+573145362841"
-  // deduplican igual.
-  if (!contactoId && telefono) {
-    const { data } = await supabase
-      .from('contactos').select('id, email, telefono')
-      .eq('workspace_id', workspaceId)
-      .not('telefono', 'is', null);
-    const candidatos = (data ?? []) as Array<{ id: string; email: string | null; telefono: string | null }>;
-    const encontrado = candidatos.find((c) => normTel(c.telefono) === telefono) ?? null;
+  // Sin match por correo, se intenta por teléfono.
+  if (!contactoId && telefonoRaw) {
+    const encontrado = await buscarDuplicado({ telefono: telefonoRaw });
     if (encontrado) {
       const emailContacto = norm(encontrado.email);
-      // Conflicto: teléfono igual pero email distinto → dos personas, un teléfono.
-      // No fusionar; se creará (o buscará) un contacto por email y se marca duplicado.
+      // Conflicto: teléfono igual pero correo distinto → dos personas, un teléfono.
+      // No fusionar; se crea contacto aparte y la interacción queda marcada para
+      // que un humano decida. Es el caso que en este workspace separa a un cónyuge
+      // de otro, y fusionarlos por el número borraría a uno de los dos.
       if (email && emailContacto && emailContacto !== email) {
         estadoInteraccion = 'posible_duplicado';
       } else {
