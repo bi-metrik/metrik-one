@@ -1000,3 +1000,24 @@ select jsonb_build_object(
 )
 where exists (select 1 from guard);
 $function$;
+
+-- ── 4. Quien puede invocarlas ──
+--
+-- `create or replace` NO reinicia la ACL, asi que en produccion estas siete ya estan
+-- como deben (medido: `anon` false, `authenticated` true). El revoke explicito existe
+-- para el otro caso: una base reconstruida desde las migraciones en orden las crearia
+-- de cero, y toda funcion nace ejecutable por PUBLIC. Sin esto, ese entorno quedaria
+-- distinto de produccion sin que nadie lo note.
+--
+-- `authenticated` conserva EXECUTE a proposito: la aplicacion las invoca con el cliente
+-- autenticado y cada una filtra por `current_user_workspace_id()`, que es lo que sostiene
+-- el aislamiento por workspace. La segmentacion por ROL sigue siendo de aplicacion, no de
+-- base: es el hallazgo abierto que CLAUDE.md ya declara para todo el producto, y este PR
+-- no lo cambia ni lo empeora.
+revoke execute on function public.get_comercial_kpis_mes_soena(uuid, integer, integer)   from public, anon;
+revoke execute on function public.get_comercial_serie_mensual_soena(uuid, integer)       from public, anon;
+revoke execute on function public.get_comercial_serie_seccional_soena(uuid, integer)     from public, anon;
+revoke execute on function public.get_comercial_serie_vendedor_soena(uuid, integer)      from public, anon;
+revoke execute on function public.get_comercial_resumen_soena(uuid, integer, integer)    from public, anon;
+revoke execute on function public.get_comercial_perfil_soena(uuid, integer, integer)     from public, anon;
+revoke execute on function public.get_directivo_soena(uuid, integer, integer)            from public, anon;
