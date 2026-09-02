@@ -150,11 +150,17 @@ comment on function telefono_utilizable is
 -- editar ningún otro campo de esas fichas.
 
 -- Copia de seguridad de lo que se va a tocar. Se conserva.
+--
+-- server-only: es una foto de datos ya corregidos, para poder reconstruir a mano
+-- si alguna de las 11 filas estaba bien y aqui se juzgo mal. No la lee ninguna
+-- pantalla y no debe salir por PostgREST: son telefonos y correos de clientes.
 create table if not exists backup_telefono_no_numerico_20260902 as
   select id, workspace_id, nombre, telefono, email, now() as respaldado_en
   from contactos
   where telefono is not null and telefono <> ''
     and not telefono_valido(limpiar_telefono(telefono));
+
+alter table backup_telefono_no_numerico_20260902 enable row level security;
 
 -- 3.a El número bueno con basura invisible: se limpia y se queda donde está.
 update contactos
@@ -235,6 +241,9 @@ create trigger trg_contactos_telefono_guardian
   before insert or update on contactos
   for each row
   execute function contactos_telefono_guardian();
+
+-- La dispara la tabla, no un cliente. Nadie debe poder llamarla suelta.
+revoke execute on function public.contactos_telefono_guardian() from public, anon;
 
 revoke all on function limpiar_telefono(text) from public;
 revoke all on function telefono_valido(text) from public;
