@@ -1890,7 +1890,7 @@ export async function crearNegocio(input: {
       contactoId = yaExiste.id
       contactoReusado = yaExiste.nombre
     } else {
-      const { data: newContact } = await supabase
+      const { data: newContact, error: errContacto } = await supabase
         .from('contactos')
         .insert({
           workspace_id: workspaceId,
@@ -1901,6 +1901,12 @@ export async function crearNegocio(input: {
         })
         .select('id')
         .single()
+      // ⚠️ Este error se descartaba. Con el guardian del telefono (migracion
+      // 20260902230000) eso pasa de raro a probable: quien escriba un usuario de
+      // WhatsApp aqui veria el negocio creado SIN contacto y sin ningun aviso,
+      // que es peor que no dejarlo crear. El mensaje de la base ya explica que
+      // hacer, asi que se devuelve tal cual.
+      if (errContacto) return { negocio_id: null, error: errContacto.message }
       contactoId = (newContact as { id: string } | null)?.id
     }
   }
