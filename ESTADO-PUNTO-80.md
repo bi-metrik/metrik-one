@@ -1,80 +1,98 @@
-# Punto 80 — cash de honorario neto de IVA en tableros
+# Punto 80 SOENA: el cash de honorario en tableros va neto de IVA
 
-Rama `feat/tableros-honorario-sin-iva`. **NO mergear a medias:** la migracion de vistas
-sola deja los tableros incoherentes (las cifras que salen de `v_venta_mes_comercial` bajan
-a base y las que salen directo de `v_cobro_valor` se quedan brutas). Entra todo junto.
+Estado al 2026-09-02. Esta nota vive en la rama para poder retomar sin la conversacion.
 
-## Diseño (cerrado, verificado contra consumidores reales)
+## La decision
 
-Se AGREGAN columnas base a `v_cobro_valor`, no se cambian las que ya tiene.
-Verificado que los tramos brutos los consumen `v_cartera_negocio`, `v_mc_linea_mes`,
-`v_pyl_mes` (o sea `/numeros`, el P&L de la empresa) y `/conciliacion` via
-`src/lib/upme/imputacion-pago.ts`. Cambiarlos en sitio movia la contabilidad de MeTRIK,
-que no es el alcance.
+Mauricio, 2026-09-02: el honorario que muestran los tableros es INGRESO, y el IVA no es
+ingreso (se recauda para la DIAN y se previsiona aparte). La meta de Direccion ya estaba
+declarada sin IVA. Los comerciales deben calcular su comision sobre el valor sin IVA.
 
-`v_venta_mes_comercial` SI cambia en sitio: sus unicos consumidores son las RPC de
-tablero de SOENA (verificado contra `pg_proc`). Ahi tambien se corrige `caso_completo`,
-que comparaba recaudo bruto contra `valor_aprobado_total`: bajar solo el numerador dejaba
-a todos los casos como no cubiertos.
+Esto REVIERTE la regla que el codigo traia escrita en `comercial-types.ts`, que dejaba el
+recaudo bruto para que fuera comparable contra el extracto bancario.
 
-**La tarifa UPME no se toca en ninguna parte.** No causa IVA.
+## Que quedo construido
 
-## Decision de Mauricio (2026-09-02) sobre el panel de pagos
+**Vistas** (`fab9165`)
+- `v_cobro_valor` conserva TODAS sus columnas y gana `a_tramo1_base` / `a_tramo2_base`.
+  No se tocan los tramos brutos: los consumen `v_cartera_negocio`, `v_mc_linea_mes`,
+  `v_pyl_mes` y la conciliacion contra ePayco (`src/lib/upme/imputacion-pago.ts`).
+  `a_tarifa` NO tiene base y no debe tenerla: la tarifa UPME no causa IVA.
+- `v_venta_mes_comercial` baja a base EN SITIO, porque sus unicos consumidores son las
+  RPC de tablero (verificado contra `pg_proc`).
+- `caso_completo` cambia LOS DOS lados. Medido: con los dos en base quedan 285 completos
+  de 306, identico a hoy; bajando solo el numerador habrian quedado **0**.
 
-`get_comercial_pagos_mes_soena` y `pagos-drawer.tsx` **se quedan en BRUTO** y ganan un
-rotulo que lo diga. Es la vista con la que se concilia contra banco y ePayco: si la suma
-de las partes deja de dar el monto recibido, deja de servir para lo unico que sirve.
-Los INDICADORES (KPIs, graficos, totales, Direccion) si quedan netos.
+**Las 7 RPC** (`45d9b38`)
+- Escritas desde `pg_get_functiondef` de PRODUCCION. Cuatro divergian del repo por
+  migraciones aplicadas via MCP que nunca quedaron como archivo.
+- `get_comercial_pagos_mes_soena` NO se toca (decision de Mauricio): es el panel de
+  conciliacion contra banco y ePayco, ahi la cifra es la que entro a la cuenta.
 
-## ⚠️ Blocker encontrado: produccion va por delante del repo
+**Rotulos TS** (`45d9b38`)
+- Panel de pagos: "Honorario cobrado (con IVA)" mas una nota de que la barra del tablero
+  va sin IVA. Antes decia "Honorario (es la barra)", que dejo de ser cierto.
+- Direccion: una nota bajo la tabla, no "(sin IVA)" repetido en cada fila.
+- Comercial: el historico y el grafico de recaudo dicen "(sin IVA)" porque su valor cambia.
+- `comercial-types.ts`: dos comentarios documentaban la regla vieja.
 
-`supabase_migrations.schema_migrations` tiene versiones aplicadas que **no existen como
-archivo** en `supabase/migrations/` (`20260826141500`, `20260826162802`, `20260826211947`,
-`20260831171338`, `20260901192404`, entre otras). Son cambios aplicados con el
-`apply_migration` del MCP, que timestampea por reloj y nunca quedaron commiteados.
+## Verificado contra produccion (sin escribir nada)
 
-Medido por md5 del cuerpo (`pg_proc.prosrc` normalizado) contra el texto del repo:
+| Cifra | Hoy | Con el cambio |
+|---|---|---|
+| Direccion agosto, ventas totales | $33.543.716 | $28.187.997 |
+| Direccion agosto, cumplimiento (meta $48.614.400) | 69,0% | **58,0%** |
+| Casos completos (de 306 vendidos) | 285 | 285 |
+| Casos completos si bajara SOLO el numerador | — | **0** |
+| Honorario historico del perfil | $238.045.501 | $155.260.308 |
 
-| RPC | repo == produccion |
-|---|---|
-| `get_comercial_resumen_soena` | si |
-| `get_comercial_perfil_soena` | si |
-| `get_comercial_serie_vendedor_soena` | si |
-| `get_comercial_kpis_mes_soena` | NO |
-| `get_comercial_serie_mensual_soena` | NO |
-| `get_comercial_serie_seccional_soena` | NO |
-| `get_directivo_soena` | NO |
+## Hallazgo que excede el IVA: `get_comercial_perfil_soena`
 
-**Consecuencia para quien siga:** las cuatro divergentes hay que reescribirlas desde
-`pg_get_functiondef` de PRODUCCION, no desde el archivo del repo. Hacerlo desde el repo
-revierte en silencio lo que produccion tiene. Verificar cada una por md5 antes y despues.
+No leia `v_cobro_valor`. Sumaba `cobros.monto` a secas y separaba honorario de tarifa por
+`tipo_cobro`. Dos defectos, los dos vivos:
 
-Esto excede el punto 80 y merece pendiente propio: el repo dejo de ser fuente de verdad
-del esquema.
+- El cobro ENTERO se contaba como honorario del comercial. La diferencia contra el bruto
+  ($53.285.735) es exactamente tarifa ($52.076.380) mas excedente ($1.209.355).
+- `tarifa_recaudada` mostraba CERO para todos, siempre: SOENA no registra ni un cobro con
+  `tipo_cobro = 'pasante'`. La tarifa viaja dentro del cobro y la separan los techos.
 
-## Hecho
+Quedaba contradiciendo a `get_comercial_resumen_soena`, que ya imputaba bien: las dos
+sirven la misma cifra para la misma persona.
 
-- [x] Auditoria completa (`proyectos/soena/ve/2026-09-02_auditoria-iva-tableros.md`)
-- [x] Diseño y radio de impacto verificado contra consumidores reales
-- [x] `supabase/migrations/20260902000010_tableros_honorario_neto_de_iva.sql`:
-      `v_cobro_valor` (+ `a_tramo1_base`, `a_tramo2_base`) y `v_venta_mes_comercial`
+**Efecto por comercial (historico):**
 
-## Falta
+| Comercial | Honorario hoy | Honorario nuevo | Tarifa hoy | Tarifa nueva |
+|---|---|---|---|---|
+| Jessica Tejada | $141.988.329 | $96.596.706 | $0 | $26.850.813 |
+| Daniela Jativa | $45.427.490 | $33.162.022 | $0 | $4.944.704 |
+| Esperanza Verdugo | $22.640.680 | $9.571.364 | $0 | $11.249.745 |
+| Jenny Cepeda | $16.486.502 | $6.264.250 | $0 | $9.031.118 |
+| Juan Bruce | $9.837.500 | $8.266.807 | $0 | $0 |
 
-- [ ] Las 7 RPC. Transformacion mecanica y siempre la misma:
-      `SUM(cv.a_tramo1 + cv.a_tramo2)` -> `SUM(cv.a_tramo1_base + cv.a_tramo2_base)`,
-      `SUM(cv.a_tramo1)` -> `SUM(cv.a_tramo1_base)`, idem `a_tramo2`.
-      `SUM(cv.a_tarifa)` NO se toca.
-      - `get_comercial_kpis_mes_soena`: solo el denominador de `tasa_recaudo`
-        (`valor_con_iva` -> `valor_sin_iva`, dos ocurrencias). El resto lo arregla la vista
-      - `get_comercial_serie_mensual_soena`: tramos + denominador de `tasa_recaudo_global`
-      - `get_comercial_serie_seccional_soena`, `..._vendedor_soena`, `..._resumen_soena`: tramos
-      - `get_comercial_perfil_soena`: tramos + `pendiente_honorario` (los DOS lados a base)
-      - `get_directivo_soena`: `sum(cv.a_tramo1)` / `sum(cv.a_tramo2)` (minuscula) -> base
-      - `get_comercial_pagos_mes_soena`: NO SE TOCA (decision de Mauricio)
-- [ ] TS: rotular el panel de pagos como bruto, revisar los "(sin IVA)" que ya no
-      distinguen nada, y corregir el comentario de `comercial-types.ts:41`, que llama
-      "ingreso real" a una cifra que hoy trae IVA
-- [ ] Decidir si `valor_con_iva` / `valor_aprobado_con_iva` siguen en pantalla o quedan
-      solo como columna de cartera
-- [ ] QA contra produccion: Direccion agosto debe pasar de 69,0% a 58,0%
+**Esto lo tiene que hablar SOENA con su equipo antes de que lo vean en pantalla.** No es
+que hayan recaudado menos: es que antes se les contaba como honorario propio la plata que
+se le gira a la UPME. Y el mismo cambio les da una columna de tarifa que llevaba meses en
+cero para todos.
+
+## Lo que falta
+
+1. **Ensayo con `rollback` contra produccion.** NO se pudo correr en esta sesion: no hay
+   `psql`, `.credentials.md` esta fuera de alcance y el CLI pide `SUPABASE_ACCESS_TOKEN`.
+   Retipear el SQL en el MCP probaria la copia y no el archivo, asi que no se hizo.
+   Con el token: `npx supabase db query --linked --file <archivo envuelto en begin/rollback>`.
+   Lo que si se verifico sin token: estructura del archivo (7 cuerpos, delimitadores y
+   parentesis balanceados) y las cifras de arriba, medidas con consultas equivalentes.
+2. **PR, checks y merge.**
+3. **QA en pantalla** tras aplicar: Direccion de agosto debe leer 58,0%.
+
+## Pendiente derivado, sin registrar
+
+El repo dejo de ser fuente de verdad del esquema: hay migraciones aplicadas por MCP sin
+archivo (`20260826141500`, `20260826162802`, `20260826211947`, `20260831171338`,
+`20260901192404`, entre otras). Merece pendiente propio.
+
+## Punto 81, despues de este
+
+Cargar a ONE los negocios del Sheet desde el 1 de julio y cuadrar los indicadores a lado
+y lado. Va DESPUES: conciliar antes compararia dos bases distintas y cada caso saldria
+descuadrado en 19%. Receta: `scripts/cargue-historico-iva.ts`.
