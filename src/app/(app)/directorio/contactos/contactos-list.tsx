@@ -260,10 +260,14 @@ const VISTAS_VALIDAS: readonly Vista[] = ['tarjetas', 'lista']
 /**
  * ¿Hay ancho para una tabla? (breakpoint `md` de Tailwind, 768 px)
  *
- * La página es `max-w-2xl` y mobile-first a propósito: una tabla de seis columnas
+ * La página es `max-w-2xl` y mobile-first a propósito: una tabla de cinco columnas
  * no cabe en 375 px, y las dos salidas conocidas —scroll horizontal y columnas
  * que se esconden solas— son las dos formas de volverla ilegible. Por debajo de
  * `md` se pintan tarjetas **aunque la URL diga `vista=lista`**.
+ *
+ * Desde `md` la tabla se pinta Y el contenedor se ensancha a `max-w-5xl` (ver
+ * `page.tsx`): los dos umbrales son el mismo a propósito, porque separarlos dejaba
+ * la tabla viviendo en 672 px entre 768 y 1024 px.
  *
  * Se resuelve con `useSyncExternalStore` y no con un `useState` + effect: el
  * snapshot de servidor es `false`, así que el HTML llega con tarjetas y el
@@ -990,14 +994,21 @@ function TablaContactos({
   return (
     <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-sm">
       <table className="w-full table-fixed text-left text-xs">
-        <thead className="border-b border-[#E5E7EB] bg-[#F5F4F2] text-[10px] uppercase tracking-wide text-[#6B7280]">
+        {/* `break-words` es la red de seguridad, no el arreglo: en `table-fixed` una
+            palabra sola y larga ("Formularios") no tiene donde partirse, se desborda
+            de su columna y se pinta ENCIMA de la vecina. Los de dos palabras envuelven
+            y por eso solo fallaba ese. Sin `tracking-wide`: en mayusculas de 10 px el
+            espaciado extra infla cada encabezado ~10% sin aportar legibilidad. */}
+        <thead className="border-b border-[#E5E7EB] bg-[#F5F4F2] text-[10px] uppercase text-[#6B7280]">
           <tr>
-            <th scope="col" className="w-[26%] px-3 py-2 font-medium">Contacto</th>
-            <th scope="col" className="w-[13%] px-3 py-2 font-medium">Estatus</th>
-            <th scope="col" className="w-[9%] px-3 py-2 text-right font-medium">Formularios</th>
-            <th scope="col" className="w-[21%] px-3 py-2 font-medium">Primera campana</th>
-            <th scope="col" className="w-[21%] px-3 py-2 font-medium">Ultima campana</th>
-            <th scope="col" className="w-[10%] px-3 py-2 text-right font-medium">Ult. interaccion</th>
+            {/* El estatus dejo de ser columna y bajo a la celda del contacto: es lo
+                que menos se escanea y le quitaba ancho a las campanas, que son lo que
+                esta vista existe para mostrar. */}
+            <th scope="col" className="w-[30%] break-words px-3 py-2 font-medium">Contacto</th>
+            <th scope="col" className="w-[12%] break-words px-3 py-2 text-right font-medium">Formularios</th>
+            <th scope="col" className="w-[25%] break-words px-3 py-2 font-medium">Primera campana</th>
+            <th scope="col" className="w-[25%] break-words px-3 py-2 font-medium">Ultima campana</th>
+            <th scope="col" className="w-[8%] break-words px-3 py-2 text-right font-medium">Ult. interaccion</th>
           </tr>
         </thead>
         <tbody>
@@ -1025,10 +1036,12 @@ function TablaContactos({
                   {c.telefono && (
                     <span className="block truncate text-[10px] text-[#6B7280]">{c.telefono}</span>
                   )}
-                </td>
-                <td className="px-3 py-2">
+                  {/* Mismo texto y mismo color que el chip de la tarjeta (los dos
+                      salen de `resolverStatusContacto`). Cada pieza es condicional,
+                      asi que un contacto sin telefono y sin estatus no deja hueco:
+                      la celda queda solo con el nombre. */}
                   {segLabel && (
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${getSegmentoChip(c.segmento)}`}>
+                    <span className={`mt-0.5 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${getSegmentoChip(c.segmento)}`}>
                       {segLabel}
                     </span>
                   )}
