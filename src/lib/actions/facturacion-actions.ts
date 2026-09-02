@@ -32,6 +32,10 @@ import { descuadreConciliacion, tarifaConfirmadaPorNegocio } from '@/lib/upme/mo
 import { casoListoParaFacturar } from '@/lib/facturacion/caso-listo'
 import { numeroFacturaEnData } from '@/lib/siigo/factura-cargada'
 import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
+// Toda lectura por LOTE de este archivo pasa por aquí. PostgREST corta en 1.000
+// filas sin avisar, y en esta cola eso ya escondió el RUT de 48 casos y devolvió
+// dos negocios ya facturados a la bandeja como facturables. Ver el módulo.
+import { traerTodo } from '@/lib/supabase/paginar'
 import { revalidatePath } from 'next/cache'
 // La ventana vive en su propio módulo: este archivo es `'use server'` y exportar
 // una constante desde aquí anula TODOS los exports en el build.
@@ -154,7 +158,21 @@ const num = (v: unknown): number | null => {
 export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
-  const { workspaceId } = ctx
+  try {
+    return await armarColaFacturacion(ctx.workspaceId)
+  } catch (e) {
+    // Una lectura por lote que no se pudo completar NO se degrada a una bandeja
+    // corta. Ese es exactamente el fallo que este frente vino a cerrar: una lista
+    // recortada tiene el mismo aspecto que una lista entera, y aquí decide si se
+    // emite un documento fiscal. Se prefiere una pantalla que dice que falló.
+    return { data: null, error: (e as Error).message }
+  }
+}
+
+/** Cuerpo de la cola. Separado solo para que el `catch` de arriba lo envuelva entero. */
+async function armarColaFacturacion(
+  workspaceId: string,
+): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const svc = createServiceClient()
 
   // ── Configuración del workspace ──
@@ -169,9 +187,13 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   // Opt-in por línea. Sin el dato NO se asume nada: la cola sale vacía y la
   // pantalla lo dice, en vez de inventar un criterio y llenar la bandeja de
   // casos que nadie mandó facturar.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: lineas } = await (svc as any)
-    .from('lineas_negocio').select('id, config_extra').eq('workspace_id', workspaceId)
+  const lineas = await traerTodo<{ id: string; config_extra?: Record<string, unknown> | null }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('lineas_negocio').select('id, config_extra')
+      .eq('workspace_id', workspaceId).order('id').range(d, h),
+    { etiqueta: 'facturacion/lineas_negocio' },
+  )
   let desde: number | null = null
   // Los conceptos se resuelven POR LÍNEA: cada una vende cosas distintas y su
   // catálogo de Siigo no tiene por qué coincidir.
@@ -179,7 +201,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   // Dónde vive el bloque de la factura en cada línea. Se usa para saber si el caso
   // ya tiene una factura CARGADA, que es distinto de emitida desde aquí.
   const facturaSlugPorLinea = new Map<string, string>()
-  for (const l of ((lineas ?? []) as Array<{ id: string; config_extra?: Record<string, unknown> | null }>)) {
+  for (const l of lineas) {
     const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
     if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
     const s = (l.config_extra?.siigo ?? {}) as { conceptos?: ConceptosConfig; bloque_factura_slug?: string }
@@ -191,12 +213,6 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   }
 
   // ── Negocios candidatos ──
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: negocios } = await (svc as any)
-    .from('negocios')
-    .select('id, codigo, nombre, precio_aprobado, contacto_id, linea_id, metadata, etapas_negocio!inner(nombre, numero)')
-    .eq('workspace_id', workspaceId)
-    .eq('estado', 'abierto')
   type Neg = {
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; contacto_id: string | null
@@ -204,20 +220,27 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     metadata: Record<string, unknown> | null
     etapas_negocio: { nombre: string | null; numero: number | null } | null
   }
-  const candidatos = ((negocios ?? []) as Neg[])
-    .filter(n => (n.etapas_negocio?.numero ?? 0) > desde!)
+  // 391 abiertos hoy en SOENA: todavía por debajo del techo, pero la cola crece
+  // con el negocio del cliente y el día que lo pase no habría error, solo casos
+  // que dejan de aparecer.
+  const negocios = await traerTodo<Neg>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('negocios')
+      .select('id, codigo, nombre, precio_aprobado, contacto_id, linea_id, metadata, etapas_negocio!inner(nombre, numero)')
+      .eq('workspace_id', workspaceId)
+      .eq('estado', 'abierto')
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'facturacion/negocios' },
+  )
+  const candidatos = negocios.filter(n => (n.etapas_negocio?.numero ?? 0) > desde!)
   if (candidatos.length === 0) {
     return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
   }
   const ids = candidatos.map(n => n.id)
 
   // ── Bloques que alimentan los borradores ──
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: bloques } = await (svc as any)
-    .from('negocio_bloques')
-    .select('negocio_id, data, bloque_configs!inner(slug)')
-    .in('negocio_id', ids)
-    .in('bloque_configs.slug', ['rut', 'comprobante_pago_upme', 'factura_emitida', 'servicio_contratado'])
   // ⚠️ Los bloques `datos` guardan plano (`data.servicio`) y los `documento` bajo
   // `data.campos[slug].value`. Leer el servicio como si fuera documento devuelve
   // null para todos y el concepto caería al default sin que nadie lo note.
@@ -226,13 +249,26 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     data: ({ campos?: Record<string, { value?: unknown }> } & Record<string, unknown>) | null
     bloque_configs: { slug: string }
   }
+  // Cuatro slugs por 305 casos = 1.115 filas medidas el 2026-09-02: 115 por encima
+  // del techo de PostgREST. Es la consulta que originó todo esto.
+  const bloques = await traerTodo<Bl>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(slug)')
+      .in('negocio_id', ids)
+      .in('bloque_configs.slug', ['rut', 'comprobante_pago_upme', 'factura_emitida', 'servicio_contratado'])
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'facturacion/negocio_bloques(borradores)' },
+  )
 
   const rutPorNegocio = new Map<string, RutExtraido>()
   const upmePorNegocio = new Map<string, number>()
   const facturadoPorNegocio = new Set<string>()
   const servicioPorNegocio = new Map<string, unknown>()
 
-  for (const b of ((bloques ?? []) as unknown as Bl[])) {
+  for (const b of bloques) {
     const campos = b.data?.campos ?? {}
     const slug = b.bloque_configs?.slug
     if (slug === 'rut') {
@@ -261,41 +297,63 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   // honorario cubierto. Se resuelve por lote (177 casos) y con los MISMOS helpers
   // que usan el panel de conciliación y los gates de avance, para que las tres
   // superficies no tengan tres restas distintas.
+  type FilaBloque = { negocio_id: string; data: Record<string, unknown> | null }
   const [cobrosRes, conciliadoRes, tarifaRes, certRes] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc as any).from('cobros').select('negocio_id, monto, tipo_cobro, split_json').in('negocio_id', ids),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc as any).from('negocio_conciliacion').select('negocio_id, conciliado').in('negocio_id', ids),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc as any).from('negocio_bloques').select('negocio_id, data, bloque_configs!inner(slug)')
-      .in('negocio_id', ids).eq('bloque_configs.slug', 'confirmar_tarifa_upme'),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc as any).from('negocio_bloques').select('negocio_id, data, bloque_configs!inner(slug)')
-      .in('negocio_id', ids).eq('bloque_configs.slug', 'servicio_contratado'),
+    // 357 cobros hoy para 305 casos: crece con el recaudo, no solo con los casos.
+    traerTodo<CobroParaRecaudo & { negocio_id: string }>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any).from('cobros')
+        .select('id, negocio_id, monto, tipo_cobro, split_json')
+        .in('negocio_id', ids).order('id').range(d, h),
+      { etiqueta: 'facturacion/cobros' },
+    ),
+    traerTodo<{ negocio_id: string; conciliado: boolean }>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any).from('negocio_conciliacion')
+        .select('id, negocio_id, conciliado')
+        .in('negocio_id', ids).order('id').range(d, h),
+      { etiqueta: 'facturacion/negocio_conciliacion' },
+    ),
+    traerTodo<FilaBloque>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any).from('negocio_bloques')
+        .select('id, negocio_id, data, bloque_configs!inner(slug)')
+        .in('negocio_id', ids).eq('bloque_configs.slug', 'confirmar_tarifa_upme')
+        .order('id').range(d, h),
+      { etiqueta: 'facturacion/confirmar_tarifa_upme' },
+    ),
+    traerTodo<FilaBloque>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any).from('negocio_bloques')
+        .select('id, negocio_id, data, bloque_configs!inner(slug)')
+        .in('negocio_id', ids).eq('bloque_configs.slug', 'servicio_contratado')
+        .order('id').range(d, h),
+      { etiqueta: 'facturacion/servicio_contratado' },
+    ),
   ])
 
   const cobrosPorNegocio = new Map<string, CobroParaRecaudo[]>()
-  for (const c of ((cobrosRes.data ?? []) as Array<CobroParaRecaudo & { negocio_id: string }>)) {
+  for (const c of cobrosRes) {
     if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
     cobrosPorNegocio.get(c.negocio_id)!.push(c)
   }
   const conciliados = new Set(
-    ((conciliadoRes.data ?? []) as Array<{ negocio_id: string; conciliado: boolean }>)
-      .filter(x => x.conciliado === true).map(x => x.negocio_id),
+    conciliadoRes.filter(x => x.conciliado === true).map(x => x.negocio_id),
   )
-  const tarifas = tarifaConfirmadaPorNegocio(
-    (tarifaRes.data ?? []) as Array<{ negocio_id: string; data: Record<string, unknown> | null }>,
-    (certRes.data ?? []) as Array<{ negocio_id: string; data: Record<string, unknown> | null }>,
-  )
+  const tarifas = tarifaConfirmadaPorNegocio(tarifaRes, certRes)
 
   // ── Contactos (email y teléfono ganan sobre el RUT: los mantiene el comercial) ──
   const contactoIds = candidatos.map(n => n.contacto_id).filter((x): x is string => !!x)
   const contactos = new Map<string, { email: string | null; telefono: string | null }>()
   if (contactoIds.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: cs } = await (svc as any)
-      .from('contactos').select('id, email, telefono').in('id', contactoIds)
-    for (const c of ((cs ?? []) as Array<{ id: string; email: string | null; telefono: string | null }>)) {
+    const cs = await traerTodo<{ id: string; email: string | null; telefono: string | null }>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any)
+        .from('contactos').select('id, email, telefono')
+        .in('id', contactoIds).order('id').range(d, h),
+      { etiqueta: 'facturacion/contactos' },
+    )
+    for (const c of cs) {
       contactos.set(c.id, { email: c.email, telefono: c.telefono })
     }
   }
@@ -341,13 +399,23 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
     copiasFactura.push(...(await idsDeCopiasDelBloque(svc, lineaId, slugFactura)))
   }
   if (copiasFactura.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: filasFactura } = await (svc as any)
-      .from('negocio_bloques')
-      .select('negocio_id, data')
-      .in('negocio_id', ids)
-      .in('bloque_config_id', copiasFactura)
-    for (const f of ((filasFactura ?? []) as Array<{ negocio_id: string; data: unknown }>)) {
+    // ⚠️ La más peligrosa de todas: 13 copias heredadas del bloque POR NEGOCIO, así
+    // que escala trece veces más rápido que la cola. Si aquí se cae una fila, un
+    // caso YA FACTURADO vuelve a la bandeja como facturable. Medido el 2026-09-02
+    // sin paginar: V0089 y V0428 estaban facturados y la cola no los veía, y V0428
+    // aparecía listo para emitir. Una factura electrónica aceptada no se deshace.
+    const filasFactura = await traerTodo<{ negocio_id: string; data: unknown }>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any)
+        .from('negocio_bloques')
+        .select('id, negocio_id, data')
+        .in('negocio_id', ids)
+        .in('bloque_config_id', copiasFactura)
+        .order('id')
+        .range(d, h),
+      { etiqueta: 'facturacion/negocio_bloques(factura)' },
+    )
+    for (const f of filasFactura) {
       if (numeroFacturaEnData(f.data)) facturadoPorNegocio.add(f.negocio_id)
     }
   }
