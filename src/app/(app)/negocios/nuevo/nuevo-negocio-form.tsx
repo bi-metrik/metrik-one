@@ -200,6 +200,16 @@ export default function NuevoNegocioForm({
         confirmar_duplicado: confirmarDuplicado,
       })
 
+      // El teléfono tecleado ya era de otro contacto: no se creó una segunda
+      // ficha, se usó la que existe. Se dice siempre, incluso cuando no hay
+      // negocios previos que mostrar: el comercial escribió un nombre y el
+      // negocio quedó a nombre de otro, y enterarse después es peor.
+      if (result.contacto_reusado) {
+        toast.info(`Ese teléfono ya era de ${result.contacto_reusado}. El negocio va a ese contacto.`, {
+          duration: 8000,
+        })
+      }
+
       // Sin error y sin id = el contacto ya tiene negocios y falta la decisión.
       if (!result.error && !result.negocio_id && result.duplicados?.length) {
         setDuplicados(result.duplicados)
