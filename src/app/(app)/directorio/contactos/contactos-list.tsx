@@ -46,6 +46,16 @@ function frenarNavegacion(e: React.MouseEvent) {
 }
 
 /**
+ * Normaliza un texto para comparar en el buscador: minusculas y sin tildes.
+ * Los nombres y campanas que entran por Meta vienen acentuados ("CAMPANA SEP",
+ * "Bogota") y quien busca casi nunca teclea la tilde; sin esto, buscar "campana"
+ * no encontraba "CAMPANA".
+ */
+function normalizarBusqueda(v: string): string {
+  return v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+/**
  * Responsable del contacto, asignable desde el listado sin abrir el detalle.
  *
  * Calca el patrón de `ResponsablesInline` de negocios, con una diferencia de
@@ -348,8 +358,22 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
       .filter(s => s.count > 0)
   })()
 
+  // El buscador cubre las cuatro llaves con las que el equipo busca de verdad:
+  // nombre, telefono, correo y campana de origen. El termino se normaliza sin
+  // tildes (los nombres de Meta llegan acentuados y nadie los teclea con tilde)
+  // y, si el termino trae digitos, se compara ademas contra el telefono reducido
+  // a digitos, para que '311 697 4491', '+573116974491' y '3116974491' encuentren
+  // la misma fila.
+  const searchTerm = normalizarBusqueda(search)
+  const searchDigitos = search.replace(/\D/g, '')
+
   const filtered = contactos.filter(c => {
-    const matchSearch = !search || c.nombre.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = !searchTerm || (
+      normalizarBusqueda(c.nombre).includes(searchTerm) ||
+      normalizarBusqueda(c.email ?? '').includes(searchTerm) ||
+      normalizarBusqueda(c.origen?.campaign_name ?? '').includes(searchTerm) ||
+      (searchDigitos.length > 0 && (c.telefono ?? '').replace(/\D/g, '').includes(searchDigitos))
+    )
     const matchRol = !rolFilter || c.rol === rolFilter
     // `segmentoFilter` guarda un status real O el centinela META_FILTER (el chip
     // de Meta reusa este estado para que Todos/rol lo limpien igual). Sin la rama
@@ -455,7 +479,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Buscar contacto..."
+            placeholder="Buscar por nombre, telefono, correo o campana..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-sm"
