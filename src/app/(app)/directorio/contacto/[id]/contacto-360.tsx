@@ -13,7 +13,7 @@ import NotesSection from '@/components/notes-section'
 import { PhoneInput } from '@/components/phone-input'
 import InteraccionesSection from './interacciones-section'
 import ActivityLog from '@/components/activity-log'
-import type { InteraccionContacto, StaffOption } from '../../actions'
+import type { InteraccionContacto, OrigenContacto, StaffOption } from '../../actions'
 import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
 interface NegocioRow {
@@ -207,7 +207,13 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
       </div>
 
       {/* Interacciones (leads sin convertir + timeline) */}
-      <InteraccionesSection interacciones={interacciones} />
+      {/* `custom_data.origen` es el first-touch inmutable que graba el webhook de
+          Meta. `getContacto` hace `select('*')`, asi que ya llega; los tipos
+          generados de `contactos` no lo declaran, de ahi la lectura defensiva. */}
+      <InteraccionesSection
+        interacciones={interacciones}
+        origen={(contacto as { custom_data?: { origen?: OrigenContacto } | null }).custom_data?.origen ?? null}
+      />
 
       {/* Historial de cambios del contacto. Hoy registra el SEGMENTO: quien lo
           movio y cuando, que es lo que se pidio. El mismo componente del detalle
