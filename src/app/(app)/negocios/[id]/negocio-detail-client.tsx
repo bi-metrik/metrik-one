@@ -31,6 +31,8 @@ import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { EtapasNoAplican } from './etapas-no-aplican'
+import PanelContacto from './panel-contacto'
+import { esEmpresaEspejo } from '@/lib/contactos/empresa-espejo'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
@@ -2030,6 +2032,15 @@ interface Props {
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
   errorMsg?: string
+  /**
+   * JSX ya renderizado en el servidor (`page.tsx`) que va ARRIBA de todo, dentro
+   * de la columna principal: hoy el banner de negocio cerrado. Antes vivía como
+   * hermano de este componente con su propio `mx-auto max-w-2xl`, y al ensanchar
+   * la columna quedaba desalineado. La lógica de permisos se queda en `page.tsx`.
+   */
+  banner?: React.ReactNode
+  /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
+  extras?: React.ReactNode
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -2056,6 +2067,8 @@ export default function NegocioDetailClient({
   registrarPagoEnabled = false,
   puedeCierreNoFacturable = false,
   errorMsg,
+  banner,
+  extras,
 }: Props) {
   useEffect(() => {
     if (errorMsg) toast.error(errorMsg)
@@ -2063,6 +2076,11 @@ export default function NegocioDetailClient({
 
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
+
+  // ¿La "empresa" de este negocio es la persona natural espejo del contacto?
+  // Decide dos cosas de presentación: que la fila 3 del header deje de decir el
+  // mismo nombre dos veces, y que el panel no pinte un bloque de empresa aparte.
+  const empresaEsEspejo = esEmpresaEspejo(negocio.empresas, negocio.contacto_id)
 
   // Evaluar condiciones: filtrar bloques cuya condition no se cumpla
   const allBloques = (bloques as BloqueExtendido[]).map(b => ({
@@ -2116,7 +2134,18 @@ export default function NegocioDetailClient({
   })
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-4">
+    /* Desde `lg:` el contenedor se ensancha y se parte en dos columnas: el
+       trabajo a la izquierda conservando su ancho de lectura, y el panel del
+       contacto pegado a la derecha. Por debajo de `lg` no hay segunda columna
+       (no cabe) y el panel entra como tarjeta plegable dentro de la misma
+       columna, justo debajo del header. */
+    <div className="mx-auto max-w-2xl lg:max-w-5xl px-4 py-4">
+      <div className="lg:grid lg:grid-cols-[1fr_18rem] lg:items-start lg:gap-6">
+        {/* ── COLUMNA PRINCIPAL ── */}
+        <div className="min-w-0">
+      {/* Banner de negocio cerrado: arriba de todo y alineado con la columna. */}
+      {banner}
+
       {/* Reproceso abierto: lo primero que se ve al abrir el negocio. */}
       <ReprocesoBanner negocioId={negocio.id} reproceso={reprocesoMarca} userRole={userRole} />
 
@@ -2135,8 +2164,14 @@ export default function NegocioDetailClient({
         </Link>
       </div>
 
-      {/* Fila 2 — STICKY titulo + accion */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
+      {/* Fila 2 — STICKY titulo + accion.
+          El `-mx-4 px-4` sangra hasta el borde del contenedor en una sola
+          columna; desde `lg:` vive DENTRO de la columna principal, así que se
+          alinea con ella y no invade el espacio del panel. Ojo: este header usa
+          `backdrop-blur`, que crea un containing block y ya obligó a sacar tres
+          modales por portal a `document.body`. El panel es `sticky` (no `fixed`)
+          y vive fuera de este nodo, así que no lo toca. */}
+      <div className="sticky top-0 z-30 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
         <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {/* Fila A — estado: [STAGE] › [E{N} ETAPA] */}
@@ -2227,10 +2262,14 @@ export default function NegocioDetailClient({
           </div>
         )}
 
-        {/* Fila 3 — empresa + contacto + precio */}
+        {/* Fila 3 — empresa + contacto + precio.
+            Cuando la empresa es la persona natural espejo del contacto (184 de
+            los 190 negocios con empresa del workspace) NO se pinta: esta fila
+            decía el mismo nombre dos veces, una con icono de edificio. Sus datos
+            fiscales viven ahora dentro del bloque de contacto del panel. */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
-            {negocio.empresas?.nombre && (
+            {negocio.empresas?.nombre && !empresaEsEspejo && (
               <Link
                 href={`/directorio/empresa/${negocio.empresas.id}`}
                 className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
@@ -2239,7 +2278,7 @@ export default function NegocioDetailClient({
                 <span className="truncate">{negocio.empresas.nombre}</span>
               </Link>
             )}
-            {negocio.empresas?.nombre && negocio.contactos?.nombre && (
+            {negocio.empresas?.nombre && !empresaEsEspejo && negocio.contactos?.nombre && (
               <span className="text-muted-foreground/40">·</span>
             )}
             {negocio.contactos?.nombre && (
@@ -2279,6 +2318,17 @@ export default function NegocioDetailClient({
         {/* Etapas que el proceso se salto con razon. Va pegado a la barra de progreso
             porque responde la misma pregunta: por donde va el caso. */}
         <EtapasNoAplican etapas={etapasNoAplican ?? []} />
+
+        {/* Panel del contacto, versión móvil: por debajo de `lg` no hay rail.
+            El teléfono se ve sin abrir nada; el resto va detrás del toggle. */}
+        <div className="lg:hidden">
+          <PanelContacto
+            variant="movil"
+            contacto={negocio.contactos}
+            empresa={negocio.empresas}
+            campanas={negocio.campanas_contacto ?? null}
+          />
+        </div>
       </div>
 
       {/* ── BODY: Bloques ── */}
@@ -2361,8 +2411,26 @@ export default function NegocioDetailClient({
             />
           </div>
         </div>
+
+        {/* Bloques de Valida: van al final de la columna principal para que
+            queden alineados con ella (antes eran hermanos con su propio ancho). */}
+        {extras}
       </div>
 
+        </div>
+        {/* ── PANEL DEL CONTACTO (escritorio) ──
+            `sticky` para que siga visible al bajar hasta el ActivityLog. No es
+            `fixed` y vive fuera del header con `backdrop-blur`, así que no lo
+            atrapa ningún containing block. */}
+        <aside className="hidden lg:block lg:sticky lg:top-4">
+          <PanelContacto
+            variant="rail"
+            contacto={negocio.contactos}
+            empresa={negocio.empresas}
+            campanas={negocio.campanas_contacto ?? null}
+          />
+        </aside>
+      </div>
     </div>
   )
 }

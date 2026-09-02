@@ -38,6 +38,12 @@ import {
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
+import {
+  resumenCampanasContacto,
+  type InteraccionCampana,
+  type OrigenCampana,
+  type ResumenCampanas,
+} from '@/lib/contactos/campanas'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
@@ -185,8 +191,35 @@ export type NegocioDetalle = {
   // Joins — usando columnas reales de las tablas existentes (empresas.nombre, contactos.nombre)
   lineas_negocio: { nombre: string; numero: number } | null
   etapas_negocio: { nombre: string; stage: string; numero: number } | null
-  empresas: { id: string; nombre: string } | null
-  contactos: { id: string; nombre: string } | null
+  /**
+   * Columnas fiscales/de contacto ensanchadas para el panel lateral del negocio.
+   * `tipo_persona` + `contacto_id` son las DOS que deciden si esta "empresa" es
+   * la persona natural espejo del contacto (ver `lib/contactos/empresa-espejo`).
+   */
+  empresas: {
+    id: string
+    nombre: string
+    tipo_persona: string | null
+    contacto_id: string | null
+    numero_documento: string | null
+    tipo_documento: string | null
+    municipio: string | null
+    departamento: string | null
+    telefono: string | null
+    email_fiscal: string | null
+  } | null
+  /**
+   * `custom_data` NO viaja al cliente: se lee en el servidor solo para resolver
+   * `campanas_contacto` y se retira antes de devolver el negocio.
+   */
+  contactos: {
+    id: string
+    nombre: string
+    telefono: string | null
+    email: string | null
+    rol: string | null
+    segmento: string | null
+  } | null
   /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
   responsables: Array<{ id: string; full_name: string }>
   /**
@@ -221,6 +254,13 @@ export type NegocioDetalle = {
    * Mismo esquema que consumirá la API de Siigo a futuro. null si no aplica.
    */
   factura_draft?: FacturaDraft | null
+  /**
+   * Primera campaña que trajo al contacto, la última, y cuántos formularios
+   * llenó. Lo resuelve `lib/contactos/campanas` — la MISMA regla que pinta el
+   * 360 del contacto, para que las dos pantallas no atribuyan el mismo cierre a
+   * campañas distintas. null cuando el contacto no tiene campaña.
+   */
+  campanas_contacto?: ResumenCampanas | null
 }
 
 /** Autopoblado del bloque de facturación (fuente para copiar a Siigo / API). */
@@ -839,8 +879,8 @@ export async function getNegocioDetalle(id: string): Promise<{
       ultimo_pausado_at,
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero),
-      empresas(id, nombre),
-      contactos(id, nombre)
+      empresas(id, nombre, tipo_persona, contacto_id, numero_documento, tipo_documento, municipio, departamento, telefono, email_fiscal),
+      contactos(id, nombre, telefono, email, rol, segmento, custom_data)
     `)
     .eq('id', id)
     .eq('workspace_id', workspaceId)
@@ -859,10 +899,36 @@ export async function getNegocioDetalle(id: string): Promise<{
     .filter((s): s is { id: string; full_name: string } => s !== null)
 
   const negocioRaw = negocio as Record<string, unknown>
+
+  // Campañas del contacto para el panel lateral: cuál lo trajo la PRIMERA vez y
+  // cuántos formularios llenó. La regla vive en `lib/contactos/campanas` porque
+  // el 360 del contacto la aplica también; duplicarla dejaría a las dos
+  // pantallas atribuyendo el mismo cierre a campañas distintas.
+  //
+  // `custom_data` se lee aquí y NO viaja al cliente: se retira del join antes de
+  // devolver el negocio (abajo).
+  const contactoJoin = (negocioRaw.contactos ?? null) as
+    | { id: string; custom_data?: { origen?: OrigenCampana } | null }
+    | null
+  let campanasContacto: ResumenCampanas | null = null
+  if (contactoJoin?.id) {
+    const { data: interRows } = await db(supabase)
+      .from('contacto_interacciones')
+      .select('payload, ocurrida_at, created_at')
+      .eq('workspace_id', workspaceId)
+      .eq('contacto_id', contactoJoin.id)
+    campanasContacto = resumenCampanasContacto(
+      (interRows ?? []) as InteraccionCampana[],
+      contactoJoin.custom_data?.origen ?? null,
+    )
+    delete (contactoJoin as Record<string, unknown>).custom_data
+  }
+
   const negocioMetadata = (negocioRaw.metadata ?? {}) as Record<string, unknown>
   const negocioTyped = {
     ...negocioRaw,
     responsables,
+    campanas_contacto: campanasContacto,
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
