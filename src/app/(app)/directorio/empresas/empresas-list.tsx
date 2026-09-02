@@ -2,28 +2,48 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Search, Trash2, Pencil, ShieldCheck, ShieldAlert, Flame } from 'lucide-react'
+import { Building2, Search, Trash2, Pencil, ShieldCheck, ShieldAlert, Flame, User } from 'lucide-react'
 import { toast } from 'sonner'
 import EntityCard from '@/components/entity-card'
 import { formatNit } from '@/lib/contacts/constants'
+import { esEspejoDeContacto } from '@/lib/contactos/empresa-espejo'
+import { useEstadoUrl } from '@/hooks/use-estado-url'
+import { filtroDesdeSearchParams, type SearchParams } from '@/lib/filtros/url-estado'
 import { deleteEmpresa } from '../actions'
 import type { Empresa } from '@/types/database'
 
 interface Props {
   empresas: Empresa[]
+  searchParams?: SearchParams
 }
 
 function isPerfilFiscalCompleto(e: Empresa): boolean {
   return !!(e.numero_documento && e.tipo_documento && e.tipo_persona && e.regimen_tributario && e.gran_contribuyente !== null && e.agente_retenedor !== null)
 }
 
-export default function EmpresasList({ empresas }: Props) {
+export default function EmpresasList({ empresas, searchParams }: Props) {
   const [search, setSearch] = useState('')
   const [fiscalFilter, setFiscalFilter] = useState<'all' | 'completo' | 'incompleto'>('all')
+  // El toggle vive en la URL (`useEstadoUrl`), no solo en estado de React: quien lo
+  // enciende para corregir un dato fiscal entra a la ficha y vuelve, y perderlo ahi
+  // obliga a re-encenderlo cada vez. El `inicial` lo resuelve el servidor desde los
+  // searchParams (ver `page.tsx`) para que los dos renders coincidan al hidratar.
+  const [mostrarEspejos, setMostrarEspejos] = useEstadoUrl<boolean>(
+    'espejos',
+    false,
+    { inicial: filtroDesdeSearchParams(searchParams, 'espejos', false) },
+  )
   const [, startTransition] = useTransition()
   const router = useRouter()
 
-  const filtered = empresas.filter(e => {
+  // Las personas naturales que son el espejo fiscal de un contacto NO se listan por
+  // defecto: ya estan en el directorio de contactos, que es donde vive su ficha. La
+  // fila de `empresas` sigue intacta y sigue alimentando contrato, cotizacion y
+  // cuenta de cobro (ver `esEspejoDeContacto`); lo unico que cambia es esta lista.
+  const espejos = empresas.filter(esEspejoDeContacto)
+  const visibles = mostrarEspejos ? empresas : empresas.filter(e => !esEspejoDeContacto(e))
+
+  const filtered = visibles.filter(e => {
     const matchSearch = !search || e.nombre.toLowerCase().includes(search.toLowerCase())
     const completo = isPerfilFiscalCompleto(e)
     const matchFiscal = fiscalFilter === 'all' ||
@@ -45,9 +65,12 @@ export default function EmpresasList({ empresas }: Props) {
     })
   }
 
-  const getPersonaBadge = (tipo: string | null) => {
-    if (tipo === 'juridica') return { label: 'PJ', color: 'bg-blue-100 text-blue-700' }
-    if (tipo === 'natural') return { label: 'PN', color: 'bg-purple-100 text-purple-700' }
+  const getPersonaBadge = (e: Empresa) => {
+    // La persona natural solo se ve con el toggle encendido, y entonces tiene que
+    // entenderse que no es una empresa: chip explicito en vez de la sigla "PN".
+    if (esEspejoDeContacto(e)) return { label: 'Persona natural', color: 'bg-purple-100 text-purple-700' }
+    if (e.tipo_persona === 'juridica') return { label: 'PJ', color: 'bg-blue-100 text-blue-700' }
+    if (e.tipo_persona === 'natural') return { label: 'PN', color: 'bg-purple-100 text-purple-700' }
     return undefined
   }
 
@@ -65,8 +88,14 @@ export default function EmpresasList({ empresas }: Props) {
     )
   }
 
-  const completeCount = empresas.filter(isPerfilFiscalCompleto).length
-  const incompleteCount = empresas.length - completeCount
+  // Los conteos del encabezado cuentan lo VISIBLE: con el toggle apagado, "Todas"
+  // son las empresas de verdad y no las 180 filas de la tabla.
+  const completeCount = visibles.filter(isPerfilFiscalCompleto).length
+  const incompleteCount = visibles.length - completeCount
+
+  const etiquetaEspejos = espejos.length === 1
+    ? (mostrarEspejos ? '1 persona natural visible' : '1 persona natural oculta')
+    : `${espejos.length} personas naturales ${mostrarEspejos ? 'visibles' : 'ocultas'}`
 
   return (
     <div className="space-y-3">
@@ -84,7 +113,7 @@ export default function EmpresasList({ empresas }: Props) {
         </div>
         <div className="flex gap-1.5">
           {(['all', 'completo', 'incompleto'] as const).map(f => {
-            const label = f === 'all' ? `Todas (${empresas.length})` : f === 'completo' ? `Completas (${completeCount})` : `Incompletas (${incompleteCount})`
+            const label = f === 'all' ? `Todas (${visibles.length})` : f === 'completo' ? `Completas (${completeCount})` : `Incompletas (${incompleteCount})`
             return (
               <button
                 key={f}
@@ -104,11 +133,15 @@ export default function EmpresasList({ empresas }: Props) {
       <div className="space-y-2">
         {filtered.map(e => {
           const completo = isPerfilFiscalCompleto(e)
-          const badge = getPersonaBadge(e.tipo_persona)
+          const badge = getPersonaBadge(e)
+          const espejo = esEspejoDeContacto(e)
           return (
             <EntityCard
               key={e.id}
-              href={`/directorio/empresa/${e.id}`}
+              // La persona natural enlaza a SU CONTACTO, que es donde esta toda la
+              // informacion y a donde ya manda el panel del negocio. El perfil
+              // fiscal de la fila `empresas` sigue alcanzable por el menu.
+              href={espejo ? `/directorio/contacto/${e.contacto_id}` : `/directorio/empresa/${e.id}`}
               title={e.nombre}
               subtitle={[e.codigo, e.sector].filter(Boolean).join(' · ') || undefined}
               statusLabel={badge?.label}
@@ -130,7 +163,11 @@ export default function EmpresasList({ empresas }: Props) {
                 onClick: () => router.push(`/negocios/nuevo?empresa_id=${e.id}&empresa_nombre=${encodeURIComponent(e.nombre)}`),
               }}
               actions={[
-                { label: 'Editar', icon: <Pencil className="h-3 w-3" />, onClick: () => router.push(`/directorio/empresa/${e.id}`) },
+                {
+                  label: espejo ? 'Perfil fiscal' : 'Editar',
+                  icon: espejo ? <User className="h-3 w-3" /> : <Pencil className="h-3 w-3" />,
+                  onClick: () => router.push(`/directorio/empresa/${e.id}`),
+                },
                 { label: 'Eliminar', icon: <Trash2 className="h-3 w-3" />, variant: 'destructive', onClick: () => handleDelete(e.id, e.nombre) },
               ]}
             />
@@ -142,6 +179,18 @@ export default function EmpresasList({ empresas }: Props) {
           </p>
         )}
       </div>
+
+      {/* Salida hacia las personas naturales escondidas: alguien va a necesitar
+          entrar a una para corregir un dato fiscal y esta lista es el unico camino. */}
+      {espejos.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setMostrarEspejos(!mostrarEspejos)}
+          className="w-full text-balance px-2 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {etiquetaEspejos} · <span className="underline underline-offset-2">{mostrarEspejos ? 'Ocultar' : 'Mostrar'}</span>
+        </button>
+      )}
     </div>
   )
 }

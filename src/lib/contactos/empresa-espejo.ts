@@ -36,3 +36,31 @@ export function esEmpresaEspejo(
   if (empresa.tipo_persona !== 'natural') return false
   return empresa.contacto_id === contactoIdDelNegocio
 }
+
+/**
+ * ¿Esta empresa existe solo como espejo fiscal de un contacto?
+ *
+ * **Son dos predicados y no uno a propósito.** `esEmpresaEspejo` vive DENTRO de
+ * un negocio, donde hay un contacto concreto contra el cual comparar: pregunta
+ * "¿la empresa de ESTE negocio es su propio contacto?". El directorio de
+ * empresas no tiene ese contexto —es una lista suelta, sin negocio— así que la
+ * pregunta que puede hacer es otra: "¿esta empresa tiene dueño humano
+ * declarado?". Unificarlos obligaría a que el directorio inventara un contacto
+ * de referencia, y la fila de `empresas` puede tener negocios de varias
+ * personas o ninguno.
+ *
+ * Mismas DOS condiciones, por la misma razón documentada arriba: en SOENA hay
+ * una `juridica` con `contacto_id` (empresa C9, negocio V0276) que **sí** es una
+ * empresa y no se puede esconder.
+ *
+ * Medido en producción (workspace SOENA, 2026-09-02): de 180 empresas, **174
+ * cumplen** este criterio, 0 son `natural` sin `contacto_id` y las 6 restantes
+ * son `juridica` (una de ellas, la del caso V0276, con `contacto_id`).
+ *
+ * Regla de PRESENTACIÓN otra vez: las 174 filas se siguen creando igual y
+ * siguen alimentando contrato, cotización en PDF y cuentas de cobro. Lo único
+ * que cambia es que el directorio no las lista por defecto.
+ */
+export function esEspejoDeContacto(empresa: EmpresaEspejoInput): boolean {
+  return empresa.tipo_persona === 'natural' && empresa.contacto_id !== null
+}
