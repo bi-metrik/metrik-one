@@ -5,9 +5,16 @@ import {
   supervisoresDeArea,
   type ConfigNotificaciones,
 } from '@/lib/notificaciones/routing'
+import {
+  diaCierrePorInactividad,
+  diaEscalarSupervisor,
+  nivelesInactividadVenta,
+} from '@/lib/notificaciones/escalamiento-inactividad'
 
 // N1 — Cron de inactividad en negocios (etapa venta)
-// Escalamiento: 3d (ejecutor), 5d (ejecutor+supervisor), 7d (ejecutor+supervisor+admin), 15d (todos)
+// Escalamiento por distancias sobre el umbral: umbral (ejecutor), +2 (con supervisor),
+// +4 (con admin), +12 (todos, y el texto pasa a preguntar si se cierra como perdido).
+// El umbral sale del SLA de la etapa; con SLA sin declarar son los 3/5/7/15 de siempre.
 // Señales que reinician el reloj: las que declare `ultima_actividad_negocio` en SQL,
 // que es la misma función con la que el resolver cierra estos avisos.
 
@@ -53,39 +60,43 @@ export async function GET(req: NextRequest) {
   const { data: actividad } = await supabase.rpc('negocios_ultima_actividad', {
     p_ids: negocios.map(n => n.id),
   })
-  const diasPorNegocio = new Map(
-    ((actividad ?? []) as Array<{ negocio_id: string; dias_habiles: number | null }>)
-      .map(a => [a.negocio_id, a.dias_habiles]),
+  const porNegocio = new Map(
+    (
+      (actividad ?? []) as Array<{
+        negocio_id: string
+        dias_habiles: number | null
+        umbral_dias: number | null
+        debe_alertar: boolean | null
+      }>
+    ).map(a => [a.negocio_id, a]),
   )
 
   for (const negocio of negocios) {
     procesadas++
 
-    // El reloj también vive en SQL, y en días HÁBILES: `negocios_ultima_actividad` los
-    // cuenta con `horas_habiles_entre`, el mismo que mide el SLA de cada etapa, así que
-    // descuenta sábados, domingos y festivos de Colombia. Antes se contaban días corridos
-    // acá y el umbral se cumplía solo con el fin de semana: medido el 2026-09-01 (martes),
-    // el día de última actividad más frecuente entre los negocios abiertos en venta era
-    // el viernes anterior, y 351 de 373 superaban el umbral por calendario contra 180
-    // por días hábiles.
+    // El MOTIVO del aviso lo decide SQL: `debe_alertar` sale de
+    // `debe_alertar_inactividad`, la misma función que el resolver consulta a las 12:45
+    // para cerrar estos avisos. Reescribir el criterio acá reabre el bucle que cerró la
+    // migración 20260901000011 — cerrado a las 12:45, vuelto a nacer a las 13:00.
     //
-    // Sin número el negocio ya no existe: se salta en vez de inventarle uno.
-    const diasSinActividad = diasPorNegocio.get(negocio.id)
-    if (diasSinActividad == null) continue
+    // El umbral ya no es el 3 fijo: es el piso del stage ALARGADO por el `sla_horas` de
+    // la etapa (`umbral_inactividad_negocio`). Seguimiento y Notificación conceden 10
+    // días hábiles cada una y recibían el aviso a los 3, sobre 188 negocios abiertos
+    // entre las dos. El SLA solo puede alargar el umbral, nunca acortarlo: ningún aviso
+    // se adelanta respecto de hoy.
+    //
+    // Los números de abajo son solo para el texto y el escalamiento.
+    const act = porNegocio.get(negocio.id)
+    if (!act?.debe_alertar) continue
 
-    if (diasSinActividad < 3) continue
+    const diasSinActividad = act.dias_habiles ?? 0
+    const umbral = act.umbral_dias ?? 3
 
-    const niveles: Array<{ dias: number; nivel: string; roles: string[] }> = [
-      { dias: 15, nivel: '15d', roles: ['operator', 'supervisor', 'admin', 'owner'] },
-      { dias: 7, nivel: '7d', roles: ['operator', 'supervisor', 'admin', 'owner'] },
-      { dias: 5, nivel: '5d', roles: ['operator', 'supervisor'] },
-      { dias: 3, nivel: '3d', roles: ['operator'] },
-    ]
-
+    const niveles = nivelesInactividadVenta(umbral)
     const nivelActual = niveles.find(n => diasSinActividad >= n.dias)
     if (!nivelActual) continue
 
-    const textoBase = diasSinActividad >= 15
+    const textoBase = diasSinActividad >= diaCierrePorInactividad(umbral)
       ? `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin gestión — ¿cerrar como perdido?`
       : `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin actividad`
 
@@ -107,7 +118,7 @@ export async function GET(req: NextRequest) {
 
       // El supervisor entra recién cuando el caso de verdad se estancó, no
       // desde el primer aviso (evita que vea 50 avisos al día).
-      if (diasSinActividad >= cfg.escalar_supervisor_dias) {
+      if (diasSinActividad >= diaEscalarSupervisor(umbral, cfg.escalar_supervisor_dias)) {
         for (const id of await supervisoresDeArea(supabase, negocio.workspace_id, 'comercial')) {
           destinatarios.add(id)
         }
