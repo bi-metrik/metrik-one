@@ -39,7 +39,11 @@ export interface ComercialResumenRow {
   valor_aprobado: number
   /** Valor aprobado CON IVA: lo que el cliente paga. Es la cifra de cartera. */
   valor_aprobado_con_iva: number
-  /** Honorario recaudado = ingreso real (excluye tarifa UPME / pasante). Headline. */
+  /**
+   * Honorario recaudado NETO DE IVA. Es la cifra de ingreso del tablero: excluye la
+   * tarifa UPME (plata de un tercero) y descuenta el IVA (se recauda para la DIAN).
+   * Para lo que entro a la cuenta esta el panel de pagos, que va bruto y lo dice.
+   */
   honorario_recaudado: number
   /** Tarifa UPME recaudada (pasante) = plata de terceros. Linea secundaria, aparte. */
   tarifa_recaudada: number
@@ -56,9 +60,11 @@ export interface ComercialPerfilKpis {
   honorario_recaudado: number
   tarifa_recaudada: number
   /**
-   * Pendiente de recaudo del honorario, CON IVA (valor con IVA - honorario recaudado).
-   * Es cartera: se compara contra plata que entra, que tambien lleva IVA. Por eso NO
-   * es `valor_aprobado - honorario_recaudado`: esas dos cifras estan en bases distintas.
+   * Pendiente de recaudo del honorario, SIN IVA: `valor_aprobado - honorario_recaudado`,
+   * los dos lados en base. Antes comparaba el valor CON IVA contra un recaudo que ademas
+   * traia la tarifa UPME adentro, asi que las dos cifras estaban en bases distintas y el
+   * pendiente salia corto. Mide cuanto INGRESO falta por entrar, no cuanta plata: para
+   * la cartera contra el cliente sirve `valor_aprobado_con_iva`.
    */
   pendiente_honorario: number
   /** Negocios abiertos con SLA de etapa vencido. */

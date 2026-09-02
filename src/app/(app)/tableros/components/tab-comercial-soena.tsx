@@ -1046,7 +1046,7 @@ export function TabComercialSoena({
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="Recaudo por mes (honorario)">
+            <ChartCard title="Recaudo por mes (honorario sin IVA)">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerieConPagos}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
@@ -1102,7 +1102,7 @@ export function TabComercialSoena({
       <section>
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <ResumenTotal label="Valor aprobado historico (sin IVA)" value={fmtCOP(totalAprobado)} />
-          <ResumenTotal label="Honorario recaudado" value={fmtCOP(totalHonorario)} color={GREEN} />
+          <ResumenTotal label="Honorario recaudado (sin IVA)" value={fmtCOP(totalHonorario)} color={GREEN} />
           <ResumenTotal label="Tarifa UPME (terceros)" value={fmtCOP(totalTarifa)} muted />
         </div>
       </section>

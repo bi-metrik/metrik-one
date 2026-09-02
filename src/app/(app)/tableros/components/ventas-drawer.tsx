@@ -217,7 +217,7 @@ export function VentasDrawer({
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
                             style={{ backgroundColor: '#F5F4F2', color: GRIS }}
-                            title="Recaudado del honorario"
+                            title="Recaudado del honorario, sin IVA"
                           >
                             {fmtCOP(c.recaudado)} recaudado
                           </span>
