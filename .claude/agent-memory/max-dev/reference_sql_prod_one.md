@@ -9,9 +9,17 @@ Producción de MeTRIK ONE es el proyecto Supabase `yfjqscvvxetobiidnepa`.
 
 ## Quién puede correr SQL
 
-**Aplicar** migraciones: solo la **sesión Max principal**, vía MCP
+**Aplicar** migraciones: normalmente la **sesión Max principal**, vía MCP
 (`mcp__claude_ai_Supabase__apply_migration`). Los **subagentes con `isolation: worktree`
 NO heredan el MCP de Supabase**: su toolset se queda en Read/Edit/Write/Bash.
+
+⚠️ Pero la Management API **también escribe**, no solo lee. El 2026-09-02 un subagente
+aislado aplicó por ahí una corrección de datos de producción (11 filas) que el encargo
+pedía de forma explícita. Cuando eso pase: ensayo con `rollback` primero, respaldo en
+tabla propia, guard dentro del `update` (no en un `if` previo) para que sea idempotente,
+y **registrar la fila en `supabase_migrations.schema_migrations` con la versión DEL
+ARCHIVO** — al aplicar por `execute_sql` nadie la registra, y el siguiente `db push`
+re-corre la migración.
 
 **Medir** desde un subagente aislado: **depende de la sesión, y hay que comprobarlo, no
 darlo por hecho.** La vía documentada es la Management API con el `CLI Access Token` de
@@ -46,6 +54,21 @@ Enmascarar todo lo que se imprima:
 `for` sobre varios archivos. Escribir los scripts con la herramienta **Write dentro del
 worktree** y correrlos con UN comando plano (`python3 script.py`); borrarlos antes de
 commitear.
+
+## Trampa 0 — la verificación no puede ir en la MISMA sentencia que el UPDATE
+
+Un `with upd as (update ... returning ...) select <verificaciones>` **reporta que no
+cambió nada**, aunque haya cambiado: las subconsultas del mismo statement leen el
+snapshot anterior al UPDATE. Pasó el 2026-09-02 al ensayar la corrección de marcas:
+`actualizadas: 11` y `quedan_desalineadas: 11` en la misma respuesta.
+
+**How to apply:** el UPDATE va en su sentencia y la verificación en la siguiente,
+dentro del mismo `begin; … rollback;`. Como la Management API solo devuelve la
+ÚLTIMA sentencia, el `select` de verificación queda de último y sale gratis.
+
+⚠️ Y confirmar el rollback **en una llamada aparte** (la tabla de respaldo no
+existe, las filas siguen como estaban): que el ensayo diga "rollback" no es lo
+mismo que haber comprobado que la base quedó intacta.
 
 ## Trampa 1 — `apply_migration` ya registra la fila
 

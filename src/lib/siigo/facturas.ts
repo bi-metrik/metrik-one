@@ -22,6 +22,7 @@ import { archivarPdfEnBloque } from './archivar-documento'
 import { numeroFacturaEnData } from './factura-cargada'
 import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 
 /**
@@ -358,21 +359,27 @@ export async function emitirFacturaNegocio(
       ...(justificacion ? { justificacion_duplicado: justificacion } : {}),
     }
 
-    const metadata = { ...((negocio.metadata ?? {}) as Record<string, unknown>), siigo_factura: marca }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: errUp } = await (svc as any)
-      .from('negocios').update({ metadata }).eq('id', negocioId).eq('workspace_id', workspaceId)
+    // ⚠️ La marca se fusiona sobre el estado de AHORA, no sobre `negocio.metadata`,
+    // que se leyó al empezar esta función. En el medio corrieron
+    // `corregirContactoParaFactura` y `asegurarClienteSiigo`, y esta última
+    // REESCRIBE `siigo_cliente` cuando la marca vieja no coincide con el RUT.
+    // Escribir sobre la copia vieja devolvía esa corrección a su valor anterior:
+    // 12 negocios facturados de SOENA quedaron con la cédula truncada por eso
+    // (medido el 2026-09-02). Ver `guardarMarcaEnMetadata`.
+    const guardada = await guardarMarcaEnMetadata(
+      svc, workspaceId, negocioId, 'siigo_factura', marca, negocio.metadata,
+    )
     // La factura YA existe en Siigo. Si la marca no se guarda, el caso sigue en la
     // cola y alguien podría re-emitir: por eso el error se dice, no se traga. El
     // guard de duplicados de Siigo lo atajaría, pero eso es la red, no el piso.
-    if (errUp) {
-      console.error('[siigo] factura emitida pero NO marcada en el negocio:', errUp.message)
+    if (!guardada.ok) {
+      console.error('[siigo] factura emitida pero NO marcada en el negocio:', guardada.mensaje)
     }
 
     // Si el caso ya estaba ESPERANDO en su etapa de cierre, la factura que acaba de
     // emitirse es justo lo que le faltaba. Nada de lo que pase aqui puede convertir una
     // emision exitosa en un fallo: la factura ya existe en Siigo y es irreversible.
-    if (!errUp) {
+    if (guardada.ok) {
       try {
         await cerrarNegocioSiQuedaResuelto(svc, workspaceId, negocioId, contexto.staffId ?? null)
       } catch (e) {

@@ -32,6 +32,7 @@ import { borradorRecibo, type BorradorRecibo } from './mapeo'
 import { asegurarClienteSiigo } from './clientes'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { renderReciboCaja } from '@/lib/pdf/pdf-render-client'
+import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
 const ESPERA_429_EMISION_MS = 30_000
@@ -214,13 +215,17 @@ export async function emitirReciboNegocio(
       por: staffNombre,
     }
 
-    const metadata = { ...((negocio.metadata ?? {}) as Record<string, unknown>), siigo_recibo: marca }
-    const { error: errUp } = await db(svc)
-      .from('negocios').update({ metadata }).eq('id', negocioId).eq('workspace_id', workspaceId)
+    // ⚠️ Sobre el estado de AHORA, no sobre `negocio.metadata`, que se leyó al
+    // empezar: en el medio corrió `asegurarClienteSiigo`, que REESCRIBE
+    // `siigo_cliente` cuando la marca vieja no coincide con el RUT. Es el mismo
+    // pisado que dañó 12 marcas al facturar. Ver `guardarMarcaEnMetadata`.
+    const guardada = await guardarMarcaEnMetadata(
+      svc, workspaceId, negocioId, 'siigo_recibo', marca, negocio.metadata,
+    )
 
-    // El recibo YA existe en Siigo. Si la marca no se guarda, el caso se vería como no
-    // recaudado y alguien podría re-emitir: por eso el error se dice, no se traga.
-    if (errUp) console.error('[siigo] recibo emitido pero NO marcado en el negocio:', errUp.message)
+    // El recibo YA existe en Siigo. Si la marca no se guarda, el caso se veria como no
+    // recaudado y alguien podria re-emitir: por eso el error se dice, no se traga.
+    if (!guardada.ok) console.error('[siigo] recibo emitido pero NO marcado en el negocio:', guardada.mensaje)
 
     return {
       ok: true, numero, siigo_id: marca.siigo_id, valor: valorPagado,

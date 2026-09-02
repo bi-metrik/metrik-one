@@ -18,6 +18,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { siigoRequest, SiigoError } from './client'
 import { borradorCliente, emailPlausible, type BorradorCliente, type RutExtraido } from './mapeo'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 
 /** Config opt-in por línea: `lineas_negocio.config_extra.siigo`. */
 export interface SiigoLineaConfig {
@@ -251,22 +252,26 @@ export async function asegurarClienteSiigo(
   }
 }
 
-/** Guarda la marca en el negocio sin pisar el resto de `metadata`. */
+/**
+ * Guarda la marca del tercero sin pisar el resto de `metadata`.
+ *
+ * Entre que quien llama leyó el negocio y este momento hubo llamadas a Siigo que
+ * tardan segundos: la fusión va sobre el estado de AHORA, no sobre esa copia. La
+ * copia se pasa solo como respaldo por si la relectura falla. Ver
+ * `guardarMarcaEnMetadata`.
+ */
 async function marcar(
   workspaceId: string,
   negocioId: string,
-  metadataActual: Record<string, unknown> | null,
+  metadataAlLeer: Record<string, unknown> | null,
   marca: MarcaCliente,
 ): Promise<void> {
   const svc = createServiceClient()
-  const metadata = { ...(metadataActual ?? {}), siigo_cliente: marca }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (svc as any)
-    .from('negocios').update({ metadata }).eq('id', negocioId).eq('workspace_id', workspaceId)
+  const r = await guardarMarcaEnMetadata(svc, workspaceId, negocioId, 'siigo_cliente', marca, metadataAlLeer)
   // No se traga el error: sin la marca, el siguiente avance vuelve a preguntarle a
-  // Siigo (que responderá "ya existe", así que no duplica), pero eso es una llamada
-  // de más repetida en cada avance y nadie la vería.
-  if (error) console.error('[siigo] no se pudo marcar el negocio con su tercero:', error.message)
+  // Siigo (que respondera "ya existe", asi que no duplica), pero eso es una llamada
+  // de mas repetida en cada avance y nadie la veria.
+  if (!r.ok) console.error('[siigo] no se pudo marcar el negocio con su tercero:', r.mensaje)
 }
 
 /**

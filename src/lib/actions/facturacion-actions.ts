@@ -54,14 +54,26 @@ export interface CasoPorFacturar {
   identificacion: string | null
   cliente: string | null
   /**
-   * Celular del contacto. Ya se leía para el borrador del cliente de Siigo; se
-   * expone para poder buscar por él, que es como el equipo identifica un caso
-   * cuando el cliente llama. No se pinta en la fila.
+   * Celular **ya resuelto**, tal como viajaría a Siigo: el del contacto, y si no
+   * hay, el del RUT, normalizado a número nacional. Se expone para poder buscar
+   * por él, que es como el equipo identifica un caso cuando el cliente llama.
+   *
+   * Va vacío cuando el borrador NO manda teléfono (un valor que no cabe en los
+   * 10 dígitos que Siigo acepta, como los `3001234567.0` que dejó el cargue
+   * desde Excel). Eso es lo que pasa de verdad: el tercero se crea sin teléfono.
+   * Pintar el valor crudo diría que hay uno cuando no lo va a haber.
    */
   telefono: string | null
   /**
-   * Correo del contacto. Es el que Siigo usa para MANDAR la factura electrónica,
-   * así que se expone para poder revisarlo y corregirlo antes de emitir.
+   * Correo **ya resuelto**: el que Siigo va a usar para MANDAR la factura
+   * electrónica. Sale del mismo borrador que la emisión (`borradorCliente`), con
+   * su misma precedencia — el contacto gana, el RUT es el respaldo.
+   *
+   * ⚠️ Aquí NO va `contactos.email` crudo. Hasta el 2026-09-02 iba, y la pantalla
+   * se contradecía sola: 69 de 110 casos pendientes mostraban la casilla vacía
+   * mientras el RUT tenía el correo y la factura se iba a emitir a él, y ninguno
+   * aparecía con "email" entre los faltantes. Diana salía a buscar un dato que el
+   * sistema ya tenía.
    */
   email: string | null
   /**
@@ -458,8 +470,10 @@ async function armarColaFacturacion(
       etapa_numero: n.etapas_negocio?.numero ?? null,
       identificacion: cli.payload.identification || null,
       cliente: cli.payload.name.filter(Boolean).join(' ') || null,
-      telefono: contacto.telefono,
-      email: contacto.email,
+      // ⚠️ Del BORRADOR, no del contacto crudo: es lo que de verdad viajaría a
+      // Siigo. Ver la nota de `CasoPorFacturar.email`.
+      telefono: cli.payload.phones?.[0]?.number ?? null,
+      email: cli.payload.contacts[0]?.email || null,
       concepto: {
         code: concepto.code,
         nombre: nombreProducto.get(concepto.code) ?? null,
