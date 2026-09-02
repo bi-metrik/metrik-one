@@ -75,20 +75,48 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
     }
   }
 
+  // El banner de cierre y los bloques de Valida se renderizan aquí (con la
+  // lógica de permisos de este server component) y viajan como props al cliente,
+  // que los pinta DENTRO de su columna principal. Antes eran hermanos con su
+  // propio `mx-auto max-w-2xl`: al ensancharse el contenedor del detalle
+  // quedaban desalineados. JSX del servidor se puede pasar como prop a un
+  // componente cliente; convertir esta página en cliente no es opción.
+  const banner = negocioCerrado && data.negocio.cierre_motivo
+    ? (
+      <div className="mb-3">
+        <CerradoHeaderBanner
+          negocioId={id}
+          cierreMotivo={data.negocio.cierre_motivo}
+          closedAt={data.negocio.closed_at}
+          razonCierre={data.negocio.razon_cierre}
+          role={role}
+          hasAreaComercial={hasAreaComercial}
+        />
+      </div>
+    )
+    : null
+
+  const extras = validaActivo
+    ? (
+      <div className="space-y-3">
+        <BloqueRiesgoSarlaft
+          negocioId={id}
+          datosIniciales={datosSarlaft?.ok ? datosSarlaft.datos : null}
+          scoreInicial={scoreSarlaft?.ok ? scoreSarlaft.score : null}
+        />
+        {validaConsultas && (
+          <BloqueValida
+            negocioId={id}
+            consultas={validaConsultas.ok ? validaConsultas.consultas : []}
+            error={validaConsultas.ok ? null : validaConsultas.error}
+          />
+        )}
+      </div>
+    )
+    : null
+
   return (
     <>
-      {negocioCerrado && data.negocio.cierre_motivo && (
-        <div className="mx-auto max-w-2xl px-4 pt-4">
-          <CerradoHeaderBanner
-            negocioId={id}
-            cierreMotivo={data.negocio.cierre_motivo}
-            closedAt={data.negocio.closed_at}
-            razonCierre={data.negocio.razon_cierre}
-            role={role}
-            hasAreaComercial={hasAreaComercial}
-          />
-        </div>
-      )}
       <NegocioDetailClient
         negocio={data.negocio}
         bloques={data.bloques}
@@ -113,23 +141,9 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         registrarPagoEnabled={conciliacionActiva}
         puedeCierreNoFacturable={puedeCierreNoFacturable}
         errorMsg={err}
+        banner={banner}
+        extras={extras}
       />
-      {validaActivo && (
-        <div className="mx-auto max-w-2xl px-4 pb-4 space-y-3">
-          <BloqueRiesgoSarlaft
-            negocioId={id}
-            datosIniciales={datosSarlaft?.ok ? datosSarlaft.datos : null}
-            scoreInicial={scoreSarlaft?.ok ? scoreSarlaft.score : null}
-          />
-          {validaConsultas && (
-            <BloqueValida
-              negocioId={id}
-              consultas={validaConsultas.ok ? validaConsultas.consultas : []}
-              error={validaConsultas.ok ? null : validaConsultas.error}
-            />
-          )}
-        </div>
-      )}
     </>
   )
 }
