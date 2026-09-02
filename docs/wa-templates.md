@@ -230,7 +230,7 @@ Ver cierre: {{3}}
 
 ---
 
-## Plantillas de alerta proactiva (wa-alerts) — pendientes de crear
+## Plantillas de alerta proactiva (wa-alerts)
 
 > Detonante: **2026-09-01**. Las tres alertas W25 de ese dia salieron como texto libre y Meta
 > las rechazo con **`131047 Re-engagement message`**. Fuera de la ventana de 24 h Meta solo
@@ -238,11 +238,40 @@ Ver cierre: {{3}}
 > la ventana cerrada: la alerta no se atrasa, no llega nunca. Queda constancia en `wa_envios`.
 
 Los diez templates de arriba cubren las notificaciones de la tabla `notificaciones`. **Ninguno
-cubre los cinco avisos de `wa-alerts`**, que son los que hoy estan fallando. Estos son.
+cubre los seis avisos de `wa-alerts`**, que son los que estaban fallando. Estos son.
 
 El codigo ya esta listo: cada aviso **publica sus variables con nombre** aunque todavia no haya
 plantilla. Declararlas es cambiar el secreto `WA_ALERT_TEMPLATES`, sin deploy y sin tocar codigo.
 Mientras el secreto no exista, todo sale como texto libre — o sea, igual que hoy.
+
+### Dos reglas de Meta que se aprendieron creandolas (2026-09-02)
+
+**⚠️ Meta REASIGNA la categoria al crear, y no avisa antes.** Las seis se crearon pidiendo
+`UTILITY` y **tres nacieron como MARKETING**. Con grupo de control (mismo autor, misma WABA,
+mismo dia) lo que las separa **no es el CTA** —`push_saldo` dice "Respondeme con el monto" y
+paso, mientras `numero_desconocido` no tiene CTA y cayo— sino **de que hablan**:
+
+| Pasaron como UTILITY | Cayeron a MARKETING |
+|---|---|
+| un registro concreto del destinatario que cambio de estado | agregados, metas y pipeline |
+| `saldo_vencido`: un negocio con su saldo y su antiguedad | `recaudo_bajo`: porcentaje contra una **meta** |
+| `push_saldo` / `sin_saldo`: el saldo propio, sin registrar | `negocios_estancados`: digest de negocios **en venta** |
+| | `numero_desconocido`: habla de **un tercero**, no del destinatario |
+
+Regla que sale: **Utility aguanta cuando el mensaje es sobre un registro concreto del
+destinatario. Se cae cuando es un resumen, una meta, un pipeline o alguien mas.** Es inferencia
+sobre un grupo de control de tres, no politica publicada de Meta.
+
+**⚠️ El cuerpo no puede empezar ni terminar en `{{n}}`.** Meta responde `(#100) Las variables no
+pueden estar al principio ni al final de la plantilla`. Por eso los tres reescritos cierran con
+texto ("Corte de hoy.", "Queda sin asignar."). `scripts/crear-plantillas-wa.ts` lo comprueba
+antes de hablar con Meta.
+
+**⚠️ Una plantilla en revision NO se puede editar**, ni por consola ni por API: `(#100) Las
+plantillas de mensajes solo se pueden editar si se rechazaron.` El boton "Editar plantilla" de
+WhatsApp Manager abre el formulario con todos los campos bloqueados, asi que parece disponible.
+Corregir el copy de una plantilla ya creada exige que Meta la rechace primero, o borrarla y
+recrearla con otro nombre.
 
 ### A1 — Saldo vencido (`W25`)
 
@@ -295,14 +324,15 @@ Respondeme con el monto y lo registro.
 Y `nombre` viaja crudo: un staff sin `full_name` deja la variable vacia y el aviso cae a texto
 libre, en vez de mandar una plantilla que saluda a nadie.
 
-### A3 — Negocios en venta sin movimiento (`stale_opps`)
+### A3 — Negocios sin movimiento (`stale_opps`)
 
 **Nombre:** `metrik_alerta_negocios_estancados` · **Utility** · `es_CO`
 
-```
-Hola, tienes {{1}} negocios en venta sin movimiento: {{2}}.
+⚠️ Meta la creo como **MARKETING** con el copy anterior. Se le quito "en venta" (lenguaje de
+pipeline) y el CTA; queda como novedad de la cuenta.
 
-Escribeme "llame a [nombre]" para actualizar.
+```
+Actualizacion de tu cuenta en MeTRIK ONE: {{1}} negocios no registran movimiento. Son: {{2}}. Corte de hoy.
 ```
 
 | `{{n}}` | variable | sample |
@@ -314,10 +344,11 @@ Escribeme "llame a [nombre]" para actualizar.
 
 **Nombre:** `metrik_alerta_recaudo_bajo` · **Utility** · `es_CO`
 
-```
-Hola, el recaudo del mes va en {{1}} de la meta: {{2}} de {{3}}.
+⚠️ Meta la creo como **MARKETING** con el copy anterior. Se le quito "de la meta" —medir contra
+una meta es lo que la vuelve un mensaje de desempeño— y el CTA. El dato del recaudo se conserva.
 
-Revisa tu cartera con "quien me debe".
+```
+Actualizacion de tu cuenta en MeTRIK ONE. Vas en {{1}} del recaudo del mes: {{2}} de {{3}}. Corte de hoy.
 ```
 
 | `{{n}}` | variable | sample |
@@ -334,10 +365,14 @@ alguien acabe de escribirle al bot no habilita nada aqui.
 
 **Nombre:** `metrik_alerta_numero_desconocido` · **Utility** · `es_CO`
 
-```
-Un numero no registrado le escribio al bot: {{1}}.
+⚠️ Meta la creo como **MARKETING** con el copy anterior, y esta **no tenia CTA**: es la que
+demuestra que el criterio no es el CTA sino de quien habla el mensaje. Sonaba a aviso de lead
+entrante (un tercero); ahora es un evento de la cuenta del destinatario.
 
-Dice: {{2}}. No hay a quien enrutarlo.
+```
+Aviso de tu cuenta en MeTRIK ONE: se recibio un mensaje de {{1}} que no corresponde a ningun contacto registrado.
+
+Contenido: {{2}}. Queda sin asignar.
 ```
 
 | `{{n}}` | variable | sample |
