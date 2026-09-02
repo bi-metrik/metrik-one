@@ -15,7 +15,7 @@ import { DialogoNegocioDuplicado } from '@/components/negocios/dialogo-negocio-d
 import { formatCOP } from '@/lib/contacts/constants'
 import { origenDesdeFuenteInteraccion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
-import type { InteraccionContacto } from '../../actions'
+import type { InteraccionContacto, OrigenContacto } from '../../actions'
 import { formatFecha } from '@/lib/dates/bogota'
 
 // ── Presentación por fuente / estado ────────────────────────────────
@@ -89,15 +89,106 @@ function formatFechaInteraccion(iso: string | null): string {
   return formatFecha(iso, { day: '2-digit', month: 'short', year: 'numeric' }) ?? ''
 }
 
-interface Props {
-  interacciones: InteraccionContacto[]
+// Lee un texto del payload de la interaccion. El payload de Meta trae
+// `campaign_name` y `ad_name` en las 703 de 703 interacciones medidas, pero el
+// tipo es `Record<string, unknown>`: se lee defensivo y sin placeholder, igual
+// que hace `leer()` con `field_data`.
+function textoPayload(it: InteraccionContacto, key: string): string | null {
+  const v = it.payload?.[key]
+  return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-export default function InteraccionesSection({ interacciones }: Props) {
+interface Props {
+  interacciones: InteraccionContacto[]
+  origen?: OrigenContacto | null
+}
+
+// Resumen de campanas del contacto. Responde las tres preguntas que Daniela
+// (supervisora comercial de SOENA) hace sobre un lead: cual campana lo trajo la
+// primera vez, cual fue la ultima, y cuantos formularios ha llenado.
+//
+// La PRIMERA sale de `custom_data.origen`, no del `min()` de las interacciones:
+// ese campo es first-touch inmutable grabado por el webhook, y es el que se usa
+// para atribuir un cierre. Solo cuando el contacto no lo tiene (leads previos al
+// webhook) se cae a la interaccion mas vieja con campana.
+function ResumenCampanas({
+  interacciones,
+  origen,
+}: {
+  interacciones: InteraccionContacto[]
+  origen?: OrigenContacto | null
+}) {
+  // `getInteraccionesPorContacto` devuelve recientes primero.
+  const conCampana = interacciones.filter((it) => textoPayload(it, 'campaign_name') !== null)
+  const masNueva = conCampana[0] ?? null
+  const masVieja = conCampana[conCampana.length - 1] ?? null
+
+  // Nombre y fecha salen SIEMPRE de la misma fuente. Medido el 2026-09-02: 333
+  // contactos del workspace tienen `origen.first_at` con `origen.campaign_name`
+  // en null (la llave existe, el valor no). Tomar el nombre de la interaccion mas
+  // vieja y la fecha de `origen` mezclaria dos origenes y podria fechar mal la
+  // primera campana, que es justo el dato con el que se atribuye un cierre.
+  const origenNombre = origen?.campaign_name?.trim() || null
+  const primeraNombre = origenNombre ?? (masVieja ? textoPayload(masVieja, 'campaign_name') : null)
+  const primeraFecha = origenNombre
+    ? origen?.first_at ?? null
+    : masVieja?.ocurrida_at ?? masVieja?.created_at ?? null
+
+  if (!primeraNombre) return null
+
+  const ultimaNombre = masNueva ? textoPayload(masNueva, 'campaign_name') : null
+  const ultimaFecha = masNueva?.ocurrida_at ?? masNueva?.created_at ?? null
+
+  // Con un solo formulario, primera y ultima son la misma fila: se colapsa.
+  const hayVarias = conCampana.length > 1 && ultimaNombre !== null
+
+  return (
+    <div className="rounded-md border border-dashed p-3">
+      <div className="flex items-center gap-2">
+        <Megaphone className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+        <h3 className="text-xs font-semibold">Campañas</h3>
+        {conCampana.length > 0 && (
+          <span className="text-[11px] text-muted-foreground">
+            {conCampana.length} formulario{conCampana.length !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+      <dl className="mt-2 space-y-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+            {hayVarias ? 'Primera' : 'Origen'}
+          </dt>
+          <dd className="min-w-0 flex-1 truncate text-right text-xs font-semibold">{primeraNombre}</dd>
+          {primeraFecha && (
+            <dd className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              {formatFechaInteraccion(primeraFecha)}
+            </dd>
+          )}
+        </div>
+        {hayVarias && (
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">Última</dt>
+            <dd className="min-w-0 flex-1 truncate text-right text-xs font-medium">{ultimaNombre}</dd>
+            {ultimaFecha && (
+              <dd className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                {formatFechaInteraccion(ultimaFecha)}
+              </dd>
+            )}
+          </div>
+        )}
+      </dl>
+    </div>
+  )
+}
+
+export default function InteraccionesSection({ interacciones, origen }: Props) {
   if (interacciones.length === 0) {
     return (
       <div className="space-y-3 rounded-lg border p-4">
         <h2 className="text-sm font-semibold">Interacciones</h2>
+        {/* El origen puede existir sin interacciones vivas (todas descartadas o
+            convertidas antes de que se guardara el historial): se muestra igual. */}
+        <ResumenCampanas interacciones={interacciones} origen={origen} />
         <p className="py-4 text-center text-xs text-muted-foreground">Sin interacciones registradas</p>
       </div>
     )
@@ -106,6 +197,7 @@ export default function InteraccionesSection({ interacciones }: Props) {
   return (
     <div className="space-y-3 rounded-lg border p-4">
       <h2 className="text-sm font-semibold">Interacciones ({interacciones.length})</h2>
+      <ResumenCampanas interacciones={interacciones} origen={origen} />
       <div className="space-y-3">
         {interacciones.map((it) => (
           <InteraccionRow key={it.id} it={it} />
@@ -125,6 +217,8 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
   const estado = ESTADO_META[it.estado] ?? ESTADO_META.nueva
   const fieldData = ((it.payload?.field_data ?? []) as FieldDatum[])
   const tipoDetectado = detectarTipoPersona(fieldData)
+  const campana = textoPayload(it, 'campaign_name')
+  const anuncio = textoPayload(it, 'ad_name')
 
   const resumen = CAMPOS_RESUMEN
     .map((c) => {
@@ -161,6 +255,16 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
         </div>
         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estado.class}`}>{estado.label}</span>
       </div>
+
+      {/* Campana y anuncio. Sin esto la fila dice de que FUENTE viene el lead pero
+          no de que campana, que es justo lo que el equipo comercial necesita para
+          atribuir el cierre. Ausencia tolerada: no se pinta nada. */}
+      {campana && (
+        <div className="mt-1.5 min-w-0">
+          <p className="truncate text-xs font-medium">{campana}</p>
+          {anuncio && <p className="truncate text-[11px] text-muted-foreground">{anuncio}</p>}
+        </div>
+      )}
 
       {/* Resumen del payload */}
       {resumen.length > 0 && (
