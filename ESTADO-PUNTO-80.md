@@ -74,22 +74,52 @@ que hayan recaudado menos: es que antes se les contaba como honorario propio la 
 se le gira a la UPME. Y el mismo cambio les da una columna de tarifa que llevaba meses en
 cero para todos.
 
+## Aplicado en produccion — 2026-09-02
+
+Version en el ledger: `20260902220053`.
+
+Se aplico por el MCP de Supabase, no con `db push`, por dos razones. La torre no tiene
+`SUPABASE_ACCESS_TOKEN` ni `psql`. Y el archivo chocaba de numero con
+`20260902000010_corregir_marcas_siigo_cliente_pisadas`, que ya estaba en el ledger: un
+`db push` habria dado ese numero por aplicado y saltado este archivo en silencio. Por eso
+el archivo se renombro a `20260902220053_...`, para que nombre y ledger digan lo mismo.
+
+El ensayo con `rollback` nunca corrio: sigue sin haber token. La duda que ese ensayo
+resolvia era si el SQL que llega a produccion es el del archivo, y eso se resolvio mejor
+por el otro lado, despues de aplicar: `md5(prosrc)` de las siete funciones en produccion
+contra los siete cuerpos del archivo. **7 de 7 identicas**, byte por byte.
+
+Medido despues de aplicar:
+
+| Comprobacion | Esperado | Produccion |
+|---|---|---|
+| Direccion agosto | $28.187.997 (58,0%) | $28.187.997 (58,0%) |
+| Casos completos | 285 de 306 | 285 de 306 |
+| Honorario historico en base | $155.260.308 | $155.260.308 |
+| Tarifa historica | $52.076.380 | $52.076.380 |
+| ACL de las 7 RPC | anon no, authenticated si | anon no, authenticated si |
+
+Y lo bruto quedo intacto, que era la condicion de no romper caja: honorario bruto
+$184.759.766, tarifa $52.076.380, excedente $1.209.355, `monto` $238.045.501. Identicos a
+la medicion previa, asi que `v_pyl_mes`, `v_mc_linea_mes`, `v_cartera_negocio`, el gate
+`saldo_cero`, Siigo y la conciliacion contra ePayco ven lo mismo de siempre.
+
 ## Lo que falta
 
-1. **Ensayo con `rollback` contra produccion.** NO se pudo correr en esta sesion: no hay
-   `psql`, `.credentials.md` esta fuera de alcance y el CLI pide `SUPABASE_ACCESS_TOKEN`.
-   Retipear el SQL en el MCP probaria la copia y no el archivo, asi que no se hizo.
-   Con el token: `npx supabase db query --linked --file <archivo envuelto en begin/rollback>`.
-   Lo que si se verifico sin token: estructura del archivo (7 cuerpos, delimitadores y
-   parentesis balanceados) y las cifras de arriba, medidas con consultas equivalentes.
-2. **PR, checks y merge.**
-3. **QA en pantalla** tras aplicar: Direccion de agosto debe leer 58,0%.
+1. **QA en pantalla**: abrir Direccion de agosto y confirmar que lee 58,0%.
+2. **SOENA con su equipo**, antes de que los comerciales vean sus cifras nuevas.
 
 ## Pendiente derivado, sin registrar
 
-El repo dejo de ser fuente de verdad del esquema: hay migraciones aplicadas por MCP sin
-archivo (`20260826141500`, `20260826162802`, `20260826211947`, `20260831171338`,
-`20260901192404`, entre otras). Merece pendiente propio.
+El repo dejo de ser fuente de verdad del esquema, y son dos fallas distintas:
+
+- Migraciones aplicadas por MCP que nunca quedaron como archivo (`20260826141500`,
+  `20260826162802`, `20260826211947`, `20260831171338`, `20260901192404`, entre otras).
+- Numeros de version repetidos entre archivos: `20260902000004`, `20260902000006` y el
+  `20260902000010` de este PR. Este es el peligroso, porque no falla: `db push` da por
+  aplicado el archivo que nunca corrio y nadie se entera.
+
+Merece pendiente propio, y probablemente un check de CI que rechace versiones duplicadas.
 
 ## Punto 81, despues de este
 
