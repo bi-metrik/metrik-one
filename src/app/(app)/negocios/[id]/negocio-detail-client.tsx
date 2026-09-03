@@ -14,7 +14,6 @@ import {
   XCircle,
   ArrowLeft,
   Pencil,
-  Building2,
   UserPlus,
   Pause,
   Play,
@@ -32,7 +31,6 @@ import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproces
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { EtapasNoAplican } from './etapas-no-aplican'
 import PanelContacto from './panel-contacto'
-import { esEmpresaEspejo } from '@/lib/contactos/empresa-espejo'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
@@ -75,7 +73,7 @@ import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
 import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { GuiaEtapaCard } from './GuiaEtapaCard'
-import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
+import { formatBogotaFechaCorta, formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -2077,10 +2075,11 @@ export default function NegocioDetailClient({
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
 
-  // ¿La "empresa" de este negocio es la persona natural espejo del contacto?
-  // Decide dos cosas de presentación: que la fila 3 del header deje de decir el
-  // mismo nombre dos veces, y que el panel no pinte un bloque de empresa aparte.
-  const empresaEsEspejo = esEmpresaEspejo(negocio.empresas, negocio.contacto_id)
+  // Día del primer cobro imputado: cuándo este negocio se volvió venta. Lo
+  // resuelve el servidor desde `v_venta_mes_comercial` (definición canónica);
+  // aquí solo se formatea. `undefined` cuando no hay cobro con fecha, y en ese
+  // caso la fila 3 no pinta nada.
+  const fechaVenta = formatBogotaFechaCortaAno(negocio.fecha_venta)
 
   // Evaluar condiciones: filtrar bloques cuya condition no se cumpla
   const allBloques = (bloques as BloqueExtendido[]).map(b => ({
@@ -2262,36 +2261,19 @@ export default function NegocioDetailClient({
           </div>
         )}
 
-        {/* Fila 3 — empresa + contacto + precio.
-            Cuando la empresa es la persona natural espejo del contacto (184 de
-            los 190 negocios con empresa del workspace) NO se pinta: esta fila
-            decía el mismo nombre dos veces, una con icono de edificio. Sus datos
-            fiscales viven ahora dentro del bloque de contacto del panel. */}
+        {/* Fila 3 — cuándo se cerró el negocio + precio.
+            La empresa y el contacto salieron de aquí: los dos viven en el panel
+            (rail desde `lg:`, tarjeta plegable debajo) y el header dejó de
+            repetir lo que ya está a la vista.
+            La fecha es `v_venta_mes_comercial.fecha_venta` — el día del PRIMER
+            cobro imputado, la misma definición que fecha la venta en /numeros y
+            en el tablero comercial. Un negocio puede decir "Cerrado" y seguir
+            `abierto`, y es deliberado: la venta ocurre cuando entra el primer
+            pago y la ejecución sigue después (295 de los 416 de SOENA el
+            2026-09-03). Sin fecha no se pinta nada: el precio queda a la derecha. */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
-            {negocio.empresas?.nombre && !empresaEsEspejo && (
-              <Link
-                href={`/directorio/empresa/${negocio.empresas.id}`}
-                className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
-              >
-                <Building2 className="h-3 w-3 text-purple-400 shrink-0" />
-                <span className="truncate">{negocio.empresas.nombre}</span>
-              </Link>
-            )}
-            {negocio.empresas?.nombre && !empresaEsEspejo && negocio.contactos?.nombre && (
-              <span className="text-muted-foreground/40">·</span>
-            )}
-            {negocio.contactos?.nombre && (
-              <Link
-                href={`/directorio/contacto/${negocio.contactos.id}`}
-                className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-accent transition-colors"
-              >
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[8px] font-bold uppercase">
-                  {negocio.contactos.nombre.charAt(0)}
-                </span>
-                <span className="truncate">{negocio.contactos.nombre}</span>
-              </Link>
-            )}
+            {fechaVenta && <span className="truncate">Cerrado {fechaVenta}</span>}
           </div>
           {precio !== null && precio !== undefined && (
             <span className={`shrink-0 tabular-nums text-base ${estaAprobado ? 'text-foreground font-bold' : 'text-muted-foreground font-semibold'}`}>
@@ -2320,7 +2302,9 @@ export default function NegocioDetailClient({
         <EtapasNoAplican etapas={etapasNoAplican ?? []} />
 
         {/* Panel del contacto, versión móvil: por debajo de `lg` no hay rail.
-            El teléfono se ve sin abrir nada; el resto va detrás del toggle. */}
+            El nombre y el teléfono se ven sin abrir nada —el nombre es
+            obligatorio ahí desde que el header dejó de pintarlo—; el resto va
+            detrás del toggle. */}
         <div className="lg:hidden">
           <PanelContacto
             variant="movil"
