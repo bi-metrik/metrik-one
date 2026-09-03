@@ -119,6 +119,9 @@ AS $function$
   );
 $function$;
 
+revoke execute on function public.get_comercial_serie_mensual_soena(uuid, integer) from public, anon;
+grant  execute on function public.get_comercial_serie_mensual_soena(uuid, integer) to authenticated;
+
 -- ── 2. Serie por seccional ──
 -- La seccional no vive en la vista: es `negocios.metadata->>'seccional'`, un campo
 -- crudo que el equipo de SOENA escribe a mano. Por eso aqui si hay JOIN a `negocios`,
@@ -206,6 +209,9 @@ AS $function$
   );
 $function$;
 
+revoke execute on function public.get_comercial_serie_seccional_soena(uuid, integer) from public, anon;
+grant  execute on function public.get_comercial_serie_seccional_soena(uuid, integer) to authenticated;
+
 -- ── 3. Serie por vendedor ──
 -- `v_venta_mes_comercial.responsable_id` ya ES el comercial resuelto por
 -- `v_negocio_comercial`, asi que el LEFT JOIN que hacia esta funcion sobra. El bloque
@@ -292,3 +298,6 @@ AS $function$
     ), '[]'::jsonb)
   );
 $function$;
+
+revoke execute on function public.get_comercial_serie_vendedor_soena(uuid, integer) from public, anon;
+grant  execute on function public.get_comercial_serie_vendedor_soena(uuid, integer) to authenticated;
