@@ -367,3 +367,20 @@ export const AREA_UI_CONFIG = [
     description: 'Reservado para uso futuro',
   },
 ] as const
+
+// ── Descarga a Excel de la tabla de negocios ────────────────────────────────
+//
+// Quién puede bajarse la lista de `/negocios` (con los filtros puestos) como Excel.
+// Compromiso con SOENA (Acta, cláusula SEXTA numeral 2), decidido el 2026-09-03:
+// owner, admin y supervisor. Ni operator, ni read_only, ni contador.
+//
+// Fuente única: la consumen el gate de la ruta (`api/negocios/export`, que es el
+// control real) y la lista (que decide si pinta el botón). Copiada en los dos lados
+// se desincroniza sin ruido: un botón que aparece y falla, o un permiso que existe
+// y nadie puede usar.
+
+export const ROLES_DESCARGA_NEGOCIOS = ['owner', 'admin', 'supervisor'] as const
+
+export function puedeDescargarNegocios(role?: string | null): boolean {
+  return (ROLES_DESCARGA_NEGOCIOS as readonly string[]).includes(role ?? '')
+}

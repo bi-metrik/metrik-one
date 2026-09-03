@@ -8,7 +8,7 @@ import {
 } from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
-import { getRolePermissions, puedeMarcarCondicionNegocio } from '@/lib/roles'
+import { getRolePermissions, puedeDescargarNegocios, puedeMarcarCondicionNegocio } from '@/lib/roles'
 import NegociosClient from './negocios-client'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { SearchParams } from '@/lib/filtros/url-estado'
@@ -53,6 +53,8 @@ export default async function NegociosPage({
   const canAsignar = getRolePermissions(ws.role ?? 'read_only').canAssignResponsable
   // Mismo guard que validan `agregarMarcaNegocio`/`quitarMarcaNegocio`.
   const canMarcar = puedeMarcarCondicionNegocio(ws.role)
+  // Mismo gate que aplica `POST /api/negocios/export` (owner/admin/supervisor).
+  const canDescargar = puedeDescargarNegocios(ws.role)
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
@@ -80,6 +82,7 @@ export default async function NegociosPage({
         staffList={staffList}
         canAsignar={canAsignar}
         canMarcar={canMarcar}
+        canDescargar={canDescargar}
         searchParams={sp}
         hoyISO={todayBogotaISO()}
       />
