@@ -42,6 +42,8 @@ interface ItemRow {
   descripcion?: string | null
   es_ajuste?: boolean
   cantidad?: number | null
+  margen_porcentaje?: number | null
+  precio_manual?: boolean | null
   rubros: RubroRow[]
 }
 
@@ -61,6 +63,7 @@ interface CotizacionData {
   descuento_valor?: number | null
   aiu_admin_pct?: number | null
   aiu_imprevistos_pct?: number | null
+  terminos_condiciones?: string | null
 }
 
 interface ClientFiscal {
@@ -96,6 +99,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
   // Discount state
   const [discountPct, setDiscountPct] = useState(cotizacion.descuento_porcentaje?.toString() ?? '0')
+  // Terminos y condiciones al final de la cotizacion
+  const [terminos, setTerminos] = useState(cotizacion.terminos_condiciones ?? '')
 
   // Detallada mode state
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(initialItems.map(i => i.id)))
@@ -373,6 +378,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const isAjuste = item.es_ajuste === true
             const isNegativo = itemPrecio < 0
             const costoUnitario = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
+            const tieneRubros = (item.rubros ?? []).length > 0
+            const precioManual = item.precio_manual === true
+            // El precio sale de los rubros cuando el item los tiene y nadie lo
+            // sobreescribio. Misma condicion que aplica el servidor.
+            const precioDesdeRubros = !isAjuste && tieneRubros && !precioManual
+            const itemMargen = Number(item.margen_porcentaje) || 0
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -425,31 +436,69 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {editable && (
                     <div className="mb-3 space-y-2">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Valor unitario</label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="Valor"
-                              defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
-                              onBlur={e => {
-                                const raw = e.target.value.replace(/[^0-9]/g, '')
-                                const val = Number(raw) || 0
-                                if (val === itemPrecio) return
-                                e.target.value = val ? val.toLocaleString('es-CO') : ''
-                                startTransition(async () => {
-                                  await updateItem(item.id, { precio_venta: val })
-                                  await recalcularTotales(cotizacion.id)
-                                  router.refresh()
-                                })
-                              }}
-                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                              className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm"
-                            />
+                        {precioDesdeRubros ? (
+                          <>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de rubros</label>
+                              <div className="rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm tabular-nums text-muted-foreground">
+                                {formatCOP(costoUnitario)}
+                              </div>
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Margen %</label>
+                              <input
+                                key={`margen-${item.id}-${itemMargen}`}
+                                type="number"
+                                defaultValue={itemMargen || ''}
+                                placeholder="0"
+                                step="0.01"
+                                className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                                onBlur={e => {
+                                  const pct = Number(e.target.value) || 0
+                                  if (pct === itemMargen) return
+                                  startTransition(async () => {
+                                    await updateItem(item.id, { margen_porcentaje: pct })
+                                    await recalcularTotales(cotizacion.id)
+                                    router.refresh()
+                                  })
+                                }}
+                                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio unitario</label>
+                              <div className="rounded border bg-background px-2 py-1.5 text-sm font-medium tabular-nums">
+                                {formatCOP(Math.round(costoUnitario * (1 + itemMargen / 100)))}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Valor unitario</label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="Valor"
+                                defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
+                                onBlur={e => {
+                                  const raw = e.target.value.replace(/[^0-9]/g, '')
+                                  const val = Number(raw) || 0
+                                  if (val === itemPrecio) return
+                                  e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                  startTransition(async () => {
+                                    await updateItem(item.id, { precio_venta: val })
+                                    await recalcularTotales(cotizacion.id)
+                                    router.refresh()
+                                  })
+                                }}
+                                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm"
+                              />
+                            </div>
                           </div>
-                        </div>
+                        )}
                         <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Cantidad</label>
                           <input
@@ -489,14 +538,55 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             }}
                           />
                         </div>
-                        <div className="flex items-end pb-0.5">
-                          {itemLineTotal > 0 && (item.subtotal ?? 0) > 0 && (
-                            <span className="text-[10px] text-green-600">
-                              Margen: {((itemLineTotal - (item.subtotal ?? 0)) / itemLineTotal * 100).toFixed(0)}%
-                            </span>
+                        {!precioDesdeRubros && (
+                          <div className="flex items-end pb-0.5">
+                            {itemLineTotal > 0 && (item.subtotal ?? 0) > 0 && (
+                              <span className="text-[10px] text-green-600">
+                                Margen: {((itemLineTotal - (item.subtotal ?? 0)) / itemLineTotal * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {tieneRubros && (
+                        <div>
+                          {precioDesdeRubros ? (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  // Congela el precio derivado de hoy y lo entrega al usuario.
+                                  await updateItem(item.id, {
+                                    precio_venta: Math.round(costoUnitario * (1 + itemMargen / 100)),
+                                    precio_manual: true,
+                                  })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+                            >
+                              Sobreescribir precio
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  await updateItem(item.id, { precio_manual: false })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                            >
+                              Volver a calcular desde rubros
+                            </button>
                           )}
                         </div>
-                      </div>
+                      )}
                       <div>
                         <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descripción (visible al cliente)</label>
                         <input
@@ -802,6 +892,39 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Descuento ({cotizacion.descuento_porcentaje}%)</span>
               <span className="font-medium text-red-600">-{formatCOP(cotizacion.descuento_valor ?? 0)}</span>
+            </div>
+          )}
+
+          {/* Terminos y condiciones (van al final de la cotizacion) */}
+          {(editable || terminos.trim()) && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Términos y condiciones
+              </label>
+              {editable ? (
+                <textarea
+                  value={terminos}
+                  onChange={e => setTerminos(e.target.value)}
+                  onBlur={() => {
+                    const valor = terminos.trim()
+                    if (valor === (cotizacion.terminos_condiciones ?? '')) return
+                    startTransition(async () => {
+                      const res = await updateCotizacion(cotizacion.id, {
+                        terminos_condiciones: valor || null,
+                      })
+                      if (!res.success) toast.error(res.error)
+                      router.refresh()
+                    })
+                  }}
+                  rows={5}
+                  placeholder="Validez de la oferta, garantía, alcance, condiciones de entrega…"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm leading-relaxed"
+                />
+              ) : (
+                <p className="whitespace-pre-wrap rounded-md border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                  {terminos}
+                </p>
+              )}
             </div>
           )}
 

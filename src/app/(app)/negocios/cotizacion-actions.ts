@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
+import { precioSeDerivaDeRubros, precioVentaDelItem } from '@/lib/cotizaciones/precio-item'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -157,7 +158,8 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
       nombre: nombre.trim(),
       subtotal: 0,
       orden: nextOrden,
-      ...(precioVenta != null ? { precio_venta: precioVenta } : {}),
+      // Un precio explicito al crear lo puso quien llama, no los rubros.
+      ...(precioVenta != null ? { precio_venta: precioVenta, precio_manual: true } : {}),
       ...(descripcion ? { descripcion: descripcion.trim() } : {}),
     } as never)
     .select('id')
@@ -168,7 +170,15 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
   return { success: true, id: (data as { id: string }).id }
 }
 
-export async function updateItem(id: string, updates: { nombre?: string; precio_venta?: number; descuento_porcentaje?: number; descripcion?: string | null; cantidad?: number }) {
+export async function updateItem(id: string, updates: {
+  nombre?: string
+  precio_venta?: number
+  descuento_porcentaje?: number
+  descripcion?: string | null
+  cantidad?: number
+  margen_porcentaje?: number
+  precio_manual?: boolean
+}) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
@@ -178,6 +188,15 @@ export async function updateItem(id: string, updates: { nombre?: string; precio_
   if (updates.descuento_porcentaje !== undefined) patch.descuento_porcentaje = updates.descuento_porcentaje
   if (updates.descripcion !== undefined) patch.descripcion = updates.descripcion?.trim() || null
   if (updates.cantidad !== undefined) patch.cantidad = updates.cantidad
+  if (updates.margen_porcentaje !== undefined) patch.margen_porcentaje = updates.margen_porcentaje
+  if (updates.precio_manual !== undefined) patch.precio_manual = updates.precio_manual
+
+  // Escribir el valor unitario a mano ES declarar que el precio lo pone una persona.
+  // Sin esto, el siguiente recalcularTotales lo reemplazaria por el costo de rubros
+  // y el usuario veria su cifra desaparecer sin explicacion.
+  if (updates.precio_venta !== undefined && updates.precio_manual === undefined) {
+    patch.precio_manual = true
+  }
 
   const { error: dbError } = await supabase
     .from('items')
@@ -296,6 +315,12 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
 
   const precioVenta = servicio.precio_estandar ?? subtotal
 
+  // El precio del catalogo lo fijo una persona en Config -> Mis servicios, asi que
+  // nace como precio manual y recalcularTotales no lo reemplaza por el costo de los
+  // rubros. Es el comportamiento que ya tenia antes del margen por rubros. Si el
+  // servicio no declara precio, el item queda derivable desde sus rubros.
+  const precioDelCatalogo = (servicio.precio_estandar ?? 0) > 0
+
   // Create item (store servicio_origen_id so deleteItem can reverse the valor_total change)
   const { data: newItem, error: itemError } = await supabase
     .from('items')
@@ -306,6 +331,7 @@ export async function addItemFromServicio(cotizacionId: string, servicioId: stri
       orden: nextOrden,
       servicio_origen_id: servicioId,
       precio_venta: precioVenta,
+      precio_manual: precioDelCatalogo,
     } as never)
     .select('id')
     .single()
@@ -563,7 +589,7 @@ export async function duplicarCotizacion(id: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: items } = await (supabase as any)
       .from('items')
-      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, es_ajuste, cantidad, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
+      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
       .eq('cotizacion_id', id)
       .order('orden')
 
@@ -581,6 +607,10 @@ export async function duplicarCotizacion(id: string) {
           descuento_porcentaje: item.descuento_porcentaje ?? 0,
           es_ajuste: item.es_ajuste ?? false,
           cantidad: item.cantidad ?? 1,
+          // Sin heredar estas dos, la copia perderia el precio que alguien escribio:
+          // nace con precio_manual = false y el primer recalculo la baja al costo.
+          margen_porcentaje: item.margen_porcentaje ?? 0,
+          precio_manual: item.precio_manual ?? false,
         })
         .select('id')
         .single()
@@ -691,25 +721,49 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, precio_venta, descuento_porcentaje, es_ajuste, cantidad, rubros(valor_total)')
+    .select('id, precio_venta, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
   let totalCosto = 0
   let totalVenta = 0
   let hayAjuste = false
   let ajusteId: string | null = null
+  // Precio unitario vigente por item, ya derivado de rubros cuando corresponde.
+  // Se guarda porque la rama del ajuste vuelve a sumar los items mas abajo, y ahi
+  // `item.precio_venta` seria el valor viejo que trajo la lectura.
+  const precioPorItem = new Map<string, number>()
 
   for (const item of items ?? []) {
+    const rubros = (item.rubros as { valor_total: number }[]) ?? []
+    const cant = Number(item.cantidad) || 1
+    let pv = Number(item.precio_venta) || 0
+
     // Update subtotal from rubros (skip for adjustment item — it has no rubros)
     if (!item.es_ajuste) {
-      const subtotal = ((item.rubros as { valor_total: number }[]) ?? []).reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
-      await supabase.from('items').update({ subtotal } as never).eq('id', item.id)
-      const cant = Number(item.cantidad) || 1
+      const subtotal = rubros.reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
+      const patch: Record<string, unknown> = { subtotal }
+
+      // Item cotizado por rubros: el precio de venta lo deriva el sistema.
+      // Sin esto el costo suma bien y el item queda en cero, que es el defecto.
+      const parametros = {
+        es_ajuste: item.es_ajuste,
+        precio_venta: item.precio_venta,
+        margen_porcentaje: item.margen_porcentaje,
+        precio_manual: item.precio_manual,
+        numeroDeRubros: rubros.length,
+        subtotal,
+      }
+      if (precioSeDerivaDeRubros(parametros)) {
+        pv = precioVentaDelItem(parametros)
+        patch.precio_venta = pv
+      }
+
+      await supabase.from('items').update(patch as never).eq('id', item.id)
       totalCosto += subtotal * cant
     }
 
-    const pv = Number(item.precio_venta) || 0
-    const cant = Number(item.cantidad) || 1
+    precioPorItem.set(item.id, pv)
+
     const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
     totalVenta += pv * cant * (1 - dp / 100)
 
@@ -734,7 +788,7 @@ export async function recalcularTotales(cotizacionId: string) {
     let sumaNetaRegulares = 0
     for (const item of items ?? []) {
       if (!item.es_ajuste) {
-        const pv = Number(item.precio_venta) || 0
+        const pv = precioPorItem.get(item.id) ?? (Number(item.precio_venta) || 0)
         const cant = Number(item.cantidad) || 1
         const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
         sumaNetaRegulares += pv * cant * (1 - dp / 100)
