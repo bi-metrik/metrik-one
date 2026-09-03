@@ -402,6 +402,15 @@ verify_jwt = false
 # Sin este flag, un redeploy aplica el default true y Meta recibe 401.
 verify_jwt = false
 
+[functions.meta-insights-sync]
+# Sync diario del gasto por campana contra la Graph API. NO usa el JWT de Supabase:
+# lo dispara un cron (pg_cron via pg_net) que no manda JWT, y el gateway ya no acepta
+# el service key legacy. Se protege con secreto interno verificado dentro de la
+# funcion (META_INSIGHTS_SYNC_SECRET, o META_LEADS_VERIFY_TOKEN si el primero no
+# existe). Sin este flag, un redeploy aplica el default true y el cron recibe 401 en
+# silencio — que fue exactamente lo que le paso a `wa-alerts` durante meses.
+verify_jwt = false
+
 [functions.wa-alerts]
 # Crons de alertas proactivas (w25, w29, w33, streak_eval). Estuvo en el default
 # `verify_jwt = true` con la nota de que "la invocan crons internos con service
