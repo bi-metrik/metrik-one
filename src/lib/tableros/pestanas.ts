@@ -11,6 +11,7 @@ export type TableroKey =
   | 'direccion'
   | 'rentabilidad_comercial'
   | 'comercial_negocios'
+  | 'marketing'
   | 'operaciones'
   | 'financiero'
   | 'comercial'
@@ -34,6 +35,12 @@ export interface DatosTableros {
   /** Pestana Direccion: la replica del Sheet de JD. Gate propio, ver abajo. */
   direccion: boolean
   comercialNegocios: boolean
+  /**
+   * Falso cuando el workspace no tiene NINGUNA interaccion de Meta. Una pestana de
+   * marketing que abre en blanco se lee como un error del producto, no como "todavia
+   * no hay campanas".
+   */
+  marketing: boolean
   procesoSeccional: boolean
   operacionesBono: boolean
   calidad: boolean
@@ -50,6 +57,9 @@ const RENTABILIDAD_TAB: PestanaTablero = {
   label: 'Rentabilidad Comercial',
 }
 const COMERCIAL_NEGOCIOS_TAB: PestanaTablero = { key: 'comercial_negocios', label: 'Comercial' }
+// Va DESPUES de Comercial y ANTES de Operaciones: la pantalla se lee de arriba hacia
+// abajo — que se vendio, de donde vino, donde esta atascado.
+const MARKETING_TAB: PestanaTablero = { key: 'marketing', label: 'Marketing' }
 // Operaciones reune las dos preguntas del area: donde estan atascados los casos
 // (vista Casos) y como le fue a cada persona (vista Personas).
 const OPERACIONES_TAB: PestanaTablero = { key: 'operaciones', label: 'Operaciones' }
@@ -84,6 +94,7 @@ export function tieneTablerosPropios(mod: ModulosWorkspace): boolean {
   return Boolean(
     mod.rentabilidad_comercial ||
       mod.comercial_negocios ||
+      mod.marketing_campanas ||
       mod.proceso_semanal ||
       mod.operaciones_bonos,
   )
@@ -124,6 +135,10 @@ export function pestanasDeTableros(
   if (mod.comercial_negocios && datos.direccion) tabs.push(DIRECCION_TAB)
   if (mod.rentabilidad_comercial) tabs.push(RENTABILIDAD_TAB)
   if (mod.comercial_negocios && datos.comercialNegocios) tabs.push(COMERCIAL_NEGOCIOS_TAB)
+  // Gate propio, al mismo nivel que los demas modulos: NO cuelga de
+  // `comercial_negocios`. Un workspace puede querer ver de donde vienen sus leads sin
+  // tener el tablero comercial, y colgarlos juntos obliga a encender los dos.
+  if (mod.marketing_campanas && datos.marketing) tabs.push(MARKETING_TAB)
   if (vistasDeOperaciones(mod, datos).length > 0) tabs.push(OPERACIONES_TAB)
   if (mod.business && !tieneTablerosPropios(mod)) tabs.push(...GENERICAS)
   if (mod.compliance) tabs.push(COMPLIANCE_TAB)

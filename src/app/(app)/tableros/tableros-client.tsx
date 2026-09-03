@@ -14,7 +14,9 @@ import type { DuenoData } from '../calidad/types'
 import { getComercialData, getOperativoData, getFinancieroData } from './actions'
 import { pestanasDeTableros, type TableroKey } from '@/lib/tableros/pestanas'
 import TabDireccion from './components/tab-direccion'
+import TabMarketing from './components/tab-marketing'
 import type { DirectivoData } from './directivo-actions'
+import type { MarketingData } from './marketing-actions'
 import { ShieldCheck, LayoutDashboard } from 'lucide-react'
 import type {
   ComercialResumenRow,
@@ -73,6 +75,8 @@ interface TablerosClientProps {
   initialComercialNegocios?: ComercialNegociosBundle | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
   initialDirectivo?: DirectivoData | null
+  /** Null si el workspace no tiene el modulo, si el rol no ve dinero, o si no hay rastro de Meta. */
+  initialMarketing?: MarketingData | null
   initialOperaciones?: OperacionesBonoData | null
   /** Null si el workspace no tiene el modulo o si el rol no ve dinero. */
   initialCalidad?: DuenoData | null
@@ -87,6 +91,7 @@ export default function TablerosClient({
   initialComercialNegocios,
   initialProcesoSeccional,
   initialDirectivo,
+  initialMarketing,
   initialOperaciones,
   initialCalidad,
   modules,
@@ -97,6 +102,7 @@ export default function TablerosClient({
   const tabs = pestanasDeTableros(mod, {
     direccion: Boolean(initialDirectivo),
     comercialNegocios: Boolean(initialComercialNegocios),
+    marketing: Boolean(initialMarketing),
     procesoSeccional: Boolean(initialProcesoSeccional),
     operacionesBono: Boolean(initialOperaciones),
     calidad: Boolean(initialCalidad),
@@ -207,6 +213,7 @@ export default function TablerosClient({
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}
+        {activeTab === 'marketing' && initialMarketing && <TabMarketing datos={initialMarketing} />}
         {activeTab === 'operaciones' && (
           <TabOperaciones
             proceso={initialProcesoSeccional ?? null}

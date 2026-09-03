@@ -12,6 +12,7 @@ import {
 const CON_DATOS: DatosTableros = {
   direccion: true,
   comercialNegocios: true,
+  marketing: true,
   procesoSeccional: true,
   operacionesBono: true,
   calidad: true,
@@ -20,6 +21,7 @@ const CON_DATOS: DatosTableros = {
 const SIN_DATOS: DatosTableros = {
   direccion: false,
   comercialNegocios: false,
+  marketing: false,
   procesoSeccional: false,
   operacionesBono: false,
   calidad: false,
@@ -45,7 +47,34 @@ const claves = (mod: ModulosWorkspace, datos: DatosTableros = CON_DATOS) =>
 
 describe('pestanasDeTableros', () => {
   it('SOENA ve tres pestanas: Direccion, Comercial y Operaciones', () => {
+    // `marketing_campanas` todavia NO esta en el `modules` de SOENA: encenderlo es
+    // escritura sobre produccion y va aparte. Mientras no este, la pestana no sale.
     expect(claves(SOENA)).toEqual(['direccion', 'comercial_negocios', 'operaciones'])
+  })
+
+  it('Marketing entra entre Comercial y Operaciones cuando el modulo esta encendido', () => {
+    // El orden es de lectura: que se vendio, de donde vino, donde esta atascado.
+    expect(claves({ ...SOENA, marketing_campanas: true })).toEqual([
+      'direccion',
+      'comercial_negocios',
+      'marketing',
+      'operaciones',
+    ])
+  })
+
+  it('Marketing tiene gate propio: no depende de comercial_negocios', () => {
+    expect(claves({ business: true, marketing_campanas: true })).toEqual(['marketing'])
+  })
+
+  it('un workspace sin rastro de Meta no ve la pestana aunque tenga el modulo', () => {
+    // Una pestana de marketing que abre en blanco se lee como un error del producto.
+    const sinMeta = { ...CON_DATOS, marketing: false }
+    expect(claves({ business: true, marketing_campanas: true }, sinMeta)).toEqual([])
+    expect(claves({ ...SOENA, marketing_campanas: true }, sinMeta)).toEqual([
+      'direccion',
+      'comercial_negocios',
+      'operaciones',
+    ])
   })
 
   it('un workspace con business y sin modulos propios conserva las tres genericas', () => {
@@ -135,6 +164,7 @@ describe('tieneTablerosPropios / necesitaDatosGenericos', () => {
       { business: true, proceso_semanal: true },
       { business: true, operaciones_bonos: true },
       { business: true, comercial_negocios: true },
+      { business: true, marketing_campanas: true },
       { business: true, rentabilidad_comercial: true },
       { compliance: true },
       {},

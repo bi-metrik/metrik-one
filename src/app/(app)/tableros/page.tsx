@@ -3,6 +3,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import { getDirectivo } from './directivo-actions'
+import { getMarketingData } from './marketing-actions'
 import {
   getComercialResumen, getComercialMes, getComercialSerie, getComercialSerieSeccional,
   getComercialSerieVendedor,
@@ -64,6 +65,7 @@ export default async function TablerosPage() {
     genericas,
     rentabilidad,
     comercialNegocios,
+    marketing,
     directivo,
     calidad,
     procesoSeccional,
@@ -88,6 +90,16 @@ export default async function TablerosPage() {
     // comercial_negocios + rol gerencial (owner/admin/supervisor). Vive en la pestaña
     // "Comercial" de Tableros (los indicadores AGREGADOS no son de Equipo).
     puedeVerComercialNegocios ? cargarComercialNegocios(role) : null,
+
+    // Pestana Marketing: de donde vienen los negocios y cuanto costo traerlos. Gate
+    // PROPIO (`marketing_campanas`), no colgado de `comercial_negocios`: un workspace
+    // puede querer ver sus campanas sin el tablero comercial. El recorte por rol lo
+    // hace la accion, con el mismo criterio que Direccion.
+    //
+    // ⚠️ Entra en el `Promise.all` que ya existe, NO encadenado despues: una espera
+    // secuencial nueva devuelve la pagina al problema que se arreglo el 2026-08-31
+    // (de 8,4-11,4 s a 5,3-8,7 s).
+    modules.marketing_campanas ? getMarketingData() : null,
 
     // Pestana Direccion: la replica del Sheet que JD lleva a mano. Mismo gate que el
     // tablero comercial (modulo + rol gerencial), porque son las mismas cifras agregadas
@@ -128,6 +140,7 @@ export default async function TablerosPage() {
   return (
     <TablerosClient
       initialDirectivo={directivo}
+      initialMarketing={marketing}
       initialOperaciones={operaciones}
       initialProcesoSeccional={procesoSeccional}
       initialComercial={comercial}
