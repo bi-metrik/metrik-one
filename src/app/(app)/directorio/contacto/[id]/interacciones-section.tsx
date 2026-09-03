@@ -17,6 +17,7 @@ import { origenDesdeFuenteInteraccion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import type { InteraccionContacto, OrigenContacto } from '../../actions'
 import { formatFecha } from '@/lib/dates/bogota'
+import { resumenCampanasContacto, textoPayload } from '@/lib/contactos/campanas'
 
 // ── Presentación por fuente / estado ────────────────────────────────
 const FUENTE_META: Record<string, { label: string; icon: typeof Megaphone; class: string }> = {
@@ -89,15 +90,6 @@ function formatFechaInteraccion(iso: string | null): string {
   return formatFecha(iso, { day: '2-digit', month: 'short', year: 'numeric' }) ?? ''
 }
 
-// Lee un texto del payload de la interaccion. El payload de Meta trae
-// `campaign_name` y `ad_name` en las 703 de 703 interacciones medidas, pero el
-// tipo es `Record<string, unknown>`: se lee defensivo y sin placeholder, igual
-// que hace `leer()` con `field_data`.
-function textoPayload(it: InteraccionContacto, key: string): string | null {
-  const v = it.payload?.[key]
-  return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
 interface Props {
   interacciones: InteraccionContacto[]
   origen?: OrigenContacto | null
@@ -107,10 +99,15 @@ interface Props {
 // (supervisora comercial de SOENA) hace sobre un lead: cual campana lo trajo la
 // primera vez, cual fue la ultima, y cuantos formularios ha llenado.
 //
-// La PRIMERA sale de `custom_data.origen`, no del `min()` de las interacciones:
-// ese campo es first-touch inmutable grabado por el webhook, y es el que se usa
-// para atribuir un cierre. Solo cuando el contacto no lo tiene (leads previos al
-// webhook) se cae a la interaccion mas vieja con campana.
+// La REGLA no vive aqui: vive en `lib/contactos/campanas.ts`, que es la misma que
+// leen el panel lateral de `/negocios/[id]` y la vista general del directorio. La
+// primera campana es con la que se atribuye un cierre, asi que dos pantallas que
+// la calculen por su cuenta terminarian adjudicandole el mismo cierre a campanas
+// distintas. Aqui solo queda la presentacion.
+//
+// El modulo ordena las interacciones por su cuenta, asi que esta pantalla deja de
+// depender de que `getInteraccionesPorContacto` las siga sirviendo recientes
+// primero. Ese es el motivo de fondo de la migracion, no un efecto lateral.
 function ResumenCampanas({
   interacciones,
   origen,
@@ -118,38 +115,19 @@ function ResumenCampanas({
   interacciones: InteraccionContacto[]
   origen?: OrigenContacto | null
 }) {
-  // `getInteraccionesPorContacto` devuelve recientes primero.
-  const conCampana = interacciones.filter((it) => textoPayload(it, 'campaign_name') !== null)
-  const masNueva = conCampana[0] ?? null
-  const masVieja = conCampana[conCampana.length - 1] ?? null
+  const resumen = resumenCampanasContacto(interacciones, origen)
+  if (!resumen) return null
 
-  // Nombre y fecha salen SIEMPRE de la misma fuente. Medido el 2026-09-02: 333
-  // contactos del workspace tienen `origen.first_at` con `origen.campaign_name`
-  // en null (la llave existe, el valor no). Tomar el nombre de la interaccion mas
-  // vieja y la fecha de `origen` mezclaria dos origenes y podria fechar mal la
-  // primera campana, que es justo el dato con el que se atribuye un cierre.
-  const origenNombre = origen?.campaign_name?.trim() || null
-  const primeraNombre = origenNombre ?? (masVieja ? textoPayload(masVieja, 'campaign_name') : null)
-  const primeraFecha = origenNombre
-    ? origen?.first_at ?? null
-    : masVieja?.ocurrida_at ?? masVieja?.created_at ?? null
-
-  if (!primeraNombre) return null
-
-  const ultimaNombre = masNueva ? textoPayload(masNueva, 'campaign_name') : null
-  const ultimaFecha = masNueva?.ocurrida_at ?? masNueva?.created_at ?? null
-
-  // Con un solo formulario, primera y ultima son la misma fila: se colapsa.
-  const hayVarias = conCampana.length > 1 && ultimaNombre !== null
+  const { formularios, primeraNombre, primeraFecha, ultimaNombre, ultimaFecha, hayVarias } = resumen
 
   return (
     <div className="rounded-md border border-dashed p-3">
       <div className="flex items-center gap-2">
         <Megaphone className="h-3.5 w-3.5 shrink-0 text-blue-600" />
         <h3 className="text-xs font-semibold">Campañas</h3>
-        {conCampana.length > 0 && (
+        {formularios > 0 && (
           <span className="text-[11px] text-muted-foreground">
-            {conCampana.length} formulario{conCampana.length !== 1 ? 's' : ''}
+            {formularios} formulario{formularios !== 1 ? 's' : ''}
           </span>
         )}
       </div>

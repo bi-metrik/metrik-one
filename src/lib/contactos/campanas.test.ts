@@ -104,6 +104,138 @@ describe('resumenCampanasContacto', () => {
   })
 })
 
+/**
+ * Los dos contactos que el 360 (`directorio/contacto/[id]`) pinta en el bloque
+ * "Campañas", con las filas COPIADAS de producción el 2026-09-03 — payload con la
+ * forma real del webhook, y `origen` tal cual está en `custom_data`.
+ *
+ * Están aquí porque desde este día el 360 dejó de tener la regla escrita en línea
+ * y consume `resumenCampanasContacto`: si alguien la cambia, lo que se rompe es
+ * una pantalla, y estas dos pruebas son las que lo dicen.
+ */
+
+/** Payload de Meta con la forma de producción (11 llaves; solo dos se leen). */
+function interMeta(
+  campana: string,
+  adName: string,
+  ocurrida: string,
+  creada: string,
+): InteraccionCampana {
+  return {
+    payload: {
+      ad_id: '120248098468680215',
+      ad_name: adName,
+      adset_id: '120248098468660215',
+      adset_name: 'Nuevo conjunto de anuncios de Clientes potenciales',
+      campaign_id: '120248098468670215',
+      campaign_name: campana,
+      created_time: ocurrida,
+      field_data: [{ name: '¿qué_tipo_de_vehículo_adquiriste?', values: ['Vehículo eléctrico'] }],
+      form_id: '4106143956347737',
+      leadgen_id: '1234567890123456',
+      platform: 'fb',
+    },
+    ocurrida_at: ocurrida,
+    created_at: creada,
+  }
+}
+
+describe('resumenCampanasContacto sobre filas reales del 360', () => {
+  // Recientes primero, que es como las sirve `getInteraccionesPorContacto`.
+  const madeleine: InteraccionCampana[] = [
+    interMeta('CLIENTES POTENCIALES AGO ($50)', 'Primer Video de Clientes Potenciales', '2026-08-27T11:50:55+00:00', '2026-08-27T11:51:05.281104+00:00'),
+    interMeta('CLIENTES POTENCIALES AGO 2026 PLUS', 'Nuevo anuncio de Clientes potenciales', '2026-08-09T19:58:48+00:00', '2026-08-09T19:58:54.878795+00:00'),
+    interMeta('CLIENTES POTENCIALES JUL/AGO 2026', 'Nuevo anuncio de Clientes potenciales', '2026-08-01T17:26:39+00:00', '2026-08-01T17:26:52.988242+00:00'),
+    interMeta('CAMPAÑA JUNIO 2026 DJ - VIDEO', 'CAMPAÑA JUNIO - DANIELA', '2026-07-29T03:21:40+00:00', '2026-07-29T03:21:49.899169+00:00'),
+  ]
+
+  const carlos: InteraccionCampana[] = [
+    interMeta('CLIENTES POTENCIALES AGO ($50)', 'Primer Video de Clientes Potenciales', '2026-08-29T22:32:07+00:00', '2026-08-29T22:32:17.447537+00:00'),
+    interMeta('CLIENTES POTENCIALES AGO 2026 PLUS', 'Nuevo anuncio de Clientes potenciales', '2026-08-20T23:42:17+00:00', '2026-08-20T23:42:24.294325+00:00'),
+    interMeta('CLIENTES POTENCIALES JUL/AGO 2026', 'Nuevo anuncio de Clientes potenciales', '2026-07-31T22:31:39+00:00', '2026-07-31T22:31:48.919307+00:00'),
+  ]
+
+  it('MADELEINE PEREZ RUA: 4 formularios y el `origen` manda sobre la interacción más vieja', () => {
+    // `123a7b24-334a-4016-93b2-08710eed0159`. Su `origen` SÍ trae campaign_name,
+    // así que nombre y fecha de la primera salen los dos de ahí.
+    const origen = { campaign_name: 'CAMPAÑA JUNIO 2026 DJ - VIDEO', first_at: '2026-07-29T03:21:40.000Z' }
+    const r = resumenCampanasContacto(madeleine, origen)
+    expect(r).toEqual({
+      formularios: 4,
+      primeraNombre: 'CAMPAÑA JUNIO 2026 DJ - VIDEO',
+      primeraFecha: '2026-07-29T03:21:40.000Z',
+      ultimaNombre: 'CLIENTES POTENCIALES AGO ($50)',
+      ultimaFecha: '2026-08-27T11:50:55+00:00',
+      hayVarias: true,
+    })
+    // El 360 pinta "Primera" + "Última" solo cuando `hayVarias`.
+    expect(r!.hayVarias).toBe(true)
+    // Y da lo mismo aunque la base sirviera las filas al revés.
+    expect(resumenCampanasContacto([...madeleine].reverse(), origen)).toEqual(r)
+  })
+
+  it('CARLOS F PAZ: `origen` con first_at y campaign_name en null cae a la más vieja, con SU fecha', () => {
+    // `6cd1bb49-8aa2-41b7-977e-a35ab48490f8`. Es la rama que un refactor rompe sin
+    // que se note: la llave `campaign_name` EXISTE en `custom_data.origen`, con
+    // valor null. Mezclar el nombre de la interacción con la fecha de `origen`
+    // fecharía mal la campaña con la que se atribuye el cierre.
+    const origen = {
+      campaign_name: null,
+      first_at: '2026-07-31T22:31:39.000Z',
+    }
+    const r = resumenCampanasContacto(carlos, origen)
+    expect(r).toEqual({
+      formularios: 3,
+      primeraNombre: 'CLIENTES POTENCIALES JUL/AGO 2026',
+      primeraFecha: '2026-07-31T22:31:39+00:00',
+      ultimaNombre: 'CLIENTES POTENCIALES AGO ($50)',
+      ultimaFecha: '2026-08-29T22:32:07+00:00',
+      hayVarias: true,
+    })
+    // La fecha sale de la INTERACCIÓN, no de `origen.first_at`. Los dos apuntan al
+    // mismo instante pero se escriben distinto, y es esa diferencia la que delata
+    // de cuál de las dos fuentes vino.
+    expect(r!.primeraFecha).not.toBe(origen.first_at)
+    expect(resumenCampanasContacto([...carlos].reverse(), origen)).toEqual(r)
+  })
+
+  it('un solo formulario: el 360 dice "Origen" y no pinta la fila de Última', () => {
+    // WILLIAM CARREÑO, `00175fb8-525e-4f07-9b4f-5720c8717956`: 622 de los 983
+    // contactos del workspace están así (medido el 2026-09-03).
+    const r = resumenCampanasContacto(
+      [interMeta('CAMPAÑA JUNIO 2026 DJ - VIDEO', 'CAMPAÑA JUNIO - DANIELA', '2026-07-17T17:39:18+00:00', '2026-07-17T17:39:28.062+00:00')],
+      { campaign_name: 'CAMPAÑA JUNIO 2026 DJ - VIDEO', first_at: '2026-07-17T17:39:18.000Z' },
+    )
+    expect(r!.formularios).toBe(1)
+    // `hayVarias` en false es lo que hace que la etiqueta diga "Origen".
+    expect(r!.hayVarias).toBe(false)
+  })
+
+  it('un contacto sin ninguna campaña no pinta el bloque', () => {
+    // 315 de los 983 (medido el 2026-09-03): sin interacciones de Meta y sin
+    // `origen`, o con interacciones que no declaran campaña.
+    expect(resumenCampanasContacto([], null)).toBeNull()
+    expect(resumenCampanasContacto([], { campaign_name: null, first_at: null })).toBeNull()
+  })
+
+  it('una interacción sin campaña NO suma al conteo de formularios', () => {
+    // El "N formularios" del 360 cuenta las interacciones que declaran campaña,
+    // no todas las del contacto. Hoy en SOENA no se puede ver (las 720 son de
+    // Meta y las 720 declaran campaña, medido el 2026-09-03), pero el timeline
+    // del 360 también pinta WhatsApp, web y manual: el día que entre una por ahí,
+    // sin esta regla el bloque diría un formulario de más.
+    const manual: InteraccionCampana = {
+      payload: { nota: 'llamada de seguimiento' },
+      ocurrida_at: '2026-08-15T10:00:00+00:00',
+      created_at: '2026-08-15T10:00:03+00:00',
+    }
+    const r = resumenCampanasContacto([...carlos.slice(0, 1), manual, ...carlos.slice(1)], null)
+    expect(r!.formularios).toBe(3)
+    expect(r!.ultimaNombre).toBe('CLIENTES POTENCIALES AGO ($50)')
+    expect(r!.primeraNombre).toBe('CLIENTES POTENCIALES JUL/AGO 2026')
+  })
+})
+
 describe('ordenarRecientesPrimero', () => {
   it('deja las filas sin ocurrida_at al final y desempata por created_at', () => {
     const sinFecha = inter('C', null, '2026-06-01T00:00:00Z')
