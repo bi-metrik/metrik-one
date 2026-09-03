@@ -269,9 +269,11 @@ revoke execute on function public.compliance_registrar_version_documento(
 
 -- ── RLS ───────────────────────────────────────────────────────────────────
 --
--- Server-only, mismo criterio que el resto de compliance: el expediente lo lee
--- y lo escribe el oficial de cumplimiento a traves de server actions que
--- validan el rol antes de tocar nada. Ningun cliente consulta directo.
+-- server-only: el expediente lo lee y lo escribe el oficial de cumplimiento a
+-- traves de server actions que validan el rol antes de tocar nada, mismo
+-- criterio que periodicidad y liberaciones. Exponerlo a PostgREST le daria a
+-- cualquier miembro del workspace el inventario de gobierno y los nombres de
+-- quienes responden por cada pieza, que es justo lo que el guard de rol evita.
 alter table compliance_documentos enable row level security;
 alter table compliance_documento_versiones enable row level security;
 
