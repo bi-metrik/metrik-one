@@ -22,6 +22,10 @@ type CotizacionNuevosCampos = {
   anticipo_terminos: string | null
   saldo_terminos: string | null
   observaciones_extra: string[] | null
+  // Terminos y condiciones al final de la cotizacion (migration
+  // 20260903100000). El dato ya viaja hasta aqui; donde se imprime lo
+  // define el rediseno del PDF, que va en un encargo aparte.
+  terminos_condiciones: string | null
 }
 
 function formatMoney(n: number): string {
