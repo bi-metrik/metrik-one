@@ -33,9 +33,12 @@ import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
  * `variant`:
  *  - `rail`: columna derecha pegada, desde `lg:`. Se pinta completo.
  *  - `movil`: por debajo de `lg` no cabe una segunda columna. Se pinta como
- *    tarjeta plegable con una línea de resumen SIEMPRE visible (teléfono y
- *    campaña) y el resto detrás de un toggle. Mobile-first es el default de
- *    este producto y no se rompe por una pantalla de escritorio.
+ *    tarjeta plegable con una línea de resumen SIEMPRE visible (nombre,
+ *    teléfono y campaña) y el resto detrás de un toggle. Mobile-first es el
+ *    default de este producto y no se rompe por una pantalla de escritorio.
+ *    El NOMBRE en ese resumen no es opcional: desde que el header del negocio
+ *    dejó de repetir contacto y empresa, este es el único sitio donde se ve sin
+ *    desplegar nada en un celular.
  */
 
 export type ContactoPanel = {
@@ -278,19 +281,23 @@ export default function PanelContacto({ contacto, empresa, campanas, variant }: 
 
   return (
     <div className="rounded-xl border border-border bg-card">
-      {/* Línea de resumen: el teléfono se ve SIN abrir nada. Es el dato por el
-          que se abre el panel. */}
+      {/* Línea de resumen: nombre arriba, teléfono debajo, los dos SIN abrir nada.
+          El nombre va primero porque por debajo de `lg:` no hay rail y el header
+          del negocio dejó de pintarlo: si aquí solo estuviera el teléfono —959 de
+          los 982 contactos del workspace lo tienen el 2026-09-03, así que el
+          nombre caía casi nunca—, en un celular el caso no diría de quién es hasta que alguien
+          tocara el chevron. El teléfono conserva su `tel:` y sus tabular-nums, y
+          no se pinta cuando no hay: una línea vacía no es información. */}
       <div className="flex items-center gap-2 px-3 py-2">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {tel ? (
-            <a href={`tel:${tel}`} className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium tabular-nums hover:underline">
+          <span className="truncate text-xs font-medium">
+            {contacto?.nombre ?? 'Sin contacto'}
+          </span>
+          {tel && (
+            <a href={`tel:${tel}`} className="inline-flex min-w-0 items-center gap-1.5 text-xs tabular-nums text-muted-foreground hover:underline">
               <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">{contacto?.telefono}</span>
             </a>
-          ) : (
-            <span className="truncate text-xs text-muted-foreground">
-              {contacto?.nombre ?? 'Sin contacto'}
-            </span>
           )}
           {campanas && (
             <span className="truncate text-[11px] text-muted-foreground">

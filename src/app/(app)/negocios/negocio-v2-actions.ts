@@ -71,6 +71,7 @@ import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-nego
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { createServiceClient } from '@/lib/supabase/server'
 import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores } from '@/lib/negocios/campos-de-bloques'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
@@ -261,6 +262,17 @@ export type NegocioDetalle = {
    * campañas distintas. null cuando el contacto no tiene campaña.
    */
   campanas_contacto?: ResumenCampanas | null
+  /**
+   * Día en que el negocio se volvió VENTA = el del primer cobro imputado.
+   * Sale tal cual de `v_venta_mes_comercial.fecha_venta`, la definición canónica
+   * que ya fecha la venta en `/numeros`, `/equipo`, `lib/negocios/cartera` y
+   * `lib/epayco/fecha-transaccion`. Columna `date`, no instante.
+   *
+   * `null` cuando el negocio no tiene ningún cobro con fecha (106 de los 416 de
+   * SOENA el 2026-09-03). NO es `closed_at`: ese marca la salida del pipeline y
+   * 11 de sus 26 casos no tienen un peso encima.
+   */
+  fecha_venta: string | null
 }
 
 /** Autopoblado del bloque de facturación (fuente para copiar a Siigo / API). */
@@ -898,6 +910,27 @@ export async function getNegocioDetalle(id: string): Promise<{
     .map((r) => r.staff)
     .filter((s): s is { id: string; full_name: string } => s !== null)
 
+  // Día en que este negocio se volvió venta, para el header: el del PRIMER cobro
+  // imputado. Se lee de `v_venta_mes_comercial`, que es la definición canónica —la
+  // misma que fecha la venta en `/numeros`, `/equipo` y la cartera—. Aquí NO se
+  // escribe un `min(fecha)` propio: el día que alguien cambie la imputación, el
+  // header diría una fecha y el tablero otra sobre el mismo negocio.
+  //
+  // ⚠️ Va con el cliente de SERVICIO a propósito, no con el de la sesión. La vista
+  // está declarada server-only y su migración (`20260812230000`) hace
+  // `revoke all ... from anon, authenticated`; verificado contra producción el
+  // 2026-09-03, `has_table_privilege('authenticated', ..., 'select')` = false. Con el
+  // cliente autenticado esta consulta devolvería vacío SIN error visible y la fecha
+  // no se pintaría NUNCA, que es indistinguible de "este negocio no tiene cobros".
+  // El `.eq('workspace_id', ...)` no es adorno: el service client no pasa por RLS.
+  const { data: ventaRow } = await db(createServiceClient())
+    .from('v_venta_mes_comercial')
+    .select('fecha_venta')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', id)
+    .maybeSingle()
+  const fechaVenta = (ventaRow as { fecha_venta?: string | null } | null)?.fecha_venta ?? null
+
   const negocioRaw = negocio as Record<string, unknown>
 
   // Campañas del contacto para el panel lateral: cuál lo trajo la PRIMERA vez y
@@ -929,6 +962,7 @@ export async function getNegocioDetalle(id: string): Promise<{
     ...negocioRaw,
     responsables,
     campanas_contacto: campanasContacto,
+    fecha_venta: fechaVenta,
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
