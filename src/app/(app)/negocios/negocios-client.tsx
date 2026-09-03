@@ -2,6 +2,7 @@
 import { useMemo } from 'react'
 import { Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
+import DescargarExcelButton from './descargar-excel-button'
 import BusquedaInput from '@/components/busqueda-input'
 import BarraFiltros from '@/components/barra-filtros'
 import EmptyState from '@/components/empty-state'
@@ -174,6 +175,7 @@ export default function NegociosClient({
   staffList = [],
   canAsignar = false,
   canMarcar = false,
+  canDescargar = false,
   searchParams,
   hoyISO,
 }: {
@@ -188,6 +190,8 @@ export default function NegociosClient({
   canAsignar?: boolean
   /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
   canMarcar?: boolean
+  /** owner/admin/supervisor: pinta «Descargar Excel» (el gate real está en la ruta). */
+  canDescargar?: boolean
   /** Parámetros de la URL ya resueltos por el server component: filtros iniciales. */
   searchParams?: SearchParams
   /**
@@ -295,6 +299,11 @@ export default function NegociosClient({
     () => (agrupada ? agruparPorLlegada(currentFiltrado, hoyISO) : []),
     [agrupada, currentFiltrado, hoyISO],
   )
+
+  // Lo que se descarga es EXACTAMENTE lo que está a la vista: los ids de la lista ya
+  // filtrada y ordenada. La ruta baja esos y nada más, así que no hay que reimplementar
+  // `aplicarFiltros` en el servidor ni puede desincronizarse de la pantalla.
+  const idsVisibles = useMemo(() => currentFiltrado.map((n) => n.id), [currentFiltrado])
 
   // Negocios con todos los filtros activos EXCEPTO fase/etapa (responsable + seccional + búsqueda).
   // Base para los contadores de fase: refleja el filtro de responsable, seccional y búsqueda libre
@@ -560,6 +569,17 @@ export default function NegociosClient({
           ))}
         </select>
       </BarraFiltros>
+
+      {/* Descarga de autoservicio (Acta SOENA, SEXTA num. 2): la tabla tal como se ve,
+          con los filtros puestos. Solo para los roles que la ruta deja pasar. */}
+      {canDescargar && (
+        <div className="flex items-center justify-between gap-2 text-xs text-[#6B7280]">
+          <span>
+            {currentFiltrado.length} negocio{currentFiltrado.length !== 1 ? 's' : ''} en la vista
+          </span>
+          <DescargarExcelButton ids={idsVisibles} />
+        </div>
+      )}
 
       {/* Sub-filtros Cerrados (motivo) */}
       {fase === 'cerrados' && cerrados.length > 0 && (
