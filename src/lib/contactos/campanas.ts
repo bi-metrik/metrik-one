@@ -7,16 +7,17 @@
  * que dos pantallas que la calculen por su cuenta terminarían atribuyendo el
  * mismo cierre a campañas distintas.
  *
- * Consumidores:
+ * Consumidores (los tres importan de aquí; la regla no está escrita en ningún
+ * otro sitio):
  *  - el panel lateral de `/negocios/[id]` (vía `getNegocioDetalle`, servidor)
+ *  - `ResumenCampanas` en el 360 del contacto (`directorio/contacto/[id]`), que
+ *    consume `resumenCampanasContacto` tal cual y solo pone la presentación
  *  - la vista general del directorio (`getContactos` + `contactos-list.tsx`),
  *    por la vía reducida de la segunda mitad de este archivo
- *  - ⚠️ `ResumenCampanas` en el 360 del contacto (`directorio/contacto/[id]`)
- *    sigue teniendo esta misma lógica escrita EN LÍNEA. Es la tercera copia de
- *    la regla y la deuda abierta: debe importar de aquí. No se migró en el PR de
- *    la vista general para no meter un cuarto archivo en un frente de
- *    presentación, pero mientras siga copiada las dos pantallas pueden
- *    desincronizarse sin que nada avise.
+ *
+ * Los tres tienen que seguir dando lo mismo para el mismo contacto: la primera
+ * campaña del 360 y la del panel de su negocio son el mismo dato, y el día que
+ * discrepen dos pantallas le adjudican el mismo cierre a campañas distintas.
  *
  * La regla, textual:
  *  - La PRIMERA sale de `custom_data.origen` del contacto, no del `min()` de
