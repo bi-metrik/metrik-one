@@ -234,15 +234,26 @@ export interface BorradorRecibo {
  * El valor sale del comprobante de pago cargado en la etapa Pago UPME, que es
  * lo efectivamente pagado, no un estimado.
  */
+/**
+ * El CONCEPTO es un parámetro, no una constante.
+ *
+ * Hasta el 2026-09-03 la observación estaba cableada a `'Valor recaudado para pago ante
+ * la UPME'`, porque el recibo solo existía para la tarifa. Con la decisión de Mauricio
+ * el recibo acusa **cualquier** entrega de dinero del cliente, así que el texto lo
+ * declara la línea (`config_extra.siigo.recibo_concepto`) y no el código: un recibo que
+ * dice "para pago ante la UPME" sobre un anticipo de honorarios describe mal un
+ * documento contable que ya no se puede corregir.
+ */
 export function borradorRecibo(
   cfg: SiigoConfig,
   identificacion: string,
   valorPagado: number | null,
   fecha: string,
+  concepto: string,
 ): Borrador<BorradorRecibo> {
   const faltantes: string[] = []
   if (!identificacion) faltantes.push('identificación')
-  if (valorPagado == null || !(valorPagado > 0)) faltantes.push('valor pagado a la UPME')
+  if (valorPagado == null || !(valorPagado > 0)) faltantes.push('valor recibido')
 
   return {
     payload: {
@@ -251,7 +262,7 @@ export function borradorRecibo(
       type: 'AdvancePayment',
       customer: { identification: identificacion, branch_office: 0 },
       payment: { id: cfg.reciboPaymentId, value: valorPagado ?? 0 },
-      observations: 'Valor recaudado para pago ante la UPME',
+      observations: concepto,
     },
     faltantes,
   }

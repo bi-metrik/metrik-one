@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
 
 // Cast a untyped para columnas/tipos nuevos no en database.ts (tipo_cobro 'externo')
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -164,7 +165,12 @@ export async function registrarPagoExterno(
         .eq('id', negocioBloqueId)
     }
 
-    // ── 5. Revalidar y retornar ──────────────────────────────────────────────
+    // ── 5. El recibo de caja de esta plata ───────────────────────────────────
+    // Solo si la línea lo declara. No devuelve error: el pago ya quedó registrado y
+    // eso es lo que la persona pidió.
+    await emitirReciboAutomatico(workspaceId, cobroId)
+
+    // ── 6. Revalidar y retornar ──────────────────────────────────────────────
     revalidatePath(`/negocios/${negocioId}`)
     return { success: true, pagos: updatedPagos }
   } catch (err) {

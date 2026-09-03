@@ -3,6 +3,7 @@
 import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
 
@@ -268,7 +269,8 @@ export async function registrarPagoEpayco(
       .eq('external_ref', String(desgloseFinal.ref_payco))
       .limit(1)
 
-    if (!existingCobro || (existingCobro as unknown[]).length === 0) {
+    let cobroId: string | null = ((existingCobro ?? [])[0] as { id: string } | undefined)?.id ?? null
+    if (!cobroId) {
       // La fecha del cobro es la del PAGO en ePayco, no la del registro en ONE
       // (decision de Mauricio, 2026-08-18). `v_venta_mes_comercial.fecha_venta`
       // es el `min(cobros.fecha)` del negocio, asi que esto decide en que mes
@@ -292,8 +294,10 @@ export async function registrarPagoEpayco(
         external_ref: String(desgloseFinal.ref_payco),
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: cobroError } = await (db(supabase) as any).from('cobros').insert(cobro)
+      const { data: insertado, error: cobroError } = await (db(supabase) as any)
+        .from('cobros').insert(cobro).select('id').single()
       if (cobroError) return { success: false, error: (cobroError as { message: string }).message }
+      cobroId = (insertado as { id: string } | null)?.id ?? null
     }
 
     // ── 4. Causar los costos de ePayco ─────────────────────────────────────
@@ -398,6 +402,10 @@ export async function registrarPagoEpayco(
       .eq('id', negocioBloqueId)
 
     // ── 6. Revalidar y retornar ────────────────────────────────────────────
+    // El recibo de caja de esta plata. Solo si la línea lo declara, y nunca devuelve
+    // error: el pago ya quedó registrado y eso es lo que la persona pidió.
+    if (cobroId) await emitirReciboAutomatico(workspaceId, cobroId)
+
     revalidatePath(`/negocios/${negocioId}`)
     return { success: true, pagos: updatedPagos }
   } catch (err) {
