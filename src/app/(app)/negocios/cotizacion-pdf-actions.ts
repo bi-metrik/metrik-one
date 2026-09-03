@@ -3,6 +3,11 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
+import {
+  PLANTILLA_POR_DEFECTO,
+  plantillaCotizacionPropia,
+} from '@/lib/pdf/plantillas-cotizacion'
+import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import { createElement } from 'react'
 import {
@@ -40,7 +45,7 @@ function extractDriveFolderId(url: string | null | undefined): string | null {
 }
 
 export async function generateCotizacionPDF(cotizacionId: string) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Get cotización (left join — puede ser de oportunidad o de negocio)
@@ -191,15 +196,23 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const fiscal = calcularFiscal(valorNeto, vendorProfile, buyerProfile)
 
   // ============================================================
-  // PATH A — Servicio WeasyPrint (template HTML por workspace)
+  // Que plantilla visual usa la cotizacion de este workspace
   // ============================================================
-  // Solo se usa si:
-  //   - env vars METRIK_PDF_RENDER_* estan configuradas, Y
-  //   - el workspace tiene cotizacion_template_slug distinto de 'metrik'
-  //     (template 'metrik' aun no esta migrado, sigue usando @react-pdf hasta Fase 3)
+  // Una sola columna decide: `workspaces.cotizacion_template_slug`. El registro de
+  // `plantillas-cotizacion.ts` dice que motor la atiende.
+  //
+  //   PATH A — servicio WeasyPrint externo: solo si las env vars METRIK_PDF_RENDER_*
+  //            estan configuradas, el slug no es el default Y no tiene plantilla propia.
+  //   PATH B — @react-pdf, aqui mismo: plantilla propia del registro si la hay, y si no
+  //            la generica de MeTRIK. Es tambien el fallback si PATH A falla.
   // ============================================================
-  const templateSlug = ws?.cotizacion_template_slug ?? 'metrik'
-  const useService = isPdfRenderConfigured() && templateSlug !== 'metrik'
+  const templateSlug = ws?.cotizacion_template_slug ?? PLANTILLA_POR_DEFECTO
+  // Si el slug tiene plantilla @react-pdf propia, se resuelve abajo (PATH B) y NO se
+  // llama al servicio externo: pedirle un template que no tiene daria un 4xx y una
+  // caida al fallback, o sea el PDF generico con aspecto de exito.
+  const plantillaPropia = plantillaCotizacionPropia(templateSlug)
+  const useService =
+    isPdfRenderConfigured() && templateSlug !== PLANTILLA_POR_DEFECTO && !plantillaPropia
 
   if (useService) {
     // Cast a la cotizacion para acceder a campos nuevos hasta regenerar database.ts
@@ -228,14 +241,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       : new Date()
     const fechaStr = `${fechaEnvio.getDate()}/${fechaEnvio.getMonth() + 1}/${fechaEnvio.getFullYear()}`
 
-    // validez_dias: si hay fecha_validez calcular delta, sino default 30
-    let validezDias = 30
-    if (cot.fecha_validez && cot.fecha_envio) {
-      const ms =
-        new Date(cot.fecha_validez as string).getTime() -
-        new Date(cot.fecha_envio as string).getTime()
-      validezDias = Math.max(1, Math.round(ms / 86400000))
-    }
+    // validez_dias: derivada de las fechas; sin ellas, el default historico de 30.
+    const validezDias =
+      vigenciaEnDias(cot.fecha_envio as string | null, cot.fecha_validez as string | null) ?? 30
 
     // observaciones_extra de la cotizacion + linea de forma de pago si hay anticipo
     const obsExtra: string[] = Array.isArray(cotExt.observaciones_extra)
@@ -325,7 +333,26 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // ============================================================
   // PATH B (fallback) — @react-pdf/renderer (legacy, pre-Fase 2)
   // ============================================================
-  const element = createElement(CotizacionPDF, {
+
+  // Quien firma el documento. Se resuelve SOLO si la plantilla lo imprime, para no
+  // cobrarle una consulta a los workspaces que no lo usan.
+  //
+  // OJO con lo que este dato significa: `cotizaciones` no guarda quien la creo, asi
+  // que esto es el staff que APRETO GENERAR, no necesariamente quien la elaboro. Si
+  // el usuario no tiene ficha de staff queda null y la plantilla omite la firma.
+  let emisor: { nombre: string; cargo: string | null } | null = null
+  if (plantillaPropia && staffId) {
+    const { data: staff } = await supabase
+      .from('staff')
+      .select('full_name, position')
+      .eq('id', staffId)
+      .maybeSingle<{ full_name: string | null; position: string | null }>()
+    if (staff?.full_name) {
+      emisor = { nombre: staff.full_name, cargo: staff.position ?? null }
+    }
+  }
+
+  const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {
       consecutivo: cot.consecutivo,
       descripcion: cot.descripcion,
@@ -337,6 +364,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       notas: cot.notas,
       descuento_porcentaje: cot.descuento_porcentaje ?? 0,
       descuento_valor: cot.descuento_valor ?? 0,
+      terminos_condiciones: (cot as unknown as CotizacionNuevosCampos).terminos_condiciones,
     },
     empresa: {
       nombre: empresa.nombre ?? '',
@@ -366,6 +394,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       cantidad: Number(i.cantidad) || 1,
     })),
     fiscal,
+    negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
+    emisor,
   })
 
   // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime

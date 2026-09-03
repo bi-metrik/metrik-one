@@ -1,56 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Image as PdfImage } from '@react-pdf/renderer'
 
-interface CotizacionPDFProps {
-  cotizacion: {
-    consecutivo: string
-    descripcion: string | null
-    valor_total: number
-    modo: string
-    fecha_envio: string | null
-    fecha_validez: string | null
-    condiciones_pago: string | null
-    notas: string | null
-    descuento_porcentaje: number | null
-    descuento_valor: number | null
-  }
-  empresa: {
-    nombre: string
-    nit: string | null
-    contacto_nombre: string | null
-    contacto_email: string | null
-    telefono: string | null
-    direccion: string | null
-    ciudad: string | null
-  }
-  vendedor: {
-    nombre: string
-    razon_social: string | null
-    nit: string | null
-    logo_url: string | null
-    color_primario: string
-    telefono: string | null
-    email: string | null
-    direccion: string | null
-    ciudad: string | null
-  }
-  items: {
-    nombre: string
-    descripcion: string | null
-    precio_venta: number
-    descuento_porcentaje: number
-    cantidad: number
-  }[]
-  fiscal: {
-    subtotal: number
-    iva: number
-    reteFuente: number
-    reteICA: number
-    reteIVA: number
-    totalBruto: number
-    totalRetenciones: number
-    teQueda: number
-  } | null
-}
+import type { CotizacionPDFProps } from './cotizacion-props'
 
 // Color lightener (react-pdf no soporta rgba)
 function lighten(hex: string, amount: number): string {
