@@ -98,6 +98,31 @@ describe('lenteCohorte', () => {
     expect(conversion(video)).toBeCloseTo(0.0519, 4)
   })
 
+  it('el nombre de Meta gana aunque solo UNO de sus meses este sincronizado', () => {
+    // Salio del QA contra produccion, no de una revision: la campana renombrada tiene
+    // una venta en julio (mes sin sincronizar, con el nombre viejo del payload) y sus
+    // leads en agosto (mes sincronizado, con el nombre de hoy). Acumulando "el ultimo
+    // nombre que se cruce" la cohorte quedaba etiquetada con la foto vieja.
+    const filas: FilaMarketing[] = [
+      f({ campaignId: PLUS, campana: 'CLIENTES POTENCIALES AGO ($100)', mes: '2026-08-01',
+          gasto: 1524621, sincronizadoAt: '2026-09-03T20:00:00Z', leads: 304, ventas: 5 }),
+      f({ campaignId: PLUS, campana: 'CLIENTES POTENCIALES AGO 2026 PLUS', mes: '2026-07-01',
+          ventas: 1 }),
+    ]
+    expect(lenteCohorte(filas)[0].campana).toBe('CLIENTES POTENCIALES AGO ($100)')
+    // Y en la lente MES cada mes se llama como se llamaba, que es lo correcto: ahi la
+    // pregunta es por ESE mes.
+    expect(lenteMes(filas, '2026-07-01')[0].campana).toBe('CLIENTES POTENCIALES AGO 2026 PLUS')
+  })
+
+  it('sin ninguna fila sincronizada, la etiqueta es la del payload mas reciente', () => {
+    const filas: FilaMarketing[] = [
+      f({ campaignId: PLUS, campana: 'NOMBRE VIEJO', mes: '2026-07-01' }),
+      f({ campaignId: PLUS, campana: 'NOMBRE NUEVO', mes: '2026-08-01' }),
+    ]
+    expect(lenteCohorte(filas)[0].campana).toBe('NOMBRE NUEVO')
+  })
+
   it('la campana renombrada aparece UNA sola vez, con la etiqueta de Meta', () => {
     // Si saliera partida en dos filas, la vista estaria agrupando por nombre.
     const plus = lenteCohorte(SOENA).filter(x => x.campaignId === PLUS)

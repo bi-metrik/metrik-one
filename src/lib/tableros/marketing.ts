@@ -84,7 +84,6 @@ const vacia = (campaignId: string | null): CampanaAgregada => ({
 function acumular(acc: CampanaAgregada, f: FilaMarketing): CampanaAgregada {
   return {
     ...acc,
-    campana: acc.sinRastro ? acc.campana : (f.campana ?? acc.campana),
     status: f.status ?? acc.status,
     gasto: acc.gasto + f.gasto,
     gastoConocido: acc.gastoConocido || f.sincronizadoAt !== null,
@@ -112,19 +111,44 @@ function maxISO(a: string | null, b: string | null): string | null {
   return a > b ? a : b
 }
 
+/**
+ * Como se llama la campana en la pantalla.
+ *
+ * ⚠️ Manda el nombre VIGENTE en Meta sobre el del payload del lead. Las filas de un
+ * mes que ya se sincronizo traen el de Meta; las de un mes sin sincronizar traen el
+ * que el lead guardo cuando entro, que es una foto vieja. Quedarse con el ultimo
+ * nombre que se cruce mostraria `CLIENTES POTENCIALES AGO 2026 PLUS` para una campana
+ * que Daniela ya renombro a `CLIENTES POTENCIALES AGO ($100)`, y la pantalla tiene que
+ * llamarla como ella la llama. Entre varias sincronizadas gana la del mes mas
+ * reciente.
+ */
+function etiqueta(filas: FilaMarketing[]): string | null {
+  const conNombre = filas.filter(f => f.campana)
+  const fuentes = conNombre.filter(f => f.sincronizadoAt !== null)
+  const orden = (fuentes.length > 0 ? fuentes : conNombre)
+    .slice()
+    .sort((a, b) => b.mes.localeCompare(a.mes))
+  return orden[0]?.campana ?? null
+}
+
 function agrupar(filas: FilaMarketing[]): CampanaAgregada[] {
-  const mapa = new Map<string, CampanaAgregada>()
+  const mapa = new Map<string, FilaMarketing[]>()
   for (const f of filas) {
     // ⚠️ La llave es el `campaign_id`, NUNCA el nombre. Meta ya renombro una campana
     // viva de SOENA; agrupar por nombre la partiria en dos filas con la mitad del
     // gasto cada una el dia que la vuelvan a renombrar.
     const k = f.campaignId ?? '__sin_rastro__'
-    mapa.set(k, acumular(mapa.get(k) ?? vacia(f.campaignId), f))
+    mapa.set(k, [...(mapa.get(k) ?? []), f])
   }
-  return [...mapa.values()].map(c => ({
-    ...c,
-    campana: c.campana || (c.campaignId ?? 'Sin campaña'),
-  }))
+  return [...mapa.values()].map(grupo => {
+    const agg = grupo.reduce(acumular, vacia(grupo[0].campaignId))
+    return {
+      ...agg,
+      campana: agg.sinRastro
+        ? agg.campana
+        : (etiqueta(grupo) ?? grupo[0].campaignId ?? 'Sin campaña'),
+    }
+  })
 }
 
 /**
