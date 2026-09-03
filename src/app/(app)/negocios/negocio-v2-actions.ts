@@ -2224,17 +2224,29 @@ function leerFieldData(
  * antes usaba el webhook (config_extra.meta_leads.nombre_negocio): base = nombre
  * del contacto, + append_fields (ej. marca-modelo), uppercase opcional.
  * Sin config → nombre base tal cual.
+ *
+ * `append_fields` tiene el mismo problema que tenía `field_map`: son nombres de
+ * campo EXACTOS de un formulario que edita otra persona en otra herramienta, así
+ * que el día que renombran el campo el negocio pasa a llamarse solo como el
+ * cliente y nadie se entera. Por eso, si el campo configurado a mano no aparece,
+ * se cae al que el webhook APRENDIÓ de ese formulario
+ * (`field_map_por_formulario[form_id].descripcion`, migración 20260903000001).
  */
 function construirNombreNegocioDesdePayload(
   base: string,
   cfgNombre: { uppercase?: boolean; append_fields?: string[] } | undefined,
   fieldData: Array<{ name?: string; values?: string[] }>,
+  campoAprendido?: string | null,
 ): string {
   let nombre = base
-  const extra = (cfgNombre?.append_fields ?? [])
+  let extra = (cfgNombre?.append_fields ?? [])
     .map((name) => leerFieldData(fieldData, [name]))
     .filter((v): v is string => !!v && v.trim().length > 0)
     .map((v) => v.trim())
+  if (!extra.length && campoAprendido) {
+    const v = leerFieldData(fieldData, [campoAprendido])
+    if (v?.trim()) extra = [v.trim()]
+  }
   if (extra.length) nombre = `${base} - ${extra.join(' ')}`
   return cfgNombre?.uppercase ? nombre.toUpperCase() : nombre
 }
@@ -2322,10 +2334,20 @@ export async function crearNegocioDesdeInteraccion(input: {
     .select('config_extra')
     .eq('id', workspaceId)
     .single()
-  const cfgNombre = ((wsCfg as { config_extra?: { meta_leads?: {
+  const metaCfg = (wsCfg as { config_extra?: { meta_leads?: {
     nombre_negocio?: { uppercase?: boolean; append_fields?: string[] }
-  } } } | null)?.config_extra?.meta_leads?.nombre_negocio)
-  const nombreNegocio = construirNombreNegocioDesdePayload(contactoNombre, cfgNombre, fieldData)
+    field_map_por_formulario?: Record<string, { descripcion?: string | null }>
+  } } } | null)?.config_extra?.meta_leads
+  const cfgNombre = metaCfg?.nombre_negocio
+  // El form_id del lead viaja en el payload de la interacción: es la llave del
+  // mapa que el webhook aprendió para ESE formulario.
+  const formIdLead = String(payloadMeta.form_id ?? '').trim()
+  const campoAprendido = formIdLead
+    ? (metaCfg?.field_map_por_formulario?.[formIdLead]?.descripcion ?? null)
+    : null
+  const nombreNegocio = construirNombreNegocioDesdePayload(
+    contactoNombre, cfgNombre, fieldData, campoAprendido,
+  )
 
   // 3.b. ¿Este contacto ya tiene negocio? Se pregunta ANTES de crear la empresa
   //      jurídica del paso 4: si se preguntara después, cancelar dejaría una

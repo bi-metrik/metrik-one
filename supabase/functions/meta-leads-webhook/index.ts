@@ -34,6 +34,7 @@
 // ============================================================
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { entenderFormulario, type MapaFormulario } from '../_shared/meta-leads/entender-formulario.ts';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -275,6 +276,11 @@ async function procesarEventos(supabase: SupabaseClient, eventos: EventoRegistra
 type MetaLeadsConfig = {
   page_id: string | number;
   field_map?: Record<string, string[]>;
+  // Mapa APRENDIDO por formulario, indexado por form_id. Lo escribe el propio
+  // webhook la primera vez que ve un formulario que el mapa a mano no resuelve
+  // (ver `resolverMapaDelFormulario`). `field_map` sigue mandando sobre esto:
+  // es el override para cuando un humano quiere corregir al modelo.
+  field_map_por_formulario?: Record<string, MapaFormulario & { _origen?: unknown }>;
   // Defaults del contacto que se crea desde el lead (opt-in). fuente_adquisicion y
   // fuente_detalle etiquetan el origen (ej. pauta digital pagada). rol_natural se
   // asigna solo si el lead declara ser persona natural (el campo tipo_persona_field
@@ -315,6 +321,80 @@ async function escribirOrigenSiFalta(
   if (cd.origen) return; // ya tiene primer origen: no se pisa
   await supabase
     .from('contactos').update({ custom_data: { ...cd, origen } }).eq('id', contactoId);
+}
+
+// ── El mapa de un formulario que nadie configuró ──────────────────────────
+//
+// Tres fuentes resuelven cada campo, de más específica a más general: el
+// `field_map` escrito a mano, el mapa APRENDIDO de este formulario, y la red por
+// parecido. Esta función se ocupa de la del medio.
+//
+// ⚠️ **El modelo no va en el camino del lead: va una vez, por formulario.**
+// Aquí solo se llega cuando (a) este `form_id` no tiene mapa aprendido todavía y
+// (b) el mapa a mano dejó un hueco de verdad. Un formulario que el mapa resuelve
+// bien nunca gasta una llamada, y uno que no, la gasta UNA vez en su vida: lo que
+// el modelo decide queda escrito y los siguientes leads lo leen de la config.
+//
+// Que quede escrito es la mitad del punto. Un modelo consultado en cada lead
+// decide en secreto, puede decidir distinto dos veces con la misma entrada, y no
+// hay dónde ir a corregirlo. Un mapa guardado se lee, se audita y se edita.
+//
+// Nunca lanza: devuelve null y el lead sigue por la red por parecido. Que no se
+// haya podido aprender el formulario no es razón para perder al cliente.
+async function resolverMapaDelFormulario(
+  supabase: SupabaseClient,
+  ctx: {
+    workspaceId: string;
+    cfg: MetaLeadsConfig;
+    formId: string | null;
+    campos: string[];
+    /** ¿El mapa a mano dejó sin resolver el nombre, o el correo Y el teléfono? */
+    faltaAlgo: boolean;
+  },
+): Promise<MapaFormulario | null> {
+  const { workspaceId, cfg, formId, campos, faltaAlgo } = ctx;
+  if (!formId) return null;
+
+  // Ya aprendido: se usa y no se consulta a nadie. Este es el camino normal a
+  // partir del segundo lead de cualquier formulario.
+  const guardado = cfg.field_map_por_formulario?.[formId];
+  if (guardado) return guardado;
+
+  // El mapa a mano resuelve el formulario: no hay nada que aprender.
+  if (!faltaAlgo) return null;
+  if (!campos.length) return null;
+
+  console.log(
+    `[meta-leads] formulario sin mapa ws=${workspaceId} form_id=${formId}: preguntando al modelo`,
+  );
+  const entendido = await entenderFormulario(campos);
+  if (!entendido) return null;
+
+  const paraGuardar = {
+    ...entendido.mapa,
+    _origen: { modelo: entendido.modelo, creado_en: new Date().toISOString(), campos },
+  };
+
+  // La escritura la hace una función de SQL y no un update desde aquí: cuando un
+  // formulario nuevo arranca no llega un lead, llegan varios a la vez, y un
+  // read-modify-write sobre `config_extra` haría que el último borrara lo que
+  // escribieron los otros — sobre la misma columna donde vive el `page_id`.
+  const { error } = await supabase.rpc('guardar_field_map_formulario', {
+    p_workspace_id: workspaceId,
+    p_form_id: formId,
+    p_mapa: paraGuardar,
+  });
+  if (error) {
+    // No se pudo guardar, pero el mapa sirve para ESTE lead. El siguiente lead
+    // del mismo formulario volverá a preguntar, que es el peor caso tolerable.
+    console.error(`[meta-leads] no se pudo guardar el mapa de ${formId}: ${error.message}`);
+  } else {
+    console.log(
+      `[meta-leads] formulario ${formId} aprendido: ${JSON.stringify(entendido.mapa)}`,
+    );
+  }
+
+  return entendido.mapa;
 }
 
 // Devuelve SIEMPRE un resultado explícito (nunca void): cada salida temprana dice
@@ -412,29 +492,55 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
       ?.values?.[0] ?? null;
 
   const fm = cfg.field_map ?? {};
+  const formId = String(c.form_id ?? lead.form_id ?? '').trim() || null;
+
+  // Mapa APRENDIDO de este formulario: la tercera fuente, entre el mapa a mano y
+  // la red por parecido. Puede costar una llamada a un modelo, y solo la primera
+  // vez que se ve el formulario. Ver `resolverMapaDelFormulario`.
+  const aprendido = await resolverMapaDelFormulario(supabase, {
+    workspaceId,
+    cfg,
+    formId,
+    campos: fieldData.map((fd) => fd.name).filter(Boolean),
+    faltaAlgo: !getField(fm.nombre ?? ['full_name', 'nombre', 'name'])
+      || (!getField(fm.email ?? ['email', 'correo', 'correo_electronico'])
+        && !getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone'])),
+  });
+  // El mapa aprendido guarda UN nombre de campo por papel, no una lista.
+  const porAprendido = (papel: keyof MapaFormulario): string | null => {
+    const campo = aprendido?.[papel];
+    return campo ? getField([campo]) : null;
+  };
+
+  // Orden de resolución, de más específico a más general:
+  //   1. `field_map` a mano — es el override humano y manda sobre todo lo demás.
+  //   2. el mapa aprendido de ESTE formulario.
+  //   3. la red por parecido, que no sabe de formularios y acierta por costumbre.
   const nombre = getField(fm.nombre ?? ['full_name', 'nombre', 'name'])
+    ?? porAprendido('nombre')
     ?? porParecido(['nombre', 'name'])
     ?? 'Lead sin nombre';
   const emailRaw = getField(fm.email ?? ['email', 'correo', 'correo_electronico'])
+    ?? porAprendido('email')
     ?? porParecido(['email', 'correo', 'mail'])
     ?? porFormaDeEmail();
   // Nada de adivinar el teléfono por su forma: una cédula también son diez
   // dígitos. Solo por el nombre del campo, que en un formulario de Meta siempre
   // dice de qué se trata.
   const telefonoRaw = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone'])
+    ?? porAprendido('telefono')
     ?? porParecido(['tel', 'phone', 'celular', 'movil', 'whatsapp']);
   const email = norm(emailRaw);
 
-  // Si ni el mapa ni el parecido sacaron NADA, el formulario trae campos que este
-  // workspace no conoce. Eso no es un lead sin datos: es un mapa desactualizado, y
-  // el log tiene que decir cuál es el formulario y cómo se llaman sus campos, para
-  // que arreglarlo sea una edición de `config_extra.meta_leads.field_map` y no una
-  // investigación.
+  // Si NADA de lo anterior sacó un dato, el formulario trae campos que ni el mapa,
+  // ni el modelo, ni el parecido reconocieron. El log tiene que decir cuál es el
+  // formulario y cómo se llaman sus campos, para que arreglarlo sea una edición de
+  // `config_extra.meta_leads.field_map` y no una investigación.
   const sinMapeo = !emailRaw && !telefonoRaw && nombre === 'Lead sin nombre';
   if (sinMapeo) {
     console.error(
       `[meta-leads] FORMULARIO SIN MAPEAR ws=${workspaceId} ` +
-      `form_id=${c.form_id ?? lead.form_id ?? '?'} ` +
+      `form_id=${formId ?? '?'} ` +
       `campos=[${fieldData.map((fd) => fd.name).join(', ')}]`,
     );
   }
@@ -446,7 +552,8 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
   const tipoPersonaNames = cc.tipo_persona_field
     ? (Array.isArray(cc.tipo_persona_field) ? cc.tipo_persona_field : [cc.tipo_persona_field])
     : [];
-  const tipoPersona = tipoPersonaNames.length ? getField(tipoPersonaNames) : null;
+  const tipoPersona = (tipoPersonaNames.length ? getField(tipoPersonaNames) : null)
+    ?? porAprendido('tipo_persona');
   const esNatural = !!tipoPersona
     && tipoPersona.trim().toLowerCase().replace(/_+$/, '') === (cc.natural_value ?? 'natural').toLowerCase();
   const contactoRol = esNatural ? (cc.rol_natural ?? null) : null;
