@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { createServiceClient } from '@/lib/supabase/server'
 import { FEATURES } from '@/lib/feature-flags'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { resumirCartera, type ItemCartera } from '@/lib/negocios/cartera'
@@ -260,8 +261,27 @@ export async function getNumeros(mesRef?: string) {
     // workspaces: P4 daba $0 siempre. `v_venta_mes_comercial` ya define que es
     // una venta (el mes del primer cobro imputado) y es la misma definicion que
     // usa la pestaña Comercial de /tableros — una sola, no dos.
+    //
+    // ⚠️ Va con el cliente de SERVICIO a proposito, no con el de la sesion. La
+    // vista esta declarada server-only: su migracion (`20260812230000`) hace
+    // `revoke all ... from anon, authenticated` y las dos que la reescriben
+    // despues (`20260823000001`, `20260824000001`) vuelven a revocarla, asi que
+    // el `grant` suelto de `20260822000004` no sobrevive. Verificado contra
+    // produccion el 2026-09-03: `has_table_privilege('authenticated',
+    // 'public.v_venta_mes_comercial', 'select')` = false. Con el cliente
+    // autenticado esta consulta devolvia `42501: permission denied for view` y
+    // el `?? []` de mas abajo lo convertia en $0 — la tarjeta P4 llevaba semanas
+    // mintiendo en TODOS los workspaces. Mismo patron que `getNegocioDetalle`
+    // en `negocios/negocio-v2-actions.ts` (PR #517).
+    //
+    // El `.eq('workspace_id', ...)` NO es adorno: el service client no pasa por
+    // RLS y sin el la cifra sumaria los 15 workspaces.
+    //
+    // ⚠️ Esto NO se generaliza a la vista hermana: `v_cartera_negocio` SI esta
+    // concedida a `authenticated` (verificado, = true) y se sigue leyendo con el
+    // cliente de la sesion, que es lo correcto — ahi la RLS es el control.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
+    (createServiceClient() as any)
       .from('v_venta_mes_comercial')
       .select('honorario_con_iva')
       .eq('workspace_id', workspaceId)
@@ -417,6 +437,49 @@ export async function getNumeros(mesRef?: string) {
       .in('stage_actual', ['ejecucion', 'cobro'])
       .eq('estado', 'abierto'),
   ])
+
+  // ── Ninguna lectura fallida se va en silencio ────
+  //
+  // Todas las lecturas de arriba se consumen con `?? []` o `?.campo ?? 0`. Sobre
+  // una respuesta de PostgREST CON error eso devuelve exactamente lo mismo que
+  // sobre una consulta legitimamente vacia: cero. Es indistinguible, y por eso
+  // el `42501` de `v_venta_mes_comercial` dejo la tarjeta P4 en $0 durante
+  // semanas sin producir una sola señal en ningun lado.
+  //
+  // Esto no cambia lo que ve el usuario —la pantalla sigue degradando a cero en
+  // vez de reventar entera por una tarjeta— pero deja rastro en los logs del
+  // servidor. Esa es la diferencia entre un bug visible y uno que no existe para
+  // nadie. El prefijo `[numeros]` sigue la convencion de `equipo/comercial-actions.ts`.
+  const lecturas: Array<[string, { error: unknown }]> = [
+    ['saldos_banco', saldoBancoRes],
+    ['cobros del mes', cobrosRes],
+    ['cobros mes anterior', cobrosPrevRes],
+    ['gastos del mes', gastosRes],
+    ['gastos mes anterior', gastosPrevRes],
+    ['gastos 3 meses', gastos3mRes],
+    ['v_venta_mes_comercial', ventasMesRes],
+    ['v_cartera_negocio', carteraRes],
+    ['config_metas', configMetasRes],
+    ['fixed_expenses', gastosFijosRes],
+    ['streaks', streakRes],
+    ['profiles', profileRes],
+    ['empresas', empresasRes],
+    ['negocios en venta', negociosVentaRes],
+    ['horas recientes', horasRecientesRes],
+    ['borradores de gastos fijos', gastosFijosBorradoresRes],
+    ['staff (nomina)', staffNominaRes],
+    ['v_pyl_mes', pylMesRes],
+    ['v_pyl_mes mes anterior', prevPylMesRes],
+    ['MC por negocio', mcNegociosRes],
+    ['MC por linea', mcLineasRes],
+    ['perfil fiscal', fiscalProfileRes],
+    ['cuentas por pagar', cxpRes],
+    ['negocios en pipeline', negociosPipelineRes],
+    ['negocios contratados', negociosContratadosRes],
+  ]
+  for (const [nombre, res] of lecturas) {
+    if (res.error) console.error(`[numeros] fallo la lectura de ${nombre}:`, res.error)
+  }
 
   // ── Calculate values ─────────────────────────────
 
