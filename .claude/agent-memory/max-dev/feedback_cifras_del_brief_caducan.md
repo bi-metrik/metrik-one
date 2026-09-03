@@ -31,5 +31,10 @@ del encargo.
   un defecto.
 - En el reporte, decir explícitamente **qué cifra del brief ya no aplica y por qué**. Un
   brief con números viejos no es un brief equivocado: es un brief con fecha.
+- **Lo mismo vale para los PUNTEROS a columnas de vistas**, no solo para las cifras. El
+  2026-09-03 el spec de la descarga a Excel nombraba `v_venta_mes_comercial.honorario_recaudado`
+  como «con IVA» y `v_cobro_valor.propio_con_iva` de respaldo: la primera había bajado a base
+  el día anterior y la segunda no existía desde agosto. Antes de consumir una columna que un
+  brief nombra, leer la ÚLTIMA migración que define esa vista ([[descarga-excel-negocios]]).
 
 Relacionado: [[medir-antes-de-construir]], [[worktree-git-bloqueado]], [[sql-prod-one]].
