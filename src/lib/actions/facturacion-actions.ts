@@ -18,7 +18,7 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
-import { emitirReciboNegocio } from '@/lib/siigo/recibos'
+import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
   conceptoFactura,
@@ -106,6 +106,8 @@ export interface CasoPorFacturar {
   factura_numero: string | null
   /** Consecutivo del recibo de caja del recaudo UPME, si ya se emitió. */
   recibo_numero: string | null
+  /** Pagos registrados y no anulados que todavía no tienen recibo de caja. */
+  pagos_sin_recibo: number
   /**
    * Base gravable que viajaría a Siigo. Sale del MISMO `borradorFactura` que se
    * enviaría, no de una división hecha en la pantalla: si la pantalla calculara
@@ -213,12 +215,19 @@ async function armarColaFacturacion(
   // Dónde vive el bloque de la factura en cada línea. Se usa para saber si el caso
   // ya tiene una factura CARGADA, que es distinto de emitida desde aquí.
   const facturaSlugPorLinea = new Map<string, string>()
+  // El concepto del recibo también sale de la línea: desde el 2026-09-03 el recibo
+  // acusa cualquier entrega de dinero, no solo la tarifa UPME, así que el texto dejó
+  // de estar cableado en el código.
+  const reciboConceptoPorLinea = new Map<string, string>()
   for (const l of lineas) {
     const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
     if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
-    const s = (l.config_extra?.siigo ?? {}) as { conceptos?: ConceptosConfig; bloque_factura_slug?: string }
+    const s = (l.config_extra?.siigo ?? {}) as {
+      conceptos?: ConceptosConfig; bloque_factura_slug?: string; recibo_concepto?: string
+    }
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
     if (s.bloque_factura_slug) facturaSlugPorLinea.set(l.id, s.bloque_factura_slug)
+    if (s.recibo_concepto) reciboConceptoPorLinea.set(l.id, s.recibo_concepto)
   }
   if (desde == null) {
     return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
@@ -312,10 +321,14 @@ async function armarColaFacturacion(
   type FilaBloque = { negocio_id: string; data: Record<string, unknown> | null }
   const [cobrosRes, conciliadoRes, tarifaRes, certRes] = await Promise.all([
     // 357 cobros hoy para 305 casos: crece con el recaudo, no solo con los casos.
-    traerTodo<CobroParaRecaudo & { negocio_id: string }>(
+    traerTodo<CobroParaRecaudo & {
+      negocio_id: string
+      siigo_recibo: { numero?: string } | null
+      anulado_at: string | null
+    }>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (d, h) => (svc as any).from('cobros')
-        .select('id, negocio_id, monto, tipo_cobro, split_json')
+        .select('id, negocio_id, monto, tipo_cobro, split_json, siigo_recibo, anulado_at')
         .in('negocio_id', ids).order('id').range(d, h),
       { etiqueta: 'facturacion/cobros' },
     ),
@@ -345,9 +358,17 @@ async function armarColaFacturacion(
   ])
 
   const cobrosPorNegocio = new Map<string, CobroParaRecaudo[]>()
+  // El recibo de caja cuelga del COBRO desde el 2026-09-03, así que su estado se lee
+  // de ahí y no de `negocios.metadata`. Un negocio puede tener varios: se muestra el
+  // último emitido, y aparte cuántos pagos siguen sin acusar.
+  const ultimoReciboPorNegocio = new Map<string, string>()
+  const pagosSinReciboPorNegocio = new Map<string, number>()
   for (const c of cobrosRes) {
     if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
     cobrosPorNegocio.get(c.negocio_id)!.push(c)
+    if (c.anulado_at) continue
+    if (c.siigo_recibo?.numero) ultimoReciboPorNegocio.set(c.negocio_id, c.siigo_recibo.numero)
+    else pagosSinReciboPorNegocio.set(c.negocio_id, (pagosSinReciboPorNegocio.get(c.negocio_id) ?? 0) + 1)
   }
   const conciliados = new Set(
     conciliadoRes.filter(x => x.conciliado === true).map(x => x.negocio_id),
@@ -452,7 +473,10 @@ async function armarColaFacturacion(
     const fac = borradorFactura(cfgEval, cli.payload.identification, honorario, hoy, 19,
       { productoCode: concepto.code })
     const upme = upmePorNegocio.get(n.id) ?? null
-    const rec = borradorRecibo(cfgEval, cli.payload.identification, upme, hoy)
+    const rec = borradorRecibo(
+      cfgEval, cli.payload.identification, upme, hoy,
+      reciboConceptoPorLinea.get(n.linea_id ?? '') ?? '',
+    )
 
     const recaudado = sumarRecaudoConfirmado(cobrosPorNegocio.get(n.id) ?? [], conciliados.has(n.id))
     const { faltante } = descuadreConciliacion(
@@ -491,7 +515,8 @@ async function armarColaFacturacion(
       // re-facturarse.
       ya_facturado: facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero,
       factura_numero: marcaFactura?.numero ?? null,
-      recibo_numero: ((n.metadata?.siigo_recibo ?? null) as { numero?: string } | null)?.numero ?? null,
+      recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
+      pagos_sin_recibo: pagosSinReciboPorNegocio.get(n.id) ?? 0,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,
       descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
@@ -824,7 +849,7 @@ export type ResultadoRecibo =
  */
 export async function emitirReciboDeNegocio(
   negocioId: string,
-  opciones?: { valorPagado?: number; justificacionDuplicado?: string },
+  opciones?: { valorPagado?: number; justificacionDuplicado?: string; cobroId?: string },
 ): Promise<ResultadoRecibo> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { ok: false, error: ctx.error }
@@ -840,61 +865,72 @@ export async function emitirReciboDeNegocio(
     nombre = (st?.full_name as string | null) ?? null
   }
 
-  // ── El valor: el capturado gana sobre el extraído ──
-  // Quien emite está mirando el comprobante; si corrige el número, es porque el
-  // extraído está mal. La extracción es una ayuda, no la autoridad.
-  let valor = opciones?.valorPagado
-  if (valor == null) {
+  // ── De qué COBRO es este recibo ──
+  // Desde el 2026-09-03 el recibo cuelga del cobro. Tesorería sigue entrando por el
+  // negocio, así que cuando no llega `cobroId` se resuelve el cobro pendiente más
+  // reciente: es el que acaba de entrar y el que la persona está mirando. Si el negocio
+  // no tiene ningún cobro sin recibo, no hay plata nueva que acusar.
+  let cobroId = opciones?.cobroId
+  if (!cobroId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: bloques } = await (svc as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(slug)')
+    const { data: pendientes } = await (svc as any)
+      .from('cobros')
+      .select('id')
+      .eq('workspace_id', workspaceId)
       .eq('negocio_id', negocioId)
-    const upme = ((bloques ?? []) as Array<{ data: Record<string, unknown> | null; bloque_configs: { slug: string | null } }>)
-      .find(b => b.bloque_configs?.slug === 'comprobante_pago_upme')
-    const campos = (upme?.data?.campos ?? {}) as Record<string, { value?: unknown }>
-    const crudo = campos.valor_pagado?.value
-    const n = typeof crudo === 'number' ? crudo : Number(String(crudo ?? '').replace(/[^\d]/g, ''))
-    if (Number.isFinite(n) && n > 0) valor = n
+      .is('siigo_recibo', null)
+      .is('anulado_at', null)
+      .order('fecha', { ascending: false })
+      .limit(1)
+    cobroId = ((pendientes ?? [])[0] as { id: string } | undefined)?.id
   }
 
-  if (valor == null || !(valor > 0)) {
+  if (!cobroId) {
     return {
       ok: false,
-      error: 'Falta el valor pagado a la UPME. Cárgalo en el comprobante o escríbelo al emitir.',
+      error: 'Este caso no tiene ningún pago registrado sin recibo. Registra el pago primero.',
     }
   }
 
-  // ── Dónde archivar el PDF: declarado por línea, junto al resto de la config ──
+  // ── Config de la línea: dónde archivar y con qué concepto ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: negLinea } = await (svc as any)
     .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
   let bloqueReciboSlug: string | undefined
+  let concepto: string | undefined
   if (negLinea?.linea_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: linea } = await (svc as any)
       .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
     const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
-      { bloque_recibo_slug?: string } | undefined
+      { bloque_recibo_slug?: string; recibo_concepto?: string } | undefined
     bloqueReciboSlug = cfgSiigo?.bloque_recibo_slug
+    concepto = cfgSiigo?.recibo_concepto
   }
 
-  const r = await emitirReciboNegocio(workspaceId, negocioId, valor, nombre, {
+  const r = await emitirReciboDeCobro(workspaceId, cobroId, nombre, {
     bloqueReciboSlug,
+    concepto,
     justificacionDuplicado: opciones?.justificacionDuplicado,
+    // El valor capturado gana sobre el del cobro: quien emite desde Tesorería está
+    // mirando el soporte y el sistema no.
+    valorPagado: opciones?.valorPagado,
+    // Emitido a mano por una persona que decidió hacerlo: el cliente se entera igual.
+    avisarAlCliente: true,
   })
 
   if (!r.ok) {
     if (r.motivo === 'duplicado_en_siigo') {
       return {
         ok: false,
-        error: `Siigo ya tiene ${r.existentes.length === 1 ? 'un recibo' : `${r.existentes.length} recibos`} de este cliente por la tarifa.`,
+        error: `Siigo ya tiene ${r.existentes.length === 1 ? 'un recibo' : `${r.existentes.length} recibos`} de este cliente por ese mismo valor.`,
         duplicados: r.existentes,
       }
     }
     const mensajes: Record<string, string> = {
-      ya_emitido: r.motivo === 'ya_emitido' ? `Este caso ya tiene el recibo ${r.numero}.` : '',
+      ya_emitido: r.motivo === 'ya_emitido' ? `Este pago ya tiene el recibo ${r.numero}.` : '',
       sin_valor: 'El valor tiene que ser mayor que cero.',
+      anulado: 'Ese pago está anulado: no se le puede emitir recibo.',
       faltan_datos: r.motivo === 'faltan_datos' ? `Faltan datos: ${r.faltantes.join(', ')}.` : '',
       error: r.motivo === 'error' ? r.mensaje : '',
     }

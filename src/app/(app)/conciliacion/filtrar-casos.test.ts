@@ -11,7 +11,7 @@ const caso = (p: Partial<CasoPorFacturar>): CasoPorFacturar => ({
   negocio_id: 'x', codigo: null, nombre: null, etapa: null, etapa_numero: null,
   identificacion: null, cliente: null, telefono: null, email: null, honorario: null, valor_upme: null,
   faltan_factura: [], faltan_cliente: [], faltan_recibo: [],
-  ya_facturado: false, factura_numero: null, recibo_numero: null,
+  ya_facturado: false, factura_numero: null, recibo_numero: null, pagos_sin_recibo: 0,
   concepto: { code: '22', nombre: null, servicio: null, porDefecto: true },
   base_gravable: null, falta_saldo: 0, descartado: null,
   ...p,

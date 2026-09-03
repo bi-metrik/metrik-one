@@ -22,6 +22,11 @@ export interface ResultadoArchivado {
   ok: boolean
   /** URL final del archivo (Drive, o Storage si Drive no estaba disponible). */
   url?: string
+  /**
+   * El bloque donde quedó. Lo necesita quien emite para pedir el aviso al cliente
+   * (`avisar_documento_al_cliente`), que se identifica por `bloque_config_id`.
+   */
+  bloqueConfigId?: string
   /** Por qué no se pudo archivar. El documento en Siigo ya existe igual. */
   error?: string
 }
@@ -48,6 +53,16 @@ export async function archivarPdfEnBloque(
    * tendría que transcribir del PDF que el propio sistema acaba de recibir.
    */
   campos?: Record<string, string>,
+  /**
+   * Entrada que se ACUMULA en una lista dentro del bloque, en vez de pisar lo anterior.
+   *
+   * Existe porque un negocio puede recibir varios recibos de caja: medido el 2026-09-02,
+   * 74 de 306 negocios con cobros ya recibieron más de un pago. `drive_url` solo puede
+   * apuntar a uno (el último, que es el que la pantalla muestra y el que el aviso
+   * enlaza), así que sin esta lista los anteriores quedarían solo en Drive, fuera del
+   * expediente. La factura no la usa: de esa hay una sola.
+   */
+  historial?: { clave: string; entrada: Record<string, unknown> },
 ): Promise<ResultadoArchivado> {
   try {
     const svc = createServiceClient()
@@ -115,6 +130,14 @@ export async function archivarPdfEnBloque(
       // los mismos gates. `manual: true` porque no salieron de una extracción:
       // los devolvió Siigo, y marcarlos como extraídos les pondría un porcentaje
       // de confianza inventado.
+      ...(historial
+        ? {
+            [historial.clave]: [
+              ...(((existente?.data as Record<string, unknown> | undefined)?.[historial.clave] ?? []) as unknown[]),
+              historial.entrada,
+            ],
+          }
+        : {}),
       ...(campos && Object.keys(campos).length > 0
         ? {
             campos: {
@@ -131,7 +154,7 @@ export async function archivarPdfEnBloque(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (svc as any)
         .from('negocio_bloques').update({ data, completado_at: new Date().toISOString() }).eq('id', existente.id)
-      if (error) return { ok: false, error: error.message }
+      if (error) return { ok: false, error: error.message, bloqueConfigId: cfg.id }
     } else {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (svc as any).from('negocio_bloques').insert({
@@ -140,10 +163,10 @@ export async function archivarPdfEnBloque(
         data,
         completado_at: new Date().toISOString(),
       })
-      if (error) return { ok: false, error: error.message }
+      if (error) return { ok: false, error: error.message, bloqueConfigId: cfg.id }
     }
 
-    return { ok: true, url }
+    return { ok: true, url, bloqueConfigId: cfg.id }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

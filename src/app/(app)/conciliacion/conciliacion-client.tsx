@@ -1175,10 +1175,11 @@ function FilaPorFacturar({
         </div>
       )}
 
-      {/* ── El recaudo de la UPME: recibo de caja, nunca factura ────────── */}
-      {/* Va aparte de la factura a propósito: son dos documentos con naturaleza
-          distinta. El honorario es ingreso y se factura; la tarifa es plata de
-          terceros y se recauda. Mezclarlos en un botón invitaría a facturarla. */}
+      {/* ── El dinero recibido: recibo de caja, nunca factura ───────────── */}
+      {/* Va aparte de la factura por decisión de Mauricio (2026-09-03): son dos
+          documentos independientes. La factura se emite por el honorario pactado;
+          el recibo acusa la plata que entregó el cliente. Mezclarlos en un botón
+          invitaría a facturar plata que todavía no es ingreso. */}
       {siigoConfigurado && !caso.descartado && (
         <ReciboUpme caso={caso} onCambio={onCambio} />
       )}
@@ -1460,7 +1461,7 @@ function FilaPorFacturar({
 
 
 /**
- * Emisión del recibo de caja del recaudo de la tarifa UPME.
+ * Emisión del recibo de caja: la confirmación de que el cliente entregó dinero.
  *
  * ⚠️ **El valor es editable y esa es la decisión de diseño, no un descuido.** Desde
  * Tesorería nadie ve el comprobante de pago, y los casos que entraron por el cargue
@@ -1468,24 +1469,30 @@ function FilaPorFacturar({
  * 2026-08-12: de 171 casos con el bloque, solo 18 traen el valor extraído. Si el campo
  * fuera de solo lectura, el 89% de los casos no podría emitir su recibo.
  *
- * El extraído se precarga cuando existe; quien emite puede corregirlo porque está
- * mirando el comprobante y el sistema no.
+ * Desde el 2026-09-03 el recibo cuelga del COBRO y acusa cualquier entrega de dinero,
+ * no solo la tarifa UPME. Por eso el campo puede quedarse **vacío**: sin valor escrito
+ * se emite por el monto del pago registrado, que es el dato exacto. Se escribe solo
+ * para corregirlo contra el soporte.
  */
 function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () => void }) {
   const [abierto, setAbierto] = useState(false)
-  const [valor, setValor] = useState<string>(caso.valor_upme != null ? String(caso.valor_upme) : '')
+  const [valor, setValor] = useState<string>('')
   const [justificacion, setJustificacion] = useState('')
   const [duplicados, setDuplicados] = useState<Array<{ numero: string; fecha: string; valor: number }> | null>(null)
   const [pendiente, startTransition] = useTransition()
 
-  const monto = Number(valor.replace(/[^\d]/g, ''))
-  const montoValido = Number.isFinite(monto) && monto > 0
+  const escrito = valor.replace(/[^\d]/g, '')
+  const monto = Number(escrito)
+  // Vacío es válido: se emite por el monto del pago. Escrito, tiene que ser > 0.
+  const montoValido = escrito === '' || (Number.isFinite(monto) && monto > 0)
 
-  if (caso.recibo_numero) {
+  // Todos los pagos acusados: no hay nada que emitir.
+  if (caso.pagos_sin_recibo === 0) {
+    if (!caso.recibo_numero) return null
     return (
       <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{ color: '#047857' }}>
         <Check className="h-3.5 w-3.5" />
-        Recaudo UPME con recibo <strong>{caso.recibo_numero}</strong>
+        Pagos con recibo de caja · último <strong>{caso.recibo_numero}</strong>
       </div>
     )
   }
@@ -1493,7 +1500,8 @@ function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () =>
   function emitir() {
     startTransition(async () => {
       const r = await emitirReciboDeNegocio(caso.negocio_id, {
-        valorPagado: monto,
+        // Vacío = el monto del pago registrado, que es el dato exacto.
+        valorPagado: escrito === '' ? undefined : monto,
         justificacionDuplicado: justificacion.trim() || undefined,
       })
       if (r.ok) {
@@ -1515,8 +1523,10 @@ function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () =>
     return (
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px]" style={{ color: '#6B7280' }}>
-          Recaudo UPME sin recibo de caja
-          {caso.valor_upme == null && ' · sin valor registrado'}
+          {caso.pagos_sin_recibo === 1
+            ? '1 pago sin recibo de caja'
+            : `${caso.pagos_sin_recibo} pagos sin recibo de caja`}
+          {caso.recibo_numero && ` · último emitido ${caso.recibo_numero}`}
         </span>
         <button
           onClick={() => setAbierto(true)}
@@ -1532,15 +1542,16 @@ function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () =>
   return (
     <div className="mt-2 rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
       <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>
-        Recibo de caja · recaudo para la UPME
+        Recibo de caja · dinero recibido
       </div>
       <p className="mt-1 text-[11px]" style={{ color: '#6B7280' }}>
-        No es una factura: esta plata se recauda para girarla a la UPME, no es ingreso.
+        No es una factura: acusa la plata que entregó el cliente. La factura va aparte, por
+        el honorario pactado.
       </p>
 
       <label className="mt-2 block">
         <span className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>
-          Valor pagado a la UPME
+          Valor recibido (opcional)
         </span>
         <input
           value={valor}
@@ -1552,9 +1563,8 @@ function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () =>
           style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
         />
         <span className="text-[10px]" style={{ color: '#6B7280' }}>
-          {caso.valor_upme != null
-            ? 'Viene del comprobante cargado. Si no coincide con el soporte, corrígelo.'
-            : 'Este caso no tiene comprobante cargado: escribe el valor del soporte.'}
+          Déjalo vacío para emitir por el monto del pago registrado. Escríbelo solo si el
+          soporte dice otra cosa.
         </span>
       </label>
 
@@ -1564,7 +1574,7 @@ function ReciboUpme({ caso, onCambio }: { caso: CasoPorFacturar; onCambio: () =>
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div>
               Siigo ya tiene {duplicados.length === 1 ? 'un recibo' : `${duplicados.length} recibos`} de
-              este cliente: {duplicados.map(d => `${d.numero} (${fmtCOP(d.valor)})`).join(', ')}.
+              este cliente por ese mismo valor: {duplicados.map(d => `${d.numero} (${fmtCOP(d.valor)})`).join(', ')}.
               Si aun así hay que emitirlo, escribe por qué.
             </div>
           </div>
