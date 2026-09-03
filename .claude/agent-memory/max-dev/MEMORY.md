@@ -7,6 +7,7 @@
 - [Formato 010 DIAN](project_formulario_010_dian.md) — Overlay AcroForm, aplanado (flatten), seccional casilla 12 con código auto, presets config-driven, scripts de prueba
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — Solo corre en producción (credenciales sensibles en Vercel); el paso 4 del cron sigue sin decisión de Mauricio
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
+- ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — mergeado y aplicado, pero el módulo NO está encendido y el sync NO está desplegado; la atribución es last-touch
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
 - ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — git fuera de mi worktree se bloquea; y OTRA sesión puede entrar al mío y borrarme la rama: cómo commitear sin mover HEAD
@@ -18,6 +19,7 @@
 ## Referencias
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio; y el `User-Agent` que la Management API exige
+- [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — Management API + Graph API leyendo el token con un script; ensayo con `DO`+`RAISE`
 - [SQL contra prod de ONE](reference_sql_prod_one.md) — la Management API también escribe: ensayo con rollback, respaldo y ledger. La verificación va en sentencia aparte
 
 ## Feedback
