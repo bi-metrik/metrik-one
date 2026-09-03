@@ -28,6 +28,7 @@
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import {
+  credencialValida,
   filasParaUpsert,
   monedasEnConflicto,
   type CampanaMeta,
@@ -86,12 +87,37 @@ Deno.serve(async (req: Request) => {
     body = await req.json();
   } catch { /* sin body: cae en el 401 de abajo */ }
 
-  // Secreto propio si existe; si no, el del handshake de Meta Lead Ads. Mismo
-  // criterio que `meta-leads-backfill`: mismo perimetro (mismos datos, mismo token
-  // de Graph). En cuanto esta funcion quede en un cron, lo primero es darle el suyo.
-  const esperado = Deno.env.get('META_INSIGHTS_SYNC_SECRET') ??
-    Deno.env.get('META_LEADS_VERIFY_TOKEN');
-  if (!esperado || body.secret !== esperado) {
+  // DOS credenciales validas, cualquiera de las dos abre.
+  //
+  // 1) El secreto compartido en el cuerpo. Secreto propio si existe; si no, el del
+  //    handshake de Meta Lead Ads. Mismo criterio que `meta-leads-backfill`: mismo
+  //    perimetro (mismos datos, mismo token de Graph).
+  //
+  // 2) La service role key en `Authorization: Bearer`. Se agrego el 2026-09-03 y es
+  //    la que usa el cron.
+  //
+  // POR QUE la service role key. El secreto compartido vive en los secretos del
+  // PROYECTO, que solo se escriben desde el panel o con el CLI autenticado. Eso dejo
+  // el sync desplegado y sin poder correr: ninguna automatizacion alcanza ese lugar,
+  // asi que arrancarlo dependia de que una persona entrara a una pantalla.
+  // `SUPABASE_SERVICE_ROLE_KEY` en cambio Supabase la inyecta sola en toda edge
+  // function (de hecho `getServiceClient()` ya depende de eso), y el cron la lee del
+  // vault igual que los demas leen los suyos.
+  //
+  // ⚠️ NO afloja la puerta: quien tenga la service role key ya puede escribir
+  // `campana_insights` directo contra la base, sin pasar por aqui. No gana ningun
+  // permiso nuevo. Y la alternativa que se evaluo — `verify_jwt: true` sin secreto —
+  // si la habria aflojado: la anon key tambien es un JWT valido y viaja en el bundle
+  // del navegador, o sea que cualquiera podria gastar cuota de Graph.
+  const autorizado = credencialValida({
+    esperado: Deno.env.get('META_INSIGHTS_SYNC_SECRET') ??
+      Deno.env.get('META_LEADS_VERIFY_TOKEN'),
+    serviceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
+    secretoEnCuerpo: body.secret,
+    authorization: req.headers.get('authorization'),
+  });
+
+  if (!autorizado) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401,
       headers: { 'content-type': 'application/json' },

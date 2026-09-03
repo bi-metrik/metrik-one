@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filasParaUpsert, mesDeTramo, monedasEnConflicto, numeroDeMeta } from './meta-insights'
+import { credencialValida, filasParaUpsert, mesDeTramo, monedasEnConflicto, numeroDeMeta } from './meta-insights'
 
 // Tramos REALES leidos de la Graph API el 2026-09-03 para la campana
 // `CAMPAÑA JUNIO 2026 DJ - VIDEO` (id 120248098468670215). El primer tramo empieza
@@ -92,5 +92,71 @@ describe('monedasEnConflicto', () => {
 
   it('una moneda que no se pudo leer no cuenta como conflicto', () => {
     expect(monedasEnConflicto(['COP', null])).toEqual([])
+  })
+})
+
+describe('credencialValida', () => {
+  const SERVICE = 'service-role-key-de-prueba'
+  const SECRETO = 'secreto-compartido'
+
+  it('el secreto compartido en el cuerpo abre', () => {
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: SERVICE,
+      secretoEnCuerpo: SECRETO, authorization: null,
+    })).toBe(true)
+  })
+
+  it('la service role key en Authorization abre, con y sin el prefijo Bearer', () => {
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: SERVICE,
+      secretoEnCuerpo: undefined, authorization: `Bearer ${SERVICE}`,
+    })).toBe(true)
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: SERVICE,
+      secretoEnCuerpo: undefined, authorization: SERVICE,
+    })).toBe(true)
+  })
+
+  it('un secreto incorrecto no abre aunque el esperado exista', () => {
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: SERVICE,
+      secretoEnCuerpo: 'otra-cosa', authorization: null,
+    })).toBe(false)
+  })
+
+  // La trampa: sin esta guarda, `undefined === undefined` deja entrar a cualquiera
+  // el dia que el secreto no este configurado en el proyecto.
+  it('si el secreto esperado NO esta configurado, un cuerpo sin secreto NO abre', () => {
+    expect(credencialValida({
+      esperado: undefined, serviceKey: SERVICE,
+      secretoEnCuerpo: undefined, authorization: null,
+    })).toBe(false)
+    expect(credencialValida({
+      esperado: null, serviceKey: SERVICE,
+      secretoEnCuerpo: null, authorization: null,
+    })).toBe(false)
+  })
+
+  // Misma trampa del otro lado: en un entorno sin service key inyectada, una
+  // peticion sin cabecera no puede pasar por "coinciden los dos ausentes".
+  it('si la service key NO esta en el entorno, una peticion sin Authorization NO abre', () => {
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: undefined,
+      secretoEnCuerpo: undefined, authorization: undefined,
+    })).toBe(false)
+  })
+
+  it('una service key incorrecta no abre', () => {
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: SERVICE,
+      secretoEnCuerpo: undefined, authorization: 'Bearer llave-ajena',
+    })).toBe(false)
+  })
+
+  it('acepta el prefijo Bearer en cualquier combinacion de mayusculas', () => {
+    expect(credencialValida({
+      esperado: SECRETO, serviceKey: SERVICE,
+      secretoEnCuerpo: undefined, authorization: `bearer ${SERVICE}`,
+    })).toBe(true)
   })
 })

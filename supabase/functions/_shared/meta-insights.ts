@@ -95,6 +95,39 @@ export function filasParaUpsert(args: {
 }
 
 /**
+ * Si quien llama puede correr el sync.
+ *
+ * DOS credenciales validas, cualquiera abre:
+ *
+ * 1. El secreto compartido en el cuerpo (`META_INSIGHTS_SYNC_SECRET`, o el del
+ *    handshake de Meta Lead Ads si aquel no existe).
+ * 2. La service role key en `Authorization: Bearer`, que es la del cron.
+ *
+ * ⚠️ La (2) NO afloja la puerta: quien tenga la service role key ya puede escribir
+ * `campana_insights` directo contra la base sin pasar por la funcion. Existe porque
+ * el secreto compartido vive en los secretos del PROYECTO, que solo se escriben
+ * desde el panel o con el CLI autenticado: sin ella, arrancar el sync depende de que
+ * una persona entre a una pantalla, y el sync estuvo desplegado sin poder correr
+ * exactamente por eso.
+ *
+ * ⚠️ Un valor ausente NUNCA autoriza. Si el secreto esperado no esta configurado, un
+ * cuerpo sin `secret` tiene `undefined === undefined` y entraria: por eso cada rama
+ * exige primero que el lado del servidor exista.
+ */
+export function credencialValida(args: {
+  esperado: string | null | undefined;
+  serviceKey: string | null | undefined;
+  secretoEnCuerpo: string | null | undefined;
+  authorization: string | null | undefined;
+}): boolean {
+  const { esperado, serviceKey, secretoEnCuerpo, authorization } = args;
+  const bearer = authorization ? authorization.replace(/^Bearer\s+/i, '') : null;
+  const porSecreto = Boolean(esperado) && secretoEnCuerpo === esperado;
+  const porServiceKey = Boolean(serviceKey) && bearer === serviceKey;
+  return porSecreto || porServiceKey;
+}
+
+/**
  * Las monedas de las cuentas que participan.
  *
  * SOENA tiene DOS cuentas publicitarias. Si una estuviera en USD y la otra en COP,
