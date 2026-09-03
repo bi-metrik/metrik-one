@@ -34,6 +34,7 @@ import {
   Headphones,
   PhoneCall,
   Tags,
+  FileText,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -155,6 +156,17 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
   // documentos de identidad de los responsables. Lo que circula por la
   // organizacion es la carta en PDF, no esta pantalla.
   { href: '/compliance/responsables', label: 'Responsables', icon: UserCheck, roles: ['owner', 'admin'] },
+  // Expediente: indice de los documentos de gobierno (manual, actas, designacion,
+  // informes a junta, capacitaciones). ONE no guarda los archivos, guarda el
+  // inventario y la vigencia — el archivo sigue en el Drive del cliente.
+  //
+  // Cuelga de mod.compliance y NO del dual de listas: un obligado tiene
+  // expediente aunque nunca consulte listas restrictivas.
+  //
+  // Solo owner/admin, misma razon que Responsables: que piezas componen el
+  // expediente de la compania lo declara el oficial de cumplimiento, no quien
+  // opera. Ademas la pantalla nombra a los responsables de cada pieza.
+  { href: '/compliance/documentos', label: 'Expediente', icon: FileText, roles: ['owner', 'admin'] },
 ]
 
 // Validacion — segmentacion + consulta de listas restrictivas. Mismo gating que compliance
