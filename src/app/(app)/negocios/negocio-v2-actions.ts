@@ -20,10 +20,15 @@ import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import {
   calcularPresupuestoPorRubro,
   asignarEjecutadoPorRubro,
+  calcularCostoHoras,
+  resolverLineaBase,
   totalPresupuestado,
   type ItemPresupuesto,
   type RubroPresupuesto,
   type RubroPresupuestoEjecutado,
+  type RepartoEjecutado,
+  type HorasSinTarifa,
+  type LineaBase,
 } from '@/lib/negocios/presupuesto-ejecucion'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
@@ -5902,6 +5907,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     /** Suma de los rubros: el presupuesto de COSTO, no el precio de venta. */
     presupuestoCosto?: number
     precioAprobado?: number
+    /**
+     * Lo ejecutado que no cuenta contra ningún rubro. Suma al costo total y no a
+     * ninguna barra: sin esto, esa plata desaparecía de la comparación.
+     */
+    sinPresupuesto?: RepartoEjecutado['sinPresupuesto']
+    /** Horas que entraron valiendo cero. Si las hay, el ejecutado está subestimado. */
+    horasSinTarifa?: HorasSinTarifa
+    /** Qué cotización fija el presupuesto, o por qué no hay contra qué comparar. */
+    lineaBase: LineaBase
   }
   historialData: {
     gastos: Array<{ id: string; descripcion: string | null; monto: number; categoria: string; fecha: string }>
@@ -6199,8 +6213,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     created_at: c.created_at as string | null,
   }))
 
-  // Buscar cotización aceptada y sus rubros para presupuesto
-  const cotizacionAceptada = cotizacionesNegocio.find(c => c.estado === 'aceptada')
+  // Cuál cotización fija el presupuesto, o por qué no hay línea base. La elección es
+  // explícita (la aceptada más reciente, con desempate estable) en vez de "la primera
+  // del arreglo": ese orden lo fijaba el `.order()` de la consulta de arriba, y un
+  // negocio de producción tiene DOS cotizaciones aceptadas a la vez, así que el
+  // presupuesto dependía de un detalle de otra parte del archivo.
+  const lineaBase = resolverLineaBase(cotizacionesNegocio)
+  const cotizacionAceptada = lineaBase.estado === 'aprobada' ? lineaBase.cotizacion : undefined
 
   // ¿Se le puede ofrecer "Corregir" a esa cotización aceptada? Cuatro condiciones, y la
   // tercera es la que hace que esto sea genérico: el bloque de cotización de la etapa
@@ -7265,16 +7284,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       costosEjecutados: (() => {
         const gastos = ((gastosData ?? []) as Array<{ monto: number }>)
         const totalGastos = gastos.reduce((s, g) => s + (g.monto ?? 0), 0)
-        // Costo horas = horas * tarifa del staff (simplificado: usar salary/160)
+        // La tarifa de la hora se calcula en UN solo sitio (`calcularCostoHoras`). Este
+        // costo y el del bloque de Ejecución son el mismo número: escritos dos veces se
+        // desincronizan, y el síntoma serían dos pantallas discrepando por la misma hora.
         const staffData = (staffRes.data ?? []) as Array<{ id: string; salary?: number }>
         const staffSalaryMap: Record<string, number> = {}
         for (const s of staffData) staffSalaryMap[s.id] = (s as Record<string, unknown>).salary as number ?? 0
         const horas = ((horasData ?? []) as Array<{ horas: number; staff_id: string | null }>)
-        const costoHoras = horas.reduce((s, h) => {
-          const salary = h.staff_id ? (staffSalaryMap[h.staff_id] ?? 0) : 0
-          const tarifa = salary > 0 ? salary / 160 : 0
-          return s + ((h.horas ?? 0) * tarifa)
-        }, 0)
+        const { costo: costoHoras } = calcularCostoHoras({ horas, salarioPorStaff: staffSalaryMap })
         return Math.round(totalGastos + costoHoras)
       })(),
     },
@@ -7300,31 +7317,36 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       }
 
       const horas = ((horasData ?? []) as Array<{ horas: number; descripcion: string | null; fecha: string; staff_id: string | null }>)
-      const totalHoras = horas.reduce((s, h) => s + (h.horas ?? 0), 0)
-      const costoHoras = horas.reduce((s, h) => {
-        const salary = h.staff_id ? (staffSalaryMap2[h.staff_id] ?? 0) : 0
-        const tarifa = salary > 0 ? salary / 160 : 0
-        return s + ((h.horas ?? 0) * tarifa)
-      }, 0)
+      // El costo de las horas y el conteo de las que NO se pudieron valorar salen de
+      // la misma pasada: si el aviso se calculara aparte, podría dejar de coincidir con
+      // la cifra que declara, que es justo lo que hace inútil un aviso.
+      const { costo: costoHoras, totalHoras, sinTarifa } = calcularCostoHoras({
+        horas,
+        salarioPorStaff: staffSalaryMap2,
+      })
 
-      // Cada peso ejecutado cuenta contra UN rubro o contra ninguno, y las horas van al
-      // rubro de mano de obra propia: sin esto ese rubro mostraba 0% con horas cargadas.
-      const rubrosConEjecutado = asignarEjecutadoPorRubro({
+      // Cada peso ejecutado cuenta contra UN rubro o contra ninguno, y lo que no cae en
+      // ninguno sale por `sinPresupuesto` en vez de desaparecer de la sección.
+      const reparto = asignarEjecutadoPorRubro({
         presupuesto: presupuestoPorRubro,
         gastosPorCategoria,
-        costoHoras: Math.round(costoHoras),
+        costoHoras,
       })
 
       return {
         totalGastos,
-        totalHoras: Math.round(totalHoras * 100) / 100,
-        costoHoras: Math.round(costoHoras),
+        totalHoras,
+        costoHoras,
         gastosPorCategoria,
-        presupuestoPorRubro: rubrosConEjecutado.length > 0 ? rubrosConEjecutado : undefined,
+        presupuestoPorRubro: reparto.rubros.length > 0 ? reparto.rubros : undefined,
         // Contra esto se mide el sobrecosto. Cuadra con `cotizaciones.costo_total`.
         presupuestoCosto:
           presupuestoPorRubro.length > 0 ? totalPresupuestado(presupuestoPorRubro) : undefined,
         precioAprobado,
+        sinPresupuesto:
+          reparto.sinPresupuesto.total > 0 ? reparto.sinPresupuesto : undefined,
+        horasSinTarifa: sinTarifa.filas > 0 ? sinTarifa : undefined,
+        lineaBase,
       }
     })(),
     historialData: {

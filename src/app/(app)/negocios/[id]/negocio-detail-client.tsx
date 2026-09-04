@@ -35,6 +35,7 @@ import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
@@ -87,6 +88,12 @@ interface EjecucionData {
   /** Presupuesto de COSTO. El precio aprobado va aparte porque mide otra cosa. */
   presupuestoCosto?: number
   precioAprobado?: number
+  /** Lo ejecutado que no cuenta contra ningún rubro: suma al costo, no a las barras. */
+  sinPresupuesto?: { total: number; conceptos: Array<{ concepto: string; total: number }> }
+  /** Horas que entraron valiendo cero: el ejecutado está subestimado. */
+  horasSinTarifa?: { filas: number; horas: number; sinStaff: number; sinSalario: number }
+  /** Qué cotización fija el presupuesto, o por qué no hay contra qué comparar. */
+  lineaBase: LineaBase
 }
 
 // ── Helpers de formato ───────────────────────────────────────────────────────
