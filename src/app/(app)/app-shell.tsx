@@ -5,6 +5,7 @@ import { TZ, formatBogotaFechaLarga } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
   FileSpreadsheet,
+  FolderOpen,
   Timer,
   Radar,
   BarChart3,
@@ -193,6 +194,13 @@ const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   // muestra quien quedo reportado en listas restrictivas. Lo que circula por la
   // organizacion es el PDF de autorizacion, no esta pantalla.
   { href: '/compliance/liberaciones', label: 'Liberaciones', icon: ShieldCheck, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_dual_informa', value: true } },
+  // Vinculacion de contrapartes (CCBF): el expediente que reemplaza el formato
+  // y el cargue manual. El motor vive en metrik-valida; esta pantalla es el
+  // panel del oficial. Add-on con costo variable por expediente, por eso flag
+  // propio y no `compliance` a secas. Misma restriccion de confidencialidad que
+  // Liberaciones: el expediente trae cedulas, declaracion de renta y la cadena
+  // de beneficiarios finales.
+  { href: '/compliance/vinculacion', label: 'Vinculación de contrapartes', icon: FolderOpen, roles: ['owner', 'admin'], requireFlag: { key: 'compliance_vinculacion', value: true } },
   // Periodicidad de revalidacion (R2): politica de riesgo del OBLIGADO, no de
   // MeTRIK. El cuadro 12/6/3 es criterio del oficial y no tiene fuente normativa
   // verificada (dictamen Lucia 2026-08-24), por eso es configurable y no constante.
