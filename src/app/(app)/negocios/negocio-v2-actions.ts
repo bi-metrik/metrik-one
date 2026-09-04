@@ -17,6 +17,14 @@ import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import {
+  calcularPresupuestoPorRubro,
+  asignarEjecutadoPorRubro,
+  totalPresupuestado,
+  type ItemPresupuesto,
+  type RubroPresupuesto,
+  type RubroPresupuestoEjecutado,
+} from '@/lib/negocios/presupuesto-ejecucion'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
@@ -5890,7 +5898,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     totalHoras: number
     costoHoras: number
     gastosPorCategoria: Array<{ categoria: string; total: number }>
-    presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number }>
+    presupuestoPorRubro?: RubroPresupuestoEjecutado[]
+    /** Suma de los rubros: el presupuesto de COSTO, no el precio de venta. */
+    presupuestoCosto?: number
     precioAprobado?: number
   }
   historialData: {
@@ -6207,44 +6217,27 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       base.bloques.map(b => ({ estado: b.estado, tipo: b.bloque_definitions?.tipo ?? null })),
     ) &&
     cobradoConfirmado((cobrosData ?? []) as Array<{ monto: number | null; fecha: string | null }>) === 0
-  let presupuestoPorRubro: { tipo: string; nombre: string; total: number }[] = []
+  // Presupuesto de COSTO de la cotización aceptada. La aritmética (cantidad, ítem de
+  // ajuste fuera) vive en `src/lib/negocios/presupuesto-ejecucion.ts`, que replica la de
+  // `recalcularTotales`: la suma de estos rubros cuadra con `cotizaciones.costo_total`.
+  //
+  // El precio aprobado (`valor_total`) NO es presupuesto: es lo que paga el cliente.
+  // Viaja aparte para que la pantalla pueda separar "me pasé del presupuesto" de "me
+  // comí el margen", que son dos cosas distintas y antes se pintaban como una sola.
+  let presupuestoPorRubro: RubroPresupuesto[] = []
   let precioAprobado: number | undefined = undefined
 
   if (cotizacionAceptada) {
     precioAprobado = cotizacionAceptada.valor_total ?? undefined
-    // Cargar items con rubros de la cotizacion aceptada
     const { data: itemsConRubros } = await supabase
       .from('items')
-      .select('nombre, subtotal, rubros(tipo, valor_total)')
+      .select('nombre, cantidad, subtotal, es_ajuste, rubros(tipo, valor_total)')
       .eq('cotizacion_id', cotizacionAceptada.id)
       .order('orden')
 
-    if (itemsConRubros && itemsConRubros.length > 0) {
-      // Agrupar rubros por tipo y sumar valores
-      const rubroMap: Record<string, { nombre: string; total: number }> = {}
-      for (const item of itemsConRubros) {
-        const rubros = (item.rubros ?? []) as Array<{ tipo: string; valor_total: number | null }>
-        if (rubros.length > 0) {
-          for (const r of rubros) {
-            const tipo = r.tipo ?? 'otro'
-            if (!rubroMap[tipo]) rubroMap[tipo] = { nombre: tipo, total: 0 }
-            rubroMap[tipo].total += r.valor_total ?? 0
-          }
-        } else {
-          // Item sin rubros detallados: usar subtotal como "otro"
-          const tipo = 'otro'
-          if (!rubroMap[tipo]) rubroMap[tipo] = { nombre: tipo, total: 0 }
-          rubroMap[tipo].total += item.subtotal ?? 0
-        }
-      }
-      presupuestoPorRubro = Object.entries(rubroMap)
-        .map(([tipo, data]) => ({ tipo, nombre: data.nombre, total: data.total }))
-        .filter(r => r.total > 0)
-        .sort((a, b) => b.total - a.total)
-    } else if (cotizacionAceptada.valor_total && cotizacionAceptada.valor_total > 0) {
-      // Cotización rápida sin items: un solo rubro genérico
-      presupuestoPorRubro = [{ tipo: 'total', nombre: 'Total cotizado', total: cotizacionAceptada.valor_total }]
-    }
+    presupuestoPorRubro = calcularPresupuestoPorRubro(
+      (itemsConRubros ?? []) as ItemPresupuesto[],
+    )
   }
 
   const actividadData = actividadRes.data
@@ -7314,12 +7307,23 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         return s + ((h.horas ?? 0) * tarifa)
       }, 0)
 
+      // Cada peso ejecutado cuenta contra UN rubro o contra ninguno, y las horas van al
+      // rubro de mano de obra propia: sin esto ese rubro mostraba 0% con horas cargadas.
+      const rubrosConEjecutado = asignarEjecutadoPorRubro({
+        presupuesto: presupuestoPorRubro,
+        gastosPorCategoria,
+        costoHoras: Math.round(costoHoras),
+      })
+
       return {
         totalGastos,
         totalHoras: Math.round(totalHoras * 100) / 100,
         costoHoras: Math.round(costoHoras),
         gastosPorCategoria,
-        presupuestoPorRubro: presupuestoPorRubro.length > 0 ? presupuestoPorRubro : undefined,
+        presupuestoPorRubro: rubrosConEjecutado.length > 0 ? rubrosConEjecutado : undefined,
+        // Contra esto se mide el sobrecosto. Cuadra con `cotizaciones.costo_total`.
+        presupuestoCosto:
+          presupuestoPorRubro.length > 0 ? totalPresupuestado(presupuestoPorRubro) : undefined,
         precioAprobado,
       }
     })(),
