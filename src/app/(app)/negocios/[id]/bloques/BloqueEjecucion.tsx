@@ -1,8 +1,12 @@
 'use client'
 
-import { Activity, Clock, Receipt, TrendingUp, Target } from 'lucide-react'
+import { Activity, Clock, Receipt, TrendingUp, Target, AlertTriangle, HelpCircle } from 'lucide-react'
 import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
-import { TIPO_RUBRO_SIN_DETALLE } from '@/lib/negocios/presupuesto-ejecucion'
+import {
+  TIPO_RUBRO_SIN_DETALLE,
+  CONCEPTO_HORAS_STAFF,
+  type LineaBase,
+} from '@/lib/negocios/presupuesto-ejecucion'
 
 const CATEGORIA_LABELS: Record<string, string> = {
   materiales: 'Materiales',
@@ -13,6 +17,10 @@ const CATEGORIA_LABELS: Record<string, string> = {
   impuestos_seguros: 'Impuestos/Seguros',
   mano_de_obra: 'Mano de obra',
   alimentacion: 'Alimentación',
+  comision: 'Comisiones',
+  arriendo: 'Arriendo',
+  marketing: 'Marketing',
+  capacitacion: 'Capacitación',
   otros: 'Otros',
 }
 
@@ -34,6 +42,12 @@ interface EjecucionData {
   presupuestoCosto?: number
   /** Precio aprobado al cliente. Mide MARGEN, no sobrecosto. */
   precioAprobado?: number
+  /** Lo ejecutado que no cuenta contra ningún rubro. Suma al costo, no a las barras. */
+  sinPresupuesto?: { total: number; conceptos: Array<{ concepto: string; total: number }> }
+  /** Horas que entraron valiendo cero: el ejecutado está subestimado. */
+  horasSinTarifa?: { filas: number; horas: number; sinStaff: number; sinSalario: number }
+  /** Qué cotización fija el presupuesto, o por qué no hay contra qué comparar. */
+  lineaBase: LineaBase
 }
 
 interface BloqueEjecucionProps {
@@ -43,6 +57,9 @@ interface BloqueEjecucionProps {
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+
+const plural = (n: number, singular: string, plural: string) =>
+  n === 1 ? `1 ${singular}` : `${n} ${plural}`
 
 function barColor(pct: number): string {
   if (pct >= 100) return 'bg-red-500'
@@ -56,6 +73,74 @@ function barTextColor(pct: number): string {
   return 'text-[#10B981]'
 }
 
+/**
+ * Por qué este negocio no tiene presupuesto contra el cual compararse.
+ *
+ * El vacío se explica en vez de dejar la sección ausente: antes, un negocio con gasto
+ * y sin cotización aprobada simplemente no mostraba nada, y eso se lee igual que "no
+ * hay nada que comparar" o que "la pantalla está rota".
+ *
+ * NUNCA se usa una cotización en borrador o enviada como si fuera presupuesto: se
+ * nombra para poder ir a buscarla, y su valor no se muestra — un número al lado de un
+ * presupuesto ausente se lee como presupuesto.
+ */
+function motivoSinLineaBase(lineaBase: LineaBase): { titulo: string; detalle: string } {
+  // Cotización aprobada que no deja presupuesto: sus ítems no tienen rubros y su precio
+  // es cero. Pasa con las cotizaciones cargadas sin desglose de costo, y sin este caso
+  // la sección volvería a quedar en blanco sin explicación.
+  if (lineaBase.estado === 'aprobada') {
+    return {
+      titulo: 'La cotización aprobada no tiene presupuesto de costo',
+      detalle: `${
+        lineaBase.cotizacion.consecutivo ? `La cotización ${lineaBase.cotizacion.consecutivo}` : 'La cotización aprobada'
+      } está aprobada pero sus ítems no tienen rubros de costo, así que no hay contra qué comparar lo ejecutado.`,
+    }
+  }
+
+  if (lineaBase.estado === 'sin_cotizacion') {
+    return {
+      titulo: 'Sin línea base para comparar',
+      detalle:
+        'Este negocio no tiene cotización, así que no hay presupuesto de costo contra el cual medir lo ejecutado. Los gastos y las horas de arriba sí están completos.',
+    }
+  }
+
+  const { borradores, enviadas, rechazadas, pendiente } = lineaBase
+  const nombre = pendiente ? `La cotización ${pendiente}` : 'La cotización'
+
+  if (enviadas > 0) {
+    return {
+      titulo: 'Sin línea base para comparar',
+      detalle: `${nombre} está enviada y todavía sin aprobar. El presupuesto aparece cuando se apruebe.`,
+    }
+  }
+
+  if (borradores > 0) {
+    return {
+      titulo: 'Sin línea base para comparar',
+      detalle: `${nombre} está en borrador. El presupuesto aparece cuando se apruebe. Si la aprobación se soltó para corregirla, queda registrado en el historial de actividad de este negocio.`,
+    }
+  }
+
+  return {
+    titulo: 'Sin línea base para comparar',
+    detalle: `${
+      rechazadas === 1 ? 'La única cotización de este negocio fue rechazada' : `Las ${rechazadas} cotizaciones de este negocio fueron rechazadas`
+    }. Mientras no se apruebe una, no hay presupuesto contra el cual medir lo ejecutado.`,
+  }
+}
+
+/** Cuántas horas entraron sin costo y qué hay que arreglar para que valgan. */
+function avisoHorasSinTarifa(sinTarifa: NonNullable<EjecucionData['horasSinTarifa']>): string {
+  const horas = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 }).format(sinTarifa.horas)
+  const causas: string[] = []
+  if (sinTarifa.sinStaff > 0) causas.push(`${plural(sinTarifa.sinStaff, 'registro', 'registros')} sin responsable`)
+  if (sinTarifa.sinSalario > 0) {
+    causas.push(`${plural(sinTarifa.sinSalario, 'registro', 'registros')} con el salario del responsable sin configurar`)
+  }
+  return `${horas} h entraron al costo valiendo $0 (${causas.join(' y ')}). El costo ejecutado está por debajo del real.`
+}
+
 export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
   const costoTotal = data.totalGastos + data.costoHoras
   const hayDatos = data.totalGastos > 0 || data.totalHoras > 0
@@ -67,6 +152,12 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
   const hayPresupuesto = hayRubros || presupuestoCosto > 0 || precioAprobado > 0
   const pctCosto = presupuestoCosto > 0 ? Math.round((costoTotal / presupuestoCosto) * 100) : 0
   const pctMargen = precioAprobado > 0 ? Math.round((costoTotal / precioAprobado) * 100) : 0
+  const sinPresupuesto = data.sinPresupuesto
+  const motivo = motivoSinLineaBase(data.lineaBase)
+  const variasAprobadas =
+    data.lineaBase.estado === 'aprobada' && data.lineaBase.otrasAprobadas > 0
+      ? data.lineaBase
+      : null
 
   if (!hayDatos && !hayPresupuesto) {
     return (
@@ -110,6 +201,18 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
         </div>
       </div>
 
+      {/* Horas que entraron valiendo cero. Va debajo del KPI porque lo que queda
+          subestimado es el "Costo total", que es el número del que cuelgan las barras.
+          NO se inventa una tarifa por defecto: se declara el hueco. */}
+      {data.horasSinTarifa && (
+        <div className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2">
+          <AlertTriangle className="mt-px h-3 w-3 shrink-0 text-amber-600" />
+          <p className="text-[10px] leading-snug text-amber-800">
+            {avisoHorasSinTarifa(data.horasSinTarifa)}
+          </p>
+        </div>
+      )}
+
       {/* Presupuesto vs Ejecutado — solo si hay cotización aprobada */}
       {hayPresupuesto && (
         <div>
@@ -117,6 +220,18 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
             <Target className="h-3 w-3 text-[#6B7280]" />
             <p className="text-[10px] font-medium text-[#6B7280]">Presupuesto vs Ejecutado</p>
           </div>
+
+          {/* Dos cotizaciones aprobadas a la vez: manda la más reciente, y se dice cuál.
+              Callarlo dejaría el presupuesto colgando de un dato que nadie sabe que
+              está duplicado. */}
+          {variasAprobadas && (
+            <p className="mb-1.5 text-[10px] leading-snug text-amber-700">
+              Este negocio tiene {variasAprobadas.otrasAprobadas + 1} cotizaciones aprobadas a la
+              vez. El presupuesto usa la más reciente
+              {variasAprobadas.cotizacion.consecutivo ? ` (${variasAprobadas.cotizacion.consecutivo})` : ''}.
+            </p>
+          )}
+
           <div className="space-y-1.5">
             {(data.presupuestoPorRubro ?? []).map(rubro => {
               // El ejecutado lo reparte el servidor: cada gasto cuenta contra un rubro o
@@ -146,6 +261,42 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                 </div>
               )
             })}
+
+            {/* Gasto ejecutado que NO estaba presupuestado. Deliberadamente SIN barra y
+                sin "X / Y": una barra necesita un denominador, y aquí no hay ninguno —
+                pintarla haría leer esta plata como si estuviera presupuestada, que es
+                justo lo contrario de lo que dice. Suma al costo total de abajo, así que
+                la sección reconcilia: rubros + esto = total ejecutado. */}
+            {sinPresupuesto && sinPresupuesto.total > 0 && (
+              <div className="rounded-md border border-dashed border-amber-300 bg-amber-50/50 p-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold text-amber-800">Sin presupuesto</p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-amber-700">
+                      Gasto ejecutado que no corresponde a ningún rubro de la cotización
+                      aprobada. Cuenta en el costo total, no en las barras de arriba.
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[11px] font-bold text-amber-800 tabular-nums">
+                    {fmt(sinPresupuesto.total)}
+                  </span>
+                </div>
+                <ul className="mt-1 space-y-0.5">
+                  {sinPresupuesto.conceptos.map(c => (
+                    <li key={c.concepto} className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-amber-700 truncate">
+                        {c.concepto === CONCEPTO_HORAS_STAFF
+                          ? 'Horas del equipo'
+                          : CATEGORIA_LABELS[c.concepto] ?? c.concepto}
+                      </span>
+                      <span className="text-[10px] text-amber-700 tabular-nums whitespace-nowrap">
+                        {fmt(c.total)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Sobrecosto: lo ejecutado contra el presupuesto de COSTO. Es la barra que
                 responde "¿me pasé de lo que dije que iba a gastar?". */}
@@ -210,6 +361,27 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                 </p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Sin línea base: el vacío se explica. Antes esta sección simplemente no
+          aparecía, y un negocio con gasto acumulado quedaba sin decir por qué no tenía
+          contra qué compararse. */}
+      {!hayPresupuesto && (
+        <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5">
+          <div className="flex items-start gap-1.5">
+            <HelpCircle className="mt-px h-3 w-3 shrink-0 text-[#6B7280]" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium text-[#1A1A1A]">{motivo.titulo}</p>
+              <p className="mt-0.5 text-[10px] leading-snug text-[#6B7280]">{motivo.detalle}</p>
+              {hayDatos && (
+                <p className="mt-1 text-[10px] text-[#6B7280]">
+                  Ejecutado hasta ahora:{' '}
+                  <span className="font-semibold text-[#1A1A1A] tabular-nums">{fmt(costoTotal)}</span>
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}
