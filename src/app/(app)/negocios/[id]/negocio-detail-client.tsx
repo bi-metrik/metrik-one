@@ -1262,6 +1262,7 @@ function BloqueRenderer({
   profiles,
   cobros,
   cotizacionesNegocio,
+  puedeCorregirCotizacion = false,
   resumenFinanciero,
   ejecucionData,
   historialData,
@@ -1294,6 +1295,8 @@ function BloqueRenderer({
     es_reparto_comercial?: boolean
   }>
   cotizacionesNegocio: CotizacionResumen[]
+  /** Lo decide el servidor (etapa + rol). El historial no lo pasa: ahí nunca se corrige. */
+  puedeCorregirCotizacion?: boolean
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   ejecucionData: EjecucionData
   historialData: HistorialData
@@ -1638,6 +1641,11 @@ function BloqueRenderer({
           modo={modo}
           cotizaciones={cotizacionesNegocio}
           skipEnviar={configExtra?.skip_enviar === true}
+          // Corregir es de la etapa VIVA. Desde el historial la copia se ve y no se
+          // toca — mismo criterio que el registro de pagos de BloqueCobros.
+          puedeCorregir={
+            (bloque as { _forceReadOnly?: boolean })._forceReadOnly ? false : puedeCorregirCotizacion
+          }
         />
       )
 
@@ -1809,6 +1817,7 @@ function BloqueCard({
   profiles,
   cobros,
   cotizacionesNegocio,
+  puedeCorregirCotizacion = false,
   resumenFinanciero,
   ejecucionData,
   historialData,
@@ -1841,6 +1850,7 @@ function BloqueCard({
     es_reparto_comercial?: boolean
   }>
   cotizacionesNegocio: CotizacionResumen[]
+  puedeCorregirCotizacion?: boolean
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   ejecucionData: EjecucionData
   historialData: HistorialData
@@ -1949,6 +1959,7 @@ function BloqueCard({
               profiles={profiles}
               cobros={cobros}
               cotizacionesNegocio={cotizacionesNegocio}
+              puedeCorregirCotizacion={puedeCorregirCotizacion}
               resumenFinanciero={resumenFinanciero}
               ejecucionData={ejecucionData}
               historialData={historialData}
@@ -2009,6 +2020,11 @@ interface Props {
     external_ref: string | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
+  /**
+   * ¿Ofrecer "Corregir" sobre la cotización aceptada? Lo resuelve el servidor: el
+   * bloque no sabe en qué etapa está el negocio ni qué declara la config del flujo.
+   */
+  puedeCorregirCotizacion?: boolean
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }
   ejecucionData: EjecucionData
   historialData: HistorialData
@@ -2054,6 +2070,7 @@ export default function NegocioDetailClient({
   userRole,
   cobros,
   cotizacionesNegocio,
+  puedeCorregirCotizacion = false,
   resumenFinanciero,
   ejecucionData,
   historialData,
@@ -2347,6 +2364,7 @@ export default function NegocioDetailClient({
                   profiles={profiles}
                   cobros={cobros}
                   cotizacionesNegocio={cotizacionesNegocio}
+                  puedeCorregirCotizacion={puedeCorregirCotizacion}
                   resumenFinanciero={resumenFinanciero}
                   ejecucionData={ejecucionData}
                   historialData={historialData}

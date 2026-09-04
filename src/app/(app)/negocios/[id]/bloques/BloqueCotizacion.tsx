@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2 } from 'lucide-react'
+import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2, PencilLine } from 'lucide-react'
 import { toast } from 'sonner'
-import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador } from '../cotizacion/actions'
+import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador, corregirCotizacionAceptada } from '../cotizacion/actions'
 
 interface CotizacionResumen {
   id: string
@@ -21,6 +21,15 @@ interface BloqueCotizacionProps {
   modo: 'editable' | 'visible'
   cotizaciones: CotizacionResumen[]
   skipEnviar?: boolean
+  /**
+   * ¿Se le puede soltar la aprobación a la cotización aceptada para corregirla?
+   *
+   * Lo decide el SERVIDOR (rol gerencial + el negocio sigue parado en una etapa donde
+   * el bloque de cotización es editable + no ha entrado plata): este componente no sabe
+   * en qué etapa está el caso ni qué se ha cobrado. El servidor vuelve a medirlo todo al
+   * ejecutar — esto solo dibuja el botón.
+   */
+  puedeCorregir?: boolean
 }
 
 const fmt = (v: number) =>
@@ -50,7 +59,7 @@ const ESTADO_ORDER: Record<string, number> = {
   vencida: 4,
 }
 
-export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar }: BloqueCotizacionProps) {
+export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false }: BloqueCotizacionProps) {
   const [isPending, startTransition] = useTransition()
   const [optimisticAceptadaId, setOptimisticAceptadaId] = useState<string | null>(null)
 
@@ -124,15 +133,58 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
     })
   }
 
+  /**
+   * Botón de excepción: la cotización aprobada vuelve a borrador para corregirla.
+   * La confirmación enumera las tres consecuencias en llano porque ninguna es obvia
+   * mirando el bloque: el negocio se queda sin precio aprobado y el bloque se reabre
+   * (si es gate, el caso vuelve a quedar retenido hasta aprobar de nuevo).
+   */
+  const handleCorregir = (cotizacionId: string) => {
+    const ok = confirm(
+      'Vas a corregir la cotización aprobada.\n\n' +
+      '· La cotización vuelve a borrador y se puede editar.\n' +
+      '· El negocio se queda sin precio aprobado.\n' +
+      '· El bloque se reabre: hay que volver a aprobarla.\n\n' +
+      'Queda registrado quién la soltó y de qué valor venía.',
+    )
+    if (!ok) return
+    startTransition(async () => {
+      const res = await corregirCotizacionAceptada(cotizacionId, negocioId)
+      if (!res.success) {
+        toast.error(res.error)
+      } else {
+        // Sin esto, una aprobación hecha en esta misma sesión dejaría el bloque
+        // creyéndose aprobado (el optimista no lo sabe) después de corregir.
+        setOptimisticAceptadaId(null)
+        toast.success('Cotización devuelta a borrador — el negocio quedó sin precio aprobado')
+      }
+    })
+  }
+
   const hayAceptada = !!aceptada || !!optimisticAceptadaId
 
   return (
     <div className="space-y-3">
       {/* Banner solo lectura */}
       {hayAceptada && (
-        <div className="flex items-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700 dark:border-green-900/30 dark:bg-green-950/20 dark:text-green-400">
+        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700 dark:border-green-900/30 dark:bg-green-950/20 dark:text-green-400">
           <Lock className="h-3.5 w-3.5 shrink-0" />
-          Cotización aprobada — bloque en solo lectura
+          <span className="min-w-0 flex-1">Cotización aprobada — bloque en solo lectura</span>
+          {/* Botón de excepción: discreto a propósito (sin color de acción, texto
+              pequeño). Corregir una aprobación no es parte del trabajo normal; tiene
+              que estar a la mano sin invitar a usarse. Solo aparece mientras el caso
+              no haya avanzado de etapa — lo decide el servidor. */}
+          {puedeCorregir && aceptada && (
+            <button
+              onClick={() => handleCorregir(aceptada.id)}
+              disabled={isPending}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-green-300/70 px-2 py-1 text-[10px] font-medium text-green-800 transition-colors hover:bg-green-100 disabled:opacity-50 dark:border-green-900/40 dark:text-green-300 dark:hover:bg-green-900/20"
+              title="Devolver la cotización a borrador para corregirla"
+            >
+              <PencilLine className="h-3 w-3" />
+              Corregir
+            </button>
+          )}
         </div>
       )}
 

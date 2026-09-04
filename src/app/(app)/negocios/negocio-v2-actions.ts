@@ -65,6 +65,7 @@ import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
+import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
@@ -5870,6 +5871,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   cotizacion: null
   cotizacionesNegocio: CotizacionResumen[]
+  /**
+   * ¿Se puede soltar la aprobación de la cotización aceptada para corregirla?
+   *
+   * Se calcula aquí, en el servidor, porque el bloque no sabe en qué etapa está el
+   * negocio ni qué declara su configuración. El botón que habilita es la pantalla; la
+   * barrera real la vuelve a medir `corregirCotizacionAceptada`.
+   */
+  puedeCorregirCotizacion: boolean
   resumenFinanciero: {
     totalCobrado: number
     porCobrar: number
@@ -6182,6 +6191,22 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   // Buscar cotización aceptada y sus rubros para presupuesto
   const cotizacionAceptada = cotizacionesNegocio.find(c => c.estado === 'aceptada')
+
+  // ¿Se le puede ofrecer "Corregir" a esa cotización aceptada? Cuatro condiciones, y la
+  // tercera es la que hace que esto sea genérico: el bloque de cotización de la etapa
+  // ACTUAL sigue declarado editable, o sea que el caso no se ha movido de donde se
+  // cotiza. Los bloques ya están en memoria (`base.bloques` son los de la etapa actual,
+  // sin los desactivados) y los cobros también (`cobrosData`), así que no cuesta una
+  // consulta más en la pantalla más pesada del producto. Ninguno de los dos criterios se
+  // reimplementa: son los mismos helpers que aplica el guard del servidor, que vuelve a
+  // medirlos contra la base al ejecutar.
+  const puedeCorregirCotizacion =
+    !!cotizacionAceptada &&
+    puedeCorregirDocumentos(role) &&
+    hayCotizacionEditableEnEtapa(
+      base.bloques.map(b => ({ estado: b.estado, tipo: b.bloque_definitions?.tipo ?? null })),
+    ) &&
+    cobradoConfirmado((cobrosData ?? []) as Array<{ monto: number | null; fecha: string | null }>) === 0
   let presupuestoPorRubro: { tipo: string; nombre: string; total: number }[] = []
   let precioAprobado: number | undefined = undefined
 
@@ -7239,6 +7264,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     })),
     cotizacion,
     cotizacionesNegocio,
+    puedeCorregirCotizacion,
     resumenFinanciero: {
       totalCobrado,
       porCobrar: Math.max(0, (precioAprobado ?? 0) - totalCobrado),
