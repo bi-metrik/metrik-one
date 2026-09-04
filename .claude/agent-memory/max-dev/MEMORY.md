@@ -18,6 +18,7 @@
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M, y termotech no usa rubros
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
+- ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PR #529: la suma de rubros DEBE cuadrar con `costo_total`; el fix de horas aún no mueve cifras; el caso de prueba no es de `metrik`
 
 ## Referencias
 
