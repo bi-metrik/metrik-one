@@ -128,6 +128,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         userRole={data.userRole}
         cobros={data.cobros}
         cotizacionesNegocio={data.cotizacionesNegocio}
+        puedeCorregirCotizacion={data.puedeCorregirCotizacion}
         resumenFinanciero={data.resumenFinanciero}
         ejecucionData={data.ejecucionData}
         historialData={data.historialData}
