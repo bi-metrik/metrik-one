@@ -1,6 +1,6 @@
 ---
 name: worktree-git-bloqueado
-description: Con isolation worktree, git fuera del propio worktree se bloquea (rama nueva DENTRO); y el aislamiento no impide que OTRA sesión entre al mismo árbol y borre tu rama — cómo commitear sin tocar HEAD
+description: Con isolation worktree, git fuera del propio worktree se bloquea (rama nueva DENTRO); otra sesión puede entrar al mismo árbol y borrar tu rama; y `gh pr merge` falla al final aunque el merge ya se hizo
 metadata:
   type: project
 ---
@@ -96,5 +96,23 @@ archivos sin commitear siguieron ahí, indistinguibles de trabajo heredado del p
 **Regla de convivencia:** en un archivo compartido, commitear **solo lo propio**. Si el otro
 agente añadió código al mismo módulo, no arrastrarlo al PR aunque compile y sus pruebas pasen
 — el repo ya lo dice para las superficies sin dueño («cada quien agrega solo lo suyo»).
+
+## ⚠️ `gh pr merge --squash --delete-branch` **parece** fallar y en realidad mergeó
+
+Medido el 2026-09-04 (PR #526). Desde el worktree aislado, el comando devuelve:
+
+```
+failed to run git: fatal: 'main' is already used by worktree at '…/metrik-one'
+```
+
+**El merge SÍ se hizo.** Ese error es del paso LOCAL posterior (`gh` intenta hacer
+checkout de `main` para dejar el repo limpio, y `main` está ocupado por el checkout
+compartido). Lo que NO alcanzó a correr es el borrado de la rama.
+
+**How to apply:** ante ese mensaje, no reintentar el merge —crearía ruido o un segundo
+PR—. Comprobar con `gh pr view <n> --json state,mergedAt,mergeCommit`; si dice `MERGED`,
+lo único pendiente es `git push origin --delete <rama>`. El worktree propio tampoco se
+puede quitar con `git worktree remove` desde adentro: se deja sin cambios sin commitear
+y la sesión siguiente nace de `origin/main` fresco, como siempre.
 
 Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]].
