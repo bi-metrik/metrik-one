@@ -25,6 +25,16 @@ hace pasar la prueba sin que el código filtre nada.
    prueba de más. Se probaron 5 mutaciones del helper de paginación y las 5 cayeron;
    se dejó escrito cuál tumbó cuántas.
 
+**⚠️ Matiz aprendido el 2026-09-04 (PR #529): una mutación que no tumba nada también
+puede delatar CÓDIGO MUERTO, y entonces se borra la línea en vez de escribir la prueba.**
+Quitar un guard (`tiposPresentes.has(...)`) antes de sumar las horas no rompía ninguna
+prueba porque el `map` posterior ya descartaba lo que no estaba en el presupuesto: el
+guard no cambiaba ningún resultado observable desde la API pública. Antes de agregar una
+prueba para cubrir la mutación huérfana, **preguntarse si el comportamiento es siquiera
+observable**; si no lo es, la prueba nueva estaría fijando un detalle interno, y la línea
+es una que nadie sabrá si sigue haciendo algo. En los dos casos, dejar escrito en el
+docblock cuál mutación no cayó y qué se decidió.
+
 **How to apply:**
 - Para código nuevo: mutar la implementación (script que sustituye una línea, corre
   vitest, restaura) y anotar en el docblock **qué mutación tumbó qué prueba**.
