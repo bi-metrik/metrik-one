@@ -173,6 +173,12 @@ const COMPLIANCE_NAV_ITEMS: ComplianceItem[] = [
 // (mod.compliance || mod.compliance_audit), separado visualmente en su propio grupo de sidebar.
 const VALIDACION_NAV_ITEMS: ComplianceItem[] = [
   { href: '/compliance/segmentacion', label: 'Segmentación SARLAFT', icon: Sliders, roles: ['owner', 'admin', 'supervisor'] },
+  // Base de sujetos de debida diligencia. ES del ejecutor, y ahi esta la
+  // diferencia con Liberaciones: aqui se ve el semaforo (puede contratarse o
+  // no) sin el fundamento del hallazgo ni quien quedo reportado. El ejecutor
+  // necesita la respuesta operativa, no la informacion reservada que la
+  // sustenta (dictamen Lucia 2026-09-04).
+  { href: '/compliance/sujetos', label: 'Empleados y contrapartes', icon: Users, roles: ['owner', 'admin', 'supervisor', 'operator'], requireFlag: { key: 'compliance_dual_informa', value: true } },
   // Validacion pura solo cuando NO esta el modo dual_informa (UX transparente)
   { href: '/compliance/validacion', label: 'Validación', icon: UserCheck, roles: ['owner', 'admin', 'supervisor', 'read_only'], requireFlag: { key: 'compliance_dual_informa', value: false } },
   // UX transparente — solo cuando el flag esta activo (alma-afi). Incluye operator:

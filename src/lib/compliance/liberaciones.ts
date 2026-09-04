@@ -48,6 +48,17 @@ export type ComplianceLiberacion = {
   control_id: string | null;
   liberada_por: string | null;
   created_at: string;
+  /**
+   * Liberación condicionada: habilita, pero deja al sujeto bajo observación. Es
+   * el "aprobado en seguimiento" del tablero de sujetos.
+   *
+   * Opcional en el tipo y no obligatorio: las filas escritas antes de que la
+   * columna existiera no lo traen, y las consultas que no la seleccionan
+   * tampoco. Ausente se lee como `false`, que es la lectura conservadora
+   * correcta: una liberación de la que no consta condición es una liberación
+   * limpia, no una condicionada que perdió su condición.
+   */
+  seguimiento?: boolean;
 };
 
 /** La misma fila con lo que hay que resolver contra otras tablas para mostrarla. */
