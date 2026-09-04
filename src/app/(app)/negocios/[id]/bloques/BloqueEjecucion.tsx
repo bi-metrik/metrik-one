@@ -1,6 +1,8 @@
 'use client'
 
 import { Activity, Clock, Receipt, TrendingUp, Target } from 'lucide-react'
+import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
+import { TIPO_RUBRO_SIN_DETALLE } from '@/lib/negocios/presupuesto-ejecucion'
 
 const CATEGORIA_LABELS: Record<string, string> = {
   materiales: 'Materiales',
@@ -14,22 +16,11 @@ const CATEGORIA_LABELS: Record<string, string> = {
   otros: 'Otros',
 }
 
-// Mapeo de tipos de cotización (rubros) a categorías de gastos
-const TIPO_A_CATEGORIA: Record<string, string> = {
-  materiales: 'materiales',
-  mano_obra: 'mano_de_obra',
-  servicio: 'servicios_profesionales',
-  transporte: 'transporte',
-  otro: 'otros',
-}
-
+// Etiqueta de cada rubro. Sale del catálogo (`TIPOS_RUBRO`), no de una copia a mano:
+// una lista paralela se desincroniza y el síntoma es un rubro rotulado con su slug.
 const RUBRO_LABELS: Record<string, string> = {
-  materiales: 'Materiales',
-  mano_obra: 'Mano de obra',
-  servicio: 'Servicios profesionales',
-  transporte: 'Transporte',
-  otro: 'Otros',
-  total: 'Total cotizado',
+  ...Object.fromEntries(TIPOS_RUBRO.map(t => [t.value, t.label])),
+  [TIPO_RUBRO_SIN_DETALLE]: 'Sin desglosar',
 }
 
 interface EjecucionData {
@@ -37,7 +28,11 @@ interface EjecucionData {
   totalHoras: number
   costoHoras: number
   gastosPorCategoria: Array<{ categoria: string; total: number }>
-  presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number }>
+  /** Rubros de la cotización aceptada, cada uno con lo ya ejecutado que le cuenta. */
+  presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number; ejecutado: number }>
+  /** Presupuesto de COSTO (suma de los rubros). Distinto del precio de venta. */
+  presupuestoCosto?: number
+  /** Precio aprobado al cliente. Mide MARGEN, no sobrecosto. */
   precioAprobado?: number
 }
 
@@ -64,7 +59,14 @@ function barTextColor(pct: number): string {
 export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
   const costoTotal = data.totalGastos + data.costoHoras
   const hayDatos = data.totalGastos > 0 || data.totalHoras > 0
-  const hayPresupuesto = data.presupuestoPorRubro && data.presupuestoPorRubro.length > 0
+  const hayRubros = !!data.presupuestoPorRubro && data.presupuestoPorRubro.length > 0
+  const presupuestoCosto = data.presupuestoCosto ?? 0
+  const precioAprobado = data.precioAprobado ?? 0
+  // La sección aparece con cualquiera de las dos líneas base. Un caso sin desglose de
+  // costo pero con precio aprobado sigue teniendo algo que decir: cuánto margen queda.
+  const hayPresupuesto = hayRubros || presupuestoCosto > 0 || precioAprobado > 0
+  const pctCosto = presupuestoCosto > 0 ? Math.round((costoTotal / presupuestoCosto) * 100) : 0
+  const pctMargen = precioAprobado > 0 ? Math.round((costoTotal / precioAprobado) * 100) : 0
 
   if (!hayDatos && !hayPresupuesto) {
     return (
@@ -76,12 +78,6 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
         </p>
       </div>
     )
-  }
-
-  // Construir mapa de gastos por categoría para lookup rápido
-  const gastosMap: Record<string, number> = {}
-  for (const g of data.gastosPorCategoria) {
-    gastosMap[g.categoria] = g.total
   }
 
   return (
@@ -122,10 +118,10 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
             <p className="text-[10px] font-medium text-[#6B7280]">Presupuesto vs Ejecutado</p>
           </div>
           <div className="space-y-1.5">
-            {data.presupuestoPorRubro!.map(rubro => {
-              const categoriaGasto = TIPO_A_CATEGORIA[rubro.tipo] ?? rubro.tipo
-              const ejecutado = gastosMap[categoriaGasto] ?? 0
-              const pct = rubro.total > 0 ? Math.round((ejecutado / rubro.total) * 100) : 0
+            {(data.presupuestoPorRubro ?? []).map(rubro => {
+              // El ejecutado lo reparte el servidor: cada gasto cuenta contra un rubro o
+              // contra ninguno, y las horas de staff caen en mano de obra propia.
+              const pct = rubro.total > 0 ? Math.round((rubro.ejecutado / rubro.total) * 100) : 0
               const label = RUBRO_LABELS[rubro.tipo] ?? rubro.nombre ?? rubro.tipo
 
               return (
@@ -144,37 +140,74 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                       />
                     </div>
                     <span className="text-[10px] text-[#6B7280] tabular-nums whitespace-nowrap">
-                      {fmt(ejecutado)} / {fmt(rubro.total)}
+                      {fmt(rubro.ejecutado)} / {fmt(rubro.total)}
                     </span>
                   </div>
                 </div>
               )
             })}
 
-            {/* Total: gastos+horas vs precio aprobado */}
-            {data.precioAprobado && data.precioAprobado > 0 && (
+            {/* Sobrecosto: lo ejecutado contra el presupuesto de COSTO. Es la barra que
+                responde "¿me pasé de lo que dije que iba a gastar?". */}
+            {presupuestoCosto > 0 && (
               <div className="pt-1.5 mt-1.5 border-t border-[#E5E7EB]">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[10px] font-medium text-[#1A1A1A]">Total</span>
-                  <span className={`text-[10px] font-semibold tabular-nums ${barTextColor(
-                    Math.round((costoTotal / data.precioAprobado) * 100)
-                  )}`}>
-                    {Math.round((costoTotal / data.precioAprobado) * 100)}%
+                  <span className="text-[10px] font-medium text-[#1A1A1A]">
+                    Total ejecutado <span className="font-normal text-[#6B7280]">vs presupuesto</span>
+                  </span>
+                  <span className={`text-[10px] font-semibold tabular-nums ${barTextColor(pctCosto)}`}>
+                    {pctCosto}%
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${barColor(
-                        Math.round((costoTotal / data.precioAprobado) * 100)
-                      )}`}
-                      style={{ width: `${Math.min(Math.round((costoTotal / data.precioAprobado) * 100), 100)}%` }}
+                      className={`h-full rounded-full transition-all ${barColor(pctCosto)}`}
+                      style={{ width: `${Math.min(pctCosto, 100)}%` }}
                     />
                   </div>
                   <span className="text-[10px] font-medium text-[#6B7280] tabular-nums whitespace-nowrap">
-                    {fmt(costoTotal)} / {fmt(data.precioAprobado)}
+                    {fmt(costoTotal)} / {fmt(presupuestoCosto)}
                   </span>
                 </div>
+                {pctCosto > 100 && (
+                  <p className="mt-0.5 text-[10px] font-medium text-red-600">
+                    Sobrecosto de {fmt(costoTotal - presupuestoCosto)} frente a lo presupuestado
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Margen: el mismo costo contra el PRECIO. Mide cuánto de la utilidad queda,
+                no si hubo sobrecosto — un caso puede gastar el doble de su presupuesto y
+                seguir por debajo del precio, y esa diferencia es la que hay que ver. */}
+            {precioAprobado > 0 && (
+              <div className="pt-1.5 mt-1.5 border-t border-[#E5E7EB]">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] font-medium text-[#1A1A1A]">
+                    Margen consumido{' '}
+                    <span className="font-normal text-[#6B7280]">vs precio aprobado</span>
+                  </span>
+                  <span className={`text-[10px] font-semibold tabular-nums ${barTextColor(pctMargen)}`}>
+                    {pctMargen}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1.5 rounded-full bg-[#E5E7EB] overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${barColor(pctMargen)}`}
+                      style={{ width: `${Math.min(pctMargen, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-[#6B7280] tabular-nums whitespace-nowrap">
+                    {fmt(costoTotal)} / {fmt(precioAprobado)}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[10px] text-[#6B7280]">
+                  {pctMargen > 100
+                    ? `El costo supera el precio en ${fmt(costoTotal - precioAprobado)}`
+                    : `Quedan ${fmt(precioAprobado - costoTotal)} de margen`}
+                </p>
               </div>
             )}
           </div>

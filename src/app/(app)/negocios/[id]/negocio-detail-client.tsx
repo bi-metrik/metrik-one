@@ -82,7 +82,10 @@ interface EjecucionData {
   totalHoras: number
   costoHoras: number
   gastosPorCategoria: Array<{ categoria: string; total: number }>
-  presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number }>
+  /** Cada rubro trae lo ya ejecutado que le cuenta, repartido en el servidor. */
+  presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number; ejecutado: number }>
+  /** Presupuesto de COSTO. El precio aprobado va aparte porque mide otra cosa. */
+  presupuestoCosto?: number
   precioAprobado?: number
 }
 
