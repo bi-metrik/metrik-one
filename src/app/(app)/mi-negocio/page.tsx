@@ -103,13 +103,11 @@ export default async function MiNegocioPage() {
       .eq('workspace_id', workspaceId),
   ])
 
-  // modules column (migration 20260409300001) — not in generated types yet
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: modulesData } = await (supabase.from('workspaces') as any)
-    .select('modules')
-    .eq('id', workspaceId)
-    .single() as { data: { modules: Record<string, boolean> | null } | null }
-  const workspaceModules = (modulesData?.modules as Record<string, boolean> | null) ?? { business: true }
+  // `modules` y `tipo` ya vienen en el `select('*')` de arriba. Antes se pedian en
+  // dos consultas extra a la MISMA fila de `workspaces` porque los tipos generados
+  // no las traian; hoy si estan, asi que se leen de lo que ya se trajo.
+  const workspaceModules =
+    (workspaceResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
 
   const { lineas: lineasDisponibles, lineaActivaId } = await getLineasDisponibles()
 
@@ -120,12 +118,7 @@ export default async function MiNegocioPage() {
   ])
 
   // Workspace tipo: nativo (default) vs clarity
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: tipoData } = await (supabase.from('workspaces') as any)
-    .select('tipo')
-    .eq('id', workspaceId)
-    .single() as { data: { tipo: string } | null }
-  const workspaceTipo = (tipoData?.tipo ?? 'nativo') as 'nativo' | 'clarity'
+  const workspaceTipo = (workspaceResult.data?.tipo ?? 'nativo') as 'nativo' | 'clarity'
 
   const workspace = workspaceResult.data
   const fiscalProfile = fiscalResult.data
