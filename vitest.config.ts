@@ -9,7 +9,9 @@ export default defineConfig({
     // `supabase/functions/**` entra aqui a proposito: hasta hoy las edge functions no las
     // verificaba ningun check de CI (solo `deno check` a mano). Solo se recogen modulos
     // PUROS — los que tocan `Deno.env` o la red no se pueden colectar desde node.
-    include: ['src/**/*.test.ts', 'supabase/functions/**/*.test.ts'],
+    // `scripts/**` entra por la guarda de migraciones: un chequeo que nadie ejercita
+    // no es un chequeo, y esa es justo la falla que motivo su regla de vistas.
+    include: ['src/**/*.test.ts', 'supabase/functions/**/*.test.ts', 'scripts/**/*.test.mjs'],
   },
   resolve: {
     alias: {
