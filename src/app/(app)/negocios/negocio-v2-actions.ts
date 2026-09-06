@@ -859,7 +859,7 @@ export async function getEtapasSegmentador(): Promise<
 
 // ── Detalle de un negocio ─────────────────────────────────────────────────────
 
-export async function getNegocioDetalle(id: string): Promise<{
+async function getNegocioDetalle(id: string): Promise<{
   negocio: NegocioDetalle
   bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }>
   etapasLinea: EtapaNegocio[]
@@ -5287,7 +5287,7 @@ export async function marcarBloqueItem(
 
 // ── Auto-crear cobro anticipo (solo 1, idempotente) ─────────────────────────
 
-export async function autoCrearCobros(
+async function autoCrearCobros(
   negocioId: string,
   valorAnticipo: number,
   referenciaEpayco?: string
@@ -5359,7 +5359,7 @@ export async function autoCrearCobros(
 
 // ── Auto-crear cobros multi-pago (etapa 7, idempotente por external_ref) ─────
 
-export async function autoCrearCobrosMulti(
+async function autoCrearCobrosMulti(
   negocioId: string,
   pagos: Array<{ referencia_epayco: string; valor_pago: number }>
 ): Promise<{ error: string | null }> {
@@ -5492,7 +5492,7 @@ export async function eliminarBloqueItem(
 // Un bloque de cobros se considera completo cuando el saldo del negocio es 0
 // (precio_aprobado/estimado - sum(cobros APROBADO|CAUSADO) <= 0).
 
-export async function reevaluarBloquesCobros(
+async function reevaluarBloquesCobros(
   negocioId: string
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
