@@ -1,0 +1,60 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+
+  // Entry points. Sin esto knip reporta media aplicacion como no usada: en el App
+  // Router nadie IMPORTA una page — la carga el framework por convencion de ruta.
+  "entry": [
+    "src/app/**/page.tsx",
+    "src/app/**/layout.tsx",
+    "src/app/**/error.tsx",
+    "src/app/**/global-error.tsx",
+    "src/app/**/not-found.tsx",
+    "src/app/**/route.ts",
+    // Cada edge function es un entry propio: corre en Deno, nadie la importa.
+    "supabase/functions/**/index.ts",
+    // Los scripts se invocan con `npx tsx`, no desde la aplicacion.
+    "scripts/**/*.{ts,mts,mjs,js}",
+    // Dobles y arneses de prueba que vitest resuelve por alias, no por import.
+    "test/**/*.ts",
+    "src/**/*.test.{ts,tsx}",
+    "supabase/functions/**/*.test.ts",
+    // shadcn/ui es un kit copiado al repo: su API completa es el contrato y
+    // `shadcn add` la regenera entera. Un re-export sin consumidor de hoy no es
+    // codigo muerto, es la pieza que falta usar.
+    "src/components/ui/**/*.tsx"
+  ],
+
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "scripts/**/*.{ts,mts,mjs}",
+    "supabase/functions/**/*.ts",
+    "test/**/*.ts"
+  ],
+
+  "ignore": [
+    // Generado por `supabase gen types`: sus 7.677 lineas de tipos sin consumidor
+    // directo no son deuda de nadie.
+    "src/types/database.ts"
+  ],
+
+  "ignoreDependencies": [
+    // Tailwind 4 se declara desde CSS (`@import "tailwindcss"`), no por import JS.
+    "tailwindcss",
+    "tw-animate-css",
+    // CLI del kit de UI: se corre a mano (`npx shadcn add`), nunca se importa.
+    "shadcn",
+    // Modulo-marcador que Next resuelve por alias interno; no va en package.json.
+    "server-only",
+    // Artefacto de parseo: `jsr:@std/...` en una edge function de Deno se lee como
+    // el paquete npm "jsr", que no existe ni tiene que existir.
+    "jsr"
+  ],
+
+  "paths": {
+    "@/*": ["./src/*"]
+  },
+
+  "typescript": {
+    "config": ["tsconfig.json"]
+  }
+}
