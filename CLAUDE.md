@@ -119,9 +119,27 @@ revoke execute on function public.<f>(<args>) from public, anon;
 
 `revoke ... from anon` a secas **NO basta** (gotcha #185): deja la función alcanzable vía PUBLIC. Si la función es una RPC que el browser debe invocar, decláralo con `-- ejecutable-por-cliente: <razon>` y asegúrate de que la propia función filtre por `current_user_workspace_id()`, porque el guard del server action no la protege (ver el hallazgo abierto sobre segmentación por rol).
 
+### Vistas: `CREATE OR REPLACE` borra `security_invoker`
+
+Una vista sin `security_invoker` corre como su dueño (`postgres`) y **no aplica el RLS de sus tablas base**. Si además tiene `grant select to authenticated`, cualquier usuario con sesión lee todos los workspaces aunque las policies de abajo sean perfectas.
+
+La trampa: **`CREATE OR REPLACE VIEW` sin cláusula `WITH` RESETEA las `reloptions`**, o sea borra el `security_invoker` que puso una migración anterior. Los grants sobreviven; la opción no. La vista sigue devolviendo filas, por eso nadie lo nota: devuelve de más.
+
+Pasó. `v_cobro_valor` nació en invoker el 2026-08-11 (`20260811120000`) y el 2026-09-02 (`20260902220053`) la reemplazaron para agregarle dos columnas sin volver a declararla: quedó filtrando 429 cobros de 4 workspaces a cualquier usuario con sesión, y el PR pasó con los cinco checks en verde. Reparado el 2026-09-06 en `20260906000001_v_cobro_valor_respeta_rls.sql`.
+
+```sql
+create or replace view public.<v> with (security_invoker = on) as ...;
+-- o, si la vista ya existe y solo se le repone la opcion:
+alter view public.<v> set (security_invoker = on);
+```
+
+**Toda migration que cree o reemplace una vista en `public`** tiene que declarar la opción en la propia sentencia o con un `alter view` en el mismo archivo, aunque la vista ya estuviera en invoker. Si la vista corre a propósito como su dueño (se lee solo con `service_role`), decláralo con `-- vista-definer: <razon>`.
+
+Para ver el estado real, que no es lo que dice la última migración: `select relname, reloptions from pg_class where relnamespace = 'public'::regnamespace and relkind = 'v';`. Ojo, se guarda como `security_invoker=on` **o** `=true` según cómo se escribió: comparar solo contra uno da falso negativo.
+
 ### La guarda que lo hace cumplir
 
-`npm run check:migraciones` revisa las migraciones que el PR agrega y falla si una tabla nace sin RLS o sin declarar su grant, o si una función nace sin revocar `EXECUTE` a PUBLIC. Corre en CI (`.github/workflows/migraciones.yml`) en cada PR que toque `supabase/migrations/`. Las marcas `-- server-only:`, `-- publico-deliberado:` y `-- ejecutable-por-cliente:` son la forma de declarar una excepción: la marca es la decisión, el silencio no.
+`npm run check:migraciones` revisa las migraciones que el PR agrega y falla si una tabla nace sin RLS o sin declarar su grant, si una función nace sin revocar `EXECUTE` a PUBLIC, o si una vista se crea o se reemplaza sin declarar `security_invoker`. Corre en CI (`.github/workflows/migraciones.yml`) en cada PR que toque `supabase/migrations/`. Las marcas `-- server-only:`, `-- publico-deliberado:`, `-- ejecutable-por-cliente:` y `-- vista-definer:` son la forma de declarar una excepción: la marca es la decisión, el silencio no.
 
 ## Estructura del proyecto
 
