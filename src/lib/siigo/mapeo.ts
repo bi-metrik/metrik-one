@@ -217,6 +217,26 @@ export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borr
   }
 }
 
+/**
+ * Sucursal que se manda cuando NO se conoce la del tercero.
+ *
+ * Siigo resuelve el tercero de un documento por **identificación MÁS sucursal**,
+ * no solo por identificación. Un tercero que vive en la sucursal 1 no aparece al
+ * buscarlo en la 0, y la API responde `The customer doesn't exist: <cédula>`, que
+ * es literalmente cierto para Siigo y completamente engañoso para quien lo lee.
+ *
+ * Cero es la principal, y es donde nacen los terceros que crea ONE (el POST no
+ * manda `branch_office` y Siigo asume esa). Por eso sigue siendo el valor por
+ * defecto: sin dato conocido, el comportamiento es idéntico al de antes de que
+ * este parámetro existiera y ningún caso sano cambia. Lo que cambia es que ahora
+ * SE PUEDE mandar otra, para los terceros que el cliente creó a mano en otra
+ * sucursal antes de la integración.
+ *
+ * Medido el 2026-09-07 sobre el catálogo completo de SOENA: 26 de 711 terceros
+ * están fuera de la sucursal 0 (23 en la 1, y uno en la 2, la 10 y la 214).
+ */
+export const SUCURSAL_POR_DEFECTO = 0
+
 export interface BorradorRecibo {
   document: { id: number }
   date: string
@@ -250,6 +270,8 @@ export function borradorRecibo(
   valorPagado: number | null,
   fecha: string,
   concepto: string,
+  /** Sucursal del tercero en Siigo. Ver `SUCURSAL_POR_DEFECTO`. */
+  branchOffice: number = SUCURSAL_POR_DEFECTO,
 ): Borrador<BorradorRecibo> {
   const faltantes: string[] = []
   if (!identificacion) faltantes.push('identificación')
@@ -260,7 +282,7 @@ export function borradorRecibo(
       document: { id: cfg.reciboDocumentId },
       date: fecha,
       type: 'AdvancePayment',
-      customer: { identification: identificacion, branch_office: 0 },
+      customer: { identification: identificacion, branch_office: branchOffice },
       payment: { id: cfg.reciboPaymentId, value: valorPagado ?? 0 },
       observations: concepto,
     },
@@ -352,6 +374,11 @@ export function borradorFactura(
      * `cfg.productoCode`, que es el comportamiento de siempre.
      */
     productoCode?: string
+    /**
+     * Sucursal del tercero en Siigo. Sin ella se manda la principal, que es el
+     * comportamiento de siempre. Ver `SUCURSAL_POR_DEFECTO`.
+     */
+    branchOffice?: number
   },
 ): Borrador<BorradorFactura> {
   const faltantes: string[] = []
@@ -364,7 +391,10 @@ export function borradorFactura(
     payload: {
       document: { id: cfg.facturaDocumentId },
       date: fecha,
-      customer: { identification: identificacion, branch_office: 0 },
+      customer: {
+        identification: identificacion,
+        branch_office: opciones?.branchOffice ?? SUCURSAL_POR_DEFECTO,
+      },
       seller: cfg.sellerId,
       items: [{
         code: opciones?.productoCode || cfg.productoCode,

@@ -26,8 +26,16 @@ import { RedistribuirModal } from './redistribuir-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { imputarPago, escalonesDelNegocio } from '@/lib/upme/imputacion-pago'
 import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion-actions'
-import { descartarDeFacturacion, restaurarEnFacturacion, emitirFacturaDeNegocio, emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
-import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
+import type { FacturasParaAdoptar } from '@/lib/actions/facturacion-actions'
+import {
+  adoptarFacturaSiigoDeNegocio,
+  descartarDeFacturacion,
+  emitirFacturaDeNegocio,
+  emitirReciboDeNegocio,
+  listarFacturasSiigoDelNegocio,
+  restaurarEnFacturacion,
+} from '@/lib/actions/facturacion-actions'
+import type { FacturaAdoptable, FacturaEnSiigo } from '@/lib/siigo/facturas'
 import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
@@ -1321,28 +1329,60 @@ function FilaPorFacturar({
                 )}
               </div>
 
-              {/* Siigo ya tiene una factura de este servicio para el cliente */}
-              {duplicados && (
-                <div className="mt-3 rounded-md border p-2" style={{ borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}>
-                  <div className="flex items-start gap-1.5">
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: '#B91C1C' }} />
-                    <div className="text-[12px]" style={{ color: '#991B1B' }}>
-                      <strong>Este cliente ya tiene factura de este servicio.</strong>{' '}
-                      {duplicados.map(d => d.name).join(', ')}
-                      {duplicados[0]?.date ? ` (${duplicados[0].date})` : ''}. Si aun así hay que
-                      facturar, escribe por qué: queda registrado.
+              {/* Siigo ya tiene facturas para este cliente.
+
+                  Se distinguen las del MISMO servicio (el duplicado evidente) de
+                  las de otro (la advertencia que el filtro por producto tiraba a
+                  la basura hasta el 2026-09-07 — ver `facturasDelClienteEnSiigo`).
+                  Las dos exigen justificación escrita; lo que cambia es lo que la
+                  pantalla afirma, porque no son lo mismo. */}
+              {duplicados && (() => {
+                const mismoServicio = duplicados.some(d => d.mismo_producto)
+                const color = mismoServicio
+                  ? { borde: '#FCA5A5', fondo: '#FEF2F2', texto: '#991B1B', icono: '#B91C1C' }
+                  : { borde: '#FCD34D', fondo: '#FFFBEB', texto: '#92400E', icono: '#B45309' }
+                return (
+                  <div className="mt-3 rounded-md border p-2"
+                       style={{ borderColor: color.borde, backgroundColor: color.fondo }}>
+                    <div className="flex items-start gap-1.5">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: color.icono }} />
+                      <div className="text-[12px]" style={{ color: color.texto }}>
+                        <strong>
+                          {mismoServicio
+                            ? 'Este cliente ya tiene factura de este servicio.'
+                            : 'Este cliente ya tiene facturas en Siigo, de otro servicio.'}
+                        </strong>{' '}
+                        Si es la misma factura de este caso, cierra esto y usa
+                        “Esta factura ya existe”. Si de verdad hay que emitir otra,
+                        escribe por qué: queda registrado.
+                      </div>
                     </div>
+                    <ul className="mt-2 space-y-1">
+                      {duplicados.map(d => (
+                        <li key={d.id || d.name} className="flex flex-wrap items-baseline gap-x-2 text-[11.5px]"
+                            style={{ color: color.texto }}>
+                          <span className="font-semibold">{d.name}</span>
+                          {d.date && <span>{d.date}</span>}
+                          {d.total != null && <span>{fmtCOP(d.total)}</span>}
+                          <span style={{ opacity: 0.75 }}>
+                            {d.mismo_producto
+                              ? 'mismo servicio'
+                              : `servicio ${d.productos.join(', ') || 'sin código'}`}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <input
+                      value={justificacion}
+                      onChange={e => setJustificacion(e.target.value)}
+                      placeholder="Por qué se factura de nuevo"
+                      className="mt-2 w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
+                      style={{ borderColor: color.borde }}
+                      autoFocus
+                    />
                   </div>
-                  <input
-                    value={justificacion}
-                    onChange={e => setJustificacion(e.target.value)}
-                    placeholder="Por qué se factura de nuevo"
-                    className="mt-2 w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
-                    style={{ borderColor: '#FCA5A5' }}
-                    autoFocus
-                  />
-                </div>
-              )}
+                )
+              })()}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {!confirmando && !duplicados && (
@@ -1399,6 +1439,18 @@ function FilaPorFacturar({
             </div>
           )}
         </div>
+      )}
+
+      {/* ── La factura que YA existe en Siigo ─────────────────────────────
+          Dos usos, misma acción: reconocer la factura hecha a mano antes de que
+          ONE emitiera, y reponer el PDF de una que ONE sí emitió y cuyo archivo
+          nunca llegó al bloque (V0076 y V0177, medido el 2026-09-07).
+
+          No se gatea por `listo`: la factura ya existe en Siigo pase lo que pase
+          con el saldo del caso, y esperar a que cuadre dejaría el expediente
+          incompleto por una razón que no tiene que ver. */}
+      {siigoConfigurado && !caso.descartado && (!caso.ya_facturado || caso.factura_sin_pdf) && (
+        <AdoptarFacturaExistente caso={caso} onCambio={onCambio} />
       )}
 
       {/* Descartado: se dice quién y por qué, y se puede deshacer */}
@@ -1469,6 +1521,189 @@ function FilaPorFacturar({
   )
 }
 
+
+
+/**
+ * "Esta factura ya existe": marca en el negocio una factura que ya está en Siigo
+ * y trae su PDF al bloque.
+ *
+ * Por qué existe: SOENA facturó a mano durante meses antes de que ONE emitiera.
+ * Esas facturas son válidas y el cliente ya las tiene; lo que falta es que estén
+ * DENTRO del expediente. Emitir otra no arregla eso — crea una segunda factura
+ * electrónica, que no se corrige, se anula.
+ *
+ * ⚠️ Nada preseleccionado, nada en lote, nada automático. Ya se intentó emparejar
+ * solo en agosto y Mauricio revirtió 7 de esos emparejamientos: coincidir en
+ * valor no es prueba (V0253 empareja con una factura de $850.000 contra un precio
+ * aprobado de $637.500). Aquí se ve la lista COMPLETA del cliente y una persona
+ * decide, caso por caso.
+ */
+function AdoptarFacturaExistente({
+  caso, onCambio,
+}: { caso: CasoPorFacturar; onCambio: () => void }) {
+  const [abierto, setAbierto] = useState(false)
+  const [cargando, setCargando] = useState(false)
+  const [datos, setDatos] = useState<FacturasParaAdoptar | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // Sin valor inicial a propósito: preseleccionar es decidir por quien revisa.
+  const [elegida, setElegida] = useState<string | null>(null)
+  const [pendiente, startTransition] = useTransition()
+
+  // Un caso ya facturado solo entra aquí a REPONER su PDF; uno sin facturar,
+  // a reconocer la factura que ya existe. Es la misma acción y dos textos.
+  const soloElPdf = caso.ya_facturado
+
+  const abrir = () => {
+    setAbierto(true)
+    setError(null)
+    setCargando(true)
+    // La consulta va al abrir y no al cargar la cola: son cientos de casos y
+    // sería una llamada a Siigo por fila.
+    listarFacturasSiigoDelNegocio(caso.negocio_id)
+      .then(r => {
+        if (r.error || !r.data) setError(r.error ?? 'No se pudo consultar Siigo')
+        else setDatos(r.data)
+      })
+      .finally(() => setCargando(false))
+  }
+
+  const cerrar = () => {
+    setAbierto(false); setDatos(null); setElegida(null); setError(null)
+  }
+
+  const adoptar = () => {
+    if (!elegida) return
+    startTransition(async () => {
+      const r = await adoptarFacturaSiigoDeNegocio(caso.negocio_id, elegida)
+      if (!r.ok) { toast.error(r.error ?? 'No se pudo adoptar la factura'); return }
+      toast.success(r.rearchivada
+        ? `PDF de ${r.numero} traído de Siigo y guardado en el negocio`
+        : `Factura ${r.numero} marcada en el negocio y archivada`)
+      cerrar()
+      onCambio()
+    })
+  }
+
+  if (!abierto) {
+    return (
+      <div className="mt-2 flex justify-end">
+        <button
+          onClick={abrir}
+          className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition"
+          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+        >
+          <FileText className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+          {soloElPdf ? 'Traer el PDF desde Siigo' : 'Esta factura ya existe'}
+        </button>
+      </div>
+    )
+  }
+
+  const seleccionable = (f: FacturaAdoptable) =>
+    f.reclamada_por == null || f.ya_es_de_este_negocio
+
+  return (
+    <div className="mt-2 rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>
+        {soloElPdf ? 'Traer el PDF desde Siigo' : 'Facturas del cliente en Siigo'}
+      </div>
+
+      {cargando && (
+        <div className="mt-2 flex items-center gap-1.5 text-[12px]" style={{ color: '#6B7280' }}>
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Consultando Siigo…
+        </div>
+      )}
+
+      {error && (
+        <p className="mt-2 text-[12px]" style={{ color: '#B91C1C' }}>{error}</p>
+      )}
+
+      {datos && (
+        <>
+          <p className="mt-1 text-[11px]" style={{ color: '#6B7280' }}>
+            Todas las de la identificación {datos.identificacion}, del servicio que sean.
+            Escoge la de este caso: quedará marcada aquí y su PDF se guarda en el negocio.
+          </p>
+
+          {datos.facturas.length === 0 ? (
+            <p className="mt-2 text-[12px]" style={{ color: '#6B7280' }}>
+              Siigo no tiene facturas para este cliente.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {datos.facturas.map(f => {
+                const libre = seleccionable(f)
+                return (
+                  <li key={f.id || f.name}>
+                    <label
+                      className="flex items-start gap-2 rounded-md border px-2 py-1.5"
+                      style={{
+                        borderColor: elegida === f.id ? VERDE : '#E5E7EB',
+                        backgroundColor: libre ? '#FFFFFF' : '#F3F4F6',
+                        cursor: libre ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name={`adoptar-${caso.negocio_id}`}
+                        className="mt-0.5"
+                        checked={elegida === f.id}
+                        disabled={!libre || pendiente}
+                        onChange={() => setElegida(f.id)}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-baseline gap-x-2 text-[12px]" style={{ color: '#1A1A1A' }}>
+                          <span className="font-semibold">{f.name}</span>
+                          {f.date && <span style={{ color: '#6B7280' }}>{f.date}</span>}
+                          {f.total != null && <span>{fmtCOP(f.total)}</span>}
+                        </span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]" style={{ color: '#6B7280' }}>
+                          <span>servicio {f.productos.join(', ') || 'sin código'}</span>
+                          {f.ya_es_de_este_negocio && (
+                            <span className="rounded-full px-1.5 py-0.5 font-semibold"
+                                  style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>
+                              ya es la de este caso
+                            </span>
+                          )}
+                          {f.reclamada_por && !f.ya_es_de_este_negocio && (
+                            <span className="rounded-full px-1.5 py-0.5 font-semibold"
+                                  style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+                              ya está en {f.reclamada_por.codigo ?? 'otro negocio'}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={adoptar}
+          disabled={!elegida || pendiente}
+          className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+          style={{ backgroundColor: VERDE }}
+        >
+          {pendiente && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {soloElPdf ? 'Traer este PDF' : 'Sí, esta es la factura de este caso'}
+        </button>
+        <button
+          onClick={cerrar}
+          disabled={pendiente}
+          className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
+          style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
 
 /**
  * Emisión del recibo de caja: la confirmación de que el cliente entregó dinero.
