@@ -118,25 +118,38 @@ export default function TabRecibos(
 
 function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => void }) {
   const [pendiente, startTransition] = useTransition()
+  const [abierto, setAbierto] = useState(false)
+  const [valor, setValor] = useState('')
+  const [justificacion, setJustificacion] = useState('')
+  const [duplicados, setDuplicados] = useState<Array<{ numero: string; fecha: string; valor: number }> | null>(null)
+
+  const escrito = valor.replace(/[^\d]/g, '')
+  // Vacío es válido y es lo normal: se emite por el monto del pago, que es el dato
+  // exacto. Se escribe solo para corregirlo contra el soporte, porque los casos del
+  // cargue masivo no tienen comprobante.
+  const montoValido = escrito === '' || Number(escrito) > 0
 
   function emitir() {
     startTransition(async () => {
-      const r = await emitirReciboDeNegocio(pago.negocio_id, { cobroId: pago.cobro_id })
+      const r = await emitirReciboDeNegocio(pago.negocio_id, {
+        cobroId: pago.cobro_id,
+        valorPagado: escrito === '' ? undefined : Number(escrito),
+        justificacionDuplicado: justificacion.trim() || undefined,
+      })
       if (r.ok) {
         toast.success(
           r.archivada
             ? `Recibo ${r.numero} emitido y archivado.`
             : `Recibo ${r.numero} emitido. El PDF no se pudo archivar: revísalo.`,
         )
+        setAbierto(false)
         onCambio()
         return
       }
-      // El duplicado en Siigo pide justificación, que aquí no se puede escribir: se
-      // manda a Tesorería en vez de fingir que el botón no hizo nada.
-      if (r.duplicados) {
-        toast.warning('Siigo ya tiene un recibo de este cliente por ese valor. Emítelo desde Por facturar, que pide la justificación.')
-        return
-      }
+      // Siigo ya tiene un recibo de este cliente por el mismo valor. No bloquea solo: el
+      // histórico de SOENA es ruidoso (medido el 2026-08-09: de 45 recibos, 4 eran el
+      // mismo caso duplicado el mismo día). Se muestra y la persona decide.
+      if (r.duplicados) { setDuplicados(r.duplicados); return }
       toast.error(r.error)
     })
   }
@@ -204,17 +217,84 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
             </span>
           ) : (
             <button
-              onClick={emitir}
-              disabled={pendiente}
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
+              onClick={() => setAbierto(true)}
+              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
               style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
             >
-              {pendiente ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
-              Emitir recibo
+              <Receipt className="h-3.5 w-3.5" /> Emitir recibo
             </button>
           )
         )}
       </div>
+
+      {abierto && (
+        <div className="mt-2 w-full rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
+          <p className="text-[11px]" style={{ color: '#6B7280' }}>
+            No es una factura: acusa la plata que entregó el cliente. La factura va aparte,
+            por el honorario pactado.
+          </p>
+
+          <label className="mt-2 block">
+            <span className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>
+              Valor recibido (opcional)
+            </span>
+            <input
+              value={valor}
+              onChange={e => setValor(e.target.value)}
+              disabled={pendiente}
+              inputMode="numeric"
+              placeholder={String(Math.round(pago.monto))}
+              className="mt-1 w-full rounded-md border px-2.5 py-1.5 text-[13px] tabular-nums disabled:opacity-50"
+              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+            />
+            <span className="text-[10px]" style={{ color: '#6B7280' }}>
+              Déjalo vacío para emitir por {fmtCOP(pago.monto)}, el monto del pago registrado.
+              Escríbelo solo si el soporte dice otra cosa.
+            </span>
+          </label>
+
+          {duplicados && (
+            <div className="mt-2 rounded-md border p-2" style={{ borderColor: '#F0C060', backgroundColor: '#FFF8E6' }}>
+              <div className="flex items-start gap-1.5 text-[11px]" style={{ color: '#7A4A00' }}>
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <div>
+                  Siigo ya tiene {duplicados.length === 1 ? 'un recibo' : `${duplicados.length} recibos`} de
+                  este cliente por ese mismo valor: {duplicados.map(d => `${d.numero} (${fmtCOP(d.valor)})`).join(', ')}.
+                  Si aun así hay que emitirlo, escribe por qué.
+                </div>
+              </div>
+              <textarea
+                value={justificacion}
+                onChange={e => setJustificacion(e.target.value)}
+                rows={2}
+                placeholder="Por qué se emite de todos modos…"
+                className="mt-2 w-full rounded border px-2 py-1 text-[12px]"
+                style={{ borderColor: '#F0C060' }}
+              />
+            </div>
+          )}
+
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              onClick={() => { setAbierto(false); setDuplicados(null) }}
+              disabled={pendiente}
+              className="rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white disabled:opacity-50"
+              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={emitir}
+              disabled={pendiente || !montoValido || (duplicados != null && justificacion.trim().length < 10)}
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+              style={{ backgroundColor: VERDE }}
+            >
+              {pendiente && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Emitir recibo
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
