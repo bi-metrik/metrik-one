@@ -34,18 +34,26 @@ vi.mock('@/lib/supabase/paginar', () => ({
   },
 }))
 
+/** Si está puesto, la consulta a esa tabla falla: simula una columna que no existe. */
+let fallaTabla: string | null
+/** Columnas pedidas a cada tabla, para poder afirmar sobre ellas. */
+let selects: Record<string, string>
+
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     from: (tabla: string) => {
       const fuente = tabla === 'cobros' ? () => cobros : tabla === 'negocios' ? () => negocios : () => contactos
       const chain = {
-        select: () => chain,
+        select: (cols: string) => { selects[tabla] = cols; return chain },
         eq: () => chain,
         is: () => chain,
         not: () => chain,
         in: () => chain,
         order: () => chain,
-        range: async () => ({ data: fuente(), error: null }),
+        range: async () => {
+          if (fallaTabla === tabla) throw new Error(`column ${tabla}.inexistente does not exist`)
+          return { data: fuente(), error: null }
+        },
       }
       return chain
     },
@@ -55,6 +63,8 @@ vi.mock('@/lib/supabase/server', () => ({
 import { getControlRecibos } from './recibos-control-actions'
 
 beforeEach(() => {
+  fallaTabla = null
+  selects = {}
   negocios = [{
     id: 'neg-1', codigo: 'V0451', nombre: 'Cliente Uno', contacto_id: 'ct-1',
     carpeta_url: 'https://drive/x',
@@ -119,5 +129,34 @@ describe('getControlRecibos — el control es por pago, no por negocio', () => {
     expect(data!.totales.pendientes).toBe(1)
     expect(data!.totales.emitibles).toBe(1)
     expect(data!.totales.valor_pendiente).toBe(637500)
+  })
+})
+
+/**
+ * Un control de plata que falla tiene que DECIRLO.
+ *
+ * EL CASO QUE IMPORTA: pedí `cobros.concepto`, que no existe (el concepto vive en
+ * `notas`). La consulta fallaba, el action devolvía null, y la pestaña solo se dibujaba
+ * cuando el control venía lleno: desaparecía entera. La pantalla se veía normal, apenas
+ * sin una pestaña, que es indistinguible de "esto todavía no existe".
+ *
+ * Los dobles no validan nombres de columna, así que la prueba no puede atrapar el
+ * nombre malo. Lo que sí puede es garantizar el contrato del que depende la pantalla
+ * para no volver a callarse: ante un fallo, `error` viene lleno y `data` en null.
+ */
+describe('getControlRecibos — un fallo se reporta, no se esconde', () => {
+  it('devuelve el error en vez de lanzarlo, para que la pantalla lo pueda mostrar', async () => {
+    fallaTabla = 'cobros'
+    const r = await getControlRecibos()
+
+    expect(r.data).toBeNull()
+    expect(r.error).toContain('does not exist')
+  })
+
+  it('el concepto del pago se lee de `notas`, que es donde vive', async () => {
+    await getControlRecibos()
+
+    expect(selects.cobros).toContain('notas')
+    expect(selects.cobros).not.toMatch(/\bconcepto\b/)
   })
 })

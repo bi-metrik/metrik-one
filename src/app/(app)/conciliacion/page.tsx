@@ -49,7 +49,7 @@ export default async function ConciliacionPage() {
 
   // El control de recibos es su propio frente: qué plata que entró está acusada. No
   // depende de la cola de facturación, y por eso se carga aparte y falla aparte.
-  const { data: recibos } = await getControlRecibos()
+  const { data: recibos, error: recibosError } = await getControlRecibos()
 
-  return <ConciliacionClient data={data} cola={cola} recibos={recibos} />
+  return <ConciliacionClient data={data} cola={cola} recibos={recibos} recibosError={recibosError ?? null} />
 }

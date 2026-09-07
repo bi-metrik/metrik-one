@@ -66,8 +66,21 @@ type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion' 
  *     tenerlo dentro obligaba a buscar pagos sin acusar en la pestaña "Ya facturados".
  */
 export default function ConciliacionClient(
-  { data, cola, recibos }:
-  { data: ConciliacionV2; cola: ColaFacturacion | null; recibos: ControlRecibos | null },
+  { data, cola, recibos, recibosError }:
+  {
+    data: ConciliacionV2; cola: ColaFacturacion | null
+    recibos: ControlRecibos | null
+    /**
+     * Por qué no se pudo armar el control.
+     *
+     * ⚠️ La pestaña se dibuja IGUAL cuando esto viene lleno. Al principio solo aparecía
+     * si el control venía bien, y un error de consulta la hizo desaparecer sin dejar
+     * rastro (2026-09-07): la pantalla se veía normal, solo que sin la pestaña, que es
+     * indistinguible de "esto todavía no existe". Un control de plata que falla tiene
+     * que decirlo.
+     */
+    recibosError: string | null
+  },
 ) {
   const router = useRouter()
 
@@ -85,7 +98,7 @@ export default function ConciliacionClient(
     { key: 'general', label: 'Vista general' },
     { key: 'fuera_epayco', label: 'Pago fuera de ePayco' },
     ...(cola ? [{ key: 'facturacion' as TabKey, label: 'Por facturar', count: cola.totales.listos + cola.totales.incompletos }] : []),
-    ...(recibos ? [{ key: 'recibos' as TabKey, label: 'Recibos de caja', count: recibos.totales.pendientes }] : []),
+    { key: 'recibos' as TabKey, label: 'Recibos de caja', count: recibos?.totales.pendientes },
   ]
 
   return (
@@ -135,7 +148,20 @@ export default function ConciliacionClient(
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
       {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
-      {tab === 'recibos' && recibos && <TabRecibos control={recibos} onCambio={() => router.refresh()} />}
+      {tab === 'recibos' && (
+        recibos
+          ? <TabRecibos control={recibos} onCambio={() => router.refresh()} />
+          : (
+            <div className="flex items-start gap-2 rounded-lg border px-3 py-2"
+                 style={{ borderColor: '#FECACA', backgroundColor: '#FEF2F2' }}>
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#B91C1C' }} />
+              <p className="text-[12px]" style={{ color: '#991B1B' }}>
+                No se pudo cargar el control de recibos, así que esta lista no está completa
+                y no se puede emitir desde aquí. {recibosError ?? 'Error desconocido.'}
+              </p>
+            </div>
+          )
+      )}
     </div>
   )
 }

@@ -56,6 +56,14 @@ export interface PagoConRecibo {
   faltantes: string[]
 }
 
+/**
+ * ⚠️ El concepto del pago vive en `cobros.notas`. No hay columna `concepto`.
+ *
+ * Pedirla hacía fallar la consulta entera, y como la pestaña solo se dibujaba cuando el
+ * control venía lleno, el control desaparecía sin decir nada (2026-09-07). Los dobles de
+ * las pruebas no validan nombres de columna, así que esto solo lo ve producción o
+ * alguien mirando el esquema.
+ */
 export interface ControlRecibos {
   pagos: PagoConRecibo[]
   totales: {
@@ -106,7 +114,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     negocio_id: string | null
     monto: number | null
     fecha: string | null
-    concepto: string | null
+    notas: string | null
     siigo_recibo: { numero?: string; archivo_url?: string | null } | null
     recibo_no_aplica: { motivo?: string } | null
   }
@@ -115,7 +123,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('cobros')
-      .select('id, negocio_id, monto, fecha, concepto, siigo_recibo, recibo_no_aplica')
+      .select('id, negocio_id, monto, fecha, notas, siigo_recibo, recibo_no_aplica')
       .eq('workspace_id', workspaceId)
       .is('anulado_at', null)
       .not('fecha', 'is', null)
@@ -187,7 +195,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       correo: contacto?.email ?? null,
       monto: Number(c.monto ?? 0),
       fecha: c.fecha,
-      concepto: c.concepto,
+      concepto: c.notas,
       estado,
       recibo_numero: c.siigo_recibo?.numero ?? null,
       recibo_url: c.siigo_recibo?.archivo_url ?? null,
