@@ -16,6 +16,8 @@ import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { resolverDestino } from '@/lib/negocios/casilla-compartida'
+import { extraerDriveFileId } from '@/lib/compliance/documentos'
+import { mimeEfectivo } from '@/lib/documentos/mime'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
 
@@ -866,8 +868,20 @@ export async function reprocesarDocumento(
     if (!bloqueData) return { success: false, error: 'Bloque no encontrado' }
 
     const currentData = (bloqueData.data as Record<string, unknown>) ?? {}
-    const driveFileId = currentData.drive_file_id as string | undefined
     const fileName = (currentData.file_name as string) ?? 'documento.pdf'
+
+    // El id del archivo se resuelve por DOS vías, y la segunda no es un adorno:
+    // `procesarDocumento` escribe `drive_file_id`, pero los cargues masivos (y todo
+    // lo que archivó el documento por otro camino) dejan solo `drive_url`. Medido
+    // contra producción el 2026-09-07: de 4.075 bloques con archivo en Drive,
+    // **1.292 no tienen `drive_file_id`** (785 de ellos con `_migrado: true`), así
+    // que hasta hoy el botón "Reprocesar" les respondía "No hay archivo en Drive"
+    // teniendo el archivo delante. La url trae el id, y `extraerDriveFileId` ya
+    // existe y está probada — no hace falta un backfill para desatascarlos.
+    const driveUrl = currentData.drive_url as string | undefined
+    const driveFileId =
+      (currentData.drive_file_id as string | undefined) ??
+      (driveUrl ? extraerDriveFileId(driveUrl) ?? undefined : undefined)
 
     if (!driveFileId) {
       return { success: false, error: 'No hay archivo en Drive para reprocesar' }
@@ -887,7 +901,12 @@ export async function reprocesarDocumento(
     // 3. Descargar archivo de Drive
     console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
     const buffer = await downloadDriveFile(driveFileId, workspaceId)
-    const mimeType = mimeTypeFromName(fileName)
+    // El tipo lo decide el ARCHIVO, no su nombre. El cargue masivo bautiza todo
+    // «Factura.pdf» / «RUT.pdf» sin mirar lo que mandó el cliente, y la gente manda
+    // fotos: el «Factura.pdf» de V0181 son 9.507 bytes cuya cabecera es `\x89PNG`.
+    // Declarado como PDF, Gemini devuelve TODOS los campos vacíos y el reproceso
+    // borra lo que el bloque sí tenía. Ver `@/lib/documentos/mime`.
+    const mimeType = mimeEfectivo(buffer, mimeTypeFromName(fileName))
 
     // 4. Extraer con AI (con reintento ante fallo transitorio)
     console.log(`[reprocesar] AI extraction (${camposExtraccion.length} campos)...`)
