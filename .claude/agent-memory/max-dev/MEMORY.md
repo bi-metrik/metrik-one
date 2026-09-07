@@ -27,6 +27,7 @@
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M, y termotech no usa rubros
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
+- ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — PR #550 sin mergear; las 252 marcas se autocorrigen solas (no hay backfill) y los 6 candidatos NO son una lista para aplicar
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
 
 ## Referencias
