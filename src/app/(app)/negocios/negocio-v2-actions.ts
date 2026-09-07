@@ -5988,7 +5988,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .eq('workspace_id', workspaceId),
     db(supabase)
       .from('cobros')
-      .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json')
+      .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', id)
       .order('created_at', { ascending: true }),
@@ -7271,6 +7271,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       vencido: (c.vencido as boolean | null) ?? false,
       notas: c.notas as string | null,
       external_ref: c.external_ref as string | null,
+      // El recibo de caja de ESTE pago. Va por cobro y no por bloque del negocio: un
+      // bloque sostiene un archivo, y con varios pagos el PDF del último pisaba a los
+      // anteriores (Mauricio, 2026-09-07).
+      siigo_recibo: (c.siigo_recibo as { numero?: string; archivo_url?: string | null } | null) ?? null,
       es_reparto_comercial:
         ((c.split_json as { origen?: string } | null)?.origen ?? null) === 'comercial',
     })),

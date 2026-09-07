@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle2, Clock, AlertTriangle, Wallet } from 'lucide-react'
+import { CheckCircle2, Clock, AlertTriangle, Wallet, Receipt, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmarCobroProgramado } from './plan-recurrente-actions'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
@@ -24,6 +24,15 @@ interface Cobro {
   vencido: boolean
   notas: string | null
   external_ref: string | null
+  /**
+   * Recibo de caja de ESTE pago, si ya se emitió.
+   *
+   * Va en el cobro y no en un bloque del negocio porque un bloque sostiene UN archivo:
+   * con varios pagos, el PDF del último pisaba a los anteriores y los recibos viejos
+   * quedaban sin puerta de entrada desde la ficha (Mauricio, 2026-09-07). El dato ya
+   * vivía aquí; lo que faltaba era mostrarlo al lado de la plata que lo originó.
+   */
+  siigo_recibo?: { numero?: string; archivo_url?: string | null } | null
   /** true si es una porción de un reparto propuesto por el comercial (split_json.origen==='comercial'). */
   es_reparto_comercial?: boolean
 }
@@ -73,6 +82,42 @@ const TIPO_LABELS: Record<string, string> = {
   pasante: 'Pasante',
 }
 
+/**
+ * El recibo de caja de un pago, al lado del pago.
+ *
+ * Sin número no se dice nada: "sin recibo" en cada fila de un histórico de meses sería
+ * ruido permanente sobre pagos que ya se decidió no acusar. Quién falta se ve entero en
+ * el control de recibos de Conciliación, que es donde se actúa.
+ */
+function ReciboDelPago({ cobro }: { cobro: Cobro }) {
+  const numero = cobro.siigo_recibo?.numero
+  if (!numero) return null
+
+  const url = cobro.siigo_recibo?.archivo_url
+  if (!url) {
+    // Emitido en Siigo pero sin PDF archivado: existe igual, y decirlo es mejor que
+    // ofrecer un enlace que no lleva a ninguna parte.
+    return (
+      <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[#047857]">
+        <Receipt className="h-3 w-3" /> Recibo {numero} · sin PDF
+      </p>
+    )
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={e => e.stopPropagation()}
+      className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[#047857] hover:underline"
+    >
+      <Receipt className="h-3 w-3" /> Recibo {numero}
+      <ExternalLink className="h-2.5 w-2.5" />
+    </a>
+  )
+}
+
 function CobroConfirmadoRow({
   cobro,
   costo,
@@ -108,6 +153,7 @@ function CobroConfirmadoRow({
             </p>
           )}
           {cobro.fecha && <p className="text-[10px] text-[#6B7280]">{fmtDate(cobro.fecha)}</p>}
+          <ReciboDelPago cobro={cobro} />
         </div>
         <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
           {fmt(cobro.monto)}

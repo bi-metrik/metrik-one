@@ -31,6 +31,8 @@ import type { FacturaEnSiigo } from '@/lib/siigo/facturas'
 import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
+import type { ControlRecibos } from '@/lib/actions/recibos-control-actions'
+import TabRecibos from './tab-recibos'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -38,7 +40,7 @@ const fmtCOP = (n: number) =>
 const VERDE = '#10B981'
 const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
 
-type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion'
+type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion' | 'recibos'
 
 /**
  * Panel de conciliación de la FINANCIERA — SOLO aceptar o rechazar lo que el
@@ -51,8 +53,14 @@ type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion'
  *   - Pago fuera de ePayco: captura excepcional de un ingreso que cayó a una cuenta
  *     bancaria. NO es conciliación — por eso vive en su propia pestaña, aislada de
  *     la bandeja de aceptar/rechazar.
+ *   - Recibos de caja: de la plata que entró, cuál está acusada. Separado de
+ *     facturación por decisión de Mauricio (2026-09-07): son dos controles distintos y
+ *     tenerlo dentro obligaba a buscar pagos sin acusar en la pestaña "Ya facturados".
  */
-export default function ConciliacionClient({ data, cola }: { data: ConciliacionV2; cola: ColaFacturacion | null }) {
+export default function ConciliacionClient(
+  { data, cola, recibos }:
+  { data: ConciliacionV2; cola: ColaFacturacion | null; recibos: ControlRecibos | null },
+) {
   const router = useRouter()
 
   // Repartos propuestos por el comercial, pendientes de confirmar.
@@ -69,6 +77,7 @@ export default function ConciliacionClient({ data, cola }: { data: ConciliacionV
     { key: 'general', label: 'Vista general' },
     { key: 'fuera_epayco', label: 'Pago fuera de ePayco' },
     ...(cola ? [{ key: 'facturacion' as TabKey, label: 'Por facturar', count: cola.totales.listos + cola.totales.incompletos }] : []),
+    ...(recibos ? [{ key: 'recibos' as TabKey, label: 'Recibos de caja', count: recibos.totales.pendientes }] : []),
   ]
 
   return (
@@ -118,6 +127,7 @@ export default function ConciliacionClient({ data, cola }: { data: ConciliacionV
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
       {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
+      {tab === 'recibos' && recibos && <TabRecibos control={recibos} onCambio={() => router.refresh()} />}
     </div>
   )
 }
