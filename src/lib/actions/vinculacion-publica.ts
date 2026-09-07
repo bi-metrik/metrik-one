@@ -18,6 +18,7 @@
  * se podría abrir bajo la marca de cualquier otro cliente.
  */
 
+import { headers } from 'next/headers';
 import { createServiceClient } from '@/lib/supabase/server';
 import {
   VERSION_TEXTO,
@@ -31,6 +32,14 @@ import {
   type MotivoEnlaceCerrado,
   type PasoPublico,
 } from '@/lib/compliance/vinculacion-publica';
+import {
+  esMotivoEnlaceSolicitud,
+  faltaEnSolicitud,
+  mensajeErrorSolicitud,
+  normalizarDocumento,
+  type DatosSolicitud,
+  type MotivoEnlaceSolicitud,
+} from '@/lib/compliance/solicitud-vinculacion';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -368,4 +377,73 @@ export async function traducirErrorPublico(error: string): Promise<string> {
     default:
       return 'Algo salió mal. Vuelve a intentar, y si sigue igual escríbele a quien te envió el enlace.';
   }
+}
+
+// ─── El mostrador de solicitudes ──────────────────────────────────────────
+
+/**
+ * La pantalla donde un proveedor pide vincularse, antes de que exista
+ * expediente. No tiene token de expediente porque todavía no hay expediente: la
+ * credencial es el token del enlace de la empresa.
+ *
+ * Lo único que se resuelve acá es la marca, y por la misma razón de siempre:
+ * quien llega a esta página está a punto de dejar su documento y su correo en
+ * un sitio que no conoce. Si no ve de quién es, no hay razón para que confíe.
+ */
+export type VistaSolicitud = { marca: MarcaInvitante };
+
+function rutaSolicitud(token: string, sufijo = ''): string {
+  return `/api/public/kyc/solicitud/${encodeURIComponent(token)}${sufijo}`;
+}
+
+export async function abrirSolicitud(
+  token: string,
+): Promise<Result<VistaSolicitud> & { motivo?: MotivoEnlaceSolicitud }> {
+  const base = await publico<{ workspace_one_id: string | null }>(rutaSolicitud(token));
+  if (!base.ok) {
+    return esMotivoEnlaceSolicitud(base.error)
+      ? { ok: false, error: base.error, motivo: base.error }
+      : { ok: false, error: base.error };
+  }
+  return { ok: true, data: { marca: await marcaDelWorkspace(base.data.workspace_one_id) } };
+}
+
+/**
+ * Manda la solicitud. La respuesta de Valida es muda a propósito: no dice si
+ * creó el expediente o si reenvió el enlace de uno que ya existía. Acá tampoco
+ * se intenta averiguarlo, porque distinguirlo convertiría la pantalla en un
+ * oráculo para saber quién es proveedor de quién.
+ */
+export async function enviarSolicitud(
+  token: string,
+  datos: DatosSolicitud,
+): Promise<Result<null>> {
+  const falta = faltaEnSolicitud(datos);
+  if (falta.length > 0) return { ok: false, error: 'datos_invalidos' };
+
+  // El host lo pone ONE, no el navegador: si viniera del cliente, cualquiera
+  // podría pedirle a Valida que mande un correo con la marca de la empresa y un
+  // enlace a un sitio suyo.
+  const h = await headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
+  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+
+  const r = await publico<{ ok: boolean }>(rutaSolicitud(token), {
+    method: 'POST',
+    body: JSON.stringify({
+      tipo_sujeto: datos.tipoSujeto,
+      razon_social: datos.tipoSujeto === 'juridica' ? datos.denominacion.trim() : null,
+      nombre: datos.tipoSujeto === 'natural' ? datos.denominacion.trim() : null,
+      documento_tipo: datos.tipoDocumento,
+      documento_numero: normalizarDocumento(datos.documento),
+      email: datos.correo.trim().toLowerCase(),
+      enlace_base: `${proto}://${host}`,
+    }),
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, data: null };
+}
+
+export async function traducirErrorSolicitud(codigo: string): Promise<string> {
+  return mensajeErrorSolicitud(codigo);
 }
