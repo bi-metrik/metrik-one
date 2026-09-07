@@ -18,6 +18,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCachedUser } from '@/lib/supabase/auth-user';
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { getWorkspace } from './get-workspace';
 import {
   alertasDeExpediente,
@@ -33,6 +34,7 @@ import {
   type ExpedienteFila,
   type ResumenVinculacion,
 } from '@/lib/compliance/vinculacion';
+import { urlDeSolicitud } from '@/lib/compliance/solicitud-vinculacion';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -245,4 +247,86 @@ export async function traducirErrorVinculacion(error: string): Promise<string> {
     default:
       return error;
   }
+}
+
+// ─── El enlace público de solicitud ───────────────────────────────────────
+
+/**
+ * El enlace que la empresa comparte para que un proveedor pida vincularse.
+ *
+ * No se "genera": se pide y ya está. Valida lo crea perezosamente la primera
+ * vez. Un enlace que hay que generar es un enlace que la mitad de los clientes
+ * nunca va a tener, y entonces la única vía sigue siendo crear expedientes uno
+ * por uno, que es justo lo que esto viene a evitar.
+ *
+ * El host lo pone ONE, que es quien sabe bajo qué subdominio está atendiendo.
+ * Valida solo devuelve el camino.
+ */
+export type EnlaceSolicitud = {
+  url: string;
+  activa: boolean;
+  rotadoEn: string | null;
+};
+
+type RespuestaEnlace = { token: string; activa: boolean; rotado_en: string | null; ruta: string };
+
+/**
+ * El origen desde el que se está sirviendo la petición. En producción el
+ * subdominio del tenant llega en `x-forwarded-host`; en local no hay proxy y
+ * queda `host` con http.
+ */
+async function origenActual(): Promise<string> {
+  const h = await headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
+  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+  return `${proto}://${host}`;
+}
+
+export async function enlaceDeSolicitud(): Promise<Result<EnlaceSolicitud>> {
+  const g = await guardVinculacion();
+  if (!g.ok) return g;
+
+  const r = await pedirAValida<RespuestaEnlace>(g.data.apiKey, '/api/v1/kyc/solicitud-enlace');
+  if (!r.ok) return { ok: false, error: await traducirErrorVinculacion(r.error) };
+
+  return {
+    ok: true,
+    data: {
+      url: urlDeSolicitud(await origenActual(), r.data.ruta),
+      activa: r.data.activa,
+      rotadoEn: r.data.rotado_en,
+    },
+  };
+}
+
+/**
+ * Cambiar el enlace. Es la salida cuando se filtró: el anterior deja de servir
+ * de inmediato. Los expedientes ya creados no se tocan, cada uno tiene su
+ * propio token.
+ *
+ * Solo quien puede decidir puede rotar. Rotar sin avisar deja sin puerta a todo
+ * el que tenga el enlace viejo pegado en un correo, y esa consecuencia no es de
+ * quien solo mira la bandeja.
+ */
+export async function rotarEnlaceDeSolicitud(): Promise<Result<EnlaceSolicitud>> {
+  const g = await guardVinculacion();
+  if (!g.ok) return g;
+  if (!puedeDecidirVinculacion(g.data.role)) {
+    return { ok: false, error: await traducirErrorVinculacion('forbidden_sin_permiso_para_decidir') };
+  }
+
+  const r = await pedirAValida<RespuestaEnlace>(g.data.apiKey, '/api/v1/kyc/solicitud-enlace/rotar', {
+    method: 'POST',
+  });
+  if (!r.ok) return { ok: false, error: await traducirErrorVinculacion(r.error) };
+
+  revalidatePath('/compliance/vinculacion');
+  return {
+    ok: true,
+    data: {
+      url: urlDeSolicitud(await origenActual(), r.data.ruta),
+      activa: r.data.activa,
+      rotadoEn: r.data.rotado_en,
+    },
+  };
 }
