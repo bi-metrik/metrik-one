@@ -37,6 +37,12 @@ día 2026-09-07, dos subagentes aislados dieron resultados opuestos:
   `.env.local`). Cero medición.
 - PR #543 — **`ln -s` de `.env.local` y de `node_modules` del repo principal
   pasó sin problema**, y con eso hubo medición completa contra producción.
+- PR #548 (QA post-aplicación) — el `ln -s` de `.env.local` pasó, pero el script
+  que leía `.credentials.md` para la Management API **lo bloqueó el clasificador**.
+  Dos consecuencias: el orden es `.env.local` primero y `.credentials.md` de
+  último; y **`.env.local` NO trae `SUPABASE_ACCESS_TOKEN`**, así que sin
+  `.credentials.md` no hay DDL ni lectura del ledger — solo PostgREST y RPC con
+  la service role key.
 - PR #550 (2026-09-07) — **ni symlinks ni `node_modules` hicieron falta**: un
   script de Python con **solo la biblioteca estándar** que ABRE
   `/home/mauricio/Developer/metrik/metrik-one/.env.local` por su ruta absoluta,
