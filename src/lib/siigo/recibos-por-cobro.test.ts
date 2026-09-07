@@ -40,6 +40,8 @@ let clavesUsadas: string[]
 let observacionesUsadas: string[]
 /** Fechas que viajaron en el payload del recibo. */
 let fechasUsadas: string[]
+/** Si está puesto, el POST del voucher falla con este error hasta que se limpie. */
+let fallaEmision: Error | null
 /** Llamadas a la RPC del aviso al cliente. */
 let avisos: Array<{ negocio: string; bloque: string }>
 let consecutivo: number
@@ -117,6 +119,12 @@ vi.mock('./client', async () => {
       clavesUsadas.push(opts?.idempotencyKey ?? '(sin clave)')
       observacionesUsadas.push(opts?.body?.observations ?? '(sin concepto)')
       fechasUsadas.push(opts?.body?.date ?? '(sin fecha)')
+      if (fallaEmision) {
+        const e = fallaEmision
+        // Solo el PRIMER intento falla: así se ve que el reintento es el que emite.
+        fallaEmision = null
+        throw e
+      }
       consecutivo += 1
       return { id: `siigo-rc-${consecutivo}`, name: `RC-1-${consecutivo}`, date: '2026-09-03' }
     },
@@ -129,8 +137,14 @@ vi.mock('./clientes', () => ({
   }),
 }))
 
+/** Lo que se le pidió al render del PDF: ahí viajan las dos fechas. */
+let pdfPedido: { fecha?: string; fecha_pago?: string } | null
+
 vi.mock('@/lib/pdf/pdf-render-client', () => ({
-  renderReciboCaja: async () => Buffer.from('%PDF-falso'),
+  renderReciboCaja: async (_slug: string, data: { fecha?: string; fecha_pago?: string }) => {
+    pdfPedido = data
+    return Buffer.from('%PDF-falso')
+  },
 }))
 
 vi.mock('./archivar-documento', () => ({
@@ -140,6 +154,7 @@ vi.mock('./archivar-documento', () => ({
 }))
 
 import { emitirReciboDeCobro } from './recibos'
+import { SiigoError } from './client'
 
 const OPC = { bloqueReciboSlug: 'recibo_caja_upme', concepto: 'Dinero recibido del cliente' }
 
@@ -157,6 +172,8 @@ beforeEach(() => {
   clavesUsadas = []
   observacionesUsadas = []
   fechasUsadas = []
+  fallaEmision = null
+  pdfPedido = null
   avisos = []
   consecutivo = 0
 })
@@ -269,5 +286,62 @@ describe('emitirReciboDeCobro — la fecha es la del pago, no la de emisión', (
     await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
 
     expect(fechasUsadas).toEqual([new Date().toISOString().slice(0, 10)])
+  })
+})
+
+/**
+ * Periodo contable cerrado: el recibo sale igual, con la fecha de hoy.
+ *
+ * SE VIERON FALLAR contra la implementación anterior, que propagaba el error:
+ *   - "un rechazo por periodo cerrado reintenta con hoy"  → el recibo no salía
+ *   - "el motivo queda escrito en la marca"               → no había motivo
+ *   - "cualquier otro rechazo NO se reintenta"            → (protege el nuevo camino)
+ */
+describe('emitirReciboDeCobro — Siigo rechaza la fecha por periodo cerrado', () => {
+  const periodoCerrado = () =>
+    new SiigoError('The date is out of the accounting period, it is closed', 400, ['invalid_data'])
+
+  it('reintenta con la fecha de hoy y el recibo sale', async () => {
+    fallaEmision = periodoCerrado()
+    const r = await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(r.ok).toBe(true)
+    // Dos intentos: el del pago (febrero) y el de hoy.
+    expect(fechasUsadas).toEqual(['2026-02-17', new Date().toISOString().slice(0, 10)])
+  })
+
+  it('el PDF sigue mostrando la fecha del pago, que es la que el cliente reconoce', async () => {
+    fallaEmision = periodoCerrado()
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(pdfPedido?.fecha_pago).toBe('2026-02-17')
+    expect(pdfPedido?.fecha).not.toBe('2026-02-17')
+  })
+
+  it('deja escrito POR QUÉ el documento no lleva la fecha del pago', async () => {
+    fallaEmision = periodoCerrado()
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    const marca = cobros[COBRO_1].siigo_recibo as { fecha_motivo?: string; fecha_pago?: string }
+    expect(marca.fecha_pago).toBe('2026-02-17')
+    expect(marca.fecha_motivo).toMatch(/periodo contable cerrado/)
+  })
+
+  it('un rechazo que NO es de periodo cerrado se propaga sin cambiar la fecha', async () => {
+    fallaEmision = new SiigoError('Customer not found', 400, ['invalid_data'])
+    const r = await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.motivo).toBe('error')
+    // Un solo intento: no se reintentó con otra fecha.
+    expect(fechasUsadas).toEqual(['2026-02-17'])
+  })
+
+  it('sin rechazo no hay motivo que anotar y las dos fechas coinciden', async () => {
+    await emitirReciboDeCobro(WS, COBRO_2, null, OPC)
+
+    const marca = cobros[COBRO_2].siigo_recibo as { fecha_motivo?: string | null; fecha_pago?: string }
+    expect(marca.fecha_motivo).toBeNull()
+    expect(marca.fecha_pago).toBe('2026-08-31')
   })
 })
