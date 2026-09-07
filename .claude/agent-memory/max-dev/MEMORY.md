@@ -28,6 +28,7 @@
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
+- ⚠️ [Certificado UPME en Anexos](project_certificado_upme_anexos.md) — PR #548 sin mergear: 264 casillas sembradas (la condición no se mira), y por qué NO es gate
 
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
 
