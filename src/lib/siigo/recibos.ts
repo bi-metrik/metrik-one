@@ -50,6 +50,27 @@ import { renderReciboCaja } from '@/lib/pdf/pdf-render-client'
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
 const ESPERA_429_EMISION_MS = 30_000
 
+const hoyISO = () => new Date().toISOString().slice(0, 10)
+
+/**
+ * ¿Siigo rechazó esto porque el periodo contable está cerrado?
+ *
+ * Se reconoce por el TEXTO porque Siigo no da un código estable para esto: el `Code`
+ * que acompaña estos rechazos es el genérico de validación, el mismo de un NIT malo o
+ * un valor inválido. Por eso el reconocimiento es deliberadamente estrecho: exige que
+ * el mensaje hable a la vez de la fecha y del periodo. Un falso positivo aquí no es
+ * cosmético, emitiría un recibo con otra fecha por un problema que era otro.
+ */
+function esPeriodoCerrado(e: unknown): boolean {
+  if (!(e instanceof SiigoError)) return false
+  const m = e.message.toLowerCase()
+  const hablaDeFecha = m.includes('date') || m.includes('fecha')
+  const hablaDePeriodo =
+    m.includes('period') || m.includes('periodo') || m.includes('período') ||
+    m.includes('closed') || m.includes('cerrado')
+  return hablaDeFecha && hablaDePeriodo
+}
+
 /** Lo que queda escrito en el negocio cuando el recibo se emite. */
 export interface MarcaRecibo {
   numero: string
@@ -58,6 +79,17 @@ export interface MarcaRecibo {
   archivo_url: string | null
   at: string
   por: string | null
+  /** Fecha del DOCUMENTO en Siigo. Puede no ser la del pago: ver `fecha_motivo`. */
+  fecha?: string
+  /** Cuándo entró la plata. Es la que el cliente reconoce. */
+  fecha_pago?: string
+  /**
+   * Por qué el documento no lleva la fecha del pago.
+   *
+   * Se guarda en vez de confiar en que alguien recuerde: cuando alguien pregunte por
+   * qué un recibo tiene dos fechas, la respuesta está en el dato (Mauricio, 2026-09-07).
+   */
+  fecha_motivo?: string | null
 }
 
 export type ResultadoRecibo =
@@ -223,31 +255,48 @@ export async function emitirReciboDeCobro(
     // ── 5. Emitir ──
     // ── La fecha es la del COBRO, no la de hoy ──
     // Decisión de Mauricio (2026-09-07). El recibo acusa plata que YA entró: fecharlo
-    // hoy diría que entró hoy. Medido el 2026-09-04 sobre los 43 pagos sin recibo y sin
+    // hoy diría que entró hoy. Medido el 2026-09-04 sobre los 48 pagos sin recibo y sin
     // facturar, el más viejo era del 17 de febrero: con la fecha de emisión, ese cliente
     // habría recibido un "recibimos tu pago" siete meses tarde y Siigo habría registrado
     // en septiembre plata de febrero.
-    //
-    // ⚠️ Siigo puede RECHAZAR una fecha de un periodo contable ya cerrado. Eso es
-    // correcto y no se esquiva volviendo a hoy: un recibo con fecha falsa sería peor que
-    // uno que no sale. El error de Siigo se propaga tal cual para que quien emite sepa
-    // que el periodo está cerrado y lo lleve por donde corresponde.
-    const fechaRecibo = cobro.fecha ?? new Date().toISOString().slice(0, 10)
+    const fechaPago = cobro.fecha ?? hoyISO()
+    let fechaRecibo = fechaPago
+    let motivoFechaDistinta: string | null = null
+
     const { payload, faltantes } = borradorRecibo(cfg, identificacion, valorPagado, fechaRecibo, concepto)
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 
-    const creado = await siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
-      workspaceId, '/v1/vouchers',
-      {
-        method: 'POST',
-        body: payload satisfies BorradorRecibo,
-        // Determinista desde el COBRO: un reintento no produce un segundo recibo, y dos
-        // cobros del mismo negocio no chocan entre sí (con la clave por negocio, el
-        // segundo recibo habría recibido de vuelta el primero).
-        idempotencyKey: claveIdempotencia(cobroId, 'rc'),
-        maxEspera429Ms: ESPERA_429_EMISION_MS,
-      },
-    )
+    // Determinista desde el COBRO: un reintento no produce un segundo recibo, y dos
+    // cobros del mismo negocio no chocan entre sí (con la clave por negocio, el segundo
+    // recibo habría recibido de vuelta el primero).
+    const clave = claveIdempotencia(cobroId, 'rc')
+    const emitir = (cuerpo: BorradorRecibo) =>
+      siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
+        workspaceId, '/v1/vouchers',
+        { method: 'POST', body: cuerpo, idempotencyKey: clave, maxEspera429Ms: ESPERA_429_EMISION_MS },
+      )
+
+    let creado: { id?: string; name?: string; number?: number; date?: string }
+    try {
+      creado = await emitir(payload)
+    } catch (e) {
+      // ⚠️ El ÚNICO rechazo que se reintenta es el del periodo contable cerrado.
+      //
+      // Un pago de febrero no se puede asentar en un mes que ya se cerró, y eso no es
+      // un defecto de Siigo: es contabilidad. La alternativa era dejar 20 pagos viejos
+      // ($8.1M, medido el 2026-09-07) sin recibo para siempre.
+      //
+      // Se reintenta con la fecha de HOY y el PDF sigue mostrando la del pago, así que
+      // el cliente ve su fecha real y el documento queda en un periodo que la admite.
+      // Cualquier otro error se propaga: tratarlos todos como periodo cerrado
+      // convertiría un dato malo en un recibo con fecha cambiada y sin nadie mirando.
+      if (!esPeriodoCerrado(e)) throw e
+
+      motivoFechaDistinta = `Siigo rechazó la fecha del pago (${fechaPago}) por periodo contable cerrado`
+      fechaRecibo = hoyISO()
+      const reintento = borradorRecibo(cfg, identificacion, valorPagado, fechaRecibo, concepto)
+      creado = await emitir(reintento.payload)
+    }
 
     const numero = creado.name ?? '(sin número)'
 
@@ -261,6 +310,7 @@ export async function emitirReciboDeCobro(
         const pdf = await renderReciboCaja('soena', {
           numero,
           fecha: creado.date ?? fechaRecibo,
+          fecha_pago: fechaPago,
           cliente_nombre: negocio.nombre,
           cliente_identificacion: identificacion,
           negocio_codigo: negocio.codigo ?? '',
@@ -293,6 +343,9 @@ export async function emitirReciboDeCobro(
       archivo_url: archivoUrl,
       at: new Date().toISOString(),
       por: staffNombre,
+      fecha: creado.date ?? fechaRecibo,
+      fecha_pago: fechaPago,
+      fecha_motivo: motivoFechaDistinta,
     }
 
     const { error: errUp } = await db(svc)

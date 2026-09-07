@@ -380,7 +380,16 @@ export async function renderGuiaDevolucion(
 export interface ReciboCajaRenderPayload {
   /** Consecutivo OFICIAL que asignó Siigo (RC-1-NN). Es el respaldo del cliente. */
   numero: string
+  /** Fecha del DOCUMENTO en Siigo: la que amarra al consecutivo. */
   fecha: string
+  /**
+   * Cuándo entró la plata.
+   *
+   * Casi siempre igual a `fecha`. Difiere cuando Siigo rechazó la fecha real por
+   * periodo contable cerrado y el recibo tuvo que emitirse con la de hoy: ahí esta es
+   * la única que dice la verdad, y es la que el cliente reconoce (Mauricio, 2026-09-07).
+   */
+  fecha_pago: string
   cliente_nombre: string
   cliente_identificacion: string
   negocio_codigo: string
