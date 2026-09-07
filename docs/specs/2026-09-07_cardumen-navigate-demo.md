@@ -122,9 +122,9 @@ select id, created_at, estudio, lang,
 
 ## 6. Decisiones que conviene saber
 
-- **Los literales van sin tildes**, tal como están en `meta.json` ("La gente comun", "Algo que se esta acabando"). El brief pide Capa A exacta y la fuente única es ese archivo. Si se quieren con tildes, primero se cambia `meta.json` y después se copia (la prueba `instrumento.test.ts` obliga a mantenerlos iguales).
+- **Los literales van tal como están en `meta.json`, tildes incluidas** ("La gente común", "Algo que se está acabando"). El brief pide Capa A exacta y la fuente única es ese archivo: si cambia la redacción, primero se cambia `meta.json` y después se copia (la prueba `instrumento.test.ts` obliga a mantenerlos iguales). El **sector** es la excepción deliberada: se **guarda** como slug sin tildes (`Infraestructura y construccion`, igual que `respuestas.json` de la muestra) y se **muestra** con la etiqueta con tildes de `SECTORES_CATALOGO` (`etiquetaSector`).
 - **Registro de usted**, como en la muestra que ve el cliente. El guard de español neutro solo corrige voseo, no interfiere.
-- **Anclas intermedias genéricas** ("mas cerca de X, con matices" / "un poco de las dos"): las definitivas de Navigate las redacta Yuto cuando Saga avale el esquema (pendiente §9 de la spec de diadas). Los extremos son los polos literales.
+- **Anclas intermedias genéricas** ("más cerca de X, con matices" / "un poco de las dos"): las definitivas de Navigate las redacta Yuto cuando Saga avale el esquema (pendiente §9 de la spec de diadas). Los extremos son los polos literales.
 - **`special_case: "unresolved"`** (no está en las specs): cuando tras dos intentos no se pudo leer un orden o un ancla, se guarda así y se sigue. Nunca se rellena.
 - **"Fue solo X"**: 0,90 al dominante y el 0,10 residual partido en mitades entre los otros dos (la tabla §3.1 no dice cómo repartirlo).
 - **Confirmación**: cuando la persona elige de un menú de anclas, se guarda sin volver a preguntar (`confirmed_by_participant: true`, porque eligió la etiqueta ella misma). Cuando el modelo leyó texto libre, siempre hay eco + botón antes de guardar.

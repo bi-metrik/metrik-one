@@ -1,7 +1,7 @@
 // Navigate (Cardumen x Reframeit) — instrumento CONGELADO para la muestra a Grupo Progreso.
 //
 // Capa A: copia LITERAL de `proyectos/metrik/cardumen/navigate-demo/data/meta.json`
-// (clave `instrumento`), incluida la ausencia de tildes. Cambiar una palabra aqui es
+// (clave `instrumento`), tildes incluidas. Cambiar una palabra aqui es
 // cambiar el instrumento: si hace falta otra redaccion, primero se cambia meta.json y
 // despues se copia. La prueba `instrumento.test.ts` fija cada literal.
 //
@@ -31,25 +31,25 @@ export interface DiadaNav {
 export const TRIADAS: Record<TriadaId, TriadaNav> = {
   T1_fuente: {
     id: "T1_fuente",
-    pregunta: "De donde nace lo que observo",
+    pregunta: "De dónde nace lo que observó",
     polos: [
-      "La gente comun, la vida de a pie",
+      "La gente común, la vida de a pie",
       "Quienes tienen poder, dinero o influencia",
       "Fuerzas que nadie controla del todo",
     ],
   },
   T2_tiempo: {
     id: "T2_tiempo",
-    pregunta: "En el fondo, que se siente que es",
+    pregunta: "En el fondo, qué se siente que es",
     polos: [
-      "Algo que se esta acabando",
+      "Algo que se está acabando",
       "Algo que apenas comienza",
       "Algo que se repite una y otra vez",
     ],
   },
   T3_enjuego: {
     id: "T3_enjuego",
-    pregunta: "Que esta realmente en juego (solo expertos)",
+    pregunta: "Qué está realmente en juego (solo expertos)",
     polos: [
       "Lo que nos conviene",
       "Lo que es justo",
@@ -59,9 +59,9 @@ export const TRIADAS: Record<TriadaId, TriadaNav> = {
 };
 
 export const DIADAS: Record<DiadaId, DiadaNav> = {
-  D1_novedad: { id: "D1_novedad", izq: "Esto ya venia pasando", der: "Esto es completamente nuevo" },
+  D1_novedad: { id: "D1_novedad", izq: "Esto ya venía pasando", der: "Esto es completamente nuevo" },
   D2_afecto: { id: "D2_afecto", izq: "Me preocupa profundamente", der: "Me da esperanza" },
-  D3_agencia: { id: "D3_agencia", izq: "Me deja sin saber que hacer", der: "Tengo claro que habria que hacer" },
+  D3_agencia: { id: "D3_agencia", izq: "Me deja sin saber qué hacer", der: "Tengo claro qué habría que hacer" },
 };
 
 /**
@@ -93,21 +93,33 @@ export const APERTURA: Record<Poblacion, string> = {
     "Desde su ángulo particular, ¿qué ha estado observando que pocos están viendo todavía? ¿Qué señal débil le llama la atención?",
 };
 
-/** Lista cerrada de sectores (los 12 del brief, en este orden). */
-export const SECTORES: readonly string[] = [
-  "Infraestructura y construccion",
-  "Comercio y retail",
-  "Agroindustria",
-  "Manufactura",
-  "Transporte y logistica",
-  "Energia y servicios publicos",
-  "Turismo y hoteleria",
-  "Servicios financieros",
-  "Salud",
-  "Educacion",
-  "Tecnologia",
-  "Sector publico",
+/**
+ * Lista cerrada de sectores (los 12 del brief, en este orden). El `slug` es lo que se
+ * GUARDA en `payload.sector` y coincide con los datos de la muestra (`respuestas.json`,
+ * sin tildes); la `etiqueta` es lo que se MUESTRA en WhatsApp. Un solo sitio para las dos.
+ */
+export const SECTORES_CATALOGO: ReadonlyArray<{ slug: string; etiqueta: string }> = [
+  { slug: "Infraestructura y construccion", etiqueta: "Infraestructura y construcción" },
+  { slug: "Comercio y retail", etiqueta: "Comercio y retail" },
+  { slug: "Agroindustria", etiqueta: "Agroindustria" },
+  { slug: "Manufactura", etiqueta: "Manufactura" },
+  { slug: "Transporte y logistica", etiqueta: "Transporte y logística" },
+  { slug: "Energia y servicios publicos", etiqueta: "Energía y servicios públicos" },
+  { slug: "Turismo y hoteleria", etiqueta: "Turismo y hotelería" },
+  { slug: "Servicios financieros", etiqueta: "Servicios financieros" },
+  { slug: "Salud", etiqueta: "Salud" },
+  { slug: "Educacion", etiqueta: "Educación" },
+  { slug: "Tecnologia", etiqueta: "Tecnología" },
+  { slug: "Sector publico", etiqueta: "Sector público" },
 ];
+
+/** Los slugs, en el orden del catalogo: es lo que lee `leerSector` y lo que se persiste. */
+export const SECTORES: readonly string[] = SECTORES_CATALOGO.map((s) => s.slug);
+
+/** Etiqueta con tildes para mostrar un slug guardado. Un slug desconocido se muestra tal cual. */
+export function etiquetaSector(slug: string): string {
+  return SECTORES_CATALOGO.find((s) => s.slug === slug)?.etiqueta ?? slug;
+}
 
 // ---- Triadas: etiquetas de peso y composicion pre-registrada (§3.1) ----------------
 
@@ -179,9 +191,9 @@ export interface Ancla {
 export function anclasDe(d: DiadaNav): Ancla[] {
   return [
     { posicion: 1, label: "extremo_izq", texto: d.izq, value: 0, special_case: null },
-    { posicion: 2, label: "intermedio_izq", texto: `mas cerca de "${d.izq}", con matices`, value: 0.25, special_case: null },
+    { posicion: 2, label: "intermedio_izq", texto: `más cerca de "${d.izq}", con matices`, value: 0.25, special_case: null },
     { posicion: 3, label: "medio", texto: "un poco de las dos", value: 0.5, special_case: "middle" },
-    { posicion: 4, label: "intermedio_der", texto: `mas cerca de "${d.der}", con matices`, value: 0.75, special_case: null },
+    { posicion: 4, label: "intermedio_der", texto: `más cerca de "${d.der}", con matices`, value: 0.75, special_case: null },
     { posicion: 5, label: "extremo_der", texto: d.der, value: 1, special_case: null },
   ];
 }
@@ -189,6 +201,6 @@ export function anclasDe(d: DiadaNav): Ancla[] {
 /** Salidas que no caen en el eje (§3 de la spec de diadas). */
 export const ESPECIALES_FUERA_DEL_EJE: Record<Exclude<SpecialCase, "middle">, string> = {
   both_intense: "las dos cosas a la vez, con fuerza",
-  not_applicable: "no aplica a lo que conto",
-  dont_know: "no sabria decir",
+  not_applicable: "no aplica a lo que contó",
+  dont_know: "no sabría decir",
 };

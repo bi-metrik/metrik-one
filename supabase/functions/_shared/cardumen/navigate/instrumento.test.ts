@@ -4,26 +4,27 @@
 // meta.json — o al reves, y entonces hay que copiar de nuevo y actualizar AQUI tambien.
 import { describe, expect, it } from 'vitest';
 import {
-  APERTURA, DIADAS, INTENSIDADES, REPARTO_SOLO_UNO, SECTORES, SECUENCIA, TRIADAS,
-  anclasDe, composicion, preguntaMostrada,
+  APERTURA, DIADAS, INTENSIDADES, REPARTO_SOLO_UNO, SECTORES, SECTORES_CATALOGO, SECUENCIA, TRIADAS,
+  anclasDe, composicion, etiquetaSector, preguntaMostrada,
 } from './instrumento';
+import { normalizarTexto } from './interprete';
 
 const META_INSTRUMENTO = {
   T1_fuente: {
-    pregunta: 'De donde nace lo que observo',
-    polos: ['La gente comun, la vida de a pie', 'Quienes tienen poder, dinero o influencia', 'Fuerzas que nadie controla del todo'],
+    pregunta: 'De dónde nace lo que observó',
+    polos: ['La gente común, la vida de a pie', 'Quienes tienen poder, dinero o influencia', 'Fuerzas que nadie controla del todo'],
   },
   T2_tiempo: {
-    pregunta: 'En el fondo, que se siente que es',
-    polos: ['Algo que se esta acabando', 'Algo que apenas comienza', 'Algo que se repite una y otra vez'],
+    pregunta: 'En el fondo, qué se siente que es',
+    polos: ['Algo que se está acabando', 'Algo que apenas comienza', 'Algo que se repite una y otra vez'],
   },
   T3_enjuego: {
-    pregunta: 'Que esta realmente en juego (solo expertos)',
+    pregunta: 'Qué está realmente en juego (solo expertos)',
     polos: ['Lo que nos conviene', 'Lo que es justo', 'Lo que nos mantiene unidos'],
   },
-  D1_novedad: { izq: 'Esto ya venia pasando', der: 'Esto es completamente nuevo' },
+  D1_novedad: { izq: 'Esto ya venía pasando', der: 'Esto es completamente nuevo' },
   D2_afecto: { izq: 'Me preocupa profundamente', der: 'Me da esperanza' },
-  D3_agencia: { izq: 'Me deja sin saber que hacer', der: 'Tengo claro que habria que hacer' },
+  D3_agencia: { izq: 'Me deja sin saber qué hacer', der: 'Tengo claro qué habría que hacer' },
 };
 
 describe('Capa A literal de meta.json', () => {
@@ -42,8 +43,8 @@ describe('Capa A literal de meta.json', () => {
   });
 
   it('a la persona no se le muestra la anotacion "(solo expertos)" de T3, pero el literal se conserva', () => {
-    expect(preguntaMostrada(TRIADAS.T3_enjuego)).toBe('Que esta realmente en juego');
-    expect(preguntaMostrada(TRIADAS.T1_fuente)).toBe('De donde nace lo que observo');
+    expect(preguntaMostrada(TRIADAS.T3_enjuego)).toBe('Qué está realmente en juego');
+    expect(preguntaMostrada(TRIADAS.T1_fuente)).toBe('De dónde nace lo que observó');
     expect(TRIADAS.T3_enjuego.pregunta).toContain('(solo expertos)');
   });
 
@@ -52,6 +53,8 @@ describe('Capa A literal de meta.json', () => {
     expect(a.map((x) => x.posicion)).toEqual([1, 2, 3, 4, 5]);
     expect(a[0].texto).toBe('Me preocupa profundamente');
     expect(a[4].texto).toBe('Me da esperanza');
+    expect(a[1].texto).toBe('más cerca de "Me preocupa profundamente", con matices');
+    expect(a[3].texto).toBe('más cerca de "Me da esperanza", con matices');
     expect(a.map((x) => x.value)).toEqual([0, 0.25, 0.5, 0.75, 1]);
     expect(a[2].special_case).toBe('middle');
   });
@@ -63,12 +66,26 @@ describe('secuencia y turno cero', () => {
     expect(SECUENCIA.experto).toEqual(['T1_fuente', 'T2_tiempo', 'D1_novedad', 'D2_afecto', 'T3_enjuego', 'D3_agencia']);
   });
 
-  it('los 12 sectores del brief, en ese orden', () => {
+  it('los 12 sectores del brief, en ese orden: el slug que se guarda va SIN tildes (como respuestas.json)', () => {
     expect(SECTORES).toEqual([
       'Infraestructura y construccion', 'Comercio y retail', 'Agroindustria', 'Manufactura',
       'Transporte y logistica', 'Energia y servicios publicos', 'Turismo y hoteleria', 'Servicios financieros',
       'Salud', 'Educacion', 'Tecnologia', 'Sector publico',
     ]);
+  });
+
+  it('lo que se MUESTRA lleva tildes, y solo difiere del slug en las tildes', () => {
+    expect(SECTORES_CATALOGO.map((s) => s.etiqueta)).toEqual([
+      'Infraestructura y construcción', 'Comercio y retail', 'Agroindustria', 'Manufactura',
+      'Transporte y logística', 'Energía y servicios públicos', 'Turismo y hotelería', 'Servicios financieros',
+      'Salud', 'Educación', 'Tecnología', 'Sector público',
+    ]);
+    // Si la etiqueta se apartara del slug en algo mas que tildes, `leerSector` dejaria de
+    // reconocer el nombre tal como se lo mostramos a la persona.
+    for (const s of SECTORES_CATALOGO) expect(normalizarTexto(s.etiqueta)).toBe(normalizarTexto(s.slug));
+    expect(etiquetaSector('Infraestructura y construccion')).toBe('Infraestructura y construcción');
+    expect(etiquetaSector('Salud')).toBe('Salud');
+    expect(etiquetaSector('algo que no esta')).toBe('algo que no esta');
   });
 
   it('las dos aperturas son las de la seccion 01 de la muestra', () => {

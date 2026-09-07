@@ -14,7 +14,7 @@
 
 import {
   APERTURA, DIADAS, ESPECIALES_FUERA_DEL_EJE, INTENSIDADES, REPARTO_SOLO_UNO, SECTORES, SECUENCIA, TRIADAS,
-  anclasDe, composicion, esTriada, preguntaMostrada,
+  anclasDe, composicion, esTriada, etiquetaSector, preguntaMostrada,
 } from "./instrumento.ts";
 import type { Ancla, DiadaNav, DimensionId, Poblacion, TriadaNav } from "./instrumento.ts";
 import { detectarIdioma } from "./idioma.ts";
@@ -99,7 +99,7 @@ const botonesSiNo = (t: string): Salida =>
   botones(t, [{ id: BOTON.si, title: "Sí, así" }, { id: BOTON.corrijo, title: "No, corrijo" }]);
 
 function menuSectores(encabezado: string): Salida {
-  const filas = SECTORES.map((s, i) => `${i + 1}. ${s}`).join("\n");
+  const filas = SECTORES.map((s, i) => `${i + 1}. ${etiquetaSector(s)}`).join("\n");
   return texto(`${encabezado}\n\n${filas}\n\nResponda con el número.`);
 }
 
@@ -643,7 +643,7 @@ function cerrarSinGuardar(state: NavigateState, mensaje: string): Resultado {
 export function resumen(state: NavigateState): string {
   const lineas: string[] = [];
   if (state.poblacion) lineas.push(`• Responde como: ${state.poblacion === "experto" ? "observador de su sector" : "panel ciudadano"}`);
-  if (state.sector) lineas.push(`• Sector: ${state.sector}`);
+  if (state.sector) lineas.push(`• Sector: ${etiquetaSector(state.sector)}`);
   for (const id of state.secuencia) {
     const reg = state.dimensiones[id];
     if (!reg) continue;

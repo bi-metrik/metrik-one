@@ -6,6 +6,7 @@
 // elicitacion-resolucion-yuto.md §1-3, elicitacion-diadas-yuto.md §2-4 y del brief de la demo.
 import { describe, expect, it } from 'vitest';
 import { BOTON, CONSENT_VERSION, armarPayload, iniciar, leerSector, procesar, resumen } from './motor';
+import { normalizarTexto } from './interprete';
 import type {
   Interprete, InterpretacionDiada, InterpretacionIntensidad, InterpretacionSegundo, InterpretacionTriada, NavigateState, Resultado, Salida,
 } from './tipos';
@@ -49,7 +50,7 @@ async function hastaHistoria(poblacion: 'ciudadano' | 'experto', sectorTxt = '1'
   expect(ultimo(r).tipo).toBe('botones');
   r = await procesar(state, poblacion === 'experto' ? { texto: 'Sí, observador', botonId: BOTON.expSi } : { texto: 'No', botonId: BOTON.expNo }, i);
   expect(state.poblacion).toBe(poblacion);
-  expect(textos(r)).toContain('12. Sector publico');
+  expect(textos(r)).toContain('12. Sector público');
   r = await procesar(state, { texto: sectorTxt }, i);
   expect(state.paso).toBe('historia');
   return state;
@@ -67,7 +68,7 @@ async function hastaPrimeraTriada(poblacion: 'ciudadano' | 'experto' = 'ciudadan
   r = await procesar(state, { texto: 'Sí, en español', botonId: BOTON.langSi }, i);
   expect(state.idioma_confirmado).toBe(true);
   expect(state.paso).toBe('triada_orden');
-  expect(textos(r)).toContain('*De donde nace lo que observo.*');
+  expect(textos(r)).toContain('*De dónde nace lo que observó.*');
   return state;
 }
 
@@ -113,6 +114,8 @@ describe('turno cero', () => {
     expect(leerSector('13')).toBeNull();
     expect(leerSector('salud')).toBe('Salud');
     expect(leerSector('tecnologia')).toBe('Tecnologia');
+    expect(leerSector(normalizarTexto('Tecnología'))).toBe('Tecnologia');
+    expect(leerSector(normalizarTexto('Infraestructura y construcción'))).toBe('Infraestructura y construccion');
     expect(leerSector('infraestructura')).toBe('Infraestructura y construccion');
     expect(leerSector('sal')).toBeNull();
     expect(leerSector('servicios')).toBeNull(); // Energia y servicios publicos / Servicios financieros
@@ -170,7 +173,7 @@ describe('idioma', () => {
     r = await procesar(state, { texto: 'sim' }, i);
     expect(state.idioma_confirmado).toBe(true);
     expect(state.idioma).toBe('es');
-    expect(textos(r)).toContain('La gente comun, la vida de a pie');
+    expect(textos(r)).toContain('La gente común, la vida de a pie');
   });
 
   it('"otro idioma" tras espanol detectado lleva al trilingue', async () => {
@@ -190,7 +193,7 @@ describe('triadas: reparto en dos tiempos', () => {
     let r = await procesar(state, { texto: 'Sobre todo los que tienen poder. Y algo de fuerzas que nadie controla, pero menos.' }, i);
     expect(state.paso).toBe('triada_confirmar');
     expect(ultimo(r).texto).toBe(
-      'Le leo entonces: *primero, Quienes tienen poder, dinero o influencia*; *en segundo lugar, Fuerzas que nadie controla del todo*; y *La gente comun, la vida de a pie* quedó al margen. ¿Lo dejo así?',
+      'Le leo entonces: *primero, Quienes tienen poder, dinero o influencia*; *en segundo lugar, Fuerzas que nadie controla del todo*; y *La gente común, la vida de a pie* quedó al margen. ¿Lo dejo así?',
     );
     r = await procesar(state, { texto: 'Sí, así', botonId: BOTON.si }, i);
     expect(state.paso).toBe('triada_intensidad');
@@ -203,7 +206,7 @@ describe('triadas: reparto en dos tiempos', () => {
       dimension_id: 'T1_fuente',
       dominant: 'Quienes tienen poder, dinero o influencia',
       second: 'Fuerzas que nadie controla del todo',
-      residual: 'La gente comun, la vida de a pie',
+      residual: 'La gente común, la vida de a pie',
       intensity_label: 'claramente_el_primero',
       composition: [0.05, 0.85, 0.1],
       resolution_captured: 'high',
@@ -211,10 +214,10 @@ describe('triadas: reparto en dos tiempos', () => {
       special_case: null,
       elicitation_turns: 3,
     });
-    expect(r.salidas[0].texto).toBe('Listo. Lo guardo así: *Quienes tienen poder, dinero o influencia* fue lo principal, *Fuerzas que nadie controla del todo* acompañó, y *La gente comun, la vida de a pie* quedó al margen.');
+    expect(r.salidas[0].texto).toBe('Listo. Lo guardo así: *Quienes tienen poder, dinero o influencia* fue lo principal, *Fuerzas que nadie controla del todo* acompañó, y *La gente común, la vida de a pie* quedó al margen.');
     // y ya viene la segunda triada
     expect(state.paso).toBe('triada_orden');
-    expect(ultimo(r).texto).toContain('*En el fondo, que se siente que es.*');
+    expect(ultimo(r).texto).toContain('*En el fondo, qué se siente que es.*');
   });
 
   it('nombra uno solo: se pide el segundo; "ninguno" = solo uno, sin turno de intensidad', async () => {
@@ -227,7 +230,7 @@ describe('triadas: reparto en dos tiempos', () => {
     expect(state.paso).toBe('triada_segundo');
     expect(ultimo(r).texto).toContain('¿Y en segundo lugar: *Quienes tienen poder, dinero o influencia* o *Fuerzas que nadie controla del todo*?');
     r = await procesar(state, { texto: 'ninguno' }, i);
-    expect(ultimo(r).texto).toBe('Le leo entonces: *solo La gente comun, la vida de a pie*, y lo demás al margen. ¿Lo dejo así?');
+    expect(ultimo(r).texto).toBe('Le leo entonces: *solo La gente común, la vida de a pie*, y lo demás al margen. ¿Lo dejo así?');
     r = await procesar(state, { texto: 'sí' }, i);
     expect(state.dimensiones.T1_fuente).toMatchObject({
       intensity_label: 'solo_uno', composition: [0.9, 0.05, 0.05], resolution_captured: 'high', confirmed_by_participant: true, second: null,
@@ -249,13 +252,13 @@ describe('triadas: reparto en dos tiempos', () => {
     expect(state.paso).toBe('triada_orden');
     expect(ultimo(r).texto).toBe('Dígamelo con sus palabras: ¿cuáles dos pesaron más, y en qué orden?');
     r = await procesar(state, { texto: 'al revés: primero la gente, después el poder' }, i);
-    expect(ultimo(r).texto).toContain('*primero, La gente comun, la vida de a pie*');
+    expect(ultimo(r).texto).toContain('*primero, La gente común, la vida de a pie*');
     await procesar(state, { texto: 'exacto' }, i);
     expect(state.paso).toBe('triada_intensidad');
     r = await procesar(state, { texto: 'no sé, da igual' }, i);
     // No graduo: resolucion gruesa, dominante = 1 y resto 0, pero el orden si quedo avalado.
     expect(state.dimensiones.T1_fuente).toMatchObject({
-      dominant: 'La gente comun, la vida de a pie', second: 'Quienes tienen poder, dinero o influencia',
+      dominant: 'La gente común, la vida de a pie', second: 'Quienes tienen poder, dinero o influencia',
       intensity_label: null, composition: [1, 0, 0], resolution_captured: 'coarse', confirmed_by_participant: true,
     });
     expect(r.salidas[0].texto).toContain('sin graduar');
@@ -280,7 +283,7 @@ describe('triadas: reparto en dos tiempos', () => {
     const state = await hastaPrimeraTriada();
     const i = guion({ triada: [{ claro: true, dominante: null, segundo: null, solo_uno: false, especial: 'not_applicable' }] });
     let r = await procesar(state, { texto: 'ninguna de esas tres tiene que ver' }, i);
-    expect(ultimo(r).texto).toBe('Lo dejo como *no aplica a lo que conto*. ¿Así?');
+    expect(ultimo(r).texto).toBe('Lo dejo como *no aplica a lo que contó*. ¿Así?');
     r = await procesar(state, { texto: 'sí' }, i);
     expect(state.dimensiones.T1_fuente).toMatchObject({ dominant: null, composition: null, special_case: 'not_applicable', resolution_captured: 'coarse', confirmed_by_participant: true });
   });
@@ -313,7 +316,7 @@ describe('triadas: reparto en dos tiempos', () => {
     state.paso = 'diada_confirmar';
     state.en_curso = { tipo: 'diada', turnos: 0, ancla: 5, especial: null, ofrecidas: [], correcciones: 0, reintentos: 0, notas: [] };
     const r = await procesar(state, { texto: 'sí' }, i);
-    expect(ultimo(r).texto).toContain('*Que esta realmente en juego.*');
+    expect(ultimo(r).texto).toContain('*Qué está realmente en juego.*');
     expect(ultimo(r).texto).not.toContain('solo expertos');
   });
 });
@@ -333,7 +336,7 @@ describe('diadas: un turno, cinco anclas', () => {
     await procesar(state, { texto: 'solo que comienza' }, i);
     const r = await procesar(state, { texto: 'sí' }, i);
     expect(state.paso).toBe('diada_abrir');
-    expect(ultimo(r).texto).toBe('Una cosa más sobre lo que contó. ¿Siente que *Esto ya venia pasando*, o que *Esto es completamente nuevo*?');
+    expect(ultimo(r).texto).toBe('Una cosa más sobre lo que contó. ¿Siente que *Esto ya venía pasando*, o que *Esto es completamente nuevo*?');
     return state;
   }
 
@@ -357,7 +360,7 @@ describe('diadas: un turno, cinco anclas', () => {
     let r = await procesar(state, { texto: 'nuevo no del todo, pero se aceleró mucho este año' }, i);
     expect(state.paso).toBe('diada_aclarar');
     expect(ultimo(r).texto).toBe(
-      'Entonces, ¿lo dejo como...?\n\n1. mas cerca de "Esto ya venia pasando", con matices\n2. Esto ya venia pasando\n3. un poco de las dos\n\nResponda con el número, o dígamelo con sus palabras.',
+      'Entonces, ¿lo dejo como...?\n\n1. más cerca de "Esto ya venía pasando", con matices\n2. Esto ya venía pasando\n3. un poco de las dos\n\nResponda con el número, o dígamelo con sus palabras.',
     );
     r = await procesar(state, { texto: '1' }, i);
     expect(state.dimensiones.D1_novedad).toMatchObject({ anchor_label: 'intermedio_izq', value: 0.25, confirmed_by_participant: true, elicitation_turns: 2 });
@@ -410,9 +413,9 @@ describe('diadas: un turno, cinco anclas', () => {
     });
     await procesar(state, { texto: 'ya venía pasando' }, i);
     let r = await procesar(state, { texto: 'no' }, i);
-    expect(ultimo(r).texto).toBe('Dígamelo con sus palabras: ¿más hacia *Esto ya venia pasando* o hacia *Esto es completamente nuevo*?');
+    expect(ultimo(r).texto).toBe('Dígamelo con sus palabras: ¿más hacia *Esto ya venía pasando* o hacia *Esto es completamente nuevo*?');
     r = await procesar(state, { texto: 'más bien nuevo' }, i);
-    expect(ultimo(r).texto).toBe('Lo dejo como *mas cerca de "Esto es completamente nuevo", con matices*. ¿Así?');
+    expect(ultimo(r).texto).toBe('Lo dejo como *más cerca de "Esto es completamente nuevo", con matices*. ¿Así?');
   });
 });
 
@@ -447,16 +450,16 @@ describe('cierre, salida y borrado', () => {
     expect(state.closed).toBe(true);
     const cierre = ultimo(r).texto;
     expect(cierre).toContain('como prueba de demostración');
-    expect(cierre).toContain('• Sector: Infraestructura y construccion');
-    expect(cierre).toContain('• De donde nace lo que observo: Quienes tienen poder, dinero o influencia › Fuerzas que nadie controla del todo (uno mandaba pero el otro contaba)');
-    expect(cierre).toContain('• En el fondo, que se siente que es: solo Algo que se repite una y otra vez');
-    expect(cierre).toContain('• Esto ya venia pasando ↔ Esto es completamente nuevo: mas cerca de "Esto ya venia pasando", con matices');
+    expect(cierre).toContain('• Sector: Infraestructura y construcción');
+    expect(cierre).toContain('• De dónde nace lo que observó: Quienes tienen poder, dinero o influencia › Fuerzas que nadie controla del todo (uno mandaba pero el otro contaba)');
+    expect(cierre).toContain('• En el fondo, qué se siente que es: solo Algo que se repite una y otra vez');
+    expect(cierre).toContain('• Esto ya venía pasando ↔ Esto es completamente nuevo: más cerca de "Esto ya venía pasando", con matices');
     expect(cierre).toContain('• Me preocupa profundamente ↔ Me da esperanza: Me preocupa profundamente');
 
     const p = armarPayload(state, 'completa', AHORA) as Record<string, unknown>;
     expect(p).toMatchObject({
       source: 'chat', motor: 'navigate', demo: true, study_id: 'navigate', collection_mode: 'panel_recurrente',
-      poblacion: 'ciudadano', sector: 'Infraestructura y construccion', idioma: 'es', idioma_detectado: 'es', idioma_confirmado: true,
+      poblacion: 'ciudadano', sector: 'Infraestructura y construccion' /* slug sin tildes, como respuestas.json */, idioma: 'es', idioma_detectado: 'es', idioma_confirmado: true,
       consent: { version: CONSENT_VERSION },
       narrative: { historia: HISTORIA_ES },
     });

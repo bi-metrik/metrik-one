@@ -24,9 +24,12 @@ redacte ni traduza nada del instrumento.
 - `cardumen_respuestas` solo tiene `id, estudio, token, lang, payload, created_at`: la bandera
   `demo`, población, sector, idioma y los campos de piloto van dentro de `payload`. No hay columna
   nueva ni migración.
-- Los literales de Capa A van **sin tildes** porque así están en `meta.json` (fuente única) y la
+- Los literales de Capa A se copian de `meta.json` (fuente única) **con sus tildes** y la
   prueba `instrumento.test.ts` los fija. Cambiar la redacción = cambiar meta.json primero.
-- Las anclas intermedias de las diadas son genéricas ("mas cerca de X, con matices"); las
+  Excepción deliberada: el **sector se guarda como slug SIN tildes** (coincide con
+  `respuestas.json` de la muestra) y se muestra con la etiqueta de `SECTORES_CATALOGO`
+  (`etiquetaSector`); `leerSector` compara normalizado, así que tecleado con o sin tildes resuelve.
+- Las anclas intermedias de las diadas son genéricas ("más cerca de X, con matices"); las
   definitivas las redacta Yuto cuando Saga avale el esquema (spec de diadas §9).
 - El registro es de **usted**, como la muestra del cliente; el guard `es-neutro.ts` solo corrige
   voseo y no interfiere.
