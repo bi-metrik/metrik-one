@@ -18,3 +18,6 @@ La emisión de cuentas de cobro solo se puede ejecutar desde la app desplegada, 
 **Why:** apagarlo cambia quién emite (cron vs. persona), y eso es decisión suya, no técnica.
 
 **How to apply:** si un frente de cobros parece pedir tocar el cron, propónlo y espera; no lo metas en el diff.
+
+Relacionado: [[cobros-emision-gate]] (mergear un cambio al cron ya equivale a autorizar una
+emisión real: esos PRs quedan fuera del merge automático aunque los checks estén verdes).
