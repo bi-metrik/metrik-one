@@ -35,6 +35,12 @@ function servicioFalso() {
         select: () => chain,
         eq: () => chain,
         in: () => chain,
+        // El listado de marcas del workspace (`marcasDeFacturaDelWorkspace`) los usa.
+        // Aquí vuelve vacío: ningún negocio reclama nada, así que TODAS las facturas
+        // de este archivo son libres y el guardián las juzga. Las reclamadas se
+        // prueban en `facturas-duplicado-hermanos.test.ts`.
+        order: () => chain,
+        range: () => chain,
         single: async () => ({ data: { ...fila }, error: null }),
         maybeSingle: async () => ({ data: { ...fila }, error: null }),
         update: (patch: Record<string, unknown>) => {
@@ -181,17 +187,20 @@ describe('clasificarDuplicados', () => {
     { id: 'c', name: 'FV-2-91', date: '2026-08-06', total: 100000, productos: ['22', '11'] },
     { id: 'd', name: 'FV-2-92', date: '2026-08-07', total: 100000, productos: [] },
   ]
+  /** Nadie las reclama: es el escenario de este archivo. */
+  const libres = new Map<string, { negocio_id: string; codigo: string | null }>()
 
   it('marca el mismo producto sin descartar el resto', () => {
-    expect(clasificarDuplicados(base, '11').map(f => f.mismo_producto))
+    expect(clasificarDuplicados(base, '11', libres).duplicados.map(f => f.mismo_producto))
       .toEqual([false, true, true, false])
     // Ninguna se pierde: informar es el punto.
-    expect(clasificarDuplicados(base, '11')).toHaveLength(4)
+    expect(clasificarDuplicados(base, '11', libres).duplicados).toHaveLength(4)
+    expect(clasificarDuplicados(base, '11', libres).hermanos).toEqual([])
   })
 
   it('una factura sin ítems legibles NO se da por del mismo producto', () => {
     // Asumir que sí la escondería del bloqueo evidente; asumir que no la deja
     // igual visible como advertencia, que es el lado seguro.
-    expect(clasificarDuplicados([base[3]], '11')[0].mismo_producto).toBe(false)
+    expect(clasificarDuplicados([base[3]], '11', libres).duplicados[0].mismo_producto).toBe(false)
   })
 })

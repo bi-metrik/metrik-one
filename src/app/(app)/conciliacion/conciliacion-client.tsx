@@ -35,7 +35,7 @@ import {
   listarFacturasSiigoDelNegocio,
   restaurarEnFacturacion,
 } from '@/lib/actions/facturacion-actions'
-import type { FacturaAdoptable, FacturaEnSiigo } from '@/lib/siigo/facturas'
+import type { FacturaAdoptable, FacturaEnSiigo, FacturaHermana } from '@/lib/siigo/facturas'
 import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
@@ -1097,6 +1097,9 @@ function FilaPorFacturar({
   const [revisando, setRevisando] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
   const [duplicados, setDuplicados] = useState<FacturaEnSiigo[] | null>(null)
+  // Las facturas del cliente que ya son de OTRO negocio. Van al lado, en gris:
+  // son la explicación de por qué abajo aparecen deshabilitadas, no una alarma.
+  const [hermanos, setHermanos] = useState<FacturaHermana[]>([])
   const [justificacion, setJustificacion] = useState('')
   // Los datos que la financiera puede corregir antes de emitir. Arrancan con lo
   // que ONE tiene: la pantalla no es un formulario en blanco, es una revisión.
@@ -1121,7 +1124,9 @@ function FilaPorFacturar({
         justificacionDuplicado,
         datos: datosEditados(),
       })
-      if (r.duplicados) { setDuplicados(r.duplicados); setConfirmando(false); return }
+      if (r.duplicados) {
+        setDuplicados(r.duplicados); setHermanos(r.hermanos ?? []); setConfirmando(false); return
+      }
       if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
       // Si el PDF no quedó en el negocio hay que decirlo: la factura salió igual,
       // pero el expediente queda incompleto y en silencio nadie lo notaría.
@@ -1130,7 +1135,7 @@ function FilaPorFacturar({
       } else {
         toast.success(`Factura ${r.numero} emitida y archivada en el negocio`)
       }
-      setRevisando(false); setConfirmando(false); setDuplicados(null); setJustificacion('')
+      setRevisando(false); setConfirmando(false); setDuplicados(null); setHermanos([]); setJustificacion('')
       onCambio()
     })
   }
@@ -1355,13 +1360,15 @@ function FilaPorFacturar({
                 )}
               </div>
 
-              {/* Siigo ya tiene facturas para este cliente.
+              {/* Siigo tiene facturas de este cliente que NINGÚN negocio reclama.
 
-                  Se distinguen las del MISMO servicio (el duplicado evidente) de
-                  las de otro (la advertencia que el filtro por producto tiraba a
-                  la basura hasta el 2026-09-07 — ver `facturasDelClienteEnSiigo`).
-                  Las dos exigen justificación escrita; lo que cambia es lo que la
-                  pantalla afirma, porque no son lo mismo. */}
+                  Solo llegan aquí las libres: la factura que ya es de otro negocio
+                  del mismo dueño se cuenta aparte, abajo, en gris (ver
+                  `clasificarDuplicados`). Entre las libres se distinguen las del
+                  MISMO servicio (el duplicado evidente) de las de otro (la
+                  advertencia que el filtro por producto tiraba a la basura hasta el
+                  2026-09-07). Las dos exigen justificación escrita; lo que cambia es
+                  lo que la pantalla afirma, porque no son lo mismo. */}
               {duplicados && (() => {
                 const mismoServicio = duplicados.some(d => d.mismo_producto)
                 const color = mismoServicio
@@ -1375,12 +1382,12 @@ function FilaPorFacturar({
                       <div className="text-[12px]" style={{ color: color.texto }}>
                         <strong>
                           {mismoServicio
-                            ? 'Este cliente ya tiene factura de este servicio.'
-                            : 'Este cliente ya tiene facturas en Siigo, de otro servicio.'}
+                            ? 'Este cliente tiene factura de este servicio y ningún negocio la reclama.'
+                            : 'Este cliente tiene facturas en Siigo, de otro servicio, que ningún negocio reclama.'}
                         </strong>{' '}
-                        Si es la misma factura de este caso, cierra esto y usa
-                        “Esta factura ya existe”. Si de verdad hay que emitir otra,
-                        escribe por qué: queda registrado.
+                        Si alguna es la de este caso, cancela y márcala con
+                        “Esta factura ya existe”, aquí abajo: sale habilitada. Si de
+                        verdad hay que emitir otra, escribe por qué: queda registrado.
                       </div>
                     </div>
                     <ul className="mt-2 space-y-1">
@@ -1409,6 +1416,23 @@ function FilaPorFacturar({
                   </div>
                 )
               })()}
+
+              {/* Los hermanos: mismo cliente, otro negocio, factura propia.
+
+                  En SOENA un cliente tiene un negocio por vehículo y cada uno se
+                  factura aparte, así que esto es CONTEXTO y no advertencia: sin
+                  color de alarma, sin justificación y sin tocar el botón. Es
+                  además lo que explica por qué esas mismas facturas salen
+                  deshabilitadas en “Esta factura ya existe”. */}
+              {hermanos.length > 0 && (
+                <p className="mt-2 text-[11px]" style={{ color: '#6B7280' }}>
+                  Otros negocios de este cliente ya facturados:{' '}
+                  <span style={{ color: '#1A1A1A' }}>
+                    {hermanos.map(h => `${h.codigo ?? 'otro negocio'} · ${h.numero}`).join(' — ')}
+                  </span>
+                  . Cada negocio se factura aparte, así que esas no son duplicado de este caso.
+                </p>
+              )}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {!confirmando && !duplicados && (
@@ -1452,7 +1476,8 @@ function FilaPorFacturar({
 
                 <button
                   onClick={() => {
-                    setRevisando(false); setConfirmando(false); setDuplicados(null); setJustificacion('')
+                    setRevisando(false); setConfirmando(false); setDuplicados(null); setHermanos([])
+                    setJustificacion('')
                     setEmail(caso.email ?? ''); setTelefono(caso.telefono ?? ''); setProductoCode(caso.concepto.code)
                   }}
                   disabled={isPending}
