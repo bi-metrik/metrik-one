@@ -28,9 +28,13 @@ import { fmtCurrency, fechaLarga } from './formato'
  *    documento (sigue vigente en el Formato 010 y en la Relación de facturas, que
  *    sí hablan de NIT).
  *
- * 3. Los datos del certificado UPME son OPCIONALES: los casos «solo IVA» se saltan
- *    la etapa de Certificación y no tienen radicado ni fecha. La cláusula SEGUNDO
- *    degrada por niveles en vez de imprimir un hueco — ver `clausulaSegundo`.
+ * 3. Los datos del certificado UPME son OPCIONALES en `campos_fuente`, pero eso es
+ *    una RED DE SEGURIDAD DEL RENDER, no el camino esperado. Desde el 2026-09-07 la
+ *    regla del proceso es que en la rama «solo IVA» el cliente entrega el certificado
+ *    en la etapa de Anexos, así que el radicado siempre existe: o viene de
+ *    `concepto_upme` (Certificación) o de `concepto_upme_anexos`, que es su
+ *    alternativa. La degradación de la cláusula SEGUNDO cubre el expediente
+ *    incompleto, no una rama del negocio — ver `clausulaSegundo`.
  */
 interface DeclaracionJuramentadaProps {
   datos: {
@@ -50,7 +54,8 @@ interface DeclaracionJuramentadaProps {
     /** Base gravable del vehículo, con el descuento ya restado. */
     valor_unitario_sin_iva: string | null
     valor_iva: string | null
-    // ── Certificado UPME. OPCIONALES: los casos «solo IVA» no lo tienen. ──────
+    // ── Certificado UPME. Opcionales por si el expediente viene incompleto, no
+    //    porque haya una rama sin certificado: en «solo IVA» se entrega en Anexos.
     numero_caso_upme?: string | null
     fecha_certificado?: string | null
     // ── Titular 2 (copropiedad). OPCIONALES: sin ellos sale la variante de un
@@ -279,21 +284,29 @@ export default function DeclaracionJuramentadaPDF({ datos }: DeclaracionJurament
 /**
  * Cláusula SEGUNDO, degradada por niveles según lo que haya del certificado UPME.
  *
- * Los casos «solo IVA» se saltan la etapa de Certificación, así que no tienen
- * radicado ni fecha (y `fecha_certificado` no es obligatoria ni siquiera cuando la
- * etapa sí corrió). La degradación es la CONSERVADORA: se retira lo que no se puede
- * respaldar, en vez de imprimir un marcador, un "null" o una frase vacía. Este
- * documento se firma bajo juramento; afirmar que existe un certificado UPME cuyo
- * radicado el expediente no tiene es exactamente lo que no puede pasar.
+ * ⚠️ Esto es una RED DE SEGURIDAD, no el camino esperado. La regla del proceso
+ * (Mauricio, 2026-09-07) es que en la rama «solo IVA» el cliente entrega el
+ * certificado en Anexos, así que el radicado existe siempre: `campos_fuente` lo lee
+ * de `concepto_upme` (Certificación, etapa 9) y, si esa etapa no se recorrió, de
+ * `concepto_upme_anexos` (Anexos, etapa 18) como alternativa. El tercer nivel de
+ * abajo no describe una rama del negocio: describe un expediente al que le falta el
+ * documento, y con esta configuración eso deja de ser lo normal.
+ *
+ * La degradación es la CONSERVADORA: se retira lo que no se puede respaldar, en vez
+ * de imprimir un marcador, un "null" o una frase vacía. Este documento se firma bajo
+ * juramento; afirmar que existe un certificado UPME cuyo radicado el expediente no
+ * tiene es exactamente lo que no puede pasar.
  *
  *  - radicado + fecha → texto íntegro de la plantilla.
- *  - radicado sin fecha → íntegro menos ", de fecha …".
+ *  - radicado sin fecha → íntegro menos ", de fecha …". Sigue siendo frecuente:
+ *    `fecha_certificado` no es obligatoria en la extracción y falta en la mayoría de
+ *    los certificados ya cargados.
  *  - sin radicado → solo lo que la factura prueba: que corresponde al vehículo
  *    descrito. Se cae la mención a la UPME y a la Ley 1715 completa.
  *
- * ⚠️ PENDIENTE con Deisy Ramírez (SOENA): confirmar qué debe decir esta cláusula en
- * los casos «solo IVA». El tercer nivel es una decisión de MéTRIK, no un texto que
- * el cliente haya aprobado.
+ * ⚠️ PENDIENTE con Deisy Ramírez (SOENA): confirmar el texto del tercer nivel. Es una
+ * decisión de MéTRIK, no un texto que el cliente haya aprobado. Ya no urge tanto como
+ * cuando se escribió —dejó de ser el caso de toda una rama— pero sigue abierto.
  */
 function clausulaSegundo(radicado: string | null, fecha: string | null): string {
   if (!radicado) {
