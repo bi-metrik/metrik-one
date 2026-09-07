@@ -342,6 +342,10 @@ export type NegocioResumen = {
   radicado: string | null
   // Número de factura emitida (bloque "Factura emitida", config-driven) — búsqueda
   numero_factura: string | null
+  // Fecha de la cita en la DIAN (bloque compartido, config-driven) — descarga a Excel.
+  // La tarjeta no la muestra: se resuelve aquí porque el export sale de esta misma
+  // lista y traerla aparte significaría una segunda lectura de los mismos bloques.
+  fecha_cita: string | null
   // ── Servicio contratado (bloque config-driven, ej. SOENA "Servicio contratado") ──
   /**
    * Valor crudo de lo que contrató el cliente (`completo`, `solo_iva`, `solo_upme`
@@ -667,6 +671,7 @@ export async function getNegociosV2(
       cedula_bloque?: string; cedula_campo?: string
       radicado_bloque?: string; radicado_campo?: string
       factura_bloque?: string; factura_campo?: string
+      cita_bloque?: string; cita_campo?: string
       // Servicio contratado: de qué bloque/campo sale y cómo se rotula en la tarjeta.
       // `servicio_labels` mapea valor crudo → etiqueta corta; un valor sin entrada
       // se muestra tal cual (mejor el valor crudo que un hueco silencioso).
@@ -679,6 +684,8 @@ export async function getNegociosV2(
   const radicadoPorNeg: Record<string, string | null> = {}
   // Número de factura emitida (bloque documento "Factura emitida", config-driven). Para búsqueda.
   const facturaPorNeg: Record<string, string | null> = {}
+  // Fecha de la cita DIAN (bloque compartido, config-driven). Solo para el Excel.
+  const citaPorNeg: Record<string, string | null> = {}
   // Servicio contratado (bloque config-driven). Para el chip de la tarjeta y el filtro.
   const servicioPorNeg: Record<string, string | null> = {}
   // Se piden PARES (bloque, campo), no todos los campos contra todos los bloques:
@@ -691,6 +698,7 @@ export async function getNegociosV2(
     { bloque: cardCfg?.radicado_bloque, campos: [cardCfg?.radicado_campo] },
     { bloque: cardCfg?.factura_bloque, campos: [cardCfg?.factura_campo] },
     { bloque: cardCfg?.servicio_bloque, campos: [cardCfg?.servicio_campo] },
+    { bloque: cardCfg?.cita_bloque, campos: [cardCfg?.cita_campo] },
   ])
   if (cardPares.length > 0 && negocioIds.length > 0) {
     // La extraccion vive en Postgres (`negocio_bloques_campos_json`). Antes esto se
@@ -728,6 +736,10 @@ export async function getNegociosV2(
       radicadoPorNeg[negId] = val(negId, cardCfg?.radicado_bloque, cardCfg?.radicado_campo)
       facturaPorNeg[negId] = val(negId, cardCfg?.factura_bloque, cardCfg?.factura_campo)
       servicioPorNeg[negId] = val(negId, cardCfg?.servicio_bloque, cardCfg?.servicio_campo)
+      // El bloque de la cita está compartido entre varias etapas: `leerCampo` aplica
+      // «la primera con valor gana», que es lo correcto aquí (las copias vacías de las
+      // etapas por las que el caso aún no pasó no deben tapar la que sí tiene fecha).
+      citaPorNeg[negId] = val(negId, cardCfg?.cita_bloque, cardCfg?.cita_campo)
     }
   }
 
@@ -781,6 +793,7 @@ export async function getNegociosV2(
       cedula: cedulaPorNeg[id] ?? null,
       radicado: radicadoPorNeg[id] ?? null,
       numero_factura: facturaPorNeg[id] ?? null,
+      fecha_cita: citaPorNeg[id] ?? null,
       servicio: servicioPorNeg[id] ?? null,
       servicio_label: (() => {
         const v = servicioPorNeg[id]
