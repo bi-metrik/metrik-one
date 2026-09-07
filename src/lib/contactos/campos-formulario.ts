@@ -170,6 +170,18 @@ export function resumenDelFormulario(fieldData: CampoFormulario[]): CampoResumen
  * etiqueta entera de la pregunta— devuelve `null`. No hay respuesta que leer, y
  * sugerir una de las dos sería inventarla; `null` deja el formulario como está
  * hoy, con el comercial eligiendo.
+ *
+ * ⚠️ **Esta regla tiene una copia deliberada en Deno**, y las dos tienen que
+ * moverse juntas: `decidirTipoPersona` en
+ * `supabase/functions/_shared/meta-leads/tipo-persona.ts`, que es la que decide
+ * el ROL del contacto cuando el lead entra por el webhook de Meta. No se comparte
+ * el código porque una edge function no puede importar de `src/`; lo que se
+ * comparte es el criterio, y cada copia tiene su prueba con **los mismos cuatro
+ * valores reales de producción**. Si alguien cambia una sola, las pruebas de la
+ * otra siguen fijando el criterio viejo y la diferencia se ve al leer.
+ *
+ * Ahí está escrito por qué existe la regla: la copia del webhook comparaba por
+ * igualdad exacta y dejó 572 contactos sin rol durante mes y medio, en silencio.
  */
 export function detectarTipoPersona(fieldData: CampoFormulario[]): 'natural' | 'juridica' | null {
   for (const fd of fieldData) {

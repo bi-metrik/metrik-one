@@ -171,9 +171,17 @@ describe('detectarTipoPersona', () => {
   })
 
   it('reconoce jurídica en las formas en que puede llegar escrita', () => {
-    // El valor exacto del caso jurídico está PENDIENTE DE MEDIR en producción
-    // (ver el cuerpo del PR): la condición se escribió por subcadena `jurid`
-    // justo para no depender de cuál de estas formas sea.
+    // ✅ YA MEDIDO (2026-09-07, 803 interacciones de SOENA): el caso jurídico
+    // llega como `persona_jurídica` (32, formulario vigente) y `jurídica` (6,
+    // formulario de julio) — las dos primeras de la lista de abajo. Las otras
+    // cuatro no llegan hoy y se conservan a propósito: la condición se escribió
+    // por subcadena `jurid` justo para no depender de cuál sea, y esta prueba es
+    // lo que fija esa independencia.
+    //
+    // El mismo criterio corre en Deno para decidir el ROL del contacto
+    // (`supabase/functions/_shared/meta-leads/tipo-persona.ts`), con estos mismos
+    // valores en sus pruebas. Son dos copias deliberadas: si alguien cambia una,
+    // las de la otra siguen fijando el criterio viejo.
     for (const v of ['persona_jurídica', 'persona_juridica', 'jurídica', 'Jurídica', 'JURIDICA', 'juridica_']) {
       expect(
         detectarTipoPersona([{ name: '¿la_compra_se_realizó_como_persona_natural_o_jurídica?', values: [v] }]),
