@@ -28,6 +28,13 @@ symlinkeado del repo principal — se contaminaría el repo de todos.
 **3. Mirar.** La herramienta **Read lee PNG directo**. Con `scale: 2` el texto de 7 pt se
 lee bien. Borrar `_qa/rast/node_modules` antes de `npm run build` y antes de commitear.
 
+**3 bis. Leer el TEXTO, no solo la imagen.** `pdf-to-img` arrastra `pdfjs-dist`,
+así que con `getDocument(...).getTextContent()` se vuelca el texto real del PDF sin
+instalar nada más. Es lo que separa un defecto de dibujo de uno de contenido: el
+2026-09-07 mostró que el guion de `S05 MAX 2027-` **estaba en el texto**, o sea que
+un copiar y pegar se lo lleva, y que la separación silábica sí se había arreglado.
+Mirar la página convence; el volcado prueba.
+
 Esto encontró tres defectos que ninguna prueba habría visto: separación silábica inglesa
 sobre palabras españolas, una caja con borde cortada al pie de página, y una fila
 desbordada sobre la columna vecina.
