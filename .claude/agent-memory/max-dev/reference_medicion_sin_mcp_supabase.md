@@ -26,6 +26,16 @@ sesiones.** El 2026-09-07, dos subagentes aislados el mismo día:
 
 Comprobar al EMPEZAR con una consulta trivial, nunca al final.
 
+**2026-09-07, PR #545 — las DOS puertas abiertas en la misma sesión.** El `ln -s`
+de `.env.local` + PostgREST pasó, **y la Management API con el token de
+`.credentials.md` también** (DDL incluido: creó la tabla de respaldo, corrió el
+`DO $$ … RAISE EXCEPTION $$` del ensayo y aplicó la migración). Refuerza la regla:
+esto **no se recuerda, se comprueba al empezar**, y conviene probar las dos —
+PostgREST alcanza para medir, pero el respaldo en tabla y el registro en el
+ledger necesitan la Management API. ⚠️ El script de la Management API va invocado
+como `python3 x.py archivo.sql`: el guard de Bash rechaza el heredoc que lo
+alimenta por stdin dentro de un comando compuesto.
+
 Se conserva el método porque el permiso lo puede reabrir Mauricio con una regla de Bash, y
 entonces esto vuelve a servir tal cual. Lo que sirvió el 2026-09-03, de punta a punta:
 
