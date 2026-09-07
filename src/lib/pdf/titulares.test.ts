@@ -35,6 +35,19 @@ describe('titularesDeDatos', () => {
     expect(titularesDeDatos({ nombre_solicitante: 'ANA', nombre_solicitante_2: '   ' })).toHaveLength(1)
   })
 
+  /**
+   * El domicilio es POR PERSONA: si el segundo propietario vive en otra ciudad, la
+   * declaración juramentada no puede atribuirle la dirección del primero.
+   */
+  it('cada titular conserva su propio domicilio', () => {
+    const t = titularesDeDatos({
+      nombre_solicitante: 'ANA GOMEZ', direccion: 'CR 43A 1-50', municipio: 'Medellín',
+      nombre_solicitante_2: 'LUIS PEREZ', direccion_2: 'CL 100 8-60', municipio_2: 'Bogotá',
+    })
+    expect(t.map(x => x.municipio)).toEqual(['Medellín', 'Bogotá'])
+    expect(t.map(x => x.direccion)).toEqual(['CR 43A 1-50', 'CL 100 8-60'])
+  })
+
   it('el primer titular se devuelve siempre, con marcador si falta', () => {
     const t = titularesDeDatos({})
     expect(t).toHaveLength(1)
@@ -74,12 +87,32 @@ describe('concordancia', () => {
   })
 
   /**
-   * `identificado` es la excepción a propósito: acompaña a CADA persona, no al
-   * conjunto ("ANA, identificada con NIT X, y LUIS, identificado con NIT Y").
+   * `identificado` y `domiciliado` son la excepción a propósito: acompañan a CADA
+   * persona, no al conjunto ("ANA, identificada con NIT X y domiciliada en …, y
+   * LUIS, identificado con NIT Y y domiciliado en …").
    */
-  it('la identificación se mantiene por persona, en singular', () => {
+  it('la identificación y el domicilio se mantienen por persona, en singular', () => {
     expect(concordancia(2).identificado).toBe('identificado(a)')
     expect(concordancia(1).identificado).toBe('identificado(a)')
+    expect(concordancia(2).domiciliado).toBe('domiciliado(a)')
+    expect(concordancia(1).domiciliado).toBe('domiciliado(a)')
+  })
+
+  /**
+   * Formas que estrenó la declaración juramentada nueva (plantilla de Deisy,
+   * 2026-09-07). La cláusula PRIMERO afirma la propiedad bajo juramento: en
+   * copropiedad tiene que decir "somos los legítimos adquirentes", no "soy".
+   */
+  it('las formas de la declaración juramentada pluralizan', () => {
+    const uno = concordancia(1)
+    expect(uno.soy).toBe('soy')
+    expect(uno.adquirente).toBe('el legítimo adquirente y propietario')
+    expect(uno.personaNatural).toBe('persona natural no obligada a llevar contabilidad')
+
+    const dos = concordancia(2)
+    expect(dos.soy).toBe('somos')
+    expect(dos.adquirente).toBe('los legítimos adquirentes y propietarios')
+    expect(dos.personaNatural).toBe('personas naturales no obligadas a llevar contabilidad')
   })
 
   /**
@@ -89,9 +122,15 @@ describe('concordancia', () => {
    */
   it('ninguna forma del cuerpo se queda en singular cuando son dos', () => {
     const c = concordancia(2)
-    const singulares = ['Yo', 'manifiesto', 'Declaro', 'solicitante', 'presento']
+    // Las que califican a cada persona por separado, no al conjunto.
+    const porPersona = ['identificado', 'domiciliado']
+    const singulares = [
+      'Yo', 'manifiesto', 'Declaro', 'solicitante', 'presento', 'soy',
+      'el legítimo adquirente y propietario',
+      'persona natural no obligada a llevar contabilidad',
+    ]
     for (const [clave, valor] of Object.entries(c)) {
-      if (typeof valor === 'string' && clave !== 'identificado') {
+      if (typeof valor === 'string' && !porPersona.includes(clave)) {
         expect(singulares, `"${clave}" quedó en singular`).not.toContain(valor)
       }
     }
