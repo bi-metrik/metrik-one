@@ -10,6 +10,10 @@
  *   - dar por válida una aceptación de versión anterior → cae 1
  *   - tratar `aceptada: false` como aceptada → cae 1
  *   - dejar pasar a documentos sin aceptar → caen 2
+ *   - ofrecer la firma con campos sin confirmar → caen 2
+ *   - dar por firmado cualquier estado → cae 1
+ *   - no limitar el código a seis dígitos → caen 2
+ *   - omitir los segundos que faltan para reenviar → cae 1
  *   - poner a MéTRIK como Responsable en el texto → cae 1
  *   - omitir la transmisión internacional del aviso → cae 1
  *   - aceptar un archivo de 20 MB → cae 1
@@ -21,8 +25,12 @@ import {
   TIPOS_ACEPTACION,
   VERSION_TEXTO,
   esMotivoEnlaceCerrado,
+  estaFirmado,
   faltaAceptar,
+  mensajeErrorFirma,
   nombrePedido,
+  normalizarOtp,
+  otpCompleto,
   pasoActual,
   textosAceptacion,
   validarArchivo,
@@ -80,31 +88,79 @@ describe('qué falta aceptar', () => {
   });
 });
 
-describe('nada se puede hacer antes de aceptar', () => {
+describe('el orden de los pasos', () => {
+  const base = { acepto: true, slotsFaltantes: 0, camposPorConfirmar: 0, firmado: false };
+
   it('sin aceptar, el paso es el de las autorizaciones aunque falten documentos', () => {
-    expect(pasoActual({ acepto: false, slotsFaltantes: 4, camposPorConfirmar: 0 })).toBe(
-      'aceptaciones',
-    );
+    expect(pasoActual({ ...base, acepto: false, slotsFaltantes: 4 })).toBe('aceptaciones');
   });
 
   it('sin aceptar, el paso es el de las autorizaciones aunque no falte nada más', () => {
-    expect(pasoActual({ acepto: false, slotsFaltantes: 0, camposPorConfirmar: 0 })).toBe(
-      'aceptaciones',
-    );
+    expect(pasoActual({ ...base, acepto: false })).toBe('aceptaciones');
   });
 
   it('aceptado, va a documentos mientras falte alguno', () => {
-    expect(pasoActual({ acepto: true, slotsFaltantes: 1, camposPorConfirmar: 5 })).toBe(
-      'documentos',
-    );
+    expect(pasoActual({ ...base, slotsFaltantes: 1, camposPorConfirmar: 5 })).toBe('documentos');
   });
 
   it('con los documentos completos, pasa a confirmar datos', () => {
-    expect(pasoActual({ acepto: true, slotsFaltantes: 0, camposPorConfirmar: 3 })).toBe('datos');
+    expect(pasoActual({ ...base, camposPorConfirmar: 3 })).toBe('datos');
   });
 
-  it('sin nada pendiente, queda listo', () => {
-    expect(pasoActual({ acepto: true, slotsFaltantes: 0, camposPorConfirmar: 0 })).toBe('listo');
+  it('la firma NO se ofrece mientras haya datos sin confirmar', () => {
+    expect(pasoActual({ ...base, camposPorConfirmar: 1 })).not.toBe('firma');
+  });
+
+  it('con todo confirmado, toca firmar', () => {
+    expect(pasoActual(base)).toBe('firma');
+  });
+
+  it('firmado, queda listo aunque el resto se vea incompleto', () => {
+    expect(
+      pasoActual({ acepto: true, slotsFaltantes: 2, camposPorConfirmar: 4, firmado: true }),
+    ).toBe('listo');
+  });
+});
+
+describe('la firma', () => {
+  it('el estado del expediente es lo que dice si ya se firmó', () => {
+    expect(estaFirmado('pendiente_revision')).toBe(true);
+    expect(estaFirmado('en_proceso')).toBe(false);
+    expect(estaFirmado('invitado')).toBe(false);
+  });
+
+  it('el código solo admite dígitos y no más de seis', () => {
+    expect(normalizarOtp('12a34b5')).toBe('12345');
+    expect(normalizarOtp('123 456')).toBe('123456');
+    expect(normalizarOtp('12345678')).toBe('123456');
+    expect(normalizarOtp('  ')).toBe('');
+  });
+
+  it('solo está completo con los seis dígitos', () => {
+    expect(otpCompleto('123456')).toBe(true);
+    expect(otpCompleto('12345')).toBe(false);
+    expect(otpCompleto('12345a')).toBe(false);
+  });
+
+  it('cada fallo del canal dice algo distinto y accionable', () => {
+    const frases = [
+      mensajeErrorFirma('sin_correo_de_contraparte'),
+      mensajeErrorFirma('canal_no_configurado'),
+      mensajeErrorFirma('otp_expirado'),
+      mensajeErrorFirma('bloqueado'),
+      mensajeErrorFirma('campos_pendientes'),
+    ];
+    expect(new Set(frases).size).toBe(frases.length);
+    for (const f of frases) expect(f.length).toBeGreaterThan(10);
+  });
+
+  it('la espera del reenvío dice cuántos segundos faltan', () => {
+    expect(mensajeErrorFirma('espera_antes_de_reenviar', 42)).toContain('42');
+    expect(mensajeErrorFirma('espera_antes_de_reenviar')).not.toContain('undefined');
+  });
+
+  it('un código desconocido no se queda mudo', () => {
+    expect(mensajeErrorFirma('lo_que_sea').length).toBeGreaterThan(10);
   });
 });
 
