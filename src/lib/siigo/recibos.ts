@@ -156,7 +156,7 @@ export async function emitirReciboDeCobro(
   // ── 0. El cobro, que es de donde cuelga todo ──
   const { data: cobroRaw, error: errCobro } = await db(svc)
     .from('cobros')
-    .select('id, negocio_id, monto, siigo_recibo, anulado_at')
+    .select('id, negocio_id, monto, fecha, siigo_recibo, anulado_at')
     .eq('id', cobroId)
     .eq('workspace_id', workspaceId)
     .single()
@@ -165,6 +165,7 @@ export async function emitirReciboDeCobro(
   const cobro = cobroRaw as {
     negocio_id: string | null
     monto: number | null
+    fecha: string | null
     siigo_recibo: MarcaRecibo | null
     anulado_at: string | null
   }
@@ -220,8 +221,19 @@ export async function emitirReciboDeCobro(
     }
 
     // ── 5. Emitir ──
-    const hoy = new Date().toISOString().slice(0, 10)
-    const { payload, faltantes } = borradorRecibo(cfg, identificacion, valorPagado, hoy, concepto)
+    // ── La fecha es la del COBRO, no la de hoy ──
+    // Decisión de Mauricio (2026-09-07). El recibo acusa plata que YA entró: fecharlo
+    // hoy diría que entró hoy. Medido el 2026-09-04 sobre los 43 pagos sin recibo y sin
+    // facturar, el más viejo era del 17 de febrero: con la fecha de emisión, ese cliente
+    // habría recibido un "recibimos tu pago" siete meses tarde y Siigo habría registrado
+    // en septiembre plata de febrero.
+    //
+    // ⚠️ Siigo puede RECHAZAR una fecha de un periodo contable ya cerrado. Eso es
+    // correcto y no se esquiva volviendo a hoy: un recibo con fecha falsa sería peor que
+    // uno que no sale. El error de Siigo se propaga tal cual para que quien emite sepa
+    // que el periodo está cerrado y lo lleve por donde corresponde.
+    const fechaRecibo = cobro.fecha ?? new Date().toISOString().slice(0, 10)
+    const { payload, faltantes } = borradorRecibo(cfg, identificacion, valorPagado, fechaRecibo, concepto)
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 
     const creado = await siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
@@ -248,7 +260,7 @@ export async function emitirReciboDeCobro(
       try {
         const pdf = await renderReciboCaja('soena', {
           numero,
-          fecha: creado.date ?? hoy,
+          fecha: creado.date ?? fechaRecibo,
           cliente_nombre: negocio.nombre,
           cliente_identificacion: identificacion,
           negocio_codigo: negocio.codigo ?? '',
