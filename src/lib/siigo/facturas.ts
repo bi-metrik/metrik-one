@@ -14,15 +14,18 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './client'
-import { borradorFactura, type BorradorFactura } from './mapeo'
+import { borradorFactura, SUCURSAL_POR_DEFECTO, type BorradorFactura } from './mapeo'
 import { resolverConceptoDeNegocio } from './concepto-negocio'
-import { asegurarClienteSiigo, corregirContactoParaFactura } from './clientes'
+import { asegurarClienteSiigo, corregirContactoParaFactura, identificacionDelNegocio } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { numeroFacturaEnData } from './factura-cargada'
 import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
+// PostgREST corta en 1.000 filas sin avisar, y aquí una fila que falte se lee
+// como "esa factura está libre". Ver el módulo.
+import { traerTodo } from '@/lib/supabase/paginar'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 
 /**
@@ -32,12 +35,21 @@ import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-ac
  */
 const ESPERA_429_EMISION_MS = 30_000
 
-/** Factura que ya existe en Siigo para ese cliente y ese producto. */
+/** Factura que Siigo ya tiene para ese cliente, sea del servicio que sea. */
 export interface FacturaEnSiigo {
   id: string
   /** Número visible, p. ej. "FV-2-225". */
   name: string
   date: string
+  /** Total que Siigo tiene registrado. `null` si no lo devolvió. */
+  total: number | null
+  /** Códigos de producto de sus ítems: es lo que dice de qué servicio es. */
+  productos: string[]
+  /**
+   * ¿Es del MISMO producto que se está por emitir? Lo llena quien compara
+   * (`clasificarDuplicados`); la consulta sola no lo sabe porque ya no filtra.
+   */
+  mismo_producto?: boolean
 }
 
 interface RespuestaFacturas {
@@ -45,23 +57,35 @@ interface RespuestaFacturas {
     id?: string
     name?: string
     date?: string
+    total?: number
     items?: Array<{ code?: string }>
   }>
 }
 
 /**
- * Facturas del PRODUCTO del servicio que Siigo ya tiene para esa identificación.
+ * TODAS las facturas que Siigo tiene para esa identificación. **Sin filtrar por
+ * producto.**
  *
- * Se filtra por producto a propósito: SOENA factura otras cosas al mismo cliente,
- * y contar cualquier factura daría por facturado a quien no lo está. El filtro
- * `customer_identification` está verificado contra la API (devuelve solo las de
- * ese cliente; el parámetro `identification`, en cambio, se ignora en silencio y
- * devuelve TODO, que es la forma más fácil de creer que un guard funciona).
+ * Hasta el 2026-09-07 filtraba por el producto que se iba a emitir, y ese filtro
+ * era un punto ciego: medido sobre las 482 facturas del Siigo de SOENA, las 269
+ * que emitió ONE van bajo el producto 11 y las 213 que ningún negocio de ONE
+ * reclama van casi todas bajo el 22 (146). O sea que una factura hecha a mano bajo
+ * el 22 pasaba el guard sin ruido cuando ONE iba a emitir bajo el 11. Es lo que le
+ * pasó a V0345: ya tenía factura del 31 de marzo por su valor exacto, y lo único
+ * que evitó la segunda fue un error de sucursal.
+ *
+ * Ahora informa en vez de decidir: devuelve número, fecha, total y productos, y
+ * quien llama clasifica. Una factura de otro servicio ya no se esconde — se muestra
+ * y se exige que alguien la justifique por escrito.
+ *
+ * El filtro `customer_identification` está verificado contra la API (devuelve solo
+ * las de ese cliente; el parámetro `identification`, en cambio, se ignora en
+ * silencio y devuelve TODO, que es la forma más fácil de creer que un guard
+ * funciona).
  */
 export async function facturasDelClienteEnSiigo(
   workspaceId: string,
   identificacion: string,
-  productoCode: string,
   maxEspera429Ms = 0,
 ): Promise<FacturaEnSiigo[]> {
   if (!identificacion) return []
@@ -70,9 +94,29 @@ export async function facturasDelClienteEnSiigo(
     `/v1/invoices?customer_identification=${encodeURIComponent(identificacion)}&page_size=100`,
     { maxEspera429Ms },
   )
-  return (r.results ?? [])
-    .filter(f => f.items?.some(i => i.code === productoCode))
-    .map(f => ({ id: f.id ?? '', name: f.name ?? '(sin número)', date: f.date ?? '' }))
+  return (r.results ?? []).map(f => ({
+    id: f.id ?? '',
+    name: f.name ?? '(sin número)',
+    date: f.date ?? '',
+    total: typeof f.total === 'number' && Number.isFinite(f.total) ? f.total : null,
+    productos: (f.items ?? []).map(i => i.code ?? '').filter(Boolean),
+  }))
+}
+
+/**
+ * Marca cuáles de esas facturas son del mismo producto que se va a emitir.
+ *
+ * Puro y aparte porque es la decisión que antes estaba escondida dentro de un
+ * `.filter()`: las del mismo producto son el duplicado evidente; las de otro
+ * producto son la advertencia que el filtro viejo tiraba a la basura. Ninguna de
+ * las dos deja emitir sin justificación escrita, pero la pantalla las cuenta
+ * distinto y quien decide tiene que ver la diferencia.
+ */
+export function clasificarDuplicados(
+  facturas: FacturaEnSiigo[],
+  productoCode: string,
+): FacturaEnSiigo[] {
+  return facturas.map(f => ({ ...f, mismo_producto: f.productos.includes(productoCode) }))
 }
 
 export interface OpcionesEmision {
@@ -169,6 +213,20 @@ export interface MarcaFactura {
    * a preguntarle a Siigo.
    */
   producto_code?: string
+  /**
+   * Cómo llegó esta factura al negocio.
+   *
+   * Ausente = la emitió ONE (todas las marcas anteriores al 2026-09-07).
+   * `adoptada_de_siigo` = ya existía en Siigo y una persona la reconoció como la
+   * de este negocio. La distinción no es cosmética: sin ella la trazabilidad
+   * afirmaría que ONE emitió un documento fiscal que no emitió.
+   */
+  origen?: 'emitido_en_siigo' | 'adoptada_de_siigo'
+  /** Fecha de la factura EN SIIGO. En una adoptada puede ser de meses atrás. */
+  fecha?: string
+  /** Quién y cuándo volvió a traer el PDF de una factura ya marcada. */
+  rearchivado_at?: string
+  rearchivado_por?: string | null
 }
 
 /**
@@ -290,10 +348,14 @@ export async function emitirFacturaNegocio(
     // 2026-08-09: 7 casos de la cola ya estaban facturados en Siigo sin que ONE
     // lo supiera, 3 de ellos con precio aprobado, o sea que la cola los mostraba
     // listos para emitir.
-    // Se pregunta por el MISMO producto que se va a emitir: con conceptos por
-    // servicio, buscar duplicados del producto base dejaría pasar una segunda
-    // factura del concepto real.
-    const existentes = await facturasDelClienteEnSiigo(workspaceId, identificacion, productoCode, ESPERA_429_EMISION_MS)
+    // Se preguntan TODAS las del cliente, no solo las del producto que se va a
+    // emitir: el filtro por producto era justo lo que dejó pasar el caso de V0345
+    // (facturado a mano bajo el 22, a punto de re-facturarse bajo el 11). Ver
+    // `facturasDelClienteEnSiigo`.
+    const existentes = clasificarDuplicados(
+      await facturasDelClienteEnSiigo(workspaceId, identificacion, ESPERA_429_EMISION_MS),
+      productoCode,
+    )
     const justificacion = opciones.justificacionDuplicado?.trim()
     if (existentes.length > 0 && !justificacion) {
       return { ok: false, motivo: 'duplicado_en_siigo', existentes }
@@ -307,6 +369,9 @@ export async function emitirFacturaNegocio(
         emitir: opciones.emitir,
         enviarCorreo: opciones.enviarCorreo === true,
         productoCode,
+        // Siigo resuelve el tercero por identificación MÁS sucursal. Sin dato
+        // conocido va la principal, que es el comportamiento de siempre.
+        branchOffice: cliente.branch_office ?? SUCURSAL_POR_DEFECTO,
       },
     )
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
@@ -392,6 +457,272 @@ export async function emitirFacturaNegocio(
       total: honorario, emitida: opciones.emitir,
       archivada: !opciones.bloqueFacturaSlug || archivoUrl != null,
     }
+  } catch (e) {
+    const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
+    return { ok: false, motivo: 'error', mensaje }
+  }
+}
+
+// ── Adoptar una factura que YA existe en Siigo ───────────────────────────────
+//
+// SOENA facturó a mano durante meses antes de que ONE emitiera. Esas facturas
+// existen, son válidas y el cliente ya las recibió: lo que falta es que estén
+// DENTRO del expediente, para que el comercial las mande sin ir a buscarlas a
+// Siigo. Medido el 2026-09-07 sobre las 482 facturas del Siigo de SOENA, 213 no
+// las reclama ningún negocio de ONE.
+//
+// La adopción NO empareja sola. Ya se intentó en agosto (`backfill-siigo-cola`
+// emparejaba por identificación y se quedaba con `suyas[0]`) y Mauricio rechazó
+// 7 de esos emparejamientos el 2026-08-10. Aquí un humano ve TODAS las facturas
+// del cliente, escoge una y confirma. Ni preselección, ni lote, ni automático.
+
+/** Factura del cliente vista desde la pantalla de adopción. */
+export interface FacturaAdoptable extends FacturaEnSiigo {
+  /**
+   * Negocio de ONE que ya la tiene marcada, si alguno. Marcarla en dos negocios
+   * contaría el mismo ingreso dos veces, así que se muestra y no se deja escoger.
+   */
+  reclamada_por: { negocio_id: string; codigo: string | null } | null
+  /** Es la que este mismo negocio ya tiene marcada: adoptarla es RE-ARCHIVAR. */
+  ya_es_de_este_negocio: boolean
+}
+
+export type ResultadoListadoAdopcion =
+  | { ok: true; identificacion: string; facturas: FacturaAdoptable[] }
+  | { ok: false; motivo: 'sin_identificacion' }
+  | { ok: false; motivo: 'error'; mensaje: string }
+
+/**
+ * Quién reclama cada factura del workspace, indexado por id y por número.
+ *
+ * Se leen TODOS los negocios y se filtra en memoria en vez de consultar por la
+ * ruta jsonb: un filtro de PostgREST mal formado devolvería cero filas sin
+ * error, y aquí ese cero significa "esta factura está libre" — justo la
+ * afirmación que no puede salir de un fallo mudo.
+ */
+async function marcasDeFacturaDelWorkspace(
+  workspaceId: string,
+): Promise<Map<string, { negocio_id: string; codigo: string | null }>> {
+  const svc = createServiceClient()
+  const filas = await traerTodo<{
+    id: string
+    codigo: string | null
+    siigo_factura: MarcaFactura | null
+  }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('negocios')
+      .select('id, codigo, siigo_factura:metadata->siigo_factura')
+      .eq('workspace_id', workspaceId)
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'siigo/marcas-de-factura' },
+  )
+
+  const porClave = new Map<string, { negocio_id: string; codigo: string | null }>()
+  for (const f of filas) {
+    const marca = f.siigo_factura
+    if (!marca) continue
+    const dueno = { negocio_id: f.id, codigo: f.codigo }
+    // Se indexa por las DOS llaves: el id de Siigo es el vínculo fuerte, pero
+    // una marca vieja puede traerlo vacío y ahí el número es lo único que hay.
+    if (marca.siigo_id) porClave.set(`id:${marca.siigo_id}`, dueno)
+    if (marca.numero) porClave.set(`num:${marca.numero}`, dueno)
+  }
+  return porClave
+}
+
+/** ¿Quién reclama esta factura, si alguien? */
+function reclamanteDe(
+  f: FacturaEnSiigo,
+  porClave: Map<string, { negocio_id: string; codigo: string | null }>,
+): { negocio_id: string; codigo: string | null } | null {
+  return porClave.get(`id:${f.id}`) ?? porClave.get(`num:${f.name}`) ?? null
+}
+
+/**
+ * Todas las facturas que Siigo tiene para el cliente de este negocio, marcando
+ * cuáles ya están reclamadas.
+ *
+ * SOLO LEE: no crea el tercero, contra Siigo solo hace GET, y no escribe en ONE.
+ * Es la pantalla previa a una decisión, no la decisión.
+ */
+export async function facturasAdoptablesDelNegocio(
+  workspaceId: string,
+  negocioId: string,
+): Promise<ResultadoListadoAdopcion> {
+  try {
+    const { identificacion } = await identificacionDelNegocio(workspaceId, negocioId)
+    if (!identificacion) return { ok: false, motivo: 'sin_identificacion' }
+
+    const [enSiigo, porClave] = await Promise.all([
+      facturasDelClienteEnSiigo(workspaceId, identificacion, ESPERA_429_EMISION_MS),
+      marcasDeFacturaDelWorkspace(workspaceId),
+    ])
+
+    const facturas: FacturaAdoptable[] = enSiigo
+      .map(f => {
+        const reclamada = reclamanteDe(f, porClave)
+        return {
+          ...f,
+          reclamada_por: reclamada,
+          ya_es_de_este_negocio: reclamada?.negocio_id === negocioId,
+        }
+      })
+      // Más reciente primero: es el orden en que alguien las busca.
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
+
+    return { ok: true, identificacion, facturas }
+  } catch (e) {
+    const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
+    return { ok: false, motivo: 'error', mensaje }
+  }
+}
+
+export type ResultadoAdopcion =
+  | {
+      ok: true
+      numero: string
+      /** `true` si el negocio ya la tenía marcada y esto solo repuso el PDF. */
+      rearchivada: boolean
+    }
+  /** El id escogido no aparece entre las facturas del cliente de este negocio. */
+  | { ok: false; motivo: 'no_es_del_cliente' }
+  /** Otro negocio ya la tiene marcada. Adoptarla contaría el ingreso dos veces. */
+  | { ok: false; motivo: 'reclamada_por_otro'; codigo: string | null }
+  /** Este negocio ya tiene OTRA factura marcada. Eso se corrige, no se pisa. */
+  | { ok: false; motivo: 'ya_facturado_en_one'; numero: string }
+  | { ok: false; motivo: 'sin_identificacion' }
+  /** Siigo no entregó el PDF. No se escribió nada: se puede reintentar. */
+  | { ok: false; motivo: 'sin_pdf' }
+  | { ok: false; motivo: 'error'; mensaje: string }
+
+/**
+ * Adopta en el negocio una factura que ya existe en Siigo.
+ *
+ * El orden importa: todo lo que puede fallar se comprueba antes de escribir, y
+ * el PDF se baja ANTES de marcar. Marcar el negocio como facturado sin haber
+ * podido traer el archivo reproduce exactamente el problema que esto viene a
+ * resolver (V0076 y V0177: factura emitida por ONE, PDF ausente del bloque).
+ *
+ * `emitida` NO se asume: se deriva del CUFE. Solo una factura radicada ante la
+ * DIAN tiene uno, así que es evidencia y no un supuesto.
+ */
+export async function adoptarFacturaDeSiigo(
+  workspaceId: string,
+  negocioId: string,
+  siigoFacturaId: string,
+  staffNombre: string | null,
+  opciones: { bloqueFacturaSlug?: string; staffId?: string | null } = {},
+): Promise<ResultadoAdopcion> {
+  const svc = createServiceClient()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negRaw, error: errNeg } = await (svc as any)
+    .from('negocios')
+    .select('id, metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (errNeg || !negRaw) return { ok: false, motivo: 'error', mensaje: 'Negocio no encontrado' }
+  const negocio = negRaw as { id: string; metadata: Record<string, unknown> | null }
+  const marcaExistente = (negocio.metadata?.siigo_factura ?? null) as MarcaFactura | null
+
+  try {
+    const listado = await facturasAdoptablesDelNegocio(workspaceId, negocioId)
+    if (!listado.ok) {
+      return listado.motivo === 'sin_identificacion'
+        ? { ok: false, motivo: 'sin_identificacion' }
+        : { ok: false, motivo: 'error', mensaje: listado.mensaje }
+    }
+
+    // ⚠️ La factura se busca dentro de las del CLIENTE de este negocio, no por
+    // id contra Siigo: quien llama manda un id, y esta es la única barrera que
+    // impide adoptar la factura de otra persona por un id mal copiado.
+    const escogida = listado.facturas.find(f => f.id === siigoFacturaId)
+    if (!escogida) return { ok: false, motivo: 'no_es_del_cliente' }
+
+    if (escogida.reclamada_por && !escogida.ya_es_de_este_negocio) {
+      return { ok: false, motivo: 'reclamada_por_otro', codigo: escogida.reclamada_por.codigo }
+    }
+
+    // El negocio ya tiene OTRA factura: eso no se pisa desde aquí. Cambiarle la
+    // factura a un negocio es una corrección con su propia decisión detrás.
+    const rearchivar = !!marcaExistente?.numero && escogida.ya_es_de_este_negocio
+    if (marcaExistente?.numero && !rearchivar) {
+      return { ok: false, motivo: 'ya_facturado_en_one', numero: marcaExistente.numero }
+    }
+
+    const doc = await pdfDeFactura(workspaceId, siigoFacturaId)
+    if (!doc) return { ok: false, motivo: 'sin_pdf' }
+
+    // ── Archivar ─────────────────────────────────────────────────────────────
+    // Re-archivar una factura que ONE sí emitió conserva su origen: el archivo
+    // llegó tarde, pero la emisión fue nuestra.
+    const origenArchivo = rearchivar && marcaExistente?.origen !== 'adoptada_de_siigo'
+      ? 'emitido_en_siigo'
+      : 'adoptada_de_siigo'
+
+    let archivoUrl: string | null = null
+    if (opciones.bloqueFacturaSlug) {
+      const nombre = `${escogida.name.replace(/[^\w.-]+/g, '-')}.pdf`
+      const arch = await archivarPdfEnBloque(
+        workspaceId, negocioId, opciones.bloqueFacturaSlug, doc.pdf, nombre,
+        { numero_factura: escogida.name },
+        undefined,
+        origenArchivo,
+      )
+      if (arch.ok) archivoUrl = arch.url ?? null
+      // A diferencia de la emisión, aquí archivar SÍ puede cortar: la factura ya
+      // existía en Siigo y nada se ha escrito todavía, así que fallar es
+      // reintentable. Marcar el negocio sin el PDF sería repetir V0076.
+      else return { ok: false, motivo: 'error', mensaje: `No se pudo archivar el PDF: ${arch.error}` }
+    }
+
+    const ahora = new Date().toISOString()
+    const marca: MarcaFactura = rearchivar && marcaExistente
+      ? {
+          // Se conserva TODO lo de la marca original: lo único que faltaba era
+          // el archivo. Reescribirla entera perdería quién emitió y cuándo.
+          ...marcaExistente,
+          cufe: doc.cufe ?? marcaExistente.cufe ?? null,
+          archivo_url: archivoUrl ?? marcaExistente.archivo_url ?? null,
+          rearchivado_at: ahora,
+          rearchivado_por: staffNombre,
+        }
+      : {
+          numero: escogida.name,
+          siigo_id: escogida.id,
+          // El total es el de SIIGO, no el honorario aprobado: es el valor del
+          // documento que existe. Cuando difieren, eso es justo lo que hay que ver.
+          total: escogida.total ?? 0,
+          cufe: doc.cufe ?? null,
+          archivo_url: archivoUrl,
+          // Un CUFE solo existe si la factura se radicó ante la DIAN.
+          emitida: doc.cufe != null,
+          at: ahora,
+          por: staffNombre,
+          producto_code: escogida.productos[0],
+          origen: 'adoptada_de_siigo',
+          fecha: escogida.date || undefined,
+        }
+
+    const guardada = await guardarMarcaEnMetadata(
+      svc, workspaceId, negocioId, 'siigo_factura', marca, negocio.metadata,
+    )
+    if (!guardada.ok) {
+      return { ok: false, motivo: 'error', mensaje: `No se pudo marcar el negocio: ${guardada.mensaje}` }
+    }
+
+    // Igual que en la emisión: si el caso ya estaba esperando su factura para
+    // cerrarse, esto es lo que le faltaba. Nada de aquí tumba la adopción.
+    try {
+      await cerrarNegocioSiQuedaResuelto(svc, workspaceId, negocioId, opciones.staffId ?? null)
+    } catch (e) {
+      console.error('[siigo] no se pudo evaluar el cierre automatico:', (e as Error).message)
+    }
+
+    return { ok: true, numero: marca.numero, rearchivada: rearchivar }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
     return { ok: false, motivo: 'error', mensaje }

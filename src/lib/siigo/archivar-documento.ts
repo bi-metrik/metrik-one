@@ -63,6 +63,14 @@ export async function archivarPdfEnBloque(
    * expediente. La factura no la usa: de esa hay una sola.
    */
   historial?: { clave: string; entrada: Record<string, unknown> },
+  /**
+   * Cómo llegó el archivo al bloque. Por defecto, ONE lo emitió.
+   *
+   * `adoptada_de_siigo` es para la factura que YA existía en Siigo y que alguien
+   * reconoce como la de este negocio: ONE no la emitió, solo la trajo. Decir lo
+   * contrario dejaría escrito en el expediente que la emitimos nosotros.
+   */
+  origen: 'emitido_en_siigo' | 'adoptada_de_siigo' = 'emitido_en_siigo',
 ): Promise<ResultadoArchivado> {
   try {
     const svc = createServiceClient()
@@ -124,7 +132,7 @@ export async function archivarPdfEnBloque(
       mime_type: 'application/pdf',
       uploaded_at: new Date().toISOString(),
       // Deja dicho que el archivo lo trajo ONE desde Siigo, no una persona.
-      origen: 'emitido_en_siigo',
+      origen,
       // Los campos se escriben con la MISMA forma que deja la extracción con IA
       // (`{value, confidence, manual}`), porque los leen las mismas pantallas y
       // los mismos gates. `manual: true` porque no salieron de una extracción:

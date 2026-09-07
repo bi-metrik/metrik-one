@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { baseYTotalGravado, borradorFactura, emailPlausible } from './mapeo'
+import { baseYTotalGravado, borradorFactura, borradorRecibo, emailPlausible } from './mapeo'
 import type { SiigoConfig } from './client'
 
 const CFG: SiigoConfig = {
@@ -75,6 +75,46 @@ describe('borradorFactura', () => {
   it('el concepto del catálogo gana sobre el producto por defecto', () => {
     const { payload } = borradorFactura(CFG, '900123456', 318000, FECHA, IVA, { productoCode: '11' })
     expect(payload.items[0].code).toBe('11')
+  })
+})
+
+/**
+ * Siigo resuelve el tercero por identificación MÁS sucursal. Mandar la 0 a un
+ * tercero que vive en la 1 produce `The customer doesn't exist: <cédula>`, que
+ * suena a que el cliente no está creado y no lo es (V0345, 2026-09-07).
+ *
+ * Las dos mitades importan: que la sucursal recibida viaje, y que SIN ella siga
+ * saliendo 0 — o sea que ningún caso sano cambie de comportamiento.
+ */
+describe('la sucursal del cliente en el payload', () => {
+  it('la factura manda la sucursal que se le pasa', () => {
+    const { payload } = borradorFactura(CFG, '52644999', 637500, FECHA, IVA, { branchOffice: 1 })
+    expect(payload.customer).toEqual({ identification: '52644999', branch_office: 1 })
+  })
+
+  it('la factura SIN sucursal sigue mandando la principal', () => {
+    const { payload } = borradorFactura(CFG, '52644999', 637500, FECHA, IVA)
+    expect(payload.customer.branch_office).toBe(0)
+  })
+
+  it('el recibo manda la sucursal que se le pasa', () => {
+    const { payload } = borradorRecibo(CFG, '52644999', 701812, FECHA, 'Recaudo', 1)
+    expect(payload.customer).toEqual({ identification: '52644999', branch_office: 1 })
+  })
+
+  it('el recibo SIN sucursal sigue mandando la principal', () => {
+    const { payload } = borradorRecibo(CFG, '52644999', 701812, FECHA, 'Recaudo')
+    expect(payload.customer.branch_office).toBe(0)
+  })
+
+  it('una sucursal que no es la principal NO se confunde con ausencia', () => {
+    // Un `branchOffice || SUCURSAL_POR_DEFECTO` daría lo mismo para el 0 y para
+    // el ausente, y ahí el caso de la sucursal 214 del catálogo de SOENA se
+    // pierde igual que antes.
+    expect(borradorFactura(CFG, '52644999', 637500, FECHA, IVA, { branchOffice: 214 })
+      .payload.customer.branch_office).toBe(214)
+    expect(borradorRecibo(CFG, '52644999', 701812, FECHA, 'Recaudo', 214)
+      .payload.customer.branch_office).toBe(214)
   })
 })
 

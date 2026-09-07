@@ -128,26 +128,50 @@ describe('lo que Siigo exige al CREAR, que no es lo que devuelve al leer', () =>
  * El caso real: V0189 quedó marcado con 8081571 cuando su RUT dice 80815711, y
  * la factura FV-2-244 salió con la cédula mutilada porque el atajo devolvía la
  * marca sin compararla. Estas pruebas fijan que ya no puede volver a pasar.
+ *
+ * El tercer argumento es la SUCURSAL de la marca, y sigue el mismo patrón: una
+ * marca que no la trae no puede tomar el atajo, porque nunca la aprendería.
  */
 describe('marcaSigueValida', () => {
   it('una marca vieja de antes de #394 ya NO sirve', () => {
-    expect(marcaSigueValida('8081571', '80815711')).toBe(false)
+    expect(marcaSigueValida('8081571', '80815711', 0)).toBe(false)
   })
 
   it('la marca que coincide con el RUT sigue mandando (no se re-crea el tercero)', () => {
-    expect(marcaSigueValida('80815711', '80815711')).toBe(true)
+    expect(marcaSigueValida('80815711', '80815711', 0)).toBe(true)
   })
 
   it('sin marca no hay atajo', () => {
-    expect(marcaSigueValida(null, '80815711')).toBe(false)
-    expect(marcaSigueValida(undefined, '80815711')).toBe(false)
-    expect(marcaSigueValida('', '80815711')).toBe(false)
+    expect(marcaSigueValida(null, '80815711', 0)).toBe(false)
+    expect(marcaSigueValida(undefined, '80815711', 0)).toBe(false)
+    expect(marcaSigueValida('', '80815711', 0)).toBe(false)
   })
 
   it('si hoy el RUT no da identificación, la marca manda', () => {
     // Un RUT que se dañó DESPUÉS no puede invalidar un tercero que ya existe en
     // Siigo: eso mandaría a re-crear terceros buenos.
-    expect(marcaSigueValida('80815711', '')).toBe(true)
-    expect(marcaSigueValida('80815711', null)).toBe(true)
+    expect(marcaSigueValida('80815711', '', 0)).toBe(true)
+    expect(marcaSigueValida('80815711', null, 0)).toBe(true)
+  })
+
+  it('una marca SIN sucursal no toma el atajo, aunque la cédula coincida', () => {
+    // Son las 252 marcas que ya existen en SOENA: ninguna la trae. Si el atajo
+    // las dejara pasar, V0345 y V0134 seguirían fallando con "The customer
+    // doesn't exist" para siempre, porque nadie volvería a preguntarle a Siigo.
+    expect(marcaSigueValida('80815711', '80815711', undefined)).toBe(false)
+    expect(marcaSigueValida('80815711', '80815711', null)).toBe(false)
+    // Y tampoco cuando el RUT no da identificación: sin sucursal se rehace igual.
+    expect(marcaSigueValida('80815711', null, undefined)).toBe(false)
+  })
+
+  it('la sucursal 0 es un dato, no una ausencia', () => {
+    // El respaldo de los borradores también es 0, así que un `!sucursal` habría
+    // pasado la prueba de arriba y mandado a re-preguntar a TODOS los terceros
+    // sanos en cada emisión.
+    expect(marcaSigueValida('80815711', '80815711', 0)).toBe(true)
+  })
+
+  it('una marca CON sucursal 1 toma el atajo (el caso reparado)', () => {
+    expect(marcaSigueValida('52644999', '52644999', 1)).toBe(true)
   })
 })

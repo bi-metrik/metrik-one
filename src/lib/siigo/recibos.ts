@@ -42,7 +42,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { siigoRequest, getSiigoConfig, claveIdempotencia, SiigoError, type SiigoConfig } from './client'
-import { borradorRecibo, type BorradorRecibo } from './mapeo'
+import { borradorRecibo, SUCURSAL_POR_DEFECTO, type BorradorRecibo } from './mapeo'
 import { asegurarClienteSiigo } from './clientes'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { renderReciboCaja } from '@/lib/pdf/pdf-render-client'
@@ -263,7 +263,17 @@ export async function emitirReciboDeCobro(
     let fechaRecibo = fechaPago
     let motivoFechaDistinta: string | null = null
 
-    const { payload, faltantes } = borradorRecibo(cfg, identificacion, valorPagado, fechaRecibo, concepto)
+    // Siigo resuelve el tercero por identificación MÁS sucursal: un cliente que vive
+    // en la sucursal 1 no existe si se le pregunta por la 0, y responde
+    // `The customer doesn't exist`, que suena a otra cosa. Sin dato conocido va la
+    // principal, igual que siempre. Se resuelve UNA vez porque el reintento por
+    // periodo cerrado vuelve a armar el borrador: dos copias se desincronizarían y
+    // el reintento perdería la sucursal justo en los casos más viejos.
+    const sucursalDelCliente = cliente.branch_office ?? SUCURSAL_POR_DEFECTO
+
+    const { payload, faltantes } = borradorRecibo(
+      cfg, identificacion, valorPagado, fechaRecibo, concepto, sucursalDelCliente,
+    )
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 
     // Determinista desde el COBRO: un reintento no produce un segundo recibo, y dos
@@ -294,7 +304,9 @@ export async function emitirReciboDeCobro(
 
       motivoFechaDistinta = `Siigo rechazó la fecha del pago (${fechaPago}) por periodo contable cerrado`
       fechaRecibo = hoyISO()
-      const reintento = borradorRecibo(cfg, identificacion, valorPagado, fechaRecibo, concepto)
+      const reintento = borradorRecibo(
+        cfg, identificacion, valorPagado, fechaRecibo, concepto, sucursalDelCliente,
+      )
       creado = await emitir(reintento.payload)
     }
 
