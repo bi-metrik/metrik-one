@@ -21,6 +21,7 @@
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PR #529: la suma de rubros DEBE cuadrar con `costo_total`; el fix de horas aún no mueve cifras; el caso de prueba no es de `metrik`
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
+- ⚠️ [Certificado UPME en Anexos](project_certificado_upme_anexos.md) — PR #548 sin mergear: 264 casillas sembradas (la condición no se mira), y por qué NO es gate
 
 ## Referencias
 

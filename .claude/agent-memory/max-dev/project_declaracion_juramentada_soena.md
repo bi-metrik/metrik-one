@@ -52,7 +52,10 @@ Están comentadas en `src/lib/pdf/declaracion-juramentada-pdf.tsx`, pero se olvi
 3. **Los datos del certificado UPME son `optional`** y la cláusula SEGUNDO degrada por
    niveles: con radicado y fecha, el texto íntegro; con radicado sin fecha, sin el
    trozo de la fecha; **sin radicado, se cae la mención a la UPME y a la Ley 1715** y
-   solo queda lo que la factura prueba.
+   solo queda lo que la factura prueba. ⚠️ Desde el PR #548 eso es **red de seguridad,
+   no el camino esperado**: la rama solo IVA entrega el certificado en Anexos y el campo
+   tiene `source_alternatives` hacia `concepto_upme_anexos`. Ver
+   [[certificado-upme-anexos]].
 
 Y dos desviaciones deliberadas de la plantilla: dice **«vehículo híbrido»** cuando la
 factura dice híbrido (la plantilla decía siempre «eléctrico»), y usa
@@ -60,8 +63,10 @@ factura dice híbrido (la plantilla decía siempre «eléctrico»), y usa
 
 ## ⚠️ Lo que falta preguntarle a Deisy
 
-1. **Qué debe decir la cláusula SEGUNDO en los casos «solo IVA».** El texto que quedó
-   es decisión de MéTRIK, no del cliente. Es lo único abierto de fondo.
+1. **Qué debe decir la cláusula SEGUNDO sin certificado UPME.** El texto que quedó es
+   decisión de MéTRIK, no del cliente. Ya no es «el caso de toda una rama» —el PR #548
+   le da a solo IVA dónde entregar el certificado— pero sigue abierto para el expediente
+   incompleto.
 2. Confirmar que omitir el valor total es lo que pidió.
 3. Confirmar «vehículo híbrido» en vez del «eléctrico» fijo.
 4. **Avisarle que ya puede dejar de hacerlo por fuera.**
@@ -69,7 +74,8 @@ factura dice híbrido (la plantilla decía siempre «eléctrico»), y usa
 **How to apply:** antes de tocar este documento, leer los comentarios del componente;
 antes de tocar `campos_fuente`, medir la cobertura de cada campo que se vuelva
 obligatorio. QA en `proyectos/soena/ve/qa/` (V0425 un titular, V0286 copropiedad,
-V0452 solo IVA) con su LÉEME.
+V0452 **sin certificado — NO es solo IVA, el nombre del archivo miente**, ver
+[[certificado-upme-anexos]]; V0284 sí es solo IVA) con su LÉEME.
 
 Relacionado: [[react-pdf-guion-entre-corridas]], [[soena-ve-pipeline]],
 [[medir-antes-de-construir]].
