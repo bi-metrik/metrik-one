@@ -1,5 +1,20 @@
 -- El certificado UPME también se pide en Anexos, para la rama «solo devolución de IVA».
 --
+-- ⚠️ YA APLICADA EN PRODUCCIÓN (2026-09-07), por el MCP de Supabase y no por `db push`.
+-- El MCP estampa su PROPIO timestamp en `supabase_migrations.schema_migrations`, no el
+-- prefijo del archivo: quedó registrada como versión **20260907214136** con nombre
+-- `certificado_upme_en_anexos`, y por eso este archivo lleva ese número y no el
+-- `20260907000002` con el que se escribió. Dos archivos con el mismo número no fallan —
+-- `db push` da el número por aplicado y salta el archivo en silencio—, así que el nombre
+-- del archivo tiene que ser el del ledger o el repo miente sobre sí mismo (decisión del
+-- 2026-09-02, misma familia que `20260902220053_tableros_honorario_neto_de_iva.sql`).
+-- Al aplicarse por MCP no se ejecutaron el `begin;` / `commit;` de abajo (el MCP maneja su
+-- propia transacción); los dos bloques `do $$` con sus `raise exception` sí corrieron.
+-- Verificado contra producción el 2026-09-07 después de aplicar: 1 `bloque_configs` creado
+-- (`concepto_upme_anexos`, `es_gate = false`) con el `config_extra` de `concepto_upme` más
+-- la condición de rama y nada más, 264 casillas sembradas, los 4 campos con
+-- `source_alternatives`, y el respaldo con sus 2 filas.
+--
 -- LA REGLA DE NEGOCIO (Mauricio, 2026-09-07, textual)
 --   «para hacer solo devolución de iva el cliente debe entregar el certificado de la upme
 --    en la etapa de anexos»
