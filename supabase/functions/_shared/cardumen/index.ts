@@ -9,6 +9,7 @@ import { initState, elicitationOpening, nextTurn } from "./r1.ts";
 import { serialize } from "./r2.ts";
 import { resolverEstudioChatPorTrigger, specDeSesion, cargarEstudioChat, type EstudioChat } from "./estudios.ts";
 import { sendCtaUrl, sendTextWithRhythm, sendTypingIndicator, enBackground } from "../wa-respond.ts";
+import { esEstadoNavigate, startNavigate, continueNavigate } from "./navigate/index.ts";
 import type { ConversationState, StudySpec, Encuadre } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -59,6 +60,11 @@ export async function startCardumenChat(
   // Sin estudio explicito, el de siempre: mantiene el comportamiento de los llamadores viejos.
   const spec: StudySpec = estudio?.spec ?? FEDE_SPEC;
   const slug = estudio?.estudio ?? FEDE_SPEC.study_id;
+  // Estudios con motor determinista (Navigate): otro modulo, misma tabla de sesiones.
+  if (spec.motor === "navigate") {
+    await startNavigate(supabase, phone, slug, waMessageId);
+    return;
+  }
   const state = initState(spec);
   // El slug del catalogo manda sobre el study_id del spec: es el que decide con que estudio
   // se guarda la respuesta al cerrar, y tiene que ser uno solo de punta a punta.
@@ -131,7 +137,13 @@ async function borrarDatosDeParticipante(supabase: Supa, phone: string, estudio:
   await supabase.from("cardumen_chat_sessions").delete().eq("phone", phone);
 }
 
-export async function continueCardumenChat(supabase: Supa, phone: string, text: string, waMessageId?: string): Promise<void> {
+export async function continueCardumenChat(
+  supabase: Supa,
+  phone: string,
+  text: string,
+  waMessageId?: string,
+  botonId?: string, // id del boton interactivo, si la persona toco uno (lo usa Navigate)
+): Promise<void> {
   const exit = (text || "").trim().toLowerCase().replace(/[!¡.,]/g, "");
   const { data: row } = await supabase
     .from("cardumen_chat_sessions")
@@ -140,6 +152,12 @@ export async function continueCardumenChat(supabase: Supa, phone: string, text: 
     .eq("closed", false)
     .maybeSingle();
   if (!row) return; // no hay sesion abierta (carrera) → no hace nada
+
+  // Sesion de Navigate: la atiende su motor (expiracion, borrado y cierre incluidos).
+  if (esEstadoNavigate(row.state)) {
+    await continueNavigate(supabase, phone, row.state, row.updated_at, text, waMessageId, botonId);
+    return;
+  }
 
   // Expiracion: si pasaron mas de 24h sin actividad, el avance se pierde (la sesion se cierra).
   if (Date.now() - new Date(row.updated_at).getTime() > 24 * 60 * 60 * 1000) {

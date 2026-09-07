@@ -32,13 +32,17 @@ Deno.serve(async (req) => {
   // 1. Recordatorios (inactivas entre 2h y 24h, aun no recordadas)
   const { data: toRemind } = await supabase
     .from("cardumen_chat_sessions")
-    .select("phone")
+    .select("phone, state")
     .eq("closed", false)
     .is("reminded_at", null)
     .lt("updated_at", h2)
     .gt("updated_at", h24);
 
   for (const r of toRemind ?? []) {
+    // El recordatorio es texto de La Araucania. Una sesion de Navigate (motor determinista,
+    // demo) no lo recibe: se filtra aqui y no en la consulta, porque `state->>motor` es NULL
+    // en todas las demas y un `neq` contra NULL las excluiria a todas.
+    if ((r.state as { motor?: string } | null)?.motor === "navigate") continue;
     try {
       await sendTextMessage(r.phone, REMINDER);
       await supabase

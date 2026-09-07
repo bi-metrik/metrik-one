@@ -32,6 +32,11 @@ export interface ClosingQuestion {
 export interface StudySpec {
   study_id: string;
   title: string;
+  // Que motor atiende el estudio. Ausente = el entrevistador R1/R2 de siempre.
+  // "navigate" = maquina de estados determinista de `navigate/` (Capa A en codigo; el
+  // resto del spec no se usa). Vive en el spec del catalogo para que el estudio siga
+  // siendo una fila, no una constante.
+  motor?: "navigate";
   lang_default: Lang;
   collection_mode: "study_async" | "event_live" | "panel_recurrente";
   context_note?: string;                  // contexto del despliegue (pais, sector). NUNCA hardcodear en el prompt.

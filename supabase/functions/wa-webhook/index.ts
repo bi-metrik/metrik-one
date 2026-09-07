@@ -227,7 +227,9 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
       return;
     }
-    await continueCardumenChat(supabase, message.phone, texto, message.wa_message_id);
+    // El id del boton viaja aparte del titulo: Navigate decide por id y acepta el texto
+    // escrito como equivalente.
+    await continueCardumenChat(supabase, message.phone, texto, message.wa_message_id, message.interactive_reply);
     return;
   }
 
