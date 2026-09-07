@@ -35,6 +35,7 @@
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { entenderFormulario, type MapaFormulario } from '../_shared/meta-leads/entender-formulario.ts';
+import { decidirTipoPersona } from '../_shared/meta-leads/tipo-persona.ts';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -283,8 +284,8 @@ type MetaLeadsConfig = {
   field_map_por_formulario?: Record<string, MapaFormulario & { _origen?: unknown }>;
   // Defaults del contacto que se crea desde el lead (opt-in). fuente_adquisicion y
   // fuente_detalle etiquetan el origen (ej. pauta digital pagada). rol_natural se
-  // asigna solo si el lead declara ser persona natural (el campo tipo_persona_field
-  // del formulario === natural_value); para jurídica no se asume rol.
+  // asigna solo si el lead declara ser persona natural — lo decide
+  // `decidirTipoPersona` por subcadena; para jurídica no se asume rol.
   contacto?: {
     fuente_adquisicion?: string;
     fuente_detalle?: string;
@@ -293,6 +294,28 @@ type MetaLeadsConfig = {
     // Meta se renombra por fuera y con un solo nombre el dato deja de llegar sin
     // error (mismo criterio que campos_fuente.source_alternatives).
     tipo_persona_field?: string | string[];
+    /**
+     * ⚠️ INERTE desde el 2026-09-07. Nada la lee.
+     *
+     * Declaraba el valor exacto que significaba "persona natural", y el webhook
+     * lo comparaba con `===`. Meta cambió el formulario a finales de julio, el
+     * valor pasó a llegar como `persona_natural`, la igualdad dio falso y **572
+     * contactos nacieron sin rol** sin que nada fallara. El tipo de persona hoy
+     * lo decide `decidirTipoPersona` por subcadena, que no depende de que nadie
+     * mantenga esta clave al día.
+     *
+     * Se conserva en el tipo, y no se borra de `config_extra`, para que quien
+     * abra la configuración y la encuentre sepa que ya no manda: una clave
+     * huérfana sin explicación invita a "corregirla" cuando el formulario vuelva
+     * a cambiar, y ese arreglo no haría nada.
+     *
+     * Medido el 2026-09-07: **SOENA es el único workspace con
+     * `config_extra.meta_leads`**, así que borrar la clave no afectaría a nadie
+     * más. No se hizo aquí porque es una escritura sobre datos de producción y
+     * este frente es de solo lectura.
+     *
+     * @deprecated
+     */
     natural_value?: string;
     // Segmento inicial del contacto recién creado desde un lead (aún sin gestionar).
     segmento_inicial?: string;
@@ -554,9 +577,32 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
     : [];
   const tipoPersona = (tipoPersonaNames.length ? getField(tipoPersonaNames) : null)
     ?? porAprendido('tipo_persona');
-  const esNatural = !!tipoPersona
-    && tipoPersona.trim().toLowerCase().replace(/_+$/, '') === (cc.natural_value ?? 'natural').toLowerCase();
-  const contactoRol = esNatural ? (cc.rol_natural ?? null) : null;
+
+  // El valor se juzga por SUBCADENA, no por igualdad contra `natural_value`.
+  // Ver `_shared/meta-leads/tipo-persona.ts`: la igualdad exacta dejó 572
+  // contactos sin rol cuando Meta cambió `natural` por `persona_natural`, y el
+  // fallo fue mudo porque un contacto sin rol no da error, solo falta.
+  const tipoDecidido = decidirTipoPersona(tipoPersona);
+  const contactoRol = tipoDecidido === 'natural' ? (cc.rol_natural ?? null) : null;
+
+  // ⚠️ El aviso que faltó la vez pasada.
+  //
+  // Lo que costó mes y medio no fue el error, fue que nadie se enterara: el lead
+  // entraba, el contacto se creaba, y lo único que faltaba era un campo que nadie
+  // mira. Esta línea es la única señal que lo habría delatado el primer día.
+  //
+  // Se avisa SOLO cuando el campo llegó con un valor y aun así no se pudo
+  // decidir. Que el formulario no pregunte el tipo de persona es normal y no es
+  // noticia: medido el 2026-09-07, 4 de las 803 interacciones de SOENA vienen de
+  // un formulario que solo pide nombre, teléfono, correo y ciudad. Avisar de esas
+  // sería ruido diario, y un aviso que se ignora no avisa.
+  if (tipoPersona && !tipoDecidido) {
+    console.warn(
+      `[meta-leads] TIPO DE PERSONA SIN DECIDIR ws=${workspaceId} ` +
+      `form_id=${formId ?? '?'} valor="${tipoPersona}" ` +
+      `— el contacto nace sin rol; revisar las respuestas del formulario en Meta`,
+    );
+  }
 
   // Nombre del contacto en MAYUSCULAS (homogeneo con negocios).
   const nombreUpper = nombre.toUpperCase();
