@@ -120,8 +120,6 @@ export interface CasoPorFacturar {
   factura_sin_pdf: boolean
   /** Consecutivo del recibo de caja del recaudo UPME, si ya se emitió. */
   recibo_numero: string | null
-  /** Pagos registrados y no anulados que todavía no tienen recibo de caja. */
-  pagos_sin_recibo: number
   /**
    * Base gravable que viajaría a Siigo. Sale del MISMO `borradorFactura` que se
    * enviaría, no de una división hecha en la pantalla: si la pantalla calculara
@@ -374,15 +372,13 @@ async function armarColaFacturacion(
   const cobrosPorNegocio = new Map<string, CobroParaRecaudo[]>()
   // El recibo de caja cuelga del COBRO desde el 2026-09-03, así que su estado se lee
   // de ahí y no de `negocios.metadata`. Un negocio puede tener varios: se muestra el
-  // último emitido, y aparte cuántos pagos siguen sin acusar.
+  // último emitido.
   const ultimoReciboPorNegocio = new Map<string, string>()
-  const pagosSinReciboPorNegocio = new Map<string, number>()
   for (const c of cobrosRes) {
     if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
     cobrosPorNegocio.get(c.negocio_id)!.push(c)
     if (c.anulado_at) continue
     if (c.siigo_recibo?.numero) ultimoReciboPorNegocio.set(c.negocio_id, c.siigo_recibo.numero)
-    else pagosSinReciboPorNegocio.set(c.negocio_id, (pagosSinReciboPorNegocio.get(c.negocio_id) ?? 0) + 1)
   }
   const conciliados = new Set(
     conciliadoRes.filter(x => x.conciliado === true).map(x => x.negocio_id),
@@ -531,7 +527,6 @@ async function armarColaFacturacion(
       factura_numero: marcaFactura?.numero ?? null,
       factura_sin_pdf: !!marcaFactura?.numero && !marcaFactura.archivo_url,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
-      pagos_sin_recibo: pagosSinReciboPorNegocio.get(n.id) ?? 0,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,
       descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
