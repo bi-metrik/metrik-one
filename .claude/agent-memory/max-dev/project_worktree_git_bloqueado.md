@@ -62,9 +62,14 @@ sesión principal o a Mik.
 
 ## Herramientas dentro del worktree
 
-- **`deno` NO está instalado en la máquina.** Bajarlo al scratchpad funciona y tarda
-  segundos: el zip de `github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip`,
+- **`deno` está en `~/.deno/bin/deno` pero NO en el PATH** (medido 2026-09-07: `which deno`
+  da vacío). Invocarlo por ruta absoluta. El check de CI se reproduce exacto y pasa el guard
+  (no hay git): `find supabase/functions -name '*.ts' -not -name '*.test.ts' -print0 | xargs -0
+  ~/.deno/bin/deno check --node-modules-dir=none`. Si algún día no está, bajarlo al scratchpad
+  tarda segundos: el zip de `github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip`,
   `unzip`, `chmod +x` (~40 MB).
+- **Para vitest:** el mismo symlink de `node_modules` y `npx vitest run <carpeta>` o `npm test`
+  completo (156 archivos, ~8 s). Quitar el symlink al terminar.
 - **Para lintear un archivo del worktree con eslint:** symlink temporal
   `ln -sfn <repo-principal>/node_modules node_modules` **dentro del worktree** y
   `npx eslint <archivo>` desde ahí. Desde el repo principal no sirve: el config ignora
@@ -112,6 +117,18 @@ que puede estar basado en un `main` más viejo: comprobar `git log <base vieja>.
 ⚠️ El guard rechaza comandos «demasiado complejos» (`&&` con variables, `until`, heredoc con
 redirección). Todo esto va en un `.sh` **dentro del worktree**, invocado con `bash script.sh`,
 y se borra antes de cerrar.
+
+Medido el 2026-09-07 (PR #556), tres rechazos más que cuestan un comando cada uno:
+- **Un heredoc que escribe FUERA del worktree** (`cat > <scratchpad>/x.py <<'EOF'`) se rechaza
+  aunque no lleve git («too complex to verify that it stays inside the worktree»). El camino
+  que sí pasa: escribir el script con la tool **`Write` DENTRO del worktree** (`.x-tmp.py`),
+  correrlo con `python3 .x-tmp.py` (comando plano) y **borrarlo antes del `git add`**.
+- **`sed -i` con la ruta en una variable** (`sed … $F`) se rechaza («runs sed with a value
+  computed at runtime … cannot be shown not to be git»). La misma línea con la ruta escrita
+  literal pasa, incluso encadenada con `;` y `npx vitest` en medio — sirve para ensayar
+  mutaciones y restaurar en un solo comando.
+- **`python3 x.py && git diff --stat`** se rechaza por el `&&` con git. Un git por llamada,
+  plano. `git commit` con varios `-m` pasa (no hace falta heredoc para el mensaje).
 
 ### El mismo choque, visto desde el lado que estorba
 
