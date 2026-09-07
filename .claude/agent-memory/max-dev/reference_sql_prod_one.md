@@ -30,6 +30,13 @@ POST https://api.supabase.com/v1/projects/yfjqscvvxetobiidnepa/database/query
 Authorization: Bearer <token>     # body: {"query": "<SQL>"}
 ```
 
+⚠️ **Reconfirmado el 2026-09-07 (PR #540): las DOS vías están cerradas en un
+subagente aislado.** Bloqueadas por el clasificador de Bash: (a) cualquier script
+que lea `.credentials.md`, y (b) `ln -s` de `.env.local` del repo principal al
+worktree — que es justo el paso que el bootstrap de la sesión aislada declara como
+estándar. Sin MCP en el toolset, no queda vía: el trabajo de código se completa y
+la medición se entrega como consulta lista para correr en el cuerpo del PR.
+
 ⚠️ **Medido el 2026-09-01: esa vía puede estar cerrada.** En la sesión del PR #475 el
 clasificador de permisos de Bash **bloqueó toda lectura de `.credentials.md`** (awk directo,
 y también un script que lo leía por dentro sin imprimirlo), y `SUPABASE_ACCESS_TOKEN` /
