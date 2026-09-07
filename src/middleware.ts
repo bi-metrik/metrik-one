@@ -82,6 +82,12 @@ export async function middleware(request: NextRequest) {
     // expone agregados sin dinero ni identificador de cliente.
     if (pathname.startsWith('/muro/')) return supabaseResponse
 
+    // Formulario publico de vinculacion de contrapartes (CCBF). La contraparte
+    // NO tiene usuario en ONE: la credencial es el token del enlace, que la
+    // pagina valida contra Valida. La marca que se pinta sale del workspace del
+    // propio expediente, no de este subdominio.
+    if (pathname.startsWith('/vinculacion/')) return supabaseResponse
+
     // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
     // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por
     // marketing/login que redirigiria al subdomain del profile.workspace_id actual
