@@ -28,6 +28,7 @@ type FilaCobro = {
   id: string
   negocio_id: string | null
   monto: number | null
+  fecha: string | null
   siigo_recibo: Record<string, unknown> | null
   anulado_at: string | null
 }
@@ -37,6 +38,8 @@ let cobros: Record<string, FilaCobro>
 let clavesUsadas: string[]
 /** Observaciones que viajaron en el payload del recibo. */
 let observacionesUsadas: string[]
+/** Fechas que viajaron en el payload del recibo. */
+let fechasUsadas: string[]
 /** Llamadas a la RPC del aviso al cliente. */
 let avisos: Array<{ negocio: string; bloque: string }>
 let consecutivo: number
@@ -107,12 +110,13 @@ vi.mock('./client', async () => {
     siigoRequest: async (
       _ws: string,
       ruta: string,
-      opts?: { idempotencyKey?: string; body?: { observations?: string } },
+      opts?: { idempotencyKey?: string; body?: { observations?: string; date?: string } },
     ) => {
       // La consulta de recibos existentes del cliente: ninguno.
       if (ruta.startsWith('/v1/vouchers?')) return { results: [] }
       clavesUsadas.push(opts?.idempotencyKey ?? '(sin clave)')
       observacionesUsadas.push(opts?.body?.observations ?? '(sin concepto)')
+      fechasUsadas.push(opts?.body?.date ?? '(sin fecha)')
       consecutivo += 1
       return { id: `siigo-rc-${consecutivo}`, name: `RC-1-${consecutivo}`, date: '2026-09-03' }
     },
@@ -141,11 +145,18 @@ const OPC = { bloqueReciboSlug: 'recibo_caja_upme', concepto: 'Dinero recibido d
 
 beforeEach(() => {
   cobros = {
-    [COBRO_1]: { id: COBRO_1, negocio_id: NEG, monto: 400_000, siigo_recibo: null, anulado_at: null },
-    [COBRO_2]: { id: COBRO_2, negocio_id: NEG, monto: 450_000, siigo_recibo: null, anulado_at: null },
+    [COBRO_1]: {
+      id: COBRO_1, negocio_id: NEG, monto: 400_000, fecha: '2026-02-17',
+      siigo_recibo: null, anulado_at: null,
+    },
+    [COBRO_2]: {
+      id: COBRO_2, negocio_id: NEG, monto: 450_000, fecha: '2026-08-31',
+      siigo_recibo: null, anulado_at: null,
+    },
   }
   clavesUsadas = []
   observacionesUsadas = []
+  fechasUsadas = []
   avisos = []
   consecutivo = 0
 })
@@ -228,5 +239,35 @@ describe('emitirReciboDeCobro — el aviso al cliente', () => {
   it('no se pide si no lo piden', async () => {
     await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
     expect(avisos).toEqual([])
+  })
+})
+
+/**
+ * La fecha del recibo es la del COBRO.
+ *
+ * SE VIERON FALLAR contra la implementación anterior, que usaba `new Date()`:
+ *   - "el recibo se fecha el día del pago"          → salía con la fecha de hoy
+ *   - "dos cobros de fechas distintas no se igualan" → ambos salían con la misma
+ */
+describe('emitirReciboDeCobro — la fecha es la del pago, no la de emisión', () => {
+  it('el recibo se fecha el día del pago, no el día en que se emite', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(fechasUsadas).toEqual(['2026-02-17'])
+    expect(fechasUsadas[0]).not.toBe(new Date().toISOString().slice(0, 10))
+  })
+
+  it('dos cobros de fechas distintas producen recibos de fechas distintas', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+    await emitirReciboDeCobro(WS, COBRO_2, null, OPC)
+
+    expect(fechasUsadas).toEqual(['2026-02-17', '2026-08-31'])
+  })
+
+  it('un cobro sin fecha cae a hoy en vez de quedarse sin emitir', async () => {
+    cobros[COBRO_1].fecha = null
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(fechasUsadas).toEqual([new Date().toISOString().slice(0, 10)])
   })
 })
