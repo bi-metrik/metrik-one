@@ -1,19 +1,25 @@
 'use client';
 
 import { useMemo, useRef, useState, useTransition } from 'react';
-import { Check, ChevronDown, FileUp, Loader2, Lock, ShieldCheck } from 'lucide-react';
+import { Check, ChevronDown, FileUp, Loader2, Lock, PenLine, ShieldCheck } from 'lucide-react';
 import {
   abrirVinculacion,
   aceptarCondiciones,
   confirmarCampos,
+  firmarConCodigo,
+  pedirCodigoDeFirma,
   pedirUrlDeSubida,
+  traducirErrorFirma,
   type VistaPublica,
 } from '@/lib/actions/vinculacion-publica';
 import {
+  LARGO_OTP,
   PASOS,
   PASO_LABEL,
   TAMANO_MAX_MB,
   nombrePedido,
+  normalizarOtp,
+  otpCompleto,
   textosAceptacion,
   validarArchivo,
   type PasoPublico,
@@ -33,6 +39,10 @@ export default function FormularioClient({
   const [abierto, setAbierto] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState<string | null>(null);
   const [borradores, setBorradores] = useState<Record<string, string>>({});
+  const [otp, setOtp] = useState('');
+  const [enviadoA, setEnviadoA] = useState<string | null>(null);
+  const [nombreFirmante, setNombreFirmante] = useState('');
+  const [docFirmante, setDocFirmante] = useState('');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const textos = useMemo(() => textosAceptacion(v.marca.nombre), [v.marca.nombre]);
@@ -107,6 +117,35 @@ export default function FormularioClient({
         setError('No se pudo guardar. Vuelve a intentar.');
         return;
       }
+      await recargar();
+    });
+  }
+
+  function pedirCodigo() {
+    startTransition(async () => {
+      setError(null);
+      const r = await pedirCodigoDeFirma(token, {
+        nombre: nombreFirmante,
+        documento: docFirmante,
+      });
+      if (!r.ok) {
+        setError(await traducirErrorFirma(r.error));
+        return;
+      }
+      setEnviadoA(r.data.enviadoA);
+      setOtp('');
+    });
+  }
+
+  function firmar() {
+    startTransition(async () => {
+      setError(null);
+      const r = await firmarConCodigo(token, otp);
+      if (!r.ok) {
+        setError(await traducirErrorFirma(r.error));
+        return;
+      }
+      setOtp('');
       await recargar();
     });
   }
@@ -263,6 +302,10 @@ export default function FormularioClient({
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#059669] shrink-0">
                         <Check className="w-3.5 h-3.5" /> Recibido
                       </span>
+                    ) : v.paso === 'listo' ? (
+                      // Ya firmado: subir mas documentos cambiaria el expediente
+                      // por debajo del hash que se sello al firmar.
+                      <span className="text-xs text-[#9CA3AF] shrink-0">No se recibió</span>
                     ) : (
                       <>
                         <input
@@ -307,14 +350,9 @@ export default function FormularioClient({
                   aparecer los datos para que los revises.
                 </p>
               ) : porConfirmar.length === 0 ? (
-                <div className="rounded-lg border border-[#10B981]/30 bg-[#ECFDF5] p-4">
-                  <p className="inline-flex items-center gap-2 text-sm font-semibold text-[#059669]">
-                    <ShieldCheck className="w-4 h-4" /> Ya está todo confirmado.
-                  </p>
-                  <p className="text-xs text-[#047857] mt-1">
-                    {v.marca.nombre} va a revisar tu expediente y te avisa.
-                  </p>
-                </div>
+                <p className="text-sm text-[#6B7280]">
+                  Ya confirmaste todos tus datos.
+                </p>
               ) : (
                 <>
                   <p className="text-xs text-[#6B7280] mb-3">
@@ -357,6 +395,111 @@ export default function FormularioClient({
               )}
             </section>
           </>
+        )}
+
+        {/* ── PASO 4: firma ── */}
+        {v.paso === 'firma' && (
+          <section className="mt-8">
+            <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Firma</h2>
+            <p className="text-xs text-[#6B7280] mb-3">
+              Con la firma declaras que lo que entregaste es cierto. Te mandamos un código de{' '}
+              {LARGO_OTP} dígitos al correo con el que te invitaron.
+            </p>
+
+            <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+              {!enviadoA ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#4B5563] mb-1">
+                        Quién firma
+                      </label>
+                      <input
+                        value={nombreFirmante}
+                        onChange={(ev) => setNombreFirmante(ev.target.value)}
+                        placeholder="Nombre completo"
+                        className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#4B5563] mb-1">
+                        Documento
+                      </label>
+                      <input
+                        value={docFirmante}
+                        onChange={(ev) => setDocFirmante(ev.target.value)}
+                        placeholder="Cédula"
+                        className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={pedirCodigo}
+                    className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
+                    style={{ background: acento }}
+                  >
+                    {pending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <PenLine className="w-4 h-4" />
+                    )}
+                    Enviarme el código
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-[#1A1A1A]">
+                    Te mandamos el código a <strong>{enviadoA}</strong>.
+                  </p>
+                  <p className="text-xs text-[#6B7280] mt-1">
+                    Si no llega en un par de minutos, revisa el correo no deseado.
+                  </p>
+                  <input
+                    value={otp}
+                    onChange={(ev) => setOtp(normalizarOtp(ev.target.value))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="000000"
+                    className="mt-3 w-full px-3 py-3 rounded-lg border border-[#E5E7EB] text-center text-xl tracking-[0.5em] font-semibold"
+                  />
+                  <button
+                    type="button"
+                    disabled={pending || !otpCompleto(otp)}
+                    onClick={firmar}
+                    className="mt-3 w-full px-4 py-3 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
+                    style={{ background: acento }}
+                  >
+                    {pending ? 'Firmando...' : 'Firmar'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={pedirCodigo}
+                    className="mt-2 w-full px-4 py-2 text-xs font-semibold text-[#6B7280] disabled:opacity-40"
+                  >
+                    Reenviar el código
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ── Listo ── */}
+        {v.paso === 'listo' && (
+          <section className="mt-8">
+            <div className="rounded-lg border border-[#10B981]/30 bg-[#ECFDF5] p-5">
+              <p className="inline-flex items-center gap-2 text-sm font-semibold text-[#059669]">
+                <ShieldCheck className="w-4 h-4" /> Firmaste. Ya está todo.
+              </p>
+              <p className="text-xs text-[#047857] mt-1.5">
+                {v.marca.nombre} va a revisar tu expediente y te avisa. No tienes que hacer nada
+                más.
+              </p>
+            </div>
+          </section>
         )}
 
         <footer className="mt-10 pt-5 border-t border-[#E5E7EB]">

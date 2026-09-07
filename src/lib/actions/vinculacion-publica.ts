@@ -22,7 +22,10 @@ import { createServiceClient } from '@/lib/supabase/server';
 import {
   VERSION_TEXTO,
   esMotivoEnlaceCerrado,
+  estaFirmado,
   faltaAceptar,
+  mensajeErrorFirma,
+  otpCompleto,
   pasoActual,
   type DeclaracionRegistrada,
   type MotivoEnlaceCerrado,
@@ -217,6 +220,7 @@ export async function abrirVinculacion(
         slotsFaltantes: kit.filter((s) => !s.cargado).length,
         camposPorConfirmar: listaCampos.filter((c) => c.requiere_confirmacion && !c.confirmado)
           .length,
+        firmado: estaFirmado(base.data.estado),
       }),
       falta,
     },
@@ -287,6 +291,68 @@ export async function confirmarCampos(
   });
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, data: { actualizados: r.data.actualizados } };
+}
+
+// ─── La firma ─────────────────────────────────────────────────────────────
+
+/**
+ * Pide el código. Valida lo genera, lo guarda hasheado y lo manda al correo de
+ * la contraparte; acá nunca pasa por el navegador ni por este proceso. Lo único
+ * que vuelve es a qué dirección salió, enmascarada.
+ */
+export async function pedirCodigoDeFirma(
+  token: string,
+  datos: { nombre?: string; documento?: string } = {},
+): Promise<
+  { ok: true; data: { enviadoA: string; expiraEn: string } } | { ok: false; error: string }
+> {
+  const r = await publico<{
+    ok: true;
+    expira_en: string;
+    enviado_a: string;
+    error?: string;
+    esperar_segundos?: number | null;
+  }>(ruta(token, '/firma'), {
+    method: 'POST',
+    body: JSON.stringify({
+      firmante_nombre: datos.nombre?.trim() || null,
+      firmante_documento: datos.documento?.trim() || null,
+    }),
+  });
+
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, data: { enviadoA: r.data.enviado_a, expiraEn: r.data.expira_en } };
+}
+
+/**
+ * Verifica el código y sella la firma. Del otro lado, Valida aplica el gate de
+ * Lucía (no se firma con campos sin confirmar), calcula el hash de integridad
+ * del expediente y lo pasa a revisión del oficial.
+ */
+export async function firmarConCodigo(
+  token: string,
+  otp: string,
+): Promise<{ ok: true; data: { hash: string } } | { ok: false; error: string }> {
+  if (!otpCompleto(otp)) return { ok: false, error: 'otp_incompleto' };
+
+  const r = await publico<{ ok: true; firmado: boolean; hash_documento_firmado: string }>(
+    ruta(token, '/firma/verificar'),
+    { method: 'POST', body: JSON.stringify({ otp }) },
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, data: { hash: r.data.hash_documento_firmado } };
+}
+
+/** Traduce a frase lo que devuelven las dos rutas de firma. */
+export async function traducirErrorFirma(
+  codigo: string,
+  esperarSegundos?: number | null,
+): Promise<string> {
+  if (codigo === 'otp_incompleto') return 'Escribe los seis dígitos del código.';
+  if (codigo === 'valida_no_responde') {
+    return 'No pudimos conectar. Vuelve a intentar en un momento.';
+  }
+  return mensajeErrorFirma(codigo, esperarSegundos);
 }
 
 // ─── Mensajes ─────────────────────────────────────────────────────────────

@@ -160,32 +160,104 @@ export function esMotivoEnlaceCerrado(v: string): v is MotivoEnlaceCerrado {
 
 // ─── Pasos del formulario ─────────────────────────────────────────────────
 
-export type PasoPublico = 'aceptaciones' | 'documentos' | 'datos' | 'listo';
+export type PasoPublico = 'aceptaciones' | 'documentos' | 'datos' | 'firma' | 'listo';
 
 export const PASO_LABEL: Record<PasoPublico, string> = {
   aceptaciones: 'Autorizaciones',
   documentos: 'Documentos',
   datos: 'Tus datos',
+  firma: 'Firma',
   listo: 'Listo',
 };
 
-export const PASOS: readonly PasoPublico[] = ['aceptaciones', 'documentos', 'datos', 'listo'];
+export const PASOS: readonly PasoPublico[] = [
+  'aceptaciones',
+  'documentos',
+  'datos',
+  'firma',
+  'listo',
+];
 
 /**
  * En qué paso va. Es deliberado que nada se pueda hacer antes de aceptar: el
  * primer documento que sube la contraparte ya es tratamiento de datos, y
  * pedirle la autorización después sería pedírsela cuando ya no puede decir que
  * no.
+ *
+ * Y la firma va de última porque firmar es afirmar que lo anterior es cierto.
+ * Valida no la deja pasar con campos sin confirmar (gate de Lucía, 409
+ * `campos_pendientes`); acá el paso ni siquiera se ofrece, para que la
+ * contraparte no llegue a chocar contra ese error.
  */
 export function pasoActual(input: {
   acepto: boolean;
   slotsFaltantes: number;
   camposPorConfirmar: number;
+  firmado: boolean;
 }): PasoPublico {
+  if (input.firmado) return 'listo';
   if (!input.acepto) return 'aceptaciones';
   if (input.slotsFaltantes > 0) return 'documentos';
   if (input.camposPorConfirmar > 0) return 'datos';
-  return 'listo';
+  return 'firma';
+}
+
+/**
+ * El expediente ya firmado. Valida lo mueve a `pendiente_revision` al sellar,
+ * así que el estado ES la respuesta: no hace falta un campo aparte que pueda
+ * quedar desfasado del que manda.
+ */
+export function estaFirmado(estado: string): boolean {
+  return estado === 'pendiente_revision';
+}
+
+// ─── La firma ─────────────────────────────────────────────────────────────
+
+/** Lo mismo que genera Valida: seis dígitos. */
+export const LARGO_OTP = 6;
+
+/** Cooldown del canal de envío. Mismo número que aplica Valida al reenviar. */
+export const SEGUNDOS_REENVIO = 60;
+
+/** Deja escribir solo dígitos, y como mucho los que tiene el código. */
+export function normalizarOtp(v: string): string {
+  return v.replace(/\D/g, '').slice(0, LARGO_OTP);
+}
+
+export function otpCompleto(v: string): boolean {
+  return normalizarOtp(v).length === LARGO_OTP;
+}
+
+/**
+ * Cada fallo del canal termina distinto para quien está del otro lado, así que
+ * cada uno tiene su frase. Un "algo salió mal" acá deja a alguien esperando un
+ * correo que no va a llegar, sin saber que tiene que hacer otra cosa.
+ */
+export function mensajeErrorFirma(codigo: string, esperarSegundos?: number | null): string {
+  switch (codigo) {
+    case 'sin_correo_de_contraparte':
+      return 'No tenemos un correo tuyo para mandarte el código. Escríbele a quien te envió el enlace para que lo registre.';
+    case 'canal_no_configurado':
+      return 'El envío de códigos no está disponible en este momento. Avísale a quien te envió el enlace.';
+    case 'espera_antes_de_reenviar':
+      return esperarSegundos
+        ? `Ya te mandamos un código. Espera ${esperarSegundos} segundos para pedir otro.`
+        : 'Ya te mandamos un código. Espera un momento para pedir otro.';
+    case 'ya_firmado':
+      return 'Este expediente ya está firmado.';
+    case 'otp_incorrecto':
+      return 'Ese código no es. Revísalo y vuelve a intentar.';
+    case 'otp_expirado':
+      return 'El código se venció. Pide uno nuevo.';
+    case 'bloqueado':
+      return 'Se agotaron los intentos. Pide un código nuevo.';
+    case 'campos_pendientes':
+      return 'Todavía hay datos sin confirmar. Revísalos antes de firmar.';
+    case 'sin_firma_iniciada':
+      return 'Pide primero el código.';
+    default:
+      return 'No se pudo completar la firma. Vuelve a intentar, y si sigue igual escríbele a quien te envió el enlace.';
+  }
 }
 
 // ─── Documentos ───────────────────────────────────────────────────────────
