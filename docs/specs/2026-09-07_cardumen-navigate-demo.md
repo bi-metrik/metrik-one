@@ -6,6 +6,7 @@
 > Instrumento: `proyectos/metrik/cardumen/navigate-demo/data/meta.json`, clave `instrumento`.
 > Mecánicas: `elicitacion-resolucion-yuto.md` (tríadas) y `elicitacion-diadas-yuto.md` (diadas).
 > 2026-09-08: el idioma se elige en el PRIMER mensaje, antes del consentimiento (§4, decisión de Mauricio tras probar el bot en vivo).
+> 2026-09-08 (segunda decisión del mismo día, misma prueba en vivo): la tríada se responde con botones numerados y se ancla a la historia; una elección explícita no se confirma, una lectura del modelo sí (§4 y §6). Las etiquetas de intensidad conservan el mapeo pre-registrado de `elicitacion-resolucion-yuto.md` §3.1: cambió cómo se preguntan, no qué composición producen.
 
 ## 1. Qué existía y qué se construyó
 
@@ -65,8 +66,50 @@ Escribir `cardumen` al número de producción de MéTRIK. Recorrido esperado:
 3. **¿Responde como observador de su sector?** Botones *Sí, observador* / *No*. Define el flujo: ciudadano T1, T2, D1, D2; experto además T3 y D3.
 4. **Sector**: lista numerada de 12. Se responde con el número o con el nombre (`salud`, `tecnologia`). Es lista numerada y no lista interactiva de WhatsApp porque esas admiten máximo 10 filas.
 5. **Apertura** (Capa B): la pregunta del panel ciudadano o la de observadores, literal de la muestra. Se responde con la historia (texto o audio). Se guarda tal como se escribió y se le detecta el idioma **solo como dato** (`idioma_detectado`): ya no hay pregunta de idioma después de la historia, se pasa directo a la primera tríada.
-6. **Tríada** (T1, luego T2, y T3 para expertos): *"¿Cuáles dos pesaron más, y en qué orden?"* → eco literal *"Le leo entonces: primero X; en segundo lugar Y; y Z quedó al margen. ¿Lo dejo así?"* → botón *Sí, así* / *No, corrijo* → *"¿casi parejos, uno mandaba pero el otro contaba, o fue claramente X?"* (tres botones) → *"Listo. Lo guardo así: ..."*. Si nombra uno solo, se pide el segundo una vez; *ninguno* = "fue solo X" y no hay turno de intensidad.
-7. **Diada** (D1, D2, y D3 para expertos): *"¿Siente que A, o que B?"* → si la respuesta es clara, eco + confirmación; si matiza, un menú corto con las anclas del lado que insinuó (se elige por número, sin confirmación extra). *"Las dos con fuerza"* se guarda como `both_intense`, no como 0,5.
+6. **Tríada** (T1, luego T2, y T3 para expertos). Tres mensajes con botones, y se pide UNA cosa por mensaje:
+   - **Apertura**, anclada a la historia con sus primeras palabras (recorte a ~90 caracteres en límite de palabra) y la pregunta del instrumento en forma interrogativa, sin cambiarle una palabra; los tres polos numerados en líneas aparte; botones *1*, *2*, *3*:
+     ```
+     Pensando en lo que me contó ("La carretera al puerto lleva meses con un carril cerrado. Los camiones se meten por el…"), ¿de dónde nace lo que observó?
+
+     1. La gente común, la vida de a pie
+     2. Quienes tienen poder, dinero o influencia
+     3. Fuerzas que nadie controla del todo
+
+     ¿Cuál de las tres pesa más? Toque 1, 2 o 3, o dígamelo con sus palabras.
+     ```
+     T2 y T3 cambian la intro (*Sobre eso mismo (…)*, *Una más sobre lo que contó (…)*) y conservan la cita. Para T2 la forma interrogativa queda *en el fondo, ¿qué se siente que es?*.
+   - **Segundo lugar**: los dos polos restantes con SU número original (no se renumeran) y botones con esos dos números más *Ninguno*:
+     ```
+     Entendido, primero *2. Quienes tienen poder, dinero o influencia*. ¿Y en segundo lugar?
+
+     1. La gente común, la vida de a pie
+     3. Fuerzas que nadie controla del todo
+
+     Toque el número, o *Ninguno* si nada más pesó.
+     ```
+   - **Intensidad**: las tres etiquetas con su redacción completa en líneas aparte (sin numerar, para que un número aquí siga significando un polo) y tres botones cortos, *Casi parejos* / *Uno mandaba más* / *Claramente el N* (N = número de polo del dominante), que mapean a las **mismas** etiquetas pre-registradas de §3.1 de `elicitacion-resolucion-yuto.md`:
+     ```
+     Una última de esta parte. Entre *Quienes tienen poder, dinero o influencia* y *La gente común, la vida de a pie*, ¿cómo se repartió el peso?
+
+     • casi parejos
+     • uno mandaba pero el otro contaba
+     • fue claramente Quienes tienen poder, dinero o influencia
+
+     Toque una opción, o dígamelo con sus palabras.
+     ```
+   - **Lectura determinista antes del modelo.** Un botón, o un texto que sea solo números de polo (`1`, `el 2`, `1 y 3`, `2 y luego 1`, `3, 1`, `primero 2 después 1`), se resuelve sin llamar al lector: `1 y 3` en el orden es dominante 1 y segundo 3. `1 o 2` no es un orden (es una duda) y va al modelo. En el segundo lugar, el número del propio dominante no vale y se repregunta; en la intensidad, un número es un polo y solo el del dominante tiene lectura (*claramente el 2* = "claramente el primero"); cualquier otro se repregunta sin gastar lector y sin fabricar.
+   - **La elección explícita no se confirma; la lectura del modelo sí.** Si el dominante Y el segundo salieron de botones o de números, no hay eco ni paso `triada_confirmar`: se va directo al segundo lugar o a la intensidad, y *Ninguno* por botón cierra como "fue solo X" sin confirmar. Si cualquiera de los dos lo leyó el modelo (texto libre), sigue como antes: eco literal *"Le leo entonces: primero X; en segundo lugar Y; y Z quedó al margen. ¿Lo dejo así?"* con *Sí, así* / *No, corrijo*. `ec.notas` (y por tanto `reflexivity_note`) deja de dónde salió cada lectura: `orden: boton|numero|texto`, `segundo: …`, `intensidad: …`.
+   - Las repreguntas (no se leyó, *No, corrijo*, pregunta de vuelta) traen el mismo menú numerado con sus botones, sin la cita. Un botón de la tríada tocado en otro paso se ignora como botón (regla que ya existía); tocado en la confirmación, su número se lee como corrección del orden.
+7. **Diada** (D1, D2, y D3 para expertos): solo cambió el formato, no la mecánica. Los dos polos en líneas aparte tras la intro, y la instrucción de responder con palabras; **sin botones ni números** (un número aquí se leería como texto y la spec de diadas pide anclas, no elección cerrada):
+   ```
+   Una cosa más sobre lo que contó. ¿Cuál de las dos se acerca más a lo que siente?
+
+   • Esto ya venía pasando
+   • Esto es completamente nuevo
+
+   Dígamelo con sus palabras.
+   ```
+   Si la respuesta es clara, eco + confirmación; si matiza, un menú corto con las anclas del lado que insinuó (se elige por número, sin confirmación extra). *"Las dos con fuerza"* se guarda como `both_intense`, no como 0,5.
 8. **Cierre**: agradecimiento, recordatorio de que fue demo, y un resumen en palabras de lo que quedó registrado (Saga §2: se muestra la fila, no el punto en el mapa).
 
 En cualquier momento: `salir` cierra (guarda lo que haya si ya hubo consentimiento, como incompleta); `borrar` elimina lo guardado y la sesión. Tras 24 h sin actividad la sesión se vence.
@@ -133,7 +176,7 @@ select id, created_at, estudio, lang,
 - **Anclas intermedias genéricas** ("más cerca de X, con matices" / "un poco de las dos"): las definitivas de Navigate las redacta Yuto cuando Saga avale el esquema (pendiente §9 de la spec de diadas). Los extremos son los polos literales.
 - **`special_case: "unresolved"`** (no está en las specs): cuando tras dos intentos no se pudo leer un orden o un ancla, se guarda así y se sigue. Nunca se rellena. **`declinado: true`** (tampoco está en las specs) marca que la persona se negó a responder: en tríadas acompaña a `unresolved`, en diadas a `not_applicable`, para que el análisis pueda separarlo de "no le entendí" y de "ninguna de las dos me aplica".
 - **"Fue solo X"**: 0,90 al dominante y el 0,10 residual partido en mitades entre los otros dos (la tabla §3.1 no dice cómo repartirlo).
-- **Confirmación**: cuando la persona elige de un menú de anclas, se guarda sin volver a preguntar (`confirmed_by_participant: true`, porque eligió la etiqueta ella misma). Cuando el modelo leyó texto libre, siempre hay eco + botón antes de guardar.
+- **Confirmación — la regla es una sola: elección explícita no se confirma; lectura por modelo sí.** Cuando la persona elige ella misma (un botón de la tríada, un número escrito, un número del menú de anclas de la diada) se guarda sin volver a preguntar, con `confirmed_by_participant: true`. Cuando el modelo leyó texto libre —aunque sea solo uno de los dos polos de la tríada— siempre hay eco + botón antes de guardar. `TriadaEnCurso.dominante_por` (`boton` / `numero` / `texto`; ausente en sesiones anteriores al PR cuenta como `texto`) es lo que decide.
 - **La palabra `cardumen` deja de abrir la mini-web FEDE** mientras la fila del catálogo esté activa. Es el efecto buscado; se revierte con `activo = false`.
 - El modelo se usa solo para leer (temperatura 0, JSON), una llamada por respuesta libre. Botones y etiquetas literales no gastan modelo.
 - **El lector es Gemini, no Haiku.** Decisión de Mauricio del 2026-09-08 ("no leamos con Haiku, prefiero mantener Gemini"). El modelo concreto, `gemini-3.1-flash-lite`, lo eligió el golden set (§8): `GEMINI_LECTOR_MODELO` en `_shared/cardumen/model.ts`. El adaptador reusa `generate()` de `_shared/venezuela/gemini.ts` (mismo cliente que los bots de VE y de customer), con `responseMimeType: application/json`. R1/R2 no cambian.
@@ -155,6 +198,7 @@ select id, created_at, estudio, lang,
 | Ruido dos veces en el primer mensaje (idioma) | Se sigue en español y se pide el consentimiento; `idioma_elegido` queda en `null` con nota. El turno "¿seguimos en español?" posterior a la historia ya no existe (§4). Ruido dos veces en el aviso trilingüe cierra sin guardar: no había consentimiento ni historia que perder. |
 | Contradicción literal ("los dos primero", "todos igual") | No llega al modelo: se repregunta con encuadre. |
 | Etiqueta de peso por palabras | Solo las formas casi literales del botón. "mi pareja", "el mandato", "les contaba" y "claro" a secas ya no fabrican una etiqueta. |
+| Botón o número en la tríada (2026-09-08) | No llega al modelo: se resuelve determinista (§4, paso 6). Un número que no sirve en ese paso (el propio dominante al pedir el segundo; otro polo al pedir el peso) se repregunta sin fabricar. Un botón de tríada tocado en una diada es un botón viejo. |
 | `especial` del modelo (no sabe / no aplica / las dos con fuerza) | Solo se acepta con evidencia léxica en la respuesta (`evidenciaEspecial`). Sin ella, un modelo chico usa "no aplica" como cajón para lo que está fuera de tema. |
 
 Los contadores viven en un solo sitio (`sumarIntento` / `sinLectura`): ningún contador pasa de 2. La marca `declinado` es un campo del registro, no se deriva de la nota; el turno cero deja lo suyo en `provenance.notas`.

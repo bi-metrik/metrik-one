@@ -5,7 +5,10 @@
 // payload) y no lo que el modelo adivina. Las reglas que se fijan aqui vienen de
 // elicitacion-resolucion-yuto.md §1-3, elicitacion-diadas-yuto.md §2-4 y del brief de la demo.
 import { describe, expect, it } from 'vitest';
-import { BOTON, CONSENT_VERSION, armarPayload, iniciar, leerSector, procesar, resumen } from './motor';
+import {
+  BOTON, CONSENT_VERSION, armarPayload, citaHistoria, iniciar, leerNumerosTriada, leerSector, preguntaInterrogativa, procesar, resumen,
+} from './motor';
+import { TRIADAS } from './instrumento';
 import { normalizarTexto } from './interprete';
 import type {
   Interprete, InterpretacionDiada, InterpretacionIntensidad, InterpretacionSegundo, InterpretacionTriada, NavigateState, Resultado, Salida,
@@ -71,6 +74,13 @@ async function hastaHistoria(poblacion: 'ciudadano' | 'experto', sectorTxt = '1'
 }
 
 const HISTORIA_ES = 'La carretera al puerto lleva meses con un carril cerrado. Los camiones se meten por el pueblo y ya se hundió una calle.';
+/** Las primeras palabras de HISTORIA_ES, recortadas en limite de palabra (90 caracteres). */
+const CITA_ES = 'La carretera al puerto lleva meses con un carril cerrado. Los camiones se meten por el…';
+const T1_APERTURA =
+  `Pensando en lo que me contó ("${CITA_ES}"), ¿de dónde nace lo que observó?\n\n` +
+  '1. La gente común, la vida de a pie\n2. Quienes tienen poder, dinero o influencia\n3. Fuerzas que nadie controla del todo\n\n' +
+  '¿Cuál de las tres pesa más? Toque 1, 2 o 3, o dígamelo con sus palabras.';
+const TITULOS_TRIADA = ['1', '2', '3'];
 
 /** Historia en espanol. Ya no hay turno de idioma despues: deja el estado en la primera triada. */
 async function hastaPrimeraTriada(poblacion: 'ciudadano' | 'experto' = 'ciudadano'): Promise<NavigateState> {
@@ -79,7 +89,10 @@ async function hastaPrimeraTriada(poblacion: 'ciudadano' | 'experto' = 'ciudadan
   expect(state.idioma_detectado).toBe('es');
   expect(state.idioma_confirmado).toBe(true);
   expect(state.paso).toBe('triada_orden');
-  expect(textos(r)).toContain('*De dónde nace lo que observó.*');
+  const u = ultimo(r);
+  expect(u.texto).toBe(T1_APERTURA);
+  expect(u.tipo).toBe('botones');
+  if (u.tipo === 'botones') expect(u.botones.map((b) => b.title)).toEqual(TITULOS_TRIADA);
   return state;
 }
 
@@ -277,7 +290,8 @@ describe('idioma: se elige en el PRIMER mensaje, antes del consentimiento', () =
     expect(state.historia).toBe(historiaEn);
     expect(state.paso).toBe('triada_orden');
     expect(r.salidas).toHaveLength(1);
-    expect(textos(r)).toContain('*De dónde nace lo que observó.*');
+    expect(textos(r)).toContain('¿de dónde nace lo que observó?');
+    expect(textos(r)).toContain('("The road to the port has had one lane closed for months. Trucks are cutting through the…")');
     expect(textos(r)).not.toContain('Seguimos en español');
     expect(armarPayload(state, 'salir', AHORA)).toMatchObject({ idioma_elegido: 'es', idioma_detectado: 'en' });
   });
@@ -295,9 +309,14 @@ describe('triadas: reparto en dos tiempos', () => {
     r = await procesar(state, { texto: 'Sí, así', botonId: BOTON.si }, i);
     expect(state.paso).toBe('triada_intensidad');
     const u = ultimo(r);
-    expect(u.texto).toContain('¿iban *casi parejos*, *uno mandaba pero el otro contaba*, o *fue claramente Quienes tienen poder, dinero o influencia*?');
-    if (u.tipo === 'botones') expect(u.botones.map((b) => b.title)).toEqual(['Casi parejos', 'Uno mandaba', 'Claramente el 1º']);
-    r = await procesar(state, { texto: 'Claramente el 1º', botonId: BOTON.intClaro }, i);
+    expect(u.texto).toBe(
+      'Una última de esta parte. Entre *Quienes tienen poder, dinero o influencia* y *Fuerzas que nadie controla del todo*, ¿cómo se repartió el peso?\n\n' +
+      '• casi parejos\n• uno mandaba pero el otro contaba\n• fue claramente Quienes tienen poder, dinero o influencia\n\n' +
+      'Toque una opción, o dígamelo con sus palabras.',
+    );
+    // "Claramente el N" nombra al dominante por su numero de polo (aqui el 2), no "el primero".
+    if (u.tipo === 'botones') expect(u.botones.map((b) => b.title)).toEqual(['Casi parejos', 'Uno mandaba más', 'Claramente el 2']);
+    r = await procesar(state, { texto: 'Claramente el 2', botonId: BOTON.intClaro }, i);
     const reg = state.dimensiones.T1_fuente!;
     expect('dimension_id' in reg && reg).toMatchObject({
       dimension_id: 'T1_fuente',
@@ -311,10 +330,14 @@ describe('triadas: reparto en dos tiempos', () => {
       special_case: null,
       elicitation_turns: 3,
     });
+    // De donde salio cada lectura queda en la nota: el orden lo leyo el modelo, el peso fue boton.
+    expect((reg as { reflexivity_note: string }).reflexivity_note).toContain('orden: texto');
+    expect((reg as { reflexivity_note: string }).reflexivity_note).toContain('intensidad: boton');
     expect(r.salidas[0].texto).toBe('Listo. Lo guardo así: *Quienes tienen poder, dinero o influencia* fue lo principal, *Fuerzas que nadie controla del todo* acompañó, y *La gente común, la vida de a pie* quedó al margen.');
-    // y ya viene la segunda triada
+    // y ya viene la segunda triada, con otra intro y la misma cita
     expect(state.paso).toBe('triada_orden');
-    expect(ultimo(r).texto).toContain('*En el fondo, qué se siente que es.*');
+    expect(ultimo(r).texto).toContain(`Sobre eso mismo ("${CITA_ES}"), en el fondo, ¿qué se siente que es?`);
+    expect(ultimo(r).texto).toContain('1. Algo que se está acabando\n2. Algo que apenas comienza\n3. Algo que se repite una y otra vez');
   });
 
   it('nombra uno solo: se pide el segundo; "ninguno" = solo uno, sin turno de intensidad', async () => {
@@ -325,7 +348,15 @@ describe('triadas: reparto en dos tiempos', () => {
     });
     let r = await procesar(state, { texto: 'la gente común' }, i);
     expect(state.paso).toBe('triada_segundo');
-    expect(ultimo(r).texto).toContain('¿Y en segundo lugar: *Quienes tienen poder, dinero o influencia* o *Fuerzas que nadie controla del todo*?');
+    const u = ultimo(r);
+    expect(u.texto).toBe(
+      'Entendido, primero *1. La gente común, la vida de a pie*. ¿Y en segundo lugar?\n\n' +
+      '2. Quienes tienen poder, dinero o influencia\n3. Fuerzas que nadie controla del todo\n\n' +
+      'Toque el número, o *Ninguno* si nada más pesó.',
+    );
+    // Los restantes conservan SU numero (2 y 3), no se renumeran.
+    if (u.tipo === 'botones') expect(u.botones).toEqual([{ id: BOTON.tri2, title: '2' }, { id: BOTON.tri3, title: '3' }, { id: BOTON.triNinguno, title: 'Ninguno' }]);
+    // "ninguno" escrito es texto libre: lo lee el modelo y se confirma, como hoy.
     r = await procesar(state, { texto: 'ninguno' }, i);
     expect(ultimo(r).texto).toBe('Le leo entonces: *solo La gente común, la vida de a pie*, y lo demás al margen. ¿Lo dejo así?');
     r = await procesar(state, { texto: 'sí' }, i);
@@ -347,7 +378,12 @@ describe('triadas: reparto en dos tiempos', () => {
     await procesar(state, { texto: 'el poder y la gente' }, i);
     let r = await procesar(state, { texto: 'No, corrijo', botonId: BOTON.corrijo }, i);
     expect(state.paso).toBe('triada_orden');
-    expect(ultimo(r).texto).toBe('Dígamelo con sus palabras: ¿cuáles dos pesaron más, y en qué orden?');
+    // Al corregir vuelve el menu con botones (sin la cita), por si prefiere tocar el numero.
+    expect(ultimo(r).texto).toBe(
+      'Entendido.\n\n1. La gente común, la vida de a pie\n2. Quienes tienen poder, dinero o influencia\n3. Fuerzas que nadie controla del todo\n\n' +
+      '¿Cuál de las tres pesa más? Toque 1, 2 o 3, o dígamelo con sus palabras.',
+    );
+    expect(ultimo(r).tipo).toBe('botones');
     r = await procesar(state, { texto: 'al revés: primero la gente, después el poder' }, i);
     expect(ultimo(r).texto).toContain('*primero, La gente común, la vida de a pie*');
     await procesar(state, { texto: 'exacto' }, i);
@@ -394,7 +430,10 @@ describe('triadas: reparto en dos tiempos', () => {
       ],
     });
     let r = await procesar(state, { texto: 'mmm' }, i);
-    expect(ultimo(r).texto).toBe('No le alcancé a seguir. Dígame cuál de las tres pesó más, y cuál iría en segundo lugar.');
+    expect(ultimo(r).texto).toBe(
+      'No le alcancé a seguir.\n\n1. La gente común, la vida de a pie\n2. Quienes tienen poder, dinero o influencia\n3. Fuerzas que nadie controla del todo\n\n' +
+      '¿Cuál de las tres pesa más? Toque 1, 2 o 3, o dígamelo con sus palabras.',
+    );
     r = await procesar(state, { texto: 'es que no sé bien' }, i);
     expect(state.dimensiones.T1_fuente).toMatchObject({ special_case: 'unresolved', confirmed_by_participant: false, dominant: null });
     expect(state.paso).toBe('triada_orden'); // ya en T2
@@ -413,8 +452,192 @@ describe('triadas: reparto en dos tiempos', () => {
     state.paso = 'diada_confirmar';
     state.en_curso = { tipo: 'diada', turnos: 0, ancla: 5, especial: null, ofrecidas: [], correcciones: 0, reintentos: 0, notas: [] };
     const r = await procesar(state, { texto: 'sí' }, i);
-    expect(ultimo(r).texto).toContain('*Qué está realmente en juego.*');
+    expect(ultimo(r).texto).toContain(`Una más sobre lo que contó ("${CITA_ES}"), ¿qué está realmente en juego?`);
     expect(ultimo(r).texto).not.toContain('solo expertos');
+  });
+});
+
+describe('triadas con botones y numeros: la eleccion explicita no se confirma', () => {
+  const NOTA = (s: NavigateState) => (s.dimensiones.T1_fuente as { reflexivity_note: string }).reflexivity_note;
+
+  it('boton 2 -> boton 1 -> boton "Casi parejos": cierra sin eco ni confirmacion, sin modelo, con la composicion pre-registrada', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({});
+    let r = await procesar(state, { texto: '2', botonId: BOTON.tri2 }, i);
+    expect(state.paso).toBe('triada_segundo');
+    expect(textos(r)).not.toContain('Le leo entonces');
+    let u = ultimo(r);
+    expect(u.texto).toContain('Entendido, primero *2. Quienes tienen poder, dinero o influencia*. ¿Y en segundo lugar?');
+    if (u.tipo === 'botones') expect(u.botones.map((b) => b.title)).toEqual(['1', '3', 'Ninguno']);
+    r = await procesar(state, { texto: '1', botonId: BOTON.tri1 }, i);
+    expect(state.paso).toBe('triada_intensidad');
+    expect(textos(r)).not.toContain('Le leo entonces');
+    u = ultimo(r);
+    if (u.tipo === 'botones') expect(u.botones.map((b) => b.title)).toEqual(['Casi parejos', 'Uno mandaba más', 'Claramente el 2']);
+    r = await procesar(state, { texto: 'Casi parejos', botonId: BOTON.intParejos }, i);
+    expect(state.dimensiones.T1_fuente).toMatchObject({
+      dominant: 'Quienes tienen poder, dinero o influencia', second: 'La gente común, la vida de a pie', residual: 'Fuerzas que nadie controla del todo',
+      intensity_label: 'casi_parejos', composition: [0.45, 0.5, 0.05], resolution_captured: 'high', confirmed_by_participant: true, elicitation_turns: 3,
+    });
+    expect(NOTA(state)).toContain('orden: boton');
+    expect(NOTA(state)).toContain('segundo: boton');
+    expect(NOTA(state)).toContain('intensidad: boton');
+    expect(i.usadas).toEqual({ triada: 0, segundo: 0, intensidad: 0, diada: 0 });
+    expect(r.salidas[0].texto).toContain('Listo. Lo guardo así');
+    expect(state.paso).toBe('triada_orden'); // T2
+  });
+
+  it('texto "1 y 3" va directo a la intensidad, sin modelo; "Claramente el 1" cierra', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({});
+    const r = await procesar(state, { texto: '1 y 3' }, i);
+    expect(state.paso).toBe('triada_intensidad');
+    expect(textos(r)).not.toContain('Le leo entonces');
+    expect(ultimo(r).texto).toContain('Entre *La gente común, la vida de a pie* y *Fuerzas que nadie controla del todo*');
+    await procesar(state, { texto: 'Claramente el 1', botonId: BOTON.intClaro }, i);
+    expect(state.dimensiones.T1_fuente).toMatchObject({ intensity_label: 'claramente_el_primero', composition: [0.85, 0.05, 0.1], confirmed_by_participant: true });
+    expect(NOTA(state)).toContain('orden: numero');
+    expect(NOTA(state)).toContain('segundo: numero');
+    expect(i.usadas.triada).toBe(0);
+  });
+
+  it.each(['el 2', '2 y luego 1', 'primero 2 después 1', '3, 1'])('"%s" escrito se lee como numeros, sin modelo', async (t) => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({});
+    await procesar(state, { texto: t }, i);
+    const ec = state.en_curso as { dominante: number | null; segundo: number | null };
+    const esperado = leerNumerosTriada(normalizarTexto(t))!;
+    expect(ec.dominante).toBe(esperado[0] - 1);
+    expect(ec.segundo).toBe(esperado.length > 1 ? esperado[1] - 1 : null);
+    expect(state.paso).toBe(esperado.length > 1 ? 'triada_intensidad' : 'triada_segundo');
+    expect(i.usadas.triada).toBe(0);
+  });
+
+  it('"Ninguno" en segundo lugar tras un boton: solo uno, cerrado sin confirmar', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({});
+    await procesar(state, { texto: '2', botonId: BOTON.tri2 }, i);
+    const r = await procesar(state, { texto: 'Ninguno', botonId: BOTON.triNinguno }, i);
+    expect(state.dimensiones.T1_fuente).toMatchObject({
+      dominant: 'Quienes tienen poder, dinero o influencia', second: null, intensity_label: 'solo_uno', composition: [0.05, 0.9, 0.05],
+      resolution_captured: 'high', confirmed_by_participant: true, elicitation_turns: 2,
+    });
+    expect(r.salidas[0].texto).toBe('Listo. Lo guardo así: *Quienes tienen poder, dinero o influencia*, y lo demás al margen.');
+    expect(i.usadas.segundo).toBe(0);
+  });
+
+  it('texto libre sigue como hoy: lector, eco y confirmacion; y el segundo por boton tras un dominante leido por el modelo TAMBIEN se confirma', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({ triada: [{ claro: true, dominante: 1, segundo: null, solo_uno: false, especial: null }] });
+    let r = await procesar(state, { texto: 'sobre todo los que tienen poder' }, i);
+    expect(state.paso).toBe('triada_segundo');
+    // El dominante lo interpreto el modelo: aunque el segundo llegue por boton, hay eco.
+    r = await procesar(state, { texto: '3', botonId: BOTON.tri3 }, i);
+    expect(state.paso).toBe('triada_confirmar');
+    expect(ultimo(r).texto).toBe('Le leo entonces: *primero, Quienes tienen poder, dinero o influencia*; *en segundo lugar, Fuerzas que nadie controla del todo*; y *La gente común, la vida de a pie* quedó al margen. ¿Lo dejo así?');
+    await procesar(state, { texto: 'Sí, así', botonId: BOTON.si }, i);
+    expect(state.paso).toBe('triada_intensidad');
+    expect((state.en_curso as { notas: string[] }).notas).toEqual(expect.arrayContaining(['orden: texto', 'segundo: boton']));
+  });
+
+  it('en segundo lugar, el numero del propio dominante no vale: se repregunta sin gastar lector', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({});
+    await procesar(state, { texto: '2', botonId: BOTON.tri2 }, i);
+    const r = await procesar(state, { texto: '2' }, i);
+    expect(state.paso).toBe('triada_segundo');
+    expect(ultimo(r).texto).toContain('¿Y en segundo lugar?');
+    expect((state.en_curso as { reintentos: number }).reintentos).toBe(1);
+    expect(i.usadas.segundo).toBe(0);
+  });
+
+  it('en la intensidad un numero es un polo: el del dominante es "claramente"; otro se repregunta sin fabricar', async () => {
+    const s1 = await hastaPrimeraTriada();
+    const i = guion({});
+    await procesar(s1, { texto: '2 y 1' }, i);
+    await procesar(s1, { texto: 'claramente el 2' }, i);
+    expect(s1.dimensiones.T1_fuente).toMatchObject({ intensity_label: 'claramente_el_primero', composition: [0.1, 0.85, 0.05] });
+    expect((s1.dimensiones.T1_fuente as { reflexivity_note: string }).reflexivity_note).toContain('intensidad: numero');
+    const s2 = await hastaPrimeraTriada();
+    await procesar(s2, { texto: '2 y 1' }, i);
+    const r = await procesar(s2, { texto: 'claramente el 1' }, i);
+    expect(s2.paso).toBe('triada_intensidad');
+    expect(ultimo(r).texto).toContain('¿cómo se repartió el peso?');
+    expect(i.usadas.intensidad).toBe(0);
+  });
+
+  it('un boton de triada tocado durante una diada no es una respuesta: se repregunta la diada sin modelo', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({});
+    await procesar(state, { texto: '1 y 2' }, i);
+    await procesar(state, { texto: 'Casi parejos', botonId: BOTON.intParejos }, i);
+    await procesar(state, { texto: '3 y 1' }, i);
+    await procesar(state, { texto: 'Casi parejos', botonId: BOTON.intParejos }, i);
+    expect(state.paso).toBe('diada_abrir');
+    const r = await procesar(state, { texto: '2', botonId: BOTON.tri2 }, i);
+    expect(state.paso).toBe('diada_abrir');
+    expect(state.dimensiones.D1_novedad).toBeUndefined();
+    expect(r.salidas[0].texto).toContain('Ese botón era de una pregunta anterior');
+    expect(r.salidas[0].texto).toContain('• Esto ya venía pasando\n• Esto es completamente nuevo');
+    expect(i.usadas.diada).toBe(0);
+  });
+
+  it('un boton de triada viejo tocado en la confirmacion se lee como numero: corrige el orden sin modelo', async () => {
+    const state = await hastaPrimeraTriada();
+    const i = guion({ triada: [{ claro: true, dominante: 0, segundo: 1, solo_uno: false, especial: null }] });
+    await procesar(state, { texto: 'la gente y después el poder' }, i);
+    expect(state.paso).toBe('triada_confirmar');
+    const r = await procesar(state, { texto: '3', botonId: BOTON.tri3 }, i);
+    expect(state.paso).toBe('triada_segundo');
+    expect((state.en_curso as { dominante: number }).dominante).toBe(2);
+    expect(ultimo(r).texto).toContain('Entendido, primero *3. Fuerzas que nadie controla del todo*');
+    expect(i.usadas.triada).toBe(1);
+  });
+
+  it('la cita de la historia se recorta en limite de palabra y no rompe si es corta o vacia', async () => {
+    expect(citaHistoria(HISTORIA_ES)).toBe(CITA_ES);
+    expect(citaHistoria(HISTORIA_ES).length).toBeLessThanOrEqual(91);
+    expect(citaHistoria('El alcalde cerró la vía y la gente se quedó sin transporte durante toda la semana, hasta que llegaron')).toBe(
+      'El alcalde cerró la vía y la gente se quedó sin transporte durante toda la semana, hasta…',
+    );
+    expect(citaHistoria('Corta.')).toBe('Corta.');
+    expect(citaHistoria('linea uno\n\nlinea   dos')).toBe('linea uno linea dos');
+    expect(citaHistoria('')).toBe('');
+    expect(citaHistoria(undefined)).toBe('');
+    expect(citaHistoria('x'.repeat(120))).toBe(`${'x'.repeat(90)}…`);
+    // Sin historia, la pregunta se arma sin la cita.
+    const state = await hastaPrimeraTriada();
+    state.historia = '';
+    const r = await procesar(state, { texto: 'cardumen' }, guion({}));
+    expect(r.salidas[0].texto).toContain('Pensando en lo que me contó, ¿de dónde nace lo que observó?');
+    expect(r.salidas[0].texto).not.toContain('("');
+  });
+
+  it('la pregunta del instrumento no cambia de palabras: solo se envuelve en ¿…?', () => {
+    expect(preguntaInterrogativa(TRIADAS.T1_fuente)).toBe('¿De dónde nace lo que observó?');
+    expect(preguntaInterrogativa(TRIADAS.T2_tiempo)).toBe('En el fondo, ¿qué se siente que es?');
+    expect(preguntaInterrogativa(TRIADAS.T3_enjuego)).toBe('¿Qué está realmente en juego?');
+  });
+
+  it('leerNumerosTriada: solo numeros de polo con relleno; una duda o cualquier otra palabra no es un orden', () => {
+    const lee = (s: string) => leerNumerosTriada(normalizarTexto(s));
+    expect(lee('1')).toEqual([1]);
+    expect(lee('el 2')).toEqual([2]);
+    expect(lee('1 y 3')).toEqual([1, 3]);
+    expect(lee('2 y luego 1')).toEqual([2, 1]);
+    expect(lee('3, 1')).toEqual([3, 1]);
+    expect(lee('primero 2 después 1')).toEqual([2, 1]);
+    expect(lee('el 1º')).toEqual([1]);
+    expect(lee('#3')).toEqual([3]);
+    expect(lee('2 y 2')).toEqual([2]);
+    expect(lee('1 o 2')).toBeNull();
+    expect(lee('12')).toBeNull();
+    expect(lee('0')).toBeNull();
+    expect(lee('-1')).toBeNull();
+    expect(lee('doce')).toBeNull();
+    expect(lee('el 2 que más pesa')).toBeNull();
+    expect(lee('ninguno')).toBeNull();
+    expect(lee('')).toBeNull();
   });
 });
 
@@ -433,7 +656,11 @@ describe('diadas: un turno, cinco anclas', () => {
     await procesar(state, { texto: 'solo que comienza' }, i);
     const r = await procesar(state, { texto: 'sí' }, i);
     expect(state.paso).toBe('diada_abrir');
-    expect(ultimo(r).texto).toBe('Una cosa más sobre lo que contó. ¿Siente que *Esto ya venía pasando*, o que *Esto es completamente nuevo*?');
+    // Los dos polos en lineas aparte; sin botones ni numeros: se responde con palabras.
+    expect(ultimo(r).texto).toBe(
+      'Una cosa más sobre lo que contó. ¿Cuál de las dos se acerca más a lo que siente?\n\n• Esto ya venía pasando\n• Esto es completamente nuevo\n\nDígamelo con sus palabras.',
+    );
+    expect(ultimo(r).tipo).toBe('texto');
     return state;
   }
 
@@ -447,8 +674,8 @@ describe('diadas: un turno, cinco anclas', () => {
       dyad_id: 'D1_novedad', anchor_label: 'extremo_der', anchor_text: 'Esto es completamente nuevo', value: 1,
       special_case: null, resolution_captured: 'high', confirmed_by_participant: true, elicitation_turns: 2,
     });
-    expect(state.paso).toBe('diada_abrir'); // D2
-    expect(ultimo(r).texto).toContain('*Me preocupa profundamente*, o que *Me da esperanza*');
+    expect(state.paso).toBe('diada_abrir'); // D2, la ultima del ciudadano
+    expect(ultimo(r).texto).toContain('Por último. ¿Cuál de las dos se acerca más a lo que siente?\n\n• Me preocupa profundamente\n• Me da esperanza');
   });
 
   it('matiz hacia un lado: se ofrecen SOLO las anclas de ese lado; elegir por numero no pide confirmacion', async () => {
@@ -607,28 +834,58 @@ describe('cierre, salida y borrado', () => {
 });
 
 describe('restricciones de WhatsApp', () => {
-  it('ningun boton pasa de 20 caracteres y ningun cuerpo de 1024', async () => {
-    const { state, r } = await (async () => {
-      const state = await hastaPrimeraTriada('experto');
-      const i = guion({
-        triada: [{ claro: true, dominante: 1, segundo: 2, solo_uno: false, especial: null }],
-        diada: [{ claro: false, ancla: null, especial: null, lado: null }],
-      });
-      const r1 = await procesar(state, { texto: 'x' }, i);
-      const r2 = await procesar(state, { texto: 'sí' }, i);
-      return { state, r: [r1, r2] };
-    })();
-    void state;
-    for (const res of r) {
-      for (const s of res.salidas) {
-        expect(s.texto.length).toBeLessThanOrEqual(1024);
-        if (s.tipo === 'botones') {
-          expect(s.botones.length).toBeLessThanOrEqual(3);
-          for (const b of s.botones) expect(b.title.length).toBeLessThanOrEqual(20);
-        }
+  // Lo que `sendButtons` (wa-respond.ts) manda tal cual: 3 botones como maximo, titulo de 20
+  // caracteres, cuerpo de 1024. El envio recorta botones y titulos pero NO el cuerpo, asi que
+  // el motor tiene que cumplirlo solo, con la historia mas larga que la cita admite.
+  function verificar(salidas: Salida[]): void {
+    for (const s of salidas) {
+      expect(s.texto.length).toBeLessThanOrEqual(1024);
+      if (s.tipo === 'botones') {
+        expect(s.botones.length).toBeLessThanOrEqual(3);
+        for (const b of s.botones) expect(b.title.length).toBeLessThanOrEqual(20);
       }
     }
+  }
+
+  it('ningun boton pasa de 20 caracteres y ningun cuerpo de 1024, en todos los mensajes de la triada', async () => {
     const { salidas } = iniciar(AHORA);
-    expect(salidas[0].texto.length).toBeLessThanOrEqual(1024);
+    verificar(salidas);
+    const state = await hastaHistoria('experto');
+    // El contador de reintentos es UNO por triada: cada repregunta va en una triada distinta.
+    const i = guion({
+      triada: [{ claro: false, dominante: null, segundo: null, solo_uno: false, especial: null }],
+      intensidad: [{ etiqueta: null }],
+      diada: [{ claro: true, ancla: 5, especial: null, lado: 'der' }, { claro: true, ancla: 1, especial: null, lado: 'izq' }],
+    });
+    const paso = async (entrada: { texto: string; botonId?: string }) => {
+      const r = await procesar(state, entrada, i);
+      verificar(r.salidas);
+      return r;
+    };
+    // Historia larga: la cita se recorta, el cuerpo no crece con ella.
+    await paso({ texto: `${HISTORIA_ES} ${HISTORIA_ES} ${HISTORIA_ES}` });
+    // T1: pregunta de vuelta en el segundo lugar (la respuesta va DENTRO del mensaje con botones), intensidad larga.
+    await paso({ texto: '2', botonId: BOTON.tri2 });
+    await paso({ texto: '¿esto es una encuesta?' });
+    await paso({ texto: '3', botonId: BOTON.tri3 });
+    await paso({ texto: 'Uno mandaba más', botonId: BOTON.intManda });
+    expect(state.indice).toBe(1);
+    // T2: pregunta de vuelta sobre la apertura (quienSoy + cita + menu, el cuerpo mas largo) y una lectura fallida.
+    await paso({ texto: '¿quién eres?' });
+    await paso({ texto: 'asdkjh' });
+    expect(state.indice).toBe(2);
+    // D1 y D2 por el camino corto.
+    await paso({ texto: 'es completamente nuevo' });
+    await paso({ texto: 'sí' });
+    await paso({ texto: 'me preocupa' });
+    await paso({ texto: 'sí' });
+    expect(state.indice).toBe(4);
+    // T3: numeros -> intensidad; una lectura fallida del peso -> la version corta; cierre y apertura de D3.
+    await paso({ texto: '1 y 2' });
+    await paso({ texto: 'zzz' });
+    expect(state.paso).toBe('triada_intensidad');
+    await paso({ texto: 'Claramente el 1', botonId: BOTON.intClaro });
+    expect(state.paso).toBe('diada_abrir');
+    expect(state.indice).toBe(5);
   });
 });

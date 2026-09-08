@@ -146,6 +146,9 @@ const BATERIA: ReadonlyArray<{ nombre: string; entrada: Entrada; sinModelo?: boo
   { nombre: 'boton viejo: Si, asi', entrada: { texto: 'Sí, así', botonId: BOTON.si } },
   { nombre: 'boton viejo: Casi parejos', entrada: { texto: 'Casi parejos', botonId: BOTON.intParejos } },
   { nombre: 'boton viejo: Si, observador', entrada: { texto: 'Sí, observador', botonId: BOTON.expSi } },
+  // Los de la triada valen en su paso (eligen un polo) y en cualquier otro son un boton viejo.
+  { nombre: 'boton viejo: 2 (polo de la triada)', entrada: { texto: '2', botonId: BOTON.tri2 } },
+  { nombre: 'boton viejo: Ninguno (segundo lugar)', entrada: { texto: 'Ninguno', botonId: BOTON.triNinguno } },
   { nombre: 'pregunta de vuelta: quien eres', entrada: { texto: '¿quién eres?' }, sinModelo: true },
   { nombre: 'pregunta de vuelta: es una encuesta', entrada: { texto: '¿esto es una encuesta?' }, sinModelo: true },
   { nombre: 'negativa: no quiero responder', entrada: { texto: 'no quiero responder' }, sinModelo: true },
@@ -394,7 +397,7 @@ describe('turno cero endurecido', () => {
     expect(s.idioma_detectado).toBe('en');
     expect(s.idioma_elegido).toBe('es');
     expect(s.historia).toBe(HISTORIA_EN);
-    expect(r.salidas[0].texto).toContain('*De dónde nace lo que observó.*');
+    expect(r.salidas[0].texto).toContain('¿de dónde nace lo que observó?');
   });
 
   it('un boton viejo del consentimiento a mitad de una triada no confirma nada: se lee como texto', async () => {
@@ -417,7 +420,8 @@ describe('capa 3: pregunta de vuelta y negativa', () => {
     expect(r.salidas).toHaveLength(1);
     expect(r.salidas[0].texto).toContain('Soy el asistente de *Navigate*');
     expect(r.salidas[0].texto).toContain('esto es una demostración'.replace('esto', 'Esto'));
-    expect(r.salidas[0].texto).toContain('*De dónde nace lo que observó.*');
+    expect(r.salidas[0].texto).toContain('¿de dónde nace lo que observó?');
+    expect(r.salidas[0].tipo).toBe('botones'); // la pregunta pendiente conserva sus botones 1, 2, 3
     expect(s.paso).toBe('triada_orden');
     expect(s.en_curso?.reintentos).toBe(1);
     // segunda no-lectura: unresolved y avanza
