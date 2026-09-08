@@ -4,6 +4,17 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
 import { emitirCuentasExplicitasPeriodo } from '@/lib/cobros/emitir-cuota-explicita'
 import { particionarPorCronograma, planesConCronogramaExplicito } from '@/lib/cobros/cronograma-explicito'
+import { fechaCuota } from '@/lib/cobros/fecha-cuota'
+import { traerTodo } from '@/lib/supabase/paginar'
+import {
+  correrCicloSuscripcion,
+  facturaOmitidaFase1,
+  type PlanDeSuscripcion,
+  type ResultadoCiclo,
+  type SuscripcionRow,
+} from '@/lib/suscripciones/ciclo'
+import { POLITICA_FASE_1 } from '@/lib/suscripciones/estado'
+import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -12,10 +23,14 @@ import { particionarPorCronograma, planesConCronogramaExplicito } from '@/lib/co
 //   3. Genera notificaciones cobro_vencido a responsable + dueno + staff del area financiera (staff_areas)
 //   4. Emite las cuentas del mes: agrupadas por empresa (planes uniformes) + una por
 //      cuota (planes con cronograma explicito en plan_cobro_cuotas)
-//   5. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   5. Suscripciones de licencia (`suscripciones`): corre el ciclo de cobro de las que
+//      tienen `proximo_cobro <= hoy`. Fase 1 = pasarela `manual`, que no cobra: el
+//      efecto sobre los planes de hoy es cero (ver el bloque del paso 5).
+//   6. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
-// Schedule: 0 13 * * * (mismo bucket que crons existentes)
+//       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
+// Schedule: 0 12 * * * (vercel.json)
 
 const DIAS_ANTICIPACION = 3
 const DIAS_GRACIA = 3
@@ -40,24 +55,9 @@ interface PlanCobro {
   pasarela: string
 }
 
-function addMeses(fecha: Date, meses: number): Date {
-  const d = new Date(fecha)
-  d.setMonth(d.getMonth() + meses)
-  return d
-}
-
-function fechaCuota(fechaInicio: string, frecuencia: string, numeroCuota: number): Date {
-  // Interpretamos fecha_inicio como dia calendario Bogota (UTC-5).
-  // 05:00 UTC del dia = 00:00 Bogota.
-  const inicio = new Date(`${fechaInicio}T05:00:00Z`)
-  const offset = numeroCuota - 1
-  switch (frecuencia) {
-    case 'mensual':     return addMeses(inicio, offset)
-    case 'trimestral':  return addMeses(inicio, offset * 3)
-    case 'anual':       return addMeses(inicio, offset * 12)
-    default:            return inicio
-  }
-}
+// `fechaCuota` vive en `@/lib/cobros/fecha-cuota`: el ciclo de suscripciones (paso 5)
+// escribe en `cobros` bajo el mismo unique `(plan_cobro_id, numero_cuota)` que el
+// paso 1, y los dos tienen que calcular la MISMA fecha para la MISMA cuota.
 
 // Dias enteros entre dos instantes contando por dias calendario Bogota.
 function diasEntreBogota(desde: Date, hasta: Date): number {
@@ -326,6 +326,83 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── 5. Suscripciones de licencia: el ciclo de cobro ──────
+  // Solo para workspaces con fila en `suscripciones` (al 2026-09-08: ninguna; las
+  // crea una persona). Para cada una con `proximo_cobro <= hoy` corre
+  // `correrCicloSuscripcion`: asegura el cobro de la cuota (mismo unique y misma
+  // fecha que el paso 1, asi que si el paso 1 ya lo creo lo reusa), pide la factura
+  // (Fase 1: se omite), dispara el cargo por el adaptador de su pasarela (Fase 1:
+  // solo `manual`, que no cobra) y registra el resultado en `suscripciones` y en
+  // `workspaces.subscription_status`, que es lo que lee el gate del layout.
+  //
+  // Con `manual` el efecto neto sobre los planes de hoy es CERO: el cobro programado
+  // que deja es el mismo que ya dejaba el paso 1, y nadie se suspende solo
+  // (`POLITICA_FASE_1.suspenderAutomaticamente = false`). Un plan sin suscripcion
+  // no pasa por aqui. Va DESPUES del paso 1 a proposito: asi el paso 1 conserva su
+  // comportamiento exacto y el ciclo encuentra la cuota ya creada.
+  const suscripcionesResultados: ResultadoCiclo[] = []
+  const suscripcionesErrores: { suscripcion_id: string; error: string }[] = []
+  try {
+    const suscripciones = await traerTodo<SuscripcionRow>(
+      (desde, hasta) =>
+        supabase
+          .from('suscripciones')
+          .select('id, workspace_id, plan_cobro_id, pasarela, medio_pago, estado, proximo_cobro, intentos_fallidos, ultimo_error')
+          // `cancelada` es terminal y `suspendida` SI entra: un pago confirmado a mano
+          // sobre una suspendida la reactiva, y eso lo ve el ciclo.
+          .in('estado', ['trial', 'activa', 'pendiente_pago', 'suspendida'])
+          .lte('proximo_cobro', hoyStr)
+          .order('id')
+          .range(desde, hasta),
+      { etiqueta: 'suscripciones con cobro vencido' },
+    )
+
+    const planIds = [...new Set(suscripciones.map((s) => s.plan_cobro_id))]
+    const planesPorId = new Map<string, PlanDeSuscripcion>()
+    if (planIds.length > 0) {
+      const { data: planesSub, error: errPlanes } = await supabase
+        .from('planes_cobro')
+        .select('id, workspace_id, negocio_id, monto, frecuencia, fecha_inicio, total_cuotas, auto_renovar, activo')
+        .in('id', planIds)
+      if (errPlanes) throw new Error(`planes de las suscripciones: ${errPlanes.message}`)
+      for (const p of (planesSub ?? []) as PlanDeSuscripcion[]) planesPorId.set(p.id, p)
+    }
+
+    for (const sus of suscripciones) {
+      const plan = planesPorId.get(sus.plan_cobro_id)
+      if (!plan) {
+        suscripcionesErrores.push({ suscripcion_id: sus.id, error: `plan ${sus.plan_cobro_id} no encontrado` })
+        continue
+      }
+      if (!plan.activo) {
+        // Un plan inactivo (todas las cuotas cobradas, o cancelado) no genera cuotas
+        // nuevas. Se reporta en vez de cobrar sobre un contrato que ya no corre.
+        suscripcionesErrores.push({ suscripcion_id: sus.id, error: `plan ${plan.id} inactivo` })
+        continue
+      }
+      const adapter = adapterPara(sus.pasarela)
+      if (!adapter) {
+        suscripcionesErrores.push({ suscripcion_id: sus.id, error: `pasarela '${sus.pasarela}' sin adaptador en Fase 1` })
+        continue
+      }
+      try {
+        suscripcionesResultados.push(
+          await correrCicloSuscripcion(sus, plan, {
+            db: supabase,
+            adapter,
+            facturar: facturaOmitidaFase1,
+            politica: POLITICA_FASE_1,
+            hoy: hoyStr,
+          }),
+        )
+      } catch (err) {
+        suscripcionesErrores.push({ suscripcion_id: sus.id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+  } catch (err) {
+    suscripcionesErrores.push({ suscripcion_id: '*', error: err instanceof Error ? err.message : String(err) })
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -335,5 +412,16 @@ export async function GET(req: NextRequest) {
     cuentas_emitidas: cuentasEmitidas,
     cuentas_omitidas: cuentasOmitidas,
     cuentas_errores: cuentasErrores,
+    suscripciones_procesadas: suscripcionesResultados.length,
+    suscripciones_resultados: suscripcionesResultados.map((r) => ({
+      suscripcion_id: r.suscripcionId,
+      accion: r.accion,
+      cuota: r.numeroCuota,
+      cobro_creado: r.cobroCreado,
+      estado: `${r.estadoAntes} → ${r.estadoDespues}`,
+      proximo_cobro: r.proximoCobro,
+      detalle: r.detalle ?? null,
+    })),
+    suscripciones_errores: suscripcionesErrores,
   })
 }

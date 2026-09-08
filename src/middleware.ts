@@ -109,8 +109,14 @@ export async function middleware(request: NextRequest) {
       return withAuthCookies(NextResponse.redirect(new URL(landing, request.url)), supabaseResponse)
     }
 
-    // Guard: contador can only access /revision
-    if (pathname !== '/revision' && !pathname.startsWith('/revision/') && !pathname.startsWith('/auth/')) {
+    // Guard: contador can only access /revision.
+    // `/suscripcion-suspendida` queda fuera del guard: es a donde manda el layout de
+    // la app cuando el workspace está suspendido, y sin esta excepción un contador
+    // rebotaría entre /revision (layout → suspendida) y aquí (guard → /revision).
+    if (
+      pathname !== '/revision' && !pathname.startsWith('/revision/') && !pathname.startsWith('/auth/') &&
+      pathname !== '/suscripcion-suspendida'
+    ) {
       const { data: tenantProfile } = await supabase
         .from('profiles')
         .select('role')
