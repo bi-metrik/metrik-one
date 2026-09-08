@@ -528,6 +528,13 @@ export async function traducirErrorPublico(error: string): Promise<string> {
     case 'padre_no_encontrado':
     case 'persona_no_encontrada':
       return 'Ese socio ya no está. Recarga la página para ver la lista al día.';
+    // Se firmó desde otra pestaña, o entre que se pintó la pantalla y se hizo
+    // clic. Lo que se firmó no se cambia: hay que pedirle el cambio a quien
+    // envió el enlace, no forzarlo por acá.
+    case 'firmado':
+      return 'Este expediente ya está firmado y no se puede cambiar. Si algo quedó mal, escríbele a quien te envió el enlace.';
+    case 'cerrado':
+      return 'Este trámite ya se cerró.';
     default:
       return 'Algo salió mal. Vuelve a intentar, y si sigue igual escríbele a quien te envió el enlace.';
   }

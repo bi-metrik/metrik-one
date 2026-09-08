@@ -38,6 +38,7 @@ import {
   POR_QUE_LOS_SOCIOS,
   SLOT_SOPORTE_BF,
   TAMANO_MAX_MB,
+  expedienteSellado,
   faltaEnFormSocio,
   faltasDe,
   fraseFalta,
@@ -398,6 +399,7 @@ export default function FormularioClient({
   }
 
   const pasos = pasosVisibles(v.pideCadena);
+  const sellado = expedienteSellado(v.paso);
   const pasoIdx = pasos.indexOf(v.paso);
 
   return (
@@ -713,6 +715,7 @@ export default function FormularioClient({
                             <span className="text-xs text-[#4B5563] shrink-0">
                               {textoParticipacion(soc)}
                             </span>
+                            {!sellado && (
                             <button
                               type="button"
                               disabled={pending}
@@ -721,6 +724,8 @@ export default function FormularioClient({
                             >
                               Editar
                             </button>
+                            )}
+                            {!sellado && (
                             <button
                               type="button"
                               disabled={pending}
@@ -730,6 +735,7 @@ export default function FormularioClient({
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
+                            )}
                           </div>
 
                           {falta.map((f) => (
@@ -763,6 +769,7 @@ export default function FormularioClient({
                                 }}
                               />
                               <div className="flex items-center gap-3 mt-1.5">
+                                {!sellado && (
                                 <button
                                   type="button"
                                   disabled={pending || subiendoSoporte === soc.persona_id}
@@ -778,12 +785,17 @@ export default function FormularioClient({
                                   )}
                                   {soc.tiene_soporte ? 'Cambiar el soporte' : 'Subir el soporte'}
                                 </button>
+                                )}
+                                {sellado && !soc.tiene_soporte && (
+                                  <span className="text-xs text-[#9CA3AF]">No se recibió</span>
+                                )}
                                 {soc.tiene_soporte && (
                                   <span className="inline-flex items-center gap-1 text-xs text-[#059669]">
                                     <Check className="w-3.5 h-3.5" /> Recibido
                                   </span>
                                 )}
                               </div>
+                              {!sellado && (
                               <button
                                 type="button"
                                 disabled={pending}
@@ -792,6 +804,7 @@ export default function FormularioClient({
                               >
                                 <Plus className="w-3.5 h-3.5" /> Agregar socio de {soc.nombre}
                               </button>
+                              )}
                             </div>
                           )}
 
@@ -823,7 +836,7 @@ export default function FormularioClient({
                   </div>
                 )}
 
-                {formSocio === null ? (
+                {sellado ? null : formSocio === null ? (
                   <button
                     type="button"
                     disabled={pending}

@@ -252,6 +252,18 @@ export function otpCompleto(v: string): boolean {
  * cada uno tiene su frase. Un "algo salió mal" acá deja a alguien esperando un
  * correo que no va a llegar, sin saber que tiene que hacer otra cosa.
  */
+/**
+ * El expediente ya se firmó: Valida lo selló y a partir de ahí devuelve 409
+ * `firmado` a cualquier cambio.
+ *
+ * La pantalla tiene que dejar de ofrecer lo que el servidor va a rechazar. No
+ * es cosmética: un botón que existe y falla le dice a la contraparte que el
+ * trámite está roto, cuando lo que pasa es que ya terminó.
+ */
+export function expedienteSellado(paso: PasoPublico): boolean {
+  return paso === 'listo';
+}
+
 export function mensajeErrorFirma(codigo: string, esperarSegundos?: number | null): string {
   switch (codigo) {
     case 'sin_correo_de_contraparte':
@@ -263,6 +275,8 @@ export function mensajeErrorFirma(codigo: string, esperarSegundos?: number | nul
         ? `Ya te mandamos un código. Espera ${esperarSegundos} segundos para pedir otro.`
         : 'Ya te mandamos un código. Espera un momento para pedir otro.';
     case 'ya_firmado':
+    // Valida sella el expediente al firmar: desde ahí ya no acepta cambios.
+    case 'firmado':
       return 'Este expediente ya está firmado.';
     case 'otp_incorrecto':
       return 'Ese código no es. Revísalo y vuelve a intentar.';
