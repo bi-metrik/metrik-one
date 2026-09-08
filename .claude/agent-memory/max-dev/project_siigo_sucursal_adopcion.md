@@ -5,8 +5,12 @@ metadata:
   type: project
 ---
 
-**PR [#550](https://github.com/bi-metrik/metrik-one/pull/550)** — checks en verde,
-**Mauricio decide el merge**: toca el camino de emisión de facturas electrónicas.
+**PR [#550](https://github.com/bi-metrik/metrik-one/pull/550)** — **MERGEADO** el
+2026-09-07 (`4a6706b` en `main`). Toca el camino de emisión de facturas electrónicas.
+
+⚠️ **Su guardián de duplicados ya no es el vigente:** el [[duplicado-hermanos-siigo]]
+(#561) lo acotó a las facturas que ningún negocio reclama, porque tal como quedó aquí
+bloqueaba a los negocios hermanos del mismo dueño y los dejaba sin salida.
 
 **Why:** Siigo resuelve el tercero de un documento por **identificación MÁS
 sucursal**, y el payload mandaba la sucursal 0 fija. Un tercero que vive en la

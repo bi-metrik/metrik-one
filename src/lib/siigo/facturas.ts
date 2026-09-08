@@ -103,20 +103,127 @@ export async function facturasDelClienteEnSiigo(
   }))
 }
 
+// ── Quién reclama cada factura ───────────────────────────────────────────────
+//
+// Una misma identificación puede tener VARIOS negocios en ONE (en SOENA, un
+// vehículo cada uno) y cada negocio se factura aparte. Por eso la pregunta
+// "¿esta factura ya es de alguien?" es la que separa un duplicado de verdad de
+// la factura del negocio hermano. Vive aquí arriba porque la usan las dos
+// pantallas: el guardián de duplicados y la adopción.
+
+/** Negocio de ONE que tiene una factura marcada en su metadata. */
+export interface ReclamoDeFactura {
+  negocio_id: string
+  /** Código visible del negocio, p. ej. "V0140". `null` si no lo tiene. */
+  codigo: string | null
+}
+
 /**
- * Marca cuáles de esas facturas son del mismo producto que se va a emitir.
+ * Quién reclama cada factura del workspace, indexado por id y por número.
  *
- * Puro y aparte porque es la decisión que antes estaba escondida dentro de un
- * `.filter()`: las del mismo producto son el duplicado evidente; las de otro
- * producto son la advertencia que el filtro viejo tiraba a la basura. Ninguna de
- * las dos deja emitir sin justificación escrita, pero la pantalla las cuenta
- * distinto y quien decide tiene que ver la diferencia.
+ * Se leen TODOS los negocios y se filtra en memoria en vez de consultar por la
+ * ruta jsonb: un filtro de PostgREST mal formado devolvería cero filas sin
+ * error, y aquí ese cero significa "esta factura está libre" — justo la
+ * afirmación que no puede salir de un fallo mudo.
+ */
+async function marcasDeFacturaDelWorkspace(
+  workspaceId: string,
+): Promise<Map<string, ReclamoDeFactura>> {
+  const svc = createServiceClient()
+  const filas = await traerTodo<{
+    id: string
+    codigo: string | null
+    siigo_factura: MarcaFactura | null
+  }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('negocios')
+      .select('id, codigo, siigo_factura:metadata->siigo_factura')
+      .eq('workspace_id', workspaceId)
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'siigo/marcas-de-factura' },
+  )
+
+  const porClave = new Map<string, ReclamoDeFactura>()
+  for (const f of filas) {
+    const marca = f.siigo_factura
+    if (!marca) continue
+    const dueno = { negocio_id: f.id, codigo: f.codigo }
+    // Se indexa por las DOS llaves: el id de Siigo es el vínculo fuerte, pero
+    // una marca vieja puede traerlo vacío y ahí el número es lo único que hay.
+    if (marca.siigo_id) porClave.set(`id:${marca.siigo_id}`, dueno)
+    if (marca.numero) porClave.set(`num:${marca.numero}`, dueno)
+  }
+  return porClave
+}
+
+/** ¿Quién reclama esta factura, si alguien? */
+function reclamanteDe(
+  f: FacturaEnSiigo,
+  porClave: Map<string, ReclamoDeFactura>,
+): ReclamoDeFactura | null {
+  return porClave.get(`id:${f.id}`) ?? porClave.get(`num:${f.name}`) ?? null
+}
+
+/** Factura del cliente que ya es de OTRO negocio. Contexto, no advertencia. */
+export interface FacturaHermana extends ReclamoDeFactura {
+  /** Número visible de la factura que ese negocio ya tiene, p. ej. "FV-2-290". */
+  numero: string
+}
+
+export interface ClasificacionDuplicados {
+  /**
+   * Facturas LIBRES: ningún negocio de ONE las tiene marcadas. Son las únicas
+   * que pueden ser este caso facturado dos veces, y las únicas que bloquean.
+   * `mismo_producto` separa el duplicado evidente de la advertencia.
+   */
+  duplicados: FacturaEnSiigo[]
+  /** Las que ya son de otro negocio del mismo cliente. */
+  hermanos: FacturaHermana[]
+}
+
+/**
+ * Separa las facturas del cliente en las que pueden ser un duplicado y las que
+ * ya tienen dueño.
+ *
+ * ⚠️ **Una factura que otro negocio ya reclama NO es evidencia de que este esté
+ * duplicado.** Cada negocio se factura independiente y cada factura queda atada a
+ * UN negocio; en SOENA un mismo cliente tiene un negocio por vehículo. Hasta el
+ * 2026-09-07 el guardián no hacía esa distinción y la pantalla quedaba sin salida:
+ * al facturar el segundo vehículo mostraba en rojo la factura del PRIMERO y mandaba
+ * a usar «Esta factura ya existe» — un botón que abajo salía deshabilitado, porque
+ * esa factura ya estaba en el otro negocio. Medido ese día sobre los 51 negocios
+ * abiertos pendientes de factura: **10 veían el aviso y en los 10 era espurio**
+ * (V0156, V0210, V0245, V0321, V0339, V0349, V0390, V0408, V0409, V0417), contra 6
+ * con al menos una factura libre (V0134, V0253, V0276, V0282, V0340, V0345).
+ *
+ * Lo que sí se conserva: entre las LIBRES, las del mismo producto son el duplicado
+ * evidente y las de otro producto la advertencia que el filtro viejo tiraba a la
+ * basura. Ninguna de las dos deja emitir sin justificación escrita.
+ *
+ * `negocioId` es el negocio que está por facturar: sus propias facturas no son
+ * hermanas de sí mismo. En la emisión no puede haber ninguna (la marca propia se
+ * comprueba antes), pero la clasificación no depende de ese orden.
  */
 export function clasificarDuplicados(
   facturas: FacturaEnSiigo[],
   productoCode: string,
-): FacturaEnSiigo[] {
-  return facturas.map(f => ({ ...f, mismo_producto: f.productos.includes(productoCode) }))
+  reclamos: Map<string, ReclamoDeFactura>,
+  negocioId?: string,
+): ClasificacionDuplicados {
+  const duplicados: FacturaEnSiigo[] = []
+  const hermanos: FacturaHermana[] = []
+  for (const f of facturas) {
+    const dueno = reclamanteDe(f, reclamos)
+    if (!dueno) {
+      duplicados.push({ ...f, mismo_producto: f.productos.includes(productoCode) })
+      continue
+    }
+    if (dueno.negocio_id === negocioId) continue
+    hermanos.push({ ...dueno, numero: f.name })
+  }
+  return { duplicados, hermanos }
 }
 
 export interface OpcionesEmision {
@@ -167,7 +274,13 @@ export type ResultadoEmision =
   | { ok: false; motivo: 'faltan_datos'; faltantes: string[] }
   | { ok: false; motivo: 'saldo_pendiente'; faltante: number }
   | { ok: false; motivo: 'ya_facturado_en_one'; numero: string }
-  | { ok: false; motivo: 'duplicado_en_siigo'; existentes: FacturaEnSiigo[] }
+  | {
+      ok: false; motivo: 'duplicado_en_siigo'
+      /** Facturas LIBRES del cliente: las que de verdad pueden ser este caso. */
+      existentes: FacturaEnSiigo[]
+      /** Las del mismo cliente que ya son de otro negocio. Contexto, no alarma. */
+      hermanos: FacturaHermana[]
+    }
   | { ok: false; motivo: 'error'; mensaje: string }
 
 /**
@@ -352,13 +465,18 @@ export async function emitirFacturaNegocio(
     // emitir: el filtro por producto era justo lo que dejó pasar el caso de V0345
     // (facturado a mano bajo el 22, a punto de re-facturarse bajo el 11). Ver
     // `facturasDelClienteEnSiigo`.
-    const existentes = clasificarDuplicados(
-      await facturasDelClienteEnSiigo(workspaceId, identificacion, ESPERA_429_EMISION_MS),
-      productoCode,
-    )
+    //
+    // Y solo retienen las LIBRES. La factura que otro negocio ya tiene marcada es
+    // del hermano —el otro vehículo del mismo dueño— y no dice nada sobre este
+    // caso: ni bloquea, ni pide justificación. Ver `clasificarDuplicados`.
+    const [enSiigo, reclamos] = await Promise.all([
+      facturasDelClienteEnSiigo(workspaceId, identificacion, ESPERA_429_EMISION_MS),
+      marcasDeFacturaDelWorkspace(workspaceId),
+    ])
+    const { duplicados, hermanos } = clasificarDuplicados(enSiigo, productoCode, reclamos, negocioId)
     const justificacion = opciones.justificacionDuplicado?.trim()
-    if (existentes.length > 0 && !justificacion) {
-      return { ok: false, motivo: 'duplicado_en_siigo', existentes }
+    if (duplicados.length > 0 && !justificacion) {
+      return { ok: false, motivo: 'duplicado_en_siigo', existentes: duplicados, hermanos }
     }
 
     // ── 5. Emitir ────────────────────────────────────────────────────────────
@@ -482,7 +600,7 @@ export interface FacturaAdoptable extends FacturaEnSiigo {
    * Negocio de ONE que ya la tiene marcada, si alguno. Marcarla en dos negocios
    * contaría el mismo ingreso dos veces, así que se muestra y no se deja escoger.
    */
-  reclamada_por: { negocio_id: string; codigo: string | null } | null
+  reclamada_por: ReclamoDeFactura | null
   /** Es la que este mismo negocio ya tiene marcada: adoptarla es RE-ARCHIVAR. */
   ya_es_de_este_negocio: boolean
 }
@@ -491,54 +609,6 @@ export type ResultadoListadoAdopcion =
   | { ok: true; identificacion: string; facturas: FacturaAdoptable[] }
   | { ok: false; motivo: 'sin_identificacion' }
   | { ok: false; motivo: 'error'; mensaje: string }
-
-/**
- * Quién reclama cada factura del workspace, indexado por id y por número.
- *
- * Se leen TODOS los negocios y se filtra en memoria en vez de consultar por la
- * ruta jsonb: un filtro de PostgREST mal formado devolvería cero filas sin
- * error, y aquí ese cero significa "esta factura está libre" — justo la
- * afirmación que no puede salir de un fallo mudo.
- */
-async function marcasDeFacturaDelWorkspace(
-  workspaceId: string,
-): Promise<Map<string, { negocio_id: string; codigo: string | null }>> {
-  const svc = createServiceClient()
-  const filas = await traerTodo<{
-    id: string
-    codigo: string | null
-    siigo_factura: MarcaFactura | null
-  }>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (d, h) => (svc as any)
-      .from('negocios')
-      .select('id, codigo, siigo_factura:metadata->siigo_factura')
-      .eq('workspace_id', workspaceId)
-      .order('id')
-      .range(d, h),
-    { etiqueta: 'siigo/marcas-de-factura' },
-  )
-
-  const porClave = new Map<string, { negocio_id: string; codigo: string | null }>()
-  for (const f of filas) {
-    const marca = f.siigo_factura
-    if (!marca) continue
-    const dueno = { negocio_id: f.id, codigo: f.codigo }
-    // Se indexa por las DOS llaves: el id de Siigo es el vínculo fuerte, pero
-    // una marca vieja puede traerlo vacío y ahí el número es lo único que hay.
-    if (marca.siigo_id) porClave.set(`id:${marca.siigo_id}`, dueno)
-    if (marca.numero) porClave.set(`num:${marca.numero}`, dueno)
-  }
-  return porClave
-}
-
-/** ¿Quién reclama esta factura, si alguien? */
-function reclamanteDe(
-  f: FacturaEnSiigo,
-  porClave: Map<string, { negocio_id: string; codigo: string | null }>,
-): { negocio_id: string; codigo: string | null } | null {
-  return porClave.get(`id:${f.id}`) ?? porClave.get(`num:${f.name}`) ?? null
-}
 
 /**
  * Todas las facturas que Siigo tiene para el cliente de este negocio, marcando

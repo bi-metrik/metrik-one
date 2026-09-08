@@ -31,6 +31,7 @@ import {
   facturasAdoptablesDelNegocio,
   type FacturaAdoptable,
   type FacturaEnSiigo,
+  type FacturaHermana,
   type MarcaFactura,
 } from '@/lib/siigo/facturas'
 import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
@@ -691,10 +692,16 @@ export interface ResultadoEmitir {
   archivada?: boolean
   error?: string
   /**
-   * Siigo ya tiene factura de este producto para el cliente. La pantalla debe
+   * Facturas del cliente que **ningún negocio reclama**. La pantalla debe
    * mostrarlas y pedir justificación; NO se emite hasta que alguien la escriba.
    */
   duplicados?: FacturaEnSiigo[]
+  /**
+   * Facturas del mismo cliente que ya son de OTRO negocio (el otro vehículo del
+   * mismo dueño). Van como contexto neutro al lado de las de arriba: no bloquean
+   * ni piden justificación, y por sí solas nunca detienen una emisión.
+   */
+  hermanos?: FacturaHermana[]
 }
 
 /**
@@ -816,7 +823,12 @@ export async function emitirFacturaDeNegocio(
   if (!r.ok) {
     switch (r.motivo) {
       case 'duplicado_en_siigo':
-        return { ok: false, duplicados: r.existentes, error: 'Siigo ya tiene una factura de este servicio para el cliente' }
+        return {
+          ok: false,
+          duplicados: r.existentes,
+          hermanos: r.hermanos,
+          error: 'Siigo ya tiene una factura de este cliente que ningún negocio reclama',
+        }
       case 'saldo_pendiente': {
         const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
         return { ok: false, error: `Falta recaudar ${fmt.format(r.faltante)} del honorario` }
