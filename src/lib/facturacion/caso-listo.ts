@@ -62,8 +62,11 @@ export function bandaMaterialidadFacturacion(honorario: number | null): number {
  *   `cubierto`         — el honorario entró. Lista y botón directo.
  *   `descuadre_menor`  — falta un residuo dentro de la banda. Lista, marcado, y
  *                        se emite solo con justificación escrita de la financiera.
- *   `retenido`         — debe plata de verdad. NO se lista: la cola es lo que se
- *                        puede resolver hoy, y cobrar no se resuelve aquí.
+ *   `retenido`         — debe plata de verdad. NO se factura: la emisión la
+ *                        bloquea el servidor sin apelación. Se LISTA aparte, en
+ *                        su propia sección, porque una factura que Siigo ya tiene
+ *                        se puede adoptar aunque el recaudo no haya entrado
+ *                        (enmienda de Mauricio, 2026-09-08).
  *
  * Medido en producción SOENA el 2026-09-08 sobre los 46 pendientes sin factura:
  * 18 cubiertos, **1 en la banda (V0179: faltan $3.000 sobre $637.500, 0,47%)** y
@@ -113,10 +116,13 @@ export function casoListoParaFacturar(caso: CasoFacturable): boolean {
  * seguirían faltando el día que llegue.
  *
  * ⚠️ El recaudo ya NO aparece como un faltante más:
- *   - `retenido` no se lista en ninguna parte, así que una etiqueta suya no la
- *     leería nadie;
  *   - `descuadre_menor` nombra el residuo CON el monto, porque el trabajo no es
- *     conseguir esa plata sino decidir por escrito que se factura sin ella.
+ *     conseguir esa plata sino decidir por escrito que se factura sin ella;
+ *   - `retenido` tampoco entra aquí, pero por la razón CONTRARIA: no es una
+ *     etiqueta más en una fila de etiquetas, es el estado entero de la tarjeta.
+ *     Su razón la da `razonDeRetencion` y la pantalla la pinta en grande. Meterla
+ *     como un chip amarillo más al lado de "dirección" o "email" es exactamente
+ *     el problema que la enmienda del 2026-09-08 vino a arreglar.
  */
 export function faltantesDelCaso(caso: CasoFacturable): string[] {
   const delCliente = caso.sin_rut ? ['RUT sin cargar'] : caso.faltan_cliente
@@ -127,9 +133,59 @@ export function faltantesDelCaso(caso: CasoFacturable): string[] {
   return faltas
 }
 
+/**
+ * Qué parte del honorario falta por recaudar, en porcentaje. `null` cuando no
+ * hay honorario del que sacarlo.
+ *
+ * Puro: no toca DB ni red.
+ */
+export function porcentajeFaltante(
+  caso: Pick<CasoFacturable, 'falta_saldo' | 'honorario'>,
+): number | null {
+  const { honorario } = caso
+  if (honorario == null || !Number.isFinite(honorario) || honorario <= 0) return null
+  if (!Number.isFinite(caso.falta_saldo)) return null
+  return (caso.falta_saldo / honorario) * 100
+}
+
+/**
+ * Por qué está retenido el caso, con la plata y el porcentaje.
+ *
+ * "falta recaudar $425.000 de $850.000 (50%)".
+ *
+ * ⚠️ El porcentaje NO es adorno: es la mitad de la decisión. Hasta el 2026-09-08
+ * los retenidos se pintaban todos con la misma etiqueta "Falta: recaudo del
+ * honorario", así que deber $3.000 y deber $425.000 se leían igual y el operador
+ * no tenía cómo priorizar. Medido ese día en SOENA, los 27 retenidos van del
+ * 11,8% al 100% del honorario: son problemas de tamaños muy distintos.
+ *
+ * ⚠️ Un decimal como máximo, y solo cuando lo tiene. "50%" y "11,8%" se leen de
+ * un vistazo; "49,98039%" hay que descifrarlo, y esa precisión no cambia ninguna
+ * decisión.
+ *
+ * ⚠️ Sin honorario aprobado no se inventa un porcentaje sobre cero: se dice el
+ * monto y nada más. No debería pasar (sin honorario la resta no da retenido),
+ * pero la frase se arma de lo que hay, no de lo que se supone.
+ *
+ * Puro: no toca DB ni red.
+ */
+export function razonDeRetencion(
+  caso: Pick<CasoFacturable, 'falta_saldo' | 'honorario'>,
+): string {
+  const pct = porcentajeFaltante(caso)
+  const base = `falta recaudar ${fmtCOP(caso.falta_saldo)}`
+  if (pct == null || caso.honorario == null) return `${base} del honorario`
+  return `${base} de ${fmtCOP(caso.honorario)} (${fmtPorcentaje(pct)})`
+}
+
 /** Pesos colombianos sin decimales, para los textos de este módulo. */
 function fmtCOP(v: number): string {
   return new Intl.NumberFormat('es-CO', {
     style: 'currency', currency: 'COP', maximumFractionDigits: 0,
   }).format(v)
+}
+
+/** Porcentaje con coma decimal y a lo sumo un decimal: "50%", "11,8%". */
+function fmtPorcentaje(v: number): string {
+  return `${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(v)}%`
 }

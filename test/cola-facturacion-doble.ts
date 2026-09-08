@@ -12,8 +12,38 @@
 // `createServiceClient` a `servicioFalso` por su cuenta.
 // ============================================================
 
+import type { CasoPorFacturar } from '@/lib/actions/facturacion-actions'
+
 export const WS = 'ws-soena'
 export const LINEA = 'linea-ve'
+
+/**
+ * Un caso de la cola YA ARMADO, para las pruebas que ejercitan la pantalla sin
+ * pasar por el servidor.
+ *
+ * Vive aquí y no en cada archivo de pruebas porque `CasoPorFacturar` crece: el
+ * 2026-09-08 ganó `estado_recaudo`, `banda_materialidad` y `retenido_por_recaudo`
+ * en dos cambios seguidos, y cada copia del literal hay que arreglarla aparte.
+ *
+ * Por defecto: cuadrado, con datos completos y listo para facturar. Lo que la
+ * prueba quiera romper, lo pasa por `p`.
+ */
+export function casoFalso(p: Partial<CasoPorFacturar> = {}): CasoPorFacturar {
+  return {
+    negocio_id: 'x', codigo: null, nombre: null, etapa: null, etapa_numero: null,
+    identificacion: null, cliente: null, telefono: null, email: null,
+    honorario: null, valor_upme: null,
+    faltan_factura: [], faltan_cliente: [], sin_rut: false,
+    ya_facturado: false, factura_numero: null, factura_sin_pdf: false,
+    recibo_numero: null,
+    concepto: { code: '22', nombre: null, servicio: null, porDefecto: true },
+    base_gravable: null, falta_saldo: 0,
+    estado_recaudo: 'cubierto', banda_materialidad: 1_000,
+    retenido_por_recaudo: false,
+    descartado: null,
+    ...p,
+  }
+}
 
 /** Tope de filas del servidor. El doble lo respeta: es el defecto que se prueba. */
 export const MAX_ROWS = 1000

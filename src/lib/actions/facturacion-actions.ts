@@ -150,15 +150,23 @@ export interface CasoPorFacturar {
   /**
    * En qué lado del recaudo cae el caso: `cubierto`, `descuadre_menor` o
    * `retenido`. El criterio vive en `lib/facturacion/caso-listo`.
-   *
-   * ⚠️ Un `retenido` NUNCA llega a la pantalla dentro de `casos`: se filtra en el
-   * servidor. El campo existe igual porque un caso ya facturado o descartado sí
-   * puede estarlo (hoy ninguno, medido el 2026-09-08), y porque el tipo se
-   * comparte con el criterio puro.
    */
   estado_recaudo: EstadoRecaudo
   /** Hasta cuánto puede faltar sin retener: `max(tolerancia, 1% del honorario)`. */
   banda_materialidad: number
+  /**
+   * El caso va a la SECCIÓN DE RETENIDOS de la pantalla: todavía debe honorario y
+   * sigue siendo candidato (ni facturado ni descartado).
+   *
+   * ⚠️ Lo decide el SERVIDOR y no la pantalla, aunque los dos ingredientes viajen
+   * en el mismo objeto. `estado_recaudo === 'retenido'` NO alcanza: un caso ya
+   * facturado o descartado puede estar retenido y pertenece a su propia vista, no
+   * a esta sección — es un REGISTRO, no un candidato. Ese matiz escrito dos veces
+   * es como el contador de la bandeja y la lista se desincronizan, que es el
+   * error que este módulo lleva documentado desde que existe. Invariante:
+   * `totales.retenidos_por_recaudo.n === casos.filter(c => c.retenido_por_recaudo).length`.
+   */
+  retenido_por_recaudo: boolean
   /** Sacado de la cola a mano durante la puesta al día. Reversible. */
   descartado: { at: string; por: string | null; motivo: string | null } | null
 }
@@ -186,13 +194,13 @@ export interface ColaFacturacion {
     descartados: number
     valor_listo: number
     /**
-     * Los que NO se listan porque todavía deben honorario.
+     * Los que todavía deben honorario. Se listan en su propia sección y NO se
+     * pueden facturar: la emisión la bloquea el servidor sin apelación.
      *
-     * ⚠️ Obligatorio, no informativo. Este panel es el ÚNICO lugar donde esos
-     * casos se veían juntos: si desaparecen sin dejar rastro nadie los vuelve a
-     * mirar, y son $18,5M de honorarios con $13,7M por recaudar (medido el
-     * 2026-09-08). Un contador que se puede leer de un vistazo es lo que separa
-     * "sacarlos de la cola" de "esconderlos".
+     * ⚠️ NO entran en `listos` ni en `incompletos`. La bandeja cuenta el trabajo
+     * que se puede hacer hoy, y mostrarlos no puede inflarla — el badge de la
+     * pestaña sale de esos dos números. Son $18,5M de honorarios con $13,7M por
+     * recaudar (medido el 2026-09-08, 27 casos).
      *
      * `valor` es el honorario que no va a salir facturado; `falta` es lo que hay
      * que cobrar para que salga. Van los dos porque un solo `$X` al lado de
@@ -548,6 +556,12 @@ async function armarColaFacturacion(
     )
     const marcaFactura = (n.metadata?.siigo_factura ?? null) as MarcaFactura | null
     const estado = estadoDeRecaudo({ falta_saldo: faltante, honorario })
+    // Dos fuentes para "ya facturado": el bloque donde se carga el PDF y la marca
+    // que deja la emisión desde aquí. La segunda hace falta porque emitir NO
+    // obliga a cargar el soporte, y sin ella el caso volvería a la cola listo
+    // para re-facturarse.
+    const yaFacturado = facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero
+    const descartado = (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null
 
     return {
       negocio_id: n.id,
@@ -575,11 +589,7 @@ async function armarColaFacturacion(
       // ausencia cubre las dos formas de no tenerlo: sin documento cargado y
       // con documento cargado del que no se pudo extraer la cédula o el NIT.
       sin_rut: !rutPorNegocio.has(n.id),
-      // Dos fuentes: el bloque donde se carga el PDF de la factura, y la marca que
-      // deja la emisión desde aquí. La segunda hace falta porque emitir NO obliga a
-      // cargar el soporte, y sin ella el caso volvería a la cola listo para
-      // re-facturarse.
-      ya_facturado: facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero,
+      ya_facturado: yaFacturado,
       factura_numero: marcaFactura?.numero ?? null,
       factura_sin_pdf: !!marcaFactura?.numero && !marcaFactura.archivo_url,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
@@ -587,7 +597,10 @@ async function armarColaFacturacion(
       falta_saldo: faltante,
       estado_recaudo: estado,
       banda_materialidad: bandaMaterialidadFacturacion(honorario),
-      descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
+      // Solo los CANDIDATOS. Un facturado o un descartado que deba plata sigue
+      // siendo un registro de su propia vista, no un retenido de esta sección.
+      retenido_por_recaudo: estado === 'retenido' && !yaFacturado && descartado == null,
+      descartado,
     }
   })
 
@@ -599,34 +612,38 @@ async function armarColaFacturacion(
   const listo = (c: CasoPorFacturar) => casoListoParaFacturar(c)
   const fuera = (c: CasoPorFacturar) => c.ya_facturado || c.descartado != null
 
-  // ── El recaudo del honorario es CONDICIÓN DE ENTRADA ──────────────────────
-  // Quien todavía debe plata de verdad sale de la cola. Se filtra AQUÍ y no en la
-  // pantalla: el conteo de la bandeja y la lista salen del mismo arreglo, y
-  // partirlos es como se desincronizan (es lo que el comentario de `caso-listo`
-  // documenta desde que existe).
+  // ── El recaudo del honorario decide DÓNDE va el caso, no si existe ────────
+  // Quien todavía debe plata de verdad no se puede facturar (el servidor bloquea
+  // la emisión sin apelación), pero SÍ viaja a la pantalla: va a una sección
+  // propia, marcado con `retenido_por_recaudo`, y ahí se le puede adoptar una
+  // factura que Siigo ya tenga. Sacarlo de `casos`, como se hizo el 2026-09-08,
+  // se llevó por delante esa adopción — y adoptar no emite nada, así que nunca
+  // dependió del recaudo (enmienda de Mauricio, el mismo día).
   //
-  // ⚠️ Solo entre los PENDIENTES. Un caso ya facturado o descartado no es un
-  // candidato, es un registro: sacarlo de `casos` lo borraría de las vistas "Ya
-  // facturados" y "Descartados" y dejaría `totales.ya_facturados` mintiendo.
-  // Hoy no cambia nada (medido el 2026-09-08: 0 de 266 facturados y 0 de 0
-  // descartados están retenidos), pero es latente — basta con que a un caso
-  // facturado le anulen un cobro.
-  const retenidos = casos.filter(c => !fuera(c) && c.estado_recaudo === 'retenido')
-  const retenidosIds = new Set(retenidos.map(c => c.negocio_id))
-  const visibles = casos.filter(c => !retenidosIds.has(c.negocio_id))
+  // ⚠️ La marca la pone el SERVIDOR. La pantalla agrupa por el booleano y no lo
+  // recalcula: el conteo de la bandeja y las listas salen del mismo arreglo, y
+  // partir el criterio en dos es como se desincronizan.
+  const retenidos = casos.filter(c => c.retenido_por_recaudo)
 
-  visibles.sort((a, b) => {
+  casos.sort((a, b) => {
     if (fuera(a) !== fuera(b)) return fuera(a) ? 1 : -1
+    // Los retenidos al final de los pendientes: quien lee esto de corrido tiene
+    // que encontrar primero lo que puede resolver hoy.
+    if (a.retenido_por_recaudo !== b.retenido_por_recaudo) return a.retenido_por_recaudo ? 1 : -1
     if (listo(a) !== listo(b)) return listo(a) ? -1 : 1
     return (b.honorario ?? 0) - (a.honorario ?? 0)
   })
 
-  // Los pendientes que SÍ se listan. Los retenidos ya salieron de `visibles`, así
-  // que `incompletos` cuenta a quien le falta un dato, no a quien debe plata.
-  const pendientes = visibles.filter(c => !fuera(c))
+  // Los pendientes ACCIONABLES: ni facturados, ni descartados, ni retenidos.
+  //
+  // ⚠️ De aquí salen `listos` e `incompletos`, y el badge de la pestaña es la
+  // suma de los dos. Un retenido no es "le falta un dato" (eso se arregla
+  // tecleando) ni es trabajo de hoy: contarlo inflaría la bandeja justo por
+  // haberlo hecho visible, que es lo contrario de lo que se pidió.
+  const pendientes = casos.filter(c => !fuera(c) && !c.retenido_por_recaudo)
   return {
     data: {
-      casos: visibles,
+      casos,
       desde_etapa_numero: desde,
       siigo_configurado,
       descarte_abierto: ventanaDescarteAbierta(),
@@ -635,8 +652,8 @@ async function armarColaFacturacion(
       totales: {
         listos: pendientes.filter(listo).length,
         incompletos: pendientes.filter(c => !listo(c)).length,
-        ya_facturados: visibles.filter(c => c.ya_facturado).length,
-        descartados: visibles.filter(c => c.descartado != null && !c.ya_facturado).length,
+        ya_facturados: casos.filter(c => c.ya_facturado).length,
+        descartados: casos.filter(c => c.descartado != null && !c.ya_facturado).length,
         valor_listo: pendientes.filter(listo).reduce((s, c) => s + (c.honorario ?? 0), 0),
         retenidos_por_recaudo: {
           n: retenidos.length,

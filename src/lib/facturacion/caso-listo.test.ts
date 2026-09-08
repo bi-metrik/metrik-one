@@ -34,6 +34,8 @@ import {
   casoListoParaFacturar,
   estadoDeRecaudo,
   faltantesDelCaso,
+  porcentajeFaltante,
+  razonDeRetencion,
 } from './caso-listo'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 
@@ -185,9 +187,11 @@ describe('faltantesDelCaso', () => {
     expect(f).toEqual(['identificación'])
   })
 
-  it('un caso RETENIDO no nombra el recaudo: ya no se lista en ninguna parte', () => {
-    // Antes decía "recaudo del honorario". Ahora el retenido sale de la cola en el
-    // servidor, así que esa etiqueta no la leería nadie.
+  it('un caso RETENIDO no nombra el recaudo entre los chips', () => {
+    // No por invisible, sino al revés: desde la enmienda del 2026-09-08 el
+    // retenido SÍ se lista, y su razón es el estado entero de la tarjeta
+    // (`razonDeRetencion`), no un chip amarillo al lado de "email". Meterla aquí
+    // la devolvería al tamaño de letra que causó el problema original.
     expect(faltantesDelCaso({ ...base, falta_saldo: 250_000 })).toEqual([])
   })
 
@@ -234,5 +238,59 @@ describe('faltantesDelCaso — sin RUT se nombra la causa, no las consecuencias'
   it('sigue sin estar listo para facturar', () => {
     // La etiqueta cambia lo que se lee, no el gate: sin identificación no hay tercero.
     expect(casoListoParaFacturar(sinRut)).toBe(false)
+  })
+})
+
+/**
+ * Por qué está retenido, con la plata y el porcentaje.
+ *
+ * Los casos son REALES, medidos en producción SOENA el 2026-09-08 sobre los 27
+ * retenidos: V0406 es el más leve (11,8%), V0224 el ejemplo del medio ($425.000
+ * de $850.000) y V0390 uno de los 14 que no han pagado un peso.
+ *
+ * ⚠️ El porcentaje no es adorno: hasta esta enmienda los 27 se pintaban con la
+ * MISMA etiqueta ("Falta: recaudo del honorario"), así que deber $50.000 y deber
+ * $850.000 se leían igual. Ninguno de los 27 tiene honorario nulo o en cero.
+ *
+ * ⚠️ Mutaciones del 2026-09-08 sobre estas funciones; ninguna quedó huérfana:
+ *
+ *   la razón no dice el porcentaje ............... 3 pruebas
+ *   la razón no dice la plata .................... 1
+ *   sin guarda de honorario nulo/no numérico ..... 2
+ */
+describe('razonDeRetencion', () => {
+  it('V0224: dice el monto, el honorario y el porcentaje', () => {
+    const r = razonDeRetencion({ falta_saldo: 425_000, honorario: 850_000 })
+    expect(r).toContain('425.000')
+    expect(r).toContain('850.000')
+    expect(r).toContain('(50%)')
+  })
+
+  it('V0406, el más leve, y V0390, que no ha pagado nada, se leen distinto', () => {
+    // Es el punto entero de la enmienda: son problemas de tamaños muy distintos.
+    expect(razonDeRetencion({ falta_saldo: 50_000, honorario: 425_000 })).toContain('(11,8%)')
+    expect(razonDeRetencion({ falta_saldo: 850_000, honorario: 850_000 })).toContain('(100%)')
+  })
+
+  it('un decimal como máximo: la precisión de más no cambia ninguna decisión', () => {
+    // V0399 en crudo es 54,12996...%
+    expect(razonDeRetencion({ falta_saldo: 414_094, honorario: 765_000 })).toContain('(54,1%)')
+  })
+
+  it('sin honorario aprobado no se inventa un porcentaje sobre cero', () => {
+    // No debería pasar (sin honorario la resta no da retenido), pero la frase se
+    // arma de lo que hay: decir "de $0 (Infinity%)" sería peor que no decirlo.
+    expect(razonDeRetencion({ falta_saldo: 250_000, honorario: null })).toBe(
+      razonDeRetencion({ falta_saldo: 250_000, honorario: 0 }),
+    )
+    expect(razonDeRetencion({ falta_saldo: 250_000, honorario: null })).toContain('del honorario')
+    expect(razonDeRetencion({ falta_saldo: 250_000, honorario: null })).not.toContain('%')
+  })
+
+  it('porcentajeFaltante devuelve null cuando no hay de qué sacarlo', () => {
+    expect(porcentajeFaltante({ falta_saldo: 100, honorario: null })).toBeNull()
+    expect(porcentajeFaltante({ falta_saldo: 100, honorario: 0 })).toBeNull()
+    expect(porcentajeFaltante({ falta_saldo: 100, honorario: -5 })).toBeNull()
+    expect(porcentajeFaltante({ falta_saldo: 425_000, honorario: 850_000 })).toBe(50)
   })
 })

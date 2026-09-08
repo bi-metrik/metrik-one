@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition, type Dispatch, type SetStateAction } from 'react'
+import { useMemo, useRef, useState, useTransition, type Dispatch, type SetStateAction } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -35,7 +35,7 @@ import {
   restaurarEnFacturacion,
 } from '@/lib/actions/facturacion-actions'
 import type { FacturaAdoptable, FacturaEnSiigo, FacturaHermana } from '@/lib/siigo/facturas'
-import { casoListoParaFacturar, faltantesDelCaso } from '@/lib/facturacion/caso-listo'
+import { casoListoParaFacturar, faltantesDelCaso, razonDeRetencion } from '@/lib/facturacion/caso-listo'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 import type { ControlRecibos } from '@/lib/actions/recibos-control-actions'
@@ -963,12 +963,48 @@ export function filtrarCasos(casos: CasoPorFacturar[], term: string): CasoPorFac
   })
 }
 
+/**
+ * ¿La tarjeta ofrece EMITIR la factura?
+ *
+ * ⚠️ Espeja el gate del servidor a propósito. `emitirFactura` bloquea sin
+ * apelación cuando el faltante supera la banda (`motivo: 'saldo_pendiente'`, y
+ * ninguna justificación lo abre): ofrecer el botón ahí sería prometer algo que va
+ * a ser rechazado, y el operador aprendería que el panel miente. El caso en la
+ * BANDA sí lo ofrece — ese se abre con justificación escrita.
+ */
+export function ofreceEmitirFactura(caso: CasoPorFacturar, siigoConfigurado: boolean): boolean {
+  if (!siigoConfigurado) return false
+  if (caso.ya_facturado || caso.descartado != null) return false
+  if (caso.faltan_factura.length > 0 || caso.faltan_cliente.length > 0) return false
+  return caso.estado_recaudo !== 'retenido'
+}
+
+/**
+ * ¿La tarjeta ofrece ADOPTAR una factura que Siigo ya tiene?
+ *
+ * ⚠️ NO se gatea por saldo, y esa es la mitad que la enmienda del 2026-09-08 vino
+ * a devolver. Una factura que ya existe en Siigo existe pase lo que pase con el
+ * recaudo, y traer su PDF al bloque no emite nada: esperar a que el cliente pague
+ * dejaría el expediente incompleto por una razón que no tiene que ver. Entre el
+ * 2026-09-08 y esa enmienda los retenidos no llegaban a la pantalla y perdieron
+ * esta acción sin que nadie lo decidiera.
+ */
+export function ofreceAdoptarFactura(caso: CasoPorFacturar, siigoConfigurado: boolean): boolean {
+  if (!siigoConfigurado) return false
+  if (caso.descartado != null) return false
+  return !caso.ya_facturado || caso.factura_sin_pdf
+}
+
 function TabFacturacion(
   { cola, onVerRetenidos }: { cola: ColaFacturacion; onVerRetenidos: () => void },
 ) {
   const router = useRouter()
   const [vista, setVista] = useState<VistaFact>('pendientes')
   const [q, setQ] = useState('')
+  // Colapsada de entrada: lo primero que se tiene que ver es lo accionable. Se
+  // abre desde el contador de arriba o cuando la búsqueda cae adentro.
+  const [retenidosAbiertos, setRetenidosAbiertos] = useState(false)
+  const seccionRetenidos = useRef<HTMLDivElement>(null)
 
   if (cola.desde_etapa_numero == null) {
     return (
@@ -990,8 +1026,27 @@ function TabFacturacion(
   const encontrados = filtrarCasos(cola.casos, term)
   const facturados = encontrados.filter(c => c.ya_facturado)
   const descartados = encontrados.filter(c => !c.ya_facturado && c.descartado != null)
-  const pendientes = encontrados.filter(c => !c.ya_facturado && c.descartado == null)
+  // Los retenidos van aparte de los accionables. La marca la trae el servidor:
+  // aquí solo se agrupa por ella, para que la bandeja y las dos listas cuenten
+  // exactamente lo mismo.
+  const retenidos = encontrados.filter(c => c.retenido_por_recaudo)
+  const pendientes = encontrados.filter(
+    c => !c.ya_facturado && c.descartado == null && !c.retenido_por_recaudo,
+  )
   const visibles = vista === 'facturados' ? facturados : vista === 'descartados' ? descartados : pendientes
+
+  // Buscar un caso que existe y no encontrarlo se lee como que el buscador está
+  // roto. Si lo tecleado cae entre los retenidos, la sección se abre sola.
+  const abiertaLaSeccion = retenidosAbiertos || (term !== '' && retenidos.length > 0)
+
+  const abrirRetenidos = () => {
+    setVista('pendientes')
+    setRetenidosAbiertos(true)
+    // Van debajo de los accionables: sin esto, el botón parecería no hacer nada.
+    requestAnimationFrame(() => {
+      seccionRetenidos.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
 
   return (
     <div>
@@ -1010,31 +1065,40 @@ function TabFacturacion(
         ))}
       </div>
 
-      {/* ── Los que NO están en la lista ────────────────────────────────────
-          El honorario recaudado es condición de entrada a esta cola: quien todavía
-          debe plata de verdad no aparece abajo. Pero este panel era el ÚNICO lugar
-          donde esos casos se veían juntos, así que sacarlos sin dejar rastro los
-          borra del mapa. El contador es lo que separa "sacarlos de la cola" de
-          "esconderlos", y por eso no se puede quitar ni colapsar. */}
+      {/* ── Los que NO se pueden facturar todavía ───────────────────────────
+          El contador es lo que separa "apartarlos" de "esconderlos", y por eso no
+          se puede quitar ni colapsar. Lleva a los dos sitios donde sirven, que no
+          son el mismo trabajo: aquí abajo, para adoptarles una factura que Siigo
+          ya tenga; y en Saldos, para ir a cobrar. */}
       {cola.totales.retenidos_por_recaudo.n > 0 && (
         <div className="mb-4 flex flex-wrap items-start justify-between gap-2 rounded-lg border px-3 py-2"
              style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
           <div className="text-[12px]" style={{ color: '#92400E' }}>
             <strong style={{ color: '#78350F' }}>
-              {cola.totales.retenidos_por_recaudo.n} casos no aparecen en esta lista
+              {cola.totales.retenidos_por_recaudo.n} casos retenidos por recaudo
             </strong>{' '}
-            porque todavía deben honorario: {fmtCOP(cola.totales.retenidos_por_recaudo.valor)} por
-            facturar, de los cuales faltan {fmtCOP(cola.totales.retenidos_por_recaudo.falta)} por
-            recaudar. No se factura antes de cobrar; cobrar no se resuelve aquí.
+            no se pueden facturar todavía: {fmtCOP(cola.totales.retenidos_por_recaudo.valor)} de
+            honorarios, con {fmtCOP(cola.totales.retenidos_por_recaudo.falta)} por recaudar. Van
+            en su propia sección, abajo. No se factura antes de cobrar; cobrar no se resuelve aquí.
           </div>
-          <button
-            type="button"
-            onClick={onVerRetenidos}
-            className="shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] font-semibold"
-            style={{ borderColor: '#FCD34D', color: '#92400E', backgroundColor: '#FFFFFF' }}
-          >
-            Ver en Saldos
-          </button>
+          <div className="flex shrink-0 flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={abrirRetenidos}
+              className="rounded-md px-2.5 py-1 text-[11.5px] font-semibold text-white"
+              style={{ backgroundColor: '#B45309' }}
+            >
+              Ver los {cola.totales.retenidos_por_recaudo.n} retenidos
+            </button>
+            <button
+              type="button"
+              onClick={onVerRetenidos}
+              className="rounded-md border px-2.5 py-1 text-[11.5px] font-semibold"
+              style={{ borderColor: '#FCD34D', color: '#92400E', backgroundColor: '#FFFFFF' }}
+            >
+              Ver en Saldos
+            </button>
+          </div>
         </div>
       )}
 
@@ -1095,7 +1159,10 @@ function TabFacturacion(
         ))}
       </div>
 
-      {visibles.length === 0 ? (
+      {/* La sección de retenidos vive DENTRO de la vista de pendientes, así que
+          cuando ahí no queda nada accionable pero sí hay retenidos encontrados, el
+          "sin resultados" mentiría. */}
+      {visibles.length === 0 && !(vista === 'pendientes' && retenidos.length > 0) ? (
         <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
           <p className="text-[13px]" style={{ color: '#6B7280' }}>
             {term ? `Sin resultados para "${q.trim()}" en esta vista.`
@@ -1103,15 +1170,6 @@ function TabFacturacion(
               : vista === 'descartados' ? 'No has descartado ningún caso.'
               : 'No hay casos por facturar.'}
           </p>
-          {/* La búsqueda solo puede encontrar lo que está en la lista, y los
-              retenidos ya no lo están. Sin esta línea, buscar un caso que existe y
-              no encontrarlo se lee como que el buscador falla. */}
-          {term && cola.totales.retenidos_por_recaudo.n > 0 && (
-            <p className="mt-1 text-[11.5px]" style={{ color: '#92400E' }}>
-              Puede que sea uno de los {cola.totales.retenidos_por_recaudo.n} que no aparecen
-              aquí porque todavía deben honorario.
-            </p>
-          )}
           {term && (
             <button
               type="button"
@@ -1135,6 +1193,57 @@ function TabFacturacion(
               onCambio={() => router.refresh()}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Retenidos por recaudo ────────────────────────────────────────────
+          Sección PROPIA, no una etiqueta dentro de la misma lista (enmienda de
+          Mauricio, 2026-09-08). Antes del gate, 27 retenidos convivían con 18
+          accionables distinguidos solo por un chip amarillo chiquito, y no había
+          forma de saber qué se podía resolver hoy. Aquí no se factura —el servidor
+          lo bloquea— pero sí se adopta la factura que Siigo ya tenga. */}
+      {vista === 'pendientes' && retenidos.length > 0 && (
+        <div ref={seccionRetenidos} className="mt-4 rounded-lg border"
+             style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
+          <button
+            type="button"
+            onClick={() => setRetenidosAbiertos(a => !a)}
+            aria-expanded={abiertaLaSeccion}
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+          >
+            <span className="text-[13px] font-bold" style={{ color: '#78350F' }}>
+              Retenidos por recaudo: {retenidos.length}
+              {term && retenidos.length !== cola.totales.retenidos_por_recaudo.n && (
+                <span className="font-medium" style={{ color: '#92400E' }}>
+                  {' '}de {cola.totales.retenidos_por_recaudo.n}
+                </span>
+              )}
+            </span>
+            <span className="text-[11.5px] font-semibold" style={{ color: '#92400E' }}>
+              {abiertaLaSeccion ? 'Ocultar' : 'Mostrar'}
+            </span>
+          </button>
+          {abiertaLaSeccion && (
+            <div className="px-3 pb-3">
+              <p className="mb-2 text-[11.5px]" style={{ color: '#92400E' }}>
+                Estos casos todavía deben honorario, así que no se pueden facturar. Si el cliente
+                ya tiene una factura hecha en Siigo, se puede reconocer aquí: adoptarla no emite
+                nada y no depende del recaudo.
+              </p>
+              <div className="space-y-2">
+                {retenidos.map(c => (
+                  <FilaPorFacturar
+                    key={c.negocio_id}
+                    caso={c}
+                    descarteAbierto={cola.descarte_abierto}
+                    siigoConfigurado={cola.siigo_configurado}
+                    productos={cola.productos}
+                    onCambio={() => router.refresh()}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1251,15 +1360,16 @@ function FilaPorFacturar({
   const enBanda = caso.estado_recaudo === 'descuadre_menor' || descuadreServidor != null
   const faltanteEnBanda = descuadreServidor?.faltante ?? caso.falta_saldo
   const bandaDelCaso = descuadreServidor?.banda ?? caso.banda_materialidad
-  const datosCompletos = caso.faltan_factura.length === 0 && caso.faltan_cliente.length === 0
-  // Un `retenido` no llega hasta aquí (el servidor lo saca de la cola), pero la
-  // condición se escribe por lo que ES y no por lo que hoy no puede pasar.
-  const puedeIntentarFactura = datosCompletos && caso.estado_recaudo !== 'retenido'
+  // Está en la sección de retenidos: se ve, se puede adoptar, no se puede emitir.
+  const retenido = caso.retenido_por_recaudo
   const faltaJustificarDescuadre = enBanda && justificacionDescuadre.trim().length === 0
 
   return (
     <div className="rounded-lg border p-3"
-         style={{ borderColor: listo ? '#A7F3D0' : enBanda ? '#FCD34D' : '#E5E7EB' }}>
+         style={{
+           borderColor: retenido ? '#FCA5A5' : listo ? '#A7F3D0' : enBanda ? '#FCD34D' : '#E5E7EB',
+           backgroundColor: retenido ? '#FFFFFF' : undefined,
+         }}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -1335,8 +1445,28 @@ function FilaPorFacturar({
           de dinero tiene su propia pestaña, y dejar el botón en los dos sitios era una
           invitación a emitir el mismo documento dos veces. */}
 
+      {/* ── Por qué está retenido, con la plata y el porcentaje ──────────────
+          "falta recaudar $425.000 de $850.000 (50%)". El monto Y el porcentaje,
+          porque deber $3.000 y deber $425.000 no son el mismo problema y hasta la
+          enmienda del 2026-09-08 se leían igual: una etiqueta "Falta: recaudo del
+          honorario", del mismo tamaño que la de un email por teclear.
+
+          Va en rojo y ocupa una franja entera, no un chip: es el estado de la
+          tarjeta, no un dato más de la lista. */}
+      {retenido && (
+        <div className="mt-2 flex items-start gap-1.5 rounded-md border p-2"
+             style={{ borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }}>
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: '#B91C1C' }} />
+          <div className="text-[12px]" style={{ color: '#991B1B' }}>
+            <strong>Retenido: {razonDeRetencion(caso)}.</strong>{' '}
+            No se factura hasta que entre el honorario. Si el cliente ya tiene su factura hecha
+            en Siigo, se puede reconocer aquí abajo.
+          </div>
+        </div>
+      )}
+
       {/* ── Prefactura y emisión ─────────────────────────────────────────── */}
-      {!caso.ya_facturado && !caso.descartado && puedeIntentarFactura && siigoConfigurado && (
+      {ofreceEmitirFactura(caso, siigoConfigurado) && (
         <div className="mt-2">
           {!revisando ? (
             <div className="flex justify-end">
@@ -1632,10 +1762,11 @@ function FilaPorFacturar({
           ONE emitiera, y reponer el PDF de una que ONE sí emitió y cuyo archivo
           nunca llegó al bloque (V0076 y V0177, medido el 2026-09-07).
 
-          No se gatea por `listo`: la factura ya existe en Siigo pase lo que pase
-          con el saldo del caso, y esperar a que cuadre dejaría el expediente
-          incompleto por una razón que no tiene que ver. */}
-      {siigoConfigurado && !caso.descartado && (!caso.ya_facturado || caso.factura_sin_pdf) && (
+          No se gatea por `listo` NI por saldo: la factura ya existe en Siigo pase
+          lo que pase con el recaudo, y esperar a que cuadre dejaría el expediente
+          incompleto por una razón que no tiene que ver. Por eso los retenidos la
+          conservan — es lo único que pueden hacer aquí. */}
+      {ofreceAdoptarFactura(caso, siigoConfigurado) && (
         <AdoptarFacturaExistente caso={caso} onCambio={onCambio} />
       )}
 
