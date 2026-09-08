@@ -49,6 +49,7 @@ import {
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
+import { llavesDeHerenciaDocumento } from '@/lib/negocios/herencia-documento'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import {
@@ -2794,6 +2795,11 @@ export async function cambiarEtapaNegocio(
       if (tipo === 'documento' && defId) {
         const label = (config?.config_extra as Record<string, unknown> | null)?.label as string | null
         if (label) completadosPorLabel.set(`${defId}:${label}`, entry)
+        // Segunda llave por nombre, para los documentos que no declaran `label`
+        // («Factura emitida», «Propuesta económica firmada»…). Sin ella, sus copias
+        // de solo lectura se quedarían sin pareja y nacerían vacías.
+        const nombreDoc = config?.nombre as string | null
+        if (nombreDoc) completadosPorLabel.set(`${defId}:${nombreDoc}`, entry)
       }
       if (tipo === 'datos' && defId) {
         const nombre = config?.nombre as string | null
@@ -2835,16 +2841,29 @@ export async function cambiarEtapaNegocio(
             prevCompleto = bc.nombre
               ? completadosPorLabel.get(`${bc.bloque_definition_id}:${bc.nombre}`)
               : undefined
+          } else if (isDocumento) {
+            // Mismo defecto que arriba, en los bloques `documento`: comparten un único
+            // `bloque_definition_id`, así que `completadosPorDef` devolvía cualquier
+            // documento del negocio. Ver `llavesDeHerenciaDocumento` para la medición
+            // (206 archivos cruzados, 508 casillas mostrando el documento de otra).
+            const label = (bc.config_extra as Record<string, unknown> | null)?.label as string | null
+            for (const llave of llavesDeHerenciaDocumento(bc.bloque_definition_id, label, bc.nombre)) {
+              prevCompleto = completadosPorLabel.get(llave)
+              if (prevCompleto) break
+            }
           } else {
             // Tipos con definition_id propio (propuesta, cobros, historial…): el id SÍ
             // identifica al bloque, así que heredar por definition_id es correcto.
             prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
           }
         } else if (isDocumento) {
-          // Documento blocks: match by label across etapas (all share same definition_id)
+          // Casilla editable: hereda solo por `label`, sin el respaldo por nombre. Aquí
+          // carga una persona, y preferimos que nazca vacía a que aparezca llena con algo
+          // que nadie subió ahí. Ver `llavesDeHerenciaDocumento`.
           const label = (bc.config_extra as Record<string, unknown> | null)?.label as string | null
-          if (label) {
-            prevCompleto = completadosPorLabel.get(`${bc.bloque_definition_id}:${label}`)
+          for (const llave of llavesDeHerenciaDocumento(bc.bloque_definition_id, label)) {
+            prevCompleto = completadosPorLabel.get(llave)
+            if (prevCompleto) break
           }
         } else if (tipo === 'cotizacion') {
           // Cotización: inherit completion state across etapas (unique definition_id)
