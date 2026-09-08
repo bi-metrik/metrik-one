@@ -178,7 +178,10 @@ export async function detalleVinculacion(
       documentos,
       campos: listaCampos,
       kit,
-      alertas: alertasDeExpediente(documentos, listaCampos, kit),
+      // La cadena llega ya calculada en el detalle: quien decide quién es
+      // beneficiario final es Valida, y recalcularla acá abriría la puerta a
+      // que las dos pantallas digan números distintos.
+      alertas: alertasDeExpediente(documentos, listaCampos, kit, exp.data.cadena ?? null),
       puedeDecidir: puedeDecidirVinculacion(g.data.role),
     },
   };

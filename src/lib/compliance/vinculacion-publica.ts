@@ -160,11 +160,18 @@ export function esMotivoEnlaceCerrado(v: string): v is MotivoEnlaceCerrado {
 
 // ─── Pasos del formulario ─────────────────────────────────────────────────
 
-export type PasoPublico = 'aceptaciones' | 'documentos' | 'datos' | 'firma' | 'listo';
+export type PasoPublico =
+  | 'aceptaciones'
+  | 'documentos'
+  | 'socios'
+  | 'datos'
+  | 'firma'
+  | 'listo';
 
 export const PASO_LABEL: Record<PasoPublico, string> = {
   aceptaciones: 'Autorizaciones',
   documentos: 'Documentos',
+  socios: 'Socios',
   datos: 'Tus datos',
   firma: 'Firma',
   listo: 'Listo',
@@ -173,10 +180,20 @@ export const PASO_LABEL: Record<PasoPublico, string> = {
 export const PASOS: readonly PasoPublico[] = [
   'aceptaciones',
   'documentos',
+  'socios',
   'datos',
   'firma',
   'listo',
 ];
+
+/**
+ * A una persona natural no se le pregunta por sus socios. El paso no se
+ * esconde con un `display:none`: se saca de la lista, porque un paso visible
+ * que nunca se puede alcanzar deja a alguien buscando qué le falta.
+ */
+export function pasosVisibles(pideCadena: boolean): readonly PasoPublico[] {
+  return pideCadena ? PASOS : PASOS.filter((p) => p !== 'socios');
+}
 
 /**
  * En qué paso va. Es deliberado que nada se pueda hacer antes de aceptar: el
@@ -192,12 +209,14 @@ export const PASOS: readonly PasoPublico[] = [
 export function pasoActual(input: {
   acepto: boolean;
   slotsFaltantes: number;
+  cadenaPendiente: number;
   camposPorConfirmar: number;
   firmado: boolean;
 }): PasoPublico {
   if (input.firmado) return 'listo';
   if (!input.acepto) return 'aceptaciones';
   if (input.slotsFaltantes > 0) return 'documentos';
+  if (input.cadenaPendiente > 0) return 'socios';
   if (input.camposPorConfirmar > 0) return 'datos';
   return 'firma';
 }
@@ -463,4 +482,227 @@ export function vistaPreviaCampos(
     vistos.push({ slug: c.slug, texto: limpio.length > 60 ? `${limpio.slice(0, 60)}...` : limpio });
   }
   return vistos;
+}
+
+// ─── La cadena hasta el beneficiario final ────────────────────
+
+/**
+ * Quién está detrás de la empresa que se está vinculando.
+ *
+ * Quien decide qué le falta a la cadena es Valida: multiplica las
+ * participaciones a lo largo del camino, las compara contra el umbral y
+ * devuelve el diagnóstico ya hecho. Acá no se vuelve a calcular nada. Lo que
+ * vive en este archivo es cómo se le dice eso a alguien que no sabe qué es un
+ * beneficiario final y que además tiene afán.
+ */
+
+/** Solo para redactar. El que decide con este número es Valida. */
+export const UMBRAL_BF = 5;
+
+export const SLOT_SOPORTE_BF = 'soporte_bf';
+
+export type FaltaEnSocio = 'porcentaje' | 'socios' | 'soporte' | 'justificacion';
+
+export type MotivoParada = 'sociedad_listada' | 'entidad_estatal' | 'bf_no_identificable';
+
+export type Socio = {
+  persona_id: string;
+  padre_persona_id: string | null;
+  nivel: number;
+  rol: string;
+  tipo_sujeto: 'natural' | 'juridica';
+  nombre: string;
+  documento_tipo: string | null;
+  documento_numero: string | null;
+  porcentaje_participacion: number | null;
+  participacion_efectiva: number | null;
+  motivo_parada: string | null;
+  parada_justificacion: string | null;
+  tiene_soporte: boolean;
+};
+
+export type CadenaPublica = {
+  completa: boolean;
+  pendientes: { persona_id: string; nombre: string; falta: FaltaEnSocio }[];
+  beneficiarios: {
+    persona_id: string;
+    nombre: string;
+    documento_tipo: string | null;
+    documento_numero: string | null;
+    participacion_efectiva: number | null;
+  }[];
+  sin_resolver: { persona_id: string; nombre: string; justificacion: string | null }[];
+  suma_directa: number;
+  suma_excedida: boolean;
+};
+
+export const CADENA_VACIA: CadenaPublica = {
+  completa: true,
+  pendientes: [],
+  beneficiarios: [],
+  sin_resolver: [],
+  suma_directa: 0,
+  suma_excedida: false,
+};
+
+/**
+ * Los tres motivos que la contraparte puede declarar para no seguir bajando.
+ * `bajo_umbral` y `persona_natural` no están: esos salen de la aritmética, y
+ * ofrecerlos sería dejar que alguien cierre a mano una rama que las cuentas
+ * dicen que sigue abierta.
+ */
+export const MOTIVOS_PARADA: readonly MotivoParada[] = [
+  'sociedad_listada',
+  'entidad_estatal',
+  'bf_no_identificable',
+];
+
+export const MOTIVO_PARADA_LABEL: Record<MotivoParada, string> = {
+  sociedad_listada: 'Cotiza en bolsa',
+  entidad_estatal: 'Es una entidad del Estado',
+  bf_no_identificable: 'No pude conseguir la información',
+};
+
+export const MOTIVO_PARADA_AYUDA: Record<MotivoParada, string> = {
+  sociedad_listada:
+    'Sus acciones se negocian en una bolsa de valores, así que no tiene un dueño identificable detrás.',
+  entidad_estatal: 'Es una entidad pública, no tiene socios privados.',
+  bf_no_identificable:
+    'El socio no te entregó su composición. Escribe qué pasó: eso es lo que va a leer quien revise.',
+};
+
+export function esMotivoParada(v: string | null): v is MotivoParada {
+  return v !== null && (MOTIVOS_PARADA as readonly string[]).includes(v);
+}
+
+/** Por qué se le está pidiendo la cadena, en una frase. */
+export const POR_QUE_LOS_SOCIOS =
+  `La ley pide saber qué personas están detrás de la empresa. Si uno de tus socios es otra empresa, hay que seguir bajando hasta llegar a personas, y solo importan las que terminen con ${UMBRAL_BF}% o más.`;
+
+/** La aclaración del soporte que se le pide a cada socio empresa. */
+export function notaSoporteBf(nombre: string): string {
+  return `El certificado de existencia y representación legal de ${nombre}, el completo, donde se listan sus socios. Si no lo tienes, sirve la composición accionaria firmada por su representante legal.`;
+}
+
+/** Qué le falta a un socio, dicho como se lo dirías a quien tiene que resolverlo. */
+export function fraseFalta(falta: FaltaEnSocio): string {
+  switch (falta) {
+    case 'porcentaje':
+      return 'Falta el porcentaje que tiene en la empresa.';
+    case 'socios':
+      return 'Falta decir quiénes son sus socios.';
+    case 'soporte':
+      return 'Falta subir el documento que respalda su composición.';
+    case 'justificacion':
+      return 'Falta explicar por qué no se puede seguir bajando por acá.';
+  }
+}
+
+/** Lo que le falta a ese socio, sin repetir el mismo faltante dos veces. */
+export function faltasDe(cadena: CadenaPublica, personaId: string): FaltaEnSocio[] {
+  const vistas = new Set<FaltaEnSocio>();
+  for (const p of cadena.pendientes) {
+    if (p.persona_id === personaId) vistas.add(p.falta);
+  }
+  return [...vistas];
+}
+
+function porcentaje(n: number): string {
+  // Un "30%" se lee mejor que un "30.0000%", y el decimal solo aparece cuando
+  // dice algo: la efectiva compuesta casi siempre lo tiene.
+  const redondo = Math.round(n * 100) / 100;
+  return `${Number.isInteger(redondo) ? redondo : redondo.toFixed(2)}%`;
+}
+
+/**
+ * Cuánto pesa un socio, en una línea. La efectiva solo se nombra cuando es
+ * distinta de la directa: repetir "30% (30% efectivo)" no informa y ocupa el
+ * lugar donde debería estar lo que sí falta.
+ */
+export function textoParticipacion(socio: Socio): string {
+  const propio = socio.porcentaje_participacion;
+  if (propio === null) return 'Sin porcentaje';
+  const efectiva = socio.participacion_efectiva;
+  if (efectiva === null || Math.abs(efectiva - propio) < 0.005) return porcentaje(propio);
+  return `${porcentaje(propio)} de su empresa, ${porcentaje(efectiva)} del total`;
+}
+
+/**
+ * El encabezado del paso. Dice lo que hay que hacer ahora, no un conteo: una
+ * persona que ve "3 pendientes" todavía tiene que averiguar cuáles.
+ */
+export function resumenCadena(cadena: CadenaPublica, socios: readonly Socio[]): string {
+  if (socios.length === 0) return 'Todavía no has registrado ningún socio.';
+  if (cadena.suma_excedida) {
+    return 'Los porcentajes de algún grupo de socios suman más de 100%. Revísalos.';
+  }
+  const n = new Set(cadena.pendientes.map((p) => p.persona_id)).size;
+  if (n === 0) {
+    const bf = cadena.beneficiarios.length;
+    if (bf === 0) return 'La cadena está completa. Ningún socio llega al umbral.';
+    return `La cadena está completa: ${bf} ${bf === 1 ? 'beneficiario final' : 'beneficiarios finales'}.`;
+  }
+  return `Falta información de ${n} ${n === 1 ? 'socio' : 'socios'}.`;
+}
+
+/** Lo que la contraparte escribe para declarar un socio. */
+export type FormSocio = {
+  tipoSujeto: 'natural' | 'juridica';
+  nombre: string;
+  documentoTipo: string;
+  documentoNumero: string;
+  porcentaje: string;
+  motivoParada: string;
+  justificacion: string;
+};
+
+export const FORM_SOCIO_VACIO: FormSocio = {
+  tipoSujeto: 'natural',
+  nombre: '',
+  documentoTipo: 'CC',
+  documentoNumero: '',
+  porcentaje: '',
+  motivoParada: '',
+  justificacion: '',
+};
+
+/**
+ * Qué está mal en el formulario, campo por campo.
+ *
+ * Valida vuelve a validar todo esto del otro lado: acá se hace para que el
+ * error salga al lado del campo y no como un mensaje suelto después de un
+ * viaje al servidor.
+ */
+export function faltaEnFormSocio(form: FormSocio): Partial<Record<keyof FormSocio, string>> {
+  const errores: Partial<Record<keyof FormSocio, string>> = {};
+
+  if (!form.nombre.trim()) errores.nombre = 'Escribe el nombre.';
+  else if (form.nombre.trim().length > 200) errores.nombre = 'El nombre es muy largo.';
+
+  const pct = form.porcentaje.trim();
+  if (!pct) {
+    errores.porcentaje = 'Escribe el porcentaje.';
+  } else {
+    const n = Number(pct.replace(',', '.'));
+    if (!Number.isFinite(n)) errores.porcentaje = 'Escribe solo el número.';
+    else if (n < 0 || n > 100) errores.porcentaje = 'Tiene que estar entre 0 y 100.';
+  }
+
+  if (form.motivoParada) {
+    if (form.tipoSujeto !== 'juridica') {
+      errores.motivoParada = 'Esto solo aplica cuando el socio es una empresa.';
+    } else if (!form.justificacion.trim()) {
+      errores.justificacion = 'Escribe por qué. Sin esto no queda constancia de nada.';
+    }
+  }
+
+  return errores;
+}
+
+/** El número tal como lo espera Valida, o null si no se escribió. */
+export function porcentajeANumero(v: string): number | null {
+  const limpio = v.trim().replace(',', '.');
+  if (!limpio) return null;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
 }

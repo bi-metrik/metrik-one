@@ -40,11 +40,25 @@ const AHORA = '2026-09-07T20:00:00.000Z';
 const textos = (r: { salidas: Salida[] }) => r.salidas.map((s) => s.texto).join('\n---\n');
 const ultimo = (r: { salidas: Salida[] }) => r.salidas[r.salidas.length - 1];
 
+const PREGUNTA_IDIOMA = 'ES: ¿En qué idioma prefiere continuar?\nEN: Which language do you prefer?\nPT: Em que idioma prefere continuar?';
+
+/** Primer mensaje (idioma) respondido con el boton Espanol. Deja el estado en el consentimiento. */
+async function hastaConsentimiento(): Promise<NavigateState> {
+  const { state, salidas } = iniciar(AHORA);
+  expect(salidas[0].tipo).toBe('botones');
+  expect(state.paso).toBe('idioma');
+  const r = await procesar(state, { texto: 'Español', botonId: BOTON.langEs }, guion({}));
+  expect(state.paso).toBe('consentimiento');
+  const u = ultimo(r);
+  expect(u.tipo).toBe('botones');
+  if (u.tipo === 'botones') expect(u.botones).toEqual([{ id: BOTON.ok, title: 'OK' }]);
+  return state;
+}
+
 /** Turno cero hasta la pregunta de apertura, con la poblacion pedida. */
 async function hastaHistoria(poblacion: 'ciudadano' | 'experto', sectorTxt = '1'): Promise<NavigateState> {
   const i = guion({});
-  const { state, salidas } = iniciar(AHORA);
-  expect(salidas[0].tipo).toBe('botones');
+  const state = await hastaConsentimiento();
   let r = await procesar(state, { texto: 'OK', botonId: BOTON.ok }, i);
   expect(state.consent?.version).toBe(CONSENT_VERSION);
   expect(ultimo(r).tipo).toBe('botones');
@@ -58,14 +72,11 @@ async function hastaHistoria(poblacion: 'ciudadano' | 'experto', sectorTxt = '1'
 
 const HISTORIA_ES = 'La carretera al puerto lleva meses con un carril cerrado. Los camiones se meten por el pueblo y ya se hundió una calle.';
 
-/** Historia en espanol + confirmacion de idioma. Deja el estado en la primera triada. */
+/** Historia en espanol. Ya no hay turno de idioma despues: deja el estado en la primera triada. */
 async function hastaPrimeraTriada(poblacion: 'ciudadano' | 'experto' = 'ciudadano'): Promise<NavigateState> {
   const state = await hastaHistoria(poblacion);
-  const i = guion({});
-  let r = await procesar(state, { texto: HISTORIA_ES }, i);
+  const r = await procesar(state, { texto: HISTORIA_ES }, guion({}));
   expect(state.idioma_detectado).toBe('es');
-  expect(state.paso).toBe('idioma_confirmar');
-  r = await procesar(state, { texto: 'Sí, en español', botonId: BOTON.langSi }, i);
   expect(state.idioma_confirmado).toBe(true);
   expect(state.paso).toBe('triada_orden');
   expect(textos(r)).toContain('*De dónde nace lo que observó.*');
@@ -73,27 +84,40 @@ async function hastaPrimeraTriada(poblacion: 'ciudadano' | 'experto' = 'ciudadan
 }
 
 describe('turno cero', () => {
-  it('abre con el consentimiento de DEMO y un boton OK; nada mas hasta el si', () => {
+  it('abre con la pregunta de idioma, trilingue y con tres botones; nada del consentimiento todavia', () => {
     const { state, salidas } = iniciar(AHORA);
     expect(salidas).toHaveLength(1);
     const s = salidas[0];
     expect(s.tipo).toBe('botones');
-    expect(s.texto).toContain('demostración');
-    expect(s.texto).toContain('no entra en ningún estudio');
-    if (s.tipo === 'botones') expect(s.botones).toEqual([{ id: BOTON.ok, title: 'OK' }]);
-    expect(state.paso).toBe('consentimiento');
+    expect(s.texto).toBe(PREGUNTA_IDIOMA);
+    if (s.tipo === 'botones') {
+      expect(s.botones).toEqual([{ id: BOTON.langEs, title: 'Español' }, { id: BOTON.langEn, title: 'English' }, { id: BOTON.langPt, title: 'Português' }]);
+    }
+    expect(state.paso).toBe('idioma');
     expect(state.demo).toBe(true);
+    expect(state.consent).toBeUndefined();
+    expect(state.historial.map((h) => h.text).join('\n')).not.toContain('demostración');
+  });
+
+  it('el consentimiento de DEMO llega tras elegir espanol, con un boton OK; nada mas hasta el si', async () => {
+    const state = await hastaConsentimiento();
+    const s = state.historial.at(-1)!;
+    expect(s.text).toContain('demostración');
+    expect(s.text).toContain('no entra en ningún estudio');
+    expect(state.idioma_elegido).toBe('es');
+    expect(state.idioma_confirmado).toBe(true);
+    expect(state.consent).toBeUndefined();
   });
 
   it('sin consentimiento no hay nada que guardar: "no" cierra y borra', async () => {
-    const { state } = iniciar(AHORA);
+    const state = await hastaConsentimiento();
     const r = await procesar(state, { texto: 'no' }, guion({}));
     expect(r.accion).toBe('cerrar_sin_guardar');
     expect(state.consent).toBeUndefined();
   });
 
   it('dos respuestas que no son OK ni no: se despide sin guardar', async () => {
-    const { state } = iniciar(AHORA);
+    const state = await hastaConsentimiento();
     const i = guion({});
     let r = await procesar(state, { texto: 'hola?' }, i);
     expect(r.accion).toBe('seguir');
@@ -133,6 +157,8 @@ describe('turno cero', () => {
   it('un sector ilegible se repregunta; dos seguidos: sigue con sector null en vez de atascarse', async () => {
     const i = guion({});
     const { state } = iniciar(AHORA);
+    await procesar(state, { texto: 'español' }, i); // escrito, sin boton
+    expect(state.paso).toBe('consentimiento');
     await procesar(state, { texto: 'ok' }, i);
     await procesar(state, { texto: 'no' }, i);
     let r = await procesar(state, { texto: 'ni idea' }, i);
@@ -145,44 +171,115 @@ describe('turno cero', () => {
   });
 });
 
-describe('idioma', () => {
-  it('espanol detectado: se confirma en un turno y se bloquea', async () => {
-    const state = await hastaPrimeraTriada();
+describe('idioma: se elige en el PRIMER mensaje, antes del consentimiento', () => {
+  it('espanol por boton: consentimiento de inmediato; elegido y confirmado quedan en el estado y en el payload', async () => {
+    const state = await hastaConsentimiento();
     expect(state.idioma).toBe('es');
+    expect(state.idioma_elegido).toBe('es');
     expect(state.idioma_confirmado).toBe(true);
+    expect(state.turnos).toBe(1);
+    expect(armarPayload(state, 'salir', AHORA)).toMatchObject({ idioma: 'es', idioma_elegido: 'es', idioma_confirmado: true, idioma_detectado: null, consent: null });
   });
 
-  it('ingles detectado: un solo mensaje trilingue; "no" cierra sin guardar', async () => {
-    const state = await hastaHistoria('ciudadano');
+  it('English por boton: un solo mensaje trilingue; "Sí / Yes / Sim" sigue en espanol y recien ahi llega el consentimiento', async () => {
+    const { state } = iniciar(AHORA);
     const i = guion({});
-    let r = await procesar(state, { texto: 'The road to the port has had one lane closed for months. Trucks are cutting through the town and a street already collapsed.' }, i);
-    expect(state.idioma_detectado).toBe('en');
+    let r = await procesar(state, { texto: 'English', botonId: BOTON.langEn }, i);
     expect(state.paso).toBe('idioma_no_es');
+    expect(state.idioma_elegido).toBe('en');
+    expect(state.idioma_confirmado).toBe(false);
     expect(r.salidas).toHaveLength(1);
     expect(r.salidas[0].texto).toContain('EN: For now this instrument is available in Spanish only');
     expect(r.salidas[0].texto).toContain('PT: Por enquanto');
-    r = await procesar(state, { texto: 'No', botonId: BOTON.langNo }, i);
-    expect(r.accion).toBe('cerrar_sin_guardar');
-  });
-
-  it('portugues detectado y "sim": sigue con el instrumento en espanol, sin traducir', async () => {
-    const state = await hastaHistoria('ciudadano');
-    const i = guion({});
-    let r = await procesar(state, { texto: 'A estrada para o porto está há meses com uma faixa fechada. Os caminhões passam pela cidade e uma rua já afundou.' }, i);
-    expect(state.idioma_detectado).toBe('pt');
-    r = await procesar(state, { texto: 'sim' }, i);
+    if (r.salidas[0].tipo === 'botones') expect(r.salidas[0].botones.map((b) => b.title)).toEqual(['Sí / Yes / Sim', 'No']);
+    r = await procesar(state, { texto: 'Sí / Yes / Sim', botonId: BOTON.langSi }, i);
+    expect(state.paso).toBe('consentimiento');
     expect(state.idioma_confirmado).toBe(true);
+    expect(state.idioma_elegido).toBe('en'); // lo que eligio no se pisa: acepto seguir en espanol
     expect(state.idioma).toBe('es');
-    expect(textos(r)).toContain('La gente común, la vida de a pie');
+    expect(r.salidas).toHaveLength(1);
+    expect(r.salidas[0].texto).toContain('demostración');
+    expect(state.consent).toBeUndefined(); // el consentimiento se PIDE aqui; todavia no se dio
   });
 
-  it('"otro idioma" tras espanol detectado lleva al trilingue', async () => {
-    const state = await hastaHistoria('ciudadano');
+  it('el boton decide por su id: vale aunque el texto que lo acompana no diga nada legible', async () => {
+    const { state } = iniciar(AHORA);
+    await procesar(state, { texto: '', botonId: BOTON.langEs }, guion({}));
+    expect(state.paso).toBe('consentimiento');
+    expect(state.idioma_elegido).toBe('es');
+    const { state: s2 } = iniciar(AHORA);
+    await procesar(s2, { texto: '', botonId: BOTON.langPt }, guion({}));
+    expect(s2.paso).toBe('idioma_no_es');
+    expect(s2.idioma_elegido).toBe('pt');
+  });
+
+  it('Português por boton y "No": cierra sin guardar; no habia consentimiento ni historia que perder', async () => {
+    const { state } = iniciar(AHORA);
     const i = guion({});
-    await procesar(state, { texto: HISTORIA_ES }, i);
-    const r = await procesar(state, { texto: 'Otro idioma', botonId: BOTON.langOtro }, i);
+    await procesar(state, { texto: 'Português', botonId: BOTON.langPt }, i);
     expect(state.paso).toBe('idioma_no_es');
+    expect(state.idioma_elegido).toBe('pt');
+    const r = await procesar(state, { texto: 'No', botonId: BOTON.langNo }, i);
+    expect(r.accion).toBe('cerrar_sin_guardar');
+    expect(r.salidas[0].texto).toBe('ES: Entendido. Gracias por su tiempo.\nEN: Understood. Thank you for your time.\nPT: Entendido. Obrigado pelo seu tempo.');
+    expect(state.closed).toBe(true);
+    expect(state.consent).toBeUndefined();
+    expect(state.historia).toBeUndefined();
+  });
+
+  it('texto libre "english please" (sin boton) lleva al trilingue; "sim" escrito acepta', async () => {
+    const { state } = iniciar(AHORA);
+    const i = guion({});
+    const r = await procesar(state, { texto: 'english please' }, i);
+    expect(state.paso).toBe('idioma_no_es');
+    expect(state.idioma_elegido).toBe('en');
     expect(r.salidas[0].texto).toContain('ES: Por ahora');
+    await procesar(state, { texto: 'sim' }, i);
+    expect(state.paso).toBe('consentimiento');
+    expect(state.idioma_confirmado).toBe(true);
+  });
+
+  it('en el trilingue, nombrar el espanol vale como si ("ok, spanish is fine")', async () => {
+    const { state } = iniciar(AHORA);
+    const i = guion({});
+    await procesar(state, { texto: 'portugues' }, i);
+    expect(state.paso).toBe('idioma_no_es');
+    await procesar(state, { texto: 'ok, spanish is fine' }, i);
+    expect(state.paso).toBe('consentimiento');
+    expect(state.idioma_elegido).toBe('pt');
+    expect(state.idioma_confirmado).toBe(true);
+  });
+
+  it('texto libre ilegible dos veces: se repregunta UNA vez con el mismo mensaje y a la segunda sigue en espanol, con nota', async () => {
+    const { state } = iniciar(AHORA);
+    const i = guion({});
+    let r = await procesar(state, { texto: 'hola?' }, i);
+    expect(state.paso).toBe('idioma');
+    expect(state.reintentos).toBe(1);
+    expect(r.salidas).toHaveLength(1);
+    expect(r.salidas[0].texto).toBe(PREGUNTA_IDIOMA);
+    r = await procesar(state, { texto: 'mmm' }, i);
+    expect(state.paso).toBe('consentimiento');
+    expect(state.idioma_confirmado).toBe(true);
+    expect(state.idioma_elegido).toBeUndefined();
+    expect(state.notas).toEqual(['no se pudo leer el idioma; se siguio en espanol, el unico del instrumento']);
+    expect(r.salidas[0].texto).toContain('demostración');
+    expect(armarPayload(state, 'salir', AHORA)).toMatchObject({ idioma_elegido: null, idioma_confirmado: true });
+  });
+
+  it('la historia ya no pregunta por el idioma: pasa directo a la primera triada y solo registra idioma_detectado', async () => {
+    // Eligio espanol al inicio y escribio la historia en ingles: el flujo NO se desvia.
+    const state = await hastaHistoria('ciudadano');
+    const historiaEn = 'The road to the port has had one lane closed for months. Trucks are cutting through the town and a street already collapsed.';
+    const r = await procesar(state, { texto: historiaEn }, guion({}));
+    expect(state.idioma_detectado).toBe('en');
+    expect(state.idioma_elegido).toBe('es');
+    expect(state.historia).toBe(historiaEn);
+    expect(state.paso).toBe('triada_orden');
+    expect(r.salidas).toHaveLength(1);
+    expect(textos(r)).toContain('*De dónde nace lo que observó.*');
+    expect(textos(r)).not.toContain('Seguimos en español');
+    expect(armarPayload(state, 'salir', AHORA)).toMatchObject({ idioma_elegido: 'es', idioma_detectado: 'en' });
   });
 });
 
@@ -459,7 +556,7 @@ describe('cierre, salida y borrado', () => {
     const p = armarPayload(state, 'completa', AHORA) as Record<string, unknown>;
     expect(p).toMatchObject({
       source: 'chat', motor: 'navigate', demo: true, study_id: 'navigate', collection_mode: 'panel_recurrente',
-      poblacion: 'ciudadano', sector: 'Infraestructura y construccion' /* slug sin tildes, como respuestas.json */, idioma: 'es', idioma_detectado: 'es', idioma_confirmado: true,
+      poblacion: 'ciudadano', sector: 'Infraestructura y construccion' /* slug sin tildes, como respuestas.json */, idioma: 'es', idioma_elegido: 'es', idioma_detectado: 'es', idioma_confirmado: true,
       consent: { version: CONSENT_VERSION },
       narrative: { historia: HISTORIA_ES },
     });

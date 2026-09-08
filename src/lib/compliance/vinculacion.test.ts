@@ -18,6 +18,11 @@
  *   - decirle al oficial que la cola falló → cae 1
    - pedir constancia siempre, aunque el expediente esté completo → cae 1
    - aprobar sin constancia un expediente con documentos sin leer → cae 1
+   - contar los soportes de la cadena como documentos del kit → cae 1
+   - no avisar de la cadena incompleta → caen 2
+   - meter `cadena_sin_resolver` entre las que exigen constancia → cae 1
+   - aprobar sin constancia un expediente de cadena incompleta → cae 1
+   - `faltantesPorSocio` repite el mismo faltante dos veces → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -31,7 +36,9 @@ import {
   documentosIlegibles,
   documentosSinLeer,
   etiquetaCampo,
+  etiquetaParada,
   etiquetaSlot,
+  faltantesPorSocio,
   mostrarValor,
   nombreContraparte,
   progresoEtapa,
@@ -46,6 +53,7 @@ import {
   type ExpedienteDoc,
   type ExpedienteFila,
 } from './vinculacion';
+import type { CadenaPublica } from './vinculacion-publica';
 
 function doc(over: Partial<ExpedienteDoc> = {}): ExpedienteDoc {
   return {
@@ -337,5 +345,120 @@ describe('exigeConstanciaSinLectura', () => {
     // Un campo que el documento no traía es algo que el oficial ve; no es
     // información que la plataforma le esté escondiendo.
     expect(exigeConstanciaSinLectura([alerta('campos_sin_llenar')])).toBe(false);
+  });
+});
+
+describe('la cadena hasta el beneficiario final, del lado del oficial', () => {
+  function cadena(over: Partial<CadenaPublica> = {}): CadenaPublica {
+    return {
+      completa: true,
+      pendientes: [],
+      beneficiarios: [],
+      sin_resolver: [],
+      suma_directa: 100,
+      suma_excedida: false,
+      ...over,
+    };
+  }
+
+  it('los soportes de un socio no cuentan como documentos del kit', () => {
+    const alertas = alertasDeExpediente(
+      [
+        doc({ doc_id: 'd1', slot: 'rut', estado_extraccion: 'ok' }),
+        // El soporte del socio no se lee automáticamente. Contarlo acá le
+        // pondría al oficial una alerta del kit por un documento que el kit
+        // nunca pidió.
+        doc({
+          doc_id: 'd2',
+          slot: 'soporte_bf',
+          persona_id: 'p1',
+          estado_extraccion: 'failed',
+        }),
+      ],
+      [],
+      ['rut'],
+    );
+    expect(alertas.map((a) => a.clave)).toEqual([]);
+  });
+
+  it('una cadena incompleta es una alerta, con cuántos socios le faltan', () => {
+    const alertas = alertasDeExpediente(
+      [doc()],
+      [],
+      ['rut'],
+      cadena({
+        completa: false,
+        pendientes: [
+          { persona_id: 'p1', nombre: 'Inversiones X', falta: 'soporte' },
+          { persona_id: 'p1', nombre: 'Inversiones X', falta: 'socios' },
+        ],
+      }),
+    );
+    const a = alertas.find((x) => x.clave === 'cadena_incompleta');
+    // Dos faltantes del mismo socio son un socio, no dos.
+    expect(a?.cuantos).toBe(1);
+  });
+
+  it('los porcentajes que se pasan de 100 se dicen como lo que son', () => {
+    const alertas = alertasDeExpediente(
+      [doc()],
+      [],
+      ['rut'],
+      cadena({ completa: false, suma_excedida: true }),
+    );
+    expect(alertas.find((x) => x.clave === 'cadena_incompleta')?.texto).toContain('100%');
+  });
+
+  it('una rama sin beneficiario final identificado se avisa aparte, no como faltante', () => {
+    const alertas = alertasDeExpediente(
+      [doc()],
+      [],
+      ['rut'],
+      cadena({
+        sin_resolver: [{ persona_id: 'p1', nombre: 'Offshore Ltd', justificacion: 'Se negó.' }],
+      }),
+    );
+    expect(alertas.map((a) => a.clave)).toEqual(['cadena_sin_resolver']);
+    expect(alertas[0].texto).toContain('Offshore Ltd');
+  });
+
+  it('sin cadena no se inventa alerta: los expedientes viejos no la traen', () => {
+    expect(alertasDeExpediente([doc()], [], ['rut'])).toEqual([]);
+    expect(alertasDeExpediente([doc()], [], ['rut'], null)).toEqual([]);
+  });
+
+  it('la cadena incompleta exige constancia; la rama declarada no', () => {
+    // Incompleta = el expediente no sabe quién está detrás.
+    expect(
+      exigeConstanciaSinLectura([{ clave: 'cadena_incompleta', texto: 'x', cuantos: 1 }]),
+    ).toBe(true);
+    // Declarada y justificada = el oficial decide sobre algo que puede leer.
+    expect(
+      exigeConstanciaSinLectura([{ clave: 'cadena_sin_resolver', texto: 'x', cuantos: 1 }]),
+    ).toBe(false);
+  });
+
+  it('los faltantes se agrupan por socio y sin repetir', () => {
+    const mapa = faltantesPorSocio({
+      completa: false,
+      pendientes: [
+        { persona_id: 'p1', nombre: 'X', falta: 'soporte' },
+        { persona_id: 'p1', nombre: 'X', falta: 'soporte' },
+        { persona_id: 'p1', nombre: 'X', falta: 'socios' },
+        { persona_id: 'p2', nombre: 'Y', falta: 'porcentaje' },
+      ],
+      beneficiarios: [],
+      sin_resolver: [],
+      suma_directa: 0,
+      suma_excedida: false,
+    });
+    expect(mapa.get('p1')).toEqual(['soporte', 'socios']);
+    expect(mapa.get('p2')).toEqual(['porcentaje']);
+  });
+
+  it('la parada se nombra para quien revisa, y un motivo desconocido no se pinta crudo', () => {
+    expect(etiquetaParada('bf_no_identificable')).toBe('Beneficiario final no identificado');
+    expect(etiquetaParada(null)).toBeNull();
+    expect(etiquetaParada('motivo_inventado')).toBeNull();
   });
 });

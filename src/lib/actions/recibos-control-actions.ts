@@ -52,8 +52,27 @@ export interface PagoConRecibo {
   no_aplica_motivo: string | null
   /** El negocio ya tiene factura. Se muestra como contexto, NO decide el estado. */
   facturado: boolean
-  /** Le falta algo para poder emitir: sin esto, el botón miente. */
+  /**
+   * Lo que de verdad IMPIDE emitir. Hoy es una sola cosa: sin RUT no hay
+   * identificación con la que crear el tercero en Siigo.
+   *
+   * ⚠️ Antes esta lista incluía "tercero en Siigo" y "correo del cliente", y ninguna
+   * de las dos frena: `asegurarClienteSiigo` crea el tercero a partir del RUT en la
+   * misma emisión, y el correo solo decide si al cliente se le avisa. Medido el
+   * 2026-09-08 en SOENA, el contador decía **19 emitibles de 47** cuando el número
+   * real era **42**: la pestaña escondía más de la mitad del trabajo que sí se podía
+   * resolver, que es la forma más cara de equivocarse en un tablero — nadie va a
+   * buscar lo que el sistema afirma que no se puede hacer.
+   */
   faltantes: string[]
+  /**
+   * Lo que va a salir peor de lo normal, pero NO frena la emisión.
+   *
+   * Se declara aparte en vez de callarse: el recibo sale igual, y quien lo emite
+   * merece saber de antemano que el cliente no se va a enterar o que el PDF no va a
+   * quedar archivado. Mezclarlo con `faltantes` fue justo lo que rompió el contador.
+   */
+  avisos: string[]
 }
 
 /**
@@ -71,7 +90,7 @@ export interface ControlRecibos {
     con_recibo: number
     no_aplica: number
     valor_pendiente: number
-    /** Pendientes a los que NO les falta ningún dato para emitir. */
+    /** Pendientes que se pueden emitir hoy: los que no tienen nada que los frene. */
     emitibles: number
   }
 }
@@ -167,6 +186,50 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
   )
   const contactoPorId = new Map(contactos.map(c => [c.id, c]))
 
+  // ── ¿Hay con qué identificar al cliente ante Siigo? ──
+  //
+  // La marca `siigo_cliente` responde que sí sin leer nada más: el tercero ya existe.
+  // Cuando no está, la respuesta la tiene el RUT, porque `asegurarClienteSiigo` crea
+  // el tercero con la identificación que saca de ahí. Por eso solo se lee el RUT de
+  // los negocios que hacen falta —los pendientes sin marca—, y no el de todos: en
+  // SOENA eso baja la lectura de ~300 negocios a ~17.
+  const negociosPendientes = new Set(
+    cobros
+      .filter(c => !c.siigo_recibo?.numero && !c.recibo_no_aplica && c.negocio_id)
+      .map(c => c.negocio_id as string),
+  )
+  const sinMarca = [...negociosPendientes].filter(id => {
+    const meta = (porId.get(id)?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
+    return !meta.siigo_cliente?.identificacion
+  })
+
+  type FilaRut = { negocio_id: string; data: { campos?: Record<string, { value?: unknown }> } | null }
+  const bloquesRut = sinMarca.length === 0 ? [] : await traerTodo<FilaRut>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('negocio_bloques')
+      .select('negocio_id, data, bloque_configs!inner(slug)')
+      .in('negocio_id', sinMarca)
+      .eq('bloque_configs.slug', 'rut')
+      .order('id')
+      .range(d, h),
+    { etiqueta: 'recibos/rut' },
+  )
+
+  // Mismo criterio que la cola de facturación (`rutPorNegocio`): un RUT sin cédula ni
+  // NIT no sirve, aunque el bloque exista. En SOENA los 5 casos medidos el 2026-09-08
+  // tenían el bloque creado y vacío, así que juzgar por su presencia habría dicho que
+  // se podían emitir.
+  const conIdentificacion = new Set(
+    bloquesRut
+      .filter(b => {
+        const campos = b.data?.campos ?? {}
+        const v = (k: string) => String(campos[k]?.value ?? '').trim()
+        return !!(v('numero_identificacion') || v('nit'))
+      })
+      .map(b => b.negocio_id),
+  )
+
   const pagos: PagoConRecibo[] = cobros.map(c => {
     const neg = c.negocio_id ? porId.get(c.negocio_id) : undefined
     const meta = (neg?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
@@ -178,13 +241,20 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
         ? 'no_aplica'
         : 'pendiente'
 
-    // Lo que impediría emitir. Se calcula siempre para que la lista diga por qué un
-    // pendiente no se puede resolver hoy, en vez de dejar que falle al oprimir.
+    // Lo que impediría emitir y lo que solo va a salir peor. Se calculan siempre para
+    // que la lista diga por qué un pendiente no se puede resolver hoy, en vez de
+    // dejar que falle al oprimir.
     const faltantes: string[] = []
+    const avisos: string[] = []
     if (estado === 'pendiente') {
-      if (!meta.siigo_cliente?.siigo_id) faltantes.push('tercero en Siigo')
-      if (!neg?.carpeta_url) faltantes.push('carpeta del negocio')
-      if (!contacto?.email) faltantes.push('correo del cliente')
+      const identificado = !!meta.siigo_cliente?.identificacion
+        || (!!c.negocio_id && conIdentificacion.has(c.negocio_id))
+      if (!identificado) faltantes.push('RUT del cliente')
+      // El PDF se archiva DESPUÉS de emitir y su fallo no deshace el recibo, que ya
+      // consumió numeración en Siigo. Frenar por esto dejaría plata sin acusar por un
+      // problema de archivo.
+      if (!neg?.carpeta_url) avisos.push('el PDF no queda archivado: el negocio no tiene carpeta')
+      if (!contacto?.email) avisos.push('al cliente no se le avisa: no hay correo')
     }
 
     return {
@@ -202,6 +272,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? null,
       facturado: !!meta.siigo_factura?.numero,
       faltantes,
+      avisos,
     }
   })
 
