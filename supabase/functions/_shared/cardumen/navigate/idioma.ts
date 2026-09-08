@@ -1,15 +1,20 @@
-// Deteccion de idioma del primer texto libre (es / en / pt), determinista y sin modelo.
+// Idioma (es / en / pt), determinista y sin modelo. Dos usos que conviene no confundir:
 //
-// Es deliberadamente simple: cuenta palabras funcionales que solo existen en uno de los
-// tres idiomas. Sirve para decidir si se confirma "seguimos en espanol" o se manda el aviso
-// trilingue — y ESA decision la remata la persona en un turno (instrumento-multilingue-saga.md
-// §5: detectar, confirmar, bloquear). Un detector que acierta el 100% no cambiaria el
-// flujo; uno que falla lo corrige la persona con un boton.
+//   - `leerIdiomaElegido`: lee la respuesta ESCRITA al primer mensaje ("¿En qué idioma
+//     prefiere continuar?") cuando la persona no toca un boton. Primero palabras claras
+//     (espanol, english, portugues...), despues la deteccion por palabras funcionales. Esa
+//     eleccion es la que decide el flujo. Es la "confirmacion" de instrumento-multilingue-saga.md
+//     §5 (detectar, confirmar, bloquear), movida al inicio como eleccion explicita: antes se
+//     detectaba en la historia y se confirmaba despues, y quien no hablaba espanol recibia
+//     cuatro mensajes que no entendia, consentimiento incluido.
+//   - `detectarIdioma` sobre la historia: solo registra `idioma_detectado` en el payload (dato
+//     para el instrumento EN/PT futuro). No cambia el flujo.
 //
-// Ante la duda devuelve "desconocido", que el motor trata como espanol (el unico idioma
-// en que existe el instrumento) y confirma igual.
+// Deliberadamente simple: cuenta palabras funcionales que solo existen en uno de los tres
+// idiomas. Ante la duda devuelve "desconocido"; en el primer mensaje eso se repregunta una
+// vez y a la segunda se sigue en espanol (el unico idioma en que existe el instrumento).
 
-import type { Idioma } from "./tipos.ts";
+import type { Idioma, IdiomaElegible } from "./tipos.ts";
 
 const ES = new Set([
   "el", "los", "las", "y", "es", "una", "del", "al", "lo", "pero", "esta", "hay", "muy",
@@ -71,4 +76,26 @@ export function detectarIdioma(texto: string): Idioma {
   if (primero.n < 2) return "desconocido";
   if (primero.n - segundo.n < 1) return "desconocido";
   return primero.idioma;
+}
+
+// Como alguien NOMBRA un idioma, sobre texto normalizado (minusculas, sin tildes).
+const NOMBRES: ReadonlyArray<[IdiomaElegible, RegExp]> = [
+  ["es", /\b(espanol|spanish|castellano)\b/],
+  ["en", /\b(ingles|english)\b/],
+  ["pt", /\b(portugues|portuguese)\b/],
+];
+
+/**
+ * Lee la respuesta escrita al primer mensaje. Una palabra clara manda ("english please");
+ * si nombra mas de un idioma no se adivina; sin palabra clara decide la deteccion por
+ * palabras funcionales. null = no se pudo leer: el motor repregunta una vez y a la segunda
+ * sigue en espanol.
+ */
+export function leerIdiomaElegido(texto: string): IdiomaElegible | null {
+  const n = normalizar(texto).join(" ");
+  const nombrados = NOMBRES.filter(([, re]) => re.test(n)).map(([idioma]) => idioma);
+  if (nombrados.length === 1) return nombrados[0];
+  if (nombrados.length > 1) return null;
+  const detectado = detectarIdioma(texto);
+  return detectado === "desconocido" ? null : detectado;
 }

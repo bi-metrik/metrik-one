@@ -33,7 +33,7 @@ const HISTORIA_ES = 'La carretera al puerto lleva meses con un carril cerrado. L
 const HISTORIA_EN = 'The road to the port has had one lane closed for months. Trucks are cutting through the town and a street already collapsed.';
 
 const PASOS: readonly Paso[] = [
-  'consentimiento', 'poblacion', 'sector', 'historia', 'idioma_confirmar', 'idioma_no_es',
+  'idioma', 'consentimiento', 'poblacion', 'sector', 'historia', 'idioma_no_es',
   'triada_orden', 'triada_segundo', 'triada_confirmar', 'triada_intensidad',
   'diada_abrir', 'diada_aclarar', 'diada_confirmar',
 ];
@@ -86,6 +86,9 @@ async function llegarA(paso: Paso, poblacion: 'ciudadano' | 'experto' = 'ciudada
     ],
   });
   const paso1 = (async () => {
+    if (paso === 'idioma') return true;
+    if (paso === 'idioma_no_es') { await procesar(state, { texto: 'English', botonId: BOTON.langEn }, i); return true; }
+    await procesar(state, { texto: 'Español', botonId: BOTON.langEs }, i);
     if (paso === 'consentimiento') return true;
     await procesar(state, { texto: 'OK', botonId: BOTON.ok }, i);
     if (paso === 'poblacion') return true;
@@ -93,10 +96,7 @@ async function llegarA(paso: Paso, poblacion: 'ciudadano' | 'experto' = 'ciudada
     if (paso === 'sector') return true;
     await procesar(state, { texto: '1' }, i);
     if (paso === 'historia') return true;
-    if (paso === 'idioma_no_es') { await procesar(state, { texto: HISTORIA_EN }, i); return true; }
     await procesar(state, { texto: HISTORIA_ES }, i);
-    if (paso === 'idioma_confirmar') return true;
-    await procesar(state, { texto: 'Sí, en español', botonId: BOTON.langSi }, i);
     if (paso === 'triada_orden') return true;
     if (paso === 'triada_segundo') {
       // T1 leida con un solo polo: se pide el segundo
@@ -294,8 +294,10 @@ describe('la palabra clave a mitad de conversacion', () => {
     expect(state.consent).toEqual(antes.consent);
     expect(state.historia).toBe(antes.historia);
     expect(r.salidas).toHaveLength(1);
-    if (paso !== 'consentimiento') expect(r.salidas[0].texto).toContain('Seguimos donde íbamos');
-    else expect(r.salidas[0].texto).toContain('presione *OK*');
+    // Antes del consentimiento no hay "donde ibamos": se repite la pregunta a secas.
+    if (paso === 'idioma') expect(r.salidas[0].texto).toBe('ES: ¿En qué idioma prefiere continuar?\nEN: Which language do you prefer?\nPT: Em que idioma prefere continuar?');
+    else if (paso === 'consentimiento') expect(r.salidas[0].texto).toContain('presione *OK*');
+    else expect(r.salidas[0].texto).toContain('Seguimos donde íbamos');
     verificarSalidas(r.salidas);
   });
 });
@@ -344,20 +346,55 @@ describe('turno cero endurecido', () => {
     expect(s.closed).toBe(true);
   });
 
-  it('en idioma_confirmar, ruido dos veces sigue en espanol y conserva la historia (antes cerraba sin guardar)', async () => {
-    const s = await llegarA('idioma_confirmar');
+  it('en idioma, ruido dos veces sigue en espanol y PIDE el consentimiento: no cierra y no consiente', async () => {
+    const s = await llegarA('idioma');
     let r = await procesar(s, { texto: 'asdkjh' }, sordo());
-    expect(s.paso).toBe('idioma_confirmar');
-    expect(r.salidas[0].texto).toContain('Seguimos en español');
+    expect(s.paso).toBe('idioma');
+    expect(s.reintentos).toBe(1);
+    expect(r.salidas[0].texto).toContain('¿En qué idioma prefiere continuar?');
     r = await procesar(s, { texto: 'zzz' }, sordo());
+    expect(s.paso).toBe('consentimiento');
     expect(s.idioma_confirmado).toBe(true);
+    expect(s.idioma_elegido).toBeUndefined();
+    expect(s.consent).toBeUndefined();
+    expect(s.notas).toContain('no se pudo leer el idioma; se siguio en espanol, el unico del instrumento');
+    expect(r.salidas[0].texto).toContain('demostración');
+  });
+
+  it('un boton viejo del consentimiento tocado en el paso idioma ni consiente ni elige: se repregunta y a la segunda cae a espanol', async () => {
+    const s = await llegarA('idioma');
+    let r = await procesar(s, { texto: 'OK', botonId: BOTON.ok }, sordo());
+    expect(s.paso).toBe('idioma');
+    expect(s.consent).toBeUndefined();
+    expect(s.idioma_elegido).toBeUndefined();
+    expect(s.reintentos).toBe(1);
+    expect(r.salidas[0].texto).toContain('¿En qué idioma prefiere continuar?');
+    r = await procesar(s, { texto: 'OK', botonId: BOTON.ok }, sordo());
+    // Cae a espanol y AHORA se pide el consentimiento: el OK viejo no lo dio.
+    expect(s.paso).toBe('consentimiento');
+    expect(s.consent).toBeUndefined();
+    expect(r.salidas[0].texto).toContain('presione OK');
+  });
+
+  it('en idioma_no_es, ruido dos veces cierra sin guardar: no habia consentimiento ni historia que perder', async () => {
+    const s = await llegarA('idioma_no_es');
+    expect(s.idioma_elegido).toBe('en');
+    await procesar(s, { texto: 'asdkjh' }, sordo());
+    expect(s.paso).toBe('idioma_no_es');
+    const r = await procesar(s, { texto: 'zzz' }, sordo());
+    expect(r.accion).toBe('cerrar_sin_guardar');
+    expect(s.consent).toBeUndefined();
+    expect(s.historia).toBeUndefined();
+  });
+
+  it('una historia en ingles ya no desvia el flujo: sigue a la triada y solo queda idioma_detectado', async () => {
+    const s = await llegarA('historia');
+    const r = await procesar(s, { texto: HISTORIA_EN }, sordo());
     expect(s.paso).toBe('triada_orden');
-    expect(s.historia).toBe(HISTORIA_ES);
-    expect(s.notas).toContain('no confirmo el idioma; se siguio en espanol, el unico del instrumento');
-    // "Otro idioma" y "no" siguen llevando al trilingue
-    const s2 = await llegarA('idioma_confirmar');
-    await procesar(s2, { texto: 'Otro idioma', botonId: BOTON.langOtro }, sordo());
-    expect(s2.paso).toBe('idioma_no_es');
+    expect(s.idioma_detectado).toBe('en');
+    expect(s.idioma_elegido).toBe('es');
+    expect(s.historia).toBe(HISTORIA_EN);
+    expect(r.salidas[0].texto).toContain('*De dónde nace lo que observó.*');
   });
 
   it('un boton viejo del consentimiento a mitad de una triada no confirma nada: se lee como texto', async () => {
@@ -445,10 +482,14 @@ describe('capa 3: pregunta de vuelta y negativa', () => {
     expect(txt).toContain('• En el fondo, qué se siente que es: sin ubicar');
   });
 
-  it('negativa antes del consentimiento: no se guarda nada', async () => {
+  it('negativa antes del consentimiento (en idioma o en consentimiento): no se guarda nada', async () => {
     const s = await llegarA('consentimiento');
     const r = await procesar(s, { texto: 'no quiero participar' }, sordo());
     expect(r.accion).toBe('cerrar_sin_guardar');
+    const s0 = await llegarA('idioma');
+    const r0 = await procesar(s0, { texto: 'paso' }, sordo());
+    expect(r0.accion).toBe('cerrar_sin_guardar');
+    expect(s0.consent).toBeUndefined();
   });
 
   it('negativa en la historia: se explica una vez; a la segunda se cierra sin guardar', async () => {

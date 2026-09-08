@@ -6,15 +6,17 @@ import type {
 } from "./instrumento.ts";
 
 export type Idioma = "es" | "en" | "pt" | "desconocido";
+/** Lo que la persona puede elegir en el primer mensaje. */
+export type IdiomaElegible = Exclude<Idioma, "desconocido">;
 
 /** Paso en el que esta la conversacion = que se espera de la persona ahora. */
 export type Paso =
-  | "consentimiento"     // esperando OK a la demo
+  | "idioma"             // primer mensaje: esperando Espanol / English / Portugues
+  | "consentimiento"     // esperando OK a la demo (ya en un idioma que la persona entiende)
   | "poblacion"          // esperando si/no a "observador de su sector"
   | "sector"             // esperando numero o nombre de la lista cerrada
   | "historia"           // esperando la narrativa (primer texto libre)
-  | "idioma_confirmar"   // se detecto espanol: esperando "seguimos en espanol"
-  | "idioma_no_es"       // no era espanol: esperando si/no al mensaje trilingue
+  | "idioma_no_es"       // eligio EN o PT: esperando si/no al mensaje trilingue
   | "triada_orden"       // esperando "cuales dos y en que orden"
   | "triada_segundo"     // nombro uno solo: esperando el segundo
   | "triada_confirmar"   // esperando si/no al eco del orden
@@ -95,8 +97,9 @@ export interface NavigateState {
   poblacion?: Poblacion;
   sector?: string | null;
   idioma: "es";                 // idioma del instrumento (el unico que existe), bloqueado al confirmar
-  idioma_detectado?: Idioma;    // lo que se detecto en el primer texto libre
-  idioma_confirmado: boolean;
+  idioma_elegido?: IdiomaElegible; // lo que eligio en el primer mensaje; ausente = no eligio y se siguio en espanol por fallback
+  idioma_detectado?: Idioma;    // lo que se detecto en la historia: dato para el instrumento EN/PT futuro, no decide nada
+  idioma_confirmado: boolean;   // eligio espanol, o acepto seguir en espanol
   historia?: string;
   consent?: { version: string; granted_at: string };
   secuencia: DimensionId[];

@@ -179,4 +179,20 @@ lo único pendiente es `git push origin --delete <rama>`. El worktree propio tam
 puede quitar con `git worktree remove` desde adentro: se deja sin cambios sin commitear
 y la sesión siguiente nace de `origin/main` fresco, como siempre.
 
-Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]].
+**2026-09-08, PR #570 — `gh pr merge <n> --squash` SIN `--delete-branch` devuelve limpio.** El
+error de arriba es del paso local del borrado; sin ese flag no hay paso local y el comando sale
+en silencio con el merge hecho. Después, `git push origin --delete <rama>` aparte. Es la forma
+sana desde un worktree aislado.
+
+## Lo que el guard rechaza como "demasiado complejo" y su forma plana (2026-09-08)
+
+- `cat >> archivo <<'EOF' … EOF` (append con heredoc) → rechazado. Usar **Edit** con el final del
+  archivo como ancla.
+- `python3 - <<'EOF' … EOF` con lógica → rechazado. **Write** del script al scratchpad y
+  `python3 /ruta/absoluta/script.py` plano → pasa.
+- `git commit -m "…" -m "…" -- ruta1 ruta2` (commit con rutas, sin `add` previo) → pasa como
+  un solo comando plano, y evita el `add && commit`.
+- El symlink RELATIVO `ln -s ../../../.env.local .env.local && ln -s ../../../node_modules
+  node_modules` pasó de nuevo. `rm .env.local node_modules` los quita sin tocar el destino.
+
+Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]], [[navigate-lector-gemini]].

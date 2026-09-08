@@ -1,9 +1,10 @@
 // Navigate — motor determinista de la conversacion.
 //
-// Todo lo que la persona VE lo arma este archivo con los literales del instrumento: turno
-// cero (consentimiento de demo, poblacion, sector), deteccion y confirmacion de idioma,
-// triadas en "reparto en dos tiempos" (elicitacion-resolucion-yuto.md §1-2) y diadas en
-// "un turno, cinco anclas" (elicitacion-diadas-yuto.md §2-3). El modelo entra SOLO por el
+// Todo lo que la persona VE lo arma este archivo con los literales del instrumento: idioma
+// (primer mensaje: eleccion explicita ANTES del consentimiento, para que el consentimiento
+// llegue en un idioma que la persona entiende), turno cero (consentimiento de demo,
+// poblacion, sector), deteccion del idioma de la historia solo como dato, triadas en "reparto
+// en dos tiempos" (elicitacion-resolucion-yuto.md §1-2) y diadas en "un turno, cinco anclas" (elicitacion-diadas-yuto.md §2-3). El modelo entra SOLO por el
 // `Interprete`, para leer texto libre; nunca redacta, nunca traduce, nunca propone.
 //
 // Es una funcion de (estado, entrada) -> (estado, mensajes, accion). No toca red ni base:
@@ -23,11 +24,11 @@ import {
   anclasDe, composicion, esTriada, etiquetaSector, preguntaMostrada,
 } from "./instrumento.ts";
 import type { Ancla, DiadaNav, DimensionId, Poblacion, TriadaNav } from "./instrumento.ts";
-import { detectarIdioma } from "./idioma.ts";
+import { detectarIdioma, leerIdiomaElegido } from "./idioma.ts";
 import { normalizarTexto } from "./interprete.ts";
 import { leerMeta, sinPalabras } from "./meta.ts";
 import type {
-  Accion, DiadaEnCurso, Entrada, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida, TriadaEnCurso,
+  Accion, DiadaEnCurso, Entrada, IdiomaElegible, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida, TriadaEnCurso,
 } from "./tipos.ts";
 
 export const STUDY_ID = "navigate";
@@ -40,8 +41,10 @@ export const BOTON = {
   no: "nav_no",
   expSi: "nav_exp_si",
   expNo: "nav_exp_no",
+  langEs: "nav_lang_es",
+  langEn: "nav_lang_en",
+  langPt: "nav_lang_pt",
   langSi: "nav_lang_si",
-  langOtro: "nav_lang_otro",
   langNo: "nav_lang_no",
   si: "nav_si",
   corrijo: "nav_corrijo",
@@ -56,11 +59,11 @@ export const BOTON = {
  * que no es del paso se ignora como boton y su titulo se lee como texto.
  */
 const BOTONES_DEL_PASO: Record<Paso, readonly string[]> = {
+  idioma: [BOTON.langEs, BOTON.langEn, BOTON.langPt],
   consentimiento: [BOTON.ok, BOTON.no],
   poblacion: [BOTON.expSi, BOTON.expNo],
   sector: [],
   historia: [],
-  idioma_confirmar: [BOTON.langSi, BOTON.langOtro],
   idioma_no_es: [BOTON.langSi, BOTON.langNo],
   triada_orden: [],
   triada_segundo: [],
@@ -87,6 +90,9 @@ const MAX_REINTENTOS = 2;
 // ---- Textos ---------------------------------------------------------------------------
 
 const TXT = {
+  // Primer mensaje tras `cardumen`. Corto y en los tres idiomas: la persona todavia no ha
+  // dicho cual habla, y el consentimiento solo vale si llega en uno que entienda.
+  idioma: "ES: ¿En qué idioma prefiere continuar?\nEN: Which language do you prefer?\nPT: Em que idioma prefere continuar?",
   consentimiento:
     "Hola. Soy el asistente de escucha de *Navigate* (Cardumen).\n\n" +
     "Antes de empezar: *esto es una demostración*. Lo que responda se guarda marcado como prueba y no entra en ningún estudio ni se comparte.\n\n" +
@@ -100,7 +106,6 @@ const TXT = {
   poblacionRepite: "¿Responde como observador de su sector? Toque *Sí, observador* o *No*.",
   sector: "¿En qué sector se ubica? Elija uno de la lista.",
   sectorRepite: "No encontré ese sector en la lista. Responda con el número.",
-  idiomaConfirmar: "Gracias por contarlo. Seguimos en español, ¿le parece?",
   trilingue:
     "ES: Por ahora este instrumento está disponible solo en español. ¿Quiere continuar en español?\n\n" +
     "EN: For now this instrument is available in Spanish only. Would you like to continue in Spanish?\n\n" +
@@ -143,7 +148,8 @@ const botonesSiNo = (t: string): Salida =>
 const botonesPoblacion = (t: string): Salida =>
   botones(t, [{ id: BOTON.expSi, title: "Sí, observador" }, { id: BOTON.expNo, title: "No" }]);
 const botonesIdioma = (): Salida =>
-  botones(TXT.idiomaConfirmar, [{ id: BOTON.langSi, title: "Sí, en español" }, { id: BOTON.langOtro, title: "Otro idioma" }]);
+  botones(TXT.idioma, [{ id: BOTON.langEs, title: "Español" }, { id: BOTON.langEn, title: "English" }, { id: BOTON.langPt, title: "Português" }]);
+const botonesConsentimiento = (t: string): Salida => botones(t, [{ id: BOTON.ok, title: "OK" }]);
 const botonesTrilingue = (): Salida =>
   botones(TXT.trilingue, [{ id: BOTON.langSi, title: "Sí / Yes / Sim" }, { id: BOTON.langNo, title: "No" }]);
 
@@ -229,7 +235,7 @@ export function iniciar(ahora: string): { state: NavigateState; salidas: Salida[
     motor: "navigate",
     study_id: STUDY_ID,
     demo: true,
-    paso: "consentimiento",
+    paso: "idioma",
     idioma: "es",
     idioma_confirmado: false,
     secuencia: [],
@@ -241,7 +247,7 @@ export function iniciar(ahora: string): { state: NavigateState; salidas: Salida[
     started_at: ahora,
     closed: false,
   };
-  const salidas = [botones(TXT.consentimiento, [{ id: BOTON.ok, title: "OK" }])];
+  const salidas = [botonesIdioma()];
   anotar(state, salidas);
   return { state, salidas };
 }
@@ -284,9 +290,11 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
   if (EXIT.has(n)) return salir(state);
 
   // La palabra clave a mitad de conversacion NO reinicia nada: se recuerda donde ibamos.
+  // Antes del consentimiento no hay nada que recordar: se repite la pregunta a secas.
   if (n === PALABRA_CLAVE) {
     const pendiente = preguntaPendiente(state);
-    return resultado(state, [state.paso === "consentimiento" ? pendiente : prefijar(TXT.yaEstamos, pendiente)]);
+    const arrancando = state.paso === "idioma" || state.paso === "consentimiento";
+    return resultado(state, [arrancando ? pendiente : prefijar(TXT.yaEstamos, pendiente)]);
   }
 
   // Capa determinista ANTES del modelo: lo que no es una respuesta no se lee como respuesta.
@@ -302,6 +310,18 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
   const esNo = boton === BOTON.no || boton === BOTON.corrijo || boton === BOTON.expNo || boton === BOTON.langNo || NO.has(n);
 
   switch (state.paso) {
+    case "idioma": {
+      const elegido = boton === BOTON.langEs
+        ? "es"
+        : boton === BOTON.langEn
+          ? "en"
+          : boton === BOTON.langPt
+            ? "pt"
+            : leerIdiomaElegido(t);
+      if (elegido === null) return fallaLectura(state, "no_leido");
+      return fijarIdioma(state, elegido);
+    }
+
     case "consentimiento": {
       if (esSi) {
         state.consent = { version: CONSENT_VERSION, granted_at: new Date().toISOString() };
@@ -335,31 +355,17 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
     }
 
     case "historia": {
+      // La historia se guarda tal cual. El idioma ya se eligio al inicio: aqui solo se registra
+      // lo detectado, como dato para el instrumento EN/PT futuro, y se abre la primera dimension.
       state.historia = t;
       state.idioma_detectado = detectarIdioma(t);
       state.reintentos = 0;
-      if (state.idioma_detectado === "en" || state.idioma_detectado === "pt") {
-        state.paso = "idioma_no_es";
-        return resultado(state, [botonesTrilingue()]);
-      }
-      state.paso = "idioma_confirmar";
-      return resultado(state, [botonesIdioma()]);
-    }
-
-    case "idioma_confirmar": {
-      if (boton === BOTON.langOtro || esNo) {
-        state.paso = "idioma_no_es";
-        state.reintentos = 0;
-        return resultado(state, [botonesTrilingue()]);
-      }
-      if (esSi) return confirmarIdioma(state);
-      // Ni si ni no: se repite. A la segunda se sigue en espanol, que es el unico idioma del
-      // instrumento y el que la persona acaba de usar; cerrar aqui botaria su historia.
-      return fallaLectura(state, "no_leido");
+      return resultado(state, abrirDimension(state));
     }
 
     case "idioma_no_es": {
-      if (esSi) return confirmarIdioma(state);
+      // "Si / Yes / Sim", o nombrar el espanol ("ok, spanish"), es aceptar seguir en espanol.
+      if (esSi || (!esNo && leerIdiomaElegido(t) === "es")) return confirmarIdioma(state);
       if (esNo) return cerrarSinGuardar(state, TXT.trilingueAdios);
       return fallaLectura(state, "no_leido");
     }
@@ -520,10 +526,21 @@ function fijarSector(state: NavigateState, sector: string | null): Resultado {
   return resultado(state, [texto(APERTURA[state.poblacion!])]);
 }
 
+/** El idioma elegido al inicio decide el flujo: espanol sigue al consentimiento; EN o PT reciben el aviso trilingue. */
+function fijarIdioma(state: NavigateState, idioma: IdiomaElegible): Resultado {
+  state.idioma_elegido = idioma;
+  state.reintentos = 0;
+  if (idioma === "es") return confirmarIdioma(state);
+  state.paso = "idioma_no_es";
+  return resultado(state, [botonesTrilingue()]);
+}
+
+/** Espanol confirmado (elegido, aceptado o por fallback): recien aqui se pide el consentimiento. */
 function confirmarIdioma(state: NavigateState): Resultado {
   state.idioma_confirmado = true;
   state.reintentos = 0;
-  return resultado(state, abrirDimension(state));
+  state.paso = "consentimiento";
+  return resultado(state, [botonesConsentimiento(TXT.consentimiento)]);
 }
 
 // ---- Lo que no se pudo leer: repreguntar una vez, resolver a la segunda ------------------
@@ -558,11 +575,11 @@ function sumarIntento(state: NavigateState): boolean {
 /** La pregunta que la persona tiene pendiente, tal como se le hizo. */
 function preguntaPendiente(state: NavigateState): Salida {
   switch (state.paso) {
-    case "consentimiento": return botones(TXT.consentimientoRepite, [{ id: BOTON.ok, title: "OK" }]);
+    case "idioma": return botonesIdioma();
+    case "consentimiento": return botonesConsentimiento(TXT.consentimientoRepite);
     case "poblacion": return botonesPoblacion(TXT.poblacionRepite);
     case "sector": return menuSectores(TXT.sector);
     case "historia": return texto(APERTURA[state.poblacion ?? "ciudadano"]);
-    case "idioma_confirmar": return botonesIdioma();
     case "idioma_no_es": return botonesTrilingue();
     case "triada_orden": { const { tri } = triadaActual(state); return preguntaTriada(tri, posicionTriada(state)); }
     case "triada_segundo": { const { tri, ec } = triadaActual(state); return preguntaSegundo(tri, ec.dominante!); }
@@ -600,6 +617,11 @@ function fallaLectura(state: NavigateState, motivo: Motivo): Resultado {
 /** Se agotaron los intentos del paso: se resuelve SIN lectura y se sigue. Nunca se rellena. */
 function sinLectura(state: NavigateState): Resultado {
   switch (state.paso) {
+    case "idioma":
+      // Dos mensajes sin un idioma legible: se sigue en espanol, el unico del instrumento, y
+      // queda dicho. `idioma_elegido` se queda vacio porque la persona no eligio.
+      nota(state, "no se pudo leer el idioma; se siguio en espanol, el unico del instrumento");
+      return confirmarIdioma(state);
     case "consentimiento": return cerrarSinGuardar(state, TXT.consentimientoAdios);
     case "poblacion":
       // No se puede dejar a la persona atascada en una demo; queda dicho en provenance.
@@ -611,9 +633,6 @@ function sinLectura(state: NavigateState): Resultado {
     case "historia":
       // Sin historia no hay Capa A que ubicar: se cierra con lo que haya (nada, si no hubo historia).
       return salir(state);
-    case "idioma_confirmar":
-      nota(state, "no confirmo el idioma; se siguio en espanol, el unico del instrumento");
-      return confirmarIdioma(state);
     case "idioma_no_es": return cerrarSinGuardar(state, TXT.trilingueAdios);
     case "triada_orden":
       return cerrarTriada(state, { intensidad: null, confirmado: false, nota: "no se pudo leer un orden tras dos intentos", sinResolver: true });
@@ -640,6 +659,7 @@ function sinLectura(state: NavigateState): Resultado {
 /** Negativa explicita ("paso", "no quiero responder"): no se insiste. */
 function declinar(state: NavigateState): Resultado {
   switch (state.paso) {
+    case "idioma":
     case "consentimiento": return cerrarSinGuardar(state, TXT.rechazo);
     case "poblacion":
       nota(state, "declino decir si es observador: se asumio panel ciudadano");
@@ -651,7 +671,6 @@ function declinar(state: NavigateState): Resultado {
       // Sin historia no se puede seguir: se explica una vez; a la segunda se cierra.
       if (sumarIntento(state)) return salir(state);
       return resultado(state, [prefijar(TXT.sinHistoria, texto(APERTURA[state.poblacion ?? "ciudadano"]))]);
-    case "idioma_confirmar": return salir(state);
     case "idioma_no_es": return cerrarSinGuardar(state, TXT.trilingueAdios);
     case "triada_orden":
     case "triada_segundo":
@@ -921,6 +940,7 @@ export function armarPayload(state: NavigateState, salida: "completa" | "salir" 
     poblacion: state.poblacion ?? null,
     sector: state.sector ?? null,
     idioma: state.idioma,
+    idioma_elegido: state.idioma_elegido ?? null,
     idioma_detectado: state.idioma_detectado ?? null,
     idioma_confirmado: state.idioma_confirmado,
     consent: state.consent ?? null,

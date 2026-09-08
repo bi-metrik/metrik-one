@@ -5,6 +5,7 @@
 > (el experto ancla, no pondera; español activo, EN/PT no se traducen en caliente).
 > Instrumento: `proyectos/metrik/cardumen/navigate-demo/data/meta.json`, clave `instrumento`.
 > Mecánicas: `elicitacion-resolucion-yuto.md` (tríadas) y `elicitacion-diadas-yuto.md` (diadas).
+> 2026-09-08: el idioma se elige en el PRIMER mensaje, antes del consentimiento (§4, decisión de Mauricio tras probar el bot en vivo).
 
 ## 1. Qué existía y qué se construyó
 
@@ -15,7 +16,7 @@ Evaluación del motor `_shared/cardumen` antes de escribir una línea:
 | (a) ¿Un estudio se define por datos o por código? | Por datos: `cardumen_estudios.spec` (jsonb `StudySpec`) + `cardumen_estudio_triggers` (palabra → estudio). Pero la **mecánica** es una sola y va en código: el entrevistador R1 con prompt abierto que *infiere* la inclinación de la narrativa y tiene prohibido presentar los polos como elección (regla 5b del prompt). | El estudio sigue siendo una fila. El spec lleva `motor: "navigate"` y el motor R1 delega a una máquina de estados nueva. Capa A vive en código (`navigate/instrumento.ts`), fijada por prueba contra `meta.json`. |
 | (b) ¿Las tríadas implementan "ordena dos + gradúa"? | No. R1 captura `CapaAPlacement { lean, verbatim, na }`: un solo polo dominante en palabras, resolución gruesa, sin segundo ni intensidad. | "Reparto en dos tiempos" completo: una pregunta saca dominante + segundo; eco literal con confirmación; turno de intensidad con las tres etiquetas de peso; composición pre-registrada (§3.1). |
 | (c) ¿Existen las diadas? | Como tipo (`dyads`) y en el prompt (`entre [A <-> B]`), capturadas igual de grueso: un `lean` textual. Sin anclas ni salidas especiales. | "Un turno, cinco anclas" con `middle` / `both_intense` / `not_applicable` / `dont_know`, valor pre-registrado (§4.1). |
-| (d) ¿Qué guarda `cardumen_respuestas`? | Medido en producción: `id, estudio, token, lang, payload (jsonb), created_at`. Sin columna de demo, población ni sector. | Todo va en `payload`: `demo: true`, `poblacion`, `sector`, `idioma`, `idioma_detectado`, `consent`, `narrative.historia`, `capaA` por dimensión con los campos de piloto, `provenance`. **No hace falta columna nueva.** |
+| (d) ¿Qué guarda `cardumen_respuestas`? | Medido en producción: `id, estudio, token, lang, payload (jsonb), created_at`. Sin columna de demo, población ni sector. | Todo va en `payload`: `demo: true`, `poblacion`, `sector`, `idioma`, `idioma_elegido`, `idioma_detectado`, `consent`, `narrative.historia`, `capaA` por dimensión con los campos de piloto, `provenance`. **No hace falta columna nueva.** |
 
 Verificado también en código: el bloque `0c` del webhook consulta el catálogo (`resolverEstudioChat`) **antes** de la palabra fija `isCardumenTrigger`, y el catálogo hoy no tiene la palabra `cardumen`. Una fila `cardumen → navigate` la captura; sin esa fila, el código nuevo es inerte y `cardumen` sigue mandando el link de la mini-web FEDE como hoy.
 
@@ -25,13 +26,13 @@ Nuevo, en `supabase/functions/_shared/cardumen/navigate/`:
 
 - `instrumento.ts` — Capa A literal de `meta.json`, aperturas de la sección 01 de la muestra, los 12 sectores, tablas de mapeo pre-registradas.
 - `tipos.ts` — estado de la conversación, registros por dimensión (§3 de las dos specs), contrato del intérprete.
-- `idioma.ts` — detector es/en/pt por palabras funcionales, determinista; ante la duda, "desconocido" (= español + confirmación).
+- `idioma.ts` — dos lectores deterministas. `leerIdiomaElegido` lee la respuesta escrita al primer mensaje: palabras claras (`español`, `spanish`, `castellano`, `inglés`, `english`, `portugués`, `português`) y, si no las hay, detección por palabras funcionales; `null` = repreguntar una vez y a la segunda seguir en español. `detectarIdioma` sobre la historia solo registra `idioma_detectado` como dato.
 - `interprete.ts` — la única puerta del modelo (`geminiFlashLite`, Gemini 3.1 Flash-Lite; el motor R1/R2 de Araucanía/Trappvel sigue en Haiku). Lee texto libre y devuelve JSON con índices y banderas. Lector por palabras primero (botones, etiquetas literales), modelo después. **El modelo entra en cuatro puntos y solo en cuatro:** orden de una tríada, segundo polo, etiqueta de peso y ancla de una diada. **La historia no pasa por el modelo**: se guarda tal cual y solo se le detecta el idioma.
 - `meta.ts` — capa determinista que corre ANTES del modelo en todos los pasos: vacío / solo emojis (`sinPalabras`), pregunta de vuelta y negativa (`leerMeta`). Estrecha a propósito: un falso positivo se comería una respuesta real.
 - `robustez.test.ts` — batería hostil por paso (Capa 1, §8); `golden-lector.json` + `golden-lector.test.ts` — golden set del lector (Capa 2, §8); `scripts/navigate-lector-eval.ts` — corre el golden contra el modelo vivo.
-- `motor.ts` — máquina de estados: turno cero, idioma, tríadas, diadas, cierre, `armarPayload`.
+- `motor.ts` — máquina de estados: idioma (primer mensaje), turno cero, tríadas, diadas, cierre, `armarPayload`.
 - `index.ts` — enganche con `cardumen_chat_sessions` y WhatsApp.
-- `*.test.ts` — 59 pruebas (vitest), sin modelo ni red.
+- `*.test.ts` — 798 pruebas (vitest), sin modelo ni red.
 
 Modificado:
 
@@ -59,16 +60,18 @@ Para apagar la demo sin borrar nada: `update public.cardumen_estudios set activo
 
 Escribir `cardumen` al número de producción de MéTRIK. Recorrido esperado:
 
-1. **Consentimiento de demo** con botón *OK*. Dice con todas las letras que es una demostración, que lo que responda se guarda marcado como prueba y no entra en ningún estudio ni se comparte. `no` cierra sin guardar nada.
-2. **¿Responde como observador de su sector?** Botones *Sí, observador* / *No*. Define el flujo: ciudadano T1, T2, D1, D2; experto además T3 y D3.
-3. **Sector**: lista numerada de 12. Se responde con el número o con el nombre (`salud`, `tecnologia`). Es lista numerada y no lista interactiva de WhatsApp porque esas admiten máximo 10 filas.
-4. **Apertura** (Capa B): la pregunta del panel ciudadano o la de observadores, literal de la muestra. Se responde con la historia (texto o audio).
-5. **Idioma**: se detecta en la historia. Si es español: *Seguimos en español, ¿le parece?* con botones. Si es inglés o portugués: un solo mensaje en los tres idiomas diciendo que por ahora el instrumento está en español, con botones *Sí / Yes / Sim* y *No*. Nunca se traduce nada. La historia se guarda tal como se escribió.
+1. **Idioma**, primer mensaje tras `cardumen`, antes de cualquier otra cosa: `ES: ¿En qué idioma prefiere continuar? / EN: Which language do you prefer? / PT: Em que idioma prefere continuar?` con botones *Español* / *English* / *Português*. *Español* sigue al consentimiento. *English* o *Português*: un solo mensaje en los tres idiomas diciendo que por ahora el instrumento está en español, con botones *Sí / Yes / Sim* y *No*; *Sí* sigue al consentimiento en español, *No* cierra sin guardar nada (todavía no hay nada que guardar). Nunca se traduce nada. Escrito en vez de botón: valen las palabras claras (`español`, `spanish`, `castellano`, `inglés`, `english`, `portugués`, `português`) y, si no las hay, la detección por palabras funcionales; si sigue sin leerse, se repregunta una vez con el mismo mensaje y a la segunda se sigue en español (queda en `provenance.notas` e `idioma_elegido` va en `null`). En el aviso trilingüe, nombrar el español ("ok, spanish") vale como *Sí*.
+2. **Consentimiento de demo** con botón *OK*, ya en un idioma que la persona entiende. Dice con todas las letras que es una demostración, que lo que responda se guarda marcado como prueba y no entra en ningún estudio ni se comparte. `no` cierra sin guardar nada.
+3. **¿Responde como observador de su sector?** Botones *Sí, observador* / *No*. Define el flujo: ciudadano T1, T2, D1, D2; experto además T3 y D3.
+4. **Sector**: lista numerada de 12. Se responde con el número o con el nombre (`salud`, `tecnologia`). Es lista numerada y no lista interactiva de WhatsApp porque esas admiten máximo 10 filas.
+5. **Apertura** (Capa B): la pregunta del panel ciudadano o la de observadores, literal de la muestra. Se responde con la historia (texto o audio). Se guarda tal como se escribió y se le detecta el idioma **solo como dato** (`idioma_detectado`): ya no hay pregunta de idioma después de la historia, se pasa directo a la primera tríada.
 6. **Tríada** (T1, luego T2, y T3 para expertos): *"¿Cuáles dos pesaron más, y en qué orden?"* → eco literal *"Le leo entonces: primero X; en segundo lugar Y; y Z quedó al margen. ¿Lo dejo así?"* → botón *Sí, así* / *No, corrijo* → *"¿casi parejos, uno mandaba pero el otro contaba, o fue claramente X?"* (tres botones) → *"Listo. Lo guardo así: ..."*. Si nombra uno solo, se pide el segundo una vez; *ninguno* = "fue solo X" y no hay turno de intensidad.
 7. **Diada** (D1, D2, y D3 para expertos): *"¿Siente que A, o que B?"* → si la respuesta es clara, eco + confirmación; si matiza, un menú corto con las anclas del lado que insinuó (se elige por número, sin confirmación extra). *"Las dos con fuerza"* se guarda como `both_intense`, no como 0,5.
 8. **Cierre**: agradecimiento, recordatorio de que fue demo, y un resumen en palabras de lo que quedó registrado (Saga §2: se muestra la fila, no el punto en el mapa).
 
 En cualquier momento: `salir` cierra (guarda lo que haya si ya hubo consentimiento, como incompleta); `borrar` elimina lo guardado y la sesión. Tras 24 h sin actividad la sesión se vence.
+
+**Por qué el idioma va primero (2026-09-08, decisión de Mauricio tras probar el bot en vivo).** Hasta el PR #570 el flujo era consentimiento → población → sector → historia → detección de idioma → confirmación (`idioma_confirmar` / `idioma_no_es`). Quien no hablaba español recibía cuatro mensajes en español que no entendía, incluido el consentimiento, y un consentimiento en un idioma que la persona no entiende no es consentimiento. Además el turno "Seguimos en español, ¿le parece?" era redundante si el idioma ya se había elegido y costaba un mensaje: se eliminó. Resultado: quien no habla español recibe el aviso trilingüe en el segundo mensaje en vez del sexto (tres turnos perdidos menos), y el consentimiento llega siempre en un idioma ya elegido. En términos de `instrumento-multilingue-saga.md` §5 ("detectar, confirmar, bloquear"): la **confirmación** pasa al inicio como elección explícita de la persona; la **detección** sobre la historia queda solo como dato (`idioma_detectado`) y no decide nada; el **bloqueo** sigue igual (`idioma: "es"`, el único instrumento que existe).
 
 Sin la fila del catálogo, la palabra `cardumen` hace lo de siempre (link a la mini-web).
 
@@ -81,6 +84,7 @@ select id, created_at, estudio, lang,
        payload->>'demo'            as demo,
        payload->>'poblacion'       as poblacion,
        payload->>'sector'          as sector,
+       payload->>'idioma_elegido'   as idioma_elegido,
        payload->>'idioma_detectado' as idioma_detectado,
        payload->'provenance'->>'completa' as completa,
        payload->'narrative'->>'historia'  as historia,
@@ -97,7 +101,7 @@ select id, created_at, estudio, lang,
   "source": "chat", "motor": "navigate", "demo": true, "study_id": "navigate",
   "collection_mode": "panel_recurrente",
   "poblacion": "ciudadano", "sector": "Infraestructura y construccion",
-  "idioma": "es", "idioma_detectado": "es", "idioma_confirmado": true,
+  "idioma": "es", "idioma_elegido": "es", "idioma_detectado": "es", "idioma_confirmado": true,
   "consent": { "version": "navigate-demo-v1", "granted_at": "..." },
   "narrative": { "historia": "La carretera al puerto lleva meses..." },
   "capaA": {
@@ -120,7 +124,7 @@ select id, created_at, estudio, lang,
 }
 ```
 
-`token` es el teléfono, `lang` es `es` (el idioma del instrumento, bloqueado). El estudio no es `publicable`, así que nada sale por `v_cardumen_live`.
+`token` es el teléfono, `lang` es `es` (el idioma del instrumento, bloqueado). El estudio no es `publicable`, así que nada sale por `v_cardumen_live`. Los tres campos de idioma: `idioma_elegido` es lo que la persona eligió en el primer mensaje (`es` / `en` / `pt`; `null` si no eligió y se cayó a español, con la nota en `provenance.notas`); `idioma_detectado` es lo que se detectó en la historia, dato para el instrumento EN/PT futuro, no decide nada; `idioma_confirmado` es que eligió español o aceptó seguir en español.
 
 ## 6. Decisiones que conviene saber
 
@@ -145,10 +149,10 @@ select id, created_at, estudio, lang,
 | Vacío, solo espacios, solo emojis | "No me llegó texto…" + la pregunta pendiente. Cuenta como intento. No gasta modelo. |
 | Botón de OTRO paso (WhatsApp deja tocar mensajes viejos) | Se ignora como botón; en pasos de texto se repregunta ("Ese botón era de una pregunta anterior…"). Un "OK" viejo a mitad de una tríada ya no confirma nada. |
 | Pregunta de vuelta ("¿quién eres?", "¿esto es una encuesta?") | Una frase corta que responde y, en el MISMO mensaje, la pregunta pendiente. Cuenta como intento. |
-| Negativa explícita ("no quiero responder", "paso") | Tríadas: `unresolved` con `declinado: true`. Diadas: `not_applicable` con `declinado: true`. Intensidad: el orden confirmado se conserva, grueso. Se avanza sin insistir. Antes del consentimiento: no se guarda nada. En la historia: se explica una vez, a la segunda se cierra. |
-| `cardumen` a mitad de conversación | "Ya estamos en la demostración. Seguimos donde íbamos:" + la pregunta pendiente. No reinicia, no cuenta. |
+| Negativa explícita ("no quiero responder", "paso") | Tríadas: `unresolved` con `declinado: true`. Diadas: `not_applicable` con `declinado: true`. Intensidad: el orden confirmado se conserva, grueso. Se avanza sin insistir. Antes del consentimiento (idioma incluido): no se guarda nada. En la historia: se explica una vez, a la segunda se cierra. |
+| `cardumen` a mitad de conversación | "Ya estamos en la demostración. Seguimos donde íbamos:" + la pregunta pendiente. No reinicia, no cuenta. Antes del consentimiento (idioma, consentimiento) se repite la pregunta a secas. |
 | "no soy observador" | Ciudadano (antes la palabra negada daba experto). |
-| Ruido dos veces en "¿seguimos en español?" | Se sigue en español y se conserva la historia (antes cerraba sin guardar). |
+| Ruido dos veces en el primer mensaje (idioma) | Se sigue en español y se pide el consentimiento; `idioma_elegido` queda en `null` con nota. El turno "¿seguimos en español?" posterior a la historia ya no existe (§4). Ruido dos veces en el aviso trilingüe cierra sin guardar: no había consentimiento ni historia que perder. |
 | Contradicción literal ("los dos primero", "todos igual") | No llega al modelo: se repregunta con encuadre. |
 | Etiqueta de peso por palabras | Solo las formas casi literales del botón. "mi pareja", "el mandato", "les contaba" y "claro" a secas ya no fabrican una etiqueta. |
 | `especial` del modelo (no sabe / no aplica / las dos con fuerza) | Solo se acepta con evidencia léxica en la respuesta (`evidenciaEspecial`). Sin ella, un modelo chico usa "no aplica" como cajón para lo que está fuera de tema. |
