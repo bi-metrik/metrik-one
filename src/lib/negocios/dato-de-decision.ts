@@ -85,6 +85,27 @@ export function esRespuesta(valor: unknown): boolean {
 }
 
 /**
+ * A qué etapa (por `orden`) manda el routing con estos campos. Primer match gana.
+ *
+ * `valores` es el bolsillo que arma `camposDeRouting`: solo los bloques que le APLICAN al
+ * caso. Un campo ausente no matchea ninguna condición y el destino es el `default`, que es
+ * la ruta deliberada cuando no hay respuesta.
+ *
+ * La comparación es `String(x ?? '')` contra `String(value)` a propósito: así un `false`
+ * booleano guardado en el bloque matchea la rama declarada como `"false"`.
+ */
+export function destinoDeRouting(
+  routing: RoutingEtapa,
+  valores: Record<string, unknown>,
+): number {
+  for (const regla of routing.conditional ?? []) {
+    const { field, value } = regla.condition
+    if (String(valores[field] ?? '') === String(value)) return regla.etapa_orden
+  }
+  return routing.default_etapa_orden
+}
+
+/**
  * Un campo de decisión con su procedencia, para poder exigirlo y explicarlo.
  */
 export interface CampoDecision {

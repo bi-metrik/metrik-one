@@ -26,7 +26,7 @@ import { createDriveFolder, uploadFileToDrive, setFilePublicByLink } from '../sr
 import { generarFormularioCore } from '../src/lib/actions/formulario-actions'
 import { nitSinDv, calcularDvNit } from '../src/lib/dian/nit'
 import { asignarResponsable } from '../src/lib/negocios/responsable-rol'
-import { canonizarSeccional } from '../src/lib/dian/seccionales'
+import { canonizarSeccional, requiereCitaDian } from '../src/lib/dian/seccionales'
 
 for (const line of readFileSync(join(process.cwd(), '.env.local'), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '')
@@ -377,12 +377,32 @@ async function procesar(f: Fila, opts: { conCobros: boolean }) {
     migrado(negocioId, DATO.certificacion_upme, { requiere_certificacion_upme: servicio !== 'solo_iva' }),
     migrado(negocioId, DATO.devolucion_de_iva, { requiere_devolucion_iva: servicio !== 'solo_upme' }),
     migrado(negocioId, DATO.titularidad, { modalidad_solicitante: 'unico' }),
-    migrado(negocioId, DATO.cita_dian_requerida, { seccional_display: f.seccional ?? null, requiere_cita_dian: ['Bogota', 'Medellin', 'Cali', 'Bucaramanga'].includes(noac(f.seccional ?? '').replace(/^\w/, (c) => c.toUpperCase())) }),
     migrado(negocioId, DATO.confirmar_tarifa),
     migrado(negocioId, DATO.propuesta),
     migrado(negocioId, DATO.confirmacion_cargue),
     migrado(negocioId, DATO.comprobante_pago),
   ]
+  // El bloque `cita_dian_requerida` declara `condition: servicio = solo_iva`: al resto de
+  // los casos NO se les muestra y no lo pueden responder, así que sembrarles una respuesta
+  // deja un valor huérfano que igual decide su ruta. Costó V0431, que el 2026-09-01 saltó de
+  // Certificación directo a Anexos con un `false` que este cargue le había puesto sin mirar
+  // el servicio, saltándose Segundo cobro, Cartera, Entrega y Cita.
+  if (servicio === 'solo_iva') {
+    // La seccional se resuelve con el MISMO respaldo al RUT que `metadata.seccional`: la hoja
+    // no siempre la trae y el renglón 12 del RUT ES la dirección seccional. Sin ese respaldo,
+    // un dato ausente entraba como "no requiere cita".
+    const seccionalTexto = f.seccional ?? (rut ? String(val(rut, 'direccion_seccional') ?? '') : null)
+    // La cita la determina el flag `cita` del CATÁLOGO, no una lista de ciudades escrita al
+    // lado: es el mismo dato del que sale la Guía de Devolución que recibe el cliente, y una
+    // lista paralela deja de enterarse el día que la DIAN mueva una seccional.
+    const { requiere_cita } = requiereCitaDian(seccionalTexto, 'natural')
+    filas.push(migrado(negocioId, DATO.cita_dian_requerida, {
+      seccional_display: canonizarSeccional(seccionalTexto) ?? seccionalTexto ?? null,
+      // Sin seccional resuelta el campo queda VACÍO. Un dato ausente no se escribe como
+      // respuesta: el gate de dato de decisión lo pedirá antes de que el motor enrute.
+      ...(requiere_cita === null ? {} : { requiere_cita_dian: requiere_cita }),
+    }))
+  }
   if (f.radicado_upme) filas.push(migrado(negocioId, DATO.radicado_cert, { radicado_certificacion: f.radicado_upme }))
   if (f.decision_incluir) filas.push(migrado(negocioId, DATO.decision_inclusion, { decision_incluir: f.decision_incluir }))
   if (f.radicado_inclusion) filas.push(migrado(negocioId, DATO.radicado_incl, { radicado_inclusion: f.radicado_inclusion }))
