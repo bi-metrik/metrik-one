@@ -4,11 +4,13 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
+  Building2,
   Check,
   ChevronLeft,
   FileText,
   Loader2,
   Quote,
+  User,
   X,
 } from 'lucide-react';
 import {
@@ -27,7 +29,9 @@ import {
   ORIGEN_LABEL,
   agruparCamposPorDocumento,
   etiquetaCampo,
+  etiquetaParada,
   etiquetaSlot,
+  faltantesPorSocio,
   exigeConstanciaSinLectura,
   mostrarValor,
   nombreContraparte,
@@ -39,6 +43,7 @@ import {
   type ConfidenceEstado,
   type EstadoExtraccion,
 } from '@/lib/compliance/vinculacion';
+import { UMBRAL_BF, fraseFalta, textoParticipacion } from '@/lib/compliance/vinculacion-publica';
 
 const CHIP_CONFIDENCE: Record<ConfidenceEstado, string> = {
   extraido: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
@@ -73,7 +78,13 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
 
   const exp = d.expediente;
   const grupos = agruparCamposPorDocumento(d.campos, d.documentos);
-  const faltantes = slotsFaltantes(d.kit, d.documentos);
+  // Los soportes de la cadena no son casilleros del kit: se listan con su
+  // socio, donde la pregunta que importa es "a cuál le falta el suyo".
+  const docsDelKit = d.documentos.filter((doc) => !doc.persona_id);
+  const faltantes = slotsFaltantes(d.kit, docsDelKit);
+  const socios = d.expediente.socios ?? [];
+  const cadena = d.expediente.cadena ?? null;
+  const faltaEn = faltantesPorSocio(cadena);
   const decidible = puedeDecidirse(exp.estado);
   const razon = razonNoDecidible(exp.estado);
   const errMotivo = rechazando ? validarMotivoRechazo(motivo) : null;
@@ -174,11 +185,11 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
 
       {/* ── Documentos ── */}
       <h2 className="text-base font-bold text-[#1A1A1A] mt-6 mb-2">Documentos</h2>
-      {d.documentos.length === 0 ? (
+      {docsDelKit.length === 0 ? (
         <p className="text-sm text-[#6B7280]">La contraparte todavía no ha subido nada.</p>
       ) : (
         <div className="rounded-lg border border-[#E5E7EB] overflow-hidden">
-          {d.documentos.map((doc, i) => (
+          {docsDelKit.map((doc, i) => (
             <div
               key={doc.doc_id}
               className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? 'border-t border-[#F3F4F6]' : ''}`}
@@ -203,6 +214,84 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
         <p className="text-xs text-[#B45309] mt-2">
           Falta subir: {faltantes.map((s) => etiquetaSlot(s)).join(', ')}.
         </p>
+      )}
+
+      {/* ── La cadena ── */}
+      {socios.length > 0 && (
+        <>
+          <h2 className="text-base font-bold text-[#1A1A1A] mt-6 mb-1">Quién está detrás</h2>
+          <p className="text-xs text-[#6B7280] mb-3">
+            Los porcentajes se multiplican a lo largo de la cadena. El umbral de {UMBRAL_BF}% se
+            mide sobre esa participación efectiva, no sobre la del eslabón.
+          </p>
+          <div className="rounded-lg border border-[#E5E7EB] overflow-hidden">
+            {socios.map((soc, i) => {
+              const falta = faltaEn.get(soc.persona_id) ?? [];
+              const parada = etiquetaParada(soc.motivo_parada);
+              return (
+                <div
+                  key={soc.persona_id}
+                  className={`px-4 py-3 ${i > 0 ? 'border-t border-[#F3F4F6]' : ''}`}
+                  style={{ paddingLeft: 16 + soc.nivel * 20 }}
+                >
+                  <div className="flex items-center gap-2">
+                    {soc.tipo_sujeto === 'juridica' ? (
+                      <Building2 className="w-4 h-4 text-[#9CA3AF] shrink-0" />
+                    ) : (
+                      <User className="w-4 h-4 text-[#9CA3AF] shrink-0" />
+                    )}
+                    <p className="text-sm text-[#1A1A1A] min-w-0 flex-1 truncate">
+                      {soc.nombre}
+                      {soc.documento_numero && (
+                        <span className="text-xs text-[#6B7280]">
+                          {' '}
+                          · {soc.documento_tipo ?? ''} {soc.documento_numero}
+                        </span>
+                      )}
+                    </p>
+                    <span className="text-xs text-[#4B5563] shrink-0">
+                      {textoParticipacion(soc)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 pl-6">
+                    {soc.tipo_sujeto === 'juridica' && !parada && (
+                      <span
+                        className={`text-[11px] ${soc.tiene_soporte ? 'text-[#059669]' : 'text-[#B45309]'}`}
+                      >
+                        {soc.tiene_soporte ? 'Con soporte' : 'Sin soporte'}
+                      </span>
+                    )}
+                    {parada && <span className="text-[11px] text-[#B45309]">{parada}</span>}
+                    {falta.map((f) => (
+                      <span key={f} className="text-[11px] text-[#B91C1C]">
+                        {fraseFalta(f as Parameters<typeof fraseFalta>[0])}
+                      </span>
+                    ))}
+                  </div>
+                  {soc.parada_justificacion && (
+                    <p className="text-xs text-[#6B7280] mt-1 pl-6 italic">
+                      &ldquo;{soc.parada_justificacion}&rdquo;
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {cadena && cadena.beneficiarios.length > 0 && (
+            <p className="text-xs text-[#4B5563] mt-2">
+              Beneficiarios finales:{' '}
+              {cadena.beneficiarios
+                .map((b) => `${b.nombre}${b.documento_numero ? ` (${b.documento_numero})` : ''}`)
+                .join(', ')}
+              .
+            </p>
+          )}
+          {cadena && cadena.beneficiarios.length === 0 && cadena.completa && (
+            <p className="text-xs text-[#6B7280] mt-2">
+              Ningún socio llega al {UMBRAL_BF}% de participación efectiva.
+            </p>
+          )}
+        </>
       )}
 
       {/* ── Campos ── */}

@@ -21,6 +21,7 @@
 import { headers } from 'next/headers';
 import { createServiceClient } from '@/lib/supabase/server';
 import {
+  CADENA_VACIA,
   VERSION_TEXTO,
   esMotivoEnlaceCerrado,
   estaFirmado,
@@ -29,9 +30,13 @@ import {
   otpCompleto,
   pasoActual,
   type LecturaDoc,
+  porcentajeANumero,
+  type CadenaPublica,
   type DeclaracionRegistrada,
+  type FormSocio,
   type MotivoEnlaceCerrado,
   type PasoPublico,
+  type Socio,
 } from '@/lib/compliance/vinculacion-publica';
 import {
   esMotivoEnlaceSolicitud,
@@ -63,7 +68,9 @@ export type MarcaInvitante = {
 export type SlotPedido = { slot: string; cargado: boolean };
 
 export type DocumentoPublico = {
+  doc_id?: string | null;
   slot: string;
+  persona_id?: string | null;
   estado_extraccion: string | null;
   subido_en: string | null;
 };
@@ -88,6 +95,10 @@ export type VistaPublica = {
   marca: MarcaInvitante;
   paso: PasoPublico;
   falta: string[];
+  /** A una persona natural no se le pregunta por socios. */
+  pideCadena: boolean;
+  socios: Socio[];
+  cadena: CadenaPublica;
 };
 
 // ─── Llamada a las rutas públicas de Valida ───────────────────────────────
@@ -184,6 +195,8 @@ type PayloadValida = {
   sujeto: { tipo: 'natural' | 'juridica'; razon_social: string | null; nombre: string | null };
   kit_requerido: SlotPedido[];
   documentos: DocumentoPublico[];
+  socios?: Socio[];
+  cadena?: CadenaPublica;
 };
 
 export async function abrirVinculacion(
@@ -212,6 +225,8 @@ export async function abrirVinculacion(
   const listaCampos = campos.data.campos ?? [];
   const kit = base.data.kit_requerido ?? [];
   const falta = faltaAceptar(declaraciones);
+  const pideCadena = base.data.sujeto.tipo === 'juridica';
+  const cadena = base.data.cadena ?? CADENA_VACIA;
 
   return {
     ok: true,
@@ -228,11 +243,17 @@ export async function abrirVinculacion(
       paso: pasoActual({
         acepto: falta.length === 0,
         slotsFaltantes: kit.filter((s) => !s.cargado).length,
+        // Una cadena incompleta detiene el paso, pero nunca deja sin salida:
+        // toda rama que no se pueda bajar se cierra declarando por qué.
+        cadenaPendiente: pideCadena && !cadena.completa ? cadena.pendientes.length || 1 : 0,
         camposPorConfirmar: listaCampos.filter((c) => c.requiere_confirmacion && !c.confirmado)
           .length,
         firmado: estaFirmado(base.data.estado),
       }),
       falta,
+      pideCadena,
+      socios: base.data.socios ?? [],
+      cadena,
     },
   };
 }
@@ -270,7 +291,7 @@ export async function aceptarCondiciones(token: string): Promise<Result<{ acepta
  */
 export async function pedirUrlDeSubida(
   token: string,
-  input: { slot: string; mime: string; size: number },
+  input: { slot: string; mime: string; size: number; personaId?: string | null },
 ): Promise<
   Result<{ docId: string; uploadUrl: string; uploadToken: string; reemplazoDe: string | null }>
 > {
@@ -283,7 +304,14 @@ export async function pedirUrlDeSubida(
     reemplazo_de: string | null;
   }>(ruta(token, '/docs'), {
     method: 'POST',
-    body: JSON.stringify({ slot: input.slot, mime: input.mime, size_bytes: input.size }),
+    body: JSON.stringify({
+      slot: input.slot,
+      mime: input.mime,
+      size_bytes: input.size,
+      // El soporte de un socio no es un casillero del expediente: cuelga de la
+      // persona. Valida rechaza la combinación al revés.
+      persona_id: input.personaId ?? null,
+    }),
   });
   if (!r.ok) return { ok: false, error: r.error };
   return {
@@ -331,6 +359,71 @@ export async function leerDocumento(
       doc_type_detected: r.data.doc_type_detected ?? null,
       campos: r.data.campos ?? [],
     },
+  };
+}
+
+// ─── Socios ─────────────────────────────────────────────────────────
+
+type RespuestaCadena = { socios?: Socio[]; cadena?: CadenaPublica };
+
+/**
+ * Declara o corrige un socio. Devuelve la cadena entera y no solo el socio
+ * guardado: corregir un porcentaje arriba cambia la participación efectiva de
+ * todo lo que cuelga debajo, y repintar una fila dejaría los demás números
+ * diciendo lo de antes.
+ */
+export async function guardarSocio(
+  token: string,
+  input: {
+    personaId?: string | null;
+    padrePersonaId?: string | null;
+    form: FormSocio;
+  },
+): Promise<Result<{ socios: Socio[]; cadena: CadenaPublica }>> {
+  const f = input.form;
+  const nombre = f.nombre.trim();
+  if (!nombre) return { ok: false, error: 'nombre_requerido' };
+
+  const r = await publico<RespuestaCadena>(ruta(token, '/personas'), {
+    method: 'POST',
+    body: JSON.stringify({
+      persona_id: input.personaId ?? null,
+      padre_persona_id: input.padrePersonaId ?? null,
+      rol: 'socio',
+      tipo_sujeto: f.tipoSujeto,
+      nombre,
+      documento_tipo: f.tipoSujeto === 'juridica' ? 'NIT' : f.documentoTipo,
+      documento_numero: f.documentoNumero.trim() || null,
+      porcentaje_participacion: porcentajeANumero(f.porcentaje),
+      motivo_parada: f.motivoParada || null,
+      parada_justificacion: f.motivoParada ? f.justificacion.trim() : null,
+    }),
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  return {
+    ok: true,
+    data: { socios: r.data.socios ?? [], cadena: r.data.cadena ?? CADENA_VACIA },
+  };
+}
+
+/**
+ * Retira un socio. Del otro lado se va con toda su rama y con los soportes que
+ * se le hubieran subido: dejar los hijos colgando de un padre que ya no existe
+ * es dejarlos fuera de la pantalla y dentro de la aritmética.
+ */
+export async function retirarSocio(
+  token: string,
+  personaId: string,
+): Promise<Result<{ socios: Socio[]; cadena: CadenaPublica }>> {
+  if (!personaId) return { ok: false, error: 'persona_requerida' };
+  const r = await publico<RespuestaCadena>(
+    ruta(token, `/personas/${encodeURIComponent(personaId)}`),
+    { method: 'DELETE' },
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return {
+    ok: true,
+    data: { socios: r.data.socios ?? [], cadena: r.data.cadena ?? CADENA_VACIA },
   };
 }
 
@@ -421,6 +514,18 @@ export async function traducirErrorPublico(error: string): Promise<string> {
       return 'No se pudo registrar el documento. Revisa que sea uno de los que se piden.';
     case 'slot_requerido':
       return 'Falta indicar qué documento estás subiendo.';
+    case 'nombre_requerido':
+      return 'Escribe el nombre del socio.';
+    case 'porcentaje_invalido':
+    case 'porcentaje_fuera_de_rango':
+      return 'El porcentaje tiene que ser un número entre 0 y 100.';
+    case 'justificacion_requerida':
+      return 'Falta explicar por qué no se puede seguir bajando por ese socio.';
+    case 'ciclo_en_cadena':
+      return 'Un socio no puede colgar de su propia rama.';
+    case 'padre_no_encontrado':
+    case 'persona_no_encontrada':
+      return 'Ese socio ya no está. Recarga la página para ver la lista al día.';
     default:
       return 'Algo salió mal. Vuelve a intentar, y si sigue igual escríbele a quien te envió el enlace.';
   }

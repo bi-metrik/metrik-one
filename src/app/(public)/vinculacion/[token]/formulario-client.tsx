@@ -2,14 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
+  Building2,
   Check,
   ChevronDown,
   FileUp,
   Loader2,
   Lock,
   PenLine,
+  Plus,
   RefreshCw,
   ShieldCheck,
+  Trash2,
+  User,
 } from 'lucide-react';
 import {
   abrirVinculacion,
@@ -19,24 +23,41 @@ import {
   pedirCodigoDeFirma,
   leerDocumento,
   pedirUrlDeSubida,
+  guardarSocio,
+  retirarSocio,
   traducirErrorFirma,
   type VistaPublica,
 } from '@/lib/actions/vinculacion-publica';
 import {
+  FORM_SOCIO_VACIO,
   LARGO_OTP,
-  PASOS,
+  MOTIVOS_PARADA,
+  MOTIVO_PARADA_AYUDA,
+  MOTIVO_PARADA_LABEL,
   PASO_LABEL,
+  POR_QUE_LOS_SOCIOS,
+  SLOT_SOPORTE_BF,
   TAMANO_MAX_MB,
+  faltaEnFormSocio,
+  faltasDe,
+  fraseFalta,
   nombrePedido,
   normalizarOtp,
   notaPedido,
+  notaSoporteBf,
+  pasosVisibles,
+  resumenCadena,
+  textoParticipacion,
   veredictoLectura,
   vistaPreviaCampos,
   otpCompleto,
   textosAceptacion,
   archivoSoltado,
   validarArchivo,
+  type FormSocio,
+  type MotivoParada,
   type PasoPublico,
+  type Socio,
   type VeredictoLectura,
 } from '@/lib/compliance/vinculacion-publica';
 
@@ -75,6 +96,13 @@ export default function FormularioClient({
   const [encima, setEncima] = useState<string | null>(null);
   const [leyendo, setLeyendo] = useState<string | null>(null);
   const [lecturas, setLecturas] = useState<Record<string, LecturaEnPantalla>>({});
+  const [formSocio, setFormSocio] = useState<FormSocio | null>(null);
+  const [socioEditado, setSocioEditado] = useState<string | null>(null);
+  const [socioPadre, setSocioPadre] = useState<string | null>(null);
+  const [erroresSocio, setErroresSocio] = useState<Partial<Record<keyof FormSocio, string>>>({});
+  const [porRetirar, setPorRetirar] = useState<string | null>(null);
+  const [subiendoSoporte, setSubiendoSoporte] = useState<string | null>(null);
+  const inputsSoporte = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Soltar un archivo FUERA de un bloque hace que el navegador lo abra y se
   // lleve la pestaña por delante. La persona pierde el formulario por apuntar
@@ -216,6 +244,115 @@ export default function FormularioClient({
     });
   }
 
+  function abrirFormSocio(padre: string | null, socio?: Socio) {
+    setErroresSocio({});
+    setPorRetirar(null);
+    setSocioPadre(padre);
+    setSocioEditado(socio?.persona_id ?? null);
+    setFormSocio(
+      socio
+        ? {
+            tipoSujeto: socio.tipo_sujeto,
+            nombre: socio.nombre,
+            documentoTipo: socio.documento_tipo ?? 'CC',
+            documentoNumero: socio.documento_numero ?? '',
+            porcentaje:
+              socio.porcentaje_participacion === null
+                ? ''
+                : String(socio.porcentaje_participacion),
+            motivoParada: socio.motivo_parada ?? '',
+            justificacion: socio.parada_justificacion ?? '',
+          }
+        : FORM_SOCIO_VACIO,
+    );
+  }
+
+  function cerrarFormSocio() {
+    setFormSocio(null);
+    setSocioEditado(null);
+    setSocioPadre(null);
+    setErroresSocio({});
+  }
+
+  function guardarSocioAhora() {
+    if (!formSocio) return;
+    const errores = faltaEnFormSocio(formSocio);
+    setErroresSocio(errores);
+    if (Object.keys(errores).length > 0) return;
+
+    startTransition(async () => {
+      setError(null);
+      const r = await guardarSocio(token, {
+        personaId: socioEditado,
+        padrePersonaId: socioPadre,
+        form: formSocio,
+      });
+      if (!r.ok) {
+        setError('No se pudo guardar el socio. Revisa los datos y vuelve a intentar.');
+        return;
+      }
+      cerrarFormSocio();
+      // La respuesta ya trae la cadena recalculada; recargar además refresca en
+      // qué paso va, que es lo único que no viene en esa respuesta.
+      setV((prev) => ({ ...prev, socios: r.data.socios, cadena: r.data.cadena }));
+      await recargar();
+    });
+  }
+
+  function retirarSocioAhora(personaId: string) {
+    startTransition(async () => {
+      setError(null);
+      const r = await retirarSocio(token, personaId);
+      if (!r.ok) {
+        setError('No se pudo retirar el socio. Vuelve a intentar.');
+        return;
+      }
+      setPorRetirar(null);
+      setV((prev) => ({ ...prev, socios: r.data.socios, cadena: r.data.cadena }));
+      await recargar();
+    });
+  }
+
+  /**
+   * El soporte de un socio no pasa por el lector: es el certificado de otra
+   * empresa y sus datos no son los del expediente. Por eso acá no hay veredicto
+   * ni vista previa, solo la constancia de que llegó.
+   */
+  function subirSoporte(personaId: string, file: File) {
+    const err = validarArchivo(file);
+    if (err) {
+      setError(err);
+      return;
+    }
+    setError(null);
+    setSubiendoSoporte(personaId);
+    startTransition(async () => {
+      try {
+        const r = await pedirUrlDeSubida(token, {
+          slot: SLOT_SOPORTE_BF,
+          personaId,
+          mime: file.type,
+          size: file.size,
+        });
+        if (!r.ok) {
+          setError('No se pudo preparar la subida. Vuelve a intentar.');
+          return;
+        }
+        const fd = new FormData();
+        fd.append('cacheControl', '3600');
+        fd.append('', file);
+        const res = await fetch(r.data.uploadUrl, { method: 'PUT', body: fd });
+        if (!res.ok) {
+          setError('El archivo no se pudo subir. Revisa tu conexión y vuelve a intentar.');
+          return;
+        }
+        await recargar();
+      } finally {
+        setSubiendoSoporte(null);
+      }
+    });
+  }
+
   function confirmarUno(slug: string) {
     startTransition(async () => {
       setError(null);
@@ -260,7 +397,8 @@ export default function FormularioClient({
     });
   }
 
-  const pasoIdx = PASOS.indexOf(v.paso);
+  const pasos = pasosVisibles(v.pideCadena);
+  const pasoIdx = pasos.indexOf(v.paso);
 
   return (
     <main className="min-h-screen">
@@ -309,7 +447,7 @@ export default function FormularioClient({
 
         {/* ── En qué vas ── */}
         <div className="flex gap-1.5 mt-5 mb-6">
-          {PASOS.map((p, i) => (
+          {pasos.map((p, i) => (
             <div key={p} className="flex-1">
               <div
                 className="h-1.5 rounded-full"
@@ -538,7 +676,327 @@ export default function FormularioClient({
               </div>
             </section>
 
-            {/* ── PASO 3: datos ── */}
+            {/* ── PASO 3: socios ── */}
+            {v.pideCadena && (
+              <section>
+                <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Socios de {quien}</h2>
+                <p className="text-xs text-[#6B7280] mb-2">{POR_QUE_LOS_SOCIOS}</p>
+                <p className="text-sm text-[#4B5563] mb-3">{resumenCadena(v.cadena, v.socios)}</p>
+
+                {v.socios.length > 0 && (
+                  <div className="rounded-lg border border-[#E5E7EB] overflow-hidden mb-3">
+                    {v.socios.map((soc, i) => {
+                      const falta = faltasDe(v.cadena, soc.persona_id);
+                      const esEmpresa = soc.tipo_sujeto === 'juridica';
+                      const conParada = Boolean(soc.motivo_parada);
+                      return (
+                        <div
+                          key={soc.persona_id}
+                          className={`px-4 py-3 ${i > 0 ? 'border-t border-[#F3F4F6]' : ''}`}
+                          style={{ paddingLeft: 16 + soc.nivel * 20 }}
+                        >
+                          <div className="flex items-center gap-2">
+                            {esEmpresa ? (
+                              <Building2 className="w-4 h-4 text-[#9CA3AF] shrink-0" />
+                            ) : (
+                              <User className="w-4 h-4 text-[#9CA3AF] shrink-0" />
+                            )}
+                            <p className="text-sm text-[#1A1A1A] min-w-0 flex-1 truncate">
+                              {soc.nombre}
+                              {soc.documento_numero && (
+                                <span className="text-xs text-[#6B7280]">
+                                  {' '}
+                                  · {soc.documento_numero}
+                                </span>
+                              )}
+                            </p>
+                            <span className="text-xs text-[#4B5563] shrink-0">
+                              {textoParticipacion(soc)}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => abrirFormSocio(soc.padre_persona_id, soc)}
+                              className="text-xs underline text-[#4B5563] shrink-0 disabled:opacity-50"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => setPorRetirar(soc.persona_id)}
+                              aria-label={`Retirar a ${soc.nombre}`}
+                              className="text-[#9CA3AF] hover:text-[#B91C1C] shrink-0 disabled:opacity-50"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {falta.map((f) => (
+                            <p key={f} className="text-xs text-[#B45309] mt-1 pl-6">
+                              {fraseFalta(f)}
+                            </p>
+                          ))}
+
+                          {conParada && (
+                            <p className="text-xs text-[#6B7280] mt-1 pl-6">
+                              {MOTIVO_PARADA_LABEL[soc.motivo_parada as MotivoParada] ??
+                                soc.motivo_parada}
+                              {soc.parada_justificacion ? `: ${soc.parada_justificacion}` : ''}
+                            </p>
+                          )}
+
+                          {esEmpresa && !conParada && (
+                            <div className="mt-2 pl-6">
+                              <p className="text-xs text-[#6B7280]">{notaSoporteBf(soc.nombre)}</p>
+                              <input
+                                ref={(el) => {
+                                  inputsSoporte.current[soc.persona_id] = el;
+                                }}
+                                type="file"
+                                accept="application/pdf,image/jpeg,image/png"
+                                className="hidden"
+                                onChange={(ev) => {
+                                  const f = ev.target.files?.[0];
+                                  if (f) subirSoporte(soc.persona_id, f);
+                                  ev.target.value = '';
+                                }}
+                              />
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <button
+                                  type="button"
+                                  disabled={pending || subiendoSoporte === soc.persona_id}
+                                  onClick={() => inputsSoporte.current[soc.persona_id]?.click()}
+                                  className="inline-flex items-center gap-1.5 text-xs font-semibold underline text-[#1A1A1A] disabled:opacity-50"
+                                >
+                                  {subiendoSoporte === soc.persona_id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : soc.tiene_soporte ? (
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <FileUp className="w-3.5 h-3.5" />
+                                  )}
+                                  {soc.tiene_soporte ? 'Cambiar el soporte' : 'Subir el soporte'}
+                                </button>
+                                {soc.tiene_soporte && (
+                                  <span className="inline-flex items-center gap-1 text-xs text-[#059669]">
+                                    <Check className="w-3.5 h-3.5" /> Recibido
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => abrirFormSocio(soc.persona_id)}
+                                className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-[#1A1A1A] underline disabled:opacity-50"
+                              >
+                                <Plus className="w-3.5 h-3.5" /> Agregar socio de {soc.nombre}
+                              </button>
+                            </div>
+                          )}
+
+                          {porRetirar === soc.persona_id && (
+                            <div className="mt-2 pl-6 flex items-center gap-3">
+                              <p className="text-xs text-[#B91C1C]">
+                                Se va {soc.nombre} y todo lo que cuelgue de él, con sus soportes.
+                              </p>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => retirarSocioAhora(soc.persona_id)}
+                                className="text-xs font-semibold underline text-[#B91C1C] disabled:opacity-50"
+                              >
+                                Retirar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPorRetirar(null)}
+                                className="text-xs underline text-[#6B7280]"
+                              >
+                                Dejarlo
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {formSocio === null ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => abrirFormSocio(null)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
+                    style={{ background: acento }}
+                  >
+                    <Plus className="w-4 h-4" /> Agregar socio
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
+                    <p className="text-sm font-semibold text-[#1A1A1A] mb-3">
+                      {socioEditado
+                        ? 'Editar socio'
+                        : socioPadre
+                          ? `Socio de ${v.socios.find((x) => x.persona_id === socioPadre)?.nombre ?? 'la empresa'}`
+                          : `Socio de ${quien}`}
+                    </p>
+
+                    <div className="flex gap-2 mb-3">
+                      {(['natural', 'juridica'] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() =>
+                            setFormSocio((f) => (f ? { ...f, tipoSujeto: t } : f))
+                          }
+                          className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                            formSocio.tipoSujeto === t
+                              ? 'border-[#1A1A1A] text-[#1A1A1A]'
+                              : 'border-[#E5E7EB] text-[#6B7280]'
+                          }`}
+                        >
+                          {t === 'natural' ? 'Es una persona' : 'Es una empresa'}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-xs text-[#6B7280] mb-1">
+                          {formSocio.tipoSujeto === 'juridica' ? 'Razón social' : 'Nombre completo'}
+                        </label>
+                        <input
+                          value={formSocio.nombre}
+                          onChange={(ev) =>
+                            setFormSocio((f) => (f ? { ...f, nombre: ev.target.value } : f))
+                          }
+                          className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                        />
+                        {erroresSocio.nombre && (
+                          <p className="text-xs text-[#B91C1C] mt-1">{erroresSocio.nombre}</p>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        {formSocio.tipoSujeto === 'natural' && (
+                          <select
+                            value={formSocio.documentoTipo}
+                            onChange={(ev) =>
+                              setFormSocio((f) =>
+                                f ? { ...f, documentoTipo: ev.target.value } : f,
+                              )
+                            }
+                            className="px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                          >
+                            <option value="CC">CC</option>
+                            <option value="CE">CE</option>
+                            <option value="PAS">Pasaporte</option>
+                          </select>
+                        )}
+                        <input
+                          value={formSocio.documentoNumero}
+                          onChange={(ev) =>
+                            setFormSocio((f) =>
+                              f ? { ...f, documentoNumero: ev.target.value } : f,
+                            )
+                          }
+                          placeholder={formSocio.tipoSujeto === 'juridica' ? 'NIT' : 'Número'}
+                          className="flex-1 px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                        />
+                        <div className="w-28">
+                          <input
+                            value={formSocio.porcentaje}
+                            onChange={(ev) =>
+                              setFormSocio((f) => (f ? { ...f, porcentaje: ev.target.value } : f))
+                            }
+                            placeholder="% "
+                            inputMode="decimal"
+                            className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                          />
+                        </div>
+                      </div>
+                      {erroresSocio.porcentaje && (
+                        <p className="text-xs text-[#B91C1C]">{erroresSocio.porcentaje}</p>
+                      )}
+
+                      {formSocio.tipoSujeto === 'juridica' && (
+                        <div className="pt-1">
+                          <label className="block text-xs text-[#6B7280] mb-1">
+                            Si no se puede seguir bajando por esta empresa, dilo acá
+                          </label>
+                          <select
+                            value={formSocio.motivoParada}
+                            onChange={(ev) =>
+                              setFormSocio((f) =>
+                                f ? { ...f, motivoParada: ev.target.value } : f,
+                              )
+                            }
+                            className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                          >
+                            <option value="">Sí se puede: voy a registrar sus socios</option>
+                            {MOTIVOS_PARADA.map((m) => (
+                              <option key={m} value={m}>
+                                {MOTIVO_PARADA_LABEL[m]}
+                              </option>
+                            ))}
+                          </select>
+                          {formSocio.motivoParada && (
+                            <>
+                              <p className="text-xs text-[#6B7280] mt-1">
+                                {MOTIVO_PARADA_AYUDA[formSocio.motivoParada as MotivoParada]}
+                              </p>
+                              <textarea
+                                value={formSocio.justificacion}
+                                onChange={(ev) =>
+                                  setFormSocio((f) =>
+                                    f ? { ...f, justificacion: ev.target.value } : f,
+                                  )
+                                }
+                                rows={2}
+                                className="w-full mt-1.5 px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+                              />
+                              {erroresSocio.justificacion && (
+                                <p className="text-xs text-[#B91C1C] mt-1">
+                                  {erroresSocio.justificacion}
+                                </p>
+                              )}
+                            </>
+                          )}
+                          {erroresSocio.motivoParada && (
+                            <p className="text-xs text-[#B91C1C] mt-1">
+                              {erroresSocio.motivoParada}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={guardarSocioAhora}
+                        className="px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
+                        style={{ background: acento }}
+                      >
+                        {pending ? 'Guardando...' : 'Guardar'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cerrarFormSocio}
+                        className="px-4 py-2 rounded-lg border border-[#E5E7EB] text-sm text-[#4B5563]"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* ── PASO 4: datos ── */}
             <section>
               <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Tus datos</h2>
               {v.campos.length === 0 ? (
@@ -594,7 +1052,7 @@ export default function FormularioClient({
           </>
         )}
 
-        {/* ── PASO 4: firma ── */}
+        {/* ── PASO 5: firma ── */}
         {v.paso === 'firma' && (
           <section className="mt-8">
             <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Firma</h2>
