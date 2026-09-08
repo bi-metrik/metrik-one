@@ -3,7 +3,8 @@
 // Es el unico punto del flujo donde entra el modelo, y entra como lector, no como
 // entrevistador: no redacta preguntas, no traduce, no propone repartos. Devuelve JSON con
 // indices y banderas; el eco que ve la persona lo arma el motor con los literales del
-// instrumento. Reutiliza el adaptador que ya usa el motor R1/R2 (`claudeHaiku`).
+// instrumento. El adaptador de produccion es `geminiFlashLite` (`../model.ts`); el motor R1/R2
+// sigue con `claudeHaiku`. Cualquier `ModelAdapter` sirve: el eval y las pruebas inyectan otros.
 //
 // Dos capas: primero un lector por palabras (determinista, gratis, cubre los botones y las
 // respuestas que repiten la etiqueta); si no alcanza, el modelo.
