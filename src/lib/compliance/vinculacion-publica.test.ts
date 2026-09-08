@@ -35,6 +35,11 @@
    - dejar guardar una parada sin justificación → cae 1
    - aceptar una parada en un socio persona natural → cae 1
    - leer "12,5" como no numérico → cae 1
+   - nada se considera sellado: la pantalla vuelve a ofrecer cambios sobre un
+     expediente ya firmado → cae 1
+   - el sello arranca en el paso de firma y la contraparte no alcanza a
+     firmar → cae 1
+   - el 409 `firmado` cae al mensaje genérico de error → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -42,6 +47,7 @@ import {
   ENCARGADO,
   FORM_SOCIO_VACIO,
   PASOS,
+  expedienteSellado,
   faltaEnFormSocio,
   faltasDe,
   fraseFalta,
@@ -555,5 +561,19 @@ describe('lo que la contraparte escribe de un socio', () => {
     expect(porcentajeANumero('12.5')).toBe(12.5);
     expect(porcentajeANumero('  ')).toBeNull();
     expect(porcentajeANumero('abc')).toBeNull();
+  });
+});
+
+describe('el expediente ya firmado', () => {
+  it('se considera sellado solo cuando ya no queda paso por hacer', () => {
+    expect(expedienteSellado('listo')).toBe(true);
+    for (const paso of ['aceptaciones', 'documentos', 'socios', 'datos', 'firma'] as const) {
+      expect(expedienteSellado(paso)).toBe(false);
+    }
+  });
+
+  it('la firma tampoco se puede repetir, y lo dice sin sonar a error', () => {
+    expect(mensajeErrorFirma('firmado')).toBe('Este expediente ya está firmado.');
+    expect(mensajeErrorFirma('firmado')).toBe(mensajeErrorFirma('ya_firmado'));
   });
 });
