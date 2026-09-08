@@ -98,11 +98,6 @@ interface AppShellProps {
    */
   modoVitrina?: boolean
   hasLineas?: boolean
-  /**
-   * Número de negocios "por conciliar" (F2). Se muestra como badge en el item
-   * "Conciliación". 0 = sin badge. Derivado server-side en el layout.
-   */
-  conciliacionPendientes?: number
   notificationBell?: React.ReactNode
   platformAdminState?: PlatformAdminState | null
 }
@@ -360,7 +355,6 @@ export default function AppShell({
   navRolesOverride,
   modoVitrina = false,
   hasLineas,
-  conciliacionPendientes = 0,
   notificationBell,
   platformAdminState,
 }: AppShellProps) {
@@ -615,13 +609,12 @@ export default function AppShell({
               {cajaItems.map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                 const Icon = item.icon
-                const badge = item.href === '/conciliacion' ? conciliacionPendientes : 0
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
-                    className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                    className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
                       isActive
@@ -635,15 +628,6 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span className="flex-1">{item.label}</span>}
-                    {badge > 0 && (
-                      sidebarExpanded ? (
-                        <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white">
-                          {badge > 99 ? '99+' : badge}
-                        </span>
-                      ) : (
-                        <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500" />
-                      )
-                    )}
                   </Link>
                 )
               })}
