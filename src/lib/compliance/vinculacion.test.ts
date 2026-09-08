@@ -13,6 +13,9 @@
  *   - descartar los campos cuyo doc_id no está en la lista de documentos → cae 1
  *   - aceptar cualquier motivo de rechazo → cae 1
  *   - tratar el arreglo vacío como valor lleno → cae 1
+ *   - volver a meter cola y fallo en la misma bolsa → caen 3
+ *   - contar los pendientes como ilegibles → caen 3
+ *   - decirle al oficial que la cola falló → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -21,6 +24,8 @@ import {
   alertasDeExpediente,
   camposSinConfirmar,
   camposSinLlenar,
+  documentosEnCola,
+  documentosIlegibles,
   documentosSinLeer,
   etiquetaCampo,
   etiquetaSlot,
@@ -263,5 +268,46 @@ describe('presentación', () => {
     expect(mostrarValor(['a', 'b'])).toBe('a, b');
     expect(mostrarValor({ ciudad: 'Cali' })).toBe('{"ciudad":"Cali"}');
     expect(mostrarValor(null)).toBe('');
+  });
+});
+
+describe('en cola no es lo mismo que ilegible', () => {
+  const doc = (slot: string, estado: string | null) =>
+    ({ slot, estado_extraccion: estado }) as never;
+
+  it('un documento en cola no cuenta como ilegible', () => {
+    const docs = [doc('rut', 'pendiente')];
+    expect(documentosEnCola(docs)).toHaveLength(1);
+    expect(documentosIlegibles(docs)).toHaveLength(0);
+  });
+
+  it('uno que falló sí cuenta como ilegible y no como en cola', () => {
+    const docs = [doc('rut', 'failed')];
+    expect(documentosIlegibles(docs)).toHaveLength(1);
+    expect(documentosEnCola(docs)).toHaveLength(0);
+  });
+
+  it('un documento leído no cae en ninguna de las dos', () => {
+    const docs = [doc('rut', 'ok')];
+    expect(documentosEnCola(docs)).toHaveLength(0);
+    expect(documentosIlegibles(docs)).toHaveLength(0);
+  });
+
+  it('la alerta de cola no le dice al oficial que la lectura falló', () => {
+    const alertas = alertasDeExpediente([doc('rut', 'pendiente')], [], []);
+    const cola = alertas.find((a) => a.clave === 'documentos_en_cola');
+    expect(cola).toBeDefined();
+    expect(cola?.texto).not.toContain('no se pudo leer');
+    expect(alertas.find((a) => a.clave === 'documentos_sin_leer')).toBeUndefined();
+  });
+
+  it('cola y fallo conviven como dos alertas distintas', () => {
+    const alertas = alertasDeExpediente(
+      [doc('rut', 'pendiente'), doc('cedula_rl', 'failed')],
+      [],
+      [],
+    );
+    expect(alertas.find((a) => a.clave === 'documentos_en_cola')?.cuantos).toBe(1);
+    expect(alertas.find((a) => a.clave === 'documentos_sin_leer')?.cuantos).toBe(1);
   });
 });

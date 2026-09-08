@@ -268,6 +268,7 @@ export function validarMotivoRechazo(motivo: string): string | null {
 export type Alerta = {
   clave:
     | 'documentos_sin_leer'
+    | 'documentos_en_cola'
     | 'campos_sin_confirmar'
     | 'campos_sin_llenar'
     | 'documentos_faltantes';
@@ -275,9 +276,34 @@ export type Alerta = {
   cuantos: number;
 };
 
-/** Documento cuya extracción no llegó a buen puerto: sus campos NO están. */
+/** Todo lo que no está leído: en cola y fallido juntos. Para decidir hay que
+ *  separarlos, y para eso están `documentosEnCola` y `documentosIlegibles`. */
 export function documentosSinLeer(docs: readonly ExpedienteDoc[]): ExpedienteDoc[] {
   return docs.filter((d) => d.estado_extraccion !== 'ok');
+}
+
+/**
+ * Un documento que todavía no se ha leído NO es un documento que falló.
+ *
+ * `documentosSinLeer` mete los dos en la misma bolsa, y la alerta que salía de
+ * ahí le decía al oficial "no se pudieron leer" sobre documentos que estaban
+ * simplemente en cola. Eso empuja a rechazar a una contraparte que no hizo nada
+ * mal, o a aprobarla creyendo que el sistema ya intentó y se rindió. Son dos
+ * situaciones distintas y piden dos cosas distintas: una, esperar; la otra,
+ * mirar el documento a mano.
+ */
+export function documentosEnCola(docs: readonly ExpedienteDoc[]): ExpedienteDoc[] {
+  return docs.filter((d) => d.estado_extraccion === 'pendiente' || d.estado_extraccion === null);
+}
+
+/** Los que sí se intentaron leer y no se pudo. */
+export function documentosIlegibles(docs: readonly ExpedienteDoc[]): ExpedienteDoc[] {
+  return docs.filter(
+    (d) =>
+      d.estado_extraccion !== 'ok' &&
+      d.estado_extraccion !== 'pendiente' &&
+      d.estado_extraccion !== null,
+  );
 }
 
 /**
@@ -332,15 +358,27 @@ export function alertasDeExpediente(
     });
   }
 
-  const sinLeer = documentosSinLeer(docs);
-  if (sinLeer.length > 0) {
+  const enCola = documentosEnCola(docs);
+  if (enCola.length > 0) {
+    alertas.push({
+      clave: 'documentos_en_cola',
+      cuantos: enCola.length,
+      texto:
+        enCola.length === 1
+          ? 'Hay 1 documento que todavía no se ha leído. Sus campos van a aparecer cuando corra la lectura; no decidas contando con ellos.'
+          : `Hay ${enCola.length} documentos que todavía no se han leído. Sus campos van a aparecer cuando corra la lectura; no decidas contando con ellos.`,
+    });
+  }
+
+  const ilegibles = documentosIlegibles(docs);
+  if (ilegibles.length > 0) {
     alertas.push({
       clave: 'documentos_sin_leer',
-      cuantos: sinLeer.length,
+      cuantos: ilegibles.length,
       texto:
-        sinLeer.length === 1
+        ilegibles.length === 1
           ? 'Hay 1 documento que no se pudo leer: sus campos no están, no es que vinieran vacíos.'
-          : `Hay ${sinLeer.length} documentos que no se pudieron leer: sus campos no están, no es que vinieran vacíos.`,
+          : `Hay ${ilegibles.length} documentos que no se pudieron leer: sus campos no están, no es que vinieran vacíos.`,
     });
   }
 
