@@ -7,7 +7,7 @@
 // `startCardumenChat` / `continueCardumenChat`, que delegan aqui cuando toca.
 
 import { sendButtons, sendTextMessage, sendTextWithRhythm, sendTypingIndicator, calcularPausaMs } from "../../wa-respond.ts";
-import { claudeHaiku } from "../model.ts";
+import { geminiFlashLite } from "../model.ts";
 import { interpreteConModelo } from "./interprete.ts";
 import { armarPayload, esEstadoNavigate, iniciar, procesar } from "./motor.ts";
 import type { NavigateState, Salida } from "./tipos.ts";
@@ -49,7 +49,9 @@ export async function continueNavigate(
   }
   if (waMessageId) await sendTypingIndicator(waMessageId);
 
-  const interprete = interpreteConModelo(claudeHaiku());
+  // El lector es Gemini (decision de Mauricio, 2026-09-08); R1/R2 siguen en Haiku. El motor es
+  // determinista: el modelo solo lee texto libre en cuatro puntos y devuelve JSON.
+  const interprete = interpreteConModelo(geminiFlashLite());
   let r;
   try {
     r = await procesar(state, { texto: text, botonId }, interprete);

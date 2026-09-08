@@ -26,7 +26,7 @@ Nuevo, en `supabase/functions/_shared/cardumen/navigate/`:
 - `instrumento.ts` — Capa A literal de `meta.json`, aperturas de la sección 01 de la muestra, los 12 sectores, tablas de mapeo pre-registradas.
 - `tipos.ts` — estado de la conversación, registros por dimensión (§3 de las dos specs), contrato del intérprete.
 - `idioma.ts` — detector es/en/pt por palabras funcionales, determinista; ante la duda, "desconocido" (= español + confirmación).
-- `interprete.ts` — la única puerta del modelo (`claudeHaiku`, el mismo del motor). Lee texto libre y devuelve JSON con índices y banderas. Lector por palabras primero (botones, etiquetas literales), modelo después. **El modelo entra en cuatro puntos y solo en cuatro:** orden de una tríada, segundo polo, etiqueta de peso y ancla de una diada. **La historia no pasa por el modelo**: se guarda tal cual y solo se le detecta el idioma.
+- `interprete.ts` — la única puerta del modelo (`geminiFlashLite`, Gemini 3.1 Flash-Lite; el motor R1/R2 de Araucanía/Trappvel sigue en Haiku). Lee texto libre y devuelve JSON con índices y banderas. Lector por palabras primero (botones, etiquetas literales), modelo después. **El modelo entra en cuatro puntos y solo en cuatro:** orden de una tríada, segundo polo, etiqueta de peso y ancla de una diada. **La historia no pasa por el modelo**: se guarda tal cual y solo se le detecta el idioma.
 - `meta.ts` — capa determinista que corre ANTES del modelo en todos los pasos: vacío / solo emojis (`sinPalabras`), pregunta de vuelta y negativa (`leerMeta`). Estrecha a propósito: un falso positivo se comería una respuesta real.
 - `robustez.test.ts` — batería hostil por paso (Capa 1, §8); `golden-lector.json` + `golden-lector.test.ts` — golden set del lector (Capa 2, §8); `scripts/navigate-lector-eval.ts` — corre el golden contra el modelo vivo.
 - `motor.ts` — máquina de estados: turno cero, idioma, tríadas, diadas, cierre, `armarPayload`.
@@ -44,7 +44,7 @@ Modificado:
 ## 3. Orden de puesta en marcha
 
 1. Mergear el PR.
-2. Desplegar las dos funciones (la clave `ANTHROPIC_API_KEY` ya está en los secrets: la usa el motor de Araucanía/Trappvel):
+2. Desplegar las dos funciones (la clave `GEMINI_API_KEY` ya está en los secrets de `wa-webhook`: la usan el bot de Venezuela, `wa-parse` y la transcripción de audio):
    ```
    SUPABASE_ACCESS_TOKEN=sbp_... npx supabase functions deploy wa-webhook --project-ref yfjqscvvxetobiidnepa --no-verify-jwt
    SUPABASE_ACCESS_TOKEN=sbp_... npx supabase functions deploy cardumen-cron --project-ref yfjqscvvxetobiidnepa
@@ -132,6 +132,7 @@ select id, created_at, estudio, lang,
 - **Confirmación**: cuando la persona elige de un menú de anclas, se guarda sin volver a preguntar (`confirmed_by_participant: true`, porque eligió la etiqueta ella misma). Cuando el modelo leyó texto libre, siempre hay eco + botón antes de guardar.
 - **La palabra `cardumen` deja de abrir la mini-web FEDE** mientras la fila del catálogo esté activa. Es el efecto buscado; se revierte con `activo = false`.
 - El modelo se usa solo para leer (temperatura 0, JSON), una llamada por respuesta libre. Botones y etiquetas literales no gastan modelo.
+- **El lector es Gemini, no Haiku.** Decisión de Mauricio del 2026-09-08 ("no leamos con Haiku, prefiero mantener Gemini"). El modelo concreto, `gemini-3.1-flash-lite`, lo eligió el golden set (§8): `GEMINI_LECTOR_MODELO` en `_shared/cardumen/model.ts`. El adaptador reusa `generate()` de `_shared/venezuela/gemini.ts` (mismo cliente que los bots de VE y de customer), con `responseMimeType: application/json`. R1/R2 no cambian.
 
 ## 8. Robustez ante ruido (PR de 2026-09-08)
 
@@ -161,10 +162,27 @@ Lo que **no** llega al motor: imagen sin caption, ubicación, sticker, contacto 
 84 casos en los cuatro puntos donde entra el modelo, con las once categorías del brief en cada uno (fuera de tema, pregunta de vuelta, negativa, incoherente, contradicción, polo inexistente, responde a otra pregunta, enterrada en párrafo largo, mezcla de idiomas, insulto, riesgo) más casos válidos de control. Métrica: **falsas ubicaciones** (debía ser "no leído" y devolvió una ubicación); objetivo cero. `golden-lector.test.ts` fija en CI la forma del set y lo que la capa determinista garantiza; `scripts/navigate-lector-eval.ts` lo corre contra el modelo vivo:
 
 ```
-node --no-warnings --experimental-strip-types scripts/navigate-lector-eval.ts [--proveedor claude|gemini] [--solo T-01,D-15]
+node --no-warnings --experimental-strip-types scripts/navigate-lector-eval.ts [--proveedor gemini|claude] [--modelo <id>] [--solo T-01,D-15] [--json ruta]
 ```
 
-El lector de producción es **Claude Haiku 4.5** (`ANTHROPIC_API_KEY`, secreto del edge function). Esa llave no está en la torre, así que el eval del 2026-09-08 corrió con **Gemini 2.5 Flash-Lite como proxy**: mide la robustez del prompt y de las guardas deterministas con otro modelo, no el comportamiento del lector desplegado. Correr con `--proveedor claude` desde una máquina con la llave antes de dar por medida la Capa 2.
+El script corre **los mismos adaptadores que producción** (`_shared/cardumen/model.ts`, con un `Deno.env` mínimo para Node): ya no es un proxy, mide el lector desplegado tal cual, con su retry, su `responseMimeType` y su configuración de thinking. Por defecto evalúa `GEMINI_LECTOR_MODELO`; `--modelo` compara otro Gemini con precio registrado en `PRECIOS_GEMINI`; `--proveedor claude` corre el Haiku de R1/R2 como referencia (necesita `ANTHROPIC_API_KEY`, que no está en la torre). Al final imprime tokens y costo del set con el precio oficial. Sale con 1 si hubo alguna falsa ubicación.
+
+### Lector: Gemini 3.1 Flash-Lite (eval del 2026-09-08)
+
+Mauricio decidió que el lector no fuera Haiku sino Gemini. Entre los dos Flash-Lite con `GEMINI_API_KEY` en producción, la regla fue *el más barato que iguale o supere al otro en el golden set*. Dos corridas por modelo, desde la torre, con el adaptador de producción; las dos corridas de cada modelo dieron **exactamente lo mismo** (temperatura 0), así que la tabla es una por modelo:
+
+| modelo | ok / 84 | falsas ubicaciones | lecturas equivocadas | no lecturas | tokens (entrada / salida) | USD por el set (precio oficial) |
+|---|---|---|---|---|---|---|
+| `gemini-2.5-flash-lite` (thinking apagado) | 78 | **2** (T-14, I-07) | 2 (I-05, D-11) | **2** (S-12, D-15) | 46.749 / 1.868 | 0,0054 (0,10 / 0,40 por 1M) |
+| `gemini-3.1-flash-lite` | **83** | **1** (D-20) | 0 | **0** | 46.749 / 2.473 | 0,0154 (0,25 / 1,50 por 1M) |
+
+Por punto, 3.1: tríada 26/26, segundo 16/16, intensidad 17/17, diada 24/25. 2.5: 25/26, 15/16, 15/17, 23/25.
+
+**Queda `gemini-3.1-flash-lite`.** 2.5 no iguala a 3.1 en la métrica que importa (2 falsas contra 1) ni en las no lecturas (2 contra 0: "ninguno" al pedir el segundo polo, y el caso enterrado en un párrafo largo, que el brief exige leer). El costo sube ~3x, pero son USD 0,015 por 77 llamadas: una conversación completa gasta menos de un centavo con cualquiera de los dos. Precios de `ai.google.dev/gemini-api/docs/pricing`, consultados ese día.
+
+Lo que sigue abierto con 3.1: **D-20** ("nuevo no del todo, pero se aceleró mucho este año", categoría *matiz*) lo lee como ancla 2 firme en vez de "lado izquierdo, sin ancla". No es una ubicación que se guarde sola: una lectura de texto libre siempre pasa por eco + botón de confirmación antes de registrarse (§6), así que la persona corrige. Sigue contando como falsa para la métrica. Lo que 2.5 fallaba y 3.1 no: T-14 (dos polos que no existen, "la religión y después el fútbol", ubicados en índices reales), I-07 (un orden dado cuando se pedía un peso, leído como "claramente el primero"), S-12 y D-15.
+
+Nota sobre thinking: en la familia 2.5 se manda `thinkingBudget: 0` (apagado). En la 3.x ese parámetro se ignora en silencio y el control es `thinking_level`, que la doc oficial no lista para `gemini-3.1-flash-lite`; no se manda nada, igual que en `meta-leads/entender-formulario.ts`. Los ~600 tokens de salida de más que muestra 3.1 son los de pensamiento, que se cobran como salida y van sumados en `usage.out`.
 
 ### Caso de riesgo (mención de hacerse daño)
 

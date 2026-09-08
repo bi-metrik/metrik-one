@@ -2,13 +2,15 @@
 // modelo VIVO. No corre en CI: cuesta, tarda y no es determinista. Lo que si corre en CI es
 // `golden-lector.test.ts`, que fija la forma del set y la capa determinista.
 //
-//   node --experimental-strip-types scripts/navigate-lector-eval.ts [--proveedor claude|gemini] [--solo T-01,D-15] [--json ruta]
+//   node --experimental-strip-types scripts/navigate-lector-eval.ts [--proveedor gemini|claude] [--modelo <id>] [--solo T-01,D-15] [--json ruta]
 //
-// El lector de PRODUCCION es Claude Haiku 4.5 (`_shared/cardumen/model.ts`, secreto
-// ANTHROPIC_API_KEY del edge function). Si esa llave no esta en el entorno ni en `.env.local`,
-// el script cae a Gemini como PROXY y lo dice en el encabezado: mide la robustez del PROMPT
-// con otro modelo, no el comportamiento del lector desplegado. Las llaves se leen a memoria y
-// nunca se imprimen.
+// Corre los MISMOS adaptadores que produccion (`_shared/cardumen/model.ts`): no hay copia del
+// cliente aqui, asi que lo que mide es el lector desplegado, no un proxy. El lector de
+// produccion es Gemini (`geminiFlashLite`, secreto GEMINI_API_KEY del edge function); por
+// defecto se evalua ese modelo (`GEMINI_LECTOR_MODELO`). `--modelo` permite comparar otro
+// Gemini con precio registrado (ej. `gemini-3.1-flash-lite`); `--proveedor claude` corre el
+// Haiku de R1/R2 como referencia. Las llaves se leen del entorno o de `.env.local` a memoria
+// y nunca se imprimen.
 //
 // Metrica que importa: FALSAS UBICACIONES — casos donde el esperado era "no leido" y el lector
 // devolvio una ubicacion (dominante/segundo, ancla, o una etiqueta de peso). Objetivo: cero.
@@ -20,6 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIADAS, TRIADAS } from '../supabase/functions/_shared/cardumen/navigate/instrumento.ts';
 import { interpreteConModelo } from '../supabase/functions/_shared/cardumen/navigate/interprete.ts';
+import { GEMINI_LECTOR_MODELO, claudeHaiku, geminiFlashLite } from '../supabase/functions/_shared/cardumen/model.ts';
 import type { ModelAdapter, ModelCallOpts, ModelResult } from '../supabase/functions/_shared/cardumen/types.ts';
 
 type Esperado = {
@@ -54,67 +57,45 @@ function llave(nombre: string): string | undefined {
   }
 }
 
-// ---- Adaptadores (mismo contrato que `_shared/cardumen/model.ts`) ---------------------------
+// ---- Adaptadores: los de produccion (`_shared/cardumen/model.ts`) --------------------------
 
-function claude(key: string): ModelAdapter {
-  const modelId = 'claude-haiku-4-5';
-  return {
-    id: modelId,
-    pricing: { in: 1.0, out: 5.0 },
-    async call(opts: ModelCallOpts): Promise<ModelResult> {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({
-          model: modelId,
-          max_tokens: opts.maxTokens ?? 1024,
-          temperature: opts.temperature ?? 0.7,
-          system: opts.system,
-          messages: opts.messages.map((m) => ({ role: m.role === 'system' ? 'user' : m.role, content: m.content })),
-        }),
-      });
-      if (!res.ok) throw new Error(`Claude ${res.status}: ${await res.text()}`);
-      const data = await res.json();
-      const text = data?.content?.map((c: { text?: string }) => c.text ?? '').join('') ?? '';
-      return { text, usage: { in: data?.usage?.input_tokens ?? 0, out: data?.usage?.output_tokens ?? 0 } };
-    },
-  };
+// Los adaptadores leen la llave con `Deno.env.get`. Aqui corre Node, asi que se les da un
+// `Deno.env` minimo que devuelve la llave leida a memoria. Nada mas de Deno se usa en esa ruta.
+function simularDenoEnv(): void {
+  const g = globalThis as unknown as { Deno?: { env: { get(n: string): string | undefined } } };
+  g.Deno ??= { env: { get: (n: string) => llave(n) } };
 }
 
-function gemini(key: string): ModelAdapter {
-  const modelId = 'gemini-2.5-flash-lite';
-  return {
-    id: modelId,
-    pricing: { in: 0.1, out: 0.4 },
+/** Envuelve un adaptador para sumar los tokens de todas las llamadas: es lo que permite decir
+ *  cuanto cuesta el golden set completo con cada modelo, con precio oficial y no a ojo. */
+function conContador(m: ModelAdapter): { modelo: ModelAdapter; total: { in: number; out: number; llamadas: number } } {
+  const total = { in: 0, out: 0, llamadas: 0 };
+  const modelo: ModelAdapter = {
+    id: m.id,
+    pricing: m.pricing,
     async call(opts: ModelCallOpts): Promise<ModelResult> {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: opts.system }] },
-          contents: opts.messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-          generationConfig: { temperature: opts.temperature ?? 0, maxOutputTokens: opts.maxTokens ?? 300 },
-        }),
-      });
-      if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
-      const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
-      const u = data?.usageMetadata ?? {};
-      return { text, usage: { in: u.promptTokenCount ?? 0, out: u.candidatesTokenCount ?? 0 } };
+      const r = await m.call(opts);
+      total.llamadas += 1;
+      total.in += r.usage?.in ?? 0;
+      total.out += r.usage?.out ?? 0;
+      return r;
     },
   };
+  return { modelo, total };
 }
 
-function elegirModelo(): { modelo: ModelAdapter; proxy: boolean } {
-  const pedido = arg('proveedor');
-  const kAnt = llave('ANTHROPIC_API_KEY');
-  const kGem = llave('GEMINI_API_KEY');
-  if (pedido === 'claude' || (!pedido && kAnt)) {
-    if (!kAnt) throw new Error('No hay ANTHROPIC_API_KEY en el entorno ni en .env.local');
-    return { modelo: claude(kAnt), proxy: false };
+function elegirModelo(): ModelAdapter {
+  const proveedor = arg('proveedor') ?? 'gemini';
+  const pedido = arg('modelo');
+  simularDenoEnv();
+  if (proveedor === 'claude') {
+    if (!llave('ANTHROPIC_API_KEY')) throw new Error('No hay ANTHROPIC_API_KEY en el entorno ni en .env.local');
+    if (pedido) throw new Error('--modelo solo aplica a --proveedor gemini (el Claude de referencia es el de R1/R2)');
+    return claudeHaiku();
   }
-  if (!kGem) throw new Error('No hay ANTHROPIC_API_KEY ni GEMINI_API_KEY: no se puede correr el lector con modelo vivo');
-  return { modelo: gemini(kGem), proxy: true };
+  if (proveedor !== 'gemini') throw new Error(`--proveedor ${proveedor}: solo gemini o claude`);
+  if (!llave('GEMINI_API_KEY')) throw new Error('No hay GEMINI_API_KEY en el entorno ni en .env.local: no se puede correr el lector con modelo vivo');
+  return geminiFlashLite(pedido ?? GEMINI_LECTOR_MODELO);
 }
 
 // ---- Veredicto por punto --------------------------------------------------------------------
@@ -182,10 +163,11 @@ async function main(): Promise<void> {
   const golden = JSON.parse(readFileSync(path.join(RAIZ, 'supabase/functions/_shared/cardumen/navigate/golden-lector.json'), 'utf-8')) as { casos: Caso[] };
   const solo = arg('solo')?.split(',').map((s) => s.trim());
   const casos = solo ? golden.casos.filter((c) => solo.includes(c.id)) : golden.casos;
-  const { modelo, proxy } = elegirModelo();
+  const { modelo, total } = conContador(elegirModelo());
   const lector = interpreteConModelo(modelo);
+  const esElDeProduccion = modelo.id === GEMINI_LECTOR_MODELO;
 
-  console.log(`# Eval del lector de Navigate — ${casos.length} casos — modelo: ${modelo.id}${proxy ? ' (PROXY: el lector de produccion es claude-haiku-4-5)' : ''}\n`);
+  console.log(`# Eval del lector de Navigate — ${casos.length} casos — modelo: ${modelo.id}${esElDeProduccion ? ' (el de produccion)' : ` (el de produccion es ${GEMINI_LECTOR_MODELO})`}\n`);
 
   const filas: Fila[] = [];
   const CONCURRENCIA = 3;
@@ -219,10 +201,14 @@ async function main(): Promise<void> {
   console.log(`\n**No lecturas sobre casos validos: ${noLeyo.length}**`);
   for (const f of noLeyo) console.log(`- ${f.caso.id} [${f.caso.categoria}] "${f.caso.texto}" -> ${JSON.stringify(f.obtenido)}`);
 
+  // Costo del set completo con precio oficial (USD / 1M tokens, `pricing` del adaptador).
+  const usd = (total.in * modelo.pricing.in + total.out * modelo.pricing.out) / 1_000_000;
+  console.log(`\n**Tokens:** ${total.llamadas} llamadas, ${total.in} de entrada, ${total.out} de salida — **USD ${usd.toFixed(4)}** por el set (precio USD/1M: ${modelo.pricing.in} entrada / ${modelo.pricing.out} salida)`);
+
   const salida = arg('json');
   if (salida) {
     const { writeFileSync } = await import('node:fs');
-    writeFileSync(salida, JSON.stringify({ modelo: modelo.id, proxy, fecha: new Date().toISOString(), filas }, null, 2));
+    writeFileSync(salida, JSON.stringify({ modelo: modelo.id, lector_produccion: GEMINI_LECTOR_MODELO, fecha: new Date().toISOString(), tokens: total, usd, filas }, null, 2));
     console.log(`\nJSON en ${salida}`);
   }
   process.exit(falsas.length > 0 ? 1 : 0);
