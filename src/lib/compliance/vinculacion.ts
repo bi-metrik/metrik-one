@@ -534,3 +534,41 @@ export function nombreContraparte(
   const doc = (f.documento_numero ?? '').trim();
   return doc ? `Sin nombre (${doc})` : 'Sin nombre';
 }
+
+// ─── Aprobar sin que la plataforma lo respalde ────────────────────────────
+
+/**
+ * Las alertas que convierten una aprobación en una decisión tomada por fuera de
+ * lo que la plataforma puede sustentar.
+ *
+ * `campos_sin_llenar` no está: un campo vacío es un dato que el documento no
+ * traía, y el oficial lo ve. Las otras cuatro son distintas — dicen que falta
+ * un documento, que nadie lo leyó, que no se pudo leer, o que la contraparte
+ * nunca confirmó lo que se leyó. Aprobar así es válido (el criterio es del
+ * oficial, no del software), pero tiene que quedar dicho que fue así.
+ */
+export const CLAVES_EXIGEN_CONSTANCIA: readonly Alerta['clave'][] = [
+  'documentos_faltantes',
+  'documentos_en_cola',
+  'documentos_sin_leer',
+  'campos_sin_confirmar',
+];
+
+/**
+ * Si aprobar exige dejar constancia.
+ *
+ * Se pide solo cuando hay algo que la plataforma no respalda. Pedirla siempre
+ * la volvería un clic más del trámite y dejaría de significar nada: en una
+ * auditoría, una casilla marcada en el 100% de los expedientes no distingue al
+ * que se revisó a mano del que se aprobó de afán.
+ */
+export function exigeConstanciaSinLectura(alertas: readonly Alerta[]): boolean {
+  return alertas.some((a) => CLAVES_EXIGEN_CONSTANCIA.includes(a.clave));
+}
+
+/**
+ * La frase de la casilla. Dice tres cosas y las tres importan ante un auditor:
+ * qué falta, que la revisión se hizo por fuera, y de quién es la decisión.
+ */
+export const CONSTANCIA_SIN_LECTURA =
+  'Apruebo con el expediente incompleto. Revisé por fuera de la plataforma lo que falta acá y la decisión es mía.';

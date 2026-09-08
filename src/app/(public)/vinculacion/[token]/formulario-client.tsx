@@ -1,13 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { Check, ChevronDown, FileUp, Loader2, Lock, PenLine, ShieldCheck } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  FileUp,
+  Loader2,
+  Lock,
+  PenLine,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
 import {
   abrirVinculacion,
   aceptarCondiciones,
   confirmarCampos,
   firmarConCodigo,
   pedirCodigoDeFirma,
+  leerDocumento,
   pedirUrlDeSubida,
   traducirErrorFirma,
   type VistaPublica,
@@ -19,12 +29,29 @@ import {
   TAMANO_MAX_MB,
   nombrePedido,
   normalizarOtp,
+  notaPedido,
+  veredictoLectura,
+  vistaPreviaCampos,
   otpCompleto,
   textosAceptacion,
   archivoSoltado,
   validarArchivo,
   type PasoPublico,
+  type VeredictoLectura,
 } from '@/lib/compliance/vinculacion-publica';
+
+/** El color dice lo mismo que la frase, para quien solo mira. */
+const TONO_LECTURA: Record<VeredictoLectura['tono'], string> = {
+  ok: 'text-[#059669]',
+  ojo: 'text-[#B45309]',
+  espera: 'text-[#6B7280]',
+  falla: 'text-[#B91C1C]',
+};
+
+type LecturaEnPantalla = {
+  veredicto: VeredictoLectura;
+  previa: { slug: string; texto: string }[];
+};
 
 export default function FormularioClient({
   token,
@@ -46,6 +73,8 @@ export default function FormularioClient({
   const [docFirmante, setDocFirmante] = useState('');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [encima, setEncima] = useState<string | null>(null);
+  const [leyendo, setLeyendo] = useState<string | null>(null);
+  const [lecturas, setLecturas] = useState<Record<string, LecturaEnPantalla>>({});
 
   // Soltar un archivo FUERA de un bloque hace que el navegador lo abra y se
   // lleve la pestaña por delante. La persona pierde el formulario por apuntar
@@ -97,6 +126,47 @@ export default function FormularioClient({
     });
   }
 
+  /**
+   * La lectura corre FUERA de la transición: puede tardar hasta cuarenta
+   * segundos y dejar el formulario entero bloqueado ese rato obligaría a la
+   * persona a mirar una rueda antes de poder subir el documento siguiente.
+   */
+  async function leerAhora(slot: string, docId: string) {
+    setLeyendo(slot);
+    try {
+      const r = await leerDocumento(token, docId);
+      if (!r.ok) {
+        // El documento YA está subido: el que falló fue el lector. Decirle que
+        // vuelva a intentar lo mandaría a subir dos veces lo mismo.
+        setLecturas((m) => ({
+          ...m,
+          [slot]: {
+            veredicto: {
+              tono: 'espera',
+              texto: 'Lo recibimos. No pudimos leerlo en este momento, lo leemos más tarde.',
+              sugiereReemplazo: false,
+            },
+            previa: [],
+          },
+        }));
+        return;
+      }
+      setLecturas((m) => ({
+        ...m,
+        [slot]: {
+          veredicto: veredictoLectura(slot, r.data),
+          previa: vistaPreviaCampos(r.data.campos),
+        },
+      }));
+      // Lo que salió de la lectura son los campos que la contraparte confirma
+      // en el paso siguiente: sin recargar, ese paso seguiría diciendo que
+      // todavía no hay nada leído.
+      if (r.data.estado === 'ok') await recargar();
+    } finally {
+      setLeyendo(null);
+    }
+  }
+
   function subir(slot: string, file: File) {
     const err = validarArchivo(file);
     if (err) {
@@ -105,7 +175,15 @@ export default function FormularioClient({
     }
     setError(null);
     setSubiendo(slot);
+    // El veredicto anterior describe el archivo anterior. Dejarlo puesto
+    // mientras sube el nuevo es afirmar algo del archivo equivocado.
+    setLecturas((m) => {
+      const n = { ...m };
+      delete n[slot];
+      return n;
+    });
     startTransition(async () => {
+      let docId: string | null = null;
       try {
         const r = await pedirUrlDeSubida(token, {
           slot,
@@ -127,10 +205,14 @@ export default function FormularioClient({
           setError('El archivo no se pudo subir. Revisa tu conexión y vuelve a intentar.');
           return;
         }
+        docId = r.data.docId;
         await recargar();
       } finally {
         setSubiendo(null);
       }
+      // Sin `await`: la transición cierra acá y el formulario queda usable
+      // mientras el lector trabaja. La rueda de ESE bloque la lleva `leyendo`.
+      if (docId) void leerAhora(slot, docId);
     });
   }
 
@@ -316,87 +398,141 @@ export default function FormularioClient({
               <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Documentos</h2>
               <p className="text-xs text-[#6B7280] mb-3">
                 Arrastra cada archivo a su bloque, o usa el botón. PDF, JPG o PNG, hasta{' '}
-                {TAMANO_MAX_MB} MB cada uno.
+                {TAMANO_MAX_MB} MB cada uno. Los leemos apenas los subas y te decimos acá mismo si
+                el documento es el que se pidió.
               </p>
               <div className="space-y-2">
                 {v.kit.map((s) => {
-                  // Solo un bloque pendiente recibe algo. Uno ya cargado, o el
-                  // expediente ya firmado, no puede aceptar un arrastre: el
-                  // documento entraría por debajo del hash que se selló.
-                  const recibe = !s.cargado && v.paso !== 'listo' && !pending;
+                  // Un bloque YA cargado también recibe. Si la persona subió el
+                  // documento equivocado tiene que poder cambiarlo ahora, que es
+                  // cuando lo tiene a la mano; obligarla a escribirle a alguien
+                  // para que le abra el paso es el reproceso que este flujo
+                  // existe para evitar. Lo único cerrado es el expediente ya
+                  // firmado: ahí un documento nuevo entraría por debajo del hash
+                  // que se selló.
+                  const recibe = v.paso !== 'listo' && !pending && leyendo !== s.slot;
+                  const nota = notaPedido(s.slot);
+                  const l = lecturas[s.slot];
                   return (
-                  <div
-                    key={s.slot}
-                    onDragOver={
-                      recibe
-                        ? (ev) => {
-                            ev.preventDefault();
-                            setEncima(s.slot);
-                          }
-                        : undefined
-                    }
-                    onDragLeave={recibe ? () => setEncima(null) : undefined}
-                    onDrop={
-                      recibe
-                        ? (ev) => {
-                            ev.preventDefault();
-                            soltar(s.slot, ev.dataTransfer.files);
-                          }
-                        : undefined
-                    }
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg border bg-white transition ${
-                      encima === s.slot
-                        ? 'border-dashed border-2 border-[#1A1A1A] bg-[#F9FAFB]'
-                        : 'border-[#E5E7EB]'
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-[#1A1A1A]">{nombrePedido(s.slot)}</p>
-                      {recibe && (
-                        <p className="text-xs text-[#9CA3AF] mt-0.5">
-                          {encima === s.slot ? 'Suelta acá' : 'Arrástralo acá o usa el botón'}
+                    <div
+                      key={s.slot}
+                      onDragOver={
+                        recibe
+                          ? (ev) => {
+                              ev.preventDefault();
+                              setEncima(s.slot);
+                            }
+                          : undefined
+                      }
+                      onDragLeave={recibe ? () => setEncima(null) : undefined}
+                      onDrop={
+                        recibe
+                          ? (ev) => {
+                              ev.preventDefault();
+                              soltar(s.slot, ev.dataTransfer.files);
+                            }
+                          : undefined
+                      }
+                      className={`px-4 py-3 rounded-lg border bg-white transition ${
+                        encima === s.slot
+                          ? 'border-dashed border-2 border-[#1A1A1A] bg-[#F9FAFB]'
+                          : 'border-[#E5E7EB]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-[#1A1A1A]">{nombrePedido(s.slot)}</p>
+                          {nota && <p className="text-xs text-[#6B7280] mt-0.5">{nota}</p>}
+                          {recibe && !s.cargado && (
+                            <p className="text-xs text-[#9CA3AF] mt-0.5">
+                              {encima === s.slot ? 'Suelta acá' : 'Arrástralo acá o usa el botón'}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {s.cargado && (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#059669]">
+                              <Check className="w-3.5 h-3.5" /> Recibido
+                            </span>
+                          )}
+                          {v.paso === 'listo' ? (
+                            !s.cargado && (
+                              // Ya firmado: subir más documentos cambiaría el
+                              // expediente por debajo del hash que se selló.
+                              <span className="text-xs text-[#9CA3AF]">No se recibió</span>
+                            )
+                          ) : (
+                            <>
+                              <input
+                                ref={(el) => {
+                                  inputs.current[s.slot] = el;
+                                }}
+                                type="file"
+                                accept="application/pdf,image/jpeg,image/png"
+                                className="hidden"
+                                onChange={(ev) => {
+                                  const f = ev.target.files?.[0];
+                                  if (f) subir(s.slot, f);
+                                  ev.target.value = '';
+                                }}
+                              />
+                              <button
+                                type="button"
+                                disabled={pending || leyendo === s.slot}
+                                onClick={() => inputs.current[s.slot]?.click()}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E7EB] text-xs font-semibold text-[#4B5563] shrink-0 disabled:opacity-50"
+                              >
+                                {subiendo === s.slot ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : s.cargado ? (
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                ) : (
+                                  <FileUp className="w-3.5 h-3.5" />
+                                )}
+                                {s.cargado ? 'Reemplazar' : 'Subir'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {leyendo === s.slot && (
+                        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-[#6B7280]">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Leyendo el documento para confirmar que es el correcto...
                         </p>
                       )}
-                    </div>
-                    {s.cargado ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#059669] shrink-0">
-                        <Check className="w-3.5 h-3.5" /> Recibido
-                      </span>
-                    ) : v.paso === 'listo' ? (
-                      // Ya firmado: subir mas documentos cambiaria el expediente
-                      // por debajo del hash que se sello al firmar.
-                      <span className="text-xs text-[#9CA3AF] shrink-0">No se recibió</span>
-                    ) : (
-                      <>
-                        <input
-                          ref={(el) => {
-                            inputs.current[s.slot] = el;
-                          }}
-                          type="file"
-                          accept="application/pdf,image/jpeg,image/png"
-                          className="hidden"
-                          onChange={(ev) => {
-                            const f = ev.target.files?.[0];
-                            if (f) subir(s.slot, f);
-                            ev.target.value = '';
-                          }}
-                        />
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => inputs.current[s.slot]?.click()}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E5E7EB] text-xs font-semibold text-[#4B5563] shrink-0 disabled:opacity-50"
-                        >
-                          {subiendo === s.slot ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <FileUp className="w-3.5 h-3.5" />
+
+                      {l && leyendo !== s.slot && (
+                        <div className="mt-2">
+                          <p className={`text-xs ${TONO_LECTURA[l.veredicto.tono]}`}>
+                            {l.veredicto.texto}
+                          </p>
+                          {l.previa.length > 0 && (
+                            <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
+                              {l.previa.map((c) => (
+                                <li key={c.slug} className="text-[11px] text-[#6B7280]">
+                                  <span className="text-[#9CA3AF]">
+                                    {c.slug.replace(/_/g, ' ')}:
+                                  </span>{' '}
+                                  {c.texto}
+                                </li>
+                              ))}
+                            </ul>
                           )}
-                          Subir
-                        </button>
-                      </>
-                    )}
-                  </div>
+                          {l.veredicto.sugiereReemplazo && (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => inputs.current[s.slot]?.click()}
+                              className="mt-1.5 text-xs font-semibold underline text-[#1A1A1A] disabled:opacity-50"
+                            >
+                              Subir otro archivo
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>

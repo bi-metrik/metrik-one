@@ -16,12 +16,15 @@
  *   - volver a meter cola y fallo en la misma bolsa → caen 3
  *   - contar los pendientes como ilegibles → caen 3
  *   - decirle al oficial que la cola falló → cae 1
+   - pedir constancia siempre, aunque el expediente esté completo → cae 1
+   - aprobar sin constancia un expediente con documentos sin leer → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
 import {
   agruparCamposPorDocumento,
   alertasDeExpediente,
+  exigeConstanciaSinLectura,
   camposSinConfirmar,
   camposSinLlenar,
   documentosEnCola,
@@ -309,5 +312,30 @@ describe('en cola no es lo mismo que ilegible', () => {
     );
     expect(alertas.find((a) => a.clave === 'documentos_en_cola')?.cuantos).toBe(1);
     expect(alertas.find((a) => a.clave === 'documentos_sin_leer')?.cuantos).toBe(1);
+  });
+});
+
+
+// ─── La constancia de aprobar sin respaldo ────────────────────────────────
+
+describe('exigeConstanciaSinLectura', () => {
+  const alerta = (clave: string) => ({ clave, texto: 'x', cuantos: 1 }) as never;
+
+  it('la pide cuando falta un documento, o nadie lo leyó, o no se pudo leer, o la contraparte no confirmó', () => {
+    for (const clave of [
+      'documentos_faltantes',
+      'documentos_en_cola',
+      'documentos_sin_leer',
+      'campos_sin_confirmar',
+    ]) {
+      expect(exigeConstanciaSinLectura([alerta(clave)])).toBe(true);
+    }
+  });
+
+  it('no la pide con el expediente completo: una casilla marcada siempre no distingue nada', () => {
+    expect(exigeConstanciaSinLectura([])).toBe(false);
+    // Un campo que el documento no traía es algo que el oficial ve; no es
+    // información que la plataforma le esté escondiendo.
+    expect(exigeConstanciaSinLectura([alerta('campos_sin_llenar')])).toBe(false);
   });
 });
