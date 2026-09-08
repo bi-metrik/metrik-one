@@ -1,25 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { filtrarCasos } from './conciliacion-client'
-import type { CasoPorFacturar } from '@/lib/actions/facturacion-actions'
+import { casoFalso as caso } from '../../../../test/cola-facturacion-doble'
 
 /**
  * Los FORMATOS de teléfono son los que conviven hoy en la cola real de SOENA
  * (medido el 2026-08-12 sobre los 181 casos, todos con teléfono); los dígitos son
  * inventados a propósito, para no versionar números de clientes.
  */
-const caso = (p: Partial<CasoPorFacturar>): CasoPorFacturar => ({
-  negocio_id: 'x', codigo: null, nombre: null, etapa: null, etapa_numero: null,
-  identificacion: null, cliente: null, telefono: null, email: null, honorario: null, valor_upme: null,
-  faltan_factura: [], faltan_cliente: [], sin_rut: false,
-  ya_facturado: false, factura_numero: null, factura_sin_pdf: false,
-  recibo_numero: null,
-  concepto: { code: '22', nombre: null, servicio: null, porDefecto: true },
-  base_gravable: null, falta_saldo: 0,
-  estado_recaudo: 'cubierto', banda_materialidad: 1_000,
-  descartado: null,
-  ...p,
-})
-
 const CASOS = [
   caso({ negocio_id: '1', codigo: 'V0006', cliente: 'JUAN PABLO ECHEVERRY', etapa: 'Seguimiento', telefono: '3100000001' }),
   caso({ negocio_id: '2', codigo: 'V0012', cliente: 'GEORGI NIKOLAEV', etapa: 'Cargue', telefono: '+57 316 0000002' }),
