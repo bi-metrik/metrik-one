@@ -62,6 +62,13 @@ sesión principal o a Mik.
 
 ## Herramientas dentro del worktree
 
+- **⚠️ El symlink de `node_modules` NO siempre hace falta, y suele sobrar.** El worktree
+  cuelga de `metrik-one/.claude/worktrees/<x>`, o sea que está DENTRO del repo principal:
+  la resolución de Node sube y encuentra `metrik-one/node_modules` sola. Medido el
+  2026-09-08 con un `node_modules/` local vacío (solo `.vite`): `npx tsc --noEmit`,
+  `npx vitest run <archivo>`, `node scripts/lint-lineas-cambiadas.mjs origin/main` y
+  `npx next build` corrieron **los cuatro** sin tocar nada. Probar primero sin symlink;
+  si algo no resuelve, ahí sí crearlo (y quitarlo al cerrar).
 - **`deno` está en `~/.deno/bin/deno` pero NO en el PATH** (medido 2026-09-07: `which deno`
   da vacío). Invocarlo por ruta absoluta. El check de CI se reproduce exacto y pasa el guard
   (no hay git): `find supabase/functions -name '*.ts' -not -name '*.test.ts' -print0 | xargs -0
@@ -133,6 +140,29 @@ Medido el 2026-09-07 (PR #556), tres rechazos más que cuestan un comando cada u
   mutaciones y restaurar en un solo comando.
 - **`python3 x.py && git diff --stat`** se rechaza por el `&&` con git. Un git por llamada,
   plano. `git commit` con varios `-m` pasa (no hace falta heredoc para el mensaje).
+
+### Variante nueva (2026-09-08): la otra sesión commitea SOBRE TU RAMA
+
+No borró nada ni cambió de rama: hizo `git commit` estando parada en **mi** rama, así que
+su commit quedó con el mío de padre, y después un `git reset` volvió HEAD a mi commit. Se
+ve así en el reflog:
+
+```
+9d043bd HEAD@{0}: reset: moving to 9d043bd          <- vuelve a mi commit
+9219521 HEAD@{1}: commit: fix(compliance): …        <- commit AJENO encima del mío
+9d043bd HEAD@{2}: commit: <el mío>
+```
+
+**Por qué importa:** si esa sesión hubiera empujado sin resetear, su PR habría arrastrado
+mi commit; y al revés, un `git commit -a` mío habría metido sus archivos en mi PR.
+
+**How to apply, y es barato:** (a) **commitear con rutas explícitas siempre**
+(`git commit -m "…" -- ruta1 ruta2`), nunca `add -A` ni `commit -a`; (b) **empujar apenas
+el commit exista**, antes de correr build/tests, que es donde se va el tiempo y donde la
+otra sesión alcanza a moverse; (c) `git status --short` al empezar y **otra vez antes de
+commitear** — aquí el árbol estaba limpio al abrir y a los diez minutos tenía cuatro
+archivos ajenos modificados. La firma es que los archivos que aparecen no los menciona el
+encargo.
 
 ### El mismo choque, visto desde el lado que estorba
 

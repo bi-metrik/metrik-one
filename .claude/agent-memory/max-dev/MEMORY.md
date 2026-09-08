@@ -49,6 +49,7 @@
 - [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — el `Date` se arma con la hora de pared en componentes LOCALES; `cellDates` en las dos llamadas; medido en UTC y Bogotá
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
 - [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
+- [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones; `hourCycle:'h23'` va igual aunque el riesgo no se reproduzca en node
 
 ## Feedback
 
