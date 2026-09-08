@@ -28,7 +28,8 @@ import { detectarIdioma, leerIdiomaElegido } from "./idioma.ts";
 import { normalizarTexto } from "./interprete.ts";
 import { leerMeta, sinPalabras } from "./meta.ts";
 import type {
-  Accion, DiadaEnCurso, Entrada, IdiomaElegible, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida, TriadaEnCurso,
+  Accion, DiadaEnCurso, Entrada, FuenteLectura, IdiomaElegible, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida,
+  TriadaEnCurso,
 } from "./tipos.ts";
 
 export const STUDY_ID = "navigate";
@@ -48,10 +49,17 @@ export const BOTON = {
   langNo: "nav_lang_no",
   si: "nav_si",
   corrijo: "nav_corrijo",
+  tri1: "nav_tri_1",
+  tri2: "nav_tri_2",
+  tri3: "nav_tri_3",
+  triNinguno: "nav_tri_ninguno",
   intParejos: "nav_int_parejos",
   intManda: "nav_int_manda",
   intClaro: "nav_int_claro",
 } as const;
+
+/** Los tres polos de una triada, en el orden del instrumento: el boton `i` es el polo `i`. */
+const TRI_IDS = [BOTON.tri1, BOTON.tri2, BOTON.tri3] as const;
 
 /**
  * Que botones VALEN en cada paso. WhatsApp deja tocar botones de mensajes viejos: un "OK"
@@ -65,8 +73,8 @@ const BOTONES_DEL_PASO: Record<Paso, readonly string[]> = {
   sector: [],
   historia: [],
   idioma_no_es: [BOTON.langSi, BOTON.langNo],
-  triada_orden: [],
-  triada_segundo: [],
+  triada_orden: [BOTON.tri1, BOTON.tri2, BOTON.tri3],
+  triada_segundo: [BOTON.tri1, BOTON.tri2, BOTON.tri3, BOTON.triNinguno],
   triada_confirmar: [BOTON.si, BOTON.corrijo],
   triada_intensidad: [BOTON.intParejos, BOTON.intManda, BOTON.intClaro],
   diada_abrir: [],
@@ -75,8 +83,14 @@ const BOTONES_DEL_PASO: Record<Paso, readonly string[]> = {
   cerrado: [],
 };
 
-/** Pasos donde se espera texto libre: un boton viejo aqui no es una respuesta. */
-const PASOS_DE_TEXTO = new Set<Paso>(["sector", "historia", "triada_orden", "triada_segundo", "diada_abrir", "diada_aclarar"]);
+/**
+ * Pasos donde la respuesta es una eleccion o un texto libre, no un si/no: un boton viejo de
+ * OTRO paso aqui no es una respuesta y se repregunta. Las triadas tienen sus propios botones
+ * (los de `BOTONES_DEL_PASO`); los demas botones que lleguen ahi son de un mensaje anterior.
+ */
+const PASOS_DE_TEXTO = new Set<Paso>([
+  "sector", "historia", "triada_orden", "triada_segundo", "triada_intensidad", "diada_abrir", "diada_aclarar",
+]);
 
 const SI = new Set([
   "si", "s", "ok", "okay", "listo", "dale", "de acuerdo", "claro", "vale", "correcto", "asi es",
@@ -112,8 +126,13 @@ const TXT = {
     "PT: Por enquanto este instrumento está disponível apenas em espanhol. Quer continuar em espanhol?",
   trilingueAdios:
     "ES: Entendido. Gracias por su tiempo.\nEN: Understood. Thank you for your time.\nPT: Entendido. Obrigado pelo seu tempo.",
-  corrijaConSusPalabrasTriada: "Dígamelo con sus palabras: ¿cuáles dos pesaron más, y en qué orden?",
-  noSeguiTriada: "No le alcancé a seguir. Dígame cuál de las tres pesó más, y cuál iría en segundo lugar.",
+  // Van delante del menu numerado de la triada (ver `repreguntaTriada`).
+  corrijoTriada: "Entendido.",
+  noSeguiTriada: "No le alcancé a seguir.",
+  instruccionTriada: "¿Cuál de las tres pesa más? Toque 1, 2 o 3, o dígamelo con sus palabras.",
+  instruccionSegundo: "Toque el número, o *Ninguno* si nada más pesó.",
+  instruccionIntensidad: "Toque una opción, o dígamelo con sus palabras.",
+  instruccionDiada: "Dígamelo con sus palabras.",
   guardoAsi: "Listo, lo guardo así.",
   sinUbicar: "Lo dejo sin ubicar, no hay problema. Seguimos.",
   declino: "Entendido, lo dejo sin responder. Seguimos.",
@@ -137,12 +156,54 @@ const TXT = {
 // Variar la entrada rompe la monotonia de repetir la misma mecanica (spec de triadas §4.2).
 // La posicion es entre las de su misma clase (primera triada, segunda diada...), no en la
 // secuencia completa.
-const INTRO_TRIADA = ["Pensando en lo que me contó, ", "Sobre eso mismo: ", "Una más sobre lo que contó. "];
-const INTRO_DIADA = ["Una cosa más sobre lo que contó.", "Y otra:", "Y una más:"];
-const INTRO_ULTIMA = "Por último:";
+const INTRO_TRIADA = ["Pensando en lo que me contó", "Sobre eso mismo", "Una más sobre lo que contó"];
+const INTRO_DIADA = ["Una cosa más sobre lo que contó.", "Otra sobre lo mismo.", "Y una más."];
+const INTRO_ULTIMA = "Por último.";
+
+/** Cuantos caracteres de la historia se citan al abrir cada triada (recorte en limite de palabra). */
+const MAX_CITA_HISTORIA = 90;
 
 const texto = (t: string): Salida => ({ tipo: "texto", texto: t });
 const botones = (t: string, b: Array<{ id: string; title: string }>): Salida => ({ tipo: "botones", texto: t, botones: b });
+
+/**
+ * Las primeras palabras de la historia, para anclar la pregunta de la triada a lo que la
+ * persona acaba de contar. Una sola linea (los saltos se colapsan), recortada en limite de
+ * palabra y con "…" si se corto. Vacia si no hay historia: la pregunta se arma sin la cita.
+ */
+export function citaHistoria(historia: string | undefined, max = MAX_CITA_HISTORIA): string {
+  const limpia = (historia ?? "").replace(/\s+/g, " ").trim();
+  if (limpia.length <= max) return limpia;
+  const corte = limpia.lastIndexOf(" ", max);
+  const base = corte > 0 ? limpia.slice(0, corte) : limpia.slice(0, max);
+  return `${base.replace(/[\s,;:.!?…]+$/, "")}…`;
+}
+
+// Palabra interrogativa (con o sin preposicion delante) sobre la que se abre el "¿". Fronteras
+// con \p{L} y no con \b: en JS \b es ASCII y "qué" (con tilde) no cierra palabra.
+const INTERROGATIVO = /(?<!\p{L})(?:(?:de|a|en|con|para|por)\s+)?(?:qu[eé]|cu[aá]l(?:es)?|qui[eé]n(?:es)?|c[oó]mo|d[oó]nde|cu[aá]ndo|cu[aá]nt[oa]s?)(?!\p{L})/iu;
+
+/**
+ * La pregunta del instrumento en forma interrogativa, sin cambiarle una palabra: el "¿" se
+ * abre en la palabra interrogativa y el "?" cierra al final. "De dónde nace lo que observó" ->
+ * "¿De dónde nace lo que observó?"; "En el fondo, qué se siente que es" -> "En el fondo, ¿qué
+ * se siente que es?". Si no hay palabra interrogativa, se envuelve completa.
+ */
+export function preguntaInterrogativa(t: TriadaNav): string {
+  const p = preguntaMostrada(t);
+  const m = INTERROGATIVO.exec(p);
+  if (!m) return `¿${p}?`;
+  return `${p.slice(0, m.index)}¿${p.slice(m.index)}?`;
+}
+
+/** Primera LETRA en minuscula (salta el "¿"), para pegar la pregunta detras de una coma. */
+function minusculaInicial(s: string): string {
+  return s.replace(/^(\P{L}*)(\p{L})/u, (_, antes: string, letra: string) => antes + letra.toLowerCase());
+}
+
+const menuTriada = (t: TriadaNav): string => t.polos.map((p, i) => `${i + 1}. ${p}`).join("\n");
+const botonesTriada = (cuerpo: string): Salida =>
+  botones(cuerpo, TRI_IDS.map((id, i) => ({ id, title: String(i + 1) })));
 const botonesSiNo = (t: string): Salida =>
   botones(t, [{ id: BOTON.si, title: "Sí, así" }, { id: BOTON.corrijo, title: "No, corrijo" }]);
 const botonesPoblacion = (t: string): Salida =>
@@ -164,21 +225,37 @@ function menuSectores(encabezado: string): Salida {
   return texto(`${encabezado}\n\n${filas}\n\nResponda con el número.`);
 }
 
-function preguntaTriada(t: TriadaNav, posicion: number): Salida {
+/**
+ * Apertura de una triada: ancla a la historia (sus primeras palabras entre comillas), la
+ * pregunta del instrumento en forma interrogativa, los tres polos numerados en lineas aparte
+ * y una sola instruccion. Pide UNA cosa (cual pesa mas); el segundo lugar se pide despues.
+ * Botones 1, 2, 3.
+ */
+function preguntaTriada(t: TriadaNav, posicion: number, historia: string | undefined): Salida {
   const intro = INTRO_TRIADA[Math.min(posicion, INTRO_TRIADA.length - 1)];
-  return texto(
-    `*${preguntaMostrada(t)}.* ${intro}se cruzan tres cosas: *${t.polos[0]}*, *${t.polos[1]}* o *${t.polos[2]}*. ¿Cuáles dos pesaron más, y en qué orden?`,
+  const cita = citaHistoria(historia);
+  const ancla = cita ? `${intro} ("${cita}")` : intro;
+  return botonesTriada(`${ancla}, ${minusculaInicial(preguntaInterrogativa(t))}\n\n${menuTriada(t)}\n\n${TXT.instruccionTriada}`);
+}
+
+/** Repregunta de la triada (no se leyo, o corrige): el mismo menu con botones, sin la cita. */
+const repreguntaTriada = (t: TriadaNav, prefijo: string): Salida =>
+  botonesTriada(`${prefijo}\n\n${menuTriada(t)}\n\n${TXT.instruccionTriada}`);
+
+/** Segundo lugar: los dos polos restantes con SU numero original (no se renumeran) y "Ninguno". */
+function preguntaSegundo(t: TriadaNav, dominante: number): Salida {
+  const otros = [0, 1, 2].filter((i) => i !== dominante);
+  const filas = otros.map((i) => `${i + 1}. ${t.polos[i]}`).join("\n");
+  return botones(
+    `Entendido, primero *${dominante + 1}. ${t.polos[dominante]}*. ¿Y en segundo lugar?\n\n${filas}\n\n${TXT.instruccionSegundo}`,
+    [...otros.map((i) => ({ id: TRI_IDS[i], title: String(i + 1) })), { id: BOTON.triNinguno, title: "Ninguno" }],
   );
 }
 
-function preguntaSegundo(t: TriadaNav, dominante: number): Salida {
-  const otros = [0, 1, 2].filter((i) => i !== dominante);
-  return texto(`¿Cuál iría en segundo lugar: *${t.polos[otros[0]]}* o *${t.polos[otros[1]]}*? Si ninguno, dígame *ninguno*.`);
-}
-
+/** Diada: los dos polos en lineas aparte, sin botones ni numeros (se lee texto libre, spec de diadas). */
 function preguntaDiada(d: DiadaNav, posicion: number, esUltima: boolean): Salida {
   const intro = esUltima ? INTRO_ULTIMA : INTRO_DIADA[Math.min(posicion, INTRO_DIADA.length - 1)];
-  return texto(`${intro} ¿Siente que *${d.izq}*, o que *${d.der}*?`);
+  return texto(`${intro} ¿Cuál de las dos se acerca más a lo que siente?\n\n• ${d.izq}\n• ${d.der}\n\n${TXT.instruccionDiada}`);
 }
 
 function ecoOrden(t: TriadaNav, ec: TriadaEnCurso): Salida {
@@ -198,16 +275,21 @@ function ecoOrden(t: TriadaNav, ec: TriadaEnCurso): Salida {
   return botonesSiNo(`Le leo entonces: *primero, ${dom}*; *en segundo lugar, ${sec}*; y *${res}* quedó al margen. ¿Lo dejo así?`);
 }
 
+/**
+ * Intensidad: las tres etiquetas de peso con su redaccion completa en lineas aparte (sin
+ * numerar, para que un numero aqui siga significando un polo) y tres botones cortos que
+ * mapean a las MISMAS etiquetas pre-registradas (§3.1). "Claramente el N" nombra al dominante
+ * por su numero de polo.
+ */
 function preguntaIntensidad(t: TriadaNav, ec: TriadaEnCurso, corta = false): Salida {
   const dom = t.polos[ec.dominante!];
   const sec = t.polos[ec.segundo!];
-  const cuerpo = corta
-    ? `¿*Casi parejos*, *uno mandaba pero el otro contaba*, o *fue claramente ${dom}*?`
-    : `Una última de esta parte. Entre *${dom}* y *${sec}*, ¿iban *casi parejos*, *uno mandaba pero el otro contaba*, o *fue claramente ${dom}*?`;
-  return botones(cuerpo, [
+  const cabeza = `${corta ? "" : "Una última de esta parte. "}Entre *${dom}* y *${sec}*, ¿cómo se repartió el peso?`;
+  const opciones = `• casi parejos\n• uno mandaba pero el otro contaba\n• fue claramente ${dom}`;
+  return botones(`${cabeza}\n\n${opciones}\n\n${TXT.instruccionIntensidad}`, [
     { id: BOTON.intParejos, title: "Casi parejos" },
-    { id: BOTON.intManda, title: "Uno mandaba" },
-    { id: BOTON.intClaro, title: "Claramente el 1º" },
+    { id: BOTON.intManda, title: "Uno mandaba más" },
+    { id: BOTON.intClaro, title: `Claramente el ${ec.dominante! + 1}` },
   ]);
 }
 
@@ -371,23 +453,35 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
     }
 
     case "triada_orden":
-      return await leerOrden(state, t, interprete);
+      return await leerOrden(state, t, n, boton, interprete);
 
     case "triada_segundo": {
       const { tri, ec } = triadaActual(state);
       ec.turnos += 1;
-      const r = await interprete.segundo(tri, ec.dominante!, t);
+      // Boton o numero: se resuelve sin el lector. Texto libre: el lector, como siempre.
+      const explicito = segundoExplicito(n, boton, ec.dominante!);
+      const fuente: FuenteLectura = explicito?.fuente ?? "texto";
+      const r = explicito ?? await interprete.segundo(tri, ec.dominante!, t);
       if (r.claro && r.ninguno) {
         ec.solo_uno = true;
         ec.segundo = null;
-        ec.notas.push("dijo que ningun otro polo peso");
+        ec.notas.push(`dijo que ningun otro polo peso (segundo: ${fuente})`);
       } else if (r.claro && r.segundo !== null) {
         ec.segundo = r.segundo;
+        ec.notas.push(`segundo: ${fuente}`);
       } else {
         ec.reintentos += 1;
         if (ec.reintentos < MAX_REINTENTOS) return resultado(state, [preguntaSegundo(tri, ec.dominante!)]);
         ec.segundo = null;
         ec.notas.push("no se pudo leer el segundo polo: queda sin ordenar");
+      }
+      // Eleccion explicita de punta a punta (dominante Y segundo por boton o numero): no hay
+      // nada que el modelo haya interpretado, asi que no se confirma. Si cualquiera de los dos
+      // lo leyo el modelo, eco + confirmacion como siempre.
+      if (r.claro && fuente !== "texto" && dominanteExplicito(ec)) {
+        if (ec.solo_uno) return cerrarTriada(state, { intensidad: "solo_uno", confirmado: true, nota: "un solo polo, elegido explicitamente" });
+        state.paso = "triada_intensidad";
+        return resultado(state, [preguntaIntensidad(tri, ec)]);
       }
       state.paso = "triada_confirmar";
       return resultado(state, [ecoOrden(tri, ec)]);
@@ -407,19 +501,19 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
       if (ec.correcciones >= MAX_REINTENTOS) {
         return cerrarTriada(state, { intensidad: null, confirmado: false, nota: "corrigio dos veces sin llegar a un orden avalado", sinResolver: true });
       }
-      if (esNo) {
-        state.paso = "triada_orden";
-        return resultado(state, [texto(TXT.corrijaConSusPalabrasTriada)]);
-      }
-      // Corrigio con contenido ("no, primero X"): se lee como un orden nuevo.
-      ec.notas.push("corrigio el eco con sus palabras");
+      // Vuelve a elegir: es otro intento del orden, con su propio tope (`correcciones`).
+      ec.reintentos = 0;
       state.paso = "triada_orden";
-      return await leerOrden(state, t, interprete);
+      if (esNo) return resultado(state, [repreguntaTriada(tri, TXT.corrijoTriada)]);
+      // Corrigio con contenido ("no, primero X", o un numero): se lee como un orden nuevo.
+      ec.notas.push("corrigio el eco con sus palabras");
+      return await leerOrden(state, t, n, undefined, interprete);
     }
 
     case "triada_intensidad": {
       const { tri, ec } = triadaActual(state);
       ec.turnos += 1;
+      let fuente: FuenteLectura = "boton";
       let etiqueta = boton === BOTON.intParejos
         ? "casi_parejos" as const
         : boton === BOTON.intManda
@@ -428,17 +522,25 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
             ? "claramente_el_primero" as const
             : null;
       if (etiqueta === null) {
-        const r = await interprete.intensidad(tri.polos[ec.dominante!], tri.polos[ec.segundo!], t);
-        if (r.etiqueta === "no_gradua") {
-          return cerrarTriada(state, { intensidad: null, confirmado: true, nota: "orden confirmado; no quiso graduar: resolucion gruesa" });
+        // Un numero aqui es un polo, no una opcion: solo el del dominante significa algo
+        // ("claramente el 2"). Cualquier otro se repregunta sin gastar lector ni fabricar.
+        const porNumero = intensidadExplicita(n, ec.dominante!);
+        fuente = porNumero === null ? "texto" : "numero";
+        if (porNumero === "claramente") etiqueta = "claramente_el_primero";
+        else if (porNumero === null) {
+          const r = await interprete.intensidad(tri.polos[ec.dominante!], tri.polos[ec.segundo!], t);
+          if (r.etiqueta === "no_gradua") {
+            return cerrarTriada(state, { intensidad: null, confirmado: true, nota: "orden confirmado; no quiso graduar: resolucion gruesa" });
+          }
+          etiqueta = r.etiqueta;
         }
-        etiqueta = r.etiqueta;
       }
       if (etiqueta === null) {
         ec.reintentos += 1;
         if (ec.reintentos < MAX_REINTENTOS) return resultado(state, [preguntaIntensidad(tri, ec, true)]);
         return cerrarTriada(state, { intensidad: null, confirmado: true, nota: "orden confirmado; la graduacion no se pudo leer: resolucion gruesa" });
       }
+      ec.notas.push(`intensidad: ${fuente}`);
       return cerrarTriada(state, { intensidad: etiqueta, confirmado: true, nota: "ordeno dos polos y graduo con etiqueta de peso; residual inferido" });
     }
 
@@ -581,7 +683,7 @@ function preguntaPendiente(state: NavigateState): Salida {
     case "sector": return menuSectores(TXT.sector);
     case "historia": return texto(APERTURA[state.poblacion ?? "ciudadano"]);
     case "idioma_no_es": return botonesTrilingue();
-    case "triada_orden": { const { tri } = triadaActual(state); return preguntaTriada(tri, posicionTriada(state)); }
+    case "triada_orden": { const { tri } = triadaActual(state); return preguntaTriada(tri, posicionTriada(state), state.historia); }
     case "triada_segundo": { const { tri, ec } = triadaActual(state); return preguntaSegundo(tri, ec.dominante!); }
     case "triada_confirmar": { const { tri, ec } = triadaActual(state); return ecoOrden(tri, ec); }
     case "triada_intensidad": { const { tri, ec } = triadaActual(state); return preguntaIntensidad(tri, ec, true); }
@@ -597,7 +699,7 @@ function repregunta(state: NavigateState, motivo: Motivo): Salida {
   if (motivo !== "no_leido") return preguntaPendiente(state);
   switch (state.paso) {
     case "sector": return menuSectores(TXT.sectorRepite);
-    case "triada_orden": return texto(TXT.noSeguiTriada);
+    case "triada_orden": return repreguntaTriada(triadaActual(state).tri, TXT.noSeguiTriada);
     default: return preguntaPendiente(state);
   }
 }
@@ -701,7 +803,7 @@ function abrirDimension(state: NavigateState): Salida[] {
   if (esTriada(id)) {
     state.en_curso = { tipo: "triada", turnos: 0, dominante: null, segundo: null, solo_uno: false, especial: null, correcciones: 0, reintentos: 0, notas: [] };
     state.paso = "triada_orden";
-    return [preguntaTriada(TRIADAS[id], posicionTriada(state))];
+    return [preguntaTriada(TRIADAS[id], posicionTriada(state), state.historia)];
   }
   state.en_curso = { tipo: "diada", turnos: 0, ancla: null, especial: null, ofrecidas: [], correcciones: 0, reintentos: 0, notas: [] };
   state.paso = "diada_abrir";
@@ -720,27 +822,130 @@ function diadaActual(state: NavigateState): { id: DimensionId; dia: DiadaNav; ec
   return { id, dia: DIADAS[id], ec: state.en_curso };
 }
 
-async function leerOrden(state: NavigateState, t: string, interprete: Interprete): Promise<Resultado> {
+// ---- Lectura determinista de la triada: botones y numeros, antes del modelo ---------------
+//
+// Un boton tocado o un texto que sea SOLO numeros de polo ("1", "el 2", "1 y 3", "2 y luego 1",
+// "primero 2 despues 1") es una eleccion explicita: se resuelve sin el lector y, si el orden
+// completo salio de ahi, sin eco ni confirmacion (la persona ya eligio, no hay interpretacion
+// que avalar). Todo lo demas es texto libre y sigue el camino del modelo.
+
+// Palabras que pueden acompanar a los numeros sin cambiar el sentido. "o" NO esta: "1 o 2" es
+// una duda, no un orden. Sobre texto normalizado (sin tildes ni signos).
+const RELLENO_NUMEROS = new Set([
+  "el", "la", "los", "las", "lo", "y", "e", "luego", "despues", "entonces", "primero", "primera",
+  "segundo", "segunda", "tercero", "tercera", "de", "en", "lugar", "numero", "num", "opcion",
+]);
+
+/** Numeros de polo (1-3) en el orden en que se escribieron, o null si el texto trae algo mas. */
+export function leerNumerosTriada(n: string): number[] | null {
+  if (!n) return null;
+  const nums: number[] = [];
+  for (const crudo of n.split(" ")) {
+    const tok = crudo.replace(/^#/, "").replace(/[º°]$/, "");
+    if (tok === "1" || tok === "2" || tok === "3") {
+      const k = Number(tok);
+      if (!nums.includes(k)) nums.push(k);
+      continue;
+    }
+    if (RELLENO_NUMEROS.has(tok)) continue;
+    return null;
+  }
+  return nums.length ? nums : null;
+}
+
+const indiceDeBotonTriada = (boton: string | undefined): number | null => {
+  const i = boton ? (TRI_IDS as readonly string[]).indexOf(boton) : -1;
+  return i >= 0 ? i : null;
+};
+
+const dominanteExplicito = (ec: TriadaEnCurso): boolean => ec.dominante_por === "boton" || ec.dominante_por === "numero";
+
+/** Orden explicito al abrir la triada: un boton da el dominante; los numeros dan dominante y, si hay dos, segundo. */
+function ordenExplicito(n: string, boton: string | undefined): { dominante: number; segundo: number | null; fuente: FuenteLectura } | null {
+  const porBoton = indiceDeBotonTriada(boton);
+  if (porBoton !== null) return { dominante: porBoton, segundo: null, fuente: "boton" };
+  const nums = leerNumerosTriada(n);
+  if (!nums) return null;
+  return { dominante: nums[0] - 1, segundo: nums.length >= 2 ? nums[1] - 1 : null, fuente: "numero" };
+}
+
+/**
+ * Segundo lugar explicito. Devuelve la misma forma que el lector para que el caso se resuelva
+ * por un solo camino. `claro: false` con fuente = un numero que no sirve (el propio dominante,
+ * o varios que no empiezan por el): se repregunta sin gastar lector. null = no era explicito.
+ */
+function segundoExplicito(
+  n: string, boton: string | undefined, dominante: number,
+): { claro: boolean; segundo: 0 | 1 | 2 | null; ninguno: boolean; fuente: FuenteLectura } | null {
+  if (boton === BOTON.triNinguno) return { claro: true, segundo: null, ninguno: true, fuente: "boton" };
+  const porBoton = indiceDeBotonTriada(boton);
+  if (porBoton !== null) {
+    return porBoton === dominante
+      ? { claro: false, segundo: null, ninguno: false, fuente: "boton" }
+      : { claro: true, segundo: porBoton as 0 | 1 | 2, ninguno: false, fuente: "boton" };
+  }
+  const nums = leerNumerosTriada(n);
+  if (!nums) return null;
+  let k: number | null = null;
+  if (nums.length === 1 && nums[0] - 1 !== dominante) k = nums[0] - 1;
+  else if (nums.length === 2 && nums[0] - 1 === dominante && nums[1] - 1 !== dominante) k = nums[1] - 1; // "2 y 1" repitiendo al dominante
+  return k === null
+    ? { claro: false, segundo: null, ninguno: false, fuente: "numero" }
+    : { claro: true, segundo: k as 0 | 1 | 2, ninguno: false, fuente: "numero" };
+}
+
+// "claramente el 2", "clarisimo el 1": el numero es el polo.
+const CLARAMENTE_N = /\bclar(?:amente|o|isimo) (?:el |la )?([123])\b/;
+
+/**
+ * En el turno de peso un numero es un polo. Solo el del dominante tiene lectura ("fue
+ * claramente el 2" = claramente el primero); otro numero seria reordenar, y eso no se
+ * fabrica: se repregunta. null = no hablo con numeros, que lo lea el modelo.
+ */
+function intensidadExplicita(n: string, dominante: number): "claramente" | "otro" | null {
+  const m = CLARAMENTE_N.exec(n);
+  const nums = leerNumerosTriada(n) ?? (m ? [Number(m[1])] : null);
+  if (!nums) return null;
+  return nums.length === 1 && nums[0] - 1 === dominante ? "claramente" : "otro";
+}
+
+async function leerOrden(state: NavigateState, t: string, n: string, boton: string | undefined, interprete: Interprete): Promise<Resultado> {
   const { tri, ec } = triadaActual(state);
   ec.turnos += 1;
+  const explicito = ordenExplicito(n, boton);
+  if (explicito) {
+    ec.especial = null;
+    ec.solo_uno = false;
+    ec.dominante = explicito.dominante;
+    ec.dominante_por = explicito.fuente;
+    ec.segundo = explicito.segundo;
+    ec.notas.push(`orden: ${explicito.fuente}`);
+    if (explicito.segundo === null) {
+      state.paso = "triada_segundo";
+      return resultado(state, [preguntaSegundo(tri, explicito.dominante)]);
+    }
+    // Dominante y segundo escritos con numeros: nada que confirmar, directo al peso.
+    ec.notas.push(`segundo: ${explicito.fuente}`);
+    state.paso = "triada_intensidad";
+    return resultado(state, [preguntaIntensidad(tri, ec)]);
+  }
   const r = await interprete.triada(tri, t);
   if (!r.claro) {
     ec.reintentos += 1;
-    if (ec.reintentos < MAX_REINTENTOS) return resultado(state, [texto(TXT.noSeguiTriada)]);
+    if (ec.reintentos < MAX_REINTENTOS) return resultado(state, [repreguntaTriada(tri, TXT.noSeguiTriada)]);
     return cerrarTriada(state, { intensidad: null, confirmado: false, nota: "no se pudo leer un orden tras dos intentos", sinResolver: true });
   }
   ec.especial = r.especial;
   ec.dominante = r.dominante;
+  ec.dominante_por = "texto";
   ec.segundo = r.segundo;
   ec.solo_uno = r.solo_uno;
+  ec.notas.push("orden: texto");
   if (!r.especial && r.dominante !== null && r.segundo === null && !r.solo_uno) {
     // Nombro uno solo sin excluir a los otros: se pide el segundo (un turno, sin insistir).
     state.paso = "triada_segundo";
     ec.notas.push("nombro un solo polo; se pidio el segundo");
-    const otros = [0, 1, 2].filter((i) => i !== r.dominante);
-    return resultado(state, [
-      texto(`Entendido, *${tri.polos[r.dominante]}* primero. ¿Y en segundo lugar: *${tri.polos[otros[0]]}* o *${tri.polos[otros[1]]}*? Si ninguno, dígame *ninguno*.`),
-    ]);
+    return resultado(state, [preguntaSegundo(tri, r.dominante)]);
   }
   if (!r.especial && !r.solo_uno) ec.notas.push("ordeno dos polos espontaneamente; residual inferido");
   state.paso = "triada_confirmar";

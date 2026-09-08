@@ -64,10 +64,16 @@ export interface RegistroDiada {
 
 // ---- Trabajo en curso sobre la dimension actual ------------------------------------
 
+/** De donde salio una lectura: boton tocado, numero escrito, o texto libre leido por el modelo. */
+export type FuenteLectura = "boton" | "numero" | "texto";
+
 export interface TriadaEnCurso {
   tipo: "triada";
   turnos: number;
   dominante: number | null;
+  /** Como se eligio el dominante. Solo una eleccion explicita (boton o numero) se guarda sin
+   *  eco ni confirmacion; ausente (sesiones anteriores a este campo) cuenta como texto. */
+  dominante_por?: FuenteLectura;
   segundo: number | null;
   solo_uno: boolean;
   especial: "not_applicable" | "dont_know" | null;
