@@ -119,3 +119,17 @@ estaba buscando:
 siempre dice algo. Si el cambio agregó un campo al tipo, media suite cae por eso y no
 por la decisión. Vale la pena una segunda tanda de mutaciones **con el campo ya puesto**,
 sobre la línea que decide, y anotar los dos conteos por separado.
+
+## ⚠️ Una mutación huérfana también puede delatar un FIXTURE que pasa por casualidad
+
+**2026-09-08 (PR #580).** Borrar el criterio de orden «los retenidos van al final» no tumbó
+ninguna prueba, y sí había una prueba escrita para eso. No era código muerto ni cobertura
+faltante: era **el fixture**. Todos los retenidos estaban sembrados al final, y con esas
+filas *ordenar por «listo»* da exactamente el mismo resultado que *ordenar por «retenido»* —
+la prueba verde no distinguía los dos criterios. Se rearmó (un retenido primero, un cubierto
+sin RUT después) para que los dos órdenes discrepen, y entonces la mutación cayó.
+
+**How to apply:** ante una mutación sin dueño, antes de concluir «código muerto» o «falta una
+prueba», preguntarse si **los datos sembrados pueden siquiera separar el criterio mutado del
+que queda**. Para cualquier prueba de ORDEN: el fixture necesita al menos un par de filas
+donde los dos criterios manden al revés, o solo se está probando el orden de inserción.

@@ -29,7 +29,7 @@
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
 - ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — PR #550 sin mergear; las 252 marcas se autocorrigen solas (no hay backfill) y los 6 candidatos NO son una lista para aplicar
-- ⚠️ [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — PR #578 sin mergear: la banda del 1%, el filtro solo para pendientes, y la adopción que pierden los retenidos
+- [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — #578 mergeado + enmienda #580: la banda del 1%, y por qué filtrar una fila borra TODAS sus acciones
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto; hueco de `ninguno` en el intérprete
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
 - ⚠️ [Duplicados: solo las facturas libres](project_duplicado_hermanos_siigo.md) — PR #561 sin mergear; el vínculo es la marca, NO el contacto (V0321/V0323 lo prueba), y la línea de hermanos no se ve en el caso que la motivó
