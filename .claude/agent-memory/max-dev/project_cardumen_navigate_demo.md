@@ -64,8 +64,30 @@ redacte ni traduza nada del instrumento.
   léxica (`evidenciaEspecial`): sin eso, Gemini usaba "no aplica" como cajón para fútbol, insultos
   y el caso de riesgo.
 - Un botón de OTRO paso se ignora como botón (`BOTONES_DEL_PASO`); `cardumen` a mitad repite la
-  pregunta pendiente sin reiniciar; ruido ×2 en "¿seguimos en español?" sigue en español (antes
-  cerraba sin guardar y botaba la historia); "no soy observador" es ciudadano.
+  pregunta pendiente sin reiniciar (antes del consentimiento, a secas, sin "Ya estamos");
+  "no soy observador" es ciudadano.
+
+## Idioma primero (PR #574, 2026-09-08)
+
+**El primer mensaje tras `cardumen` es la pregunta de idioma** (trilingüe, botones Español /
+English / Português), ANTES del consentimiento. Decisión de Mauricio tras probar el bot en vivo:
+un consentimiento en un idioma que la persona no entiende no es consentimiento, y quien no
+hablaba español recibía cuatro mensajes antes del aviso trilingüe.
+
+- El paso `idioma_confirmar` ("Seguimos en español, ¿le parece?") **ya no existe**: la historia
+  pasa directo a la primera tríada. `detectarIdioma(historia)` solo deja `idioma_detectado`
+  como dato. Un brief que hable de "confirmar el idioma después de la historia" es del flujo viejo.
+- `idioma_elegido` (`es|en|pt`, en estado y payload) es lo que eligió; `null` = no eligió y cayó
+  a español por fallback (nota en `provenance.notas`). Ruido ×2 en `idioma` **no cierra**: sigue
+  en español y pide el consentimiento. Ruido ×2 en el trilingüe sí cierra sin guardar (no hay nada
+  que perder todavía).
+- `leerIdiomaElegido` (idioma.ts) lee texto libre: palabra clara manda, dos idiomas nombrados →
+  `null` (no adivina), sin palabra → `detectarIdioma`. Botones nuevos `nav_lang_es/en/pt`;
+  `nav_lang_otro` se retiró.
+- ⚠️ Las pruebas de robustez enumeran los pasos en `PASOS` y `llegarA` construye el camino real:
+  todo paso nuevo o eliminado hay que reflejarlo ahí, o la batería hostil no lo recorre.
+- ⚠️ El merge NO despliega `wa-webhook`: hasta que Mik lo redespliegue, producción sigue con el
+  flujo viejo (consentimiento primero). Misma cola que el lector Gemini del #570.
 - Los contadores viven en `sumarIntento`/`sinLectura`/`fallaLectura` (motor.ts): tope 2 en un solo
   sitio. `robustez.test.ts` (632 casos) inyecta la batería hostil en cada paso, ciudadano y experto.
 - **Caso de riesgo ("me quiero morir"):** hoy es ruido — no se lee, se repregunta, `unresolved`.

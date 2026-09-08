@@ -18,7 +18,7 @@
 - ⚠️ [staff es 1 fila por persona en TODA la base](project_staff_unique_global.md) — UNIQUE global de `profile_id`: el platform_admin en workspace ajeno opera con `staffId` null a propósito
 - [La empresa espejo se sigue creando](project_empresa_espejo_se_sigue_creando.md) — decisión cerrada de Mauricio; solo el directorio dejó de listarla, y el predicado son DOS condiciones
 - [Canal WhatsApp propio](project_canal_wa_propio.md) — webhook construido (#448) y sin desplegar; Gate 0 prohíbe persistir contenido y no se suscribe `history`
-- ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — motor determinista aparte del R1; deploy ANTES del SQL; el lector es Claude Haiku (sin llave en la torre); `meta.ts` antes del modelo; golden del lector
+- ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — motor determinista aparte del R1; deploy ANTES del SQL; `meta.ts` antes del modelo; golden del lector; idioma PRIMERO (#574, sin desplegar)
 - [R4 liberación de contrapartes](project_r4_liberaciones.md) — PR #343: la regla de cobertura, por qué cuelga de la contraparte, y qué quedó para R3/R5
 - ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` es la única vía para lecturas por lote; cuáles filas se pierden cambia entre corridas
 - ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — 11 corregidas; FV-2-244 salió con la cédula truncada y NO se toca; 15 terceros basura para Diana
@@ -29,6 +29,7 @@
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
 - ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — PR #550 sin mergear; las 252 marcas se autocorrigen solas (no hay backfill) y los 6 candidatos NO son una lista para aplicar
+- ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto; hueco de `ninguno` en el intérprete
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
 - ⚠️ [Duplicados: solo las facturas libres](project_duplicado_hermanos_siigo.md) — PR #561 sin mergear; el vínculo es la marca, NO el contacto (V0321/V0323 lo prueba), y la línea de hermanos no se ve en el caso que la motivó
 - [Sucursal y adopción de factura en Siigo](project_siigo_sucursal_adopcion.md) — PR #550 ya en `main`; su guardián de duplicados quedó superado por el #561
