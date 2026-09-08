@@ -1216,10 +1216,20 @@ function FilaPorFacturar({
       {!caso.ya_facturado && faltas.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-medium" style={{ color: '#B45309' }}>Falta:</span>
-          {faltas.map(f => (
-            <span key={f} className="rounded-full px-2 py-0.5 text-[10px]"
-                  style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>{f}</span>
-          ))}
+          {faltas.map(f => {
+            // El RUT se pinta distinto porque no se resuelve tecleando: hay que
+            // pedirle el documento al cliente y cargarlo para que se extraiga.
+            const esRut = f === 'RUT sin cargar'
+            return (
+              <span key={f} className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    title={esRut
+                      ? 'El negocio no tiene RUT. Sin él no hay identificación, nombre, dirección ni ciudad, así que no se puede crear el tercero en Siigo ni emitir factura o recibo de caja.'
+                      : undefined}
+                    style={esRut
+                      ? { backgroundColor: '#FEE2E2', color: '#B91C1C' }
+                      : { backgroundColor: '#FEF3C7', color: '#92400E' }}>{f}</span>
+            )
+          })}
         </div>
       )}
 

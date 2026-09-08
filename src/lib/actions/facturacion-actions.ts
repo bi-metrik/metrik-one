@@ -106,6 +106,17 @@ export interface CasoPorFacturar {
   faltan_factura: string[]
   /** Qué le falta al borrador del cliente. */
   faltan_cliente: string[]
+  /**
+   * `true` cuando el negocio no tiene un RUT del que sacar la identificación.
+   *
+   * Se declara aparte porque sin RUT `faltan_cliente` se llena de consecuencias
+   * (identificación, nombre, dirección, ciudad) y ninguna nombra la causa: la
+   * tarjeta pintaba cuatro etiquetas que hacían pensar en cuatro datos sueltos
+   * por completar a mano. Medido el 2026-09-08 sobre los 5 casos con pago y sin
+   * recibo de caja, en los 5 el documento nunca se cargó — no estaba tampoco en
+   * la carpeta de Drive.
+   */
+  sin_rut: boolean
   /** Ya tiene número de factura registrado en el negocio. */
   ya_facturado: boolean
   /** Número de la factura, cuando la emitió ONE contra Siigo. */
@@ -508,6 +519,10 @@ async function armarColaFacturacion(
       valor_upme: upme,
       faltan_factura: fac.faltantes,
       faltan_cliente: cli.faltantes,
+      // El mapa solo guarda RUT con identificación utilizable, así que su
+      // ausencia cubre las dos formas de no tenerlo: sin documento cargado y
+      // con documento cargado del que no se pudo extraer la cédula o el NIT.
+      sin_rut: !rutPorNegocio.has(n.id),
       // Dos fuentes: el bloque donde se carga el PDF de la factura, y la marca que
       // deja la emisión desde aquí. La segunda hace falta porque emitir NO obliga a
       // cargar el soporte, y sin ella el caso volvería a la cola listo para

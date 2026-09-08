@@ -15,6 +15,8 @@ export interface CasoFacturable {
   faltan_cliente: string[]
   /** Lo que falta recaudar del HONORARIO. */
   falta_saldo: number
+  /** El negocio no tiene RUT con identificación utilizable. */
+  sin_rut?: boolean
 }
 
 /**
@@ -32,9 +34,19 @@ export function casoListoParaFacturar(caso: CasoFacturable): boolean {
   )
 }
 
-/** Lista de lo que le falta, sin repetir, para pintarla como etiquetas. */
+/**
+ * Lista de lo que le falta, sin repetir, para pintarla como etiquetas.
+ *
+ * ⚠️ Sin RUT se nombra el RUT, no sus consecuencias. `faltan_cliente` se arma del
+ * documento, así que un negocio sin RUT declaraba a la vez identificación, nombre,
+ * dirección y ciudad: cuatro etiquetas que se leen como cuatro datos por teclear,
+ * cuando el trabajo real es UNO y no es de digitación, es pedirle el documento al
+ * cliente. Los faltantes de la FACTURA sí se conservan, porque no salen del RUT y
+ * seguirían faltando el día que llegue.
+ */
 export function faltantesDelCaso(caso: CasoFacturable): string[] {
-  const faltas = [...new Set([...caso.faltan_cliente, ...caso.faltan_factura])]
+  const delCliente = caso.sin_rut ? ['RUT sin cargar'] : caso.faltan_cliente
+  const faltas = [...new Set([...delCliente, ...caso.faltan_factura])]
   if (caso.falta_saldo > TOLERANCIA_SALDO_COP) faltas.push('recaudo del honorario')
   return faltas
 }
