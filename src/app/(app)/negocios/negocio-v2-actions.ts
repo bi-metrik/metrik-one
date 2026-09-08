@@ -44,10 +44,12 @@ import {
   exigeDatoDeDecision,
   camposDeDecision,
   decisionesSinResponder,
+  destinoDeRouting,
   mensajeDatoFaltante,
   type RoutingEtapa,
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
+import { camposDeRouting, type BloqueParaRouting } from '@/lib/negocios/campos-de-routing'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { llavesDeHerenciaDocumento } from '@/lib/negocios/herencia-documento'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
@@ -3293,6 +3295,64 @@ async function camposDecisionDelNegocio(
   return resultado
 }
 
+// ── El bolsillo de datos con el que el motor decide ───────────────────────────
+//
+// Arma el mapa de campos de una etapa fuente para un negocio, DESCARTANDO los bloques que
+// no le aplican al caso (su `condition` no se cumple) y los `desactivado: true`. Lo usan los
+// DOS sitios que resuelven routing —el avance de etapa y el salto encadenado por saldo— y
+// alimenta tanto el gate de dato de decisión como la evaluación de `routing.conditional`:
+// el gate y el conditional tienen que ver EXACTAMENTE el mismo mapa, o un caso puede pasar
+// el gate con un valor que el routing luego ignora.
+//
+// La regla pura (qué se descarta, en qué orden, cómo se cachea) vive en
+// `lib/negocios/campos-de-routing.ts` con sus pruebas. Aquí solo se leen los bloques y se
+// conecta el evaluador: `condicion_cumplida`, la MISMA función SQL que usan los gates y el
+// render, llamada con `p_etapa_actual_id = sourceEtapaId` igual que en
+// `camposDecisionDelNegocio`.
+async function camposDeRoutingDelNegocio(
+  supabase: unknown,
+  negocioId: string,
+  lineaId: string,
+  sourceEtapaId: string,
+): Promise<Record<string, unknown>> {
+  const { data: bloquesDatos } = await db(supabase)
+    .from('negocio_bloques')
+    .select(`
+      data,
+      bloque_configs!inner(
+        etapa_id,
+        config_extra,
+        bloque_definitions!inner(tipo)
+      )
+    `)
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.etapa_id', sourceEtapaId)
+
+  type FilaBloque = {
+    data: unknown
+    bloque_configs: {
+      config_extra: Record<string, unknown> | null
+      bloque_definitions: { tipo: string } | null
+    } | null
+  }
+
+  const bloques: BloqueParaRouting[] = ((bloquesDatos ?? []) as FilaBloque[]).map(b => ({
+    data: b.data,
+    config_extra: b.bloque_configs?.config_extra ?? null,
+    tipo: b.bloque_configs?.bloque_definitions?.tipo ?? null,
+  }))
+
+  return camposDeRouting(bloques, async condicion => {
+    const { data: cumple } = await db(supabase).rpc('condicion_cumplida', {
+      p_negocio_id: negocioId,
+      p_linea_id: lineaId,
+      p_etapa_actual_id: sourceEtapaId,
+      p_cond: condicion,
+    })
+    return cumple === true
+  })
+}
+
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
 export async function cambiarEtapaNegocioConGate(
@@ -3411,26 +3471,11 @@ export async function cambiarEtapaNegocioConGate(
         if (sourceEtapa) sourceEtapaId = (sourceEtapa as { id: string }).id
       }
 
-      // Leer datos del negocio para evaluar condiciones
-      const { data: bloquesDatos } = await db(supabase)
-        .from('negocio_bloques')
-        .select(`
-          data,
-          bloque_configs!inner(
-            etapa_id,
-            bloque_definitions!inner(tipo)
-          )
-        `)
-        .eq('negocio_id', negocioId)
-        .eq('bloque_configs.etapa_id', sourceEtapaId)
-
-      const camposNegocio: Record<string, unknown> = {}
-      for (const b of ((bloquesDatos ?? []) as Record<string, unknown>[])) {
-        const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
-        if (tipo === 'datos' && b.data && typeof b.data === 'object') {
-          Object.assign(camposNegocio, b.data)
-        }
-      }
+      // Leer datos del negocio para evaluar condiciones. Los bloques que NO le aplican al
+      // caso quedan fuera: su valor no se muestra, no se puede responder y no decide.
+      const camposNegocio = await camposDeRoutingDelNegocio(
+        supabase, negocioId, etapaActualData.linea_id, sourceEtapaId,
+      )
 
       // ── El motor exige el dato ANTES de decidir ─────────────────────────────
       //
@@ -3460,14 +3505,7 @@ export async function cambiarEtapaNegocioConGate(
       }
 
       // Evaluar condicionales — primer match gana
-      let etapaOrdenDestino = routing.default_etapa_orden
-      for (const rule of (routing.conditional ?? [])) {
-        const { field, value } = rule.condition
-        if (String(camposNegocio[field] ?? '') === String(value)) {
-          etapaOrdenDestino = rule.etapa_orden
-          break
-        }
-      }
+      const etapaOrdenDestino = destinoDeRouting(routing as RoutingEtapa, camposNegocio)
 
       // Auto-corregir destino si routing resuelve a una etapa diferente
       if (nuevaEtapaData.orden !== etapaOrdenDestino) {
@@ -4127,16 +4165,10 @@ export async function cambiarEtapaNegocioConGate(
             .single()
           if (se) srcEtapaId = (se as { id: string }).id
         }
-        const { data: bDatos } = await db(supabase)
-          .from('negocio_bloques')
-          .select('data, bloque_configs!inner(etapa_id, bloque_definitions!inner(tipo))')
-          .eq('negocio_id', negocioId)
-          .eq('bloque_configs.etapa_id', srcEtapaId)
-        const campos: Record<string, unknown> = {}
-        for (const b of ((bDatos ?? []) as Record<string, unknown>[])) {
-          const tipo = ((b.bloque_configs as Record<string, unknown>)?.bloque_definitions as Record<string, unknown> | null)?.tipo
-          if (tipo === 'datos' && b.data && typeof b.data === 'object') Object.assign(campos, b.data)
-        }
+        // Mismo bolsillo que el avance de etapa: sin los bloques que no le aplican al caso.
+        const campos = await camposDeRoutingDelNegocio(
+          supabase, negocioId, destStage.linea_id, srcEtapaId,
+        )
         // El salto también RESUELVE ROUTING, así que también puede decidir a ciegas. Si la
         // etapa exige el dato y falta, el negocio se queda AQUÍ en vez de pasar de largo:
         // aterriza donde está la pregunta, que es justo lo que se quiere. No se devuelve
@@ -4148,13 +4180,7 @@ export async function cambiarEtapaNegocioConGate(
           if (decisionesSinResponder(camposDec, campos).length > 0) break
         }
 
-        destinoOrden = cobroRouting.default_etapa_orden
-        for (const rule of (cobroRouting.conditional ?? [])) {
-          if (String(campos[rule.condition.field] ?? '') === String(rule.condition.value)) {
-            destinoOrden = rule.etapa_orden
-            break
-          }
-        }
+        destinoOrden = destinoDeRouting(cobroRouting as RoutingEtapa, campos)
       }
 
       // Solo saltar si el routing manda a una etapa POSTERIOR. Si el destino es la etapa
