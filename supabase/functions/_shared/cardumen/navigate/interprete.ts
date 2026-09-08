@@ -25,24 +25,78 @@ export function normalizarTexto(t: string): string {
     .replace(/\s+/g, " ");
 }
 
-/** Lector por palabras de la etiqueta de peso. Cubre botones y respuestas literales. */
+/**
+ * Lector por palabras de la etiqueta de peso. Cubre botones y respuestas literales.
+ *
+ * Corre ANTES del modelo, asi que un falso positivo aqui es una ubicacion fabricada sin que
+ * nadie la lea: por eso cada patron es la etiqueta casi literal y no un prefijo. "mi pareja",
+ * "el mandato", "les contaba" y un "claro" a secas (que en Colombia es "ok") NO son etiquetas
+ * y van al modelo.
+ */
 export function intensidadPorPalabras(respuesta: string): InterpretacionIntensidad["etiqueta"] {
   const t = normalizarTexto(respuesta);
   if (!t) return null;
   // "No graduo" va primero: "me da igual" contiene "igual" y no es "iban iguales".
   if (/\bno se\b/.test(t) || /\bno sabria\b/.test(t) || /\bda igual\b/.test(t) || /\bno quiero\b/.test(t) || /\bcualquiera\b/.test(t)) return "no_gradua";
-  if (/\bparej/.test(t) || /\biguales\b/.test(t) || /\bpor igual\b/.test(t) || /\bempate/.test(t)) return "casi_parejos";
-  if (/\bmanda/.test(t) || /\bcontaba\b/.test(t) || /\bacompan/.test(t)) return "uno_manda_otro_cuenta";
-  // "primero" solo NO alcanza ("no se si el primero"): eso lo lee el modelo.
-  if (/\bclaramente\b/.test(t) || /\bclaro\b/.test(t)) return "claramente_el_primero";
+  if (/\bparejos?\b/.test(t) || /\biguales\b/.test(t) || /\bpor igual\b/.test(t) || /\bempat(e|ados|adas)\b/.test(t)) return "casi_parejos";
+  if (/\buno manda(ba)?\b/.test(t) || /\bmandaba pero\b/.test(t) || /\bel otro (contaba|acompan\w*)\b/.test(t)) return "uno_manda_otro_cuenta";
+  // "primero" solo NO alcanza ("no se si el primero"): eso lo lee el modelo. "claro" a secas
+  // tampoco: es un "ok". Y "claramente X" solo cuenta cuando X es "el primero": "claramente el
+  // clima" nombra algo que no es ninguno de los dos, y eso lo tiene que decidir el modelo, que
+  // si sabe cuales son.
+  if (/^claramente$/.test(t) || /\b(fue )?clar(amente|o) el (primero|primera|1o|1|uno)\b/.test(t)) return "claramente_el_primero";
   return null;
+}
+
+/**
+ * Contradicciones literales que no son un orden ni un ancla ("los dos primero", "todos igual").
+ * Se atajan por palabras porque un modelo chico las resuelve eligiendo por la persona, que es
+ * justo lo que no puede pasar. El motor repregunta con encuadre.
+ */
+export function contradiccionPorPalabras(respuesta: string): boolean {
+  const t = normalizarTexto(respuesta);
+  // "los dos primero" (los dos de primeros) si; "los dos primeros son X y Y" es un orden real, no.
+  return /^(los|las|ambos|ambas) dos$/.test(t)
+    || /\b(los|las) dos (primero|igual|iguales|por igual)\b/.test(t)
+    || /\b(ambos|ambas) (primero|igual|por igual)\b/.test(t)
+    || /\btod[oa]s (igual|iguales|primero|por igual|parejos)\b/.test(t);
+}
+
+/**
+ * Un "especial" (no sabe / no aplica / las dos con fuerza) solo se acepta si la respuesta trae
+ * evidencia de ESO. Sin esta guarda, un modelo chico usa "not_applicable" como cajon para lo que
+ * esta fuera de tema, y una historia de futbol terminaria registrada como "no aplica".
+ * "middle" no se comprueba: esta en el eje y pasa por eco + confirmacion como cualquier ancla.
+ */
+export function evidenciaEspecial(especial: string | null, respuesta: string): boolean {
+  if (!especial || especial === "middle") return true;
+  const t = normalizarTexto(respuesta);
+  if (especial === "dont_know") {
+    // "no se" del que no sabe; NO el "no se puede" / "no se nota" impersonal de una historia.
+    return /\bno (lo |la )?se\b(?! (puede|pueden|puedo|podia|podria|va|ve|vio|nota|notaba|logra|dio|hizo|ha|han|hace|hacen|sabe|sabia|da|dan|dice|dicen|pasa|pasaba|paso))/.test(t)
+      || /\bno (lo |la )?(sabria|sabria decir(le)?|tengo (ni )?idea|estoy segur[oa]|podria decir(le)?)\b/.test(t)
+      || /\bni idea\b/.test(t) || /\bquien sabe\b/.test(t);
+  }
+  if (especial === "not_applicable") {
+    return /\bningun[oa]s?\b/.test(t) || /\bnada que ver\b/.test(t) || /\bno aplica\b/.test(t)
+      || /\bno tienen? (nada )?que ver\b/.test(t) || /\bno (me )?(corresponde|cabe|encaja)\b/.test(t)
+      || /\bno es (mi |el |ese |este )?caso\b/.test(t) || /\bno va con\b/.test(t);
+  }
+  if (especial === "both_intense") {
+    return /\b(las dos|los dos|ambas|ambos|a la vez|al mismo tiempo|las dos cosas)\b/.test(t);
+  }
+  return true;
 }
 
 const REGLAS_LECTOR = `Eres un lector. Recibes lo que una persona respondio en un chat y lo devuelves como JSON.
 REGLAS DURAS:
 - NO interpretes ni completes: si la persona no lo dijo, no existe. Ante la duda, "claro": false.
 - NO inventes un orden que la persona no dio. Un solo polo mencionado NO implica un segundo.
-- La persona puede nombrar los polos con otras palabras (parafrasis, sinonimos, ejemplos). Emparejalos por significado, pero solo si es evidente.
+- La persona puede nombrar los polos con otras palabras (parafrasis, sinonimos, ejemplos, otro idioma). Emparejalos por significado, pero solo si es evidente.
+- Si la persona NO responde la pregunta — habla de otra cosa, hace una pregunta, se niega, insulta, escribe algo sin sentido, o responde a OTRA pregunta (por ejemplo da un peso cuando se le pidio un orden) — es "claro": false y todo lo demas null/false. No busques la lectura "mas cercana".
+- Un polo que NO esta en la lista no se aproxima al mas parecido: "claro": false.
+- Si dice cosas contradictorias ("los dos primero", "todos igual"), no elijas por la persona: "claro": false.
+- Si la respuesta es larga y divaga, busca dentro de ella una eleccion explicita; si la hay, leela; si no, "claro": false.
 - Responde SOLO con el JSON pedido, sin texto alrededor.`;
 
 async function pedirJSON<T>(model: ModelAdapter, system: string, user: string): Promise<T> {
@@ -69,6 +123,7 @@ const ancla = (v: unknown): 1 | 2 | 3 | 4 | 5 | null =>
 export function interpreteConModelo(model: ModelAdapter): Interprete {
   return {
     async triada(t: TriadaNav, respuesta: string): Promise<InterpretacionTriada> {
+      if (contradiccionPorPalabras(respuesta)) return { claro: false, dominante: null, segundo: null, solo_uno: false, especial: null };
       const system = `${REGLAS_LECTOR}
 Los polos, con su indice:
 0 = "${t.polos[0]}"
@@ -79,14 +134,17 @@ Devuelve: {"claro": bool, "dominante": 0|1|2|null, "segundo": 0|1|2|null, "solo_
 - "dominante": el que la persona puso primero o dijo que peso mas.
 - "segundo": el que puso en segundo lugar. null si solo nombro uno.
 - "solo_uno": true SOLO si dijo explicitamente que fue unicamente uno ("solo", "unicamente", "nada mas", "los otros no").
-- "especial": "not_applicable" si dice que ninguno aplica a lo que conto; "dont_know" si dice que no sabe. Si hay especial, dominante y segundo van null.
-- "claro": false si no se puede leer con seguridad ni un dominante.`;
+- "especial": "not_applicable" si dice que ninguno aplica a lo que conto; "dont_know" si dice que no sabe. Si hay especial, dominante y segundo van null y "claro" es true.
+- Mencionar a la gente, al poder o a las fuerzas DENTRO de una historia NO es elegirlos: solo hay lectura si la persona ORDENA o ELIGE de forma explicita ("primero X", "sobre todo X", "X y despues Y", "solo X").
+- "claro": false si no se puede leer con seguridad ni un dominante ni un especial.`;
       const r = await pedirJSON<Partial<InterpretacionTriada>>(model, system, `RESPUESTA DE LA PERSONA: ${respuesta}`);
       const dominante = idx(r.dominante);
       const segundo = idx(r.segundo);
-      const especial = r.especial === "not_applicable" || r.especial === "dont_know" ? r.especial : null;
+      const especialDicho = r.especial === "not_applicable" || r.especial === "dont_know" ? r.especial : null;
+      const especial = evidenciaEspecial(especialDicho, respuesta) ? especialDicho : null;
       return {
-        claro: !!r.claro && (dominante !== null || especial !== null),
+        // Un especial es una lectura aunque el modelo marque claro:false (no habia dominante que leer).
+        claro: especial !== null || (!!r.claro && dominante !== null),
         dominante: especial ? null : dominante,
         segundo: especial || segundo === dominante ? null : segundo,
         solo_uno: !!r.solo_uno && !especial,
@@ -95,6 +153,7 @@ Devuelve: {"claro": bool, "dominante": 0|1|2|null, "segundo": 0|1|2|null, "solo_
     },
 
     async segundo(t: TriadaNav, dominante: number, respuesta: string): Promise<InterpretacionSegundo> {
+      if (contradiccionPorPalabras(respuesta)) return { claro: false, segundo: null, ninguno: false };
       const otros = [0, 1, 2].filter((i) => i !== dominante);
       const system = `${REGLAS_LECTOR}
 La persona ya dijo que lo que mas peso fue "${t.polos[dominante]}". Se le pregunto cual iria en SEGUNDO lugar entre:
@@ -119,7 +178,8 @@ Se le pregunto a la persona como se repartio el peso entre "${dominante}" (prime
 - "claramente_el_primero": fue claramente el primero
 Devuelve: {"etiqueta": "casi_parejos"|"uno_manda_otro_cuenta"|"claramente_el_primero"|"no_gradua"|null}
 - "no_gradua": la persona no quiere o no puede graduar ("no se", "da igual", "cualquiera").
-- null: no se entiende.`;
+- Repetir el ORDEN ("primero X, despues Y") NO es decir cuanto peso cada uno: null.
+- null: no se entiende, habla de otra cosa, o nombra algo que no es ninguno de los dos.`;
       const r = await pedirJSON<Partial<InterpretacionIntensidad>>(model, system, `RESPUESTA DE LA PERSONA: ${respuesta}`);
       const e = r.etiqueta;
       return {
@@ -140,15 +200,19 @@ Anclas:
 - "both_intense": siente LAS DOS con fuerza a la vez (ambivalencia, no punto medio). ancla null.
 - "not_applicable": dice que ninguna de las dos le aplica. ancla null.
 - "dont_know": dice que no sabe. ancla null.
-- "lado": hacia que lado se inclina, si se nota; si no, null.
-- "claro": true solo si el ancla (o el especial) se lee sin duda. Si la persona matiza sin que quede claro cuanto, "claro": false y deja "lado".`;
+- Si hay especial, "claro" es true.
+- "lado": hacia que lado se inclina, si se nota; si no, null. Si no hablo de A ni de B, null.
+- "claro": true solo si el ancla (o el especial) se lee sin duda. Si la persona matiza sin que quede claro cuanto, "claro": false y deja "lado".
+- Un orden de otras opciones, un peso ("casi parejos") o una historia sin postura sobre A y B NO es un ancla: "claro": false, "lado": null.`;
       const r = await pedirJSON<Partial<InterpretacionDiada>>(model, system, `RESPUESTA DE LA PERSONA: ${respuesta}`);
-      const especial = r.especial === "middle" || r.especial === "both_intense" || r.especial === "not_applicable" || r.especial === "dont_know"
+      const especialDicho = r.especial === "middle" || r.especial === "both_intense" || r.especial === "not_applicable" || r.especial === "dont_know"
         ? r.especial
         : null;
+      const especial = evidenciaEspecial(especialDicho, respuesta) ? especialDicho : null;
       const a = especial && especial !== "middle" ? null : (especial === "middle" ? 3 : ancla(r.ancla));
       const lado = r.lado === "izq" || r.lado === "der" ? r.lado : null;
-      return { claro: !!r.claro && (a !== null || especial !== null), ancla: a, especial, lado };
+      // Un especial es una lectura aunque el modelo marque claro:false (no habia ancla que leer).
+      return { claro: especial !== null || (!!r.claro && a !== null), ancla: a, especial, lado };
     },
   };
 }

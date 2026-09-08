@@ -37,6 +37,9 @@ export interface RegistroTriada {
   resolution_captured: "high" | "coarse";
   confirmed_by_participant: boolean;
   special_case: "not_applicable" | "dont_know" | "unresolved" | null;
+  /** La persona se nego a responder ("paso", "no quiero"). Queda `unresolved` y ESTA marca:
+   *  no es lo mismo que no haberle entendido. */
+  declinado: boolean;
   elicitation_turns: number;
   reflexivity_note: string;
 }
@@ -50,6 +53,9 @@ export interface RegistroDiada {
   special_case: SpecialCase | "unresolved" | null;
   resolution_captured: "high" | "coarse";
   confirmed_by_participant: boolean;
+  /** Se nego a responder: queda `not_applicable` (fuera del eje) y ESTA marca, para que el
+   *  analisis pueda separarlo de "ninguna de las dos me aplica". */
+  declinado: boolean;
   elicitation_turns: number;
   reflexivity_note: string;
 }
@@ -99,6 +105,7 @@ export interface NavigateState {
   en_curso?: TriadaEnCurso | DiadaEnCurso;
   reintentos: number;           // del paso actual (turno cero)
   turnos: number;               // mensajes de la persona, en total
+  notas?: string[];             // lo que paso en el turno cero y no cabe en una dimension (declino decir sector, etc.)
   historial: TurnoHistorial[];
   started_at: string;
   closed: boolean;
