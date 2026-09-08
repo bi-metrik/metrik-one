@@ -118,6 +118,11 @@ async function executeW06(ctx: HandlerContext): Promise<void> {
   // WhatsApp, sin pantalla que muestre el directorio), y por eso comprueba contra
   // la MISMA funcion de la base que usa la app: `buscar_contacto_duplicado`.
   // Reimplementar aqui la comparacion de telefonos crearia una segunda verdad.
+  //
+  // La funcion admite una tercera llave (`p_usuario_whatsapp`, migracion
+  // 20260908000001) que aqui se deja en su default: el bot solo captura nombre,
+  // telefono y cargo, no hay handle que comparar. Los argumentos van por NOMBRE
+  // justamente para que agregar una llave no obligue a tocar esta puerta.
   const { data: dupRows, error: dupErr } = await supabase.rpc('buscar_contacto_duplicado', {
     p_workspace_id: user.workspace_id,
     p_telefono: fields.phone || null,

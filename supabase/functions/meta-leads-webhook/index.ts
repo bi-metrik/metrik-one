@@ -36,6 +36,11 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { entenderFormulario, type MapaFormulario } from '../_shared/meta-leads/entender-formulario.ts';
 import { decidirTipoPersona } from '../_shared/meta-leads/tipo-persona.ts';
+import {
+  resolverContactoDelLead,
+  type BuscarCandidatos,
+  type CandidatoContacto,
+} from '../_shared/meta-leads/dedup-lead.ts';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -322,13 +327,6 @@ type MetaLeadsConfig = {
   };
 };
 
-// Normaliza un valor de contacto para dedup: lower + trim. Emails se comparan así
-// para que "  Ana@X.com " y "ana@x.com" sean el mismo.
-function norm(v: string | null | undefined): string | null {
-  const t = (v ?? '').trim().toLowerCase();
-  return t.length ? t : null;
-}
-
 // Graba el ORIGEN de primer toque en el contacto (custom_data.origen) si aun no
 // lo tiene. Es first-touch INMUTABLE: la campana por la que el contacto llego la
 // primera vez. Nunca pisa un origen existente (un contacto dedup que ya tenia
@@ -553,7 +551,6 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
   const telefonoRaw = getField(fm.telefono ?? ['phone_number', 'telefono', 'celular', 'phone'])
     ?? porAprendido('telefono')
     ?? porParecido(['tel', 'phone', 'celular', 'movil', 'whatsapp']);
-  const email = norm(emailRaw);
 
   // Si NADA de lo anterior sacó un dato, el formulario trae campos que ni el mapa,
   // ni el modelo, ni el parecido reconocieron. El log tiene que decir cuál es el
@@ -648,69 +645,75 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
     }
   }
 
-  // 3. Dedup de contacto — EMAIL-first. El email identifica mejor a una persona
-  //    que el teléfono (un teléfono se comparte entre familiares/empresa). Reglas:
-  //    a) hay email y matchea un contacto → fusiona con ese contacto.
-  //    b) no hay match por email → intenta por teléfono; si matchea, fusiona.
-  //    c) el teléfono matchea pero el email declarado DIFIERE del contacto hallado
-  //       → NO fusiona (usa/crea el contacto por email) y marca la interacción
-  //       'posible_duplicado' para revisión humana (dos personas, un teléfono).
-  //    d) sin email ni teléfono → crea contacto igual (no se puede deduplicar).
+  // 3. Dedup de contacto — CORREO primero, luego TELÉFONO, luego HANDLE.
+  //
+  //    a) el correo coincide → se engancha a ese contacto.
+  //    b) sin correo que coincida, el teléfono coincide y el correo NO choca →
+  //       se engancha.
+  //    c) el teléfono coincide y el correo declarado DIFIERE:
+  //         · mismo nombre  → es la misma persona con un segundo correo: se
+  //           engancha al contacto que ya existe, el correo nuevo va a
+  //           `custom_data.emails_alternos` y la interacción se marca igual
+  //           `posible_duplicado` (agrupar bien no exime de que un humano lo
+  //           confirme).
+  //         · nombre distinto → dos personas con un teléfono: se crea aparte y
+  //           se marca `posible_duplicado`.
+  //    d) el usuario de WhatsApp coincide → mismas reglas que el teléfono.
+  //    e) sin ninguna de las tres llaves → se crea (no hay con qué comparar).
+  //
+  // La decisión vive en `_shared/meta-leads/dedup-lead.ts`, aparte y con
+  // pruebas: `index.ts` toca `Deno.env` y la red, así que ningún check de CI lo
+  // puede colectar, y cada rama de esta regla decide si una persona termina con
+  // una o con dos fichas. La regla (c) por nombre nació el 2026-09-07: las 6
+  // interacciones marcadas `posible_duplicado` desde agosto eran la MISMA
+  // persona, las 6, y hubo que fusionarlas a mano.
   let contactoId: string | null = null;
   let estadoInteraccion = 'nueva';
 
-  // La comparación la hace `buscar_contacto_duplicado` (migración 20260902000007),
-  // la MISMA función que usan las puertas de creación de la app. Antes se hacía
-  // aquí con dos consultas propias, y las dos fallaban en producción:
+  // Quién choca lo responde `buscar_contacto_duplicado` (migraciones
+  // 20260902000007 y 20260908000001), la MISMA función que usan las puertas de
+  // creación de la app. Antes se hacía aquí con dos consultas propias, y las dos
+  // fallaban en producción:
   //
   //   · la de email usaba `maybeSingle()`, que ante dos contactos con el mismo
   //     correo devuelve error y deja pasar el duplicado. Con 5 correos repetidos
   //     en el workspace, eso ya estaba ocurriendo.
   //   · la de teléfono se traía TODOS los contactos del workspace para comparar
   //     en memoria, contra el techo de 1.000 filas de PostgREST. Este workspace
-  //     tiene 1.030 contactos: la lista ya llega recortada y el duplicado pasa.
+  //     tiene 1.059 contactos: la lista ya llega recortada y el duplicado pasa.
   //
   // Dos verdades sobre lo que es "la misma persona" se desincronizan en el primer
   // cambio. Ahora hay una, en SQL, indexada, y este webhook la consulta.
-  const buscarDuplicado = async (
-    datos: { telefono?: string | null; email?: string | null },
-  ): Promise<{ id: string; email: string | null } | null> => {
+  const buscarCandidatos: BuscarCandidatos = async (llaves) => {
     const { data, error } = await supabase.rpc('buscar_contacto_duplicado', {
       p_workspace_id: workspaceId,
-      p_telefono: datos.telefono ?? null,
-      p_email: datos.email ?? null,
+      p_telefono: llaves.telefono ?? null,
+      p_email: llaves.email ?? null,
       p_excluir_id: null,
+      p_usuario_whatsapp: llaves.usuarioWhatsapp ?? null,
     });
     // Sin respuesta no se sabe si es duplicado, y crear a ciegas es justo lo que
     // llenó el directorio de repetidos. Se propaga para que el lead falle y Meta
     // lo reintente, en vez de resolverlo creando.
+    //
+    // ⚠️ Por eso mismo, esta migración va aplicada ANTES de desplegar esta
+    // función: `p_usuario_whatsapp` contra la versión vieja es PGRST202 y los
+    // leads se quedan reintentando hasta que exista.
     if (error) throw new Error(`dedup: ${error.message}`);
-    const filas = (data ?? []) as Array<{ id: string; email: string | null }>;
-    return filas[0] ?? null;
+    return (data ?? []) as CandidatoContacto[];
   };
 
-  // Email primero: identifica a una persona mejor que el teléfono, que se comparte
-  // entre familia y empresa. Si el correo coincide, es la misma persona y se fusiona.
-  if (emailRaw) {
-    contactoId = (await buscarDuplicado({ email: emailRaw }))?.id ?? null;
-  }
-
-  // Sin match por correo, se intenta por teléfono.
-  if (!contactoId && telefonoLimpio) {
-    const encontrado = await buscarDuplicado({ telefono: telefonoLimpio });
-    if (encontrado) {
-      const emailContacto = norm(encontrado.email);
-      // Conflicto: teléfono igual pero correo distinto → dos personas, un teléfono.
-      // No fusionar; se crea contacto aparte y la interacción queda marcada para
-      // que un humano decida. Es el caso que en este workspace separa a un cónyuge
-      // de otro, y fusionarlos por el número borraría a uno de los dos.
-      if (email && emailContacto && emailContacto !== email) {
-        estadoInteraccion = 'posible_duplicado';
-      } else {
-        contactoId = encontrado.id;
-      }
-    }
-  }
+  const decision = await resolverContactoDelLead(
+    {
+      nombre: nombreUpper,
+      email: emailRaw,
+      telefono: telefonoLimpio,
+      usuarioWhatsapp,
+    },
+    buscarCandidatos,
+  );
+  contactoId = decision.contactoId;
+  estadoInteraccion = decision.estado;
 
   // Crear contacto si no se resolvió por dedup.
   let contactoCreado = false;
@@ -742,6 +745,38 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
   // Contacto ya existente (dedup): grabar el primer origen si aun no lo tiene.
   if (!contactoCreado && contactoId) {
     await escribirOrigenSiFalta(supabase, contactoId, origen);
+  }
+
+  // El segundo correo de la misma persona no cabe en `contactos.email` (ya está
+  // ocupado) y pisarlo destruiría el dato con el que se registró la primera vez.
+  // Va a `custom_data.emails_alternos`, con la misma convención que
+  // `fusionar_contactos` usa para lo que el ganador no pudo heredar.
+  //
+  // ⚠️ Un fallo aquí NO puede tumbar el lead: la interacción todavía no está
+  // escrita y el contacto ya se resolvió. Perder el correo alterno es un dato
+  // menos; devolver error deja a Meta reintentando el lead para siempre. Y el
+  // correo declarado no se pierde de vista igual: viaja completo en el
+  // `field_data` de la interacción, que la ficha del contacto pinta.
+  if (!contactoCreado && contactoId && decision.emailAlterno) {
+    const { error } = await supabase.rpc('registrar_email_alterno', {
+      p_workspace_id: workspaceId,
+      p_contacto_id: contactoId,
+      p_email: decision.emailAlterno,
+      p_fuente: 'meta',
+    });
+    if (error) {
+      console.warn(
+        `[meta-leads] no se pudo guardar el correo alterno ws=${workspaceId} ` +
+        `contacto=${contactoId}: ${error.message}`,
+      );
+    } else {
+      // La señal de que la regla del nombre actuó. Sin esto, enganchar un lead a
+      // un contacto que declara otro correo es indistinguible de un dedup normal.
+      console.warn(
+        `[meta-leads] ENGANCHADO POR NOMBRE ws=${workspaceId} contacto=${contactoId} ` +
+        `llave=${decision.motivo} — mismo nombre, correo distinto; interacción marcada posible_duplicado`,
+      );
+    }
   }
 
   // 4. Registrar la INTERACCIÓN (no un negocio). El humano la convierte luego.
