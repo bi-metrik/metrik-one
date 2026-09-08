@@ -142,20 +142,6 @@ export default async function AppLayout({
     ?.modo_vitrina === true
   const hasLineas = (lineasResult.count ?? 0) > 0
 
-  // Badge "Conciliación" — número de negocios por conciliar (F2). Solo se computa
-  // si el módulo conciliacion está activo (opt-in por workspace). El contador se
-  // DERIVA por query (RPC set-based, un solo round trip, sin N+1), reusando la
-  // sesión ya cargada — no agrega un auth.getUser() extra.
-  let conciliacionPendientes = 0
-  if (workspaceModules.conciliacion) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: cnt } = await (activeClient as any).rpc(
-      'count_negocios_por_conciliar',
-      { p_workspace_id: activeWorkspaceId },
-    )
-    conciliacionPendientes = typeof cnt === 'number' ? cnt : 0
-  }
-
   // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
   // el contador en el primer render. Antes el componente arrancaba vacío y solo
   // consultaba al abrir el panel → el badge siempre marcaba cero. Se piden arriba,
@@ -180,7 +166,6 @@ export default async function AppLayout({
         navRolesOverride={navRolesOverride}
         modoVitrina={modoVitrina}
         hasLineas={hasLineas}
-        conciliacionPendientes={conciliacionPendientes}
         notificationBell={
           <NotificationBell
             userId={user.id}
