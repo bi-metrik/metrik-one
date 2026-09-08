@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Check, ChevronDown, FileUp, Loader2, Lock, PenLine, ShieldCheck } from 'lucide-react';
 import {
   abrirVinculacion,
@@ -21,6 +21,7 @@ import {
   normalizarOtp,
   otpCompleto,
   textosAceptacion,
+  archivoSoltado,
   validarArchivo,
   type PasoPublico,
 } from '@/lib/compliance/vinculacion-publica';
@@ -44,6 +45,33 @@ export default function FormularioClient({
   const [nombreFirmante, setNombreFirmante] = useState('');
   const [docFirmante, setDocFirmante] = useState('');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [encima, setEncima] = useState<string | null>(null);
+
+  // Soltar un archivo FUERA de un bloque hace que el navegador lo abra y se
+  // lleve la pestaña por delante. La persona pierde el formulario por apuntar
+  // mal, que es exactamente lo que pasa cuando uno arrastra. Se anula el
+  // comportamiento por defecto en toda la ventana; los bloques siguen
+  // recibiendo lo suyo porque ellos también llaman a preventDefault.
+  useEffect(() => {
+    const anular = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', anular);
+    window.addEventListener('drop', anular);
+    return () => {
+      window.removeEventListener('dragover', anular);
+      window.removeEventListener('drop', anular);
+    };
+  }, []);
+
+  function soltar(slot: string, lista: FileList | null) {
+    setEncima(null);
+    const files = Array.from(lista ?? []);
+    const r = archivoSoltado(files);
+    if (!r.ok) {
+      setError(r.error);
+      return;
+    }
+    subir(slot, files[r.indice]);
+  }
 
   const textos = useMemo(() => textosAceptacion(v.marca.nombre), [v.marca.nombre]);
   const acento = v.marca.colorPrimario ?? '#1A1A1A';
@@ -287,16 +315,48 @@ export default function FormularioClient({
             <section className="mb-8">
               <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Documentos</h2>
               <p className="text-xs text-[#6B7280] mb-3">
-                PDF, JPG o PNG, hasta {TAMANO_MAX_MB} MB cada uno.
+                Arrastra cada archivo a su bloque, o usa el botón. PDF, JPG o PNG, hasta{' '}
+                {TAMANO_MAX_MB} MB cada uno.
               </p>
               <div className="space-y-2">
-                {v.kit.map((s) => (
+                {v.kit.map((s) => {
+                  // Solo un bloque pendiente recibe algo. Uno ya cargado, o el
+                  // expediente ya firmado, no puede aceptar un arrastre: el
+                  // documento entraría por debajo del hash que se selló.
+                  const recibe = !s.cargado && v.paso !== 'listo' && !pending;
+                  return (
                   <div
                     key={s.slot}
-                    className="flex items-center gap-3 px-4 py-3 rounded-lg border border-[#E5E7EB] bg-white"
+                    onDragOver={
+                      recibe
+                        ? (ev) => {
+                            ev.preventDefault();
+                            setEncima(s.slot);
+                          }
+                        : undefined
+                    }
+                    onDragLeave={recibe ? () => setEncima(null) : undefined}
+                    onDrop={
+                      recibe
+                        ? (ev) => {
+                            ev.preventDefault();
+                            soltar(s.slot, ev.dataTransfer.files);
+                          }
+                        : undefined
+                    }
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg border bg-white transition ${
+                      encima === s.slot
+                        ? 'border-dashed border-2 border-[#1A1A1A] bg-[#F9FAFB]'
+                        : 'border-[#E5E7EB]'
+                    }`}
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-[#1A1A1A]">{nombrePedido(s.slot)}</p>
+                      {recibe && (
+                        <p className="text-xs text-[#9CA3AF] mt-0.5">
+                          {encima === s.slot ? 'Suelta acá' : 'Arrástralo acá o usa el botón'}
+                        </p>
+                      )}
                     </div>
                     {s.cargado ? (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#059669] shrink-0">
@@ -337,7 +397,8 @@ export default function FormularioClient({
                       </>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
 

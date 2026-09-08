@@ -278,6 +278,30 @@ export function validarArchivo(file: { type: string; size: number }): string | n
   return null;
 }
 
+/**
+ * Lo que se suelta sobre un bloque de documento.
+ *
+ * Soltar es más impreciso que elegir del explorador: la persona puede arrastrar
+ * una selección entera sin darse cuenta, o soltar algo que ni siquiera es un
+ * archivo. Tomar el primero en silencio sería lo peor de los dos mundos: el
+ * expediente queda con un documento que nadie escogió, y la persona cree que
+ * subió otro.
+ */
+export function archivoSoltado(
+  files: readonly { type: string; size: number }[],
+): { ok: true; indice: 0 } | { ok: false; error: string } {
+  if (files.length === 0) return { ok: false, error: 'No reconocimos lo que soltaste. Intenta con un archivo.' };
+  if (files.length > 1) {
+    return {
+      ok: false,
+      error: 'Suelta un archivo a la vez: cada bloque recibe un solo documento.',
+    };
+  }
+  const err = validarArchivo(files[0]);
+  if (err) return { ok: false, error: err };
+  return { ok: true, indice: 0 };
+}
+
 /** Nombre del documento en palabras de la contraparte, no del schema. */
 const SLOT_PEDIDO: Record<string, string> = {
   camara_comercio: 'Certificado de existencia y representación legal',
