@@ -39,8 +39,19 @@ const ESTADO_META: Record<string, { label: string; class: string }> = {
   posible_duplicado: { label: 'Posible duplicado', class: 'bg-red-50 text-red-700' },
 }
 
+// Dos y no una: la hora dice cuando llego el lead, y eso solo aplica a la fila de
+// la interaccion; en el resumen de campanas la fecha es atribucion, no llegada.
 function formatFechaInteraccion(iso: string | null): string {
   return formatFecha(iso, { day: '2-digit', month: 'short', year: 'numeric' }) ?? ''
+}
+
+// `hourCycle: 'h23'` y no `hour12: false`: en varias versiones de ICU ese segundo
+// da el ciclo h24 y la medianoche sale como "24:05" en vez de "00:05".
+function formatFechaHoraInteraccion(iso: string | null): string {
+  return formatFecha(iso, {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }) ?? ''
 }
 
 interface Props {
@@ -178,7 +189,7 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${fuente.class}`}>
             <FuenteIcon className="h-3 w-3" /> {fuente.label}
           </span>
-          <span className="text-[11px] text-muted-foreground">{formatFechaInteraccion(it.ocurrida_at ?? it.created_at)}</span>
+          <span className="text-[11px] text-muted-foreground">{formatFechaHoraInteraccion(it.ocurrida_at ?? it.created_at)}</span>
         </div>
         <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${estado.class}`}>{estado.label}</span>
       </div>
