@@ -121,6 +121,18 @@ export interface ContactoConMeta {
    * Medido: 1 contacto de 988 discrepa hoy.
    */
   campanas: string[]
+  /**
+   * Interacciones de este contacto marcadas `posible_duplicado`: el dedup del
+   * webhook encontro un choque que un humano tiene que confirmar (mismo telefono
+   * o mismo handle, correo distinto).
+   *
+   * ⚠️ Existe porque esa marca era INVISIBLE. Se pintaba solo como etiqueta roja
+   * dentro de la ficha del contacto, o sea que para verla habia que abrir justo
+   * el contacto que uno no sabia que estaba repetido. Medido el 2026-09-07: 6
+   * interacciones asi desde el 2026-08-02, ninguna vista por nadie. Sale del
+   * MISMO recorrido que `interacciones_meta`, sin una consulta extra.
+   */
+  posibles_duplicados: number
 }
 
 export async function getContactos(): Promise<ContactoConMeta[]> {
@@ -195,6 +207,7 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
   const inters = await traerTodo<{
     contacto_id: string
     fuente: string
+    estado: string | null
     payload: Record<string, unknown> | null
     ocurrida_at: string | null
     created_at: string | null
@@ -202,7 +215,7 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (supabase as any)
       .from('contacto_interacciones')
-      .select('contacto_id, fuente, payload, ocurrida_at, created_at')
+      .select('contacto_id, fuente, estado, payload, ocurrida_at, created_at')
       .eq('workspace_id', workspaceId)
       .order('id')
       .range(d, h),
@@ -216,11 +229,15 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
     nMeta: number
     // campana → primera vez que se vio. La clave deduplica y el valor ordena.
     campanas: Map<string, string>
+    dup: number
   }>()
   for (const it of inters) {
     const when = it.ocurrida_at ?? it.created_at
-    const cur = agg.get(it.contacto_id) ?? { last: null, lastMeta: null, meta: false, nMeta: 0, campanas: new Map<string, string>() }
+    const cur = agg.get(it.contacto_id) ?? { last: null, lastMeta: null, meta: false, nMeta: 0, campanas: new Map<string, string>(), dup: 0 }
     if (when && (!cur.last || when > cur.last)) cur.last = when
+    // Se cuenta sobre TODAS las interacciones, no solo las de Meta: la marca la
+    // pone hoy el webhook, pero el estado existe para cualquier fuente.
+    if (it.estado === 'posible_duplicado') cur.dup += 1
     if (it.fuente === 'meta') {
       cur.meta = true
       cur.nMeta += 1
@@ -252,6 +269,7 @@ export async function getContactos(): Promise<ContactoConMeta[]> {
       responsable_nombre: c.responsable_id ? (staffMap.get(c.responsable_id) ?? null) : null,
       interacciones_meta: a?.nMeta ?? 0,
       campanas: ordenarCampanas(a?.campanas),
+      posibles_duplicados: a?.dup ?? 0,
     }
   })
 }
@@ -295,12 +313,22 @@ export async function createContacto(formData: FormData) {
 
   const telefono = (formData.get('telefono') as string)?.trim() || null
   const email = (formData.get('email') as string)?.trim() || null
+  const usuarioWhatsapp = (formData.get('usuario_whatsapp') as string)?.trim() || null
 
-  // Una persona, un contacto: si el telefono o el correo ya son de alguien, esto
-  // no se crea. Se devuelve QUIEN es y su id, porque un bloqueo sin salida hace
-  // que el comercial invente un dato para poder seguir, y eso ensucia mas que el
-  // duplicado que se queria evitar.
-  const duplicado = await buscarContactoDuplicado(supabase, workspaceId, { telefono, email })
+  // Una persona, un contacto: si el telefono, el correo o el usuario de WhatsApp
+  // ya son de alguien, esto no se crea. Se devuelve QUIEN es y su id, porque un
+  // bloqueo sin salida hace que el comercial invente un dato para poder seguir,
+  // y eso ensucia mas que el duplicado que se queria evitar.
+  //
+  // El usuario de WhatsApp entra a la comparacion desde la migracion
+  // 20260908000001. Este formulario siempre tuvo el campo y el guardian lo
+  // ignoraba, asi que era la puerta por la que se podia crear una ficha repetida
+  // de alguien cuyo unico dato de contacto es el handle (4 casos en produccion).
+  const duplicado = await buscarContactoDuplicado(supabase, workspaceId, {
+    telefono,
+    email,
+    usuarioWhatsapp,
+  })
   if (duplicado) {
     return { success: false, error: mensajeDuplicado(duplicado), duplicado }
   }
@@ -316,7 +344,7 @@ export async function createContacto(formData: FormData) {
       // Casa propia del usuario de WhatsApp. Sin este campo, rechazar `@doritasrg`
       // en el teléfono no arregla nada: quien lo escribió ahí lo hizo porque no
       // tenía otro sitio, y lo volvería a hacer. Ver migración 20260902230000.
-      usuario_whatsapp: (formData.get('usuario_whatsapp') as string)?.trim() || null,
+      usuario_whatsapp: usuarioWhatsapp,
       fuente_adquisicion: (formData.get('fuente_adquisicion') as string) || null,
       fuente_detalle: (formData.get('fuente_detalle') as string)?.trim() || null,
       rol: (formData.get('rol') as string) || null,
@@ -352,11 +380,23 @@ export async function updateContacto(id: string, formData: FormData) {
   // telefono de otro deja dos filas con el mismo numero igual que crearlo de
   // cero. Se comprueba con el MISMO guardian, excluyendo el contacto que se
   // edita para que no choque consigo mismo.
-  if (updates.telefono !== undefined || updates.email !== undefined) {
+  //
+  // ⚠️ El `usuario_whatsapp` tambien dispara la comprobacion: si no estuviera en
+  // esta condicion, mover un handle de un contacto a otro seria la unica forma
+  // de crear un duplicado por esa llave que el guardian no ve.
+  if (
+    updates.telefono !== undefined ||
+    updates.email !== undefined ||
+    updates.usuario_whatsapp !== undefined
+  ) {
     const duplicado = await buscarContactoDuplicado(
       supabase,
       workspaceId,
-      { telefono: updates.telefono as string | null, email: updates.email as string | null },
+      {
+        telefono: updates.telefono as string | null,
+        email: updates.email as string | null,
+        usuarioWhatsapp: updates.usuario_whatsapp as string | null,
+      },
       id,
     )
     if (duplicado) return { success: false, error: mensajeDuplicado(duplicado), duplicado }

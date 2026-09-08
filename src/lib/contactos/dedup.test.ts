@@ -18,7 +18,8 @@ function fakeSupabase(respuesta: { data?: unknown; error?: { message: string } |
 
 const UN_DUPLICADO: ContactoDuplicado = {
   id: 'c-1', nombre: 'MADELEINE PEREZ RUA',
-  telefono: '+57 311 409 4122', email: 'maperu13@hotmail.com', motivo: 'telefono',
+  telefono: '+57 311 409 4122', email: 'maperu13@hotmail.com',
+  usuario_whatsapp: null, motivo: 'telefono',
 }
 
 describe('buscarContactoDuplicado', () => {
@@ -34,12 +35,27 @@ describe('buscarContactoDuplicado', () => {
     expect(await buscarContactoDuplicado(client, WS, { telefono: '3000000000' })).toBeNull()
   })
 
-  // Un contacto sin teléfono ni correo no tiene con qué chocar: ni se consulta.
-  // Importa porque la vía del bot y la creación inline llaman siempre.
-  it('no consulta la base si no hay teléfono ni correo', async () => {
+  // Un contacto sin ninguna de las tres llaves no tiene con qué chocar: ni se
+  // consulta. Importa porque la vía del bot y la creación inline llaman siempre.
+  it('no consulta la base si no hay teléfono, correo ni usuario de WhatsApp', async () => {
     const { client, llamadas } = fakeSupabase({ data: [UN_DUPLICADO] })
-    expect(await buscarContactoDuplicado(client, WS, { telefono: '  ', email: null })).toBeNull()
+    expect(await buscarContactoDuplicado(client, WS, {
+      telefono: '  ', email: null, usuarioWhatsapp: '   ',
+    })).toBeNull()
     expect(llamadas).toHaveLength(0)
+  })
+
+  // La tercera llave (migración 20260908000001). Sin ella, un contacto cuyo
+  // único dato es el handle no se podía comparar con nada: hay 4 así en
+  // producción y el guardián los dejaba pasar siempre.
+  it('consulta con el usuario de WhatsApp aunque no haya teléfono ni correo', async () => {
+    const { client, llamadas } = fakeSupabase({
+      data: [{ ...UN_DUPLICADO, telefono: null, email: null, usuario_whatsapp: '@doritasrg', motivo: 'usuario_whatsapp' }],
+    })
+    const r = await buscarContactoDuplicado(client, WS, { usuarioWhatsapp: '@doritasrg' })
+    expect(r?.motivo).toBe('usuario_whatsapp')
+    expect(llamadas[0].args.p_usuario_whatsapp).toBe('@doritasrg')
+    expect(llamadas[0].args.p_telefono).toBeNull()
   })
 
   // El caso que decide si esto sirve: un fallo de la consulta NO puede leerse
@@ -66,5 +82,10 @@ describe('mensajeDuplicado', () => {
 
   it('distingue el correo del teléfono', () => {
     expect(mensajeDuplicado({ ...UN_DUPLICADO, motivo: 'email' })).toMatch(/^Ese correo/)
+  })
+
+  it('nombra el usuario de WhatsApp cuando chocó por ahí', () => {
+    expect(mensajeDuplicado({ ...UN_DUPLICADO, motivo: 'usuario_whatsapp' }))
+      .toMatch(/^Ese usuario de WhatsApp/)
   })
 })

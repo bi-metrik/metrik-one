@@ -7,7 +7,7 @@ import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/
 import { CardLink } from '@/components/card-link'
 import {
   Phone, Mail, Search, Users, Trash2, Flame, Megaphone, ArrowUpDown, UserCircle,
-  Plus, X, Loader2, CheckSquare, Square, LayoutGrid, List,
+  Plus, X, Loader2, CheckSquare, Square, LayoutGrid, List, Copy,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, STATUS_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
@@ -304,6 +304,16 @@ function useAnchoMd(): boolean {
 // lo resuelve contra `es_meta`, no contra el status.
 const META_FILTER = '__meta__'
 
+// Centinela del chip de posibles duplicados. Mismo mecanismo que el de Meta.
+//
+// ⚠️ Es la única superficie desde la que se puede LLEGAR a un posible duplicado.
+// La marca ya existía (etiqueta roja en la ficha del contacto), pero para verla
+// había que abrir justo el contacto que uno no sabía que estaba repetido: seis
+// interacciones marcadas desde el 2026-08-02 y ninguna revisada. Aquí no hay
+// flujo de resolución —quien confirma que son la misma persona fusiona a mano—;
+// lo que hay es una lista con contador, que es lo que faltaba.
+const DUPLICADO_FILTER = '__posible_duplicado__'
+
 // Orden del ciclo al tocar el chip: sigue la secuencia natural de gestión
 // (los tres intentos, luego los desenlaces).
 //
@@ -451,7 +461,11 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
     // contacto y la lista salía vacía aunque el chip contara bien.
     const matchSegmento =
       !segmentoFilter ||
-      (segmentoFilter === META_FILTER ? c.es_meta : c.segmento === segmentoFilter)
+      (segmentoFilter === META_FILTER
+        ? c.es_meta
+        : segmentoFilter === DUPLICADO_FILTER
+          ? c.posibles_duplicados > 0
+          : c.segmento === segmentoFilter)
     const matchResponsable =
       responsableFilter === RESP_TODOS ||
       (responsableFilter === RESP_SIN ? c.responsable_id === null : c.responsable_id === responsableFilter)
@@ -689,6 +703,25 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
               </button>
             )
           })()}
+          {(() => {
+            const dupCount = contactos.filter(c => c.posibles_duplicados > 0).length
+            // Un chip en cero no filtra nada y roba espacio horizontal (mismo
+            // criterio que los de status). Que desaparezca al llegar a cero es la
+            // señal de que no queda nada por revisar.
+            if (dupCount === 0) return null
+            const active = segmentoFilter === DUPLICADO_FILTER
+            return (
+              <button
+                onClick={() => { setSegmentoFilter(active ? null : DUPLICADO_FILTER); setRolFilter(null) }}
+                className={`shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  active ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'
+                }`}
+                title="Contactos con una interacción marcada como posible duplicado"
+              >
+                <Copy className="h-3 w-3" /> Posible duplicado ({dupCount})
+              </button>
+            )
+          })()}
           {ROLES_CONTACTO.map(r => {
             const count = contactos.filter(c => c.rol === r.value).length
             if (count === 0) return null
@@ -862,6 +895,27 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                             abajo lo que si se lee. En la tabla si va como columna. */}
                         {c.interacciones_meta > 1 && (
                           <span className="font-semibold tabular-nums"> · {c.interacciones_meta} formularios</span>
+                        )}
+                      </span>
+                    )}
+                    {/* La misma marca que la ficha del contacto pinta por
+                        interacción, subida a la tarjeta: sin esto, filtrar por
+                        "Posible duplicado" devuelve una lista de contactos que se
+                        ven iguales a cualquier otro y hay que abrirlos uno por uno
+                        para saber por qué están ahí. */}
+                    {c.posibles_duplicados > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700"
+                        title={
+                          c.posibles_duplicados > 1
+                            ? `${c.posibles_duplicados} interacciones marcadas como posible duplicado: revisa si es la misma persona`
+                            : 'Una interacción marcada como posible duplicado: revisa si es la misma persona'
+                        }
+                      >
+                        <Copy className="h-2.5 w-2.5" />
+                        Posible duplicado
+                        {c.posibles_duplicados > 1 && (
+                          <span className="font-semibold tabular-nums"> · {c.posibles_duplicados}</span>
                         )}
                       </span>
                     )}
