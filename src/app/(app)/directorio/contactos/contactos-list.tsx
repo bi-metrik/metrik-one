@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { FUENTES_ADQUISICION, ROLES_CONTACTO, STATUS_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
-import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
+import { formatFecha } from '@/lib/dates/bogota'
 import {
   deleteContacto,
   updateContactoSegmento,
@@ -381,10 +381,20 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
   const getSegmentoLabel = (value: string | null) => resolverStatusContacto(value).label
   const getSegmentoChip = (value: string | null) => resolverStatusContacto(value).chipClass
 
-  // Fecha corta absoluta (pura, calcada de negocio-card). Evita Date.now() en
+  // Fecha y hora absolutas (puras, calcadas de negocio-card). Evita Date.now() en
   // render (regla react-hooks/purity) y ancla la zona a Bogota para que el
-  // servidor (UTC) y el navegador pinten el mismo dia.
-  const fechaCorta = (date: string | null) => formatBogotaFechaCorta(date)
+  // servidor (UTC) y el navegador pinten el mismo instante.
+  //
+  // No pasa por `formatBogotaFechaCorta`: ese helper lo comparten otras cinco
+  // pantallas donde la hora no aporta, y cambiarlo se la metia a todas.
+  //
+  // `hourCycle: 'h23'` y no `hour12: false`: en varias versiones de ICU ese
+  // segundo da el ciclo h24 y la medianoche sale como "24:05" en vez de "00:05".
+  const fechaCorta = (date: string | null) =>
+    formatFecha(date, {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    })
 
   const cycleSegmento = (id: string, currentSegmento: string | null) => {
     const current = currentSegmento ?? 'primer_contacto'
