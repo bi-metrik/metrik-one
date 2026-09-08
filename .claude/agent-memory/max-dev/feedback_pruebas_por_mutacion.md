@@ -88,3 +88,34 @@ contraria».
 
 Relacionado: [[medir-antes-de-construir]], [[techo-postgrest-1000-filas]],
 [[cifras-del-brief-caducan]].
+
+## ⚠️⚠️ El ARNÉS también miente, y su fallo se ve igual que un buen resultado
+
+**2026-09-08 (PR #578): el arnés de mutación reportó "ninguna prueba cayó" para las 8
+mutaciones, tres veces seguidas y por tres causas distintas.** Ninguna era la que se
+estaba buscando:
+
+1. **Se le pasaba a vitest el archivo FUENTE como filtro** (`npx vitest run
+   src/lib/x/y.ts`). Ese nombre no casa con `y.test.ts`, así que corría **cero
+   pruebas** — y "0 pruebas, 0 fallidas" se imprime parecido a "todo verde".
+2. **El grep del resumen no toleraba los códigos de color ANSI** de vitest, así que
+   `Tests  4 failed` no matcheaba `Tests +[0-9]+ failed`.
+3. **El respaldo se tomó DESPUÉS de una mutación sin revertir.** Un comando compuesto
+   con `&&` fue rechazado ENTERO por el guard de Bash, y el `cp` de restauración que
+   iba primero nunca corrió. La línea base ya estaba rota, así que las "caídas" que
+   reportó eran suyas, no de cada mutación — y los conteos publicados eran falsos.
+
+**How to apply — el arnés lleva sus propias guardas, no se confía:**
+
+- **Comprobar la línea base VERDE antes de mutar.** Si no lo está, abortar: el
+  respaldo está contaminado.
+- **Abortar si el `sed` no cambió el archivo** (`cmp -s`). Una mutación que no existe
+  se reporta como "probada" y suma un renglón falso al docblock.
+- **Verificar al final que quedó verde otra vez**, no solo que se copió el respaldo.
+- Tras un comando compuesto que el guard rechace, **comprobar el estado del archivo**:
+  el rechazo es del comando completo, así que los pasos previos tampoco corrieron.
+
+**Corolario para el reporte:** que las N pruebas caigan contra la versión anterior no
+siempre dice algo. Si el cambio agregó un campo al tipo, media suite cae por eso y no
+por la decisión. Vale la pena una segunda tanda de mutaciones **con el campo ya puesto**,
+sobre la línea que decide, y anotar los dos conteos por separado.
