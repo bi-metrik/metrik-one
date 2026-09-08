@@ -38,21 +38,23 @@ vi.mock('next/navigation', () => ({
 import AppShell from './app-shell'
 
 /** Un workspace con el módulo de Tesorería encendido, que es el único caso donde el
- *  item existe. Con `conciliacion: false` la prueba pasaría vacía. */
-const pintarShell = () =>
-  renderToStaticMarkup(
-    React.createElement(
-      AppShell,
-      {
-        fullName: 'Persona de prueba',
-        workspaceName: 'Workspace de prueba',
-        role: 'owner',
-        modules: { business: true, conciliacion: true },
-      },
-      // El contenido de la página no importa acá: lo que se mide es el nav del shell.
-      null,
-    ),
-  )
+ *  item existe. Con `conciliacion: false` la prueba pasaría vacía.
+ *
+ *  Las props van en una constante y no en el literal de `createElement` a propósito:
+ *  `AppShellProps` exige `children`, y escribirlo dentro del literal dispara la regla
+ *  `react/no-children-prop` de eslint. Desde una constante, tipos y lint quedan contentos.
+ *  (El archivo tiene que seguir siendo `.ts`: el `include` de vitest es `*.test.ts`, así
+ *  que renombrarlo a `.tsx` para usar JSX lo sacaría de la suite sin que nadie lo note.) */
+const props = {
+  fullName: 'Persona de prueba',
+  workspaceName: 'Workspace de prueba',
+  role: 'owner',
+  modules: { business: true, conciliacion: true },
+  // El contenido de la página no importa acá: lo que se mide es el nav del shell.
+  children: null,
+}
+
+const pintarShell = () => renderToStaticMarkup(React.createElement(AppShell, props))
 
 /** El `<a>` de Tesorería, aislado del resto del nav. */
 function enlaceTesoreria(html: string): string {
