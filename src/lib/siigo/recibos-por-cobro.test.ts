@@ -131,17 +131,24 @@ vi.mock('./client', async () => {
   }
 })
 
+/** Nombre que devuelve el doble del tercero. Null simula un RUT que no se pudo releer. */
+let nombreTercero: string | null
+
 vi.mock('./clientes', () => ({
   asegurarClienteSiigo: async () => ({
     estado: 'ya_existia' as const, identificacion: '80815711', siigo_id: 'siigo-cli-1',
+    branch_office: 0, nombre: nombreTercero,
   }),
 }))
 
 /** Lo que se le pidió al render del PDF: ahí viajan las dos fechas. */
-let pdfPedido: { fecha?: string; fecha_pago?: string } | null
+let pdfPedido: { fecha?: string; fecha_pago?: string; cliente_nombre?: string } | null
 
 vi.mock('@/lib/pdf/pdf-render-client', () => ({
-  renderReciboCaja: async (_slug: string, data: { fecha?: string; fecha_pago?: string }) => {
+  renderReciboCaja: async (
+    _slug: string,
+    data: { fecha?: string; fecha_pago?: string; cliente_nombre?: string },
+  ) => {
     pdfPedido = data
     return Buffer.from('%PDF-falso')
   },
@@ -174,6 +181,7 @@ beforeEach(() => {
   fechasUsadas = []
   fallaEmision = null
   pdfPedido = null
+  nombreTercero = 'JORGE ANDRES SUESCUN CHACON'
   avisos = []
   consecutivo = 0
 })
@@ -343,5 +351,31 @@ describe('emitirReciboDeCobro — Siigo rechaza la fecha por periodo cerrado', (
     const marca = cobros[COBRO_2].siigo_recibo as { fecha_motivo?: string | null; fecha_pago?: string }
     expect(marca.fecha_motivo).toBeNull()
     expect(marca.fecha_pago).toBe('2026-08-31')
+  })
+})
+
+/**
+ * El nombre impreso es el del TERCERO, no el del negocio.
+ *
+ * EL CASO QUE IMPORTA: `negocios.nombre` en SOENA trae el vehículo pegado. RC-1-67 salió
+ * con "JORGE ANDRES SUESCUN CHACON - DEEPAL S05 MAX" en el campo Cliente, como si esa
+ * fuera la razón social del tercero.
+ *
+ * SE VIO FALLAR contra la implementación anterior, que imprimía `negocio.nombre`.
+ */
+describe('emitirReciboDeCobro — el PDF dice el nombre del tercero', () => {
+  it('imprime el nombre del tercero, no el del negocio con el vehículo pegado', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(pdfPedido?.cliente_nombre).toBe('JORGE ANDRES SUESCUN CHACON')
+    // El del negocio en el doble es 'Cliente Prueba': no debe ser ese.
+    expect(pdfPedido?.cliente_nombre).not.toBe('Cliente Prueba')
+  })
+
+  it('si el RUT no se pudo releer cae al nombre del negocio, que es peor pero no vacío', async () => {
+    nombreTercero = null
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(pdfPedido?.cliente_nombre).toBe('Cliente Prueba')
   })
 })

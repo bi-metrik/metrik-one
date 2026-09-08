@@ -239,6 +239,13 @@ export async function emitirReciboDeCobro(
   if (cliente.estado === 'incompleto') return { ok: false, motivo: 'faltan_datos', faltantes: cliente.faltantes }
   if (cliente.estado === 'error') return { ok: false, motivo: 'error', mensaje: cliente.mensaje }
   const identificacion = cliente.identificacion
+  // ⚠️ En el PDF va el nombre del TERCERO, no el del negocio.
+  //
+  // `negocios.nombre` en SOENA trae el vehículo pegado ("JORGE ANDRES SUESCUN CHACON -
+  // DEEPAL S05 MAX"), y eso salió impreso en RC-1-67 como si fuera la razón social. El
+  // nombre del tercero se arma del RUT y es el mismo que quedó en el asiento contable.
+  // Si no se pudo releer el RUT se cae al del negocio, que es peor pero no vacío.
+  const nombreParaDocumento = cliente.nombre ?? negocio.nombre
 
   try {
     const cfg = await getSiigoConfig(workspaceId)
@@ -323,7 +330,7 @@ export async function emitirReciboDeCobro(
           numero,
           fecha: creado.date ?? fechaRecibo,
           fecha_pago: fechaPago,
-          cliente_nombre: negocio.nombre,
+          cliente_nombre: nombreParaDocumento,
           cliente_identificacion: identificacion,
           negocio_codigo: negocio.codigo ?? '',
           valor: valorPagado,
