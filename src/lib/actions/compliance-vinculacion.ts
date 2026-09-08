@@ -22,6 +22,7 @@ import { headers } from 'next/headers';
 import { getWorkspace } from './get-workspace';
 import {
   alertasDeExpediente,
+  exigeConstanciaSinLectura,
   kitDeExpediente,
   puedeDecidirVinculacion,
   puedeVerVinculacion,
@@ -189,6 +190,7 @@ export async function decidirVinculacion(input: {
   expedienteId: string;
   decision: 'aprobado' | 'rechazado';
   motivo?: string;
+  sinLectura?: boolean;
 }): Promise<Result<{ estado: string }>> {
   const g = await guardVinculacion();
   if (!g.ok) return g;
@@ -205,6 +207,22 @@ export async function decidirVinculacion(input: {
     if (err) return { ok: false, error: err };
   }
 
+  // La constancia se exige acá, no en la pantalla. Una casilla que solo vive en
+  // el navegador no es un control: se salta con una llamada directa a la acción,
+  // y lo que queda en el expediente es una aprobación limpia de un expediente
+  // que no lo estaba. Se recalculan las alertas contra Valida en este momento
+  // porque entre que el oficial abrió la pantalla y decidió pudo entrar un
+  // documento o terminar una lectura.
+  let sinLectura = false;
+  if (input.decision === 'aprobado') {
+    const det = await detalleVinculacion(input.expedienteId);
+    if (!det.ok) return { ok: false, error: det.error };
+    if (exigeConstanciaSinLectura(det.data.alertas)) {
+      if (input.sinLectura !== true) return { ok: false, error: 'falta_constancia_sin_lectura' };
+      sinLectura = true;
+    }
+  }
+
   const r = await pedirAValida<{ estado: string }>(
     g.data.apiKey,
     `/api/v1/kyc/expedientes/${encodeURIComponent(input.expedienteId)}/decision`,
@@ -217,6 +235,10 @@ export async function decidirVinculacion(input: {
         // diría que decidió "el oficial" sin nombre, que ante un auditor es lo
         // mismo que no decir nada.
         oc_revisor_id: g.data.userId,
+        // Queda en el expediente que se aprobó sin que la plataforma lo
+        // respaldara. Es el dato que separa, en una auditoría, al que revisó
+        // por fuera del que aprobó sin mirar.
+        sin_lectura: sinLectura,
       }),
     },
   );
@@ -236,6 +258,8 @@ export async function traducirErrorVinculacion(error: string): Promise<string> {
     case 'valida_no_responde':
       return 'No se pudo hablar con Valida. Vuelve a intentar en un momento.';
     case 'forbidden_sin_acceso_a_vinculacion':
+    case 'falta_constancia_sin_lectura':
+      return 'Este expediente está incompleto. Marca la constancia para aprobarlo así.';
     case 'forbidden_sin_permiso_para_decidir':
       return 'Esta pantalla es del oficial de cumplimiento.';
     case 'invalid_api_key':

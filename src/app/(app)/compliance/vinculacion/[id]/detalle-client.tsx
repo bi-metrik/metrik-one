@@ -18,6 +18,7 @@ import {
 } from '@/lib/actions/compliance-vinculacion';
 import {
   CONFIDENCE_LABEL,
+  CONSTANCIA_SIN_LECTURA,
   ESTADO_EXPEDIENTE_ACCION,
   ESTADO_EXPEDIENTE_LABEL,
   ETAPAS,
@@ -27,6 +28,7 @@ import {
   agruparCamposPorDocumento,
   etiquetaCampo,
   etiquetaSlot,
+  exigeConstanciaSinLectura,
   mostrarValor,
   nombreContraparte,
   progresoEtapa,
@@ -67,6 +69,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
   const [pending, startTransition] = useTransition();
   const [rechazando, setRechazando] = useState(false);
   const [motivo, setMotivo] = useState('');
+  const [constancia, setConstancia] = useState(false);
 
   const exp = d.expediente;
   const grupos = agruparCamposPorDocumento(d.campos, d.documentos);
@@ -74,6 +77,9 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
   const decidible = puedeDecidirse(exp.estado);
   const razon = razonNoDecidible(exp.estado);
   const errMotivo = rechazando ? validarMotivoRechazo(motivo) : null;
+  // Aprobar un expediente al que le falta algo se permite: el criterio es del
+  // oficial. Lo que no se permite es que después no se sepa que fue así.
+  const exigeConstancia = exigeConstanciaSinLectura(d.alertas);
   const { paso, total } = progresoEtapa(exp.etapa_actual);
 
   function decidir(decision: 'aprobado' | 'rechazado') {
@@ -84,6 +90,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
         expedienteId: exp.expediente_id,
         decision,
         motivo: decision === 'rechazado' ? motivo : undefined,
+        sinLectura: decision === 'aprobado' ? constancia : undefined,
       });
       if (!r.ok) {
         setError(r.error);
@@ -93,6 +100,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       if (rec.ok) setD(rec.data);
       setRechazando(false);
       setMotivo('');
+      setConstancia(false);
       setAviso(decision === 'aprobado' ? 'Contraparte vinculada.' : 'Vinculación rechazada.');
     });
   }
@@ -267,6 +275,12 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
           {typeof exp.decision_oc.motivo === 'string' && exp.decision_oc.motivo.length > 0 && (
             <p className="text-[#6B7280] mt-1">{exp.decision_oc.motivo}</p>
           )}
+          {exp.decision_oc.sin_lectura === true && (
+            <p className="text-[#B45309] mt-1">
+              Se decidió con el expediente incompleto. Quien decidió dejó constancia de haber
+              revisado por fuera de la plataforma lo que faltaba acá.
+            </p>
+          )}
           <p className="text-xs text-[#9CA3AF] mt-2">
             La decisión no se reescribe. Si cambian las circunstancias, se abre una vinculación
             nueva.
@@ -279,10 +293,27 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       ) : (
         <div className="rounded-lg border border-[#E5E7EB] p-4">
           {!rechazando ? (
-            <div className="flex flex-wrap gap-2">
+            <div>
+              {exigeConstancia && (
+                <label className="flex items-start gap-2 mb-3 text-sm text-[#4B5563] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={constancia}
+                    onChange={(ev) => setConstancia(ev.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    {CONSTANCIA_SIN_LECTURA}
+                    <span className="block text-xs text-[#9CA3AF] mt-0.5">
+                      Queda en el expediente y en la bitácora, con tu nombre y la fecha.
+                    </span>
+                  </span>
+                </label>
+              )}
+              <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={pending}
+                disabled={pending || (exigeConstancia && !constancia)}
                 onClick={() => decidir('aprobado')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold disabled:opacity-50"
               >
@@ -296,6 +327,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
               >
                 <X className="w-4 h-4" /> Rechazar
               </button>
+              </div>
             </div>
           ) : (
             <div>

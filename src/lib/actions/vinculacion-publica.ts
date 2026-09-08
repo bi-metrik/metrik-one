@@ -28,6 +28,7 @@ import {
   mensajeErrorFirma,
   otpCompleto,
   pasoActual,
+  type LecturaDoc,
   type DeclaracionRegistrada,
   type MotivoEnlaceCerrado,
   type PasoPublico,
@@ -270,20 +271,66 @@ export async function aceptarCondiciones(token: string): Promise<Result<{ acepta
 export async function pedirUrlDeSubida(
   token: string,
   input: { slot: string; mime: string; size: number },
-): Promise<Result<{ docId: string; uploadUrl: string; uploadToken: string }>> {
+): Promise<
+  Result<{ docId: string; uploadUrl: string; uploadToken: string; reemplazoDe: string | null }>
+> {
   if (!input.slot) return { ok: false, error: 'slot_requerido' };
 
-  const r = await publico<{ doc_id: string; upload_url: string; upload_token: string }>(
-    ruta(token, '/docs'),
-    {
-      method: 'POST',
-      body: JSON.stringify({ slot: input.slot, mime: input.mime, size_bytes: input.size }),
-    },
-  );
+  const r = await publico<{
+    doc_id: string;
+    upload_url: string;
+    upload_token: string;
+    reemplazo_de: string | null;
+  }>(ruta(token, '/docs'), {
+    method: 'POST',
+    body: JSON.stringify({ slot: input.slot, mime: input.mime, size_bytes: input.size }),
+  });
   if (!r.ok) return { ok: false, error: r.error };
   return {
     ok: true,
-    data: { docId: r.data.doc_id, uploadUrl: r.data.upload_url, uploadToken: r.data.upload_token },
+    data: {
+      docId: r.data.doc_id,
+      uploadUrl: r.data.upload_url,
+      uploadToken: r.data.upload_token,
+      // Valida deja el anterior marcado como reemplazado y este pasa a ser el
+      // que vale. La pantalla lo dice: un reemplazo silencioso deja a la
+      // persona sin saber cuál de los dos quedó.
+      reemplazoDe: r.data.reemplazo_de ?? null,
+    },
+  };
+}
+
+/**
+ * Pide que el documento se lea AHORA, con la contraparte todavía en la
+ * pantalla. No es por velocidad: es para que pueda ver que subió el que era.
+ *
+ * Valida corta su propia espera y responde 202 `en_proceso` si el modelo se
+ * demora; la extracción sigue corriendo del otro lado. Acá eso NO es error: se
+ * devuelve como un estado más, porque decirle "falló" a alguien cuyo documento
+ * sí entró lo manda a subirlo otra vez sin necesidad.
+ */
+export async function leerDocumento(
+  token: string,
+  docId: string,
+): Promise<Result<LecturaDoc>> {
+  if (!docId) return { ok: false, error: 'doc_requerido' };
+
+  const r = await publico<{
+    estado: string;
+    doc_type_match: boolean | null;
+    doc_type_detected: string | null;
+    campos: { slug: string; value: unknown }[];
+  }>(ruta(token, `/docs/${encodeURIComponent(docId)}/leer`), { method: 'POST' });
+
+  if (!r.ok) return { ok: false, error: r.error };
+  return {
+    ok: true,
+    data: {
+      estado: r.data.estado ?? 'pendiente',
+      doc_type_match: r.data.doc_type_match ?? null,
+      doc_type_detected: r.data.doc_type_detected ?? null,
+      campos: r.data.campos ?? [],
+    },
   };
 }
 

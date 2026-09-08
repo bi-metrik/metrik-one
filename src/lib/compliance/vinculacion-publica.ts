@@ -317,3 +317,150 @@ const SLOT_PEDIDO: Record<string, string> = {
 export function nombrePedido(slot: string): string {
   return SLOT_PEDIDO[slot] ?? slot.replace(/_/g, ' ');
 }
+
+/**
+ * La aclaración de cada documento, en el bloque, antes de subirlo.
+ *
+ * No es ayuda opcional: el error que más cuesta acá es el que se descubre
+ * tarde. Una cámara de comercio de una sola hoja pasa como "recibida", el
+ * lector no encuentra socios ni revisor fiscal, y tres días después alguien
+ * tiene que escribirle a la contraparte para pedirle otra vez lo mismo. La
+ * frase que evita eso vale más puesta antes que la explicación después.
+ */
+const NOTA_PEDIDO: Record<string, string> = {
+  camara_comercio:
+    'El certificado completo, el que lista socios o accionistas, revisor fiscal y contador. La carátula o el resumen de una hoja no sirven. Que no tenga más de 30 días de expedido.',
+  rut: 'El RUT actualizado, descargado del portal de la DIAN, con la hoja de responsabilidades.',
+  estados_financieros:
+    'Los del último año cerrado, firmados por el representante legal y el contador. Si tienes revisor fiscal, también con su firma.',
+  cedula_rl:
+    'Las dos caras en un solo archivo, y que se lea el número. Tiene que ser la del representante legal que aparece en el certificado.',
+  cedula: 'Las dos caras en un solo archivo, y que se lea el número.',
+  declaracion_renta: 'La del último año gravable, con el acuse de presentación.',
+  rub: 'El reporte completo del Registro Único de Beneficiarios que expide la DIAN.',
+  cert_laboral:
+    'Con cargo, salario y fecha de ingreso, firmada por quien la expide y con fecha reciente.',
+};
+
+export function notaPedido(slot: string): string | null {
+  return NOTA_PEDIDO[slot] ?? null;
+}
+
+// ─── La lectura delante de la contraparte ─────────────────────────────────
+
+/** Lo que devuelve Valida al leer un documento recién subido. */
+export type LecturaDoc = {
+  estado: string;
+  doc_type_match: boolean | null;
+  doc_type_detected: string | null;
+  campos: readonly { slug: string; value: unknown }[];
+};
+
+export type VeredictoLectura = {
+  tono: 'ok' | 'ojo' | 'espera' | 'falla';
+  texto: string;
+  /** Si conviene ofrecerle cambiar el archivo ahí mismo. */
+  sugiereReemplazo: boolean;
+};
+
+/**
+ * Qué se le dice a la contraparte del documento que acaba de subir.
+ *
+ * El tipo detectado lo escribe un modelo, así que solo se nombra cuando cae en
+ * la lista de documentos que conocemos. Pegar el texto crudo del modelo en la
+ * pantalla de un desconocido es dejar que el modelo le escriba a la persona.
+ */
+export function nombreDetectado(detectado: string | null): string | null {
+  if (!detectado) return null;
+  const clave = detectado.trim().toLowerCase();
+  return SLOT_PEDIDO[clave] ?? null;
+}
+
+/**
+ * Un "no era este documento" que llega tres días después ya no cuesta un clic:
+ * cuesta un correo, una espera y una persona que dejó de confiar en el trámite.
+ * Por eso el veredicto se dice completo acá, con lo que se sabe en el momento,
+ * incluso cuando lo que se sabe es que todavía no se sabe.
+ */
+export function veredictoLectura(slot: string, l: LecturaDoc): VeredictoLectura {
+  const pedido = nombrePedido(slot);
+
+  if (l.estado === 'en_proceso' || l.estado === 'pendiente') {
+    return {
+      tono: 'espera',
+      texto:
+        'Lo recibimos y lo estamos leyendo. Se está demorando más de lo normal, así que sigue con lo demás: si algo no cuadra te escribimos.',
+      sugiereReemplazo: false,
+    };
+  }
+
+  // El documento se guardó, pero no es el que se pidió. Esto NO es un error de
+  // lectura: el lector funcionó y por eso puede decirlo.
+  if (l.doc_type_match === false) {
+    const otro = nombreDetectado(l.doc_type_detected);
+    return {
+      tono: 'ojo',
+      texto: otro
+        ? `Esto no parece ${pedido}: se parece más a ${otro}. Revísalo y súbelo de nuevo.`
+        : `Esto no parece ${pedido}. Revísalo y súbelo de nuevo.`,
+      sugiereReemplazo: true,
+    };
+  }
+
+  // Sin llave del lector no leímos nada, y no es culpa de quien subió el
+  // archivo. Decirle "revísalo" sería mandarlo a buscar un defecto que no
+  // existe.
+  if (l.estado === 'no_key') {
+    return {
+      tono: 'espera',
+      texto: 'Lo recibimos. La lectura automática no está disponible ahora, la hacemos después.',
+      sugiereReemplazo: false,
+    };
+  }
+
+  if (l.estado !== 'ok') {
+    return {
+      tono: 'falla',
+      texto:
+        'Lo recibimos, pero no pudimos leerlo. Si está borroso o es una foto de una pantalla, súbelo otra vez más nítido.',
+      sugiereReemplazo: true,
+    };
+  }
+
+  const n = l.campos.length;
+  if (n === 0) {
+    return {
+      tono: 'espera',
+      texto: `Recibimos ${pedido}, pero no alcanzamos a sacarle datos. Los vas a poder escribir tú en el paso siguiente.`,
+      sugiereReemplazo: false,
+    };
+  }
+
+  return {
+    tono: 'ok',
+    texto: `Leímos ${pedido}: ${n} ${n === 1 ? 'dato' : 'datos'}. Los revisas en el paso siguiente.`,
+    sugiereReemplazo: false,
+  };
+}
+
+/**
+ * Qué se muestra del documento leído, ahí mismo. Se enseñan pocos y cortos: es
+ * para que la persona reconozca su documento de un vistazo, no para que lo
+ * revise entero (eso es el paso de datos).
+ */
+export const CAMPOS_EN_VISTA_PREVIA = 4;
+
+export function vistaPreviaCampos(
+  campos: readonly { slug: string; value: unknown }[],
+): { slug: string; texto: string }[] {
+  const vistos: { slug: string; texto: string }[] = [];
+  for (const c of campos) {
+    if (vistos.length >= CAMPOS_EN_VISTA_PREVIA) break;
+    if (c.value === null || c.value === undefined) continue;
+    const texto = typeof c.value === 'object' ? JSON.stringify(c.value) : String(c.value);
+    const limpio = texto.trim();
+    if (limpio.length === 0) continue;
+    vistos.push({ slug: c.slug, texto: limpio.length > 60 ? `${limpio.slice(0, 60)}...` : limpio });
+  }
+  return vistos;
+}
