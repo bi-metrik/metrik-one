@@ -61,6 +61,8 @@ export type NegocioExportable = {
   vehiculo_label: string | null
   radicado: string | null
   numero_factura: string | null
+  /** Fecha de la cita en la DIAN (bloque compartido). `null` si el caso no tiene cita. */
+  fecha_cita: string | null
   precio_aprobado: number | null
   precio_estimado: number | null
   horas_habiles_en_etapa: number | null
@@ -160,6 +162,7 @@ export const ENCABEZADOS = [
   'Cierre',
   'Fecha creacion',
   'Fecha venta',
+  'Fecha cita',
   'Fecha cierre',
   // Personas y origen
   'Comercial',
@@ -390,6 +393,7 @@ export function armarFilasExcel(entrada: EntradaExcel): FilaExcel[] {
       'Cierre': cierreDeNegocio(n),
       'Fecha creacion': fechaExcel(n.created_at),
       'Fecha venta': fechaExcel(venta?.fecha_venta),
+      'Fecha cita': fechaExcel(n.fecha_cita),
       'Fecha cierre': fechaExcel(n.closed_at),
 
       'Comercial': comercialId ? (nombrePor.get(comercialId) ?? null) : null,

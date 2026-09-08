@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getConciliacionV2 } from '@/lib/actions/conciliacion-actions'
 import { getColaFacturacion } from '@/lib/actions/facturacion-actions'
+import { getControlRecibos } from '@/lib/actions/recibos-control-actions'
 import ConciliacionClient from './conciliacion-client'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
@@ -46,5 +47,9 @@ export default async function ConciliacionPage() {
   // (o el usuario no pasa el guard financiero), la pestaña simplemente no aparece.
   const { data: cola } = await getColaFacturacion()
 
-  return <ConciliacionClient data={data} cola={cola} />
+  // El control de recibos es su propio frente: qué plata que entró está acusada. No
+  // depende de la cola de facturación, y por eso se carga aparte y falla aparte.
+  const { data: recibos, error: recibosError } = await getControlRecibos()
+
+  return <ConciliacionClient data={data} cola={cola} recibos={recibos} recibosError={recibosError ?? null} />
 }

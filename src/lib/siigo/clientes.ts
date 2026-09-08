@@ -72,21 +72,43 @@ export function debeCrearClienteSiigo(
  *
  * Sin identificación de hoy la marca MANDA: un RUT que se dañó después no puede
  * invalidar un tercero que ya existe en Siigo.
+ *
+ * ⚠️ Segundo uso del mismo patrón, 2026-09-07: la marca tiene que traer también la
+ * SUCURSAL del tercero. Las 252 marcas que ya existen se escribieron cuando ONE
+ * botaba ese dato del GET, así que ninguna lo tiene; como el atajo sale antes de
+ * preguntarle a Siigo, nunca la aprenderían. Exigirla aquí convierte el backfill en
+ * autocorrección: el caso se repara solo la próxima vez que alguien intente
+ * facturarlo (un GET de más, y a partir de ahí el atajo vuelve a valer).
+ *
+ * Sin esto, V0345 y V0134 —cuyo tercero vive en la sucursal 1— seguirían fallando
+ * con `The customer doesn't exist` por más que el borrador supiera mandar la
+ * sucursal: la marca nunca le diría cuál es.
  */
 export function marcaSigueValida(
   identificacionMarcada: string | null | undefined,
   identificacionDelRut: string | null | undefined,
+  sucursalMarcada: number | null | undefined,
 ): boolean {
   if (!identificacionMarcada) return false
+  // Una marca sin sucursal es de antes de que ONE la aprendiera: se rehace el
+  // camino completo para que la marca nueva sí la traiga.
+  if (typeof sucursalMarcada !== 'number') return false
   if (!identificacionDelRut) return true
   return identificacionMarcada === identificacionDelRut
 }
 
 export type ResultadoCliente =
   /** Creado ahora en Siigo. */
-  | { estado: 'creado'; identificacion: string; siigo_id: string | null }
-  /** Ya existía (por identificación) o ya lo habíamos registrado. */
-  | { estado: 'ya_existia'; identificacion: string; siigo_id: string | null }
+  | { estado: 'creado'; identificacion: string; siigo_id: string | null; branch_office: number | null; nombre: string | null }
+  /**
+   * Ya existía (por identificación) o ya lo habíamos registrado.
+   *
+   * `nombre` es el del TERCERO, armado desde el RUT igual que el que viaja a Siigo. Va
+   * en el resultado para que un documento impreso pueda decir el mismo nombre que el
+   * asiento contable. Viene null cuando la respuesta salió de la marca sin releer el
+   * RUT: ahí no hay de dónde sacarlo y quien llame decide con qué rellenar.
+   */
+  | { estado: 'ya_existia'; identificacion: string; siigo_id: string | null; branch_office: number | null; nombre: string | null }
   /** Falta información del expediente. NO es un error: es trabajo pendiente. */
   | { estado: 'incompleto'; faltantes: string[] }
   /** Siigo respondió con error, o el workspace no está configurado. */
@@ -99,9 +121,16 @@ interface NegocioParaCliente {
 }
 
 /** Marca que queda en `negocios.metadata.siigo_cliente`. */
-interface MarcaCliente {
+export interface MarcaCliente {
   identificacion: string
   siigo_id: string | null
+  /**
+   * Sucursal del tercero en Siigo. **Opcional a propósito**: las 252 marcas que ya
+   * existen se escribieron sin ella. El atajo de `marcaSigueValida` la exige, así
+   * que las viejas se rehacen solas; el tipo no puede exigirla porque describe
+   * también lo que hay guardado hoy.
+   */
+  branch_office?: number
   at: string
   origen: 'automatico' | 'manual'
 }
@@ -148,19 +177,36 @@ async function borradorDelNegocio(
   return { borrador: borradorCliente(rut, contacto) }
 }
 
-/** ¿Existe ya el tercero en Siigo? Se pregunta por identificación, que es su llave. */
+/**
+ * ¿Existe ya el tercero en Siigo? Se pregunta por identificación, que es su llave
+ * de BÚSQUEDA… pero no la de resolución: para amarrar un documento, Siigo cruza
+ * identificación con SUCURSAL. Por eso se devuelve también `branch_office`, que la
+ * respuesta ya traía y hasta el 2026-09-07 se botaba. Ver `SUCURSAL_POR_DEFECTO`.
+ */
 async function buscarEnSiigo(
   workspaceId: string,
   identificacion: string,
   maxEspera429Ms: number,
-): Promise<string | null> {
-  const res = await siigoRequest<{ results?: Array<{ id?: string }> }>(
+): Promise<{ id: string | null; branch_office: number | null } | null> {
+  const res = await siigoRequest<{ results?: Array<{ id?: string; branch_office?: number }> }>(
     workspaceId,
     `/v1/customers?identification=${encodeURIComponent(identificacion)}`,
     { maxEspera429Ms },
   )
   const primero = res.results?.[0]
-  return primero ? (primero.id ?? null) : null
+  if (!primero) return null
+  return { id: primero.id ?? null, branch_office: sucursalDeSiigo(primero.branch_office) }
+}
+
+/**
+ * La sucursal tal como la devuelve Siigo, o `null` si no vino un número.
+ *
+ * `null` NO se convierte aquí en 0: eso sería afirmar que el tercero está en la
+ * principal sin que Siigo lo haya dicho, y volvería a enterrar el dato que causó
+ * el fallo. Quien arma el documento decide el respaldo (y ese respaldo es 0).
+ */
+function sucursalDeSiigo(valor: unknown): number | null {
+  return typeof valor === 'number' && Number.isFinite(valor) ? valor : null
 }
 
 /**
@@ -204,17 +250,33 @@ export async function asegurarClienteSiigo(
     // Un caso YA marcado no se convierte en error porque hoy no se pueda releer
     // su RUT: eso ya estaba resuelto y la marca sigue siendo la respuesta.
     if (yaMarcado?.identificacion) {
-      return { estado: 'ya_existia', identificacion: yaMarcado.identificacion, siigo_id: yaMarcado.siigo_id }
+      return {
+        estado: 'ya_existia',
+        identificacion: yaMarcado.identificacion,
+        siigo_id: yaMarcado.siigo_id,
+        branch_office: yaMarcado.branch_office ?? null,
+        nombre: null,
+      }
     }
     return { estado: 'error', mensaje: (e as Error).message }
   }
   const { payload, faltantes } = borrador.borrador
+  // El MISMO nombre que va a Siigo: un documento impreso no puede decir uno distinto
+  // al del asiento contable. `payload.name` es un arreglo (Siigo separa nombres y
+  // apellidos de una persona natural), así que se une para mostrarlo.
+  const nombreTercero = payload.name.filter(Boolean).join(' ').trim() || null
 
   // La marca vale mientras siga coincidiendo con el RUT; si no, se rehace el
   // camino completo (buscar en Siigo por la identificación buena, crear si no
   // está, y re-marcar). Ver `marcaSigueValida`.
-  if (yaMarcado && marcaSigueValida(yaMarcado.identificacion, payload.identification)) {
-    return { estado: 'ya_existia', identificacion: yaMarcado.identificacion, siigo_id: yaMarcado.siigo_id }
+  if (yaMarcado && marcaSigueValida(yaMarcado.identificacion, payload.identification, yaMarcado.branch_office)) {
+    return {
+      estado: 'ya_existia',
+      identificacion: yaMarcado.identificacion,
+      siigo_id: yaMarcado.siigo_id,
+      branch_office: yaMarcado.branch_office ?? null,
+      nombre: nombreTercero,
+    }
   }
 
   // Lo que ONE no pudo resolver se declara, no se rellena. El caso aparece en la
@@ -226,26 +288,47 @@ export async function asegurarClienteSiigo(
     if (existente !== null) {
       await marcar(workspaceId, negocioId, negocio.metadata, {
         identificacion: payload.identification,
-        siigo_id: existente,
+        siigo_id: existente.id,
+        // Si Siigo no dijo la sucursal, la marca se queda sin ella y el próximo
+        // intento vuelve a preguntar. Cuesta un GET de más; escribir un 0
+        // inventado costaría otra factura rechazada.
+        ...(existente.branch_office == null ? {} : { branch_office: existente.branch_office }),
         at: new Date().toISOString(),
         origen,
       })
-      return { estado: 'ya_existia', identificacion: payload.identification, siigo_id: existente }
+      return {
+        estado: 'ya_existia',
+        identificacion: payload.identification,
+        siigo_id: existente.id,
+        branch_office: existente.branch_office,
+        nombre: nombreTercero,
+      }
     }
 
-    const creado = await siigoRequest<{ id?: string }>(workspaceId, '/v1/customers', {
+    // El POST no manda `branch_office`: Siigo lo crea en la principal. Aun así se
+    // lee de la respuesta en vez de asumir el 0, que es el supuesto que hizo falla
+    // silenciosa la primera vez.
+    const creado = await siigoRequest<{ id?: string; branch_office?: number }>(workspaceId, '/v1/customers', {
       method: 'POST',
       body: payload satisfies BorradorCliente,
       maxEspera429Ms,
     })
+    const sucursalNueva = sucursalDeSiigo(creado.branch_office)
 
     await marcar(workspaceId, negocioId, negocio.metadata, {
       identificacion: payload.identification,
       siigo_id: creado.id ?? null,
+      ...(sucursalNueva == null ? {} : { branch_office: sucursalNueva }),
       at: new Date().toISOString(),
       origen,
     })
-    return { estado: 'creado', identificacion: payload.identification, siigo_id: creado.id ?? null }
+    return {
+      estado: 'creado',
+      identificacion: payload.identification,
+      siigo_id: creado.id ?? null,
+      branch_office: sucursalNueva,
+      nombre: nombreTercero,
+    }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
     return { estado: 'error', mensaje }
@@ -340,6 +423,47 @@ async function anotar(
     autor_id: staffId,
     contenido,
   }, 'anotar')
+}
+
+/**
+ * Con qué identificación busca ONE los documentos de este negocio en Siigo, SIN
+ * crear ni tocar nada.
+ *
+ * `asegurarClienteSiigo` sirve para emitir: crea el tercero si falta. Para
+ * LISTAR lo que Siigo ya tiene (la adopción de una factura vieja) eso sobra y
+ * además escribe donde no hay que escribir.
+ *
+ * Precedencia: gana el RUT del expediente, que es de donde sale la identificación
+ * con la que se emitiría hoy; la marca es el respaldo para los casos cuyo RUT no
+ * se puede releer. Cuando las dos existen y difieren, mandar la del RUT es lo
+ * mismo que hace la emisión, así que las dos pantallas hablan del mismo tercero.
+ */
+export async function identificacionDelNegocio(
+  workspaceId: string,
+  negocioId: string,
+): Promise<{ identificacion: string | null; marca: MarcaCliente | null }> {
+  const svc = createServiceClient()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negRaw } = await (svc as any)
+    .from('negocios')
+    .select('id, contacto_id, metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  if (!negRaw) return { identificacion: null, marca: null }
+  const negocio = negRaw as NegocioParaCliente
+  const marca = (negocio.metadata?.siigo_cliente ?? null) as MarcaCliente | null
+
+  try {
+    const { borrador } = await borradorDelNegocio(negocioId, negocio.contacto_id)
+    const delRut = borrador.payload.identification
+    if (delRut) return { identificacion: delRut, marca }
+  } catch {
+    // Que hoy no se pueda releer el RUT no deja al negocio sin identificación si
+    // ya tiene tercero marcado: ese caso ya estaba resuelto.
+  }
+  return { identificacion: marca?.identificacion ?? null, marca }
 }
 
 /** Datos que la financiera puede corregir en la pantalla de revisión. */

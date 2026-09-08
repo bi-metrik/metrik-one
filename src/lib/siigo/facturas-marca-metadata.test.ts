@@ -56,6 +56,11 @@ function servicioFalso() {
         select: () => chain,
         eq: () => chain,
         in: () => chain,
+        // Los usa el listado de marcas del workspace, que el guardián de
+        // duplicados consulta para saber qué facturas ya son de otro negocio.
+        // Aquí vuelve vacío (ver el `then` de abajo): ninguna está reclamada.
+        order: () => chain,
+        range: () => chain,
         single: async () =>
           fallaRelectura
             ? { data: null, error: { message: 'conexión caída' } }

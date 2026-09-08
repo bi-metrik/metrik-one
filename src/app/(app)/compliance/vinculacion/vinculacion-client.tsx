@@ -2,11 +2,14 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ChevronRight, FolderOpen, Loader2, Search } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Copy, FolderOpen, Link2, Loader2, RefreshCw, Search } from 'lucide-react';
 import {
   listarVinculaciones,
+  rotarEnlaceDeSolicitud,
   type BandejaVinculacion,
+  type EnlaceSolicitud,
 } from '@/lib/actions/compliance-vinculacion';
+import { mensajeParaCompartir } from '@/lib/compliance/solicitud-vinculacion';
 import {
   ESTADOS_EXPEDIENTE,
   ESTADO_EXPEDIENTE_ACCION,
@@ -40,12 +43,143 @@ function fecha(iso: string | null): string {
   });
 }
 
+
+/**
+ * El enlace que la empresa comparte para que un proveedor pida vincularse.
+ *
+ * Está arriba y siempre visible, no detrás de un botón "generar". La alternativa
+ * a tenerlo a la mano es seguir creando expedientes uno por uno, que es justo
+ * lo que este enlace viene a evitar.
+ *
+ * Se ofrecen dos copias: la URL pelada, para quien va a pegarla en un correo
+ * que ya tiene contexto, y el mensaje completo. El mensaje existe porque un
+ * enlace pelado por WhatsApp llega como un link sin remitente pidiendo la
+ * cédula del representante legal, que es la forma exacta de una estafa.
+ */
+function TarjetaEnlace({
+  enlace,
+  error,
+  puedeRotar,
+  empresa,
+}: {
+  enlace: EnlaceSolicitud | null;
+  error: string | null;
+  puedeRotar: boolean;
+  empresa: string;
+}) {
+  const [actual, setActual] = useState(enlace);
+  const [copiado, setCopiado] = useState<'url' | 'mensaje' | null>(null);
+  const [rotando, startRotar] = useTransition();
+  const [errorRotar, setErrorRotar] = useState<string | null>(null);
+
+  async function copiar(que: 'url' | 'mensaje') {
+    if (!actual) return;
+    const texto = que === 'url' ? actual.url : mensajeParaCompartir(empresa, actual.url);
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(que);
+      setTimeout(() => setCopiado(null), 2000);
+    } catch {
+      // Sin permiso de portapapeles no se pierde el enlace: sigue seleccionable
+      // en pantalla. Un error acá sería ruido por algo que la persona puede
+      // hacer a mano.
+    }
+  }
+
+  function rotar() {
+    if (!confirm('El enlace actual deja de servir de inmediato. Quien lo tenga guardado ya no va a poder entrar. ¿Seguro?')) return;
+    startRotar(async () => {
+      const r = await rotarEnlaceDeSolicitud();
+      if (r.ok) {
+        setActual(r.data);
+        setErrorRotar(null);
+      } else {
+        setErrorRotar(r.error);
+      }
+    });
+  }
+
+  if (error || !actual) {
+    return (
+      <div className="mb-6 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+        <p className="text-sm font-semibold text-[#1A1A1A]">Enlace para que se registren</p>
+        <p className="text-xs text-[#6B7280] mt-1">
+          No se pudo traer el enlace en este momento. {error ?? ''}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-6 rounded-lg border border-[#E5E7EB] p-4">
+      <div className="flex items-start gap-2 mb-2">
+        <Link2 className="w-4 h-4 text-[#6B7280] mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#1A1A1A]">Enlace para que se registren</p>
+          <p className="text-xs text-[#6B7280] mt-0.5">
+            Compártelo con tus proveedores. Ellos dejan sus datos básicos y les llega por correo su
+            enlace personal para subir documentos y firmar. Los documentos nunca se suben por acá.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <code className="flex-1 min-w-0 truncate rounded-md bg-[#F3F4F6] px-3 py-2 text-xs text-[#1A1A1A]">
+          {actual.url}
+        </code>
+        <button
+          type="button"
+          onClick={() => copiar('url')}
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-2 text-xs font-semibold text-[#1A1A1A] hover:bg-[#F9FAFB] transition"
+        >
+          {copiado === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          {copiado === 'url' ? 'Copiado' : 'Copiar enlace'}
+        </button>
+        <button
+          type="button"
+          onClick={() => copiar('mensaje')}
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-2 text-xs font-semibold text-[#1A1A1A] hover:bg-[#F9FAFB] transition"
+        >
+          {copiado === 'mensaje' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          {copiado === 'mensaje' ? 'Copiado' : 'Copiar mensaje'}
+        </button>
+      </div>
+
+      {puedeRotar && (
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={rotar}
+            disabled={rotando}
+            className="inline-flex items-center gap-1.5 text-xs text-[#6B7280] hover:text-[#1A1A1A] transition disabled:opacity-50"
+          >
+            {rotando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Cambiar el enlace
+          </button>
+          <span className="text-[11px] text-[#9CA3AF]">
+            Úsalo si el enlace se filtró. El anterior deja de servir.
+          </span>
+        </div>
+      )}
+      {errorRotar && <p className="mt-2 text-xs text-[#B91C1C]">{errorRotar}</p>}
+    </div>
+  );
+}
+
 export default function VinculacionClient({
   inicial,
   error: errorInicial,
+  enlace: enlaceInicial,
+  errorEnlace,
+  puedeRotar,
+  empresa,
 }: {
   inicial: BandejaVinculacion | null;
   error: string | null;
+  enlace: EnlaceSolicitud | null;
+  errorEnlace: string | null;
+  puedeRotar: boolean;
+  empresa: string;
 }) {
   const [bandeja, setBandeja] = useState(inicial);
   const [error, setError] = useState<string | null>(errorInicial);
@@ -88,6 +222,13 @@ export default function VinculacionClient({
         La contraparte sube sus documentos por un enlace propio y el sistema los lee. Acá revisas lo
         que quedó y decides si la vinculas.
       </p>
+
+      <TarjetaEnlace
+        enlace={enlaceInicial}
+        error={errorEnlace}
+        puedeRotar={puedeRotar}
+        empresa={empresa}
+      />
 
       {error && (
         <div className="mb-5 rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-4">

@@ -221,18 +221,28 @@ const dormir = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
  * Mensaje legible a partir del cuerpo de error de Siigo, que llega como
  * `{ Status, Errors: [{ Code, Message, Params, Detail }] }`. Sin esto, el
  * operador ve "HTTP 400" y no qué campo rechazaron.
+ *
+ * ⚠️ `Detail` es el único campo que dice QUÉ dato rechazaron, y hasta el 2026-09-07 se
+ * descartaba. Siigo usa `Message` para textos genéricos que no se pueden accionar
+ * ("Your request could not be completed with the data you submitted. Please verify"),
+ * que es exactamente lo que llegó a la pantalla cuando falló el recibo de V0437 y dejó
+ * el fallo sin diagnóstico posible. Se agrega al final y solo cuando aporta algo que
+ * `Message` no dice ya.
  */
 function describirError(status: number, raw: string): SiigoError {
   try {
     const parsed = JSON.parse(raw) as {
-      Errors?: Array<{ Code?: string; Message?: string; Params?: string[] }>
+      Errors?: Array<{ Code?: string; Message?: string; Params?: string[]; Detail?: string }>
     }
     const errs = parsed.Errors ?? []
     if (errs.length > 0) {
       const detalle = errs
         .map(e => {
           const params = e.Params?.length ? ` (${e.Params.join(', ')})` : ''
-          return `${e.Message ?? e.Code ?? 'error'}${params}`
+          const base = `${e.Message ?? e.Code ?? 'error'}${params}`
+          const det = e.Detail?.trim()
+          // Siigo a veces repite el Message en Detail: no se muestra dos veces.
+          return det && det !== e.Message?.trim() ? `${base}: ${det}` : base
         })
         .join(' · ')
       return new SiigoError(detalle, status, errs.map(e => e.Code ?? '').filter(Boolean))

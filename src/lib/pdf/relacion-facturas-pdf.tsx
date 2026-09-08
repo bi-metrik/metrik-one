@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { nitConGuion } from '@/lib/dian/nit'
 import { titularesDeDatos, concordancia } from './titulares'
+import { MESES, fmtCurrency } from './formato'
 
 interface RelacionFacturasProps {
   datos: {
@@ -27,15 +28,6 @@ interface RelacionFacturasProps {
   fechaGeneracion: string
   codigoNegocio: string
 }
-
-const fmtCurrency = (v: string | null) => {
-  if (!v) return '—'
-  const n = Number(v)
-  if (isNaN(n)) return v
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
-const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
 
 const s = StyleSheet.create({
   page: { paddingTop: 50, paddingBottom: 60, paddingHorizontal: 50, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.5 },

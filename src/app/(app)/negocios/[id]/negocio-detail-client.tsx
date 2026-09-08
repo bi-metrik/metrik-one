@@ -1147,6 +1147,7 @@ interface EtapaHistorialProps {
     id: string; concepto: string | null; monto: number; revisado: boolean
     tipo_cobro: string | null; fecha: string | null; fecha_esperada: string | null
     numero_cuota: number | null; vencido: boolean; notas: string | null; external_ref: string | null
+    siigo_recibo?: { numero?: string; archivo_url?: string | null } | null
   }>
   cotizacionesNegocio: CotizacionResumen[]
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number; precioAprobado?: number }

@@ -42,13 +42,34 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { siigoRequest, getSiigoConfig, claveIdempotencia, SiigoError, type SiigoConfig } from './client'
-import { borradorRecibo, type BorradorRecibo } from './mapeo'
+import { borradorRecibo, SUCURSAL_POR_DEFECTO, type BorradorRecibo } from './mapeo'
 import { asegurarClienteSiigo } from './clientes'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { renderReciboCaja } from '@/lib/pdf/pdf-render-client'
 
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
 const ESPERA_429_EMISION_MS = 30_000
+
+const hoyISO = () => new Date().toISOString().slice(0, 10)
+
+/**
+ * ¿Siigo rechazó esto porque el periodo contable está cerrado?
+ *
+ * Se reconoce por el TEXTO porque Siigo no da un código estable para esto: el `Code`
+ * que acompaña estos rechazos es el genérico de validación, el mismo de un NIT malo o
+ * un valor inválido. Por eso el reconocimiento es deliberadamente estrecho: exige que
+ * el mensaje hable a la vez de la fecha y del periodo. Un falso positivo aquí no es
+ * cosmético, emitiría un recibo con otra fecha por un problema que era otro.
+ */
+function esPeriodoCerrado(e: unknown): boolean {
+  if (!(e instanceof SiigoError)) return false
+  const m = e.message.toLowerCase()
+  const hablaDeFecha = m.includes('date') || m.includes('fecha')
+  const hablaDePeriodo =
+    m.includes('period') || m.includes('periodo') || m.includes('período') ||
+    m.includes('closed') || m.includes('cerrado')
+  return hablaDeFecha && hablaDePeriodo
+}
 
 /** Lo que queda escrito en el negocio cuando el recibo se emite. */
 export interface MarcaRecibo {
@@ -58,6 +79,17 @@ export interface MarcaRecibo {
   archivo_url: string | null
   at: string
   por: string | null
+  /** Fecha del DOCUMENTO en Siigo. Puede no ser la del pago: ver `fecha_motivo`. */
+  fecha?: string
+  /** Cuándo entró la plata. Es la que el cliente reconoce. */
+  fecha_pago?: string
+  /**
+   * Por qué el documento no lleva la fecha del pago.
+   *
+   * Se guarda en vez de confiar en que alguien recuerde: cuando alguien pregunte por
+   * qué un recibo tiene dos fechas, la respuesta está en el dato (Mauricio, 2026-09-07).
+   */
+  fecha_motivo?: string | null
 }
 
 export type ResultadoRecibo =
@@ -156,7 +188,7 @@ export async function emitirReciboDeCobro(
   // ── 0. El cobro, que es de donde cuelga todo ──
   const { data: cobroRaw, error: errCobro } = await db(svc)
     .from('cobros')
-    .select('id, negocio_id, monto, siigo_recibo, anulado_at')
+    .select('id, negocio_id, monto, fecha, siigo_recibo, anulado_at')
     .eq('id', cobroId)
     .eq('workspace_id', workspaceId)
     .single()
@@ -165,6 +197,7 @@ export async function emitirReciboDeCobro(
   const cobro = cobroRaw as {
     negocio_id: string | null
     monto: number | null
+    fecha: string | null
     siigo_recibo: MarcaRecibo | null
     anulado_at: string | null
   }
@@ -206,6 +239,13 @@ export async function emitirReciboDeCobro(
   if (cliente.estado === 'incompleto') return { ok: false, motivo: 'faltan_datos', faltantes: cliente.faltantes }
   if (cliente.estado === 'error') return { ok: false, motivo: 'error', mensaje: cliente.mensaje }
   const identificacion = cliente.identificacion
+  // ⚠️ En el PDF va el nombre del TERCERO, no el del negocio.
+  //
+  // `negocios.nombre` en SOENA trae el vehículo pegado ("JORGE ANDRES SUESCUN CHACON -
+  // DEEPAL S05 MAX"), y eso salió impreso en RC-1-67 como si fuera la razón social. El
+  // nombre del tercero se arma del RUT y es el mismo que quedó en el asiento contable.
+  // Si no se pudo releer el RUT se cae al del negocio, que es peor pero no vacío.
+  const nombreParaDocumento = cliente.nombre ?? negocio.nombre
 
   try {
     const cfg = await getSiigoConfig(workspaceId)
@@ -220,22 +260,62 @@ export async function emitirReciboDeCobro(
     }
 
     // ── 5. Emitir ──
-    const hoy = new Date().toISOString().slice(0, 10)
-    const { payload, faltantes } = borradorRecibo(cfg, identificacion, valorPagado, hoy, concepto)
+    // ── La fecha es la del COBRO, no la de hoy ──
+    // Decisión de Mauricio (2026-09-07). El recibo acusa plata que YA entró: fecharlo
+    // hoy diría que entró hoy. Medido el 2026-09-04 sobre los 48 pagos sin recibo y sin
+    // facturar, el más viejo era del 17 de febrero: con la fecha de emisión, ese cliente
+    // habría recibido un "recibimos tu pago" siete meses tarde y Siigo habría registrado
+    // en septiembre plata de febrero.
+    const fechaPago = cobro.fecha ?? hoyISO()
+    let fechaRecibo = fechaPago
+    let motivoFechaDistinta: string | null = null
+
+    // Siigo resuelve el tercero por identificación MÁS sucursal: un cliente que vive
+    // en la sucursal 1 no existe si se le pregunta por la 0, y responde
+    // `The customer doesn't exist`, que suena a otra cosa. Sin dato conocido va la
+    // principal, igual que siempre. Se resuelve UNA vez porque el reintento por
+    // periodo cerrado vuelve a armar el borrador: dos copias se desincronizarían y
+    // el reintento perdería la sucursal justo en los casos más viejos.
+    const sucursalDelCliente = cliente.branch_office ?? SUCURSAL_POR_DEFECTO
+
+    const { payload, faltantes } = borradorRecibo(
+      cfg, identificacion, valorPagado, fechaRecibo, concepto, sucursalDelCliente,
+    )
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 
-    const creado = await siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
-      workspaceId, '/v1/vouchers',
-      {
-        method: 'POST',
-        body: payload satisfies BorradorRecibo,
-        // Determinista desde el COBRO: un reintento no produce un segundo recibo, y dos
-        // cobros del mismo negocio no chocan entre sí (con la clave por negocio, el
-        // segundo recibo habría recibido de vuelta el primero).
-        idempotencyKey: claveIdempotencia(cobroId, 'rc'),
-        maxEspera429Ms: ESPERA_429_EMISION_MS,
-      },
-    )
+    // Determinista desde el COBRO: un reintento no produce un segundo recibo, y dos
+    // cobros del mismo negocio no chocan entre sí (con la clave por negocio, el segundo
+    // recibo habría recibido de vuelta el primero).
+    const clave = claveIdempotencia(cobroId, 'rc')
+    const emitir = (cuerpo: BorradorRecibo) =>
+      siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
+        workspaceId, '/v1/vouchers',
+        { method: 'POST', body: cuerpo, idempotencyKey: clave, maxEspera429Ms: ESPERA_429_EMISION_MS },
+      )
+
+    let creado: { id?: string; name?: string; number?: number; date?: string }
+    try {
+      creado = await emitir(payload)
+    } catch (e) {
+      // ⚠️ El ÚNICO rechazo que se reintenta es el del periodo contable cerrado.
+      //
+      // Un pago de febrero no se puede asentar en un mes que ya se cerró, y eso no es
+      // un defecto de Siigo: es contabilidad. La alternativa era dejar 20 pagos viejos
+      // ($8.1M, medido el 2026-09-07) sin recibo para siempre.
+      //
+      // Se reintenta con la fecha de HOY y el PDF sigue mostrando la del pago, así que
+      // el cliente ve su fecha real y el documento queda en un periodo que la admite.
+      // Cualquier otro error se propaga: tratarlos todos como periodo cerrado
+      // convertiría un dato malo en un recibo con fecha cambiada y sin nadie mirando.
+      if (!esPeriodoCerrado(e)) throw e
+
+      motivoFechaDistinta = `Siigo rechazó la fecha del pago (${fechaPago}) por periodo contable cerrado`
+      fechaRecibo = hoyISO()
+      const reintento = borradorRecibo(
+        cfg, identificacion, valorPagado, fechaRecibo, concepto, sucursalDelCliente,
+      )
+      creado = await emitir(reintento.payload)
+    }
 
     const numero = creado.name ?? '(sin número)'
 
@@ -248,8 +328,9 @@ export async function emitirReciboDeCobro(
       try {
         const pdf = await renderReciboCaja('soena', {
           numero,
-          fecha: creado.date ?? hoy,
-          cliente_nombre: negocio.nombre,
+          fecha: creado.date ?? fechaRecibo,
+          fecha_pago: fechaPago,
+          cliente_nombre: nombreParaDocumento,
           cliente_identificacion: identificacion,
           negocio_codigo: negocio.codigo ?? '',
           valor: valorPagado,
@@ -281,6 +362,9 @@ export async function emitirReciboDeCobro(
       archivo_url: archivoUrl,
       at: new Date().toISOString(),
       por: staffNombre,
+      fecha: creado.date ?? fechaRecibo,
+      fecha_pago: fechaPago,
+      fecha_motivo: motivoFechaDistinta,
     }
 
     const { error: errUp } = await db(svc)

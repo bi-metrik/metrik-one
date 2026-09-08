@@ -380,7 +380,16 @@ export async function renderGuiaDevolucion(
 export interface ReciboCajaRenderPayload {
   /** Consecutivo OFICIAL que asignó Siigo (RC-1-NN). Es el respaldo del cliente. */
   numero: string
+  /** Fecha del DOCUMENTO en Siigo: la que amarra al consecutivo. */
   fecha: string
+  /**
+   * Cuándo entró la plata.
+   *
+   * Casi siempre igual a `fecha`. Difiere cuando Siigo rechazó la fecha real por
+   * periodo contable cerrado y el recibo tuvo que emitirse con la de hoy: ahí esta es
+   * la única que dice la verdad, y es la que el cliente reconoce (Mauricio, 2026-09-07).
+   */
+  fecha_pago: string
   cliente_nombre: string
   cliente_identificacion: string
   negocio_codigo: string
@@ -422,6 +431,10 @@ export async function renderReciboCaja(
         // una fecha en formato de base de datos.
         valor_fmt: `$${Math.round(data.valor).toLocaleString('es-CO')}`,
         fecha: fechaLegible(data.fecha),
+        // Las DOS fechas se formatean. Formatear solo una imprimió "31 de marzo de
+        // 2026" junto a "2026-03-31" en RC-1-67: el mismo día escrito de dos formas,
+        // una de ellas en formato de base de datos, en un documento al cliente.
+        fecha_pago: fechaLegible(data.fecha_pago),
       },
     }),
   })

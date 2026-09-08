@@ -12,12 +12,16 @@ import {
   type NegocioDelMismoContacto,
 } from '../../../negocios/negocio-v2-actions'
 import { DialogoNegocioDuplicado } from '@/components/negocios/dialogo-negocio-duplicado'
-import { formatCOP } from '@/lib/contacts/constants'
 import { origenDesdeFuenteInteraccion } from '@/lib/negocios/constants'
 import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import type { InteraccionContacto, OrigenContacto } from '../../actions'
 import { formatFecha } from '@/lib/dates/bogota'
 import { resumenCampanasContacto, textoPayload } from '@/lib/contactos/campanas'
+import {
+  resumenDelFormulario,
+  detectarTipoPersona,
+  type CampoFormulario,
+} from '@/lib/contactos/campos-formulario'
 
 // ── Presentación por fuente / estado ────────────────────────────────
 const FUENTE_META: Record<string, { label: string; icon: typeof Megaphone; class: string }> = {
@@ -33,57 +37,6 @@ const ESTADO_META: Record<string, { label: string; class: string }> = {
   descartada: { label: 'Descartada', class: 'bg-slate-100 text-slate-500' },
   convertida: { label: 'Convertida', class: 'bg-green-50 text-green-700' },
   posible_duplicado: { label: 'Posible duplicado', class: 'bg-red-50 text-red-700' },
-}
-
-// Campos del field_data que resumimos (nombre candidato → etiqueta). Tolerante:
-// si el campo no está o llega sin values, simplemente no se muestra. `money`
-// formatea el valor como COP.
-const CAMPOS_RESUMEN: Array<{ names: string[]; label: string; money?: boolean }> = [
-  { names: ['¿qué_tipo_de_vehículo_adquiriste?', 'tipo_vehiculo', 'tipo_de_vehiculo'], label: 'Vehículo' },
-  { names: ['marca_-línea_-modelo__(_byd_-yuan_-2026)', 'marca_linea_modelo', 'marca'], label: 'Marca/modelo' },
-  {
-    names: ['precio_de_el(los)_vehículo(s)._pesos_colombianos', 'precio', 'precio_declarado', 'valor'],
-    label: 'Precio declarado',
-    money: true,
-  },
-  { names: ['persona_natural_o_jurídica', 'tipo_persona'], label: 'Tipo persona' },
-]
-
-// Formatea un valor de precio declarado. Tolera "$", puntos y comas de miles.
-// Si extrae un número, lo formatea como COP; si no, deja el texto limpio.
-function formatPrecio(v: string): string {
-  const digits = v.replace(/[^\d]/g, '')
-  if (digits.length > 0) {
-    const n = Number(digits)
-    if (Number.isFinite(n) && n > 0) return formatCOP(n)
-  }
-  return limpiar(v)
-}
-
-type FieldDatum = { name?: string; values?: string[] }
-
-function leer(fieldData: FieldDatum[], names: string[]): string | null {
-  for (const n of names) {
-    const f = fieldData.find((fd) => fd.name?.toLowerCase() === n.toLowerCase())
-    // Tolerar campos sin `values` o vacíos.
-    if (f?.values?.length && f.values[0]?.trim()) return f.values[0].trim()
-  }
-  return null
-}
-
-// Limpia un valor declarado: quita relleno con guiones bajos y capitaliza enums.
-function limpiar(v: string): string {
-  const t = v.replace(/_+$/g, '').replace(/_/g, ' ').trim()
-  return t.charAt(0).toUpperCase() + t.slice(1)
-}
-
-function detectarTipoPersona(fieldData: FieldDatum[]): 'natural' | 'juridica' | null {
-  const raw = leer(fieldData, ['persona_natural_o_jurídica', 'tipo_persona'])
-  if (!raw) return null
-  const norm = raw.trim().toLowerCase().replace(/_+$/, '')
-  if (norm.startsWith('natural')) return 'natural'
-  if (norm.startsWith('jur')) return 'juridica'
-  return null
 }
 
 function formatFechaInteraccion(iso: string | null): string {
@@ -193,18 +146,14 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
   const fuente = FUENTE_META[it.fuente] ?? FUENTE_META.manual
   const FuenteIcon = fuente.icon
   const estado = ESTADO_META[it.estado] ?? ESTADO_META.nueva
-  const fieldData = ((it.payload?.field_data ?? []) as FieldDatum[])
+  const fieldData = ((it.payload?.field_data ?? []) as CampoFormulario[])
   const tipoDetectado = detectarTipoPersona(fieldData)
   const campana = textoPayload(it, 'campaign_name')
   const anuncio = textoPayload(it, 'ad_name')
 
-  const resumen = CAMPOS_RESUMEN
-    .map((c) => {
-      const v = leer(fieldData, c.names)
-      if (!v) return null
-      return { label: c.label, value: c.money ? formatPrecio(v) : limpiar(v) }
-    })
-    .filter((x): x is { label: string; value: string } => x !== null)
+  // Lo que el lead contestó, sin lista quemada: la regla vive en
+  // `lib/contactos/campos-formulario`. Aquí solo queda la presentación.
+  const resumen = resumenDelFormulario(fieldData)
 
   const yaConvertida = it.estado === 'convertida'
   const cerrada = it.estado === 'descartada'
@@ -244,13 +193,18 @@ function InteraccionRow({ it }: { it: InteraccionContacto }) {
         </div>
       )}
 
-      {/* Resumen del payload */}
+      {/* Lo que el lead contestó en el formulario. Las etiquetas salen del propio
+          nombre del campo, así que llegan largas y en forma de pregunta: se
+          dejan envolver (`break-words`) en vez de truncarse. Truncar el valor
+          sería volver a esconder la respuesta — "$100 - $200 millones" en media
+          columna de 375 px se leería "$100 - $2…". Una interacción sin
+          `field_data` (manual, whatsapp) no pinta el bloque. */}
       {resumen.length > 0 && (
         <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
           {resumen.map((r) => (
-            <div key={r.label} className="min-w-0">
-              <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</dt>
-              <dd className="truncate text-xs font-medium">{r.value}</dd>
+            <div key={r.name} className="min-w-0">
+              <dt className="break-words text-[10px] uppercase tracking-wide text-muted-foreground">{r.label}</dt>
+              <dd className="break-words text-xs font-medium">{r.value}</dd>
             </div>
           ))}
         </dl>

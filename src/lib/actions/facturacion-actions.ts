@@ -25,7 +25,15 @@ import {
   type ConceptosConfig,
   type ServicioContratado,
 } from '@/lib/siigo/concepto'
-import { emitirFacturaNegocio, type FacturaEnSiigo, type MarcaFactura } from '@/lib/siigo/facturas'
+import {
+  adoptarFacturaDeSiigo,
+  emitirFacturaNegocio,
+  facturasAdoptablesDelNegocio,
+  type FacturaAdoptable,
+  type FacturaEnSiigo,
+  type FacturaHermana,
+  type MarcaFactura,
+} from '@/lib/siigo/facturas'
 import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
 import { descuadreConciliacion, tarifaConfirmadaPorNegocio } from '@/lib/upme/modelo-dinero'
@@ -104,10 +112,15 @@ export interface CasoPorFacturar {
   ya_facturado: boolean
   /** Número de la factura, cuando la emitió ONE contra Siigo. */
   factura_numero: string | null
+  /**
+   * `true` si el negocio tiene marca de factura pero su PDF **no** quedó en el
+   * bloque. Son los casos que hay que re-archivar: medido el 2026-09-07, V0076
+   * (FV-2-459) y V0177 (FV-2-373). Sin decirlo en pantalla, nadie los distingue
+   * de un caso completo — la marca se ve igual.
+   */
+  factura_sin_pdf: boolean
   /** Consecutivo del recibo de caja del recaudo UPME, si ya se emitió. */
   recibo_numero: string | null
-  /** Pagos registrados y no anulados que todavía no tienen recibo de caja. */
-  pagos_sin_recibo: number
   /**
    * Base gravable que viajaría a Siigo. Sale del MISMO `borradorFactura` que se
    * enviaría, no de una división hecha en la pantalla: si la pantalla calculara
@@ -360,15 +373,13 @@ async function armarColaFacturacion(
   const cobrosPorNegocio = new Map<string, CobroParaRecaudo[]>()
   // El recibo de caja cuelga del COBRO desde el 2026-09-03, así que su estado se lee
   // de ahí y no de `negocios.metadata`. Un negocio puede tener varios: se muestra el
-  // último emitido, y aparte cuántos pagos siguen sin acusar.
+  // último emitido.
   const ultimoReciboPorNegocio = new Map<string, string>()
-  const pagosSinReciboPorNegocio = new Map<string, number>()
   for (const c of cobrosRes) {
     if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
     cobrosPorNegocio.get(c.negocio_id)!.push(c)
     if (c.anulado_at) continue
     if (c.siigo_recibo?.numero) ultimoReciboPorNegocio.set(c.negocio_id, c.siigo_recibo.numero)
-    else pagosSinReciboPorNegocio.set(c.negocio_id, (pagosSinReciboPorNegocio.get(c.negocio_id) ?? 0) + 1)
   }
   const conciliados = new Set(
     conciliadoRes.filter(x => x.conciliado === true).map(x => x.negocio_id),
@@ -515,8 +526,8 @@ async function armarColaFacturacion(
       // re-facturarse.
       ya_facturado: facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero,
       factura_numero: marcaFactura?.numero ?? null,
+      factura_sin_pdf: !!marcaFactura?.numero && !marcaFactura.archivo_url,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
-      pagos_sin_recibo: pagosSinReciboPorNegocio.get(n.id) ?? 0,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,
       descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
@@ -681,10 +692,41 @@ export interface ResultadoEmitir {
   archivada?: boolean
   error?: string
   /**
-   * Siigo ya tiene factura de este producto para el cliente. La pantalla debe
+   * Facturas del cliente que **ningún negocio reclama**. La pantalla debe
    * mostrarlas y pedir justificación; NO se emite hasta que alguien la escriba.
    */
   duplicados?: FacturaEnSiigo[]
+  /**
+   * Facturas del mismo cliente que ya son de OTRO negocio (el otro vehículo del
+   * mismo dueño). Van como contexto neutro al lado de las de arriba: no bloquean
+   * ni piden justificación, y por sí solas nunca detienen una emisión.
+   */
+  hermanos?: FacturaHermana[]
+}
+
+/**
+ * Dónde archivar el PDF de la factura: se declara por línea, junto al resto de la
+ * config de Siigo. Sin el dato la factura sale igual, pero el archivo no queda en
+ * el expediente y la pantalla lo dice, en vez de callarlo.
+ *
+ * Lo consultan la emisión y la adopción: escrito dos veces, un día un camino
+ * archivaría y el otro no, y la diferencia solo se vería abriendo el negocio.
+ */
+async function slugDelBloqueDeFactura(
+  workspaceId: string,
+  negocioId: string,
+): Promise<string | undefined> {
+  const svc = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negLinea } = await (svc as any)
+    .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+  if (!negLinea?.linea_id) return undefined
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: linea } = await (svc as any)
+    .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
+  const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
+    { bloque_factura_slug?: string } | undefined
+  return cfgSiigo?.bloque_factura_slug
 }
 
 /**
@@ -737,21 +779,7 @@ export async function emitirFacturaDeNegocio(
     (conc as { conciliado: boolean } | null)?.conciliado === true,
   )
 
-  // Dónde archivar el PDF: se declara por línea, junto al resto de la config de
-  // Siigo. Sin el dato la factura sale igual, pero el archivo no queda en el
-  // expediente y la pantalla lo dice, en vez de callarlo.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: negLinea } = await (svc as any)
-    .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
-  let bloqueFacturaSlug: string | undefined
-  if (negLinea?.linea_id) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: linea } = await (svc as any)
-      .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
-    const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
-      { bloque_factura_slug?: string } | undefined
-    bloqueFacturaSlug = cfgSiigo?.bloque_factura_slug
-  }
+  const bloqueFacturaSlug = await slugDelBloqueDeFactura(workspaceId, negocioId)
 
   // El concepto que llega de la pantalla se valida contra el CATÁLOGO antes de
   // emitir. Un código que Siigo no conoce tumbaría la factura a mitad de camino;
@@ -795,7 +823,12 @@ export async function emitirFacturaDeNegocio(
   if (!r.ok) {
     switch (r.motivo) {
       case 'duplicado_en_siigo':
-        return { ok: false, duplicados: r.existentes, error: 'Siigo ya tiene una factura de este servicio para el cliente' }
+        return {
+          ok: false,
+          duplicados: r.existentes,
+          hermanos: r.hermanos,
+          error: 'Siigo ya tiene una factura de este cliente que ningún negocio reclama',
+        }
       case 'saldo_pendiente': {
         const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
         return { ok: false, error: `Falta recaudar ${fmt.format(r.faltante)} del honorario` }
@@ -827,6 +860,129 @@ export async function emitirFacturaDeNegocio(
 
   revalidatePath('/conciliacion')
   return { ok: true, numero: r.numero, borrador: !r.emitida, archivada: r.archivada }
+}
+
+// ── Adoptar una factura que YA existe en Siigo ───────────────────────────────
+//
+// Requisito de Mauricio (2026-09-07): que el bloque de factura quede completo con
+// la factura ORIGINAL, para que el comercial la jale de ahí y se la mande al
+// cliente. La emisión no sirve para eso — esa factura ya existe.
+//
+// ⚠️ No empareja sola, y esa es la decisión, no una limitación. El backfill de
+// agosto emparejaba por identificación y se quedaba con la primera; Mauricio
+// rechazó 7 de esos emparejamientos el 2026-08-10 (respaldo
+// `backup_marcas_factura_20260810`). Aquí se ve la lista completa del cliente,
+// una persona escoge, y confirma de a un caso.
+
+export interface FacturasParaAdoptar {
+  /** Identificación con la que se consultó Siigo, para poder verificarla a ojo. */
+  identificacion: string
+  facturas: FacturaAdoptable[]
+}
+
+/**
+ * Lista TODAS las facturas que Siigo tiene para el cliente del negocio.
+ *
+ * Solo lee. Se llama al abrir el panel, no al cargar la cola: son 306 casos y
+ * sería una llamada a Siigo por fila.
+ */
+export async function listarFacturasSiigoDelNegocio(
+  negocioId: string,
+): Promise<{ data: FacturasParaAdoptar | null; error?: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { data: null, error: ctx.error }
+
+  const r = await facturasAdoptablesDelNegocio(ctx.workspaceId, negocioId)
+  if (!r.ok) {
+    return {
+      data: null,
+      error: r.motivo === 'sin_identificacion'
+        ? 'El negocio no tiene identificación del cliente: sin ella no se puede preguntar en Siigo'
+        : `No se pudo consultar Siigo: ${r.mensaje}`,
+    }
+  }
+  return { data: { identificacion: r.identificacion, facturas: r.facturas } }
+}
+
+export interface ResultadoAdoptar {
+  ok: boolean
+  numero?: string
+  /** El negocio ya la tenía marcada: esto solo repuso el PDF en el bloque. */
+  rearchivada?: boolean
+  error?: string
+}
+
+/**
+ * Marca en el negocio una factura que ya existe en Siigo y trae su PDF.
+ *
+ * Lo que viaja del cliente es el id de la factura y nada más; a quién pertenece,
+ * si está libre y dónde se archiva se re-resuelve aquí. Una acción de servidor es
+ * una puerta pública: que la pantalla solo ofrezca facturas del cliente no
+ * garantiza que el id que llega sea una de ellas.
+ */
+export async function adoptarFacturaSiigoDeNegocio(
+  negocioId: string,
+  siigoFacturaId: string,
+): Promise<ResultadoAdoptar> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { workspaceId } = ctx
+
+  const id = (siigoFacturaId ?? '').trim()
+  if (!id) return { ok: false, error: 'Falta la factura a adoptar' }
+
+  const { staffId } = await getWorkspace()
+  const svc = createServiceClient()
+
+  let nombre: string | null = null
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
+    nombre = (st?.full_name as string | null) ?? null
+  }
+
+  const bloqueFacturaSlug = await slugDelBloqueDeFactura(workspaceId, negocioId)
+
+  const r = await adoptarFacturaDeSiigo(workspaceId, negocioId, id, nombre, {
+    bloqueFacturaSlug,
+    staffId,
+  })
+
+  if (!r.ok) {
+    switch (r.motivo) {
+      case 'no_es_del_cliente':
+        return { ok: false, error: 'Esa factura no aparece entre las del cliente de este negocio' }
+      case 'reclamada_por_otro':
+        return { ok: false, error: `Esa factura ya está marcada en ${r.codigo ?? 'otro negocio'}` }
+      case 'ya_facturado_en_one':
+        return { ok: false, error: `Este negocio ya tiene la factura ${r.numero}` }
+      case 'sin_identificacion':
+        return { ok: false, error: 'El negocio no tiene identificación del cliente' }
+      case 'sin_pdf':
+        return { ok: false, error: 'Siigo no entregó el PDF de esa factura. No se guardó nada: se puede reintentar' }
+      default:
+        return { ok: false, error: r.mensaje }
+    }
+  }
+
+  if (staffId) {
+    // `tipo` DEBE estar en el CHECK de activity_log o el insert falla en silencio.
+    // `autor_id` es FK a staff(id), NO a profiles.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await registrarActividad((svc as any), {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      contenido: r.rearchivada
+        ? `PDF de la factura ${r.numero} traído de nuevo desde Siigo`
+        : `Factura ${r.numero} adoptada desde Siigo (no la emitió ONE)`,
+    }, 'adoptarFacturaSiigoDeNegocio')
+  }
+
+  revalidatePath('/conciliacion')
+  return { ok: true, numero: r.numero, rearchivada: r.rearchivada }
 }
 
 // ── Recibo de caja del recaudo de la tarifa UPME ─────────────────────────────

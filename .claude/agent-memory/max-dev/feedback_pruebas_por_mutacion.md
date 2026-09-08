@@ -35,13 +35,56 @@ observable**; si no lo es, la prueba nueva estaría fijando un detalle interno, 
 es una que nadie sabrá si sigue haciendo algo. En los dos casos, dejar escrito en el
 docblock cuál mutación no cayó y qué se decidió.
 
+**⚠️ Matiz aprendido el 2026-09-05 (PR #532), que corrige el de arriba: una mutación
+huérfana puede volver a tener dueño, y el conteo anotado NO se cita de memoria.**
+
+1. **La línea muerta del #529 revivió.** El guard `tiposPresentes.has(...)` se había
+   borrado por no tumbar nada; al agregar `sinPresupuesto`, ese mismo guard pasó a
+   decidir si las horas cuentan contra el rubro o salen declaradas fuera — o sea que
+   volvió a cambiar un resultado observable, y ahora su mutación cae. **Borrar la línea
+   fue correcto entonces y volver a ponerla fue correcto ahora**: lo que decide no es
+   la simetría del código sino si el comportamiento es observable desde la API pública.
+2. **Los conteos del docblock caducan como cualquier cifra.** Al re-correr las 7
+   mutaciones que el #529 dejó anotadas, **dos habían cambiado** (la de reemplazar el
+   gasto de mano de obra pasó de 1 a 2 rojas). Y de mis 8 estimaciones nuevas, **tres
+   estaban mal** antes de medirlas. Se re-corren TODAS contra el archivo del día, con
+   un arnés (`_qa/mutar.py`: sustituye, corre vitest, restaura), y se anota lo medido.
+3. **Una prueba escrita desde la INTENCIÓN atrapa el defecto que uno acaba de escribir.**
+   La prueba "una enviada manda sobre un borrador" salió roja contra mi primera
+   implementación: yo ordenaba `[...enviadas, ...borradores]` como una sola lista, así
+   que un borrador nuevo tapaba una enviada vieja. Se corrigió el código, no la prueba.
+   Una prueba que solo repite lo que hace el código no habría dicho nada.
+
+**El mismo principio, aplicado a una comparación masiva contra producción
+(2026-09-03, PR #524).** Al migrar la tercera copia de la atribución de campaña al
+módulo compartido, la premisa era «sobre los datos reales las dos implementaciones
+dan lo mismo». Se volcaron los 983 contactos de SOENA y salieron **0 diferencias** —
+un verde que no prueba nada por sí solo: puede significar «equivalentes» o puede
+significar «el arnés compara mal». **La contraprueba es correr la misma comparación
+sobre una entrada donde SÍ deben diferir**: con las filas invertidas, 46 contactos
+discrepan. Ese segundo número es el que convierte el cero en evidencia.
+
+Regla derivada: **toda comparación A-vs-B que salga idéntica necesita una entrada
+control donde se espere que difiera.** Sin ella es la misma familia del gotcha del
+`CLAUDE.md` «una prueba que sale bien puede estar saliendo bien por la razón
+contraria».
+
 **How to apply:**
 - Para código nuevo: mutar la implementación (script que sustituye una línea, corre
   vitest, restaura) y anotar en el docblock **qué mutación tumbó qué prueba**.
 - Para un fix sobre código existente: correr las pruebas nuevas contra la versión
   vieja — `git show origin/main:<archivo> > <archivo>`, correr, restaurar. Si alguna
   pasa, el fixture no reproduce el defecto.
-- Ambas listas van en el encabezado del archivo de pruebas, con fecha. Es lo que
+- Para una migración de copia a módulo compartido: copiar la implementación vieja
+  **verbatim** dentro del arnés, compararla contra la nueva sobre las filas reales, y
+  agregar la entrada control que las separa.
+- ⚠️ **La mutación que sobrevive suele apuntar a un hueco que los datos de hoy no
+  pueden mostrar.** En el #524 sobrevivió «el conteo de formularios cuenta TODAS las
+  interacciones»: en SOENA las 720 son de Meta y las 720 declaran campaña, así que
+  ninguna fila real lo delata — pero la pantalla admite WhatsApp, web y manual. Se
+  cierra con un caso propio marcado como latente, no se descarta por no reproducirse.
+- Todas las listas van en el encabezado del archivo de pruebas, con fecha. Es lo que
   permite que quien lea dentro de seis meses sepa que el verde significa algo.
 
-Relacionado: [[medir-antes-de-construir]], [[techo-postgrest-1000-filas]].
+Relacionado: [[medir-antes-de-construir]], [[techo-postgrest-1000-filas]],
+[[cifras-del-brief-caducan]].

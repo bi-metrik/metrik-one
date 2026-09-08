@@ -52,6 +52,7 @@ const negocio = (p: Partial<NegocioExportable> & Pick<NegocioExportable, 'id'>):
   vehiculo_label: null,
   radicado: null,
   numero_factura: null,
+  fecha_cita: null,
   precio_aprobado: null,
   precio_estimado: null,
   horas_habiles_en_etapa: null,
@@ -133,6 +134,30 @@ describe('armarFilasExcel — pagos', () => {
     expect(filas[0]['Otros pagos']).toBeNull()
     expect(filas[1]['Primer pago monto']).toBeNull()
     expect(filas[1]['Primer pago fecha']).toBeNull()
+  })
+})
+
+describe('armarFilasExcel — fecha de la cita', () => {
+  it('sale como fecha de Excel, no como texto, y el caso sin cita queda vacío', () => {
+    const filas = armarFilasExcel(entrada({
+      negocios: [
+        negocio({ id: 'n1', fecha_cita: '2026-09-26' }),
+        negocio({ id: 'n2', fecha_cita: null }),
+      ],
+    }))
+    const cita = filas[0]['Fecha cita']
+    expect(cita).toBeInstanceOf(Date)
+    // El día que dice la casilla, no el de UTC: en Bogotá `new Date(iso)` lo correría atrás.
+    expect((cita as Date).getFullYear()).toBe(2026)
+    expect((cita as Date).getMonth()).toBe(8)
+    expect((cita as Date).getDate()).toBe(26)
+    expect(filas[1]['Fecha cita']).toBeNull()
+  })
+
+  it('va entre "Fecha venta" y "Fecha cierre", con las demás fechas', () => {
+    const i = ENCABEZADOS.indexOf('Fecha cita')
+    expect(ENCABEZADOS[i - 1]).toBe('Fecha venta')
+    expect(ENCABEZADOS[i + 1]).toBe('Fecha cierre')
   })
 })
 
@@ -287,9 +312,9 @@ describe('armarFilasExcel — identidad, personas y forma', () => {
     expect(filas[0]['Operaciones']).toBeNull()
   })
 
-  it('cada fila tiene exactamente las 49 columnas del spec, en su orden', () => {
+  it('cada fila tiene exactamente las 50 columnas del spec, en su orden', () => {
     const [f] = armarFilasExcel(entrada({ negocios: [negocio({ id: 'n1' })] }))
-    expect(ENCABEZADOS).toHaveLength(49)
+    expect(ENCABEZADOS).toHaveLength(50)
     expect(Object.keys(f)).toEqual([...ENCABEZADOS])
   })
 

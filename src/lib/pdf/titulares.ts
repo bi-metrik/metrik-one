@@ -18,6 +18,15 @@ export interface Titular {
   identificacion: string | null
   email?: string | null
   telefono?: string | null
+  /**
+   * Domicilio de ESTA persona. La declaración juramentada identifica a cada
+   * firmante con su propia dirección y ciudad ("domiciliado(a) en …, ciudad de
+   * …"): en copropiedad los dos propietarios pueden vivir en municipios
+   * distintos, y un documento que le atribuye a ambos el domicilio del primero
+   * es falso bajo juramento.
+   */
+  direccion?: string | null
+  municipio?: string | null
 }
 
 /** Los campos que un documento puede recibir por titular. */
@@ -26,10 +35,14 @@ export interface DatosTitulares {
   numero_identificacion?: string | null
   email?: string | null
   telefono?: string | null
+  direccion?: string | null
+  municipio?: string | null
   nombre_solicitante_2?: string | null
   numero_identificacion_2?: string | null
   email_2?: string | null
   telefono_2?: string | null
+  direccion_2?: string | null
+  municipio_2?: string | null
 }
 
 /**
@@ -51,6 +64,8 @@ export function titularesDeDatos(
     identificacion: datos.numero_identificacion?.trim() || null,
     email: datos.email ?? null,
     telefono: datos.telefono ?? null,
+    direccion: datos.direccion ?? null,
+    municipio: datos.municipio ?? null,
   }]
 
   const nombre2 = datos.nombre_solicitante_2?.trim()
@@ -60,6 +75,8 @@ export function titularesDeDatos(
       identificacion: datos.numero_identificacion_2?.trim() || null,
       email: datos.email_2 ?? null,
       telefono: datos.telefono_2 ?? null,
+      direccion: datos.direccion_2 ?? null,
+      municipio: datos.municipio_2 ?? null,
     })
   }
 
@@ -93,13 +110,19 @@ export function concordancia(cantidad: number) {
   return {
     plural,
     yo: plural ? 'Nosotros' : 'Yo',
-    // Va en SINGULAR incluso con dos firmantes: califica a cada persona por
+    // Van en SINGULAR incluso con dos firmantes: califican a cada persona por
     // separado ("ANA, identificada con NIT X, y LUIS, identificado con NIT Y").
     // El plural solo aplica al pronombre y a los verbos del cuerpo.
     identificado: 'identificado(a)',
+    domiciliado: 'domiciliado(a)',
     manifiesto: plural ? 'manifestamos' : 'manifiesto',
     declaro: plural ? 'Declaramos' : 'Declaro',
     solicitante: plural ? 'solicitantes' : 'solicitante',
     presento: plural ? 'presentamos' : 'presento',
+    soy: plural ? 'somos' : 'soy',
+    adquirente: plural ? 'los legítimos adquirentes y propietarios' : 'el legítimo adquirente y propietario',
+    personaNatural: plural
+      ? 'personas naturales no obligadas a llevar contabilidad'
+      : 'persona natural no obligada a llevar contabilidad',
   }
 }

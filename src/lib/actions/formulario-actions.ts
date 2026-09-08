@@ -314,17 +314,32 @@ function getTemplateComponent(
       return createElement(DeclaracionJuramentadaPDF, {
         datos: datos as {
           nombre_solicitante: string | null
+          // Cédula de ciudadanía, SIN dígito de verificación: la plantilla de la
+          // declaración juramentada identifica al firmante con C.C., no con NIT.
           numero_identificacion: string | null
-          tipo_vehiculo: string | null
-          email: string | null
-          telefono: string | null
+          direccion: string | null
           municipio: string | null
+          marca: string | null
+          linea: string | null
+          tipo_vehiculo: string | null
+          fecha_factura: string | null
+          proveedor: string | null
+          numero_factura: string | null
+          valor_unitario_sin_iva: string | null
+          valor_iva: string | null
+          // Certificado UPME: siguen `optional: true` en `campos_fuente`, pero como
+          // red de seguridad del render, no porque haya una rama sin certificado. La
+          // rama «solo IVA» se salta Certificación (etapa 9) y por eso el campo tiene
+          // `source_alternatives` hacia `concepto_upme_anexos` (Anexos, etapa 18),
+          // donde el proceso exige que el cliente lo entregue.
+          numero_caso_upme?: string | null
+          fecha_certificado?: string | null
           // Copropiedad: los declara la config del bloque (`campos_fuente`), y son
           // opcionales. Sin ellos el documento sale con un solo firmante.
           nombre_solicitante_2?: string | null
           numero_identificacion_2?: string | null
-          email_2?: string | null
-          telefono_2?: string | null
+          direccion_2?: string | null
+          municipio_2?: string | null
         },
         fechaGeneracion,
         codigoNegocio,
