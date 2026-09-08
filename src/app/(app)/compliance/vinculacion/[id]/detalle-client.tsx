@@ -31,6 +31,7 @@ import {
   etiquetaCampo,
   etiquetaParada,
   etiquetaSlot,
+  llegoElArchivo,
   faltantesPorSocio,
   exigeConstanciaSinLectura,
   mostrarValor,
@@ -197,14 +198,26 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
               <FileText className="w-4 h-4 text-[#9CA3AF] shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-[#1A1A1A]">{etiquetaSlot(doc.slot)}</p>
-                <p className="text-xs text-[#6B7280]">Subido el {fecha(doc.subido_en)}</p>
+                <p className="text-xs text-[#6B7280]">
+                  {llegoElArchivo(doc)
+                    ? `Subido el ${fecha(doc.subido_en)}`
+                    : `Se intentó el ${fecha(doc.subido_en)}, pero el archivo no llegó`}
+                </p>
               </div>
+              {/* Se deja la fila a la vista: que la contraparte lo haya
+                  intentado y se le haya cortado la subida es distinto de que
+                  nunca lo haya intentado, y el casillero aparece igual en
+                  "Falta subir". */}
               <span
                 className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold shrink-0 ${
-                  CHIP_EXTRACCION[doc.estado_extraccion ?? 'pendiente']
+                  llegoElArchivo(doc)
+                    ? CHIP_EXTRACCION[doc.estado_extraccion ?? 'pendiente']
+                    : 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30'
                 }`}
               >
-                {EXTRACCION_LABEL[doc.estado_extraccion ?? 'pendiente']}
+                {llegoElArchivo(doc)
+                  ? EXTRACCION_LABEL[doc.estado_extraccion ?? 'pendiente']
+                  : 'sin archivo'}
               </span>
             </div>
           ))}
