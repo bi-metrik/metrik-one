@@ -23,6 +23,14 @@
    - meter `cadena_sin_resolver` entre las que exigen constancia → cae 1
    - aprobar sin constancia un expediente de cadena incompleta → cae 1
    - `faltantesPorSocio` repite el mismo faltante dos veces → cae 1
+   - `llegoElArchivo` siempre true: el documento vuelve a contarse por la fila
+     y no por el archivo → caen 5
+   - `llegoElArchivo` exige el campo, así que una respuesta que todavía no lo
+     informa inventa documentos faltantes → caen 10
+   - `slotsFaltantes` no filtra por archivo → caen 3
+   - las alertas de lectura vuelven a mirar todo el kit y avisan de un
+     documento que no llegó como si estuviera en cola → caen 2
+   - lo mismo con los ilegibles → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,6 +56,7 @@ import {
   razonNoDecidible,
   resumirExpedientes,
   slotsFaltantes,
+  llegoElArchivo,
   validarMotivoRechazo,
   type ExpedienteCampo,
   type ExpedienteDoc,
@@ -193,6 +202,51 @@ describe('el motivo del rechazo', () => {
 
   it('acepta un motivo escrito de verdad', () => {
     expect(validarMotivoRechazo('Aparece en lista vinculante ONU')).toBeNull();
+  });
+});
+
+describe('un documento registrado que nunca llegó', () => {
+  const kit = ['rut', 'cedula_rl'];
+
+  it('cuenta como faltante, no como entregado', () => {
+    const docs = [doc({ doc_id: 'a', slot: 'rut', archivo_presente: false }), doc({ doc_id: 'b', slot: 'cedula_rl' })];
+    expect(slotsFaltantes(kit, docs)).toEqual(['rut']);
+  });
+
+  it('un documento de una respuesta que no informa el archivo se sigue dando por entregado', () => {
+    const docs = [doc({ doc_id: 'a', slot: 'rut' }), doc({ doc_id: 'b', slot: 'cedula_rl' })];
+    expect(slotsFaltantes(kit, docs)).toEqual([]);
+  });
+
+  it('no le pone al oficial dos alertas que se contradicen', () => {
+    const docs = [doc({ doc_id: 'a', slot: 'rut', estado_extraccion: 'pendiente', archivo_presente: false })];
+    const alertas = alertasDeExpediente(docs, [], kit);
+
+    expect(alertas.find((a) => a.clave === 'documentos_faltantes')?.cuantos).toBe(2);
+    expect(alertas.find((a) => a.clave === 'documentos_en_cola')).toBeUndefined();
+  });
+
+  it('el que sí llegó y está en cola sigue avisando', () => {
+    const docs = [
+      doc({ doc_id: 'a', slot: 'rut', estado_extraccion: 'pendiente', archivo_presente: false }),
+      doc({ doc_id: 'b', slot: 'cedula_rl', estado_extraccion: 'pendiente', archivo_presente: true }),
+    ];
+    const alertas = alertasDeExpediente(docs, [], kit);
+
+    expect(alertas.find((a) => a.clave === 'documentos_faltantes')?.cuantos).toBe(1);
+    expect(alertas.find((a) => a.clave === 'documentos_en_cola')?.cuantos).toBe(1);
+  });
+
+  it('tampoco se cuenta como ilegible: no es que no se pudiera leer, es que no está', () => {
+    const docs = [doc({ doc_id: 'a', slot: 'rut', estado_extraccion: 'failed', archivo_presente: false })];
+    const alertas = alertasDeExpediente(docs, [], kit);
+    expect(alertas.find((a) => a.clave === 'documentos_sin_leer')).toBeUndefined();
+  });
+
+  it('llegoElArchivo distingue los tres casos', () => {
+    expect(llegoElArchivo(doc({ archivo_presente: true }))).toBe(true);
+    expect(llegoElArchivo(doc({ archivo_presente: false }))).toBe(false);
+    expect(llegoElArchivo(doc())).toBe(true);
   });
 });
 

@@ -167,6 +167,13 @@ export type ExpedienteDoc = {
   size_bytes: number | null;
   subido_en: string | null;
   procesado_en: string | null;
+  /**
+   * Si detrás de la fila hay archivo de verdad. La fila se crea un paso antes
+   * de la subida, para poder firmar la URL, así que puede existir sin nada
+   * detrás. `undefined` es una respuesta de Valida que todavía no lo informa:
+   * ahí se asume que llegó, para no inventar documentos faltantes.
+   */
+  archivo_presente?: boolean | null;
 };
 
 export type ExpedienteCampo = {
@@ -343,11 +350,23 @@ function esVacio(v: unknown): boolean {
 }
 
 /** Slots del kit que todavía no tienen documento subido. */
+/**
+ * Un documento registrado sin archivo detrás no es un documento entregado.
+ *
+ * Contarlo como entregado le decía al oficial que faltaba LEER algo que en
+ * realidad faltaba ENTREGAR, y a la contraparte le dejaba el casillero en
+ * verde. Ninguno de los dos hacía lo único que resuelve el caso, que es
+ * volver a subirlo.
+ */
+export function llegoElArchivo(d: ExpedienteDoc): boolean {
+  return d.archivo_presente !== false;
+}
+
 export function slotsFaltantes(
   kit: readonly string[],
   docs: readonly ExpedienteDoc[],
 ): string[] {
-  const subidos = new Set(docs.map((d) => d.slot));
+  const subidos = new Set(docs.filter(llegoElArchivo).map((d) => d.slot));
   return kit.filter((slot) => !subidos.has(slot));
 }
 
@@ -364,6 +383,11 @@ export function alertasDeExpediente(
   // documentos que el kit nunca pidió, y la cadena tiene su propia alerta.
   const delKit = docs.filter((d) => !d.persona_id);
 
+  // Lo que nunca llegó ya se cuenta como faltante. Pasarlo además por las
+  // alertas de lectura le pone al oficial dos avisos del mismo documento que
+  // se contradicen: uno dice que falta, el otro que está esperando turno.
+  const entregados = delKit.filter(llegoElArchivo);
+
   const faltantes = slotsFaltantes(kit, delKit);
   if (faltantes.length > 0) {
     alertas.push({
@@ -376,7 +400,7 @@ export function alertasDeExpediente(
     });
   }
 
-  const enCola = documentosEnCola(delKit);
+  const enCola = documentosEnCola(entregados);
   if (enCola.length > 0) {
     alertas.push({
       clave: 'documentos_en_cola',
@@ -388,7 +412,7 @@ export function alertasDeExpediente(
     });
   }
 
-  const ilegibles = documentosIlegibles(delKit);
+  const ilegibles = documentosIlegibles(entregados);
   if (ilegibles.length > 0) {
     alertas.push({
       clave: 'documentos_sin_leer',

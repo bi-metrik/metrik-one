@@ -72,6 +72,8 @@ export type DocumentoPublico = {
   slot: string;
   persona_id?: string | null;
   estado_extraccion: string | null;
+  /** Si detrás de la fila hay archivo. `kit[].cargado` ya sale de esto. */
+  archivo_presente?: boolean | null;
   subido_en: string | null;
 };
 
