@@ -1250,7 +1250,8 @@ function TabFacturacion(
   )
 }
 
-function FilaPorFacturar({
+/** Exportada para la prueba de render: lo que se afirma es qué OFRECE la tarjeta. */
+export function FilaPorFacturar({
   caso, descarteAbierto, siigoConfigurado, productos, onCambio,
 }: {
   caso: CasoPorFacturar

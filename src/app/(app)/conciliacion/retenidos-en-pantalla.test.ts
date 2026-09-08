@@ -18,13 +18,16 @@
  * $425.000 de $850.000 (50%), y buscarlo y no encontrarlo era lo que se leía como
  * que el buscador estaba roto.
  *
- * ⚠️ Estas pruebas NO renderizan: vitest corre con `environment: 'node'` y el
- * `include` del config solo recoge `*.test.ts`, así que no hay DOM ni se recogería
- * un `.test.tsx`. Por eso las dos decisiones de la tarjeta viven en funciones
- * puras EXPORTADAS del componente (`ofreceEmitirFactura`, `ofreceAdoptarFactura`)
- * y el JSX las llama: si aquí se copiara la condición en vez de importarla, la
- * prueba pasaría el día que el botón dejara de mirarla. Mismo patrón que
- * `filtrarCasos`.
+ * ⚠️ Estas pruebas fijan la DECISIÓN, no el pintado. Las dos condiciones de la
+ * tarjeta viven en funciones puras EXPORTADAS del componente
+ * (`ofreceEmitirFactura`, `ofreceAdoptarFactura`) y el JSX las llama: si aquí se
+ * copiara la condición en vez de importarla, la prueba pasaría el día que el botón
+ * dejara de mirarla. Mismo patrón que `filtrarCasos`.
+ *
+ * Que el JSX de verdad las consulta lo fija `tarjeta-retenido-render.test.ts`, que
+ * SÍ renderiza (`renderToStaticMarkup`, sin DOM, en el entorno `node` de vitest).
+ * Las dos capas hacen falta: sin la pura, la regla no está fijada; sin la de render,
+ * un botón que deje de consultarla pasa igual.
  *
  * ⚠️ Mutaciones corridas el 2026-09-08 (`_qa/mutar.py`, borrado antes de
  * commitear); ninguna quedó huérfana:
