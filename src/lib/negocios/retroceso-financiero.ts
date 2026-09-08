@@ -29,6 +29,8 @@
  * `cerebro/reglas/retroceso-financiero-tres-destinos.md`.
  */
 
+import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+
 /** Por qué cambió la plata. Lo elige el área financiera, no se deduce. */
 export type CausaRetrocesoFinanciero =
   /** La plata siempre estuvo; estaba anotada en el negocio equivocado. */
@@ -187,6 +189,63 @@ export interface AvisoRecaudoCambiado {
   destinoSugerido: string | null
   creadoEn: string
   creadoPor: string | null
+}
+
+/**
+ * ¿Este reparto le dejó al negocio algo que una PERSONA deba decidir?
+ *
+ * ── Por qué existe ──────────────────────────────────────────────────────────
+ *
+ * El aviso se ponía SIEMPRE que se redistribuía una referencia, incluso cuando el
+ * reparto quedaba cuadrado. Como es un gate que no cede al override, y hasta el
+ * 2026-09-08 ninguna pantalla podía resolverlo, cualquier negocio con el reparto
+ * corregido quedaba congelado de forma permanente. Caso real: V0442 y V0443
+ * (ref EXT-593279), repartidos correctamente y atascados en Negociación.
+ *
+ * ── Las tres preguntas, en orden ────────────────────────────────────────────
+ *
+ * 1. **¿Se cayó algún gate que esta plata sostenía?** Si el recálculo reabrió gates,
+ *    el caso ya está adelante de donde su plata lo sostiene: eso lo mira una persona.
+ *
+ * 2. **¿El reparto le quitó algo al negocio?** Si quedó igual o con MÁS plata que
+ *    antes, no puede haberse quedado corto: antes del reparto nadie tenía nada que
+ *    decidir sobre él, y ahora tiene al menos lo mismo. Sin aviso.
+ *
+ * 3. **Perdió plata: ¿le sigue alcanzando?** Solo se da por cuadrado si con lo que
+ *    quedó cubre TODO lo que el cliente le debe a ese negocio (honorario + tarifa
+ *    pasante). Es a propósito el listón más alto y no uno por etapa: un negocio que
+ *    tiene la cuenta completa no puede estar corto en NINGUNA etapa, así que la
+ *    respuesta no depende de dónde esté ni de por dónde vaya su routing. Es el caso
+ *    de V0442: perdió la mitad de la referencia y aun así cubre su cuenta entera
+ *    (honorario $637.500 + UPME $701.812 < $1.356.500).
+ *
+ * Si perdió plata y no se puede medir cuánto debe (`loQueDebePagar === null`: negocio
+ * sin cotizar), el aviso SE QUEDA. No medir no es lo mismo que estar cuadrado.
+ *
+ * Puro: no toca DB ni red.
+ */
+export function avisoRecaudoNecesario(input: {
+  /** Gates que el recálculo reabrió en ESTE negocio (no en el conjunto del reparto). */
+  gatesReabiertos: number
+  /** Lo que el reparto le sumó (positivo) o le quitó (negativo) a ESTE negocio. */
+  deltaRecaudo: number
+  /** Recaudo confirmado del negocio DESPUÉS del reparto (todas sus referencias). */
+  recaudoConfirmado: number
+  /**
+   * Todo lo que el cliente le debe al negocio: honorario + tarifa pasante
+   * (`valorARecaudar`). `null` cuando no hay con qué medirlo (sin precio y sin
+   * propuesta aprobada en cero).
+   */
+  loQueDebePagar: number | null
+  /** Materialidad de saldo. Por defecto, la del sistema. */
+  toleranciaCop?: number
+}): boolean {
+  if (input.gatesReabiertos > 0) return true
+  if (input.deltaRecaudo >= 0) return false
+  if (input.loQueDebePagar === null) return true
+
+  const tolerancia = input.toleranciaCop ?? TOLERANCIA_SALDO_COP
+  return input.recaudoConfirmado < input.loQueDebePagar - tolerancia
 }
 
 export function construirAviso(input: {

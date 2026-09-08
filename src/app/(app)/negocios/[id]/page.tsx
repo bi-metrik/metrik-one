@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getNegocioDetalleCompleto } from '../negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { puedeAutorizarCierreNoFacturable, type Area, type Role } from '@/lib/permissions/can-edit'
+import { puedeAutorizarCierreNoFacturable, canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { createServiceClient } from '@/lib/supabase/server'
 import { listarConsultasPorNegocio } from '@/lib/actions/valida-consultas'
 import { getDatosSarlaft, getScoreNegocio } from '@/lib/actions/valida-score'
@@ -31,6 +31,8 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // y la casilla de cierre no facturable)
   let hasAreaComercial = false
   let puedeCierreNoFacturable = false
+  // Cerrar el aviso de recaudo cambiado es del area financiera, igual que conciliar.
+  let puedeResolverAvisoRecaudo = false
   if (staffId) {
     const svc2 = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,6 +48,16 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       role: (role ?? 'read_only') as Role,
       areas: areaList as Area[],
     })
+    // MISMO predicado que `ctxFinanciero` (canEditBloque del stage 'cobro' con
+    // responsables vacio). Copiar el criterio aqui desincronizaria la pantalla del
+    // guard: ofreceria el boton a quien la accion rechaza, o se lo esconderia a
+    // quien si puede.
+    const userCtx: UserContext = {
+      id: staffId,
+      role: (role ?? 'read_only') as Role,
+      areas: areaList as Area[],
+    }
+    puedeResolverAvisoRecaudo = canEditBloque(userCtx, { stage: 'cobro' }, [])
   }
   const negocioCerrado = data.negocio.cierre_motivo !== null
   let validaConsultas: Awaited<ReturnType<typeof listarConsultasPorNegocio>> | null = null
@@ -141,6 +153,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         pausaEnabled={data.pausaEnabled}
         registrarPagoEnabled={conciliacionActiva}
         puedeCierreNoFacturable={puedeCierreNoFacturable}
+        puedeResolverAvisoRecaudo={puedeResolverAvisoRecaudo}
         errorMsg={err}
         banner={banner}
         extras={extras}

@@ -36,6 +36,7 @@
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
+- ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
 
 ## Referencias
 
@@ -45,6 +46,7 @@
 - [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger; la verificación va en sentencia aparte
 - [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — el `Date` se arma con la hora de pared en componentes LOCALES; `cellDates` en las dos llamadas; medido en UTC y Bogotá
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
+- [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
 
 ## Feedback
 

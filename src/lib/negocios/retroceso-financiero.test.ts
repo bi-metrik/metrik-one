@@ -3,6 +3,7 @@ import {
   proponerRetrocesoFinanciero,
   validarRetroceso,
   construirAviso,
+  avisoRecaudoNecesario,
   type EtapaCandidata,
 } from './retroceso-financiero'
 
@@ -203,5 +204,68 @@ describe('construirAviso', () => {
     expect(aviso.motivo).toBe(MOTIVO)
     expect(aviso.referencia).toBe('375720883')
     expect(aviso.gatesReabiertos).toBe(2)
+  })
+})
+
+// ── ¿Cuándo hace falta el aviso? ─────────────────────────────────────────────
+//
+// El caso que obligó a escribir esto: V0442 / V0443, referencia EXT-593279
+// (2026-09-07). Un pago de $2.713.000 anotado completo en V0442 se repartió en dos
+// mitades de $1.356.500. El reparto quedó CORRECTO —cada negocio cubre su cuenta
+// (honorario $637.500 + tarifa UPME $701.812 = $1.339.312)— y aun así los dos
+// quedaron con el aviso puesto, que es un gate que no cede al override. Los dos
+// quedaron congelados en Negociación.
+describe('avisoRecaudoNecesario', () => {
+  const V0442 = {
+    gatesReabiertos: 0,
+    // Perdió la mitad de la referencia.
+    deltaRecaudo: 1_356_500 - 2_713_000,
+    recaudoConfirmado: 1_356_500,
+    loQueDebePagar: 637_500 + 701_812,
+  }
+
+  it('el caso V0442: perdió plata pero sigue cubriendo su cuenta → sin aviso', () => {
+    expect(avisoRecaudoNecesario(V0442)).toBe(false)
+  })
+
+  it('el negocio que quedó CORTO sí se queda con el aviso', () => {
+    // Mismo reparto, pero a este le tocó una porción que no alcanza su cuenta.
+    expect(avisoRecaudoNecesario({ ...V0442, recaudoConfirmado: 900_000 })).toBe(true)
+  })
+
+  it('un gate reabierto manda, aunque la plata alcance', () => {
+    // El gate se cerró con plata que ya no está: eso lo mira una persona.
+    expect(avisoRecaudoNecesario({ ...V0442, gatesReabiertos: 1 })).toBe(true)
+  })
+
+  it('el negocio que RECIBE plata no necesita aviso, ni con la cuenta corta', () => {
+    // No hace falta medir nada: antes del reparto nadie tenía qué decidir sobre él,
+    // y ahora tiene más.
+    expect(avisoRecaudoNecesario({
+      gatesReabiertos: 0,
+      deltaRecaudo: 1_356_500,
+      recaudoConfirmado: 1_356_500,
+      loQueDebePagar: 9_000_000,
+    })).toBe(false)
+  })
+
+  it('perdió plata y no hay con qué medir su cuenta → el aviso se queda', () => {
+    // Un negocio sin cotizar. No medir no es lo mismo que estar cuadrado.
+    expect(avisoRecaudoNecesario({ ...V0442, loQueDebePagar: null })).toBe(true)
+  })
+
+  it('sin plata que medir pero tampoco perdió nada → sin aviso', () => {
+    expect(avisoRecaudoNecesario({
+      gatesReabiertos: 0,
+      deltaRecaudo: 0,
+      recaudoConfirmado: 0,
+      loQueDebePagar: null,
+    })).toBe(false)
+  })
+
+  it('un faltante por debajo de la materialidad no retiene el caso', () => {
+    // $500 de residuo: la misma vara que usan los gates de saldo.
+    expect(avisoRecaudoNecesario({ ...V0442, recaudoConfirmado: 1_339_312 - 500 })).toBe(false)
+    expect(avisoRecaudoNecesario({ ...V0442, recaudoConfirmado: 1_339_312 - 1_500 })).toBe(true)
   })
 })

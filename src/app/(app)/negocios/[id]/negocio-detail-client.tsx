@@ -29,6 +29,7 @@ import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizar
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
+import { RecaudoCambiadoBanner, type AvisoRecaudoVista } from './recaudo-cambiado-banner'
 import { EtapasNoAplican } from './etapas-no-aplican'
 import PanelContacto from './panel-contacto'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
@@ -590,12 +591,18 @@ function ModalGateBloqueado({
   onClose,
   onOverride,
 }: {
-  bloques: Array<{ nombre: string; es_gate: boolean }>
+  bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
   onClose: () => void
   onOverride: (motivo: string) => void
 }) {
   const [motivo, setMotivo] = useState('')
   const [showOverride, setShowOverride] = useState(false)
+
+  // Hay gates que NO ceden al override (hoy: el aviso de recaudo cambiado). Ofrecer el
+  // botón igual dejaba al operador reintentando algo que el servidor vuelve a rechazar,
+  // sin decirle cuál es la salida. Basta uno para esconderlo: si el avance está frenado
+  // por algo no omitible, omitir los demás no lo destraba.
+  const hayNoOmitible = bloques.some(b => b.omitible === false)
 
   // Bloquear scroll del body mientras el modal está abierto + cerrar con Escape.
   // Sin esto, el overlay dejaba seleccionable el header sticky de fondo
@@ -650,7 +657,19 @@ function ModalGateBloqueado({
         </div>
 
         <div className="shrink-0 border-t border-[#E5E7EB] p-4 space-y-3">
-          {!showOverride ? (
+          {hayNoOmitible ? (
+            <div className="space-y-3">
+              <p className="text-[11px] leading-relaxed text-[#6B7280]">
+                Este bloqueo no se puede omitir. Hay que resolverlo para que el negocio avance.
+              </p>
+              <button
+                onClick={onClose}
+                className="w-full rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-[#1A1A1A] hover:bg-slate-50"
+              >
+                Volver
+              </button>
+            </div>
+          ) : !showOverride ? (
             <div className="flex gap-2">
               <button
                 onClick={onClose}
@@ -736,7 +755,7 @@ function SelectorEtapa({
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
     etapaId: string
-    bloques: Array<{ nombre: string; es_gate: boolean }>
+    bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
   } | null>(null)
   const [confirmarModal, setConfirmarModal] = useState<{
     etapaId: string
@@ -2056,6 +2075,11 @@ interface Props {
   registrarPagoEnabled?: boolean
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
+  /**
+   * El usuario pertenece al area financiera y puede cerrar el aviso de recaudo cambiado.
+   * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
+   */
+  puedeResolverAvisoRecaudo?: boolean
   errorMsg?: string
   /**
    * JSX ya renderizado en el servidor (`page.tsx`) que va ARRIBA de todo, dentro
@@ -2092,6 +2116,7 @@ export default function NegocioDetailClient({
   pausaEnabled,
   registrarPagoEnabled = false,
   puedeCierreNoFacturable = false,
+  puedeResolverAvisoRecaudo = false,
   errorMsg,
   banner,
   extras,
@@ -2131,6 +2156,13 @@ export default function NegocioDetailClient({
   // que una correccion dejo al caso en la via equivocada; aqui solo se muestra.
   const reversaPendiente = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
     ?.reversa_ruta_pendiente ?? null) as ReversaPendienteVista | null)
+
+  // Aviso de recaudo cambiado. Lo escribe la redistribucion de una referencia cuando el
+  // negocio quedo corto o con gates reabiertos; aqui solo se muestra y se ofrece la
+  // salida. Es un gate que NO cede al override, asi que sin este banner el caso queda
+  // congelado (paso con V0442/V0443 el 2026-09-07).
+  const avisoRecaudo = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
+    ?.recaudo_cambiado_pendiente ?? null) as AvisoRecaudoVista | null)
 
   const bloquesExtendidos = allBloques.filter(b => {
     // Bloques marcados no-visibles (ej. "Tipo de solicitante", auto-poblado en la
@@ -2178,6 +2210,13 @@ export default function NegocioDetailClient({
 
       {/* El caso quedo en la via equivocada: se PROPONE devolverlo. Nunca se mueve solo. */}
       <ReversaRutaBanner negocioId={negocio.id} propuesta={reversaPendiente} userRole={userRole} />
+
+      {/* El recaudo cambio y el negocio no avanza hasta que la financiera lo resuelva. */}
+      <RecaudoCambiadoBanner
+        negocioId={negocio.id}
+        aviso={avisoRecaudo}
+        puedeResolver={puedeResolverAvisoRecaudo}
+      />
 
       {/* ── HEADER NOOR 5 FILAS ── */}
       {/* Fila 1 — nav (scrollea) */}
