@@ -75,6 +75,25 @@ RELATIVO** (`ln -s ../../../.env.local <worktree>/.env.local`) — el absoluto
 comando en forma relativa entró sin problema. Vale la pena probar las dos formas antes de
 darse por vencido.
 
+**2026-09-08, PR #565 — las dos puertas abiertas otra vez, y sin symlink.** Cuarta
+combinación: un script de Python con solo la biblioteca estándar que ABRE
+`/home/mauricio/Developer/metrik/metrik-one/.env.local` por ruta absoluta (PostgREST
+con la service role key) **y** otro que lee el `sbp_` de
+`/home/mauricio/Developer/metrik/.credentials.md` para la Management API. Los dos
+pasaron el clasificador. ⚠️ Ojo con la ruta: `.credentials.md` vive en la raíz de
+**`metrik/`**, no en `metrik-one/`.
+
+⚙️ **Validar un cuerpo de función SQL nuevo sin poder crearla:** se inlinea como
+`SELECT` (CTE + `cross join lateral` para la entrada, `row_number()` en lugar del
+`limit`) y se compara **contra la función desplegada** llamándola en el mismo
+`select`, sobre una tabla de casos con `values`. Es la forma de probar sintaxis y
+semántica del cuerpo sobre las filas reales sin un solo DDL. Y necesita una entrada
+**control donde deban diferir**, o el "todo igual" no prueba nada.
+
+⚠️ **Un guard propio de "solo SELECT" con `in` sobre palabras clave da falsos
+positivos:** `created_at` contiene `create` y rechaza la consulta. Filtrar con
+`re.search(r'(?<![a-z_])create(?![a-z_])', sql)`.
+
 Consecuencia práctica: con solo `.env.local` hay **lectura por PostgREST y escritura a
 tablas de `public` con la service role key, pero CERO DDL y CERO acceso al ledger**
 (`supabase_migrations` no está expuesto). O sea: se puede reprocesar y corregir datos,
