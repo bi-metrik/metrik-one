@@ -22,6 +22,7 @@ import { archivarPdfEnBloque } from './archivar-documento'
 import { numeroFacturaEnData } from './factura-cargada'
 import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { bandaMaterialidadFacturacion } from '@/lib/facturacion/caso-listo'
 import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 // PostgREST corta en 1.000 filas sin avisar, y aquí una fila que falte se lee
 // como "esa factura está libre". Ver el módulo.
@@ -246,6 +247,15 @@ export interface OpcionesEmision {
    */
   justificacionDuplicado?: string
   /**
+   * Justificación para emitir con un residuo del honorario sin recaudar, dentro
+   * de la banda de materialidad. Sin ella, el descuadre BLOQUEA.
+   *
+   * ⚠️ No abre el gate del saldo: por encima de la banda no hay justificación que
+   * sirva, porque eso ya no es un residuo, es cartera. Esta llave solo cubre la
+   * franja entre la tolerancia del producto y el 1% del honorario.
+   */
+  justificacionDescuadre?: string
+  /**
    * Lo que la financiera corrigió en la pantalla de revisión antes de darle a
    * facturar. Es la aplicación del principio de siempre (ONE sugiere, la
    * financiera edita) al único momento en que todavía se puede: después de emitir,
@@ -270,9 +280,19 @@ export type ResultadoEmision =
       ok: true; numero: string; siigo_id: string; total: number; emitida: boolean
       /** `false` si la factura salió pero su PDF no se pudo dejar en el negocio. */
       archivada: boolean
+      /**
+       * Presente SOLO si de verdad se cruzó la banda de materialidad. Quien llama
+       * lo usa para dejar el rastro en `activity_log`: mandar la justificación no
+       * es lo mismo que haberla necesitado, y anunciar una autorización que no
+       * hizo falta llenaría el timeline de ruido.
+       */
+      descuadre_justificado?: { faltante: number; justificacion: string }
     }
   | { ok: false; motivo: 'faltan_datos'; faltantes: string[] }
-  | { ok: false; motivo: 'saldo_pendiente'; faltante: number }
+  /** Debe plata de verdad: por encima de la banda NO hay justificación que abra. */
+  | { ok: false; motivo: 'saldo_pendiente'; faltante: number; banda: number }
+  /** Dentro de la banda y sin justificación escrita. La pantalla pide el texto. */
+  | { ok: false; motivo: 'descuadre_de_recaudo'; faltante: number; banda: number }
   | { ok: false; motivo: 'ya_facturado_en_one'; numero: string }
   | {
       ok: false; motivo: 'duplicado_en_siigo'
@@ -320,6 +340,17 @@ export interface MarcaFactura {
   por: string | null
   /** Presente solo si se emitió pasando por encima de un duplicado. */
   justificacion_duplicado?: string
+  /**
+   * Presente solo si se emitió con un residuo del honorario sin recaudar, dentro
+   * de la banda de materialidad.
+   *
+   * Guarda el texto, **el faltante del momento** y quién lo autorizó. El faltante
+   * va congelado a propósito: es el número sobre el que se decidió, y a los tres
+   * meses el saldo del negocio ya no lo puede reconstruir (un cobro posterior lo
+   * borra). Sin él, la justificación quedaría explicando una cifra que nadie
+   * puede volver a ver.
+   */
+  justificacion_descuadre?: { texto: string; faltante: number; por: string | null; at: string }
   /**
    * Producto de Siigo con el que salió el concepto. Se guarda siempre, no solo
    * cuando lo cambiaron a mano: sin él, saber qué decía una factura vieja obliga
@@ -420,10 +451,28 @@ export async function emitirFacturaNegocio(
   // HONORARIO, nunca contra honorario + tarifa: quien le paga la tarifa directo
   // a la UPME no le debe nada a SOENA, y medirlo simétrico lo dejaría sin
   // facturar para siempre (ya se midió: 62 casos retenidos, #206).
+  //
+  // Tres ramas, no dos (decisión de Mauricio, 2026-09-08):
+  //
+  //   faltante <= tolerancia .......... sigue de largo, igual que siempre
+  //   faltante  > banda ............... BLOQUEA sin apelación: es la condición
+  //                                     de entrada, no hay justificación que abra
+  //   en la banda, sin justificación .. bloquea y pide el texto
+  //   en la banda, con justificación .. emite POR EL HONORARIO COMPLETO
+  //
+  // ⚠️ El valor de la factura NO baja a lo recaudado. Cambiarlo arrastraría la
+  // base gravable y el plan de cobro, y eso no está en esta decisión: lo que la
+  // financiera autoriza es facturar sin ese residuo, no facturar por menos.
   const honorario = negocio.precio_aprobado == null ? 0 : Number(negocio.precio_aprobado)
   const { faltante } = descuadreConciliacion(honorario, contexto.modelo, contexto.recaudado)
-  if (faltante > TOLERANCIA_SALDO_COP) {
-    return { ok: false, motivo: 'saldo_pendiente', faltante }
+  const banda = bandaMaterialidadFacturacion(negocio.precio_aprobado == null ? null : honorario)
+  const justificacionDescuadre = opciones.justificacionDescuadre?.trim()
+  if (faltante > banda) {
+    return { ok: false, motivo: 'saldo_pendiente', faltante, banda }
+  }
+  const hayDescuadre = faltante > TOLERANCIA_SALDO_COP
+  if (hayDescuadre && !justificacionDescuadre) {
+    return { ok: false, motivo: 'descuadre_de_recaudo', faltante, banda }
   }
 
   // ── 2.bis. Las correcciones de la pantalla ────────────────────────────────
@@ -540,6 +589,18 @@ export async function emitirFacturaNegocio(
       por: staffNombre,
       producto_code: productoCode,
       ...(justificacion ? { justificacion_duplicado: justificacion } : {}),
+      // Sin rastro escrito, la decisión de la financiera no existe el día que
+      // alguien audite por qué esta factura salió con plata sin recaudar.
+      ...(hayDescuadre && justificacionDescuadre
+        ? {
+            justificacion_descuadre: {
+              texto: justificacionDescuadre,
+              faltante,
+              por: staffNombre,
+              at: new Date().toISOString(),
+            },
+          }
+        : {}),
     }
 
     // ⚠️ La marca se fusiona sobre el estado de AHORA, no sobre `negocio.metadata`,
@@ -574,6 +635,11 @@ export async function emitirFacturaNegocio(
       ok: true, numero: marca.numero, siigo_id: marca.siigo_id,
       total: honorario, emitida: opciones.emitir,
       archivada: !opciones.bloqueFacturaSlug || archivoUrl != null,
+      // Solo si de verdad se cruzó la banda: mandar la justificación no es lo
+      // mismo que haberla necesitado.
+      ...(hayDescuadre && justificacionDescuadre
+        ? { descuadre_justificado: { faltante, justificacion: justificacionDescuadre } }
+        : {}),
     }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message

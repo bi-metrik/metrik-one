@@ -162,10 +162,21 @@ export function sembrar(opciones: {
   contacto?: (i: number) => { email: string | null; telefono: string | null }
   /** Campos del bloque `rut` del caso `i`. Por defecto `RUT_COMPLETO`. */
   rut?: (i: number) => Record<string, { value: unknown }>
+  /**
+   * Cuánto del honorario tiene recaudado el caso `i`. Por defecto, todo.
+   *
+   * Existe para el gate del recaudo: es la única palanca con la que un caso puede
+   * quedar `descuadre_menor` o `retenido`, que es lo que decide si entra a la cola.
+   */
+  recaudo?: (i: number) => number
+  /** Marca en `metadata` del caso `i`. Sirve para sembrar un ya facturado o un descartado. */
+  metadata?: (i: number) => Record<string, unknown>
 }) {
   const { casos, facturados = [], copiasFactura = 1, facturaEnCopia = 0 } = opciones
   const contactoDe = opciones.contacto ?? (() => ({ email: null, telefono: '3142557450' }))
   const rutDe = opciones.rut ?? (() => RUT_COMPLETO)
+  const recaudoDe = opciones.recaudo ?? (() => 637500)
+  const metadataDe = opciones.metadata ?? (() => ({}))
   const orden = opciones.ordenBloques ?? 'factura-al-final'
   const yaFacturado = new Set(facturados)
 
@@ -193,13 +204,13 @@ export function sembrar(opciones: {
     const id = `neg-${pad(i)}`
     estado.fixtures.negocios.push({
       id, codigo: `V${pad(i)}`, nombre: `Caso ${i}`, workspace_id: WS, estado: 'abierto',
-      precio_aprobado: 637500, contacto_id: `con-${pad(i)}`, linea_id: LINEA, metadata: {},
+      precio_aprobado: 637500, contacto_id: `con-${pad(i)}`, linea_id: LINEA, metadata: metadataDe(i),
       etapas_negocio: { nombre: 'Cargue', numero: 6 },
     })
     estado.fixtures.contactos.push({ id: `con-${pad(i)}`, ...contactoDe(i) })
     // Honorario recaudado completo: así `falta_saldo` es 0 y lo único que puede
     // dejar un caso fuera de "listo" es que le falte un dato del borrador.
-    estado.fixtures.cobros.push({ id: `cob-${pad(i)}`, negocio_id: id, monto: 637500, tipo_cobro: 'pago', split_json: null })
+    estado.fixtures.cobros.push({ id: `cob-${pad(i)}`, negocio_id: id, monto: recaudoDe(i), tipo_cobro: 'pago', split_json: null })
   }
 
   // Configuraciones del bloque de factura (la nativa y sus copias heredadas).

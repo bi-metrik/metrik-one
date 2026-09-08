@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition, type Dispatch, type SetStateAction } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -90,6 +90,11 @@ export default function ConciliacionClient(
   )
 
   const [tab, setTab] = useState<TabKey>(pendientes.length > 0 ? 'bandeja' : 'general')
+  // Sube desde `TabSaldos` para que el contador de retenidos de la cola de
+  // facturación pueda mandar a esta pestaña YA filtrada por faltante.
+  const [filtrosSaldo, setFiltrosSaldo] = useState<Record<SaldoFiltro, boolean>>(
+    { sobrante: true, faltante: false, cero: false },
+  )
 
   const tabs: { key: TabKey; label: string; count?: number }[] = [
     { key: 'bandeja', label: 'Por confirmar', count: pendientes.length },
@@ -143,10 +148,18 @@ export default function ConciliacionClient(
       </div>
 
       {tab === 'bandeja' && <TabBandeja pendientes={pendientes} onDone={() => router.refresh()} />}
-      {tab === 'saldos' && <TabSaldos data={data} />}
+      {tab === 'saldos' && <TabSaldos data={data} filtros={filtrosSaldo} setFiltros={setFiltrosSaldo} />}
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
-      {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
+      {tab === 'facturacion' && cola && (
+        <TabFacturacion
+          cola={cola}
+          onVerRetenidos={() => {
+            setFiltrosSaldo({ sobrante: false, faltante: true, cero: false })
+            setTab('saldos')
+          }}
+        />
+      )}
       {tab === 'recibos' && (
         recibos
           ? <TabRecibos control={recibos} onCambio={() => router.refresh()} />
@@ -690,9 +703,20 @@ function DesgloseRecaudo({
   )
 }
 
-function TabSaldos({ data }: { data: ConciliacionV2 }) {
+/**
+ * Los filtros viven en el PADRE, no aquí: el contador de retenidos de la cola de
+ * facturación enlaza a esta pestaña y tiene que llegar con "faltante" prendido.
+ * Con el estado adentro, el enlace aterrizaba en la lista de sobrantes — o sea en
+ * una pantalla que no contiene lo que se prometió mostrar.
+ */
+function TabSaldos(
+  { data, filtros, setFiltros }: {
+    data: ConciliacionV2
+    filtros: Record<SaldoFiltro, boolean>
+    setFiltros: Dispatch<SetStateAction<Record<SaldoFiltro, boolean>>>
+  },
+) {
   const [q, setQ] = useState('')
-  const [filtros, setFiltros] = useState<Record<SaldoFiltro, boolean>>({ sobrante: true, faltante: false, cero: false })
   const query = q.trim().toLowerCase()
 
   const totales = useMemo(() => {
@@ -939,7 +963,9 @@ export function filtrarCasos(casos: CasoPorFacturar[], term: string): CasoPorFac
   })
 }
 
-function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
+function TabFacturacion(
+  { cola, onVerRetenidos }: { cola: ColaFacturacion; onVerRetenidos: () => void },
+) {
   const router = useRouter()
   const [vista, setVista] = useState<VistaFact>('pendientes')
   const [q, setQ] = useState('')
@@ -983,6 +1009,34 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
           </div>
         ))}
       </div>
+
+      {/* ── Los que NO están en la lista ────────────────────────────────────
+          El honorario recaudado es condición de entrada a esta cola: quien todavía
+          debe plata de verdad no aparece abajo. Pero este panel era el ÚNICO lugar
+          donde esos casos se veían juntos, así que sacarlos sin dejar rastro los
+          borra del mapa. El contador es lo que separa "sacarlos de la cola" de
+          "esconderlos", y por eso no se puede quitar ni colapsar. */}
+      {cola.totales.retenidos_por_recaudo.n > 0 && (
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-2 rounded-lg border px-3 py-2"
+             style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
+          <div className="text-[12px]" style={{ color: '#92400E' }}>
+            <strong style={{ color: '#78350F' }}>
+              {cola.totales.retenidos_por_recaudo.n} casos no aparecen en esta lista
+            </strong>{' '}
+            porque todavía deben honorario: {fmtCOP(cola.totales.retenidos_por_recaudo.valor)} por
+            facturar, de los cuales faltan {fmtCOP(cola.totales.retenidos_por_recaudo.falta)} por
+            recaudar. No se factura antes de cobrar; cobrar no se resuelve aquí.
+          </div>
+          <button
+            type="button"
+            onClick={onVerRetenidos}
+            className="shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] font-semibold"
+            style={{ borderColor: '#FCD34D', color: '#92400E', backgroundColor: '#FFFFFF' }}
+          >
+            Ver en Saldos
+          </button>
+        </div>
+      )}
 
       {!cola.siigo_configurado && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border px-3 py-2"
@@ -1049,6 +1103,15 @@ function TabFacturacion({ cola }: { cola: ColaFacturacion }) {
               : vista === 'descartados' ? 'No has descartado ningún caso.'
               : 'No hay casos por facturar.'}
           </p>
+          {/* La búsqueda solo puede encontrar lo que está en la lista, y los
+              retenidos ya no lo están. Sin esta línea, buscar un caso que existe y
+              no encontrarlo se lee como que el buscador falla. */}
+          {term && cola.totales.retenidos_por_recaudo.n > 0 && (
+            <p className="mt-1 text-[11.5px]" style={{ color: '#92400E' }}>
+              Puede que sea uno de los {cola.totales.retenidos_por_recaudo.n} que no aparecen
+              aquí porque todavía deben honorario.
+            </p>
+          )}
           {term && (
             <button
               type="button"
@@ -1100,6 +1163,13 @@ function FilaPorFacturar({
   // son la explicación de por qué abajo aparecen deshabilitadas, no una alarma.
   const [hermanos, setHermanos] = useState<FacturaHermana[]>([])
   const [justificacion, setJustificacion] = useState('')
+  // El descuadre de recaudo se pide ANTES de intentar, no después del rechazo: el
+  // servidor ya dijo en qué lado de la banda cae el caso, así que hacerle dar un
+  // clic para enterarse sería una barrera sin información.
+  const [justificacionDescuadre, setJustificacionDescuadre] = useState('')
+  // Y aun así se maneja el rechazo del servidor: entre que la pantalla se pintó y
+  // alguien confirma, un cobro anulado puede meter al caso en la banda.
+  const [descuadreServidor, setDescuadreServidor] = useState<{ faltante: number; banda: number } | null>(null)
   // Los datos que la financiera puede corregir antes de emitir. Arrancan con lo
   // que ONE tiene: la pantalla no es un formulario en blanco, es una revisión.
   const [email, setEmail] = useState(caso.email ?? '')
@@ -1121,10 +1191,17 @@ function FilaPorFacturar({
     startTransition(async () => {
       const r = await emitirFacturaDeNegocio(caso.negocio_id, {
         justificacionDuplicado,
+        justificacionDescuadre: justificacionDescuadre.trim() || undefined,
         datos: datosEditados(),
       })
       if (r.duplicados) {
         setDuplicados(r.duplicados); setHermanos(r.hermanos ?? []); setConfirmando(false); return
+      }
+      // El saldo cambió debajo: se pide el texto con las cifras del servidor, que
+      // son las de ahora y no las del render.
+      if (r.descuadre) {
+        setDescuadreServidor(r.descuadre); setConfirmando(false)
+        toast.error(r.error ?? 'Falta recaudo del honorario'); return
       }
       if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
       // Si el PDF no quedó en el negocio hay que decirlo: la factura salió igual,
@@ -1135,6 +1212,7 @@ function FilaPorFacturar({
         toast.success(`Factura ${r.numero} emitida y archivada en el negocio`)
       }
       setRevisando(false); setConfirmando(false); setDuplicados(null); setHermanos([]); setJustificacion('')
+      setJustificacionDescuadre(''); setDescuadreServidor(null)
       onCambio()
     })
   }
@@ -1162,8 +1240,26 @@ function FilaPorFacturar({
   const listo = casoListoParaFacturar(caso)
   const faltas = faltantesDelCaso(caso)
 
+  // El caso está en la banda de materialidad: le falta un residuo del honorario y
+  // se puede facturar, pero solo con justificación escrita.
+  //
+  // ⚠️ NO es lo mismo que el duplicado, aunque las dos pidan un texto. El
+  // duplicado avisa que quizá esta factura YA existe (riesgo de facturar dos
+  // veces); esto avisa que va a salir una factura por plata que no entró toda.
+  // La copia y el color van distintos a propósito: si se leyeran igual, el
+  // operador aprendería a pasarlos con el mismo reflejo.
+  const enBanda = caso.estado_recaudo === 'descuadre_menor' || descuadreServidor != null
+  const faltanteEnBanda = descuadreServidor?.faltante ?? caso.falta_saldo
+  const bandaDelCaso = descuadreServidor?.banda ?? caso.banda_materialidad
+  const datosCompletos = caso.faltan_factura.length === 0 && caso.faltan_cliente.length === 0
+  // Un `retenido` no llega hasta aquí (el servidor lo saca de la cola), pero la
+  // condición se escribe por lo que ES y no por lo que hoy no puede pasar.
+  const puedeIntentarFactura = datosCompletos && caso.estado_recaudo !== 'retenido'
+  const faltaJustificarDescuadre = enBanda && justificacionDescuadre.trim().length === 0
+
   return (
-    <div className="rounded-lg border p-3" style={{ borderColor: listo ? '#A7F3D0' : '#E5E7EB' }}>
+    <div className="rounded-lg border p-3"
+         style={{ borderColor: listo ? '#A7F3D0' : enBanda ? '#FCD34D' : '#E5E7EB' }}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -1240,7 +1336,7 @@ function FilaPorFacturar({
           invitación a emitir el mismo documento dos veces. */}
 
       {/* ── Prefactura y emisión ─────────────────────────────────────────── */}
-      {!caso.ya_facturado && !caso.descartado && listo && siigoConfigurado && (
+      {!caso.ya_facturado && !caso.descartado && puedeIntentarFactura && siigoConfigurado && (
         <div className="mt-2">
           {!revisando ? (
             <div className="flex justify-end">
@@ -1366,6 +1462,38 @@ function FilaPorFacturar({
                 )}
               </div>
 
+              {/* ── Falta un residuo del honorario, dentro de la banda ───────────
+                  Esto NO es el aviso de duplicado y no puede leerse igual: allá el
+                  riesgo es facturar dos veces lo mismo; aquí es facturar por plata
+                  que no entró toda. Va en ámbar (advertencia), no en rojo (alarma),
+                  y dice el número: "faltan $3.000 de $637.500" es una decisión
+                  tomable, "hay un descuadre" no. */}
+              {enBanda && (
+                <div className="mt-3 rounded-md border p-2"
+                     style={{ borderColor: '#FCD34D', backgroundColor: '#FFFBEB' }}>
+                  <div className="flex items-start gap-1.5">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: '#B45309' }} />
+                    <div className="text-[12px]" style={{ color: '#92400E' }}>
+                      <strong>
+                        Falta recaudar {fmtCOP(faltanteEnBanda)} del honorario
+                        {caso.honorario != null ? ` de ${fmtCOP(caso.honorario)}` : ''}.
+                      </strong>{' '}
+                      Cabe dentro de lo que la financiera puede autorizar (hasta{' '}
+                      {fmtCOP(bandaDelCaso)}). La factura sale por el honorario{' '}
+                      <strong>completo</strong>, no por lo recaudado. Escribe por qué se
+                      factura sin ese saldo: queda registrado en el negocio.
+                    </div>
+                  </div>
+                  <input
+                    value={justificacionDescuadre}
+                    onChange={e => setJustificacionDescuadre(e.target.value)}
+                    placeholder="Por qué se factura con el saldo pendiente"
+                    className="mt-2 w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
+                    style={{ borderColor: '#FCD34D' }}
+                  />
+                </div>
+              )}
+
               {/* Siigo tiene facturas de este cliente que NINGÚN negocio reclama.
 
                   Solo llegan aquí las libres: la factura que ya es de otro negocio
@@ -1444,7 +1572,8 @@ function FilaPorFacturar({
                 {!confirmando && !duplicados && (
                   <button
                     onClick={() => setConfirmando(true)}
-                    className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition"
+                    disabled={faltaJustificarDescuadre}
+                    className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
                     style={{ backgroundColor: VERDE }}
                   >
                     Facturar electrónicamente
@@ -1458,7 +1587,7 @@ function FilaPorFacturar({
                     </span>
                     <button
                       onClick={() => emitir()}
-                      disabled={isPending}
+                      disabled={isPending || faltaJustificarDescuadre}
                       className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
                       style={{ backgroundColor: '#B91C1C' }}
                     >
@@ -1471,7 +1600,7 @@ function FilaPorFacturar({
                 {duplicados && (
                   <button
                     onClick={() => emitir(justificacion)}
-                    disabled={isPending || justificacion.trim().length === 0}
+                    disabled={isPending || justificacion.trim().length === 0 || faltaJustificarDescuadre}
                     className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
                     style={{ backgroundColor: '#B91C1C' }}
                   >
@@ -1483,7 +1612,7 @@ function FilaPorFacturar({
                 <button
                   onClick={() => {
                     setRevisando(false); setConfirmando(false); setDuplicados(null); setHermanos([])
-                    setJustificacion('')
+                    setJustificacion(''); setJustificacionDescuadre(''); setDescuadreServidor(null)
                     setEmail(caso.email ?? ''); setTelefono(caso.telefono ?? ''); setProductoCode(caso.concepto.code)
                   }}
                   disabled={isPending}

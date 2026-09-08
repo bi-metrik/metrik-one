@@ -37,7 +37,12 @@ import {
 import { leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
 import { descuadreConciliacion, tarifaConfirmadaPorNegocio } from '@/lib/upme/modelo-dinero'
-import { casoListoParaFacturar } from '@/lib/facturacion/caso-listo'
+import {
+  bandaMaterialidadFacturacion,
+  casoListoParaFacturar,
+  estadoDeRecaudo,
+  type EstadoRecaudo,
+} from '@/lib/facturacion/caso-listo'
 import { numeroFacturaEnData } from '@/lib/siigo/factura-cargada'
 import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
 // Toda lectura por LOTE de este archivo pasa por aquí. PostgREST corta en 1.000
@@ -142,6 +147,18 @@ export interface CasoPorFacturar {
    * le paga la tarifa directo a la UPME no le debe nada a SOENA.
    */
   falta_saldo: number
+  /**
+   * En qué lado del recaudo cae el caso: `cubierto`, `descuadre_menor` o
+   * `retenido`. El criterio vive en `lib/facturacion/caso-listo`.
+   *
+   * ⚠️ Un `retenido` NUNCA llega a la pantalla dentro de `casos`: se filtra en el
+   * servidor. El campo existe igual porque un caso ya facturado o descartado sí
+   * puede estarlo (hoy ninguno, medido el 2026-09-08), y porque el tipo se
+   * comparte con el criterio puro.
+   */
+  estado_recaudo: EstadoRecaudo
+  /** Hasta cuánto puede faltar sin retener: `max(tolerancia, 1% del honorario)`. */
+  banda_materialidad: number
   /** Sacado de la cola a mano durante la puesta al día. Reversible. */
   descartado: { at: string; por: string | null; motivo: string | null } | null
 }
@@ -162,7 +179,27 @@ export interface ColaFacturacion {
    * concepto que ONE dedujo y no ofrece cambiarlo, en vez de inventar una lista.
    */
   productos: Array<{ code: string; nombre: string }>
-  totales: { listos: number; incompletos: number; ya_facturados: number; descartados: number; valor_listo: number }
+  totales: {
+    listos: number
+    incompletos: number
+    ya_facturados: number
+    descartados: number
+    valor_listo: number
+    /**
+     * Los que NO se listan porque todavía deben honorario.
+     *
+     * ⚠️ Obligatorio, no informativo. Este panel es el ÚNICO lugar donde esos
+     * casos se veían juntos: si desaparecen sin dejar rastro nadie los vuelve a
+     * mirar, y son $18,5M de honorarios con $13,7M por recaudar (medido el
+     * 2026-09-08). Un contador que se puede leer de un vistazo es lo que separa
+     * "sacarlos de la cola" de "esconderlos".
+     *
+     * `valor` es el honorario que no va a salir facturado; `falta` es lo que hay
+     * que cobrar para que salga. Van los dos porque un solo `$X` al lado de
+     * "retenidos" se lee como cualquiera de los dos y significan cosas distintas.
+     */
+    retenidos_por_recaudo: { n: number; valor: number; falta: number }
+  }
 }
 
 /**
@@ -184,6 +221,20 @@ async function ctxFinanciero(): Promise<
   }
   return { ok: true, workspaceId }
 }
+
+/**
+ * Bandeja en cero, para los dos cortes tempranos (sin línea configurada y sin
+ * candidatos). NO se exporta: este archivo es `'use server'` y exportar una
+ * constante desde aquí anula TODOS los exports del módulo en el build.
+ */
+const TOTALES_VACIOS: ColaFacturacion['totales'] = {
+  listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0,
+  retenidos_por_recaudo: { n: 0, valor: 0, falta: 0 },
+}
+
+/** Pesos sin decimales para los mensajes de este archivo. No se exporta (`'use server'`). */
+const fmtCOP = (v: number): string =>
+  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 const num = (v: unknown): number | null => {
   if (v == null || v === '') return null
@@ -247,7 +298,7 @@ async function armarColaFacturacion(
     if (s.bloque_factura_slug) facturaSlugPorLinea.set(l.id, s.bloque_factura_slug)
   }
   if (desde == null) {
-    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
+    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
   }
 
   // ── Negocios candidatos ──
@@ -274,7 +325,7 @@ async function armarColaFacturacion(
   )
   const candidatos = negocios.filter(n => (n.etapas_negocio?.numero ?? 0) > desde!)
   if (candidatos.length === 0) {
-    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
+    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
   }
   const ids = candidatos.map(n => n.id)
 
@@ -496,6 +547,7 @@ async function armarColaFacturacion(
       recaudado,
     )
     const marcaFactura = (n.metadata?.siigo_factura ?? null) as MarcaFactura | null
+    const estado = estadoDeRecaudo({ falta_saldo: faltante, honorario })
 
     return {
       negocio_id: n.id,
@@ -533,6 +585,8 @@ async function armarColaFacturacion(
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,
+      estado_recaudo: estado,
+      banda_materialidad: bandaMaterialidadFacturacion(honorario),
       descartado: (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null,
     }
   })
@@ -544,16 +598,35 @@ async function armarColaFacturacion(
   // lista pinta cuatro botones.
   const listo = (c: CasoPorFacturar) => casoListoParaFacturar(c)
   const fuera = (c: CasoPorFacturar) => c.ya_facturado || c.descartado != null
-  casos.sort((a, b) => {
+
+  // ── El recaudo del honorario es CONDICIÓN DE ENTRADA ──────────────────────
+  // Quien todavía debe plata de verdad sale de la cola. Se filtra AQUÍ y no en la
+  // pantalla: el conteo de la bandeja y la lista salen del mismo arreglo, y
+  // partirlos es como se desincronizan (es lo que el comentario de `caso-listo`
+  // documenta desde que existe).
+  //
+  // ⚠️ Solo entre los PENDIENTES. Un caso ya facturado o descartado no es un
+  // candidato, es un registro: sacarlo de `casos` lo borraría de las vistas "Ya
+  // facturados" y "Descartados" y dejaría `totales.ya_facturados` mintiendo.
+  // Hoy no cambia nada (medido el 2026-09-08: 0 de 266 facturados y 0 de 0
+  // descartados están retenidos), pero es latente — basta con que a un caso
+  // facturado le anulen un cobro.
+  const retenidos = casos.filter(c => !fuera(c) && c.estado_recaudo === 'retenido')
+  const retenidosIds = new Set(retenidos.map(c => c.negocio_id))
+  const visibles = casos.filter(c => !retenidosIds.has(c.negocio_id))
+
+  visibles.sort((a, b) => {
     if (fuera(a) !== fuera(b)) return fuera(a) ? 1 : -1
     if (listo(a) !== listo(b)) return listo(a) ? -1 : 1
     return (b.honorario ?? 0) - (a.honorario ?? 0)
   })
 
-  const pendientes = casos.filter(c => !fuera(c))
+  // Los pendientes que SÍ se listan. Los retenidos ya salieron de `visibles`, así
+  // que `incompletos` cuenta a quien le falta un dato, no a quien debe plata.
+  const pendientes = visibles.filter(c => !fuera(c))
   return {
     data: {
-      casos,
+      casos: visibles,
       desde_etapa_numero: desde,
       siigo_configurado,
       descarte_abierto: ventanaDescarteAbierta(),
@@ -562,9 +635,14 @@ async function armarColaFacturacion(
       totales: {
         listos: pendientes.filter(listo).length,
         incompletos: pendientes.filter(c => !listo(c)).length,
-        ya_facturados: casos.filter(c => c.ya_facturado).length,
-        descartados: casos.filter(c => c.descartado != null && !c.ya_facturado).length,
+        ya_facturados: visibles.filter(c => c.ya_facturado).length,
+        descartados: visibles.filter(c => c.descartado != null && !c.ya_facturado).length,
         valor_listo: pendientes.filter(listo).reduce((s, c) => s + (c.honorario ?? 0), 0),
+        retenidos_por_recaudo: {
+          n: retenidos.length,
+          valor: retenidos.reduce((s, c) => s + (c.honorario ?? 0), 0),
+          falta: retenidos.reduce((s, c) => s + c.falta_saldo, 0),
+        },
       },
     },
   }
@@ -705,6 +783,16 @@ export interface ResultadoEmitir {
    * ni piden justificación, y por sí solas nunca detienen una emisión.
    */
   hermanos?: FacturaHermana[]
+  /**
+   * Falta un residuo del honorario, dentro de la banda de materialidad, y nadie
+   * escribió por qué se factura igual. La pantalla pide el texto con ESTE monto
+   * adentro: "faltan $3.000" es una decisión tomable, "hay un descuadre" no.
+   *
+   * ⚠️ Distinto de `saldo_pendiente`, que llega como `error` a secas y NO se
+   * puede pasar con justificación: ahí el caso ni siquiera debería estar en la
+   * cola.
+   */
+  descuadre?: { faltante: number; banda: number }
 }
 
 /**
@@ -745,6 +833,11 @@ export async function emitirFacturaDeNegocio(
     emitir?: boolean
     enviarCorreo?: boolean
     justificacionDuplicado?: string
+    /**
+     * Por qué se factura con un residuo del honorario sin recaudar. Solo sirve
+     * dentro de la banda de materialidad: por encima, el saldo bloquea igual.
+     */
+    justificacionDescuadre?: string
     /**
      * Lo que la financiera corrigió en la pantalla de revisión. Son los ÚNICOS
      * campos que el cliente puede mandar además del id: datos de contacto y el
@@ -819,6 +912,7 @@ export async function emitirFacturaDeNegocio(
       emitir: opciones?.emitir !== false,
       enviarCorreo: opciones?.enviarCorreo === true,
       justificacionDuplicado: opciones?.justificacionDuplicado,
+      justificacionDescuadre: opciones?.justificacionDescuadre,
     },
     { modelo, recaudado, staffId },
   )
@@ -833,9 +927,23 @@ export async function emitirFacturaDeNegocio(
           error: 'Siigo ya tiene una factura de este cliente que ningún negocio reclama',
         }
       case 'saldo_pendiente': {
-        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-        return { ok: false, error: `Falta recaudar ${fmt.format(r.faltante)} del honorario` }
+        // Sin salida por justificación: por encima de la banda el caso ni siquiera
+        // debería estar en la cola, así que llegar aquí quiere decir que el saldo
+        // cambió entre que la pantalla se pintó y alguien confirmó.
+        return {
+          ok: false,
+          error: `Falta recaudar ${fmtCOP(r.faltante)} del honorario. Es más de la banda de `
+            + `${fmtCOP(r.banda)} que la financiera puede autorizar: hay que cobrar antes de facturar.`,
+        }
       }
+      case 'descuadre_de_recaudo':
+        // El monto viaja aparte, no solo dentro del texto: la pantalla lo necesita
+        // para pedir la justificación con la cifra a la vista.
+        return {
+          ok: false,
+          descuadre: { faltante: r.faltante, banda: r.banda },
+          error: `Faltan ${fmtCOP(r.faltante)} del honorario. Escribe por qué se factura igual.`,
+        }
       case 'faltan_datos':
         return { ok: false, error: `Faltan datos: ${r.faltantes.join(', ')}` }
       case 'ya_facturado_en_one':
@@ -855,9 +963,17 @@ export async function emitirFacturaDeNegocio(
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId,
-      contenido: r.emitida
+      contenido: (r.emitida
         ? `Factura ${r.numero} emitida en Siigo`
-        : `Factura ${r.numero} creada en Siigo SIN radicar ante la DIAN`,
+        : `Factura ${r.numero} creada en Siigo SIN radicar ante la DIAN`)
+        // El descuadre autorizado va en la MISMA entrada que la emisión: son el
+        // mismo acto, y partirlo en dos deja el timeline diciendo dos veces lo
+        // mismo. Solo aparece si la banda se cruzó de verdad (lo decide el
+        // servidor de emisión, no el hecho de haber mandado el texto).
+        + (r.descuadre_justificado
+          ? ` · se facturó con ${fmtCOP(r.descuadre_justificado.faltante)} del honorario sin`
+            + ` recaudar. Autorizado: "${r.descuadre_justificado.justificacion}"`
+          : ''),
     }, 'emitirFacturaDeNegocio')
   }
 
