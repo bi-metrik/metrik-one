@@ -3288,7 +3288,13 @@ export async function cambiarEtapaNegocioConGate(
   confirmado?: boolean,
 ): Promise<{
   error: string | null
-  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean }>
+  /**
+   * `omitible: false` marca el bloqueo que NO cede al override de owner/admin. Sin esa
+   * marca la pantalla dibujaba "Omitir gate (owner)" sobre el aviso de recaudo cambiado,
+   * que el servidor vuelve a rechazar: un botón que no hace nada y no explica por qué.
+   * Ausente = omitible, que es como se comportan todos los demás.
+   */
+  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
   /** Presente solo con `error === 'requiere_confirmacion'`. */
@@ -4004,7 +4010,10 @@ export async function cambiarEtapaNegocioConGate(
   // probablemente use el override es quien menos contexto tiene de por qué se frenó.
   //
   // No es un callejón sin salida: la salida es RESOLVER el aviso, con motivo escrito
-  // (`resolverAviso`), que deja el rastro de por qué se dio por atendido.
+  // (`resolverAvisoRecaudo`, desde el aviso de la ficha del negocio), que deja el rastro
+  // de por qué se dio por atendido. Por eso el bloqueo viaja con `omitible: false`: la
+  // pantalla esconde "Omitir gate" y dice cuál es la salida real, en vez de ofrecer un
+  // botón que el servidor va a rechazar igual.
   {
     const aviso = await leerAviso(supabase, workspaceId, negocioId)
     if (aviso) {
@@ -4014,8 +4023,10 @@ export async function cambiarEtapaNegocioConGate(
           nombre:
             `El recaudo de este negocio cambió (referencia ${aviso.referencia}) y todavía nadie lo resolvió. ` +
             `Motivo: ${aviso.motivo}` +
-            (aviso.destinoSugerido ? ` · Se sugirió devolverlo a ${aviso.destinoSugerido}.` : ''),
+            (aviso.destinoSugerido ? ` · Se sugirió devolverlo a ${aviso.destinoSugerido}.` : '') +
+            ' · Lo resuelve el área financiera desde el aviso del negocio.',
           es_gate: true,
+          omitible: false,
         }],
       }
     }

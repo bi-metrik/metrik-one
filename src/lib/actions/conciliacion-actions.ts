@@ -13,6 +13,7 @@ import {
   niegaCertificacionUpme,
   tarifaConfirmadaPorNegocio,
   valorARecaudarCartera,
+  valorARecaudar,
   saldoConciliacion,
   esCeroDeliberado,
   type FilaBloqueTarifa,
@@ -21,7 +22,7 @@ import {
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { diasDesde, compararPorAntiguedad } from '@/lib/negocios/antiguedad'
-import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar } from '@/lib/negocios/recaudo-confirmado'
+import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
 import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
@@ -33,6 +34,7 @@ import {
   ejecutarRetroceso,
   proponerRetrocesoFinanciero,
 } from '@/lib/correcciones/retroceso'
+import { avisoRecaudoNecesario } from '@/lib/negocios/retroceso-financiero'
 import type {
   CausaRetrocesoFinanciero,
   PropuestaRetroceso,
@@ -1856,6 +1858,75 @@ export async function rechazarRepartoComercial(
 // ── Redistribuir una referencia desde el panel de la financiera ────────────────
 
 /**
+ * La cuenta de un negocio: lo que tiene recaudado y lo que el cliente le debe.
+ *
+ * `loQueDebePagar` es `valorARecaudar` (honorario + tarifa pasante), el listón más alto
+ * que existe: quien lo cubre no puede estar corto en ninguna etapa. Es `null` cuando no
+ * hay con qué medirlo —negocio sin cotizar—, y quien decide qué hacer con esa ausencia
+ * es `avisoRecaudoNecesario`, no esta función.
+ *
+ * La propuesta aprobada con honorario 0 (`esCeroDeliberado`) SÍ es medible: la cuenta es
+ * la tarifa, o cero si tampoco hay tarifa. Mismo criterio que los gates de saldo.
+ */
+async function cuentaDelNegocio(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+): Promise<{ recaudoConfirmado: number; loQueDebePagar: number | null; etapaNombre: string }> {
+  const [negRes, cobrosRes, conciliadoRes, propRes, modelo] = await Promise.all([
+    db(supabase)
+      .from('negocios')
+      .select('precio_aprobado, precio_estimado, etapas_negocio!negocios_etapa_actual_id_fkey(nombre)')
+      .eq('id', negocioId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
+    // db(): `split_json` no está en los tipos generados. Ver `recaudo-confirmado.ts`.
+    db(supabase)
+      .from('cobros')
+      .select('monto, split_json, tipo_cobro')
+      .eq('negocio_id', negocioId)
+      .eq('workspace_id', workspaceId)
+      .is('anulado_at', null),
+    db(supabase)
+      .from('negocio_conciliacion')
+      .select('conciliado')
+      .eq('negocio_id', negocioId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle(),
+    db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+      .eq('negocio_id', negocioId)
+      .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'),
+    leerModeloDineroCompleto(supabase, negocioId),
+  ])
+
+  const neg = negRes.data as {
+    precio_aprobado: number | null
+    precio_estimado: number | null
+    etapas_negocio: { nombre: string } | null
+  } | null
+
+  // Las porciones de esta redistribución llevan `origen: 'redistribucion_financiera'`,
+  // no `'comercial'`, así que cuentan aunque el recálculo acabe de tumbar el check de
+  // conciliación: las escribió la propia financiera.
+  const recaudoConfirmado = sumarRecaudoConfirmado(
+    (cobrosRes.data ?? []) as CobroParaRecaudo[],
+    (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true,
+  )
+
+  const honorario = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
+  const propuestas = (propRes.data ?? []) as PropuestaBloqueData[]
+  const medible = honorario > 0 || esCeroDeliberado(propuestas, neg?.precio_aprobado ?? null)
+
+  return {
+    recaudoConfirmado,
+    loQueDebePagar: medible ? valorARecaudar(honorario, modelo) : null,
+    etapaNombre: neg?.etapas_negocio?.nombre ?? 'sin etapa',
+  }
+}
+
+/**
  * El área financiera reescribe cómo se reparte una referencia entre negocios.
  *
  * Es UNA operación para los cuatro gestos que antes no existían: repartir, deshacer un
@@ -2009,9 +2080,18 @@ export async function redistribuirReferencia(input: {
     if (upErr) return { ok: false, error: (upErr as { message: string }).message }
   }
 
-  // ── Lo que el cambio de plata desarma ──
+  // ── Lo que el cambio de plata desarma, y el aviso SOLO donde hace falta ──
+  //
   // Des-concilia, reevalúa los bloques de cobros y reabre SOLO los gates que se habían
   // cerrado con esta plata. No devuelve de etapa: eso lo decide una persona.
+  //
+  // El aviso (`recaudo_cambiado_pendiente`) es un gate duro que NO cede al override de
+  // owner/admin, así que ponerlo donde no hace falta congela el negocio: hasta el
+  // 2026-09-08 ninguna pantalla podía resolverlo y V0442/V0443 quedaron atascados con el
+  // reparto perfectamente cuadrado. Ahora lo decide `avisoRecaudoNecesario` **por
+  // negocio**, con los gates que se reabrieron EN ESE negocio (antes se le pasaba a
+  // todos la suma del reparto completo, así que el aviso de uno reportaba los gates de
+  // otro).
   let gatesReabiertos = 0
   for (const negocioId of plan.negociosAfectados) {
     const r = await recalcularNegocioPorCambioDeRecaudo(
@@ -2020,46 +2100,52 @@ export async function redistribuirReferencia(input: {
     )
     gatesReabiertos += r.gates_reabiertos
 
+    const cambio = plan.cambios.find(c => c.negocioId === negocioId)
+    const deltaRecaudo = cambio ? cambio.montoNuevo - cambio.montoAnterior : 0
+
+    const cuenta = await cuentaDelNegocio(supabase, workspaceId, negocioId)
+    const necesitaAviso = avisoRecaudoNecesario({
+      gatesReabiertos: r.gates_reabiertos,
+      deltaRecaudo,
+      recaudoConfirmado: cuenta.recaudoConfirmado,
+      loQueDebePagar: cuenta.loQueDebePagar,
+    })
+
+    if (necesitaAviso) {
+      // El aviso queda pegado al negocio, lo ven la financiera y el comercial, y vuelve
+      // a frenar cuando alguien intenta avanzar (guard en `cambiarEtapaNegocioConGate`).
+      await guardarAviso({
+        supabase,
+        workspaceId,
+        negocioId,
+        referencia: ref,
+        motivo,
+        etapaAlCambiar: cuenta.etapaNombre,
+        gatesReabiertos: r.gates_reabiertos,
+        destinoSugerido: null,
+        ahora,
+        staffId,
+      })
+    }
+
     if (staffId) {
-      const cambio = plan.cambios.find(c => c.negocioId === negocioId)
       const detalle = cambio
         ? `${fmtCop(cambio.montoAnterior)} → ${fmtCop(cambio.montoNuevo)}`
         : 'ajustado'
+      // El reparto cuadrado no deja aviso, así que el registro es lo único que queda
+      // de él: decir cómo terminó evita que después parezca que el aviso se perdió.
+      const cierre = necesitaAviso
+        ? ' Queda pendiente de resolver por el área financiera.'
+        : ' El reparto quedó cuadrado: sin pendientes.'
       await registrarActividad(db(supabase), {
         workspace_id: workspaceId,
         entidad_tipo: 'negocio',
         entidad_id: negocioId,
         tipo: 'cambio_sistema',
         autor_id: staffId,
-        contenido: `Recaudo redistribuido por el área financiera (ref ${ref}): ${detalle}. Motivo: ${motivo}`.slice(0, 280),
+        contenido: `Recaudo redistribuido por el área financiera (ref ${ref}): ${detalle}. Motivo: ${motivo}.${cierre}`.slice(0, 280),
       }, 'redistribuirReferencia')
     }
-  }
-
-  // ── El aviso que NO se puede cerrar por accidente ──
-  // Reabrir los gates no basta: el caso puede haber avanzado tres etapas con esta plata,
-  // y la pantalla se ve igual que la de un caso sano. El aviso queda pegado al negocio,
-  // lo ven la financiera y el comercial, y vuelve a frenar cuando alguien intenta
-  // avanzar (ver el guard en `cambiarEtapaNegocioConGate`).
-  for (const negocioId of plan.negociosAfectados) {
-    const { data: etapaRaw } = await db(supabase)
-      .from('negocios')
-      .select('etapas_negocio!negocios_etapa_actual_id_fkey(nombre)')
-      .eq('id', negocioId)
-      .single()
-
-    await guardarAviso({
-      supabase,
-      workspaceId,
-      negocioId,
-      referencia: ref,
-      motivo,
-      etapaAlCambiar: (etapaRaw?.etapas_negocio as { nombre: string } | null)?.nombre ?? 'sin etapa',
-      gatesReabiertos,
-      destinoSugerido: null,
-      ahora,
-      staffId,
-    })
   }
 
   revalidatePath('/conciliacion')
@@ -2154,6 +2240,43 @@ export async function aplicarRetrocesoFinanciero(input: {
   revalidatePath(`/negocios/${input.negocioId}`)
 
   return { ok: true, movido: res.movido }
+}
+
+/**
+ * Retira el aviso de recaudo cambiado, con motivo escrito.
+ *
+ * Es la SALIDA del gate. Hasta el 2026-09-08 `resolverAviso` solo se alcanzaba desde
+ * `aplicarRetrocesoFinanciero`, que ninguna pantalla invocaba: el aviso se ponía solo y
+ * no había un botón que lo quitara, así que un negocio con el reparto corregido quedaba
+ * congelado de forma permanente (V0442 y V0443).
+ *
+ * Va bajo `ctxFinanciero()` a propósito: quien cambió la plata es quien puede declarar
+ * que ya está resuelta. El comercial la VE —para eso el aviso vive en la ficha— pero no
+ * la cierra, que es la misma razón por la que el aviso se persiste en vez de mostrarse
+ * una vez (ver la cabecera de `lib/correcciones/retroceso.ts`).
+ *
+ * El mínimo de 10 caracteres lo aplica `resolverAviso`; acá NO se reimplementa.
+ */
+export async function resolverAvisoRecaudo(input: {
+  negocioId: string
+  motivo: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId, staffId } = ctx
+
+  const { error } = await resolverAviso({
+    supabase,
+    workspaceId,
+    negocioId: input.negocioId,
+    motivo: input.motivo,
+    staffId,
+  })
+  if (error) return { ok: false, error }
+
+  revalidatePath('/conciliacion')
+  revalidatePath(`/negocios/${input.negocioId}`)
+  return { ok: true }
 }
 
 function fmtCop(n: number): string {
