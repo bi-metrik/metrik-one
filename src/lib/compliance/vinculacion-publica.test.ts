@@ -17,6 +17,9 @@
  *   - poner a MéTRIK como Responsable en el texto → cae 1
  *   - omitir la transmisión internacional del aviso → cae 1
  *   - aceptar un archivo de 20 MB → cae 1
+ *   - tomar el primero cuando sueltan varios → cae 1
+ *   - no validar tipo ni tamaño al soltar → cae 1
+ *   - aceptar un drop vacío → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -33,6 +36,7 @@ import {
   otpCompleto,
   pasoActual,
   textosAceptacion,
+  archivoSoltado,
   validarArchivo,
   yaAcepto,
   type DeclaracionRegistrada,
@@ -231,5 +235,31 @@ describe('mensajes del enlace', () => {
       'Certificado de existencia y representación legal',
     );
     expect(nombrePedido('algo_raro')).toBe('algo raro');
+  });
+});
+
+describe('soltar un archivo sobre un bloque', () => {
+  const bueno = { type: 'application/pdf', size: 1024 };
+
+  it('un archivo válido pasa', () => {
+    expect(archivoSoltado([bueno])).toEqual({ ok: true, indice: 0 });
+  });
+
+  it('soltar dos archivos no toma el primero en silencio', () => {
+    const r = archivoSoltado([bueno, bueno]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('un archivo a la vez');
+  });
+
+  it('soltar algo que no es archivo avisa, no falla callado', () => {
+    const r = archivoSoltado([]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.length).toBeGreaterThan(10);
+  });
+
+  it('aplica las mismas reglas de tipo y tamaño que el botón', () => {
+    expect(archivoSoltado([{ type: 'application/zip', size: 10 }]).ok).toBe(false);
+    expect(archivoSoltado([{ type: 'application/pdf', size: 20 * 1024 * 1024 }]).ok).toBe(false);
+    expect(archivoSoltado([{ type: 'application/pdf', size: 0 }]).ok).toBe(false);
   });
 });
