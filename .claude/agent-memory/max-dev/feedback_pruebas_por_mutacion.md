@@ -122,7 +122,7 @@ sobre la línea que decide, y anotar los dos conteos por separado.
 
 ## ⚠️ Una mutación huérfana también puede delatar un FIXTURE que pasa por casualidad
 
-**2026-09-08 (PR #580).** Borrar el criterio de orden «los retenidos van al final» no tumbó
+**2026-09-08 (PR #581).** Borrar el criterio de orden «los retenidos van al final» no tumbó
 ninguna prueba, y sí había una prueba escrita para eso. No era código muerto ni cobertura
 faltante: era **el fixture**. Todos los retenidos estaban sembrados al final, y con esas
 filas *ordenar por «listo»* da exactamente el mismo resultado que *ordenar por «retenido»* —

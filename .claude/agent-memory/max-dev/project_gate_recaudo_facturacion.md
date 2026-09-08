@@ -11,7 +11,7 @@ día** y las dos mitades importan:
 
 - **PR [#578](https://github.com/bi-metrik/metrik-one/pull/578)** (`30eba08`, **mergeado**):
   el recaudo pasa a condición de entrada y los retenidos **salen** de la cola.
-- **Enmienda** (PR **#580**, abierto sin mergear al cerrar): vuelven a la pantalla, a una
+- **Enmienda** (PR **#581**, abierto sin mergear al cerrar): vuelven a la pantalla, a una
   **sección propia**, marcados y sin botón de facturar.
 
 ```
@@ -92,13 +92,25 @@ vuelve a medir la distribución antes que a razonar.
   en el servidor es lo que obliga a la pantalla a no ofrecer el botón**, no al revés.
 - `src/app/(app)/conciliacion/conciliacion-client.tsx` — sección colapsable, contador que la
   abre, y las dos decisiones de la tarjeta como funciones puras EXPORTADAS
-  (`ofreceEmitirFactura`, `ofreceAdoptarFactura`) para poder probarlas sin DOM.
+  (`ofreceEmitirFactura`, `ofreceAdoptarFactura`), más `FilaPorFacturar` exportada para la
+  prueba de render.
 - `test/cola-facturacion-doble.ts` — `sembrar` con `recaudo(i)`/`metadata(i)`/`rut(i)`, y
   `casoFalso()` para las pruebas de pantalla.
 
-⚠️ **No hay pruebas de render en este repo:** vitest corre con `environment: 'node'` y el
-`include` solo recoge `*.test.ts` — un `.test.tsx` **ni se colectaría**. Lo que se prueba de
-una pantalla son funciones puras exportadas del componente, como `filtrarCasos`.
+## Una decisión de pantalla se prueba en DOS capas
+
+Cuando lo que se pide es un hecho de pantalla («no ofrece facturar», «sí ofrece adoptar»),
+la prueba pura no alcanza: fija la regla, pero un botón que deje de consultarla pasa igual.
+Aquí conviven la prueba pura de `ofreceEmitirFactura`/`ofreceAdoptarFactura` y una de
+render (`tarjeta-retenido-render.test.ts`) que confirma que el JSX las mira. **La mutación
+que lo demuestra es la del botón que ignora el helper: tumba la de render y ninguna pura.**
+
+⚠️ Y va con **un caso de contraste** (un caso cuadrado que SÍ pinta «Revisar y facturar»):
+sin él, «el botón no aparece» podría deberse a que la tarjeta no lo pinta nunca — un mock
+mal puesto o un error silencioso se leerían como éxito.
+
+Ver [[probar-render-sin-dom]] para el patrón (`renderToStaticMarkup` + `React.createElement`,
+archivo `.test.ts` porque el `include` no recoge `.test.tsx`).
 
 Relacionado: [[medir-antes-de-construir]], [[pruebas-por-mutacion]], [[sql-prod-one]],
-[[siigo-sucursal-adopcion]].
+[[siigo-sucursal-adopcion]], [[probar-render-sin-dom]].
