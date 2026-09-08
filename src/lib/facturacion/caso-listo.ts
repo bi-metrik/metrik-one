@@ -20,7 +20,9 @@ export interface CasoFacturable {
 /**
  * El recibo del recaudo UPME NO entra en este criterio a propósito: es otro
  * documento y plata de un tercero, así que su falta no puede frenar la factura
- * del honorario.
+ * del honorario. Por eso la cola de facturación ni siquiera calcula lo que le
+ * falta al recibo: quien lo vigila es el control de recibos de `/conciliacion`
+ * (`getControlRecibos`), que es una superficie aparte.
  */
 export function casoListoParaFacturar(caso: CasoFacturable): boolean {
   return (

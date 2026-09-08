@@ -29,11 +29,6 @@ describe('casoListoParaFacturar', () => {
     expect(casoListoParaFacturar({ ...base, falta_saldo: TOLERANCIA_SALDO_COP })).toBe(true)
     expect(casoListoParaFacturar({ ...base, falta_saldo: TOLERANCIA_SALDO_COP + 1 })).toBe(false)
   })
-
-  it('el recibo del recaudo UPME NO entra en el criterio', () => {
-    // Es otro documento y plata de un tercero: su falta no frena el honorario.
-    expect(casoListoParaFacturar({ ...base, ...{ faltan_recibo: ['valor pagado a la UPME'] } })).toBe(true)
-  })
 })
 
 describe('faltantesDelCaso', () => {

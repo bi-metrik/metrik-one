@@ -17,7 +17,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
-import { borradorCliente, borradorFactura, borradorRecibo, type RutExtraido } from '@/lib/siigo/mapeo'
+import { borradorCliente, borradorFactura, type RutExtraido } from '@/lib/siigo/mapeo'
 import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
@@ -106,8 +106,6 @@ export interface CasoPorFacturar {
   faltan_factura: string[]
   /** Qué le falta al borrador del cliente. */
   faltan_cliente: string[]
-  /** Qué le falta al borrador del recibo del recaudo UPME. */
-  faltan_recibo: string[]
   /** Ya tiene número de factura registrado en el negocio. */
   ya_facturado: boolean
   /** Número de la factura, cuando la emitió ONE contra Siigo. */
@@ -228,19 +226,14 @@ async function armarColaFacturacion(
   // Dónde vive el bloque de la factura en cada línea. Se usa para saber si el caso
   // ya tiene una factura CARGADA, que es distinto de emitida desde aquí.
   const facturaSlugPorLinea = new Map<string, string>()
-  // El concepto del recibo también sale de la línea: desde el 2026-09-03 el recibo
-  // acusa cualquier entrega de dinero, no solo la tarifa UPME, así que el texto dejó
-  // de estar cableado en el código.
-  const reciboConceptoPorLinea = new Map<string, string>()
   for (const l of lineas) {
     const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
     if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
     const s = (l.config_extra?.siigo ?? {}) as {
-      conceptos?: ConceptosConfig; bloque_factura_slug?: string; recibo_concepto?: string
+      conceptos?: ConceptosConfig; bloque_factura_slug?: string
     }
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
     if (s.bloque_factura_slug) facturaSlugPorLinea.set(l.id, s.bloque_factura_slug)
-    if (s.recibo_concepto) reciboConceptoPorLinea.set(l.id, s.recibo_concepto)
   }
   if (desde == null) {
     return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: { listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0 } } }
@@ -484,10 +477,6 @@ async function armarColaFacturacion(
     const fac = borradorFactura(cfgEval, cli.payload.identification, honorario, hoy, 19,
       { productoCode: concepto.code })
     const upme = upmePorNegocio.get(n.id) ?? null
-    const rec = borradorRecibo(
-      cfgEval, cli.payload.identification, upme, hoy,
-      reciboConceptoPorLinea.get(n.linea_id ?? '') ?? '',
-    )
 
     const recaudado = sumarRecaudoConfirmado(cobrosPorNegocio.get(n.id) ?? [], conciliados.has(n.id))
     const { faltante } = descuadreConciliacion(
@@ -519,7 +508,6 @@ async function armarColaFacturacion(
       valor_upme: upme,
       faltan_factura: fac.faltantes,
       faltan_cliente: cli.faltantes,
-      faltan_recibo: rec.faltantes,
       // Dos fuentes: el bloque donde se carga el PDF de la factura, y la marca que
       // deja la emisión desde aquí. La segunda hace falta porque emitir NO obliga a
       // cargar el soporte, y sin ella el caso volvería a la cola listo para
