@@ -28,11 +28,30 @@
    - dejar pasar la vista previa sin tope de campos → cae 1
    - mostrar campos vacíos en la vista previa → cae 1
    - quitarle a la cámara de comercio la aclaración de socios → cae 1
+   - mostrarle el paso de socios a una persona natural → cae 1
+   - repetir el mismo faltante de un socio dos veces → cae 1
+   - nombrar la efectiva cuando es igual a la directa → cae 1
+   - dejar guardar un socio sin porcentaje → cae 1
+   - dejar guardar una parada sin justificación → cae 1
+   - aceptar una parada en un socio persona natural → cae 1
+   - leer "12,5" como no numérico → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
 import {
   ENCARGADO,
+  FORM_SOCIO_VACIO,
+  PASOS,
+  faltaEnFormSocio,
+  faltasDe,
+  fraseFalta,
+  pasosVisibles,
+  porcentajeANumero,
+  resumenCadena,
+  textoParticipacion,
+  type CadenaPublica,
+  type FormSocio,
+  type Socio,
   TIPOS_ACEPTACION,
   VERSION_TEXTO,
   esMotivoEnlaceCerrado,
@@ -105,7 +124,13 @@ describe('qué falta aceptar', () => {
 });
 
 describe('el orden de los pasos', () => {
-  const base = { acepto: true, slotsFaltantes: 0, camposPorConfirmar: 0, firmado: false };
+  const base = {
+    acepto: true,
+    slotsFaltantes: 0,
+    cadenaPendiente: 0,
+    camposPorConfirmar: 0,
+    firmado: false,
+  };
 
   it('sin aceptar, el paso es el de las autorizaciones aunque falten documentos', () => {
     expect(pasoActual({ ...base, acepto: false, slotsFaltantes: 4 })).toBe('aceptaciones');
@@ -123,6 +148,18 @@ describe('el orden de los pasos', () => {
     expect(pasoActual({ ...base, camposPorConfirmar: 3 })).toBe('datos');
   });
 
+  it('los socios van antes que los datos: la cadena sale del certificado', () => {
+    expect(pasoActual({ ...base, cadenaPendiente: 1, camposPorConfirmar: 3 })).toBe('socios');
+  });
+
+  it('los documentos van antes que los socios', () => {
+    expect(pasoActual({ ...base, slotsFaltantes: 1, cadenaPendiente: 2 })).toBe('documentos');
+  });
+
+  it('la firma NO se ofrece con la cadena a medias', () => {
+    expect(pasoActual({ ...base, cadenaPendiente: 1 })).not.toBe('firma');
+  });
+
   it('la firma NO se ofrece mientras haya datos sin confirmar', () => {
     expect(pasoActual({ ...base, camposPorConfirmar: 1 })).not.toBe('firma');
   });
@@ -133,7 +170,13 @@ describe('el orden de los pasos', () => {
 
   it('firmado, queda listo aunque el resto se vea incompleto', () => {
     expect(
-      pasoActual({ acepto: true, slotsFaltantes: 2, camposPorConfirmar: 4, firmado: true }),
+      pasoActual({
+        acepto: true,
+        slotsFaltantes: 2,
+        cadenaPendiente: 3,
+        camposPorConfirmar: 4,
+        firmado: true,
+      }),
     ).toBe('listo');
   });
 });
@@ -386,5 +429,131 @@ describe('vistaPreviaCampos', () => {
 
     const largo = vistaPreviaCampos([{ slug: 'x', value: 'y'.repeat(200) }]);
     expect(largo[0].texto.length).toBeLessThanOrEqual(63);
+  });
+});
+
+describe('el paso de socios', () => {
+  function socio(over: Partial<Socio> = {}): Socio {
+    return {
+      persona_id: 'p1',
+      padre_persona_id: null,
+      nivel: 0,
+      rol: 'socio',
+      tipo_sujeto: 'natural',
+      nombre: 'Ana',
+      documento_tipo: 'CC',
+      documento_numero: '1020',
+      porcentaje_participacion: 30,
+      participacion_efectiva: 30,
+      motivo_parada: null,
+      parada_justificacion: null,
+      tiene_soporte: false,
+      ...over,
+    };
+  }
+
+  const cadenaVacia: CadenaPublica = {
+    completa: true,
+    pendientes: [],
+    beneficiarios: [],
+    sin_resolver: [],
+    suma_directa: 0,
+    suma_excedida: false,
+  };
+
+  it('a una persona natural no se le pregunta por sus socios', () => {
+    expect(pasosVisibles(false)).not.toContain('socios');
+    expect(pasosVisibles(true)).toEqual(PASOS);
+  });
+
+  it('los faltantes de un socio no se repiten', () => {
+    const cadena: CadenaPublica = {
+      ...cadenaVacia,
+      completa: false,
+      pendientes: [
+        { persona_id: 'p1', nombre: 'X', falta: 'soporte' },
+        { persona_id: 'p1', nombre: 'X', falta: 'soporte' },
+        { persona_id: 'p1', nombre: 'X', falta: 'socios' },
+        { persona_id: 'p2', nombre: 'Y', falta: 'porcentaje' },
+      ],
+    };
+    expect(faltasDe(cadena, 'p1')).toEqual(['soporte', 'socios']);
+    expect(faltasDe(cadena, 'p3')).toEqual([]);
+  });
+
+  it('cada faltante se dice como lo que hay que hacer', () => {
+    expect(fraseFalta('soporte')).toContain('documento');
+    expect(fraseFalta('socios')).toContain('socios');
+    expect(fraseFalta('porcentaje')).toContain('porcentaje');
+    expect(fraseFalta('justificacion')).toContain('por qué');
+  });
+
+  it('la participación efectiva solo se nombra cuando dice algo distinto', () => {
+    // Un socio directo: repetir "30% (30% efectivo)" ocupa el lugar de lo que sí falta.
+    expect(textoParticipacion(socio())).toBe('30%');
+    // Un socio de segundo nivel: los dos números importan.
+    expect(
+      textoParticipacion(socio({ porcentaje_participacion: 40, participacion_efectiva: 4 })),
+    ).toBe('40% de su empresa, 4% del total');
+    expect(textoParticipacion(socio({ porcentaje_participacion: null }))).toBe('Sin porcentaje');
+  });
+
+  it('el resumen dice qué hacer, no un conteo suelto', () => {
+    expect(resumenCadena(cadenaVacia, [])).toContain('Todavía no');
+    expect(
+      resumenCadena(
+        { ...cadenaVacia, completa: false, pendientes: [{ persona_id: 'p1', nombre: 'X', falta: 'soporte' }] },
+        [socio()],
+      ),
+    ).toContain('1 socio');
+    expect(
+      resumenCadena({ ...cadenaVacia, suma_excedida: true, completa: false }, [socio()]),
+    ).toContain('100%');
+    expect(
+      resumenCadena(
+        { ...cadenaVacia, beneficiarios: [{ persona_id: 'p1', nombre: 'Ana', documento_tipo: 'CC', documento_numero: '1', participacion_efectiva: 30 }] },
+        [socio()],
+      ),
+    ).toContain('1 beneficiario final');
+  });
+});
+
+describe('lo que la contraparte escribe de un socio', () => {
+  const base: FormSocio = { ...FORM_SOCIO_VACIO, nombre: 'Ana', porcentaje: '30' };
+
+  it('un socio sin nombre o sin porcentaje no se guarda', () => {
+    expect(faltaEnFormSocio({ ...base, nombre: '  ' }).nombre).toBeTruthy();
+    expect(faltaEnFormSocio({ ...base, porcentaje: '' }).porcentaje).toBeTruthy();
+    expect(faltaEnFormSocio({ ...base, porcentaje: '101' }).porcentaje).toBeTruthy();
+    expect(faltaEnFormSocio({ ...base, porcentaje: 'mucho' }).porcentaje).toBeTruthy();
+  });
+
+  it('un socio bien escrito no genera errores', () => {
+    expect(faltaEnFormSocio(base)).toEqual({});
+  });
+
+  it('una parada declarada sin explicación no pasa', () => {
+    const conParada: FormSocio = {
+      ...base,
+      tipoSujeto: 'juridica',
+      motivoParada: 'bf_no_identificable',
+      justificacion: '   ',
+    };
+    expect(faltaEnFormSocio(conParada).justificacion).toBeTruthy();
+    expect(faltaEnFormSocio({ ...conParada, justificacion: 'Se negó a entregarla.' })).toEqual({});
+  });
+
+  it('una persona natural no puede declarar parada: no tiene socios detrás', () => {
+    expect(
+      faltaEnFormSocio({ ...base, tipoSujeto: 'natural', motivoParada: 'sociedad_listada' })
+        .motivoParada,
+    ).toBeTruthy();
+  });
+
+  it('el porcentaje se escribe con coma o con punto, como lo escriba quien lo escriba', () => {
+    expect(porcentajeANumero('12,5')).toBe(12.5);
+    expect(porcentajeANumero('12.5')).toBe(12.5);
+    expect(porcentajeANumero('  ')).toBeNull();
+    expect(porcentajeANumero('abc')).toBeNull();
   });
 });

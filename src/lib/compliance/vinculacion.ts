@@ -31,6 +31,10 @@
  * funciones async, y porque estas reglas tienen que poder probarse sin red.
  */
 
+// La forma de la cadena la define quien la calcula, que es Valida, y de este
+// lado la modela una sola vez. Es `import type`: no arrastra nada al bundle.
+import type { CadenaPublica, Socio } from './vinculacion-publica';
+
 // ─── Vocabulario del expediente (espejo de lib/kyc/types.ts en metrik-valida) ─
 
 export type EstadoExpediente =
@@ -154,6 +158,8 @@ export type ExpedienteFila = {
 export type ExpedienteDoc = {
   doc_id: string;
   slot: string;
+  /** Socio de la cadena al que pertenece, cuando no es un documento del kit. */
+  persona_id?: string | null;
   tipo_doc: string | null;
   estado_extraccion: EstadoExtraccion | null;
   vigencia_hasta: string | null;
@@ -193,6 +199,10 @@ export type ExpedienteDetalle = {
   fecha_cierre: string | null;
   data_retention_until: string | null;
   creado_en: string;
+  /** La cadena de socios, tal como la calcula Valida. Ausente en expedientes
+   *  viejos y en los de persona natural. */
+  socios?: Socio[];
+  cadena?: CadenaPublica;
 };
 
 // ─── Permisos ─────────────────────────────────────────────────────────────
@@ -271,7 +281,9 @@ export type Alerta = {
     | 'documentos_en_cola'
     | 'campos_sin_confirmar'
     | 'campos_sin_llenar'
-    | 'documentos_faltantes';
+    | 'documentos_faltantes'
+    | 'cadena_incompleta'
+    | 'cadena_sin_resolver';
   texto: string;
   cuantos: number;
 };
@@ -343,10 +355,16 @@ export function alertasDeExpediente(
   docs: readonly ExpedienteDoc[],
   campos: readonly ExpedienteCampo[],
   kit: readonly string[] = [],
+  cadena?: CadenaPublica | null,
 ): Alerta[] {
   const alertas: Alerta[] = [];
 
-  const faltantes = slotsFaltantes(kit, docs);
+  // Los soportes de la cadena cuelgan de un socio, no de un casillero del kit.
+  // Contarlos acá le pondría al oficial alertas del kit que hablan de
+  // documentos que el kit nunca pidió, y la cadena tiene su propia alerta.
+  const delKit = docs.filter((d) => !d.persona_id);
+
+  const faltantes = slotsFaltantes(kit, delKit);
   if (faltantes.length > 0) {
     alertas.push({
       clave: 'documentos_faltantes',
@@ -358,7 +376,7 @@ export function alertasDeExpediente(
     });
   }
 
-  const enCola = documentosEnCola(docs);
+  const enCola = documentosEnCola(delKit);
   if (enCola.length > 0) {
     alertas.push({
       clave: 'documentos_en_cola',
@@ -370,7 +388,7 @@ export function alertasDeExpediente(
     });
   }
 
-  const ilegibles = documentosIlegibles(docs);
+  const ilegibles = documentosIlegibles(delKit);
   if (ilegibles.length > 0) {
     alertas.push({
       clave: 'documentos_sin_leer',
@@ -397,6 +415,33 @@ export function alertasDeExpediente(
       clave: 'campos_sin_llenar',
       cuantos: sinLlenar.length,
       texto: `${sinLlenar.length} ${sinLlenar.length === 1 ? 'campo quedó' : 'campos quedaron'} sin llenar.`,
+    });
+  }
+
+  if (cadena && !cadena.completa) {
+    const socios = new Set(cadena.pendientes.map((p) => p.persona_id)).size;
+    alertas.push({
+      clave: 'cadena_incompleta',
+      cuantos: socios,
+      texto: cadena.suma_excedida
+        ? 'La cadena hasta el beneficiario final no cuadra: hay porcentajes que suman más de 100%.'
+        : `La cadena hasta el beneficiario final está incompleta: falta información de ${socios} ${socios === 1 ? 'socio' : 'socios'}.`,
+    });
+  }
+
+  // Una rama donde la contraparte declaró que no pudo identificar al
+  // beneficiario final NO deja la cadena incompleta: la declaración con su
+  // justificación está en el expediente. Pero es lo que hay que leer antes de
+  // aprobar, así que se dice aparte y no se mezcla con lo que falta.
+  const sinResolver = cadena?.sin_resolver ?? [];
+  if (sinResolver.length > 0) {
+    alertas.push({
+      clave: 'cadena_sin_resolver',
+      cuantos: sinResolver.length,
+      texto:
+        sinResolver.length === 1
+          ? `En 1 rama la contraparte declaró que no pudo identificar al beneficiario final (${sinResolver[0].nombre}). Lee su justificación antes de decidir.`
+          : `En ${sinResolver.length} ramas la contraparte declaró que no pudo identificar al beneficiario final. Lee sus justificaciones antes de decidir.`,
     });
   }
 
@@ -547,11 +592,47 @@ export function nombreContraparte(
  * nunca confirmó lo que se leyó. Aprobar así es válido (el criterio es del
  * oficial, no del software), pero tiene que quedar dicho que fue así.
  */
+// ─── La cadena, en palabras del oficial ────────────────────
+
+/**
+ * El motivo de parada dicho para quien revisa, no para quien declara. La
+ * contraparte lee "No pude conseguir la información"; el oficial necesita leer
+ * qué quedó declarado, que es otra frase.
+ */
+export const MOTIVO_PARADA_OC: Record<string, string> = {
+  sociedad_listada: 'Cotiza en bolsa',
+  entidad_estatal: 'Entidad del Estado',
+  bf_no_identificable: 'Beneficiario final no identificado',
+};
+
+export function etiquetaParada(motivo: string | null | undefined): string | null {
+  if (!motivo) return null;
+  return MOTIVO_PARADA_OC[motivo] ?? null;
+}
+
+/**
+ * Los socios que le faltan algo, por id. La pantalla los marca en la fila: una
+ * lista de pendientes aparte obliga a cruzar dos listas a ojo.
+ */
+export function faltantesPorSocio(cadena: CadenaPublica | null | undefined): Map<string, string[]> {
+  const mapa = new Map<string, string[]>();
+  for (const p of cadena?.pendientes ?? []) {
+    const previo = mapa.get(p.persona_id) ?? [];
+    if (!previo.includes(p.falta)) previo.push(p.falta);
+    mapa.set(p.persona_id, previo);
+  }
+  return mapa;
+}
+
 export const CLAVES_EXIGEN_CONSTANCIA: readonly Alerta['clave'][] = [
   'documentos_faltantes',
   'documentos_en_cola',
   'documentos_sin_leer',
   'campos_sin_confirmar',
+  // Una cadena a medias es el expediente diciendo que no sabe quién está
+  // detrás. `cadena_sin_resolver` NO está: ahí la contraparte sí declaró, con
+  // su justificación escrita, y el oficial decide sobre algo que puede leer.
+  'cadena_incompleta',
 ];
 
 /**
