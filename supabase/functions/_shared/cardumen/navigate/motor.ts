@@ -11,6 +11,12 @@
 //
 // Registro: la persona se trata de USTED, como en la muestra que ve el cliente (Guatemala).
 // El guard de espanol neutro (`es-neutro.ts`) solo corrige voseo, asi que no interfiere.
+//
+// Invariante que defiende todo el archivo: NUNCA se fabrica una ubicacion de Capa A a partir
+// de ruido. Lo que no se pudo leer se repregunta UNA vez con encuadre mas claro; a la segunda
+// queda `unresolved` y se avanza. La sesion no se cuelga, no se reinicia sola y no salta pasos.
+// Antes del modelo hay una capa determinista (`meta.ts`): vacio, pregunta de vuelta y
+// negativa nunca llegan al lector como si fueran una respuesta.
 
 import {
   APERTURA, DIADAS, ESPECIALES_FUERA_DEL_EJE, INTENSIDADES, REPARTO_SOLO_UNO, SECTORES, SECUENCIA, TRIADAS,
@@ -19,8 +25,9 @@ import {
 import type { Ancla, DiadaNav, DimensionId, Poblacion, TriadaNav } from "./instrumento.ts";
 import { detectarIdioma } from "./idioma.ts";
 import { normalizarTexto } from "./interprete.ts";
+import { leerMeta, sinPalabras } from "./meta.ts";
 import type {
-  Accion, DiadaEnCurso, Entrada, Interprete, NavigateState, RegistroDiada, RegistroTriada, Resultado, Salida, TriadaEnCurso,
+  Accion, DiadaEnCurso, Entrada, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida, TriadaEnCurso,
 } from "./tipos.ts";
 
 export const STUDY_ID = "navigate";
@@ -42,6 +49,31 @@ export const BOTON = {
   intManda: "nav_int_manda",
   intClaro: "nav_int_claro",
 } as const;
+
+/**
+ * Que botones VALEN en cada paso. WhatsApp deja tocar botones de mensajes viejos: un "OK"
+ * del consentimiento tocado a mitad de una triada no es una respuesta a la triada. Un boton
+ * que no es del paso se ignora como boton y su titulo se lee como texto.
+ */
+const BOTONES_DEL_PASO: Record<Paso, readonly string[]> = {
+  consentimiento: [BOTON.ok, BOTON.no],
+  poblacion: [BOTON.expSi, BOTON.expNo],
+  sector: [],
+  historia: [],
+  idioma_confirmar: [BOTON.langSi, BOTON.langOtro],
+  idioma_no_es: [BOTON.langSi, BOTON.langNo],
+  triada_orden: [],
+  triada_segundo: [],
+  triada_confirmar: [BOTON.si, BOTON.corrijo],
+  triada_intensidad: [BOTON.intParejos, BOTON.intManda, BOTON.intClaro],
+  diada_abrir: [],
+  diada_aclarar: [],
+  diada_confirmar: [BOTON.si, BOTON.corrijo],
+  cerrado: [],
+};
+
+/** Pasos donde se espera texto libre: un boton viejo aqui no es una respuesta. */
+const PASOS_DE_TEXTO = new Set<Paso>(["sector", "historia", "triada_orden", "triada_segundo", "diada_abrir", "diada_aclarar"]);
 
 const SI = new Set([
   "si", "s", "ok", "okay", "listo", "dale", "de acuerdo", "claro", "vale", "correcto", "asi es",
@@ -78,12 +110,23 @@ const TXT = {
   corrijaConSusPalabrasTriada: "Dígamelo con sus palabras: ¿cuáles dos pesaron más, y en qué orden?",
   noSeguiTriada: "No le alcancé a seguir. Dígame cuál de las tres pesó más, y cuál iría en segundo lugar.",
   guardoAsi: "Listo, lo guardo así.",
+  sinUbicar: "Lo dejo sin ubicar, no hay problema. Seguimos.",
+  declino: "Entendido, lo dejo sin responder. Seguimos.",
   salidaConDatos: "Gracias por lo que alcanzó a compartir. Quedó guardado como prueba de demostración.",
   salidaSinDatos: "Listo, no guardamos nada.",
   alBorrar: "Hecho: borré lo que había compartido y cerré la conversación. Si quiere empezar de nuevo, escriba *cardumen*.",
   cierre:
     "Gracias, eso era todo.\n\nLo que respondió quedó guardado *como prueba de demostración*: no entra en ningún estudio ni se comparte.\n\n" +
     "Esto es lo que quedó registrado, con sus palabras:",
+  // Meta-respuestas: una frase corta que responde, y en el MISMO mensaje la pregunta pendiente.
+  quienSoy:
+    "Soy el asistente de *Navigate* (Cardumen). Esto es una demostración: lo que responda se guarda como prueba y no entra en ningún estudio ni se comparte. " +
+    "Si prefiere parar, escriba *salir*.",
+  noLlegoTexto: "No me llegó texto. Respóndame con un mensaje de texto o de voz, por favor.",
+  botonViejo: "Ese botón era de una pregunta anterior. Seguimos con esta:",
+  yaEstamos: "Ya estamos en la demostración. Seguimos donde íbamos:",
+  sinHistoria: "Entendido. Sin una historia no tengo con qué seguir: si prefiere no continuar, escriba *salir*. Si no, cuénteme:",
+  yaCerrado: "Esta conversación ya terminó. Escriba *cardumen* para empezar de nuevo.",
 };
 
 // Variar la entrada rompe la monotonia de repetir la misma mecanica (spec de triadas §4.2).
@@ -97,6 +140,18 @@ const texto = (t: string): Salida => ({ tipo: "texto", texto: t });
 const botones = (t: string, b: Array<{ id: string; title: string }>): Salida => ({ tipo: "botones", texto: t, botones: b });
 const botonesSiNo = (t: string): Salida =>
   botones(t, [{ id: BOTON.si, title: "Sí, así" }, { id: BOTON.corrijo, title: "No, corrijo" }]);
+const botonesPoblacion = (t: string): Salida =>
+  botones(t, [{ id: BOTON.expSi, title: "Sí, observador" }, { id: BOTON.expNo, title: "No" }]);
+const botonesIdioma = (): Salida =>
+  botones(TXT.idiomaConfirmar, [{ id: BOTON.langSi, title: "Sí, en español" }, { id: BOTON.langOtro, title: "Otro idioma" }]);
+const botonesTrilingue = (): Salida =>
+  botones(TXT.trilingue, [{ id: BOTON.langSi, title: "Sí / Yes / Sim" }, { id: BOTON.langNo, title: "No" }]);
+
+/** Antepone una frase a una salida (texto o botones) sin cambiar su tipo. */
+function prefijar(prefijo: string | undefined, s: Salida): Salida {
+  if (!prefijo) return s;
+  return { ...s, texto: `${prefijo}\n\n${s.texto}` };
+}
 
 function menuSectores(encabezado: string): Salida {
   const filas = SECTORES.map((s, i) => `${i + 1}. ${etiquetaSector(s)}`).join("\n");
@@ -108,6 +163,11 @@ function preguntaTriada(t: TriadaNav, posicion: number): Salida {
   return texto(
     `*${preguntaMostrada(t)}.* ${intro}se cruzan tres cosas: *${t.polos[0]}*, *${t.polos[1]}* o *${t.polos[2]}*. ¿Cuáles dos pesaron más, y en qué orden?`,
   );
+}
+
+function preguntaSegundo(t: TriadaNav, dominante: number): Salida {
+  const otros = [0, 1, 2].filter((i) => i !== dominante);
+  return texto(`¿Cuál iría en segundo lugar: *${t.polos[otros[0]]}* o *${t.polos[otros[1]]}*? Si ninguno, dígame *ninguno*.`);
 }
 
 function preguntaDiada(d: DiadaNav, posicion: number, esUltima: boolean): Salida {
@@ -150,6 +210,8 @@ function textoAncla(d: DiadaNav, ec: DiadaEnCurso): string {
   const a = anclasDe(d).find((x) => x.posicion === ec.ancla);
   return a ? a.texto : "";
 }
+
+const ecoDiada = (d: DiadaNav, ec: DiadaEnCurso): Salida => botonesSiNo(`Lo dejo como *${textoAncla(d, ec)}*. ¿Así?`);
 
 function menuAclaracion(d: DiadaNav, ec: DiadaEnCurso): Salida {
   const anclas = anclasDe(d);
@@ -197,14 +259,21 @@ function resultado(state: NavigateState, salidas: Salida[], accion: Accion = "se
   return { state, salidas, accion };
 }
 
+function nota(state: NavigateState, n: string): void {
+  (state.notas ??= []).push(n);
+}
+
 // ---- Procesar un mensaje de la persona -------------------------------------------------
 
 export async function procesar(state: NavigateState, entrada: Entrada, interprete: Interprete): Promise<Resultado> {
   const t = (entrada.texto || "").trim();
   const n = normalizarTexto(t);
-  const boton = entrada.botonId;
+  // Un boton de OTRO paso no vale como boton: su titulo se lee como texto.
+  const boton = entrada.botonId && BOTONES_DEL_PASO[state.paso].includes(entrada.botonId) ? entrada.botonId : undefined;
   state.turnos += 1;
   state.historial.push({ role: "persona", text: t });
+
+  if (state.closed || state.paso === "cerrado") return resultado(state, [], "seguir");
 
   // Salidas globales. BORRAR vale en cualquier momento, incluso antes del consentimiento.
   if (ERASE.has(n)) {
@@ -213,6 +282,21 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
     return resultado(state, [texto(TXT.alBorrar)], "borrar");
   }
   if (EXIT.has(n)) return salir(state);
+
+  // La palabra clave a mitad de conversacion NO reinicia nada: se recuerda donde ibamos.
+  if (n === PALABRA_CLAVE) {
+    const pendiente = preguntaPendiente(state);
+    return resultado(state, [state.paso === "consentimiento" ? pendiente : prefijar(TXT.yaEstamos, pendiente)]);
+  }
+
+  // Capa determinista ANTES del modelo: lo que no es una respuesta no se lee como respuesta.
+  if (!boton) {
+    if (sinPalabras(t)) return fallaLectura(state, "vacio");
+    if (entrada.botonId && PASOS_DE_TEXTO.has(state.paso)) return fallaLectura(state, "boton");
+    const meta = leerMeta(t);
+    if (meta === "pregunta") return fallaLectura(state, "pregunta");
+    if (meta === "negativa") return declinar(state);
+  }
 
   const esSi = boton === BOTON.ok || boton === BOTON.si || boton === BOTON.expSi || boton === BOTON.langSi || SI.has(n);
   const esNo = boton === BOTON.no || boton === BOTON.corrijo || boton === BOTON.expNo || boton === BOTON.langNo || NO.has(n);
@@ -223,69 +307,61 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
         state.consent = { version: CONSENT_VERSION, granted_at: new Date().toISOString() };
         state.paso = "poblacion";
         state.reintentos = 0;
-        return resultado(state, [botones(TXT.poblacion, [{ id: BOTON.expSi, title: "Sí, observador" }, { id: BOTON.expNo, title: "No" }])]);
+        return resultado(state, [botonesPoblacion(TXT.poblacion)]);
       }
       if (esNo) return cerrarSinGuardar(state, TXT.rechazo);
-      state.reintentos += 1;
-      if (state.reintentos >= MAX_REINTENTOS) return cerrarSinGuardar(state, TXT.consentimientoAdios);
-      return resultado(state, [botones(TXT.consentimientoRepite, [{ id: BOTON.ok, title: "OK" }])]);
+      return fallaLectura(state, "no_leido");
     }
 
     case "poblacion": {
+      // "no soy observador" menciona la palabra y la niega: es ciudadano, no experto.
+      const menciona = /\b(observador|observadora|experto|experta)\b/.test(n);
+      const niega = /\bno\b/.test(n);
       let poblacion: Poblacion | null = null;
-      if (boton === BOTON.expSi || /\b(observador|experto|experta)\b/.test(n) || (esSi && !esNo)) poblacion = "experto";
-      else if (boton === BOTON.expNo || /\bciudadan/.test(n) || esNo) poblacion = "ciudadano";
-      if (poblacion === null) {
-        state.reintentos += 1;
-        if (state.reintentos < MAX_REINTENTOS) {
-          return resultado(state, [botones(TXT.poblacionRepite, [{ id: BOTON.expSi, title: "Sí, observador" }, { id: BOTON.expNo, title: "No" }])]);
-        }
-        poblacion = "ciudadano"; // no se puede dejar a la persona atascada en una demo; queda dicho en provenance
-      }
-      state.poblacion = poblacion;
-      state.secuencia = [...SECUENCIA[poblacion]];
-      state.paso = "sector";
-      state.reintentos = 0;
-      return resultado(state, [menuSectores(TXT.sector)]);
+      if (boton === BOTON.expSi) poblacion = "experto";
+      else if (boton === BOTON.expNo) poblacion = "ciudadano";
+      else if (menciona) poblacion = niega ? "ciudadano" : "experto";
+      else if (/\bciudadan/.test(n)) poblacion = "ciudadano";
+      else if (esSi && !esNo) poblacion = "experto";
+      else if (esNo) poblacion = "ciudadano";
+      if (poblacion === null) return fallaLectura(state, "no_leido");
+      return fijarPoblacion(state, poblacion);
     }
 
     case "sector": {
       const sector = leerSector(n);
-      if (sector === null) {
-        state.reintentos += 1;
-        if (state.reintentos < MAX_REINTENTOS) return resultado(state, [menuSectores(TXT.sectorRepite)]);
-        state.sector = null;
-      } else {
-        state.sector = sector;
-      }
-      state.paso = "historia";
-      state.reintentos = 0;
-      return resultado(state, [texto(APERTURA[state.poblacion!])]);
+      if (sector === null) return fallaLectura(state, "no_leido");
+      return fijarSector(state, sector);
     }
 
     case "historia": {
       state.historia = t;
       state.idioma_detectado = detectarIdioma(t);
+      state.reintentos = 0;
       if (state.idioma_detectado === "en" || state.idioma_detectado === "pt") {
         state.paso = "idioma_no_es";
-        return resultado(state, [botones(TXT.trilingue, [{ id: BOTON.langSi, title: "Sí / Yes / Sim" }, { id: BOTON.langNo, title: "No" }])]);
+        return resultado(state, [botonesTrilingue()]);
       }
       state.paso = "idioma_confirmar";
-      return resultado(state, [botones(TXT.idiomaConfirmar, [{ id: BOTON.langSi, title: "Sí, en español" }, { id: BOTON.langOtro, title: "Otro idioma" }])]);
+      return resultado(state, [botonesIdioma()]);
     }
 
     case "idioma_confirmar": {
-      if (esSi && boton !== BOTON.langOtro) return confirmarIdioma(state);
-      state.paso = "idioma_no_es";
-      return resultado(state, [botones(TXT.trilingue, [{ id: BOTON.langSi, title: "Sí / Yes / Sim" }, { id: BOTON.langNo, title: "No" }])]);
+      if (boton === BOTON.langOtro || esNo) {
+        state.paso = "idioma_no_es";
+        state.reintentos = 0;
+        return resultado(state, [botonesTrilingue()]);
+      }
+      if (esSi) return confirmarIdioma(state);
+      // Ni si ni no: se repite. A la segunda se sigue en espanol, que es el unico idioma del
+      // instrumento y el que la persona acaba de usar; cerrar aqui botaria su historia.
+      return fallaLectura(state, "no_leido");
     }
 
     case "idioma_no_es": {
       if (esSi) return confirmarIdioma(state);
       if (esNo) return cerrarSinGuardar(state, TXT.trilingueAdios);
-      state.reintentos += 1;
-      if (state.reintentos >= MAX_REINTENTOS) return cerrarSinGuardar(state, TXT.trilingueAdios);
-      return resultado(state, [botones(TXT.trilingue, [{ id: BOTON.langSi, title: "Sí / Yes / Sim" }, { id: BOTON.langNo, title: "No" }])]);
+      return fallaLectura(state, "no_leido");
     }
 
     case "triada_orden":
@@ -303,10 +379,7 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
         ec.segundo = r.segundo;
       } else {
         ec.reintentos += 1;
-        if (ec.reintentos < MAX_REINTENTOS) {
-          const otros = [0, 1, 2].filter((i) => i !== ec.dominante);
-          return resultado(state, [texto(`¿Cuál iría en segundo lugar: *${tri.polos[otros[0]]}* o *${tri.polos[otros[1]]}*? Si ninguno, dígame *ninguno*.`)]);
-        }
+        if (ec.reintentos < MAX_REINTENTOS) return resultado(state, [preguntaSegundo(tri, ec.dominante!)]);
         ec.segundo = null;
         ec.notas.push("no se pudo leer el segundo polo: queda sin ordenar");
       }
@@ -384,7 +457,7 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
       if (r.claro) {
         aplicarLecturaDiada(ec, r);
         state.paso = "diada_confirmar";
-        return resultado(state, [botonesSiNo(`Lo dejo como *${textoAncla(dia, ec)}*. ¿Así?`)]);
+        return resultado(state, [ecoDiada(dia, ec)]);
       }
       ec.reintentos += 1;
       if (ec.reintentos < MAX_REINTENTOS) return resultado(state, [menuAclaracion(dia, ec)]);
@@ -408,8 +481,8 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
       return await leerDiada(state, t, interprete);
     }
 
-    case "cerrado":
     default:
+      // "cerrado" quedo atendido arriba: aqui TypeScript ya lo excluye del tipo.
       return resultado(state, [], "seguir");
   }
 }
@@ -432,27 +505,188 @@ export function leerSector(n: string): string | null {
   return candidatos.length === 1 ? candidatos[0] : null;
 }
 
+function fijarPoblacion(state: NavigateState, poblacion: Poblacion): Resultado {
+  state.poblacion = poblacion;
+  state.secuencia = [...SECUENCIA[poblacion]];
+  state.paso = "sector";
+  state.reintentos = 0;
+  return resultado(state, [menuSectores(TXT.sector)]);
+}
+
+function fijarSector(state: NavigateState, sector: string | null): Resultado {
+  state.sector = sector;
+  state.paso = "historia";
+  state.reintentos = 0;
+  return resultado(state, [texto(APERTURA[state.poblacion!])]);
+}
+
 function confirmarIdioma(state: NavigateState): Resultado {
   state.idioma_confirmado = true;
   state.reintentos = 0;
   return resultado(state, abrirDimension(state));
 }
 
+// ---- Lo que no se pudo leer: repreguntar una vez, resolver a la segunda ------------------
+//
+// Todos los caminos "no se leyo" (vacio, boton viejo, pregunta de vuelta, negativa, lectura
+// fallida) pasan por aqui, asi que el tope de intentos vive en UN sitio.
+
+type Motivo = "vacio" | "boton" | "pregunta" | "no_leido";
+
+/** Suma un intento al contador del paso actual. Devuelve true si se agoto el tope. */
+function sumarIntento(state: NavigateState): boolean {
+  const ec = state.en_curso;
+  if (ec) ec.turnos += 1;
+  switch (state.paso) {
+    case "triada_confirmar":
+    case "diada_confirmar":
+      ec!.correcciones += 1;
+      return ec!.correcciones >= MAX_REINTENTOS;
+    case "triada_orden":
+    case "triada_segundo":
+    case "triada_intensidad":
+    case "diada_abrir":
+    case "diada_aclarar":
+      ec!.reintentos += 1;
+      return ec!.reintentos >= MAX_REINTENTOS;
+    default:
+      state.reintentos += 1;
+      return state.reintentos >= MAX_REINTENTOS;
+  }
+}
+
+/** La pregunta que la persona tiene pendiente, tal como se le hizo. */
+function preguntaPendiente(state: NavigateState): Salida {
+  switch (state.paso) {
+    case "consentimiento": return botones(TXT.consentimientoRepite, [{ id: BOTON.ok, title: "OK" }]);
+    case "poblacion": return botonesPoblacion(TXT.poblacionRepite);
+    case "sector": return menuSectores(TXT.sector);
+    case "historia": return texto(APERTURA[state.poblacion ?? "ciudadano"]);
+    case "idioma_confirmar": return botonesIdioma();
+    case "idioma_no_es": return botonesTrilingue();
+    case "triada_orden": { const { tri } = triadaActual(state); return preguntaTriada(tri, posicionTriada(state)); }
+    case "triada_segundo": { const { tri, ec } = triadaActual(state); return preguntaSegundo(tri, ec.dominante!); }
+    case "triada_confirmar": { const { tri, ec } = triadaActual(state); return ecoOrden(tri, ec); }
+    case "triada_intensidad": { const { tri, ec } = triadaActual(state); return preguntaIntensidad(tri, ec, true); }
+    case "diada_abrir": { const { dia } = diadaActual(state); return preguntaDiada(dia, posicionDiada(state), esUltimaDimension(state)); }
+    case "diada_aclarar": { const { dia, ec } = diadaActual(state); return menuAclaracion(dia, ec); }
+    case "diada_confirmar": { const { dia, ec } = diadaActual(state); return ecoDiada(dia, ec); }
+    case "cerrado": return texto(TXT.yaCerrado);
+  }
+}
+
+/** La repregunta con encuadre mas claro cuando lo que llego no se pudo leer. */
+function repregunta(state: NavigateState, motivo: Motivo): Salida {
+  if (motivo !== "no_leido") return preguntaPendiente(state);
+  switch (state.paso) {
+    case "sector": return menuSectores(TXT.sectorRepite);
+    case "triada_orden": return texto(TXT.noSeguiTriada);
+    default: return preguntaPendiente(state);
+  }
+}
+
+const PREFIJO: Record<Motivo, string | undefined> = {
+  vacio: TXT.noLlegoTexto,
+  boton: TXT.botonViejo,
+  pregunta: TXT.quienSoy,
+  no_leido: undefined,
+};
+
+function fallaLectura(state: NavigateState, motivo: Motivo): Resultado {
+  if (!sumarIntento(state)) return resultado(state, [prefijar(PREFIJO[motivo], repregunta(state, motivo))]);
+  return sinLectura(state);
+}
+
+/** Se agotaron los intentos del paso: se resuelve SIN lectura y se sigue. Nunca se rellena. */
+function sinLectura(state: NavigateState): Resultado {
+  switch (state.paso) {
+    case "consentimiento": return cerrarSinGuardar(state, TXT.consentimientoAdios);
+    case "poblacion":
+      // No se puede dejar a la persona atascada en una demo; queda dicho en provenance.
+      nota(state, "no se pudo leer si es observador: se asumio panel ciudadano");
+      return fijarPoblacion(state, "ciudadano");
+    case "sector":
+      nota(state, "no se pudo leer el sector: queda sin sector");
+      return fijarSector(state, null);
+    case "historia":
+      // Sin historia no hay Capa A que ubicar: se cierra con lo que haya (nada, si no hubo historia).
+      return salir(state);
+    case "idioma_confirmar":
+      nota(state, "no confirmo el idioma; se siguio en espanol, el unico del instrumento");
+      return confirmarIdioma(state);
+    case "idioma_no_es": return cerrarSinGuardar(state, TXT.trilingueAdios);
+    case "triada_orden":
+      return cerrarTriada(state, { intensidad: null, confirmado: false, nota: "no se pudo leer un orden tras dos intentos", sinResolver: true });
+    case "triada_segundo": {
+      const { tri, ec } = triadaActual(state);
+      ec.segundo = null;
+      ec.notas.push("no se pudo leer el segundo polo: queda sin ordenar");
+      state.paso = "triada_confirmar";
+      return resultado(state, [ecoOrden(tri, ec)]);
+    }
+    case "triada_confirmar":
+      return cerrarTriada(state, { intensidad: null, confirmado: false, nota: "corrigio dos veces sin llegar a un orden avalado", sinResolver: true });
+    case "triada_intensidad":
+      return cerrarTriada(state, { intensidad: null, confirmado: true, nota: "orden confirmado; la graduacion no se pudo leer: resolucion gruesa" });
+    case "diada_abrir":
+    case "diada_aclarar":
+      return cerrarDiada(state, { confirmado: false, nota: "no se pudo leer un ancla tras dos intentos", sinResolver: true });
+    case "diada_confirmar":
+      return cerrarDiada(state, { confirmado: false, nota: "corrigio dos veces sin avalar un ancla", sinResolver: true });
+    case "cerrado": return resultado(state, []);
+  }
+}
+
+/** Negativa explicita ("paso", "no quiero responder"): no se insiste. */
+function declinar(state: NavigateState): Resultado {
+  switch (state.paso) {
+    case "consentimiento": return cerrarSinGuardar(state, TXT.rechazo);
+    case "poblacion":
+      nota(state, "declino decir si es observador: se asumio panel ciudadano");
+      return fijarPoblacion(state, "ciudadano");
+    case "sector":
+      nota(state, "declino decir el sector");
+      return fijarSector(state, null);
+    case "historia":
+      // Sin historia no se puede seguir: se explica una vez; a la segunda se cierra.
+      if (sumarIntento(state)) return salir(state);
+      return resultado(state, [prefijar(TXT.sinHistoria, texto(APERTURA[state.poblacion ?? "ciudadano"]))]);
+    case "idioma_confirmar": return salir(state);
+    case "idioma_no_es": return cerrarSinGuardar(state, TXT.trilingueAdios);
+    case "triada_orden":
+    case "triada_segundo":
+    case "triada_confirmar":
+      if (state.en_curso) state.en_curso.turnos += 1;
+      return cerrarTriada(state, { intensidad: null, confirmado: false, nota: "declino responder", sinResolver: true, declinado: true });
+    case "triada_intensidad":
+      if (state.en_curso) state.en_curso.turnos += 1;
+      return cerrarTriada(state, { intensidad: null, confirmado: true, nota: "orden confirmado; declino graduar: resolucion gruesa" });
+    case "diada_abrir":
+    case "diada_aclarar":
+    case "diada_confirmar":
+      if (state.en_curso) state.en_curso.turnos += 1;
+      return cerrarDiada(state, { confirmado: false, nota: "declino responder", declinado: true });
+    case "cerrado": return resultado(state, []);
+  }
+}
+
 // ---- Dimensiones ------------------------------------------------------------------------
+
+const posicionTriada = (state: NavigateState): number => state.secuencia.slice(0, state.indice).filter(esTriada).length;
+const posicionDiada = (state: NavigateState): number => state.secuencia.slice(0, state.indice).filter((d) => !esTriada(d)).length;
+const esUltimaDimension = (state: NavigateState): boolean => state.indice === state.secuencia.length - 1;
 
 function abrirDimension(state: NavigateState): Salida[] {
   const id = state.secuencia[state.indice];
   if (!id) return [];
-  const previas = state.secuencia.slice(0, state.indice);
-  const esUltima = state.indice === state.secuencia.length - 1;
   if (esTriada(id)) {
     state.en_curso = { tipo: "triada", turnos: 0, dominante: null, segundo: null, solo_uno: false, especial: null, correcciones: 0, reintentos: 0, notas: [] };
     state.paso = "triada_orden";
-    return [preguntaTriada(TRIADAS[id], previas.filter(esTriada).length)];
+    return [preguntaTriada(TRIADAS[id], posicionTriada(state))];
   }
   state.en_curso = { tipo: "diada", turnos: 0, ancla: null, especial: null, ofrecidas: [], correcciones: 0, reintentos: 0, notas: [] };
   state.paso = "diada_abrir";
-  return [preguntaDiada(DIADAS[id], previas.filter((d) => !esTriada(d)).length, esUltima)];
+  return [preguntaDiada(DIADAS[id], posicionDiada(state), esUltimaDimension(state))];
 }
 
 function triadaActual(state: NavigateState): { id: DimensionId; tri: TriadaNav; ec: TriadaEnCurso } {
@@ -496,7 +730,7 @@ async function leerOrden(state: NavigateState, t: string, interprete: Interprete
 
 function cerrarTriada(
   state: NavigateState,
-  o: { intensidad: RegistroTriada["intensity_label"]; confirmado: boolean; nota: string; sinResolver?: boolean },
+  o: { intensidad: RegistroTriada["intensity_label"]; confirmado: boolean; nota: string; sinResolver?: boolean; declinado?: boolean },
 ): Resultado {
   const { id, tri, ec } = triadaActual(state);
   const salidas: Salida[] = [];
@@ -514,10 +748,11 @@ function cerrarTriada(
       resolution_captured: "coarse",
       confirmed_by_participant: o.confirmado,
       special_case: o.sinResolver ? "unresolved" : ec.especial,
+      declinado: !!o.declinado,
       elicitation_turns: ec.turnos,
       reflexivity_note: [...ec.notas, o.nota].join("; "),
     };
-    salidas.push(texto(o.sinResolver ? "Lo dejo sin ubicar, no hay problema. Seguimos." : TXT.guardoAsi));
+    salidas.push(texto(o.declinado ? TXT.declino : o.sinResolver ? TXT.sinUbicar : TXT.guardoAsi));
   } else {
     const dom = ec.dominante!;
     const sec = ec.segundo;
@@ -536,6 +771,7 @@ function cerrarTriada(
       resolution_captured: alta ? "high" : "coarse",
       confirmed_by_participant: o.confirmado,
       special_case: null,
+      declinado: false,
       elicitation_turns: ec.turnos,
       reflexivity_note: [...ec.notas, o.nota].join("; "),
     };
@@ -560,15 +796,16 @@ async function leerDiada(state: NavigateState, t: string, interprete: Interprete
   if (r.claro) {
     aplicarLecturaDiada(ec, r);
     state.paso = "diada_confirmar";
-    return resultado(state, [botonesSiNo(`Lo dejo como *${textoAncla(dia, ec)}*. ¿Así?`)]);
+    return resultado(state, [ecoDiada(dia, ec)]);
   }
   ec.reintentos += 1;
   if (ec.reintentos >= MAX_REINTENTOS) {
     return cerrarDiada(state, { confirmado: false, nota: "no se pudo leer un ancla tras dos intentos", sinResolver: true });
   }
-  // Matizo sin que quede claro cuanto: se despliegan SOLO las anclas del lado que insinuo.
+  // No se leyo un ancla: se despliegan las anclas como menu. Si insinuo un lado, SOLO las de
+  // ese lado; si no (matizo sin lado, o no hablo de los polos), las intermedias.
   ec.ofrecidas = r.lado === "izq" ? [2, 1, 3] : r.lado === "der" ? [4, 5, 3] : [2, 3, 4, "both_intense"];
-  ec.notas.push(r.lado ? `matizo hacia ${r.lado}; se ofrecieron las anclas de ese lado` : "matizo sin lado claro; se ofrecieron las intermedias");
+  ec.notas.push(r.lado ? `matizo hacia ${r.lado}; se ofrecieron las anclas de ese lado` : "no se leyo un lado; se ofrecieron las intermedias");
   state.paso = "diada_aclarar";
   return resultado(state, [menuAclaracion(dia, ec)]);
 }
@@ -583,32 +820,31 @@ function aplicarLecturaDiada(ec: DiadaEnCurso, r: { ancla: 1 | 2 | 3 | 4 | 5 | n
   ec.especial = ec.ancla === 3 ? "middle" : null;
 }
 
-function cerrarDiada(state: NavigateState, o: { confirmado: boolean; nota: string; sinResolver?: boolean }): Resultado {
+function cerrarDiada(state: NavigateState, o: { confirmado: boolean; nota: string; sinResolver?: boolean; declinado?: boolean }): Resultado {
   const { id, dia, ec } = diadaActual(state);
   const anclas = anclasDe(dia);
+  const base = { dyad_id: id, poles: [dia.izq, dia.der] as [string, string], elicitation_turns: ec.turnos, reflexivity_note: [...ec.notas, o.nota].join("; ") };
   let reg: RegistroDiada;
-  if (o.sinResolver) {
-    reg = {
-      dyad_id: id, poles: [dia.izq, dia.der], anchor_label: null, anchor_text: null, value: null,
-      special_case: "unresolved", resolution_captured: "coarse", confirmed_by_participant: false,
-      elicitation_turns: ec.turnos, reflexivity_note: [...ec.notas, o.nota].join("; "),
-    };
+  if (o.declinado) {
+    // Fuera del eje, como pide la spec de diadas para lo que no aplica; la marca `declinado`
+    // lo separa de "ninguna de las dos me aplica".
+    reg = { ...base, anchor_label: null, anchor_text: null, value: null, special_case: "not_applicable", resolution_captured: "coarse", confirmed_by_participant: false, declinado: true };
+  } else if (o.sinResolver) {
+    reg = { ...base, anchor_label: null, anchor_text: null, value: null, special_case: "unresolved", resolution_captured: "coarse", confirmed_by_participant: false, declinado: false };
   } else if (ec.especial && ec.especial !== "middle") {
     reg = {
-      dyad_id: id, poles: [dia.izq, dia.der], anchor_label: null, anchor_text: ESPECIALES_FUERA_DEL_EJE[ec.especial], value: null,
-      special_case: ec.especial, resolution_captured: "high", confirmed_by_participant: o.confirmado,
-      elicitation_turns: ec.turnos, reflexivity_note: [...ec.notas, o.nota].join("; "),
+      ...base, anchor_label: null, anchor_text: ESPECIALES_FUERA_DEL_EJE[ec.especial], value: null,
+      special_case: ec.especial, resolution_captured: "high", confirmed_by_participant: o.confirmado, declinado: false,
     };
   } else {
     const a = anclas.find((x) => x.posicion === ec.ancla)!;
     reg = {
-      dyad_id: id, poles: [dia.izq, dia.der], anchor_label: a.label, anchor_text: a.texto, value: a.value,
-      special_case: a.special_case, resolution_captured: "high", confirmed_by_participant: o.confirmado,
-      elicitation_turns: ec.turnos, reflexivity_note: [...ec.notas, o.nota].join("; "),
+      ...base, anchor_label: a.label, anchor_text: a.texto, value: a.value,
+      special_case: a.special_case, resolution_captured: "high", confirmed_by_participant: o.confirmado, declinado: false,
     };
   }
   state.dimensiones[id] = reg;
-  return avanzar(state, [texto(o.sinResolver ? "Lo dejo sin ubicar, no hay problema. Seguimos." : TXT.guardoAsi)]);
+  return avanzar(state, [texto(o.declinado ? TXT.declino : o.sinResolver ? TXT.sinUbicar : TXT.guardoAsi)]);
 }
 
 /** Pasa a la siguiente dimension o cierra. `salidas` son los mensajes que ya toca mandar. */
@@ -650,7 +886,8 @@ export function resumen(state: NavigateState): string {
     if ("dimension_id" in reg) {
       const tri = TRIADAS[id as keyof typeof TRIADAS];
       let v: string;
-      if (reg.special_case === "unresolved") v = "sin ubicar";
+      if (reg.declinado) v = "no quiso responder";
+      else if (reg.special_case === "unresolved") v = "sin ubicar";
       else if (reg.special_case) v = ESPECIALES_FUERA_DEL_EJE[reg.special_case];
       else if (reg.intensity_label === "solo_uno") v = `solo ${reg.dominant}`;
       else if (reg.second === null) v = `${reg.dominant} primero`;
@@ -661,7 +898,7 @@ export function resumen(state: NavigateState): string {
       lineas.push(`• ${preguntaMostrada(tri)}: ${v}`);
     } else {
       const dia = DIADAS[id as keyof typeof DIADAS];
-      const v = reg.special_case === "unresolved" ? "sin ubicar" : reg.anchor_text ?? "";
+      const v = reg.declinado ? "no quiso responder" : reg.special_case === "unresolved" ? "sin ubicar" : reg.anchor_text ?? "";
       lineas.push(`• ${dia.izq} ↔ ${dia.der}: ${v}`);
     }
   }
@@ -697,6 +934,7 @@ export function armarPayload(state: NavigateState, salida: "completa" | "salir" 
       salida,
       dimensiones_capturadas: Object.keys(capaA).length,
       dimensiones_esperadas: state.secuencia.length,
+      notas: state.notas ?? [],
       raw_history: state.historial,
     },
   };

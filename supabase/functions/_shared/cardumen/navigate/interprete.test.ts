@@ -3,7 +3,7 @@
 // respuestas literales SIN gastar modelo, y (2) que ninguna salida rara del modelo (indices
 // fuera de rango, segundo = dominante, especial y ancla a la vez) pase a la estructura.
 import { describe, expect, it } from 'vitest';
-import { interpreteConModelo, intensidadPorPalabras, normalizarTexto } from './interprete';
+import { contradiccionPorPalabras, evidenciaEspecial, interpreteConModelo, intensidadPorPalabras, normalizarTexto } from './interprete';
 import { DIADAS, TRIADAS } from './instrumento';
 import type { ModelAdapter } from '../types';
 
@@ -28,7 +28,9 @@ describe('intensidadPorPalabras (sin modelo)', () => {
     expect(intensidadPorPalabras('Uno mandaba')).toBe('uno_manda_otro_cuenta');
     expect(intensidadPorPalabras('uno mandaba pero el otro contaba')).toBe('uno_manda_otro_cuenta');
     expect(intensidadPorPalabras('Claramente el 1º')).toBe('claramente_el_primero');
-    expect(intensidadPorPalabras('claramente el poder')).toBe('claramente_el_primero');
+    expect(intensidadPorPalabras('claramente')).toBe('claramente_el_primero');
+    // "claramente el poder" nombra un polo por parafrasis: lo decide el modelo, que sabe cual es el dominante.
+    expect(intensidadPorPalabras('claramente el poder')).toBeNull();
   });
 
   it('"no se" es no graduar, y lo que no se entiende es null (va al modelo)', () => {
@@ -40,9 +42,62 @@ describe('intensidadPorPalabras (sin modelo)', () => {
     expect(intensidadPorPalabras('el primero por mucho')).toBeNull();
   });
 
+  it('lo que se PARECE a una etiqueta pero no lo es va al modelo, no a una composicion', () => {
+    // Cada uno de estos dio una etiqueta con los patrones viejos (prefijos): eran ubicaciones
+    // fabricadas sin que nadie leyera la respuesta.
+    expect(intensidadPorPalabras('mi pareja dice que fue el poder')).toBeNull();
+    expect(intensidadPorPalabras('el mandato del alcalde')).toBeNull();
+    expect(intensidadPorPalabras('les contaba a mis vecinos')).toBeNull();
+    expect(intensidadPorPalabras('me acompañó mi hermano')).toBeNull();
+    expect(intensidadPorPalabras('claro')).toBeNull();
+    expect(intensidadPorPalabras('claro que sí')).toBeNull();
+    expect(intensidadPorPalabras('las parejas jóvenes')).toBeNull();
+    expect(intensidadPorPalabras('claramente el clima')).toBeNull();
+    expect(intensidadPorPalabras('mi mamá mandaba en la casa')).toBeNull();
+    // y las formas literales siguen leyendose
+    expect(intensidadPorPalabras('parejo')).toBe('casi_parejos');
+    expect(intensidadPorPalabras('empatados')).toBe('casi_parejos');
+    expect(intensidadPorPalabras('el otro acompañaba')).toBe('uno_manda_otro_cuenta');
+    expect(intensidadPorPalabras('uno mandaba')).toBe('uno_manda_otro_cuenta');
+    expect(intensidadPorPalabras('el poder mandaba pero lo otro contaba')).toBe('uno_manda_otro_cuenta');
+    expect(intensidadPorPalabras('claro el primero')).toBe('claramente_el_primero');
+  });
+
   it('normalizarTexto quita tildes, signos y asteriscos', () => {
     expect(normalizarTexto('  ¡Sí, así! ')).toBe('si asi');
     expect(normalizarTexto('*Uno mandaba*')).toBe('uno mandaba');
+  });
+});
+
+describe('contradiccionPorPalabras (sin modelo)', () => {
+  it('atrapa las contradicciones literales', () => {
+    for (const t of ['los dos primero', 'Las dos primero', 'todos igual', 'todos iguales', 'ambos primero', 'los dos', 'las dos por igual']) {
+      expect(contradiccionPorPalabras(t), t).toBe(true);
+    }
+  });
+  it('deja pasar un orden real que menciona "los dos"', () => {
+    for (const t of ['los dos primeros son el poder y la gente', 'primero el poder, los dos restantes menos', 'todos se quejan pero el poder manda']) {
+      expect(contradiccionPorPalabras(t), t).toBe(false);
+    }
+  });
+});
+
+describe('evidenciaEspecial (sin modelo)', () => {
+  it('un especial sin evidencia en el texto se descarta', () => {
+    expect(evidenciaEspecial('not_applicable', 'anoche ganó Millonarios')).toBe(false);
+    expect(evidenciaEspecial('not_applicable', 'ya no aguanto más, me quiero morir')).toBe(false);
+    expect(evidenciaEspecial('dont_know', 'casi parejos')).toBe(false);
+    expect(evidenciaEspecial('both_intense', 'qué bot tan idiota')).toBe(false);
+  });
+  it('con evidencia se acepta; middle y null no se comprueban', () => {
+    expect(evidenciaEspecial('not_applicable', 'ninguna de esas tres tiene que ver')).toBe(true);
+    expect(evidenciaEspecial('not_applicable', 'eso no aplica a lo que conté')).toBe(true);
+    expect(evidenciaEspecial('dont_know', 'no sé')).toBe(true);
+    expect(evidenciaEspecial('dont_know', 'no sabría decir')).toBe(true);
+    expect(evidenciaEspecial('dont_know', 'ni idea')).toBe(true);
+    expect(evidenciaEspecial('both_intense', 'las dos con fuerza')).toBe(true);
+    expect(evidenciaEspecial('middle', 'lo que sea')).toBe(true);
+    expect(evidenciaEspecial(null, 'lo que sea')).toBe(true);
   });
 });
 
@@ -67,6 +122,26 @@ describe('interpreteConModelo: triada', () => {
     const m = modeloQueDevuelve(['{"claro":true,"dominante":0,"segundo":1,"solo_uno":true,"especial":"not_applicable"}']);
     const r = await interpreteConModelo(m).triada(TRIADAS.T2_tiempo, 'ninguna de esas');
     expect(r).toEqual({ claro: true, dominante: null, segundo: null, solo_uno: false, especial: 'not_applicable' });
+  });
+
+  it('un especial cuenta como lectura aunque el modelo marque claro:false (no habia dominante que leer)', async () => {
+    const m = modeloQueDevuelve(['{"claro":false,"dominante":null,"segundo":null,"solo_uno":false,"especial":"dont_know"}']);
+    const r = await interpreteConModelo(m).triada(TRIADAS.T1_fuente, 'no sé');
+    expect(r).toEqual({ claro: true, dominante: null, segundo: null, solo_uno: false, especial: 'dont_know' });
+  });
+
+  it('un especial SIN evidencia en el texto se descarta: una historia de futbol no es "no aplica"', async () => {
+    const m = modeloQueDevuelve(['{"claro":true,"dominante":null,"segundo":null,"solo_uno":false,"especial":"not_applicable"}']);
+    const r = await interpreteConModelo(m).triada(TRIADAS.T1_fuente, 'anoche ganó Millonarios 2-1');
+    expect(r).toEqual({ claro: false, dominante: null, segundo: null, solo_uno: false, especial: null });
+    expect(m.llamadas).toBe(1);
+  });
+
+  it('una contradiccion literal no gasta modelo y no se lee', async () => {
+    const m = modeloQueDevuelve(['{"claro":true,"dominante":0,"segundo":1,"solo_uno":false,"especial":null}']);
+    const r = await interpreteConModelo(m).triada(TRIADAS.T1_fuente, 'los dos primero');
+    expect(r.claro).toBe(false);
+    expect(m.llamadas).toBe(0);
   });
 
   it('si el modelo no da JSON, reintenta una vez con el aviso', async () => {
@@ -125,6 +200,15 @@ describe('interpreteConModelo: diada', () => {
     const m = modeloQueDevuelve(['{"claro":true,"ancla":3,"especial":"both_intense","lado":null}']);
     const r = await interpreteConModelo(m).diada(DIADAS.D2_afecto, 'las dos, con mucha fuerza');
     expect(r).toEqual({ claro: true, ancla: null, especial: 'both_intense', lado: null });
+  });
+
+  it('un especial sin evidencia se descarta tambien en la diada', async () => {
+    const m = modeloQueDevuelve(['{"claro":true,"ancla":null,"especial":"not_applicable","lado":null}']);
+    const r = await interpreteConModelo(m).diada(DIADAS.D1_novedad, 'qué hora es');
+    expect(r).toEqual({ claro: false, ancla: null, especial: null, lado: null });
+    const m2 = modeloQueDevuelve(['{"claro":false,"ancla":null,"especial":"not_applicable","lado":null}']);
+    const r2 = await interpreteConModelo(m2).diada(DIADAS.D1_novedad, 'ninguna de las dos aplica');
+    expect(r2).toEqual({ claro: true, ancla: null, especial: 'not_applicable', lado: null });
   });
 
   it('un matiz sin ancla deja el lado como pista', async () => {

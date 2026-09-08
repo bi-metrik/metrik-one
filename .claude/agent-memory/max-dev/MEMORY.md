@@ -18,7 +18,7 @@
 - ⚠️ [staff es 1 fila por persona en TODA la base](project_staff_unique_global.md) — UNIQUE global de `profile_id`: el platform_admin en workspace ajeno opera con `staffId` null a propósito
 - [La empresa espejo se sigue creando](project_empresa_espejo_se_sigue_creando.md) — decisión cerrada de Mauricio; solo el directorio dejó de listarla, y el predicado son DOS condiciones
 - [Canal WhatsApp propio](project_canal_wa_propio.md) — webhook construido (#448) y sin desplegar; Gate 0 prohíbe persistir contenido y no se suscribe `history`
-- ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — motor determinista aparte del R1; deploy ANTES del SQL; `cardumen` deja de abrir la mini-web FEDE
+- ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — motor determinista aparte del R1; deploy ANTES del SQL; el lector es Claude Haiku (sin llave en la torre); `meta.ts` antes del modelo; golden del lector
 - [R4 liberación de contrapartes](project_r4_liberaciones.md) — PR #343: la regla de cobertura, por qué cuelga de la contraparte, y qué quedó para R3/R5
 - ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` es la única vía para lecturas por lote; cuáles filas se pierden cambia entre corridas
 - ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — 11 corregidas; FV-2-244 salió con la cédula truncada y NO se toca; 15 terceros basura para Diana

@@ -26,7 +26,9 @@ Nuevo, en `supabase/functions/_shared/cardumen/navigate/`:
 - `instrumento.ts` — Capa A literal de `meta.json`, aperturas de la sección 01 de la muestra, los 12 sectores, tablas de mapeo pre-registradas.
 - `tipos.ts` — estado de la conversación, registros por dimensión (§3 de las dos specs), contrato del intérprete.
 - `idioma.ts` — detector es/en/pt por palabras funcionales, determinista; ante la duda, "desconocido" (= español + confirmación).
-- `interprete.ts` — la única puerta del modelo (`claudeHaiku`, el mismo del motor). Lee texto libre y devuelve JSON con índices y banderas. Lector por palabras primero (botones, etiquetas literales), modelo después.
+- `interprete.ts` — la única puerta del modelo (`claudeHaiku`, el mismo del motor). Lee texto libre y devuelve JSON con índices y banderas. Lector por palabras primero (botones, etiquetas literales), modelo después. **El modelo entra en cuatro puntos y solo en cuatro:** orden de una tríada, segundo polo, etiqueta de peso y ancla de una diada. **La historia no pasa por el modelo**: se guarda tal cual y solo se le detecta el idioma.
+- `meta.ts` — capa determinista que corre ANTES del modelo en todos los pasos: vacío / solo emojis (`sinPalabras`), pregunta de vuelta y negativa (`leerMeta`). Estrecha a propósito: un falso positivo se comería una respuesta real.
+- `robustez.test.ts` — batería hostil por paso (Capa 1, §8); `golden-lector.json` + `golden-lector.test.ts` — golden set del lector (Capa 2, §8); `scripts/navigate-lector-eval.ts` — corre el golden contra el modelo vivo.
 - `motor.ts` — máquina de estados: turno cero, idioma, tríadas, diadas, cierre, `armarPayload`.
 - `index.ts` — enganche con `cardumen_chat_sessions` y WhatsApp.
 - `*.test.ts` — 59 pruebas (vitest), sin modelo ni red.
@@ -103,18 +105,18 @@ select id, created_at, estudio, lang,
       "dimension_id": "T1_fuente", "poles": ["La gente comun, la vida de a pie", "Quienes tienen poder, dinero o influencia", "Fuerzas que nadie controla del todo"],
       "dominant": "Quienes tienen poder, dinero o influencia", "second": "Fuerzas que nadie controla del todo", "residual": "La gente comun, la vida de a pie",
       "intensity_label": "claramente_el_primero", "composition": [0.05, 0.85, 0.10],
-      "resolution_captured": "high", "confirmed_by_participant": true, "special_case": null,
+      "resolution_captured": "high", "confirmed_by_participant": true, "special_case": null, "declinado": false,
       "elicitation_turns": 3, "reflexivity_note": "ordeno dos polos espontaneamente; residual inferido; ..."
     },
     "D1_novedad": {
       "dyad_id": "D1_novedad", "poles": ["Esto ya venia pasando", "Esto es completamente nuevo"],
       "anchor_label": "intermedio_izq", "anchor_text": "mas cerca de \"Esto ya venia pasando\", con matices",
-      "value": 0.25, "special_case": null, "resolution_captured": "high", "confirmed_by_participant": true,
+      "value": 0.25, "special_case": null, "resolution_captured": "high", "confirmed_by_participant": true, "declinado": false,
       "elicitation_turns": 2, "reflexivity_note": "matizo hacia izq; se ofrecieron las anclas de ese lado; ..."
     }
   },
   "provenance": { "turns": 14, "started_at": "...", "closed_at": "...", "completa": true, "salida": "completa",
-                  "dimensiones_capturadas": 4, "dimensiones_esperadas": 4, "raw_history": [ ... ] }
+                  "dimensiones_capturadas": 4, "dimensiones_esperadas": 4, "notas": [], "raw_history": [ ... ] }
 }
 ```
 
@@ -125,11 +127,48 @@ select id, created_at, estudio, lang,
 - **Los literales van tal como están en `meta.json`, tildes incluidas** ("La gente común", "Algo que se está acabando"). El brief pide Capa A exacta y la fuente única es ese archivo: si cambia la redacción, primero se cambia `meta.json` y después se copia (la prueba `instrumento.test.ts` obliga a mantenerlos iguales). El **sector** es la excepción deliberada: se **guarda** como slug sin tildes (`Infraestructura y construccion`, igual que `respuestas.json` de la muestra) y se **muestra** con la etiqueta con tildes de `SECTORES_CATALOGO` (`etiquetaSector`).
 - **Registro de usted**, como en la muestra que ve el cliente. El guard de español neutro solo corrige voseo, no interfiere.
 - **Anclas intermedias genéricas** ("más cerca de X, con matices" / "un poco de las dos"): las definitivas de Navigate las redacta Yuto cuando Saga avale el esquema (pendiente §9 de la spec de diadas). Los extremos son los polos literales.
-- **`special_case: "unresolved"`** (no está en las specs): cuando tras dos intentos no se pudo leer un orden o un ancla, se guarda así y se sigue. Nunca se rellena.
+- **`special_case: "unresolved"`** (no está en las specs): cuando tras dos intentos no se pudo leer un orden o un ancla, se guarda así y se sigue. Nunca se rellena. **`declinado: true`** (tampoco está en las specs) marca que la persona se negó a responder: en tríadas acompaña a `unresolved`, en diadas a `not_applicable`, para que el análisis pueda separarlo de "no le entendí" y de "ninguna de las dos me aplica".
 - **"Fue solo X"**: 0,90 al dominante y el 0,10 residual partido en mitades entre los otros dos (la tabla §3.1 no dice cómo repartirlo).
 - **Confirmación**: cuando la persona elige de un menú de anclas, se guarda sin volver a preguntar (`confirmed_by_participant: true`, porque eligió la etiqueta ella misma). Cuando el modelo leyó texto libre, siempre hay eco + botón antes de guardar.
 - **La palabra `cardumen` deja de abrir la mini-web FEDE** mientras la fila del catálogo esté activa. Es el efecto buscado; se revierte con `activo = false`.
 - El modelo se usa solo para leer (temperatura 0, JSON), una llamada por respuesta libre. Botones y etiquetas literales no gastan modelo.
+
+## 8. Robustez ante ruido (PR de 2026-09-08)
+
+**Invariante:** nunca se fabrica una ubicación de Capa A a partir de ruido. Una respuesta incoherente, fuera de tema, vacía, hostil o que responde a otra pregunta no puede terminar guardada como dominante/segundo/intensidad ni como ancla. Lo que no se puede leer se repregunta UNA vez con encuadre más claro; a la segunda queda `unresolved` y se avanza. La sesión no se cuelga, no se reinicia sola y no salta pasos.
+
+### Capa determinista, antes del modelo (`meta.ts`, `motor.ts`)
+
+| Entrada | Qué hace el motor |
+|---|---|
+| Vacío, solo espacios, solo emojis | "No me llegó texto…" + la pregunta pendiente. Cuenta como intento. No gasta modelo. |
+| Botón de OTRO paso (WhatsApp deja tocar mensajes viejos) | Se ignora como botón; en pasos de texto se repregunta ("Ese botón era de una pregunta anterior…"). Un "OK" viejo a mitad de una tríada ya no confirma nada. |
+| Pregunta de vuelta ("¿quién eres?", "¿esto es una encuesta?") | Una frase corta que responde y, en el MISMO mensaje, la pregunta pendiente. Cuenta como intento. |
+| Negativa explícita ("no quiero responder", "paso") | Tríadas: `unresolved` con `declinado: true`. Diadas: `not_applicable` con `declinado: true`. Intensidad: el orden confirmado se conserva, grueso. Se avanza sin insistir. Antes del consentimiento: no se guarda nada. En la historia: se explica una vez, a la segunda se cierra. |
+| `cardumen` a mitad de conversación | "Ya estamos en la demostración. Seguimos donde íbamos:" + la pregunta pendiente. No reinicia, no cuenta. |
+| "no soy observador" | Ciudadano (antes la palabra negada daba experto). |
+| Ruido dos veces en "¿seguimos en español?" | Se sigue en español y se conserva la historia (antes cerraba sin guardar). |
+| Contradicción literal ("los dos primero", "todos igual") | No llega al modelo: se repregunta con encuadre. |
+| Etiqueta de peso por palabras | Solo las formas casi literales del botón. "mi pareja", "el mandato", "les contaba" y "claro" a secas ya no fabrican una etiqueta. |
+| `especial` del modelo (no sabe / no aplica / las dos con fuerza) | Solo se acepta con evidencia léxica en la respuesta (`evidenciaEspecial`). Sin ella, un modelo chico usa "no aplica" como cajón para lo que está fuera de tema. |
+
+Los contadores viven en un solo sitio (`sumarIntento` / `sinLectura`): ningún contador pasa de 2. La marca `declinado` es un campo del registro, no se deriva de la nota; el turno cero deja lo suyo en `provenance.notas`.
+
+Lo que **no** llega al motor: imagen sin caption, ubicación, sticker, contacto y documento los filtra el webhook (bloque 0b) antes de `continueCardumenChat`, y el audio llega ya transcrito. Sticker, contacto y documento **no reciben respuesta** (`parseMessage` los descarta); la sesión queda intacta.
+
+### Golden set del lector (`golden-lector.json`)
+
+84 casos en los cuatro puntos donde entra el modelo, con las once categorías del brief en cada uno (fuera de tema, pregunta de vuelta, negativa, incoherente, contradicción, polo inexistente, responde a otra pregunta, enterrada en párrafo largo, mezcla de idiomas, insulto, riesgo) más casos válidos de control. Métrica: **falsas ubicaciones** (debía ser "no leído" y devolvió una ubicación); objetivo cero. `golden-lector.test.ts` fija en CI la forma del set y lo que la capa determinista garantiza; `scripts/navigate-lector-eval.ts` lo corre contra el modelo vivo:
+
+```
+node --no-warnings --experimental-strip-types scripts/navigate-lector-eval.ts [--proveedor claude|gemini] [--solo T-01,D-15]
+```
+
+El lector de producción es **Claude Haiku 4.5** (`ANTHROPIC_API_KEY`, secreto del edge function). Esa llave no está en la torre, así que el eval del 2026-09-08 corrió con **Gemini 2.5 Flash-Lite como proxy**: mide la robustez del prompt y de las guardas deterministas con otro modelo, no el comportamiento del lector desplegado. Correr con `--proveedor claude` desde una máquina con la llave antes de dar por medida la Capa 2.
+
+### Caso de riesgo (mención de hacerse daño)
+
+Hoy el motor lo trata como ruido: el texto va al lector, no se lee (o el lector por palabras lo deja en "no gradúa"), se repregunta con encuadre y a la segunda queda `unresolved`. No hay detección ni protocolo; diseñarlo es de Emilio.
 
 ## 7. Pendientes fuera de este PR
 
