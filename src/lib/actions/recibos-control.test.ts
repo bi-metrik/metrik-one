@@ -20,6 +20,7 @@ type Fila = Record<string, unknown>
 let cobros: Fila[]
 let negocios: Fila[]
 let contactos: Fila[]
+let bloquesRut: Fila[]
 
 vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({ workspaceId: WS, staffId: 's1', role: 'admin', areas: ['financiera'] }),
@@ -42,7 +43,10 @@ let selects: Record<string, string>
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     from: (tabla: string) => {
-      const fuente = tabla === 'cobros' ? () => cobros : tabla === 'negocios' ? () => negocios : () => contactos
+      const fuente = tabla === 'cobros' ? () => cobros
+        : tabla === 'negocios' ? () => negocios
+        : tabla === 'negocio_bloques' ? () => bloquesRut
+        : () => contactos
       const chain = {
         select: (cols: string) => { selects[tabla] = cols; return chain },
         eq: () => chain,
@@ -68,8 +72,9 @@ beforeEach(() => {
   negocios = [{
     id: 'neg-1', codigo: 'V0451', nombre: 'Cliente Uno', contacto_id: 'ct-1',
     carpeta_url: 'https://drive/x',
-    metadata: { siigo_cliente: { siigo_id: 'cli-1' } },
+    metadata: { siigo_cliente: { siigo_id: 'cli-1', identificacion: '1110584384' } },
   }]
+  bloquesRut = []
   contactos = [{ id: 'ct-1', nombre: 'José Noel', email: 'jose@ejemplo.com' }]
   cobros = [
     {
@@ -113,14 +118,58 @@ describe('getControlRecibos — el control es por pago, no por negocio', () => {
     expect(pendiente.estado).toBe('pendiente')
   })
 
-  it('dice qué le falta a un pago que todavía no se puede emitir', async () => {
+  it('sin RUT y sin marca de tercero, el pago NO se puede emitir', async () => {
+    // Es lo unico que frena de verdad: sin identificacion no hay tercero que crear.
     negocios[0].metadata = {}
+    const { data } = await getControlRecibos()
+
+    const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
+    expect(pendiente.faltantes).toEqual(['RUT del cliente'])
+    expect(data!.totales.emitibles).toBe(0)
+  })
+
+  it('con RUT cargado se puede emitir aunque el tercero no exista todavia en Siigo', async () => {
+    // `asegurarClienteSiigo` lo crea en la misma emision a partir del RUT. Exigir la
+    // marca previa dejaba 17 de 47 pendientes de SOENA marcados como no emitibles
+    // (medido el 2026-09-08) sin que nada los frenara de verdad.
+    negocios[0].metadata = {}
+    bloquesRut = [{ negocio_id: 'neg-1', data: { campos: { numero_identificacion: { value: '1110584384' } } } }]
+    const { data } = await getControlRecibos()
+
+    const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
+    expect(pendiente.faltantes).toEqual([])
+    expect(data!.totales.emitibles).toBe(1)
+  })
+
+  it('un bloque de RUT presente pero VACIO no alcanza', async () => {
+    // Los 5 casos bloqueados de SOENA tenian el bloque creado sin un solo campo.
+    negocios[0].metadata = {}
+    bloquesRut = [{ negocio_id: 'neg-1', data: { campos: {} } }]
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c2')!.faltantes).toEqual(['RUT del cliente'])
+  })
+
+  it('sin correo el recibo SI se emite: es aviso, no bloqueo', async () => {
+    // El correo solo decide si al cliente se le avisa. Contarlo como faltante era la
+    // otra mitad del contador que mentia.
     contactos[0].email = null
     const { data } = await getControlRecibos()
 
     const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
-    expect(pendiente.faltantes).toEqual(['tercero en Siigo', 'correo del cliente'])
-    expect(data!.totales.emitibles).toBe(0)
+    expect(pendiente.faltantes).toEqual([])
+    expect(pendiente.avisos).toContain('al cliente no se le avisa: no hay correo')
+    expect(data!.totales.emitibles).toBe(1)
+  })
+
+  it('sin carpeta del negocio tambien se emite: el PDF se archiva despues', async () => {
+    negocios[0].carpeta_url = null
+    const { data } = await getControlRecibos()
+
+    const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
+    expect(pendiente.faltantes).toEqual([])
+    expect(pendiente.avisos).toContain('el PDF no queda archivado: el negocio no tiene carpeta')
+    expect(data!.totales.emitibles).toBe(1)
   })
 
   it('un pago sin faltantes cuenta como emitible', async () => {

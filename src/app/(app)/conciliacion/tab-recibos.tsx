@@ -211,18 +211,27 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
 
         {pago.estado === 'pendiente' && (
           pago.faltantes.length > 0 ? (
-            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
+            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
               <AlertTriangle className="h-3.5 w-3.5" />
               Falta {pago.faltantes.join(', ')}
             </span>
           ) : (
-            <button
-              onClick={() => setAbierto(true)}
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
-              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
-            >
-              <Receipt className="h-3.5 w-3.5" /> Emitir recibo
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setAbierto(true)}
+                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
+                style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+              >
+                <Receipt className="h-3.5 w-3.5" /> Emitir recibo
+              </button>
+              {/* El recibo sale igual: esto se dice ANTES de emitir, no se calla. */}
+              {pago.avisos.map(a => (
+                <span key={a} className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {a}
+                </span>
+              ))}
+            </div>
           )
         )}
       </div>
