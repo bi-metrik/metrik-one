@@ -99,9 +99,16 @@ export function marcaSigueValida(
 
 export type ResultadoCliente =
   /** Creado ahora en Siigo. */
-  | { estado: 'creado'; identificacion: string; siigo_id: string | null; branch_office: number | null }
-  /** Ya existía (por identificación) o ya lo habíamos registrado. */
-  | { estado: 'ya_existia'; identificacion: string; siigo_id: string | null; branch_office: number | null }
+  | { estado: 'creado'; identificacion: string; siigo_id: string | null; branch_office: number | null; nombre: string | null }
+  /**
+   * Ya existía (por identificación) o ya lo habíamos registrado.
+   *
+   * `nombre` es el del TERCERO, armado desde el RUT igual que el que viaja a Siigo. Va
+   * en el resultado para que un documento impreso pueda decir el mismo nombre que el
+   * asiento contable. Viene null cuando la respuesta salió de la marca sin releer el
+   * RUT: ahí no hay de dónde sacarlo y quien llame decide con qué rellenar.
+   */
+  | { estado: 'ya_existia'; identificacion: string; siigo_id: string | null; branch_office: number | null; nombre: string | null }
   /** Falta información del expediente. NO es un error: es trabajo pendiente. */
   | { estado: 'incompleto'; faltantes: string[] }
   /** Siigo respondió con error, o el workspace no está configurado. */
@@ -248,11 +255,16 @@ export async function asegurarClienteSiigo(
         identificacion: yaMarcado.identificacion,
         siigo_id: yaMarcado.siigo_id,
         branch_office: yaMarcado.branch_office ?? null,
+        nombre: null,
       }
     }
     return { estado: 'error', mensaje: (e as Error).message }
   }
   const { payload, faltantes } = borrador.borrador
+  // El MISMO nombre que va a Siigo: un documento impreso no puede decir uno distinto
+  // al del asiento contable. `payload.name` es un arreglo (Siigo separa nombres y
+  // apellidos de una persona natural), así que se une para mostrarlo.
+  const nombreTercero = payload.name.filter(Boolean).join(' ').trim() || null
 
   // La marca vale mientras siga coincidiendo con el RUT; si no, se rehace el
   // camino completo (buscar en Siigo por la identificación buena, crear si no
@@ -263,6 +275,7 @@ export async function asegurarClienteSiigo(
       identificacion: yaMarcado.identificacion,
       siigo_id: yaMarcado.siigo_id,
       branch_office: yaMarcado.branch_office ?? null,
+      nombre: nombreTercero,
     }
   }
 
@@ -288,6 +301,7 @@ export async function asegurarClienteSiigo(
         identificacion: payload.identification,
         siigo_id: existente.id,
         branch_office: existente.branch_office,
+        nombre: nombreTercero,
       }
     }
 
@@ -313,6 +327,7 @@ export async function asegurarClienteSiigo(
       identificacion: payload.identification,
       siigo_id: creado.id ?? null,
       branch_office: sucursalNueva,
+      nombre: nombreTercero,
     }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message

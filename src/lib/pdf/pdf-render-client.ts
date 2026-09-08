@@ -431,6 +431,10 @@ export async function renderReciboCaja(
         // una fecha en formato de base de datos.
         valor_fmt: `$${Math.round(data.valor).toLocaleString('es-CO')}`,
         fecha: fechaLegible(data.fecha),
+        // Las DOS fechas se formatean. Formatear solo una imprimió "31 de marzo de
+        // 2026" junto a "2026-03-31" en RC-1-67: el mismo día escrito de dos formas,
+        // una de ellas en formato de base de datos, en un documento al cliente.
+        fecha_pago: fechaLegible(data.fecha_pago),
       },
     }),
   })
