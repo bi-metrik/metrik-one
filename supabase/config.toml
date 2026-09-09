@@ -457,6 +457,17 @@ verify_jwt = false
 # compartido de `notificar-etapa`, que es el otro emisor de correo interno.
 verify_jwt = false
 
+[functions.resend-webhook]
+# Acuses de Resend (email.delivered / email.bounced / email.complained) sobre los
+# avisos al cliente. Resend NO manda el JWT de Supabase: firma cada peticion con
+# Svix, y la autenticidad se valida DENTRO de la funcion (cabeceras svix-id /
+# svix-timestamp / svix-signature contra RESEND_WEBHOOK_SECRET, con ventana de 5
+# minutos). Sin este flag el gateway responde 401 antes de ejecutar una linea de
+# codigo: Resend veria el endpoint caido, reintentaria durante 10 horas y despues
+# lo deshabilitaria solo — o sea que dejariamos de enterarnos de los rebotes,
+# que es exactamente lo que esta funcion existe para evitar.
+verify_jwt = false
+
 [functions.wa-canal-propio]
 # Webhook del canal de WhatsApp PROPIO de MeTRIK (numero corporativo via
 # Coexistence, app de Meta DEDICADA y separada del bot — decision 6 de la spec

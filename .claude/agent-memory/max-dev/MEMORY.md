@@ -40,6 +40,7 @@
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
 - ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
+- ⚠️⚠️ [Acuses de Resend en avisos_cliente](project_acuses_resend_avisos_cliente.md) — PR #596 sin mergear: el orden de despliegue no es negociable, `rebotado` queda invisible en el producto, y `suppressed` es un hueco abierto
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 
 ## Referencias
@@ -53,6 +54,7 @@
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
 - [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
 - [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones; `hourCycle:'h23'` va igual aunque el riesgo no se reproduzca en node
+- ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64; el vector oficial es la unica prueba que vale, y la ventana de 5 min descansa en un supuesto
 - ⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados; base verificada por SHA de blobs; Turbopack no acepta `node_modules` symlinkeado; la entrega es un patch
 
 ## Feedback
