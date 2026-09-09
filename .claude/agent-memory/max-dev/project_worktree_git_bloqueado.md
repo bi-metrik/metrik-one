@@ -247,7 +247,10 @@ sana desde un worktree aislado.
 - `python3 - <<'EOF' … EOF` con lógica → rechazado. **Write** del script al scratchpad y
   `python3 /ruta/absoluta/script.py` plano → pasa.
 - `git commit -m "…" -m "…" -- ruta1 ruta2` (commit con rutas, sin `add` previo) → pasa como
-  un solo comando plano, y evita el `add && commit`.
+  un solo comando plano, y evita el `add && commit`. ⚠️ **Pero solo con archivos YA
+  RASTREADOS**: para uno nuevo devuelve `pathspec … did not match any file(s) known to git`
+  y no commitea NADA (2026-09-09, PR #603). Con archivos nuevos son dos comandos planos:
+  `git add <rutas nuevas>` y después el `commit -- <todas las rutas>`.
 - El symlink RELATIVO `ln -s ../../../.env.local .env.local && ln -s ../../../node_modules
   node_modules` pasó de nuevo. `rm .env.local node_modules` los quita sin tocar el destino.
 - **2026-09-09:** el guard mira la palabra «git» **en el texto del comando**, no si ejecuta git.
