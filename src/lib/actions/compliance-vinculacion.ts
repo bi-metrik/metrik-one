@@ -26,6 +26,7 @@ import {
   kitDeExpediente,
   puedeDecidirVinculacion,
   puedeVerVinculacion,
+  selloImpideAprobar,
   resumirExpedientes,
   validarMotivoRechazo,
   type Alerta,
@@ -232,6 +233,15 @@ export async function decidirVinculacion(input: {
   if (input.decision === 'aprobado') {
     const det = await detalleVinculacion(input.expedienteId);
     if (!det.ok) return { ok: false, error: det.error };
+    // El sello se mira acá y no solo en la pantalla, por lo mismo que la
+    // constancia: un bloqueo que solo vive en el navegador se salta con una
+    // llamada directa a la acción. Y va dentro del `aprobado`: rechazar un
+    // expediente alterado tiene que seguir siendo posible, o el oficial queda
+    // sin salida dentro de la plataforma.
+    if (selloImpideAprobar(det.data.integridad)) {
+      return { ok: false, error: 'sello_no_coincide' };
+    }
+
     if (exigeConstanciaSinLectura(det.data.alertas)) {
       if (input.sinLectura !== true) return { ok: false, error: 'falta_constancia_sin_lectura' };
       sinLectura = true;

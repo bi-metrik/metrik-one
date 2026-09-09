@@ -37,6 +37,8 @@
    - `no_verificable` se reporta como `grave`: se acusa de alterado un
      expediente que nadie tocó → cae 1
    - `sin_firmar` pinta bloque → cae 1
+   - un sello que no cuadra deja aprobar igual → cae 1
+   - no poder verificar el sello bloquea como si hubiera hallazgo → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -57,6 +59,7 @@ import {
   nombreContraparte,
   progresoEtapa,
   resumirIntegridad,
+  selloImpideAprobar,
   puedeDecidirse,
   puedeDecidirVinculacion,
   puedeVerVinculacion,
@@ -563,5 +566,34 @@ describe('el veredicto del sello', () => {
     // No poder recalcular no es lo mismo que recalcular y que no dé.
     expect(resumirIntegridad(sello({ veredicto: 'no_verificable', version_del_sello: null }))?.tono)
       .toBe('alerta');
+  });
+});
+
+describe('el sello frente a la decisión', () => {
+  const sello = (v: Integridad['veredicto']): Integridad => ({
+    veredicto: v,
+    version_del_sello: 2,
+    hash_sellado: 'a'.repeat(64),
+    hash_recalculado: 'b'.repeat(64),
+    firmado_en: '2026-09-01T00:00:00Z',
+    nota: '',
+  });
+
+  it('un sello que no cuadra impide aprobar, y dice por qué', () => {
+    const r = selloImpideAprobar(sello('no_coincide'));
+    expect(r).not.toBeNull();
+    expect(r).toContain('rechaza');
+  });
+
+  it('un sello que cuadra no estorba', () => {
+    expect(selloImpideAprobar(sello('coincide'))).toBeNull();
+  });
+
+  it('lo que no se pudo comprobar no bloquea: ausencia de prueba no es hallazgo', () => {
+    // Frenar todas las aprobaciones porque un endpoint no respondió empuja la
+    // decisión por fuera de la plataforma sin haber encontrado nada.
+    expect(selloImpideAprobar(null)).toBeNull();
+    expect(selloImpideAprobar(sello('no_verificable'))).toBeNull();
+    expect(selloImpideAprobar(sello('sin_firmar'))).toBeNull();
   });
 });

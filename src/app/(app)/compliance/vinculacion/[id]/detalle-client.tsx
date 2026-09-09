@@ -42,6 +42,7 @@ import {
   puedeDecidirse,
   razonNoDecidible,
   resumirIntegridad,
+  selloImpideAprobar,
   slotsFaltantes,
   validarMotivoRechazo,
   type ConfidenceEstado,
@@ -108,6 +109,9 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
   // oficial. Lo que no se permite es que después no se sepa que fue así.
   const exigeConstancia = exigeConstanciaSinLectura(d.alertas);
   const sello = resumirIntegridad(d.integridad ?? null);
+  // Rechazar sigue habilitado a propósito: un expediente alterado es
+  // justamente uno que puede haber que rechazar.
+  const selloBloquea = selloImpideAprobar(d.integridad ?? null);
   const { paso, total } = progresoEtapa(exp.etapa_actual);
 
   function decidir(decision: 'aprobado' | 'rechazado') {
@@ -452,10 +456,13 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                   </span>
                 </label>
               )}
+              {selloBloquea && (
+                <p className="mb-3 text-sm text-[#B91C1C]">{selloBloquea}</p>
+              )}
               <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                disabled={pending || (exigeConstancia && !constancia)}
+                disabled={pending || selloBloquea !== null || (exigeConstancia && !constancia)}
                 onClick={() => decidir('aprobado')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold disabled:opacity-50"
               >
