@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { CardLink } from '@/components/card-link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck } from 'lucide-react'
+import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck, AlertTriangle, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
@@ -12,6 +12,8 @@ import { origenNegocioConfig } from '@/lib/catalogos/constants'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { STAGE_LABEL_UPPER } from '@/lib/negocios/stage-label'
+import { fechaHoraEnLetras, partesFechaHora } from '@/lib/negocios/fecha-hora-campo'
+import { textoAtencionCita } from '@/lib/negocios/seguimiento-citas'
 
 export type StaffAsignable = { id: string; full_name: string }
 
@@ -447,6 +449,23 @@ export default function NegocioCard({
       : 'CERRADO'
     : (STAGE_LABELS[negocio.stage_actual ?? ''] ?? negocio.stage_actual?.toUpperCase())
 
+  // ── Cita en la DIAN ────────────────────────────────────────────────────────
+  // El valor es tiempo CIVIL de Bogotá ('2026-09-26' o '2026-09-26T07:00'), no un
+  // instante: se lee con los helpers del campo, nunca con `new Date()`.
+  const citaPartes = partesFechaHora(negocio.fecha_cita)
+  const citaChip = citaPartes.dia
+    ? // 'es-CO' devuelve "26 de sept" por el patrón CLDR, y ese "de" no se quita
+      // con opciones de formato. En un chip corto solo estorba, sobre todo pegado
+      // a la hora: "Cita 26 de sept · 09:30". Mismo aseo que hace `etiquetaDia`.
+      `${(formatBogotaFechaCorta(citaPartes.dia) ?? citaPartes.dia).replace(/ de /g, ' ')}${
+        citaPartes.hora ? ` · ${citaPartes.hora}` : ''
+      }`
+    : null
+  // La marca roja se pinta en CUALQUIER orden de la lista, no solo dentro de la
+  // vista de citas: lo que se pidió es atención inmediata, no una pestaña donde
+  // haya que entrar. La calcula el servidor porque depende del reloj.
+  const atencion = !isCerrado ? negocio.atencion_cita : null
+
   const CierreIcon = motivoCierre ? CIERRE_ICONS[motivoCierre] : null
   const cierreColor = motivoCierre ? CIERRE_COLORS[motivoCierre] : ''
 
@@ -466,6 +485,19 @@ export default function NegocioCard({
       href={`/negocios/${negocio.id}`}
       className="block rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
     >
+      {/* Atención inmediata: falta documentación y la cita está encima. Va ARRIBA
+          de todo y ocupa su propia línea — como chip suelto se perdería entre los
+          otros badges, que es exactamente el problema que esta marca viene a
+          resolver (los avisos por correo ya nadie los abre). */}
+      {atencion && (
+        <div
+          className="mb-2 flex items-center gap-1.5 rounded-lg bg-[#EF4444] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+          title={`${textoAtencionCita(atencion)}. Cita: ${fechaHoraEnLetras(negocio.fecha_cita) || 'sin fecha'}`}
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0">{textoAtencionCita(atencion)}</span>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           {/* Fila 1: estado actual — [STAGE] › [E{N} Etapa] */}
@@ -501,6 +533,32 @@ export default function NegocioCard({
               <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
                 <Pause className="h-2.5 w-2.5" />
                 Pausado
+              </span>
+            )}
+            {/* Fecha de la cita en la DIAN. Se lee sin abrir el negocio porque es
+                lo que ordena el trabajo del día; la hora solo aparece cuando está
+                registrada (los valores heredados de solo día no la tienen y no se
+                les inventa una). */}
+            {citaChip && !isCerrado && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#1A1A1A]"
+                title={`Cita en la DIAN: ${fechaHoraEnLetras(negocio.fecha_cita)}`}
+              >
+                <CalendarClock className="h-2.5 w-2.5" />
+                Cita {citaChip}
+              </span>
+            )}
+            {/* Llegó al punto donde se pregunta la fecha de la cita y no la tiene:
+                el cliente agendó y nadie reportó la fecha. Es el caso que se
+                pierde, así que se nombra en la tarjeta y no solo en el encabezado
+                del grupo (que solo existe en el orden por cita). */}
+            {!citaChip && negocio.cita_pendiente && !isCerrado && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]"
+                title="El bloque de la cita ya está abierto y sigue sin fecha: falta que el cliente reporte cuándo se la asignó la DIAN."
+              >
+                <CalendarClock className="h-2.5 w-2.5" />
+                Sin fecha de cita
               </span>
             )}
             {/* Atraso de etapa. Solo se pinta cuando la etapa TIENE sla_horas

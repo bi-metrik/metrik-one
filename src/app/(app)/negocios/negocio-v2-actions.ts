@@ -89,7 +89,17 @@ import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
-import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores } from '@/lib/negocios/campos-de-bloques'
+import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores, type IndiceCampos } from '@/lib/negocios/campos-de-bloques'
+import { traerTodo } from '@/lib/supabase/paginar'
+import { diaDeFechaHora, horasHastaFechaHora } from '@/lib/negocios/fecha-hora-campo'
+import {
+  bloquesDeDocsRequeridos,
+  docsFaltantes,
+  evaluarAtencionCita,
+  leerSeguimientoCitas,
+  type AtencionCita,
+  type EstadoBloque,
+} from '@/lib/negocios/seguimiento-citas'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
 
@@ -345,10 +355,32 @@ export type NegocioResumen = {
   radicado: string | null
   // Número de factura emitida (bloque "Factura emitida", config-driven) — búsqueda
   numero_factura: string | null
-  // Fecha de la cita en la DIAN (bloque compartido, config-driven) — descarga a Excel.
-  // La tarjeta no la muestra: se resuelve aquí porque el export sale de esta misma
-  // lista y traerla aparte significaría una segunda lectura de los mismos bloques.
+  // ── Cita en la DIAN (bloque compartido, config-driven) ────────────────────
+  /**
+   * Valor CIVIL de Bogotá: 'YYYY-MM-DD' o 'YYYY-MM-DDTHH:mm'. NO es un instante
+   * UTC — leerlo con `new Date()` corre la fecha un día. Se lee con los helpers
+   * de `lib/negocios/fecha-hora-campo`.
+   *
+   * Alimenta el orden «Cita más próxima» de la lista, el chip de la tarjeta y la
+   * columna «Fecha cita» del Excel, que sale de esta misma lista.
+   */
   fecha_cita: string | null
+  /**
+   * Llegó al punto donde se pregunta la fecha de la cita y sigue sin tenerla.
+   *
+   * Es lo que separa «esperando que el cliente reporte la fecha» de «este negocio
+   * nunca va a ir a la DIAN»: los dos tienen `fecha_cita` null. Medido en SOENA el
+   * 9-sep-2026, 133 negocios abiertos con el bloque abierto y sin fecha (46 de
+   * ellos en Notificación), contra 166 que ni siquiera han llegado ahí.
+   */
+  cita_pendiente: boolean
+  /**
+   * Marca roja de atención inmediata: falta documentación requerida y la cita está
+   * dentro de la ventana configurada. null = no aplica (que es el caso normal).
+   * Se resuelve en el servidor porque depende del reloj: calcularlo en el render
+   * del cliente desajustaría la hidratación.
+   */
+  atencion_cita: AtencionCita | null
   // ── Servicio contratado (bloque config-driven, ej. SOENA "Servicio contratado") ──
   /**
    * Valor crudo de lo que contrató el cliente (`completo`, `solo_iva`, `solo_upme`
@@ -680,6 +712,9 @@ export async function getNegociosV2(
       // se muestra tal cual (mejor el valor crudo que un hueco silencioso).
       servicio_bloque?: string; servicio_campo?: string
       servicio_labels?: Record<string, string> } | undefined
+  // Seguimiento de citas (config_extra.seguimiento_citas). null en todo workspace
+  // que no lo configure, y entonces ni se consulta la base ni se calcula nada.
+  const citasCfg = leerSeguimientoCitas((wsRes.data as { config_extra?: unknown } | null)?.config_extra)
   const vehiculoPorNeg: Record<string, { label: string | null; ciudad: string | null }> = {}
   // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
   const cedulaPorNeg: Record<string, string | null> = {}
@@ -687,8 +722,12 @@ export async function getNegociosV2(
   const radicadoPorNeg: Record<string, string | null> = {}
   // Número de factura emitida (bloque documento "Factura emitida", config-driven). Para búsqueda.
   const facturaPorNeg: Record<string, string | null> = {}
-  // Fecha de la cita DIAN (bloque compartido, config-driven). Solo para el Excel.
+  // Fecha de la cita DIAN (bloque compartido, config-driven). Orden de la lista,
+  // chip de la tarjeta y columna del Excel.
   const citaPorNeg: Record<string, string | null> = {}
+  // Índice completo de campos leídos de bloques. Vive fuera del `if` porque el
+  // seguimiento de citas lo necesita después, para resolver los `solo_si`.
+  let indiceCampos: IndiceCampos = {}
   // Servicio contratado (bloque config-driven). Para el chip de la tarjeta y el filtro.
   const servicioPorNeg: Record<string, string | null> = {}
   // Se piden PARES (bloque, campo), no todos los campos contra todos los bloques:
@@ -702,6 +741,12 @@ export async function getNegociosV2(
     { bloque: cardCfg?.factura_bloque, campos: [cardCfg?.factura_campo] },
     { bloque: cardCfg?.servicio_bloque, campos: [cardCfg?.servicio_campo] },
     { bloque: cardCfg?.cita_bloque, campos: [cardCfg?.cita_campo] },
+    // Campos que condicionan un documento requerido (`solo_si`). Viajan en la
+    // misma llamada: pedirlos aparte sería una segunda lectura de los mismos
+    // bloques para leer una cadena.
+    ...(citasCfg?.docs_requeridos ?? [])
+      .filter((d) => d.solo_si)
+      .map((d) => ({ bloque: d.solo_si!.bloque, campos: [d.solo_si!.campo] })),
   ])
   if (cardPares.length > 0 && negocioIds.length > 0) {
     // La extraccion vive en Postgres (`negocio_bloques_campos_json`). Antes esto se
@@ -720,7 +765,8 @@ export async function getNegociosV2(
     // `lib/negocios/campos-de-bloques`, con pruebas: es logica que se puede
     // equivocar en silencio (quedarse con la copia vacia = tarjeta sin cedula y
     // busqueda que no encuentra, sin ningun error visible).
-    const indice = indexarValoresDeBloques((filas ?? []) as FilaValores[])
+    indiceCampos = indexarValoresDeBloques((filas ?? []) as FilaValores[])
+    const indice = indiceCampos
     const val = (negId: string, bloque: string | undefined, campo: string | undefined) =>
       leerCampo(indice, negId, bloque, campo)
 
@@ -743,6 +789,78 @@ export async function getNegociosV2(
       // «la primera con valor gana», que es lo correcto aquí (las copias vacías de las
       // etapas por las que el caso aún no pasó no deben tapar la que sí tiene fecha).
       citaPorNeg[negId] = val(negId, cardCfg?.cita_bloque, cardCfg?.cita_campo)
+    }
+  }
+
+  // ── Seguimiento de citas: quién está esperando la fecha y a quién le falta un
+  //    documento con la cita encima ──────────────────────────────────────────
+  //
+  // Hace falta una lectura APARTE de `negocio_bloques` porque lo que se necesita
+  // aquí es la PRESENCIA de la instancia y su `estado`, y la RPC de campos solo
+  // devuelve valores: un bloque abierto y vacío no produce ninguna fila ahí, que
+  // es justo el caso que hay que detectar.
+  const citaPendientePorNeg: Record<string, boolean> = {}
+  const atencionPorNeg: Record<string, AtencionCita | null> = {}
+  if (citasCfg && cardCfg?.cita_bloque && negocioIds.length > 0 && estado !== 'completado') {
+    const nombres = Array.from(
+      new Set([cardCfg.cita_bloque, ...bloquesDeDocsRequeridos(citasCfg.docs_requeridos)]),
+    )
+    // Primero los ids de config (una decena de filas): mapear nombre→id aquí evita
+    // filtrar por un recurso embebido y deja la consulta grande con un `in` plano.
+    const { data: configs } = await db(supabase)
+      .from('bloque_configs')
+      .select('id, nombre')
+      .eq('workspace_id', workspaceId)
+      .in('nombre', nombres)
+    const nombrePorConfig = new Map<string, string>(
+      ((configs ?? []) as Array<{ id: string; nombre: string }>).map((c) => [c.id, c.nombre]),
+    )
+    if (nombrePorConfig.size > 0) {
+      // ⚠️ `traerTodo` no es opcional: medido en SOENA el 9-sep-2026, estos dos
+      // bloques dan 1.510 filas sobre los negocios abiertos. PostgREST corta en
+      // 1.000 sin avisar, y lo que se perdería son instancias del bloque — o sea,
+      // negocios que dejarían de aparecer en su grupo o marcas que no encenderían.
+      const filas = await traerTodo<{ negocio_id: string; bloque_config_id: string; estado: string | null }>(
+        (desde, hasta) =>
+          db(supabase)
+            .from('negocio_bloques')
+            .select('negocio_id, bloque_config_id, estado')
+            .in('negocio_id', negocioIds)
+            .in('bloque_config_id', Array.from(nombrePorConfig.keys()))
+            .order('id')
+            .range(desde, hasta),
+        { etiqueta: 'seguimiento de citas · negocio_bloques' },
+      )
+
+      const estadosPorNeg: Record<string, Record<string, EstadoBloque>> = {}
+      for (const f of filas) {
+        const nombre = nombrePorConfig.get(f.bloque_config_id)
+        if (!nombre) continue
+        const porBloque = (estadosPorNeg[f.negocio_id] ??= {})
+        const e = (porBloque[nombre] ??= { instancias: 0, completos: 0 })
+        e.instancias += 1
+        if (f.estado === 'completo') e.completos += 1
+      }
+
+      // Un solo "hoy"/"ahora" para toda la lista: dos negocios de la misma carga no
+      // pueden quedar en días distintos porque el reloj cruzó la medianoche en medio.
+      const ahora = new Date(ahoraMs)
+      const hoyBogota = todayBogotaISO(ahora)
+      for (const negId of negocioIds) {
+        const estados = estadosPorNeg[negId] ?? {}
+        const fecha = citaPorNeg[negId] ?? null
+        citaPendientePorNeg[negId] =
+          !fecha && (estados[cardCfg.cita_bloque]?.instancias ?? 0) > 0
+        atencionPorNeg[negId] = evaluarAtencionCita({
+          diaCita: diaDeFechaHora(fecha),
+          horasHastaLaCita: horasHastaFechaHora(fecha, ahora),
+          faltantes: docsFaltantes(citasCfg.docs_requeridos, estados, (bloque, campo) =>
+            leerCampo(indiceCampos, negId, bloque, campo),
+          ),
+          horasAlerta: citasCfg.horas_alerta,
+          hoy: hoyBogota,
+        })
+      }
     }
   }
 
@@ -797,6 +915,8 @@ export async function getNegociosV2(
       radicado: radicadoPorNeg[id] ?? null,
       numero_factura: facturaPorNeg[id] ?? null,
       fecha_cita: citaPorNeg[id] ?? null,
+      cita_pendiente: citaPendientePorNeg[id] ?? false,
+      atencion_cita: atencionPorNeg[id] ?? null,
       servicio: servicioPorNeg[id] ?? null,
       servicio_label: (() => {
         const v = servicioPorNeg[id]

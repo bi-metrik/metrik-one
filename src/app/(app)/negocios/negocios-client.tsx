@@ -10,7 +10,8 @@ import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
-import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-llegada'
+import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-dia'
+import { agruparPorCita, GRUPO_CITA_VENCIDA } from '@/lib/negocios/agrupar-por-cita'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { CampoFiltro } from '@/lib/filtros/campos'
@@ -69,11 +70,12 @@ const SIN_SERVICIO = 'sin_servicio'
  * etapa esa es la pregunta equivocada: lo que se necesita ver es que cayo aqui hoy
  * y que lleva parado, no quien es el cliente mas nuevo.
  */
-type SortKey = 'reciente' | 'atraso'
-const SORT_VALIDOS: readonly SortKey[] = ['reciente', 'atraso']
+type SortKey = 'reciente' | 'atraso' | 'cita'
+const SORT_VALIDOS: readonly SortKey[] = ['reciente', 'atraso', 'cita']
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'reciente', label: 'Llegada reciente' },
   { value: 'atraso', label: 'Mas atrasado' },
+  { value: 'cita', label: 'Cita mas proxima' },
 ]
 
 /** ¿El negocio pasó el SLA de su etapa? false si la etapa no tiene SLA configurado. */
@@ -279,7 +281,7 @@ export default function NegociosClient({
   const currentFiltradoSinOrden = segmentacion.lista
   const etapaCount = segmentacion.contarEtapa
 
-  // Orden. 'reciente' se resuelve al agrupar por día de llegada (más abajo), así
+  // Orden. 'reciente' y 'cita' se resuelven al agrupar por día (más abajo), así
   // que aquí solo hay que respetar el orden del servidor.
   // 'atraso' pone primero al más atrasado; los que no tienen SLA (o van a
   // tiempo) quedan al final, sin reordenarse entre sí.
@@ -291,19 +293,42 @@ export default function NegociosClient({
     return [...currentFiltradoSinOrden].sort((a, b) => exceso(b) - exceso(a))
   }, [currentFiltradoSinOrden, sortBy])
 
-  // La lista se parte por día de llegada a la etapa SOLO cuando ese es el orden
-  // vigente. Con 'atraso' mandan los días de retraso, y agrupar por fecha pelearía
-  // con ese orden; en 'cerrados' la etapa actual ya no significa nada.
-  const agrupada = sortBy === 'reciente' && fase !== 'cerrados'
+  // La lista se parte por día SOLO cuando el orden vigente es una fecha: 'reciente'
+  // agrupa por el día de llegada a la etapa y 'cita' por el día de la cita en la
+  // DIAN. Con 'atraso' mandan los días de retraso, y agrupar por fecha pelearía con
+  // ese orden; en 'cerrados' ni la etapa actual ni la cita significan nada.
+  const agrupada = (sortBy === 'reciente' || sortBy === 'cita') && fase !== 'cerrados'
   const grupos = useMemo(
-    () => (agrupada ? agruparPorLlegada(currentFiltrado, hoyISO) : []),
-    [agrupada, currentFiltrado, hoyISO],
+    () =>
+      !agrupada
+        ? []
+        : sortBy === 'cita'
+          ? agruparPorCita(currentFiltrado, hoyISO)
+          : agruparPorLlegada(currentFiltrado, hoyISO),
+    [agrupada, sortBy, currentFiltrado, hoyISO],
+  )
+
+  // El orden por cita solo se ofrece donde significa algo. En un workspace sin
+  // bloque de cita configurado toda la lista caería en «Sin cita registrada»: una
+  // opción que no puede responder nada es ruido en el desplegable.
+  const hayCitas = useMemo(
+    () => negocios.some((n) => n.fecha_cita || n.cita_pendiente),
+    [negocios],
+  )
+  const opcionesOrden = useMemo(
+    () => (hayCitas ? SORT_OPTIONS : SORT_OPTIONS.filter((o) => o.value !== 'cita')),
+    [hayCitas],
   )
 
   // Lo que se descarga es EXACTAMENTE lo que está a la vista: los ids de la lista ya
   // filtrada y ordenada. La ruta baja esos y nada más, así que no hay que reimplementar
-  // `aplicarFiltros` en el servidor ni puede desincronizarse de la pantalla.
-  const idsVisibles = useMemo(() => currentFiltrado.map((n) => n.id), [currentFiltrado])
+  // `aplicarFiltros` en el servidor ni puede desincronizarse de la pantalla. Cuando la
+  // lista está agrupada el orden lo fijan los grupos, no la lista plana: el Excel de
+  // «Cita más próxima» tiene que salir en ese mismo orden.
+  const idsVisibles = useMemo(
+    () => (agrupada ? grupos.flatMap((g) => g.items) : currentFiltrado).map((n) => n.id),
+    [agrupada, grupos, currentFiltrado],
+  )
 
   // Negocios con todos los filtros activos EXCEPTO fase/etapa (responsable + seccional + búsqueda).
   // Base para los contadores de fase: refleja el filtro de responsable, seccional y búsqueda libre
@@ -564,7 +589,7 @@ export default function NegociosClient({
           aria-label="Ordenar negocios"
           className="ml-auto rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
         >
-          {SORT_OPTIONS.map((o) => (
+          {opcionesOrden.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
@@ -653,7 +678,14 @@ export default function NegociosClient({
               {/* El encabezado lleva el conteo: al mirar una etapa, "cuántos
                   cayeron hoy" es la pregunta, y obliga a contar tarjetas si no está. */}
               <div className="flex items-baseline gap-2 px-0.5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">
+                <h3
+                  className={`text-xs font-bold uppercase tracking-wider ${
+                    // Las citas ya vencidas son lo que se está perdiendo: el grupo va
+                    // primero Y va en rojo, porque leído en gris al tope de la lista
+                    // se confunde con "lo más próximo".
+                    g.dia === GRUPO_CITA_VENCIDA ? 'text-[#EF4444]' : 'text-[#1A1A1A]'
+                  }`}
+                >
                   {g.etiqueta}
                 </h3>
                 <span className="text-[11px] text-[#6B7280]">
@@ -668,6 +700,9 @@ export default function NegociosClient({
                     staffList={staffList}
                     canAsignar={canAsignar}
                     canMarcar={canMarcar}
+                    // Agrupada por cita, el encabezado ya no dice cuándo llegó el
+                    // caso a la etapa: ese dato vuelve a la tarjeta.
+                    mostrarLlegada={sortBy === 'cita'}
                   />
                 ))}
               </div>

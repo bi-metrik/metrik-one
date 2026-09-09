@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agruparPorLlegada, diaBogotaDe, etiquetaDia } from './agrupar-por-llegada'
+import { agruparPorDia, agruparPorLlegada, diaBogotaDe, etiquetaDia } from './agrupar-por-dia'
 
 const HOY = '2026-08-21'
 
@@ -39,8 +39,57 @@ describe('etiquetaDia', () => {
     expect(etiquetaDia('2025-12-30', HOY)).toBe('Mar 30 dic 2025')
   })
 
-  it('sin fecha lo dice', () => {
+  it('nombra manana, que es lo que mira una lista de citas', () => {
+    expect(etiquetaDia('2026-08-22', HOY)).toBe('Mañana')
+  })
+
+  it('cruza el fin de mes hacia adelante sin inventar dias', () => {
+    expect(etiquetaDia('2026-09-01', '2026-08-31')).toBe('Mañana')
+  })
+
+  it('sin fecha lo dice, y quien pregunte otra cosa puede rotularlo distinto', () => {
     expect(etiquetaDia('', HOY)).toBe('Sin fecha de llegada')
+    expect(etiquetaDia('', HOY, 'Esperando la fecha')).toBe('Esperando la fecha')
+  })
+})
+
+describe('agruparPorDia — el nucleo generalizado', () => {
+  type F = { id: string; f: string }
+  const lista: F[] = [
+    { id: 'b', f: '2026-08-22T09:00' },
+    { id: 'c', f: '2026-08-23T07:00' },
+    { id: 'a', f: '2026-08-22T07:00' },
+    { id: 'z', f: '' },
+  ]
+  const lectura = {
+    dia: (n: F) => n.f.slice(0, 10),
+    orden: (n: F) => n.f,
+    etiqueta: (dia: string) => dia || 'sin dia',
+  }
+
+  it("'asc' pone el dia mas proximo arriba y ordena la hora dentro del dia", () => {
+    const grupos = agruparPorDia(lista, { ...lectura, direccion: 'asc' })
+    expect(grupos.map((g) => g.dia)).toEqual(['2026-08-22', '2026-08-23', ''])
+    expect(grupos[0].items.map((n) => n.id)).toEqual(['a', 'b'])
+  })
+
+  it("'desc' invierte las dos cosas — dias y orden dentro del dia", () => {
+    const grupos = agruparPorDia(lista, { ...lectura, direccion: 'desc' })
+    expect(grupos.map((g) => g.dia)).toEqual(['2026-08-23', '2026-08-22', ''])
+    expect(grupos[1].items.map((n) => n.id)).toEqual(['b', 'a'])
+  })
+
+  it('los que no tienen dia van al final en LOS DOS sentidos', () => {
+    for (const direccion of ['asc', 'desc'] as const) {
+      const grupos = agruparPorDia(lista, { ...lectura, direccion })
+      expect(grupos[grupos.length - 1].dia).toBe('')
+    }
+  })
+
+  it('no muta la lista que recibe', () => {
+    const copia = [...lista]
+    agruparPorDia(lista, { ...lectura, direccion: 'asc' })
+    expect(lista).toEqual(copia)
   })
 })
 
