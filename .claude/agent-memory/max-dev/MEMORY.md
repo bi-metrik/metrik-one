@@ -11,7 +11,8 @@
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — mergeado y aplicado, pero el módulo NO está encendido y el sync NO está desplegado; la atribución es last-touch
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
-- ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — git fuera se bloquea (pero el mantenimiento sin `-C` pasa); otra sesión te borra la rama; `gh pr merge` miente al fallar
+- ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — git fuera se bloquea (pero el mantenimiento sin `-C` pasa); otra sesión te borra la rama o commitea sobre la tuya; `gh pr merge` miente al fallar; otro repo = tarball + API (`createCommitOnBranch`); el scratchpad es COMPARTIDO
+- ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote y /v/ quedó fuera; migración 10 años pendiente
 - [Verificar el deploy sin el CLI de Vercel](project_verificar_deploy_sin_vercel_cli.md) — el CLI se cuelga en un worktree aislado; el commit status y los deployments de GitHub dan fechas absolutas
 - ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate toda escritura en metrik-one se bloquea; no crear el flag a mano, pedir `/max`
 - ⚠️ [Vistas server-only](project_vistas_server_only.md) — `v_venta_mes_comercial` revocada a `authenticated` devuelve vacío sin error; el `grant` viejo no sobrevive a la siguiente reescritura
@@ -39,6 +40,7 @@
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
 - ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
+- ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 
 ## Referencias
 
@@ -51,6 +53,7 @@
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
 - [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
 - [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones; `hourCycle:'h23'` va igual aunque el riesgo no se reproduzca en node
+- ⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados; base verificada por SHA de blobs; Turbopack no acepta `node_modules` symlinkeado; la entrega es un patch
 
 ## Feedback
 
