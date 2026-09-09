@@ -32,6 +32,7 @@
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
 - ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — PR #550 sin mergear; las 252 marcas se autocorrigen solas (no hay backfill) y los 6 candidatos NO son una lista para aplicar
 - [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — #578 mergeado + enmienda #581: la banda del 1%, y por qué filtrar una fila borra TODAS sus acciones
+- ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — #598 mergeado, config SOENA SIN aplicar; el `solo_si` que evitó el único falso positivo y lo que no se verificó
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto; hueco de `ninguno` en el intérprete
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
 - ⚠️ [Duplicados: solo las facturas libres](project_duplicado_hermanos_siigo.md) — PR #561 sin mergear; el vínculo es la marca, NO el contacto (V0321/V0323 lo prueba), y la línea de hermanos no se ve en el caso que la motivó
@@ -50,6 +51,7 @@
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST, después la Management API
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte; y cómo probar que otro PDF no cambió byte a byte
 - [Renderizar el AppShell en aislamiento](reference_render_appshell_aislado.md) — sí se puede: solo `usePathname` + `useRouter` (este lo pide el FAB); Supabase no se dobla
+- [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
 - [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger; la verificación va en sentencia aparte
 - [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — el `Date` se arma con la hora de pared en componentes LOCALES; `cellDates` en las dos llamadas; medido en UTC y Bogotá
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
