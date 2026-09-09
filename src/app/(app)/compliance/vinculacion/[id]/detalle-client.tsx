@@ -10,6 +10,8 @@ import {
   FileText,
   Loader2,
   Quote,
+  ShieldAlert,
+  ShieldCheck,
   User,
   X,
 } from 'lucide-react';
@@ -39,6 +41,7 @@ import {
   progresoEtapa,
   puedeDecidirse,
   razonNoDecidible,
+  resumirIntegridad,
   slotsFaltantes,
   validarMotivoRechazo,
   type ConfidenceEstado,
@@ -50,6 +53,18 @@ const CHIP_CONFIDENCE: Record<ConfidenceEstado, string> = {
   extraido: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
   requiere_confirmacion: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
   manual_obligatorio: 'bg-[#F3F4F6] text-[#4B5563] border-[#D1D5DB]',
+};
+
+/**
+ * El sello tiene tres tonos y ninguno es decorativo: `ok` confirma, `alerta`
+ * dice que no se pudo comprobar, `grave` dice que el contenido cambió después
+ * de la firma. Si los tres se pintaran igual, el tercero se perdería entre los
+ * otros dos justo el día que aparezca.
+ */
+const CAJA_INTEGRIDAD: Record<'ok' | 'alerta' | 'grave', string> = {
+  ok: 'border-[#10B981]/30 bg-[#ECFDF5] text-[#047857]',
+  alerta: 'border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#B45309]',
+  grave: 'border-[#EF4444]/40 bg-[#EF4444]/5 text-[#B91C1C]',
 };
 
 const CHIP_EXTRACCION: Record<EstadoExtraccion, string> = {
@@ -92,6 +107,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
   // Aprobar un expediente al que le falta algo se permite: el criterio es del
   // oficial. Lo que no se permite es que después no se sepa que fue así.
   const exigeConstancia = exigeConstanciaSinLectura(d.alertas);
+  const sello = resumirIntegridad(d.integridad ?? null);
   const { paso, total } = progresoEtapa(exp.etapa_actual);
 
   function decidir(decision: 'aprobado' | 'rechazado') {
@@ -167,6 +183,30 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
           </p>
         )}
       </div>
+
+      {sello && (
+        <div className={`mt-4 rounded-lg border p-4 ${CAJA_INTEGRIDAD[sello.tono]}`}>
+          <div className="flex items-start gap-2">
+            {sello.tono === 'ok' ? (
+              <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
+            ) : (
+              <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+            )}
+            <div className="text-sm">
+              <p className="font-semibold">{sello.titulo}</p>
+              <p className="mt-1 text-[13px] leading-snug">{sello.detalle}</p>
+              {d.integridad?.firmado_en && (
+                <p className="mt-1.5 text-[11px] opacity-80">
+                  Firmado el {fecha(d.integridad.firmado_en)}
+                  {d.integridad.hash_sellado
+                    ? ` · sello ${d.integridad.hash_sellado.slice(0, 12)}…`
+                    : ''}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {d.alertas.length > 0 && (
         <div className="mt-4 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-4">
