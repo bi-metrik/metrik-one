@@ -37,7 +37,15 @@ import {
   type Integridad,
   type ResumenVinculacion,
 } from '@/lib/compliance/vinculacion';
-import { urlDeSolicitud } from '@/lib/compliance/solicitud-vinculacion';
+import {
+  urlDeSolicitud,
+  type TipoDocumento,
+  type TipoSujeto,
+} from '@/lib/compliance/solicitud-vinculacion';
+import {
+  faltaEnInvitacion,
+  type ResultadoInvitacion,
+} from '@/lib/compliance/invitacion-vinculacion';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -76,11 +84,21 @@ async function guardVinculacion(): Promise<Result<Guard>> {
  * explícito y la pantalla lo muestra, en vez de una lista vacía que se
  * confunde con un workspace sin vinculaciones.
  */
+/**
+ * El cuerpo del error se conserva. Hay respuestas de Valida cuyo fallo trae
+ * datos que la pantalla necesita (una invitación cuyo correo no salió devuelve
+ * el expediente que sí quedó creado); tirarlas obligaría a reintentar la
+ * operación para recuperarlas, que es justo lo que no se puede hacer.
+ */
+type Respuesta<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; cuerpo?: Record<string, unknown> };
+
 async function pedirAValida<T>(
   apiKey: string,
   ruta: string,
   init?: RequestInit,
-): Promise<Result<T>> {
+): Promise<Respuesta<T>> {
   try {
     const res = await fetch(`${VALIDA_API_BASE}${ruta}`, {
       ...init,
@@ -92,8 +110,15 @@ async function pedirAValida<T>(
       cache: 'no-store',
     });
     if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-      return { ok: false, error: body.error ?? body.message ?? `http_${res.status}` };
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown> & {
+        error?: string;
+        message?: string;
+      };
+      return {
+        ok: false,
+        error: body.error ?? body.message ?? `http_${res.status}`,
+        cuerpo: body,
+      };
     }
     return { ok: true, data: (await res.json()) as T };
   } catch {
@@ -291,6 +316,10 @@ export async function traducirErrorVinculacion(error: string): Promise<string> {
       return 'La llave de Valida de este espacio de trabajo no es válida.';
     case 'not_found':
       return 'Ese expediente no existe o no es de este espacio de trabajo.';
+    case 'validation_error':
+      return 'Revisa los datos de la contraparte: algo quedó mal escrito.';
+    case 'envio_fallido':
+      return 'El expediente quedó creado, pero no se pudo enviar el correo con el enlace.';
     case 'estado_invalido':
       return 'El expediente ya no está por revisar: alguien más lo decidió mientras lo mirabas.';
     default:
@@ -376,6 +405,102 @@ export async function rotarEnlaceDeSolicitud(): Promise<Result<EnlaceSolicitud>>
       url: urlDeSolicitud(await origenActual(), r.data.ruta),
       activa: r.data.activa,
       rotadoEn: r.data.rotado_en,
+    },
+  };
+}
+
+// ─── Invitar a una contraparte ────────────────────────────────────────────
+
+/**
+ * El oficial abre el expediente de una contraparte que él eligió.
+ *
+ * Exige permiso de decidir, no solo de mirar. Invitar no es una consulta: crea
+ * sobre un tercero una obligación de custodia de cinco años, y le manda un
+ * correo a nombre de la empresa. Quien solo revisa la bandeja no carga con eso.
+ *
+ * Valida deduplica por documento y manda el correo. Acá no se replica nada de
+ * eso: una segunda comprobación en ONE se desincroniza con la de allá y la que
+ * manda es la de allá, que es la que escribe.
+ */
+export async function invitarContraparte(input: {
+  tipoSujeto: TipoSujeto;
+  denominacion: string;
+  tipoDocumento: TipoDocumento;
+  documento: string;
+  correo: string;
+}): Promise<Result<ResultadoInvitacion>> {
+  const g = await guardVinculacion();
+  if (!g.ok) return g;
+  if (!puedeDecidirVinculacion(g.data.role)) {
+    return { ok: false, error: await traducirErrorVinculacion('forbidden_sin_permiso_para_decidir') };
+  }
+
+  const datos = {
+    tipoSujeto: input.tipoSujeto,
+    denominacion: input.denominacion,
+    tipoDocumento: input.tipoDocumento,
+    documento: input.documento,
+    correo: input.correo,
+  };
+  const falta = faltaEnInvitacion(datos);
+  if (falta.length > 0) return { ok: false, error: `faltan_datos:${falta.join(',')}` };
+
+  const denominacion = input.denominacion.trim();
+  const r = await pedirAValida<{
+    resultado: 'creado' | 'reenviado';
+    expediente_id: string;
+    url: string;
+    correo_distinto: boolean;
+  }>(g.data.apiKey, '/api/v1/kyc/invitaciones', {
+    method: 'POST',
+    body: JSON.stringify({
+      tipo_sujeto: input.tipoSujeto,
+      razon_social: input.tipoSujeto === 'juridica' ? denominacion : null,
+      nombre: input.tipoSujeto === 'natural' ? denominacion : null,
+      documento_tipo: input.tipoDocumento,
+      documento_numero: input.documento,
+      email: input.correo,
+      // El host lo pone ONE, que es quien sabe bajo qué subdominio atiende.
+      enlace_base: await origenActual(),
+      // Queda en la bitácora quién invitó. Sin esto el expediente diría que lo
+      // abrió "el oficial" sin nombre, que ante un auditor no dice nada.
+      invitado_por: g.data.userId,
+    }),
+  });
+
+  if (!r.ok) {
+    // El expediente SÍ quedó creado y solo falló el correo. Tratarlo como error
+    // haría que el oficial volviera a invitar sobre un expediente que ya está,
+    // y que el enlace que sí existe se pierda con la respuesta.
+    if (r.error === 'envio_fallido') {
+      const expedienteId = r.cuerpo?.expediente_id;
+      const url = r.cuerpo?.url;
+      if (typeof expedienteId === 'string' && typeof url === 'string') {
+        revalidatePath('/compliance/vinculacion');
+        return {
+          ok: true,
+          data: {
+            resultado: 'creado',
+            expedienteId,
+            url,
+            correoDistinto: false,
+            correoSalio: false,
+          },
+        };
+      }
+    }
+    return { ok: false, error: await traducirErrorVinculacion(r.error) };
+  }
+
+  revalidatePath('/compliance/vinculacion');
+  return {
+    ok: true,
+    data: {
+      resultado: r.data.resultado,
+      expedienteId: r.data.expediente_id,
+      url: r.data.url,
+      correoDistinto: r.data.correo_distinto === true,
+      correoSalio: true,
     },
   };
 }
