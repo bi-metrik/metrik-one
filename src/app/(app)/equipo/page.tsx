@@ -7,6 +7,8 @@ import EquipoClient from './equipo-client'
 import VendedoresClient from './vendedores-client'
 import EquipoComercialPersonasClient from './equipo-comercial-personas-client'
 import EquiposClient from './equipos-client'
+import SelectorMesEquipo from './selector-mes'
+import { parsearPeriodo } from './mes-navegacion'
 import { getOperacionesBono } from '../tableros/operaciones-actions'
 import { getVendedoresResumen } from './vendedores-actions'
 import { getComercialResumen, getComercialMes, getMetasPorVendedorPeriodo } from './comercial-actions'
@@ -90,11 +92,14 @@ export default async function EquipoPage({ searchParams }: Props) {
         if (role === 'operator' && staffId) redirect(`/equipo/comercial/${staffId}`)
         redirect('/negocios')
       }
-      const [anioStr, mesStr] = mes.split('-')
-      const anioSel = Number(anioStr)
-      const mesSel = Number(mesStr)
+      // El periodo de la URL manda sobre TODA la pantalla, ranking incluido.
+      // Antes el resumen se pedia sin periodo (historico completo) mientras las metas
+      // si venian del mes: el cumplimiento dividia ventas de siempre entre la meta de
+      // un mes y podia mostrar cifras como 4925%. Numerador y denominador vuelven a
+      // hablar del mismo mes.
+      const { anio: anioSel, mes: mesSel } = parsearPeriodo(params.mes, bogotaYearMonth())
       const [resumen, mesData, metasMap] = await Promise.all([
-        getComercialResumen(),
+        getComercialResumen(anioSel, mesSel),
         getComercialMes(anioSel, mesSel),
         getMetasPorVendedorPeriodo(anioSel, mesSel),
       ])
@@ -111,19 +116,30 @@ export default async function EquipoPage({ searchParams }: Props) {
       // vendido. Antes esta pantalla mostraba solo la lista comercial, y como esa lista
       // agrupaba por el responsable principal del negocio (que puede ser un operativo),
       // el equipo de operaciones aparecia dentro de los indicadores comerciales.
+      // El selector se pinta UNA vez y arriba de todo: el mes manda sobre las dos
+      // pestanas (comercial y operaciones), no sobre una. Vive aqui, en el unico
+      // punto que conoce las dos formas de esta pantalla.
       if (modules.operaciones_bonos) {
         const operaciones = await getOperacionesBono(anioSel, mesSel)
-        return <EquiposClient comercial={comercial} operaciones={operaciones} />
+        return (
+          <div>
+            <SelectorMesEquipo anio={anioSel} mes={mesSel} />
+            <EquiposClient comercial={comercial} operaciones={operaciones} />
+          </div>
+        )
       }
 
       return (
-        <EquipoComercialPersonasClient
-          resumen={comercial.resumen}
-          mesData={comercial.mesData}
-          anio={comercial.anio}
-          mes={comercial.mes}
-          metasPorVendedor={comercial.metasPorVendedor}
-        />
+        <div>
+          <SelectorMesEquipo anio={anioSel} mes={mesSel} />
+          <EquipoComercialPersonasClient
+            resumen={comercial.resumen}
+            mesData={comercial.mesData}
+            anio={comercial.anio}
+            mes={comercial.mes}
+            metasPorVendedor={comercial.metasPorVendedor}
+          />
+        </div>
       )
     }
   }

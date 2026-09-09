@@ -69,7 +69,13 @@ export default function EquiposClient({ comercial, operaciones, inicial }: Props
           metasPorVendedor={comercial.metasPorVendedor}
         />
       ) : operaciones ? (
-        <TabOperacionesPersonas data={operaciones} />
+        // La `key` con el periodo NO es decoracion: `TabOperacionesPersonas` guarda su
+        // mes en estado propio (nace de `useState(inicial)` y trae su propio navegador,
+        // porque en Tableros ese reloj es suyo). Al cambiar el mes de la URL, React
+        // reusaria la instancia y el bloque de operaciones se quedaria en el mes
+        // anterior mientras el resto de la pantalla ya cambio. Con la key se remonta
+        // sobre los datos del mes elegido.
+        <TabOperacionesPersonas key={`${comercial.anio}-${comercial.mes}`} data={operaciones} />
       ) : (
         // Sin datos NO se pinta un tablero en ceros: eso se leería como un mes sin
         // errores y sin trabajo, que es lo contrario de "todavía no hay medición".
