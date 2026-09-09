@@ -32,6 +32,7 @@
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
 - ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — PR #550 sin mergear; las 252 marcas se autocorrigen solas (no hay backfill) y los 6 candidatos NO son una lista para aplicar
 - [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — #578 mergeado + enmienda #581: la banda del 1%, y por qué filtrar una fila borra TODAS sus acciones
+- ⚠️⚠️ [PQR rechazado: el desenlace que devuelve el caso](project_pqr_rechazado_desenlace.md) — #603 mergeado, config SOENA SIN aplicar; archivar el dato NO rompe el bucle (lo rompe el gate), y otro gate dejaba el frente inalcanzable para 44 casos
 - ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — #598 mergeado, config SOENA SIN aplicar; el `solo_si` que evitó el único falso positivo y lo que no se verificó
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto; hueco de `ninguno` en el intérprete
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos); las 3 decisiones que no se revierten y lo que falta preguntarle a Deisy
