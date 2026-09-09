@@ -753,3 +753,28 @@ export function resumirIntegridad(i: Integridad | null): ResumenIntegridad | nul
       };
   }
 }
+
+/**
+ * Un sello que no cuadra impide aprobar.
+ *
+ * Aprobar es decir "revisé esto y lo acepto". Si el contenido cambió después de
+ * la firma, lo que hay hoy en el expediente no es lo que la contraparte firmó,
+ * así que la aprobación quedaría sustentada en una firma que no cubre lo que se
+ * aprobó. Ante un supervisor eso es peor que no tener sello: hay una prueba
+ * documental de que el expediente se movió y se aprobó igual.
+ *
+ * Rechazar NO se bloquea nunca. Un expediente alterado es justamente uno que
+ * puede haber que rechazar, y dejar al oficial sin ninguna salida lo empuja a
+ * resolverlo por fuera de la plataforma, que es donde no queda registro.
+ *
+ * Solo bloquea `no_coincide`, que es un hallazgo positivo: se recalculó y no
+ * dio. `null` (no se pudo verificar) y `no_verificable` (sello v1) NO bloquean:
+ * ahí no hay hallazgo, hay ausencia de comprobación, y frenar todas las
+ * aprobaciones porque un endpoint no respondió empuja la decisión por fuera sin
+ * haber encontrado nada. Eso se muestra en amarillo y se decide con eso a la
+ * vista.
+ */
+export function selloImpideAprobar(i: Integridad | null): string | null {
+  if (i?.veredicto !== 'no_coincide') return null;
+  return 'El contenido del expediente cambió después de que la contraparte firmó. No se puede aprobar así: lo firmado no es lo que hay hoy. Revisa la bitácora en Valida, y si el cambio no se explica, rechaza.';
+}
