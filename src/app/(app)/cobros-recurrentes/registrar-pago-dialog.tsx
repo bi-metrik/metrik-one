@@ -124,7 +124,7 @@ export default function RegistrarPagoDialog({ cuentaId, numero, cobros }: Props)
       <button
         type="button"
         onClick={() => setAbierto(true)}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:border-[#10B981] hover:text-[#10B981] transition-colors"
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-tinta hover:border-acento hover:text-acento transition-colors"
       >
         <Wallet className="h-3 w-3" /> Registrar pago
       </button>
@@ -248,7 +248,7 @@ export default function RegistrarPagoDialog({ cuentaId, numero, cobros }: Props)
                   />
                 </label>
                 <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-[#F59E0B]" />
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-advertencia" />
                   <span>
                     Un comprobante de transferencia entre cuentas propias no prueba el ingreso del cliente:
                     describe el crédito entrante (extracto o comprobante del cliente).
@@ -264,7 +264,7 @@ export default function RegistrarPagoDialog({ cuentaId, numero, cobros }: Props)
               >Cancelar</button>
               <button
                 type="button" onClick={guardar} disabled={!puedeGuardar}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#10B981] text-white hover:bg-[#059669] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-acento text-white hover:bg-acento-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {guardando
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Registrando…</>

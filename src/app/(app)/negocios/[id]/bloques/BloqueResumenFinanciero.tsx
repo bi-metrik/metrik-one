@@ -45,21 +45,21 @@ export default function BloqueResumenFinanciero({ data }: BloqueResumenFinancier
           <p className="text-[10px] font-medium text-red-600">Costos ejecutados</p>
           <p className="text-sm font-bold text-red-700 tabular-nums">{fmt(data.costosEjecutados)}</p>
         </div>
-        <div className={`rounded-lg border p-2.5 ${ganancia >= 0 ? 'bg-[#10B981]/10 border-[#10B981]/30' : 'bg-red-50 border-red-100'}`}>
-          <p className={`text-[10px] font-medium ${ganancia >= 0 ? 'text-[#10B981]' : 'text-red-600'}`}>Ganancia</p>
-          <p className={`text-sm font-bold tabular-nums ${ganancia >= 0 ? 'text-[#10B981]' : 'text-red-700'}`}>{fmt(ganancia)}</p>
+        <div className={`rounded-lg border p-2.5 ${ganancia >= 0 ? 'bg-acento/10 border-acento/30' : 'bg-red-50 border-red-100'}`}>
+          <p className={`text-[10px] font-medium ${ganancia >= 0 ? 'text-acento' : 'text-red-600'}`}>Ganancia</p>
+          <p className={`text-sm font-bold tabular-nums ${ganancia >= 0 ? 'text-acento' : 'text-red-700'}`}>{fmt(ganancia)}</p>
         </div>
       </div>
 
       {data.totalCobrado > 0 && (
         <div>
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] text-[#6B7280]">Margen</span>
-            <span className={`text-[10px] font-semibold ${margen >= 0 ? 'text-[#10B981]' : 'text-red-600'}`}>{margen}%</span>
+            <span className="text-[10px] text-tinta-suave">Margen</span>
+            <span className={`text-[10px] font-semibold ${margen >= 0 ? 'text-acento' : 'text-red-600'}`}>{margen}%</span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#E5E7EB]">
             <div
-              className={`h-full rounded-full transition-all ${margen >= 0 ? 'bg-[#10B981]' : 'bg-red-500'}`}
+              className={`h-full rounded-full transition-all ${margen >= 0 ? 'bg-acento' : 'bg-red-500'}`}
               style={{ width: `${Math.min(Math.abs(margen), 100)}%` }}
             />
           </div>
@@ -67,8 +67,8 @@ export default function BloqueResumenFinanciero({ data }: BloqueResumenFinancier
       )}
 
       <div className="flex items-center gap-1.5">
-        <BarChart3 className="h-3 w-3 text-[#6B7280]" />
-        <span className="text-[10px] text-[#6B7280]">Solo visualización · Actualiza en tiempo real</span>
+        <BarChart3 className="h-3 w-3 text-tinta-suave" />
+        <span className="text-[10px] text-tinta-suave">Solo visualización · Actualiza en tiempo real</span>
       </div>
     </div>
   )

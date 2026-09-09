@@ -15,7 +15,7 @@ interface VitrinaPlaceholderProps {
  * Empty-state comercial premium para workspaces en `config_extra.modo_vitrina`.
  * Un cliente Valida-only ve una muestra curada de lo que MeTRIK ONE ofrece,
  * en vez de los datos reales del módulo (que no compró). Marca obligatoria:
- * Montserrat (heredada), Verde Métrica #10B981, Negro Carbón #1A1A1A, lockup
+ * Sans de marca (heredada), acento Pino Profundo, tinta carbon calido, lockup
  * oficial y sello "Powered by MéTRIK". No inventar diseño ni colores fuera de
  * tokens.
  */
@@ -33,7 +33,7 @@ export default function VitrinaPlaceholder({
 
         <h1
           className="mb-4 text-2xl font-bold tracking-tight"
-          style={{ color: '#1A1A1A' }}
+          style={{ color: 'var(--tinta)' }}
         >
           {title}
         </h1>
@@ -47,7 +47,7 @@ export default function VitrinaPlaceholder({
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-colors hover:brightness-95"
-          style={{ backgroundColor: '#10B981' }}
+          style={{ backgroundColor: 'var(--acento)' }}
         >
           {ctaLabel}
         </a>

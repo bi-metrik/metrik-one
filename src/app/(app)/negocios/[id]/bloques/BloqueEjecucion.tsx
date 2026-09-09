@@ -64,13 +64,13 @@ const plural = (n: number, singular: string, plural: string) =>
 function barColor(pct: number): string {
   if (pct >= 100) return 'bg-red-500'
   if (pct >= 90) return 'bg-amber-500'
-  return 'bg-[#10B981]'
+  return 'bg-acento'
 }
 
 function barTextColor(pct: number): string {
   if (pct >= 100) return 'text-red-600'
   if (pct >= 90) return 'text-amber-600'
-  return 'text-[#10B981]'
+  return 'text-acento'
 }
 
 /**
@@ -162,9 +162,9 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
   if (!hayDatos && !hayPresupuesto) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center">
-        <Activity className="h-8 w-8 text-[#6B7280]/20" />
-        <p className="text-xs text-[#6B7280]">Sin registros de ejecución aún</p>
-        <p className="text-[11px] text-[#6B7280]/60">
+        <Activity className="h-8 w-8 text-tinta-suave/20" />
+        <p className="text-xs text-tinta-suave">Sin registros de ejecución aún</p>
+        <p className="text-[11px] text-tinta-suave/60">
           Registra gastos y horas desde el FAB o por WhatsApp
         </p>
       </div>
@@ -217,8 +217,8 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
       {hayPresupuesto && (
         <div>
           <div className="flex items-center gap-1.5 mb-1.5">
-            <Target className="h-3 w-3 text-[#6B7280]" />
-            <p className="text-[10px] font-medium text-[#6B7280]">Presupuesto vs Ejecutado</p>
+            <Target className="h-3 w-3 text-tinta-suave" />
+            <p className="text-[10px] font-medium text-tinta-suave">Presupuesto vs Ejecutado</p>
           </div>
 
           {/* Dos cotizaciones aprobadas a la vez: manda la más reciente, y se dice cuál.
@@ -242,7 +242,7 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
               return (
                 <div key={rubro.tipo}>
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[10px] text-[#6B7280] truncate">{label}</span>
+                    <span className="text-[10px] text-tinta-suave truncate">{label}</span>
                     <span className={`text-[10px] font-semibold tabular-nums ${barTextColor(pct)}`}>
                       {pct}%
                     </span>
@@ -254,7 +254,7 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                         style={{ width: `${Math.min(pct, 100)}%` }}
                       />
                     </div>
-                    <span className="text-[10px] text-[#6B7280] tabular-nums whitespace-nowrap">
+                    <span className="text-[10px] text-tinta-suave tabular-nums whitespace-nowrap">
                       {fmt(rubro.ejecutado)} / {fmt(rubro.total)}
                     </span>
                   </div>
@@ -303,8 +303,8 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
             {presupuestoCosto > 0 && (
               <div className="pt-1.5 mt-1.5 border-t border-[#E5E7EB]">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[10px] font-medium text-[#1A1A1A]">
-                    Total ejecutado <span className="font-normal text-[#6B7280]">vs presupuesto</span>
+                  <span className="text-[10px] font-medium text-tinta">
+                    Total ejecutado <span className="font-normal text-tinta-suave">vs presupuesto</span>
                   </span>
                   <span className={`text-[10px] font-semibold tabular-nums ${barTextColor(pctCosto)}`}>
                     {pctCosto}%
@@ -317,7 +317,7 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                       style={{ width: `${Math.min(pctCosto, 100)}%` }}
                     />
                   </div>
-                  <span className="text-[10px] font-medium text-[#6B7280] tabular-nums whitespace-nowrap">
+                  <span className="text-[10px] font-medium text-tinta-suave tabular-nums whitespace-nowrap">
                     {fmt(costoTotal)} / {fmt(presupuestoCosto)}
                   </span>
                 </div>
@@ -335,9 +335,9 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
             {precioAprobado > 0 && (
               <div className="pt-1.5 mt-1.5 border-t border-[#E5E7EB]">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[10px] font-medium text-[#1A1A1A]">
+                  <span className="text-[10px] font-medium text-tinta">
                     Margen consumido{' '}
-                    <span className="font-normal text-[#6B7280]">vs precio aprobado</span>
+                    <span className="font-normal text-tinta-suave">vs precio aprobado</span>
                   </span>
                   <span className={`text-[10px] font-semibold tabular-nums ${barTextColor(pctMargen)}`}>
                     {pctMargen}%
@@ -350,11 +350,11 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
                       style={{ width: `${Math.min(pctMargen, 100)}%` }}
                     />
                   </div>
-                  <span className="text-[10px] text-[#6B7280] tabular-nums whitespace-nowrap">
+                  <span className="text-[10px] text-tinta-suave tabular-nums whitespace-nowrap">
                     {fmt(costoTotal)} / {fmt(precioAprobado)}
                   </span>
                 </div>
-                <p className="mt-0.5 text-[10px] text-[#6B7280]">
+                <p className="mt-0.5 text-[10px] text-tinta-suave">
                   {pctMargen > 100
                     ? `El costo supera el precio en ${fmt(costoTotal - precioAprobado)}`
                     : `Quedan ${fmt(precioAprobado - costoTotal)} de margen`}
@@ -369,16 +369,16 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
           aparecía, y un negocio con gasto acumulado quedaba sin decir por qué no tenía
           contra qué compararse. */}
       {!hayPresupuesto && (
-        <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5">
+        <div className="rounded-lg border border-[#E5E7EB] bg-papel p-2.5">
           <div className="flex items-start gap-1.5">
-            <HelpCircle className="mt-px h-3 w-3 shrink-0 text-[#6B7280]" />
+            <HelpCircle className="mt-px h-3 w-3 shrink-0 text-tinta-suave" />
             <div className="min-w-0">
-              <p className="text-[10px] font-medium text-[#1A1A1A]">{motivo.titulo}</p>
-              <p className="mt-0.5 text-[10px] leading-snug text-[#6B7280]">{motivo.detalle}</p>
+              <p className="text-[10px] font-medium text-tinta">{motivo.titulo}</p>
+              <p className="mt-0.5 text-[10px] leading-snug text-tinta-suave">{motivo.detalle}</p>
               {hayDatos && (
-                <p className="mt-1 text-[10px] text-[#6B7280]">
+                <p className="mt-1 text-[10px] text-tinta-suave">
                   Ejecutado hasta ahora:{' '}
-                  <span className="font-semibold text-[#1A1A1A] tabular-nums">{fmt(costoTotal)}</span>
+                  <span className="font-semibold text-tinta tabular-nums">{fmt(costoTotal)}</span>
                 </p>
               )}
             </div>
@@ -389,19 +389,19 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
       {/* Gastos por categoría — siempre visible */}
       {data.gastosPorCategoria.length > 0 && (
         <div>
-          <p className="text-[10px] font-medium text-[#6B7280] mb-1.5">Gastos por categoría</p>
+          <p className="text-[10px] font-medium text-tinta-suave mb-1.5">Gastos por categoría</p>
           <div className="space-y-1">
             {data.gastosPorCategoria.map(g => {
               const pct = data.totalGastos > 0 ? Math.round((g.total / data.totalGastos) * 100) : 0
               return (
                 <div key={g.categoria} className="flex items-center gap-2">
-                  <span className="text-[10px] text-[#6B7280] w-28 truncate">
+                  <span className="text-[10px] text-tinta-suave w-28 truncate">
                     {CATEGORIA_LABELS[g.categoria] ?? g.categoria}
                   </span>
                   <div className="flex-1 h-1.5 rounded-full bg-[#E5E7EB] overflow-hidden">
                     <div className="h-full rounded-full bg-red-400" style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="text-[10px] font-medium text-[#6B7280] tabular-nums w-20 text-right">
+                  <span className="text-[10px] font-medium text-tinta-suave tabular-nums w-20 text-right">
                     {fmt(g.total)}
                   </span>
                 </div>
@@ -412,8 +412,8 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
       )}
 
       <div className="flex items-center gap-1.5">
-        <Activity className="h-3 w-3 text-[#6B7280]" />
-        <span className="text-[10px] text-[#6B7280]">Solo visualización · Actualiza en tiempo real</span>
+        <Activity className="h-3 w-3 text-tinta-suave" />
+        <span className="text-[10px] text-tinta-suave">Solo visualización · Actualiza en tiempo real</span>
       </div>
     </div>
   )

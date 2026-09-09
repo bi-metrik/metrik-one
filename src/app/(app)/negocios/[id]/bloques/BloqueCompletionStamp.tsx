@@ -67,11 +67,11 @@ export default function BloqueCompletionStamp({
         })
       : null
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] px-3 py-2">
-        <CheckCircle2 className="h-4 w-4 text-[#10B981] shrink-0" />
+      <div className="flex items-center gap-2 rounded-lg border border-[#BBF7D0] bg-[var(--acento-tinte)] px-3 py-2">
+        <CheckCircle2 className="h-4 w-4 text-acento shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-[#059669]">Cargado por {completadoPorNombre}</p>
-          {fechaFmt && <p className="text-[10px] text-[#10B981]/80">{fechaFmt}</p>}
+          <p className="text-xs font-medium text-acento">Cargado por {completadoPorNombre}</p>
+          {fechaFmt && <p className="text-[10px] text-acento/80">{fechaFmt}</p>}
         </div>
       </div>
     )
@@ -79,7 +79,7 @@ export default function BloqueCompletionStamp({
 
   if (modo === 'visible') {
     return (
-      <p className="text-xs text-[#6B7280] italic">Pendiente de marcar.</p>
+      <p className="text-xs text-tinta-suave italic">Pendiente de marcar.</p>
     )
   }
 
@@ -89,13 +89,13 @@ export default function BloqueCompletionStamp({
         type="button"
         onClick={handleClick}
         disabled={isPending || !canMark}
-        className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white hover:bg-[#059669] disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-lg bg-acento px-4 py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {!canMark && <Lock className="h-3.5 w-3.5" />}
         {isPending ? 'Registrando…' : (labelBoton ?? 'Marcar como completado')}
       </button>
       {reasonBlocked && (
-        <p className="text-[11px] text-[#6B7280]">{reasonBlocked}</p>
+        <p className="text-[11px] text-tinta-suave">{reasonBlocked}</p>
       )}
     </div>
   )

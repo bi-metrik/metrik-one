@@ -37,10 +37,10 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
 
   if (lineas.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-[#F5F4F2] p-8 text-center">
-        <GitFork className="mx-auto h-8 w-8 text-[#6B7280]" />
-        <p className="mt-3 text-sm font-semibold text-[#1A1A1A]">Aún no hay flujo configurado</p>
-        <p className="mt-1 text-xs text-[#6B7280]">
+      <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-papel p-8 text-center">
+        <GitFork className="mx-auto h-8 w-8 text-tinta-suave" />
+        <p className="mt-3 text-sm font-semibold text-tinta">Aún no hay flujo configurado</p>
+        <p className="mt-1 text-xs text-tinta-suave">
           Tu workspace todavía no tiene líneas de negocio activas. Contacta a tu administrador MéTRIK.
         </p>
       </div>
@@ -66,20 +66,20 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
       <header className="mb-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#1A1A1A]">Workflows</h1>
-            <p className="mt-1 text-sm text-[#6B7280]">
+            <h1 className="text-2xl font-bold tracking-tight text-tinta">Workflows</h1>
+            <p className="mt-1 text-sm text-tinta-suave">
               Cómo avanza un caso en tu negocio, etapa por etapa.
             </p>
           </div>
           {/* Selector de línea siempre visible — incluso con 1 sola */}
           <div className="flex items-center gap-2">
-            <label htmlFor="linea-select" className="text-xs text-[#6B7280]">Línea:</label>
+            <label htmlFor="linea-select" className="text-xs text-tinta-suave">Línea:</label>
             <select
               id="linea-select"
               value={selectedLineaId ?? ''}
               onChange={(e) => handleLineaChange(e.target.value)}
               disabled={lineas.length === 1}
-              className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-70"
+              className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-70"
             >
               {lineas.map(l => (
                 <option key={l.id} value={l.id}>{l.nombre}</option>
@@ -93,7 +93,7 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
       {workflowEtapas.length > 0 && (
         <div
           className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg px-3 py-2 text-[13px]"
-          style={{ backgroundColor: '#F5F4F2', color: '#1A1A1A' }}
+          style={{ backgroundColor: 'var(--papel)', color: 'var(--tinta)' }}
         >
           <span className="font-semibold">
             {lineaActual?.nombre ?? 'Flujo'}
@@ -101,21 +101,21 @@ export default function FlujoClient({ data }: { data: FlujoData }) {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
             <span>
               <span className="font-semibold">{totalAbiertos}</span>{' '}
-              <span className="text-[#6B7280]">abierto{totalAbiertos === 1 ? '' : 's'}</span>
+              <span className="text-tinta-suave">abierto{totalAbiertos === 1 ? '' : 's'}</span>
             </span>
             <span>
               <span
                 className="font-semibold"
-                style={{ color: totalVencidos > 0 ? '#B91C1C' : '#1A1A1A' }}
+                style={{ color: totalVencidos > 0 ? '#B91C1C' : 'var(--tinta)' }}
               >
                 {totalVencidos}
               </span>{' '}
-              <span className="text-[#6B7280]">vencido{totalVencidos === 1 ? '' : 's'}</span>
+              <span className="text-tinta-suave">vencido{totalVencidos === 1 ? '' : 's'}</span>
             </span>
             {slaPromedio !== null && (
-              <span className="text-[#6B7280]">
+              <span className="text-tinta-suave">
                 SLA promedio{' '}
-                <span className="font-semibold text-[#1A1A1A]">{slaPromedio}h</span>
+                <span className="font-semibold text-tinta">{slaPromedio}h</span>
               </span>
             )}
           </div>

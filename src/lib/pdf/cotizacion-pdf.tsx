@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet, Image as PdfImage } from '@react-pdf/renderer'
 
 import type { CotizacionPDFProps } from './cotizacion-props'
+import { PALETA } from '@/lib/marca/paleta'
 
 // Color lightener (react-pdf no soporta rgba)
 function lighten(hex: string, amount: number): string {
@@ -24,7 +25,7 @@ const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal }: CotizacionPDFProps) {
-  const pc = vendedor.color_primario || '#10B981'
+  const pc = vendedor.color_primario || PALETA.acento
   const pcLight = lighten(pc, 0.08)
 
   // Pre-calculate item totals
@@ -76,22 +77,22 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
               {vendedor.nombre}
             </Text>
             {showRazonSocial && (
-              <Text style={{ fontSize: 9, color: '#6B7280', marginTop: 1 }}>
+              <Text style={{ fontSize: 9, color: PALETA.tintaSuave, marginTop: 1 }}>
                 {vendedor.razon_social}
               </Text>
             )}
             {vendedor.nit && (
-              <Text style={{ fontSize: 8, color: '#6B7280', marginTop: 1 }}>
+              <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 1 }}>
                 NIT: {vendedor.nit}
               </Text>
             )}
             {vendorContactLine && (
-              <Text style={{ fontSize: 8, color: '#6B7280', marginTop: 1 }}>
+              <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 1 }}>
                 {vendorContactLine}
               </Text>
             )}
             {vendorAddressLine && (
-              <Text style={{ fontSize: 8, color: '#6B7280', marginTop: 1 }}>
+              <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 1 }}>
                 {vendorAddressLine}
               </Text>
             )}
@@ -99,7 +100,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
 
           {/* Right: title block */}
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 3 }}>
+            <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 3 }}>
               COTIZACION
             </Text>
             <Text style={{ fontSize: 16, fontFamily: 'Helvetica-Bold', color: '#111827', marginTop: 2 }}>
@@ -157,28 +158,28 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
 
             {/* Table header */}
             <View style={{ flexDirection: 'row', borderBottomWidth: 1.5, borderBottomColor: '#E5E7EB', paddingVertical: 6 }}>
-              <Text style={{ width: '5%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1 }}>
+              <Text style={{ width: '5%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1 }}>
                 #
               </Text>
-              <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '40%' : '50%') : (hasQuantity ? '47%' : '60%'), fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1 }}>
+              <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '40%' : '50%') : (hasQuantity ? '47%' : '60%'), fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1 }}>
                 Concepto
               </Text>
               {hasQuantity && (
-                <Text style={{ width: '8%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+                <Text style={{ width: '8%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                   Cant.
                 </Text>
               )}
               {hasItemDiscounts && (
                 <>
-                  <Text style={{ width: hasQuantity ? '17%' : '20%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+                  <Text style={{ width: hasQuantity ? '17%' : '20%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                     Valor
                   </Text>
-                  <Text style={{ width: '10%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+                  <Text style={{ width: '10%', fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                     Dcto.
                   </Text>
                 </>
               )}
-              <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '20%' : '15%') : (hasQuantity ? '30%' : '35%'), fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
+              <Text style={{ width: hasItemDiscounts ? (hasQuantity ? '20%' : '15%') : (hasQuantity ? '30%' : '35%'), fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'right' }}>
                 Subtotal
               </Text>
             </View>
@@ -204,7 +205,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
                     {item.nombre}
                   </Text>
                   {item.descripcion && (
-                    <Text style={{ fontSize: 8, color: '#6B7280', marginTop: 2 }}>
+                    <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 2 }}>
                       {item.descripcion}
                     </Text>
                   )}
@@ -238,31 +239,31 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
           {items.length > 0 && totalDescuentoItems > 0 && (
             <>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-                <Text style={{ fontSize: 9, color: '#6B7280' }}>Subtotal items</Text>
+                <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>Subtotal items</Text>
                 <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{fmt(subtotalItems)}</Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-                <Text style={{ fontSize: 9, color: '#6B7280' }}>Descuento items</Text>
+                <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>Descuento items</Text>
                 <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#DC2626' }}>-{fmt(totalDescuentoItems)}</Text>
               </View>
             </>
           )}
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-            <Text style={{ fontSize: 9, color: '#6B7280' }}>Subtotal</Text>
+            <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>Subtotal</Text>
             <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{fmt(cotizacion.valor_total)}</Text>
           </View>
 
           {(cotizacion.descuento_valor ?? 0) > 0 && (
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-              <Text style={{ fontSize: 9, color: '#6B7280' }}>Descuento ({cotizacion.descuento_porcentaje ?? 0}%)</Text>
+              <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>Descuento ({cotizacion.descuento_porcentaje ?? 0}%)</Text>
               <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#DC2626' }}>-{fmt(cotizacion.descuento_valor ?? 0)}</Text>
             </View>
           )}
 
           {ivaAmount > 0 && (
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
-              <Text style={{ fontSize: 9, color: '#6B7280' }}>IVA (19%)</Text>
+              <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>IVA (19%)</Text>
               <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{fmt(ivaAmount)}</Text>
             </View>
           )}

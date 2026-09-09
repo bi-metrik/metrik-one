@@ -11,11 +11,11 @@ import {
 } from '@/lib/actions/solicitudes-llamada'
 
 const C = {
-  texto: '#1A1A1A',
-  suave: '#6B7280',
+  texto: 'var(--tinta)',
+  suave: 'var(--tinta-suave)',
   borde: '#E5E7EB',
-  fondo: '#F5F4F2',
-  verde: '#10B981',
+  fondo: 'var(--papel)',
+  verde: 'var(--acento)',
 }
 
 const FILTROS: { clave: EstadoSolicitud | 'todas'; label: string }[] = [

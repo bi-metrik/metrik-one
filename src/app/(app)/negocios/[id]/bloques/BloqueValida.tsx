@@ -40,9 +40,9 @@ export default function BloqueValida({ negocioId, consultas, error }: Props) {
 
         <div className="flex-1 min-w-0">
           <p className="flex items-center gap-1.5 text-sm font-medium leading-tight text-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-[#10B981]" />
+            <ShieldCheck className="h-3.5 w-3.5 text-acento" />
             Consultas Valida
-            <span className="text-xs font-normal text-[#6B7280]">({count})</span>
+            <span className="text-xs font-normal text-tinta-suave">({count})</span>
           </p>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wide">
@@ -67,7 +67,7 @@ export default function BloqueValida({ negocioId, consultas, error }: Props) {
           <div className="flex justify-end">
             <Link
               href={`/valida?negocio_id=${negocioId}`}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#10B981] hover:text-[#059669] transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-acento hover:text-acento-hover transition-colors"
             >
               Ver historial completo en Valida
               <ExternalLink className="h-3 w-3" />

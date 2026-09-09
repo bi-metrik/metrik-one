@@ -526,7 +526,7 @@ export default function MovimientosClient({
         <button
           onClick={handleAprobarTodos}
           disabled={isPending}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-acento-claro bg-acento-tinte py-2 text-xs font-medium text-acento hover:bg-acento/15 dark:border-acento dark:bg-acento/30 dark:text-acento-claro dark:hover:bg-acento/50 transition-colors disabled:opacity-50"
         >
           <ShieldCheck className="h-4 w-4" />
           {isPending ? 'Aprobando...' : `Aprobar todo (${pendientesVisibles.length})`}
@@ -662,10 +662,10 @@ export default function MovimientosClient({
                             {mov.tipo === 'egreso' && mov.clasificacion_costo && (
                               <span className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium ${
                                 mov.clasificacion_costo === 'variable'
-                                  ? 'bg-[#10B981]/10 text-[#059669]'
+                                  ? 'bg-acento/10 text-acento'
                                   : mov.clasificacion_costo === 'fijo'
-                                    ? 'bg-[#F5F4F2] text-[#6B7280]'
-                                    : 'bg-[#F59E0B]/10 text-[#92400E]'
+                                    ? 'bg-papel text-tinta-suave'
+                                    : 'bg-advertencia/10 text-[#92400E]'
                               }`}>
                                 {mov.clasificacion_costo === 'no_operativo' ? 'No oper.' : mov.clasificacion_costo}
                               </span>
@@ -779,7 +779,7 @@ export default function MovimientosClient({
                                 <button
                                   onClick={() => handleMarcarRevisado(mov.tabla, mov.id)}
                                   disabled={isPending}
-                                  className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
+                                  className="inline-flex items-center gap-1 rounded-md border border-acento-claro bg-acento-tinte px-2.5 py-1 text-[11px] font-medium text-acento hover:bg-acento/15 dark:border-acento dark:bg-acento/30 dark:text-acento-claro dark:hover:bg-acento/50 transition-colors disabled:opacity-50"
                                   title="Aprobar movimiento"
                                 >
                                   <ShieldCheck className="h-3 w-3" />

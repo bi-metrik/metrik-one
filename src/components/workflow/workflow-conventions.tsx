@@ -20,6 +20,7 @@ import {
   Eye,
   GitBranch,
 } from 'lucide-react'
+import { PALETA } from '@/lib/marca/paleta'
 
 interface Item {
   label: string
@@ -63,7 +64,7 @@ const ITEMS: Item[] = [
     description: 'Antes del cierre comercial.',
     sample: (
       <Sample>
-        <StageBadge color="#10B981" label="Venta" />
+        <StageBadge color={PALETA.acento} label="Venta" />
       </Sample>
     ),
   },
@@ -72,7 +73,7 @@ const ITEMS: Item[] = [
     description: 'Después del cierre, en operación.',
     sample: (
       <Sample>
-        <StageBadge color="#F59E0B" label="Ejecución" />
+        <StageBadge color={PALETA.advertencia} label="Ejecución" />
       </Sample>
     ),
   },
@@ -92,9 +93,9 @@ const ITEMS: Item[] = [
       <Sample>
         <div
           className="flex h-7 w-9 items-center justify-center rounded-md border-2 bg-white"
-          style={{ borderColor: '#10B981' }}
+          style={{ borderColor: PALETA.acento }}
         >
-          <span className="text-[8px] font-semibold text-[#10B981]">Rama</span>
+          <span className="text-[8px] font-semibold text-acento">Rama</span>
         </div>
       </Sample>
     ),
@@ -107,9 +108,9 @@ const ITEMS: Item[] = [
       <Sample>
         <div
           className="flex h-6 w-6 rotate-45 items-center justify-center border-2 bg-white"
-          style={{ borderColor: '#1A1A1A' }}
+          style={{ borderColor: PALETA.tinta }}
         >
-          <span className="-rotate-45 text-[11px] font-bold text-[#1A1A1A]">?</span>
+          <span className="-rotate-45 text-[11px] font-bold text-tinta">?</span>
         </div>
       </Sample>
     ),
@@ -122,13 +123,13 @@ const ITEMS: Item[] = [
         <svg width="20" height="28" viewBox="0 0 20 28" fill="none">
           <path
             d="M10 2 L10 22"
-            stroke="#10B981"
+            stroke={PALETA.acento}
             strokeWidth="2"
             strokeLinecap="round"
           />
           <path
             d="M5 17 L10 22 L15 17"
-            stroke="#10B981"
+            stroke={PALETA.acento}
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -146,13 +147,13 @@ const ITEMS: Item[] = [
         <svg width="32" height="20" viewBox="0 0 32 20" fill="none">
           <path
             d="M2 10 L26 10"
-            stroke="#6B7280"
+            stroke={PALETA.tintaSuave}
             strokeWidth="2"
             strokeLinecap="round"
           />
           <path
             d="M21 5 L26 10 L21 15"
-            stroke="#6B7280"
+            stroke={PALETA.tintaSuave}
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -170,7 +171,7 @@ const ITEMS: Item[] = [
       <Sample>
         <span
           className="inline-block h-2.5 w-2.5 rounded-full"
-          style={{ backgroundColor: '#6B7280' }}
+          style={{ backgroundColor: PALETA.tintaSuave }}
         />
       </Sample>
     ),
@@ -183,9 +184,9 @@ const ITEMS: Item[] = [
         <div className="flex items-center gap-1">
           <span
             className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: '#10B981' }}
+            style={{ backgroundColor: PALETA.acento }}
           />
-          <ShieldCheck className="h-3.5 w-3.5" style={{ color: '#10B981' }} />
+          <ShieldCheck className="h-3.5 w-3.5" style={{ color: PALETA.acento }} />
         </div>
       </Sample>
     ),
@@ -196,7 +197,7 @@ const ITEMS: Item[] = [
       'Muestra información heredada de etapas anteriores. No se edita aquí.',
     sample: (
       <Sample>
-        <Eye className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+        <Eye className="h-3.5 w-3.5" style={{ color: PALETA.tintaSuave }} />
       </Sample>
     ),
   },
@@ -206,7 +207,7 @@ const ITEMS: Item[] = [
       'Solo aparece si se cumple una condición de otro bloque (ej: respuesta de un toggle).',
     sample: (
       <Sample>
-        <GitBranch className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+        <GitBranch className="h-3.5 w-3.5" style={{ color: PALETA.tintaSuave }} />
       </Sample>
     ),
   },
@@ -217,7 +218,7 @@ const ITEMS: Item[] = [
     sample: (
       <Sample>
         <span
-          className="rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-[#6B7280]"
+          className="rounded-full bg-papel px-1.5 py-[1px] text-[9px] font-mono uppercase tracking-wider text-tinta-suave"
         >
           datos
         </span>
@@ -231,7 +232,7 @@ const ITEMS: Item[] = [
     sample: (
       <Sample>
         <span
-          className="rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+          className="rounded-md bg-tinta px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
         >
           DC1
         </span>
@@ -248,7 +249,7 @@ const ITEMS: Item[] = [
           className="inline-flex min-w-[20px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
           style={{
             backgroundColor: '#E5E7EB',
-            color: '#1A1A1A',
+            color: PALETA.tinta,
           }}
         >
           7
@@ -282,7 +283,7 @@ const ITEMS: Item[] = [
       <Sample>
         <span
           className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold text-white"
-          style={{ backgroundColor: '#1A1A1A' }}
+          style={{ backgroundColor: PALETA.tinta }}
         >
           Cierre
         </span>
@@ -296,7 +297,7 @@ const ITEMS: Item[] = [
       <Sample>
         <span
           className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
-          style={{ backgroundColor: '#10B981' }}
+          style={{ backgroundColor: PALETA.acento }}
         >
           03
         </span>
@@ -311,7 +312,7 @@ export function WorkflowConventions() {
   return (
     <div
       className="mb-4 rounded-xl border"
-      style={{ backgroundColor: '#F5F4F2', borderColor: '#E5E7EB' }}
+      style={{ backgroundColor: PALETA.papel, borderColor: '#E5E7EB' }}
     >
       <button
         type="button"
@@ -319,13 +320,13 @@ export function WorkflowConventions() {
         aria-expanded={open}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
       >
-        <span className="text-[12px] font-semibold text-[#1A1A1A]">
+        <span className="text-[12px] font-semibold text-tinta">
           Convenciones del diagrama
         </span>
         {open ? (
-          <ChevronDown className="h-4 w-4 text-[#6B7280]" />
+          <ChevronDown className="h-4 w-4 text-tinta-suave" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-[#6B7280]" />
+          <ChevronRight className="h-4 w-4 text-tinta-suave" />
         )}
       </button>
       {open && (
@@ -335,10 +336,10 @@ export function WorkflowConventions() {
               <div key={item.label} className="flex items-start gap-3">
                 {item.sample}
                 <div className="min-w-0 flex-1 pt-0.5">
-                  <div className="text-[12px] font-semibold text-[#1A1A1A]">
+                  <div className="text-[12px] font-semibold text-tinta">
                     {item.label}
                   </div>
-                  <div className="text-[11px] leading-snug text-[#6B7280]">
+                  <div className="text-[11px] leading-snug text-tinta-suave">
                     {item.description}
                   </div>
                 </div>

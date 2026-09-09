@@ -8,8 +8,8 @@ import { ChartCard } from './chart-card'
 import { CasosDrawer, type CeldaSeleccionada } from './casos-drawer'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
 const ROJO = '#B91C1C'
 const OCRE = '#92400E'

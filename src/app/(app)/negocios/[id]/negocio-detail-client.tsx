@@ -394,7 +394,7 @@ function ResponsableSelector({
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         {responsables.map(r => (
           <span key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
               {getInitials(r.full_name)}
             </span>
             <span className="text-xs text-foreground">{truncName(r.full_name)}</span>
@@ -408,7 +408,7 @@ function ResponsableSelector({
     <div className="relative flex flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
       {responsables.map(r => (
         <div key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
             {getInitials(r.full_name)}
           </span>
           <span className="text-foreground">{truncName(r.full_name)}</span>
@@ -453,7 +453,7 @@ function ResponsableSelector({
                   onClick={() => handleAdd(s.id)}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
                 >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[9px] font-bold text-emerald-700">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
                     {getInitials(s.full_name)}
                   </span>
                   <span className="truncate">{s.full_name}</span>
@@ -554,12 +554,12 @@ function ModalConfirmarAvance({
       >
         <div className="flex shrink-0 items-start gap-3 border-b border-[#E5E7EB] p-4">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-          <h3 className="flex-1 text-sm font-semibold text-[#1A1A1A]">{confirmacion.titulo}</h3>
+          <h3 className="flex-1 text-sm font-semibold text-tinta">{confirmacion.titulo}</h3>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {confirmacion.parrafos.map((p, i) => (
-            <p key={i} className="text-[13px] leading-relaxed text-[#1A1A1A]">{p}</p>
+            <p key={i} className="text-[13px] leading-relaxed text-tinta">{p}</p>
           ))}
         </div>
 
@@ -567,7 +567,7 @@ function ModalConfirmarAvance({
           <button
             onClick={onClose}
             disabled={pendiente}
-            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-[#6B7280] hover:text-[#1A1A1A] disabled:opacity-50"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-tinta-suave hover:text-tinta disabled:opacity-50"
           >
             {confirmacion.cancelar}
           </button>
@@ -575,7 +575,7 @@ function ModalConfirmarAvance({
             onClick={onConfirmar}
             disabled={pendiente}
             className="rounded-md px-3 py-1.5 text-[13px] font-semibold text-white transition disabled:opacity-50"
-            style={{ backgroundColor: '#10B981' }}
+            style={{ backgroundColor: 'var(--acento)' }}
           >
             {pendiente ? 'Pasando…' : confirmacion.confirmar}
           </button>
@@ -636,12 +636,12 @@ function ModalGateBloqueado({
         <div className="flex shrink-0 items-start gap-3 border-b border-[#E5E7EB] p-4">
           <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-[#1A1A1A]">Bloques gate pendientes</h3>
-            <p className="mt-0.5 text-xs text-[#6B7280]">
+            <h3 className="text-sm font-semibold text-tinta">Bloques gate pendientes</h3>
+            <p className="mt-0.5 text-xs text-tinta-suave">
               Los siguientes bloques deben completarse antes de avanzar:
             </p>
           </div>
-          <button onClick={onClose} className="shrink-0 text-[#6B7280] hover:text-[#1A1A1A]">
+          <button onClick={onClose} className="shrink-0 text-tinta-suave hover:text-tinta">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -650,7 +650,7 @@ function ModalGateBloqueado({
           {bloques.map((b, i) => (
             <div key={i} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-              <span className="text-xs text-[#1A1A1A]">{b.nombre}</span>
+              <span className="text-xs text-tinta">{b.nombre}</span>
               <span className="ml-auto text-[10px] font-semibold text-amber-600">GATE</span>
             </div>
           ))}
@@ -659,12 +659,12 @@ function ModalGateBloqueado({
         <div className="shrink-0 border-t border-[#E5E7EB] p-4 space-y-3">
           {hayNoOmitible ? (
             <div className="space-y-3">
-              <p className="text-[11px] leading-relaxed text-[#6B7280]">
+              <p className="text-[11px] leading-relaxed text-tinta-suave">
                 Este bloqueo no se puede omitir. Hay que resolverlo para que el negocio avance.
               </p>
               <button
                 onClick={onClose}
-                className="w-full rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-[#1A1A1A] hover:bg-slate-50"
+                className="w-full rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-tinta hover:bg-slate-50"
               >
                 Volver
               </button>
@@ -673,7 +673,7 @@ function ModalGateBloqueado({
             <div className="flex gap-2">
               <button
                 onClick={onClose}
-                className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-[#1A1A1A] hover:bg-slate-50"
+                className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-tinta hover:bg-slate-50"
               >
                 Volver
               </button>
@@ -686,7 +686,7 @@ function ModalGateBloqueado({
             </div>
           ) : (
             <div className="space-y-2">
-              <label className="block text-[11px] font-medium text-[#6B7280]">
+              <label className="block text-[11px] font-medium text-tinta-suave">
                 Motivo del override <span className="text-red-500">*</span>
               </label>
               <textarea
@@ -694,12 +694,12 @@ function ModalGateBloqueado({
                 onChange={e => setMotivo(e.target.value)}
                 placeholder="Explica por qué omites los gates..."
                 rows={2}
-                className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+                className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
               />
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowOverride(false)}
-                  className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-[#6B7280]"
+                  className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-tinta-suave"
                 >
                   Cancelar
                 </button>
@@ -1831,7 +1831,7 @@ function BloqueRenderer({
 
     default:
       return (
-        <p className="text-xs text-[#6B7280] italic">
+        <p className="text-xs text-tinta-suave italic">
           Tipo de bloque &ldquo;{tipo}&rdquo; no soportado aún
         </p>
       )
@@ -1929,7 +1929,7 @@ function BloqueCard({
           <p className={`flex items-center gap-2 text-sm font-medium leading-tight ${isCompleto && !isVisualization ? 'text-muted-foreground' : 'text-foreground'}`}>
             {bloque.block_id && (
               <span
-                className="inline-block shrink-0 rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+                className="inline-block shrink-0 rounded-md bg-tinta px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
                 title={`ID del bloque: ${bloque.block_id}`}
               >
                 {bloque.block_id}

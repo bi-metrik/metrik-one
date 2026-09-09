@@ -24,8 +24,8 @@ import { TabProceso } from './tab-proceso'
 import { TabOperacionesPersonas } from './tab-operaciones-personas'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 
 const ETIQUETAS: Record<VistaOperaciones, string> = {
   casos: 'Casos',

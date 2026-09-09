@@ -14,7 +14,7 @@
 //   - Pre-asigna valor sugerido con badge cuando viene una propuesta confianza ≥0.7
 //   - Si elige "Directo a negocio", muestra selector de negocio
 //
-// Tokens MeTRIK canónicos (verde #10B981, gris #6B7280, borde #E5E7EB).
+// Tokens MeTRIK canónicos (verde var(--acento), gris var(--tinta-suave), borde #E5E7EB).
 // ============================================================
 
 import { useState } from 'react'
@@ -104,7 +104,7 @@ export default function CentroCostosSelector({
 
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-[#6B7280]">
+      <label className="mb-1 block text-xs font-medium text-tinta-suave">
         Centro de costos
       </label>
 
@@ -120,8 +120,8 @@ export default function CentroCostosSelector({
               onClick={() => handleSelectPrimaria(opt.centro)}
               className={`rounded-md border px-2 py-2 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
-                  : 'border-[#E5E7EB] bg-background text-[#6B7280] hover:border-[#10B981]/50'
+                  ? 'border-acento bg-acento/10 text-acento'
+                  : 'border-[#E5E7EB] bg-background text-tinta-suave hover:border-acento/50'
               }`}
             >
               <div className="flex items-center justify-center gap-1">
@@ -136,7 +136,7 @@ export default function CentroCostosSelector({
 
       {/* Sugerencia badge */}
       {mostrandoSugerenciaBadge && (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[#059669]">
+        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-acento">
           <Sparkles className="h-3 w-3" />
           <span>
             Sugerido — tap para cambiar
@@ -150,8 +150,8 @@ export default function CentroCostosSelector({
         onClick={() => setShowMixtaModal(true)}
         className={`mt-2 text-[11px] underline-offset-2 hover:underline ${
           centroActual === 'mixta'
-            ? 'text-[#059669] font-medium'
-            : 'text-[#6B7280]'
+            ? 'text-acento font-medium'
+            : 'text-tinta-suave'
         }`}
       >
         {centroActual === 'mixta'
@@ -162,7 +162,7 @@ export default function CentroCostosSelector({
       {/* Selector negocio cuando directa_negocio */}
       {centroActual === 'directa_negocio' && (
         <div className="mt-3">
-          <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+          <label className="mb-1 block text-[10px] font-medium text-tinta-suave">
             ¿A qué negocio?
           </label>
           <select
@@ -264,17 +264,17 @@ function MixtaModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-[#1A1A1A]">Gasto mixto</h3>
+          <h3 className="text-sm font-bold text-tinta">Gasto mixto</h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-[#6B7280] hover:bg-[#F5F4F2]"
+            className="rounded p-1 text-tinta-suave hover:bg-papel"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="mb-3 text-[11px] text-[#6B7280]">
+        <p className="mb-3 text-[11px] text-tinta-suave">
           Distribuye el gasto entre centros. Los porcentajes deben sumar 100%.
         </p>
 
@@ -285,8 +285,8 @@ function MixtaModal({
             onClick={() => setModo('preset')}
             className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${
               modo === 'preset'
-                ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
-                : 'border-[#E5E7EB] text-[#6B7280]'
+                ? 'border-acento bg-acento/10 text-acento'
+                : 'border-[#E5E7EB] text-tinta-suave'
             }`}
           >
             Presets
@@ -296,8 +296,8 @@ function MixtaModal({
             onClick={() => setModo('custom')}
             className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${
               modo === 'custom'
-                ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
-                : 'border-[#E5E7EB] text-[#6B7280]'
+                ? 'border-acento bg-acento/10 text-acento'
+                : 'border-[#E5E7EB] text-tinta-suave'
             }`}
           >
             Personalizado
@@ -311,19 +311,19 @@ function MixtaModal({
                 key={p.label}
                 type="button"
                 onClick={() => onConfirm(p.split)}
-                className="w-full rounded-md border border-[#E5E7EB] bg-background px-3 py-2.5 text-left text-sm hover:border-[#10B981]/50"
+                className="w-full rounded-md border border-[#E5E7EB] bg-background px-3 py-2.5 text-left text-sm hover:border-acento/50"
               >
                 {p.label}
               </button>
             ))}
-            <p className="pt-2 text-[10px] text-[#6B7280]">
+            <p className="pt-2 text-[10px] text-tinta-suave">
               ¿Necesitas split con un negocio específico? Usa Personalizado.
             </p>
           </div>
         ) : (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+              <label className="mb-1 block text-[10px] font-medium text-tinta-suave">
                 % a ONE
               </label>
               <div className="relative">
@@ -335,13 +335,13 @@ function MixtaModal({
                   onChange={(e) => handlePctOneChange(e.target.value)}
                   className="w-full rounded-md border border-[#E5E7EB] bg-background py-2 pl-3 pr-8 text-sm"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#6B7280]">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-tinta-suave">
                   %
                 </span>
               </div>
             </div>
             <div>
-              <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+              <label className="mb-1 block text-[10px] font-medium text-tinta-suave">
                 % a Clarity
               </label>
               <div className="relative">
@@ -353,12 +353,12 @@ function MixtaModal({
                   onChange={(e) => handlePctClarityChange(e.target.value)}
                   className="w-full rounded-md border border-[#E5E7EB] bg-background py-2 pl-3 pr-8 text-sm"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#6B7280]">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-tinta-suave">
                   %
                 </span>
               </div>
             </div>
-            <p className="text-[10px] text-[#6B7280]">
+            <p className="text-[10px] text-tinta-suave">
               Al cambiar uno, el complemento se autoajusta. Para incluir un negocio
               específico en el split (ej: 60% ONE + 40% a un negocio), edita el JSON
               tras guardar — UI completa de splits con negocios viene en iteración siguiente.
@@ -366,7 +366,7 @@ function MixtaModal({
             <button
               type="button"
               onClick={handleCustomConfirm}
-              className="w-full rounded-md bg-[#10B981] py-2 text-sm font-medium text-white hover:bg-[#059669]"
+              className="w-full rounded-md bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover"
             >
               Guardar split
             </button>
@@ -375,7 +375,7 @@ function MixtaModal({
 
         {/* Lista negocios disponibles (informativo) */}
         {modo === 'custom' && negocios.length > 0 && (
-          <details className="mt-3 text-[10px] text-[#6B7280]">
+          <details className="mt-3 text-[10px] text-tinta-suave">
             <summary className="cursor-pointer">
               Ver {negocios.length} negocio(s) disponibles
             </summary>

@@ -39,12 +39,12 @@ export default function ControlesList({ controles }: Props) {
   if (controles.length === 0) {
     return (
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-12 text-center">
-        <ShieldCheck className="mx-auto h-10 w-10 text-[#6B7280] mb-3" />
-        <p className="text-sm font-medium text-[#1A1A1A]">Sin controles registrados</p>
-        <p className="mt-1 text-xs text-[#6B7280]">Agrega el primer control para mitigar riesgos.</p>
+        <ShieldCheck className="mx-auto h-10 w-10 text-tinta-suave mb-3" />
+        <p className="text-sm font-medium text-tinta">Sin controles registrados</p>
+        <p className="mt-1 text-xs text-tinta-suave">Agrega el primer control para mitigar riesgos.</p>
         <Link
           href="/controles/nuevo"
-          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-[#10B981] hover:underline"
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-acento hover:underline"
         >
           Crear primer control
         </Link>
@@ -70,19 +70,19 @@ export default function ControlesList({ controles }: Props) {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-[#10B981]">
+                  <span className="font-mono text-xs font-bold text-acento">
                     {ctrl.referencia ?? '\u2014'}
                   </span>
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${TIPO_COLORS[ctrl.tipo_control] ?? 'bg-gray-100 text-gray-800'}`}>
                     {ctrl.tipo_control}
                   </span>
                   {ctrl.clasificacion && (
-                    <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                    <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave capitalize">
                       {ctrl.clasificacion}
                     </span>
                   )}
                   {ctrl.periodicidad && (
-                    <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                    <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave capitalize">
                       {ctrl.periodicidad}
                     </span>
                   )}
@@ -90,7 +90,7 @@ export default function ControlesList({ controles }: Props) {
                     {ctrl.estado}
                   </span>
                 </div>
-                <p className="text-sm font-medium text-[#1A1A1A] line-clamp-1">{ctrl.nombre_control}</p>
+                <p className="text-sm font-medium text-tinta line-clamp-1">{ctrl.nombre_control}</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {efectividad != null && (
@@ -104,13 +104,13 @@ export default function ControlesList({ controles }: Props) {
             {/* Row 2: Responsable + causas count */}
             <div className="mt-2 flex items-center gap-3">
               {ctrl.responsable_nombre && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-[#6B7280]">
+                <span className="inline-flex items-center gap-1 text-[10px] text-tinta-suave">
                   <User className="h-3 w-3" />
                   {ctrl.responsable_nombre}
                 </span>
               )}
               {causas.length > 0 && (
-                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280]">
+                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave">
                   {causas.length} causa{causas.length !== 1 ? 's' : ''}
                 </span>
               )}

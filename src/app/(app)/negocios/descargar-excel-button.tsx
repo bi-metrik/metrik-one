@@ -69,16 +69,16 @@ export default function DescargarExcelButton({ ids }: { ids: string[] }) {
         onClick={descargar}
         disabled={cargando || n === 0}
         aria-busy={cargando}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-[#1A1A1A] transition-colors hover:border-[#1A1A1A]/30 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-tinta transition-colors hover:border-tinta/30 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {cargando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
         {cargando ? 'Generando…' : 'Descargar Excel'}
-        <span className="rounded-full bg-[#F5F4F2] px-1.5 py-0.5 text-[10px] font-bold">
+        <span className="rounded-full bg-papel px-1.5 py-0.5 text-[10px] font-bold">
           {n} negocio{n !== 1 ? 's' : ''}
         </span>
       </button>
       {error && (
-        <p role="alert" className="text-[11px] text-[#EF4444]">
+        <p role="alert" className="text-[11px] text-alerta">
           {error}
         </p>
       )}

@@ -299,36 +299,36 @@ export default function AliadosList({ aliados, puedeGestionar }: Props) {
                   <div className="mb-1 flex flex-wrap items-center gap-1.5">
                     <span
                       className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        activo ? 'bg-[#10B981]/10 text-[#059669]' : 'bg-[#F5F4F2] text-[#6B7280]'
+                        activo ? 'bg-acento/10 text-acento' : 'bg-papel text-tinta-suave'
                       }`}
                     >
                       {activo ? 'Activo' : 'Inactivo'}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta-suave">
                       <Handshake className="h-2.5 w-2.5" />
                       Aliado
                     </span>
                   </div>
 
-                  <p className="truncate text-sm font-semibold leading-tight text-[#1A1A1A]">
+                  <p className="truncate text-sm font-semibold leading-tight text-tinta">
                     {a.nombre}
                   </p>
-                  {a.nit && <p className="truncate text-[11px] text-[#6B7280]">NIT {a.nit}</p>}
+                  {a.nit && <p className="truncate text-[11px] text-tinta-suave">NIT {a.nit}</p>}
 
                   {/* Contacto */}
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
                     {a.contacto_nombre && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-tinta-suave">
                         <User className="h-3 w-3" /> {a.contacto_nombre}
                       </span>
                     )}
                     {a.telefono && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-tinta-suave">
                         <Phone className="h-3 w-3" /> {a.telefono}
                       </span>
                     )}
                     {a.email && (
-                      <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-[#6B7280]">
+                      <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-tinta-suave">
                         <Mail className="h-3 w-3 shrink-0" />
                         <span className="truncate">{a.email}</span>
                       </span>
@@ -336,7 +336,7 @@ export default function AliadosList({ aliados, puedeGestionar }: Props) {
                   </div>
 
                   {a.notas && (
-                    <p className="mt-1 line-clamp-2 text-[11px] text-[#6B7280]">{a.notas}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] text-tinta-suave">{a.notas}</p>
                   )}
                 </div>
 
@@ -346,7 +346,7 @@ export default function AliadosList({ aliados, puedeGestionar }: Props) {
                     <button
                       type="button"
                       onClick={() => abrirEdicion(a)}
-                      className="rounded p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
+                      className="rounded p-1 text-tinta-suave transition-colors hover:bg-papel hover:text-tinta"
                       title="Editar"
                       aria-label="Editar aliado"
                     >
@@ -355,8 +355,8 @@ export default function AliadosList({ aliados, puedeGestionar }: Props) {
                     <button
                       type="button"
                       onClick={() => alternarEstado(a)}
-                      className={`rounded p-1 transition-colors hover:bg-[#F5F4F2] ${
-                        activo ? 'text-[#6B7280] hover:text-[#EF4444]' : 'text-[#6B7280] hover:text-[#059669]'
+                      className={`rounded p-1 transition-colors hover:bg-papel ${
+                        activo ? 'text-tinta-suave hover:text-alerta' : 'text-tinta-suave hover:text-acento-hover'
                       }`}
                       title={activo ? 'Desactivar' : 'Activar'}
                       aria-label={activo ? 'Desactivar aliado' : 'Activar aliado'}

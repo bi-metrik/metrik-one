@@ -84,16 +84,16 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
     : null
   const recaudoColor = monthType !== 'current' || !ritmoRecaudo
     ? undefined
-    : data.recaudoMes >= ritmoRecaudo ? '#10B981'
-    : data.recaudoMes >= ritmoRecaudo * 0.8 ? '#F59E0B'
-    : '#EF4444'
+    : data.recaudoMes >= ritmoRecaudo ? 'var(--acento)'
+    : data.recaudoMes >= ritmoRecaudo * 0.8 ? 'var(--advertencia)'
+    : 'var(--alerta)'
 
   // P4 color
   let ventasColor: string | undefined
   if (monthType === 'current' && data.puntoEquilibrio > 0) {
-    if (data.ventasMes >= data.puntoEquilibrio) ventasColor = '#10B981'
-    else if (data.diaActual <= data.diasDelMes * 0.5) ventasColor = '#F59E0B'
-    else ventasColor = '#EF4444'
+    if (data.ventasMes >= data.puntoEquilibrio) ventasColor = 'var(--acento)'
+    else if (data.diaActual <= data.diasDelMes * 0.5) ventasColor = 'var(--advertencia)'
+    else ventasColor = 'var(--alerta)'
   }
 
   // P3 trend is inverted (cartera down = good)
@@ -155,7 +155,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
           {/* Modo Rentabilidad Comercial: alcance de la data actual vs universo completo */}
           {data.rentabilidadComercialMode && (
             <div className="rounded-xl border p-4" style={{ borderColor: 'rgba(16,185,129,0.30)', backgroundColor: 'rgba(16,185,129,0.06)' }}>
-              <p className="text-sm font-semibold text-[#1A1A1A]">Alcance de estos números</p>
+              <p className="text-sm font-semibold text-tinta">Alcance de estos números</p>
               <p className="text-xs text-[#4B5563] mt-1 leading-relaxed">
                 Con la data que compartieron hoy (ventas y costos de Siesa) podemos construir el indicador de <strong>margen bruto</strong>, que ves encendido en &quot;¿Estoy ganando?&quot;. Las otras tres preguntas del negocio (cuánta plata tienes, cuánto te deben y cuánto aguantas) necesitan el <strong>universo completo</strong>: al conectar ONE a Siesa con gastos, cartera y caja, se responden las cuatro en tiempo real.
               </p>
@@ -165,37 +165,37 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
           {/* MC + EBITDA — Norte operativo (decision 2026-04-23). Click → drill P2 */}
           <button
             onClick={() => setActiveDrill(2)}
-            className="w-full text-left rounded-xl border bg-card p-4 shadow-sm hover:bg-[#F5F4F2] transition-colors"
+            className="w-full text-left rounded-xl border bg-card p-4 shadow-sm hover:bg-papel transition-colors"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">Margen de contribucion</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-tinta-suave">Margen de contribucion</p>
                 <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-xl font-bold tabular-nums text-[#1A1A1A]">
+                  <span className="text-xl font-bold tabular-nums text-tinta">
                     {Math.round(data.margenContribucion * 100)}%
                   </span>
-                  <span className="text-xs text-[#6B7280]">
+                  <span className="text-xs text-tinta-suave">
                     {formatCOP(data.mcMonto)}
                   </span>
                 </div>
-                <p className="text-[10px] text-[#6B7280] mt-0.5">Ingresos − costos variables</p>
+                <p className="text-[10px] text-tinta-suave mt-0.5">Ingresos − costos variables</p>
               </div>
               <div className="h-10 w-px bg-[#E5E7EB] shrink-0" aria-hidden="true" />
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">EBITDA</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-tinta-suave">EBITDA</p>
                 <div className="flex items-baseline gap-2 mt-1">
-                  <span className={`text-xl font-bold tabular-nums ${data.ebitda >= 0 ? 'text-[#1A1A1A]' : 'text-[#EF4444]'}`}>
+                  <span className={`text-xl font-bold tabular-nums ${data.ebitda >= 0 ? 'text-tinta' : 'text-alerta'}`}>
                     {data.ebitda >= 0 ? '' : '−'}{formatCOP(Math.abs(data.ebitda))}
                   </span>
                 </div>
-                <p className="text-[10px] text-[#6B7280] mt-0.5">MC − costos fijos</p>
+                <p className="text-[10px] text-tinta-suave mt-0.5">MC − costos fijos</p>
               </div>
             </div>
           </button>
 
           {/* Modo Rentabilidad Comercial: aclara que el margen es bruto (histórico Siesa), no EBITDA completo */}
           {data.rentabilidadComercialMode && (
-            <p className="text-[10px] text-[#6B7280] leading-relaxed px-1 -mt-1">
+            <p className="text-[10px] text-tinta-suave leading-relaxed px-1 -mt-1">
               Margen bruto real de tu operación (histórico Siesa). El EBITDA completo, la caja, la cartera y el
               runway se encienden al conectar ONE a Siesa con tus gastos y cobros. Detalle en el tab Rentabilidad Comercial.
             </p>
@@ -286,9 +286,9 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
               }}
               barColor={
                 data.honorarioAprobado > 0
-                  ? (data.honorarioRecaudado / data.honorarioAprobado) >= 0.7 ? '#10B981'
-                    : (data.honorarioRecaudado / data.honorarioAprobado) >= 0.5 ? '#F59E0B'
-                    : '#EF4444'
+                  ? (data.honorarioRecaudado / data.honorarioAprobado) >= 0.7 ? 'var(--acento)'
+                    : (data.honorarioRecaudado / data.honorarioAprobado) >= 0.5 ? 'var(--advertencia)'
+                    : 'var(--alerta)'
                   : undefined
               }
               onClick={() => setActiveDrill(3)}
@@ -356,8 +356,8 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
 // ── Modo vitrina: modal flotante + pill ───────────────
 // Muestra comercial sobre el dashboard real en ceros (workspaces Valida-only).
 // Modal centrado sobre el dashboard borroso. Sin lockup pesado: solo copy + un CTA
-// centrado + "Powered by MéTRIK" en chico. Marca: Verde Métrica #10B981, Negro
-// Carbón #1A1A1A, tokens existentes. Copy de Mateo (no editar).
+// centrado + "Powered by MéTRIK" en chico. Marca: acento y tinta, tokens
+// existentes. Copy de Mateo (no editar).
 
 const METRIK_URL = 'https://metrik.com.co'
 
@@ -366,7 +366,7 @@ function VitrinaNumerosModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Velo + blur del fondo (refuerza el blur del dashboard) */}
       <div
-        className="absolute inset-0 bg-[#1A1A1A]/30 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-tinta/30 backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden
       />
@@ -386,7 +386,7 @@ function VitrinaNumerosModal({ onClose }: { onClose: () => void }) {
           <X className="h-4 w-4" />
         </button>
 
-        <p className="mx-auto mt-2 max-w-sm text-[15px] leading-relaxed" style={{ color: '#1A1A1A' }}>
+        <p className="mx-auto mt-2 max-w-sm text-[15px] leading-relaxed" style={{ color: 'var(--tinta)' }}>
           Estos indicadores se construyen con los datos de tu operación en tiempo
           real. Hoy usas Valida para cumplir; suma tu operación con MeTRIK ONE.
         </p>
@@ -396,7 +396,7 @@ function VitrinaNumerosModal({ onClose }: { onClose: () => void }) {
           target="_blank"
           rel="noopener noreferrer"
           className="mt-6 inline-flex items-center justify-center rounded-lg px-6 py-3 text-sm font-semibold text-white transition-colors hover:brightness-95"
-          style={{ backgroundColor: '#10B981' }}
+          style={{ backgroundColor: 'var(--acento)' }}
         >
           Hablemos con MéTRIK
         </a>
@@ -422,7 +422,7 @@ function VitrinaPill({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:brightness-95"
-      style={{ backgroundColor: '#10B981' }}
+      style={{ backgroundColor: 'var(--acento)' }}
     >
       Hablemos con MéTRIK
     </button>

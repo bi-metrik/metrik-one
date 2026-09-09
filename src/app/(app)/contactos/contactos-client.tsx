@@ -943,7 +943,7 @@ export default function ContactosClient({
                         {c.person_type === 'juridica' ? (
                           <Badge className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300 border-0">PJ</Badge>
                         ) : c.person_type === 'natural' ? (
-                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 border-0">PN</Badge>
+                          <Badge className="bg-acento/15 text-acento dark:bg-acento/30 dark:text-acento-claro border-0">PN</Badge>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}

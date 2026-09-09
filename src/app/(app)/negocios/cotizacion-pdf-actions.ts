@@ -380,7 +380,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       razon_social: vendorFiscal?.razon_social ?? null,
       nit: vendorFiscal?.nit ?? null,
       logo_url: ws?.logo_url ?? null,
-      color_primario: ws?.color_primario ?? '#10B981',
+      color_primario: ws?.color_primario ?? 'var(--acento)',
       telefono: vendorFiscal?.telefono ?? null,
       email: vendorFiscal?.email_fiscal ?? null,
       direccion: vendorFiscal?.direccion_fiscal ?? null,

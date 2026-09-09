@@ -23,7 +23,7 @@ import { getMetasAnio, guardarMetasAnio } from '../metas-anio-actions'
  * escribir en un mes distinto del que se está viendo.
  */
 
-const GREEN = '#059669'
+const GREEN = 'var(--acento)'
 
 const ETIQUETA: Record<CampoMeta, string> = {
   metaLeads: 'Leads',
@@ -144,7 +144,7 @@ export default function MetasAnioModal({
                 cambiarContexto(() => setStaffId(v))
               }}
               aria-label="Metas de"
-              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-900 focus:border-emerald-400 focus:outline-none"
+              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-900 focus:border-acento-claro focus:outline-none"
             >
               <option value="">Equipo (meta global)</option>
               {vendedores.map((v) => (
@@ -173,7 +173,7 @@ export default function MetasAnioModal({
                   <div
                     key={fila.mes}
                     className={`rounded-xl border p-3 transition-colors ${
-                      editada ? 'border-emerald-300 bg-emerald-50/40' : 'border-gray-100'
+                      editada ? 'border-acento-claro bg-acento-tinte/40' : 'border-gray-100'
                     }`}
                   >
                     <div className="mb-2 flex items-center justify-between">
@@ -199,7 +199,7 @@ export default function MetasAnioModal({
                             type="number" min={0} inputMode="numeric"
                             value={fila[campo]}
                             onChange={(e) => actualizar(fila.mes, campo, e.target.value)}
-                            className="w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                            className="w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm focus:border-acento-claro focus:outline-none focus:ring-2 focus:ring-acento/15"
                             placeholder="—"
                           />
                         </label>

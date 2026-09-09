@@ -32,23 +32,23 @@ export const AREA_DESCRIPTIONS: Record<Area, string> = {
  */
 export const AREA_CLASSES: Record<Area, { bg: string; text: string; border: string }> = {
   comercial: {
-    bg: 'bg-[#10B981]/10',
-    text: 'text-[#059669]',
-    border: 'border-[#10B981]',
+    bg: 'bg-acento/10',
+    text: 'text-acento',
+    border: 'border-acento',
   },
   operaciones: {
-    bg: 'bg-[#1A1A1A]/[0.08]',
-    text: 'text-[#1A1A1A]',
-    border: 'border-[#1A1A1A]/30',
+    bg: 'bg-tinta/[0.08]',
+    text: 'text-tinta',
+    border: 'border-tinta/30',
   },
   financiera: {
-    bg: 'bg-[#6B7280]/[0.12]',
-    text: 'text-[#6B7280]',
-    border: 'border-[#6B7280]/40',
+    bg: 'bg-tinta-suave/[0.12]',
+    text: 'text-tinta-suave',
+    border: 'border-tinta-suave/40',
   },
   direccion: {
-    bg: 'bg-[#F5F4F2]',
-    text: 'text-[#1A1A1A]',
+    bg: 'bg-papel',
+    text: 'text-tinta',
     border: 'border-[#E5E7EB] border-dashed',
   },
 }

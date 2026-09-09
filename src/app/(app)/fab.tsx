@@ -13,7 +13,7 @@ import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 
-const VERDE = '#10B981'
+const VERDE = 'var(--acento)'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -548,15 +548,15 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
         <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <div className="flex items-center gap-2">
             <Wallet className="h-4 w-4" style={{ color: VERDE }} />
-            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>Registrar pago</h3>
+            <h3 className="text-[15px] font-bold" style={{ color: 'var(--tinta)' }}>Registrar pago</h3>
           </div>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
+          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: 'var(--tinta-suave)' }} /></button>
         </div>
 
         <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
           <PagoField label="Negocio">
             {loadingNegocios ? (
-              <div className="flex items-center gap-2 px-1 py-1.5 text-[13px]" style={{ color: '#6B7280' }}>
+              <div className="flex items-center gap-2 px-1 py-1.5 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
               </div>
             ) : loadError ? (
@@ -596,8 +596,8 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
                   }}
                   className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
                   style={fuente === f
-                    ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
-                    : { borderColor: '#E5E7EB', color: '#6B7280' }}
+                    ? { borderColor: VERDE, color: VERDE, backgroundColor: 'var(--acento-tinte)' }
+                    : { borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
                 >
                   ePayco
                 </button>
@@ -652,7 +652,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
                   value={Number(monto).toLocaleString('es-CO')}
                   readOnly
                   className="w-full rounded-md border px-2.5 py-1.5 text-right text-[13px] tabular-nums outline-none"
-                  style={{ borderColor: VERDE, backgroundColor: '#ECFDF5', color: '#065F46' }}
+                  style={{ borderColor: VERDE, backgroundColor: 'var(--acento-tinte)', color: 'var(--acento)' }}
                 />
               </PagoField>
               <PagoField label="Fecha (ePayco)">
@@ -660,7 +660,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
                   value={fecha}
                   readOnly
                   className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-                  style={{ borderColor: VERDE, backgroundColor: '#ECFDF5', color: '#065F46' }}
+                  style={{ borderColor: VERDE, backgroundColor: 'var(--acento-tinte)', color: 'var(--acento)' }}
                 />
               </PagoField>
             </div>
@@ -679,13 +679,13 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
           {needJust && (
             <PagoField label="Justificación (referencia duplicada)">
-              <textarea value={justificacion} onChange={(e) => setJustificacion(e.target.value)} rows={2} placeholder="Explica por qué registrar esta referencia que ya existe…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#F59E0B' }} />
+              <textarea value={justificacion} onChange={(e) => setJustificacion(e.target.value)} rows={2} placeholder="Explica por qué registrar esta referencia que ya existe…" className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: 'var(--advertencia)' }} />
             </PagoField>
           )}
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
-          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
+          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: 'var(--tinta-suave)' }}>Cancelar</button>
           <button onClick={handleSubmit} disabled={pending || loadingNegocios || faltaHonorario || (esEpayco && epaycoStatus !== 'success')} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
             Registrar pago

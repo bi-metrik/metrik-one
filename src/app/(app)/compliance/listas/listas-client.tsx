@@ -47,6 +47,7 @@ import {
   type ComplianceSegmento,
 } from '@/lib/compliance/segmentos';
 import { formatFecha } from '@/lib/dates/bogota'
+import { PALETA } from '@/lib/marca/paleta'
 
 /**
  * Carga el catalogo de segmentos del workspace.
@@ -86,7 +87,7 @@ function useSegmentos() {
 
 function SinCatalogoAviso() {
   return (
-    <div className="p-4 rounded-lg bg-[#FEF3C7] border border-[#F59E0B]/40 text-[#92400E] text-sm flex items-start gap-2">
+    <div className="p-4 rounded-lg bg-[#FEF3C7] border border-advertencia/40 text-[#92400E] text-sm flex items-start gap-2">
       <Tags className="h-4 w-4 mt-0.5 shrink-0" />
       <span>
         Todavia no hay segmentos configurados. El oficial de cumplimiento los crea en{' '}
@@ -112,15 +113,15 @@ function SelectorSegmento({
     <div>
       <label
         htmlFor={id}
-        className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2"
+        className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2"
       >
-        Segmento <span className="text-[#EF4444] normal-case font-medium">(obligatorio)</span>
+        Segmento <span className="text-alerta normal-case font-medium">(obligatorio)</span>
       </label>
       <select
         id={id}
         value={valor}
         onChange={e => onChange(e.target.value)}
-        className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white"
+        className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white"
       >
         <option value="">Selecciona un segmento…</option>
         {segmentos.map(sg => (
@@ -139,16 +140,16 @@ function SelectorSegmento({
  * y pintarlas de rojo llenaría el historial de alarmas por historia.
  */
 const ESTADO_VIGENCIA_CLASS: Record<EstadoVigencia, string> = {
-  vigente: 'bg-[#ECFDF5] text-[#059669]',
+  vigente: 'bg-acento-tinte text-acento',
   por_vencer: 'bg-[#FFFBEB] text-[#B45309]',
   vencida: 'bg-[#FEF2F2] text-[#B91C1C]',
-  sin_vigencia: 'bg-[#F5F4F2] text-[#6B7280]',
+  sin_vigencia: 'bg-papel text-tinta-suave',
 };
 
 const SEVERIDAD_CLASS: Record<DualSeveridad, string> = {
-  alto: 'bg-[#EF4444] text-white',
-  sin_hallazgo: 'bg-[#10B981] text-white',
-  error: 'bg-[#1A1A1A] text-white',
+  alto: 'bg-alerta text-white',
+  sin_hallazgo: 'bg-acento text-white',
+  error: 'bg-tinta text-white',
 };
 
 const SEVERIDAD_LABEL: Record<DualSeveridad, string> = {
@@ -193,10 +194,10 @@ export default function ListasClient({ tutorialNuncaVisto = false }: ListasClien
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <ListChecks className="h-6 w-6 text-[#1A1A1A]" />
+        <ListChecks className="h-6 w-6 text-tinta" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Consulta de Listas Restrictivas</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Consulta de Listas Restrictivas</h1>
+          <p className="text-sm text-tinta-suave">
             Consulta puntual o masiva contra listas vinculantes y de referencia.
           </p>
         </div>
@@ -260,8 +261,8 @@ function TabButton({
       data-tutorial-target={dataTutorialTarget}
       className={`-mb-px inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
         active
-          ? 'border-[#1A1A1A] text-[#1A1A1A]'
-          : 'border-transparent text-[#6B7280] hover:text-[#1A1A1A]'
+          ? 'border-tinta text-tinta'
+          : 'border-transparent text-tinta-suave hover:text-tinta'
       }`}
     >
       {icon}
@@ -351,7 +352,7 @@ function ConsultaPuntualForm() {
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               {labelDocumento}{' '}
               <span className="text-[#9CA3AF] normal-case font-medium">(opcional)</span>
             </label>
@@ -363,11 +364,11 @@ function ConsultaPuntualForm() {
                 if (validation) setValidation(null);
               }}
               placeholder={placeholderDocumento}
-              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               {labelNombre}{' '}
               <span className="text-[#9CA3AF] normal-case font-medium">(opcional)</span>
             </label>
@@ -379,19 +380,19 @@ function ConsultaPuntualForm() {
                 if (validation) setValidation(null);
               }}
               placeholder={placeholderNombre}
-              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
         </div>
 
-        <p className="text-xs text-[#6B7280]">
+        <p className="text-xs text-tinta-suave">
           Llena al menos uno de los dos. Mejor si llenas ambos: la coincidencia es más precisa.
         </p>
 
         <button
           type="submit"
           disabled={pending || isEmpty || !segmentoId}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
         >
           <Search className="h-4 w-4" />
           {pending ? 'Consultando…' : 'Consultar'}
@@ -540,8 +541,8 @@ function ConsultaMasivaForm() {
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="text-base font-bold text-[#1A1A1A]">Carga masiva (XLSX)</h3>
-          <p className="text-sm text-[#6B7280] mt-1">
+          <h3 className="text-base font-bold text-tinta">Carga masiva (XLSX)</h3>
+          <p className="text-sm text-tinta-suave mt-1">
             Sube un XLSX con la plantilla. Hasta 500 filas. Cada fila se procesa y queda
             registrada en el historial. La columna <strong>segmento</strong> es obligatoria y
             solo acepta los segmentos configurados en este espacio de trabajo.
@@ -551,7 +552,7 @@ function ConsultaMasivaForm() {
           type="button"
           onClick={descargarPlantilla}
           disabled={pendingTpl}
-          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
         >
           <Download className="h-4 w-4" />
           {pendingTpl ? 'Descargando…' : 'Descargar plantilla'}
@@ -568,7 +569,7 @@ function ConsultaMasivaForm() {
       ) : (
         <form onSubmit={iniciarCargue} className="space-y-4">
           <div>
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               Título del cargue{' '}
               <span className="font-light lowercase tracking-normal">
                 (opcional, queda en el historial)
@@ -580,20 +581,20 @@ function ConsultaMasivaForm() {
               onChange={e => setTitulo(e.target.value)}
               placeholder="Cargue contrapartes mayo 2026"
               maxLength={200}
-              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
 
           <label
             htmlFor="archivo-batch"
-            className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-[#1A1A1A] rounded-lg p-8 cursor-pointer transition-colors"
+            className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-[#E5E7EB] hover:border-tinta rounded-lg p-8 cursor-pointer transition-colors"
           >
-            <Upload className="h-8 w-8 text-[#6B7280]" />
+            <Upload className="h-8 w-8 text-tinta-suave" />
             <div className="text-center">
-              <p className="text-sm font-semibold text-[#1A1A1A]">
+              <p className="text-sm font-semibold text-tinta">
                 {archivo ? archivo.name : 'Arrastra o selecciona un archivo XLSX'}
               </p>
-              <p className="text-xs text-[#6B7280] mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
+              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
             </div>
             <input
               id="archivo-batch"
@@ -607,7 +608,7 @@ function ConsultaMasivaForm() {
           <button
             type="submit"
             disabled={!archivo}
-            className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
           >
             <Upload className="h-4 w-4" />
             Procesar cargue
@@ -625,8 +626,8 @@ function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
     return (
       <div className="py-10 text-center space-y-3">
         <Dona total={1} procesadas={0} pulsante />
-        <p className="text-sm font-semibold text-[#1A1A1A]">Preparando cargue…</p>
-        <p className="text-xs text-[#6B7280]">Leyendo el archivo y validando filas.</p>
+        <p className="text-sm font-semibold text-tinta">Preparando cargue…</p>
+        <p className="text-xs text-tinta-suave">Leyendo el archivo y validando filas.</p>
       </div>
     );
   }
@@ -640,7 +641,7 @@ function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
         <Dona total={estado.total} procesadas={estado.procesadas} />
       </div>
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+        <div className="flex items-center justify-between text-xs text-tinta-suave">
           <span className="font-semibold">
             {estado.procesadas} / {estado.total} consultas
           </span>
@@ -648,13 +649,13 @@ function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
         </div>
         <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
           <div
-            className="h-full bg-[#10B981] transition-[width] duration-200 ease-out"
+            className="h-full bg-acento transition-[width] duration-200 ease-out"
             style={{ width: `${pct}%` }}
           />
         </div>
       </div>
       <DistribucionSeveridadDual sev={estado.severidades} />
-      <p className="text-[11px] text-center text-[#6B7280]">
+      <p className="text-[11px] text-center text-tinta-suave">
         No cierres esta pestaña hasta que el cargue termine. Las consultas se guardan en el
         historial conforme avanzan.
       </p>
@@ -679,7 +680,7 @@ function Dona({ total, procesadas, pulsante }: { total: number; procesadas: numb
           cy="64"
           r={radio}
           fill="none"
-          stroke="#10B981"
+          stroke={PALETA.acento}
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={circ}
@@ -688,8 +689,8 @@ function Dona({ total, procesadas, pulsante }: { total: number; procesadas: numb
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold text-[#1A1A1A] leading-none">{pctTexto}%</span>
-        <span className="text-[10px] uppercase tracking-wider text-[#6B7280] mt-0.5 font-semibold">
+        <span className="text-2xl font-bold text-tinta leading-none">{pctTexto}%</span>
+        <span className="text-[10px] uppercase tracking-wider text-tinta-suave mt-0.5 font-semibold">
           procesado
         </span>
       </div>
@@ -702,7 +703,7 @@ function DistribucionSeveridadDual({ sev }: { sev: Record<DualSeveridad, number>
   const visibles = items.filter(s => (sev[s] ?? 0) > 0);
   if (visibles.length === 0) {
     return (
-      <p className="text-[11px] text-center text-[#6B7280]">
+      <p className="text-[11px] text-center text-tinta-suave">
         Aún sin resultados — los primeros aparecen pronto.
       </p>
     );
@@ -730,12 +731,12 @@ function ResumenCargueCompletado({
 }) {
   return (
     <div className="space-y-5">
-      <div className="rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 p-5">
-        <div className="flex items-center gap-2 text-[#059669] font-semibold">
+      <div className="rounded-lg bg-acento-tinte border border-acento/30 p-5">
+        <div className="flex items-center gap-2 text-acento font-semibold">
           <Check className="h-5 w-5" />
           Cargue completado
         </div>
-        <p className="text-sm text-[#1A1A1A] mt-1">
+        <p className="text-sm text-tinta mt-1">
           {estado.total} consultas procesadas{estado.tituloLote ? ` · ${estado.tituloLote}` : ''}.
           Las puedes revisar en el tab Historial.
         </p>
@@ -747,7 +748,7 @@ function ResumenCargueCompletado({
       <button
         type="button"
         onClick={onReiniciar}
-        className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+        className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
       >
         Nuevo cargue
       </button>
@@ -780,8 +781,8 @@ function SelectorTipoPersona({
             onClick={() => onChange(o.v)}
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${
               active
-                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
-                : 'bg-white text-[#6B7280] border-[#E5E7EB] hover:border-[#1A1A1A]'
+                ? 'bg-tinta text-white border-tinta'
+                : 'bg-white text-tinta-suave border-[#E5E7EB] hover:border-tinta'
             }`}
           >
             {o.icon}
@@ -804,11 +805,11 @@ function ResultadoConsulta({
     <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
       <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Resultado</p>
-          <h3 className="text-lg font-bold text-[#1A1A1A] mt-1 truncate">
+          <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">Resultado</p>
+          <h3 className="text-lg font-bold text-tinta mt-1 truncate">
             {nombreConsultado || '—'}
           </h3>
-          <p className="text-xs text-[#6B7280] font-mono">ID: {data.consulta_local_id}</p>
+          <p className="text-xs text-tinta-suave font-mono">ID: {data.consulta_local_id}</p>
         </div>
         <div className="flex items-center gap-3">
           {data.severidad !== 'error' && (
@@ -816,7 +817,7 @@ function ResultadoConsulta({
               href={`/api/compliance/listas/soporte/${data.consulta_local_id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#10B981] hover:text-[#059669] border border-[#10B981]/30 hover:border-[#10B981] rounded-md px-3 py-1.5 transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-acento hover:text-acento-hover border border-acento/30 hover:border-acento rounded-md px-3 py-1.5 transition-colors"
             >
               <FileText className="h-3.5 w-3.5" />
               Ver soporte
@@ -831,11 +832,11 @@ function ResultadoConsulta({
       </div>
 
       <div className="p-5 space-y-3">
-        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+        <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
           Coincidencias ({data.total_matches})
         </p>
         {data.matches.length === 0 ? (
-          <p className="text-sm text-[#10B981] font-medium flex items-center gap-1.5">
+          <p className="text-sm text-acento font-medium flex items-center gap-1.5">
             <Check className="h-4 w-4" />
             La consulta no arrojó coincidencias en las listas restrictivas evaluadas.
           </p>
@@ -853,24 +854,24 @@ function ListaCoincidencias({ matches }: { matches: InformaMatch[] }) {
       {matches.slice(0, 20).map((m, i) => (
         <li key={i} className="py-3 flex flex-col sm:flex-row sm:items-start sm:gap-4">
           <div className="sm:w-32 shrink-0">
-            <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold">
+            <p className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold">
               Lista
             </p>
-            <p className="text-sm font-semibold text-[#1A1A1A] mt-0.5 break-words">{m.lista}</p>
+            <p className="text-sm font-semibold text-tinta mt-0.5 break-words">{m.lista}</p>
           </div>
           <div className="flex-1 min-w-0 mt-2 sm:mt-0">
-            <p className="text-sm font-medium text-[#1A1A1A]">{m.nombre}</p>
+            <p className="text-sm font-medium text-tinta">{m.nombre}</p>
             {m.documento && (
-              <p className="text-xs text-[#6B7280] font-mono mt-0.5">{m.documento}</p>
+              <p className="text-xs text-tinta-suave font-mono mt-0.5">{m.documento}</p>
             )}
             {m.fundamento && (
-              <p className="text-xs text-[#6B7280] mt-1.5 leading-relaxed">{m.fundamento}</p>
+              <p className="text-xs text-tinta-suave mt-1.5 leading-relaxed">{m.fundamento}</p>
             )}
           </div>
         </li>
       ))}
       {matches.length > 20 && (
-        <li className="py-3 text-xs text-[#6B7280] text-center italic">
+        <li className="py-3 text-xs text-tinta-suave text-center italic">
           Mostrando 20 de {matches.length} coincidencias.
         </li>
       )}
@@ -880,7 +881,7 @@ function ListaCoincidencias({ matches }: { matches: InformaMatch[] }) {
 
 function ErrorBox({ msg }: { msg: string }) {
   return (
-    <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-center gap-2">
+    <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
       <AlertTriangle className="h-4 w-4" /> {msg}
     </div>
   );
@@ -969,16 +970,16 @@ function HistorialPanel() {
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
-        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Filtros</p>
+        <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">Filtros</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Segmento
             </label>
             <select
               value={segmentoFiltro}
               onChange={e => setSegmentoFiltro(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Todos</option>
               {segmentos.map(sg => (
@@ -990,13 +991,13 @@ function HistorialPanel() {
             </select>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Severidad
             </label>
             <select
               value={severidad}
               onChange={e => setSeveridad(e.target.value as DualSeveridad | '')}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Todas</option>
               <option value="alto">Alto</option>
@@ -1005,13 +1006,13 @@ function HistorialPanel() {
             </select>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Tipo
             </label>
             <select
               value={tipo}
               onChange={e => setTipo(e.target.value as 'puntual' | 'masiva_item' | '')}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Todos</option>
               <option value="puntual">Puntual</option>
@@ -1019,25 +1020,25 @@ function HistorialPanel() {
             </select>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Desde
             </label>
             <input
               type="date"
               value={fechaDesde}
               onChange={e => setFechaDesde(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             />
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Hasta
             </label>
             <input
               type="date"
               value={fechaHasta}
               onChange={e => setFechaHasta(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             />
           </div>
         </div>
@@ -1046,7 +1047,7 @@ function HistorialPanel() {
             type="button"
             onClick={aplicarFiltros}
             disabled={pending}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] transition-colors"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-tinta text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] transition-colors"
           >
             <Search className="h-4 w-4" />
             {pending ? 'Aplicando…' : 'Aplicar'}
@@ -1055,7 +1056,7 @@ function HistorialPanel() {
             type="button"
             onClick={limpiarFiltros}
             disabled={pending}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
           >
             Limpiar
           </button>
@@ -1063,13 +1064,13 @@ function HistorialPanel() {
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
           Cargando historial…
         </div>
       ) : error ? (
         <ErrorBox msg={`Error cargando historial: ${error}`} />
       ) : consultas.length === 0 ? (
-        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
           Sin consultas con los filtros aplicados.
         </div>
       ) : (
@@ -1197,25 +1198,25 @@ function ReconsultaBar({
     const pct = estado.total === 0 ? 0 : Math.round((estado.procesadas / estado.total) * 100);
     return (
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-3">
-        <p className="text-sm font-semibold text-[#1A1A1A]">
+        <p className="text-sm font-semibold text-tinta">
           Re-consultando {estado.procesadas} / {estado.total}…
         </p>
         <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
           <div
-            className="h-full bg-[#10B981] transition-[width] duration-200 ease-out"
+            className="h-full bg-acento transition-[width] duration-200 ease-out"
             style={{ width: `${pct}%` }}
           />
         </div>
         <DistribucionSeveridadDual sev={estado.severidades} />
-        <p className="text-[11px] text-[#6B7280]">No cierres esta pestaña hasta que termine.</p>
+        <p className="text-[11px] text-tinta-suave">No cierres esta pestaña hasta que termine.</p>
       </div>
     );
   }
 
   if (estado.fase === 'listo') {
     return (
-      <div className="rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 p-5 space-y-3">
-        <div className="flex items-center gap-2 text-[#059669] font-semibold">
+      <div className="rounded-lg bg-acento-tinte border border-acento/30 p-5 space-y-3">
+        <div className="flex items-center gap-2 text-acento font-semibold">
           <Check className="h-5 w-5" />
           Re-consulta terminada · {estado.total} consulta(s)
         </div>
@@ -1230,7 +1231,7 @@ function ReconsultaBar({
         <button
           type="button"
           onClick={cancelar}
-          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] bg-white text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] bg-white text-sm font-semibold text-tinta hover:bg-papel transition-colors"
         >
           Cerrar
         </button>
@@ -1241,14 +1242,14 @@ function ReconsultaBar({
   if (estado.fase === 'confirmando') {
     const ejecutables = elegidas.length - sinCriterio.length;
     return (
-      <div className="bg-white rounded-lg border border-[#F59E0B]/50 p-5 space-y-4">
+      <div className="bg-white rounded-lg border border-advertencia/50 p-5 space-y-4">
         <div className="flex items-start gap-2">
           <AlertTriangle className="h-5 w-5 text-[#B45309] mt-0.5 shrink-0" />
-          <div className="text-sm text-[#1A1A1A]">
+          <div className="text-sm text-tinta">
             <p className="font-semibold">
               Se van a hacer {ejecutables} consulta(s) nuevas.
             </p>
-            <p className="text-[#6B7280] mt-1">
+            <p className="text-tinta-suave mt-1">
               Cada una queda registrada en el historial como un cargue nuevo. Las consultas
               anteriores no se borran.
             </p>
@@ -1263,7 +1264,7 @@ function ReconsultaBar({
 
         {sinSegmentoUtil.length > 0 && (
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Segmento para las {sinSegmentoUtil.length} fila(s) sin segmento vigente
             </label>
             <select
@@ -1272,7 +1273,7 @@ function ReconsultaBar({
                 setSegmentoFallback(e.target.value);
                 setValidacion(null);
               }}
-              className="w-full sm:w-80 h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full sm:w-80 h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Selecciona un segmento…</option>
               {segmentos.map(sg => (
@@ -1291,7 +1292,7 @@ function ReconsultaBar({
             type="button"
             onClick={ejecutar}
             disabled={ejecutables === 0}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-tinta text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
           >
             <RefreshCw className="h-4 w-4" />
             Confirmar y re-consultar
@@ -1299,7 +1300,7 @@ function ReconsultaBar({
           <button
             type="button"
             onClick={cancelar}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
           >
             Cancelar
           </button>
@@ -1310,13 +1311,13 @@ function ReconsultaBar({
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-4 flex items-center justify-between gap-3 flex-wrap">
-      <p className="text-sm text-[#1A1A1A]">
+      <p className="text-sm text-tinta">
         <strong>{elegidas.length}</strong> fila(s) seleccionada(s) en el historial.
       </p>
       <button
         type="button"
         onClick={abrirConfirmacion}
-        className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] transition-colors"
+        className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-tinta text-white text-sm font-semibold hover:bg-[#374151] transition-colors"
       >
         <RefreshCw className="h-4 w-4" />
         Re-consultar seleccionadas
@@ -1353,45 +1354,45 @@ function HistorialTablaDual({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
+            <tr className="bg-papel border-b border-[#E5E7EB]">
               <th className="w-10 px-2 py-2.5 text-center">
                 <input
                   type="checkbox"
                   checked={todasMarcadas}
                   onChange={onAlternarTodas}
                   aria-label="Seleccionar todas las consultas listadas"
-                  className="h-4 w-4 accent-[#1A1A1A] cursor-pointer"
+                  className="h-4 w-4 accent-tinta cursor-pointer"
                 />
               </th>
               <th className="w-8" />
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Fecha
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Nombre
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Documento
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Consultado por
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Segmento
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Tipo
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Coincidencias
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Severidad
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Vigencia
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Soporte
               </th>
             </tr>
@@ -1405,7 +1406,7 @@ function HistorialTablaDual({
               return (
                 <Fragment key={c.id}>
                   <tr
-                    className={`border-b border-[#E5E7EB] last:border-0 ${canExpand ? 'hover:bg-[#F5F4F2]/60 cursor-pointer' : ''}`}
+                    className={`border-b border-[#E5E7EB] last:border-0 ${canExpand ? 'hover:bg-papel/60 cursor-pointer' : ''}`}
                     onClick={() => canExpand && toggle(c.id)}
                   >
                     <td className="px-2 py-2.5 text-center">
@@ -1415,10 +1416,10 @@ function HistorialTablaDual({
                         onChange={() => onAlternar(c.id)}
                         onClick={e => e.stopPropagation()}
                         aria-label={`Seleccionar consulta de ${c.nombre_consultado ?? c.documento_numero ?? 'sin identificar'}`}
-                        className="h-4 w-4 accent-[#1A1A1A] cursor-pointer"
+                        className="h-4 w-4 accent-tinta cursor-pointer"
                       />
                     </td>
-                    <td className="px-2 py-2.5 text-[#6B7280] text-center">
+                    <td className="px-2 py-2.5 text-tinta-suave text-center">
                       {canExpand ? (
                         isOpen ? (
                           <ChevronDown className="h-4 w-4 inline" />
@@ -1427,26 +1428,26 @@ function HistorialTablaDual({
                         )
                       ) : null}
                     </td>
-                    <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
+                    <td className="px-4 py-2.5 text-tinta-suave whitespace-nowrap text-xs">
                       {formatFecha(c.created_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
-                    <td className="px-4 py-2.5 font-medium text-[#1A1A1A]">
+                    <td className="px-4 py-2.5 font-medium text-tinta">
                       {c.nombre_consultado ?? '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-[#6B7280] font-mono text-xs">
+                    <td className="px-4 py-2.5 text-tinta-suave font-mono text-xs">
                       {c.documento_tipo && c.documento_numero
                         ? `${c.documento_tipo} ${c.documento_numero}`
                         : '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-[#1A1A1A] text-xs">
+                    <td className="px-4 py-2.5 text-tinta text-xs">
                       {c.consultado_por ?? '—'}
                     </td>
                     <td
-                      className={`px-4 py-2.5 text-xs ${seg.huerfano ? 'text-[#B91C1C] font-semibold' : 'text-[#1A1A1A]'}`}
+                      className={`px-4 py-2.5 text-xs ${seg.huerfano ? 'text-[#B91C1C] font-semibold' : 'text-tinta'}`}
                     >
                       {seg.texto}
                     </td>
-                    <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-[#6B7280]">
+                    <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-tinta-suave">
                       {c.tipo === 'puntual' ? 'Puntual' : 'Cargue'}
                     </td>
                     <td className="px-4 py-2.5 text-center font-semibold">{c.total_matches}</td>
@@ -1477,7 +1478,7 @@ function HistorialTablaDual({
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           title="Ver documento de soporte"
-                          className="inline-flex items-center gap-1 text-xs font-medium text-[#10B981] hover:text-[#059669]"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-acento hover:text-acento-hover"
                         >
                           <FileText className="h-3.5 w-3.5" />
                           Soporte
@@ -1486,7 +1487,7 @@ function HistorialTablaDual({
                     </td>
                   </tr>
                   {isOpen && (
-                    <tr className="border-b border-[#E5E7EB] bg-[#F5F4F2]/40">
+                    <tr className="border-b border-[#E5E7EB] bg-papel/40">
                       <td />
                       <td />
                       <td colSpan={10} className="px-4 py-4">

@@ -142,12 +142,12 @@ export default function BloquePlanRecurrente({
     const total = (planData.monto ?? 0) * (planData.total_cuotas ?? 0)
     return (
       <div className="space-y-3">
-        <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-3">
+        <div className="rounded-lg border border-acento/30 bg-acento/5 p-3">
           <div className="flex items-start gap-2">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 text-[#10B981] shrink-0" />
+            <CheckCircle2 className="mt-0.5 h-4 w-4 text-acento shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-[#1A1A1A]">Plan recurrente activo</p>
-              <p className="text-xs text-[#6B7280]">
+              <p className="text-sm font-semibold text-tinta">Plan recurrente activo</p>
+              <p className="text-xs text-tinta-suave">
                 {formatCOP(planData.monto ?? 0)} {FREC_LABEL[planData.frecuencia ?? 'mensual'].toLowerCase()} ·{' '}
                 {planData.total_cuotas} cuotas
               </p>
@@ -156,25 +156,25 @@ export default function BloquePlanRecurrente({
 
           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
             <div>
-              <p className="text-[#6B7280]">Inicio</p>
-              <p className="font-medium text-[#1A1A1A]">{formatFechaCorta(planData.fecha_inicio)}</p>
+              <p className="text-tinta-suave">Inicio</p>
+              <p className="font-medium text-tinta">{formatFechaCorta(planData.fecha_inicio)}</p>
             </div>
             <div>
-              <p className="text-[#6B7280]">Fin</p>
-              <p className="font-medium text-[#1A1A1A]">{formatFechaCorta(planData.fecha_fin)}</p>
+              <p className="text-tinta-suave">Fin</p>
+              <p className="font-medium text-tinta">{formatFechaCorta(planData.fecha_fin)}</p>
             </div>
             <div>
-              <p className="text-[#6B7280]">Pasarela</p>
-              <p className="font-medium text-[#1A1A1A]">{PASARELA_LABEL[planData.pasarela ?? 'manual']}</p>
+              <p className="text-tinta-suave">Pasarela</p>
+              <p className="font-medium text-tinta">{PASARELA_LABEL[planData.pasarela ?? 'manual']}</p>
             </div>
             <div>
-              <p className="text-[#6B7280]">Total contrato</p>
-              <p className="font-medium text-[#1A1A1A]">{formatCOP(total)}</p>
+              <p className="text-tinta-suave">Total contrato</p>
+              <p className="font-medium text-tinta">{formatCOP(total)}</p>
             </div>
           </div>
 
           {planData.auto_renovar && (
-            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-[#6B7280]">
+            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-tinta-suave">
               <RefreshCw className="h-3 w-3" />
               Auto-renovacion activada al fin del contrato
             </div>
@@ -185,7 +185,7 @@ export default function BloquePlanRecurrente({
           <button
             onClick={handleCancelar}
             disabled={isPending}
-            className="text-[11px] text-[#6B7280] hover:text-[#EF4444] underline disabled:opacity-50"
+            className="text-[11px] text-tinta-suave hover:text-alerta underline disabled:opacity-50"
           >
             Cancelar plan
           </button>
@@ -198,7 +198,7 @@ export default function BloquePlanRecurrente({
   if (modo !== 'editable') {
     return (
       <div className="rounded-lg border border-dashed border-[#E5E7EB] p-3 text-center">
-        <p className="text-xs text-[#6B7280]">Plan recurrente sin configurar</p>
+        <p className="text-xs text-tinta-suave">Plan recurrente sin configurar</p>
       </div>
     )
   }
@@ -206,18 +206,18 @@ export default function BloquePlanRecurrente({
   // ── Form de captura ───────────────────────────────────
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2 rounded-md border border-[#E5E7EB] bg-[#F5F4F2] p-2.5">
-        <Calendar className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B7280]" />
-        <p className="text-[11px] leading-relaxed text-[#6B7280]">
+      <div className="flex items-start gap-2 rounded-md border border-[#E5E7EB] bg-papel p-2.5">
+        <Calendar className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tinta-suave" />
+        <p className="text-[11px] leading-relaxed text-tinta-suave">
           Define monto y duracion del contrato recurrente. El sistema generara cobros programados 3 dias antes de cada fecha y notificara si una cuota se vence sin pago.
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Monto por cuota *</label>
+          <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Monto por cuota *</label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#6B7280]">$</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-tinta-suave">$</span>
             <input
               type="number"
               value={monto}
@@ -230,7 +230,7 @@ export default function BloquePlanRecurrente({
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Frecuencia *</label>
+          <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Frecuencia *</label>
           <select
             value={frecuencia}
             onChange={e => setFrecuencia(e.target.value as Frecuencia)}
@@ -243,7 +243,7 @@ export default function BloquePlanRecurrente({
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Fecha primera cuota *</label>
+          <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Fecha primera cuota *</label>
           <input
             type="date"
             value={fechaInicio}
@@ -253,7 +253,7 @@ export default function BloquePlanRecurrente({
         </div>
 
         <div>
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Total cuotas *</label>
+          <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Total cuotas *</label>
           <input
             type="number"
             value={totalCuotas}
@@ -265,7 +265,7 @@ export default function BloquePlanRecurrente({
         </div>
 
         <div className="col-span-2">
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Pasarela *</label>
+          <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Pasarela *</label>
           <select
             value={pasarela}
             onChange={e => setPasarela(e.target.value as Pasarela)}
@@ -286,13 +286,13 @@ export default function BloquePlanRecurrente({
                 onChange={e => setAutoRenovar(e.target.checked)}
                 className="rounded border-[#E5E7EB]"
               />
-              <span className="text-xs text-[#1A1A1A]">Auto-renovar al fin del contrato</span>
+              <span className="text-xs text-tinta">Auto-renovar al fin del contrato</span>
             </label>
           </div>
         )}
 
         <div className="col-span-2">
-          <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Notas (opcional)</label>
+          <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Notas (opcional)</label>
           <input
             type="text"
             value={notas}
@@ -305,20 +305,20 @@ export default function BloquePlanRecurrente({
 
       {/* Preview */}
       {montoNum > 0 && cuotasNum > 0 && fechaFinPreview && (
-        <div className="rounded-md border border-[#E5E7EB] bg-[#F5F4F2] p-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">Resumen del plan</p>
+        <div className="rounded-md border border-[#E5E7EB] bg-papel p-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-tinta-suave">Resumen del plan</p>
           <div className="mt-1.5 grid grid-cols-2 gap-2 text-[11px]">
             <div>
-              <span className="text-[#6B7280]">Total contrato </span>
-              <span className="font-semibold text-[#1A1A1A]">{formatCOP(precioTotal)}</span>
+              <span className="text-tinta-suave">Total contrato </span>
+              <span className="font-semibold text-tinta">{formatCOP(precioTotal)}</span>
             </div>
             <div>
-              <span className="text-[#6B7280]">Hasta </span>
-              <span className="font-semibold text-[#1A1A1A]">{formatFechaCorta(fechaFinPreview)}</span>
+              <span className="text-tinta-suave">Hasta </span>
+              <span className="font-semibold text-tinta">{formatFechaCorta(fechaFinPreview)}</span>
             </div>
           </div>
           {pasarela === 'wompi' && (
-            <p className="mt-2 flex items-center gap-1 text-[10px] text-[#F59E0B]">
+            <p className="mt-2 flex items-center gap-1 text-[10px] text-advertencia">
               <AlertCircle className="h-3 w-3" />
               Wompi se conecta cuando MeTRIK active la cuenta empresarial.
             </p>
@@ -329,7 +329,7 @@ export default function BloquePlanRecurrente({
       <button
         onClick={handleCrear}
         disabled={isPending || montoNum <= 0 || cuotasNum <= 0}
-        className="w-full rounded-lg bg-[#10B981] py-2.5 text-sm font-medium text-white hover:bg-[#059669] disabled:opacity-50"
+        className="w-full rounded-lg bg-acento py-2.5 text-sm font-medium text-white hover:bg-acento-hover disabled:opacity-50"
       >
         {isPending ? 'Creando plan...' : 'Crear plan recurrente'}
       </button>

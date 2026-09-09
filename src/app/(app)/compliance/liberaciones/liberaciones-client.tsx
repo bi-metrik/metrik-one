@@ -32,10 +32,10 @@ import type { CoberturaCatalogo } from '@/lib/actions/compliance-tier-catalogo';
 import { formatBogotaFechaCortaAno, formatBogotaFechaHora, todayBogotaISO } from '@/lib/dates/bogota';
 
 const ESTILO_MOTIVO: Record<MotivoCobertura, string> = {
-  sin_registro: 'bg-[#FEF2F2] text-[#B91C1C] border-[#EF4444]/30',
-  vigente: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
-  vencida: 'bg-[#FFFBEB] text-[#B45309] border-[#F59E0B]/30',
-  rechazada: 'bg-[#1A1A1A] text-white border-[#1A1A1A]',
+  sin_registro: 'bg-[#FEF2F2] text-[#B91C1C] border-alerta/30',
+  vigente: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
+  vencida: 'bg-[#FFFBEB] text-[#B45309] border-advertencia/30',
+  rechazada: 'bg-tinta text-white border-tinta',
 };
 
 export default function LiberacionesClient({
@@ -94,10 +94,10 @@ export default function LiberacionesClient({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <ShieldCheck className="h-6 w-6 text-[#1A1A1A]" />
+        <ShieldCheck className="h-6 w-6 text-tinta" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Liberación de contrapartes</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Liberación de contrapartes</h1>
+          <p className="text-sm text-tinta-suave">
             Las contrapartes que salieron reportadas en listas restrictivas y lo que decidiste sobre
             ellas. Es la evidencia de la debida diligencia: lo que viaja al área de compras es el
             documento de autorización, no esta pantalla.
@@ -106,12 +106,12 @@ export default function LiberacionesClient({
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {error}
         </div>
       )}
       {aviso && (
-        <div className="p-3 rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 text-[#059669] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-[var(--acento-tinte)] border border-acento/30 text-acento text-sm flex items-start gap-2">
           <Check className="h-4 w-4 mt-0.5 shrink-0" /> {aviso}
         </div>
       )}
@@ -169,25 +169,25 @@ export default function LiberacionesClient({
       />
 
       {tablero.sin_documento.length > 0 && (
-        <div className="bg-white rounded-lg border border-[#F59E0B]/40 p-5 space-y-3">
+        <div className="bg-white rounded-lg border border-advertencia/40 p-5 space-y-3">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5 text-[#B45309] shrink-0" />
             <div>
-              <h2 className="text-base font-bold text-[#1A1A1A]">
+              <h2 className="text-base font-bold text-tinta">
                 Hallazgos que no se pueden liberar por aquí ({tablero.sin_documento.length})
               </h2>
-              <p className="text-sm text-[#6B7280] mt-1">
+              <p className="text-sm text-tinta-suave mt-1">
                 Se consultaron solo por nombre. La vigencia se ata al documento, así que para
                 decidir sobre ellos hay que volver a consultarlos con cédula o NIT. No se ocultan:
                 siguen siendo hallazgos sin resolver.
               </p>
             </div>
           </div>
-          <ul className="text-sm text-[#1A1A1A] space-y-1">
+          <ul className="text-sm text-tinta space-y-1">
             {tablero.sin_documento.map((h) => (
               <li key={h.consulta_id} className="flex justify-between gap-3 border-t border-[#E5E7EB] pt-1.5">
                 <span className="font-semibold">{h.nombre ?? 'Sin nombre'}</span>
-                <span className="text-[#6B7280]">
+                <span className="text-tinta-suave">
                   {h.total_matches} coincidencia(s) · {formatBogotaFechaCortaAno(h.created_at)}
                 </span>
               </li>
@@ -265,7 +265,7 @@ function Indicadores({
         </p>
       )}
       {tablero.vigilancia_sin_vigencia > 0 && (
-        <p className="text-xs text-[#6B7280]">
+        <p className="text-xs text-tinta-suave">
           {tablero.vigilancia_sin_vigencia} contraparte(s) limpias no tienen fecha de
           revalidación: se consultaron antes de que se configurara la periodicidad. No cuentan
           como vencidas, pero tampoco están programadas. Vuelven a entrar al ciclo con su
@@ -298,14 +298,14 @@ function Indicador({
   return (
     <div
       className={`rounded-lg border p-4 ${
-        alarma ? 'bg-[#FEF2F2] border-[#EF4444]/40' : 'bg-white border-[#E5E7EB]'
+        alarma ? 'bg-[#FEF2F2] border-alerta/40' : 'bg-white border-[#E5E7EB]'
       }`}
     >
-      <div className={`text-2xl font-bold ${alarma ? 'text-[#B91C1C]' : 'text-[#1A1A1A]'}`}>
+      <div className={`text-2xl font-bold ${alarma ? 'text-[#B91C1C]' : 'text-tinta'}`}>
         {valor}
       </div>
-      <div className="text-sm font-semibold text-[#1A1A1A] mt-0.5">{label}</div>
-      <div className="text-xs text-[#6B7280] mt-0.5">{nota}</div>
+      <div className="text-sm font-semibold text-tinta mt-0.5">{label}</div>
+      <div className="text-xs text-tinta-suave mt-0.5">{nota}</div>
     </div>
   );
 }
@@ -349,22 +349,22 @@ function Seccion({
     <div
       className={`space-y-3 ${
         alarma && contrapartes.length > 0
-          ? 'rounded-lg border border-[#EF4444]/40 bg-[#FEF2F2] p-4'
+          ? 'rounded-lg border border-alerta/40 bg-[#FEF2F2] p-4'
           : ''
       }`}
     >
       <div>
-        <h2 className="text-base font-bold text-[#1A1A1A] flex items-center gap-2">
+        <h2 className="text-base font-bold text-tinta flex items-center gap-2">
           {alarma && contrapartes.length > 0 && (
             <AlertTriangle className="h-4 w-4 text-[#B91C1C]" />
           )}
           {titulo} ({contrapartes.length})
         </h2>
-        <p className="text-sm text-[#6B7280]">{descripcion}</p>
+        <p className="text-sm text-tinta-suave">{descripcion}</p>
       </div>
 
       {contrapartes.length === 0 ? (
-        <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 text-center text-sm text-[#6B7280]">
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 text-center text-sm text-tinta-suave">
           {vacio}
         </div>
       ) : (
@@ -422,18 +422,18 @@ function FilaContraparte({
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-[#F5F4F2] transition-colors"
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-papel transition-colors"
       >
         {expandida ? (
-          <ChevronDown className="h-4 w-4 text-[#6B7280] shrink-0" />
+          <ChevronDown className="h-4 w-4 text-tinta-suave shrink-0" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-[#6B7280] shrink-0" />
+          <ChevronRight className="h-4 w-4 text-tinta-suave shrink-0" />
         )}
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-[#1A1A1A] truncate">
+          <p className="font-semibold text-tinta truncate">
             {contraparte.nombre ?? 'Sin nombre registrado'}
           </p>
-          <p className="text-xs text-[#6B7280]">
+          <p className="text-xs text-tinta-suave">
             {contraparte.documento_tipo} {contraparte.documento_numero} ·{' '}
             {contraparte.total_matches} coincidencia(s) · última consulta{' '}
             {formatBogotaFechaCortaAno(contraparte.ultima_consulta_fecha)}
@@ -443,8 +443,8 @@ function FilaContraparte({
           <span
             className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border ${
               diasEsperando > 30
-                ? 'bg-[#FEF2F2] text-[#B91C1C] border-[#EF4444]/30'
-                : 'bg-[#F5F4F2] text-[#6B7280] border-[#E5E7EB]'
+                ? 'bg-[#FEF2F2] text-[#B91C1C] border-alerta/30'
+                : 'bg-papel text-tinta-suave border-[#E5E7EB]'
             }`}
             title="Días que lleva este hallazgo esperando decisión"
           >
@@ -514,17 +514,17 @@ function DetalleContraparte({
     <div className="border-t border-[#E5E7EB] p-4 space-y-5 bg-[#FAFAF9]">
       {/* Hallazgos: lo que el oficial tiene a la vista al decidir. */}
       <div>
-        <h3 className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+        <h3 className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-2">
           Hallazgos de la consulta del {formatBogotaFechaHora(consultaVigente.created_at)}
         </h3>
         {consultaVigente.matches.length === 0 ? (
-          <p className="text-sm text-[#6B7280]">
+          <p className="text-sm text-tinta-suave">
             La consulta reportó {consultaVigente.total_matches} coincidencia(s) sin detalle guardado.
           </p>
         ) : (
           <div className="rounded-lg border border-[#E5E7EB] overflow-hidden bg-white">
             <table className="w-full text-xs">
-              <thead className="bg-[#1A1A1A] text-white">
+              <thead className="bg-tinta text-white">
                 <tr>
                   <th className="text-left px-3 py-2 font-semibold">Lista</th>
                   <th className="text-left px-3 py-2 font-semibold">Nombre coincidente</th>
@@ -535,10 +535,10 @@ function DetalleContraparte({
               <tbody>
                 {consultaVigente.matches.map((m, i) => (
                   <tr key={i} className="border-t border-[#E5E7EB]">
-                    <td className="px-3 py-2 font-semibold text-[#1A1A1A]">{m.lista}</td>
+                    <td className="px-3 py-2 font-semibold text-tinta">{m.lista}</td>
                     <td className="px-3 py-2">{m.nombre}</td>
                     <td className="px-3 py-2">{m.documento ?? '—'}</td>
-                    <td className="px-3 py-2 text-[#6B7280]">{m.fundamento ?? '—'}</td>
+                    <td className="px-3 py-2 text-tinta-suave">{m.fundamento ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -546,7 +546,7 @@ function DetalleContraparte({
           </div>
         )}
         {contraparte.consultas.length > 1 && (
-          <p className="text-xs text-[#6B7280] mt-2">
+          <p className="text-xs text-tinta-suave mt-2">
             Esta contraparte tiene {contraparte.consultas.length} consultas con hallazgo. La decisión
             se registra sobre la más reciente.
           </p>
@@ -556,20 +556,20 @@ function DetalleContraparte({
       {/* Decisión vigente y su autorización descargable. */}
       {contraparte.cobertura.liberacion && (
         <div className="rounded-lg border border-[#E5E7EB] bg-white p-3 text-sm">
-          <p className="text-[#1A1A1A]">
+          <p className="text-tinta">
             <strong>{DECISION_LABEL[contraparte.cobertura.liberacion.decision]}</strong>
             {contraparte.cobertura.liberacion.vigente_hasta
               ? ` hasta el ${formatBogotaFechaCortaAno(contraparte.cobertura.liberacion.vigente_hasta)}`
               : ''}{' '}
             · registrada el {formatBogotaFechaHora(contraparte.cobertura.liberacion.created_at)}
           </p>
-          <p className="text-[#6B7280] mt-1">{contraparte.cobertura.liberacion.justificacion}</p>
+          <p className="text-tinta-suave mt-1">{contraparte.cobertura.liberacion.justificacion}</p>
           {contraparte.cobertura.liberacion.decision === 'liberada' && (
             <a
               href={`/api/compliance/liberaciones/${contraparte.cobertura.liberacion.id}/autorizacion`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 mt-3 h-9 px-4 rounded-lg border border-[#E5E7EB] text-[#1A1A1A] font-semibold hover:bg-[#F5F4F2] transition-colors text-xs"
+              className="inline-flex items-center gap-2 mt-3 h-9 px-4 rounded-lg border border-[#E5E7EB] text-tinta font-semibold hover:bg-papel transition-colors text-xs"
             >
               <FileText className="h-3.5 w-3.5" />
               Autorización de contratación (PDF)
@@ -580,8 +580,8 @@ function DetalleContraparte({
 
       {/* Formulario de decisión. */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-4 space-y-3">
-        <h3 className="text-sm font-bold text-[#1A1A1A]">Registrar decisión</h3>
-        <p className="text-xs text-[#6B7280]">
+        <h3 className="text-sm font-bold text-tinta">Registrar decisión</h3>
+        <p className="text-xs text-tinta-suave">
           Cada decisión queda escrita y no se puede editar ni borrar. Para cambiar de opinión se
           registra una nueva, y la más reciente es la que manda.
         </p>
@@ -594,8 +594,8 @@ function DetalleContraparte({
               onClick={() => setDecision(d)}
               className={`h-10 px-4 rounded-lg text-sm font-semibold border transition-colors ${
                 decision === d
-                  ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
-                  : 'bg-white text-[#1A1A1A] border-[#E5E7EB] hover:bg-[#F5F4F2]'
+                  ? 'bg-tinta text-white border-tinta'
+                  : 'bg-white text-tinta border-[#E5E7EB] hover:bg-papel'
               }`}
             >
               {DECISION_LABEL[d]}
@@ -606,7 +606,7 @@ function DetalleContraparte({
         <div>
           <label
             htmlFor={`justificacion-${contraparte.clave}`}
-            className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5"
+            className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5"
           >
             Justificación (queda en el documento que verá compras)
           </label>
@@ -617,14 +617,14 @@ function DetalleContraparte({
             rows={3}
             maxLength={4000}
             placeholder="Qué revisaste, qué concluiste y con qué soporte."
-            className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta text-sm"
           />
         </div>
 
         {decision === 'liberada' && (
           <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-3 items-end">
             <div>
-              <span className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              <span className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
                 Vigencia
               </span>
               <div className="flex gap-2">
@@ -635,8 +635,8 @@ function DetalleContraparte({
                     onClick={() => setVigenteHasta(sumarMesesISO(hoy, v.meses))}
                     className={`h-10 px-3 rounded-lg text-xs font-semibold border transition-colors ${
                       vigenteHasta === sumarMesesISO(hoy, v.meses)
-                        ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
-                        : 'bg-white text-[#1A1A1A] border-[#E5E7EB] hover:bg-[#F5F4F2]'
+                        ? 'bg-tinta text-white border-tinta'
+                        : 'bg-white text-tinta border-[#E5E7EB] hover:bg-papel'
                     }`}
                   >
                     {v.label}
@@ -647,7 +647,7 @@ function DetalleContraparte({
             <div>
               <label
                 htmlFor={`vigencia-${contraparte.clave}`}
-                className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5"
+                className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5"
               >
                 Vence el
               </label>
@@ -657,7 +657,7 @@ function DetalleContraparte({
                 min={hoy}
                 value={vigenteHasta}
                 onChange={(e) => setVigenteHasta(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] text-sm"
+                className="w-full h-10 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta text-sm"
               />
             </div>
           </div>
@@ -667,7 +667,7 @@ function DetalleContraparte({
           <div>
             <label
               htmlFor={`control-${contraparte.clave}`}
-              className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5"
+              className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5"
             >
               Control de la matriz que estás operando (opcional)
             </label>
@@ -675,7 +675,7 @@ function DetalleContraparte({
               id={`control-${contraparte.clave}`}
               value={controlId}
               onChange={(e) => setControlId(e.target.value)}
-              className="w-full h-10 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-10 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Sin control asociado</option>
               {controles.map((c) => (
@@ -699,7 +699,7 @@ function DetalleContraparte({
               controlId || null,
             )
           }
-          className="inline-flex items-center gap-2 h-11 px-5 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
         >
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
           Registrar {DECISION_LABEL[decision].toLowerCase()}
@@ -713,28 +713,28 @@ function DetalleContraparte({
             type="button"
             onClick={verBitacora}
             disabled={cargandoBitacora}
-            className="text-xs font-semibold text-[#1A1A1A] underline underline-offset-2 hover:text-[#374151]"
+            className="text-xs font-semibold text-tinta underline underline-offset-2 hover:text-[#374151]"
           >
             {cargandoBitacora ? 'Cargando…' : 'Ver bitácora completa de esta contraparte'}
           </button>
         ) : bitacora.length === 0 ? (
-          <p className="text-xs text-[#6B7280]">Todavía no hay decisiones registradas.</p>
+          <p className="text-xs text-tinta-suave">Todavía no hay decisiones registradas.</p>
         ) : (
           <div className="space-y-2">
-            <h3 className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold">
+            <h3 className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold">
               Bitácora ({bitacora.length})
             </h3>
             {bitacora.map((f) => (
               <div key={f.id} className="rounded-lg border border-[#E5E7EB] bg-white p-3 text-xs">
-                <p className="text-[#1A1A1A]">
+                <p className="text-tinta">
                   <strong>{DECISION_LABEL[f.decision]}</strong>
                   {f.vigente_hasta ? ` hasta ${formatBogotaFechaCortaAno(f.vigente_hasta)}` : ''} ·{' '}
                   {formatBogotaFechaHora(f.created_at)} ·{' '}
                   {f.liberada_por_nombre ?? 'Autor no resuelto'}
                 </p>
-                <p className="text-[#6B7280] mt-1">{f.justificacion}</p>
+                <p className="text-tinta-suave mt-1">{f.justificacion}</p>
                 {(f.control_referencia || f.control_nombre) && (
-                  <p className="text-[#6B7280] mt-1">
+                  <p className="text-tinta-suave mt-1">
                     Control: {[f.control_referencia, f.control_nombre].filter(Boolean).join(' · ')}
                   </p>
                 )}
@@ -743,7 +743,7 @@ function DetalleContraparte({
                     href={`/api/compliance/liberaciones/${f.id}/autorizacion`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 mt-2 text-[#1A1A1A] font-semibold underline underline-offset-2"
+                    className="inline-flex items-center gap-1.5 mt-2 text-tinta font-semibold underline underline-offset-2"
                   >
                     <FileText className="h-3 w-3" />
                     Autorización (PDF)

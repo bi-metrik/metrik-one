@@ -282,8 +282,8 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
             html: `<h2>Te invitaron a MéTRIK ONE</h2>
 <p>${staffMember.full_name}, te invitaron a unirte al equipo en MéTRIK ONE.</p>
 <p>Inicia sesion con tu correo para aceptar la invitacion:</p>
-<p><a href="${loginUrl}" style="display:inline-block;padding:12px 24px;background-color:#10B981;color:white;text-decoration:none;border-radius:8px;font-weight:600;">Iniciar sesion</a></p>
-<p style="color:#6B7280;font-size:14px;">Al iniciar sesion, seras redirigido automaticamente al workspace.</p>`,
+<p><a href="${loginUrl}" style="display:inline-block;padding:12px 24px;background-color:var(--acento);color:white;text-decoration:none;border-radius:8px;font-weight:600;">Iniciar sesion</a></p>
+<p style="color:var(--tinta-suave);font-size:14px;">Al iniciar sesion, seras redirigido automaticamente al workspace.</p>`,
           }),
         })
         if (!res.ok) {

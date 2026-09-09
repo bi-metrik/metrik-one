@@ -125,12 +125,12 @@ export default function BloqueChecklist({
   }
 
   if (initializing) {
-    return <p className="text-xs text-[#6B7280]">Cargando checklist...</p>
+    return <p className="text-xs text-tinta-suave">Cargando checklist...</p>
   }
 
   if (items.length === 0) {
     return (
-      <p className="text-xs text-[#6B7280]">
+      <p className="text-xs text-tinta-suave">
         Sin ítems configurados. MéTRIK los configura via{' '}
         <code className="rounded bg-slate-100 px-1 text-[10px]">/configure-gates</code>
       </p>
@@ -149,9 +149,9 @@ export default function BloqueChecklist({
               <div className="mt-0.5 shrink-0">
                 {withSupport ? (
                   hasLink ? (
-                    <CheckSquare className="h-4 w-4 text-[#10B981]" />
+                    <CheckSquare className="h-4 w-4 text-acento" />
                   ) : (
-                    <Square className="h-4 w-4 text-[#6B7280]/40" />
+                    <Square className="h-4 w-4 text-tinta-suave/40" />
                   )
                 ) : (
                   <button
@@ -160,9 +160,9 @@ export default function BloqueChecklist({
                     className="disabled:cursor-default"
                   >
                     {item.completado ? (
-                      <CheckSquare className="h-4 w-4 text-[#10B981]" />
+                      <CheckSquare className="h-4 w-4 text-acento" />
                     ) : (
-                      <Square className="h-4 w-4 text-[#6B7280]/40" />
+                      <Square className="h-4 w-4 text-tinta-suave/40" />
                     )}
                   </button>
                 )}
@@ -170,7 +170,7 @@ export default function BloqueChecklist({
 
               <div className="flex-1 min-w-0">
                 {/* Label */}
-                <p className={`text-xs ${(withSupport ? hasLink : item.completado) ? 'text-[#6B7280]' : 'text-[#1A1A1A]'}`}>
+                <p className={`text-xs ${(withSupport ? hasLink : item.completado) ? 'text-tinta-suave' : 'text-tinta'}`}>
                   {item.label}
                 </p>
 
@@ -182,7 +182,7 @@ export default function BloqueChecklist({
                         href={item.link_url!}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[11px] text-[#10B981] underline underline-offset-2 truncate"
+                        className="text-[11px] text-acento underline underline-offset-2 truncate"
                       >
                         {item.link_url}
                       </a>
@@ -190,7 +190,7 @@ export default function BloqueChecklist({
                         onClick={() => {
                           setItems(prev => prev.map(i => i.id === item.id ? { ...i, link_url: '', completado: false } : i))
                         }}
-                        className="shrink-0 text-[10px] text-[#6B7280] hover:text-red-500"
+                        className="shrink-0 text-[10px] text-tinta-suave hover:text-red-500"
                         title="Cambiar link"
                       >
                         ✕
@@ -211,7 +211,7 @@ export default function BloqueChecklist({
                         }
                       }}
                       disabled={isPending}
-                      className="mt-1 w-full rounded border border-[#E5E7EB] px-2 py-1 text-[11px] placeholder:text-[#6B7280]/50 focus:border-[#10B981] focus:outline-none disabled:opacity-60"
+                      className="mt-1 w-full rounded border border-[#E5E7EB] px-2 py-1 text-[11px] placeholder:text-tinta-suave/50 focus:border-acento focus:outline-none disabled:opacity-60"
                     />
                   )
                 )}
@@ -222,7 +222,7 @@ export default function BloqueChecklist({
                     href={item.link_url!}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-[11px] text-[#10B981] underline underline-offset-2"
+                    className="mt-1 inline-flex items-center gap-1 text-[11px] text-acento underline underline-offset-2"
                   >
                     <ExternalLink className="h-3 w-3" />
                     Ver documento
@@ -231,7 +231,7 @@ export default function BloqueChecklist({
 
                 {/* Fecha de completado (solo checklist normal) */}
                 {!withSupport && item.completado && item.completado_at && (
-                  <p className="text-[10px] text-[#6B7280]">{fmtDate(item.completado_at)}</p>
+                  <p className="text-[10px] text-tinta-suave">{fmtDate(item.completado_at)}</p>
                 )}
               </div>
             </div>
@@ -239,7 +239,7 @@ export default function BloqueChecklist({
         )
       })}
       <div className="flex items-center justify-between pt-1">
-        <span className="text-[10px] text-[#6B7280]">
+        <span className="text-[10px] text-tinta-suave">
           {items.filter(i => withSupport ? !!(i.link_url?.trim()) : i.completado).length}/{items.length} completados
         </span>
         {allComplete && (

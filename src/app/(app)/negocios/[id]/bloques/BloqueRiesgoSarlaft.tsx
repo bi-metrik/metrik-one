@@ -19,9 +19,9 @@ interface Props {
 }
 
 const NIVEL_CLASS: Record<'alto' | 'medio' | 'bajo', string> = {
-  alto: 'bg-[#EF4444] text-white',
-  medio: 'bg-[#F59E0B] text-[#1A1A1A]',
-  bajo: 'bg-[#10B981] text-white',
+  alto: 'bg-alerta text-white',
+  medio: 'bg-advertencia text-tinta',
+  bajo: 'bg-acento text-white',
 }
 const NIVEL_LABEL: Record<'alto' | 'medio' | 'bajo', string> = {
   alto: 'Alto',
@@ -89,7 +89,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
         </div>
         <div className="flex-1 min-w-0">
           <p className="flex items-center gap-1.5 text-sm font-medium leading-tight text-foreground flex-wrap">
-            <Scale className="h-3.5 w-3.5 text-[#10B981]" />
+            <Scale className="h-3.5 w-3.5 text-acento" />
             Riesgo SARLAFT
             {score && (
               <>
@@ -97,7 +97,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
                   {niveltxt} · {score.puntaje.toFixed(2)} pts
                 </span>
                 {score.proxima_revision && (
-                  <span className="text-[10px] text-[#6B7280]">
+                  <span className="text-[10px] text-tinta-suave">
                     Próxima revisión: {formatFecha(score.proxima_revision, { year: 'numeric', month: 'short', day: 'numeric' })}
                   </span>
                 )}
@@ -246,7 +246,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
               type="button"
               onClick={guardar}
               disabled={pending}
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded bg-[#10B981] text-white font-semibold text-xs hover:bg-[#059669] disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded bg-acento text-white font-semibold text-xs hover:bg-acento-hover disabled:opacity-50 transition-colors"
             >
               <Save className="h-3.5 w-3.5" />
               {pending ? 'Guardando…' : 'Guardar y recalcular'}
@@ -256,14 +256,14 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
                 type="button"
                 onClick={recalcular}
                 disabled={pending}
-                className="ml-2 inline-flex items-center gap-1.5 h-9 px-3 rounded border border-[#E5E7EB] text-xs font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+                className="ml-2 inline-flex items-center gap-1.5 h-9 px-3 rounded border border-[#E5E7EB] text-xs font-semibold text-tinta hover:bg-papel transition-colors"
               >
                 Recalcular sin cambios
               </button>
             )}
             <Link
               href="/compliance/segmentacion"
-              className="ml-2 inline-flex items-center gap-1 text-xs font-semibold text-[#10B981] hover:text-[#059669]"
+              className="ml-2 inline-flex items-center gap-1 text-xs font-semibold text-acento hover:text-acento-hover"
             >
               Configurar segmentación
               <ExternalLink className="h-3 w-3" />
@@ -271,7 +271,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
           </div>
 
           {info && (
-            <div className="text-xs text-[#059669] flex items-center gap-1">
+            <div className="text-xs text-acento flex items-center gap-1">
               ✓ {info}
             </div>
           )}
@@ -296,13 +296,13 @@ function DetalleFactores({ score }: { score: ScoreNegocioItem }) {
   const filas = Object.entries(f).filter(([, v]) => v && typeof v === 'object')
 
   return (
-    <div className="border border-[#E5E7EB] rounded p-3 bg-[#F5F4F2]/50">
-      <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+    <div className="border border-[#E5E7EB] rounded p-3 bg-papel/50">
+      <p className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-2">
         Detalle de factores aplicados
       </p>
       <table className="w-full text-[11px]">
         <thead>
-          <tr className="text-[#6B7280] text-left">
+          <tr className="text-tinta-suave text-left">
             <th className="font-semibold py-1">Factor</th>
             <th className="font-semibold text-center">Score</th>
             <th className="font-semibold text-center">Peso</th>
@@ -323,7 +323,7 @@ function DetalleFactores({ score }: { score: ScoreNegocioItem }) {
               </tr>
             )
           })}
-          <tr className="border-t border-[#1A1A1A] font-bold">
+          <tr className="border-t border-tinta font-bold">
             <td colSpan={3} className="py-1 text-right">Puntaje total</td>
             <td className="text-right font-mono">{score.puntaje.toFixed(2)}</td>
           </tr>
@@ -359,7 +359,7 @@ const BANDERA_LABEL: Record<string, string> = {
 function Campo({ etiqueta, hint, children }: { etiqueta: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+      <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
         {etiqueta}
         {hint && <span className="ml-1 normal-case tracking-normal font-normal text-[#9CA3AF]">— {hint}</span>}
       </label>

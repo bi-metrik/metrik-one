@@ -108,23 +108,23 @@ export default function BloqueDatosMultiPago({
   // Modo visible: tabla read-only
   if (modo === 'visible') {
     if (savedPagos.length === 0) {
-      return <p className="text-xs text-[#6B7280] italic">Sin pagos registrados</p>
+      return <p className="text-xs text-tinta-suave italic">Sin pagos registrados</p>
     }
     return (
       <div className="space-y-1.5">
         {savedPagos.map((p, i) => (
           <div key={i} className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] p-2.5">
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-[#1A1A1A]">Ref: {p.referencia_epayco || '---'}</p>
+              <p className="text-xs font-medium text-tinta">Ref: {p.referencia_epayco || '---'}</p>
             </div>
-            <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
+            <span className="text-xs font-semibold text-tinta tabular-nums shrink-0">
               {p.valor_pago ? fmt(Number(p.valor_pago)) : '---'}
             </span>
           </div>
         ))}
         <div className="rounded-lg bg-slate-50 border border-slate-100 p-2 text-center">
-          <p className="text-[10px] text-[#6B7280] font-medium">Total</p>
-          <p className="text-sm font-bold text-[#1A1A1A] tabular-nums">
+          <p className="text-[10px] text-tinta-suave font-medium">Total</p>
+          <p className="text-sm font-bold text-tinta tabular-nums">
             {fmt(savedPagos.reduce((s, p) => s + (Number(p.valor_pago) || 0), 0))}
           </p>
         </div>
@@ -141,7 +141,7 @@ export default function BloqueDatosMultiPago({
         <div key={i} className="flex items-start gap-2">
           <div className="flex-1 space-y-2">
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+              <label className="mb-1 block text-[11px] font-medium text-tinta-suave">
                 {refLabel}
                 <span className="ml-0.5 text-red-500">*</span>
               </label>
@@ -151,11 +151,11 @@ export default function BloqueDatosMultiPago({
                 onChange={e => updateRow(i, 'referencia_epayco', e.target.value)}
                 disabled={isPending || faltaHonorario}
                 placeholder="Ej: REF-12345"
-                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
+                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+              <label className="mb-1 block text-[11px] font-medium text-tinta-suave">
                 {valorLabel}
                 <span className="ml-0.5 text-red-500">*</span>
               </label>
@@ -165,7 +165,7 @@ export default function BloqueDatosMultiPago({
                 onChange={e => updateRow(i, 'valor_pago', e.target.value)}
                 disabled={isPending || faltaHonorario}
                 placeholder="0"
-                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
+                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
               />
             </div>
           </div>
@@ -173,7 +173,7 @@ export default function BloqueDatosMultiPago({
             <button
               onClick={() => removeRow(i)}
               disabled={isPending}
-              className="mt-6 shrink-0 rounded-lg p-1.5 text-[#6B7280] hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40"
+              className="mt-6 shrink-0 rounded-lg p-1.5 text-tinta-suave hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40"
               title="Eliminar pago"
             >
               <X className="h-3.5 w-3.5" />
@@ -185,14 +185,14 @@ export default function BloqueDatosMultiPago({
       <button
         onClick={addRow}
         disabled={isPending || faltaHonorario}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#E5E7EB] py-2 text-xs font-medium text-[#6B7280] hover:border-[#10B981] hover:text-[#10B981] transition-colors disabled:opacity-40"
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#E5E7EB] py-2 text-xs font-medium text-tinta-suave hover:border-acento hover:text-acento transition-colors disabled:opacity-40"
       >
         <Plus className="h-3.5 w-3.5" />
         Agregar pago
       </button>
 
       {isPending && (
-        <p className="text-[10px] text-[#6B7280]">Guardando...</p>
+        <p className="text-[10px] text-tinta-suave">Guardando...</p>
       )}
     </div>
   )

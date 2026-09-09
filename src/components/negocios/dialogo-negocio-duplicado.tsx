@@ -6,8 +6,8 @@ import { AlertTriangle, ExternalLink, Loader2 } from 'lucide-react'
 import type { NegocioDelMismoContacto } from '@/app/(app)/negocios/negocio-v2-actions'
 import { formatFecha } from '@/lib/dates/bogota'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
 const AMBAR = '#B45309'
 
@@ -104,13 +104,13 @@ export function DialogoNegocioDuplicado({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       {d.codigo && (
-                        <span className="rounded bg-[#1A1A1A] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white">
+                        <span className="rounded bg-tinta px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white">
                           {d.codigo}
                         </span>
                       )}
                       <span
                         className="text-[10px] font-bold uppercase tracking-wider"
-                        style={{ color: estaAbierto(d.estado) ? '#10B981' : GRIS }}
+                        style={{ color: estaAbierto(d.estado) ? 'var(--acento)' : GRIS }}
                       >
                         {etiquetaEstado(d.estado)}
                       </span>
@@ -126,7 +126,7 @@ export function DialogoNegocioDuplicado({
                     href={`/negocios/${d.id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-[#F5F4F2]"
+                    className="flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-papel"
                     style={{ borderColor: BORDE, color: CARBON }}
                   >
                     Abrir <ExternalLink className="h-3 w-3" />
@@ -143,7 +143,7 @@ export function DialogoNegocioDuplicado({
               type="button"
               onClick={onCancelar}
               disabled={creando}
-              className="rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
+              className="rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-papel disabled:opacity-50"
               style={{ borderColor: BORDE, color: CARBON }}
             >
               No crear
@@ -152,7 +152,7 @@ export function DialogoNegocioDuplicado({
               type="button"
               onClick={onCrearIgual}
               disabled={creando}
-              className="flex items-center justify-center gap-2 rounded-lg bg-[#10B981] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+              className="flex items-center justify-center gap-2 rounded-lg bg-acento px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
             >
               {creando && <Loader2 className="h-4 w-4 animate-spin" />}
               Crear otro de todos modos

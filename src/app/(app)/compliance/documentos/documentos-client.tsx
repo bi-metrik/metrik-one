@@ -36,11 +36,11 @@ import {
 } from '@/lib/compliance/documentos';
 
 const CHIP: Record<EstadoDocumento, string> = {
-  faltante: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
-  link_roto: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
-  vencido: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  por_vencer: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  vigente: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
+  faltante: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
+  link_roto: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
+  vencido: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  por_vencer: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  vigente: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
 };
 
 type Cargo = { id: string; nombre: string };
@@ -96,10 +96,10 @@ export default function DocumentosClient({
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
-        <FileText className="h-6 w-6 text-[#1A1A1A] mt-0.5" />
+        <FileText className="h-6 w-6 text-tinta mt-0.5" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Expediente de cumplimiento</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Expediente de cumplimiento</h1>
+          <p className="text-sm text-tinta-suave">
             El inventario de los documentos que sostienen el sistema. Los archivos siguen viviendo
             donde ya los manejas: acá queda registrado <strong>qué existe, qué versión rige y quién
             la aprobó</strong>, para que una auditoría se responda desde un solo lugar.
@@ -107,19 +107,19 @@ export default function DocumentosClient({
         </div>
       </div>
 
-      <div className="p-3 rounded-lg bg-[#F5F4F2] border border-[#E5E7EB] text-sm text-[#6B7280]">
+      <div className="p-3 rounded-lg bg-papel border border-[#E5E7EB] text-sm text-tinta-suave">
         Enlaza siempre el <strong>PDF congelado de la versión aprobada</strong>, no el documento
         editable. Si el archivo se sigue editando, esta fila dirá una versión y el archivo tendrá
         otra, y esa diferencia aparece justo el día en que alguien la revisa.
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {error}
         </div>
       )}
       {aviso && (
-        <div className="p-3 rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 text-[#059669] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-[var(--acento-tinte)] border border-acento/30 text-acento text-sm flex items-start gap-2">
           <Check className="h-4 w-4 mt-0.5 shrink-0" /> {aviso}
         </div>
       )}
@@ -134,7 +134,7 @@ export default function DocumentosClient({
               </span>
             ) : null,
           )}
-          {activas.length === 0 && <span className="text-sm text-[#6B7280]">Todavía no hay piezas registradas.</span>}
+          {activas.length === 0 && <span className="text-sm text-tinta-suave">Todavía no hay piezas registradas.</span>}
         </div>
 
         <button
@@ -147,7 +147,7 @@ export default function DocumentosClient({
             )
           }
           disabled={pending}
-          className="inline-flex items-center gap-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40"
+          className="inline-flex items-center gap-2 border border-[#E5E7EB] text-tinta text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40"
         >
           {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           Verificar enlaces
@@ -155,7 +155,7 @@ export default function DocumentosClient({
         <button
           type="button"
           onClick={() => setNuevoDoc((v) => !v)}
-          className="inline-flex items-center gap-2 bg-[#1A1A1A] text-white text-sm font-semibold rounded-lg px-3 py-1.5"
+          className="inline-flex items-center gap-2 bg-tinta text-white text-sm font-semibold rounded-lg px-3 py-1.5"
         >
           <Plus className="h-3.5 w-3.5" /> Agregar pieza
         </button>
@@ -178,8 +178,8 @@ export default function DocumentosClient({
       {/* La pregunta del auditor */}
       <div className="p-4 rounded-lg border border-[#E5E7EB] bg-white flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[18rem]">
-          <p className="text-sm font-semibold text-[#1A1A1A]">¿Qué regía el día...?</p>
-          <p className="text-xs text-[#6B7280]">
+          <p className="text-sm font-semibold text-tinta">¿Qué regía el día...?</p>
+          <p className="text-xs text-tinta-suave">
             Es la pregunta que hace una auditoría sobre un hecho pasado. Pon la fecha y la tabla
             muestra la versión que estaba vigente ese día, no la de hoy.
           </p>
@@ -194,7 +194,7 @@ export default function DocumentosClient({
           <button
             type="button"
             onClick={() => setFechaCorte('')}
-            className="text-sm text-[#6B7280] underline"
+            className="text-sm text-tinta-suave underline"
           >
             Volver a hoy
           </button>
@@ -203,7 +203,7 @@ export default function DocumentosClient({
 
       {filas.length === 0 && (
         <div className="p-6 rounded-lg border border-dashed border-[#E5E7EB] text-center space-y-3">
-          <p className="text-sm text-[#6B7280]">
+          <p className="text-sm text-tinta-suave">
             Podemos sembrar un catálogo sugerido con las piezas que suelen componer un expediente.
             Es una <strong>sugerencia</strong>, no una lista de obligaciones: la adoptas, la editas
             y borras lo que no aplique.
@@ -214,7 +214,7 @@ export default function DocumentosClient({
               correr(sembrarCatalogoSugerido, (d) => `${d.creados} piezas agregadas al expediente.`)
             }
             disabled={pending}
-            className="inline-flex items-center gap-2 bg-[#1A1A1A] text-white text-sm font-semibold rounded-lg px-3 py-2 disabled:opacity-40"
+            className="inline-flex items-center gap-2 bg-tinta text-white text-sm font-semibold rounded-lg px-3 py-2 disabled:opacity-40"
           >
             {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             Sembrar catálogo sugerido
@@ -234,7 +234,7 @@ export default function DocumentosClient({
                 <button
                   type="button"
                   onClick={() => setAbierto(expandido ? null : f.id)}
-                  className="mt-0.5 text-[#6B7280]"
+                  className="mt-0.5 text-tinta-suave"
                   aria-label={expandido ? 'Contraer' : 'Expandir'}
                 >
                   {expandido ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -242,9 +242,9 @@ export default function DocumentosClient({
 
                 <div className="flex-1 min-w-[18rem]">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-[#6B7280]">{f.codigo}</span>
-                    <span className="font-semibold text-[#1A1A1A]">{f.nombre}</span>
-                    <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full border bg-[#F5F4F2] text-[#6B7280] border-[#E5E7EB]">
+                    <span className="font-mono text-xs text-tinta-suave">{f.codigo}</span>
+                    <span className="font-semibold text-tinta">{f.nombre}</span>
+                    <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full border bg-papel text-tinta-suave border-[#E5E7EB]">
                       {TIPO_LABEL[f.tipo]}
                     </span>
                     {!fechaCorte && f.estado && (
@@ -253,9 +253,9 @@ export default function DocumentosClient({
                       </span>
                     )}
                   </div>
-                  {f.descripcion && <p className="text-xs text-[#6B7280] mt-0.5">{f.descripcion}</p>}
+                  {f.descripcion && <p className="text-xs text-tinta-suave mt-0.5">{f.descripcion}</p>}
 
-                  <div className="mt-1.5 text-xs text-[#6B7280] space-y-0.5">
+                  <div className="mt-1.5 text-xs text-tinta-suave space-y-0.5">
                     {mostrada ? (
                       <>
                         <div className="flex flex-wrap items-center gap-2">
@@ -263,7 +263,7 @@ export default function DocumentosClient({
                             href={mostrada.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-[#1A1A1A] font-semibold underline"
+                            className="inline-flex items-center gap-1 text-tinta font-semibold underline"
                           >
                             Versión {mostrada.version} <ExternalLink className="h-3 w-3" />
                           </a>
@@ -347,13 +347,13 @@ export default function DocumentosClient({
         <button
           type="button"
           onClick={() => recargar()}
-          className="text-xs text-[#6B7280] underline"
+          className="text-xs text-tinta-suave underline"
         >
           {filas.filter((f) => !f.activo).length} piezas fuera del expediente conservan su historial.
         </button>
       )}
 
-      <p className="text-xs text-[#6B7280]">
+      <p className="text-xs text-tinta-suave">
         Que una pieza sea obligatoria lo declaras tú: la plataforma no afirma que la norma la exija.
         Los reportes a la UIAF, los expedientes de contraparte y la ejecución de cada control no van
         acá, porque son evidencia por registro y quedan amarrados a su propio registro en ONE.
@@ -365,7 +365,7 @@ export default function DocumentosClient({
 // ─── Piezas de formulario ──────────────────────────────────────────────────
 
 const INPUT = 'border border-[#E5E7EB] rounded-lg px-2 py-1.5 text-sm w-full';
-const LABEL = 'text-xs font-semibold text-[#6B7280] block mb-1';
+const LABEL = 'text-xs font-semibold text-tinta-suave block mb-1';
 
 function FormNuevoDocumento({
   pending,
@@ -392,7 +392,7 @@ function FormNuevoDocumento({
           onChange={(e) => setCodigo(e.target.value.toUpperCase())}
           placeholder="MAN-SARLAFT"
         />
-        <p className="text-[11px] text-[#6B7280] mt-1">Mayúsculas, números y guion. Es la cita del expediente.</p>
+        <p className="text-[11px] text-tinta-suave mt-1">Mayúsculas, números y guion. Es la cita del expediente.</p>
       </div>
       <div>
         <label className={LABEL}>Tipo</label>
@@ -427,11 +427,11 @@ function FormNuevoDocumento({
           type="button"
           disabled={pending || !codigo || nombre.trim().length < 3}
           onClick={() => onGuardar({ codigo, tipo, nombre, descripcion, periodicidad_meses: periodicidad })}
-          className="inline-flex items-center gap-2 bg-[#1A1A1A] text-white text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40"
+          className="inline-flex items-center gap-2 bg-tinta text-white text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40"
         >
           {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Guardar
         </button>
-        <button type="button" onClick={onCancelar} className="text-sm text-[#6B7280] underline">
+        <button type="button" onClick={onCancelar} className="text-sm text-tinta-suave underline">
           Cancelar
         </button>
       </div>
@@ -456,8 +456,8 @@ function Ajustes({
   const [cargo, setCargo] = useState(fila.responsable_cargo_id ?? '');
 
   return (
-    <div className="grid gap-3 sm:grid-cols-3 p-3 rounded-lg bg-[#F5F4F2] border border-[#E5E7EB]">
-      <label className="flex items-center gap-2 text-sm text-[#1A1A1A]">
+    <div className="grid gap-3 sm:grid-cols-3 p-3 rounded-lg bg-papel border border-[#E5E7EB]">
+      <label className="flex items-center gap-2 text-sm text-tinta">
         <input
           type="checkbox"
           checked={fila.obligatorio}
@@ -530,7 +530,7 @@ function FormVersion({
 
   return (
     <div className="p-3 rounded-lg border border-[#E5E7EB] grid gap-3 sm:grid-cols-3">
-      <div className="sm:col-span-3 text-xs font-semibold text-[#1A1A1A]">Registrar una versión nueva</div>
+      <div className="sm:col-span-3 text-xs font-semibold text-tinta">Registrar una versión nueva</div>
       <div>
         <label className={LABEL}>Versión</label>
         <input className={INPUT} value={version} onChange={(e) => setVersion(e.target.value)} placeholder="3.0" />
@@ -578,11 +578,11 @@ function FormVersion({
               aprobacion_referencia: acta || null,
             })
           }
-          className="inline-flex items-center gap-2 bg-[#1A1A1A] text-white text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40"
+          className="inline-flex items-center gap-2 bg-tinta text-white text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-40"
         >
           {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Registrar versión
         </button>
-        <p className="text-[11px] text-[#6B7280] mt-1.5">
+        <p className="text-[11px] text-tinta-suave mt-1.5">
           Al registrarla, la versión que estaba vigente se cierra el mismo día en que arranca esta.
         </p>
       </div>
@@ -594,17 +594,17 @@ function Historial({ versiones }: { versiones: VersionDocumento[] }) {
   if (versiones.length === 0) return null;
   return (
     <div>
-      <div className="text-xs font-semibold text-[#1A1A1A] mb-1.5">Historial de versiones</div>
+      <div className="text-xs font-semibold text-tinta mb-1.5">Historial de versiones</div>
       <div className="border border-[#E5E7EB] rounded-lg divide-y divide-[#E5E7EB] text-xs">
         {versiones.map((v) => (
           <div key={v.id} className="p-2 flex flex-wrap items-center gap-2">
-            <a href={v.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#1A1A1A] underline">
+            <a href={v.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-tinta underline">
               {v.version}
             </a>
-            <span className="text-[#6B7280]">
+            <span className="text-tinta-suave">
               {v.vigente_desde} a {v.vigente_hasta ?? 'hoy'}
             </span>
-            {v.aprobacion_referencia && <span className="text-[#6B7280]">{v.aprobacion_referencia}</span>}
+            {v.aprobacion_referencia && <span className="text-tinta-suave">{v.aprobacion_referencia}</span>}
             {v.url_estado && v.url_estado !== 'ok' && (
               <span className="text-[#B91C1C]">
                 {v.url_estado === 'rota' ? 'Enlace roto' : 'Sin acceso'}

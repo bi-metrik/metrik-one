@@ -44,8 +44,8 @@ import TabRecibos from './tab-recibos'
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 
-const VERDE = '#10B981'
-const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
+const VERDE = 'var(--acento)'
+const FONT = { fontFamily: 'var(--font-schibsted), sans-serif' }
 
 type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion' | 'recibos'
 
@@ -111,9 +111,9 @@ export default function ConciliacionClient(
       <div className="mb-5">
         <div className="flex items-center gap-2">
           <Scale className="h-5 w-5" style={{ color: VERDE }} />
-          <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>Tesorería</h1>
+          <h1 className="text-lg font-bold" style={{ color: 'var(--tinta)' }}>Tesorería</h1>
         </div>
-        <p className="mt-1 text-[13px]" style={{ color: '#6B7280' }}>
+        <p className="mt-1 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
           Facturación, confirmación de pagos y saldos. Los pagos los registra el comercial desde el
           bloque de pagos de cada negocio; aquí se confirman.
         </p>
@@ -130,14 +130,14 @@ export default function ConciliacionClient(
               className="relative -mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-semibold transition"
               style={{
                 borderColor: active ? VERDE : 'transparent',
-                color: active ? '#1A1A1A' : '#6B7280',
+                color: active ? 'var(--tinta)' : 'var(--tinta-suave)',
               }}
             >
               {t.label}
               {typeof t.count === 'number' && t.count > 0 && (
                 <span
                   className="inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold"
-                  style={{ backgroundColor: active ? '#D1FAE5' : '#F3F4F6', color: active ? '#047857' : '#6B7280' }}
+                  style={{ backgroundColor: active ? 'var(--acento-tinte)' : '#F3F4F6', color: active ? 'var(--acento)' : 'var(--tinta-suave)' }}
                 >
                   {t.count}
                 </span>
@@ -227,7 +227,7 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
           <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]" title={r.external_ref}>{referenciaVisible(r.external_ref)}</span>
           {r.fuente && <FuenteBadge fuente={r.fuente} small />}
           {esReparto && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-1.5 py-0.5 text-[10px] font-semibold text-acento">
               <ArrowRightLeft className="h-3 w-3" /> Reparto · {porcionesReales.length}
             </span>
           )}
@@ -235,7 +235,7 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
             Propuesto por el comercial
           </span>
         </div>
-        <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>
+        <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
           {fmtCOP(r.total_declarado ?? r.valor_pagado)}
         </span>
       </div>
@@ -256,16 +256,16 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
                 <td className="py-1.5">
                   {p.negocio_id ? (
                     <Link href={`/negocios/${p.negocio_id}`} className="group inline-flex items-center gap-1">
-                      <span className="font-semibold" style={{ color: '#1A1A1A' }}>{p.negocio_codigo ?? '—'}</span>
-                      <span style={{ color: '#6B7280' }}>{p.negocio_nombre ?? ''}</span>
+                      <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{p.negocio_codigo ?? '—'}</span>
+                      <span style={{ color: 'var(--tinta-suave)' }}>{p.negocio_nombre ?? ''}</span>
                       <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
                     </Link>
                   ) : (
                     <span className="italic" style={{ color: '#9CA3AF' }}>Sin negocio</span>
                   )}
                 </td>
-                <td className="py-1.5" style={{ color: '#6B7280' }}>{p.etapa_nombre ?? '—'}</td>
-                <td className="py-1.5 text-right font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(p.monto)}</td>
+                <td className="py-1.5" style={{ color: 'var(--tinta-suave)' }}>{p.etapa_nombre ?? '—'}</td>
+                <td className="py-1.5 text-right font-semibold tabular-nums" style={{ color: 'var(--tinta)' }}>{fmtCOP(p.monto)}</td>
               </tr>
             ))}
           </tbody>
@@ -314,7 +314,7 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
             <button
               onClick={() => { setRechazando(false); setNota('') }}
               disabled={pending}
-              className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ color: '#6B7280' }}
+              className="rounded-md px-3 py-1.5 text-[12px] font-semibold" style={{ color: 'var(--tinta-suave)' }}
             >
               Cancelar
             </button>
@@ -356,11 +356,11 @@ function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey
             className="rounded-lg border bg-white p-4 text-left transition hover:shadow-sm"
             style={{ borderColor: '#E5E7EB' }}
           >
-            <div className="flex items-center gap-1.5" style={{ color: '#6B7280' }}>
+            <div className="flex items-center gap-1.5" style={{ color: 'var(--tinta-suave)' }}>
               {t.icon}
               <span className="text-[11px] font-semibold uppercase tracking-wide">{t.label}</span>
             </div>
-            <div className="mt-2 text-2xl font-bold tabular-nums" style={{ color: '#1A1A1A' }}>
+            <div className="mt-2 text-2xl font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
               {t.value}
             </div>
           </button>
@@ -403,7 +403,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
   return (
     <section>
       <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#6B7280' }}>
+        <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--tinta-suave)' }}>
           <LayoutGrid className="h-3.5 w-3.5" /> Registro de pagos por referencia ({referencias.length})
         </h2>
       </div>
@@ -418,7 +418,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
           onChange={(e) => setQ(e.target.value)}
           placeholder="Busca por referencia, fuente o negocio…"
           className="w-full text-[13px] outline-none"
-          style={{ color: '#1A1A1A' }}
+          style={{ color: 'var(--tinta)' }}
         />
       </div>
 
@@ -441,7 +441,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                     <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px]" title={r.external_ref}>{referenciaVisible(r.external_ref)}</span>
                     {r.fuente && <FuenteBadge fuente={r.fuente} small />}
                     {multi && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-1.5 py-0.5 text-[10px] font-semibold text-acento">
                         <ArrowRightLeft className="h-3 w-3" /> Repartido · {r.negocios_ids.length}
                       </span>
                     )}
@@ -451,7 +451,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                       </span>
                     )}
                     {r.algun_conciliado && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-1.5 py-0.5 text-[10px] font-semibold text-acento">
                         <CheckCircle2 className="h-3 w-3" /> Conciliado
                       </span>
                     )}
@@ -461,7 +461,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                       </span>
                     )}
                   </div>
-                  <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.total_declarado ?? r.valor_pagado)}</span>
+                  <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>{fmtCOP(r.total_declarado ?? r.valor_pagado)}</span>
                 </button>
 
                 {open && (
@@ -481,15 +481,15 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                             <td className="py-1.5">
                               {p.negocio_id ? (
                                 <Link href={`/negocios/${p.negocio_id}`} className="group inline-flex items-center gap-1">
-                                  <span className="font-semibold" style={{ color: '#1A1A1A' }}>{p.negocio_codigo ?? '—'}</span>
-                                  <span style={{ color: '#6B7280' }}>{p.negocio_nombre ?? ''}</span>
+                                  <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{p.negocio_codigo ?? '—'}</span>
+                                  <span style={{ color: 'var(--tinta-suave)' }}>{p.negocio_nombre ?? ''}</span>
                                   <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
                                 </Link>
                               ) : (
                                 <span className="italic" style={{ color: '#9CA3AF' }}>Sin negocio</span>
                               )}
                             </td>
-                            <td className="py-1.5" style={{ color: '#6B7280' }}>{p.etapa_nombre ?? '—'}</td>
+                            <td className="py-1.5" style={{ color: 'var(--tinta-suave)' }}>{p.etapa_nombre ?? '—'}</td>
                             <td className="py-1.5 text-right tabular-nums">
                               {p.anulado ? (
                                 // El monto de una fila anulada es 0: se muestra el que registró,
@@ -502,7 +502,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                                   <Undo2 className="h-3 w-3" /> {fmtCOP(Math.abs(p.monto))} por devolver
                                 </span>
                               ) : (
-                                <span className="font-semibold" style={{ color: '#1A1A1A' }}>{fmtCOP(p.monto)}</span>
+                                <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{fmtCOP(p.monto)}</span>
                               )}
                             </td>
                             <td className="w-8 py-1.5 text-right">
@@ -537,7 +537,7 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                     </table>
                     {porDevolver.length === 0 && r.porciones.length > 1 && (
                       <p className="mt-1.5 text-right text-[11px]" style={{ color: '#9CA3AF' }}>
-                        Total cargado: <span className="font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>{fmtCOP(r.valor_pagado)}</span>
+                        Total cargado: <span className="font-semibold tabular-nums" style={{ color: 'var(--tinta)' }}>{fmtCOP(r.valor_pagado)}</span>
                       </p>
                     )}
 
@@ -547,8 +547,8 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                     <div className="mt-2 flex justify-end border-t pt-2" style={{ borderColor: '#F3F4F6' }}>
                       <button
                         onClick={() => setRedistribuyendo(r)}
-                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
-                        style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+                        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:bg-papel"
+                        style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
                       >
                         <ArrowRightLeft className="h-3.5 w-3.5" /> Corregir el reparto
                       </button>
@@ -611,7 +611,7 @@ function ModalAnularPorcion({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" style={FONT}>
       <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-[14px] font-bold" style={{ color: '#1A1A1A' }}>Anular cobro</h3>
+          <h3 className="text-[14px] font-bold" style={{ color: 'var(--tinta)' }}>Anular cobro</h3>
           <button onClick={onCerrar} style={{ color: '#9CA3AF' }}><X className="h-4 w-4" /></button>
         </div>
 
@@ -635,7 +635,7 @@ function ModalAnularPorcion({
         </label>
 
         <div className="mt-3 flex justify-end gap-2">
-          <button onClick={onCerrar} className="rounded-md border bg-white px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+          <button onClick={onCerrar} className="rounded-md border bg-white px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}>
             Cancelar
           </button>
           <button onClick={anular} disabled={pending || corto}
@@ -756,13 +756,13 @@ function TabSaldos(
     // El faltante SIEMPRE se midió contra el honorario (ver `saldoConciliacion`); lo que
     // faltaba era decirlo en la pantalla, que dejaba pensar que la tarifa entra a la cartera.
     { label: 'Faltante (cartera)', value: totales.faltante, color: '#B45309', hint: 'Honorario por cobrar · sin tarifa UPME' },
-    { label: 'Diferencia neta', value: totales.diferencia, color: '#1A1A1A', hint: 'Faltante − sobrante' },
+    { label: 'Diferencia neta', value: totales.diferencia, color: 'var(--tinta)', hint: 'Faltante − sobrante' },
   ]
 
   const chips: { key: SaldoFiltro; label: string; on: string; text: string }[] = [
     { key: 'sobrante', label: 'Sobrantes', on: '#FEE2E2', text: '#DC2626' },
     { key: 'faltante', label: 'Faltantes', on: '#FEF3C7', text: '#B45309' },
-    { key: 'cero', label: 'En cero', on: '#D1FAE5', text: '#047857' },
+    { key: 'cero', label: 'En cero', on: 'var(--acento-tinte)', text: 'var(--acento)' },
   ]
 
   return (
@@ -786,7 +786,7 @@ function TabSaldos(
       <div className="mb-4 grid grid-cols-3 gap-3">
         {cards.map((c) => (
           <div key={c.label} className="rounded-lg border bg-white p-3" style={{ borderColor: '#E5E7EB' }}>
-            <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>{c.label}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>{c.label}</div>
             <div className="mt-1 text-[15px] font-bold tabular-nums sm:text-[18px]" style={{ color: c.color }}>{fmtCOP(c.value)}</div>
             <div className="mt-0.5 text-[10px]" style={{ color: '#9CA3AF' }}>{c.hint}</div>
           </div>
@@ -804,7 +804,7 @@ function TabSaldos(
               className="rounded-full border px-3 py-1 text-[12px] font-semibold transition"
               style={active
                 ? { backgroundColor: c.on, color: c.text, borderColor: c.on }
-                : { backgroundColor: 'white', color: '#6B7280', borderColor: '#E5E7EB' }}
+                : { backgroundColor: 'white', color: 'var(--tinta-suave)', borderColor: '#E5E7EB' }}
             >
               {c.label}
             </button>
@@ -820,7 +820,7 @@ function TabSaldos(
           onChange={(e) => setQ(e.target.value)}
           placeholder="Busca por negocio o referencia (dentro del filtro activo)…"
           className="w-full text-[13px] outline-none"
-          style={{ color: '#1A1A1A' }}
+          style={{ color: 'var(--tinta)' }}
         />
       </div>
 
@@ -833,8 +833,8 @@ function TabSaldos(
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <Link href={`/negocios/${n.negocio_id}`} className="group inline-flex items-center gap-1">
-                    <span className="font-semibold" style={{ color: '#1A1A1A' }}>{n.codigo ?? '—'}</span>
-                    <span className="text-[12px]" style={{ color: '#6B7280' }}>{n.empresa ?? n.nombre ?? ''}</span>
+                    <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{n.codigo ?? '—'}</span>
+                    <span className="text-[12px]" style={{ color: 'var(--tinta-suave)' }}>{n.empresa ?? n.nombre ?? ''}</span>
                     <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" />
                   </Link>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[11px]" style={{ color: '#9CA3AF' }}>
@@ -855,17 +855,17 @@ function TabSaldos(
                 </div>
                 <div className="text-right shrink-0">
                   {saldoCuadrado(n.saldo) ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-2 py-0.5 text-[11px] font-semibold text-acento">
                       <CheckCircle2 className="h-3 w-3" /> Pagado
                     </span>
                   ) : n.saldo > 0 ? (
                     <>
-                      <div className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>Falta</div>
+                      <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>Falta</div>
                       <div className="text-[14px] font-bold tabular-nums" style={{ color: '#B45309' }}>{fmtCOP(n.saldo)}</div>
                     </>
                   ) : (
                     <>
-                      <div className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>Sobra</div>
+                      <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>Sobra</div>
                       <div className="text-[14px] font-bold tabular-nums" style={{ color: '#DC2626' }}>{fmtCOP(Math.abs(n.saldo))}</div>
                     </>
                   )}
@@ -891,7 +891,7 @@ function TabSaldos(
               {n.referencias.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5 border-t pt-2" style={{ borderColor: '#F3F4F6' }}>
                   {n.referencias.map((r) => (
-                    <span key={r.external_ref} className="inline-flex items-center gap-1 rounded bg-gray-50 px-1.5 py-0.5 text-[11px]" style={{ color: '#6B7280' }}>
+                    <span key={r.external_ref} className="inline-flex items-center gap-1 rounded bg-gray-50 px-1.5 py-0.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
                       <span className="font-mono" title={r.external_ref}>{referenciaVisible(r.external_ref)}</span>
                       {r.fuente && <FuenteBadge fuente={r.fuente} small />}
                       <span className="tabular-nums">{fmtCOP(r.monto)}</span>
@@ -916,7 +916,7 @@ function TabSaldos(
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-md border border-dashed px-4 py-8 text-center text-[13px]" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+    <p className="rounded-md border border-dashed px-4 py-8 text-center text-[13px]" style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}>
       {children}
     </p>
   )
@@ -1010,8 +1010,8 @@ function TabFacturacion(
     return (
       <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
         <FileText className="mx-auto h-8 w-8" style={{ color: '#D1D5DB' }} />
-        <p className="mt-2 text-[13px] font-semibold" style={{ color: '#1A1A1A' }}>Facturación sin configurar</p>
-        <p className="mt-1 text-[12px]" style={{ color: '#6B7280' }}>
+        <p className="mt-2 text-[13px] font-semibold" style={{ color: 'var(--tinta)' }}>Facturación sin configurar</p>
+        <p className="mt-1 text-[12px]" style={{ color: 'var(--tinta-suave)' }}>
           Falta definir desde qué etapa se habilita facturar. Mientras no esté, esta bandeja no
           asume ningún criterio: prefiere estar vacía a llenarse de casos que nadie mandó facturar.
         </p>
@@ -1059,8 +1059,8 @@ function TabFacturacion(
           { label: 'Valor listo', value: fmtCOP(cola.totales.valor_listo) },
         ].map(t => (
           <div key={t.label} className="rounded-lg border px-3 py-2" style={{ borderColor: '#E5E7EB' }}>
-            <div className="text-[11px]" style={{ color: '#6B7280' }}>{t.label}</div>
-            <div className="text-[15px] font-bold" style={{ color: t.destaque ? VERDE : '#1A1A1A' }}>{t.value}</div>
+            <div className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>{t.label}</div>
+            <div className="text-[15px] font-bold" style={{ color: t.destaque ? VERDE : 'var(--tinta)' }}>{t.value}</div>
           </div>
         ))}
       </div>
@@ -1115,8 +1115,8 @@ function TabFacturacion(
 
       {cola.descarte_abierto && (
         <div className="mb-3 rounded-lg border px-3 py-2 text-[12px]"
-             style={{ borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', color: '#6B7280' }}>
-          <strong style={{ color: '#1A1A1A' }}>Puesta al día:</strong> puedes descartar los casos que ya
+             style={{ borderColor: '#E5E7EB', backgroundColor: '#F9FAFB', color: 'var(--tinta-suave)' }}>
+          <strong style={{ color: 'var(--tinta)' }}>Puesta al día:</strong> puedes descartar los casos que ya
           se facturaron por fuera o que no van a facturarse. Se pueden devolver a la cola en cualquier
           momento. Esta opción está disponible hasta el {cola.descarte_hasta}.
         </div>
@@ -1131,7 +1131,7 @@ function TabFacturacion(
           ariaLabel="Buscar casos por facturar"
         />
         {term && (
-          <p className="mt-1.5 text-[11px]" style={{ color: '#6B7280' }}>
+          <p className="mt-1.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             {encontrados.length} de {cola.casos.length} casos
           </p>
         )}
@@ -1150,8 +1150,8 @@ function TabFacturacion(
             className="rounded-full border px-3 py-1 text-[12px] font-medium transition"
             style={{
               borderColor: vista === o.k ? VERDE : '#E5E7EB',
-              backgroundColor: vista === o.k ? '#D1FAE5' : 'transparent',
-              color: vista === o.k ? '#047857' : '#6B7280',
+              backgroundColor: vista === o.k ? 'var(--acento-tinte)' : 'transparent',
+              color: vista === o.k ? 'var(--acento)' : 'var(--tinta-suave)',
             }}
           >
             {o.label}
@@ -1164,7 +1164,7 @@ function TabFacturacion(
           "sin resultados" mentiría. */}
       {visibles.length === 0 && !(vista === 'pendientes' && retenidos.length > 0) ? (
         <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
-          <p className="text-[13px]" style={{ color: '#6B7280' }}>
+          <p className="text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
             {term ? `Sin resultados para "${q.trim()}" en esta vista.`
               : vista === 'facturados' ? 'Ningún caso registra factura todavía.'
               : vista === 'descartados' ? 'No has descartado ningún caso.'
@@ -1368,25 +1368,25 @@ export function FilaPorFacturar({
   return (
     <div className="rounded-lg border p-3"
          style={{
-           borderColor: retenido ? '#FCA5A5' : listo ? '#A7F3D0' : enBanda ? '#FCD34D' : '#E5E7EB',
+           borderColor: retenido ? '#FCA5A5' : listo ? 'var(--acento-borde)' : enBanda ? '#FCD34D' : '#E5E7EB',
            backgroundColor: retenido ? '#FFFFFF' : undefined,
          }}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Link href={`/negocios/${caso.negocio_id}`} className="text-[13px] font-semibold hover:underline"
-                  style={{ color: '#1A1A1A' }}>
+                  style={{ color: 'var(--tinta)' }}>
               {caso.codigo ?? 'sin código'}
             </Link>
-            <span className="truncate text-[13px]" style={{ color: '#1A1A1A' }}>{caso.nombre ?? ''}</span>
+            <span className="truncate text-[13px]" style={{ color: 'var(--tinta)' }}>{caso.nombre ?? ''}</span>
             {caso.ya_facturado && (
               <span className="rounded-full px-2 py-0.5 text-[10px] font-bold"
-                    style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>
+                    style={{ backgroundColor: 'var(--acento-tinte)', color: 'var(--acento)' }}>
                 {caso.factura_numero ?? 'Facturado'}
               </span>
             )}
           </div>
-          <div className="mt-0.5 text-[11px]" style={{ color: '#6B7280' }}>
+          <div className="mt-0.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             {[caso.cliente, caso.identificacion, caso.etapa].filter(Boolean).join(' · ')}
           </div>
           {/* El concepto es lo que el cliente lee en la factura: se ve ANTES de
@@ -1394,8 +1394,8 @@ export function FilaPorFacturar({
               entonces no refleja lo que el cliente contrató sino un supuesto. */}
           {!caso.ya_facturado && (
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span style={{ color: '#6B7280' }}>Concepto:</span>
-              <span className="font-medium" style={{ color: '#1A1A1A' }}>
+              <span style={{ color: 'var(--tinta-suave)' }}>Concepto:</span>
+              <span className="font-medium" style={{ color: 'var(--tinta)' }}>
                 {caso.concepto.nombre ?? `código ${caso.concepto.code}`}
               </span>
               {caso.concepto.porDefecto && (
@@ -1409,11 +1409,11 @@ export function FilaPorFacturar({
           )}
         </div>
         <div className="text-right">
-          <div className="text-[14px] font-bold" style={{ color: '#1A1A1A' }}>
+          <div className="text-[14px] font-bold" style={{ color: 'var(--tinta)' }}>
             {caso.honorario == null ? 'sin precio' : fmtCOP(caso.honorario)}
           </div>
           {caso.valor_upme != null && (
-            <div className="text-[11px]" style={{ color: '#6B7280' }}>
+            <div className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
               recaudo UPME {fmtCOP(caso.valor_upme)}
             </div>
           )}
@@ -1481,8 +1481,8 @@ export function FilaPorFacturar({
               </button>
             </div>
           ) : (
-            <div className="rounded-md border p-3" style={{ borderColor: '#A7F3D0', backgroundColor: '#F0FDF4' }}>
-              <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#047857' }}>
+            <div className="rounded-md border p-3" style={{ borderColor: 'var(--acento-borde)', backgroundColor: 'var(--acento-tinte)' }}>
+              <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--acento)' }}>
                 Así saldría la factura
               </div>
 
@@ -1495,24 +1495,24 @@ export function FilaPorFacturar({
                   ['Identificación', caso.identificacion ?? '—'],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-3">
-                    <dt style={{ color: '#6B7280' }}>{k}</dt>
-                    <dd className="text-right" style={{ color: '#1A1A1A' }}>{v}</dd>
+                    <dt style={{ color: 'var(--tinta-suave)' }}>{k}</dt>
+                    <dd className="text-right" style={{ color: 'var(--tinta)' }}>{v}</dd>
                   </div>
                 ))}
-                <div className="flex justify-between gap-3 border-t pt-1" style={{ borderColor: '#A7F3D0' }}>
-                  <dt style={{ color: '#6B7280' }}>Base</dt>
-                  <dd style={{ color: '#1A1A1A' }}>{caso.base_gravable == null ? '—' : fmtCOP(caso.base_gravable)}</dd>
+                <div className="flex justify-between gap-3 border-t pt-1" style={{ borderColor: 'var(--acento-borde)' }}>
+                  <dt style={{ color: 'var(--tinta-suave)' }}>Base</dt>
+                  <dd style={{ color: 'var(--tinta)' }}>{caso.base_gravable == null ? '—' : fmtCOP(caso.base_gravable)}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
-                  <dt style={{ color: '#6B7280' }}>IVA</dt>
-                  <dd style={{ color: '#1A1A1A' }}>
+                  <dt style={{ color: 'var(--tinta-suave)' }}>IVA</dt>
+                  <dd style={{ color: 'var(--tinta)' }}>
                     {caso.honorario == null || caso.base_gravable == null
                       ? '—' : fmtCOP(caso.honorario - caso.base_gravable)}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3 text-[13px] font-bold">
-                  <dt style={{ color: '#1A1A1A' }}>Total</dt>
-                  <dd style={{ color: '#1A1A1A' }}>{caso.honorario == null ? '—' : fmtCOP(caso.honorario)}</dd>
+                  <dt style={{ color: 'var(--tinta)' }}>Total</dt>
+                  <dd style={{ color: 'var(--tinta)' }}>{caso.honorario == null ? '—' : fmtCOP(caso.honorario)}</dd>
                 </div>
               </dl>
 
@@ -1524,13 +1524,13 @@ export function FilaPorFacturar({
                   ⚠️ El correo NO es cosmético: es la dirección a la que Siigo manda
                   la factura. Diana lo pidió con un caso concreto (2026-08-19) —
                   cuando está mal, la factura sale bien y no llega a nadie. */}
-              <div className="mt-3 space-y-1.5 border-t pt-2" style={{ borderColor: '#A7F3D0' }}>
-                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#047857' }}>
+              <div className="mt-3 space-y-1.5 border-t pt-2" style={{ borderColor: 'var(--acento-borde)' }}>
+                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--acento)' }}>
                   Datos editables
                 </div>
 
                 <label className="block">
-                  <span className="text-[11px]" style={{ color: '#6B7280' }}>Concepto</span>
+                  <span className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>Concepto</span>
                   {/* Sin catálogo no se ofrece cambiarlo: una lista inventada haría
                       facturar bajo un código que Siigo puede no tener. */}
                   {productos.length > 0 ? (
@@ -1539,7 +1539,7 @@ export function FilaPorFacturar({
                       onChange={e => setProductoCode(e.target.value)}
                       disabled={isPending}
                       className="mt-0.5 w-full rounded-md border bg-white px-2 py-1 text-[12px] focus:outline-none disabled:opacity-50"
-                      style={{ borderColor: '#A7F3D0', color: '#1A1A1A' }}
+                      style={{ borderColor: 'var(--acento-borde)', color: 'var(--tinta)' }}
                     >
                       {productos.some(pr => pr.code === caso.concepto.code) ? null : (
                         <option value={caso.concepto.code}>
@@ -1551,14 +1551,14 @@ export function FilaPorFacturar({
                       ))}
                     </select>
                   ) : (
-                    <div className="mt-0.5 text-[12px]" style={{ color: '#1A1A1A' }}>
+                    <div className="mt-0.5 text-[12px]" style={{ color: 'var(--tinta)' }}>
                       {caso.concepto.nombre ?? `código ${caso.concepto.code}`}
                     </div>
                   )}
                 </label>
 
                 <label className="block">
-                  <span className="text-[11px]" style={{ color: '#6B7280' }}>
+                  <span className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
                     Correo (a este le llega la factura)
                   </span>
                   <input
@@ -1568,12 +1568,12 @@ export function FilaPorFacturar({
                     disabled={isPending}
                     placeholder="Sin correo registrado"
                     className="mt-0.5 w-full rounded-md border bg-white px-2 py-1 text-[12px] focus:outline-none disabled:opacity-50"
-                    style={{ borderColor: '#A7F3D0', color: '#1A1A1A' }}
+                    style={{ borderColor: 'var(--acento-borde)', color: 'var(--tinta)' }}
                   />
                 </label>
 
                 <label className="block">
-                  <span className="text-[11px]" style={{ color: '#6B7280' }}>Teléfono</span>
+                  <span className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>Teléfono</span>
                   <input
                     type="tel"
                     value={telefono}
@@ -1581,12 +1581,12 @@ export function FilaPorFacturar({
                     disabled={isPending}
                     placeholder="Sin teléfono registrado"
                     className="mt-0.5 w-full rounded-md border bg-white px-2 py-1 text-[12px] focus:outline-none disabled:opacity-50"
-                    style={{ borderColor: '#A7F3D0', color: '#1A1A1A' }}
+                    style={{ borderColor: 'var(--acento-borde)', color: 'var(--tinta)' }}
                   />
                 </label>
 
                 {(email.trim() !== (caso.email ?? '') || telefono.trim() !== (caso.telefono ?? '')) && (
-                  <p className="text-[10.5px]" style={{ color: '#6B7280' }}>
+                  <p className="text-[10.5px]" style={{ color: 'var(--tinta-suave)' }}>
                     El correo y el teléfono quedan corregidos también en el contacto del negocio,
                     no solo en esta factura.
                   </p>
@@ -1690,9 +1690,9 @@ export function FilaPorFacturar({
                   además lo que explica por qué esas mismas facturas salen
                   deshabilitadas en “Esta factura ya existe”. */}
               {hermanos.length > 0 && (
-                <p className="mt-2 text-[11px]" style={{ color: '#6B7280' }}>
+                <p className="mt-2 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
                   Otros negocios de este cliente ya facturados:{' '}
-                  <span style={{ color: '#1A1A1A' }}>
+                  <span style={{ color: 'var(--tinta)' }}>
                     {hermanos.map(h => `${h.codigo ?? 'otro negocio'} · ${h.numero}`).join(' — ')}
                   </span>
                   . Cada negocio se factura aparte, así que esas no son duplicado de este caso.
@@ -1748,7 +1748,7 @@ export function FilaPorFacturar({
                   }}
                   disabled={isPending}
                   className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
-                  style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+                  style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
                 >
                   Cancelar
                 </button>
@@ -1775,7 +1775,7 @@ export function FilaPorFacturar({
       {caso.descartado && (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-1.5"
              style={{ backgroundColor: '#F9FAFB' }}>
-          <span className="text-[11px]" style={{ color: '#6B7280' }}>
+          <span className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             Descartado{caso.descartado.por ? ` por ${caso.descartado.por}` : ''}
             {caso.descartado.motivo ? ` · ${caso.descartado.motivo}` : ''}
           </span>
@@ -1783,7 +1783,7 @@ export function FilaPorFacturar({
             onClick={restaurar}
             disabled={isPending}
             className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition disabled:opacity-50"
-            style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+            style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
           >
             {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
             Devolver a la cola
@@ -1816,7 +1816,7 @@ export function FilaPorFacturar({
               <button
                 onClick={() => { setPidiendoMotivo(false); setMotivo('') }}
                 className="rounded-md border px-2 py-1 text-[11px] font-medium"
-                style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+                style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
               >
                 Cancelar
               </button>
@@ -1827,7 +1827,7 @@ export function FilaPorFacturar({
             <button
               onClick={() => setPidiendoMotivo(true)}
               className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition"
-              style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+              style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
             >
               <X className="h-3 w-3" />
               Descartar factura
@@ -1908,9 +1908,9 @@ function AdoptarFacturaExistente({
         <button
           onClick={abrir}
           className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition"
-          style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+          style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
         >
-          <FileText className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+          <FileText className="h-3.5 w-3.5" style={{ color: 'var(--tinta-suave)' }} />
           {soloElPdf ? 'Traer el PDF desde Siigo' : 'Esta factura ya existe'}
         </button>
       </div>
@@ -1922,12 +1922,12 @@ function AdoptarFacturaExistente({
 
   return (
     <div className="mt-2 rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
         {soloElPdf ? 'Traer el PDF desde Siigo' : 'Facturas del cliente en Siigo'}
       </div>
 
       {cargando && (
-        <div className="mt-2 flex items-center gap-1.5 text-[12px]" style={{ color: '#6B7280' }}>
+        <div className="mt-2 flex items-center gap-1.5 text-[12px]" style={{ color: 'var(--tinta-suave)' }}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Consultando Siigo…
         </div>
       )}
@@ -1938,13 +1938,13 @@ function AdoptarFacturaExistente({
 
       {datos && (
         <>
-          <p className="mt-1 text-[11px]" style={{ color: '#6B7280' }}>
+          <p className="mt-1 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             Todas las de la identificación {datos.identificacion}, del servicio que sean.
             Escoge la de este caso: quedará marcada aquí y su PDF se guarda en el negocio.
           </p>
 
           {datos.facturas.length === 0 ? (
-            <p className="mt-2 text-[12px]" style={{ color: '#6B7280' }}>
+            <p className="mt-2 text-[12px]" style={{ color: 'var(--tinta-suave)' }}>
               Siigo no tiene facturas para este cliente.
             </p>
           ) : (
@@ -1970,16 +1970,16 @@ function AdoptarFacturaExistente({
                         onChange={() => setElegida(f.id)}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-baseline gap-x-2 text-[12px]" style={{ color: '#1A1A1A' }}>
+                        <span className="flex flex-wrap items-baseline gap-x-2 text-[12px]" style={{ color: 'var(--tinta)' }}>
                           <span className="font-semibold">{f.name}</span>
-                          {f.date && <span style={{ color: '#6B7280' }}>{f.date}</span>}
+                          {f.date && <span style={{ color: 'var(--tinta-suave)' }}>{f.date}</span>}
                           {f.total != null && <span>{fmtCOP(f.total)}</span>}
                         </span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]" style={{ color: '#6B7280' }}>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]" style={{ color: 'var(--tinta-suave)' }}>
                           <span>servicio {f.productos.join(', ') || 'sin código'}</span>
                           {f.ya_es_de_este_negocio && (
                             <span className="rounded-full px-1.5 py-0.5 font-semibold"
-                                  style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>
+                                  style={{ backgroundColor: 'var(--acento-tinte)', color: 'var(--acento)' }}>
                               ya es la de este caso
                             </span>
                           )}
@@ -2014,7 +2014,7 @@ function AdoptarFacturaExistente({
           onClick={cerrar}
           disabled={pendiente}
           className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
-          style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+          style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
         >
           Cancelar
         </button>

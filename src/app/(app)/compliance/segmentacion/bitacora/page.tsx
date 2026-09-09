@@ -58,16 +58,16 @@ export default async function BitacoraPage() {
       <div>
         <Link
           href="/compliance/segmentacion"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#6B7280] hover:text-[#1A1A1A] mb-2"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-tinta-suave hover:text-tinta mb-2"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Volver a segmentación
         </Link>
         <div className="flex items-center gap-3">
-          <HistoryIcon className="h-6 w-6 text-[#10B981]" />
+          <HistoryIcon className="h-6 w-6 text-acento" />
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Bitácora de segmentación</h1>
-            <p className="text-sm text-[#6B7280]">
+            <h1 className="text-xl font-bold text-tinta">Bitácora de segmentación</h1>
+            <p className="text-sm text-tinta-suave">
               Historial de cambios a la metodología de segmentación SARLAFT del workspace.
             </p>
           </div>
@@ -79,7 +79,7 @@ export default async function BitacoraPage() {
           Error: {r.error}
         </div>
       ) : entradas.length === 0 ? (
-        <div className="p-8 bg-white border border-[#E5E7EB] rounded-lg text-center text-sm text-[#6B7280]">
+        <div className="p-8 bg-white border border-[#E5E7EB] rounded-lg text-center text-sm text-tinta-suave">
           Aún no hay versiones aplicadas. Cuando apliques la primera configuración aparecerá aquí.
         </div>
       ) : (
@@ -108,24 +108,24 @@ function EntradaCard({ entrada, nombreUsuario }: { entrada: EntradaBitacora; nom
 
   return (
     <details className="bg-white border border-[#E5E7EB] rounded-lg overflow-hidden">
-      <summary className="p-4 cursor-pointer hover:bg-[#F5F4F2] transition-colors flex items-center justify-between gap-3 flex-wrap">
+      <summary className="p-4 cursor-pointer hover:bg-papel transition-colors flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="bg-[#1A1A1A] text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">
+          <span className="bg-tinta text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">
             v{entrada.version}
           </span>
           <div>
-            <p className="text-sm font-semibold text-[#1A1A1A]">{PRESET_LABEL[entrada.preset]}</p>
-            <p className="text-xs text-[#6B7280]">{fecha} · {nombreUsuario ?? 'Usuario sin nombre'}</p>
+            <p className="text-sm font-semibold text-tinta">{PRESET_LABEL[entrada.preset]}</p>
+            <p className="text-xs text-tinta-suave">{fecha} · {nombreUsuario ?? 'Usuario sin nombre'}</p>
           </div>
         </div>
         {entrada.razon_cambio && (
-          <span className="text-xs text-[#6B7280] italic max-w-md truncate">
+          <span className="text-xs text-tinta-suave italic max-w-md truncate">
             «{entrada.razon_cambio}»
           </span>
         )}
       </summary>
 
-      <div className="border-t border-[#E5E7EB] p-4 space-y-4 bg-[#F5F4F2]/50">
+      <div className="border-t border-[#E5E7EB] p-4 space-y-4 bg-papel/50">
         <PesosTabla
           titulo="Contrapartes"
           pesos={entrada.pesos_contrapartes as Record<string, number>}
@@ -160,11 +160,11 @@ function PesosTabla({
 }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-2">{titulo}</p>
+      <p className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-2">{titulo}</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
         {Object.entries(pesos).map(([k, v]) => (
           <div key={k} className="flex items-center justify-between bg-white border border-[#E5E7EB] rounded px-2 py-1.5">
-            <span className="text-[#1A1A1A]">{labels[k] ?? k}</span>
+            <span className="text-tinta">{labels[k] ?? k}</span>
             <span className="font-mono font-semibold">{Math.round((v as number) * 100)} %</span>
           </div>
         ))}
@@ -182,11 +182,11 @@ function UmbralesTabla({
 }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-2">{titulo}</p>
+      <p className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-2">{titulo}</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-        <UmbralCell label="Alto si ≥" valor={umbrales.alto_min.toFixed(2)} extra={`cada ${umbrales.frec_alto_meses} meses`} color="text-[#EF4444]" />
-        <UmbralCell label="Medio si ≥" valor={umbrales.medio_min.toFixed(2)} extra={`cada ${umbrales.frec_medio_meses} meses`} color="text-[#F59E0B]" />
-        <UmbralCell label="Bajo" valor="<" extra={`cada ${umbrales.frec_bajo_meses} meses`} color="text-[#10B981]" />
+        <UmbralCell label="Alto si ≥" valor={umbrales.alto_min.toFixed(2)} extra={`cada ${umbrales.frec_alto_meses} meses`} color="text-alerta" />
+        <UmbralCell label="Medio si ≥" valor={umbrales.medio_min.toFixed(2)} extra={`cada ${umbrales.frec_medio_meses} meses`} color="text-advertencia" />
+        <UmbralCell label="Bajo" valor="<" extra={`cada ${umbrales.frec_bajo_meses} meses`} color="text-acento" />
       </div>
     </div>
   );
@@ -197,7 +197,7 @@ function UmbralCell({ label, valor, extra, color }: { label: string; valor: stri
     <div className="bg-white border border-[#E5E7EB] rounded px-2 py-1.5">
       <p className={`text-[10px] font-bold uppercase tracking-wider ${color}`}>{label}</p>
       <p className="text-sm font-mono font-semibold">{valor}</p>
-      <p className="text-[10px] text-[#6B7280]">{extra}</p>
+      <p className="text-[10px] text-tinta-suave">{extra}</p>
     </div>
   );
 }

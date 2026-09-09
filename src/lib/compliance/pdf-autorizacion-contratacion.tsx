@@ -3,6 +3,7 @@ import { Document, Page, Text, View, StyleSheet, renderToBuffer, Svg, Line } fro
 import type { InformaMatch } from '@/lib/actions/compliance-dual';
 import type { LiberacionDecision } from './liberaciones';
 import { formatFecha } from '@/lib/dates/bogota';
+import { PALETA } from '@/lib/marca/paleta'
 
 /**
  * Autorización de contratación (R4).
@@ -22,18 +23,18 @@ import { formatFecha } from '@/lib/dates/bogota';
 
 // Branding tokens — cerebro/conceptos/identidad-visual-metrik.md
 const C = {
-  negro: '#1A1A1A',
-  gris: '#6B7280',
-  verde: '#10B981',
-  verdeDark: '#059669',
-  rojo: '#EF4444',
+  negro: PALETA.tinta,
+  gris: PALETA.tintaSuave,
+  verde: PALETA.acento,
+  verdeDark: PALETA.acento,
+  rojo: PALETA.alerta,
   rojoClaro: '#FEF2F2',
   ambar: '#B45309',
   ambarClaro: '#FFFBEB',
-  verdeClaro: '#ECFDF5',
+  verdeClaro: PALETA.acentoTinte,
   blanco: '#FFFFFF',
   grisLinea: '#E5E7EB',
-  crema: '#F5F4F2',
+  crema: PALETA.papel,
 };
 
 /** Estado de la autorización AL MOMENTO DE IMPRIMIRLA. */

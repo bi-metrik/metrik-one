@@ -94,7 +94,7 @@ export function ReversaRutaBanner({
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-[#F59E0B]/40 bg-[#FFFBEB] p-3">
+    <div className="mb-3 rounded-lg border border-advertencia/40 bg-[#FFFBEB] p-3">
       <div className="flex items-start gap-2">
         <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-[#B45309]" />
         <div className="min-w-0 flex-1">
@@ -131,14 +131,14 @@ export function ReversaRutaBanner({
               <button
                 type="button"
                 onClick={() => setModo('aplicar')}
-                className="rounded-md border border-[#F59E0B]/50 bg-white px-2 py-1 text-[11px] font-medium text-[#B45309] hover:bg-[#FEF3C7] transition-colors"
+                className="rounded-md border border-advertencia/50 bg-white px-2 py-1 text-[11px] font-medium text-[#B45309] hover:bg-[#FEF3C7] transition-colors"
               >
                 Devolver a {destino}
               </button>
               <button
                 type="button"
                 onClick={() => setModo('descartar')}
-                className="rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-[#F5F4F2] transition-colors"
+                className="rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-papel transition-colors"
               >
                 Dejarlo donde está
               </button>
@@ -162,14 +162,14 @@ export function ReversaRutaBanner({
                     ? 'Ej.: el cliente sí contrató la certificación, el interruptor estaba mal.'
                     : 'Ej.: el tramo ya se hizo por fuera y quedó documentado en el expediente.'
                 }
-                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
               />
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
                   disabled={isPending}
                   onClick={enviar}
-                  className="rounded-md border border-[#F59E0B]/50 bg-white px-2 py-1 text-[11px] font-medium text-[#B45309] hover:bg-[#FEF3C7] transition-colors disabled:opacity-60"
+                  className="rounded-md border border-advertencia/50 bg-white px-2 py-1 text-[11px] font-medium text-[#B45309] hover:bg-[#FEF3C7] transition-colors disabled:opacity-60"
                 >
                   {isPending ? 'Guardando…' : modo === 'aplicar' ? 'Devolver el caso' : 'Retirar la propuesta'}
                 </button>

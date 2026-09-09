@@ -123,7 +123,7 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
                 placeholder="Buscar workspace..."
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-emerald-400"
+                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-acento-claro"
                 autoFocus
               />
             </div>
@@ -155,7 +155,7 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
                       </div>
                     </div>
                     {isCurrent && (
-                      <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-emerald-700">
+                      <span className="shrink-0 rounded bg-acento/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-acento">
                         Aqui
                       </span>
                     )}

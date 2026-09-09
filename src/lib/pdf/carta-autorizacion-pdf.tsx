@@ -1,4 +1,5 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
+import { PALETA } from '@/lib/marca/paleta'
 
 /**
  * Carta de autorización para devolución de IVA con DOS solicitantes.
@@ -62,7 +63,7 @@ const s = StyleSheet.create({
   signatureLine: { borderTop: '1 solid #111827', marginTop: 46, paddingTop: 6 },
   signatureName: { fontSize: 10, fontFamily: 'Helvetica-Bold' },
   signatureDetail: { fontSize: 9, color: '#374151', marginTop: 2 },
-  nota: { marginTop: 16, fontSize: 8, fontFamily: 'Helvetica-Oblique', color: '#6B7280' },
+  nota: { marginTop: 16, fontSize: 8, fontFamily: 'Helvetica-Oblique', color: PALETA.tintaSuave },
 })
 
 export default function CartaAutorizacionPDF({ datos, fechaGeneracion, codigoNegocio }: CartaAutorizacionProps) {

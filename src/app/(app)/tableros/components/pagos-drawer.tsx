@@ -22,10 +22,10 @@ import Link from 'next/link'
 import { getComercialPagosMes } from '../../equipo/comercial-actions'
 import type { ComercialPagoMes } from '../../equipo/comercial-types'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = '#059669'
+const VERDE = 'var(--acento)'
 const OCRE = '#92400E'
 const AZUL = '#1D4ED8'
 
@@ -137,7 +137,7 @@ export function PagosDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-1.5 hover:bg-[#F5F4F2]"
+              className="shrink-0 rounded-lg p-1.5 hover:bg-papel"
               aria-label="Cerrar"
             >
               <X className="h-4 w-4" style={{ color: GRIS }} />
@@ -248,10 +248,10 @@ export function PagosDrawer({
                       {/* Solo las franjas con plata. Una fila de ceros diria "cero
                           tarifa" en cobros donde la tarifa ni siquiera aplica. */}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {p.a_tramo1 > 0 && <Chip texto={`1er pago ${fmtCOP(p.a_tramo1)}`} color={VERDE} fondo="#ECFDF5" />}
+                        {p.a_tramo1 > 0 && <Chip texto={`1er pago ${fmtCOP(p.a_tramo1)}`} color={VERDE} fondo="var(--acento-tinte)" />}
                         {p.a_tramo2 > 0 && <Chip texto={`2º pago ${fmtCOP(p.a_tramo2)}`} color={OCRE} fondo="#FFFBEB" />}
-                        {p.a_tarifa > 0 && <Chip texto={`Tarifa ${fmtCOP(p.a_tarifa)}`} color={GRIS} fondo="#F5F4F2" />}
-                        {p.excedente > 0 && <Chip texto={`Excedente ${fmtCOP(p.excedente)}`} color={GRIS} fondo="#F5F4F2" />}
+                        {p.a_tarifa > 0 && <Chip texto={`Tarifa ${fmtCOP(p.a_tarifa)}`} color={GRIS} fondo="var(--papel)" />}
+                        {p.excedente > 0 && <Chip texto={`Excedente ${fmtCOP(p.excedente)}`} color={GRIS} fondo="var(--papel)" />}
                       </div>
                     </>
                   )

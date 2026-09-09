@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
 
-const FONT = 'var(--font-montserrat), Montserrat, sans-serif'
+const FONT = 'var(--font-schibsted), sans-serif'
 
 export default function SinEspacioPage() {
   const [loading, setLoading] = useState(false)

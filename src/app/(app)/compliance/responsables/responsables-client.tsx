@@ -29,11 +29,11 @@ import {
 import { formatBogotaFechaCortaAno, todayBogotaISO } from '@/lib/dates/bogota';
 
 const ESTILO_MOTIVO: Record<MotivoAceptacion, string> = {
-  sin_cargo: 'bg-[#FEF2F2] text-[#B91C1C] border-[#EF4444]/30',
-  sin_aceptacion: 'bg-[#FFFBEB] text-[#B45309] border-[#F59E0B]/30',
-  no_incluido: 'bg-[#FFFBEB] text-[#B45309] border-[#F59E0B]/30',
-  desactualizada: 'bg-[#FEF2F2] text-[#B91C1C] border-[#EF4444]/30',
-  vigente: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
+  sin_cargo: 'bg-[#FEF2F2] text-[#B91C1C] border-alerta/30',
+  sin_aceptacion: 'bg-[#FFFBEB] text-[#B45309] border-advertencia/30',
+  no_incluido: 'bg-[#FFFBEB] text-[#B45309] border-advertencia/30',
+  desactualizada: 'bg-[#FEF2F2] text-[#B91C1C] border-alerta/30',
+  vigente: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
 };
 
 export default function ResponsablesClient({ inicial }: { inicial: TableroResponsables }) {
@@ -64,10 +64,10 @@ export default function ResponsablesClient({ inicial }: { inicial: TableroRespon
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <UserCheck className="h-6 w-6 text-[#1A1A1A]" />
+        <UserCheck className="h-6 w-6 text-tinta" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Responsables de controles</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Responsables de controles</h1>
+          <p className="text-sm text-tinta-suave">
             Qué cargo responde por cada control y quién lo aceptó. Responde un cargo, no una persona
             ni una cuenta: el responsable firma la carta y no necesita entrar a la plataforma.
           </p>
@@ -75,12 +75,12 @@ export default function ResponsablesClient({ inicial }: { inicial: TableroRespon
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {error}
         </div>
       )}
       {aviso && (
-        <div className="p-3 rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 text-[#059669] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-[var(--acento-tinte)] border border-acento/30 text-acento text-sm flex items-start gap-2">
           <Check className="h-4 w-4 mt-0.5 shrink-0" /> {aviso}
         </div>
       )}
@@ -108,7 +108,7 @@ export default function ResponsablesClient({ inicial }: { inicial: TableroRespon
       </div>
 
       {ind.total === 0 && (
-        <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 text-center text-sm text-[#6B7280]">
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 text-center text-sm text-tinta-suave">
           Este workspace todavía no tiene controles en la matriz de riesgo. Los indicadores quedan en
           blanco a propósito: sin controles no hay nada que medir, y un 0% o un 100% mentirían en
           direcciones opuestas.
@@ -187,13 +187,13 @@ function Indicador({
 }) {
   return (
     <div
-      className={`bg-white rounded-lg border p-4 ${alerta ? 'border-[#F59E0B]/40' : 'border-[#E5E7EB]'}`}
+      className={`bg-white rounded-lg border p-4 ${alerta ? 'border-advertencia/40' : 'border-[#E5E7EB]'}`}
     >
-      <p className="text-xs uppercase tracking-wide text-[#6B7280]">{titulo}</p>
-      <p className={`text-2xl font-bold mt-1 ${alerta ? 'text-[#B45309]' : 'text-[#059669]'}`}>
+      <p className="text-xs uppercase tracking-wide text-tinta-suave">{titulo}</p>
+      <p className={`text-2xl font-bold mt-1 ${alerta ? 'text-[#B45309]' : 'text-acento'}`}>
         {valor}
       </p>
-      <p className="text-xs text-[#6B7280] mt-0.5">{detalle}</p>
+      <p className="text-xs text-tinta-suave mt-0.5">{detalle}</p>
     </div>
   );
 }
@@ -237,8 +237,8 @@ function Cargos({
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
       <div>
-        <h2 className="text-base font-bold text-[#1A1A1A]">Cargos responsables</h2>
-        <p className="text-sm text-[#6B7280]">
+        <h2 className="text-base font-bold text-tinta">Cargos responsables</h2>
+        <p className="text-sm text-tinta-suave">
           El catálogo del workspace. Un cargo no se borra: se desactiva, porque el que ya nominó
           controles y firmó aceptaciones tiene que seguir siendo legible en la bitácora.
         </p>
@@ -249,7 +249,7 @@ function Cargos({
           value={nuevo}
           onChange={(e) => setNuevo(e.target.value)}
           placeholder="Ej. Coordinador jurídico predial"
-          className="flex-1 px-3 py-2 text-sm border border-[#E5E7EB] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#10B981]/30"
+          className="flex-1 px-3 py-2 text-sm border border-[#E5E7EB] rounded-lg focus:outline-none focus:ring-2 focus:ring-acento/30"
         />
         <button
           type="button"
@@ -258,14 +258,14 @@ function Cargos({
             onCrear(nuevo.trim());
             setNuevo('');
           }}
-          className="px-3 py-2 text-sm font-semibold rounded-lg bg-[#1A1A1A] text-white disabled:opacity-40 flex items-center gap-1.5"
+          className="px-3 py-2 text-sm font-semibold rounded-lg bg-tinta text-white disabled:opacity-40 flex items-center gap-1.5"
         >
           <Plus className="h-4 w-4" /> Agregar
         </button>
       </div>
 
       {tablero.cargos.length === 0 ? (
-        <p className="text-sm text-[#6B7280]">
+        <p className="text-sm text-tinta-suave">
           Todavía no hay cargos. Empieza por los que ya aparecen en tu matriz de riesgo.
         </p>
       ) : (
@@ -276,18 +276,18 @@ function Cargos({
               <div key={cargo.id} className="border border-[#E5E7EB] rounded-lg">
                 <div className="flex items-center gap-3 px-3 py-2.5 flex-wrap">
                   <span
-                    className={`text-sm font-semibold ${cargo.activo ? 'text-[#1A1A1A]' : 'text-[#6B7280] line-through'}`}
+                    className={`text-sm font-semibold ${cargo.activo ? 'text-tinta' : 'text-tinta-suave line-through'}`}
                   >
                     {cargo.nombre}
                   </span>
-                  <span className="text-xs text-[#6B7280]">{n} control(es)</span>
+                  <span className="text-xs text-tinta-suave">{n} control(es)</span>
                   <div className="flex-1" />
                   {n > 0 && (
                     <a
                       href={`/api/compliance/cargos/${cargo.id}/carta`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs font-semibold text-[#1A1A1A] border border-[#E5E7EB] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-[#F5F4F2]"
+                      className="text-xs font-semibold text-tinta border border-[#E5E7EB] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-papel"
                     >
                       <FileText className="h-3.5 w-3.5" /> Carta
                     </a>
@@ -296,7 +296,7 @@ function Cargos({
                     <button
                       type="button"
                       onClick={() => setAceptando(aceptando === cargo.id ? null : cargo.id)}
-                      className="text-xs font-semibold text-white bg-[#10B981] rounded-lg px-2.5 py-1.5"
+                      className="text-xs font-semibold text-white bg-acento rounded-lg px-2.5 py-1.5"
                     >
                       Registrar aceptación
                     </button>
@@ -305,7 +305,7 @@ function Cargos({
                     type="button"
                     disabled={pending}
                     onClick={() => onEstado(cargo.id, !cargo.activo, cargo.nombre)}
-                    className="text-xs text-[#6B7280] underline disabled:opacity-40"
+                    className="text-xs text-tinta-suave underline disabled:opacity-40"
                   >
                     {cargo.activo ? 'Desactivar' : 'Reactivar'}
                   </button>
@@ -395,15 +395,15 @@ function FormAceptacion({
   }
 
   return (
-    <div className="border-t border-[#E5E7EB] p-3 bg-[#F5F4F2] space-y-3">
-      <p className="text-xs text-[#6B7280]">
+    <div className="border-t border-[#E5E7EB] p-3 bg-papel space-y-3">
+      <p className="text-xs text-tinta-suave">
         Se registrarán los <strong>{controles}</strong> control(es) que este cargo tiene hoy, con la
         versión actual de cada uno. Si alguno cambia después, la aceptación quedará desactualizada y
         habrá que emitir una carta nueva.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        <label className="text-xs text-[#6B7280]">
+        <label className="text-xs text-tinta-suave">
           Nombre de quien acepta
           <input
             value={nombre}
@@ -411,7 +411,7 @@ function FormAceptacion({
             className="mt-1 w-full px-2.5 py-1.5 text-sm border border-[#E5E7EB] rounded-lg bg-white"
           />
         </label>
-        <label className="text-xs text-[#6B7280]">
+        <label className="text-xs text-tinta-suave">
           Documento de identidad
           <input
             value={documento}
@@ -420,7 +420,7 @@ function FormAceptacion({
             className="mt-1 w-full px-2.5 py-1.5 text-sm border border-[#E5E7EB] rounded-lg bg-white"
           />
         </label>
-        <label className="text-xs text-[#6B7280]">
+        <label className="text-xs text-tinta-suave">
           Fecha de la firma
           <input
             type="date"
@@ -432,13 +432,13 @@ function FormAceptacion({
         </label>
       </div>
 
-      <label className="block text-xs text-[#6B7280]">
+      <label className="block text-xs text-tinta-suave">
         Carta firmada (PDF o imagen)
         <input
           type="file"
           accept=".pdf,image/*"
           onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
-          className="mt-1 w-full text-sm text-[#1A1A1A]"
+          className="mt-1 w-full text-sm text-tinta"
         />
       </label>
 
@@ -449,7 +449,7 @@ function FormAceptacion({
           type="button"
           disabled={pending || subiendo}
           onClick={guardar}
-          className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-[#10B981] text-white disabled:opacity-40 flex items-center gap-1.5"
+          className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-acento text-white disabled:opacity-40 flex items-center gap-1.5"
         >
           {(pending || subiendo) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {subiendo ? 'Cargando documento…' : 'Registrar aceptación'}
@@ -457,7 +457,7 @@ function FormAceptacion({
         <button
           type="button"
           onClick={onCancelar}
-          className="px-3 py-1.5 text-sm text-[#6B7280] underline"
+          className="px-3 py-1.5 text-sm text-tinta-suave underline"
         >
           Cancelar
         </button>
@@ -486,8 +486,8 @@ function Controles({
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-base font-bold text-[#1A1A1A]">Controles ({controles.length})</h2>
-        <p className="text-sm text-[#6B7280]">
+        <h2 className="text-base font-bold text-tinta">Controles ({controles.length})</h2>
+        <p className="text-sm text-tinta-suave">
           El cargo dice quién responde ante un auditor. El usuario es opcional y solo aplica a quien
           opera el control dentro de la plataforma: nominarlo no reparte accesos, pero vincularlo sí
           hace que el control le aparezca.
@@ -559,19 +559,19 @@ function FilaControl({
         className="w-full flex items-center gap-3 px-4 py-3 text-left flex-wrap"
       >
         {expandido ? (
-          <ChevronDown className="h-4 w-4 text-[#6B7280] shrink-0" />
+          <ChevronDown className="h-4 w-4 text-tinta-suave shrink-0" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-[#6B7280] shrink-0" />
+          <ChevronRight className="h-4 w-4 text-tinta-suave shrink-0" />
         )}
         {control.referencia && (
-          <span className="text-xs font-bold text-white bg-[#1A1A1A] rounded px-1.5 py-0.5">
+          <span className="text-xs font-bold text-white bg-tinta rounded px-1.5 py-0.5">
             {control.referencia}
           </span>
         )}
-        <span className="text-sm font-semibold text-[#1A1A1A] flex-1 min-w-[12rem]">
+        <span className="text-sm font-semibold text-tinta flex-1 min-w-[12rem]">
           {control.nombre_control ?? 'Control sin nombre'}
         </span>
-        <span className="text-xs text-[#6B7280]">
+        <span className="text-xs text-tinta-suave">
           {control.cargo_nombre ?? 'Sin cargo responsable'}
         </span>
         <span className={`text-xs font-semibold border rounded-full px-2 py-0.5 ${ESTILO_MOTIVO[motivo]}`}>
@@ -589,18 +589,18 @@ function FilaControl({
           )}
 
           {control.actividad_control && (
-            <p className="text-sm text-[#6B7280]">{control.actividad_control}</p>
+            <p className="text-sm text-tinta-suave">{control.actividad_control}</p>
           )}
 
           {control.estado.aceptacion && (
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-xs text-tinta-suave">
               Última aceptación del cargo: {control.estado.aceptacion.persona_nombre} el{' '}
               {formatBogotaFechaCortaAno(control.estado.aceptacion.fecha_aceptacion)}.
             </p>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <label className="text-xs text-[#6B7280]">
+            <label className="text-xs text-tinta-suave">
               Cargo responsable (nomina)
               <select
                 value={cargoId}
@@ -615,7 +615,7 @@ function FilaControl({
                 ))}
               </select>
             </label>
-            <label className="text-xs text-[#6B7280]">
+            <label className="text-xs text-tinta-suave">
               Usuario que lo opera en ONE (opcional)
               <select
                 value={usuarioId}
@@ -636,7 +636,7 @@ function FilaControl({
             type="button"
             disabled={pending}
             onClick={() => onNominar(control.id, cargoId || null, usuarioId || null)}
-            className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-[#1A1A1A] text-white disabled:opacity-40"
+            className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-tinta text-white disabled:opacity-40"
           >
             Guardar responsable
           </button>
@@ -654,10 +654,10 @@ function Bitacora({ tablero }: { tablero: TableroResponsables }) {
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-3">
       <div>
-        <h2 className="text-base font-bold text-[#1A1A1A]">
+        <h2 className="text-base font-bold text-tinta">
           Bitácora de aceptaciones ({tablero.aceptaciones.length})
         </h2>
-        <p className="text-sm text-[#6B7280]">
+        <p className="text-sm text-tinta-suave">
           No se puede editar ni borrar: corregir una aceptación es registrar otra. Cada fila
           conserva la versión de los controles que se aceptó.
         </p>
@@ -669,11 +669,11 @@ function Bitacora({ tablero }: { tablero: TableroResponsables }) {
             key={a.id}
             className="flex justify-between gap-3 border-t border-[#E5E7EB] pt-1.5 text-sm flex-wrap"
           >
-            <span className="font-semibold text-[#1A1A1A]">
+            <span className="font-semibold text-tinta">
               {a.persona_nombre}{' '}
-              <span className="font-normal text-[#6B7280]">— {a.cargo_nombre ?? 'Cargo'}</span>
+              <span className="font-normal text-tinta-suave">— {a.cargo_nombre ?? 'Cargo'}</span>
             </span>
-            <span className="text-[#6B7280] text-xs">
+            <span className="text-tinta-suave text-xs">
               {a.controles_snapshot?.length ?? 0} control(es) ·{' '}
               {formatBogotaFechaCortaAno(a.fecha_aceptacion)} · registró{' '}
               {a.registrada_por_nombre ?? 'el oficial'}

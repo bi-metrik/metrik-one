@@ -39,9 +39,9 @@ export default function DevWorkspaceBar({
               borderRadius: '4px',
               textDecoration: 'none',
               fontWeight: isActive ? 700 : 400,
-              background: isActive ? '#10b981' : '#27272a',
+              background: isActive ? 'var(--acento)' : '#27272a',
               color: isActive ? '#fff' : '#a1a1aa',
-              border: isActive ? '1px solid #10b981' : '1px solid #3f3f46',
+              border: isActive ? '1px solid var(--acento)' : '1px solid #3f3f46',
               transition: 'all 0.1s',
             }}
           >

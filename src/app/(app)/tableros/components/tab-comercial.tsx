@@ -9,12 +9,13 @@ import { StatHero } from './stat-hero'
 import { ChartCard } from './chart-card'
 import { ProgressGauge } from './progress-gauge'
 import { AlertCard } from './alert-card'
+import { PALETA } from '@/lib/marca/paleta'
 
-const GREEN = '#10B981'
-const GREEN_LIGHT = '#D1FAE5'
-const GREEN_MED = '#6EE7B7'
-const GREEN_BRIGHT = '#34D399'
-const YELLOW = '#F59E0B'
+const GREEN = PALETA.acento
+const GREEN_LIGHT = PALETA.acentoTinte
+const GREEN_MED = PALETA.acentoClaro
+const GREEN_BRIGHT = PALETA.acentoClaro
+const YELLOW = PALETA.advertencia
 const BLUE = '#3B82F6'
 
 const ETAPA_COLORS: Record<string, string> = {
@@ -59,7 +60,7 @@ export function TabComercial({ data }: { data: ComercialData }) {
                 className="h-full rounded-full transition-all duration-500"
                 style={{
                   width: `${Math.min(metaPct, 100)}%`,
-                  backgroundColor: metaPct >= 100 ? GREEN : metaPct >= 70 ? YELLOW : '#6B7280',
+                  backgroundColor: metaPct >= 100 ? GREEN : metaPct >= 70 ? YELLOW : PALETA.tintaSuave,
                 }}
               />
             </div>
@@ -107,7 +108,7 @@ export function TabComercial({ data }: { data: ComercialData }) {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={pipelineActivo} layout="vertical" margin={{ left: 0, right: 16 }}>
                 <CartesianGrid horizontal={false} stroke="#F3F4F6" />
-                <XAxis type="number" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={(v) => formatCOP(v)} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={(v) => formatCOP(v)} />
                 <YAxis dataKey="etapa" type="category" width={90} tick={{ fontSize: 12, fill: '#374151' }} tickLine={false} axisLine={false} />
                 <Tooltip
                   contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E5E7EB' }}
@@ -134,7 +135,7 @@ export function TabComercial({ data }: { data: ComercialData }) {
         <ChartCard title="Conversion" accentColor={BLUE}>
           <ProgressGauge label="Tasa de cierre" value={data.conversionRate} />
           <div className="flex gap-3 mt-4">
-            <span className="text-sm font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700">
+            <span className="text-sm font-semibold px-3 py-1 rounded-full bg-acento-tinte text-acento">
               Ganadas: {data.ganados}
             </span>
             <span className="text-sm font-semibold px-3 py-1 rounded-full bg-red-50 text-red-700">
@@ -162,20 +163,20 @@ export function TabComercial({ data }: { data: ComercialData }) {
             <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
               <p>
                 Tus oportunidades pasan en promedio{' '}
-                <span className="text-2xl font-bold text-emerald-600">{data.ritmoPipeline.diasPromedioEtapaMasLenta}</span>
+                <span className="text-2xl font-bold text-acento">{data.ritmoPipeline.diasPromedioEtapaMasLenta}</span>
                 {' '}dias en{' '}
-                <span className="font-bold text-emerald-600">{data.ritmoPipeline.etapaMasLenta}</span>.
+                <span className="font-bold text-acento">{data.ritmoPipeline.etapaMasLenta}</span>.
               </p>
               <p>
                 Esta semana moviste{' '}
-                <span className="text-2xl font-bold text-emerald-600">{data.ritmoPipeline.transicionesEstaSemana}</span>
+                <span className="text-2xl font-bold text-acento">{data.ritmoPipeline.transicionesEstaSemana}</span>
                 {' '}oportunidades.
               </p>
               <p>
                 El mes pasado cerraste{' '}
-                <span className="text-2xl font-bold text-emerald-600">{data.ritmoPipeline.cierresMesAnterior}</span>
+                <span className="text-2xl font-bold text-acento">{data.ritmoPipeline.cierresMesAnterior}</span>
                 {' '}negocios en{' '}
-                <span className="text-2xl font-bold text-emerald-600">{data.ritmoPipeline.diasPromedioCierre}</span>
+                <span className="text-2xl font-bold text-acento">{data.ritmoPipeline.diasPromedioCierre}</span>
                 {' '}dias promedio.
               </p>
             </div>
@@ -202,7 +203,7 @@ export function TabComercial({ data }: { data: ComercialData }) {
                 <CartesianGrid horizontal={false} stroke="#F3F4F6" />
                 <XAxis
                   type="number"
-                  tick={{ fontSize: 11, fill: '#6B7280' }}
+                  tick={{ fontSize: 11, fill: PALETA.tintaSuave }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(v) => `${v}%`}

@@ -7,21 +7,21 @@
  * semaforo, y tienen que leerse como semaforo.
  */
 export const C = {
-  ink: '#1A1A1A',
-  inkMuted: '#6B7280',
+  ink: 'var(--tinta)',
+  inkMuted: 'var(--tinta-suave)',
   line: '#E5E7EB',
   lineStrong: '#D3D5D8',
   surface: '#FFFFFF',
   surfaceAlt: '#FAF9F7',
-  ground: '#F5F4F2',
-  brand: '#10B981',
-  brandDeep: '#059669',
+  ground: 'var(--papel)',
+  brand: 'var(--acento)',
+  brandDeep: 'var(--acento)',
   crit: '#DC2626',
   critSoft: '#FEE2E2',
   high: '#D97706',
   highSoft: '#FEF3C7',
-  ok: '#059669',
-  okSoft: '#D1FAE5',
+  ok: 'var(--acento)',
+  okSoft: 'var(--acento-tinte)',
 } as const
 
 /** Monoespaciada para cifras: alinea columnas y minutos. */

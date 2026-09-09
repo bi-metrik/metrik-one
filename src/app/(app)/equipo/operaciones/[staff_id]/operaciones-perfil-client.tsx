@@ -10,11 +10,11 @@ import type {
 } from '../../../tableros/operaciones-types'
 import { formatFecha } from '@/lib/dates/bogota'
 
-const VERDE = '#10B981'
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const VERDE = 'var(--acento)'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const AMBAR = '#F59E0B'
+const AMBAR = 'var(--advertencia)'
 const ROJO = '#B91C1C'
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',

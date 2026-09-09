@@ -18,10 +18,10 @@ export default async function ControlesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <ShieldCheck className="h-6 w-6 text-[#10B981]" />
+          <ShieldCheck className="h-6 w-6 text-acento" />
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Controles</h1>
-            <p className="text-sm text-[#6B7280]">
+            <h1 className="text-xl font-bold text-tinta">Controles</h1>
+            <p className="text-sm text-tinta-suave">
               {controles.length} control{controles.length !== 1 ? 'es' : ''} registrado{controles.length !== 1 ? 's' : ''}
             </p>
           </div>
@@ -29,7 +29,7 @@ export default async function ControlesPage() {
         {perms.canEditRiesgos && (
           <Link
             href="/controles/nuevo"
-            className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
+            className="inline-flex items-center gap-2 rounded-lg bg-acento px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-acento-hover"
           >
             <Plus className="h-4 w-4" />
             Nuevo control

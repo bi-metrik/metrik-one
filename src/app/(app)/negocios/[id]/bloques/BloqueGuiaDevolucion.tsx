@@ -107,7 +107,7 @@ export default function BloqueGuiaDevolucion({
   // ── Modo visible (heredado o post-aprobacion) ──
   if (modo === 'visible') {
     if (versiones.length === 0) {
-      return <p className="text-xs text-[#6B7280] italic">Aún no se ha generado la guía.</p>
+      return <p className="text-xs text-tinta-suave italic">Aún no se ha generado la guía.</p>
     }
     return (
       <div className="space-y-2">

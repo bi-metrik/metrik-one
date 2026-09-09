@@ -347,7 +347,7 @@ function CrearNegocioForm({
         <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Origen del negocio</label>
         <div className="flex items-center gap-2">
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${origenCfg?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]'}`}
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${origenCfg?.chipClass ?? 'bg-papel text-tinta-suave'}`}
           >
             {origenCfg?.label ?? origenResuelto}
           </span>

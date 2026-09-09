@@ -135,7 +135,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
       <select
         value={value}
         onChange={e => onChange(parseInt(e.target.value))}
-        className="rounded-md border border-[#E5E7EB] px-2 py-1 text-xs font-bold focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+        className="rounded-md border border-[#E5E7EB] px-2 py-1 text-xs font-bold focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
         aria-label={label}
       >
         {[1, 2, 3, 4, 5].map(v => (
@@ -154,13 +154,13 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
             href="/riesgos"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#E5E7EB] transition-colors hover:bg-gray-50"
           >
-            <ArrowLeft className="h-4 w-4 text-[#6B7280]" />
+            <ArrowLeft className="h-4 w-4 text-tinta-suave" />
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-mono text-sm font-bold text-[#10B981]">{causa.referencia}</span>
+              <span className="font-mono text-sm font-bold text-acento">{causa.referencia}</span>
               {!editing && causa.factor_riesgo && (
-                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave capitalize">
                   {causa.factor_riesgo}
                 </span>
               )}
@@ -168,7 +168,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                 <select
                   value={factorRiesgo}
                   onChange={e => setFactorRiesgo(e.target.value)}
-                  className="rounded-md border border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium capitalize focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+                  className="rounded-md border border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium capitalize focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
                 >
                   <option value="">Sin factor</option>
                   {FACTORES.map(f => (
@@ -180,11 +180,11 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                 Impacto: {impPonderado.toFixed(1)}
               </span>
             </div>
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-xs text-tinta-suave">
               Causa del evento{' '}
               {riesgo && (
                 <>
-                  <Link href={`/riesgos/${riesgo.id}`} className="text-[#10B981] hover:underline font-medium">
+                  <Link href={`/riesgos/${riesgo.id}`} className="text-acento hover:underline font-medium">
                     {riesgo.codigo}
                   </Link>
                   {' '}
@@ -205,7 +205,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                 <button
                   onClick={cancelEdit}
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-gray-100 transition-colors"
+                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-tinta-suave hover:bg-gray-100 transition-colors"
                 >
                   <X className="h-3.5 w-3.5" />
                   Cancelar
@@ -213,7 +213,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-[#10B981] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-acento px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
                 >
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                   {saving ? 'Guardando...' : 'Guardar'}
@@ -222,7 +222,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
             ) : (
               <button
                 onClick={() => setEditing(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-[#6B7280] transition-colors hover:bg-gray-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-tinta-suave transition-colors hover:bg-gray-50"
               >
                 <Pencil className="h-3.5 w-3.5" />
                 Editar
@@ -242,7 +242,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-orange-500" />
-          <h2 className="text-sm font-semibold text-[#1A1A1A]">Descripcion de la causa</h2>
+          <h2 className="text-sm font-semibold text-tinta">Descripcion de la causa</h2>
         </div>
         {editing ? (
           <div className="space-y-3">
@@ -250,25 +250,25 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
               value={descripcion}
               onChange={e => setDescripcion(e.target.value)}
               rows={3}
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm leading-relaxed focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981] resize-none"
+              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm leading-relaxed focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
               placeholder="Descripcion de la causa"
             />
             <div>
-              <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Contexto adicional</label>
+              <label className="block text-[10px] font-medium text-tinta-suave mb-1">Contexto adicional</label>
               <textarea
                 value={contexto}
                 onChange={e => setContexto(e.target.value)}
                 rows={2}
-                className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-xs leading-relaxed focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981] resize-none"
+                className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-xs leading-relaxed focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
                 placeholder="Contexto adicional (opcional)"
               />
             </div>
           </div>
         ) : (
           <>
-            <p className="text-sm text-[#1A1A1A] leading-relaxed">{causa.descripcion}</p>
+            <p className="text-sm text-tinta leading-relaxed">{causa.descripcion}</p>
             {causa.contexto && (
-              <p className="text-xs text-[#6B7280] italic leading-relaxed border-t border-[#E5E7EB] pt-2">{causa.contexto}</p>
+              <p className="text-xs text-tinta-suave italic leading-relaxed border-t border-[#E5E7EB] pt-2">{causa.contexto}</p>
             )}
           </>
         )}
@@ -276,7 +276,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
 
       {/* Scoring: 4 impact dimensions + probability */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Evaluacion de riesgo</h2>
+        <h2 className="text-sm font-semibold text-tinta">Evaluacion de riesgo</h2>
 
         {/* 4 dimensions grid */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -291,8 +291,8 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
             return (
               <div key={dim.key} className="rounded-lg border border-[#E5E7EB] p-3 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-medium text-[#6B7280]">{dim.label}</span>
-                  <span className="text-[10px] text-[#6B7280]">Peso: {dim.peso}</span>
+                  <span className="text-[10px] font-medium text-tinta-suave">{dim.label}</span>
+                  <span className="text-[10px] text-tinta-suave">Peso: {dim.peso}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {editing ? (
@@ -302,10 +302,10 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                       {val}
                     </span>
                   )}
-                  <span className="text-xs text-[#6B7280]">{nivel.label}</span>
+                  <span className="text-xs text-tinta-suave">{nivel.label}</span>
                 </div>
                 {!editing && causa[dim.key + '_detalle'] && (
-                  <p className="text-[10px] text-[#6B7280] italic mt-1">{causa[dim.key + '_detalle']}</p>
+                  <p className="text-[10px] text-tinta-suave italic mt-1">{causa[dim.key + '_detalle']}</p>
                 )}
               </div>
             )
@@ -314,11 +314,11 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
 
         {/* Impact ponderado summary */}
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#E5E7EB] bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-[#6B7280]">Impacto ponderado:</span>
+          <span className="text-sm font-medium text-tinta-suave">Impacto ponderado:</span>
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getImpactoBadgeColor(impPonderado)}`}>
             {impPonderado.toFixed(1)}
           </span>
-          <span className="text-xs text-[#6B7280]">
+          <span className="text-xs text-tinta-suave">
             = L:{editing ? impLegal : (causa.impacto_legal ?? 1)}×0.3 + R:{editing ? impReputacional : (causa.impacto_reputacional ?? 1)}×0.4 + O:{editing ? impOperativo : (causa.impacto_operativo ?? 1)}×0.2 + C:{editing ? impContagio : (causa.impacto_contagio ?? 1)}×0.1
           </span>
         </div>
@@ -326,7 +326,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
         {/* Probability */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-[#E5E7EB] p-3 space-y-1">
-            <span className="text-[10px] font-medium text-[#6B7280]">Probabilidad por ocurrencia</span>
+            <span className="text-[10px] font-medium text-tinta-suave">Probabilidad por ocurrencia</span>
             <div className="flex items-center gap-2">
               {editing ? (
                 <ScoreSelect value={probOcurrencia} onChange={setProbOcurrencia} label="Probabilidad ocurrencia" />
@@ -335,14 +335,14 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                   {causa.probabilidad_ocurrencia ?? '—'}
                 </span>
               )}
-              <span className="text-xs text-[#6B7280]">{PROB_LABELS[editing ? probOcurrencia : (causa.probabilidad_ocurrencia ?? 1)]}</span>
+              <span className="text-xs text-tinta-suave">{PROB_LABELS[editing ? probOcurrencia : (causa.probabilidad_ocurrencia ?? 1)]}</span>
             </div>
             {!editing && causa.probabilidad_ocurrencia_detalle && (
-              <p className="text-[10px] text-[#6B7280] italic">{causa.probabilidad_ocurrencia_detalle}</p>
+              <p className="text-[10px] text-tinta-suave italic">{causa.probabilidad_ocurrencia_detalle}</p>
             )}
           </div>
           <div className="rounded-lg border border-[#E5E7EB] p-3 space-y-1">
-            <span className="text-[10px] font-medium text-[#6B7280]">Probabilidad por frecuencia</span>
+            <span className="text-[10px] font-medium text-tinta-suave">Probabilidad por frecuencia</span>
             <div className="flex items-center gap-2">
               {editing ? (
                 <ScoreSelect value={probFrecuencia} onChange={setProbFrecuencia} label="Probabilidad frecuencia" />
@@ -351,21 +351,21 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                   {causa.probabilidad_frecuencia ?? '—'}
                 </span>
               )}
-              <span className="text-xs text-[#6B7280]">{PROB_LABELS[editing ? probFrecuencia : (causa.probabilidad_frecuencia ?? 1)]}</span>
+              <span className="text-xs text-tinta-suave">{PROB_LABELS[editing ? probFrecuencia : (causa.probabilidad_frecuencia ?? 1)]}</span>
             </div>
             {!editing && causa.probabilidad_frecuencia_detalle && (
-              <p className="text-[10px] text-[#6B7280] italic">{causa.probabilidad_frecuencia_detalle}</p>
+              <p className="text-[10px] text-tinta-suave italic">{causa.probabilidad_frecuencia_detalle}</p>
             )}
           </div>
         </div>
 
         {/* Probability result */}
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#E5E7EB] bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-[#6B7280]">Probabilidad resultante:</span>
+          <span className="text-sm font-medium text-tinta-suave">Probabilidad resultante:</span>
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${IMPACTO_NIVEL[probResultante]?.color ?? 'bg-gray-100 text-gray-800'}`}>
             {probResultante} — {PROB_LABELS[probResultante]}
           </span>
-          <span className="text-xs text-[#6B7280]">= max(ocurrencia, frecuencia)</span>
+          <span className="text-xs text-tinta-suave">= max(ocurrencia, frecuencia)</span>
         </div>
       </div>
 
@@ -373,8 +373,8 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
       {riesgo && (
         <div className="rounded-lg border border-[#E5E7EB] bg-gray-50 p-4 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">Evento de riesgo</span>
-            <Link href={`/riesgos/${riesgo.id}`} className="font-mono text-xs font-bold text-[#10B981] hover:underline">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-tinta-suave">Evento de riesgo</span>
+            <Link href={`/riesgos/${riesgo.id}`} className="font-mono text-xs font-bold text-acento hover:underline">
               {riesgo.codigo}
             </Link>
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${CATEGORIA_COLORS[riesgo.categoria]}`}>
@@ -384,7 +384,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
               {riesgo.nivel_riesgo}
             </span>
           </div>
-          <p className="text-xs text-[#1A1A1A] leading-relaxed">{riesgo.descripcion}</p>
+          <p className="text-xs text-tinta leading-relaxed">{riesgo.descripcion}</p>
         </div>
       )}
 
@@ -392,15 +392,15 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-[#10B981]" />
-            <h2 className="text-base font-semibold text-[#1A1A1A]">
+            <ShieldCheck className="h-5 w-5 text-acento" />
+            <h2 className="text-base font-semibold text-tinta">
               Controles asignados
-              <span className="ml-2 text-sm font-normal text-[#6B7280]">({controles.length})</span>
+              <span className="ml-2 text-sm font-normal text-tinta-suave">({controles.length})</span>
             </h2>
           </div>
           <Link
             href="/controles/nuevo"
-            className="text-xs font-medium text-[#10B981] hover:underline"
+            className="text-xs font-medium text-acento hover:underline"
           >
             Gestionar controles
           </Link>
@@ -408,8 +408,8 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
 
         {controles.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center">
-            <p className="text-xs text-[#6B7280]">Sin controles asignados a esta causa.</p>
-            <Link href="/controles/nuevo" className="mt-2 inline-block text-xs font-medium text-[#10B981] hover:underline">
+            <p className="text-xs text-tinta-suave">Sin controles asignados a esta causa.</p>
+            <Link href="/controles/nuevo" className="mt-2 inline-block text-xs font-medium text-acento hover:underline">
               Crear un control
             </Link>
           </div>
@@ -419,11 +419,11 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
             {controles.map((ctrl: any) => {
               const efectividad = ctrl.ponderacion_efectividad != null ? Math.round(ctrl.ponderacion_efectividad * 100) : null
               return (
-                <Link key={ctrl.id} href={`/controles/${ctrl.id}`} className="block rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-2 transition-colors hover:border-[#10B981]/30">
+                <Link key={ctrl.id} href={`/controles/${ctrl.id}`} className="block rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-2 transition-colors hover:border-acento/30">
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold text-[#10B981]">{ctrl.referencia ?? '\u2014'}</span>
+                        <span className="font-mono text-xs font-bold text-acento">{ctrl.referencia ?? '\u2014'}</span>
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
                           ctrl.tipo_control === 'preventivo' ? 'bg-blue-100 text-blue-800' :
                           ctrl.tipo_control === 'detectivo' ? 'bg-purple-100 text-purple-800' :
@@ -432,12 +432,12 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
                           {ctrl.tipo_control}
                         </span>
                         {ctrl.periodicidad && (
-                          <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                          <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave capitalize">
                             {ctrl.periodicidad}
                           </span>
                         )}
                       </div>
-                      <p className="text-sm font-medium text-[#1A1A1A]">{ctrl.nombre_control}</p>
+                      <p className="text-sm font-medium text-tinta">{ctrl.nombre_control}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {efectividad != null && (

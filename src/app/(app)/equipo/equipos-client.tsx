@@ -18,8 +18,8 @@ import { TabOperacionesPersonas } from '../tableros/components/tab-operaciones-p
 import type { ComercialResumenRow, ComercialMesResponse } from './comercial-types'
 import type { OperacionesBonoData } from '../tableros/operaciones-types'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 
 type Equipo = 'comercial' | 'operaciones'
 

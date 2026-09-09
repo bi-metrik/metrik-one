@@ -64,9 +64,9 @@ import {
 
 /** El color dice lo mismo que la frase, para quien solo mira. */
 const TONO_LECTURA: Record<VeredictoLectura['tono'], string> = {
-  ok: 'text-[#059669]',
+  ok: 'text-acento',
   ojo: 'text-[#B45309]',
-  espera: 'text-[#6B7280]',
+  espera: 'text-tinta-suave',
   falla: 'text-[#B91C1C]',
 };
 
@@ -132,7 +132,7 @@ export default function FormularioClient({
   }
 
   const textos = useMemo(() => textosAceptacion(v.marca.nombre), [v.marca.nombre]);
-  const acento = v.marca.colorPrimario ?? '#1A1A1A';
+  const acento = v.marca.colorPrimario ?? 'var(--tinta)';
   const quien =
     v.sujeto.razon_social?.trim() || v.sujeto.nombre?.trim() || 'tu empresa';
   const todasMarcadas = textos.every((t) => marcadas[t.tipo]);
@@ -428,8 +428,8 @@ export default function FormularioClient({
             </div>
           )}
           <div className="min-w-0">
-            <p className="text-sm font-bold text-[#1A1A1A] truncate">{v.marca.nombre}</p>
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-sm font-bold text-tinta truncate">{v.marca.nombre}</p>
+            <p className="text-xs text-tinta-suave">
               {[v.marca.nit ? `NIT ${v.marca.nit}` : null, v.marca.ciudad]
                 .filter(Boolean)
                 .join(' · ')}
@@ -439,10 +439,10 @@ export default function FormularioClient({
       </header>
 
       <div className="max-w-2xl mx-auto px-6 py-8">
-        <h1 className="text-xl font-bold text-[#1A1A1A]">
+        <h1 className="text-xl font-bold text-tinta">
           {v.marca.nombre} necesita conocer a {quien}
         </h1>
-        <p className="text-sm text-[#6B7280] mt-1.5">
+        <p className="text-sm text-tinta-suave mt-1.5">
           Es un trámite de una sola vez. Subes unos documentos, revisas los datos que el sistema
           lee de ellos y confirmas. No tienes que transcribir nada.
         </p>
@@ -456,7 +456,7 @@ export default function FormularioClient({
                 style={{ background: i <= pasoIdx ? acento : '#E5E7EB' }}
               />
               <p
-                className={`text-[11px] mt-1 ${i <= pasoIdx ? 'text-[#1A1A1A] font-semibold' : 'text-[#9CA3AF]'}`}
+                className={`text-[11px] mt-1 ${i <= pasoIdx ? 'text-tinta font-semibold' : 'text-[#9CA3AF]'}`}
               >
                 {PASO_LABEL[p as PasoPublico]}
               </p>
@@ -465,7 +465,7 @@ export default function FormularioClient({
         </div>
 
         {error && (
-          <div className="mb-5 rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-3 text-sm text-[#B91C1C]">
+          <div className="mb-5 rounded-lg border border-alerta/30 bg-alerta/5 p-3 text-sm text-[#B91C1C]">
             {error}
           </div>
         )}
@@ -474,7 +474,7 @@ export default function FormularioClient({
         {v.paso === 'aceptaciones' ? (
           <section>
             <div className="flex items-start gap-2 mb-4 text-sm text-[#4B5563]">
-              <Lock className="w-4 h-4 mt-0.5 shrink-0 text-[#6B7280]" />
+              <Lock className="w-4 h-4 mt-0.5 shrink-0 text-tinta-suave" />
               <p>
                 Antes de que subas cualquier documento necesitamos tu autorización. Léelas y
                 acéptalas para continuar.
@@ -489,7 +489,7 @@ export default function FormularioClient({
                     onClick={() => setAbierto(abierto === t.tipo ? null : t.tipo)}
                     className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
                   >
-                    <span className="text-sm font-semibold text-[#1A1A1A]">{t.titulo}</span>
+                    <span className="text-sm font-semibold text-tinta">{t.titulo}</span>
                     <ChevronDown
                       className={`w-4 h-4 text-[#9CA3AF] shrink-0 transition ${abierto === t.tipo ? 'rotate-180' : ''}`}
                     />
@@ -512,7 +512,7 @@ export default function FormularioClient({
                       }
                       className="mt-0.5 w-4 h-4 shrink-0"
                     />
-                    <span className="text-[13px] text-[#1A1A1A]">{t.casilla}</span>
+                    <span className="text-[13px] text-tinta">{t.casilla}</span>
                   </label>
                 </div>
               ))}
@@ -535,8 +535,8 @@ export default function FormularioClient({
           <>
             {/* ── PASO 2: documentos ── */}
             <section className="mb-8">
-              <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Documentos</h2>
-              <p className="text-xs text-[#6B7280] mb-3">
+              <h2 className="text-base font-bold text-tinta mb-1">Documentos</h2>
+              <p className="text-xs text-tinta-suave mb-3">
                 Arrastra cada archivo a su bloque, o usa el botón. PDF, JPG o PNG, hasta{' '}
                 {TAMANO_MAX_MB} MB cada uno. Los leemos apenas los subas y te decimos acá mismo si
                 el documento es el que se pidió.
@@ -575,14 +575,14 @@ export default function FormularioClient({
                       }
                       className={`px-4 py-3 rounded-lg border bg-white transition ${
                         encima === s.slot
-                          ? 'border-dashed border-2 border-[#1A1A1A] bg-[#F9FAFB]'
+                          ? 'border-dashed border-2 border-tinta bg-[#F9FAFB]'
                           : 'border-[#E5E7EB]'
                       }`}
                     >
                       <div className="flex items-center gap-3">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-[#1A1A1A]">{nombrePedido(s.slot)}</p>
-                          {nota && <p className="text-xs text-[#6B7280] mt-0.5">{nota}</p>}
+                          <p className="text-sm text-tinta">{nombrePedido(s.slot)}</p>
+                          {nota && <p className="text-xs text-tinta-suave mt-0.5">{nota}</p>}
                           {recibe && !s.cargado && (
                             <p className="text-xs text-[#9CA3AF] mt-0.5">
                               {encima === s.slot ? 'Suelta acá' : 'Arrástralo acá o usa el botón'}
@@ -591,7 +591,7 @@ export default function FormularioClient({
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           {s.cargado && (
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#059669]">
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-acento">
                               <Check className="w-3.5 h-3.5" /> Recibido
                             </span>
                           )}
@@ -637,7 +637,7 @@ export default function FormularioClient({
                       </div>
 
                       {leyendo === s.slot && (
-                        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-[#6B7280]">
+                        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-tinta-suave">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           Leyendo el documento para confirmar que es el correcto...
                         </p>
@@ -651,7 +651,7 @@ export default function FormularioClient({
                           {l.previa.length > 0 && (
                             <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
                               {l.previa.map((c) => (
-                                <li key={c.slug} className="text-[11px] text-[#6B7280]">
+                                <li key={c.slug} className="text-[11px] text-tinta-suave">
                                   <span className="text-[#9CA3AF]">
                                     {c.slug.replace(/_/g, ' ')}:
                                   </span>{' '}
@@ -665,7 +665,7 @@ export default function FormularioClient({
                               type="button"
                               disabled={pending}
                               onClick={() => inputs.current[s.slot]?.click()}
-                              className="mt-1.5 text-xs font-semibold underline text-[#1A1A1A] disabled:opacity-50"
+                              className="mt-1.5 text-xs font-semibold underline text-tinta disabled:opacity-50"
                             >
                               Subir otro archivo
                             </button>
@@ -681,8 +681,8 @@ export default function FormularioClient({
             {/* ── PASO 3: socios ── */}
             {v.pideCadena && (
               <section>
-                <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Socios de {quien}</h2>
-                <p className="text-xs text-[#6B7280] mb-2">{POR_QUE_LOS_SOCIOS}</p>
+                <h2 className="text-base font-bold text-tinta mb-1">Socios de {quien}</h2>
+                <p className="text-xs text-tinta-suave mb-2">{POR_QUE_LOS_SOCIOS}</p>
                 <p className="text-sm text-[#4B5563] mb-3">{resumenCadena(v.cadena, v.socios)}</p>
 
                 {v.socios.length > 0 && (
@@ -703,10 +703,10 @@ export default function FormularioClient({
                             ) : (
                               <User className="w-4 h-4 text-[#9CA3AF] shrink-0" />
                             )}
-                            <p className="text-sm text-[#1A1A1A] min-w-0 flex-1 truncate">
+                            <p className="text-sm text-tinta min-w-0 flex-1 truncate">
                               {soc.nombre}
                               {soc.documento_numero && (
-                                <span className="text-xs text-[#6B7280]">
+                                <span className="text-xs text-tinta-suave">
                                   {' '}
                                   · {soc.documento_numero}
                                 </span>
@@ -745,7 +745,7 @@ export default function FormularioClient({
                           ))}
 
                           {conParada && (
-                            <p className="text-xs text-[#6B7280] mt-1 pl-6">
+                            <p className="text-xs text-tinta-suave mt-1 pl-6">
                               {MOTIVO_PARADA_LABEL[soc.motivo_parada as MotivoParada] ??
                                 soc.motivo_parada}
                               {soc.parada_justificacion ? `: ${soc.parada_justificacion}` : ''}
@@ -754,7 +754,7 @@ export default function FormularioClient({
 
                           {esEmpresa && !conParada && (
                             <div className="mt-2 pl-6">
-                              <p className="text-xs text-[#6B7280]">{notaSoporteBf(soc.nombre)}</p>
+                              <p className="text-xs text-tinta-suave">{notaSoporteBf(soc.nombre)}</p>
                               <input
                                 ref={(el) => {
                                   inputsSoporte.current[soc.persona_id] = el;
@@ -774,7 +774,7 @@ export default function FormularioClient({
                                   type="button"
                                   disabled={pending || subiendoSoporte === soc.persona_id}
                                   onClick={() => inputsSoporte.current[soc.persona_id]?.click()}
-                                  className="inline-flex items-center gap-1.5 text-xs font-semibold underline text-[#1A1A1A] disabled:opacity-50"
+                                  className="inline-flex items-center gap-1.5 text-xs font-semibold underline text-tinta disabled:opacity-50"
                                 >
                                   {subiendoSoporte === soc.persona_id ? (
                                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -790,7 +790,7 @@ export default function FormularioClient({
                                   <span className="text-xs text-[#9CA3AF]">No se recibió</span>
                                 )}
                                 {soc.tiene_soporte && (
-                                  <span className="inline-flex items-center gap-1 text-xs text-[#059669]">
+                                  <span className="inline-flex items-center gap-1 text-xs text-acento">
                                     <Check className="w-3.5 h-3.5" /> Recibido
                                   </span>
                                 )}
@@ -800,7 +800,7 @@ export default function FormularioClient({
                                 type="button"
                                 disabled={pending}
                                 onClick={() => abrirFormSocio(soc.persona_id)}
-                                className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-[#1A1A1A] underline disabled:opacity-50"
+                                className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-tinta underline disabled:opacity-50"
                               >
                                 <Plus className="w-3.5 h-3.5" /> Agregar socio de {soc.nombre}
                               </button>
@@ -824,7 +824,7 @@ export default function FormularioClient({
                               <button
                                 type="button"
                                 onClick={() => setPorRetirar(null)}
-                                className="text-xs underline text-[#6B7280]"
+                                className="text-xs underline text-tinta-suave"
                               >
                                 Dejarlo
                               </button>
@@ -848,7 +848,7 @@ export default function FormularioClient({
                   </button>
                 ) : (
                   <div className="rounded-lg border border-[#E5E7EB] bg-white p-4">
-                    <p className="text-sm font-semibold text-[#1A1A1A] mb-3">
+                    <p className="text-sm font-semibold text-tinta mb-3">
                       {socioEditado
                         ? 'Editar socio'
                         : socioPadre
@@ -866,8 +866,8 @@ export default function FormularioClient({
                           }
                           className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
                             formSocio.tipoSujeto === t
-                              ? 'border-[#1A1A1A] text-[#1A1A1A]'
-                              : 'border-[#E5E7EB] text-[#6B7280]'
+                              ? 'border-tinta text-tinta'
+                              : 'border-[#E5E7EB] text-tinta-suave'
                           }`}
                         >
                           {t === 'natural' ? 'Es una persona' : 'Es una empresa'}
@@ -877,7 +877,7 @@ export default function FormularioClient({
 
                     <div className="space-y-2">
                       <div>
-                        <label className="block text-xs text-[#6B7280] mb-1">
+                        <label className="block text-xs text-tinta-suave mb-1">
                           {formSocio.tipoSujeto === 'juridica' ? 'Razón social' : 'Nombre completo'}
                         </label>
                         <input
@@ -936,7 +936,7 @@ export default function FormularioClient({
 
                       {formSocio.tipoSujeto === 'juridica' && (
                         <div className="pt-1">
-                          <label className="block text-xs text-[#6B7280] mb-1">
+                          <label className="block text-xs text-tinta-suave mb-1">
                             Si no se puede seguir bajando por esta empresa, dilo acá
                           </label>
                           <select
@@ -957,7 +957,7 @@ export default function FormularioClient({
                           </select>
                           {formSocio.motivoParada && (
                             <>
-                              <p className="text-xs text-[#6B7280] mt-1">
+                              <p className="text-xs text-tinta-suave mt-1">
                                 {MOTIVO_PARADA_AYUDA[formSocio.motivoParada as MotivoParada]}
                               </p>
                               <textarea
@@ -1011,19 +1011,19 @@ export default function FormularioClient({
 
             {/* ── PASO 4: datos ── */}
             <section>
-              <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Tus datos</h2>
+              <h2 className="text-base font-bold text-tinta mb-1">Tus datos</h2>
               {v.campos.length === 0 ? (
-                <p className="text-sm text-[#6B7280]">
+                <p className="text-sm text-tinta-suave">
                   Estamos leyendo tus documentos. Vuelve a este enlace más tarde y acá van a
                   aparecer los datos para que los revises.
                 </p>
               ) : porConfirmar.length === 0 ? (
-                <p className="text-sm text-[#6B7280]">
+                <p className="text-sm text-tinta-suave">
                   Ya confirmaste todos tus datos.
                 </p>
               ) : (
                 <>
-                  <p className="text-xs text-[#6B7280] mb-3">
+                  <p className="text-xs text-tinta-suave mb-3">
                     Esto es lo que leímos de tus documentos. Corrige lo que esté mal y confirma.
                   </p>
                   <div className="space-y-2">
@@ -1032,7 +1032,7 @@ export default function FormularioClient({
                         key={c.slug}
                         className="px-4 py-3 rounded-lg border border-[#E5E7EB] bg-white"
                       >
-                        <label className="block text-xs text-[#6B7280] mb-1">
+                        <label className="block text-xs text-tinta-suave mb-1">
                           {c.slug.replace(/_/g, ' ')}
                         </label>
                         <div className="flex gap-2">
@@ -1068,8 +1068,8 @@ export default function FormularioClient({
         {/* ── PASO 5: firma ── */}
         {v.paso === 'firma' && (
           <section className="mt-8">
-            <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Firma</h2>
-            <p className="text-xs text-[#6B7280] mb-3">
+            <h2 className="text-base font-bold text-tinta mb-1">Firma</h2>
+            <p className="text-xs text-tinta-suave mb-3">
               Con la firma declaras que lo que entregaste es cierto. Te mandamos un código de{' '}
               {LARGO_OTP} dígitos al correo con el que te invitaron.
             </p>
@@ -1118,10 +1118,10 @@ export default function FormularioClient({
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-[#1A1A1A]">
+                  <p className="text-sm text-tinta">
                     Te mandamos el código a <strong>{enviadoA}</strong>.
                   </p>
-                  <p className="text-xs text-[#6B7280] mt-1">
+                  <p className="text-xs text-tinta-suave mt-1">
                     Si no llega en un par de minutos, revisa el correo no deseado.
                   </p>
                   <input
@@ -1145,7 +1145,7 @@ export default function FormularioClient({
                     type="button"
                     disabled={pending}
                     onClick={pedirCodigo}
-                    className="mt-2 w-full px-4 py-2 text-xs font-semibold text-[#6B7280] disabled:opacity-40"
+                    className="mt-2 w-full px-4 py-2 text-xs font-semibold text-tinta-suave disabled:opacity-40"
                   >
                     Reenviar el código
                   </button>
@@ -1158,11 +1158,11 @@ export default function FormularioClient({
         {/* ── Listo ── */}
         {v.paso === 'listo' && (
           <section className="mt-8">
-            <div className="rounded-lg border border-[#10B981]/30 bg-[#ECFDF5] p-5">
-              <p className="inline-flex items-center gap-2 text-sm font-semibold text-[#059669]">
+            <div className="rounded-lg border border-acento/30 bg-[var(--acento-tinte)] p-5">
+              <p className="inline-flex items-center gap-2 text-sm font-semibold text-acento">
                 <ShieldCheck className="w-4 h-4" /> Firmaste. Ya está todo.
               </p>
-              <p className="text-xs text-[#047857] mt-1.5">
+              <p className="text-xs text-[var(--acento)] mt-1.5">
                 {v.marca.nombre} va a revisar tu expediente y te avisa. No tienes que hacer nada
                 más.
               </p>

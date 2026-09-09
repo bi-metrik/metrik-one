@@ -189,7 +189,7 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
       )}
 
       {cotizaciones.length === 0 ? (
-        <p className="text-xs text-[#6B7280]">Sin cotizaciones registradas</p>
+        <p className="text-xs text-tinta-suave">Sin cotizaciones registradas</p>
       ) : (
         <div className="space-y-2">
           {sorted.map(cot => {
@@ -204,21 +204,21 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
                   className={`flex flex-1 items-center gap-2.5 rounded-lg border p-2.5 transition-colors group ${
                     esAceptada
                       ? 'border-green-200 bg-green-50/50 hover:border-green-300 dark:border-green-900/30 dark:bg-green-950/10'
-                      : 'border-[#E5E7EB] hover:border-[#10B981] hover:bg-[#10B981]/5'
+                      : 'border-[#E5E7EB] hover:border-acento hover:bg-acento/5'
                   }`}
                 >
                   <FileSpreadsheet
                     className={`h-4 w-4 shrink-0 ${
-                      esAceptada ? 'text-green-500' : 'text-[#6B7280] group-hover:text-[#10B981]'
+                      esAceptada ? 'text-green-500' : 'text-tinta-suave group-hover:text-acento'
                     }`}
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-[#1A1A1A] truncate">
+                    <p className="text-xs font-medium text-tinta truncate">
                       {cot.consecutivo ?? 'COT'} &middot;{' '}
                       {cot.descripcion ?? (cot.modo === 'flash' ? 'Cotización rápida' : 'Cotización detallada')}
                     </p>
                     {cot.valor_total !== null && (
-                      <p className="text-[10px] text-[#6B7280] tabular-nums">{fmt(cot.valor_total)}</p>
+                      <p className="text-[10px] text-tinta-suave tabular-nums">{fmt(cot.valor_total)}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -232,7 +232,7 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
                     {esAceptada ? (
                       <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
                     ) : (
-                      <ExternalLink className="h-3 w-3 text-[#6B7280]/40 group-hover:text-[#10B981]" />
+                      <ExternalLink className="h-3 w-3 text-tinta-suave/40 group-hover:text-acento" />
                     )}
                   </div>
                 </Link>
@@ -262,7 +262,7 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
                         <button
                           onClick={() => handleEnviar(cot.id)}
                           disabled={isPending}
-                          className="rounded-lg border border-[#10B981] bg-[#10B981]/10 px-3 py-2 text-[10px] font-semibold text-[#10B981] hover:bg-[#10B981]/20 disabled:opacity-50 transition-colors"
+                          className="rounded-lg border border-acento bg-acento/10 px-3 py-2 text-[10px] font-semibold text-acento hover:bg-acento/20 disabled:opacity-50 transition-colors"
                         >
                           Enviar
                         </button>
@@ -320,7 +320,7 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
       {modo === 'editable' && !hayAceptada && (
         <Link
           href={`/negocios/${negocioId}/cotizacion/nueva`}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[#10B981]/40 bg-[#10B981]/5 py-2.5 text-xs font-medium text-[#10B981] hover:border-[#10B981] hover:bg-[#10B981]/10 transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-acento/40 bg-acento/5 py-2.5 text-xs font-medium text-acento hover:border-acento hover:bg-acento/10 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
           Nueva cotización

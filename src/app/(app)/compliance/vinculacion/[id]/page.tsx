@@ -35,11 +35,11 @@ export default async function DetalleVinculacionPage({
       <div className="p-6 max-w-3xl">
         <Link
           href="/compliance/vinculacion"
-          className="inline-flex items-center gap-1 text-sm text-[#6B7280] hover:text-[#1A1A1A] mb-4"
+          className="inline-flex items-center gap-1 text-sm text-tinta-suave hover:text-tinta mb-4"
         >
           <ChevronLeft className="w-4 h-4" /> Volver a la bandeja
         </Link>
-        <div className="rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-4 text-sm text-[#B91C1C]">
+        <div className="rounded-lg border border-alerta/30 bg-alerta/5 p-4 text-sm text-[#B91C1C]">
           <p className="font-semibold">No se pudo abrir el expediente.</p>
           <p className="mt-1">{r.error}</p>
         </div>

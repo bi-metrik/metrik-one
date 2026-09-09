@@ -86,10 +86,10 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Tags className="h-6 w-6 text-[#1A1A1A]" />
+        <Tags className="h-6 w-6 text-tinta" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Catálogo de segmentos</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Catálogo de segmentos</h1>
+          <p className="text-sm text-tinta-suave">
             Las poblaciones que tu organización consulta en listas restrictivas. Cada consulta
             queda etiquetada con una, y por eso después se pueden volver a consultar en masa.
           </p>
@@ -98,8 +98,8 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
 
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
         <div>
-          <h2 className="text-base font-bold text-[#1A1A1A]">Agregar segmento</h2>
-          <p className="text-sm text-[#6B7280] mt-1">
+          <h2 className="text-base font-bold text-tinta">Agregar segmento</h2>
+          <p className="text-sm text-tinta-suave mt-1">
             El <strong>universo</strong> es el eje de tu metodología de segmentación SARLAFT:
             contrapartes y empleados se califican con pesos y umbrales distintos. El segmento es
             la etiqueta operativa que cuelga de él — &ldquo;Proveedor&rdquo;, &ldquo;Accionista&rdquo; y
@@ -111,7 +111,7 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
           <div>
             <label
               htmlFor="nuevo-segmento-nombre"
-              className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5"
+              className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5"
             >
               Nombre
             </label>
@@ -122,13 +122,13 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
               onChange={e => setNuevoNombre(e.target.value)}
               placeholder="Contraparte"
               maxLength={80}
-              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
           <div>
             <label
               htmlFor="nuevo-segmento-universo"
-              className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5"
+              className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5"
             >
               Universo
             </label>
@@ -136,7 +136,7 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
               id="nuevo-segmento-universo"
               value={nuevoUniverso}
               onChange={e => setNuevoUniverso(e.target.value as UniversoSegmentacion)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               {UNIVERSOS_SEGMENTACION.map(u => (
                 <option key={u} value={u}>
@@ -149,7 +149,7 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
             <button
               type="submit"
               disabled={pending || nuevoNombre.trim().length === 0}
-              className="inline-flex items-center gap-2 h-11 px-5 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
             >
               <Plus className="h-4 w-4" />
               Agregar
@@ -158,19 +158,19 @@ export default function SegmentosClient({ inicial }: { inicial: ComplianceSegmen
         </form>
 
         {error && (
-          <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-start gap-2">
+          <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {error}
           </div>
         )}
         {aviso && (
-          <div className="p-3 rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 text-[#059669] text-sm flex items-center gap-2">
+          <div className="p-3 rounded-lg bg-[var(--acento-tinte)] border border-acento/30 text-acento text-sm flex items-center gap-2">
             <Check className="h-4 w-4" /> {aviso}
           </div>
         )}
       </div>
 
       {segmentos.length === 0 ? (
-        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+        <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
           Todavía no hay segmentos. Sin al menos uno, el equipo no puede consultar listas.
         </div>
       ) : (
@@ -209,20 +209,20 @@ function TablaSegmentos({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+            <tr className="bg-papel border-b border-[#E5E7EB]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Segmento
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Universo
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Orden
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Estado
               </th>
-              <th className="text-right px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-right px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Acciones
               </th>
             </tr>
@@ -239,7 +239,7 @@ function TablaSegmentos({
                         onChange={e => setBorrador(e.target.value)}
                         maxLength={80}
                         aria-label={`Nuevo nombre para ${seg.nombre}`}
-                        className="h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] text-sm"
+                        className="h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta text-sm"
                       />
                       <button
                         type="button"
@@ -249,7 +249,7 @@ function TablaSegmentos({
                           setEditando(null);
                         }}
                         title="Guardar nombre"
-                        className="text-[#10B981] hover:text-[#059669] disabled:text-[#9CA3AF]"
+                        className="text-acento hover:text-acento-hover disabled:text-[#9CA3AF]"
                       >
                         <Check className="h-4 w-4" />
                       </button>
@@ -257,7 +257,7 @@ function TablaSegmentos({
                         type="button"
                         onClick={() => setEditando(null)}
                         title="Cancelar"
-                        className="text-[#6B7280] hover:text-[#1A1A1A]"
+                        className="text-tinta-suave hover:text-tinta"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -266,7 +266,7 @@ function TablaSegmentos({
                     <button
                       type="button"
                       onClick={() => empezarEdicion(seg)}
-                      className="font-medium text-[#1A1A1A] hover:underline"
+                      className="font-medium text-tinta hover:underline"
                     >
                       {seg.nombre}
                     </button>
@@ -280,7 +280,7 @@ function TablaSegmentos({
                     onChange={e =>
                       onGuardar(seg.id, { universo: e.target.value as UniversoSegmentacion })
                     }
-                    className="h-9 px-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+                    className="h-9 px-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
                   >
                     {UNIVERSOS_SEGMENTACION.map(u => (
                       <option key={u} value={u}>
@@ -299,7 +299,7 @@ function TablaSegmentos({
                       const v = Number(e.target.value);
                       if (Number.isFinite(v) && v !== seg.orden) onGuardar(seg.id, { orden: v });
                     }}
-                    className="h-9 w-20 px-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] text-sm text-center"
+                    className="h-9 w-20 px-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta text-sm text-center"
                   />
                 </td>
                 <td className="px-4 py-2.5 text-center">
@@ -314,8 +314,8 @@ function TablaSegmentos({
                     }
                     className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider transition-colors ${
                       seg.activo
-                        ? 'bg-[#10B981] text-white hover:bg-[#059669]'
-                        : 'bg-[#E5E7EB] text-[#6B7280] hover:bg-[#D1D5DB]'
+                        ? 'bg-acento text-white hover:bg-acento-hover'
+                        : 'bg-[#E5E7EB] text-tinta-suave hover:bg-[#D1D5DB]'
                     }`}
                   >
                     {seg.activo ? 'Activo' : 'Inactivo'}
@@ -338,7 +338,7 @@ function TablaSegmentos({
           </tbody>
         </table>
       </div>
-      <p className="px-4 py-3 text-xs text-[#6B7280] border-t border-[#E5E7EB]">
+      <p className="px-4 py-3 text-xs text-tinta-suave border-t border-[#E5E7EB]">
         Un segmento que ya tiene consultas no se puede eliminar: se desactiva. Así el historial
         conserva por qué se consultó a cada contraparte.
       </p>

@@ -24,7 +24,7 @@ export function StatHero({ label, value, delta, deltaLabel, suffix, invertDelta 
       </div>
       {delta !== undefined && (
         <div className={`flex items-center gap-1 mt-1 text-sm font-semibold ${
-          isNeutral ? 'text-gray-400' : isPositive ? 'text-emerald-500' : 'text-red-500'
+          isNeutral ? 'text-gray-400' : isPositive ? 'text-acento' : 'text-red-500'
         }`}>
           {isNeutral ? (
             <Minus className="h-3.5 w-3.5" />

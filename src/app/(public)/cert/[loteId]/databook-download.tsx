@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { getDatabookUrl } from '@/lib/cert/public-actions'
 
-const C = { black: '#1A1A1A', gray: '#6B7280', grayLt: '#9CA3AF', green: '#10B981', greenDark: '#059669', red: '#B91C1C', line: '#E5E7EB', white: '#FFFFFF' }
+const C = { black: 'var(--tinta)', gray: 'var(--tinta-suave)', grayLt: '#9CA3AF', green: 'var(--acento)', greenDark: 'var(--acento)', red: '#B91C1C', line: '#E5E7EB', white: '#FFFFFF' }
 
 export default function DatabookDownload({ loteId }: { loteId: string }) {
   const [open, setOpen] = useState(false)

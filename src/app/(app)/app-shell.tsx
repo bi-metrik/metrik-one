@@ -500,23 +500,25 @@ export default function AppShell({
     brandingStyle['--sidebar-primary'] = branding.colorPrimario
     // If primary is light, use dark text for primary-foreground
     if (hexLuminance(branding.colorPrimario) > 0.4) {
-      brandingStyle['--sidebar-primary-foreground'] = '#1a1a1a'
+      brandingStyle['--sidebar-primary-foreground'] = 'var(--tinta)'
     }
   }
   if (branding?.colorSecundario) {
     brandingStyle['--sidebar'] = branding.colorSecundario
     // If sidebar bg is light, use dark text colors for readability
     if (hexLuminance(branding.colorSecundario) > 0.4) {
-      brandingStyle['--sidebar-foreground'] = '#1a1a1a'
+      brandingStyle['--sidebar-foreground'] = 'var(--tinta)'
       brandingStyle['--sidebar-muted'] = '#555555'
       brandingStyle['--sidebar-border'] = '#d4d4d4'
+      // Sobre un sidebar claro, Pino 300 casi no se ve: la linea vuelve al acento.
+      brandingStyle['--sidebar-linea'] = 'var(--acento)'
     }
   }
 
   const hasLogo = !!branding?.logoUrl
 
   // Brand lockup: MéTRIK (Bold 700) + one (Light 300) + green line
-  const logoFont = 'var(--font-montserrat), Montserrat, sans-serif'
+  const logoFont = 'var(--font-schibsted), sans-serif'
 
   return (
     <div className="flex h-dvh flex-col bg-background" style={brandingStyle}>
@@ -540,9 +542,9 @@ export default function AppShell({
               <div className="inline-flex flex-col">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em', color: 'var(--sidebar-foreground)' }}>MéTRIK</span>
-                  <span style={{ fontWeight: 300, fontSize: '0.9375rem', letterSpacing: '-0.005em', color: 'var(--sidebar-foreground)', marginLeft: '0.25rem' }}>one</span>
+                  <span style={{ fontWeight: 400, fontSize: '0.9375rem', letterSpacing: '-0.005em', color: 'var(--sidebar-foreground)', marginLeft: '0.25rem' }}>one</span>
                 </div>
-                <div style={{ height: '2px', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '3px' }} />
+                <div style={{ height: '2px', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '3px' }} />
               </div>
             </Link>
           ) : (
@@ -552,7 +554,7 @@ export default function AppShell({
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
                   <span style={{ fontWeight: 400, fontSize: '0.5625rem' }}>1</span>
                 </div>
-                <div style={{ height: '1.5px', width: '100%', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '1px' }} />
+                <div style={{ height: '1.5px', width: '100%', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '1px' }} />
               </div>
             </Link>
           )}
@@ -1013,7 +1015,7 @@ export default function AppShell({
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
                   <span style={{ fontWeight: 400, fontSize: '0.5625rem' }}>1</span>
                 </div>
-                <div style={{ height: '1.5px', width: '100%', backgroundColor: '#10B981', borderRadius: '1px', marginTop: '1px' }} />
+                <div style={{ height: '1.5px', width: '100%', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '1px' }} />
               </div>
             </Link>
             {hasLogo && (

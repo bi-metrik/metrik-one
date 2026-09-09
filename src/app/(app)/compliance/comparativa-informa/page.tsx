@@ -30,10 +30,10 @@ export default async function ComparativaInformaPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Scale className="h-6 w-6 text-[#10B981]" />
+        <Scale className="h-6 w-6 text-acento" />
         <div>
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Comparativa Informa vs Valida</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Comparativa Informa vs Valida</h1>
+          <p className="text-sm text-tinta-suave">
             Auditoría de consultas duales — workspace MéTRIK.
           </p>
         </div>

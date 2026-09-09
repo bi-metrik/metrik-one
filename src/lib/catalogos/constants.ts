@@ -70,12 +70,12 @@ export type FuenteAdquisicion = typeof FUENTES_ADQUISICION[number]['value']
 export const ORIGENES_NEGOCIO = [
   { value: 'meta', label: 'Meta (Facebook / Instagram)', chipClass: 'bg-[#1877F2]/10 text-[#1877F2]' },
   { value: 'alianza', label: 'Alianza', chipClass: 'bg-[#8B5CF6]/10 text-[#7C3AED]' },
-  { value: 'referido', label: 'Referido', chipClass: 'bg-[#10B981]/10 text-[#059669]' },
-  { value: 'promotor', label: 'Promotor', chipClass: 'bg-[#F59E0B]/10 text-[#B45309]' },
-  { value: 'contacto_directo', label: 'Contacto directo', chipClass: 'bg-[#F5F4F2] text-[#6B7280]' },
+  { value: 'referido', label: 'Referido', chipClass: 'bg-acento/10 text-acento' },
+  { value: 'promotor', label: 'Promotor', chipClass: 'bg-advertencia/10 text-[#B45309]' },
+  { value: 'contacto_directo', label: 'Contacto directo', chipClass: 'bg-papel text-tinta-suave' },
   { value: 'evento', label: 'Evento / Networking', chipClass: 'bg-[#0EA5E9]/10 text-[#0284C7]' },
   { value: 'web_organico', label: 'Web / Orgánico', chipClass: 'bg-[#14B8A6]/10 text-[#0F766E]' },
-  { value: 'otro', label: 'Otro', chipClass: 'bg-[#F5F4F2] text-[#6B7280]' },
+  { value: 'otro', label: 'Otro', chipClass: 'bg-papel text-tinta-suave' },
 ] as const
 
 export type OrigenNegocio = typeof ORIGENES_NEGOCIO[number]['value']
@@ -137,7 +137,7 @@ export const STATUS_CONTACTO = [
   { value: 'primer_contacto', label: 'Primer contacto', chipClass: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' },
   { value: 'segundo_contacto', label: 'Segundo contacto', chipClass: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' },
   { value: 'tercer_contacto', label: 'Tercer contacto', chipClass: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300' },
-  { value: 'conectado', label: 'Conectado', chipClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
+  { value: 'conectado', label: 'Conectado', chipClass: 'bg-acento/15 text-acento dark:bg-acento/30 dark:text-acento-claro' },
   { value: 'no_contesto', label: 'No contestó', chipClass: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300' },
   { value: 'standby', label: 'Standby', chipClass: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
   { value: 'descartado', label: 'Descartado', chipClass: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300' },
@@ -145,7 +145,7 @@ export const STATUS_CONTACTO = [
 
 export type StatusContacto = typeof STATUS_CONTACTO[number]['value']
 
-const CHIP_STATUS_DESCONOCIDO = 'bg-[#F5F4F2] text-[#6B7280]'
+const CHIP_STATUS_DESCONOCIDO = 'bg-papel text-tinta-suave'
 
 /**
  * Resuelve label + chip de un status. Tolera valores que no están en la lista

@@ -81,7 +81,7 @@ export default function TutorialTour({ slug, forceStart = 0 }: Props) {
         smoothScroll: true,
         allowClose: true,
         animate: true,
-        overlayColor: '#1A1A1A',
+        overlayColor: 'var(--tinta)',
         overlayOpacity: 0.55,
         stagePadding: 6,
         stageRadius: 8,

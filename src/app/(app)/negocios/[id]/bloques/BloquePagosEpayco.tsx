@@ -176,22 +176,22 @@ export default function BloquePagosEpayco({
   if (modo === 'visible') {
     return (
       <div className="space-y-1.5">
-        {pagos.length === 0 && <p className="text-xs text-[#6B7280] italic">Sin pagos registrados</p>}
+        {pagos.length === 0 && <p className="text-xs text-tinta-suave italic">Sin pagos registrados</p>}
         {pagos.map((p, i) => (
           <div key={i} className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] p-2.5">
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-[#1A1A1A]">Ref: {p.ref_payco}</p>
-              <p className="text-[10px] text-[#6B7280]">{p.pagador_nombre}</p>
+              <p className="text-xs font-medium text-tinta">Ref: {p.ref_payco}</p>
+              <p className="text-[10px] text-tinta-suave">{p.pagador_nombre}</p>
             </div>
-            <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
+            <span className="text-xs font-semibold text-tinta tabular-nums shrink-0">
               {fmt(p.monto_bruto)}
             </span>
           </div>
         ))}
         {pagos.length > 0 && (
           <div className="rounded-lg bg-slate-50 border border-slate-100 p-2 text-center">
-            <p className="text-[10px] text-[#6B7280] font-medium">{pagos.length} pago{pagos.length > 1 ? 's' : ''}</p>
-            <p className="text-sm font-bold text-[#1A1A1A] tabular-nums">
+            <p className="text-[10px] text-tinta-suave font-medium">{pagos.length} pago{pagos.length > 1 ? 's' : ''}</p>
+            <p className="text-sm font-bold text-tinta tabular-nums">
               {fmt(total)}
             </p>
           </div>
@@ -210,31 +210,31 @@ export default function BloquePagosEpayco({
             <div key={i} className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] bg-white p-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-[#1A1A1A]">Ref: {p.ref_payco}</span>
-                  <span className="rounded bg-[#F0FDF4] px-1.5 py-0.5 text-[9px] font-medium text-[#10B981] border border-[#BBF7D0]">
+                  <span className="text-xs font-medium text-tinta">Ref: {p.ref_payco}</span>
+                  <span className="rounded bg-[var(--acento-tinte)] px-1.5 py-0.5 text-[9px] font-medium text-acento border border-[#BBF7D0]">
                     verificado
                   </span>
                 </div>
-                <p className="text-[10px] text-[#6B7280] mt-0.5">{p.pagador_nombre}</p>
+                <p className="text-[10px] text-tinta-suave mt-0.5">{p.pagador_nombre}</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="text-xs font-semibold text-[#1A1A1A] tabular-nums">{fmt(p.monto_bruto)}</p>
-                <p className="text-[10px] text-[#6B7280] tabular-nums">Neto: {fmt(p.monto_neto)}</p>
+                <p className="text-xs font-semibold text-tinta tabular-nums">{fmt(p.monto_bruto)}</p>
+                <p className="text-[10px] text-tinta-suave tabular-nums">Neto: {fmt(p.monto_neto)}</p>
               </div>
             </div>
           ))}
 
           {/* Total bar */}
           <div className="rounded-lg bg-slate-50 border border-slate-100 p-2.5 flex items-center justify-between">
-            <span className="text-[10px] text-[#6B7280] font-medium">{pagos.length} pago{pagos.length > 1 ? 's' : ''} registrado{pagos.length > 1 ? 's' : ''}</span>
-            <span className="text-sm font-bold text-[#1A1A1A] tabular-nums">{fmt(total)}</span>
+            <span className="text-[10px] text-tinta-suave font-medium">{pagos.length} pago{pagos.length > 1 ? 's' : ''} registrado{pagos.length > 1 ? 's' : ''}</span>
+            <span className="text-sm font-bold text-tinta tabular-nums">{fmt(total)}</span>
           </div>
         </div>
       )}
 
       {/* New payment section */}
       <div className="border-t border-[#E5E7EB] pt-3 mt-1">
-        <p className="text-[11px] font-medium text-[#6B7280] mb-2">Nuevo pago</p>
+        <p className="text-[11px] font-medium text-tinta-suave mb-2">Nuevo pago</p>
         {faltaHonorario && (
           <div className="mb-2">
             <AvisoHonorarioPendiente />
@@ -259,13 +259,13 @@ export default function BloquePagosEpayco({
               }}
               placeholder="Ej: 344799998"
               disabled={consultando || isPending || faltaHonorario}
-              className={`w-full rounded-lg border bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60 ${
+              className={`w-full rounded-lg border bg-white px-3 py-2 text-xs text-tinta focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60 ${
                 newRef.length > 0 && newRef.length !== 9
                   ? 'border-amber-400 focus:border-amber-400'
-                  : 'border-[#E5E7EB] focus:border-[#10B981]'
+                  : 'border-[#E5E7EB] focus:border-acento'
               }`}
             />
-            <p className="mt-1 text-[10px] text-[#6B7280]">
+            <p className="mt-1 text-[10px] text-tinta-suave">
               La referencia debe tener 9 digitos{newRef.length > 0 && newRef.length !== 9 && (
                 <span className="text-amber-600 font-medium"> ({newRef.length}/9)</span>
               )}
@@ -304,7 +304,7 @@ export default function BloquePagosEpayco({
             placeholder="Justifica por qué registras esta referencia duplicada…"
             rows={2}
             disabled={isPending}
-            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-amber-400/30 focus:border-amber-400 disabled:opacity-60"
+            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-tinta focus:outline-none focus:ring-2 focus:ring-amber-400/30 focus:border-amber-400 disabled:opacity-60"
           />
           <div className="flex gap-2">
             <button
@@ -327,13 +327,13 @@ export default function BloquePagosEpayco({
 
       {/* Preview card */}
       {previewDesglose && (
-        <div className="rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] p-3 space-y-1">
-          <p className="text-xs font-semibold text-[#10B981]">Transaccion verificada</p>
-          <p className="text-xs text-[#1A1A1A]">Pagador: {previewDesglose.pagador_nombre}</p>
-          <p className="text-xs text-[#1A1A1A] tabular-nums">Monto: {fmt(previewDesglose.monto_bruto)}</p>
-          <p className="text-xs text-[#1A1A1A] tabular-nums">Comision ePayco: -{fmt(previewDesglose.total_descuentos)}</p>
+        <div className="rounded-lg border border-[#BBF7D0] bg-[var(--acento-tinte)] p-3 space-y-1">
+          <p className="text-xs font-semibold text-acento">Transaccion verificada</p>
+          <p className="text-xs text-tinta">Pagador: {previewDesglose.pagador_nombre}</p>
+          <p className="text-xs text-tinta tabular-nums">Monto: {fmt(previewDesglose.monto_bruto)}</p>
+          <p className="text-xs text-tinta tabular-nums">Comision ePayco: -{fmt(previewDesglose.total_descuentos)}</p>
           {(previewDesglose.comision > 0 || previewDesglose.iva_comision > 0 || previewDesglose.retefuente > 0 || previewDesglose.reteica > 0) && (
-            <p className="text-[10px] text-[#6B7280] tabular-nums pl-2">
+            <p className="text-[10px] text-tinta-suave tabular-nums pl-2">
               {[
                 previewDesglose.comision > 0 && `Comision: ${fmt(previewDesglose.comision)}`,
                 previewDesglose.iva_comision > 0 && `IVA: ${fmt(previewDesglose.iva_comision)}`,
@@ -342,18 +342,18 @@ export default function BloquePagosEpayco({
               ].filter(Boolean).join(' + ')}
             </p>
           )}
-          <p className="text-xs font-semibold text-[#1A1A1A] tabular-nums">Neto: {fmt(previewDesglose.monto_neto)}</p>
+          <p className="text-xs font-semibold text-tinta tabular-nums">Neto: {fmt(previewDesglose.monto_neto)}</p>
           <button
             onClick={handleRegistrar}
             disabled={isPending}
-            className="w-full mt-2 rounded-lg bg-[#10B981] py-2 text-xs font-semibold text-white hover:bg-[#059669] disabled:opacity-40 transition-colors"
+            className="w-full mt-2 rounded-lg bg-acento py-2 text-xs font-semibold text-white hover:bg-acento-hover disabled:opacity-40 transition-colors"
           >
             {isPending ? 'Registrando...' : 'Registrar pago'}
           </button>
           <button
             onClick={() => setShowReparto(true)}
             disabled={isPending}
-            className="w-full mt-1.5 rounded-lg border border-[#10B981] py-2 text-xs font-semibold text-[#10B981] hover:bg-[#ECFDF5] disabled:opacity-40 transition-colors"
+            className="w-full mt-1.5 rounded-lg border border-acento py-2 text-xs font-semibold text-acento hover:bg-[var(--acento-tinte)] disabled:opacity-40 transition-colors"
           >
             ¿El pago cubre varios negocios? Repartir
           </button>

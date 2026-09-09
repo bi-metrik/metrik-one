@@ -9,10 +9,10 @@ import {
 } from '@/lib/cert/admin'
 
 const C = {
-  black: '#1A1A1A', gray: '#6B7280', grayLt: '#9CA3AF', green: '#10B981',
-  greenDark: '#059669', red: '#EF4444', redDark: '#B91C1C', amber: '#B45309',
+  black: 'var(--tinta)', gray: 'var(--tinta-suave)', grayLt: '#9CA3AF', green: 'var(--acento)',
+  greenDark: 'var(--acento)', red: 'var(--alerta)', redDark: '#B91C1C', amber: '#B45309',
   amberSoft: 'rgba(245,158,11,0.12)', white: '#FFFFFF', line: '#E5E7EB',
-  hair: '#F0EFEC', bg: '#F5F4F2',
+  hair: '#F0EFEC', bg: 'var(--papel)',
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -129,7 +129,7 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
   const inp: React.CSSProperties = { width: '100%', padding: '10px 12px', border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 14, color: C.black, background: C.white }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '20px 16px 60px', fontFamily: 'var(--font-montserrat), system-ui, sans-serif' }}>
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '20px 16px 60px', fontFamily: 'var(--font-schibsted), system-ui, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: C.black, margin: 0 }}>Certificaciones</h1>
         <button onClick={() => setShowForm((v) => !v)} disabled={pending}
@@ -307,8 +307,8 @@ export default function CertificacionesClient({ lotes, productos, negocios, esCe
 }
 
 function ActBtn({ label, onClick, disabled, primary, danger }: { label: string; onClick: () => void; disabled?: boolean; primary?: boolean; danger?: boolean }) {
-  const bg = primary ? '#10B981' : danger ? '#FFFFFF' : '#FFFFFF'
-  const color = primary ? '#FFFFFF' : danger ? '#B91C1C' : '#1A1A1A'
+  const bg = primary ? 'var(--acento)' : danger ? '#FFFFFF' : '#FFFFFF'
+  const color = primary ? '#FFFFFF' : danger ? '#B91C1C' : 'var(--tinta)'
   const border = primary ? 'none' : `1px solid ${danger ? 'rgba(239,68,68,0.4)' : '#E5E7EB'}`
   return (
     <button onClick={onClick} disabled={disabled}

@@ -4,29 +4,73 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Sistema visual "Pino Profundo" (decision de marca 2026-09-07).
+
+   Antes de esto la paleta de MeTRIK ERAN los defaults de Tailwind: el "Verde
+   Metrica" era el emerald 500, el "Gris Acero" el gray 500, la alerta el red
+   500 y el warning el amber 500. Una marca construida sobre defaults no se
+   puede defender porque no hay nada que defender: por eso estos valores son
+   elegidos, no heredados.
+
+   Se declaran por ROL, no por color. Un verde que era un check de exito y otro
+   que era el acento de marca no son el mismo token aunque fueran el mismo hex;
+   al migrar se decidio por rol. Regla practica para elegir:
+
+     --acento         accion de marca, enlace, foco, estado "va bien" sobre claro
+     --acento-hover   el mismo elemento en hover/active/pressed
+     --acento-claro   verde sobre fondo OSCURO — el acento base no contrasta ahi
+     --dato-vivo      cifra o senal viva, SOLO sobre carbon (regla de marca)
+     --tinta          texto principal
+     --tinta-suave    texto de soporte, metadatos, placeholders
+     --alerta         error, bloqueo, vencido
+     --advertencia    pendiente, por vencer, atencion
+     --papel          fondo de pagina y de zonas en reposo
+
+   Ojo con --acento-claro: es el UNICO verde legible sobre carbon. El acento
+   base sobre `--tinta` da 2.24:1, por debajo de cualquier minimo.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --acento: #0E5C43;
+  --acento-hover: #1C7D5E;
+  --acento-claro: #6FB89D;
+  /* Superficie y borde de chip/badge del acento. Derivados, no colores nuevos:
+     existen porque la paleta vieja resolvia eso con el emerald 50 y el emerald
+     200, que tambien eran defaults de Tailwind. Con 8% el texto `--acento`
+     encima queda en 7.0:1. */
+  --acento-tinte: color-mix(in srgb, var(--acento) 8%, #FFFFFF);
+  --acento-borde: color-mix(in srgb, var(--acento) 28%, #FFFFFF);
+  --dato-vivo: #B8E62D;
+  --tinta: #191713;
+  --tinta-suave: #6E6A62;
+  --alerta: #B3382C;
+  --advertencia: #B87515;
+  --papel: #F3F1EC;
+}
+
 :root {
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: var(--tinta);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: var(--tinta);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --popover-foreground: var(--tinta);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: var(--tinta-suave);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: var(--alerta);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --radius: 0.625rem;
-  --success: oklch(0.55 0.18 142);
-  --warning: oklch(0.75 0.18 65);
+  --success: var(--acento);
+  --warning: var(--advertencia);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -41,6 +85,10 @@
   --sidebar-border: oklch(0.28 0 0);
   --sidebar-ring: oklch(0.708 0 0);
   --sidebar-muted: oklch(0.45 0 0);
+  /* La linea del lockup dentro del sidebar. El sidebar nace oscuro, asi que su
+     verde es Pino 300; si un workspace lo pone claro, app-shell la cambia a
+     Pino Profundo junto con el resto de los colores de texto. */
+  --sidebar-linea: var(--acento-claro);
 }
 
 .dark {
@@ -63,7 +111,8 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --success: oklch(0.55 0.18 142);
+  /* Sobre oscuro el acento base da 2.24:1: aqui va Pino 300, no Pino Profundo. */
+  --success: var(--acento-claro);
   --warning: oklch(0.75 0.18 65);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -82,6 +131,21 @@
 }
 
 @theme inline {
+  /* Paleta de marca por rol. Expuesta aqui para que Tailwind genere las
+     utilidades (`text-acento`, `bg-papel`, `border-alerta/30`, `ring-acento/15`,
+     …). El modificador de opacidad funciona: Tailwind 4 lo resuelve con
+     color-mix sobre la variable. */
+  --color-acento: var(--acento);
+  --color-acento-hover: var(--acento-hover);
+  --color-acento-claro: var(--acento-claro);
+  --color-acento-tinte: var(--acento-tinte);
+  --color-acento-borde: var(--acento-borde);
+  --color-dato-vivo: var(--dato-vivo);
+  --color-tinta: var(--tinta);
+  --color-tinta-suave: var(--tinta-suave);
+  --color-alerta: var(--alerta);
+  --color-advertencia: var(--advertencia);
+  --color-papel: var(--papel);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -124,8 +188,14 @@
   --radius-2xl: calc(var(--radius) + 8px);
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Stack tipografico Pino Profundo. Las tres son SIL OFL 1.1 y estan
+     autoalojadas en src/app/fonts (ver el aviso de copyright en layout.tsx).
+     `--font-mono` es Martian Mono a proposito: en este codebase `font-mono`
+     marca cifras, codigos y referencias, que es justo donde la decision pide
+     Martian Mono tabular. */
+  --font-sans: var(--font-schibsted);
+  --font-display: var(--font-newsreader);
+  --font-mono: var(--font-martian-mono);
 }
 
 @layer base {
@@ -138,5 +208,15 @@
   body {
     background-color: var(--background);
     color: var(--foreground);
+  }
+  /* "Martian Mono tabular en TODA cifra": la familia ya es monoespaciada, pero
+     `tabular-nums` es lo que garantiza que una columna de plata no baile cuando
+     el numero cambia. Va aqui y no en cada componente para que no se olvide. */
+  .font-mono,
+  code,
+  kbd,
+  samp,
+  pre {
+    font-variant-numeric: tabular-nums;
   }
 }

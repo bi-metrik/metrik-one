@@ -20,8 +20,8 @@ import { X, ExternalLink, AlertTriangle, RotateCcw } from 'lucide-react'
 import Link from 'next/link'
 import { getCasosDeEtapa, type CasoEnEtapa } from '../actions'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
 const ROJO = '#B91C1C'
 const OCRE = '#92400E'
@@ -129,7 +129,7 @@ export function CasosDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-1.5 hover:bg-[#F5F4F2]"
+              className="shrink-0 rounded-lg p-1.5 hover:bg-papel"
               aria-label="Cerrar"
             >
               <X className="h-4 w-4" style={{ color: GRIS }} />
@@ -182,7 +182,7 @@ export function CasosDrawer({
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium"
                             style={{
-                              backgroundColor: c.vencido ? '#FEE2E2' : '#F5F4F2',
+                              backgroundColor: c.vencido ? '#FEE2E2' : 'var(--papel)',
                               color: c.vencido ? ROJO : GRIS,
                             }}
                             title="Horas hábiles en esta etapa"
@@ -195,7 +195,7 @@ export function CasosDrawer({
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium"
                             style={{
-                              backgroundColor: c.diasInactivo >= 14 ? '#FEF3C7' : '#F5F4F2',
+                              backgroundColor: c.diasInactivo >= 14 ? '#FEF3C7' : 'var(--papel)',
                               color: c.diasInactivo >= 14 ? OCRE : GRIS,
                             }}
                             title="Días desde la última actividad registrada en el negocio"

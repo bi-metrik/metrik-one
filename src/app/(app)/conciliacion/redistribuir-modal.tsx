@@ -8,10 +8,10 @@ import { redistribuirReferencia } from '@/lib/actions/conciliacion-actions'
 import { buscarNegociosParaValida } from '@/lib/actions/valida-consultas'
 import type { ReferenciaPago } from '@/lib/actions/conciliacion-actions'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = '#10B981'
+const VERDE = 'var(--acento)'
 const AMBAR = '#B45309'
 
 type Linea = {
@@ -166,7 +166,7 @@ export function RedistribuirModal({
               ])
             }
             disabled={isPending}
-            className="mt-3 flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
+            className="mt-3 flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-papel disabled:opacity-50"
             style={{ borderColor: BORDE, color: CARBON }}
           >
             <Plus className="h-3.5 w-3.5" /> Agregar negocio
@@ -221,7 +221,7 @@ export function RedistribuirModal({
               type="button"
               onClick={onCerrar}
               disabled={isPending}
-              className="rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
+              className="rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-papel disabled:opacity-50"
               style={{ borderColor: BORDE, color: CARBON }}
             >
               Cancelar
@@ -230,7 +230,7 @@ export function RedistribuirModal({
               type="button"
               onClick={guardar}
               disabled={isPending || sobrepasa || motivo.trim().length < 10}
-              className="flex items-center justify-center gap-2 rounded-lg bg-[#10B981] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+              className="flex items-center justify-center gap-2 rounded-lg bg-acento px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
             >
               {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Guardar el reparto
@@ -302,7 +302,7 @@ function FilaLinea({
               onClick={() => !deshabilitado && setCambiando(true)}
               className="text-left"
             >
-              <span className="rounded bg-[#1A1A1A] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white">
+              <span className="rounded bg-tinta px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white">
                 {linea.negocioCodigo ?? 'Negocio'}
               </span>
               <p className="mt-1 truncate text-sm" style={{ color: CARBON }}>
@@ -333,7 +333,7 @@ function FilaLinea({
                           onCambiar({ negocioId: n.id, negocioCodigo: n.codigo, negocioNombre: n.nombre })
                           setCambiando(false); setQ(''); setResultados([])
                         }}
-                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-[#F5F4F2]"
+                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-papel"
                       >
                         <span className="font-bold" style={{ color: CARBON }}>{n.codigo}</span>
                         <span className="truncate" style={{ color: GRIS }}>{n.nombre}</span>
@@ -363,7 +363,7 @@ function FilaLinea({
           onClick={onEliminar}
           disabled={deshabilitado}
           aria-label="Quitar esta línea"
-          className="shrink-0 rounded-lg p-2 transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
+          className="shrink-0 rounded-lg p-2 transition-colors hover:bg-papel disabled:opacity-50"
           style={{ color: GRIS }}
         >
           <Trash2 className="h-4 w-4" />

@@ -22,15 +22,15 @@ export default async function AdminFlujoDetallePage({
     <div className="mx-auto max-w-7xl p-4">
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <Link href="/admin/workflows" className="text-xs text-[#6B7280] hover:text-[#1A1A1A]">
+          <Link href="/admin/workflows" className="text-xs text-tinta-suave hover:text-tinta">
             ← Workflows
           </Link>
-          <h1 className="mt-1 text-xl font-bold text-[#1A1A1A]">
+          <h1 className="mt-1 text-xl font-bold text-tinta">
             {detalle.workspace.name ?? detalle.workspace.slug ?? '—'}
-            <span className="mx-2 text-[#6B7280]">/</span>
+            <span className="mx-2 text-tinta-suave">/</span>
             <span className="font-semibold">{detalle.linea.nombre}</span>
           </h1>
-          <p className="text-[11px] text-[#6B7280]">
+          <p className="text-[11px] text-tinta-suave">
             {detalle.workspace.slug} · tipo: {detalle.linea.tipo} · {detalle.etapas.length} etapa{detalle.etapas.length === 1 ? '' : 's'}
             {!detalle.linea.is_active && <span className="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-500">línea inactiva</span>}
           </p>

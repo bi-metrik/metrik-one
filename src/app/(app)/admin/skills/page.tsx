@@ -16,7 +16,7 @@ export default async function AdminSkillsPage() {
       <header className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-[#1A1A1A]">Biblioteca de Skills</h1>
+            <h1 className="text-2xl font-bold text-tinta">Biblioteca de Skills</h1>
             <p className="mt-1 text-sm text-gray-500">
               Skills MéTRIK sincronizados desde{' '}
               <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs">.claude/skills/</code>

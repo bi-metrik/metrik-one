@@ -7,13 +7,13 @@ interface ProgressGaugeProps {
 }
 
 function getColor(pct: number): string {
-  if (pct <= 70) return '#10B981'  // green
-  if (pct <= 90) return '#F59E0B'  // yellow
-  return '#EF4444'                  // red
+  if (pct <= 70) return 'var(--acento)'  // green
+  if (pct <= 90) return 'var(--advertencia)'  // yellow
+  return 'var(--alerta)'                  // red
 }
 
 function getBg(pct: number): string {
-  if (pct <= 70) return '#D1FAE5'
+  if (pct <= 70) return 'var(--acento-tinte)'
   if (pct <= 90) return '#FEF3C7'
   return '#FEE2E2'
 }

@@ -158,24 +158,24 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
             href="/controles"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#E5E7EB] transition-colors hover:bg-gray-50"
           >
-            <ArrowLeft className="h-4 w-4 text-[#6B7280]" />
+            <ArrowLeft className="h-4 w-4 text-tinta-suave" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Nuevo control</h1>
-            <p className="text-sm text-[#6B7280]">Registrar un nuevo control de riesgo</p>
+            <h1 className="text-xl font-bold text-tinta">Nuevo control</h1>
+            <p className="text-sm text-tinta-suave">Registrar un nuevo control de riesgo</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <Link
             href="/controles"
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-gray-100 transition-colors"
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-tinta-suave hover:bg-gray-100 transition-colors"
           >
             Cancelar
           </Link>
           <button
             onClick={handleSubmit}
             disabled={saving}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#10B981] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-acento px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
             {saving ? 'Creando...' : 'Crear control'}
@@ -191,12 +191,12 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
 
       {/* Section 1: Informacion del control */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Informacion del control</h2>
+        <h2 className="text-sm font-semibold text-tinta">Informacion del control</h2>
 
         {/* Row 1: Referencia + Tipo */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">
               Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automatica)</span>
             </label>
             <input
@@ -205,17 +205,17 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
               readOnly
               tabIndex={-1}
               placeholder="..."
-              className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-[#1A1A1A] cursor-not-allowed"
+              className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-tinta cursor-not-allowed"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">
               Tipo de control <span className="text-red-500">*</span>
             </label>
             <select
               value={tipoControl}
               onChange={e => setTipoControl(e.target.value)}
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
             >
               <option value="preventivo">Preventivo</option>
               <option value="detectivo">Detectivo</option>
@@ -226,7 +226,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
 
         {/* Nombre del control */}
         <div>
-          <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+          <label className="block text-[10px] font-medium text-tinta-suave mb-1">
             Nombre del control <span className="text-red-500">*</span>
           </label>
           <input
@@ -234,30 +234,30 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
             onChange={e => setNombreControl(e.target.value)}
             type="text"
             placeholder="Nombre descriptivo del control"
-            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
           />
         </div>
 
         {/* Actividad de control */}
         <div>
-          <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Actividad de control</label>
+          <label className="block text-[10px] font-medium text-tinta-suave mb-1">Actividad de control</label>
           <textarea
             value={actividadControl}
             onChange={e => setActividadControl(e.target.value)}
             rows={2}
             placeholder="Descripcion de la actividad de control"
-            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981] resize-none"
+            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
           />
         </div>
 
         {/* Row 2: Clasificacion + Periodicidad */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Clasificacion</label>
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">Clasificacion</label>
             <select
               value={clasificacion}
               onChange={e => setClasificacion(e.target.value)}
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
             >
               <option value="manual">Manual</option>
               <option value="automatico">Automatico</option>
@@ -265,11 +265,11 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
             </select>
           </div>
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Periodicidad</label>
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">Periodicidad</label>
             <select
               value={periodicidad}
               onChange={e => setPeriodicidad(e.target.value)}
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
             >
               <option value="">-- Sin definir --</option>
               <option value="continuo">Continuo</option>
@@ -286,11 +286,11 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
 
         {/* Responsable */}
         <div>
-          <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Responsable</label>
+          <label className="block text-[10px] font-medium text-tinta-suave mb-1">Responsable</label>
           <select
             value={responsableId}
             onChange={e => setResponsableId(e.target.value)}
-            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
           >
             <option value="">Sin asignar</option>
             {equipo.map(m => (
@@ -303,15 +303,15 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
       {/* Section 2: Causas de riesgo impactadas */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
         <div>
-          <h2 className="text-sm font-semibold text-[#1A1A1A]">
+          <h2 className="text-sm font-semibold text-tinta">
             Causas que impacta este control <span className="text-red-500">*</span>
           </h2>
-          <p className="text-[10px] text-[#6B7280] mt-0.5">Selecciona las causas de riesgo que este control mitiga</p>
+          <p className="text-[10px] text-tinta-suave mt-0.5">Selecciona las causas de riesgo que este control mitiga</p>
         </div>
 
         {causas.length === 0 ? (
           <div className="rounded-md border border-dashed border-[#E5E7EB] bg-gray-50 p-4 text-center">
-            <p className="text-xs text-[#6B7280]">No hay causas de riesgo registradas. Crea una causa primero.</p>
+            <p className="text-xs text-tinta-suave">No hay causas de riesgo registradas. Crea una causa primero.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -321,7 +321,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${CATEGORIA_COLORS[cat] ?? 'bg-gray-100 text-gray-800'}`}>
                     {cat}
                   </span>
-                  <span className="text-[10px] text-[#6B7280]">{causasByCategoria[cat].length} causa{causasByCategoria[cat].length !== 1 ? 's' : ''}</span>
+                  <span className="text-[10px] text-tinta-suave">{causasByCategoria[cat].length} causa{causasByCategoria[cat].length !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="space-y-1">
                   {causasByCategoria[cat].map(c => (
@@ -329,7 +329,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
                       key={c.id}
                       className={`flex items-start gap-2.5 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
                         selectedCausas.has(c.id)
-                          ? 'border-[#10B981] bg-green-50/50'
+                          ? 'border-acento bg-green-50/50'
                           : 'border-[#E5E7EB] hover:bg-gray-50'
                       }`}
                     >
@@ -337,15 +337,15 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
                         type="checkbox"
                         checked={selectedCausas.has(c.id)}
                         onChange={() => toggleCausa(c.id)}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border-[#E5E7EB] text-[#10B981] focus:ring-[#10B981]"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-[#E5E7EB] text-acento focus:ring-acento"
                       />
                       <div className="min-w-0 flex-1">
                         <span className="text-xs">
-                          <span className="font-mono font-medium text-[#10B981]">{c.referencia ?? '?'}</span>
+                          <span className="font-mono font-medium text-acento">{c.referencia ?? '?'}</span>
                           {' '}
-                          <span className="text-[#6B7280]">({c.riesgo_codigo} {c.riesgo_categoria})</span>
+                          <span className="text-tinta-suave">({c.riesgo_codigo} {c.riesgo_categoria})</span>
                           {' \u2014 '}
-                          <span className="text-[#1A1A1A]">{(c.descripcion ?? '').length > 80 ? (c.descripcion ?? '').slice(0, 80) + '...' : (c.descripcion ?? '')}</span>
+                          <span className="text-tinta">{(c.descripcion ?? '').length > 80 ? (c.descripcion ?? '').slice(0, 80) + '...' : (c.descripcion ?? '')}</span>
                         </span>
                       </div>
                     </label>
@@ -369,7 +369,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
                         key={c.id}
                         className={`flex items-start gap-2.5 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
                           selectedCausas.has(c.id)
-                            ? 'border-[#10B981] bg-green-50/50'
+                            ? 'border-acento bg-green-50/50'
                             : 'border-[#E5E7EB] hover:bg-gray-50'
                         }`}
                       >
@@ -377,13 +377,13 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
                           type="checkbox"
                           checked={selectedCausas.has(c.id)}
                           onChange={() => toggleCausa(c.id)}
-                          className="mt-0.5 h-3.5 w-3.5 rounded border-[#E5E7EB] text-[#10B981] focus:ring-[#10B981]"
+                          className="mt-0.5 h-3.5 w-3.5 rounded border-[#E5E7EB] text-acento focus:ring-acento"
                         />
                         <div className="min-w-0 flex-1">
                           <span className="text-xs">
-                            <span className="font-mono font-medium text-[#10B981]">{c.referencia ?? '?'}</span>
+                            <span className="font-mono font-medium text-acento">{c.referencia ?? '?'}</span>
                             {' \u2014 '}
-                            <span className="text-[#1A1A1A]">{(c.descripcion ?? '').length > 80 ? (c.descripcion ?? '').slice(0, 80) + '...' : (c.descripcion ?? '')}</span>
+                            <span className="text-tinta">{(c.descripcion ?? '').length > 80 ? (c.descripcion ?? '').slice(0, 80) + '...' : (c.descripcion ?? '')}</span>
                           </span>
                         </div>
                       </label>
@@ -394,14 +394,14 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
           </div>
         )}
 
-        <p className="text-[10px] text-[#6B7280]">
+        <p className="text-[10px] text-tinta-suave">
           {selectedCausas.size} causa{selectedCausas.size !== 1 ? 's' : ''} seleccionada{selectedCausas.size !== 1 ? 's' : ''}
         </p>
       </div>
 
       {/* Section 3: Factores de efectividad */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Factores de efectividad</h2>
+        <h2 className="text-sm font-semibold text-tinta">Factores de efectividad</h2>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {EF_FIELDS.map(f => {
@@ -425,7 +425,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
         </div>
 
         <div className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-[#6B7280]">Efectividad:</span>
+          <span className="text-sm font-medium text-tinta-suave">Efectividad:</span>
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${
             efectividad >= 80 ? 'bg-green-100 text-green-800' :
             efectividad >= 60 ? 'bg-yellow-100 text-yellow-800' :
@@ -433,7 +433,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
           }`}>
             {efectividad}%
           </span>
-          <p className="text-[10px] text-[#6B7280]">Click para alternar Si (3) / No (1)</p>
+          <p className="text-[10px] text-tinta-suave">Click para alternar Si (3) / No (1)</p>
         </div>
       </div>
     </div>

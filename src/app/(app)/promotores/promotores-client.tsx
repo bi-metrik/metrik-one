@@ -222,8 +222,8 @@ export default function PromotoresClient({ promoters }: PromotoresClientProps) {
         {/* Promotores Activos */}
         <div className="rounded-xl border bg-card p-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
-              <Users className="h-5 w-5 text-emerald-500" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-acento/10">
+              <Users className="h-5 w-5 text-acento" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Promotores Activos</p>

@@ -6,8 +6,8 @@ import { toast } from 'sonner'
 import { repartirPagoComercial } from '@/lib/actions/conciliacion-actions'
 import { getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
 
-const VERDE = '#10B981'
-const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
+const VERDE = 'var(--acento)'
+const FONT = { fontFamily: 'var(--font-schibsted), sans-serif' }
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -180,15 +180,15 @@ export default function DistribuirPagoModal({
         <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
           <div className="flex items-center gap-2">
             {fijadoActivo ? <Wallet className="h-4 w-4" style={{ color: VERDE }} /> : <ArrowRightLeft className="h-4 w-4" style={{ color: VERDE }} />}
-            <h3 className="text-[15px] font-bold" style={{ color: '#1A1A1A' }}>
+            <h3 className="text-[15px] font-bold" style={{ color: 'var(--tinta)' }}>
               {contextoEpayco ? 'Repartir pago entre negocios' : fijadoActivo ? 'Registrar pago' : 'Distribuir pago entre negocios'}
             </h3>
           </div>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: '#6B7280' }} /></button>
+          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: 'var(--tinta-suave)' }} /></button>
         </div>
 
         <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
-          <p className="text-[11px] leading-relaxed" style={{ color: '#6B7280' }}>
+          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--tinta-suave)' }}>
             {fijadoActivo
               ? 'Registra el pago de este negocio. Si un mismo pago cubre varios negocios, reparte el resto abajo. El área financiera lo confirma.'
               : 'Propón cómo se reparte un solo pago entre varios negocios. El área financiera lo valida contra el dinero real y concilia.'}
@@ -203,8 +203,8 @@ export default function DistribuirPagoModal({
                   onClick={() => setFuente(f)}
                   className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
                   style={fuente === f
-                    ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
-                    : { borderColor: '#E5E7EB', color: '#6B7280' }}
+                    ? { borderColor: VERDE, color: VERDE, backgroundColor: 'var(--acento-tinte)' }
+                    : { borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
                 >
                   {f === 'epayco' ? 'ePayco' : 'Otra (manual)'}
                 </button>
@@ -226,7 +226,7 @@ export default function DistribuirPagoModal({
               inputMode={esEpayco ? 'numeric' : 'text'}
               placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
               disabled={contextoEpayco}
-              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none disabled:bg-[#F9FAFB] disabled:text-[#6B7280]"
+              className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none disabled:bg-[#F9FAFB] disabled:text-tinta-suave"
               style={{ borderColor: '#E5E7EB' }}
             />
             {esEpayco && <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>{contextoEpayco ? 'Referencia ya validada en ePayco. Reparte el monto entre los negocios abajo.' : 'Se valida con ePayco: solo se registra si está Aceptada. El total se toma del pago real.'}</p>}
@@ -252,22 +252,22 @@ export default function DistribuirPagoModal({
           {/* Repetidor de porciones */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>
+              <span className="text-[12px] font-semibold" style={{ color: 'var(--tinta)' }}>
                 {fijadoActivo ? 'Monto del pago' : 'Reparto por negocio'}
               </span>
               {totalNum > 0 && (repartoActivo ? (
-                <span className="text-[11px]" style={{ color: origenEnCero ? '#DC2626' : '#6B7280' }}>
+                <span className="text-[11px]" style={{ color: origenEnCero ? '#DC2626' : 'var(--tinta-suave)' }}>
                   {origenEnCero ? '⚠ El origen no puede quedar en $0' : <>Queda en {negocioFijado!.codigo ?? 'origen'}: <span className="font-semibold tabular-nums">{fmtCOP(montoOrigen)}</span></>}
                 </span>
               ) : (
-                <span className="text-[11px]" style={{ color: sinAsignar < -1 ? '#DC2626' : '#6B7280' }}>
+                <span className="text-[11px]" style={{ color: sinAsignar < -1 ? '#DC2626' : 'var(--tinta-suave)' }}>
                   Sin asignar: <span className="font-semibold tabular-nums">{fmtCOP(sinAsignar)}</span>
                 </span>
               ))}
             </div>
 
             {loading ? (
-              <div className="flex items-center gap-2 px-1 py-1.5 text-[13px]" style={{ color: '#6B7280' }}>
+              <div className="flex items-center gap-2 px-1 py-1.5 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
               </div>
             ) : loadError ? (
@@ -279,9 +279,9 @@ export default function DistribuirPagoModal({
                   return (
                     <div key={i} className="flex items-center gap-2">
                       {esFilaFija ? (
-                        <div className="min-w-0 flex-1 rounded-md border bg-[#F9FAFB] px-2 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}>
+                        <div className="min-w-0 flex-1 rounded-md border bg-[#F9FAFB] px-2 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}>
                           {negocioFijado!.codigo ?? negocioFijado!.nombre ?? 'Este negocio'}
-                          {negocioFijado!.nombre && negocioFijado!.codigo ? <span className="ml-1 font-normal" style={{ color: '#6B7280' }}>· {negocioFijado!.nombre}</span> : null}
+                          {negocioFijado!.nombre && negocioFijado!.codigo ? <span className="ml-1 font-normal" style={{ color: 'var(--tinta-suave)' }}>· {negocioFijado!.nombre}</span> : null}
                         </div>
                       ) : (
                         <select
@@ -301,7 +301,7 @@ export default function DistribuirPagoModal({
                       {esFilaFija && repartoActivo ? (
                         <div
                           className="w-28 rounded-md border px-2 py-1.5 text-right text-[12px] font-semibold tabular-nums"
-                          style={{ borderColor: origenEnCero ? '#FCA5A5' : '#A7F3D0', backgroundColor: origenEnCero ? '#FEF2F2' : '#ECFDF5', color: origenEnCero ? '#DC2626' : '#065F46' }}
+                          style={{ borderColor: origenEnCero ? '#FCA5A5' : 'var(--acento-borde)', backgroundColor: origenEnCero ? '#FEF2F2' : 'var(--acento-tinte)', color: origenEnCero ? '#DC2626' : 'var(--acento)' }}
                           title="Saldo del negocio original — se calcula solo (total menos lo repartido) y no puede quedar en $0"
                         >
                           {fmtCOP(Math.max(0, montoOrigen))}
@@ -322,7 +322,7 @@ export default function DistribuirPagoModal({
                         title={esFilaFija ? 'El negocio de este bloque no se puede quitar' : 'Quitar esta línea'}
                         className="rounded p-1 hover:bg-gray-100 disabled:opacity-30"
                       >
-                        <Trash2 className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+                        <Trash2 className="h-3.5 w-3.5" style={{ color: 'var(--tinta-suave)' }} />
                       </button>
                     </div>
                   )
@@ -340,7 +340,7 @@ export default function DistribuirPagoModal({
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
-          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: '#6B7280' }}>Cancelar</button>
+          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-[13px] font-semibold" style={{ color: 'var(--tinta-suave)' }}>Cancelar</button>
           <button onClick={handleSubmit} disabled={pending || loading || origenEnCero} className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: VERDE }}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : esReparto ? <ArrowRightLeft className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
             {esReparto ? 'Proponer reparto' : 'Registrar pago'}

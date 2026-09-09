@@ -37,16 +37,17 @@ import TutorialButton from '@/components/tutorial/TutorialButton';
 import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
 import { formatFecha } from '@/lib/dates/bogota'
+import { PALETA } from '@/lib/marca/paleta'
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
 
 const SEVERIDAD_CLASS: Record<Severidad, string> = {
-  alto: 'bg-[#EF4444] text-white',
-  medio: 'bg-[#F59E0B] text-[#1A1A1A]',
-  bajo: 'bg-[#FBBF24] text-[#1A1A1A]',
-  informativo: 'bg-[#6B7280] text-white',
-  sin_hallazgo: 'bg-[#10B981] text-white',
-  error: 'bg-[#1A1A1A] text-white',
+  alto: 'bg-alerta text-white',
+  medio: 'bg-advertencia text-tinta',
+  bajo: 'bg-[#FBBF24] text-tinta',
+  informativo: 'bg-tinta-suave text-white',
+  sin_hallazgo: 'bg-acento text-white',
+  error: 'bg-tinta text-white',
 };
 
 const SEVERIDAD_LABEL: Record<Severidad, string> = {
@@ -59,9 +60,9 @@ const SEVERIDAD_LABEL: Record<Severidad, string> = {
 };
 
 const TIER_CLASS: Record<TierLista, string> = {
-  '1_vinculante': 'bg-[#EF4444] text-white',
-  '2_obligatoria': 'bg-[#F59E0B] text-[#1A1A1A]',
-  '3_referencia': 'bg-[#6B7280] text-white',
+  '1_vinculante': 'bg-alerta text-white',
+  '2_obligatoria': 'bg-advertencia text-tinta',
+  '3_referencia': 'bg-tinta-suave text-white',
   '4_kyc_nacional': 'bg-[#2980b9] text-white',
 };
 
@@ -136,10 +137,10 @@ export default function ValidaClient({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <ShieldCheck className="h-6 w-6 text-[#10B981]" />
+        <ShieldCheck className="h-6 w-6 text-acento" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Valida</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Valida</h1>
+          <p className="text-sm text-tinta-suave">
             Consulta puntual o por cargue contra listas vinculantes SARLAFT (ONU, OFAC, UE, PEP, CSN).
           </p>
         </div>
@@ -219,7 +220,7 @@ function TabButton({
       onClick={onClick}
       data-tutorial-target={dataTutorialTarget}
       className={`-mb-px inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
-        active ? 'border-[#1A1A1A] text-[#1A1A1A]' : 'border-transparent text-[#6B7280] hover:text-[#1A1A1A]'
+        active ? 'border-tinta text-tinta' : 'border-transparent text-tinta-suave hover:text-tinta'
       }`}
     >
       {icon}
@@ -274,8 +275,8 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
               onClick={() => setTipo(t)}
               className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${
                 tipo === t
-                  ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
-                  : 'bg-white text-[#6B7280] border-[#E5E7EB] hover:border-[#1A1A1A]'
+                  ? 'bg-tinta text-white border-tinta'
+                  : 'bg-white text-tinta-suave border-[#E5E7EB] hover:border-tinta'
               }`}
             >
               {t === 'natural' ? 'Persona natural' : 'Persona jurídica'}
@@ -284,7 +285,7 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
         </div>
 
         <div>
-          <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+          <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
             {tipo === 'natural' ? 'Nombre completo' : 'Razón social'}{' '}
             <span className="font-light lowercase tracking-normal">(nombre o documento)</span>
           </label>
@@ -294,19 +295,19 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
             onChange={e => setNombre(e.target.value)}
             minLength={2}
             placeholder={tipo === 'natural' ? 'Juan Pérez Gómez' : 'Acme Trading SAS'}
-            className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+            className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
           />
         </div>
 
         <div className="grid sm:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               Tipo documento
             </label>
             <select
               value={docTipo}
               onChange={e => setDocTipo(e.target.value as TipoDocumento)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white"
             >
               {tipo === 'natural' ? (
                 <>
@@ -320,7 +321,7 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
             </select>
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               Número <span className="font-light lowercase tracking-normal">(opcional)</span>
             </label>
             <input
@@ -328,25 +329,25 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
               value={docNumero}
               onChange={e => setDocNumero(e.target.value)}
               placeholder="1077089147"
-              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
         </div>
 
         {!modoVitrina && (
           <div data-tutorial-target="negocio-picker">
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               Asociar a negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
             </label>
             <NegocioPicker value={negocio} onChange={setNegocio} />
-            <p className="text-xs text-[#6B7280] mt-1.5">
+            <p className="text-xs text-tinta-suave mt-1.5">
               Útil para agrupar consultas por CDA. Incluye negocios cerrados.
             </p>
           </div>
         )}
 
         {(nombre.trim().length >= 2) !== (docNumero.trim().length >= 3) && (nombre.trim() || docNumero.trim()) ? (
-          <div className="p-3 rounded-lg bg-[#FFFBEB] border-l-[3px] border-[#F59E0B] text-[#1A1A1A] text-xs leading-relaxed">
+          <div className="p-3 rounded-lg bg-[#FFFBEB] border-l-[3px] border-advertencia text-tinta text-xs leading-relaxed">
             Estás consultando con un solo dato ({nombre.trim().length >= 2 ? 'nombre' : 'documento'}). Es posible que no se
             detecten todas las coincidencias. Si una coincidencia aporta el dato faltante, Valida revalida automáticamente
             contra el resto de listas. Para máxima cobertura, ingresa nombre y documento.
@@ -356,7 +357,7 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
         <button
           type="submit"
           disabled={pending || (nombre.trim().length < 2 && docNumero.trim().length < 3)}
-          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
         >
           <Search className="h-4 w-4" />
           {pending ? 'Consultando…' : 'Consultar'}
@@ -424,14 +425,14 @@ function NegocioPicker({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] bg-white text-left text-sm flex items-center justify-between hover:border-[#1A1A1A] transition-colors"
+        className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] bg-white text-left text-sm flex items-center justify-between hover:border-tinta transition-colors"
       >
         {value ? (
           <span className="flex items-center gap-2 min-w-0">
-            <span className="font-mono text-xs text-[#6B7280] shrink-0">{value.codigo}</span>
-            <span className="truncate text-[#1A1A1A]">{value.nombre}</span>
+            <span className="font-mono text-xs text-tinta-suave shrink-0">{value.codigo}</span>
+            <span className="truncate text-tinta">{value.nombre}</span>
             {value.estado === 'completado' && (
-              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#F5F4F2] text-[#6B7280] shrink-0">
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-papel text-tinta-suave shrink-0">
                 Cerrado
               </span>
             )}
@@ -447,12 +448,12 @@ function NegocioPicker({
                 e.stopPropagation();
                 onChange(null);
               }}
-              className="p-1 rounded hover:bg-[#F5F4F2]"
+              className="p-1 rounded hover:bg-papel"
             >
-              <X className="h-3.5 w-3.5 text-[#6B7280]" />
+              <X className="h-3.5 w-3.5 text-tinta-suave" />
             </button>
           )}
-          <ChevronDown className="h-4 w-4 text-[#6B7280]" />
+          <ChevronDown className="h-4 w-4 text-tinta-suave" />
         </span>
       </button>
 
@@ -465,14 +466,14 @@ function NegocioPicker({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Buscar por código o nombre…"
-              className="w-full h-9 px-3 text-sm rounded-md border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-9 px-3 text-sm rounded-md border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
           <div className="max-h-64 overflow-y-auto">
             {loading ? (
-              <div className="p-3 text-sm text-[#6B7280] text-center">Buscando…</div>
+              <div className="p-3 text-sm text-tinta-suave text-center">Buscando…</div>
             ) : items.length === 0 ? (
-              <div className="p-3 text-sm text-[#6B7280] text-center">Sin resultados</div>
+              <div className="p-3 text-sm text-tinta-suave text-center">Sin resultados</div>
             ) : (
               items.map(n => (
                 <button
@@ -483,12 +484,12 @@ function NegocioPicker({
                     setOpen(false);
                     setQuery('');
                   }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-[#F5F4F2] flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-papel flex items-center gap-2"
                 >
-                  <span className="font-mono text-xs text-[#6B7280] shrink-0 w-20">{n.codigo}</span>
-                  <span className="truncate text-[#1A1A1A] flex-1">{n.nombre}</span>
+                  <span className="font-mono text-xs text-tinta-suave shrink-0 w-20">{n.codigo}</span>
+                  <span className="truncate text-tinta flex-1">{n.nombre}</span>
                   {n.estado === 'completado' && (
-                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#F5F4F2] text-[#6B7280] shrink-0">
+                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-papel text-tinta-suave shrink-0">
                       Cerrado
                     </span>
                   )}
@@ -517,9 +518,9 @@ function ResultadoCard({
     <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
       <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Resultado</p>
-          <h3 className="text-lg font-bold text-[#1A1A1A] mt-1">{nombreConsultado.trim() || 'Consulta por documento'}</h3>
-          <p className="text-xs text-[#6B7280] font-mono">ID: {data.consulta_id}</p>
+          <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">Resultado</p>
+          <h3 className="text-lg font-bold text-tinta mt-1">{nombreConsultado.trim() || 'Consulta por documento'}</h3>
+          <p className="text-xs text-tinta-suave font-mono">ID: {data.consulta_id}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span
@@ -533,16 +534,16 @@ function ResultadoCard({
 
       <div className="p-5 space-y-2">
         {data.consulta_parcial && (
-          <div className="p-3 mb-2 rounded-lg bg-[#FFFBEB] border-l-[3px] border-[#F59E0B] text-[#1A1A1A] text-xs leading-relaxed">
+          <div className="p-3 mb-2 rounded-lg bg-[#FFFBEB] border-l-[3px] border-advertencia text-tinta text-xs leading-relaxed">
             Consulta con un solo dato identificador — es posible que no se detecten todas las coincidencias. Cuando una
             coincidencia aporta el dato que faltaba, se revalida contra el resto de listas (marcado como “derivada”).
           </div>
         )}
-        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+        <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
           Coincidencias ({data.total_matches})
         </p>
         {data.matches.length === 0 ? (
-          <p className="text-sm text-[#10B981] font-medium">Sin coincidencias.</p>
+          <p className="text-sm text-acento font-medium">Sin coincidencias.</p>
         ) : (
           <ul className="space-y-2">
             {data.matches.slice(0, 20).map((m, i) => (
@@ -553,23 +554,23 @@ function ResultadoCard({
                   {TIER_LABEL[m.tier]}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-[#1A1A1A] truncate">{m.nombre_coincidencia}</p>
-                  <p className="text-xs text-[#6B7280] truncate">{m.lista_nombre}</p>
+                  <p className="text-sm font-semibold text-tinta truncate">{m.nombre_coincidencia}</p>
+                  <p className="text-xs text-tinta-suave truncate">{m.lista_nombre}</p>
                   {m.documento_coincidencia?.numero && (
-                    <p className="text-[11px] text-[#059669] truncate">
+                    <p className="text-[11px] text-acento truncate">
                       Documento en la lista: {m.documento_coincidencia.tipo} {m.documento_coincidencia.numero}
                       {m.documento_coincidencia.pais ? ` (${m.documento_coincidencia.pais})` : ''}
                     </p>
                   )}
                   {m.derivado && m.derivado_de && (
-                    <p className="text-[10px] text-[#6B7280] uppercase tracking-wider">
+                    <p className="text-[10px] text-tinta-suave uppercase tracking-wider">
                       Coincidencia derivada · {m.derivado_de.tipo} hallado en {m.derivado_de.lista_nombre}
                     </p>
                   )}
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold">{(m.score * 100).toFixed(1)}%</p>
-                  <p className="text-[10px] text-[#6B7280] uppercase">
+                  <p className="text-[10px] text-tinta-suave uppercase">
                     {m.resultado === 'exacto' ? 'Exacto' : 'Posible'} · Puntaje
                   </p>
                 </div>
@@ -613,7 +614,7 @@ function BotonPDFConsulta({
         type="button"
         onClick={descargar}
         disabled={pending}
-        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#10B981] text-white font-semibold text-xs uppercase tracking-wider hover:bg-[#059669] disabled:opacity-50 transition-colors"
+        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-acento text-white font-semibold text-xs uppercase tracking-wider hover:bg-acento-hover disabled:opacity-50 transition-colors"
         title={error ?? 'Descargar reporte PDF'}
       >
         <FileText className="h-3.5 w-3.5" />
@@ -627,7 +628,7 @@ function BotonPDFConsulta({
       type="button"
       onClick={descargar}
       disabled={pending}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wider text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-40 transition-colors"
+      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wider text-tinta hover:bg-papel disabled:opacity-40 transition-colors"
       title={error ?? 'Descargar reporte PDF'}
     >
       <FileText className="h-3.5 w-3.5" />
@@ -757,8 +758,8 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="text-base font-bold text-[#1A1A1A]">Carga masiva (XLSX)</h3>
-          <p className="text-sm text-[#6B7280] mt-1">
+          <h3 className="text-base font-bold text-tinta">Carga masiva (XLSX)</h3>
+          <p className="text-sm text-tinta-suave mt-1">
             Sube un XLSX con la plantilla. Hasta 500 filas. Al finalizar generas un reporte PDF del cargue con marca verificable.
           </p>
         </div>
@@ -766,7 +767,7 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
           type="button"
           onClick={descargarPlantilla}
           disabled={pendingTpl}
-          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
         >
           <Download className="h-4 w-4" />
           {pendingTpl ? 'Descargando…' : 'Descargar plantilla'}
@@ -786,7 +787,7 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
       ) : (
         <form onSubmit={iniciarCargue} className="space-y-4">
           <div>
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               Título del cargue <span className="font-light lowercase tracking-normal">(opcional, queda en el reporte)</span>
             </label>
             <input
@@ -795,18 +796,18 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
               onChange={e => setTitulo(e.target.value)}
               placeholder="Cargue CDA mayo 2026"
               maxLength={200}
-              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A]"
+              className="w-full h-11 px-4 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta"
             />
           </div>
 
           {!modoVitrina && (
           <div>
-            <label className="block text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+            <label className="block text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
               Asociar todo el lote a un negocio <span className="font-light lowercase tracking-normal">(opcional)</span>
             </label>
             <NegocioPicker value={negocioLote} onChange={setNegocioLote} />
-            <p className="text-xs text-[#6B7280] mt-1.5">
-              Si la columna <code className="bg-[#F5F4F2] px-1 rounded">negocio_codigo</code> tiene valor en el XLSX, sobrescribe esta selección fila por fila.
+            <p className="text-xs text-tinta-suave mt-1.5">
+              Si la columna <code className="bg-papel px-1 rounded">negocio_codigo</code> tiene valor en el XLSX, sobrescribe esta selección fila por fila.
             </p>
           </div>
           )}
@@ -816,20 +817,20 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
             {...drop.dropProps}
             className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-lg p-8 cursor-pointer transition-colors ${
               drop.isDragging
-                ? 'border-[#10B981] bg-[#10B981]/5'
-                : 'border-[#E5E7EB] hover:border-[#1A1A1A]'
+                ? 'border-acento bg-acento/5'
+                : 'border-[#E5E7EB] hover:border-tinta'
             }`}
           >
-            <Upload className={`h-8 w-8 ${drop.isDragging ? 'text-[#10B981]' : 'text-[#6B7280]'}`} />
+            <Upload className={`h-8 w-8 ${drop.isDragging ? 'text-acento' : 'text-tinta-suave'}`} />
             <div className="text-center">
-              <p className="text-sm font-semibold text-[#1A1A1A]">
+              <p className="text-sm font-semibold text-tinta">
                 {drop.isDragging
                   ? 'Suelta el archivo aquí'
                   : archivo
                   ? archivo.name
                   : 'Arrastra o selecciona un archivo XLSX'}
               </p>
-              <p className="text-xs text-[#6B7280] mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
+              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
             </div>
             <input
               id="archivo-batch"
@@ -843,7 +844,7 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
           <button
             type="submit"
             disabled={!archivo}
-            className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-[#1A1A1A] text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center gap-2 h-11 px-6 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
           >
             <Upload className="h-4 w-4" />
             Procesar cargue
@@ -861,8 +862,8 @@ function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
     return (
       <div className="py-10 text-center space-y-3">
         <Dona total={1} procesadas={0} pulsante />
-        <p className="text-sm font-semibold text-[#1A1A1A]">Preparando cargue…</p>
-        <p className="text-xs text-[#6B7280]">Leyendo el archivo y validando filas.</p>
+        <p className="text-sm font-semibold text-tinta">Preparando cargue…</p>
+        <p className="text-xs text-tinta-suave">Leyendo el archivo y validando filas.</p>
       </div>
     );
   }
@@ -876,19 +877,19 @@ function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
         <Dona total={estado.total} procesadas={estado.procesadas} />
       </div>
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+        <div className="flex items-center justify-between text-xs text-tinta-suave">
           <span className="font-semibold">{estado.procesadas} / {estado.total} consultas</span>
           <span className="font-mono">{pct}%</span>
         </div>
         <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
           <div
-            className="h-full bg-[#10B981] transition-[width] duration-200 ease-out"
+            className="h-full bg-acento transition-[width] duration-200 ease-out"
             style={{ width: `${pct}%` }}
           />
         </div>
       </div>
       <DistribucionSeveridad sev={estado.severidades} />
-      <p className="text-[11px] text-center text-[#6B7280]">
+      <p className="text-[11px] text-center text-tinta-suave">
         No cierres esta pestaña hasta que el cargue termine. Las consultas se guardan en el historial conforme avanzan.
       </p>
     </div>
@@ -919,7 +920,7 @@ function Dona({ total, procesadas, pulsante }: { total: number; procesadas: numb
           cy="64"
           r={radio}
           fill="none"
-          stroke="#10B981"
+          stroke={PALETA.acento}
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={circ}
@@ -928,8 +929,8 @@ function Dona({ total, procesadas, pulsante }: { total: number; procesadas: numb
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold text-[#1A1A1A] leading-none">{pctTexto}%</span>
-        <span className="text-[10px] uppercase tracking-wider text-[#6B7280] mt-0.5 font-semibold">
+        <span className="text-2xl font-bold text-tinta leading-none">{pctTexto}%</span>
+        <span className="text-[10px] uppercase tracking-wider text-tinta-suave mt-0.5 font-semibold">
           procesado
         </span>
       </div>
@@ -941,7 +942,7 @@ function DistribucionSeveridad({ sev }: { sev: Record<Severidad, number> }) {
   const items: Severidad[] = ['alto', 'medio', 'bajo', 'informativo', 'sin_hallazgo', 'error'];
   const visibles = items.filter(s => (sev[s] ?? 0) > 0);
   if (visibles.length === 0) {
-    return <p className="text-[11px] text-center text-[#6B7280]">Aún sin resultados — los primeros aparecen pronto.</p>;
+    return <p className="text-[11px] text-center text-tinta-suave">Aún sin resultados — los primeros aparecen pronto.</p>;
   }
   return (
     <div className="flex flex-wrap items-center justify-center gap-2">
@@ -972,12 +973,12 @@ function ResumenCargueCompletado({
 }) {
   return (
     <div className="space-y-5">
-      <div className="rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 p-5">
-        <div className="flex items-center gap-2 text-[#059669] font-semibold">
+      <div className="rounded-lg bg-acento-tinte border border-acento/30 p-5">
+        <div className="flex items-center gap-2 text-acento font-semibold">
           <Check className="h-5 w-5" />
           Cargue completado
         </div>
-        <p className="text-sm text-[#1A1A1A] mt-1">
+        <p className="text-sm text-tinta mt-1">
           {estado.total} consultas procesadas{estado.tituloLote ? ` · ${estado.tituloLote}` : ''}.
         </p>
         <div className="mt-3">
@@ -990,7 +991,7 @@ function ResumenCargueCompletado({
           type="button"
           onClick={onDescargar}
           disabled={pendingPDF}
-          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-[#10B981] text-white font-semibold hover:bg-[#059669] disabled:opacity-50 transition-colors"
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-acento text-white font-semibold hover:bg-acento-hover disabled:opacity-50 transition-colors"
         >
           <FileText className="h-4 w-4" />
           {pendingPDF ? 'Generando reporte…' : 'Descargar reporte del cargue (PDF)'}
@@ -998,7 +999,7 @@ function ResumenCargueCompletado({
         <button
           type="button"
           onClick={onReiniciar}
-          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
         >
           Nuevo cargue
         </button>
@@ -1057,24 +1058,24 @@ function Historial({
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
-        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">Filtros</p>
+        <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">Filtros</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {!modoVitrina && (
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+              <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
                 Negocio
               </label>
               <NegocioPicker value={negocio} onChange={setNegocio} />
             </div>
           )}
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Severidad
             </label>
             <select
               value={severidad}
               onChange={e => setSeveridad(e.target.value as Severidad | '')}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Todas</option>
               <option value="alto">Alto</option>
@@ -1086,13 +1087,13 @@ function Historial({
             </select>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Tipo
             </label>
             <select
               value={tipo}
               onChange={e => setTipo(e.target.value as 'puntual' | 'masiva_item' | '')}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             >
               <option value="">Todos</option>
               <option value="puntual">Puntual</option>
@@ -1100,25 +1101,25 @@ function Historial({
             </select>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Desde
             </label>
             <input
               type="date"
               value={fechaDesde}
               onChange={e => setFechaDesde(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             />
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1.5">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1.5">
               Hasta
             </label>
             <input
               type="date"
               value={fechaHasta}
               onChange={e => setFechaHasta(e.target.value)}
-              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#1A1A1A] bg-white text-sm"
+              className="w-full h-11 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-tinta bg-white text-sm"
             />
           </div>
         </div>
@@ -1127,7 +1128,7 @@ function Historial({
             type="button"
             onClick={aplicarFiltros}
             disabled={pending}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] transition-colors"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-tinta text-white text-sm font-semibold hover:bg-[#374151] disabled:bg-[#9CA3AF] transition-colors"
           >
             <Search className="h-4 w-4" />
             {pending ? 'Aplicando…' : 'Aplicar'}
@@ -1136,7 +1137,7 @@ function Historial({
             type="button"
             onClick={limpiarFiltros}
             disabled={pending}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] transition-colors"
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
           >
             Limpiar
           </button>
@@ -1166,7 +1167,7 @@ export function HistorialTable({
   }
   if (consultas.length === 0) {
     return (
-      <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-[#6B7280]">
+      <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
         Sin consultas con los filtros aplicados.
       </div>
     );
@@ -1177,57 +1178,57 @@ export function HistorialTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+            <tr className="bg-papel border-b border-[#E5E7EB]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Fecha
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Nombre
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Documento
               </th>
-              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Consultado por
               </th>
               {mostrarNegocio && (
-                <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                <th className="text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                   Negocio
                 </th>
               )}
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Tipo
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Coincidencias
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Severidad
               </th>
-              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+              <th className="text-center px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
                 Reporte
               </th>
             </tr>
           </thead>
           <tbody>
             {consultas.map(c => (
-              <tr key={c.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F5F4F2]/60">
-                <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
+              <tr key={c.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-papel/60">
+                <td className="px-4 py-2.5 text-tinta-suave whitespace-nowrap text-xs">
                   {formatFecha(c.created_at, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </td>
-                <td className="px-4 py-2.5 font-medium text-[#1A1A1A]">{c.nombre_consultado ?? '—'}</td>
-                <td className="px-4 py-2.5 text-[#6B7280] font-mono text-xs">
+                <td className="px-4 py-2.5 font-medium text-tinta">{c.nombre_consultado ?? '—'}</td>
+                <td className="px-4 py-2.5 text-tinta-suave font-mono text-xs">
                   {c.documento_tipo && c.documento_numero
                     ? `${c.documento_tipo} ${c.documento_numero}`
                     : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-[#1A1A1A] text-xs">{c.consultado_por ?? '—'}</td>
+                <td className="px-4 py-2.5 text-tinta text-xs">{c.consultado_por ?? '—'}</td>
                 {mostrarNegocio && (
                   <td className="px-4 py-2.5 text-xs">
                     {c.negocio_codigo ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="font-mono text-[#6B7280]">{c.negocio_codigo}</span>
-                        <span className="text-[#1A1A1A] truncate max-w-[140px] inline-block align-bottom">
+                        <span className="font-mono text-tinta-suave">{c.negocio_codigo}</span>
+                        <span className="text-tinta truncate max-w-[140px] inline-block align-bottom">
                           {c.negocio_nombre}
                         </span>
                       </span>
@@ -1236,7 +1237,7 @@ export function HistorialTable({
                     )}
                   </td>
                 )}
-                <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-[#6B7280]">
+                <td className="px-4 py-2.5 text-center text-[10px] uppercase tracking-wider text-tinta-suave">
                   {c.tipo === 'puntual' ? 'Puntual' : 'Cargue'}
                 </td>
                 <td className="px-4 py-2.5 text-center font-semibold">{c.total_matches}</td>
@@ -1265,7 +1266,7 @@ export function HistorialTable({
 
 function ErrorBox({ msg }: { msg: string }) {
   return (
-    <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-center gap-2">
+    <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
       <ShieldAlert className="h-4 w-4" /> {msg}
     </div>
   );

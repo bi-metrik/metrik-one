@@ -20,7 +20,7 @@ export default function SuscripcionSuspendidaPage() {
       <div className="w-full max-w-md space-y-8 text-center">
         <MetrikLockup size="md" linkTo="/" />
         <div className="space-y-3">
-          <h1 className="text-xl font-bold text-foreground" style={{ fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }}>
+          <h1 className="text-xl font-bold text-foreground" style={{ fontFamily: 'var(--font-schibsted), sans-serif' }}>
             Tu suscripción está suspendida
           </h1>
           <p className="text-sm text-muted-foreground">

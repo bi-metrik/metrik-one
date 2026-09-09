@@ -18,7 +18,7 @@ export const CONTACT_SOURCES = [
 export type ContactSource = typeof CONTACT_SOURCES[number]
 
 export const PROMOTER_STATUSES = [
-  { id: 'active', label: 'Activo', color: 'bg-emerald-500' },
+  { id: 'active', label: 'Activo', color: 'bg-acento' },
   { id: 'inactive', label: 'Inactivo', color: 'bg-muted-foreground' },
   { id: 'suspended', label: 'Suspendido', color: 'bg-red-500' },
 ] as const

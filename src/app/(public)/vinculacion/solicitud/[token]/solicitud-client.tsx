@@ -41,7 +41,7 @@ export default function SolicitudClient({
   const [abierto, setAbierto] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const acento = marca.colorPrimario ?? '#1A1A1A';
+  const acento = marca.colorPrimario ?? 'var(--tinta)';
   const falta = faltaEnSolicitud(datos);
   const avisos = textoAvisoSolicitud(marca.nombre);
 
@@ -96,8 +96,8 @@ export default function SolicitudClient({
             </div>
           )}
           <div className="min-w-0">
-            <p className="text-sm font-bold text-[#1A1A1A] truncate">{marca.nombre}</p>
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-sm font-bold text-tinta truncate">{marca.nombre}</p>
+            <p className="text-xs text-tinta-suave">
               {[marca.nit ? `NIT ${marca.nit}` : null, marca.ciudad].filter(Boolean).join(' · ')}
             </p>
           </div>
@@ -106,28 +106,28 @@ export default function SolicitudClient({
 
       <div className="max-w-xl mx-auto px-6 py-8">
         {enviado ? (
-          <div className="rounded-lg border border-[#10B981]/30 bg-[#ECFDF5] p-5">
+          <div className="rounded-lg border border-acento/30 bg-[var(--acento-tinte)] p-5">
             <div className="flex items-start gap-2">
-              <Check className="w-5 h-5 text-[#059669] mt-0.5 shrink-0" />
+              <Check className="w-5 h-5 text-acento mt-0.5 shrink-0" />
               <div>
-                <p className="text-sm font-bold text-[#065F46]">Solicitud enviada</p>
-                <p className="text-sm text-[#047857] mt-1">{MENSAJE_SOLICITUD_ENVIADA}</p>
+                <p className="text-sm font-bold text-[var(--acento)]">Solicitud enviada</p>
+                <p className="text-sm text-[var(--acento)] mt-1">{MENSAJE_SOLICITUD_ENVIADA}</p>
               </div>
             </div>
           </div>
         ) : (
           <>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">
+            <h1 className="text-xl font-bold text-tinta">
               Regístrate como contraparte de {marca.nombre}
             </h1>
-            <p className="text-sm text-[#6B7280] mt-1.5">
+            <p className="text-sm text-tinta-suave mt-1.5">
               Déjanos tus datos básicos y te llega a tu correo un enlace personal para subir los
               documentos y firmar. Acá no subes nada todavía.
             </p>
 
             <div className="mt-6 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-[#1A1A1A] mb-1.5">
+                <label className="block text-xs font-semibold text-tinta mb-1.5">
                   ¿Quién se va a vincular?
                 </label>
                 <div className="flex gap-2">
@@ -138,8 +138,8 @@ export default function SolicitudClient({
                       onClick={() => cambiarSujeto(t)}
                       className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
                         datos.tipoSujeto === t
-                          ? 'border-[#1A1A1A] bg-[#1A1A1A] text-white'
-                          : 'border-[#E5E7EB] text-[#1A1A1A] hover:bg-[#F9FAFB]'
+                          ? 'border-tinta bg-tinta text-white'
+                          : 'border-[#E5E7EB] text-tinta hover:bg-[#F9FAFB]'
                       }`}
                     >
                       {ETIQUETA_SUJETO[t]}
@@ -149,7 +149,7 @@ export default function SolicitudClient({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#1A1A1A] mb-1.5">
+                <label className="block text-xs font-semibold text-tinta mb-1.5">
                   {datos.tipoSujeto === 'juridica' ? 'Razón social' : 'Nombre completo'}
                 </label>
                 <input
@@ -158,13 +158,13 @@ export default function SolicitudClient({
                   placeholder={
                     datos.tipoSujeto === 'juridica' ? 'Como aparece en el RUT' : 'Como aparece en tu documento'
                   }
-                  className={`${CAMPO} ${malo('razon_social') || malo('nombre') ? 'border-[#EF4444]' : ''}`}
+                  className={`${CAMPO} ${malo('razon_social') || malo('nombre') ? 'border-alerta' : ''}`}
                 />
               </div>
 
               <div className="flex gap-2">
                 <div className="w-40">
-                  <label className="block text-xs font-semibold text-[#1A1A1A] mb-1.5">
+                  <label className="block text-xs font-semibold text-tinta mb-1.5">
                     Documento
                   </label>
                   <select
@@ -182,19 +182,19 @@ export default function SolicitudClient({
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-xs font-semibold text-[#1A1A1A] mb-1.5">Número</label>
+                  <label className="block text-xs font-semibold text-tinta mb-1.5">Número</label>
                   <input
                     value={datos.documento}
                     onChange={(e) => set('documento', e.target.value)}
                     inputMode="numeric"
                     placeholder="Sin puntos ni guiones"
-                    className={`${CAMPO} ${malo('documento') ? 'border-[#EF4444]' : ''}`}
+                    className={`${CAMPO} ${malo('documento') ? 'border-alerta' : ''}`}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#1A1A1A] mb-1.5">
+                <label className="block text-xs font-semibold text-tinta mb-1.5">
                   Correo electrónico
                 </label>
                 <input
@@ -204,9 +204,9 @@ export default function SolicitudClient({
                   inputMode="email"
                   autoComplete="email"
                   placeholder="A este correo llega tu enlace"
-                  className={`${CAMPO} ${malo('correo') ? 'border-[#EF4444]' : ''}`}
+                  className={`${CAMPO} ${malo('correo') ? 'border-alerta' : ''}`}
                 />
-                <p className="text-xs text-[#6B7280] mt-1">
+                <p className="text-xs text-tinta-suave mt-1">
                   Escríbelo bien: el enlace y el código para firmar van a llegar ahí, y no se puede
                   cambiar después sin volver a empezar.
                 </p>
@@ -215,7 +215,7 @@ export default function SolicitudClient({
               {/* ── El aviso, antes de recoger nada ── */}
               <div
                 className={`rounded-lg border p-3 ${
-                  malo('aviso') ? 'border-[#EF4444]' : 'border-[#E5E7EB]'
+                  malo('aviso') ? 'border-alerta' : 'border-[#E5E7EB]'
                 }`}
               >
                 <label className="flex items-start gap-2.5 cursor-pointer">
@@ -225,12 +225,12 @@ export default function SolicitudClient({
                     onChange={(e) => set('acepta', e.target.checked)}
                     className="mt-0.5 w-4 h-4 shrink-0"
                   />
-                  <span className="text-sm text-[#1A1A1A]">{CASILLA_AVISO}</span>
+                  <span className="text-sm text-tinta">{CASILLA_AVISO}</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => setAbierto((a) => !a)}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#6B7280] hover:text-[#1A1A1A]"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-tinta-suave hover:text-tinta"
                 >
                   <ChevronDown
                     className={`w-3.5 h-3.5 transition ${abierto ? 'rotate-180' : ''}`}
@@ -240,7 +240,7 @@ export default function SolicitudClient({
                 {abierto && (
                   <div className="mt-2 space-y-2 border-t border-[#F3F4F6] pt-2">
                     {avisos.map((p, i) => (
-                      <p key={i} className="text-xs text-[#6B7280] leading-relaxed">
+                      <p key={i} className="text-xs text-tinta-suave leading-relaxed">
                         {p}
                       </p>
                     ))}
@@ -249,7 +249,7 @@ export default function SolicitudClient({
               </div>
 
               {error && (
-                <p className="text-sm text-[#B91C1C] rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-3">
+                <p className="text-sm text-[#B91C1C] rounded-lg border border-alerta/30 bg-alerta/5 p-3">
                   {error}
                 </p>
               )}

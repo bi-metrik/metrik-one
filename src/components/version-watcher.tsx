@@ -143,12 +143,12 @@ export default function VersionWatcher({ version }: { version: string }) {
       role="status"
       className="fixed bottom-4 left-1/2 z-[9998] flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-card px-4 py-2 text-sm shadow-lg"
     >
-      <RefreshCw className="h-4 w-4 text-emerald-600" aria-hidden />
+      <RefreshCw className="h-4 w-4 text-acento" aria-hidden />
       <span className="text-foreground">Hay una versión nueva</span>
       <button
         type="button"
         onClick={recargar}
-        className="rounded-full bg-emerald-600 px-3 py-1 font-medium text-white transition-colors hover:bg-emerald-700"
+        className="rounded-full bg-acento px-3 py-1 font-medium text-white transition-colors hover:bg-acento"
       >
         Recargar
       </button>

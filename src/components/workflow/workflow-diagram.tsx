@@ -42,6 +42,7 @@ import { toast } from 'sonner'
 import type { WorkflowEtapa, WorkflowBloque } from './types'
 import { siguienteOrdenPorDefecto } from '@/lib/negocios/flujo'
 import { STAGE_COLORS, STAGE_LABELS } from './types'
+import { PALETA } from '@/lib/marca/paleta'
 
 interface Props {
   etapas: WorkflowEtapa[]
@@ -60,8 +61,8 @@ interface Props {
 // ── Stage indicator color (borde superior) ─────────────────────────────────
 
 const STAGE_INDICATOR_COLOR: Record<string, string> = {
-  venta: '#10B981',
-  ejecucion: '#F59E0B',
+  venta: PALETA.acento,
+  ejecucion: PALETA.advertencia,
   cobro: '#3B82F6',
 }
 
@@ -263,7 +264,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla, onUpd
   if (sorted.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-white p-8 text-center">
-        <p className="text-sm text-[#6B7280]">Esta línea aún no tiene etapas configuradas.</p>
+        <p className="text-sm text-tinta-suave">Esta línea aún no tiene etapas configuradas.</p>
       </div>
     )
   }
@@ -406,7 +407,7 @@ export function WorkflowDiagram({ etapas, mode, canConfigSla, onUpdateSla, onUpd
                 {firstBranch && (
                   <div className="relative">
                     {/* Mobile: timeline indentado */}
-                    <div className="md:hidden ml-6 border-l-2 border-dashed border-[#10B981] pl-4 pb-2">
+                    <div className="md:hidden ml-6 border-l-2 border-dashed border-acento pl-4 pb-2">
                       <BranchHeader direction="in" labelOverride="Rama: SÍ" />
                       <EtapaCard
                         etapa={firstBranch}
@@ -485,8 +486,8 @@ function Connector() {
   return (
     <div className="flex justify-center my-1" aria-hidden>
       <div className="flex flex-col items-center">
-        <div className="h-3 w-px bg-[#6B7280]" />
-        <div className="h-0 w-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px] border-t-[#6B7280]" />
+        <div className="h-3 w-px bg-tinta-suave" />
+        <div className="h-0 w-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px] border-t-tinta-suave" />
       </div>
     </div>
   )
@@ -498,14 +499,14 @@ function BranchHeader({ direction, labelOverride }: { direction: 'in' | 'out'; l
   if (direction === 'in') {
     return (
       <div className="flex items-center gap-1.5 mb-1.5 text-[11px]" aria-hidden>
-        <span className="font-semibold text-[#10B981] uppercase tracking-wider">
+        <span className="font-semibold text-acento uppercase tracking-wider">
           {labelOverride ?? 'SÍ ↓ Rama'}
         </span>
       </div>
     )
   }
   return (
-    <div className="flex items-center gap-1.5 mt-2 text-[11px] text-[#6B7280]" aria-hidden>
+    <div className="flex items-center gap-1.5 mt-2 text-[11px] text-tinta-suave" aria-hidden>
       <ArrowDown className="h-3 w-3" />
       <span>Vuelve al flujo principal</span>
     </div>
@@ -528,12 +529,12 @@ function BranchReturnConnector() {
         <path
           d="M 50 0 Q 50 25 0 35"
           fill="none"
-          stroke="#6B7280"
+          stroke={PALETA.tintaSuave}
           strokeWidth="1.5"
           strokeDasharray="0"
         />
         {/* Arrowhead */}
-        <polygon points="0,35 6,32 6,38" fill="#6B7280" />
+        <polygon points="0,35 6,32 6,38" fill={PALETA.tintaSuave} />
       </svg>
     </div>
   )
@@ -565,15 +566,15 @@ function DecisionDiamond({
             <polygon
               points="100,4 196,100 100,196 4,100"
               fill="#FFFFFF"
-              stroke="#10B981"
+              stroke={PALETA.acento}
               strokeWidth="2"
             />
           </svg>
           {/* Contenido centrado */}
           <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
-            <HelpCircle className="h-4 w-4 text-[#10B981]" aria-hidden />
+            <HelpCircle className="h-4 w-4 text-acento" aria-hidden />
             <p
-              className="mt-1 text-[12px] font-semibold leading-tight text-[#1A1A1A]"
+              className="mt-1 text-[12px] font-semibold leading-tight text-tinta"
               style={{ maxWidth: '120px' }}
             >
               {question}
@@ -586,16 +587,16 @@ function DecisionDiamond({
             <div key={`${s.respuesta}-${i}`} className="flex items-center justify-center gap-1.5">
               <span
                 className="font-semibold"
-                style={{ color: s.esRama ? '#10B981' : '#6B7280' }}
+                style={{ color: s.esRama ? PALETA.acento : PALETA.tintaSuave }}
               >
                 {s.respuesta}
               </span>
               {s.esRama ? (
-                <ArrowRight className="h-3.5 w-3.5" style={{ color: '#10B981' }} />
+                <ArrowRight className="h-3.5 w-3.5" style={{ color: PALETA.acento }} />
               ) : (
-                <ArrowDown className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+                <ArrowDown className="h-3.5 w-3.5" style={{ color: PALETA.tintaSuave }} />
               )}
-              <span className="text-[#1A1A1A]">{s.destinoLabel}</span>
+              <span className="text-tinta">{s.destinoLabel}</span>
             </div>
           ))}
         </div>
@@ -610,7 +611,7 @@ function TerminalNode() {
   return (
     <div
       className="mx-auto max-w-[260px] rounded-full border px-5 py-2 text-center text-[12px] font-semibold"
-      style={{ borderColor: '#1A1A1A', backgroundColor: '#1A1A1A', color: '#FFFFFF' }}
+      style={{ borderColor: PALETA.tinta, backgroundColor: PALETA.tinta, color: '#FFFFFF' }}
     >
       Cierre del negocio
     </div>
@@ -673,7 +674,7 @@ function EtapaCard({
   const bloquesExpanded = bloquesOverride ?? defaultExpanded
   const [detailExpanded, setDetailExpanded] = useState(mode === 'detailed')
 
-  const stageIndicator = STAGE_INDICATOR_COLOR[etapa.stage] ?? '#6B7280'
+  const stageIndicator = STAGE_INDICATOR_COLOR[etapa.stage] ?? PALETA.tintaSuave
 
   // Bloques summary line (simplified, colapsado)
   const totalBloques = etapa.bloques.length
@@ -692,7 +693,7 @@ function EtapaCard({
     <article
       className="rounded-xl border bg-white shadow-sm overflow-hidden"
       style={{
-        borderColor: isBranch ? '#10B981' : '#E5E7EB',
+        borderColor: isBranch ? PALETA.acento : '#E5E7EB',
         borderWidth: isBranch ? '1.5px' : '1px',
         borderTop: `3px solid ${stageIndicator}`,
       }}
@@ -710,9 +711,9 @@ function EtapaCard({
               style={{
                 width: '28px',
                 height: '28px',
-                border: '2px solid #10B981',
-                color: '#1A1A1A',
-                fontFamily: 'var(--font-montserrat), Montserrat, sans-serif',
+                border: `2px solid ${PALETA.acento}`,
+                color: PALETA.tinta,
+                fontFamily: 'var(--font-schibsted), sans-serif',
               }}
               // El número VISIBLE de la etapa, el mismo que usan las salidas de las
               // decisiones. Mostrar aquí el `orden` interno hacía que la tarjeta y las
@@ -721,11 +722,11 @@ function EtapaCard({
             >
               {etapa.numero ?? etapa.orden}
             </span>
-            <h3 className="truncate text-sm font-bold text-[#1A1A1A]">{etapa.nombre}</h3>
+            <h3 className="truncate text-sm font-bold text-tinta">{etapa.nombre}</h3>
             {isBranch && (
               <span
                 className="rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
-                style={{ backgroundColor: '#ECFDF5', color: '#059669' }}
+                style={{ backgroundColor: PALETA.acentoTinte, color: PALETA.acento }}
               >
                 Rama
               </span>
@@ -753,7 +754,7 @@ function EtapaCard({
 
         <div className="flex flex-col items-end gap-1">
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[11px] font-semibold text-[#1A1A1A]"
+            className="inline-flex items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[11px] font-semibold text-tinta"
             title={`${etapa.abiertos} negocio(s) abierto(s) en esta etapa`}
           >
             {etapa.abiertos}
@@ -791,18 +792,18 @@ function EtapaCard({
       {/* Bloques */}
       <div className="px-4 py-3">
         {etapa.bloques.length === 0 ? (
-          <p className="text-[11px] italic text-[#6B7280]">Sin bloques configurados.</p>
+          <p className="text-[11px] italic text-tinta-suave">Sin bloques configurados.</p>
         ) : mode === 'simplified' ? (
           <>
             {!bloquesExpanded ? (
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] text-[#6B7280]">
+                <span className="text-[12px] text-tinta-suave">
                   {summaryLine || `${totalBloques} bloque${totalBloques === 1 ? '' : 's'}`}
                 </span>
                 <button
                   type="button"
                   onClick={() => setBloquesOverride(true)}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-[#10B981] transition-colors hover:bg-[#F5F4F2]"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-acento transition-colors hover:bg-papel"
                 >
                   Ver más
                   <ChevronDown className="h-3 w-3" />
@@ -821,21 +822,21 @@ function EtapaCard({
                       <li
                         key={b.config_id}
                         className="flex items-center gap-2 text-[12px]"
-                        style={{ color: isReadOnly ? '#6B7280' : '#1A1A1A' }}
+                        style={{ color: isReadOnly ? PALETA.tintaSuave : PALETA.tinta }}
                       >
                         <span
-                          className="inline-block w-10 shrink-0 truncate rounded-md bg-[#1A1A1A] px-1 py-[1px] text-center text-[9px] font-mono font-semibold tracking-wider text-white"
+                          className="inline-block w-10 shrink-0 truncate rounded-md bg-tinta px-1 py-[1px] text-center text-[9px] font-mono font-semibold tracking-wider text-white"
                           title={b.block_id ? `ID del bloque: ${b.block_id}` : undefined}
                         >
                           {b.block_id ?? ''}
                         </span>
                         <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
                           {isReadOnly ? (
-                            <Eye className="h-3 w-3 text-[#6B7280]" aria-hidden />
+                            <Eye className="h-3 w-3 text-tinta-suave" aria-hidden />
                           ) : (
                             <span
                               className="inline-block h-1.5 w-1.5 rounded-full"
-                              style={{ backgroundColor: b.es_gate ? '#10B981' : '#6B7280' }}
+                              style={{ backgroundColor: b.es_gate ? PALETA.acento : PALETA.tintaSuave }}
                               title={b.es_gate ? 'Gate (bloquea avance)' : 'Bloque normal'}
                             />
                           )}
@@ -848,7 +849,7 @@ function EtapaCard({
                               title={`Aparece si ${b.condition_field} = ${b.condition_value}`}
                               aria-label="Condicional"
                             >
-                              <GitBranch className="h-3 w-3 text-[#6B7280]" />
+                              <GitBranch className="h-3 w-3 text-tinta-suave" />
                             </span>
                           )}
                         </span>
@@ -859,12 +860,12 @@ function EtapaCard({
                               title="Gate (bloquea avance)"
                               aria-label="Gate"
                             >
-                              <ShieldCheck className="h-3 w-3 text-[#10B981]" />
+                              <ShieldCheck className="h-3 w-3 text-acento" />
                             </span>
                           )}
                         </span>
                         <span
-                          className="hidden w-[88px] shrink-0 truncate rounded-full bg-[#F5F4F2] px-1.5 py-[1px] text-center text-[9px] font-mono uppercase tracking-wider text-[#6B7280] sm:inline-block"
+                          className="hidden w-[88px] shrink-0 truncate rounded-full bg-papel px-1.5 py-[1px] text-center text-[9px] font-mono uppercase tracking-wider text-tinta-suave sm:inline-block"
                           title={`Tipo de bloque: ${b.tipo}`}
                         >
                           {b.tipo}
@@ -877,7 +878,7 @@ function EtapaCard({
                 <button
                   type="button"
                   onClick={() => setBloquesOverride(false)}
-                  className="md:hidden mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-[#6B7280] transition-colors hover:bg-[#F5F4F2]"
+                  className="md:hidden mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-tinta-suave transition-colors hover:bg-papel"
                 >
                   Ver menos
                   <ChevronDown className="h-3 w-3 rotate-180" />
@@ -896,11 +897,11 @@ function EtapaCard({
 
       {/* Detailed extras: gates de etapa + routing */}
       {mode === 'detailed' && ((gates && gates.length > 0) || routing) && (
-        <div className="border-t border-[#E5E7EB] bg-[#F5F4F2]">
+        <div className="border-t border-[#E5E7EB] bg-papel">
           <button
             type="button"
             onClick={() => setDetailExpanded(v => !v)}
-            className="flex w-full items-center justify-between px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#6B7280] hover:bg-[#E5E7EB]/40"
+            className="flex w-full items-center justify-between px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-tinta-suave hover:bg-[#E5E7EB]/40"
           >
             <span>Config de etapa</span>
             {detailExpanded ? (
@@ -913,18 +914,18 @@ function EtapaCard({
             <div className="space-y-2 border-t border-[#E5E7EB] p-3">
               {gates && gates.length > 0 && (
                 <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">Gates</p>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-tinta-suave">Gates</p>
                   <ul className="space-y-0.5">
                     {gates.map(g => (
-                      <li key={g} className="font-mono text-[11px] text-[#1A1A1A]">{g}</li>
+                      <li key={g} className="font-mono text-[11px] text-tinta">{g}</li>
                     ))}
                   </ul>
                 </div>
               )}
               {routing && (
                 <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">Routing</p>
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px] text-[#1A1A1A]">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-tinta-suave">Routing</p>
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px] text-tinta">
                     {JSON.stringify(routing, null, 2)}
                   </pre>
                 </div>
@@ -951,28 +952,28 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[#E5E7EB] bg-white">
       <header
-        className={`flex items-center justify-between gap-2 px-3 py-1.5 ${hasConfig ? 'cursor-pointer hover:bg-[#F5F4F2]' : ''}`}
+        className={`flex items-center justify-between gap-2 px-3 py-1.5 ${hasConfig ? 'cursor-pointer hover:bg-papel' : ''}`}
         onClick={() => hasConfig && setExpanded(!expanded)}
       >
         <div className="flex min-w-0 items-center gap-2">
           <span
             className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: bloque.es_gate ? '#10B981' : '#6B7280' }}
+            style={{ backgroundColor: bloque.es_gate ? PALETA.acento : PALETA.tintaSuave }}
           />
-          <span className="shrink-0 text-[10px] font-mono text-[#6B7280]">{bloque.orden}</span>
+          <span className="shrink-0 text-[10px] font-mono text-tinta-suave">{bloque.orden}</span>
           {bloque.block_id && (
             <span
-              className="shrink-0 rounded-md bg-[#1A1A1A] px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
+              className="shrink-0 rounded-md bg-tinta px-1.5 py-[1px] text-[9px] font-mono font-semibold tracking-wider text-white"
               title={`ID del bloque: ${bloque.block_id}`}
             >
               {bloque.block_id}
             </span>
           )}
-          <span className="truncate text-[12px] font-semibold text-[#1A1A1A]">{bloque.nombre}</span>
-          <span className="rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-mono text-[#6B7280]">{bloque.tipo}</span>
+          <span className="truncate text-[12px] font-semibold text-tinta">{bloque.nombre}</span>
+          <span className="rounded-full bg-papel px-2 py-0.5 text-[10px] font-mono text-tinta-suave">{bloque.tipo}</span>
           {isCondicional && (
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+              className="inline-flex items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta-suave"
               title={`Aparece si ${bloque.condition_field} = ${bloque.condition_value}`}
             >
               <GitBranch className="h-3 w-3" />
@@ -981,7 +982,7 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
           )}
           {isReadOnly && (
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+              className="inline-flex items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta-suave"
               title={
                 bloque.source_etapa_orden != null
                   ? `Solo lectura — heredado de etapa ${bloque.source_etapa_orden}`
@@ -993,7 +994,7 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
             </span>
           )}
           {bloque.es_gate && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-medium text-[#059669]">
+            <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-2 py-0.5 text-[10px] font-medium text-acento">
               <ShieldCheck className="h-3 w-3" />
               gate
             </span>
@@ -1001,13 +1002,13 @@ function DetailedBloqueRow({ bloque }: { bloque: WorkflowBloque }) {
         </div>
         {hasConfig && (
           expanded
-            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#6B7280]" />
-            : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#6B7280]" />
+            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-tinta-suave" />
+            : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-tinta-suave" />
         )}
       </header>
       {expanded && hasConfig && (
-        <div className="border-t border-[#E5E7EB] bg-[#F5F4F2] px-3 py-2">
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px] text-[#1A1A1A]">
+        <div className="border-t border-[#E5E7EB] bg-papel px-3 py-2">
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px] text-tinta">
             {JSON.stringify(bloque.config_extra, null, 2)}
           </pre>
         </div>
@@ -1063,10 +1064,10 @@ export function SlaConfig({
         className="flex items-center justify-between gap-2 border-b px-4 py-2"
         style={{ borderColor: '#E5E7EB' }}
       >
-        <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280]">
+        <div className="flex items-center gap-1.5 text-[11px] text-tinta-suave">
           <Clock className="h-3 w-3" />
           {slaHoras !== null ? (
-            <span>SLA: <span className="font-semibold text-[#1A1A1A]">{formatSlaLong(slaHoras)}</span></span>
+            <span>SLA: <span className="font-semibold text-tinta">{formatSlaLong(slaHoras)}</span></span>
           ) : (
             <span>Sin alerta</span>
           )}
@@ -1074,7 +1075,7 @@ export function SlaConfig({
         {canEdit && onUpdateSla && (
           <button
             onClick={() => setEditing(true)}
-            className="rounded-md p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
+            className="rounded-md p-1 text-tinta-suave transition-colors hover:bg-papel hover:text-tinta"
             title="Configurar SLA"
           >
             <Pencil className="h-3 w-3" />
@@ -1105,8 +1106,8 @@ export function SlaConfig({
   }
 
   return (
-    <div className="border-b bg-[#F5F4F2] px-3 py-2" style={{ borderColor: '#E5E7EB' }}>
-      <label htmlFor={inputId} className="block text-[10px] font-medium text-[#6B7280]">
+    <div className="border-b bg-papel px-3 py-2" style={{ borderColor: '#E5E7EB' }}>
+      <label htmlFor={inputId} className="block text-[10px] font-medium text-tinta-suave">
         Horas hábiles esperadas en esta etapa (L-V Colombia)
       </label>
       <div className="mt-1 flex items-center gap-1.5">
@@ -1121,12 +1122,12 @@ export function SlaConfig({
           onChange={(e) => setValue(e.target.value)}
           placeholder="Sin alerta"
           disabled={isPending}
-          className="w-full rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[12px] text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-50"
+          className="w-full rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[12px] text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-50"
         />
         <button
           onClick={save}
           disabled={isPending}
-          className="rounded-md bg-[#10B981] p-1 text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+          className="rounded-md bg-acento p-1 text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
           title="Guardar"
         >
           <Check className="h-3 w-3" />
@@ -1134,14 +1135,14 @@ export function SlaConfig({
         <button
           onClick={() => { setEditing(false); setValue(slaHoras?.toString() ?? '') }}
           disabled={isPending}
-          className="rounded-md bg-white p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] disabled:opacity-50"
+          className="rounded-md bg-white p-1 text-tinta-suave transition-colors hover:bg-papel disabled:opacity-50"
           style={{ border: '1px solid #E5E7EB' }}
           title="Cancelar"
         >
           <X className="h-3 w-3" />
         </button>
       </div>
-      <p className="mt-1 text-[10px] text-[#6B7280]">Excluye sábados, domingos y festivos. Vacía el campo para desactivar la alerta.</p>
+      <p className="mt-1 text-[10px] text-tinta-suave">Excluye sábados, domingos y festivos. Vacía el campo para desactivar la alerta.</p>
     </div>
   )
 }
@@ -1201,7 +1202,7 @@ export function AvisosConfig({
       className="flex items-center gap-1.5 border-b px-4 py-2"
       style={{ borderColor: '#E5E7EB' }}
     >
-      <span className="text-[11px] text-[#6B7280]">Avisar al entrar:</span>
+      <span className="text-[11px] text-tinta-suave">Avisar al entrar:</span>
       <ChipAviso
         activo={avisoInterno}
         label="equipo"
@@ -1250,8 +1251,8 @@ function ChipAviso({
       aria-pressed={activo}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors disabled:opacity-60 ${
         activo
-          ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
-          : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#10B981]/40 hover:text-[#059669]'
+          ? 'border-acento bg-acento/10 text-acento'
+          : 'border-[#E5E7EB] text-tinta-suave hover:border-acento/40 hover:text-acento-hover'
       }`}
     >
       <Mail className="h-2.5 w-2.5" />

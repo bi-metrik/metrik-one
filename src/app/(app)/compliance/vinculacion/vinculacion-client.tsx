@@ -42,11 +42,11 @@ import {
 const CHIP: Record<EstadoExpediente, string> = {
   invitado: 'bg-[#F3F4F6] text-[#4B5563] border-[#D1D5DB]',
   en_proceso: 'bg-[#F3F4F6] text-[#4B5563] border-[#D1D5DB]',
-  pendiente_revision: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  aprobado: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
-  rechazado: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
-  devuelto: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  vencido: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
+  pendiente_revision: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  aprobado: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
+  rechazado: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
+  devuelto: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  vencido: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
   sin_respuesta: 'bg-[#F3F4F6] text-[#4B5563] border-[#D1D5DB]',
 };
 
@@ -118,8 +118,8 @@ function TarjetaEnlace({
   if (error || !actual) {
     return (
       <div className="mb-6 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] p-4">
-        <p className="text-sm font-semibold text-[#1A1A1A]">Enlace para que se registren</p>
-        <p className="text-xs text-[#6B7280] mt-1">
+        <p className="text-sm font-semibold text-tinta">Enlace para que se registren</p>
+        <p className="text-xs text-tinta-suave mt-1">
           No se pudo traer el enlace en este momento. {error ?? ''}
         </p>
       </div>
@@ -129,10 +129,10 @@ function TarjetaEnlace({
   return (
     <div className="mb-6 rounded-lg border border-[#E5E7EB] p-4">
       <div className="flex items-start gap-2 mb-2">
-        <Link2 className="w-4 h-4 text-[#6B7280] mt-0.5 shrink-0" />
+        <Link2 className="w-4 h-4 text-tinta-suave mt-0.5 shrink-0" />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#1A1A1A]">Enlace para que se registren</p>
-          <p className="text-xs text-[#6B7280] mt-0.5">
+          <p className="text-sm font-semibold text-tinta">Enlace para que se registren</p>
+          <p className="text-xs text-tinta-suave mt-0.5">
             Compártelo con tus proveedores. Ellos dejan sus datos básicos y les llega por correo su
             enlace personal para subir documentos y firmar. Los documentos nunca se suben por acá.
           </p>
@@ -140,13 +140,13 @@ function TarjetaEnlace({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <code className="flex-1 min-w-0 truncate rounded-md bg-[#F3F4F6] px-3 py-2 text-xs text-[#1A1A1A]">
+        <code className="flex-1 min-w-0 truncate rounded-md bg-[#F3F4F6] px-3 py-2 text-xs text-tinta">
           {actual.url}
         </code>
         <button
           type="button"
           onClick={() => copiar('url')}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-2 text-xs font-semibold text-[#1A1A1A] hover:bg-[#F9FAFB] transition"
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-2 text-xs font-semibold text-tinta hover:bg-[#F9FAFB] transition"
         >
           {copiado === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copiado === 'url' ? 'Copiado' : 'Copiar enlace'}
@@ -154,7 +154,7 @@ function TarjetaEnlace({
         <button
           type="button"
           onClick={() => copiar('mensaje')}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-2 text-xs font-semibold text-[#1A1A1A] hover:bg-[#F9FAFB] transition"
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-2 text-xs font-semibold text-tinta hover:bg-[#F9FAFB] transition"
         >
           {copiado === 'mensaje' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copiado === 'mensaje' ? 'Copiado' : 'Copiar mensaje'}
@@ -167,7 +167,7 @@ function TarjetaEnlace({
             type="button"
             onClick={rotar}
             disabled={rotando}
-            className="inline-flex items-center gap-1.5 text-xs text-[#6B7280] hover:text-[#1A1A1A] transition disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-xs text-tinta-suave hover:text-tinta transition disabled:opacity-50"
           >
             {rotando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             Cambiar el enlace
@@ -254,7 +254,7 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
       <button
         type="button"
         onClick={() => setAbierto(true)}
-        className="mb-5 inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#333] transition"
+        className="mb-5 inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-tinta text-white text-sm font-semibold hover:bg-[#333] transition"
       >
         <UserPlus className="w-4 h-4" />
         Invitar contraparte
@@ -263,20 +263,20 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
   }
 
   const marcar = (campo: string) =>
-    tocado && falta.includes(campo) ? 'border-[#EF4444]' : 'border-[#E5E7EB]';
+    tocado && falta.includes(campo) ? 'border-alerta' : 'border-[#E5E7EB]';
 
   return (
     <div className="mb-5 rounded-lg border border-[#E5E7EB] p-4">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <p className="text-sm font-semibold text-[#1A1A1A]">Invitar a una contraparte</p>
-          <p className="text-xs text-[#6B7280] mt-0.5">
+          <p className="text-sm font-semibold text-tinta">Invitar a una contraparte</p>
+          <p className="text-xs text-tinta-suave mt-0.5">
             Le llega a su correo un enlace personal para subir documentos y firmar. El correo lo
             eliges tú: es lo que después hace que el código de firma llegue a un canal que ya
             conocías.
           </p>
         </div>
-        <button type="button" onClick={cerrar} className="text-[#9CA3AF] hover:text-[#1A1A1A] transition">
+        <button type="button" onClick={cerrar} className="text-[#9CA3AF] hover:text-tinta transition">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -285,11 +285,11 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
         <div
           className={`rounded-lg border p-3 ${
             desenlace.resumen.tono === 'ok'
-              ? 'border-[#10B981]/30 bg-[#ECFDF5]'
-              : 'border-[#F59E0B]/30 bg-[#F59E0B]/5'
+              ? 'border-acento/30 bg-[var(--acento-tinte)]'
+              : 'border-advertencia/30 bg-advertencia/5'
           }`}
         >
-          <p className="text-sm font-semibold text-[#1A1A1A]">{desenlace.resumen.titulo}</p>
+          <p className="text-sm font-semibold text-tinta">{desenlace.resumen.titulo}</p>
           <p className="text-xs text-[#4B5563] mt-1">{desenlace.resumen.detalle}</p>
           {desenlace.resumen.ofreceEnlace && (
             <div className="mt-3 flex items-center gap-2">
@@ -301,7 +301,7 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
                 onClick={() => copiarEnlace(desenlace.url)}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[#E5E7EB] bg-white text-xs font-semibold hover:bg-[#F9FAFB] transition shrink-0"
               >
-                {copiado ? <Check className="w-3.5 h-3.5 text-[#059669]" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiado ? <Check className="w-3.5 h-3.5 text-acento" /> : <Copy className="w-3.5 h-3.5" />}
                 {copiado ? 'Copiado' : 'Copiar enlace'}
               </button>
             </div>
@@ -310,11 +310,11 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
             <button
               type="button"
               onClick={() => setDesenlace(null)}
-              className="text-xs font-semibold underline underline-offset-2 text-[#1A1A1A]"
+              className="text-xs font-semibold underline underline-offset-2 text-tinta"
             >
               Invitar a otra
             </button>
-            <button type="button" onClick={cerrar} className="text-xs text-[#6B7280]">
+            <button type="button" onClick={cerrar} className="text-xs text-tinta-suave">
               Cerrar
             </button>
           </div>
@@ -329,7 +329,7 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
                 onClick={() => cambiarSujeto(t)}
                 className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
                   datos.tipoSujeto === t
-                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
+                    ? 'bg-tinta text-white border-tinta'
                     : 'bg-white text-[#4B5563] border-[#E5E7EB] hover:bg-[#F9FAFB]'
                 }`}
               >
@@ -399,12 +399,12 @@ function PanelInvitar({ onListo }: { onListo: () => void }) {
               type="button"
               onClick={enviar}
               disabled={enviando}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#333] transition disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-tinta text-white text-sm font-semibold hover:bg-[#333] transition disabled:opacity-50"
             >
               {enviando ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
               Enviar invitación
             </button>
-            <button type="button" onClick={cerrar} className="text-xs text-[#6B7280]">
+            <button type="button" onClick={cerrar} className="text-xs text-tinta-suave">
               Cancelar
             </button>
           </div>
@@ -463,10 +463,10 @@ export default function VinculacionClient({
   return (
     <div className="p-6 max-w-6xl">
       <div className="flex items-start justify-between gap-4 mb-1">
-        <h1 className="text-xl font-bold text-[#1A1A1A]">Vinculación de contrapartes</h1>
-        {pending && <Loader2 className="w-4 h-4 animate-spin text-[#6B7280] mt-1" />}
+        <h1 className="text-xl font-bold text-tinta">Vinculación de contrapartes</h1>
+        {pending && <Loader2 className="w-4 h-4 animate-spin text-tinta-suave mt-1" />}
       </div>
-      <p className="text-sm text-[#6B7280] mb-6">
+      <p className="text-sm text-tinta-suave mb-6">
         La contraparte sube sus documentos por un enlace propio y el sistema los lee. Acá revisas lo
         que quedó y decides si la vinculas.
       </p>
@@ -481,7 +481,7 @@ export default function VinculacionClient({
       />
 
       {error && (
-        <div className="mb-5 rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-4">
+        <div className="mb-5 rounded-lg border border-alerta/30 bg-alerta/5 p-4">
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-[#B91C1C] mt-0.5 shrink-0" />
             <div className="text-sm text-[#B91C1C]">
@@ -508,7 +508,7 @@ export default function VinculacionClient({
                 type="button"
                 onClick={() => setFiltro(filtro === e ? null : e)}
                 className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${CHIP[e]} ${
-                  filtro === e ? 'ring-2 ring-offset-1 ring-[#1A1A1A]/20' : ''
+                  filtro === e ? 'ring-2 ring-offset-1 ring-tinta/20' : ''
                 }`}
               >
                 {ESTADO_EXPEDIENTE_LABEL[e]} · {bandeja.resumen[e]}
@@ -529,14 +529,14 @@ export default function VinculacionClient({
           {bandeja.expedientes.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[#E5E7EB] p-8 text-center">
               <FolderOpen className="w-6 h-6 text-[#9CA3AF] mx-auto mb-2" />
-              <p className="text-sm font-semibold text-[#1A1A1A]">Todavía no hay vinculaciones.</p>
-              <p className="text-xs text-[#6B7280] mt-1">
+              <p className="text-sm font-semibold text-tinta">Todavía no hay vinculaciones.</p>
+              <p className="text-xs text-tinta-suave mt-1">
                 Cuando invites a una contraparte, su expediente aparece acá y va cambiando de estado
                 a medida que ella avanza.
               </p>
             </div>
           ) : visibles.length === 0 ? (
-            <p className="text-sm text-[#6B7280] py-6">Nada coincide con ese filtro.</p>
+            <p className="text-sm text-tinta-suave py-6">Nada coincide con ese filtro.</p>
           ) : (
             <div className="rounded-lg border border-[#E5E7EB] overflow-hidden">
               {visibles.map((f, i) => (
@@ -548,10 +548,10 @@ export default function VinculacionClient({
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-[#1A1A1A] truncate">
+                    <p className="text-sm font-semibold text-tinta truncate">
                       {nombreContraparte(f)}
                     </p>
-                    <p className="text-xs text-[#6B7280] truncate">
+                    <p className="text-xs text-tinta-suave truncate">
                       {f.documento_tipo && f.documento_numero
                         ? `${f.documento_tipo} ${f.documento_numero} · `
                         : ''}

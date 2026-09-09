@@ -138,10 +138,10 @@ function ResponsableInline({
 
   return (
     <div className="relative mt-1 flex flex-wrap items-center gap-1" ref={popoverRef}>
-      <UserCircle className="h-2.5 w-2.5 shrink-0 text-[#6B7280]/70" />
+      <UserCircle className="h-2.5 w-2.5 shrink-0 text-tinta-suave/70" />
       {responsableNombre ? (
         <span
-          className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+          className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta-suave"
           title={responsableNombre}
         >
           <span className="truncate">{responsableNombre}</span>
@@ -150,7 +150,7 @@ function ResponsableInline({
               type="button"
               onClick={handleQuitar}
               disabled={isPending}
-              className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white hover:text-[#1A1A1A] disabled:opacity-60"
+              className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white hover:text-tinta disabled:opacity-60"
               title={`Quitar a ${responsableNombre}`}
               aria-label={`Quitar a ${responsableNombre}`}
             >
@@ -159,7 +159,7 @@ function ResponsableInline({
           )}
         </span>
       ) : (
-        !canAsignar && <span className="text-[10px] italic text-[#6B7280]/70">Sin responsable</span>
+        !canAsignar && <span className="text-[10px] italic text-tinta-suave/70">Sin responsable</span>
       )}
 
       {canAsignar && (
@@ -167,7 +167,7 @@ function ResponsableInline({
           type="button"
           onClick={handleToggleOpen}
           disabled={isPending}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] transition-colors hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-tinta-suave transition-colors hover:border-acento hover:text-acento disabled:opacity-60"
           aria-label={responsableNombre ? 'Cambiar responsable' : 'Asignar responsable'}
         >
           {isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
@@ -181,26 +181,26 @@ function ResponsableInline({
           className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white shadow-lg"
         >
           <div className="relative border-b border-[#E5E7EB]">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#6B7280]" />
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-tinta-suave" />
             <input
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Buscar persona…"
               aria-label="Buscar persona"
-              className="w-full py-1.5 pl-7 pr-2 text-xs text-[#1A1A1A] placeholder:text-[#6B7280] focus:outline-none"
+              className="w-full py-1.5 pl-7 pr-2 text-xs text-tinta placeholder:text-tinta-suave focus:outline-none"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
             {disponibles.length === 0 ? (
-              <p className="px-3 py-2 text-[11px] text-[#6B7280]">Sin personas disponibles</p>
+              <p className="px-3 py-2 text-[11px] text-tinta-suave">Sin personas disponibles</p>
             ) : (
               disponibles.map(s => (
                 <button
                   key={s.id}
                   type="button"
                   onClick={e => handleAsignar(e, s.id, s.full_name)}
-                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#1A1A1A] transition-colors hover:bg-[#F5F4F2]"
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-tinta transition-colors hover:bg-papel"
                 >
                   {s.full_name}
                 </button>
@@ -646,7 +646,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                 aria-pressed={vista === value}
                 title={`Ver en ${label.toLowerCase()}`}
                 className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                  vista === value ? 'bg-[#1A1A1A] text-white' : 'text-[#6B7280] hover:bg-[#F5F4F2]'
+                  vista === value ? 'bg-tinta text-white' : 'text-tinta-suave hover:bg-papel'
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -778,15 +778,15 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
               type="button"
               onClick={toggleSeleccionarVisibles}
               disabled={sorted.length === 0}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#6B7280] transition-colors hover:text-[#1A1A1A] disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-tinta-suave transition-colors hover:text-tinta disabled:opacity-50"
             >
               {todosVisiblesSeleccionados
-                ? <CheckSquare className="h-3.5 w-3.5 text-[#10B981]" />
+                ? <CheckSquare className="h-3.5 w-3.5 text-acento" />
                 : <Square className="h-3.5 w-3.5" />}
               {todosVisiblesSeleccionados ? 'Quitar selección' : `Seleccionar los ${sorted.length} visibles`}
             </button>
             {seleccionados.length > 0 && (
-              <span className="text-xs font-semibold text-[#1A1A1A]">
+              <span className="text-xs font-semibold text-tinta">
                 {seleccionados.length} seleccionado{seleccionados.length !== 1 ? 's' : ''}
               </span>
             )}
@@ -810,7 +810,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                 type="button"
                 onClick={handleAsignarMasivo}
                 disabled={!destinoMasivo || isPending}
-                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#10B981] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-acento px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
               >
                 {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
                 Aplicar
@@ -819,7 +819,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                 type="button"
                 onClick={limpiarSeleccion}
                 disabled={isPending}
-                className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A] disabled:opacity-50"
+                className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-tinta-suave transition-colors hover:bg-papel hover:text-tinta disabled:opacity-50"
               >
                 Limpiar
               </button>
@@ -858,7 +858,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
               key={c.id}
               href={`/directorio/contacto/${c.id}`}
               className={`block rounded-xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${
-                marcado ? 'border-[#10B981] ring-1 ring-[#10B981]/20' : 'border-[#E5E7EB]'
+                marcado ? 'border-acento ring-1 ring-acento/20' : 'border-[#E5E7EB]'
               }`}
             >
               <div className="flex items-start justify-between gap-2">
@@ -866,13 +866,13 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                   <button
                     type="button"
                     onClick={e => { frenarNavegacion(e); toggleSeleccion(c.id) }}
-                    className="mt-0.5 shrink-0 rounded p-0.5 text-[#6B7280] transition-colors hover:text-[#1A1A1A]"
+                    className="mt-0.5 shrink-0 rounded p-0.5 text-tinta-suave transition-colors hover:text-tinta"
                     role="checkbox"
                     aria-checked={marcado}
                     aria-label={`Seleccionar ${c.nombre}`}
                   >
                     {marcado
-                      ? <CheckSquare className="h-4 w-4 text-[#10B981]" />
+                      ? <CheckSquare className="h-4 w-4 text-acento" />
                       : <Square className="h-4 w-4" />}
                   </button>
                 )}
@@ -937,22 +937,22 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                   </div>
 
                   {/* Nombre (ya viene en mayusculas) */}
-                  <p className="truncate text-sm font-semibold leading-tight text-[#1A1A1A]">
+                  <p className="truncate text-sm font-semibold leading-tight text-tinta">
                     {c.nombre}
                   </p>
                   {fuenteLabel && (
-                    <p className="truncate text-[11px] text-[#6B7280]">{fuenteLabel}</p>
+                    <p className="truncate text-[11px] text-tinta-suave">{fuenteLabel}</p>
                   )}
 
                   {/* Contacto */}
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
                     {c.telefono && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-[#6B7280]">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-tinta-suave">
                         <Phone className="h-3 w-3" /> {c.telefono}
                       </span>
                     )}
                     {c.email && (
-                      <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-[#6B7280]">
+                      <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-tinta-suave">
                         <Mail className="h-3 w-3 shrink-0" /> <span className="truncate">{c.email}</span>
                       </span>
                     )}
@@ -960,19 +960,19 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
 
                   {/* Origen de campana (first-touch) */}
                   {(campana || c.es_meta) && (
-                    <p className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#6B7280]">
+                    <p className="mt-1 inline-flex items-center gap-1 text-[10px] text-tinta-suave">
                       <Megaphone className="h-2.5 w-2.5 text-[#1877F2]" />
                       Origen: Meta
-                      {campana && <span className="font-medium text-[#1A1A1A]"> · {campana}</span>}
+                      {campana && <span className="font-medium text-tinta"> · {campana}</span>}
                       {c.origen?.platform && (
-                        <span className="uppercase text-[#6B7280]/70"> ({c.origen.platform})</span>
+                        <span className="uppercase text-tinta-suave/70"> ({c.origen.platform})</span>
                       )}
                       {/* La tabla con las campanas es solo de escritorio, asi que en
                           celular esta es la unica pista de que el contacto toco mas
                           de una. Sin ella, filtrar por "Mas de una campana" desde el
                           telefono devuelve una lista que no se puede interpretar. */}
                       {c.campanas.length > 1 && (
-                        <span className="text-[#6B7280]/70" title={c.campanas.join(' → ')}>
+                        <span className="text-tinta-suave/70" title={c.campanas.join(' → ')}>
                           {' '}· +{c.campanas.length - 1} campana{c.campanas.length - 1 !== 1 ? 's' : ''}
                         </span>
                       )}
@@ -992,7 +992,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
 
                 {/* Acciones */}
                 <div className="flex shrink-0 flex-col items-end gap-1.5 text-right">
-                  {cuando && <span className="text-[10px] text-[#6B7280]/80">{cuando}</span>}
+                  {cuando && <span className="text-[10px] text-tinta-suave/80">{cuando}</span>}
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -1000,7 +1000,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                         e.preventDefault(); e.stopPropagation()
                         router.push(`/negocios/nuevo?contacto_id=${c.id}&contacto_nombre=${encodeURIComponent(c.nombre)}`)
                       }}
-                      className="rounded p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#F59E0B]"
+                      className="rounded p-1 text-tinta-suave transition-colors hover:bg-papel hover:text-advertencia"
                       title="Crear negocio"
                       aria-label="Crear negocio"
                     >
@@ -1009,7 +1009,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
                     <button
                       type="button"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDelete(c.id, c.nombre) }}
-                      className="rounded p-1 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#EF4444]"
+                      className="rounded p-1 text-tinta-suave transition-colors hover:bg-papel hover:text-alerta"
                       title="Eliminar"
                       aria-label="Eliminar contacto"
                     >
@@ -1063,7 +1063,7 @@ function TablaContactos({
             de su columna y se pinta ENCIMA de la vecina. Los de dos palabras envuelven
             y por eso solo fallaba ese. Sin `tracking-wide`: en mayusculas de 10 px el
             espaciado extra infla cada encabezado ~10% sin aportar legibilidad. */}
-        <thead className="border-b border-[#E5E7EB] bg-[#F5F4F2] text-[10px] uppercase text-[#6B7280]">
+        <thead className="border-b border-[#E5E7EB] bg-papel text-[10px] uppercase text-tinta-suave">
           <tr>
             {/* El estatus dejo de ser columna y bajo a la celda del contacto: es lo
                 que menos se escanea y le quitaba ancho a las campanas, que son lo que
@@ -1091,14 +1091,14 @@ function TablaContactos({
                 onKeyDown={e => {
                   if (e.key === 'Enter') router.push(`/directorio/contacto/${c.id}`)
                 }}
-                className="cursor-pointer border-b border-[#E5E7EB] last:border-0 transition-colors hover:bg-[#F5F4F2] focus:bg-[#F5F4F2] focus:outline-none"
+                className="cursor-pointer border-b border-[#E5E7EB] last:border-0 transition-colors hover:bg-papel focus:bg-papel focus:outline-none"
               >
                 <td className="px-3 py-2">
-                  <span className="block truncate font-semibold text-[#1A1A1A]" title={c.nombre}>
+                  <span className="block truncate font-semibold text-tinta" title={c.nombre}>
                     {c.nombre}
                   </span>
                   {c.telefono && (
-                    <span className="block truncate text-[10px] text-[#6B7280]">{c.telefono}</span>
+                    <span className="block truncate text-[10px] text-tinta-suave">{c.telefono}</span>
                   )}
                   {/* Mismo texto y mismo color que el chip de la tarjeta (los dos
                       salen de `resolverStatusContacto`). Cada pieza es condicional,
@@ -1110,24 +1110,24 @@ function TablaContactos({
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium text-[#1A1A1A]">
+                <td className="px-3 py-2 text-right tabular-nums font-medium text-tinta">
                   {c.interacciones_meta}
                 </td>
                 {/* Los nombres reales llegan a 34 caracteres: `truncate` mas el
                     `title` completo, que es lo que deja leerlos sin ensanchar. */}
                 <td className="px-3 py-2">
-                  <span className="block truncate text-[#1A1A1A]" title={primera ?? undefined}>
-                    {primera ?? <span className="text-[#6B7280]/60">—</span>}
+                  <span className="block truncate text-tinta" title={primera ?? undefined}>
+                    {primera ?? <span className="text-tinta-suave/60">—</span>}
                   </span>
                 </td>
                 <td className="px-3 py-2">
                   {/* Vacia cuando coincide con la primera (647 de 673 contactos):
                       repetir el mismo texto gasta el ancho que necesita el nombre. */}
-                  <span className="block truncate text-[#6B7280]" title={ultima ?? undefined}>
+                  <span className="block truncate text-tinta-suave" title={ultima ?? undefined}>
                     {ultima ?? ''}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-[10px] text-[#6B7280]">
+                <td className="px-3 py-2 text-right tabular-nums text-[10px] text-tinta-suave">
                   {fechaCorta(c.ultima_interaccion_at ?? c.created_at)}
                 </td>
               </tr>
