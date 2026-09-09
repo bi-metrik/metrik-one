@@ -283,4 +283,35 @@ Y el resto del método, medido:
   están bloqueados, y restaurar el archivo a mano (sobreescribirlo) arriesga pisar a una sesión
   viva. Se reporta el comando para que lo corra la sesión principal, y no se toca.
 
-Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]], [[navigate-lector-gemini]].
+## ⚠️ `main` avanza mientras trabajas: `git diff origin/main` inventa borrados
+
+Medido el 2026-09-09 (PR #601). Se creo la rama de `origin/main` fresco y, horas
+despues, `git diff --stat origin/main` mostraba **ocho modulos borrados**
+(`src/lib/suscripciones/*`, `fecha-cuota.ts`, una migracion, archivos de memoria).
+No los borraba nadie: eran **adiciones de tres PR que entraron a `main` en el
+medio**, y el diff de dos puntos contra la punta las presenta como borrados
+propios.
+
+**Como separar el susto del problema, en dos comandos:**
+
+```
+git show --diff-filter=D --name-only --format="" HEAD   # que borra MI commit
+git rev-parse HEAD~1 ; git rev-parse origin/main        # base vs main de ahora
+```
+
+Si el primero solo lista lo que uno quiso borrar, el PR **no revierte nada**:
+GitHub diffea contra el *merge base*, no contra la punta.
+
+⚠️ **Pero rebasar igual es obligatorio en una migracion transversal.** Los
+archivos que llegaron traen el defecto que uno acaba de barrer (aqui, hex viejo y
+`font-montserrat` reintroducidos en 2 archivos), y el barrido nunca los vio
+porque no existian en el arbol. Sin rebasar, el "grep en cero" del reporte es
+falso desde el instante del merge. Despues del `git rebase origin/main`, **volver
+a correr el barrido completo** y recien ahi verificar.
+
+Los conflictos son del tipo bueno: main agrego una clase nueva con el hex viejo
+sobre la linea que uno tokenizo. Se resuelve conservando **la logica de ellos**
+con **el token de uno**. Y al terminar, `push --force-with-lease`.
+
+Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]], [[navigate-lector-gemini]],
+[[tokens-pino-profundo]].
