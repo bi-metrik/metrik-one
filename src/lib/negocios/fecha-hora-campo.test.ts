@@ -8,6 +8,8 @@ import {
   partesFechaHora,
   componerFechaHora,
   faltaHoraDeCita,
+  diaDeFechaHora,
+  horasHastaFechaHora,
 } from './fecha-hora-campo'
 
 // 2026-08-18 15:30 en Bogotá = 20:30 UTC del mismo día.
@@ -128,5 +130,60 @@ describe('dos casillas: dia y hora', () => {
     expect(faltaHoraDeCita('2026-09-26', '09:30')).toBe(false)
     expect(faltaHoraDeCita('', '')).toBe(false)
     expect(faltaHoraDeCita('', '09:30')).toBe(false)
+  })
+})
+
+describe('diaDeFechaHora', () => {
+  it('devuelve el dia civil tal cual, con hora o sin ella', () => {
+    expect(diaDeFechaHora('2026-09-26')).toBe('2026-09-26')
+    expect(diaDeFechaHora('2026-09-26T00:30')).toBe('2026-09-26')
+  })
+
+  it('lo que no es una fecha del campo no tiene dia', () => {
+    expect(diaDeFechaHora(null)).toBe('')
+    expect(diaDeFechaHora('por confirmar')).toBe('')
+  })
+})
+
+describe('horasHastaFechaHora', () => {
+  it('cuenta horas corridas, incluido el fin de semana', () => {
+    // Viernes 21-ago 15:30 Bogotá desde el martes 18-ago 15:30: 72 h de reloj de
+    // pared. Con horas HÁBILES darían muchas menos, y ese no es el criterio: el
+    // cliente imprime, firma a mano y escanea, y lo hace un sábado igual.
+    expect(horasHastaFechaHora('2026-08-21T15:30', AHORA)).toBe(72)
+  })
+
+  it('lo que ya paso da negativo', () => {
+    expect(horasHastaFechaHora('2026-08-18T13:30', AHORA)).toBe(-2)
+  })
+
+  it('lee la hora de pared de Bogota, no UTC', () => {
+    // `new Date('2026-08-19')` da medianoche UTC = 19:00 del 18 en Bogotá, y la
+    // cuenta saldría 5 h corrida. Desde las 15:30 del 18 hasta la medianoche del
+    // 19 hay 8,5 h.
+    expect(horasHastaFechaHora('2026-08-19', AHORA)).toBe(8.5)
+  })
+
+  it('un valor heredado de solo dia cuenta como su medianoche', () => {
+    // Consecuencia aceptada: la cuenta le queda hasta 12 h adelantada respecto de
+    // la cita real. Es el lado seguro del error y NO se arregla migrando el dato.
+    expect(horasHastaFechaHora('2026-08-20', AHORA)).toBe(32.5)
+    expect(horasHastaFechaHora('2026-08-20T12:00', AHORA)).toBe(44.5)
+  })
+
+  it('lo que no es una fecha del campo no da cuenta ninguna', () => {
+    expect(horasHastaFechaHora(null, AHORA)).toBeNull()
+    expect(horasHastaFechaHora('', AHORA)).toBeNull()
+    expect(horasHastaFechaHora('por confirmar', AHORA)).toBeNull()
+    expect(horasHastaFechaHora(1234, AHORA)).toBeNull()
+  })
+
+  it('cruza el fin de mes y el fin de año sin desbordarse', () => {
+    // Los dos "ahora" caen ya en el mes/año siguiente en UTC pero todavía en el
+    // anterior en Bogotá: es el filo donde leer en UTC da un mes de diferencia.
+    // 31-ago 22:30 Bogotá → 1-sep 00:00 = 1,5 h.
+    expect(horasHastaFechaHora('2026-09-01T00:00', new Date('2026-09-01T03:30:00Z'))).toBe(1.5)
+    // 31-dic-2026 21:00 Bogotá → 1-ene-2027 00:00 = 3 h.
+    expect(horasHastaFechaHora('2027-01-01T00:00', new Date('2027-01-01T02:00:00Z'))).toBe(3)
   })
 })

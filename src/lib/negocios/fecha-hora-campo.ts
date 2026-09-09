@@ -159,3 +159,45 @@ export function faltaHoraDeCita(dia: unknown, hora: unknown): boolean {
   const h = typeof hora === 'string' ? hora.trim() : ''
   return SOLO_DIA.test(d) && !HORA.test(h)
 }
+
+/** El dia civil 'YYYY-MM-DD' del valor, o cadena vacia si no es una fecha del campo. */
+export function diaDeFechaHora(value: unknown): string {
+  return partesFechaHora(value).dia
+}
+
+/** Los componentes civiles proyectados a un marco fijo, para poder restarlos. */
+function msCivil(v: string): number {
+  return Date.UTC(
+    Number(v.slice(0, 4)),
+    Number(v.slice(5, 7)) - 1,
+    Number(v.slice(8, 10)),
+    v.length > 10 ? Number(v.slice(11, 13)) : 0,
+    v.length > 10 ? Number(v.slice(14, 16)) : 0,
+  )
+}
+
+/**
+ * Cuantas horas CORRIDAS faltan para el valor. Negativo = ya paso. `null` si el
+ * valor no es una fecha del campo.
+ *
+ * ⚠️ Horas corridas, no habiles. El SLA de etapa mide horas habiles porque mide
+ * trabajo nuestro; esto mide el reloj de pared del cliente, que imprime, firma a
+ * mano y escanea, y lo hace un sabado igual.
+ *
+ * Los dos valores se leen como hora de pared de Bogota y se proyectan al mismo
+ * marco ficticio: la resta es exacta porque Colombia no tiene horario de verano y
+ * el desfase se cancela. Construir un `Date` con la cadena seria el error clasico
+ * — `new Date('2026-09-26')` da medianoche UTC, o sea las 19:00 del dia anterior
+ * en Bogota, y corre la cuenta cinco horas.
+ *
+ * ⚠️ Un valor heredado de SOLO DIA cuenta como su medianoche, asi que la cuenta le
+ * queda hasta 12 h adelantada respecto de la cita real. Es el lado seguro del
+ * error (avisa antes, no despues) y NO se arregla migrando esos valores: la
+ * decision de dejarlos como estan fue deliberada.
+ */
+export function horasHastaFechaHora(value: unknown, ahora?: Date): number | null {
+  if (typeof value !== 'string') return null
+  const v = value.trim()
+  if (!SOLO_DIA.test(v) && !CON_HORA.test(v)) return null
+  return (msCivil(v) - msCivil(ahoraBogotaCivil(ahora))) / 3_600_000
+}
