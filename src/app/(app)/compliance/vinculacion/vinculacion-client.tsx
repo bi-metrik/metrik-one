@@ -2,14 +2,30 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Check, ChevronRight, Copy, FolderOpen, Link2, Loader2, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Copy, FolderOpen, Link2, Loader2, RefreshCw, Search, UserPlus, X } from 'lucide-react';
 import {
+  invitarContraparte,
   listarVinculaciones,
   rotarEnlaceDeSolicitud,
   type BandejaVinculacion,
   type EnlaceSolicitud,
 } from '@/lib/actions/compliance-vinculacion';
-import { mensajeParaCompartir } from '@/lib/compliance/solicitud-vinculacion';
+import {
+  DOCUMENTOS_POR_SUJETO,
+  ETIQUETA_DOCUMENTO,
+  ETIQUETA_SUJETO,
+  documentoPorDefecto,
+  mensajeParaCompartir,
+  type TipoSujeto,
+} from '@/lib/compliance/solicitud-vinculacion';
+import {
+  DATOS_INVITACION_VACIOS,
+  faltaEnInvitacion,
+  puedeInvitar as datosCompletos,
+  resumirInvitacion,
+  type DatosInvitacion,
+  type DesenlaceInvitacion,
+} from '@/lib/compliance/invitacion-vinculacion';
 import {
   ESTADOS_EXPEDIENTE,
   ESTADO_EXPEDIENTE_ACCION,
@@ -59,12 +75,12 @@ function fecha(iso: string | null): string {
 function TarjetaEnlace({
   enlace,
   error,
-  puedeRotar,
+  puedeGestionar,
   empresa,
 }: {
   enlace: EnlaceSolicitud | null;
   error: string | null;
-  puedeRotar: boolean;
+  puedeGestionar: boolean;
   empresa: string;
 }) {
   const [actual, setActual] = useState(enlace);
@@ -145,7 +161,7 @@ function TarjetaEnlace({
         </button>
       </div>
 
-      {puedeRotar && (
+      {puedeGestionar && (
         <div className="mt-3 flex items-center gap-3">
           <button
             type="button"
@@ -166,19 +182,251 @@ function TarjetaEnlace({
   );
 }
 
+/**
+ * Invitar a una contraparte: el oficial abre el expediente de alguien que él
+ * eligió, sin esperar a que se presente por el mostrador.
+ *
+ * Convive con el enlace público a propósito, porque son dos momentos distintos:
+ * el enlace sirve para el proveedor que llega solo; esto sirve para el que la
+ * empresa ya decidió contratar y todavía no ha hecho nada. Sin esta vía, abrir
+ * un expediente solo se podía por fuera de la plataforma, que es lo contrario
+ * de que una auditoría lo encuentre todo adentro.
+ *
+ * El aviso de tratamiento NO se marca acá. Lo escribe el oficial, no la
+ * contraparte: una casilla firmada por quien no estuvo presente no es una
+ * autorización. La autorización completa se pide dentro del enlace personal.
+ */
+function PanelInvitar({ onListo }: { onListo: () => void }) {
+  const [abierto, setAbierto] = useState(false);
+  const [datos, setDatos] = useState<DatosInvitacion>(DATOS_INVITACION_VACIOS);
+  const [enviando, startEnviar] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [desenlace, setDesenlace] = useState<{ resumen: DesenlaceInvitacion; url: string } | null>(null);
+  const [copiado, setCopiado] = useState(false);
+  const [tocado, setTocado] = useState(false);
+
+  const falta = faltaEnInvitacion(datos);
+
+  function cambiarSujeto(tipo: TipoSujeto) {
+    // Pasar de empresa a persona deja el tipo de documento en uno imposible.
+    setDatos({ ...datos, tipoSujeto: tipo, tipoDocumento: documentoPorDefecto(tipo) });
+  }
+
+  function cerrar() {
+    setAbierto(false);
+    setDatos(DATOS_INVITACION_VACIOS);
+    setDesenlace(null);
+    setError(null);
+    setTocado(false);
+  }
+
+  function enviar() {
+    setTocado(true);
+    if (!datosCompletos(datos)) return;
+    setError(null);
+    startEnviar(async () => {
+      const r = await invitarContraparte(datos);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      setDesenlace({ resumen: resumirInvitacion(r.data, datos.correo), url: r.data.url });
+      setDatos(DATOS_INVITACION_VACIOS);
+      setTocado(false);
+      // La bandeja tiene que mostrar el expediente nuevo sin que el oficial
+      // tenga que adivinar que hay que recargar.
+      onListo();
+    });
+  }
+
+  async function copiarEnlace(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      setError('No se pudo copiar. Selecciona el enlace y cópialo a mano.');
+    }
+  }
+
+  if (!abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="mb-5 inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#333] transition"
+      >
+        <UserPlus className="w-4 h-4" />
+        Invitar contraparte
+      </button>
+    );
+  }
+
+  const marcar = (campo: string) =>
+    tocado && falta.includes(campo) ? 'border-[#EF4444]' : 'border-[#E5E7EB]';
+
+  return (
+    <div className="mb-5 rounded-lg border border-[#E5E7EB] p-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <p className="text-sm font-semibold text-[#1A1A1A]">Invitar a una contraparte</p>
+          <p className="text-xs text-[#6B7280] mt-0.5">
+            Le llega a su correo un enlace personal para subir documentos y firmar. El correo lo
+            eliges tú: es lo que después hace que el código de firma llegue a un canal que ya
+            conocías.
+          </p>
+        </div>
+        <button type="button" onClick={cerrar} className="text-[#9CA3AF] hover:text-[#1A1A1A] transition">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {desenlace ? (
+        <div
+          className={`rounded-lg border p-3 ${
+            desenlace.resumen.tono === 'ok'
+              ? 'border-[#10B981]/30 bg-[#ECFDF5]'
+              : 'border-[#F59E0B]/30 bg-[#F59E0B]/5'
+          }`}
+        >
+          <p className="text-sm font-semibold text-[#1A1A1A]">{desenlace.resumen.titulo}</p>
+          <p className="text-xs text-[#4B5563] mt-1">{desenlace.resumen.detalle}</p>
+          {desenlace.resumen.ofreceEnlace && (
+            <div className="mt-3 flex items-center gap-2">
+              <code className="flex-1 min-w-0 truncate text-[11px] text-[#4B5563] bg-white border border-[#E5E7EB] rounded px-2 py-1.5">
+                {desenlace.url}
+              </code>
+              <button
+                type="button"
+                onClick={() => copiarEnlace(desenlace.url)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[#E5E7EB] bg-white text-xs font-semibold hover:bg-[#F9FAFB] transition shrink-0"
+              >
+                {copiado ? <Check className="w-3.5 h-3.5 text-[#059669]" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiado ? 'Copiado' : 'Copiar enlace'}
+              </button>
+            </div>
+          )}
+          <div className="mt-3 flex gap-3">
+            <button
+              type="button"
+              onClick={() => setDesenlace(null)}
+              className="text-xs font-semibold underline underline-offset-2 text-[#1A1A1A]"
+            >
+              Invitar a otra
+            </button>
+            <button type="button" onClick={cerrar} className="text-xs text-[#6B7280]">
+              Cerrar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-2 mb-3">
+            {(Object.keys(ETIQUETA_SUJETO) as TipoSujeto[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => cambiarSujeto(t)}
+                className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
+                  datos.tipoSujeto === t
+                    ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
+                    : 'bg-white text-[#4B5563] border-[#E5E7EB] hover:bg-[#F9FAFB]'
+                }`}
+              >
+                {ETIQUETA_SUJETO[t]}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-[#4B5563] mb-1">
+                {datos.tipoSujeto === 'juridica' ? 'Razón social' : 'Nombre completo'}
+              </label>
+              <input
+                value={datos.denominacion}
+                onChange={(ev) => setDatos({ ...datos, denominacion: ev.target.value })}
+                className={`w-full px-3 py-2 rounded-lg border text-sm ${marcar(
+                  datos.tipoSujeto === 'juridica' ? 'razon_social' : 'nombre',
+                )}`}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#4B5563] mb-1">Documento</label>
+              <div className="flex gap-2">
+                <select
+                  value={datos.tipoDocumento}
+                  onChange={(ev) =>
+                    setDatos({ ...datos, tipoDocumento: ev.target.value as DatosInvitacion['tipoDocumento'] })
+                  }
+                  className="px-2 py-2 rounded-lg border border-[#E5E7EB] text-sm bg-white"
+                >
+                  {DOCUMENTOS_POR_SUJETO[datos.tipoSujeto].map((d) => (
+                    <option key={d} value={d}>
+                      {ETIQUETA_DOCUMENTO[d]}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={datos.documento}
+                  onChange={(ev) => setDatos({ ...datos, documento: ev.target.value })}
+                  className={`min-w-0 flex-1 px-3 py-2 rounded-lg border text-sm ${marcar('documento')}`}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#4B5563] mb-1">
+                Correo de la contraparte
+              </label>
+              <input
+                value={datos.correo}
+                onChange={(ev) => setDatos({ ...datos, correo: ev.target.value })}
+                inputMode="email"
+                className={`w-full px-3 py-2 rounded-lg border text-sm ${marcar('correo')}`}
+              />
+            </div>
+          </div>
+
+          {tocado && falta.length > 0 && (
+            <p className="mt-2 text-xs text-[#B91C1C]">
+              Falta completar lo que quedó en rojo.
+            </p>
+          )}
+          {error && <p className="mt-2 text-xs text-[#B91C1C]">{error}</p>}
+
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={enviar}
+              disabled={enviando}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold hover:bg-[#333] transition disabled:opacity-50"
+            >
+              {enviando ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              Enviar invitación
+            </button>
+            <button type="button" onClick={cerrar} className="text-xs text-[#6B7280]">
+              Cancelar
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function VinculacionClient({
   inicial,
   error: errorInicial,
   enlace: enlaceInicial,
   errorEnlace,
-  puedeRotar,
+  puedeGestionar,
   empresa,
 }: {
   inicial: BandejaVinculacion | null;
   error: string | null;
   enlace: EnlaceSolicitud | null;
   errorEnlace: string | null;
-  puedeRotar: boolean;
+  puedeGestionar: boolean;
   empresa: string;
 }) {
   const [bandeja, setBandeja] = useState(inicial);
@@ -223,10 +471,12 @@ export default function VinculacionClient({
         que quedó y decides si la vinculas.
       </p>
 
+      {puedeGestionar && <PanelInvitar onListo={recargar} />}
+
       <TarjetaEnlace
         enlace={enlaceInicial}
         error={errorEnlace}
-        puedeRotar={puedeRotar}
+        puedeGestionar={puedeGestionar}
         empresa={empresa}
       />
 

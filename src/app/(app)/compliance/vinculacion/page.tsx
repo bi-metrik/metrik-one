@@ -40,7 +40,7 @@ export default async function VinculacionPage() {
       error={bandeja.ok ? null : bandeja.error}
       enlace={enlace.ok ? enlace.data : null}
       errorEnlace={enlace.ok ? null : enlace.error}
-      puedeRotar={puedeDecidirVinculacion(role)}
+      puedeGestionar={puedeDecidirVinculacion(role)}
       empresa={empresa}
     />
   );
