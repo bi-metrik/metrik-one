@@ -8,7 +8,7 @@ import type {
   ComercialMesResponse,
   ComercialVendedorMes,
 } from './comercial-types'
-import { MESES_ES } from './comercial-types'
+import { etiquetaMes, paramMes } from './mes-navegacion'
 import { computeRanking, type RankingPersona } from './comercial-ranking'
 
 function fmtCOP(n: number): string {
@@ -28,6 +28,13 @@ interface Props {
  * Hoja de indicadores POR PERSONA (no el agregado, que vive en Tableros).
  * Cada persona ve sus propios indicadores + su posicion en el ranking del equipo.
  * El bucket "(sin responsable)" aparece como fila informativa, fuera del ranking.
+ *
+ * ⚠️ TODA la tarjeta habla del mes seleccionado, ranking incluido: `resumen` llega ya
+ * filtrado por el periodo. Lo unico que no se mueve con el mes son los dos bloques de
+ * abajo (lideres y sin responsable), que muestran INVENTARIO a hoy (casos abiertos y
+ * valor aprobado) porque la RPC no los filtra por periodo, y porque un caso abierto
+ * esta abierto hoy, no en agosto. Ahi la etiqueta lo dice en pantalla: sin esa nota,
+ * cambiar de mes y ver la misma cifra se lee como un tablero congelado.
  */
 export default function EquipoComercialPersonasClient({ resumen, mesData, anio, mes, metasPorVendedor }: Props) {
   const ranking = computeRanking(resumen, new Map(metasPorVendedor))
@@ -35,13 +42,15 @@ export default function EquipoComercialPersonasClient({ resumen, mesData, anio, 
   for (const v of mesData?.porVendedor ?? []) {
     if (v.responsable_id) ventasMesPorId.set(v.responsable_id, v)
   }
+  const mesLabel = etiquetaMes(anio, mes)
 
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Equipo comercial</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Equipo comercial · {mesLabel}</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Indicadores por persona y posicion en el ranking del equipo. El tablero agregado vive en Tableros.
+          Ventas, recaudo y cumplimiento de {mesLabel}, con la posición de cada persona en el
+          ranking de ese mes. El tablero agregado vive en Tableros.
         </p>
       </div>
 
@@ -53,7 +62,7 @@ export default function EquipoComercialPersonasClient({ resumen, mesData, anio, 
             persona={p}
             total={ranking.total}
             ventasMes={ventasMesPorId.get(p.responsable_id) ?? null}
-            mesLabel={`${MESES_ES[mes - 1]} ${anio}`}
+            mesParam={paramMes(anio, mes)}
           />
         ))}
       </div>
@@ -62,8 +71,11 @@ export default function EquipoComercialPersonasClient({ resumen, mesData, anio, 
           equipo quedaria corta sin explicar por que. */}
       {ranking.lideres.length > 0 && (
         <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
-          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-gray-400">
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-400">
             Casos que llevan los lideres
+          </p>
+          <p className="mb-3 mt-1 text-xs text-gray-400">
+            Inventario a hoy: no depende del mes seleccionado.
           </p>
           <div className="space-y-3">
             {ranking.lideres.map((l) => (
@@ -76,7 +88,7 @@ export default function EquipoComercialPersonasClient({ resumen, mesData, anio, 
                   <p className="text-xs text-gray-400">{l.position ?? 'Lidera el equipo'} · fuera del ranking</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-semibold text-gray-700 tabular-nums">{l.negocios_abiertos} activos</p>
+                  <p className="text-sm font-semibold text-gray-700 tabular-nums">{l.negocios_abiertos} activos hoy</p>
                   <p className="text-xs text-gray-400 tabular-nums">{fmtCOP(l.valor_aprobado)}</p>
                 </div>
               </div>
@@ -95,12 +107,13 @@ export default function EquipoComercialPersonasClient({ resumen, mesData, anio, 
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-gray-700">Sin responsable</p>
               <p className="text-xs text-gray-400">
-                {ranking.sinResponsable.negocios_total} negocios sin asignar (fuera del ranking)
+                {ranking.sinResponsable.negocios_total} negocios sin asignar (fuera del ranking) ·
+                inventario a hoy, no depende del mes seleccionado
               </p>
             </div>
             <div className="text-right">
               <p className="text-sm font-semibold text-gray-700 tabular-nums">
-                {ranking.sinResponsable.negocios_abiertos} activos
+                {ranking.sinResponsable.negocios_abiertos} activos hoy
               </p>
               <p className="text-xs text-gray-400 tabular-nums">{fmtCOP(ranking.sinResponsable.valor_aprobado)}</p>
             </div>
@@ -121,16 +134,17 @@ function PersonaCard({
   persona,
   total,
   ventasMes,
-  mesLabel,
+  mesParam,
 }: {
   persona: RankingPersona
   total: number
   ventasMes: ComercialVendedorMes | null
-  mesLabel: string
+  /** `YYYY-MM` del periodo activo: viaja al perfil para que abra en el mismo mes. */
+  mesParam: string
 }) {
   return (
     <Link
-      href={`/equipo/comercial/${persona.responsable_id}`}
+      href={`/equipo/comercial/${persona.responsable_id}?mes=${mesParam}`}
       className="group rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition-all hover:border-gray-200 hover:shadow-md"
     >
       <div className="mb-4 flex items-center gap-3">
@@ -144,9 +158,12 @@ function PersonaCard({
         <RankBadge rank={persona.rank_ventas} total={total} />
       </div>
 
-      {/* Indicadores del mes */}
+      {/* Indicadores del mes seleccionado. Las ventas salen del resumen (la MISMA
+          fuente que la meta y el ranking): si vinieran del KPI del mes, la tarjeta
+          podria mostrar "4 ventas" al lado de un cumplimiento calculado sobre 5.
+          El mes no se repite en cada etiqueta: lo dice el titulo de la pagina. */}
       <div className="mb-3 grid grid-cols-2 gap-2">
-        <Mini label={`Ventas ${mesLabel}`} value={ventasMes ? String(ventasMes.num_ventas) : '0'} />
+        <Mini label="Ventas" value={String(persona.num_ventas)} />
         <Mini
           label="Valor vendido"
           value={ventasMes ? fmtCOP(ventasMes.valor_sin_iva) : '$0'}
@@ -154,15 +171,10 @@ function PersonaCard({
         />
       </div>
 
-      {/* Indicadores acumulados + posiciones (ranking primario = ventas) */}
+      {/* Posiciones del mes. La fila de ventas NO se repite aqui: mostraria el mismo
+          numero de arriba con otro nombre (era "Ventas (total)" cuando el resumen si
+          era historico), y su posicion ya la lleva el distintivo del encabezado. */}
       <div className="space-y-2 border-t border-gray-50 pt-3">
-        <RankRow
-          label="Ventas (total)"
-          value={String(persona.num_ventas)}
-          rank={persona.rank_ventas}
-          total={total}
-          strong
-        />
         <RankRow
           label="Honorario recaudado"
           value={fmtCOP(persona.honorario_recaudado)}
