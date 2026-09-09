@@ -5856,6 +5856,66 @@ export type Database = {
           },
         ]
       }
+      suscripciones: {
+        Row: {
+          created_at: string
+          estado: string
+          estado_cambiado_at: string | null
+          id: string
+          intentos_fallidos: number
+          medio_pago: Json | null
+          pasarela: string
+          plan_cobro_id: string
+          proximo_cobro: string | null
+          ultimo_error: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          estado?: string
+          estado_cambiado_at?: string | null
+          id?: string
+          intentos_fallidos?: number
+          medio_pago?: Json | null
+          pasarela?: string
+          plan_cobro_id: string
+          proximo_cobro?: string | null
+          ultimo_error?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          estado?: string
+          estado_cambiado_at?: string | null
+          id?: string
+          intentos_fallidos?: number
+          medio_pago?: Json | null
+          pasarela?: string
+          plan_cobro_id?: string
+          proximo_cobro?: string | null
+          ultimo_error?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suscripciones_plan_cobro_id_fkey"
+            columns: ["plan_cobro_id"]
+            isOneToOne: true
+            referencedRelation: "planes_cobro"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suscripciones_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       team_invitations: {
         Row: {
           accepted_at: string | null
@@ -7665,6 +7725,7 @@ export type SaldoBanco = Database['public']['Tables']['saldos_banco']['Row']
 export type Servicio = Database['public']['Tables']['servicios']['Row']
 export type Staff = Database['public']['Tables']['staff']['Row']
 export type StageTransitionRule = Database['public']['Tables']['stage_transition_rules']['Row']
+export type Suscripcion = Database['public']['Tables']['suscripciones']['Row']
 export type TeamInvitation = Database['public']['Tables']['team_invitations']['Row']
 export type TimeEntry = Database['public']['Tables']['time_entries']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']

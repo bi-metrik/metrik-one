@@ -10,6 +10,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { getNotificaciones } from '@/lib/actions/notificaciones'
 import { versionDelBuild } from '@/lib/version/build'
+import { accesoWorkspace } from '@/lib/suscripciones/estado'
 
 export default async function AppLayout({
   children,
@@ -98,6 +99,7 @@ export default async function AppLayout({
     logo_url: string | null
     modules: Record<string, boolean> | null
     config_extra: Record<string, unknown> | null
+    subscription_status: string | null
   }
   const [staffSelfResult, workspaceResult, lineasResult] = await Promise.all([
     // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
@@ -112,7 +114,7 @@ export default async function AppLayout({
       .maybeSingle(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (activeClient.from('workspaces') as any)
-      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra')
+      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra, subscription_status')
       .eq('id', activeWorkspaceId)
       .single() as Promise<{ data: WorkspaceRow | null; error: unknown }>,
     // hasLineas: workspace tiene al menos una linea activa → habilita item /flujo
@@ -127,6 +129,17 @@ export default async function AppLayout({
   const workspace = workspaceResult.data
   if (!workspace) {
     redirect('/sin-espacio')
+  }
+
+  // Gate de suscripción: el acceso es el producto. Solo `suspendida` cierra la puerta;
+  // los valores heredados ('trial', 'active', 'active_pro') y el NULL pasan como
+  // siempre, y el platform_admin entra aunque el workspace esté suspendido (alguien
+  // tiene que poder entrar a ver por qué). Se evalúa aquí porque esta lectura de
+  // `workspaces` ya existía: no cuesta una ida y vuelta más. El estado lo escribe el
+  // ciclo de suscripciones (src/lib/suscripciones/ciclo.ts), proyectado desde
+  // `suscripciones.estado`.
+  if (accesoWorkspace(workspace.subscription_status, platformAdminState != null) === 'suspendido') {
+    redirect('/suscripcion-suspendida')
   }
 
   const workspaceModules = (workspace.modules as Record<string, boolean> | null) ?? { business: true }
