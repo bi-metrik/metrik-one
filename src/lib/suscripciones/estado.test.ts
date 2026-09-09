@@ -121,11 +121,12 @@ describe('guardas de vocabulario', () => {
     expect(esEstadoSuscripcion(null)).toBe(false)
   })
 
-  it('reconoce las tres pasarelas de la suscripcion', () => {
+  it('reconoce las cuatro pasarelas de la suscripcion', () => {
     expect(esPasarela('manual')).toBe(true)
+    expect(esPasarela('wompi')).toBe(true)
     expect(esPasarela('bold')).toBe(true)
     expect(esPasarela('epayco')).toBe(true)
-    // `wompi` y `mixto` existen en planes_cobro, no en suscripciones.
-    expect(esPasarela('wompi')).toBe(false)
+    // `mixto` es un valor heredado de planes_cobro; en suscripciones no existe.
+    expect(esPasarela('mixto')).toBe(false)
   })
 })
