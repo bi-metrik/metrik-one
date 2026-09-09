@@ -385,7 +385,7 @@ export default function ContactosList({ contactos, staff, miStaffId, miRol, canA
   // render (regla react-hooks/purity) y ancla la zona a Bogota para que el
   // servidor (UTC) y el navegador pinten el mismo instante.
   //
-  // No pasa por `formatBogotaFechaCorta`: ese helper lo comparten otras cinco
+  // No pasa por `formatBogotaFechaCorta`: ese helper lo comparten otras siete
   // pantallas donde la hora no aporta, y cambiarlo se la metia a todas.
   //
   // `hourCycle: 'h23'` y no `hour12: false`: en varias versiones de ICU ese
