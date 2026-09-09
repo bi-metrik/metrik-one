@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
 import {
   AlertTriangle,
@@ -210,6 +211,7 @@ export default function SujetosClient({
                 <th className="text-left px-3 py-2 font-semibold">Documento</th>
                 <th className="text-left px-3 py-2 font-semibold">Estado</th>
                 <th className="text-left px-3 py-2 font-semibold">Vigencia</th>
+                <th className="text-left px-3 py-2 font-semibold">Vinculación</th>
               </tr>
             </thead>
             <tbody>
@@ -315,11 +317,23 @@ function FilaSujetoUI({
             <span className="text-[#9CA3AF]">sin fecha</span>
           )}
         </td>
+        <td className="px-3 py-2 text-[#6B7280]">
+          {sujeto.vinculacion ? (
+            <span>
+              {sujeto.vinculacion.etiqueta}
+              {sujeto.vinculacion.total > 1 && (
+                <span className="text-xs text-[#9CA3AF]"> ({sujeto.vinculacion.total})</span>
+              )}
+            </span>
+          ) : (
+            <span className="text-[#9CA3AF]">sin expediente</span>
+          )}
+        </td>
       </tr>
 
       {abierto && (
         <tr className="border-t border-[#E5E7EB] bg-[#FAFAF9]">
-          <td colSpan={5} className="px-4 py-4">
+          <td colSpan={6} className="px-4 py-4">
             <Detalle
               sujeto={sujeto}
               esOficial={esOficial}
@@ -383,6 +397,36 @@ function Detalle({
         )}
         {sujeto.segmento_nombre && (
           <div className="text-xs text-[#6B7280]">Segmento: {sujeto.segmento_nombre}</div>
+        )}
+      </div>
+
+      <div className="p-3 rounded-lg bg-white border border-[#E5E7EB]">
+        <div className="text-sm font-medium text-[#1A1A1A]">Vinculación de contrapartes</div>
+        {sujeto.vinculacion ? (
+          <>
+            <div className="text-xs text-[#6B7280] mt-1">
+              {sujeto.vinculacion.etiqueta}. {sujeto.vinculacion.accion}
+              {sujeto.vinculacion.total > 1 &&
+                ` Esta contraparte tiene ${sujeto.vinculacion.total} expedientes; acá se muestra el más reciente.`}
+            </div>
+            {/* La fecha va a la vista a propósito: esto es el espejo que llega
+                por webhook desde Valida, no el expediente. Un rótulo viejo con
+                su fecha es honesto; sin fecha, miente. */}
+            <div className="text-xs text-[#9CA3AF] mt-1">
+              Según el último aviso recibido, del {sujeto.vinculacion.actualizado_en.slice(0, 10)}.
+            </div>
+            <Link
+              href="/compliance/vinculacion"
+              className="inline-block mt-2 text-xs text-[#1A1A1A] underline"
+            >
+              Abrir el expediente en la bandeja
+            </Link>
+          </>
+        ) : (
+          <div className="text-xs text-[#6B7280] mt-1">
+            No hay expediente de vinculación para este documento. Invítalo desde la bandeja de
+            vinculación para que llene el formulario y firme.
+          </div>
         )}
       </div>
 
