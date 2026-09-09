@@ -33,6 +33,7 @@ import {
   type ExpedienteDetalle,
   type ExpedienteDoc,
   type ExpedienteFila,
+  type Integridad,
   type ResumenVinculacion,
 } from '@/lib/compliance/vinculacion';
 import { urlDeSolicitud } from '@/lib/compliance/solicitud-vinculacion';
@@ -144,6 +145,12 @@ export type DetalleVinculacion = {
   campos: ExpedienteCampo[];
   kit: string[];
   alertas: Alerta[];
+  /**
+   * Veredicto del sello, recalculado por Valida en esta misma carga. `null`
+   * cuando no se pudo traer: la pantalla lo dice en vez de callarlo, porque un
+   * bloque que no aparece se lee como "el sello cuadra".
+   */
+  integridad: Integridad | null;
   puedeDecidir: boolean;
 };
 
@@ -154,10 +161,11 @@ export async function detalleVinculacion(
   if (!g.ok) return g;
 
   const base = `/api/v1/kyc/expedientes/${encodeURIComponent(expedienteId)}`;
-  const [exp, docs, campos] = await Promise.all([
+  const [exp, docs, campos, integridad] = await Promise.all([
     pedirAValida<ExpedienteDetalle>(g.data.apiKey, base),
     pedirAValida<{ documentos: ExpedienteDoc[] }>(g.data.apiKey, `${base}/docs`),
     pedirAValida<{ campos: ExpedienteCampo[] }>(g.data.apiKey, `${base}/campos`),
+    pedirAValida<Integridad>(g.data.apiKey, `${base}/integridad`),
   ]);
 
   if (!exp.ok) return exp;
@@ -182,6 +190,10 @@ export async function detalleVinculacion(
       // beneficiario final es Valida, y recalcularla acá abriría la puerta a
       // que las dos pantallas digan números distintos.
       alertas: alertasDeExpediente(documentos, listaCampos, kit, exp.data.cadena ?? null),
+      // El sello no bloquea la pantalla como sí lo hacen documentos y campos:
+      // el expediente se puede seguir revisando sin él. Pero el fallo se
+      // propaga como `null` y la pantalla lo muestra; no se finge verificado.
+      integridad: integridad.ok ? integridad.data : null,
       puedeDecidir: puedeDecidirVinculacion(g.data.role),
     },
   };

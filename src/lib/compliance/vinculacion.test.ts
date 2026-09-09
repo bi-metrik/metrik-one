@@ -31,6 +31,12 @@
    - las alertas de lectura vuelven a mirar todo el kit y avisan de un
      documento que no llegó como si estuviera en cola → caen 2
    - lo mismo con los ilegibles → cae 1
+   - `resumirIntegridad(null)` calla en vez de avisar: lo que nadie pudo
+     comprobar se ve igual que un sello que cuadra → cae 1
+   - `no_coincide` se reporta con el mismo tono que `coincide` → cae 1
+   - `no_verificable` se reporta como `grave`: se acusa de alterado un
+     expediente que nadie tocó → cae 1
+   - `sin_firmar` pinta bloque → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -50,6 +56,7 @@ import {
   mostrarValor,
   nombreContraparte,
   progresoEtapa,
+  resumirIntegridad,
   puedeDecidirse,
   puedeDecidirVinculacion,
   puedeVerVinculacion,
@@ -62,6 +69,7 @@ import {
   type ExpedienteDoc,
   type ExpedienteFila,
 } from './vinculacion';
+import type { Integridad } from './vinculacion';
 import type { CadenaPublica } from './vinculacion-publica';
 
 function doc(over: Partial<ExpedienteDoc> = {}): ExpedienteDoc {
@@ -514,5 +522,46 @@ describe('la cadena hasta el beneficiario final, del lado del oficial', () => {
     expect(etiquetaParada('bf_no_identificable')).toBe('Beneficiario final no identificado');
     expect(etiquetaParada(null)).toBeNull();
     expect(etiquetaParada('motivo_inventado')).toBeNull();
+  });
+});
+
+
+describe('el veredicto del sello', () => {
+  const sello = (over: Partial<Integridad> = {}): Integridad => ({
+    veredicto: 'coincide',
+    version_del_sello: 2,
+    hash_sellado: 'a'.repeat(64),
+    hash_recalculado: 'a'.repeat(64),
+    firmado_en: '2026-09-01T00:00:00Z',
+    nota: '',
+    ...over,
+  });
+
+  it('lo que no se pudo verificar se dice, no se calla', () => {
+    // Es la trampa entera: si Valida no responde y la pantalla no pinta nada,
+    // el oficial lee ausencia de aviso como "el sello cuadra".
+    const r = resumirIntegridad(null);
+    expect(r).not.toBeNull();
+    expect(r?.tono).toBe('alerta');
+  });
+
+  it('un expediente sin firmar no tiene sello del que hablar', () => {
+    expect(resumirIntegridad(sello({ veredicto: 'sin_firmar' }))).toBeNull();
+  });
+
+  it('un sello que cuadra no pide nada', () => {
+    expect(resumirIntegridad(sello())?.tono).toBe('ok');
+  });
+
+  it('un sello que no cuadra es un hallazgo, no un aviso más', () => {
+    const r = resumirIntegridad(sello({ veredicto: 'no_coincide' }));
+    expect(r?.tono).toBe('grave');
+    expect(r?.tono).not.toBe(resumirIntegridad(sello())?.tono);
+  });
+
+  it('una versión vieja del sello no acusa a nadie de alterar el expediente', () => {
+    // No poder recalcular no es lo mismo que recalcular y que no dé.
+    expect(resumirIntegridad(sello({ veredicto: 'no_verificable', version_del_sello: null }))?.tono)
+      .toBe('alerta');
   });
 });

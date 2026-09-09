@@ -677,3 +677,79 @@ export function exigeConstanciaSinLectura(alertas: readonly Alerta[]): boolean {
  */
 export const CONSTANCIA_SIN_LECTURA =
   'Apruebo con el expediente incompleto. Revisé por fuera de la plataforma lo que falta acá y la decisión es mía.';
+
+// ─── Integridad del sello ─────────────────────────────────────────────────
+
+/**
+ * Espejo de `lib/kyc/firma.ts` en metrik-valida. Quien recalcula el sello es
+ * Valida: acá solo se traduce el veredicto a algo que el oficial pueda leer.
+ */
+export type Veredicto = 'coincide' | 'no_coincide' | 'sin_firmar' | 'no_verificable';
+
+export type Integridad = {
+  veredicto: Veredicto;
+  version_del_sello: number | null;
+  hash_sellado: string | null;
+  hash_recalculado: string | null;
+  firmado_en: string | null;
+  nota: string;
+};
+
+export type ResumenIntegridad = {
+  /** `ok` no pide nada; `alerta` pide mirar; `grave` es un hallazgo. */
+  tono: 'ok' | 'alerta' | 'grave';
+  titulo: string;
+  detalle: string;
+};
+
+/**
+ * Qué mostrar sobre el sello.
+ *
+ * `null` de entrada significa que ONE no pudo traer el veredicto (Valida no
+ * respondió, o respondió con error). Eso NO se muestra como "todo bien": lo que
+ * no se pudo verificar se dice, porque un expediente que se aprueba creyendo
+ * que el sello cuadra cuando nadie lo comprobó es peor que uno sin sello.
+ *
+ * `sin_firmar` es lo único que no pinta nada: el estado del expediente ya dice
+ * que la contraparte no ha firmado, y repetirlo en rojo enseña a ignorar el
+ * bloque justo cuando empiece a decir algo.
+ */
+export function resumirIntegridad(i: Integridad | null): ResumenIntegridad | null {
+  if (i === null) {
+    return {
+      tono: 'alerta',
+      titulo: 'No se pudo verificar el sello.',
+      detalle:
+        'Valida no respondió la verificación. No quiere decir que el expediente esté alterado: quiere decir que hoy nadie lo comprobó. Vuelve a abrir la pantalla antes de decidir.',
+    };
+  }
+
+  switch (i.veredicto) {
+    case 'sin_firmar':
+      return null;
+
+    case 'coincide':
+      return {
+        tono: 'ok',
+        titulo: 'El expediente no ha cambiado desde que se firmó.',
+        detalle:
+          'El sello se recalculó desde el contenido de hoy y da lo mismo que se guardó al firmar.',
+      };
+
+    case 'no_coincide':
+      return {
+        tono: 'grave',
+        titulo: 'El contenido cambió después de la firma.',
+        detalle:
+          'El sello recalculado no da lo mismo que el que se guardó al firmar. Lo que la contraparte firmó no es lo que hay hoy en el expediente. Revisa la bitácora antes de decidir.',
+      };
+
+    case 'no_verificable':
+      return {
+        tono: 'alerta',
+        titulo: 'El sello es de una versión anterior y no se puede recalcular.',
+        detalle:
+          'Se firmó antes de que el sello guardara con qué fórmula se calculó, así que no hay contra qué compararlo. No se vuelve a sellar: ponerle un sello nuevo a un expediente ya firmado sería sellar como firmado algo que la contraparte nunca vio.',
+      };
+  }
+}
