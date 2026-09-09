@@ -54,8 +54,8 @@ export default function BarraFiltros({
             aria-controls="panel-filtros"
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
               abierto || activos.length > 0
-                ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]'
-                : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#1A1A1A]/30 hover:text-[#1A1A1A]'
+                ? 'border-tinta/30 bg-papel text-tinta'
+                : 'border-[#E5E7EB] text-tinta-suave hover:border-tinta/30 hover:text-tinta'
             }`}
           >
             <SlidersHorizontal className="h-3 w-3" />
@@ -82,18 +82,18 @@ export default function BarraFiltros({
               type="button"
               onClick={() => c.onChange(c.porDefecto)}
               aria-label={`Quitar filtro de ${c.etiqueta.toLowerCase()}`}
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#1A1A1A]/20 bg-[#F5F4F2] px-2.5 py-1 text-xs text-[#1A1A1A] transition-colors hover:border-[#1A1A1A]/40"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-tinta/20 bg-papel px-2.5 py-1 text-xs text-tinta transition-colors hover:border-tinta/40"
             >
-              <span className="text-[#6B7280]">{c.etiqueta}:</span>
+              <span className="text-tinta-suave">{c.etiqueta}:</span>
               {etiquetaValor(c)}
-              <X className="h-3 w-3 text-[#6B7280]" />
+              <X className="h-3 w-3 text-tinta-suave" />
             </button>
           ))}
           {activos.length > 1 && (
             <button
               type="button"
               onClick={() => activos.forEach((c) => c.onChange(c.porDefecto))}
-              className="shrink-0 rounded-full px-2 py-1 text-xs text-[#6B7280] underline-offset-2 transition-colors hover:text-[#1A1A1A] hover:underline"
+              className="shrink-0 rounded-full px-2 py-1 text-xs text-tinta-suave underline-offset-2 transition-colors hover:text-tinta hover:underline"
             >
               Limpiar
             </button>
@@ -107,7 +107,7 @@ export default function BarraFiltros({
             <div key={c.clave}>
               <label
                 htmlFor={`filtro-${c.clave}`}
-                className="mb-1 block text-[11px] font-medium text-[#6B7280]"
+                className="mb-1 block text-[11px] font-medium text-tinta-suave"
               >
                 {c.etiqueta}
               </label>
@@ -115,7 +115,7 @@ export default function BarraFiltros({
                 id={`filtro-${c.clave}`}
                 value={c.valor}
                 onChange={(e) => c.onChange(e.target.value)}
-                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+                className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-tinta focus:border-tinta/30 focus:outline-none"
               >
                 <option value={c.porDefecto}>{c.etiquetaTodos}</option>
                 {c.opciones.map((o) => (

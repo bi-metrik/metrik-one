@@ -107,13 +107,13 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
   if (readonly) {
     return (
       <div className="space-y-2 text-sm">
-        <div className="flex items-center gap-2 text-[#1A1A1A] font-medium">
-          <FileText className="h-4 w-4 text-[#10B981]" />
+        <div className="flex items-center gap-2 text-tinta font-medium">
+          <FileText className="h-4 w-4 text-acento" />
           {configExtra.label ?? 'Facturación'}
         </div>
-        <div className="rounded-md border border-[#E5E7EB] bg-[#F9FAFB] p-3 space-y-1 text-xs text-[#6B7280]">
-          <div><span className="text-[#1A1A1A] font-medium">Cliente:</span> {val('nombre') || '-'}</div>
-          <div><span className="text-[#1A1A1A] font-medium">Total:</span> {formatCOP(total)}</div>
+        <div className="rounded-md border border-[#E5E7EB] bg-[#F9FAFB] p-3 space-y-1 text-xs text-tinta-suave">
+          <div><span className="text-tinta font-medium">Cliente:</span> {val('nombre') || '-'}</div>
+          <div><span className="text-tinta font-medium">Total:</span> {formatCOP(total)}</div>
         </div>
       </div>
     )
@@ -123,11 +123,11 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
   return (
     <div className="space-y-3 text-sm">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-[#1A1A1A] font-medium">
-          <FileText className="h-4 w-4 text-[#10B981]" />
+        <div className="flex items-center gap-2 text-tinta font-medium">
+          <FileText className="h-4 w-4 text-acento" />
           {configExtra.label ?? 'Factura para Siigo'}
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-[#6B7280] cursor-pointer">
+        <label className="flex items-center gap-1.5 text-xs text-tinta-suave cursor-pointer">
           <input
             type="checkbox"
             checked={facturarATercero}
@@ -143,13 +143,13 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
                 setOverride(seed)
               }
             }}
-            className="accent-[#10B981]"
+            className="accent-acento"
           />
           Facturar a nombre de otro
         </label>
       </div>
 
-      <p className="text-xs text-[#6B7280]">
+      <p className="text-xs text-tinta-suave">
         Copia estos campos para crear la factura en Siigo. El negocio se cierra al cargar la factura emitida abajo.
       </p>
 
@@ -169,10 +169,10 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
               <input
                 value={override[c.key] ?? ''}
                 onChange={e => setOv(c.key, e.target.value)}
-                className="w-full rounded-md border border-[#E5E7EB] px-2 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+                className="w-full rounded-md border border-[#E5E7EB] px-2 py-1.5 text-sm focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
               />
             ) : (
-              <div className="rounded-md border border-[#E5E7EB] bg-[#F9FAFB] px-2 py-1.5 text-sm text-[#1A1A1A] min-h-[34px]">
+              <div className="rounded-md border border-[#E5E7EB] bg-[#F9FAFB] px-2 py-1.5 text-sm text-tinta min-h-[34px]">
                 {val(c.key) || <span className="text-[#9CA3AF]">-</span>}
               </div>
             )}
@@ -183,23 +183,23 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
       {/* Ítem + valores */}
       <div className="rounded-md border border-[#E5E7EB] p-3 space-y-1.5">
         <div className="flex justify-between text-xs">
-          <span className="text-[#6B7280]">{descripcion} (x1)</span>
+          <span className="text-tinta-suave">{descripcion} (x1)</span>
           {facturarATercero ? (
             <input
               value={override.valor_bruto ?? ''}
               onChange={e => setOv('valor_bruto', e.target.value)}
               placeholder="Valor bruto"
-              className="w-28 rounded border border-[#E5E7EB] px-2 py-0.5 text-right text-sm focus:border-[#10B981] focus:outline-none"
+              className="w-28 rounded border border-[#E5E7EB] px-2 py-0.5 text-right text-sm focus:border-acento focus:outline-none"
             />
           ) : (
-            <span className="text-[#1A1A1A] font-medium">{formatCOP(valorBruto)}</span>
+            <span className="text-tinta font-medium">{formatCOP(valorBruto)}</span>
           )}
         </div>
-        <div className="flex justify-between text-xs text-[#6B7280]">
+        <div className="flex justify-between text-xs text-tinta-suave">
           <span>IVA {ivaPct}%</span>
           <span>{formatCOP(total - valorBruto)}</span>
         </div>
-        <div className="flex justify-between text-sm font-semibold text-[#1A1A1A] border-t border-[#E5E7EB] pt-1.5">
+        <div className="flex justify-between text-sm font-semibold text-tinta border-t border-[#E5E7EB] pt-1.5">
           <span>Total</span>
           <span>{formatCOP(total)}</span>
         </div>
@@ -207,9 +207,9 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
 
       <button
         onClick={handleCopiar}
-        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-[#1A1A1A] hover:bg-accent"
+        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-tinta hover:bg-accent"
       >
-        {copiado ? <Check className="h-3.5 w-3.5 text-[#10B981]" /> : <Copy className="h-3.5 w-3.5" />}
+        {copiado ? <Check className="h-3.5 w-3.5 text-acento" /> : <Copy className="h-3.5 w-3.5" />}
         {copiado ? 'Copiado' : 'Copiar campos'}
       </button>
     </div>

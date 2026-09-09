@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { downloadDriveFile, getAccessToken } from '@/lib/google-drive'
 import { formatCOP } from '@/lib/cobros/format'
+import { PALETA } from '@/lib/marca/paleta'
 
 const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrikone.co>'
 const REPLY_TO_MAURICIO = 'mauricio.moreno@metrik.com.co'
@@ -121,35 +122,35 @@ function buildClienteEmailHtml(args: {
 <meta charset="utf-8">
 <title>Cuenta de cobro ${args.numero}</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F4F2;font-family:'Helvetica Neue',Arial,sans-serif;color:#1A1A1A;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#F5F4F2;padding:32px 16px;">
+<body style="margin:0;padding:0;background:${PALETA.papel};font-family:'Helvetica Neue',Arial,sans-serif;color:${PALETA.tinta};">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${PALETA.papel};padding:32px 16px;">
     <tr>
       <td align="center">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E5E7EB;">
           <tr>
             <td style="padding:28px 32px 8px 32px;">
-              <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;color:#1A1A1A;">MéTRIK</div>
-              <div style="height:2px;width:48px;background:#10B981;margin-top:4px;"></div>
+              <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;color:${PALETA.tinta};">MéTRIK</div>
+              <div style="height:2px;width:48px;background:${PALETA.acento};margin-top:4px;"></div>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 32px 8px 32px;">
-              <h1 style="margin:0;font-size:18px;font-weight:600;color:#1A1A1A;">Cuenta de cobro ${args.numero}</h1>
+              <h1 style="margin:0;font-size:18px;font-weight:600;color:${PALETA.tinta};">Cuenta de cobro ${args.numero}</h1>
             </td>
           </tr>
           <tr>
-            <td style="padding:8px 32px 16px 32px;font-size:14px;line-height:1.6;color:#1A1A1A;">
+            <td style="padding:8px 32px 16px 32px;font-size:14px;line-height:1.6;color:${PALETA.tinta};">
               <p style="margin:0 0 12px 0;">${saludo}</p>
               <p style="margin:0 0 12px 0;">Adjunto encontrarás la cuenta de cobro <strong>${args.numero}</strong> correspondiente al acuerdo vigente con <strong>${args.empresaNombre}</strong>.</p>
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0;border-collapse:collapse;width:100%;">
                 <tr>
-                  <td style="padding:10px 12px;background:#F5F4F2;border-radius:6px;font-size:13px;color:#6B7280;">Valor</td>
-                  <td style="padding:10px 12px;background:#F5F4F2;border-radius:6px;text-align:right;font-size:15px;font-weight:600;color:#059669;">${formatCOP(args.monto)}</td>
+                  <td style="padding:10px 12px;background:${PALETA.papel};border-radius:6px;font-size:13px;color:${PALETA.tintaSuave};">Valor</td>
+                  <td style="padding:10px 12px;background:${PALETA.papel};border-radius:6px;text-align:right;font-size:15px;font-weight:600;color:${PALETA.acento};">${formatCOP(args.monto)}</td>
                 </tr>
                 <tr><td style="height:6px;" colspan="2"></td></tr>
                 <tr>
-                  <td style="padding:10px 12px;background:#F5F4F2;border-radius:6px;font-size:13px;color:#6B7280;">Vencimiento</td>
-                  <td style="padding:10px 12px;background:#F5F4F2;border-radius:6px;text-align:right;font-size:14px;color:#1A1A1A;">${args.fechaVencimientoLetras}</td>
+                  <td style="padding:10px 12px;background:${PALETA.papel};border-radius:6px;font-size:13px;color:${PALETA.tintaSuave};">Vencimiento</td>
+                  <td style="padding:10px 12px;background:${PALETA.papel};border-radius:6px;text-align:right;font-size:14px;color:${PALETA.tinta};">${args.fechaVencimientoLetras}</td>
                 </tr>
               </table>
               <p style="margin:0 0 12px 0;">Los datos para el pago están detallados en el documento adjunto.</p>
@@ -158,8 +159,8 @@ function buildClienteEmailHtml(args: {
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 32px 24px 32px;border-top:1px solid #E5E7EB;font-size:11px;color:#6B7280;">
-              Powered by MéTRIK · <a href="https://www.metrik.com.co" style="color:#6B7280;text-decoration:underline;">www.metrik.com.co</a>
+            <td style="padding:16px 32px 24px 32px;border-top:1px solid #E5E7EB;font-size:11px;color:${PALETA.tintaSuave};">
+              Powered by MéTRIK · <a href="https://www.metrik.com.co" style="color:${PALETA.tintaSuave};text-decoration:underline;">www.metrik.com.co</a>
             </td>
           </tr>
         </table>

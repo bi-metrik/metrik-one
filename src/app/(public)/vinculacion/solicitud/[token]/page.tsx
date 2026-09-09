@@ -29,10 +29,10 @@ export default async function SolicitudPublicaPage({
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md text-center">
-          <h1 className="text-lg font-bold text-[#1A1A1A]">
+          <h1 className="text-lg font-bold text-tinta">
             {motivo === 'cerrado' ? 'Enlace cerrado' : 'Enlace no disponible'}
           </h1>
-          <p className="text-sm text-[#6B7280] mt-2">
+          <p className="text-sm text-tinta-suave mt-2">
             {motivo
               ? MENSAJE_ENLACE_SOLICITUD[motivo]
               : 'No pudimos abrir este enlace en este momento. Vuelve a intentar en unos minutos.'}

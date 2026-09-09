@@ -271,8 +271,8 @@ function SinTableros() {
 function CumplimientoPlaceholder() {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 mb-4">
-        <ShieldCheck className="h-7 w-7 text-emerald-500" />
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-acento-tinte mb-4">
+        <ShieldCheck className="h-7 w-7 text-acento" />
       </div>
       <p className="text-lg font-semibold text-gray-700">Cumplimiento</p>
       <p className="text-sm text-gray-400 mt-2 max-w-sm">

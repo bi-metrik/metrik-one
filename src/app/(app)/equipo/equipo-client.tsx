@@ -184,7 +184,7 @@ export default function EquipoClient({
           <button
             onClick={handleAprobarTodas}
             disabled={isPending}
-            className="flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+            className="flex items-center gap-1 text-xs font-medium text-acento hover:text-acento disabled:opacity-50"
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
             Aprobar todas ({totales.pendientes})
@@ -302,7 +302,7 @@ export default function EquipoClient({
                   </span>
                 )}
                 {h.estado_aprobacion === 'APROBADO' && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 text-[10px]">
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-acento/15 text-acento dark:bg-acento/30 dark:text-acento-claro px-2 py-0.5 text-[10px]">
                     Aprobada
                   </span>
                 )}
@@ -321,7 +321,7 @@ export default function EquipoClient({
                       <button
                         onClick={() => handleAprobar(h.id)}
                         disabled={isPending}
-                        className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                        className="flex items-center gap-1 text-[11px] font-medium text-acento hover:text-acento disabled:opacity-50"
                       >
                         <ShieldCheck className="h-3.5 w-3.5" />
                         Aprobar
@@ -422,7 +422,7 @@ export default function EquipoClient({
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <div className="rounded-lg border p-2 text-center">
                   <p className="text-[10px] text-muted-foreground">Aprobadas</p>
-                  <p className="text-sm font-bold text-emerald-600">{staffProfile.horas.aprobadas.toFixed(1)}h</p>
+                  <p className="text-sm font-bold text-acento">{staffProfile.horas.aprobadas.toFixed(1)}h</p>
                 </div>
                 <div className="rounded-lg border p-2 text-center">
                   <p className="text-[10px] text-muted-foreground">Pendientes</p>

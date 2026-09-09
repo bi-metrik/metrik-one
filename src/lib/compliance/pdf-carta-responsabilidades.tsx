@@ -1,6 +1,7 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, renderToBuffer, Svg, Line } from '@react-pdf/renderer';
 import { formatFecha } from '@/lib/dates/bogota';
+import { PALETA } from '@/lib/marca/paleta'
 
 /**
  * Carta de asignación de responsabilidades (R2).
@@ -25,12 +26,12 @@ import { formatFecha } from '@/lib/dates/bogota';
 
 // Branding tokens — cerebro/conceptos/identidad-visual-metrik.md
 const C = {
-  negro: '#1A1A1A',
-  gris: '#6B7280',
-  verde: '#10B981',
+  negro: PALETA.tinta,
+  gris: PALETA.tintaSuave,
+  verde: PALETA.acento,
   blanco: '#FFFFFF',
   grisLinea: '#E5E7EB',
-  crema: '#F5F4F2',
+  crema: PALETA.papel,
 };
 
 const s = StyleSheet.create({

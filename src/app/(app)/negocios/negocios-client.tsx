@@ -144,12 +144,12 @@ const ALL_FASES: FaseSpec[] = [
   {
     key: 'todos',
     label: 'Todos',
-    active: { bg: 'bg-[#F5F4F2]', text: 'text-[#1A1A1A]', border: 'border-[#1A1A1A]/20' },
+    active: { bg: 'bg-papel', text: 'text-tinta', border: 'border-tinta/20' },
   },
   {
     key: 'venta',
     label: STAGE_LABEL.venta,
-    active: { bg: 'bg-[#10B981]/10', text: 'text-[#059669]', border: 'border-[#10B981]' },
+    active: { bg: 'bg-acento/10', text: 'text-acento', border: 'border-acento' },
   },
   {
     key: 'ejecucion',
@@ -164,7 +164,7 @@ const ALL_FASES: FaseSpec[] = [
   {
     key: 'cerrados',
     label: 'Cerrados',
-    active: { bg: 'bg-[#F5F4F2]', text: 'text-[#6B7280]', border: 'border-[#E5E7EB]' },
+    active: { bg: 'bg-papel', text: 'text-tinta-suave', border: 'border-[#E5E7EB]' },
   },
 ]
 
@@ -486,14 +486,14 @@ export default function NegociosClient({
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 active
                   ? `${f.active.bg} ${f.active.text} ${f.active.border}`
-                  : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#1A1A1A]/30 hover:text-[#1A1A1A]'
+                  : 'border-[#E5E7EB] text-tinta-suave hover:border-tinta/30 hover:text-tinta'
               }`}
             >
               {f.label}
               {count > 0 && (
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                    active ? 'bg-black/10' : 'bg-[#F5F4F2]'
+                    active ? 'bg-black/10' : 'bg-papel'
                   }`}
                 >
                   {count}
@@ -512,8 +512,8 @@ export default function NegociosClient({
             onClick={() => setEtapaNum(null)}
             className={`shrink-0 rounded-full border px-2.5 py-1 transition-colors ${
               etapaNum === null
-                ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]'
-                : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+                ? 'border-tinta/30 bg-papel text-tinta'
+                : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
             }`}
           >
             Todas
@@ -529,16 +529,16 @@ export default function NegociosClient({
                 onClick={() => setEtapaNum(e.numero)}
                 className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 transition-colors ${
                   active
-                    ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]'
+                    ? 'border-tinta/30 bg-papel text-tinta'
                     : vacia
-                      ? 'border-[#E5E7EB] text-[#6B7280]/50 hover:text-[#6B7280]'
-                      : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+                      ? 'border-[#E5E7EB] text-tinta-suave/50 hover:text-tinta-suave'
+                      : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
                 }`}
               >
                 {e.nombre}
                 <span
                   className={`rounded-full px-1 py-0.5 text-[10px] font-bold ${
-                    active ? 'bg-black/10' : vacia ? 'bg-[#F5F4F2] text-[#6B7280]/50' : 'bg-[#F5F4F2]'
+                    active ? 'bg-black/10' : vacia ? 'bg-papel text-tinta-suave/50' : 'bg-papel'
                   }`}
                 >
                   {count}
@@ -567,8 +567,8 @@ export default function NegociosClient({
             onClick={() => setSoloAtrasados((v) => !v)}
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
               soloAtrasados
-                ? 'border-[#EF4444] bg-[#EF4444]/10 text-[#EF4444]'
-                : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#EF4444]/40 hover:text-[#EF4444]'
+                ? 'border-alerta bg-alerta/10 text-alerta'
+                : 'border-[#E5E7EB] text-tinta-suave hover:border-alerta/40 hover:text-alerta'
             }`}
             aria-pressed={soloAtrasados}
           >
@@ -576,7 +576,7 @@ export default function NegociosClient({
             Atrasados
             <span
               className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                soloAtrasados ? 'bg-black/10' : 'bg-[#F5F4F2]'
+                soloAtrasados ? 'bg-black/10' : 'bg-papel'
               }`}
             >
               {atrasadosCount}
@@ -587,7 +587,7 @@ export default function NegociosClient({
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as SortKey)}
           aria-label="Ordenar negocios"
-          className="ml-auto rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+          className="ml-auto rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-xs text-tinta focus:border-tinta/30 focus:outline-none"
         >
           {opcionesOrden.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -598,7 +598,7 @@ export default function NegociosClient({
       {/* Descarga de autoservicio (Acta SOENA, SEXTA num. 2): la tabla tal como se ve,
           con los filtros puestos. Solo para los roles que la ruta deja pasar. */}
       {canDescargar && (
-        <div className="flex items-center justify-between gap-2 text-xs text-[#6B7280]">
+        <div className="flex items-center justify-between gap-2 text-xs text-tinta-suave">
           <span>
             {currentFiltrado.length} negocio{currentFiltrado.length !== 1 ? 's' : ''} en la vista
           </span>
@@ -622,8 +622,8 @@ export default function NegociosClient({
                 onClick={() => setMotivoCierre(m)}
                 className={`shrink-0 rounded-full border px-2.5 py-1 transition-colors ${
                   isActive
-                    ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]'
-                    : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+                    ? 'border-tinta/30 bg-papel text-tinta'
+                    : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
                 }`}
               >
                 {motivoLabel(m)} {cuenta > 0 && `(${cuenta})`}
@@ -659,7 +659,7 @@ export default function NegociosClient({
           />
         ) : (
           <div className="py-16 text-center">
-            <p className="text-sm text-[#6B7280]">
+            <p className="text-sm text-tinta-suave">
               {fase === 'todos'
                 ? 'Sin negocios abiertos'
                 : etapaNum !== null
@@ -667,7 +667,7 @@ export default function NegociosClient({
                   : `Sin negocios en ${ALL_FASES.find((f) => f.key === fase)?.label}`}
             </p>
             {fase === 'todos' && (
-              <p className="mt-1 text-xs text-[#6B7280]/70">Crea uno con el boton +</p>
+              <p className="mt-1 text-xs text-tinta-suave/70">Crea uno con el boton +</p>
             )}
           </div>
         )
@@ -683,12 +683,12 @@ export default function NegociosClient({
                     // Las citas ya vencidas son lo que se está perdiendo: el grupo va
                     // primero Y va en rojo, porque leído en gris al tope de la lista
                     // se confunde con "lo más próximo".
-                    g.dia === GRUPO_CITA_VENCIDA ? 'text-[#EF4444]' : 'text-[#1A1A1A]'
+                    g.dia === GRUPO_CITA_VENCIDA ? 'text-alerta' : 'text-tinta'
                   }`}
                 >
                   {g.etiqueta}
                 </h3>
-                <span className="text-[11px] text-[#6B7280]">
+                <span className="text-[11px] text-tinta-suave">
                   {g.items.length} caso{g.items.length !== 1 ? 's' : ''}
                 </span>
               </div>

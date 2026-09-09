@@ -55,7 +55,7 @@ export default function SkillsClient({ skills }: Props) {
             value={q}
             onChange={e => setQ(e.target.value)}
             placeholder="Buscar skill…"
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none"
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:border-acento focus:outline-none"
           />
           <div className="flex flex-wrap gap-1">
             <button
@@ -88,7 +88,7 @@ export default function SkillsClient({ skills }: Props) {
                 onClick={() => setSelected(isActive ? null : skill)}
                 className={`w-full rounded-lg border px-3 py-2.5 text-left transition-all ${
                   isActive
-                    ? 'border-[#10B981] bg-emerald-50 shadow-sm'
+                    ? 'border-acento bg-acento-tinte shadow-sm'
                     : 'border-gray-200 bg-white hover:border-gray-300'
                 }`}
               >
@@ -98,7 +98,7 @@ export default function SkillsClient({ skills }: Props) {
                       {skill.skill_id && (
                         <span className="shrink-0 font-mono text-[10px] font-bold text-gray-400">{skill.skill_id}</span>
                       )}
-                      <p className="text-[13px] font-semibold text-[#1A1A1A]">/{skill.nombre}</p>
+                      <p className="text-[13px] font-semibold text-tinta">/{skill.nombre}</p>
                     </div>
                     {skill.descripcion && (
                       <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-500">{skill.descripcion}</p>
@@ -155,7 +155,7 @@ function SkillDetail({ skill }: { skill: SkillRow }) {
               {skill.skill_id && (
                 <span className="font-mono text-sm font-bold text-gray-300">{skill.skill_id}</span>
               )}
-              <h2 className="font-mono text-lg font-bold text-[#1A1A1A]">/{skill.nombre}</h2>
+              <h2 className="font-mono text-lg font-bold text-tinta">/{skill.nombre}</h2>
               {skill.tipo && TIPO_LABELS[skill.tipo] && (
                 <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${TIPO_STYLES[skill.tipo]}`}>
                   {TIPO_LABELS[skill.tipo]}
@@ -235,9 +235,9 @@ function MarkdownPreview({ content }: { content: string }) {
     const line = lines[i]
 
     if (line.startsWith('# ')) {
-      elements.push(<h1 key={i} className="mb-2 mt-4 text-lg font-bold text-[#1A1A1A]">{line.slice(2)}</h1>)
+      elements.push(<h1 key={i} className="mb-2 mt-4 text-lg font-bold text-tinta">{line.slice(2)}</h1>)
     } else if (line.startsWith('## ')) {
-      elements.push(<h2 key={i} className="mb-1.5 mt-4 text-[15px] font-bold text-[#1A1A1A]">{line.slice(3)}</h2>)
+      elements.push(<h2 key={i} className="mb-1.5 mt-4 text-[15px] font-bold text-tinta">{line.slice(3)}</h2>)
     } else if (line.startsWith('### ')) {
       elements.push(<h3 key={i} className="mb-1 mt-3 text-[13px] font-semibold text-gray-700">{line.slice(4)}</h3>)
     } else if (line.startsWith('```')) {
@@ -266,7 +266,7 @@ function MarkdownPreview({ content }: { content: string }) {
       elements.push(<hr key={i} className="my-3 border-gray-200" />)
     } else if (line.startsWith('> ')) {
       elements.push(
-        <blockquote key={i} className="my-2 border-l-4 border-[#10B981] pl-3 text-sm italic text-gray-600">
+        <blockquote key={i} className="my-2 border-l-4 border-acento pl-3 text-sm italic text-gray-600">
           {line.slice(2)}
         </blockquote>
       )

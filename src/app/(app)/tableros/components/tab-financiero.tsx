@@ -9,10 +9,11 @@ import { StatHero } from './stat-hero'
 import { ChartCard } from './chart-card'
 import { MiniTable } from './mini-table'
 import { AlertCard } from './alert-card'
+import { PALETA } from '@/lib/marca/paleta'
 
-const GREEN = '#10B981'
+const GREEN = PALETA.acento
 const SLATE = '#64748B'
-const RED = '#EF4444'
+const RED = PALETA.alerta
 
 function formatCOP(n: number): string {
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
@@ -21,8 +22,8 @@ function formatCOP(n: number): string {
 }
 
 export function TabFinanciero({ data }: { data: FinancieroData }) {
-  const flujoColor = data.flujoNeto >= 0 ? 'text-emerald-600' : 'text-red-600'
-  const runwayColor = data.runwayMeses >= 6 ? 'text-emerald-600' : data.runwayMeses >= 3 ? 'text-amber-600' : 'text-red-600'
+  const flujoColor = data.flujoNeto >= 0 ? 'text-acento' : 'text-red-600'
+  const runwayColor = data.runwayMeses >= 6 ? 'text-acento' : data.runwayMeses >= 3 ? 'text-amber-600' : 'text-red-600'
 
   return (
     <div className="space-y-6">
@@ -40,7 +41,7 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
           </div>
           {data.flujoNetoDelta !== 0 && (
             <span className={`mb-1 text-sm font-semibold px-2 py-0.5 rounded-full ${
-              data.flujoNetoDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+              data.flujoNetoDelta > 0 ? 'bg-acento-tinte text-acento' : 'bg-red-50 text-red-700'
             }`}>
               {data.flujoNetoDelta > 0 ? '+' : ''}{data.flujoNetoDelta.toFixed(0)}% vs mes anterior
             </span>
@@ -74,7 +75,7 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Runway" accentColor={data.runwayMeses >= 6 ? GREEN : data.runwayMeses >= 3 ? '#F59E0B' : RED}>
+        <ChartCard title="Runway" accentColor={data.runwayMeses >= 6 ? GREEN : data.runwayMeses >= 3 ? PALETA.advertencia : RED}>
           <p className={`text-4xl font-bold ${runwayColor}`}>
             {data.runwayMeses >= 99 ? '99+' : data.runwayMeses.toFixed(1)}
             <span className="text-lg font-medium text-gray-500 ml-2">meses</span>
@@ -101,7 +102,7 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
               <ComposedChart data={data.ingresosVsEgresos} margin={{ left: 0, right: 8 }}>
                 <CartesianGrid vertical={false} stroke="#F3F4F6" />
                 <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#374151' }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={(v) => formatCOP(v)} />
+                <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={(v) => formatCOP(v)} />
                 <Tooltip
                   contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E5E7EB' }}
                   formatter={(value, name) => [
@@ -127,7 +128,7 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
 
       {/* F4 — Cartera pendiente */}
       {data.carteraPendiente.length > 0 && (
-        <ChartCard title="Cartera pendiente" subtitle="Los cinco saldos mas viejos por cobrar" accentColor="#F59E0B">
+        <ChartCard title="Cartera pendiente" subtitle="Los cinco saldos mas viejos por cobrar" accentColor={PALETA.advertencia}>
           <MiniTable
             columns={[
               { key: 'nombre', label: 'Negocio' },
@@ -179,7 +180,7 @@ export function TabFinanciero({ data }: { data: FinancieroData }) {
         accentColor={data.posicionNetaCaja >= 0 ? GREEN : RED}
       >
         <div className="flex items-end gap-4">
-          <span className={`text-4xl font-bold ${data.posicionNetaCaja >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+          <span className={`text-4xl font-bold ${data.posicionNetaCaja >= 0 ? 'text-acento' : 'text-red-600'}`}>
             {formatCOP(data.posicionNetaCaja)}
           </span>
         </div>

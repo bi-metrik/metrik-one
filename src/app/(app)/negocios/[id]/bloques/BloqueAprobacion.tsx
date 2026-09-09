@@ -91,16 +91,16 @@ export default function BloqueAprobacion({
           </span>
         </div>
         {data.aprobador_id && (
-          <p className="text-[11px] text-[#6B7280]">
+          <p className="text-[11px] text-tinta-suave">
             {estado === 'pendiente' ? 'Pendiente de' : estado === 'aprobado' ? 'Aprobado por' : 'Rechazado por'}:{' '}
-            <span className="font-medium text-[#1A1A1A]">{getProfileName(data.aprobador_id)}</span>
+            <span className="font-medium text-tinta">{getProfileName(data.aprobador_id)}</span>
           </p>
         )}
         {data.aprobado_at && (
-          <p className="text-[10px] text-[#6B7280]">{fmtDate(data.aprobado_at)}</p>
+          <p className="text-[10px] text-tinta-suave">{fmtDate(data.aprobado_at)}</p>
         )}
         {data.comentario && (
-          <p className="rounded-lg bg-slate-50 border border-[#E5E7EB] p-2 text-xs text-[#1A1A1A]">
+          <p className="rounded-lg bg-slate-50 border border-[#E5E7EB] p-2 text-xs text-tinta">
             &ldquo;{data.comentario}&rdquo;
           </p>
         )}
@@ -113,7 +113,7 @@ export default function BloqueAprobacion({
               value={comentario}
               onChange={e => setComentario(e.target.value)}
               rows={2}
-              className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+              className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
             />
             <div className="flex gap-2">
               <button
@@ -140,12 +140,12 @@ export default function BloqueAprobacion({
   return (
     <div className="space-y-3">
       <div>
-        <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">Aprobador</label>
+        <label className="mb-1 block text-[11px] font-medium text-tinta-suave">Aprobador</label>
         <select
           value={aprobadorId}
           onChange={e => handleSetAprobador(e.target.value)}
           disabled={isPending}
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1.5 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
         >
           <option value="">— Seleccionar aprobador —</option>
           {profiles.map(p => (
@@ -175,7 +175,7 @@ export default function BloqueAprobacion({
             value={comentario}
             onChange={e => setComentario(e.target.value)}
             rows={2}
-            className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+            className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
           />
           <div className="flex gap-2">
             <button

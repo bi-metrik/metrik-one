@@ -33,8 +33,8 @@ import {
 import type { MarketingData } from '../marketing-actions'
 import { MarketingDrawer, type CampanaSeleccionada } from './marketing-drawer'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
 
 const MESES_ES = [

@@ -452,8 +452,8 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
                   onClick={() => setClasificacion(opt.value)}
                   className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
                     active
-                      ? 'border-[#10B981] bg-[#10B981]/10 text-[#059669]'
-                      : 'border-[#E5E7EB] bg-background text-[#6B7280] hover:border-[#10B981]/50'
+                      ? 'border-acento bg-acento/10 text-acento'
+                      : 'border-[#E5E7EB] bg-background text-tinta-suave hover:border-acento/50'
                   }`}
                 >
                   <div className="leading-tight">{opt.label}</div>

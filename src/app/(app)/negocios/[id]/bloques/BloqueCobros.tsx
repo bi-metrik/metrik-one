@@ -98,7 +98,7 @@ function ReciboDelPago({ cobro }: { cobro: Cobro }) {
     // Emitido en Siigo pero sin PDF archivado: existe igual, y decirlo es mejor que
     // ofrecer un enlace que no lleva a ninguna parte.
     return (
-      <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[#047857]">
+      <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[var(--acento)]">
         <Receipt className="h-3 w-3" /> Recibo {numero} · sin PDF
       </p>
     )
@@ -110,7 +110,7 @@ function ReciboDelPago({ cobro }: { cobro: Cobro }) {
       target="_blank"
       rel="noopener noreferrer"
       onClick={e => e.stopPropagation()}
-      className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[#047857] hover:underline"
+      className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[var(--acento)] hover:underline"
     >
       <Receipt className="h-3 w-3" /> Recibo {numero}
       <ExternalLink className="h-2.5 w-2.5" />
@@ -131,12 +131,12 @@ function CobroConfirmadoRow({
   return (
     <div className="rounded-lg border border-[#E5E7EB] p-2.5">
       <div className="flex items-center gap-2">
-        <CheckCircle2 className="h-4 w-4 text-[#10B981] shrink-0" />
+        <CheckCircle2 className="h-4 w-4 text-acento shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-[#1A1A1A] truncate">
+          <p className="text-xs font-medium text-tinta truncate">
             {cobro.concepto ?? 'Cobro'}
             {cobro.tipo_cobro && cobro.tipo_cobro !== 'regular' && (
-              <span className="ml-1 inline-flex items-center rounded-full bg-[#F5F4F2] px-1.5 py-0 text-[9px] font-medium text-[#6B7280]">
+              <span className="ml-1 inline-flex items-center rounded-full bg-papel px-1.5 py-0 text-[9px] font-medium text-tinta-suave">
                 {TIPO_LABELS[cobro.tipo_cobro] ?? cobro.tipo_cobro}
                 {cobro.numero_cuota ? ` ${cobro.numero_cuota}` : ''}
               </span>
@@ -148,34 +148,34 @@ function CobroConfirmadoRow({
             )}
           </p>
           {cobro.external_ref && (
-            <p className="text-[10px] text-[#6B7280]" title={cobro.external_ref}>
+            <p className="text-[10px] text-tinta-suave" title={cobro.external_ref}>
               Ref: {referenciaVisible(cobro.external_ref)}
             </p>
           )}
-          {cobro.fecha && <p className="text-[10px] text-[#6B7280]">{fmtDate(cobro.fecha)}</p>}
+          {cobro.fecha && <p className="text-[10px] text-tinta-suave">{fmtDate(cobro.fecha)}</p>}
           <ReciboDelPago cobro={cobro} />
         </div>
-        <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
+        <span className="text-xs font-semibold text-tinta tabular-nums shrink-0">
           {fmt(cobro.monto)}
         </span>
       </div>
 
       {/* Desglose ePayco: lo que descuenta la pasarela y el neto recibido por SOENA. */}
       {descontado > 0 && (
-        <div className="mt-2 rounded-md bg-[#F5F4F2] px-2 py-1.5 text-[10px] text-[#6B7280]">
+        <div className="mt-2 rounded-md bg-papel px-2 py-1.5 text-[10px] text-tinta-suave">
           <div className="flex items-center justify-between">
-            <span className="font-medium text-[#1A1A1A]">Descuento ePayco</span>
-            <span className="font-semibold text-[#EF4444] tabular-nums">−{fmt(descontado)}</span>
+            <span className="font-medium text-tinta">Descuento ePayco</span>
+            <span className="font-semibold text-alerta tabular-nums">−{fmt(descontado)}</span>
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
-            {costo!.comision > 0 && <span>Comisión <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.comision)}</span></span>}
-            {costo!.iva > 0 && <span>· IVA <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.iva)}</span></span>}
-            {costo!.retefuente > 0 && <span>· Retefuente <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.retefuente)}</span></span>}
-            {costo!.reteica > 0 && <span>· ReteICA <span className="tabular-nums text-[#1A1A1A]">{fmt(costo!.reteica)}</span></span>}
+            {costo!.comision > 0 && <span>Comisión <span className="tabular-nums text-tinta">{fmt(costo!.comision)}</span></span>}
+            {costo!.iva > 0 && <span>· IVA <span className="tabular-nums text-tinta">{fmt(costo!.iva)}</span></span>}
+            {costo!.retefuente > 0 && <span>· Retefuente <span className="tabular-nums text-tinta">{fmt(costo!.retefuente)}</span></span>}
+            {costo!.reteica > 0 && <span>· ReteICA <span className="tabular-nums text-tinta">{fmt(costo!.reteica)}</span></span>}
           </div>
           <div className="mt-1 flex items-center justify-between border-t border-[#E5E7EB] pt-1">
-            <span className="font-medium text-[#1A1A1A]">Neto recibido</span>
-            <span className="font-semibold text-[#059669] tabular-nums">{fmt(neto ?? 0)}</span>
+            <span className="font-medium text-tinta">Neto recibido</span>
+            <span className="font-semibold text-acento tabular-nums">{fmt(neto ?? 0)}</span>
           </div>
         </div>
       )}
@@ -203,23 +203,23 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
 
   return (
     <div className={`rounded-lg border p-2.5 ${
-      vencido ? 'border-[#EF4444]/40 bg-[#EF4444]/5' : 'border-[#E5E7EB] bg-[#F5F4F2]'
+      vencido ? 'border-alerta/40 bg-alerta/5' : 'border-[#E5E7EB] bg-papel'
     }`}>
       <div className="flex items-center gap-2">
         {vencido ? (
-          <AlertTriangle className="h-4 w-4 text-[#EF4444] shrink-0" />
+          <AlertTriangle className="h-4 w-4 text-alerta shrink-0" />
         ) : (
-          <Clock className="h-4 w-4 text-[#6B7280] shrink-0" />
+          <Clock className="h-4 w-4 text-tinta-suave shrink-0" />
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-[#1A1A1A]">
+          <p className="text-xs font-medium text-tinta">
             {cobro.numero_cuota ? `Cuota ${cobro.numero_cuota}` : 'Cuota'}
-            <span className={`ml-2 text-[10px] font-normal ${vencido ? 'text-[#EF4444]' : 'text-[#6B7280]'}`}>
+            <span className={`ml-2 text-[10px] font-normal ${vencido ? 'text-alerta' : 'text-tinta-suave'}`}>
               {vencido ? 'Vencida' : 'Esperada'} el {fmtDate(cobro.fecha_esperada)}
             </span>
           </p>
         </div>
-        <span className="text-xs font-semibold text-[#1A1A1A] tabular-nums shrink-0">
+        <span className="text-xs font-semibold text-tinta tabular-nums shrink-0">
           {fmt(cobro.monto)}
         </span>
       </div>
@@ -231,8 +231,8 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
             disabled={isPending}
             className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${
               vencido
-                ? 'bg-[#10B981] text-white hover:bg-[#059669]'
-                : 'border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:bg-[#F5F4F2]'
+                ? 'bg-acento text-white hover:bg-acento-hover'
+                : 'border border-[#E5E7EB] bg-white text-tinta hover:bg-papel'
             }`}
           >
             {isPending ? 'Confirmando...' : 'Confirmar pago manual'}
@@ -296,7 +296,7 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
           <button
             onClick={() => setPagoModal(true)}
             className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:opacity-90"
-            style={{ backgroundColor: '#10B981' }}
+            style={{ backgroundColor: 'var(--acento)' }}
           >
             <Wallet className="h-3.5 w-3.5" /> Registrar pago
           </button>
@@ -306,21 +306,21 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
       {/* Plan de pago elegido por el cliente (de la propuesta aprobada). Visible para
           que financiera haga seguimiento sin buscarlo en la propuesta. */}
       {planLabel && (
-        <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5">
+        <div className="rounded-lg border border-acento/30 bg-acento/5 p-2.5">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-[#6B7280]">Plan de pago</p>
-            <span className="inline-flex items-center rounded-full bg-[#10B981]/10 px-2 py-0.5 text-[11px] font-semibold text-[#059669]">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-tinta-suave">Plan de pago</p>
+            <span className="inline-flex items-center rounded-full bg-acento/10 px-2 py-0.5 text-[11px] font-semibold text-acento">
               {planLabel.titulo}
             </span>
           </div>
-          <p className="mt-1 text-[10px] text-[#6B7280]">{planLabel.detalle}</p>
+          <p className="mt-1 text-[10px] text-tinta-suave">{planLabel.detalle}</p>
           {(modeloDinero?.aprobado_honorario != null || tarifaMostrar > 0) && (
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[#6B7280]">
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-tinta-suave">
               {modeloDinero?.aprobado_honorario != null && (
-                <span>Honorario: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(modeloDinero.aprobado_honorario)}</span></span>
+                <span>Honorario: <span className="font-medium text-tinta tabular-nums">{fmt(modeloDinero.aprobado_honorario)}</span></span>
               )}
               {tarifaMostrar > 0 && (
-                <span>Tarifa UPME{tarifaAprobada ? '' : ' (ref.)'}: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(tarifaMostrar)}</span></span>
+                <span>Tarifa UPME{tarifaAprobada ? '' : ' (ref.)'}: <span className="font-medium text-tinta tabular-nums">{fmt(tarifaMostrar)}</span></span>
               )}
             </div>
           )}
@@ -330,27 +330,27 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
       {/* Resumen */}
       {(!precioTotal || precioTotal === 0) && confirmados.length === 0 && programados.length === 0 ? (
         <div className="flex justify-center">
-          <span className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-[#F5F4F2] px-3 py-1 text-xs font-medium text-[#6B7280]">
+          <span className="inline-flex items-center rounded-full border border-[#E5E7EB] bg-papel px-3 py-1 text-xs font-medium text-tinta-suave">
             Sin cobro
           </span>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-[#10B981]/30 bg-[#10B981]/5 p-2.5 text-center">
-            <p className="text-[10px] font-medium text-[#059669]">Cobrado</p>
-            <p className="text-sm font-bold text-[#059669] tabular-nums">{fmt(totalCobrado)}</p>
+          <div className="rounded-lg border border-acento/30 bg-acento/5 p-2.5 text-center">
+            <p className="text-[10px] font-medium text-acento">Cobrado</p>
+            <p className="text-sm font-bold text-acento tabular-nums">{fmt(totalCobrado)}</p>
           </div>
           <div
             className={
               haySaldoAFavor
-                ? 'rounded-lg border border-[#F59E0B]/40 bg-[#F59E0B]/5 p-2.5 text-center'
-                : 'rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-2.5 text-center'
+                ? 'rounded-lg border border-advertencia/40 bg-advertencia/5 p-2.5 text-center'
+                : 'rounded-lg border border-[#E5E7EB] bg-papel p-2.5 text-center'
             }
           >
-            <p className={haySaldoAFavor ? 'text-[10px] font-medium text-[#B45309]' : 'text-[10px] font-medium text-[#6B7280]'}>
+            <p className={haySaldoAFavor ? 'text-[10px] font-medium text-[#B45309]' : 'text-[10px] font-medium text-tinta-suave'}>
               {saldoAFavor ? 'A favor del cliente' : 'Saldo'}
             </p>
-            <p className={haySaldoAFavor ? 'text-sm font-bold text-[#B45309] tabular-nums' : 'text-sm font-bold text-[#1A1A1A] tabular-nums'}>
+            <p className={haySaldoAFavor ? 'text-sm font-bold text-[#B45309] tabular-nums' : 'text-sm font-bold text-tinta tabular-nums'}>
               {fmt(saldoAFavor ? -saldoPendiente : saldoPendiente)}
             </p>
           </div>
@@ -360,26 +360,26 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
       {/* Pendiente para pasar a operaciones (gate saldo:handoff). El cliente debe
           cubrir el 100% de la tarifa UPME + el honorario del plan antes del handoff. */}
       {bloqueaHandoff && (
-        <div className="rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 p-2.5">
+        <div className="rounded-lg border border-alerta/30 bg-alerta/5 p-2.5">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-[#EF4444] shrink-0" />
+            <AlertTriangle className="h-4 w-4 text-alerta shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-[#1A1A1A]">Pendiente para pasar a operaciones</p>
-              <p className="text-[10px] text-[#6B7280]">
+              <p className="text-xs font-semibold text-tinta">Pendiente para pasar a operaciones</p>
+              <p className="text-[10px] text-tinta-suave">
                 El cliente debe cubrir la tarifa UPME y el honorario del plan antes del handoff.
               </p>
             </div>
-            <span className="text-sm font-bold text-[#EF4444] tabular-nums shrink-0">
+            <span className="text-sm font-bold text-alerta tabular-nums shrink-0">
               {fmt(pendienteHandoff!.pendienteTotal)}
             </span>
           </div>
           {(pendienteHandoff!.pendienteUpme > 0 || pendienteHandoff!.pendienteHonorario > 0) && (
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-[10px] text-[#6B7280]">
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-[10px] text-tinta-suave">
               {pendienteHandoff!.pendienteUpme > 0 && (
-                <span>UPME: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(pendienteHandoff!.pendienteUpme)}</span></span>
+                <span>UPME: <span className="font-medium text-tinta tabular-nums">{fmt(pendienteHandoff!.pendienteUpme)}</span></span>
               )}
               {pendienteHandoff!.pendienteHonorario > 0 && (
-                <span>Honorario: <span className="font-medium text-[#1A1A1A] tabular-nums">{fmt(pendienteHandoff!.pendienteHonorario)}</span></span>
+                <span>Honorario: <span className="font-medium text-tinta tabular-nums">{fmt(pendienteHandoff!.pendienteHonorario)}</span></span>
               )}
             </div>
           )}
@@ -390,11 +390,11 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
       {programados.length > 0 && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-tinta-suave">
               Pendientes de pago ({programados.length})
             </p>
             {programadosVencidos > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-[#EF4444]/10 px-2 py-0.5 text-[10px] font-medium text-[#EF4444]">
+              <span className="inline-flex items-center gap-1 rounded-full bg-alerta/10 px-2 py-0.5 text-[10px] font-medium text-alerta">
                 <AlertTriangle className="h-2.5 w-2.5" />
                 {programadosVencidos} vencido{programadosVencidos > 1 ? 's' : ''}
               </span>
@@ -411,7 +411,7 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
       {/* Confirmados */}
       {confirmados.length > 0 ? (
         <div className="space-y-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-tinta-suave">
             Cobros recibidos ({confirmados.length})
           </p>
           <div className="space-y-1.5">
@@ -426,7 +426,7 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
         </div>
       ) : (
         programados.length === 0 && (
-          <p className="text-center text-xs text-[#6B7280] py-4">
+          <p className="text-center text-xs text-tinta-suave py-4">
             {(!precioTotal || precioTotal === 0) ? 'Sin cobro' : 'Sin cobros registrados'}
           </p>
         )

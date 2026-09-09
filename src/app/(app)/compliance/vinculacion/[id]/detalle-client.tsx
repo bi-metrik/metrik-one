@@ -51,8 +51,8 @@ import {
 import { UMBRAL_BF, fraseFalta, textoParticipacion } from '@/lib/compliance/vinculacion-publica';
 
 const CHIP_CONFIDENCE: Record<ConfidenceEstado, string> = {
-  extraido: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
-  requiere_confirmacion: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
+  extraido: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
+  requiere_confirmacion: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
   manual_obligatorio: 'bg-[#F3F4F6] text-[#4B5563] border-[#D1D5DB]',
 };
 
@@ -63,16 +63,16 @@ const CHIP_CONFIDENCE: Record<ConfidenceEstado, string> = {
  * otros dos justo el día que aparezca.
  */
 const CAJA_INTEGRIDAD: Record<'ok' | 'alerta' | 'grave', string> = {
-  ok: 'border-[#10B981]/30 bg-[#ECFDF5] text-[#047857]',
-  alerta: 'border-[#F59E0B]/30 bg-[#F59E0B]/5 text-[#B45309]',
-  grave: 'border-[#EF4444]/40 bg-[#EF4444]/5 text-[#B91C1C]',
+  ok: 'border-acento/30 bg-[var(--acento-tinte)] text-[var(--acento)]',
+  alerta: 'border-advertencia/30 bg-advertencia/5 text-[#B45309]',
+  grave: 'border-alerta/40 bg-alerta/5 text-[#B91C1C]',
 };
 
 const CHIP_EXTRACCION: Record<EstadoExtraccion, string> = {
-  ok: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
-  pendiente: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  failed: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
-  no_key: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
+  ok: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
+  pendiente: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  failed: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
+  no_key: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
 };
 
 function fecha(iso: string | null): string {
@@ -141,15 +141,15 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
     <div className="p-6 max-w-4xl">
       <Link
         href="/compliance/vinculacion"
-        className="inline-flex items-center gap-1 text-sm text-[#6B7280] hover:text-[#1A1A1A] mb-4"
+        className="inline-flex items-center gap-1 text-sm text-tinta-suave hover:text-tinta mb-4"
       >
         <ChevronLeft className="w-4 h-4" /> Volver a la bandeja
       </Link>
 
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-[#1A1A1A] truncate">{nombreContraparte(exp)}</h1>
-          <p className="text-sm text-[#6B7280] mt-0.5">
+          <h1 className="text-xl font-bold text-tinta truncate">{nombreContraparte(exp)}</h1>
+          <p className="text-sm text-tinta-suave mt-0.5">
             {exp.documento_tipo && exp.documento_numero
               ? `${exp.documento_tipo} ${exp.documento_numero} · `
               : ''}
@@ -157,26 +157,26 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
             {exp.email_contraparte ? ` · ${exp.email_contraparte}` : ''}
           </p>
         </div>
-        {pending && <Loader2 className="w-4 h-4 animate-spin text-[#6B7280] mt-1 shrink-0" />}
+        {pending && <Loader2 className="w-4 h-4 animate-spin text-tinta-suave mt-1 shrink-0" />}
       </div>
 
       <div className="mt-4 rounded-lg border border-[#E5E7EB] p-4">
         <div className="flex items-center justify-between gap-3 mb-2">
-          <p className="text-sm font-semibold text-[#1A1A1A]">
+          <p className="text-sm font-semibold text-tinta">
             {ESTADO_EXPEDIENTE_LABEL[exp.estado] ?? exp.estado}
           </p>
-          <p className="text-xs text-[#6B7280]">
+          <p className="text-xs text-tinta-suave">
             Etapa {paso} de {total}: {ETAPA_LABEL[exp.etapa_actual] ?? exp.etapa_actual}
           </p>
         </div>
-        <p className="text-xs text-[#6B7280]">{ESTADO_EXPEDIENTE_ACCION[exp.estado]}</p>
+        <p className="text-xs text-tinta-suave">{ESTADO_EXPEDIENTE_ACCION[exp.estado]}</p>
         <div className="mt-3 flex gap-1">
           {ETAPAS.map((e, i) => (
             <div
               key={e}
               title={ETAPA_LABEL[e]}
               className={`h-1.5 flex-1 rounded-full ${
-                i < paso ? 'bg-[#1A1A1A]' : 'bg-[#E5E7EB]'
+                i < paso ? 'bg-tinta' : 'bg-[#E5E7EB]'
               }`}
             />
           ))}
@@ -213,7 +213,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       )}
 
       {d.alertas.length > 0 && (
-        <div className="mt-4 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/5 p-4">
+        <div className="mt-4 rounded-lg border border-advertencia/30 bg-advertencia/5 p-4">
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-[#B45309] mt-0.5 shrink-0" />
             <div className="text-sm text-[#B45309]">
@@ -229,9 +229,9 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       )}
 
       {/* ── Documentos ── */}
-      <h2 className="text-base font-bold text-[#1A1A1A] mt-6 mb-2">Documentos</h2>
+      <h2 className="text-base font-bold text-tinta mt-6 mb-2">Documentos</h2>
       {docsDelKit.length === 0 ? (
-        <p className="text-sm text-[#6B7280]">La contraparte todavía no ha subido nada.</p>
+        <p className="text-sm text-tinta-suave">La contraparte todavía no ha subido nada.</p>
       ) : (
         <div className="rounded-lg border border-[#E5E7EB] overflow-hidden">
           {docsDelKit.map((doc, i) => (
@@ -241,8 +241,8 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
             >
               <FileText className="w-4 h-4 text-[#9CA3AF] shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm text-[#1A1A1A]">{etiquetaSlot(doc.slot)}</p>
-                <p className="text-xs text-[#6B7280]">
+                <p className="text-sm text-tinta">{etiquetaSlot(doc.slot)}</p>
+                <p className="text-xs text-tinta-suave">
                   {llegoElArchivo(doc)
                     ? `Subido el ${fecha(doc.subido_en)}`
                     : `Se intentó el ${fecha(doc.subido_en)}, pero el archivo no llegó`}
@@ -256,7 +256,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                 className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold shrink-0 ${
                   llegoElArchivo(doc)
                     ? CHIP_EXTRACCION[doc.estado_extraccion ?? 'pendiente']
-                    : 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30'
+                    : 'bg-alerta/10 text-[#B91C1C] border-alerta/30'
                 }`}
               >
                 {llegoElArchivo(doc)
@@ -276,8 +276,8 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       {/* ── La cadena ── */}
       {socios.length > 0 && (
         <>
-          <h2 className="text-base font-bold text-[#1A1A1A] mt-6 mb-1">Quién está detrás</h2>
-          <p className="text-xs text-[#6B7280] mb-3">
+          <h2 className="text-base font-bold text-tinta mt-6 mb-1">Quién está detrás</h2>
+          <p className="text-xs text-tinta-suave mb-3">
             Los porcentajes se multiplican a lo largo de la cadena. El umbral de {UMBRAL_BF}% se
             mide sobre esa participación efectiva, no sobre la del eslabón.
           </p>
@@ -297,10 +297,10 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                     ) : (
                       <User className="w-4 h-4 text-[#9CA3AF] shrink-0" />
                     )}
-                    <p className="text-sm text-[#1A1A1A] min-w-0 flex-1 truncate">
+                    <p className="text-sm text-tinta min-w-0 flex-1 truncate">
                       {soc.nombre}
                       {soc.documento_numero && (
-                        <span className="text-xs text-[#6B7280]">
+                        <span className="text-xs text-tinta-suave">
                           {' '}
                           · {soc.documento_tipo ?? ''} {soc.documento_numero}
                         </span>
@@ -313,7 +313,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                   <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 pl-6">
                     {soc.tipo_sujeto === 'juridica' && !parada && (
                       <span
-                        className={`text-[11px] ${soc.tiene_soporte ? 'text-[#059669]' : 'text-[#B45309]'}`}
+                        className={`text-[11px] ${soc.tiene_soporte ? 'text-acento' : 'text-[#B45309]'}`}
                       >
                         {soc.tiene_soporte ? 'Con soporte' : 'Sin soporte'}
                       </span>
@@ -326,7 +326,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                     ))}
                   </div>
                   {soc.parada_justificacion && (
-                    <p className="text-xs text-[#6B7280] mt-1 pl-6 italic">
+                    <p className="text-xs text-tinta-suave mt-1 pl-6 italic">
                       &ldquo;{soc.parada_justificacion}&rdquo;
                     </p>
                   )}
@@ -344,7 +344,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
             </p>
           )}
           {cadena && cadena.beneficiarios.length === 0 && cadena.completa && (
-            <p className="text-xs text-[#6B7280] mt-2">
+            <p className="text-xs text-tinta-suave mt-2">
               Ningún socio llega al {UMBRAL_BF}% de participación efectiva.
             </p>
           )}
@@ -352,13 +352,13 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       )}
 
       {/* ── Campos ── */}
-      <h2 className="text-base font-bold text-[#1A1A1A] mt-6 mb-1">Lo que dicen los documentos</h2>
-      <p className="text-xs text-[#6B7280] mb-3">
+      <h2 className="text-base font-bold text-tinta mt-6 mb-1">Lo que dicen los documentos</h2>
+      <p className="text-xs text-tinta-suave mb-3">
         Cada dato muestra de dónde salió. Si un documento no se pudo leer, sus campos no aparecen
         acá: eso no quiere decir que vinieran vacíos.
       </p>
       {grupos.length === 0 ? (
-        <p className="text-sm text-[#6B7280]">Todavía no hay datos extraídos.</p>
+        <p className="text-sm text-tinta-suave">Todavía no hay datos extraídos.</p>
       ) : (
         <div className="space-y-4">
           {grupos.map((g) => (
@@ -371,8 +371,8 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                   <div key={c.campo_id} className={`px-4 py-3 ${i > 0 ? 'border-t border-[#F3F4F6]' : ''}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs text-[#6B7280]">{etiquetaCampo(c.slug)}</p>
-                        <p className="text-sm text-[#1A1A1A] break-words">
+                        <p className="text-xs text-tinta-suave">{etiquetaCampo(c.slug)}</p>
+                        <p className="text-sm text-tinta break-words">
                           {mostrarValor(c.value) || (
                             <span className="text-[#9CA3AF] italic">
                               {c.reason_if_null ?? 'sin dato'}
@@ -397,7 +397,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                       </div>
                     </div>
                     {c.evidencia && (
-                      <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[#6B7280] italic">
+                      <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-tinta-suave italic">
                         <Quote className="w-3 h-3 mt-0.5 shrink-0" />
                         <span className="break-words">{c.evidencia}</span>
                       </p>
@@ -411,15 +411,15 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       )}
 
       {/* ── La decisión ── */}
-      <h2 className="text-base font-bold text-[#1A1A1A] mt-6 mb-2">Decisión</h2>
+      <h2 className="text-base font-bold text-tinta mt-6 mb-2">Decisión</h2>
 
       {exp.decision_oc ? (
         <div className="rounded-lg border border-[#E5E7EB] p-4 text-sm">
-          <p className="font-semibold text-[#1A1A1A]">
+          <p className="font-semibold text-tinta">
             {ESTADO_EXPEDIENTE_LABEL[exp.estado] ?? exp.estado} el {fecha(exp.fecha_cierre)}
           </p>
           {typeof exp.decision_oc.motivo === 'string' && exp.decision_oc.motivo.length > 0 && (
-            <p className="text-[#6B7280] mt-1">{exp.decision_oc.motivo}</p>
+            <p className="text-tinta-suave mt-1">{exp.decision_oc.motivo}</p>
           )}
           {exp.decision_oc.sin_lectura === true && (
             <p className="text-[#B45309] mt-1">
@@ -433,9 +433,9 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
           </p>
         </div>
       ) : !decidible ? (
-        <p className="text-sm text-[#6B7280]">{razon}</p>
+        <p className="text-sm text-tinta-suave">{razon}</p>
       ) : !d.puedeDecidir ? (
-        <p className="text-sm text-[#6B7280]">Solo el oficial de cumplimiento decide.</p>
+        <p className="text-sm text-tinta-suave">Solo el oficial de cumplimiento decide.</p>
       ) : (
         <div className="rounded-lg border border-[#E5E7EB] p-4">
           {!rechazando ? (
@@ -464,7 +464,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                 type="button"
                 disabled={pending || selloBloquea !== null || (exigeConstancia && !constancia)}
                 onClick={() => decidir('aprobado')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-semibold disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-tinta text-white text-sm font-semibold disabled:opacity-50"
               >
                 <Check className="w-4 h-4" /> Aprobar la vinculación
               </button>
@@ -472,7 +472,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                 type="button"
                 disabled={pending}
                 onClick={() => setRechazando(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#EF4444]/40 text-[#B91C1C] text-sm font-semibold disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-alerta/40 text-[#B91C1C] text-sm font-semibold disabled:opacity-50"
               >
                 <X className="w-4 h-4" /> Rechazar
               </button>
@@ -518,7 +518,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       )}
 
       {error && <p className="text-sm text-[#B91C1C] mt-3">{error}</p>}
-      {aviso && <p className="text-sm text-[#059669] mt-3">{aviso}</p>}
+      {aviso && <p className="text-sm text-acento mt-3">{aviso}</p>}
     </div>
   );
 }

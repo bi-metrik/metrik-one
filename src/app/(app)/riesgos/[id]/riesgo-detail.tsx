@@ -136,11 +136,11 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             href="/riesgos"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#E5E7EB] transition-colors hover:bg-gray-50"
           >
-            <ArrowLeft className="h-4 w-4 text-[#6B7280]" />
+            <ArrowLeft className="h-4 w-4 text-tinta-suave" />
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-mono text-sm font-bold text-[#10B981]">{riesgo.codigo}</span>
+              <span className="font-mono text-sm font-bold text-acento">{riesgo.codigo}</span>
               <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${CATEGORIA_COLORS[riesgo.categoria]}`}>
                 {riesgo.categoria}
               </span>
@@ -153,7 +153,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
                 </span>
               )}
             </div>
-            <p className="text-xs text-[#6B7280]">{CATEGORIA_LABELS[riesgo.categoria]}</p>
+            <p className="text-xs text-tinta-suave">{CATEGORIA_LABELS[riesgo.categoria]}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -161,7 +161,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             <button
               onClick={handleSave}
               disabled={isPending}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669] disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-acento px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-acento-hover disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
               {isPending ? 'Guardando...' : 'Guardar'}
@@ -176,7 +176,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             </button>
           )}
           {!canEdit && (
-            <span className="inline-flex items-center gap-1 rounded-lg border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-xs font-medium text-[#6B7280]">
+            <span className="inline-flex items-center gap-1 rounded-lg border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-xs font-medium text-tinta-suave">
               Solo lectura
             </span>
           )}
@@ -197,7 +197,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             </button>
             <button
               onClick={() => setShowDeleteConfirm(false)}
-              className="rounded-lg border border-[#E5E7EB] px-4 py-1.5 text-sm font-medium text-[#6B7280] hover:bg-gray-50"
+              className="rounded-lg border border-[#E5E7EB] px-4 py-1.5 text-sm font-medium text-tinta-suave hover:bg-gray-50"
             >
               Cancelar
             </button>
@@ -207,21 +207,21 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
 
       {/* Evento de riesgo summary */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Evento de riesgo</h2>
-        <p className="text-sm text-[#1A1A1A] leading-relaxed">{riesgo.descripcion}</p>
+        <h2 className="text-sm font-semibold text-tinta">Evento de riesgo</h2>
+        <p className="text-sm text-tinta leading-relaxed">{riesgo.descripcion}</p>
         {riesgo.evento_riesgo && (
-          <p className="text-xs text-[#6B7280] italic leading-relaxed">{riesgo.evento_riesgo}</p>
+          <p className="text-xs text-tinta-suave italic leading-relaxed">{riesgo.evento_riesgo}</p>
         )}
 
         {/* Estado + Responsable + Nivel inline */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 pt-2 border-t border-[#E5E7EB]">
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-[#6B7280]">Estado</label>
+            <label className="block text-xs font-medium text-tinta-suave">Estado</label>
             <select
               value={estado}
               onChange={e => setEstado(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-acento focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-tinta-suave"
             >
               {ESTADOS.map(e => (
                 <option key={e.value} value={e.value}>{e.label}</option>
@@ -229,12 +229,12 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             </select>
           </div>
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-[#6B7280]">Responsable</label>
+            <label className="block text-xs font-medium text-tinta-suave">Responsable</label>
             <select
               value={responsableId}
               onChange={e => setResponsableId(e.target.value)}
               disabled={!canEdit}
-              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
+              className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-acento focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-tinta-suave"
             >
               <option value="">Sin asignar</option>
               {equipo.map(m => (
@@ -243,26 +243,26 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             </select>
           </div>
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-[#6B7280]">Riesgo inherente</label>
+            <label className="block text-xs font-medium text-tinta-suave">Riesgo inherente</label>
             <div className="flex items-center gap-2 h-[34px]">
               <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${NIVEL_COLORS[riesgo.nivel_riesgo]}`}>
                 {riesgo.nivel_riesgo}
               </span>
-              <span className="text-xs text-[#6B7280]">P:{riesgo.probabilidad} × I:{riesgo.impacto}</span>
+              <span className="text-xs text-tinta-suave">P:{riesgo.probabilidad} × I:{riesgo.impacto}</span>
             </div>
           </div>
         </div>
 
         {/* Notas */}
         <div className="space-y-1 pt-2">
-          <label className="block text-xs font-medium text-[#6B7280]">Notas</label>
+          <label className="block text-xs font-medium text-tinta-suave">Notas</label>
           <textarea
             value={notas}
             onChange={e => setNotas(e.target.value)}
             rows={2}
             disabled={!canEdit}
             placeholder="Observaciones adicionales..."
-            className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm placeholder:text-[#6B7280] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-[#6B7280]"
+            className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm placeholder:text-tinta-suave focus:border-acento focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:bg-gray-50 disabled:text-tinta-suave"
           />
         </div>
       </div>
@@ -271,15 +271,15 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-5 w-5 text-orange-500" />
-          <h2 className="text-base font-semibold text-[#1A1A1A]">
+          <h2 className="text-base font-semibold text-tinta">
             Causas identificadas
-            <span className="ml-2 text-sm font-normal text-[#6B7280]">({causas.length})</span>
+            <span className="ml-2 text-sm font-normal text-tinta-suave">({causas.length})</span>
           </h2>
         </div>
 
         {causas.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center">
-            <p className="text-xs text-[#6B7280]">Sin causas identificadas.</p>
+            <p className="text-xs text-tinta-suave">Sin causas identificadas.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -295,16 +295,16 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
                     <div className="flex items-start justify-between">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-[#10B981]">{c.referencia}</span>
+                          <span className="font-mono text-xs font-bold text-acento">{c.referencia}</span>
                           {c.factor_riesgo && (
-                            <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                            <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave capitalize">
                               {c.factor_riesgo}
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-[#1A1A1A] leading-relaxed">{c.descripcion}</p>
+                        <p className="text-sm text-tinta leading-relaxed">{c.descripcion}</p>
                         {c.contexto && (
-                          <p className="text-xs text-[#6B7280] italic leading-relaxed">{c.contexto}</p>
+                          <p className="text-xs text-tinta-suave italic leading-relaxed">{c.contexto}</p>
                         )}
                       </div>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold shrink-0 ${getImpactoBadgeColor(impPonderado)}`}>
@@ -340,7 +340,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
 
                       {/* Probabilidad */}
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-[#6B7280]">Prob:</span>
+                        <span className="text-[10px] text-tinta-suave">Prob:</span>
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${IMPACTO_NIVEL[c.probabilidad ?? 1]?.color ?? 'bg-gray-100 text-gray-800'}`}>
                           {c.probabilidad ?? 1} — {PROB_LABELS[c.probabilidad ?? 1]}
                         </span>
@@ -353,8 +353,8 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
                     <div className="border-t border-gray-100 bg-gray-50/50">
                       <div className="px-5 py-2">
                         <div className="flex items-center gap-1.5 mb-2">
-                          <ShieldCheck className="h-3.5 w-3.5 text-[#10B981]" />
-                          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                          <ShieldCheck className="h-3.5 w-3.5 text-acento" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-tinta-suave">
                             Control{causaControles.length > 1 ? 'es' : ''} ({causaControles.length})
                           </span>
                         </div>
@@ -372,7 +372,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
                                 <div className="flex items-start justify-between">
                                   <div className="space-y-0.5">
                                     <div className="flex items-center gap-2">
-                                      <span className="font-mono text-[10px] font-bold text-[#10B981]">{ctrl.referencia ?? '—'}</span>
+                                      <span className="font-mono text-[10px] font-bold text-acento">{ctrl.referencia ?? '—'}</span>
                                       <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                         ctrl.tipo_control === 'preventivo' ? 'bg-blue-100 text-blue-800' :
                                         ctrl.tipo_control === 'detectivo' ? 'bg-purple-100 text-purple-800' :
@@ -381,14 +381,14 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
                                         {ctrl.tipo_control}
                                       </span>
                                       {ctrl.clasificacion && (
-                                        <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-[#6B7280] capitalize">
+                                        <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-tinta-suave capitalize">
                                           {ctrl.clasificacion}
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-xs font-medium text-[#1A1A1A]">{ctrl.nombre_control}</p>
+                                    <p className="text-xs font-medium text-tinta">{ctrl.nombre_control}</p>
                                     {ctrl.actividad_control && (
-                                      <p className="text-[11px] text-[#6B7280] leading-relaxed">{ctrl.actividad_control}</p>
+                                      <p className="text-[11px] text-tinta-suave leading-relaxed">{ctrl.actividad_control}</p>
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0">
@@ -444,7 +444,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
 
                   {causaControles.length === 0 && (
                     <div className="border-t border-gray-100 px-5 py-2 bg-gray-50/50">
-                      <p className="text-[10px] text-[#6B7280] italic flex items-center gap-1">
+                      <p className="text-[10px] text-tinta-suave italic flex items-center gap-1">
                         <ShieldCheck className="h-3 w-3" />
                         Sin control asignado
                       </p>
@@ -461,8 +461,8 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
       {unassignedControls.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-[#6B7280]" />
-            <h2 className="text-sm font-semibold text-[#6B7280]">
+            <ShieldCheck className="h-5 w-5 text-tinta-suave" />
+            <h2 className="text-sm font-semibold text-tinta-suave">
               Controles sin causa asignada ({unassignedControls.length})
             </h2>
           </div>
@@ -471,11 +471,11 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             {unassignedControls.map((ctrl: any) => (
               <div key={ctrl.id} className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] font-bold text-[#6B7280]">{ctrl.referencia ?? '—'}</span>
-                  <span className="text-xs text-[#1A1A1A]">{ctrl.nombre_control}</span>
+                  <span className="font-mono text-[10px] font-bold text-tinta-suave">{ctrl.referencia ?? '—'}</span>
+                  <span className="text-xs text-tinta">{ctrl.nombre_control}</span>
                 </div>
                 {ctrl.actividad_control && (
-                  <p className="text-[11px] text-[#6B7280]">{ctrl.actividad_control}</p>
+                  <p className="text-[11px] text-tinta-suave">{ctrl.actividad_control}</p>
                 )}
               </div>
             ))}
@@ -485,31 +485,31 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
 
       {/* Metadata */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-2">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Informacion</h2>
+        <h2 className="text-sm font-semibold text-tinta">Informacion</h2>
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
           <div>
-            <span className="text-[#6B7280]">Referencia:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{riesgo.referencia ?? '—'}</span>
+            <span className="text-tinta-suave">Referencia:</span>{' '}
+            <span className="text-tinta font-medium">{riesgo.referencia ?? '—'}</span>
           </div>
           <div>
-            <span className="text-[#6B7280]">Factor de riesgo:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium capitalize">{riesgo.factor_riesgo}</span>
+            <span className="text-tinta-suave">Factor de riesgo:</span>{' '}
+            <span className="text-tinta font-medium capitalize">{riesgo.factor_riesgo}</span>
           </div>
           <div>
-            <span className="text-[#6B7280]">Fecha identificacion:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{riesgo.fecha_identificacion ?? '—'}</span>
+            <span className="text-tinta-suave">Fecha identificacion:</span>{' '}
+            <span className="text-tinta font-medium">{riesgo.fecha_identificacion ?? '—'}</span>
           </div>
           <div>
-            <span className="text-[#6B7280]">Fecha evaluacion:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{riesgo.fecha_evaluacion ?? '—'}</span>
+            <span className="text-tinta-suave">Fecha evaluacion:</span>{' '}
+            <span className="text-tinta font-medium">{riesgo.fecha_evaluacion ?? '—'}</span>
           </div>
           <div>
-            <span className="text-[#6B7280]">Creado:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{formatFecha(riesgo.created_at, { day: 'numeric', month: 'numeric', year: 'numeric' })}</span>
+            <span className="text-tinta-suave">Creado:</span>{' '}
+            <span className="text-tinta font-medium">{formatFecha(riesgo.created_at, { day: 'numeric', month: 'numeric', year: 'numeric' })}</span>
           </div>
           <div>
-            <span className="text-[#6B7280]">Actualizado:</span>{' '}
-            <span className="text-[#1A1A1A] font-medium">{formatFecha(riesgo.updated_at, { day: 'numeric', month: 'numeric', year: 'numeric' })}</span>
+            <span className="text-tinta-suave">Actualizado:</span>{' '}
+            <span className="text-tinta font-medium">{formatFecha(riesgo.updated_at, { day: 'numeric', month: 'numeric', year: 'numeric' })}</span>
           </div>
         </div>
       </div>

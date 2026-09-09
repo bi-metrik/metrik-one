@@ -15,7 +15,7 @@ import { Trophy } from 'lucide-react'
  * suyos y arma la tarjeta con estas piezas.
  */
 
-export const GREEN = '#059669'
+export const GREEN = 'var(--acento)'
 export const GOLD = '#D97706'
 
 /** "JUAN PEREZ" → "Juan Perez". */
@@ -37,7 +37,7 @@ export function RankBadge({ rank, total }: { rank: number; total: number }) {
       className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold"
       style={{
         backgroundColor: esPrimero ? '#FEF3C7' : '#F3F4F6',
-        color: esPrimero ? GOLD : '#6B7280',
+        color: esPrimero ? GOLD : 'var(--tinta-suave)',
       }}
       title={`Posicion ${rank} de ${total} en ventas`}
     >

@@ -58,7 +58,7 @@ export function AreaMultiSelect({
     <div ref={containerRef} className="relative">
       <div className="flex flex-wrap items-center gap-1.5">
         {value.length === 0 && emptyHint && (
-          <span className="text-xs text-[#6B7280]">{emptyHint}</span>
+          <span className="text-xs text-tinta-suave">{emptyHint}</span>
         )}
         {value.map((area) => (
           <AreaBadge
@@ -71,7 +71,7 @@ export function AreaMultiSelect({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="inline-flex h-7 items-center gap-1 rounded-full border border-dashed border-[#E5E7EB] px-2 text-xs text-[#6B7280] hover:border-[#10B981] hover:text-[#10B981]"
+            className="inline-flex h-7 items-center gap-1 rounded-full border border-dashed border-[#E5E7EB] px-2 text-xs text-tinta-suave hover:border-acento hover:text-acento"
             aria-haspopup="listbox"
             aria-expanded={open}
           >
@@ -95,16 +95,16 @@ export function AreaMultiSelect({
                 role="option"
                 aria-selected={false}
                 onClick={() => addArea(area)}
-                className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-[#F5F4F2]"
+                className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-papel"
               >
                 {isDireccion && (
-                  <Compass className="mt-0.5 h-4 w-4 shrink-0 text-[#10B981]" />
+                  <Compass className="mt-0.5 h-4 w-4 shrink-0 text-acento" />
                 )}
                 <span className="flex-1">
-                  <span className="block font-medium text-[#1A1A1A]">
+                  <span className="block font-medium text-tinta">
                     {AREA_LABELS[area]}
                   </span>
-                  <span className="block text-[11px] text-[#6B7280]">
+                  <span className="block text-[11px] text-tinta-suave">
                     {AREA_DESCRIPTIONS[area]}
                   </span>
                 </span>

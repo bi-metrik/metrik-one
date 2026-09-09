@@ -40,9 +40,9 @@ const CIERRE_ICONS = {
 } as const
 
 const CIERRE_COLORS = {
-  exitoso: 'text-[#10B981]',
-  perdido: 'text-[#6B7280]',
-  cancelado: 'text-[#EF4444]',
+  exitoso: 'text-acento',
+  perdido: 'text-tinta-suave',
+  cancelado: 'text-alerta',
 } as const
 
 const CIERRE_LABELS = {
@@ -147,11 +147,11 @@ function ResponsablesInline({
 
   return (
     <div className="relative mt-1.5 flex flex-wrap items-center gap-1" ref={popoverRef}>
-      <User className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
+      <User className="h-3 w-3 shrink-0 text-tinta-suave/70" />
       {responsables.map((r) => (
         <span
           key={r.id}
-          className="inline-flex max-w-[140px] items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+          className="inline-flex max-w-[140px] items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta-suave"
           title={r.full_name}
         >
           <span className="truncate">{r.full_name}</span>
@@ -160,7 +160,7 @@ function ResponsablesInline({
               type="button"
               onClick={(e) => handleRemove(e, r.id)}
               disabled={isPending}
-              className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white hover:text-[#1A1A1A] disabled:opacity-60"
+              className="-mr-0.5 shrink-0 rounded-full p-0.5 transition-colors hover:bg-white hover:text-tinta disabled:opacity-60"
               title={`Quitar a ${r.full_name}`}
               aria-label={`Quitar a ${r.full_name}`}
             >
@@ -171,7 +171,7 @@ function ResponsablesInline({
       ))}
 
       {responsables.length === 0 && !canAsignar && (
-        <span className="text-[10px] italic text-[#6B7280]/60">Sin responsable</span>
+        <span className="text-[10px] italic text-tinta-suave/60">Sin responsable</span>
       )}
 
       {canAsignar && (
@@ -179,7 +179,7 @@ function ResponsablesInline({
           type="button"
           onClick={handleToggleOpen}
           disabled={isPending}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] transition-colors hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-tinta-suave transition-colors hover:border-acento hover:text-acento disabled:opacity-60"
           aria-label="Asignar responsable"
         >
           {isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
@@ -193,26 +193,26 @@ function ResponsablesInline({
           className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-[#E5E7EB] bg-white shadow-lg"
         >
           <div className="relative border-b border-[#E5E7EB]">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#6B7280]" />
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-tinta-suave" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar persona…"
               aria-label="Buscar persona"
-              className="w-full py-1.5 pl-7 pr-2 text-xs text-[#1A1A1A] placeholder:text-[#6B7280] focus:outline-none"
+              className="w-full py-1.5 pl-7 pr-2 text-xs text-tinta placeholder:text-tinta-suave focus:outline-none"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
             {disponibles.length === 0 ? (
-              <p className="px-3 py-2 text-[11px] text-[#6B7280]">Sin personas disponibles</p>
+              <p className="px-3 py-2 text-[11px] text-tinta-suave">Sin personas disponibles</p>
             ) : (
               disponibles.map((s) => (
                 <button
                   key={s.id}
                   type="button"
                   onClick={(e) => handleAdd(e, s.id, s.full_name)}
-                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#1A1A1A] transition-colors hover:bg-[#F5F4F2]"
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-tinta transition-colors hover:bg-papel"
                 >
                   {s.full_name}
                 </button>
@@ -293,7 +293,7 @@ function MarcasInline({
 
   return (
     <div className="relative mt-1.5 flex flex-wrap items-center gap-1" ref={popoverRef}>
-      <Tag className="h-3 w-3 shrink-0 text-[#6B7280]/70" />
+      <Tag className="h-3 w-3 shrink-0 text-tinta-suave/70" />
       {marcas.map((m) => {
         const cfg = MARCAS_CONDICION.find((x) => x.value === m.tipo)
         const detalle = [
@@ -304,7 +304,7 @@ function MarcasInline({
         return (
           <span
             key={m.tipo}
-            className={`inline-flex max-w-[180px] items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cfg?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]'}`}
+            className={`inline-flex max-w-[180px] items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cfg?.chipClass ?? 'bg-papel text-tinta-suave'}`}
             title={detalle || cfg?.label}
           >
             <span className="truncate">
@@ -332,7 +332,7 @@ function MarcasInline({
           type="button"
           onClick={handleToggleOpen}
           disabled={isPending}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] transition-colors hover:border-[#F59E0B] hover:text-[#B45309] disabled:opacity-60"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-dashed border-[#E5E7EB] px-2 py-0.5 text-[10px] font-medium text-tinta-suave transition-colors hover:border-advertencia hover:text-[#B45309] disabled:opacity-60"
           aria-label="Marcar condicion economica"
         >
           {isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
@@ -353,7 +353,7 @@ function MarcasInline({
               placeholder="Detalle (opcional): 20% por volumen"
               aria-label="Detalle de la marca"
               maxLength={120}
-              className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-xs text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
+              className="w-full rounded border border-[#E5E7EB] px-2 py-1 text-xs text-tinta placeholder:text-tinta-suave focus:border-tinta/30 focus:outline-none"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
@@ -362,7 +362,7 @@ function MarcasInline({
                 key={m.value}
                 type="button"
                 onClick={(e) => handleAdd(e, m.value, m.label)}
-                className="block w-full truncate px-3 py-1.5 text-left text-xs text-[#1A1A1A] transition-colors hover:bg-[#F5F4F2]"
+                className="block w-full truncate px-3 py-1.5 text-left text-xs text-tinta transition-colors hover:bg-papel"
               >
                 {m.label}
               </button>
@@ -431,17 +431,17 @@ export default function NegocioCard({
         label: negocio.aliado_nombre
           ? `${origenCfg?.label ?? origenValue}: ${negocio.aliado_nombre}`
           : (origenCfg?.label ?? origenValue),
-        chipClass: origenCfg?.chipClass ?? 'bg-[#F5F4F2] text-[#6B7280]',
+        chipClass: origenCfg?.chipClass ?? 'bg-papel text-tinta-suave',
         title: `Origen: ${origenCfg?.label ?? origenValue}${negocio.aliado_nombre ? ` — ${negocio.aliado_nombre}` : ''}`,
       }
     : null
 
   const stageKey = negocio.stage_actual as WorkflowStage | null
   const pillClass = isCerrado
-    ? 'bg-[#F5F4F2] text-[#6B7280]'
+    ? 'bg-papel text-tinta-suave'
     : stageKey && stageKey in STAGE_BADGE_CLASSES
       ? STAGE_BADGE_CLASSES[stageKey]
-      : 'bg-[#F5F4F2] text-[#6B7280]'
+      : 'bg-papel text-tinta-suave'
 
   const stageLabel = isCerrado
     ? motivoCierre
@@ -475,10 +475,10 @@ export default function NegocioCard({
   const pctEjecutado = showEjecucion ? Math.round((negocio.costos_ejecutados / precio) * 100) : 0
   const barColor =
     pctEjecutado > 90
-      ? 'bg-[#EF4444]'
+      ? 'bg-alerta'
       : pctEjecutado > 70
-        ? 'bg-[#F59E0B]'
-        : 'bg-[#10B981]'
+        ? 'bg-advertencia'
+        : 'bg-acento'
 
   return (
     <CardLink
@@ -491,7 +491,7 @@ export default function NegocioCard({
           resolver (los avisos por correo ya nadie los abre). */}
       {atencion && (
         <div
-          className="mb-2 flex items-center gap-1.5 rounded-lg bg-[#EF4444] px-2.5 py-1.5 text-[11px] font-semibold text-white"
+          className="mb-2 flex items-center gap-1.5 rounded-lg bg-alerta px-2.5 py-1.5 text-[11px] font-semibold text-white"
           title={`${textoAtencionCita(atencion)}. Cita: ${fechaHoraEnLetras(negocio.fecha_cita) || 'sin fecha'}`}
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -510,7 +510,7 @@ export default function NegocioCard({
             </span>
             {negocio.etapa_nombre && !isCerrado && (
               <>
-                <span className="text-[11px] text-[#6B7280]/40">›</span>
+                <span className="text-[11px] text-tinta-suave/40">›</span>
                 <span
                   className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider ${pillClass}`}
                 >
@@ -523,14 +523,14 @@ export default function NegocioCard({
             )}
             {mostrarLlegada && !isCerrado && negocio.etapa_cambiada_at && (
               <span
-                className="text-[10px] text-[#6B7280]"
+                className="text-[10px] text-tinta-suave"
                 title={`Está en esta etapa desde el ${formatDateShort(negocio.etapa_cambiada_at)}`}
               >
                 aquí desde {formatDateShort(negocio.etapa_cambiada_at)}
               </span>
             )}
             {negocio.pausado && !isCerrado && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]">
+              <span className="inline-flex items-center gap-1 rounded-full bg-advertencia/10 px-2 py-0.5 text-[10px] font-medium text-advertencia">
                 <Pause className="h-2.5 w-2.5" />
                 Pausado
               </span>
@@ -541,7 +541,7 @@ export default function NegocioCard({
                 les inventa una). */}
             {citaChip && !isCerrado && (
               <span
-                className="inline-flex items-center gap-1 rounded-full bg-[#F5F4F2] px-2 py-0.5 text-[10px] font-medium text-[#1A1A1A]"
+                className="inline-flex items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta"
                 title={`Cita en la DIAN: ${fechaHoraEnLetras(negocio.fecha_cita)}`}
               >
                 <CalendarClock className="h-2.5 w-2.5" />
@@ -554,7 +554,7 @@ export default function NegocioCard({
                 del grupo (que solo existe en el orden por cita). */}
             {!citaChip && negocio.cita_pendiente && !isCerrado && (
               <span
-                className="inline-flex items-center gap-1 rounded-full bg-[#F59E0B]/10 px-2 py-0.5 text-[10px] font-medium text-[#F59E0B]"
+                className="inline-flex items-center gap-1 rounded-full bg-advertencia/10 px-2 py-0.5 text-[10px] font-medium text-advertencia"
                 title="El bloque de la cita ya está abierto y sigue sin fecha: falta que el cliente reporte cuándo se la asignó la DIAN."
               >
                 <CalendarClock className="h-2.5 w-2.5" />
@@ -567,7 +567,7 @@ export default function NegocioCard({
                 permanente sería ruido, no señal. */}
             {!isCerrado && negocio.sla_exceso_horas !== null && negocio.sla_exceso_horas > 0 && (
               <span
-                className="inline-flex items-center gap-1 rounded-full bg-[#EF4444]/10 px-2 py-0.5 text-[10px] font-medium text-[#EF4444]"
+                className="inline-flex items-center gap-1 rounded-full bg-alerta/10 px-2 py-0.5 text-[10px] font-medium text-alerta"
                 title={`Lleva ${Math.round(negocio.horas_habiles_en_etapa ?? 0)}h hábiles en esta etapa; el SLA es de ${negocio.etapa_sla_horas}h`}
               >
                 <Clock className="h-2.5 w-2.5" />
@@ -619,20 +619,20 @@ export default function NegocioCard({
           </div>
           {/* Fila 2: contexto — L{N} Linea */}
           {negocio.linea_nombre && (
-            <p className="mb-0.5 truncate text-[11px] text-[#6B7280]">
+            <p className="mb-0.5 truncate text-[11px] text-tinta-suave">
               {negocio.linea_numero !== null && (
-                <span className="mr-1 font-mono text-[#6B7280]/70">L{negocio.linea_numero}</span>
+                <span className="mr-1 font-mono text-tinta-suave/70">L{negocio.linea_numero}</span>
               )}
               {negocio.linea_nombre}
             </p>
           )}
-          <p className="text-sm font-semibold leading-tight text-[#1A1A1A]">
+          <p className="text-sm font-semibold leading-tight text-tinta">
             {negocio.codigo && (
               <span className="shrink-0 font-mono">{negocio.codigo}{' — '}</span>
             )}
             <span>{negocio.nombre}</span>
             {negocio.cedula && (
-              <span className="ml-1.5 font-mono text-[11px] font-normal text-[#6B7280]">
+              <span className="ml-1.5 font-mono text-[11px] font-normal text-tinta-suave">
                 CC {negocio.cedula}
               </span>
             )}
@@ -641,35 +641,35 @@ export default function NegocioCard({
             /* Variante config-driven (ej. SOENA): vehículo (izq) + seccional DIAN (der).
                El nombre del cliente ya va en la línea de título (código — nombre). */
             <div className="mt-0.5 flex items-center justify-between gap-2">
-              <span className="min-w-0 flex-1 truncate text-xs font-medium text-[#1A1A1A]">
+              <span className="min-w-0 flex-1 truncate text-xs font-medium text-tinta">
                 {negocio.vehiculo_label ?? '—'}
               </span>
               {negocio.seccional_label && (
-                <span className="shrink-0 truncate text-[10px] text-[#6B7280]" title={negocio.seccional_label}>
+                <span className="shrink-0 truncate text-[10px] text-tinta-suave" title={negocio.seccional_label}>
                   {negocio.seccional_label}
                 </span>
               )}
             </div>
           ) : (
-            <p className="mt-0.5 text-xs text-[#6B7280]">
+            <p className="mt-0.5 text-xs text-tinta-suave">
               {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
             </p>
           )}
           {/* Radicado de certificación (config-driven, ej. SOENA) + copiar al portapapeles */}
           {negocio.radicado && (
             <div className="mt-0.5 flex items-center gap-1">
-              <span className="truncate font-mono text-[11px] text-[#6B7280]" title={`Radicado: ${negocio.radicado}`}>
+              <span className="truncate font-mono text-[11px] text-tinta-suave" title={`Radicado: ${negocio.radicado}`}>
                 Rad. {negocio.radicado}
               </span>
               <button
                 type="button"
                 onClick={handleCopiarRadicado}
-                className="shrink-0 rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#10B981]"
+                className="shrink-0 rounded p-0.5 text-tinta-suave transition-colors hover:bg-papel hover:text-acento"
                 title="Copiar radicado"
                 aria-label="Copiar radicado"
               >
                 {radicadoCopiado
-                  ? <Check className="h-3 w-3 text-[#10B981]" />
+                  ? <Check className="h-3 w-3 text-acento" />
                   : <Copy className="h-3 w-3" />}
               </button>
             </div>
@@ -688,7 +688,7 @@ export default function NegocioCard({
             canMarcar={canMarcar}
           />
           {isCerrado && negocio.closed_at && (
-            <p className="mt-1 text-[10px] text-[#6B7280]">
+            <p className="mt-1 text-[10px] text-tinta-suave">
               Cerrado {formatDateShort(negocio.closed_at)}
               {negocio.razon_cierre && (
                 <>
@@ -709,20 +709,20 @@ export default function NegocioCard({
               <button
                 type="button"
                 onClick={(e) => openFolder(negocio.carpeta_url!, e)}
-                className="rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
+                className="rounded p-0.5 text-tinta-suave transition-colors hover:bg-papel hover:text-tinta"
                 aria-label="Abrir carpeta Drive"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
               </button>
             )}
             {precio !== null && precio !== undefined && (
-              <p className="text-sm font-bold tabular-nums text-[#1A1A1A]">
+              <p className="text-sm font-bold tabular-nums text-tinta">
                 {fmt(precio)}
               </p>
             )}
           </div>
           {negocio.precio_aprobado && !isCerrado && (
-            <span className="text-[9px] text-[#6B7280]/70">aprobado</span>
+            <span className="text-[9px] text-tinta-suave/70">aprobado</span>
           )}
         </div>
       </div>
@@ -731,16 +731,16 @@ export default function NegocioCard({
       {showEjecucion && (
         <div className="mt-2.5">
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] text-[#6B7280]">
+            <span className="text-[10px] text-tinta-suave">
               {fmtShort(negocio.costos_ejecutados)} ejecutado
             </span>
             <span
               className={`text-[10px] font-semibold tabular-nums ${
                 pctEjecutado > 90
-                  ? 'text-[#EF4444]'
+                  ? 'text-alerta'
                   : pctEjecutado > 70
-                    ? 'text-[#F59E0B]'
-                    : 'text-[#10B981]'
+                    ? 'text-advertencia'
+                    : 'text-acento'
               }`}
             >
               {pctEjecutado}%

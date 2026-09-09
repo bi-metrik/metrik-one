@@ -8,19 +8,20 @@ import {
   VARIABLE_EMPLEADO_LABEL,
 } from './segmentacion-presets';
 import { formatFecha } from '@/lib/dates/bogota'
+import { PALETA } from '@/lib/marca/paleta'
 
 // Branding tokens — cerebro/conceptos/identidad-visual-metrik.md
 const C = {
-  negro: '#1A1A1A',
-  gris: '#6B7280',
-  verde: '#10B981',
-  verdeDark: '#059669',
-  rojo: '#EF4444',
-  amarillo: '#F59E0B',
+  negro: PALETA.tinta,
+  gris: PALETA.tintaSuave,
+  verde: PALETA.acento,
+  verdeDark: PALETA.acento,
+  rojo: PALETA.alerta,
+  amarillo: PALETA.advertencia,
   amarilloClaro: '#FBBF24',
   blanco: '#FFFFFF',
   grisLinea: '#E5E7EB',
-  crema: '#F5F4F2',
+  crema: PALETA.papel,
 };
 
 const s = StyleSheet.create({
@@ -159,7 +160,7 @@ function UmbralesRow({ umbrales }: { umbrales: ConfigPersistida['umbrales_contra
         <Text style={s.umbralValor}>{umbrales.medio_min.toFixed(2)}</Text>
         <Text style={s.umbralFrec}>Revisión cada {umbrales.frec_medio_meses} meses</Text>
       </View>
-      <View style={[s.umbralBox, { borderLeftColor: C.verde, backgroundColor: '#ECFDF5' }]}>
+      <View style={[s.umbralBox, { borderLeftColor: C.verde, backgroundColor: PALETA.acentoTinte }]}>
         <Text style={[s.umbralLabel, { color: C.verdeDark }]}>Bajo si {'<'}</Text>
         <Text style={s.umbralValor}>{umbrales.medio_min.toFixed(2)}</Text>
         <Text style={s.umbralFrec}>Revisión cada {umbrales.frec_bajo_meses} meses</Text>

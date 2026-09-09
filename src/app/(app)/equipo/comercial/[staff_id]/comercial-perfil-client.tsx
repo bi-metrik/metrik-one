@@ -10,8 +10,9 @@ import {
 import { STAGE_LABEL, MESES_ES, type ComercialPerfil, type ComercialPerfilNegocio } from '../../comercial-types'
 import type { RankingEquipo, RankingPersona } from '../../comercial-ranking'
 import { formatFecha } from '@/lib/dates/bogota'
+import { PALETA } from '@/lib/marca/paleta'
 
-const GREEN = '#059669'
+const GREEN = PALETA.acento
 const GOLD = '#D97706'
 const RED = '#B91C1C'
 
@@ -109,7 +110,7 @@ export default function ComercialPerfilClient({
             value={periodoValue}
             onChange={(e) => cambiarPeriodo(e.target.value)}
             aria-label="Periodo del perfil"
-            className="rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm font-medium text-[#1A1A1A] focus:border-[#1A1A1A]/30 focus:outline-none"
+            className="rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm font-medium text-tinta focus:border-tinta/30 focus:outline-none"
           >
             <option value="acumulado">Acumulado</option>
             {opcionesPeriodo.map((o) => (
@@ -179,8 +180,8 @@ export default function ComercialPerfilClient({
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={perfil.serie} margin={{ left: -20, right: 12, top: 8 }}>
               <CartesianGrid vertical={false} stroke="#F3F4F6" />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
               <Tooltip formatter={(v) => [`${v}`, 'Ventas']} />
               <Bar dataKey="num_ventas" fill={GREEN} radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -190,8 +191,8 @@ export default function ComercialPerfilClient({
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={perfil.serie} margin={{ left: -4, right: 12, top: 8 }}>
               <CartesianGrid vertical={false} stroke="#F3F4F6" />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} width={64}
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} width={64}
                 tickFormatter={(v) => `$${(Number(v) / 1_000_000).toFixed(0)}M`} />
               <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Recaudo']} />
               <Line type="monotone" dataKey="honorario_recaudado" stroke={GREEN} strokeWidth={2} dot={{ r: 3 }} />
@@ -266,7 +267,7 @@ function ComparativoCard({
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
       <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: sinDato ? '#9CA3AF' : color ?? '#1A1A1A' }}>
+      <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: sinDato ? '#9CA3AF' : color ?? PALETA.tinta }}>
         {valor}
       </p>
       <div className="mt-1 flex items-center gap-1.5">
@@ -276,7 +277,7 @@ function ComparativoCard({
           <>
             <span
               className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold"
-              style={{ backgroundColor: esPrimero ? '#FEF3C7' : '#F3F4F6', color: esPrimero ? GOLD : '#6B7280' }}
+              style={{ backgroundColor: esPrimero ? '#FEF3C7' : '#F3F4F6', color: esPrimero ? GOLD : PALETA.tintaSuave }}
             >
               {esPrimero && <Trophy className="h-3 w-3" />}#{rank} de {total}
             </span>
@@ -310,21 +311,21 @@ function LeaderboardTabla({ ranking, destacado }: { ranking: RankingEquipo; dest
               return (
                 <tr
                   key={p.responsable_id}
-                  className={`border-b border-gray-50 ${yo ? 'bg-emerald-50/60' : 'hover:bg-gray-50/50'}`}
+                  className={`border-b border-gray-50 ${yo ? 'bg-acento-tinte/60' : 'hover:bg-gray-50/50'}`}
                 >
                   <td className="py-3 px-4 tabular-nums">
                     <span
                       className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold"
-                      style={{ backgroundColor: p.rank_ventas === 1 ? '#FEF3C7' : '#F3F4F6', color: p.rank_ventas === 1 ? GOLD : '#6B7280' }}
+                      style={{ backgroundColor: p.rank_ventas === 1 ? '#FEF3C7' : '#F3F4F6', color: p.rank_ventas === 1 ? GOLD : PALETA.tintaSuave }}
                     >
                       {p.rank_ventas}
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    <Link href={`/equipo/comercial/${p.responsable_id}`} className={`font-medium ${yo ? 'text-[#059669]' : 'text-gray-900 hover:text-[#059669]'}`}>
+                    <Link href={`/equipo/comercial/${p.responsable_id}`} className={`font-medium ${yo ? 'text-acento' : 'text-gray-900 hover:text-acento-hover'}`}>
                       {nombreCorto(p.nombre)}
                     </Link>
-                    {yo && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">Tu</span>}
+                    {yo && <span className="ml-2 rounded bg-acento/15 px-1.5 py-0.5 text-[10px] font-bold text-acento">Tu</span>}
                   </td>
                   <td className="py-3 px-4 text-right font-bold text-gray-900 tabular-nums">{p.num_ventas}</td>
                   <td className="py-3 px-4 text-right font-semibold tabular-nums" style={{ color: GREEN }}>{fmtCOP(p.honorario_recaudado)}</td>
@@ -410,13 +411,13 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
               onClick={() => seleccionarFase(f.key)}
               className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-[#1A1A1A]/20 bg-[#F5F4F2] text-[#1A1A1A]'
-                  : 'border-[#E5E7EB] text-[#6B7280] hover:border-[#1A1A1A]/30 hover:text-[#1A1A1A]'
+                  ? 'border-tinta/20 bg-papel text-tinta'
+                  : 'border-[#E5E7EB] text-tinta-suave hover:border-tinta/30 hover:text-tinta'
               }`}
             >
               {f.label}
               {count > 0 && (
-                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10' : 'bg-[#F5F4F2]'}`}>
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10' : 'bg-papel'}`}>
                   {count}
                 </span>
               )}
@@ -432,7 +433,7 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
             type="button"
             onClick={() => setEtapaNum(null)}
             className={`shrink-0 rounded-full border px-2.5 py-1 transition-colors ${
-              etapaNum === null ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]' : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+              etapaNum === null ? 'border-tinta/30 bg-papel text-tinta' : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
             }`}
           >
             Todas
@@ -446,11 +447,11 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
                 type="button"
                 onClick={() => setEtapaNum(e.numero)}
                 className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 transition-colors ${
-                  active ? 'border-[#1A1A1A]/30 bg-[#F5F4F2] text-[#1A1A1A]' : 'border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1A1A]'
+                  active ? 'border-tinta/30 bg-papel text-tinta' : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
                 }`}
               >
                 {e.nombre}
-                <span className={`rounded-full px-1 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10' : 'bg-[#F5F4F2]'}`}>{count}</span>
+                <span className={`rounded-full px-1 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10' : 'bg-papel'}`}>{count}</span>
               </button>
             )
           })}
@@ -459,20 +460,20 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
 
       {/* Busqueda */}
       <div className="relative mb-3">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6B7280]" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-tinta-suave" />
         <input
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Buscar por codigo, nombre o etapa…"
-          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-9 text-sm text-[#1A1A1A] placeholder:text-[#6B7280] focus:border-[#1A1A1A]/30 focus:outline-none"
+          className="w-full rounded-lg border border-[#E5E7EB] bg-white py-2 pl-9 pr-9 text-sm text-tinta placeholder:text-tinta-suave focus:border-tinta/30 focus:outline-none"
         />
         {q && (
           <button
             type="button"
             onClick={() => setQ('')}
             aria-label="Limpiar busqueda"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[#6B7280] transition-colors hover:bg-[#F5F4F2] hover:text-[#1A1A1A]"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-tinta-suave transition-colors hover:bg-papel hover:text-tinta"
           >
             <X className="h-4 w-4" />
           </button>
@@ -496,7 +497,7 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
               {filtrados.map((n) => (
                 <tr key={n.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                   <td className="py-3 px-4">
-                    <Link href={`/negocios/${n.id}`} className="font-medium text-gray-900 hover:text-[#059669]">
+                    <Link href={`/negocios/${n.id}`} className="font-medium text-gray-900 hover:text-acento-hover">
                       {n.nombre ?? n.codigo ?? 'Negocio'}
                     </Link>
                     {n.codigo && <span className="block text-[11px] text-gray-400">{n.codigo}</span>}
@@ -540,7 +541,7 @@ function SlaBadge({ estado }: { estado: ComercialPerfilNegocio['sla_estado'] }) 
   }
   if (estado === 'a_tiempo') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+      <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-2 py-0.5 text-[11px] font-bold text-acento">
         <Clock className="h-3 w-3" /> A tiempo
       </span>
     )

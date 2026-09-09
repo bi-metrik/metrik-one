@@ -40,7 +40,7 @@ import {
 } from '@/lib/actions/pagos-externos'
 import { formatFecha } from '@/lib/dates/bogota'
 
-const VERDE = '#10B981'
+const VERDE = 'var(--acento)'
 const BUCKET = 've-documentos'
 const TIPOS_SOPORTE = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
@@ -74,7 +74,7 @@ export default function PagosExternosTab({ onDone }: { onDone: () => void }) {
 
   if (cargando) {
     return (
-      <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
+      <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
         <Loader2 className="h-4 w-4 animate-spin" /> Cargando pagos…
       </div>
     )
@@ -248,19 +248,19 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
         <div className="block">
           <span className="mb-1 block text-[11px] font-semibold" style={{ color: '#374151' }}>Negocio</span>
           {cargandoNegocios ? (
-            <div className="flex items-center gap-2 text-[13px]" style={{ color: '#6B7280' }}>
+            <div className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
             </div>
           ) : loadError ? (
             <p className="text-[12px]" style={{ color: '#DC2626' }}>{loadError}</p>
           ) : seleccionado ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5" style={{ borderColor: VERDE, backgroundColor: '#ECFDF5' }}>
+            <div className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5" style={{ borderColor: VERDE, backgroundColor: 'var(--acento-tinte)' }}>
               <span className="min-w-0 truncate text-[13px]">
-                <span className="font-semibold" style={{ color: '#1A1A1A' }}>{seleccionado.codigo ?? '—'}</span>
-                <span style={{ color: '#6B7280' }}> · {seleccionado.empresa ?? seleccionado.nombre ?? ''}</span>
+                <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{seleccionado.codigo ?? '—'}</span>
+                <span style={{ color: 'var(--tinta-suave)' }}> · {seleccionado.empresa ?? seleccionado.nombre ?? ''}</span>
               </span>
               <button onClick={() => { setNegocioId(''); setQ('') }} className="shrink-0 rounded p-0.5 hover:bg-white" aria-label="Cambiar negocio">
-                <X className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+                <X className="h-3.5 w-3.5" style={{ color: 'var(--tinta-suave)' }} />
               </button>
             </div>
           ) : (
@@ -272,7 +272,7 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Busca por código, empresa o nombre…"
                   className="w-full text-[13px] outline-none"
-                  style={{ color: '#1A1A1A' }}
+                  style={{ color: 'var(--tinta)' }}
                 />
               </div>
               {query && (
@@ -287,8 +287,8 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
                         className="block w-full rounded-md border px-2.5 py-1.5 text-left text-[13px] transition hover:bg-gray-50"
                         style={{ borderColor: '#E5E7EB' }}
                       >
-                        <span className="font-semibold" style={{ color: '#1A1A1A' }}>{n.codigo ?? '—'}</span>
-                        <span style={{ color: '#6B7280' }}> · {n.empresa ?? n.nombre ?? ''}</span>
+                        <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{n.codigo ?? '—'}</span>
+                        <span style={{ color: 'var(--tinta-suave)' }}> · {n.empresa ?? n.nombre ?? ''}</span>
                       </button>
                     ))}
                   </div>
@@ -336,8 +336,8 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
                 onClick={() => setFuente(c.valor)}
                 className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
                 style={fuente === c.valor
-                  ? { borderColor: VERDE, color: VERDE, backgroundColor: '#ECFDF5' }
-                  : { borderColor: '#E5E7EB', color: '#6B7280' }}
+                  ? { borderColor: VERDE, color: VERDE, backgroundColor: 'var(--acento-tinte)' }
+                  : { borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
               >
                 {c.label}
               </button>
@@ -407,8 +407,8 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
             Soporte del pago{panel.soporte_obligatorio && <span style={{ color: '#DC2626' }}> *</span>}
           </span>
           {soporte ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5" style={{ borderColor: VERDE, backgroundColor: '#ECFDF5' }}>
-              <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px]" style={{ color: '#1A1A1A' }}>
+            <div className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5" style={{ borderColor: VERDE, backgroundColor: 'var(--acento-tinte)' }}>
+              <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px]" style={{ color: 'var(--tinta)' }}>
                 <Paperclip className="h-3.5 w-3.5 shrink-0" style={{ color: VERDE }} />
                 <span className="truncate">{soporte.file_name}</span>
               </span>
@@ -417,13 +417,13 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
                 className="shrink-0 rounded p-0.5 hover:bg-white"
                 aria-label="Quitar soporte"
               >
-                <X className="h-3.5 w-3.5" style={{ color: '#6B7280' }} />
+                <X className="h-3.5 w-3.5" style={{ color: 'var(--tinta-suave)' }} />
               </button>
             </div>
           ) : (
             <label
               className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed px-2.5 py-2 text-[13px] transition hover:bg-gray-50"
-              style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
+              style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
             >
               {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
               {subiendo ? 'Subiendo…' : 'Adjuntar comprobante (PDF, JPG, PNG)'}
@@ -462,7 +462,7 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
 function PanelReferencia({ estado, consultando }: { estado: EstadoReferenciaConsulta | null; consultando: boolean }) {
   if (consultando && !estado) {
     return (
-      <div className="flex items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+      <div className="flex items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]" style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}>
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Revisando la referencia…
       </div>
     )
@@ -471,7 +471,7 @@ function PanelReferencia({ estado, consultando }: { estado: EstadoReferenciaCons
 
   if (estado.porciones.length === 0) {
     return (
-      <div className="rounded-md border px-2.5 py-2 text-[12px]" style={{ borderColor: '#D1FAE5', backgroundColor: '#ECFDF5', color: '#047857' }}>
+      <div className="rounded-md border px-2.5 py-2 text-[12px]" style={{ borderColor: 'var(--acento-tinte)', backgroundColor: 'var(--acento-tinte)', color: 'var(--acento)' }}>
         Referencia libre: no hay nada registrado con <strong>{estado.referencia_label}</strong>.
       </div>
     )
@@ -530,15 +530,15 @@ function ListadoPagos({ panel, onCambio }: { panel: PanelPagosExternos; onCambio
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[13px] font-bold" style={{ color: '#1A1A1A' }}>
+        <h2 className="text-[13px] font-bold" style={{ color: 'var(--tinta)' }}>
           Pagos registrados fuera de ePayco
-          <span className="ml-1.5 font-normal" style={{ color: '#6B7280' }}>({visibles.length})</span>
+          <span className="ml-1.5 font-normal" style={{ color: 'var(--tinta-suave)' }}>({visibles.length})</span>
         </h2>
         {anulados > 0 && (
           <button
             onClick={() => setVerAnulados((v) => !v)}
             className="text-[12px] font-semibold underline-offset-2 hover:underline"
-            style={{ color: '#6B7280' }}
+            style={{ color: 'var(--tinta-suave)' }}
           >
             {verAnulados ? 'Ocultar anulados' : `Ver anulados (${anulados})`}
           </button>
@@ -546,7 +546,7 @@ function ListadoPagos({ panel, onCambio }: { panel: PanelPagosExternos; onCambio
       </div>
 
       {visibles.length === 0 ? (
-        <p className="rounded-md border border-dashed px-4 py-8 text-center text-[13px]" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+        <p className="rounded-md border border-dashed px-4 py-8 text-center text-[13px]" style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}>
           Todavía no hay pagos registrados fuera de ePayco.
         </p>
       ) : (
@@ -573,7 +573,7 @@ function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: Pan
           <div className="flex flex-wrap items-center gap-1.5">
             <span
               className="text-[13px] font-bold tabular-nums"
-              style={{ color: '#1A1A1A', textDecoration: pago.anulado ? 'line-through' : 'none' }}
+              style={{ color: 'var(--tinta)', textDecoration: pago.anulado ? 'line-through' : 'none' }}
             >
               {fmtCOP(pago.monto)}
             </span>
@@ -588,7 +588,7 @@ function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: Pan
             ) : (
               <span className="text-[12px]" style={{ color: '#9CA3AF' }}>sin negocio</span>
             )}
-            {pago.anulado && <Chip texto="ANULADO" fondo="#F3F4F6" color="#6B7280" />}
+            {pago.anulado && <Chip texto="ANULADO" fondo="#F3F4F6" color="var(--tinta-suave)" />}
             {!pago.anulado && pago.ref_estado === 'sobreasignada' && (
               <Chip texto={`Sobre-asignada +${fmtCOP(pago.ref_excedente)}`} fondo="#FEF2F2" color="#B91C1C" icono />
             )}
@@ -600,11 +600,11 @@ function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: Pan
             )}
           </div>
 
-          <p className="mt-1 text-[12px]" style={{ color: '#6B7280' }}>
+          <p className="mt-1 text-[12px]" style={{ color: 'var(--tinta-suave)' }}>
             {pago.empresa ?? pago.negocio_nombre ?? '—'}
           </p>
 
-          <p className="mt-1 text-[11px]" style={{ color: '#6B7280' }}>
+          <p className="mt-1 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             Ref <strong style={{ color: '#374151' }}>{pago.referencia_autogenerada ? 'interna' : pago.referencia_label}</strong>
             {' · '}{pago.fuente ?? '—'}
             {' · '}pago {pago.fecha ?? 's/f'}
@@ -710,7 +710,7 @@ function FormEditar({
 
   return (
     <div className="mt-3 space-y-3 rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#F9FAFB' }}>
-      <p className="text-[11px]" style={{ color: '#6B7280' }}>
+      <p className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
         El <strong>monto</strong> y el <strong>negocio</strong> no se editan: los dos mueven plata.
         Para cambiarlos, anula este pago y regístralo de nuevo — así quedan las dos filas.
       </p>
@@ -745,7 +745,7 @@ function FormEditar({
         </p>
       )}
       <div className="flex justify-end gap-2">
-        <button onClick={onCerrar} className="rounded-md border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+        <button onClick={onCerrar} className="rounded-md border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}>
           Cancelar
         </button>
         <button onClick={guardar} disabled={pending}
@@ -793,7 +793,7 @@ function FormAnular({
         />
       </label>
       <div className="flex justify-end gap-2">
-        <button onClick={onCerrar} className="rounded-md border bg-white px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: '#6B7280' }}>
+        <button onClick={onCerrar} className="rounded-md border bg-white px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}>
           Cancelar
         </button>
         <button onClick={anular} disabled={pending}

@@ -22,6 +22,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CandidataActa } from './seleccion'
 import type { ActaGenerada } from './generacion'
+import { PALETA } from '@/lib/marca/paleta'
 
 export type ModoEnvio = 'revision' | 'produccion'
 
@@ -90,7 +91,7 @@ function buildActaEmailHtml(args: {
     ? `<ul style="margin:0;padding-left:18px;">${args.decisiones
         .map((d) => `<li style="margin:0 0 6px 0;">${escapeHtml(d)}</li>`)
         .join('')}</ul>`
-    : `<p style="margin:0;color:#6B7280;">No se registraron decisiones formales.</p>`
+    : `<p style="margin:0;color:${PALETA.tintaSuave};">No se registraron decisiones formales.</p>`
 
   const porResponsable = new Map<string, { tarea: string; fecha_limite: string | null }[]>()
   for (const c of args.compromisos) {
@@ -104,13 +105,13 @@ function buildActaEmailHtml(args: {
         .map(
           ([responsable, tareas]) => `
         <div style="margin:0 0 14px 0;">
-          <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin:0 0 4px 0;">${escapeHtml(responsable)}</div>
+          <div style="font-size:13px;font-weight:600;color:${PALETA.tinta};margin:0 0 4px 0;">${escapeHtml(responsable)}</div>
           <ul style="margin:0;padding-left:18px;">
             ${tareas
               .map(
                 (t) =>
                   `<li style="margin:0 0 4px 0;">${escapeHtml(t.tarea)}${
-                    t.fecha_limite ? ` <span style="color:#6B7280;">— ${escapeHtml(t.fecha_limite)}</span>` : ''
+                    t.fecha_limite ? ` <span style="color:${PALETA.tintaSuave};">— ${escapeHtml(t.fecha_limite)}</span>` : ''
                   }</li>`,
               )
               .join('')}
@@ -118,7 +119,7 @@ function buildActaEmailHtml(args: {
         </div>`,
         )
         .join('')
-    : `<p style="margin:0;color:#6B7280;">No se registraron compromisos concretos.</p>`
+    : `<p style="margin:0;color:${PALETA.tintaSuave};">No se registraron compromisos concretos.</p>`
 
   const avisoRevision =
     args.modoEnvio === 'revision'
@@ -135,45 +136,45 @@ function buildActaEmailHtml(args: {
 <meta charset="utf-8">
 <title>Acta — ${escapeHtml(args.titulo)}</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F4F2;font-family:'Helvetica Neue',Arial,sans-serif;color:#1A1A1A;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#F5F4F2;padding:32px 16px;">
+<body style="margin:0;padding:0;background:${PALETA.papel};font-family:'Helvetica Neue',Arial,sans-serif;color:${PALETA.tinta};">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${PALETA.papel};padding:32px 16px;">
     <tr>
       <td align="center">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E5E7EB;">
           <tr>
             <td style="padding:28px 32px 8px 32px;">
-              <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;color:#1A1A1A;">MéTRIK</div>
-              <div style="height:2px;width:48px;background:#10B981;margin-top:4px;"></div>
+              <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;color:${PALETA.tinta};">MéTRIK</div>
+              <div style="height:2px;width:48px;background:${PALETA.acento};margin-top:4px;"></div>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 32px 4px 32px;">
-              <h1 style="margin:0;font-size:18px;font-weight:600;color:#1A1A1A;">${escapeHtml(args.titulo)}</h1>
-              <div style="font-size:13px;color:#6B7280;margin-top:2px;">${args.fechaLetras}</div>
+              <h1 style="margin:0;font-size:18px;font-weight:600;color:${PALETA.tinta};">${escapeHtml(args.titulo)}</h1>
+              <div style="font-size:13px;color:${PALETA.tintaSuave};margin-top:2px;">${args.fechaLetras}</div>
             </td>
           </tr>
           ${avisoRevision}
           <tr>
             <td style="padding:16px 32px 4px 32px;">
-              <h2 style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:#059669;text-transform:uppercase;letter-spacing:0.5px;">Resumen</h2>
+              <h2 style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:${PALETA.acento};text-transform:uppercase;letter-spacing:0.5px;">Resumen</h2>
               <p style="margin:0;font-size:14px;line-height:1.6;">${escapeHtml(args.resumen)}</p>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 32px 4px 32px;">
-              <h2 style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:#059669;text-transform:uppercase;letter-spacing:0.5px;">Decisiones</h2>
+              <h2 style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:${PALETA.acento};text-transform:uppercase;letter-spacing:0.5px;">Decisiones</h2>
               <div style="font-size:14px;line-height:1.6;">${decisionesHtml}</div>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 32px 20px 32px;">
-              <h2 style="margin:0 0 10px 0;font-size:13px;font-weight:600;color:#059669;text-transform:uppercase;letter-spacing:0.5px;">Compromisos</h2>
+              <h2 style="margin:0 0 10px 0;font-size:13px;font-weight:600;color:${PALETA.acento};text-transform:uppercase;letter-spacing:0.5px;">Compromisos</h2>
               <div style="font-size:14px;line-height:1.5;">${compromisosHtml}</div>
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 32px 24px 32px;border-top:1px solid #E5E7EB;font-size:11px;color:#6B7280;">
-              Powered by MéTRIK · <a href="https://www.metrik.com.co" style="color:#6B7280;text-decoration:underline;">www.metrik.com.co</a>
+            <td style="padding:16px 32px 24px 32px;border-top:1px solid #E5E7EB;font-size:11px;color:${PALETA.tintaSuave};">
+              Powered by MéTRIK · <a href="https://www.metrik.com.co" style="color:${PALETA.tintaSuave};text-decoration:underline;">www.metrik.com.co</a>
             </td>
           </tr>
         </table>

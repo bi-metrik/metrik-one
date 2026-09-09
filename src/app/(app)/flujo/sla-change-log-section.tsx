@@ -43,33 +43,33 @@ export function SlaChangeLogSection({ lineaId }: { lineaId: string }) {
       <button
         type="button"
         onClick={() => setExpanded(v => !v)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#F5F4F2]"
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-papel"
       >
         <div className="flex items-center gap-2">
-          <History className="h-4 w-4 text-[#6B7280]" />
-          <span className="text-sm font-semibold text-[#1A1A1A]">
+          <History className="h-4 w-4 text-tinta-suave" />
+          <span className="text-sm font-semibold text-tinta">
             Historial de cambios SLA
           </span>
         </div>
         {expanded ? (
-          <ChevronDown className="h-4 w-4 text-[#6B7280]" />
+          <ChevronDown className="h-4 w-4 text-tinta-suave" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-[#6B7280]" />
+          <ChevronRight className="h-4 w-4 text-tinta-suave" />
         )}
       </button>
 
       {expanded && (
         <div className="border-t border-[#E5E7EB]">
           {isPending && entries === null ? (
-            <p className="px-4 py-6 text-sm text-[#6B7280]">Cargando…</p>
+            <p className="px-4 py-6 text-sm text-tinta-suave">Cargando…</p>
           ) : entries === null || entries.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-[#6B7280]">
+            <p className="px-4 py-6 text-sm text-tinta-suave">
               Aún no se han registrado cambios al SLA en esta línea.
             </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-[#F5F4F2] text-[11px] uppercase tracking-wider text-[#6B7280]">
+                <thead className="bg-papel text-[11px] uppercase tracking-wider text-tinta-suave">
                   <tr>
                     <th className="px-4 py-2 text-left font-semibold">Fecha</th>
                     <th className="px-4 py-2 text-left font-semibold">Usuario</th>
@@ -84,20 +84,20 @@ export function SlaChangeLogSection({ lineaId }: { lineaId: string }) {
                       className="border-t"
                       style={{ borderColor: '#E5E7EB' }}
                     >
-                      <td className="px-4 py-2 align-top text-[12px] text-[#1A1A1A]">
+                      <td className="px-4 py-2 align-top text-[12px] text-tinta">
                         {formatDate(entry.changed_at)}
                       </td>
-                      <td className="px-4 py-2 align-top text-[12px] text-[#1A1A1A]">
+                      <td className="px-4 py-2 align-top text-[12px] text-tinta">
                         {entry.user_name ?? '—'}
                       </td>
-                      <td className="px-4 py-2 align-top text-[12px] text-[#1A1A1A]">
+                      <td className="px-4 py-2 align-top text-[12px] text-tinta">
                         {entry.etapa_nombre}
                       </td>
-                      <td className="px-4 py-2 align-top text-[12px] text-[#1A1A1A]">
-                        <span className="text-[#6B7280]">
+                      <td className="px-4 py-2 align-top text-[12px] text-tinta">
+                        <span className="text-tinta-suave">
                           {formatSlaValue(entry.old_sla_horas)}
                         </span>{' '}
-                        <span className="text-[#6B7280]">→</span>{' '}
+                        <span className="text-tinta-suave">→</span>{' '}
                         <span className="font-semibold">
                           {formatSlaValue(entry.new_sla_horas)}
                         </span>

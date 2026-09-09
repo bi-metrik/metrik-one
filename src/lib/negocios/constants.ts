@@ -91,9 +91,9 @@ export function origenDesdeFuenteInteraccion(fuente: string | null | undefined):
 //
 // Fuente unica del catalogo: agregar o renombrar una marca se hace AQUI.
 export const MARCAS_CONDICION = [
-  { value: 'descuento', label: 'Con descuento', chipClass: 'bg-[#F59E0B]/10 text-[#B45309]' },
-  { value: 'sin_honorario', label: 'Sin honorario', chipClass: 'bg-[#EF4444]/10 text-[#DC2626]' },
-  { value: 'otro', label: 'Otra condicion', chipClass: 'bg-[#F5F4F2] text-[#6B7280]' },
+  { value: 'descuento', label: 'Con descuento', chipClass: 'bg-advertencia/10 text-[#B45309]' },
+  { value: 'sin_honorario', label: 'Sin honorario', chipClass: 'bg-alerta/10 text-[#DC2626]' },
+  { value: 'otro', label: 'Otra condicion', chipClass: 'bg-papel text-tinta-suave' },
 ] as const
 
 export type MarcaCondicionTipo = typeof MARCAS_CONDICION[number]['value']

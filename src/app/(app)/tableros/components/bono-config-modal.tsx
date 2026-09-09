@@ -30,10 +30,10 @@ import {
   getEtapasParaBono, guardarConfigBonoMes, type ConfigBonoMes,
 } from '../operaciones-config-actions'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = '#059669'
+const VERDE = 'var(--acento)'
 const AMBAR = '#B45309'
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -375,7 +375,7 @@ function Campo({ etiqueta, sufijo, valor, onChange, ayuda }: {
       </span>
       <input type="number" inputMode="decimal" min={0} step="any" value={valor}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        className="w-full rounded-lg border px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-acento/15"
         style={{ borderColor: BORDE, color: CARBON }} />
       {ayuda && <span className="mt-1 block text-[10px] leading-snug" style={{ color: GRIS }}>{ayuda}</span>}
     </label>
@@ -390,7 +390,7 @@ function Selector({ etiqueta, valor, onChange, opciones, ayuda }: {
     <label className="block">
       <span className="mb-1 block text-[11px] font-medium" style={{ color: GRIS }}>{etiqueta}</span>
       <select value={valor} onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        className="w-full rounded-lg border px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-acento/15"
         style={{ borderColor: BORDE, color: CARBON }}>
         {opciones.length === 0 && <option value="">Cargando…</option>}
         {opciones.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}

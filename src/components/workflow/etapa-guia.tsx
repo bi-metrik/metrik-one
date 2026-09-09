@@ -23,22 +23,22 @@ export function EtapaGuia({ guia }: { guia: GuiaEtapa | null | undefined }) {
   if (!guiaTieneContenido(guia)) return null
 
   return (
-    <div className="border-t border-[#BBF7D0] bg-[#F0FDF4] px-3 py-2.5 dark:border-emerald-900/60 dark:bg-emerald-950/25">
+    <div className="border-t border-[#BBF7D0] bg-[var(--acento-tinte)] px-3 py-2.5 dark:border-acento/60 dark:bg-acento/25">
       <div className="flex items-start gap-2">
-        <HelpCircle className="mt-[1px] h-3.5 w-3.5 shrink-0 text-[#10B981]" aria-hidden="true" />
+        <HelpCircle className="mt-[1px] h-3.5 w-3.5 shrink-0 text-acento" aria-hidden="true" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           {guia.definicion && (
-            <p className="text-[12px] leading-snug text-[#1A1A1A] dark:text-foreground">
+            <p className="text-[12px] leading-snug text-tinta dark:text-foreground">
               {guia.definicion}
             </p>
           )}
 
           {!!guia.hacer?.length && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#059669] dark:text-emerald-400">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-acento dark:text-acento-claro">
                 Qué se hace
               </p>
-              <ol className="mt-0.5 flex list-decimal flex-col gap-0.5 pl-4 text-[12px] leading-snug text-[#1A1A1A] marker:text-[#10B981] dark:text-foreground">
+              <ol className="mt-0.5 flex list-decimal flex-col gap-0.5 pl-4 text-[12px] leading-snug text-tinta marker:text-acento dark:text-foreground">
                 {guia.hacer.map((paso, i) => (
                   <li key={i}>{paso}</li>
                 ))}
@@ -48,10 +48,10 @@ export function EtapaGuia({ guia }: { guia: GuiaEtapa | null | undefined }) {
 
           {guia.avanzar && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#059669] dark:text-emerald-400">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-acento dark:text-acento-claro">
                 No avanza hasta
               </p>
-              <p className="mt-0.5 text-[12px] leading-snug text-[#1A1A1A] dark:text-foreground">
+              <p className="mt-0.5 text-[12px] leading-snug text-tinta dark:text-foreground">
                 {guia.avanzar}
               </p>
             </div>
@@ -59,10 +59,10 @@ export function EtapaGuia({ guia }: { guia: GuiaEtapa | null | undefined }) {
 
           {guia.responsable && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#059669] dark:text-emerald-400">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-acento dark:text-acento-claro">
                 Quién responde
               </p>
-              <p className="mt-0.5 text-[12px] leading-snug text-[#1A1A1A] dark:text-foreground">
+              <p className="mt-0.5 text-[12px] leading-snug text-tinta dark:text-foreground">
                 {guia.responsable}
               </p>
             </div>

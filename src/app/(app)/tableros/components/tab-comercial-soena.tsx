@@ -38,6 +38,7 @@ import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
 import { PagosDrawer, type MesSeleccionado } from './pagos-drawer'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
+import { PALETA } from '@/lib/marca/paleta'
 
 /**
  * El vendedor elegido en la tabla. `id` null + `sinResponsable` true es el bucket de los
@@ -46,7 +47,7 @@ import { origenNegocioLabel } from '@/lib/catalogos/constants'
  */
 type VendedorSel = { id: string | null; nombre: string; sinResponsable: boolean }
 
-const GREEN = '#059669'
+const GREEN = PALETA.acento
 const BLUE = '#2563EB'
 // El segundo pago necesita color propio y CONTRASTADO: en gris sobre el verde del
 // primero, $850.000 al lado de $25,9M eran unos seis pixeles indistinguibles.
@@ -860,17 +861,17 @@ export function TabComercialSoena({
           NO se recorta se declara en la misma frase — una seccion que se queda entera
           sin avisar es exactamente como el tablero deja de creerse. */}
       {hayFiltroVendedor && (
-        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
-          <span className="text-sm text-emerald-900">
+        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-acento-borde bg-acento-tinte/60 px-4 py-3">
+          <span className="text-sm text-acento">
             Todo lo que sigue es solo de <span className="font-bold">{filtroVendedor.nombre}</span>.
           </span>
-          <span className="text-[11px] text-emerald-800/80">
+          <span className="text-[11px] text-acento/80">
             El panel de cifras de arriba y «Capacidad por seccional» siguen siendo de toda la linea.
           </span>
           <button
             type="button"
             onClick={() => elegirVendedor(null)}
-            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
+            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-acento-claro bg-white px-2.5 py-1.5 text-xs font-semibold text-acento hover:bg-acento-tinte"
           >
             <X className="h-3.5 w-3.5" /> Ver todo el equipo
           </button>
@@ -951,12 +952,12 @@ export function TabComercialSoena({
                 <CartesianGrid vertical={false} stroke="#F3F4F6" />
                 <XAxis
                   dataKey="dia"
-                  tick={{ fontSize: 10, fill: '#6B7280' }}
+                  tick={{ fontSize: 10, fill: PALETA.tintaSuave }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(d: string) => d.slice(8)}
                 />
-                <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip formatter={(v) => [`${v}`, 'Ventas']} labelFormatter={(l) => `Dia ${String(l).slice(8)} — clic para ver los casos`} />
                 <Bar dataKey="ventas" fill={GREEN} radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -1028,8 +1029,8 @@ export function TabComercialSoena({
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={serieData} margin={{ left: -10, right: 12, top: 8 }} {...propsSerieConLista}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} allowDecimals={false} />
                   <Tooltip formatter={(v) => [`${v}`, 'Ventas']} labelFormatter={pistaDeLaSerie} />
                   <Line type="monotone" dataKey="num_ventas" stroke={GREEN} strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
@@ -1039,8 +1040,8 @@ export function TabComercialSoena({
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerieConLista}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
                   <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Valor sin IVA']} labelFormatter={pistaDeLaSerie} />
                   <Bar dataKey="valor_sin_iva" fill={GREEN} radius={[4, 4, 0, 0]} />
                 </BarChart>
@@ -1050,8 +1051,8 @@ export function TabComercialSoena({
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={serieData} margin={{ left: -4, right: 12, top: 8 }} {...propsSerieConPagos}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
                   <Tooltip formatter={(v) => [fmtCOP(Number(v)), 'Recaudo']} labelFormatter={pistaDeRecaudo} />
                   <Bar dataKey="honorario_recaudado" fill={BLUE} radius={[4, 4, 0, 0]} />
                 </BarChart>
@@ -1067,8 +1068,8 @@ export function TabComercialSoena({
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={serieData} margin={{ left: -4, right: 12, top: 18 }} {...propsSerieConPagos}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
                   <Tooltip
                     formatter={(v, name) => [fmtCOP(Number(v)), name === 'primer_pago' ? '1er pago' : '2o pago']}
                     labelFormatter={pistaDeRecaudo}
@@ -1171,7 +1172,7 @@ function CeldaAbrible({ children, onAbrir, title, className, style }: {
       <button
         type="button"
         onClick={onAbrir}
-        className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+        className="underline decoration-dotted underline-offset-4 hover:text-acento-hover"
         title={title}
       >
         {children}
@@ -1222,19 +1223,19 @@ function FilaVendedor({ v, seleccionado, onElegir, onAbrir }: {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onElegir() } }}
       title={seleccionado ? 'Clic para dejar de filtrar por esta persona' : `Clic para ver todo el tablero solo de ${etiqueta}`}
       className={`cursor-pointer border-b border-gray-50 transition ${
-        seleccionado ? 'bg-emerald-50/70 hover:bg-emerald-50' : 'hover:bg-gray-50/50'
+        seleccionado ? 'bg-acento-tinte/70 hover:bg-acento-tinte' : 'hover:bg-gray-50/50'
       }`}
     >
       <td className="px-4 py-3">
         <span className="flex items-center gap-2">
           {/* La barrita verde es lo unico que distingue la fila elegida cuando la tabla
               se lee en una pantalla angosta y el fondo casi no se ve. */}
-          <span className={`h-4 w-1 rounded-full ${seleccionado ? 'bg-[#059669]' : 'bg-transparent'}`} />
+          <span className={`h-4 w-1 rounded-full ${seleccionado ? 'bg-acento' : 'bg-transparent'}`} />
           <Link
             href={perfil}
             onClick={detener}
             onKeyDown={detener}
-            className="font-medium text-gray-900 underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            className="font-medium text-gray-900 underline decoration-dotted underline-offset-4 hover:text-acento-hover"
             title={`Ver el perfil de ${etiqueta}`}
           >
             {etiqueta}
@@ -1246,7 +1247,7 @@ function FilaVendedor({ v, seleccionado, onElegir, onAbrir }: {
           <button
             type="button"
             onClick={(e) => { detener(e); abrirTodas() }}
-            className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            className="underline decoration-dotted underline-offset-4 hover:text-acento-hover"
             title="Ver estas ventas"
           >
             {v.num_ventas}
@@ -1278,7 +1279,7 @@ function FilaVendedor({ v, seleccionado, onElegir, onAbrir }: {
           <button
             type="button"
             onClick={(e) => { detener(e); onAbrir('bonificables') }}
-            className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            className="underline decoration-dotted underline-offset-4 hover:text-acento-hover"
             title="Ver las ventas que pasaron el umbral del proceso"
           >
             {v.bonificables}
@@ -1292,7 +1293,7 @@ function FilaVendedor({ v, seleccionado, onElegir, onAbrir }: {
           <button
             type="button"
             onClick={(e) => { detener(e); onAbrir('completos') }}
-            className="underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+            className="underline decoration-dotted underline-offset-4 hover:text-acento-hover"
             title="Ver los casos con el honorario cubierto"
           >
             {v.casos_completos}
@@ -1342,7 +1343,7 @@ function Kpi({ label, value, sub, color, delta: variacion, onAbrir }: {
     <button
       type="button"
       onClick={onAbrir}
-      className="rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-colors hover:border-gray-200 hover:bg-gray-50/60 focus:outline-none focus:ring-2 focus:ring-[#10B981]/20"
+      className="rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-colors hover:border-gray-200 hover:bg-gray-50/60 focus:outline-none focus:ring-2 focus:ring-acento/20"
       title="Ver los casos detrás de esta cifra"
     >
       {contenido}
@@ -1456,7 +1457,7 @@ function SeccionOrigen({ origen, mesLabel, onAbrirCampana }: {
                           c.campana ?? '',
                           c.campana ?? 'Meta sin campaña atribuida',
                         )}
-                        className="block w-full truncate text-left underline decoration-dotted underline-offset-4 hover:text-[#059669]"
+                        className="block w-full truncate text-left underline decoration-dotted underline-offset-4 hover:text-acento-hover"
                         title={c.campana ?? 'Vinieron de Meta y la interacción no trae campaña'}
                       >
                         <span className={c.campana ? 'text-gray-900' : 'italic text-amber-800'}>

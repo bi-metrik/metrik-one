@@ -61,15 +61,15 @@ import { formatFecha } from '@/lib/dates/bogota'
  */
 
 const M = {
-  bg: '#1A1A1A',
+  bg: 'var(--tinta)',
   panel: '#232321',
   line: '#32322F',
   ink: '#EDECEA',
   muted: '#9A9C9F',
-  brand: '#34D399',
+  brand: 'var(--acento-claro)',
   crit: '#F87171',
   high: '#FBBF24',
-  ok: '#34D399',
+  ok: 'var(--acento-claro)',
 } as const
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'

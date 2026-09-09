@@ -17,8 +17,8 @@ import type { ComercialPerdido } from '../../equipo/comercial-types'
 import { RAZONES_PERDIDA_NEGOCIO } from '@/lib/negocios/constants'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
 const OCRE = '#92400E'
 
@@ -88,7 +88,7 @@ export function PerdidosDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-1.5 hover:bg-[#F5F4F2]"
+              className="shrink-0 rounded-lg p-1.5 hover:bg-papel"
               aria-label="Cerrar"
             >
               <X className="h-4 w-4" style={{ color: GRIS }} />
@@ -135,7 +135,7 @@ export function PerdidosDrawer({
                         <span
                           className="rounded px-1.5 py-0.5 font-medium"
                           style={{
-                            backgroundColor: c.razon ? '#FEF3C7' : '#F5F4F2',
+                            backgroundColor: c.razon ? '#FEF3C7' : 'var(--papel)',
                             color: c.razon ? OCRE : GRIS,
                           }}
                         >

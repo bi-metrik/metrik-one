@@ -165,7 +165,7 @@ export default function BloqueCronograma({
   if (items.length === 0 && !isPending) {
     return (
       <div className="space-y-2">
-        <p className="text-xs text-[#6B7280]">Sin actividades configuradas en el cronograma</p>
+        <p className="text-xs text-tinta-suave">Sin actividades configuradas en el cronograma</p>
         {modo === 'editable' && (
           <button
             onClick={() => {
@@ -177,7 +177,7 @@ export default function BloqueCronograma({
               setItems([tmp])
               startEdit(tmp)
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[#10B981] px-3 py-2 text-xs text-[#10B981] hover:bg-[#10B981]/5"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-acento px-3 py-2 text-xs text-acento hover:bg-acento/5"
           >
             <Plus className="h-3.5 w-3.5" />
             Agregar actividad
@@ -193,13 +193,13 @@ export default function BloqueCronograma({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-[#E5E7EB]">
-              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Actividad</th>
-              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Inicio</th>
-              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Fin</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Actividad</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Inicio</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Fin</th>
               {profiles.length > 0 && (
-                <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-[#6B7280] uppercase">Responsable</th>
+                <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Responsable</th>
               )}
-              <th className="pb-1.5 text-left text-[10px] font-medium text-[#6B7280] uppercase">Estado</th>
+              <th className="pb-1.5 text-left text-[10px] font-medium text-tinta-suave uppercase">Estado</th>
               {modo === 'editable' && <th className="pb-1.5 w-6" />}
             </tr>
           </thead>
@@ -213,12 +213,12 @@ export default function BloqueCronograma({
                       value={editValues.label ?? ''}
                       onChange={e => setEditValues(p => ({ ...p, label: e.target.value }))}
                       placeholder="Nombre de la actividad"
-                      className="w-full rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-[#10B981] focus:outline-none"
+                      className="w-full rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
                       autoFocus
                     />
                   ) : (
                     <span
-                      className={`${item.completado ? 'line-through text-[#6B7280]' : 'text-[#1A1A1A]'} ${modo === 'editable' ? 'cursor-pointer hover:text-[#10B981]' : ''}`}
+                      className={`${item.completado ? 'line-through text-tinta-suave' : 'text-tinta'} ${modo === 'editable' ? 'cursor-pointer hover:text-acento' : ''}`}
                       onClick={() => modo === 'editable' && startEdit(item)}
                     >
                       {item.label || 'Sin nombre'}
@@ -231,10 +231,10 @@ export default function BloqueCronograma({
                       type="date"
                       value={editValues.fecha_inicio ?? ''}
                       onChange={e => setEditValues(p => ({ ...p, fecha_inicio: e.target.value }))}
-                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-[#10B981] focus:outline-none"
+                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
                     />
                   ) : (
-                    <span className="text-[#6B7280]">{fmtDate(item.fecha_inicio)}</span>
+                    <span className="text-tinta-suave">{fmtDate(item.fecha_inicio)}</span>
                   )}
                 </td>
                 <td className="py-2 pr-2">
@@ -243,10 +243,10 @@ export default function BloqueCronograma({
                       type="date"
                       value={editValues.fecha_fin ?? ''}
                       onChange={e => setEditValues(p => ({ ...p, fecha_fin: e.target.value }))}
-                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-[#10B981] focus:outline-none"
+                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
                     />
                   ) : (
-                    <span className="text-[#6B7280]">{fmtDate(item.fecha_fin)}</span>
+                    <span className="text-tinta-suave">{fmtDate(item.fecha_fin)}</span>
                   )}
                 </td>
                 {profiles.length > 0 && (
@@ -255,7 +255,7 @@ export default function BloqueCronograma({
                       <select
                         value={editValues.responsable_id ?? ''}
                         onChange={e => setEditValues(p => ({ ...p, responsable_id: e.target.value || null }))}
-                        className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-[#10B981] focus:outline-none"
+                        className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
                       >
                         <option value="">Sin asignar</option>
                         {profiles.map(p => (
@@ -263,15 +263,15 @@ export default function BloqueCronograma({
                         ))}
                       </select>
                     ) : (
-                      <span className="text-[#6B7280]">{getProfileName(item.responsable_id) ?? '—'}</span>
+                      <span className="text-tinta-suave">{getProfileName(item.responsable_id) ?? '—'}</span>
                     )}
                   </td>
                 )}
                 <td className="py-2">
                   {editingId === item.id ? (
                     <div className="flex gap-1">
-                      <button onClick={saveEdit} disabled={!editValues.label?.trim()} className="rounded bg-[#10B981] px-2 py-0.5 text-[10px] text-white disabled:opacity-50">OK</button>
-                      <button onClick={cancelEdit} className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-[#6B7280]">✕</button>
+                      <button onClick={saveEdit} disabled={!editValues.label?.trim()} className="rounded bg-acento px-2 py-0.5 text-[10px] text-white disabled:opacity-50">OK</button>
+                      <button onClick={cancelEdit} className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-tinta-suave">✕</button>
                     </div>
                   ) : (
                     <button
@@ -280,9 +280,9 @@ export default function BloqueCronograma({
                       className="disabled:cursor-default"
                     >
                       {item.completado ? (
-                        <CheckCircle2 className="h-4 w-4 text-[#10B981]" />
+                        <CheckCircle2 className="h-4 w-4 text-acento" />
                       ) : (
-                        <Circle className="h-4 w-4 text-[#6B7280]/30" />
+                        <Circle className="h-4 w-4 text-tinta-suave/30" />
                       )}
                     </button>
                   )}
@@ -293,7 +293,7 @@ export default function BloqueCronograma({
                       <button
                         onClick={() => handleDelete(item)}
                         disabled={isPending}
-                        className="text-[#6B7280]/40 hover:text-red-500 disabled:opacity-50"
+                        className="text-tinta-suave/40 hover:text-red-500 disabled:opacity-50"
                         title="Eliminar actividad"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -318,7 +318,7 @@ export default function BloqueCronograma({
             setItems(prev => [...prev, tmp])
             startEdit(tmp)
           }}
-          className="inline-flex items-center gap-1.5 text-[11px] text-[#10B981] hover:underline"
+          className="inline-flex items-center gap-1.5 text-[11px] text-acento hover:underline"
         >
           <Plus className="h-3 w-3" />
           Agregar actividad
@@ -326,8 +326,8 @@ export default function BloqueCronograma({
       )}
 
       <div className="flex items-center gap-2 pt-1">
-        <CalendarDays className="h-3 w-3 text-[#6B7280]" />
-        <span className="text-[10px] text-[#6B7280]">
+        <CalendarDays className="h-3 w-3 text-tinta-suave" />
+        <span className="text-[10px] text-tinta-suave">
           {items.filter(i => i.completado).length}/{items.length} completadas
           {requireAllDates && ' · Requiere todas las fechas'}
         </span>

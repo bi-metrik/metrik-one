@@ -39,11 +39,11 @@ import {
  * hacer algo antes, rojo no. El ejecutor mira la fila, no la leyenda.
  */
 const CHIP: Record<EstadoSujeto, string> = {
-  habilitado: 'bg-[#ECFDF5] text-[#059669] border-[#10B981]/30',
-  en_seguimiento: 'bg-[#ECFDF5] text-[#047857] border-[#10B981]/50',
-  vencido: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  sin_consultar: 'bg-[#F59E0B]/10 text-[#B45309] border-[#F59E0B]/30',
-  inhabilitado: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30',
+  habilitado: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
+  en_seguimiento: 'bg-[var(--acento-tinte)] text-[var(--acento)] border-acento/50',
+  vencido: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  sin_consultar: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
+  inhabilitado: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
 };
 
 type Segmento = { id: string; nombre: string };
@@ -104,10 +104,10 @@ export default function SujetosClient({
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
-        <Users className="h-6 w-6 text-[#1A1A1A] mt-0.5" />
+        <Users className="h-6 w-6 text-tinta mt-0.5" />
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Empleados y contrapartes</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Empleados y contrapartes</h1>
+          <p className="text-sm text-tinta-suave">
             Quién está vinculado y si puede contratarse. El estado no se marca a mano:{' '}
             <strong>sale de la consulta vigente y de la decisión del oficial</strong>, así que
             cuando una vigencia caduca esta lista lo dice sola.
@@ -116,7 +116,7 @@ export default function SujetosClient({
         {puedeGestionar && (
           <button
             onClick={() => setNuevo((v) => !v)}
-            className="shrink-0 px-3 py-2 rounded-lg bg-[#1A1A1A] text-white text-sm font-medium flex items-center gap-2 hover:bg-[#333]"
+            className="shrink-0 px-3 py-2 rounded-lg bg-tinta text-white text-sm font-medium flex items-center gap-2 hover:bg-[#333]"
           >
             <Plus className="h-4 w-4" /> Agregar
           </button>
@@ -124,7 +124,7 @@ export default function SujetosClient({
       </div>
 
       {base.sinPeriodicidad && base.esOficial && (
-        <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-sm text-[#B45309]">
+        <div className="p-3 rounded-lg bg-advertencia/10 border border-advertencia/30 text-sm text-[#B45309]">
           Hay sujetos habilitados <strong>sin fecha de revalidación</strong>: el workspace todavía
           no adoptó la periodicidad. Mientras no la adoptes, esas consultas no vencen nunca y el
           tablero no puede avisarte.
@@ -132,12 +132,12 @@ export default function SujetosClient({
       )}
 
       {error && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {error}
         </div>
       )}
       {aviso && (
-        <div className="p-3 rounded-lg bg-[#ECFDF5] border border-[#10B981]/30 text-[#059669] text-sm">
+        <div className="p-3 rounded-lg bg-[var(--acento-tinte)] border border-acento/30 text-acento text-sm">
           {aviso}
         </div>
       )}
@@ -149,14 +149,14 @@ export default function SujetosClient({
             key={e}
             onClick={() => setFiltro((f) => (f === e ? null : e))}
             className={`px-3 py-2 rounded-lg border text-sm ${CHIP[e]} ${
-              filtro === e ? 'ring-2 ring-[#1A1A1A]/20' : ''
+              filtro === e ? 'ring-2 ring-tinta/20' : ''
             }`}
           >
             <span className="font-bold">{base.resumen[e]}</span> {ESTADO_SUJETO_LABEL[e]}
           </button>
         ))}
         {base.resumen.porVencer > 0 && (
-          <span className="px-3 py-2 rounded-lg border border-[#E5E7EB] bg-white text-sm text-[#6B7280]">
+          <span className="px-3 py-2 rounded-lg border border-[#E5E7EB] bg-white text-sm text-tinta-suave">
             <span className="font-bold text-[#B45309]">{base.resumen.porVencer}</span> vencen en los
             próximos 30 días
           </span>
@@ -173,7 +173,7 @@ export default function SujetosClient({
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
           />
         </div>
-        <label className="flex items-center gap-2 text-sm text-[#6B7280]">
+        <label className="flex items-center gap-2 text-sm text-tinta-suave">
           <input
             type="checkbox"
             checked={verCerradas}
@@ -181,7 +181,7 @@ export default function SujetosClient({
           />
           Ver relaciones cerradas ({base.resumen.relacionesCerradas})
         </label>
-        {pending && <Loader2 className="h-4 w-4 animate-spin text-[#6B7280]" />}
+        {pending && <Loader2 className="h-4 w-4 animate-spin text-tinta-suave" />}
       </div>
 
       {nuevo && puedeGestionar && (
@@ -197,14 +197,14 @@ export default function SujetosClient({
 
       <div className="border border-[#E5E7EB] rounded-lg overflow-hidden">
         {visibles.length === 0 ? (
-          <div className="p-6 text-sm text-[#6B7280] text-center">
+          <div className="p-6 text-sm text-tinta-suave text-center">
             {base.sujetos.length === 0
               ? 'Todavía no hay nadie en la base. Agrega los proveedores y contratistas con los que trabajas hoy.'
               : 'Ningún sujeto coincide con el filtro.'}
           </div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-[#F5F4F2] text-[#6B7280]">
+            <thead className="bg-papel text-tinta-suave">
               <tr>
                 <th className="text-left px-3 py-2 font-semibold">Nombre</th>
                 <th className="text-left px-3 py-2 font-semibold">Tipo</th>
@@ -293,14 +293,14 @@ function FilaSujetoUI({
             ) : (
               <ChevronRight className="h-4 w-4 text-[#9CA3AF]" />
             )}
-            <span className="font-medium text-[#1A1A1A]">{sujeto.nombre}</span>
+            <span className="font-medium text-tinta">{sujeto.nombre}</span>
             {situacion.relacionCerrada && (
               <span className="text-xs text-[#9CA3AF]">(relación cerrada)</span>
             )}
           </div>
         </td>
-        <td className="px-3 py-2 text-[#6B7280]">{TIPO_SUJETO_LABEL[sujeto.tipo]}</td>
-        <td className="px-3 py-2 text-[#6B7280]">
+        <td className="px-3 py-2 text-tinta-suave">{TIPO_SUJETO_LABEL[sujeto.tipo]}</td>
+        <td className="px-3 py-2 text-tinta-suave">
           {sujeto.documento_tipo} {sujeto.documento_numero}
         </td>
         <td className="px-3 py-2">
@@ -308,7 +308,7 @@ function FilaSujetoUI({
             {ESTADO_SUJETO_LABEL[situacion.estado]}
           </span>
         </td>
-        <td className="px-3 py-2 text-[#6B7280]">
+        <td className="px-3 py-2 text-tinta-suave">
           {situacion.venceEl ? (
             <span className={avisa ? 'text-[#B45309] font-medium' : ''}>
               hasta {situacion.venceEl}
@@ -317,7 +317,7 @@ function FilaSujetoUI({
             <span className="text-[#9CA3AF]">sin fecha</span>
           )}
         </td>
-        <td className="px-3 py-2 text-[#6B7280]">
+        <td className="px-3 py-2 text-tinta-suave">
           {sujeto.vinculacion ? (
             <span>
               {sujeto.vinculacion.etiqueta}
@@ -376,10 +376,10 @@ function Detalle({
   return (
     <div className="space-y-4">
       <div className="p-3 rounded-lg bg-white border border-[#E5E7EB]">
-        <div className="text-sm font-medium text-[#1A1A1A]">
+        <div className="text-sm font-medium text-tinta">
           {ESTADO_SUJETO_ACCION[situacion.estado]}
         </div>
-        <div className="text-xs text-[#6B7280] mt-1">
+        <div className="text-xs text-tinta-suave mt-1">
           {situacion.fuente === 'liberacion' &&
             'El estado viene de una decisión del oficial de cumplimiento. '}
           {situacion.fuente === 'consulta' &&
@@ -391,20 +391,20 @@ function Detalle({
           {sujeto.motivo_cierre && ` Motivo: ${sujeto.motivo_cierre}`}
         </div>
         {sujeto.responsable_nombre && (
-          <div className="text-xs text-[#6B7280] mt-1">
+          <div className="text-xs text-tinta-suave mt-1">
             Responsable: {sujeto.responsable_nombre}
           </div>
         )}
         {sujeto.segmento_nombre && (
-          <div className="text-xs text-[#6B7280]">Segmento: {sujeto.segmento_nombre}</div>
+          <div className="text-xs text-tinta-suave">Segmento: {sujeto.segmento_nombre}</div>
         )}
       </div>
 
       <div className="p-3 rounded-lg bg-white border border-[#E5E7EB]">
-        <div className="text-sm font-medium text-[#1A1A1A]">Vinculación de contrapartes</div>
+        <div className="text-sm font-medium text-tinta">Vinculación de contrapartes</div>
         {sujeto.vinculacion ? (
           <>
-            <div className="text-xs text-[#6B7280] mt-1">
+            <div className="text-xs text-tinta-suave mt-1">
               {sujeto.vinculacion.etiqueta}. {sujeto.vinculacion.accion}
               {sujeto.vinculacion.total > 1 &&
                 ` Esta contraparte tiene ${sujeto.vinculacion.total} expedientes; acá se muestra el más reciente.`}
@@ -417,13 +417,13 @@ function Detalle({
             </div>
             <Link
               href="/compliance/vinculacion"
-              className="inline-block mt-2 text-xs text-[#1A1A1A] underline"
+              className="inline-block mt-2 text-xs text-tinta underline"
             >
               Abrir el expediente en la bandeja
             </Link>
           </>
         ) : (
-          <div className="text-xs text-[#6B7280] mt-1">
+          <div className="text-xs text-tinta-suave mt-1">
             No hay expediente de vinculación para este documento. Invítalo desde la bandeja de
             vinculación para que llene el formulario y firme.
           </div>
@@ -432,7 +432,7 @@ function Detalle({
 
       {esOficial && (
         <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs text-[#6B7280]">
+          <label className="text-xs text-tinta-suave">
             Segmento de consulta
             <select
               defaultValue={sujeto.segmento_id ?? ''}
@@ -447,7 +447,7 @@ function Detalle({
               ))}
             </select>
           </label>
-          <label className="text-xs text-[#6B7280]">
+          <label className="text-xs text-tinta-suave">
             Tipo
             <select
               defaultValue={sujeto.tipo}
@@ -466,8 +466,8 @@ function Detalle({
 
       {puedeGestionar && !situacion.relacionCerrada && (
         <div className="p-3 rounded-lg bg-white border border-[#E5E7EB] space-y-2">
-          <div className="text-sm font-medium text-[#1A1A1A]">Terminar la relación</div>
-          <p className="text-xs text-[#6B7280]">
+          <div className="text-sm font-medium text-tinta">Terminar la relación</div>
+          <p className="text-xs text-tinta-suave">
             Úsalo cuando deje de trabajar con la compañía. No lo inhabilita ni borra su historial.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -486,7 +486,7 @@ function Detalle({
             <button
               disabled={motivo.trim().length === 0}
               onClick={() => onCerrar(fecha, motivo)}
-              className="px-3 py-1.5 rounded bg-[#1A1A1A] text-white text-sm disabled:opacity-40"
+              className="px-3 py-1.5 rounded bg-tinta text-white text-sm disabled:opacity-40"
             >
               Cerrar relación
             </button>
@@ -510,7 +510,7 @@ function Detalle({
           />
           <button
             onClick={() => onReabrir(fecha, motivo)}
-            className="px-3 py-1.5 rounded border border-[#E5E7EB] text-sm hover:bg-[#F5F4F2]"
+            className="px-3 py-1.5 rounded border border-[#E5E7EB] text-sm hover:bg-papel"
           >
             Reabrir relación
           </button>
@@ -526,7 +526,7 @@ function Detalle({
               setHistorial(r.ok ? r.data : []);
               setCargandoHist(false);
             }}
-            className="text-sm text-[#6B7280] underline"
+            className="text-sm text-tinta-suave underline"
           >
             {cargandoHist ? 'Cargando...' : 'Ver historial de la ficha'}
           </button>
@@ -535,8 +535,8 @@ function Detalle({
         ) : (
           <ul className="space-y-1">
             {historial.map((e) => (
-              <li key={e.id} className="text-xs text-[#6B7280]">
-                <span className="font-medium text-[#1A1A1A]">{e.evento}</span>{' '}
+              <li key={e.id} className="text-xs text-tinta-suave">
+                <span className="font-medium text-tinta">{e.evento}</span>{' '}
                 {e.detalle && <>{e.detalle}. </>}
                 {e.motivo && <>Motivo: {e.motivo}. </>}
                 {e.actor_nombre && <>Por {e.actor_nombre}. </>}
@@ -585,7 +585,7 @@ function FormNuevo({
   return (
     <div className="p-4 rounded-lg border border-[#E5E7EB] bg-white space-y-3">
       <div className="flex flex-wrap gap-3">
-        <label className="text-xs text-[#6B7280]">
+        <label className="text-xs text-tinta-suave">
           Tipo
           <select
             value={tipo}
@@ -604,7 +604,7 @@ function FormNuevo({
         </label>
 
         {tipo === 'empleado' && (
-          <label className="text-xs text-[#6B7280]">
+          <label className="text-xs text-tinta-suave">
             Persona de la nómina
             <select
               value={staffId}
@@ -626,7 +626,7 @@ function FormNuevo({
           </label>
         )}
 
-        <label className="text-xs text-[#6B7280]">
+        <label className="text-xs text-tinta-suave">
           Documento
           <div className="flex gap-1 mt-1">
             <select
@@ -648,7 +648,7 @@ function FormNuevo({
           </div>
         </label>
 
-        <label className="text-xs text-[#6B7280] flex-1 min-w-[200px]">
+        <label className="text-xs text-tinta-suave flex-1 min-w-[200px]">
           Nombre o razón social
           <input
             value={nombre}
@@ -657,7 +657,7 @@ function FormNuevo({
           />
         </label>
 
-        <label className="text-xs text-[#6B7280]">
+        <label className="text-xs text-tinta-suave">
           Segmento
           <select
             value={segmentoId}
@@ -692,13 +692,13 @@ function FormNuevo({
               segmento_id: segmentoId || null,
             })
           }
-          className="px-3 py-1.5 rounded bg-[#1A1A1A] text-white text-sm disabled:opacity-40"
+          className="px-3 py-1.5 rounded bg-tinta text-white text-sm disabled:opacity-40"
         >
           Agregar
         </button>
         <button
           onClick={onCancelar}
-          className="px-3 py-1.5 rounded border border-[#E5E7EB] text-sm hover:bg-[#F5F4F2]"
+          className="px-3 py-1.5 rounded border border-[#E5E7EB] text-sm hover:bg-papel"
         >
           Cancelar
         </button>

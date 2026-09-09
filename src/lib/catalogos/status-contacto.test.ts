@@ -36,7 +36,10 @@ describe('catálogo de status de contacto', () => {
   it('el estado de nacimiento se muestra con su nombre, no en gris como desconocido', () => {
     const { label, chipClass } = resolverStatusContacto(ESTADO_DE_NACIMIENTO)
     expect(label).toBe('Sin contactar')
-    expect(chipClass).not.toContain('#6B7280') // el chip de "valor desconocido"
+    // El chip de "desconocido" se DERIVA (es el que sale con un valor nulo) en
+    // vez de escribirse aqui: escrito a mano, esta prueba se volvia vacua el dia
+    // que ese chip cambiara de color — y eso paso al tokenizar la paleta.
+    expect(chipClass).not.toBe(resolverStatusContacto(null).chipClass)
   })
 
   it('sigue tolerando los valores legacy sin romper la pantalla', () => {

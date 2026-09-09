@@ -3,22 +3,23 @@ import { Document, Page, Text, View, StyleSheet, renderToBuffer, Svg, Line, Imag
 import type { InformaMatch, DualSeveridad, DualTipo } from '@/lib/actions/compliance-dual';
 import { INFORMA_LOGO_PNG } from './informa-logo';
 import { formatFecha } from '@/lib/dates/bogota'
+import { PALETA } from '@/lib/marca/paleta'
 
 // Azul corporativo Informa Cesce — fondo de contraste para el logo (letras blancas).
 const INFORMA_AZUL = '#003DA5';
 
 // Branding tokens — cerebro/conceptos/identidad-visual-metrik.md
 const C = {
-  negro: '#1A1A1A',
-  gris: '#6B7280',
-  verde: '#10B981',
-  verdeDark: '#059669',
-  rojo: '#EF4444',
+  negro: PALETA.tinta,
+  gris: PALETA.tintaSuave,
+  verde: PALETA.acento,
+  verdeDark: PALETA.acento,
+  rojo: PALETA.alerta,
   rojoClaro: '#FEF2F2',
-  verdeClaro: '#ECFDF5',
+  verdeClaro: PALETA.acentoTinte,
   blanco: '#FFFFFF',
   grisLinea: '#E5E7EB',
-  crema: '#F5F4F2',
+  crema: PALETA.papel,
 };
 
 const SEVERIDAD_PDF: Record<DualSeveridad, { label: string; bg: string; fg: string }> = {

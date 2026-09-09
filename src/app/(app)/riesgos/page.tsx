@@ -72,10 +72,10 @@ export default async function RiesgosPage({ searchParams }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <ShieldAlert className="h-6 w-6 text-[#10B981]" />
+          <ShieldAlert className="h-6 w-6 text-acento" />
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Riesgos</h1>
-            <p className="text-sm text-[#6B7280]">
+            <h1 className="text-xl font-bold text-tinta">Riesgos</h1>
+            <p className="text-sm text-tinta-suave">
               {totalCausas} causa{totalCausas !== 1 ? 's' : ''} en {riesgos.length} evento{riesgos.length !== 1 ? 's' : ''} de riesgo
             </p>
           </div>
@@ -88,7 +88,7 @@ export default async function RiesgosPage({ searchParams }: Props) {
           {perms.canEditRiesgos && (
             <Link
               href="/riesgos/nuevo"
-              className="inline-flex items-center gap-2 rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#059669]"
+              className="inline-flex items-center gap-2 rounded-lg bg-acento px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-acento-hover"
             >
               <Plus className="h-4 w-4" />
               Nueva causa

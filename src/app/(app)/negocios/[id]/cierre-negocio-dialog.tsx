@@ -72,8 +72,8 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
 
   return (
     <>
-      <h3 className="text-sm font-bold text-[#1A1A1A]">{esBuzonLeads ? 'Descartar lead' : 'Perder negocio'}</h3>
-      <p className="text-xs text-[#6B7280]">
+      <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : 'Perder negocio'}</h3>
+      <p className="text-xs text-tinta-suave">
         {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : 'Selecciona la razon principal'}
       </p>
 
@@ -144,13 +144,13 @@ function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () =
 
   return (
     <>
-      <h3 className="text-sm font-bold text-[#1A1A1A]">Cancelar proyecto</h3>
-      <p className="text-xs text-[#6B7280]">
+      <h3 className="text-sm font-bold text-tinta">Cancelar proyecto</h3>
+      <p className="text-xs text-tinta-suave">
         Esta accion registra la cancelacion del proyecto en ejecucion
       </p>
 
       <div className="mt-3">
-        <label className="block text-xs font-medium text-[#6B7280] mb-1">Motivo</label>
+        <label className="block text-xs font-medium text-tinta-suave mb-1">Motivo</label>
         <select
           value={motivo}
           onChange={e => setMotivo(e.target.value)}
@@ -164,7 +164,7 @@ function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () =
       </div>
 
       <div className="mt-3">
-        <label className="block text-xs font-medium text-[#6B7280] mb-1">
+        <label className="block text-xs font-medium text-tinta-suave mb-1">
           Descripcion detallada
         </label>
         <textarea
@@ -176,7 +176,7 @@ function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () =
         />
         <div className="mt-1 flex justify-end">
           <span className={`text-[10px] tabular-nums ${
-            descripcion.trim().length < 20 ? 'text-red-500' : 'text-[#6B7280]'
+            descripcion.trim().length < 20 ? 'text-red-500' : 'text-tinta-suave'
           }`}>
             {descripcion.trim().length}/20 min
           </span>
@@ -255,13 +255,13 @@ function CompletarForm({
   if (step === 1) {
     return (
       <>
-        <h3 className="text-sm font-bold text-[#1A1A1A]">Cerrar proyecto</h3>
+        <h3 className="text-sm font-bold text-tinta">Cerrar proyecto</h3>
         <textarea
           value={lecciones}
           onChange={e => setLecciones(e.target.value)}
           placeholder="Que aprendiste de este proyecto? Que mejorarias?"
           rows={4}
-          className="mt-3 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm resize-none focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+          className="mt-3 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm resize-none focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
         />
         {permiteCierreNoFacturable && (
           <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
@@ -279,7 +279,7 @@ function CompletarForm({
         )}
         {permiteCierreNoFacturable && cerrarSinFactura && (
           <div className="mt-3 space-y-2 rounded-lg border border-amber-200 p-3">
-            <label className="block text-xs font-medium text-[#6B7280]">Motivo del cierre no facturable</label>
+            <label className="block text-xs font-medium text-tinta-suave">Motivo del cierre no facturable</label>
             <select
               value={motivoNoFacturable}
               onChange={e => setMotivoNoFacturable(e.target.value)}
@@ -311,7 +311,7 @@ function CompletarForm({
           <button
             onClick={() => setStep(2)}
             disabled={!cierreNoFacturableValido}
-            className="flex-1 rounded-lg bg-[#10B981] py-2 text-sm font-medium text-white hover:bg-[#059669] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded-lg bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             Ver resumen
           </button>
@@ -323,7 +323,7 @@ function CompletarForm({
   // Step 2: Resumen financiero
   return (
     <>
-      <h3 className="text-sm font-bold text-[#1A1A1A]">Resumen financiero</h3>
+      <h3 className="text-sm font-bold text-tinta">Resumen financiero</h3>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         <FinCard label="Precio aprobado" value={formatCOP(precioAprobado ?? 0)} />
@@ -357,7 +357,7 @@ function CompletarForm({
         <button
           onClick={handleConfirm}
           disabled={isPending}
-          className="flex-1 rounded-lg bg-[#10B981] py-2 text-sm font-medium text-white hover:bg-[#059669] disabled:opacity-50"
+          className="flex-1 rounded-lg bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:opacity-50"
         >
           {isPending ? 'Cerrando...' : 'Confirmar cierre'}
         </button>
@@ -369,11 +369,11 @@ function CompletarForm({
 function FinCard({ label, value, highlight }: { label: string; value: string; highlight?: number }) {
   return (
     <div className="rounded-lg border border-[#E5E7EB] p-3">
-      <p className="text-[10px] text-[#6B7280]">{label}</p>
+      <p className="text-[10px] text-tinta-suave">{label}</p>
       <p className={`text-sm font-bold mt-0.5 tabular-nums ${
         highlight !== undefined
           ? highlight >= 0 ? 'text-green-600' : 'text-red-600'
-          : 'text-[#1A1A1A]'
+          : 'text-tinta'
       }`}>
         {value}
       </p>

@@ -31,8 +31,8 @@ const TIPO_LABELS: Record<string, string> = {
   honorario: 'Honorario',
 }
 
-const VERDE = '#10B981'
-const FONT = { fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }
+const VERDE = 'var(--acento)'
+const FONT = { fontFamily: 'var(--font-schibsted), sans-serif' }
 
 // ── Meses disponibles para el selector ───────────────────────────────────────
 
@@ -69,11 +69,11 @@ function ResumenCard({
         >
           <Icono className="h-4 w-4" style={{ color }} />
         </div>
-        <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#6B7280' }}>
+        <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
           {label}
         </span>
       </div>
-      <p className="text-[22px] font-bold tabular-nums leading-none" style={{ color: '#1A1A1A' }}>
+      <p className="text-[22px] font-bold tabular-nums leading-none" style={{ color: 'var(--tinta)' }}>
         {fmtCOP(valor)}
       </p>
       {sublabel && (
@@ -106,14 +106,14 @@ function TablaCobros({ cobros }: { cobros: CobroEpayco[] }) {
       <table className="w-full text-left text-[12px]" style={{ minWidth: 720 }}>
         <thead>
           <tr style={{ backgroundColor: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-            <th className="px-4 py-2.5 font-semibold" style={{ color: '#6B7280' }}>Referencia</th>
-            <th className="px-4 py-2.5 font-semibold" style={{ color: '#6B7280' }}>Negocio</th>
-            <th className="px-4 py-2.5 font-semibold" style={{ color: '#6B7280' }}>Fecha</th>
-            <th className="px-4 py-2.5 font-semibold" style={{ color: '#6B7280' }}>Tipo</th>
-            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: '#6B7280' }}>Monto bruto</th>
-            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: '#6B7280' }}>Comisión est.</th>
-            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: '#6B7280' }}>IVA est.</th>
-            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: '#6B7280' }}>Neto est.</th>
+            <th className="px-4 py-2.5 font-semibold" style={{ color: 'var(--tinta-suave)' }}>Referencia</th>
+            <th className="px-4 py-2.5 font-semibold" style={{ color: 'var(--tinta-suave)' }}>Negocio</th>
+            <th className="px-4 py-2.5 font-semibold" style={{ color: 'var(--tinta-suave)' }}>Fecha</th>
+            <th className="px-4 py-2.5 font-semibold" style={{ color: 'var(--tinta-suave)' }}>Tipo</th>
+            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: 'var(--tinta-suave)' }}>Monto bruto</th>
+            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: 'var(--tinta-suave)' }}>Comisión est.</th>
+            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: 'var(--tinta-suave)' }}>IVA est.</th>
+            <th className="px-4 py-2.5 text-right font-semibold" style={{ color: 'var(--tinta-suave)' }}>Neto est.</th>
           </tr>
         </thead>
         <tbody>
@@ -130,21 +130,21 @@ function TablaCobros({ cobros }: { cobros: CobroEpayco[] }) {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="group inline-flex items-center gap-1 font-mono text-[11px] font-semibold hover:underline"
-                  style={{ color: '#1A1A1A' }}
+                  style={{ color: 'var(--tinta)' }}
                 >
                   {c.external_ref}
-                  <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" style={{ color: '#6B7280' }} />
+                  <ExternalLink className="h-3 w-3 opacity-0 transition group-hover:opacity-60" style={{ color: 'var(--tinta-suave)' }} />
                 </a>
               </td>
 
               {/* Negocio */}
               <td className="px-4 py-2.5">
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-semibold" style={{ color: '#1A1A1A' }}>
+                  <span className="font-semibold" style={{ color: 'var(--tinta)' }}>
                     {c.negocio_codigo ?? '—'}
                   </span>
                   {c.negocio_nombre && (
-                    <span className="text-[11px]" style={{ color: '#6B7280' }}>
+                    <span className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
                       {c.negocio_nombre}
                     </span>
                   )}
@@ -167,7 +167,7 @@ function TablaCobros({ cobros }: { cobros: CobroEpayco[] }) {
               </td>
 
               {/* Monto bruto */}
-              <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: '#1A1A1A' }}>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums" style={{ color: 'var(--tinta)' }}>
                 {fmtCOP(c.monto)}
               </td>
 
@@ -192,10 +192,10 @@ function TablaCobros({ cobros }: { cobros: CobroEpayco[] }) {
         {/* Totales */}
         <tfoot>
           <tr style={{ borderTop: '2px solid #E5E7EB', backgroundColor: '#F9FAFB' }}>
-            <td colSpan={4} className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: '#6B7280' }}>
+            <td colSpan={4} className="px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
               Total ({cobros.length} cobros)
             </td>
-            <td className="px-4 py-2.5 text-right font-bold tabular-nums" style={{ color: '#1A1A1A' }}>
+            <td className="px-4 py-2.5 text-right font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
               {fmtCOP(cobros.reduce((s, c) => s + c.monto, 0))}
             </td>
             <td className="px-4 py-2.5 text-right font-bold tabular-nums" style={{ color: '#DC2626' }}>
@@ -240,7 +240,7 @@ export default function EpaycoClient({
         <Link
           href="/conciliacion"
           className="mb-4 inline-flex items-center gap-1.5 text-[12px] font-semibold transition hover:opacity-80"
-          style={{ color: '#6B7280' }}
+          style={{ color: 'var(--tinta-suave)' }}
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Volver a Tesorería
@@ -250,11 +250,11 @@ export default function EpaycoClient({
           <div>
             <div className="flex items-center gap-2">
               <CreditCard className="h-5 w-5" style={{ color: VERDE }} />
-              <h1 className="text-lg font-bold" style={{ color: '#1A1A1A' }}>
+              <h1 className="text-lg font-bold" style={{ color: 'var(--tinta)' }}>
                 Panel ePayco
               </h1>
             </div>
-            <p className="mt-1 text-[13px]" style={{ color: '#6B7280' }}>
+            <p className="mt-1 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
               Cobros procesados por ePayco con estimado de comisiones e IVA. Los cálculos son aproximados
               (2.9% + IVA 19%); los valores exactos están en el panel de ePayco.
             </p>
@@ -265,8 +265,8 @@ export default function EpaycoClient({
             <select
               value={mesActual ?? ''}
               onChange={(e) => cambiarMes(e.target.value)}
-              className="appearance-none rounded-lg border py-2 pl-3 pr-8 text-[13px] font-semibold outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-              style={{ borderColor: '#D1D5DB', color: '#1A1A1A', backgroundColor: '#fff' }}
+              className="appearance-none rounded-lg border py-2 pl-3 pr-8 text-[13px] font-semibold outline-none transition focus:border-acento focus:ring-1 focus:ring-acento"
+              style={{ borderColor: '#D1D5DB', color: 'var(--tinta)', backgroundColor: '#fff' }}
             >
               <option value="">Todos los meses</option>
               {meses_disponibles.map((m) => (
@@ -275,14 +275,14 @@ export default function EpaycoClient({
             </select>
             <ChevronDown
               className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-              style={{ color: '#6B7280' }}
+              style={{ color: 'var(--tinta-suave)' }}
             />
           </div>
         </div>
 
         {/* Periodo activo */}
         {mesActual && (
-          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold" style={{ backgroundColor: '#D1FAE5', color: '#065F46' }}>
+          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold" style={{ backgroundColor: 'var(--acento-tinte)', color: 'var(--acento)' }}>
             Período: {mesLabel}
           </div>
         )}
@@ -294,7 +294,7 @@ export default function EpaycoClient({
           label="Total bruto"
           valor={resumen.total_bruto}
           icono={Banknote}
-          color="#1A1A1A"
+          color="var(--tinta)"
           sublabel={`${resumen.total_cobros} cobro${resumen.total_cobros !== 1 ? 's' : ''}`}
         />
         <ResumenCard

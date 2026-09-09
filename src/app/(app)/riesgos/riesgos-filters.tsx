@@ -103,7 +103,7 @@ export default function RiesgosFilters({ categoria, nivel, estado, factor }: Pro
           type="button"
           onClick={() => startTransition(() => router.push('/riesgos'))}
           disabled={isPending}
-          className="text-xs font-medium text-[#10B981] hover:text-[#059669] transition-colors disabled:opacity-50 pb-2"
+          className="text-xs font-medium text-acento hover:text-acento-hover transition-colors disabled:opacity-50 pb-2"
         >
           Limpiar filtros
         </button>
@@ -127,14 +127,14 @@ function FilterDropdown({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280]">
+      <label className="text-[10px] font-medium uppercase tracking-wider text-tinta-suave">
         {label}
       </label>
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
-        className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 pr-8 text-sm text-[#1A1A1A] shadow-sm transition-colors hover:border-[#10B981] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 pr-8 text-sm text-tinta shadow-sm transition-colors hover:border-acento focus:border-acento focus:outline-none focus:ring-2 focus:ring-[rgba(16,185,129,0.15)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {options.map(opt => (
           <option key={opt.value} value={opt.value}>

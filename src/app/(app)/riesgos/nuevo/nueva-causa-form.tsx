@@ -115,7 +115,7 @@ export default function NuevaCausaForm({ riesgos }: Props) {
       <select
         value={value}
         onChange={e => onChange(parseInt(e.target.value))}
-        className="rounded-md border border-[#E5E7EB] px-2 py-1 text-xs font-bold focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+        className="rounded-md border border-[#E5E7EB] px-2 py-1 text-xs font-bold focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
         aria-label={label}
       >
         {[1, 2, 3, 4, 5].map(v => (
@@ -134,24 +134,24 @@ export default function NuevaCausaForm({ riesgos }: Props) {
             href="/riesgos"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#E5E7EB] transition-colors hover:bg-gray-50"
           >
-            <ArrowLeft className="h-4 w-4 text-[#6B7280]" />
+            <ArrowLeft className="h-4 w-4 text-tinta-suave" />
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-[#1A1A1A]">Nueva causa</h1>
-            <p className="text-sm text-[#6B7280]">Registrar una nueva causa de riesgo</p>
+            <h1 className="text-xl font-bold text-tinta">Nueva causa</h1>
+            <p className="text-sm text-tinta-suave">Registrar una nueva causa de riesgo</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <Link
             href="/riesgos"
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-gray-100 transition-colors"
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-tinta-suave hover:bg-gray-100 transition-colors"
           >
             Cancelar
           </Link>
           <button
             onClick={handleSubmit}
             disabled={saving}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#10B981] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#059669] disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-acento px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
             {saving ? 'Creando...' : 'Crear causa'}
@@ -167,13 +167,13 @@ export default function NuevaCausaForm({ riesgos }: Props) {
 
       {/* Parent riesgo selector */}
       <div className="rounded-lg border border-[#E5E7EB] bg-gray-50 p-4 space-y-3">
-        <label className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+        <label className="text-[10px] font-semibold uppercase tracking-wider text-tinta-suave">
           Evento de riesgo <span className="text-red-500">*</span>
         </label>
         <select
           value={riesgoId}
           onChange={e => setRiesgoId(e.target.value)}
-          className="w-full rounded-md border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+          className="w-full rounded-md border border-[#E5E7EB] bg-white px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
         >
           <option value="">Seleccionar evento de riesgo...</option>
           {riesgos.map(r => (
@@ -184,11 +184,11 @@ export default function NuevaCausaForm({ riesgos }: Props) {
         </select>
         {selectedRiesgo && (
           <div className="flex items-center gap-2 pt-1">
-            <span className="font-mono text-xs font-bold text-[#10B981]">{selectedRiesgo.codigo}</span>
+            <span className="font-mono text-xs font-bold text-acento">{selectedRiesgo.codigo}</span>
             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${CATEGORIA_COLORS[selectedRiesgo.categoria]}`}>
               {selectedRiesgo.categoria}
             </span>
-            <span className="text-xs text-[#6B7280] truncate">{selectedRiesgo.descripcion}</span>
+            <span className="text-xs text-tinta-suave truncate">{selectedRiesgo.descripcion}</span>
           </div>
         )}
       </div>
@@ -197,12 +197,12 @@ export default function NuevaCausaForm({ riesgos }: Props) {
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-orange-500" />
-          <h2 className="text-sm font-semibold text-[#1A1A1A]">Descripcion de la causa</h2>
+          <h2 className="text-sm font-semibold text-tinta">Descripcion de la causa</h2>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">
               Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automatica)</span>
             </label>
             <input
@@ -211,15 +211,15 @@ export default function NuevaCausaForm({ riesgos }: Props) {
               readOnly
               tabIndex={-1}
               placeholder={riesgoId ? '...' : 'Selecciona un evento de riesgo'}
-              className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-[#1A1A1A] cursor-not-allowed"
+              className="w-full rounded-md border border-[#E5E7EB] bg-gray-50 px-3 py-2 text-sm font-mono text-tinta cursor-not-allowed"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Factor de riesgo</label>
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">Factor de riesgo</label>
             <select
               value={factorRiesgo}
               onChange={e => setFactorRiesgo(e.target.value)}
-              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm capitalize focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981]"
+              className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm capitalize focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
             >
               <option value="">Sin factor</option>
               {FACTORES.map(f => (
@@ -230,7 +230,7 @@ export default function NuevaCausaForm({ riesgos }: Props) {
         </div>
 
         <div>
-          <label className="block text-[10px] font-medium text-[#6B7280] mb-1">
+          <label className="block text-[10px] font-medium text-tinta-suave mb-1">
             Descripcion <span className="text-red-500">*</span>
           </label>
           <textarea
@@ -238,25 +238,25 @@ export default function NuevaCausaForm({ riesgos }: Props) {
             onChange={e => setDescripcion(e.target.value)}
             rows={3}
             placeholder="Describa la causa del riesgo..."
-            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm leading-relaxed focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981] resize-none"
+            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm leading-relaxed focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
           />
         </div>
 
         <div>
-          <label className="block text-[10px] font-medium text-[#6B7280] mb-1">Contexto adicional</label>
+          <label className="block text-[10px] font-medium text-tinta-suave mb-1">Contexto adicional</label>
           <textarea
             value={contexto}
             onChange={e => setContexto(e.target.value)}
             rows={2}
             placeholder="Contexto adicional (opcional)"
-            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-xs leading-relaxed focus:border-[#10B981] focus:outline-none focus:ring-1 focus:ring-[#10B981] resize-none"
+            className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-xs leading-relaxed focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
           />
         </div>
       </div>
 
       {/* Scoring: 4 impact dimensions + probability */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-[#1A1A1A]">Evaluacion de riesgo</h2>
+        <h2 className="text-sm font-semibold text-tinta">Evaluacion de riesgo</h2>
 
         {/* 4 dimensions grid */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -270,12 +270,12 @@ export default function NuevaCausaForm({ riesgos }: Props) {
             return (
               <div key={dim.label} className="rounded-lg border border-[#E5E7EB] p-3 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-medium text-[#6B7280]">{dim.label}</span>
-                  <span className="text-[10px] text-[#6B7280]">Peso: {dim.peso}</span>
+                  <span className="text-[10px] font-medium text-tinta-suave">{dim.label}</span>
+                  <span className="text-[10px] text-tinta-suave">Peso: {dim.peso}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <ScoreSelect value={dim.value} onChange={dim.setter} label={dim.label} />
-                  <span className="text-xs text-[#6B7280]">{nivel.label}</span>
+                  <span className="text-xs text-tinta-suave">{nivel.label}</span>
                 </div>
               </div>
             )
@@ -284,11 +284,11 @@ export default function NuevaCausaForm({ riesgos }: Props) {
 
         {/* Impact ponderado summary */}
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#E5E7EB] bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-[#6B7280]">Impacto ponderado:</span>
+          <span className="text-sm font-medium text-tinta-suave">Impacto ponderado:</span>
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getImpactoBadgeColor(impPonderado)}`}>
             {impPonderado.toFixed(1)}
           </span>
-          <span className="text-xs text-[#6B7280]">
+          <span className="text-xs text-tinta-suave">
             = L:{impLegal}×0.3 + R:{impReputacional}×0.4 + O:{impOperativo}×0.2 + C:{impContagio}×0.1
           </span>
         </div>
@@ -296,28 +296,28 @@ export default function NuevaCausaForm({ riesgos }: Props) {
         {/* Probability */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-[#E5E7EB] p-3 space-y-1">
-            <span className="text-[10px] font-medium text-[#6B7280]">Probabilidad por ocurrencia</span>
+            <span className="text-[10px] font-medium text-tinta-suave">Probabilidad por ocurrencia</span>
             <div className="flex items-center gap-2">
               <ScoreSelect value={probOcurrencia} onChange={setProbOcurrencia} label="Probabilidad ocurrencia" />
-              <span className="text-xs text-[#6B7280]">{PROB_LABELS[probOcurrencia]}</span>
+              <span className="text-xs text-tinta-suave">{PROB_LABELS[probOcurrencia]}</span>
             </div>
           </div>
           <div className="rounded-lg border border-[#E5E7EB] p-3 space-y-1">
-            <span className="text-[10px] font-medium text-[#6B7280]">Probabilidad por frecuencia</span>
+            <span className="text-[10px] font-medium text-tinta-suave">Probabilidad por frecuencia</span>
             <div className="flex items-center gap-2">
               <ScoreSelect value={probFrecuencia} onChange={setProbFrecuencia} label="Probabilidad frecuencia" />
-              <span className="text-xs text-[#6B7280]">{PROB_LABELS[probFrecuencia]}</span>
+              <span className="text-xs text-tinta-suave">{PROB_LABELS[probFrecuencia]}</span>
             </div>
           </div>
         </div>
 
         {/* Probability result */}
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#E5E7EB] bg-gray-50 px-4 py-3">
-          <span className="text-sm font-medium text-[#6B7280]">Probabilidad resultante:</span>
+          <span className="text-sm font-medium text-tinta-suave">Probabilidad resultante:</span>
           <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${IMPACTO_NIVEL[probResultante]?.color ?? 'bg-gray-100 text-gray-800'}`}>
             {probResultante} — {PROB_LABELS[probResultante]}
           </span>
-          <span className="text-xs text-[#6B7280]">= max(ocurrencia, frecuencia)</span>
+          <span className="text-xs text-tinta-suave">= max(ocurrencia, frecuencia)</span>
         </div>
       </div>
     </div>

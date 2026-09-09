@@ -55,7 +55,7 @@ export default function CerradoHeaderBanner({
 
   return (
     <>
-      <div className="mb-4 flex items-center gap-3 rounded-xl border border-[#E5E7EB] bg-[#F5F4F2] p-4">
+      <div className="mb-4 flex items-center gap-3 rounded-xl border border-[#E5E7EB] bg-papel p-4">
         <Image
           src={`/empty-states/header-cerrado-${cierreMotivo}.svg`}
           alt={`Negocio cerrado como ${MOTIVO_LABEL[cierreMotivo].toLowerCase()}`}
@@ -65,16 +65,16 @@ export default function CerradoHeaderBanner({
           className="shrink-0"
         />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-[#1A1A1A]">
+          <p className="text-sm font-semibold text-tinta">
             Cerrado como {MOTIVO_LABEL[cierreMotivo]}
           </p>
           {closedAt && (
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-xs text-tinta-suave">
               {formatDateLong(closedAt)}
             </p>
           )}
           {razonCierre && (
-            <p className="mt-1 truncate text-[11px] italic text-[#6B7280]">
+            <p className="mt-1 truncate text-[11px] italic text-tinta-suave">
               {razonCierre}
             </p>
           )}
@@ -83,7 +83,7 @@ export default function CerradoHeaderBanner({
           <button
             type="button"
             onClick={() => setShowReabrir(true)}
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-[#10B981]/40 px-3 py-1.5 text-xs font-medium text-[#10B981] hover:bg-[#10B981]/10"
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-acento/40 px-3 py-1.5 text-xs font-medium text-acento hover:bg-acento/10"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Reabrir

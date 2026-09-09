@@ -24,10 +24,10 @@ import type {
 } from '../operaciones-types'
 import { getOperacionesDetalle } from '../operaciones-actions'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = '#059669'
+const VERDE = 'var(--acento)'
 const ROJO = '#B91C1C'
 const AMBAR = '#B45309'
 
@@ -103,7 +103,7 @@ export function BonoDetalleDrawer({
               </p>
             </div>
             <button type="button" onClick={onClose}
-              className="shrink-0 rounded-lg p-1.5 hover:bg-[#F5F4F2]" aria-label="Cerrar">
+              className="shrink-0 rounded-lg p-1.5 hover:bg-papel" aria-label="Cerrar">
               <X className="h-4 w-4" style={{ color: GRIS }} />
             </button>
           </div>
@@ -116,7 +116,7 @@ export function BonoDetalleDrawer({
               <button key={i} type="button" onClick={() => onCambiarIndicador(i)}
                 className="rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors"
                 style={i === indicador
-                  ? { backgroundColor: '#F5F4F2', color: CARBON }
+                  ? { backgroundColor: 'var(--papel)', color: CARBON }
                   : { color: GRIS }}>
                 {NOMBRE_INDICADOR[i]}
               </button>
@@ -235,7 +235,7 @@ function Caso({ id, codigo, nombre, estado, lineas, etiquetas }: {
             {etiquetas.map((e, i) => (
               <span key={i} className="rounded px-1.5 py-0.5 text-[10px] font-medium"
                 style={{
-                  backgroundColor: e.tono === 'mal' ? '#FEE2E2' : e.tono === 'ok' ? '#ECFDF5' : '#F5F4F2',
+                  backgroundColor: e.tono === 'mal' ? '#FEE2E2' : e.tono === 'ok' ? 'var(--acento-tinte)' : 'var(--papel)',
                   color: e.tono === 'mal' ? ROJO : e.tono === 'ok' ? VERDE : GRIS,
                 }}>
                 {e.texto}

@@ -149,8 +149,8 @@ export default function PilaSection({ anioActual = new Date().getFullYear() }: P
           const planilla = planillaPorMes.get(mes)
           const estado = estadoDelMes(anio, mes, planilla)
           const colorClass =
-            estado === 'cargado' ? 'border-[#10B981] bg-[#10B981]/5' :
-            estado === 'vencido' ? 'border-[#F59E0B] bg-[#F59E0B]/5' :
+            estado === 'cargado' ? 'border-acento bg-acento/5' :
+            estado === 'vencido' ? 'border-advertencia bg-advertencia/5' :
             estado === 'mes_futuro' ? 'border-border bg-muted/30 opacity-60' :
             'border-border bg-card'
 
@@ -159,8 +159,8 @@ export default function PilaSection({ anioActual = new Date().getFullYear() }: P
             estado === 'vencido' ? AlertTriangle :
             FileText
           const iconColor =
-            estado === 'cargado' ? 'text-[#10B981]' :
-            estado === 'vencido' ? 'text-[#F59E0B]' :
+            estado === 'cargado' ? 'text-acento' :
+            estado === 'vencido' ? 'text-advertencia' :
             'text-muted-foreground'
 
           return (

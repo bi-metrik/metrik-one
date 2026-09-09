@@ -17,10 +17,10 @@ import { ExternalLink, X } from 'lucide-react'
 import Link from 'next/link'
 import { getNegociosDeCampana, type NegocioDeCampana } from '../marketing-actions'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = '#10B981'
+const VERDE = 'var(--acento)'
 
 export interface CampanaSeleccionada {
   campaignId: string | null
@@ -78,7 +78,7 @@ export function MarketingDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-1.5 hover:bg-[#F5F4F2]"
+              className="shrink-0 rounded-lg p-1.5 hover:bg-papel"
               aria-label="Cerrar"
             >
               <X className="h-4 w-4" style={{ color: GRIS }} />
@@ -118,7 +118,7 @@ export function MarketingDrawer({
                         {n.fechaVenta ? (
                           <span
                             className="rounded px-1.5 py-0.5 font-medium tabular-nums"
-                            style={{ backgroundColor: '#ECFDF5', color: VERDE }}
+                            style={{ backgroundColor: 'var(--acento-tinte)', color: VERDE }}
                             title="Fecha de venta"
                           >
                             Venta {n.fechaVenta}
@@ -126,7 +126,7 @@ export function MarketingDrawer({
                         ) : (
                           <span
                             className="rounded px-1.5 py-0.5 font-medium"
-                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            style={{ backgroundColor: 'var(--papel)', color: GRIS }}
                             title="Todavía no ha entrado dinero: no cuenta como venta"
                           >
                             Sin venta

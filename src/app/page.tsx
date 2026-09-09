@@ -10,9 +10,9 @@ export default function Home() {
         <p
           className="max-w-xs text-center text-lg"
           style={{
-            fontFamily: 'var(--font-montserrat), Montserrat, sans-serif',
+            fontFamily: 'var(--font-schibsted), sans-serif',
             fontWeight: 400,
-            color: '#6B7280',
+            color: 'var(--tinta-suave)',
           }}
         >
           Tus numeros claros para tomar mejores decisiones.
@@ -21,8 +21,8 @@ export default function Home() {
         <div className="flex gap-4">
           <Link
             href="/login"
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-emerald-500 px-8 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
-            style={{ fontFamily: 'var(--font-montserrat), Montserrat, sans-serif' }}
+            className="inline-flex h-11 items-center justify-center rounded-lg bg-acento px-8 text-sm font-semibold text-white transition-colors hover:bg-acento"
+            style={{ fontFamily: 'var(--font-schibsted), sans-serif' }}
           >
             Iniciar sesion
           </Link>

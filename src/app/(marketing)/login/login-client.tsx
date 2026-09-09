@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
 
-const FONT = 'var(--font-montserrat), Montserrat, sans-serif'
+const FONT = 'var(--font-schibsted), sans-serif'
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
 
 type Mode = 'loading' | 'bare' | 'tenant'
@@ -219,7 +219,7 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
               required
               className="flex h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               onFocus={(e) => {
-                e.currentTarget.style.borderColor = '#10B981'
+                e.currentTarget.style.borderColor = 'var(--acento)'
                 e.currentTarget.style.boxShadow = '0 0 0 2px rgba(16,185,129,0.15)'
               }}
               onBlur={(e) => {

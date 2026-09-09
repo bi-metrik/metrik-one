@@ -7,6 +7,7 @@ import { parseRut } from '@/lib/rut/parse-rut'
 import { normalizeTipoPersonaFiscal, normalizeRegimenFiscal } from '@/lib/rut/normalize-rut-fiscal'
 import type { RutParseResult } from '@/lib/rut/types'
 import { getServerKey } from '@/lib/server-keys'
+import { BRANDING_POR_DEFECTO } from '@/lib/marca/paleta'
 
 // ── Update Extended Fiscal Fields ────────────────────────
 
@@ -156,8 +157,8 @@ export async function updateBranding(data: {
     .from('workspaces')
     .update({
       logo_url: data.logo_url?.trim() || null,
-      color_primario: data.color_primario || '#10B981',
-      color_secundario: data.color_secundario || '#1A1A1A',
+      color_primario: data.color_primario || BRANDING_POR_DEFECTO.primario,
+      color_secundario: data.color_secundario || BRANDING_POR_DEFECTO.secundario,
     })
     .eq('id', workspaceId)
 

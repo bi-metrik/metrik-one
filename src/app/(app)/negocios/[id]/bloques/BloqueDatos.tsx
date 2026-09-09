@@ -139,9 +139,9 @@ function CopyValueButton({ value }: { value: string | number | null | undefined 
       onClick={handleCopy}
       disabled={!canCopy}
       title={canCopy ? 'Copiar' : 'Sin valor'}
-      className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-md text-[#6B7280] hover:bg-[#F5F4F2] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+      className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-md text-tinta-suave hover:bg-papel disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-[#10B981]" /> : <Copy className="h-3 w-3" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-acento" /> : <Copy className="h-3 w-3" />}
     </button>
   )
 }
@@ -163,17 +163,17 @@ function PlantillaCorreo({ field, values }: { field: DatosField; values: Record<
   return (
     <div className="rounded-lg border border-[#E5E7EB] bg-[#F9FAFB]">
       <div className="flex items-center justify-between border-b border-[#E5E7EB] px-3 py-1.5">
-        <span className="text-[10px] font-medium text-[#6B7280] uppercase tracking-wide">{field.label}</span>
+        <span className="text-[10px] font-medium text-tinta-suave uppercase tracking-wide">{field.label}</span>
         <button
           type="button"
           onClick={copiar}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-[#10B981] hover:bg-[#F0FDF4] transition-colors"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-acento hover:bg-[var(--acento-tinte)] transition-colors"
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3 w-3" />}
           {copied ? 'Copiado' : 'Copiar'}
         </button>
       </div>
-      <pre className="whitespace-pre-wrap break-words px-3 py-2 text-xs text-[#1A1A1A] font-sans leading-relaxed">{texto}</pre>
+      <pre className="whitespace-pre-wrap break-words px-3 py-2 text-xs text-tinta font-sans leading-relaxed">{texto}</pre>
     </div>
   )
 }
@@ -611,25 +611,25 @@ export default function BloqueDatos({
             const resolved = f.doc_link?._resolved
             return (
               <div key={f.slug} className="flex flex-col gap-0.5">
-                <span className="text-[10px] font-medium text-[#6B7280] uppercase tracking-wide">{f.label}</span>
+                <span className="text-[10px] font-medium text-tinta-suave uppercase tracking-wide">{f.label}</span>
                 {resolved?.drive_url ? (
                   <div className="flex items-center justify-between gap-2 rounded-md border border-[#E5E7EB] bg-white px-2 py-1.5">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <FileText className="h-3.5 w-3.5 text-[#6B7280] shrink-0" />
-                      <span className="text-xs text-[#1A1A1A] truncate">{resolved.file_name ?? f.label}</span>
+                      <FileText className="h-3.5 w-3.5 text-tinta-suave shrink-0" />
+                      <span className="text-xs text-tinta truncate">{resolved.file_name ?? f.label}</span>
                     </div>
                     <a
                       href={resolved.drive_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[10px] text-[#059669] hover:underline shrink-0"
+                      className="inline-flex items-center gap-1 text-[10px] text-acento hover:underline shrink-0"
                     >
                       <ExternalLink className="h-3 w-3" />
                       Ver
                     </a>
                   </div>
                 ) : (
-                  <span className="text-xs text-[#6B7280] italic">Aún no cargado</span>
+                  <span className="text-xs text-tinta-suave italic">Aún no cargado</span>
                 )}
               </div>
             )
@@ -641,9 +641,9 @@ export default function BloqueDatos({
           return (
             <div key={f.slug} className="flex flex-col gap-0.5">
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-medium text-[#6B7280] uppercase tracking-wide">{f.label}</span>
+                <span className="text-[10px] font-medium text-tinta-suave uppercase tracking-wide">{f.label}</span>
                 {!!saved._epayco_desglose && epaycoLookup && epaycoFilledSlugs.includes(f.slug) && (
-                  <span className="inline-flex items-center rounded bg-[#F0FDF4] px-1.5 py-0.5 text-[9px] font-medium text-[#10B981] border border-[#BBF7D0]">
+                  <span className="inline-flex items-center rounded bg-[var(--acento-tinte)] px-1.5 py-0.5 text-[9px] font-medium text-acento border border-[#BBF7D0]">
                     ePayco verificado
                   </span>
                 )}
@@ -657,7 +657,7 @@ export default function BloqueDatos({
                 )}
               </div>
               {(f.tipo === 'toggle' || f.tipo === 'checkbox') ? (
-                <span className={`text-xs font-medium ${v ? 'text-[#10B981]' : 'text-[#6B7280]'}`}>
+                <span className={`text-xs font-medium ${v ? 'text-acento' : 'text-tinta-suave'}`}>
                   {v ? 'Sí' : 'No'}
                 </span>
               ) : f.tipo === 'imagen_clipboard' && v ? (
@@ -665,7 +665,7 @@ export default function BloqueDatos({
                 <img src={v as string} alt={f.label} className="max-h-40 rounded-lg border border-[#E5E7EB] object-contain" />
               ) : (
                 <div className="flex items-center gap-1.5">
-                  <span className={`flex-1 min-w-0 text-xs text-[#1A1A1A] break-words ${f.tipo === 'numero' ? 'tabular-nums' : ''}`}>{
+                  <span className={`flex-1 min-w-0 text-xs text-tinta break-words ${f.tipo === 'numero' ? 'tabular-nums' : ''}`}>{
                     // La cita se lee aquí para decírsela al cliente: '2026-09-08T09:40'
                     // obliga a traducirla mentalmente y se presta a leer mal la hora.
                     f.tipo === 'fecha_hora' && v
@@ -698,7 +698,7 @@ export default function BloqueDatos({
                 setConsultandoRetorno(false)
               }
             }}
-            className="mt-1 inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-[#6B7280] hover:bg-[#F5F4F2] hover:text-[#1A1A1A] transition-colors disabled:opacity-60"
+            className="mt-1 inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] px-2 py-1 text-[11px] font-medium text-tinta-suave hover:bg-papel hover:text-tinta transition-colors disabled:opacity-60"
           >
             <Pencil className="h-3 w-3" />
             {consultandoRetorno ? 'Revisando…' : 'Corregir'}
@@ -743,7 +743,7 @@ export default function BloqueDatos({
   const isTriggerField = (slug: string) => epaycoLookup?.triggerField === slug
   const isEpaycoFilled = (slug: string) => epaycoDesglose !== null && epaycoFilledSlugs.includes(slug)
 
-  const inputBaseClass = 'w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60'
+  const inputBaseClass = 'w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60'
   const inputBg = (slug: string) => isEpaycoFilled(slug) ? 'bg-[#F9FAFB]' : 'bg-white'
 
   return (
@@ -767,21 +767,21 @@ export default function BloqueDatos({
       )}
       {/* Indicador de guardado pasivo (no roba atención: sin toasts por guardado) */}
       <div className="flex h-3 items-center justify-end">
-        {saveStatus === 'saving' && <span className="text-[10px] text-[#6B7280]">Guardando…</span>}
+        {saveStatus === 'saving' && <span className="text-[10px] text-tinta-suave">Guardando…</span>}
         {saveStatus === 'saved' && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-[#10B981]"><Check className="h-3 w-3" />Guardado</span>
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-acento"><Check className="h-3 w-3" />Guardado</span>
         )}
       </div>
       {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
           {f.tipo !== 'documentos_preview' && f.tipo !== 'plantilla' && (
-            <label className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[#6B7280]">
+            <label className="mb-1 flex items-center gap-1 text-[11px] font-medium text-tinta-suave">
               {f.label}
               {f.required && <span className="text-red-500">*</span>}
               {f.ayuda && <InfoTooltip text={f.ayuda} />}
               {/* Dato traído de otra fuente y aún no editado a mano → badge "auto" */}
               {autoFillDefaults?.[f.slug] != null && saved[f.slug] === undefined && values[f.slug] === autoFillDefaults[f.slug] && (
-                <span className="rounded bg-[#F5F4F2] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
+                <span className="rounded bg-papel px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
               )}
               {/* Dato leído por IA de un pantallazo y aún sin verificar → badge "Revisar" */}
               {aiFilled[f.slug] && (
@@ -789,7 +789,7 @@ export default function BloqueDatos({
               )}
               {/* Valor de referencia calculado (informativo, editable) → badge "Referencia" */}
               {f.es_referencia && values[f.slug] != null && values[f.slug] !== '' && (
-                <span className="rounded bg-[#D1FAE5] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#047857]">Referencia</span>
+                <span className="rounded bg-[var(--acento-tinte)] px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[var(--acento)]">Referencia</span>
               )}
             </label>
           )}
@@ -938,18 +938,18 @@ export default function BloqueDatos({
                 <label className="inline-flex items-center gap-2">
                   <div
                     onClick={() => !blocked && handleToggleChange(f.slug, !values[f.slug])}
-                    className={`relative h-5 w-9 rounded-full transition-colors ${shown ? 'bg-[#10B981]' : 'bg-[#E5E7EB]'} ${blocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${shown ? 'bg-acento' : 'bg-[#E5E7EB]'} ${blocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                   >
                     <span
                       className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${shown ? 'translate-x-4' : 'translate-x-0'}`}
                     />
                   </div>
-                  <span className={`text-xs ${sinDefinir ? 'text-[#6B7280] italic' : 'text-[#1A1A1A]'}`}>
+                  <span className={`text-xs ${sinDefinir ? 'text-tinta-suave italic' : 'text-tinta'}`}>
                     {sinDefinir ? 'Sin definir' : shown ? 'Sí' : 'No'}
                   </span>
                 </label>
                 {lk.locked && lk.hint && (
-                  <span className="text-[10px] text-[#6B7280] italic">{lk.hint}</span>
+                  <span className="text-[10px] text-tinta-suave italic">{lk.hint}</span>
                 )}
               </div>
             )
@@ -962,9 +962,9 @@ export default function BloqueDatos({
                 checked={!!values[f.slug]}
                 onChange={e => handleToggleChange(f.slug, e.target.checked)}
                 disabled={isPending}
-                className="h-4 w-4 accent-[#10B981] disabled:opacity-60"
+                className="h-4 w-4 accent-acento disabled:opacity-60"
               />
-              <span className="text-xs text-[#1A1A1A]">{values[f.slug] ? 'Sí' : 'No'}</span>
+              <span className="text-xs text-tinta">{values[f.slug] ? 'Sí' : 'No'}</span>
             </label>
           )}
 
@@ -973,7 +973,7 @@ export default function BloqueDatos({
             if (!resolved?.drive_url) {
               return (
                 <div className="rounded-lg border border-dashed border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2">
-                  <p className="text-[11px] text-[#6B7280] italic">
+                  <p className="text-[11px] text-tinta-suave italic">
                     {f.doc_link?.source_bloque_nombre ?? 'Documento'} aún no cargado
                   </p>
                 </div>
@@ -982,8 +982,8 @@ export default function BloqueDatos({
             return (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <FileText className="h-4 w-4 text-[#6B7280] shrink-0" />
-                  <span className="text-xs text-[#1A1A1A] truncate">
+                  <FileText className="h-4 w-4 text-tinta-suave shrink-0" />
+                  <span className="text-xs text-tinta truncate">
                     {resolved.file_name ?? f.doc_link?.source_bloque_nombre ?? 'Documento'}
                   </span>
                 </div>
@@ -992,7 +992,7 @@ export default function BloqueDatos({
                     href={resolved.drive_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-[#1A1A1A] hover:border-[#10B981]/40 hover:text-[#059669]"
+                    className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-tinta hover:border-acento/40 hover:text-acento-hover"
                   >
                     <ExternalLink className="h-3 w-3" />
                     Ver
@@ -1000,7 +1000,7 @@ export default function BloqueDatos({
                   <a
                     href={resolved.drive_url}
                     download
-                    className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-[#1A1A1A] hover:border-[#10B981]/40 hover:text-[#059669]"
+                    className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-tinta hover:border-acento/40 hover:text-acento-hover"
                   >
                     <Download className="h-3 w-3" />
                     Descargar
@@ -1037,7 +1037,7 @@ export default function BloqueDatos({
             <div
               onPaste={e => handlePaste(f.slug, e)}
               tabIndex={0}
-              className="flex min-h-[80px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-3 focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15"
+              className="flex min-h-[80px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-3 focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
             >
               {pasteImgs[f.slug] || (values[f.slug] as string) ? (
                 <div className="flex flex-col items-center gap-1">
@@ -1048,14 +1048,14 @@ export default function BloqueDatos({
                     className="max-h-32 rounded object-contain"
                   />
                   {subiendo[f.slug] && (
-                    <span className="text-[10px] text-[#6B7280] font-medium">Guardando imagen…</span>
+                    <span className="text-[10px] text-tinta-suave font-medium">Guardando imagen…</span>
                   )}
                   {extrayendo[f.slug] && (
-                    <span className="text-[10px] text-[#059669] font-medium">Extrayendo dato del pantallazo…</span>
+                    <span className="text-[10px] text-acento font-medium">Extrayendo dato del pantallazo…</span>
                   )}
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-1 text-[#6B7280]">
+                <div className="flex flex-col items-center gap-1 text-tinta-suave">
                   <ImageIcon className="h-5 w-5" />
                   <span className="text-[11px]">Pega una imagen con Ctrl+V / Cmd+V</span>
                   {f.extrae && <span className="text-[10px] text-[#9CA3AF]">El número se leerá automáticamente</span>}
@@ -1085,7 +1085,7 @@ export default function BloqueDatos({
                       className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
                         yaNoAplica
                           ? 'border-[#FDE68A] bg-[#FFFBEB]'
-                          : 'border-[#E5E7EB] hover:border-[#10B981]/50'
+                          : 'border-[#E5E7EB] hover:border-acento/50'
                       }`}
                     >
                       <input
@@ -1095,9 +1095,9 @@ export default function BloqueDatos({
                         checked={values[f.slug] === opt.value}
                         onChange={() => handleToggleChange(f.slug, opt.value)}
                         disabled={isPending}
-                        className="h-3.5 w-3.5 accent-[#10B981]"
+                        className="h-3.5 w-3.5 accent-acento"
                       />
-                      <span className="text-[#1A1A1A]">{opt.label}</span>
+                      <span className="text-tinta">{opt.label}</span>
                     </label>
                   )
                 })}
@@ -1123,17 +1123,17 @@ export default function BloqueDatos({
 
       {/* ePayco desglose summary card */}
       {epaycoDesglose && (
-        <div className="rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] p-3 space-y-1">
-          <p className="text-xs font-semibold text-[#10B981] flex items-center gap-1">
+        <div className="rounded-lg border border-[#BBF7D0] bg-[var(--acento-tinte)] p-3 space-y-1">
+          <p className="text-xs font-semibold text-acento flex items-center gap-1">
             <span>Transaccion verificada</span>
           </p>
-          <p className="text-xs text-[#1A1A1A]">Pagador: {epaycoDesglose.pagador_nombre}</p>
-          <p className="text-xs text-[#1A1A1A] tabular-nums">Monto bruto: {fmt(epaycoDesglose.monto_bruto)}</p>
-          <p className="text-xs text-[#1A1A1A] tabular-nums">
+          <p className="text-xs text-tinta">Pagador: {epaycoDesglose.pagador_nombre}</p>
+          <p className="text-xs text-tinta tabular-nums">Monto bruto: {fmt(epaycoDesglose.monto_bruto)}</p>
+          <p className="text-xs text-tinta tabular-nums">
             Comision ePayco: -{fmt(epaycoDesglose.total_descuentos)}
           </p>
           {(epaycoDesglose.comision > 0 || epaycoDesglose.iva_comision > 0 || epaycoDesglose.retefuente > 0 || epaycoDesglose.reteica > 0) && (
-            <p className="text-[10px] text-[#6B7280] tabular-nums pl-2">
+            <p className="text-[10px] text-tinta-suave tabular-nums pl-2">
               {[
                 epaycoDesglose.comision > 0 && `Comision: ${fmt(epaycoDesglose.comision)}`,
                 epaycoDesglose.iva_comision > 0 && `IVA: ${fmt(epaycoDesglose.iva_comision)}`,
@@ -1142,7 +1142,7 @@ export default function BloqueDatos({
               ].filter(Boolean).join(' + ')}
             </p>
           )}
-          <p className="text-xs font-semibold text-[#1A1A1A] tabular-nums">
+          <p className="text-xs font-semibold text-tinta tabular-nums">
             Neto a recibir: {fmt(epaycoDesglose.monto_neto)}
           </p>
         </div>
@@ -1153,18 +1153,18 @@ export default function BloqueDatos({
         <button
           onClick={handleConfirm}
           disabled={isPending || !isComplete(values) || (!!epaycoLookup && !epaycoDesglose)}
-          className="w-full rounded-lg bg-[#10B981] py-2 text-xs font-semibold text-white hover:bg-[#059669] disabled:opacity-40 transition-colors"
+          className="w-full rounded-lg bg-acento py-2 text-xs font-semibold text-white hover:bg-acento-hover disabled:opacity-40 transition-colors"
         >
           {isPending ? 'Confirmando...' : confirmLabel ?? 'Confirmar datos'}
         </button>
       )}
       {requireConfirm && instancia?.estado === 'completo' && (
-        <p className="text-[11px] text-[#10B981] font-medium flex items-center gap-1">
+        <p className="text-[11px] text-acento font-medium flex items-center gap-1">
           <span>Confirmado</span>
         </p>
       )}
       {isPending && !requireConfirm && (
-        <p className="text-[10px] text-[#6B7280]">Guardando...</p>
+        <p className="text-[10px] text-tinta-suave">Guardando...</p>
       )}
     </div>
   )
@@ -1175,21 +1175,21 @@ function DocumentosPreview({ productos }: { productos: ProductosContratados }) {
   if (codes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-3">
-        <p className="text-[11px] text-[#6B7280]">Selecciona al menos un producto para ver los documentos a generar.</p>
+        <p className="text-[11px] text-tinta-suave">Selecciona al menos un producto para ver los documentos a generar.</p>
       </div>
     )
   }
   return (
-    <div className="rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] p-3 space-y-1.5">
-      <p className="text-[11px] font-semibold text-[#10B981] flex items-center gap-1.5">
+    <div className="rounded-lg border border-[#BBF7D0] bg-[var(--acento-tinte)] p-3 space-y-1.5">
+      <p className="text-[11px] font-semibold text-acento flex items-center gap-1.5">
         <FileText className="h-3.5 w-3.5" />
         {codes.length} documento{codes.length === 1 ? '' : 's'} a generar
       </p>
       <ul className="space-y-0.5">
         {codes.map(c => (
-          <li key={c} className="text-[11px] text-[#1A1A1A] flex gap-1.5">
-            <span className="text-[#6B7280] tabular-nums">{c}</span>
-            <span className="text-[#6B7280]">—</span>
+          <li key={c} className="text-[11px] text-tinta flex gap-1.5">
+            <span className="text-tinta-suave tabular-nums">{c}</span>
+            <span className="text-tinta-suave">—</span>
             <span>{TEMPLATE_NAMES[c] ?? c}</span>
           </li>
         ))}

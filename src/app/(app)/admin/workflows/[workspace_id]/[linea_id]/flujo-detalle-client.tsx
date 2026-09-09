@@ -8,8 +8,8 @@ import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
 export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDetalle }) {
   if (detalle.etapas.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-[#F5F4F2] p-8 text-center">
-        <p className="text-sm text-[#6B7280]">Esta línea aún no tiene etapas configuradas.</p>
+      <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-papel p-8 text-center">
+        <p className="text-sm text-tinta-suave">Esta línea aún no tiene etapas configuradas.</p>
       </div>
     )
   }

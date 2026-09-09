@@ -235,7 +235,7 @@ export default function MiNegocioClient({
                     ? 'bg-primary/5 border-l-primary'
                     : 'hover:bg-accent/40 border-l-transparent'
                 }`}
-                style={!isActive ? { borderLeftColor: isComplete ? '#10B981' : '#F59E0B' } : undefined}
+                style={!isActive ? { borderLeftColor: isComplete ? 'var(--acento)' : 'var(--advertencia)' } : undefined}
               >
                 <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
                 <div className="flex-1 min-w-0">
@@ -289,7 +289,7 @@ export default function MiNegocioClient({
                     ? 'bg-primary/5 border-l-primary'
                     : 'hover:bg-accent/40 border-l-transparent'
                 }`}
-                style={!isActive ? { borderLeftColor: isComplete ? '#10B981' : '#F59E0B' } : undefined}
+                style={!isActive ? { borderLeftColor: isComplete ? 'var(--acento)' : 'var(--advertencia)' } : undefined}
               >
                 <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
                 <div className="flex-1 min-w-0">
@@ -464,11 +464,11 @@ function MargenContribucionSection() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-3">
-        <p className="text-xs text-[#6B7280]">
+      <div className="rounded-lg border border-[#E5E7EB] bg-papel p-3">
+        <p className="text-xs text-tinta-suave">
           Tu MC% se calcula del PyL del mes en <strong>Mis Numeros</strong>. Para verla con detalle, abre el drill-down de &quot;Estoy ganando?&quot;.
         </p>
-        <p className="mt-1 text-[10px] text-[#6B7280]">
+        <p className="mt-1 text-[10px] text-tinta-suave">
           Cada gasto se clasifica como variable / fijo / no operativo al registrarlo.
         </p>
       </div>

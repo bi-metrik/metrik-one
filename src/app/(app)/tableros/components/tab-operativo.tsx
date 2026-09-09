@@ -9,14 +9,15 @@ import { ChartCard } from './chart-card'
 import { ProgressGauge } from './progress-gauge'
 import { AlertCard } from './alert-card'
 import { MiniTable } from './mini-table'
+import { PALETA } from '@/lib/marca/paleta'
 
-const GREEN = '#10B981'
-const YELLOW = '#F59E0B'
-const RED = '#EF4444'
-const AMBER = '#F59E0B'
+const GREEN = PALETA.acento
+const YELLOW = PALETA.advertencia
+const RED = PALETA.alerta
+const AMBER = PALETA.advertencia
 
 const ESTADO_COLORES: Record<string, string> = {
-  'En ejecucion': 'bg-emerald-100 text-emerald-700',
+  'En ejecucion': 'bg-acento/15 text-acento',
   'Pausado': 'bg-amber-100 text-amber-700',
   'Rework': 'bg-amber-100 text-amber-700',
   'Completado': 'bg-slate-100 text-slate-700',
@@ -173,7 +174,7 @@ export function TabOperativo({ data }: { data: OperativoData }) {
                 <CartesianGrid horizontal={false} stroke="#F3F4F6" />
                 <XAxis
                   type="number"
-                  tick={{ fontSize: 11, fill: '#6B7280' }}
+                  tick={{ fontSize: 11, fill: PALETA.tintaSuave }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(v) => `${v}%`}
@@ -227,7 +228,7 @@ export function TabOperativo({ data }: { data: OperativoData }) {
                 align: 'right',
                 render: (v: number) => (
                   <span className={`font-semibold ${
-                    v >= 80 ? 'text-emerald-600' : v >= 50 ? 'text-amber-600' : 'text-gray-400'
+                    v >= 80 ? 'text-acento' : v >= 50 ? 'text-amber-600' : 'text-gray-400'
                   }`}>
                     {v.toFixed(0)}%
                   </span>

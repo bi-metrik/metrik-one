@@ -27,10 +27,10 @@ export default async function MatrizPage({ searchParams }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Grid3X3 className="h-6 w-6 text-[#10B981]" />
+        <Grid3X3 className="h-6 w-6 text-acento" />
         <div>
-          <h1 className="text-xl font-bold text-[#1A1A1A]">Matriz de riesgos</h1>
-          <p className="text-sm text-[#6B7280]">
+          <h1 className="text-xl font-bold text-tinta">Matriz de riesgos</h1>
+          <p className="text-sm text-tinta-suave">
             {causas.length} causa{causas.length !== 1 ? 's' : ''} — Probabilidad vs Impacto ponderado
           </p>
         </div>

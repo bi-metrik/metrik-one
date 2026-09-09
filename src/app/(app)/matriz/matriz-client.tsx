@@ -56,7 +56,7 @@ function getCellColor(prob: number, imp: number): string {
 
 function getCellBorder(prob: number, imp: number, selectedCell: string | null): string {
   const key = `${prob}-${imp}`
-  if (selectedCell === key) return 'ring-2 ring-[#10B981] ring-offset-1'
+  if (selectedCell === key) return 'ring-2 ring-acento ring-offset-1'
   return ''
 }
 
@@ -131,7 +131,7 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
       {/* Summary + category filter */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-[#1A1A1A]">
+          <span className="text-sm font-medium text-tinta">
             {causas.length} causa{causas.length !== 1 ? 's' : ''}
           </span>
           {(['EXTREMO', 'ALTO', 'MODERADO', 'BAJO'] as const).map(n => (
@@ -147,8 +147,8 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
               onClick={() => handleCategoriaChange(c.value)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 categoriaFiltro === c.value
-                  ? 'bg-[#10B981] text-white'
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
+                  ? 'bg-acento text-white'
+                  : 'bg-gray-100 text-tinta-suave hover:bg-gray-200'
               }`}
             >
               {c.label}
@@ -163,8 +163,8 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
         <div className="flex items-end gap-0.5 pl-20 pr-1 pb-1">
           {[1, 2, 3, 4, 5].map(p => (
             <div key={p} className="flex-1 text-center">
-              <div className="text-[10px] font-bold text-[#6B7280]">{p}</div>
-              <div className="text-[8px] text-[#6B7280] leading-tight truncate">{PROB_LABELS[p]}</div>
+              <div className="text-[10px] font-bold text-tinta-suave">{p}</div>
+              <div className="text-[8px] text-tinta-suave leading-tight truncate">{PROB_LABELS[p]}</div>
             </div>
           ))}
         </div>
@@ -173,7 +173,7 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
         <div className="flex">
           {/* Y-axis label */}
           <div className="w-5 shrink-0 flex items-center justify-center">
-            <span className="text-[10px] font-semibold text-[#6B7280] -rotate-90 whitespace-nowrap tracking-wider">
+            <span className="text-[10px] font-semibold text-tinta-suave -rotate-90 whitespace-nowrap tracking-wider">
               IMPACTO
             </span>
           </div>
@@ -184,8 +184,8 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
               <div key={imp} className="flex items-center gap-0.5 mb-0.5">
                 {/* Row label left */}
                 <div className="w-14 shrink-0 text-right pr-1.5">
-                  <span className="text-[10px] font-medium text-[#6B7280]">{imp}</span>
-                  <span className="text-[8px] text-[#6B7280] ml-0.5 hidden sm:inline">{IMPACTO_LABELS[imp]}</span>
+                  <span className="text-[10px] font-medium text-tinta-suave">{imp}</span>
+                  <span className="text-[8px] text-tinta-suave ml-0.5 hidden sm:inline">{IMPACTO_LABELS[imp]}</span>
                 </div>
                 {/* 5 cells */}
                 {[1, 2, 3, 4, 5].map(prob => {
@@ -208,7 +208,7 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
         </div>
 
         {/* Axis label */}
-        <div className="text-center text-[10px] font-semibold text-[#6B7280] tracking-wider pt-1 pl-20">
+        <div className="text-center text-[10px] font-semibold text-tinta-suave tracking-wider pt-1 pl-20">
           PROBABILIDAD
         </div>
       </div>
@@ -216,7 +216,7 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
       {/* Selected cell indicator */}
       {selectedCell && (
         <div className="flex items-center justify-center gap-2">
-          <span className="text-xs text-[#6B7280]">
+          <span className="text-xs text-tinta-suave">
             Filtrando: Prob {selectedCell.split('-')[0]} ({PROB_LABELS[parseInt(selectedCell.split('-')[0])]}) × Imp {selectedCell.split('-')[1]} ({IMPACTO_LABELS[parseInt(selectedCell.split('-')[1])]})
             {' — '}
             <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[9px] font-bold ${NIVEL_COLORS[getNivelFromCell(parseInt(selectedCell.split('-')[0]), parseInt(selectedCell.split('-')[1]))]}`}>
@@ -225,7 +225,7 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
           </span>
           <button
             onClick={() => setSelectedCell(null)}
-            className="text-xs font-medium text-[#10B981] hover:underline"
+            className="text-xs font-medium text-acento hover:underline"
           >
             Quitar filtro
           </button>
@@ -235,14 +235,14 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
       {/* Table of filtered causas */}
       {filteredCausas.length === 0 ? (
         <div className="rounded-lg border border-[#E5E7EB] bg-white p-8 text-center">
-          <p className="text-sm text-[#6B7280]">
+          <p className="text-sm text-tinta-suave">
             {selectedCell ? 'No hay causas en esta celda.' : 'No hay causas registradas.'}
           </p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-[#E5E7EB]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-[#6B7280]">
+            <thead className="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-tinta-suave">
               <tr>
                 <th className="px-4 py-2.5">Ref</th>
                 <th className="px-4 py-2.5">Cat</th>
@@ -260,7 +260,7 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
                 return (
                   <tr key={c.id} className="transition-colors hover:bg-gray-50">
                     <td className="px-4 py-2.5">
-                      <Link href={`/riesgos/causa/${c.id}`} className="font-mono text-xs font-medium text-[#10B981] hover:underline">
+                      <Link href={`/riesgos/causa/${c.id}`} className="font-mono text-xs font-medium text-acento hover:underline">
                         {c.referencia ?? '—'}
                       </Link>
                     </td>
@@ -269,12 +269,12 @@ export default function MatrizClient({ causas, categoriaFiltro, celdaFiltro }: P
                         {c.riesgo_categoria}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-[#1A1A1A]">
+                    <td className="px-4 py-2.5 text-tinta">
                       <Link href={`/riesgos/causa/${c.id}`} className="hover:underline line-clamp-2">
                         {c.descripcion}
                       </Link>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-[#6B7280] capitalize">{c.factor_riesgo ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-xs text-tinta-suave capitalize">{c.factor_riesgo ?? '—'}</td>
                     <td className="px-4 py-2.5 text-center font-mono text-xs">{c.gridProb}</td>
                     <td className="px-4 py-2.5 text-center font-mono text-xs">{c.gridImp}</td>
                     <td className="px-4 py-2.5">

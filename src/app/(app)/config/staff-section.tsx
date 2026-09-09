@@ -435,7 +435,7 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                   )}
                   <div className="flex items-center justify-between gap-2">
                     {s.phone_whatsapp ? (
-                      <span className="flex items-center gap-1 text-xs text-emerald-600">
+                      <span className="flex items-center gap-1 text-xs text-acento">
                         <Phone className="h-3 w-3" /> {s.phone_whatsapp}
                       </span>
                     ) : <span />}

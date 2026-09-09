@@ -46,17 +46,17 @@ const TIPO_ICON: Record<string, React.ElementType> = {
 }
 
 const TIPO_COLOR: Record<string, string> = {
-  inactividad_oportunidad: '#F59E0B',
+  inactividad_oportunidad: 'var(--advertencia)',
   handoff: '#8B5CF6',
-  asignacion_responsable: '#10B981',
-  asignacion_colaborador: '#10B981',
+  asignacion_responsable: 'var(--acento)',
+  asignacion_colaborador: 'var(--acento)',
   mencion: '#3B82F6',
-  streak_roto: '#EF4444',
-  inactividad_proyecto: '#F59E0B',
-  proyecto_entregado: '#10B981',
-  proyecto_cerrado: '#6B7280',
-  responsable_faltante_area: '#F59E0B',
-  cobro_vencido: '#EF4444',
+  streak_roto: 'var(--alerta)',
+  inactividad_proyecto: 'var(--advertencia)',
+  proyecto_entregado: 'var(--acento)',
+  proyecto_cerrado: 'var(--tinta-suave)',
+  responsable_faltante_area: 'var(--advertencia)',
+  cobro_vencido: 'var(--alerta)',
   cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
 }
 
@@ -263,7 +263,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
         {count > 0 && (
           <span
             className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
-            style={{ backgroundColor: '#10B981' }}
+            style={{ backgroundColor: 'var(--acento)' }}
           >
             {count > 99 ? '99+' : count}
           </span>
@@ -291,7 +291,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
               {count > 0 && (
                 <span
                   className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white"
-                  style={{ backgroundColor: '#10B981' }}
+                  style={{ backgroundColor: 'var(--acento)' }}
                 >
                   {count}
                 </span>
@@ -335,7 +335,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
 
             {!loading && pendientes.map((item) => {
               const Icon = TIPO_ICON[item.tipo] ?? Bell
-              const color = TIPO_COLOR[item.tipo] ?? '#6B7280'
+              const color = TIPO_COLOR[item.tipo] ?? 'var(--tinta-suave)'
 
               return (
                 <div
@@ -367,7 +367,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                   <div className="flex shrink-0 items-center gap-1 ml-1">
                     <button
                       onClick={(e) => handleCompletar(item.id, e)}
-                      className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-emerald-100 hover:text-emerald-600"
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-acento/15 hover:text-acento"
                       title="Marcar como completada"
                     >
                       <Check className="h-3 w-3" />

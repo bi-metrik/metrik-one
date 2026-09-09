@@ -21,7 +21,7 @@ const FASE_COLORS: Record<string, string> = {
 }
 
 const SKILL_ESTADO_STYLES: Record<string, string> = {
-  listo:            'bg-emerald-100 text-emerald-700',
+  listo:            'bg-acento/15 text-acento',
   en_construccion:  'bg-amber-100 text-amber-700',
   pendiente:        'bg-gray-100 text-gray-500',
 }
@@ -34,7 +34,7 @@ const TIPO_BLOQUE_DOT: Record<string, string> = {
   calculo:      'bg-cyan-400',
   evaluacion:   'bg-yellow-400',
   aprobacion:   'bg-rose-400',
-  efecto:       'bg-emerald-400',
+  efecto:       'bg-acento-claro',
   validacion:   'bg-red-400',
   decision:     'bg-indigo-400',
   sesion:       'bg-pink-400',
@@ -60,7 +60,7 @@ export default function ProcesoClient({ etapas }: Props) {
           <span className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-500">
             {etapas.length} etapas
           </span>
-          <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
+          <span className="rounded-md border border-acento-borde bg-acento-tinte px-2.5 py-1 text-xs text-acento">
             {totalListo} listas
           </span>
           {totalConstruccion > 0 && (
@@ -91,13 +91,13 @@ export default function ProcesoClient({ etapas }: Props) {
                       onClick={() => setSelected(isActive ? null : etapa)}
                       className={`relative w-full rounded-lg border px-3 py-2.5 text-left transition-all ${
                         isActive
-                          ? 'border-[#10B981] bg-emerald-50 shadow-sm'
+                          ? 'border-acento bg-acento-tinte shadow-sm'
                           : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
                       }`}
                     >
                       {/* Dot en la línea */}
                       <div className={`absolute -left-[11px] top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border-2 border-white ${
-                        etapa.skill_estado === 'listo' ? 'bg-emerald-500' :
+                        etapa.skill_estado === 'listo' ? 'bg-acento' :
                         etapa.skill_estado === 'en_construccion' ? 'bg-amber-400' :
                         'bg-gray-300'
                       }`} />
@@ -108,7 +108,7 @@ export default function ProcesoClient({ etapas }: Props) {
                             <span className="text-[11px] font-medium text-gray-400">
                               {etapa.orden}.
                             </span>
-                            <span className="text-[13px] font-semibold text-[#1A1A1A]">
+                            <span className="text-[13px] font-semibold text-tinta">
                               {etapa.nombre}
                             </span>
                           </div>
@@ -157,7 +157,7 @@ function DetailPanel({ etapa }: { etapa: EtapaRow }) {
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-[#1A1A1A]">{etapa.nombre}</h2>
+            <h2 className="text-lg font-bold text-tinta">{etapa.nombre}</h2>
             <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${SKILL_ESTADO_STYLES[etapa.skill_estado]}`}>
               {etapa.skill_estado === 'en_construccion' ? 'en construcción' : etapa.skill_estado}
             </span>
@@ -258,7 +258,7 @@ function DetailPanel({ etapa }: { etapa: EtapaRow }) {
                     <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-[#1A1A1A]">{b.nombre}</p>
+                    <p className="text-[13px] font-medium text-tinta">{b.nombre}</p>
                     <p className="text-[11px] text-gray-500">{b.descripcion}</p>
                   </div>
                   <span className="shrink-0 rounded bg-white border border-gray-200 px-1.5 py-0.5 text-[9px] text-gray-400 capitalize">
@@ -288,7 +288,7 @@ function Section({ title, color, children }: {
 }) {
   const header = {
     blue:    'text-blue-700 border-blue-200 bg-blue-50',
-    emerald: 'text-emerald-700 border-emerald-200 bg-emerald-50',
+    emerald: 'text-acento border-acento-borde bg-acento-tinte',
     rose:    'text-rose-700 border-rose-200 bg-rose-50',
   }[color]
 

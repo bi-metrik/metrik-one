@@ -148,7 +148,7 @@ function DualBar({ data, empty }: { data: DualBarData; empty?: boolean }) {
   const pct1 = (data.bar1.value / maxVal) * 100
   const pct2 = (data.bar2.value / maxVal) * 100
   const ratio = data.bar1.value > 0 ? data.bar2.value / data.bar1.value : 0
-  const gastosColor = ratio > 0.9 ? '#EF4444' : ratio > 0.7 ? '#F59E0B' : '#10B981'
+  const gastosColor = ratio > 0.9 ? 'var(--alerta)' : ratio > 0.7 ? 'var(--advertencia)' : 'var(--acento)'
 
   return (
     <div className="space-y-1.5">

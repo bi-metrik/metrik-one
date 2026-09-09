@@ -75,7 +75,7 @@ export const STAGE_LABELS: Record<WorkflowStage, string> = {
 // Aplica en /flujo, /admin/workflows, listados de negocios y detalle de negocio.
 
 export const STAGE_COLORS: Record<WorkflowStage, { bg: string; text: string; border: string }> = {
-  venta:     { bg: '#ECFDF5', text: '#059669', border: '#A7F3D0' },
+  venta:     { bg: 'var(--acento-tinte)', text: 'var(--acento)', border: 'var(--acento-borde)' },
   ejecucion: { bg: '#FFF7ED', text: '#C2410C', border: '#FED7AA' },
   cobro:     { bg: '#EFF6FF', text: '#2563EB', border: '#BFDBFE' },
 }

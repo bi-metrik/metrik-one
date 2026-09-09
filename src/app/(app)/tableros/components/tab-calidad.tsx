@@ -31,8 +31,8 @@ import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
  * navegacion diaria — se abre una vez y se deja puesta en un televisor.
  */
 
-const GREEN = '#10B981'
-const RED = '#EF4444'
+const GREEN = 'var(--acento)'
+const RED = 'var(--alerta)'
 const BLUE = '#3B82F6'
 
 const usd = (n: number) => `US$${Math.round(n).toLocaleString('es-CO')}`
@@ -96,7 +96,7 @@ export default function TabCalidad({ datos }: { datos: DuenoData }) {
         <div className="space-y-4">
           {datos.cuotas.map((c) => {
             const pctRec = c.esperadoUsd > 0 ? (c.entraUsd / c.esperadoUsd) * 100 : 0
-            const color = pctRec >= 85 ? GREEN : pctRec >= 60 ? '#F59E0B' : RED
+            const color = pctRec >= 85 ? GREEN : pctRec >= 60 ? 'var(--advertencia)' : RED
             return (
               <div key={c.cuota}>
                 <div className="flex items-baseline justify-between gap-3 text-sm">

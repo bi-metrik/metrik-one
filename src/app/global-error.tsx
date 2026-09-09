@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { PALETA } from '@/lib/marca/paleta'
 
 /**
  * Ultimo recurso: se activa cuando el error revienta el layout raiz, asi que
@@ -34,7 +35,7 @@ export default function GlobalError({
           padding: '24px',
           textAlign: 'center',
           background: '#ffffff',
-          color: '#1A1A1A',
+          color: PALETA.tinta,
           fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
         }}
       >
@@ -53,7 +54,7 @@ export default function GlobalError({
               padding: '8px 16px',
               borderRadius: '6px',
               border: 'none',
-              background: '#10B981',
+              background: PALETA.acento,
               color: '#ffffff',
               fontSize: '14px',
               fontWeight: 500,
@@ -70,7 +71,7 @@ export default function GlobalError({
               borderRadius: '6px',
               border: '1px solid #E5E7EB',
               background: '#ffffff',
-              color: '#1A1A1A',
+              color: PALETA.tinta,
               fontSize: '14px',
               fontWeight: 500,
               cursor: 'pointer',

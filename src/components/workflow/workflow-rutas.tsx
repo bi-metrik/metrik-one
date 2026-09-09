@@ -21,13 +21,13 @@ import { EtapaGuia } from './etapa-guia'
 import { STAGE_LABELS } from './types'
 import { SlaConfig, AvisosConfig } from './workflow-diagram'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
 
 const STAGE_COLOR: Record<string, string> = {
-  venta: '#10B981',
-  ejecucion: '#F59E0B',
+  venta: 'var(--acento)',
+  ejecucion: 'var(--advertencia)',
   cobro: '#3B82F6',
 }
 
@@ -258,13 +258,13 @@ export function WorkflowRutas({
                 onClick={() => setRutaSel(i)}
                 className="rounded-lg border px-3 py-2 text-left transition-all"
                 style={{
-                  borderColor: i === rutaSel ? '#10B981' : BORDE,
-                  backgroundColor: i === rutaSel ? '#F0FDF4' : '#FFFFFF',
+                  borderColor: i === rutaSel ? 'var(--acento)' : BORDE,
+                  backgroundColor: i === rutaSel ? 'var(--acento-tinte)' : '#FFFFFF',
                 }}
               >
                 <span
                   className="block text-xs font-bold"
-                  style={{ color: i === rutaSel ? '#059669' : CARBON }}
+                  style={{ color: i === rutaSel ? 'var(--acento)' : CARBON }}
                 >
                   {r.nombre}
                 </span>
@@ -296,7 +296,7 @@ export function WorkflowRutas({
                       return next
                     })
                   }
-                  className="h-3.5 w-3.5 accent-[#10B981]"
+                  className="h-3.5 w-3.5 accent-acento"
                 />
                 <span style={{ color: activo ? CARBON : GRIS }}>{d.pregunta}</span>
               </label>
@@ -315,7 +315,7 @@ export function WorkflowRutas({
             <button
               type="button"
               onClick={abrirModoSla}
-              className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[#F5F4F2]"
+              className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-papel"
               style={{ color: GRIS }}
             >
               Configurar tiempos
@@ -324,8 +324,8 @@ export function WorkflowRutas({
           <button
             type="button"
             onClick={() => setVerBloques(v => !v)}
-            className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[#F5F4F2]"
-            style={{ color: '#10B981' }}
+            className="rounded-md px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-papel"
+            style={{ color: 'var(--acento)' }}
           >
             {verBloques ? 'Ocultar bloques' : 'Ver qué hay en cada etapa'}
           </button>
@@ -335,7 +335,7 @@ export function WorkflowRutas({
       {modoSla && (
         <div
           className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
-          style={{ borderColor: '#10B981', backgroundColor: '#F0FDF4' }}
+          style={{ borderColor: 'var(--acento)', backgroundColor: 'var(--acento-tinte)' }}
         >
           <p className="text-[11px]" style={{ color: CARBON }}>
             Escribe el tiempo máximo de cada etapa en <strong>horas hábiles</strong>. Déjalo vacío
@@ -369,7 +369,7 @@ export function WorkflowRutas({
               onClick={guardarSla}
               disabled={guardandoSla || hayInvalidos || cambiosValidos.length === 0}
               className="rounded-md px-3 py-1.5 text-[11px] font-semibold text-white transition-colors disabled:opacity-50"
-              style={{ backgroundColor: '#10B981' }}
+              style={{ backgroundColor: 'var(--acento)' }}
             >
               {guardandoSla
                 ? 'Guardando…'
@@ -383,7 +383,7 @@ export function WorkflowRutas({
 
       <div className="space-y-2">
         {camino.map((etapa, i) => {
-          const color = STAGE_COLOR[etapa.stage] ?? '#10B981'
+          const color = STAGE_COLOR[etapa.stage] ?? 'var(--acento)'
           const anterior = camino[i - 1]
           const cambiaArea = !anterior || anterior.stage !== etapa.stage
           return (
@@ -659,7 +659,7 @@ function BloqueFila({ bloque }: { bloque: WorkflowBloque }) {
         ) : (
           <span
             className="inline-block h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: bloque.es_gate ? '#10B981' : GRIS }}
+            style={{ backgroundColor: bloque.es_gate ? 'var(--acento)' : GRIS }}
             title={bloque.es_gate ? 'Gate: bloquea el avance' : 'Bloque normal'}
           />
         )}
@@ -672,7 +672,7 @@ function BloqueFila({ bloque }: { bloque: WorkflowBloque }) {
       )}
       {!isReadOnly && bloque.es_gate && (
         <span title="Gate: bloquea el avance">
-          <ShieldCheck className="h-3 w-3" style={{ color: '#10B981' }} />
+          <ShieldCheck className="h-3 w-3" style={{ color: 'var(--acento)' }} />
         </span>
       )}
     </li>

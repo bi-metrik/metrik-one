@@ -38,13 +38,13 @@ const CLASIFICACIONES: Array<{
   color: string;
   auditable: boolean;
 }> = [
-  { value: 'zero_zero', label: 'Sin matches', color: 'bg-[#10B981]/10 text-[#065F46] border-[#10B981]/30', auditable: false },
-  { value: 'ambos_misma_entidad', label: 'Ambos — misma entidad', color: 'bg-[#1A1A1A] text-white border-[#1A1A1A]', auditable: true },
+  { value: 'zero_zero', label: 'Sin matches', color: 'bg-acento/10 text-[var(--acento)] border-acento/30', auditable: false },
+  { value: 'ambos_misma_entidad', label: 'Ambos — misma entidad', color: 'bg-tinta text-white border-tinta', auditable: true },
   { value: 'ambos_distinta_entidad', label: 'Ambos — distinta entidad', color: 'bg-[#8B5CF6]/10 text-[#5B21B6] border-[#8B5CF6]/30', auditable: true },
-  { value: 'solo_informa', label: 'Solo Informa', color: 'bg-[#F59E0B]/10 text-[#92400E] border-[#F59E0B]/30', auditable: true },
+  { value: 'solo_informa', label: 'Solo Informa', color: 'bg-advertencia/10 text-[#92400E] border-advertencia/30', auditable: true },
   { value: 'solo_valida', label: 'Solo Valida', color: 'bg-[#3B82F6]/10 text-[#1E40AF] border-[#3B82F6]/30', auditable: true },
-  { value: 'error_informa', label: 'Error Informa', color: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30', auditable: false },
-  { value: 'error_valida', label: 'Error Valida', color: 'bg-[#EF4444]/10 text-[#B91C1C] border-[#EF4444]/30', auditable: false },
+  { value: 'error_informa', label: 'Error Informa', color: 'bg-alerta/10 text-[#B91C1C] border-alerta/30', auditable: false },
+  { value: 'error_valida', label: 'Error Valida', color: 'bg-alerta/10 text-[#B91C1C] border-alerta/30', auditable: false },
 ];
 
 const AUDITABLES = CLASIFICACIONES.filter(c => c.auditable).map(c => c.value);
@@ -95,8 +95,8 @@ function TabButton({
       onClick={onClick}
       className={`-mb-px inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
         active
-          ? 'border-[#10B981] text-[#1A1A1A]'
-          : 'border-transparent text-[#6B7280] hover:text-[#1A1A1A]'
+          ? 'border-acento text-tinta'
+          : 'border-transparent text-tinta-suave hover:text-tinta'
       }`}
     >
       {icon}
@@ -158,8 +158,8 @@ function CronologicoTab() {
     <div className="space-y-4">
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-4 space-y-4">
         <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-[#6B7280]" />
-          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+          <Filter className="h-4 w-4 text-tinta-suave" />
+          <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
             Filtros
           </p>
         </div>
@@ -174,7 +174,7 @@ function CronologicoTab() {
                   : [...AUDITABLES]
               )
             }
-            className="px-3 py-1.5 rounded-full text-xs font-bold border border-[#10B981] text-[#065F46] bg-[#10B981]/10 hover:bg-[#10B981]/20 transition-colors"
+            className="px-3 py-1.5 rounded-full text-xs font-bold border border-acento text-[var(--acento)] bg-acento/10 hover:bg-acento/20 transition-colors"
           >
             Solo auditables
           </button>
@@ -189,7 +189,7 @@ function CronologicoTab() {
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                   active
                     ? c.color
-                    : 'bg-white text-[#6B7280] border-[#E5E7EB] hover:border-[#10B981]'
+                    : 'bg-white text-tinta-suave border-[#E5E7EB] hover:border-acento'
                 }`}
               >
                 {c.label}
@@ -200,7 +200,7 @@ function CronologicoTab() {
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
               Workspace
             </label>
             <input
@@ -208,39 +208,39 @@ function CronologicoTab() {
               value={workspaceFilter}
               onChange={e => setWorkspaceFilter(e.target.value)}
               placeholder="ej: alma-afi"
-              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm"
+              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm"
             />
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
               Desde
             </label>
             <input
               type="date"
               value={desde}
               onChange={e => setDesde(e.target.value)}
-              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm"
+              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm"
             />
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
               Hasta
             </label>
             <input
               type="date"
               value={hasta}
               onChange={e => setHasta(e.target.value)}
-              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm"
+              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm"
             />
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
               Auditada
             </label>
             <select
               value={auditadaFilter}
               onChange={e => setAuditadaFilter(e.target.value as 'all' | 'true' | 'false')}
-              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm bg-white"
+              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm bg-white"
             >
               <option value="all">Todas</option>
               <option value="true">Auditadas</option>
@@ -248,13 +248,13 @@ function CronologicoTab() {
             </select>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+            <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
               Informa
             </label>
             <select
               value={stubFilter}
               onChange={e => setStubFilter(e.target.value as 'all' | 'true' | 'false')}
-              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm bg-white"
+              className="w-full h-9 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm bg-white"
             >
               <option value="false">Solo reales</option>
               <option value="true">Solo stub</option>
@@ -264,7 +264,7 @@ function CronologicoTab() {
         </div>
 
         {stubFilter !== 'false' && (
-          <p className="text-xs text-[#92400E] bg-[#F59E0B]/10 border border-[#F59E0B]/30 rounded-lg px-3 py-2">
+          <p className="text-xs text-[#92400E] bg-advertencia/10 border border-advertencia/30 rounded-lg px-3 py-2">
             Estas viendo consultas con Informa en modo stub: la respuesta es sembrada, la
             comparacion no mide a Valida.
           </p>
@@ -272,14 +272,14 @@ function CronologicoTab() {
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-center gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
           <AlertTriangle className="h-4 w-4" /> {error}
         </div>
       )}
 
       <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
         <div className="p-3 border-b border-[#E5E7EB] flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+          <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
             {data
               ? `${data.total} consultas · mostrando ${data.items.length}`
               : 'Cargando…'}
@@ -288,7 +288,7 @@ function CronologicoTab() {
             type="button"
             onClick={() => cargar(page)}
             disabled={pending}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-50 transition-colors"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${pending ? 'animate-spin' : ''}`} />
             Refrescar
@@ -298,7 +298,7 @@ function CronologicoTab() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
+              <tr className="bg-papel border-b border-[#E5E7EB]">
                 <Th>Fecha</Th>
                 <Th>Workspace</Th>
                 <Th>Modo</Th>
@@ -314,7 +314,7 @@ function CronologicoTab() {
             <tbody>
               {!data || data.items.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-sm text-[#6B7280]">
+                  <td colSpan={10} className="px-4 py-12 text-center text-sm text-tinta-suave">
                     {pending ? 'Cargando…' : 'Sin consultas con los filtros actuales.'}
                   </td>
                 </tr>
@@ -329,7 +329,7 @@ function CronologicoTab() {
 
         {data && data.total > data.page_size && (
           <div className="p-3 border-t border-[#E5E7EB] flex items-center justify-between gap-2">
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-xs text-tinta-suave">
               Página {data.page} de {totalPages}
             </p>
             <div className="flex items-center gap-1">
@@ -341,7 +341,7 @@ function CronologicoTab() {
                   setPage(np);
                   cargar(np);
                 }}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-[#E5E7EB] hover:bg-[#F5F4F2] disabled:opacity-40"
+                className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-[#E5E7EB] hover:bg-papel disabled:opacity-40"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -353,7 +353,7 @@ function CronologicoTab() {
                   setPage(np);
                   cargar(np);
                 }}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-[#E5E7EB] hover:bg-[#F5F4F2] disabled:opacity-40"
+                className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-[#E5E7EB] hover:bg-papel disabled:opacity-40"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -379,7 +379,7 @@ function CronologicoTab() {
 function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'center' | 'right' }) {
   return (
     <th
-      className={`text-${align} px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280] whitespace-nowrap`}
+      className={`text-${align} px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-tinta-suave whitespace-nowrap`}
     >
       {children}
     </th>
@@ -401,14 +401,14 @@ function ConsultaRow({
   return (
     <tr
       onClick={onSelect}
-      className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F5F4F2]/60 cursor-pointer"
+      className="border-b border-[#E5E7EB] last:border-0 hover:bg-papel/60 cursor-pointer"
     >
-      <td className="px-4 py-2.5 text-[#6B7280] whitespace-nowrap text-xs">
+      <td className="px-4 py-2.5 text-tinta-suave whitespace-nowrap text-xs">
         {formatFecha(item.fecha, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
       </td>
-      <td className="px-4 py-2.5 text-[#1A1A1A] font-medium text-xs">{item.workspace_origen}</td>
-      <td className="px-4 py-2.5 text-[#6B7280] text-xs">{item.modo}</td>
-      <td className="px-4 py-2.5 text-[#1A1A1A] text-sm max-w-[220px] truncate">
+      <td className="px-4 py-2.5 text-tinta font-medium text-xs">{item.workspace_origen}</td>
+      <td className="px-4 py-2.5 text-tinta-suave text-xs">{item.modo}</td>
+      <td className="px-4 py-2.5 text-tinta text-sm max-w-[220px] truncate">
         {item.identificacion || item.nombre || '—'}
       </td>
       <td className="px-4 py-2.5 text-center font-semibold">{item.count_informa}</td>
@@ -422,24 +422,24 @@ function ConsultaRow({
       </td>
       <td className="px-4 py-2.5 text-center">
         {item.auditada ? (
-          <Check className="inline h-4 w-4 text-[#10B981]" />
+          <Check className="inline h-4 w-4 text-acento" />
         ) : (
-          <Clock className="inline h-4 w-4 text-[#6B7280]" />
+          <Clock className="inline h-4 w-4 text-tinta-suave" />
         )}
       </td>
-      <td className="px-4 py-2.5 text-[#6B7280] text-xs max-w-[180px] truncate">
+      <td className="px-4 py-2.5 text-tinta-suave text-xs max-w-[180px] truncate">
         {decisionLabel ?? '—'}
       </td>
       <td className="px-4 py-2.5 text-center">
         {item.stub_mode ? (
           <span
-            className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase border bg-[#F59E0B]/10 text-[#92400E] border-[#F59E0B]/30"
+            className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase border bg-advertencia/10 text-[#92400E] border-advertencia/30"
             title="Informa respondio con datos sembrados: esta comparacion no mide a Valida."
           >
             Stub
           </span>
         ) : (
-          <span className="text-[10px] text-[#6B7280]">real</span>
+          <span className="text-[10px] text-tinta-suave">real</span>
         )}
       </td>
     </tr>
@@ -474,15 +474,15 @@ function DetalleModal({
       <div className="bg-white rounded-lg border border-[#E5E7EB] max-w-5xl w-full my-8 shadow-xl">
         <div className="p-5 border-b border-[#E5E7EB] flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+            <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
               Detalle de consulta dual
             </p>
-            <h2 className="text-lg font-bold text-[#1A1A1A] mt-0.5 font-mono">{dualId}</h2>
+            <h2 className="text-lg font-bold text-tinta mt-0.5 font-mono">{dualId}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 hover:bg-[#F5F4F2] text-[#6B7280]"
+            className="rounded-md p-1.5 hover:bg-papel text-tinta-suave"
             aria-label="Cerrar"
           >
             <X className="h-5 w-5" />
@@ -490,11 +490,11 @@ function DetalleModal({
         </div>
 
         {pending && !detail && (
-          <div className="p-12 text-center text-sm text-[#6B7280]">Cargando…</div>
+          <div className="p-12 text-center text-sm text-tinta-suave">Cargando…</div>
         )}
 
         {error && (
-          <div className="m-5 p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-center gap-2">
+          <div className="m-5 p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" /> {error}
           </div>
         )}
@@ -530,19 +530,19 @@ function DetalleContent({
       </div>
 
       <div>
-        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+        <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-1">
           Consultado
         </p>
-        <p className="text-base font-bold text-[#1A1A1A]">
+        <p className="text-base font-bold text-tinta">
           {detail.identificacion || detail.nombre || '—'}
         </p>
-        <p className="text-xs text-[#6B7280] mt-0.5">
+        <p className="text-xs text-tinta-suave mt-0.5">
           {formatFecha(detail.fecha, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </p>
       </div>
 
       {detail.stub_mode && (
-        <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#92400E] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-advertencia/10 border border-advertencia/30 text-[#92400E] text-sm flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
             <strong>Informa en modo stub:</strong> la respuesta de la izquierda es sembrada.
@@ -552,7 +552,7 @@ function DetalleContent({
       )}
 
       {divergencia && (
-        <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#92400E] text-sm flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-advertencia/10 border border-advertencia/30 text-[#92400E] text-sm flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
             <strong>Divergencia detectada:</strong> Informa retornó {informaCount} matches y Valida {validaCount}.
@@ -565,7 +565,7 @@ function DetalleContent({
         <PanelMatches
           titulo="Informa"
           subtitulo="Competencia (300+ listas)"
-          color="#1A1A1A"
+          color="var(--tinta)"
           count={informaCount}
         >
           {detail.informa.matches.length === 0 ? (
@@ -573,12 +573,12 @@ function DetalleContent({
           ) : (
             <ul className="space-y-2">
               {detail.informa.matches.map((m, i) => (
-                <li key={i} className="p-3 rounded-md bg-[#F5F4F2] border border-[#E5E7EB]">
-                  <p className="text-xs text-[#6B7280] font-semibold uppercase">{m.lista}</p>
-                  <p className="text-sm text-[#1A1A1A] font-medium mt-0.5">{m.nombre}</p>
-                  <p className="text-xs text-[#6B7280] font-mono mt-0.5">{m.documento ?? '—'}</p>
+                <li key={i} className="p-3 rounded-md bg-papel border border-[#E5E7EB]">
+                  <p className="text-xs text-tinta-suave font-semibold uppercase">{m.lista}</p>
+                  <p className="text-sm text-tinta font-medium mt-0.5">{m.nombre}</p>
+                  <p className="text-xs text-tinta-suave font-mono mt-0.5">{m.documento ?? '—'}</p>
                   {m.fundamento && (
-                    <p className="text-xs text-[#6B7280] mt-1 leading-relaxed">{m.fundamento}</p>
+                    <p className="text-xs text-tinta-suave mt-1 leading-relaxed">{m.fundamento}</p>
                   )}
                 </li>
               ))}
@@ -589,7 +589,7 @@ function DetalleContent({
         <PanelMatches
           titulo="Valida"
           subtitulo="Motor MéTRIK"
-          color="#10B981"
+          color="var(--acento)"
           count={validaCount}
         >
           {detail.valida.matches.length === 0 ? (
@@ -597,10 +597,10 @@ function DetalleContent({
           ) : (
             <ul className="space-y-2">
               {detail.valida.matches.map((m, i) => (
-                <li key={i} className="p-3 rounded-md bg-[#10B981]/5 border border-[#10B981]/20">
-                  <p className="text-xs text-[#065F46] font-semibold uppercase">{m.lista_slug}</p>
-                  <p className="text-sm text-[#1A1A1A] font-medium mt-0.5">{m.nombre_principal}</p>
-                  <p className="text-xs text-[#065F46] mt-0.5 font-bold">
+                <li key={i} className="p-3 rounded-md bg-acento/5 border border-acento/20">
+                  <p className="text-xs text-[var(--acento)] font-semibold uppercase">{m.lista_slug}</p>
+                  <p className="text-sm text-tinta font-medium mt-0.5">{m.nombre_principal}</p>
+                  <p className="text-xs text-[var(--acento)] mt-0.5 font-bold">
                     Score: {(m.score_final * 100).toFixed(1)}%
                   </p>
                 </li>
@@ -633,7 +633,7 @@ function PanelMatches({
       <div className="p-3 border-b border-[#E5E7EB] flex items-center justify-between gap-2">
         <div>
           <p className="text-sm font-bold" style={{ color }}>{titulo}</p>
-          <p className="text-[10px] text-[#6B7280] uppercase tracking-wider">{subtitulo}</p>
+          <p className="text-[10px] text-tinta-suave uppercase tracking-wider">{subtitulo}</p>
         </div>
         <span
           className="inline-flex items-center justify-center h-7 min-w-[28px] px-2 rounded-full text-xs font-bold text-white"
@@ -650,17 +650,17 @@ function PanelMatches({
 function EmptyMatches() {
   return (
     <div className="py-6 text-center">
-      <Check className="inline-block h-5 w-5 text-[#10B981] mb-1" />
-      <p className="text-xs text-[#6B7280]">Sin coincidencias</p>
+      <Check className="inline-block h-5 w-5 text-acento mb-1" />
+      <p className="text-xs text-tinta-suave">Sin coincidencias</p>
     </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: string | null }) {
   return (
-    <div className="p-3 rounded-lg bg-[#F5F4F2] border border-[#E5E7EB]">
-      <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold">{label}</p>
-      <p className="text-sm font-bold text-[#1A1A1A] mt-0.5">{value ?? '—'}</p>
+    <div className="p-3 rounded-lg bg-papel border border-[#E5E7EB]">
+      <p className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold">{label}</p>
+      <p className="text-sm font-bold text-tinta mt-0.5">{value ?? '—'}</p>
     </div>
   );
 }
@@ -704,19 +704,19 @@ function AuditForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="bg-[#F5F4F2] rounded-lg border border-[#E5E7EB] p-4 space-y-3">
-      <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+    <form onSubmit={onSubmit} className="bg-papel rounded-lg border border-[#E5E7EB] p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
         Registrar veredicto auditor
       </p>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+        <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
           Decisión
         </label>
         <select
           value={decision}
           onChange={e => setDecision(e.target.value as DualDecision | '')}
-          className="w-full h-10 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm bg-white"
+          className="w-full h-10 px-3 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm bg-white"
         >
           <option value="">— Selecciona —</option>
           {DECISIONES.map(d => (
@@ -726,21 +726,21 @@ function AuditForm({
           ))}
         </select>
         {decision && (
-          <p className="text-[11px] text-[#6B7280] mt-1">
+          <p className="text-[11px] text-tinta-suave mt-1">
             {DECISIONES.find(d => d.value === decision)?.descripcion}
           </p>
         )}
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold mb-1">
+        <label className="block text-[10px] uppercase tracking-wider text-tinta-suave font-semibold mb-1">
           Notas (opcional)
         </label>
         <textarea
           value={notas}
           onChange={e => setNotas(e.target.value)}
           rows={3}
-          className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-[#10B981] text-sm bg-white"
+          className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] focus:outline-none focus:border-acento text-sm bg-white"
           placeholder="Observaciones del auditor…"
         />
       </div>
@@ -748,19 +748,19 @@ function AuditForm({
       <button
         type="submit"
         disabled={pending || !decision}
-        className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-[#10B981] text-white text-sm font-semibold hover:bg-[#059669] disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
+        className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-acento text-white text-sm font-semibold hover:bg-acento-hover disabled:bg-[#9CA3AF] disabled:cursor-not-allowed transition-colors"
       >
         <Check className="h-4 w-4" />
         {pending ? 'Guardando…' : 'Registrar veredicto'}
       </button>
 
       {error && (
-        <div className="p-2.5 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-xs flex items-center gap-2">
+        <div className="p-2.5 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-xs flex items-center gap-2">
           <AlertTriangle className="h-3.5 w-3.5" /> {error}
         </div>
       )}
       {info && (
-        <div className="p-2.5 rounded-lg bg-[#10B981]/10 border border-[#10B981]/30 text-[#065F46] text-xs flex items-center gap-2">
+        <div className="p-2.5 rounded-lg bg-acento/10 border border-acento/30 text-[var(--acento)] text-xs flex items-center gap-2">
           <Check className="h-3.5 w-3.5" /> {info}
         </div>
       )}
@@ -793,16 +793,16 @@ function DashboardTab() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-sm text-[#6B7280]">
+        <p className="text-sm text-tinta-suave">
           Métricas agregadas — alimentan los umbrales de validación de Vera.
         </p>
         <div className="flex items-center gap-3">
-          <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#6B7280] cursor-pointer">
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-tinta-suave cursor-pointer">
             <input
               type="checkbox"
               checked={incluirStub}
               onChange={e => setIncluirStub(e.target.checked)}
-              className="h-3.5 w-3.5 accent-[#F59E0B]"
+              className="h-3.5 w-3.5 accent-advertencia"
             />
             Incluir consultas en stub
           </label>
@@ -810,7 +810,7 @@ function DashboardTab() {
           type="button"
           onClick={() => cargar()}
           disabled={pending}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[#E5E7EB] text-xs font-semibold text-[#1A1A1A] hover:bg-[#F5F4F2] disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-[#E5E7EB] text-xs font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${pending ? 'animate-spin' : ''}`} />
           Refrescar
@@ -819,13 +819,13 @@ function DashboardTab() {
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-sm flex items-center gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
           <AlertTriangle className="h-4 w-4" /> {error}
         </div>
       )}
 
       {!metrics && !error && (
-        <div className="p-12 text-center text-sm text-[#6B7280]">Cargando métricas…</div>
+        <div className="p-12 text-center text-sm text-tinta-suave">Cargando métricas…</div>
       )}
 
       {metrics && <DashboardContent metrics={metrics} />}
@@ -851,8 +851,8 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
       <div
         className={`p-4 rounded-lg border-2 flex items-center gap-3 ${
           cumple
-            ? 'bg-[#10B981]/10 border-[#10B981] text-[#065F46]'
-            : 'bg-[#EF4444]/10 border-[#EF4444] text-[#B91C1C]'
+            ? 'bg-acento/10 border-acento text-[var(--acento)]'
+            : 'bg-alerta/10 border-alerta text-[#B91C1C]'
         }`}
       >
         {cumple ? (
@@ -878,7 +878,7 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
       </div>
 
       {metrics.stub_excluidas > 0 && !metrics.incluye_stub && (
-        <div className="p-3 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#92400E] text-xs flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-advertencia/10 border border-advertencia/30 text-[#92400E] text-xs flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
             <strong>{metrics.stub_excluidas} consultas con Informa en stub quedaron fuera.</strong>{' '}
@@ -890,7 +890,7 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
       )}
 
       {metrics.incluye_stub && (
-        <div className="p-3 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#B91C1C] text-xs flex items-start gap-2">
+        <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-xs flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
             <strong>Las consultas en stub están incluidas.</strong> Estos números sirven para
@@ -910,14 +910,14 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
 
       <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
         <div className="p-3 border-b border-[#E5E7EB]">
-          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+          <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
             Veredictos por categoría
           </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
+              <tr className="bg-papel border-b border-[#E5E7EB]">
                 <Th>Categoría</Th>
                 <Th>Descripción</Th>
                 <Th align="center">Total</Th>
@@ -926,13 +926,13 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
             <tbody>
               {veredictosArray.map(v => (
                 <tr key={v.decision.value} className="border-b border-[#E5E7EB] last:border-0">
-                  <td className="px-4 py-2.5 text-[#1A1A1A] font-semibold text-sm">
+                  <td className="px-4 py-2.5 text-tinta font-semibold text-sm">
                     {v.decision.label}
                   </td>
-                  <td className="px-4 py-2.5 text-[#6B7280] text-xs leading-relaxed">
+                  <td className="px-4 py-2.5 text-tinta-suave text-xs leading-relaxed">
                     {v.decision.descripcion}
                   </td>
-                  <td className="px-4 py-2.5 text-center font-bold text-[#1A1A1A]">{v.count}</td>
+                  <td className="px-4 py-2.5 text-center font-bold text-tinta">{v.count}</td>
                 </tr>
               ))}
             </tbody>
@@ -942,12 +942,12 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
 
       <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
         <div className="p-3 border-b border-[#E5E7EB]">
-          <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold">
+          <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold">
             Por lista — umbral Vera ≥30 positivos auditados, recall ≥95% y precision ≥95%
           </p>
         </div>
         {metrics.por_lista.length === 0 ? (
-          <p className="p-6 text-center text-sm text-[#6B7280]">
+          <p className="p-6 text-center text-sm text-tinta-suave">
             Sin datos por lista: no hay ningún veredicto registrado todavía. Esta tabla se
             llena a medida que el auditor decide en la pestaña Cronológico.
           </p>
@@ -955,7 +955,7 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-[#F5F4F2] border-b border-[#E5E7EB]">
+                <tr className="bg-papel border-b border-[#E5E7EB]">
                   <Th>Lista</Th>
                   <Th align="center">Nombrada por</Th>
                   <Th align="center">Positivos auditados</Th>
@@ -967,16 +967,16 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
               <tbody>
                 {metrics.por_lista.map(l => (
                   <tr key={l.lista} className="border-b border-[#E5E7EB] last:border-0">
-                    <td className="px-4 py-2.5 text-[#1A1A1A] font-semibold text-sm">{l.lista}</td>
-                    <td className="px-4 py-2.5 text-center text-[#6B7280] text-xs">{l.origen}</td>
-                    <td className="px-4 py-2.5 text-center text-[#1A1A1A]">{l.positivos_auditados}</td>
-                    <td className="px-4 py-2.5 text-center text-[#1A1A1A]">{formatPct(l.recall)}</td>
-                    <td className="px-4 py-2.5 text-center text-[#1A1A1A]">{formatPct(l.precision)}</td>
+                    <td className="px-4 py-2.5 text-tinta font-semibold text-sm">{l.lista}</td>
+                    <td className="px-4 py-2.5 text-center text-tinta-suave text-xs">{l.origen}</td>
+                    <td className="px-4 py-2.5 text-center text-tinta">{l.positivos_auditados}</td>
+                    <td className="px-4 py-2.5 text-center text-tinta">{formatPct(l.recall)}</td>
+                    <td className="px-4 py-2.5 text-center text-tinta">{formatPct(l.precision)}</td>
                     <td className="px-4 py-2.5 text-center">
                       {l.cumple_umbral ? (
-                        <Check className="inline h-4 w-4 text-[#10B981]" />
+                        <Check className="inline h-4 w-4 text-acento" />
                       ) : (
-                        <X className="inline h-4 w-4 text-[#EF4444]" />
+                        <X className="inline h-4 w-4 text-alerta" />
                       )}
                     </td>
                   </tr>
@@ -987,8 +987,8 @@ function DashboardContent({ metrics }: { metrics: DualMetrics }) {
         )}
       </div>
 
-      <div className="rounded-lg border border-[#E5E7EB] bg-[#F5F4F2] p-4">
-        <p className="text-xs uppercase tracking-wider text-[#6B7280] font-semibold mb-2">
+      <div className="rounded-lg border border-[#E5E7EB] bg-papel p-4">
+        <p className="text-xs uppercase tracking-wider text-tinta-suave font-semibold mb-2">
           Cómo se calcula
         </p>
         <ul className="text-xs text-[#374151] space-y-1.5 leading-relaxed list-disc list-inside">
@@ -1030,13 +1030,13 @@ function KpiCard({
   return (
     <div
       className={`p-3 rounded-lg border ${
-        accent ? 'bg-[#10B981]/5 border-[#10B981]/30' : 'bg-white border-[#E5E7EB]'
+        accent ? 'bg-acento/5 border-acento/30' : 'bg-white border-[#E5E7EB]'
       }`}
     >
-      <p className="text-[10px] uppercase tracking-wider text-[#6B7280] font-semibold">
+      <p className="text-[10px] uppercase tracking-wider text-tinta-suave font-semibold">
         {label}
       </p>
-      <p className={`text-xl font-bold mt-1 ${accent ? 'text-[#10B981]' : 'text-[#1A1A1A]'}`}>
+      <p className={`text-xl font-bold mt-1 ${accent ? 'text-acento' : 'text-tinta'}`}>
         {value}
       </p>
     </div>

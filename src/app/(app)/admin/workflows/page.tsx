@@ -15,11 +15,11 @@ export default async function AdminWorkflowsPage() {
   return (
     <div className="mx-auto max-w-6xl p-6">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1A1A1A]">Workflows</h1>
-        <p className="mt-1 text-sm text-[#6B7280]">
+        <h1 className="text-2xl font-bold text-tinta">Workflows</h1>
+        <p className="mt-1 text-sm text-tinta-suave">
           Biblioteca de flujos en vivo desde la DB. Cada item es un workspace × línea con sus etapas y bloques actuales.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#6B7280]">
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-tinta-suave">
           <span className="rounded-md border border-[#E5E7EB] bg-white px-2.5 py-1">
             {items.length} flujos
           </span>
@@ -30,8 +30,8 @@ export default async function AdminWorkflowsPage() {
       </header>
 
       {items.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-[#F5F4F2] p-8 text-center">
-          <p className="text-sm text-[#6B7280]">No hay líneas de negocio configuradas en ningún workspace todavía.</p>
+        <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-papel p-8 text-center">
+          <p className="text-sm text-tinta-suave">No hay líneas de negocio configuradas en ningún workspace todavía.</p>
         </div>
       ) : (
         <WorkflowsList items={items} />

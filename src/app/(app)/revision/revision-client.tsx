@@ -98,8 +98,8 @@ export default function RevisionClient({ items, counts, mes, filtro, role }: Pro
     <div className="mx-auto max-w-3xl space-y-4 px-4 py-6">
       {/* Header */}
       <div>
-        <h1 className="text-lg font-semibold text-[#1A1A1A]">Bandeja de revision</h1>
-        <p className="text-xs text-[#6B7280]">
+        <h1 className="text-lg font-semibold text-tinta">Bandeja de revision</h1>
+        <p className="text-xs text-tinta-suave">
           Marca como revisado los movimientos del mes para tu contador.
         </p>
       </div>
@@ -109,15 +109,15 @@ export default function RevisionClient({ items, counts, mes, filtro, role }: Pro
         <div className="flex items-center justify-between rounded-md border border-[#E5E7EB] bg-white px-3 py-2 flex-1 min-w-[180px]">
           <button
             onClick={() => cambiarMes(-1)}
-            className="rounded px-2 py-1 text-sm text-[#6B7280] hover:bg-[#F5F4F2]"
+            className="rounded px-2 py-1 text-sm text-tinta-suave hover:bg-papel"
             aria-label="Mes anterior"
           >
             ←
           </button>
-          <span className="text-sm font-medium text-[#1A1A1A]">{mesLabel(mes)}</span>
+          <span className="text-sm font-medium text-tinta">{mesLabel(mes)}</span>
           <button
             onClick={() => cambiarMes(1)}
-            className="rounded px-2 py-1 text-sm text-[#6B7280] hover:bg-[#F5F4F2]"
+            className="rounded px-2 py-1 text-sm text-tinta-suave hover:bg-papel"
             aria-label="Mes siguiente"
           >
             →
@@ -135,9 +135,9 @@ export default function RevisionClient({ items, counts, mes, filtro, role }: Pro
 
       {/* List */}
       {!hayItems ? (
-        <div className="rounded-md border border-dashed border-[#E5E7EB] bg-[#F5F4F2] py-12 text-center">
-          <CheckCircle2 className="mx-auto h-8 w-8 text-[#10B981]" />
-          <p className="mt-3 text-sm font-medium text-[#1A1A1A]">
+        <div className="rounded-md border border-dashed border-[#E5E7EB] bg-papel py-12 text-center">
+          <CheckCircle2 className="mx-auto h-8 w-8 text-acento" />
+          <p className="mt-3 text-sm font-medium text-tinta">
             {filtro === 'pendientes' ? 'No hay pendientes — todo al dia' : filtro === 'revisados' ? 'Sin movimientos revisados aun' : 'Sin movimientos en este mes'}
           </p>
         </div>
@@ -145,7 +145,7 @@ export default function RevisionClient({ items, counts, mes, filtro, role }: Pro
         <div className="space-y-4">
           {fechasOrdenadas.map(fecha => (
             <div key={fecha}>
-              <p className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-[#6B7280]">
+              <p className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-tinta-suave">
                 {formatFechaCorta(fecha)}
               </p>
               <div className="space-y-1.5">
@@ -180,7 +180,7 @@ function DescargarMenu({ mes }: { mes: string }) {
     <div className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-medium text-[#1A1A1A] hover:bg-[#F5F4F2]"
+        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] bg-white px-3 py-2 text-xs font-medium text-tinta hover:bg-papel"
       >
         <Download className="h-3.5 w-3.5" />
         Descargar
@@ -191,13 +191,13 @@ function DescargarMenu({ mes }: { mes: string }) {
           <div className="absolute right-0 z-20 mt-1 min-w-[140px] rounded-md border border-[#E5E7EB] bg-white shadow-lg">
             <button
               onClick={() => handleDownload('xlsx')}
-              className="block w-full px-3 py-2 text-left text-xs hover:bg-[#F5F4F2]"
+              className="block w-full px-3 py-2 text-left text-xs hover:bg-papel"
             >
               Excel (3 hojas)
             </button>
             <button
               onClick={() => handleDownload('csv')}
-              className="block w-full px-3 py-2 text-left text-xs hover:bg-[#F5F4F2]"
+              className="block w-full px-3 py-2 text-left text-xs hover:bg-papel"
             >
               CSV (combinado)
             </button>
@@ -219,14 +219,14 @@ function FilterPill({ active, onClick, label, dot }: {
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
         active
-          ? 'bg-[#1A1A1A] text-white'
-          : 'border border-[#E5E7EB] bg-white text-[#6B7280] hover:bg-[#F5F4F2]'
+          ? 'bg-tinta text-white'
+          : 'border border-[#E5E7EB] bg-white text-tinta-suave hover:bg-papel'
       }`}
     >
       {dot && (
         <span
           className={`h-1.5 w-1.5 rounded-full ${
-            dot === 'orange' ? 'bg-[#F59E0B]' : 'bg-[#10B981]'
+            dot === 'orange' ? 'bg-advertencia' : 'bg-acento'
           }`}
           aria-hidden="true"
         />
@@ -257,29 +257,29 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
         {/* Tipo icon */}
         <div className="mt-0.5 shrink-0">
           {isEgreso ? (
-            <ArrowDownCircle className="h-5 w-5 text-[#EF4444]" />
+            <ArrowDownCircle className="h-5 w-5 text-alerta" />
           ) : (
-            <ArrowUpCircle className="h-5 w-5 text-[#10B981]" />
+            <ArrowUpCircle className="h-5 w-5 text-acento" />
           )}
         </div>
 
         {/* Body */}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <p className="truncate text-sm font-medium text-[#1A1A1A]">
+            <p className="truncate text-sm font-medium text-tinta">
               {item.descripcion}
             </p>
             <span className={`shrink-0 text-sm font-semibold tabular-nums ${
-              isEgreso ? 'text-[#EF4444]' : 'text-[#10B981]'
+              isEgreso ? 'text-alerta' : 'text-acento'
             }`}>
               {isEgreso ? '−' : '+'}{formatCOP(item.monto)}
             </span>
           </div>
 
           {/* Metadata row */}
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[#6B7280]">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-tinta-suave">
             {item.categoria && (
-              <span className="rounded bg-[#F5F4F2] px-1.5 py-0.5">
+              <span className="rounded bg-papel px-1.5 py-0.5">
                 {item.categoria.replace('_', ' ')}
               </span>
             )}
@@ -297,12 +297,12 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
           {/* Badges row */}
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {item.deducible && (
-              <span className="rounded bg-[#10B981]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#059669]">
+              <span className="rounded bg-acento/10 px-1.5 py-0.5 text-[10px] font-medium text-acento">
                 Deducible
               </span>
             )}
             {item.retencion !== null && item.retencion > 0 && (
-              <span className="rounded bg-[#F5F4F2] px-1.5 py-0.5 text-[10px] font-medium text-[#1A1A1A]">
+              <span className="rounded bg-papel px-1.5 py-0.5 text-[10px] font-medium text-tinta">
                 Ret. {formatCOP(item.retencion)}
               </span>
             )}
@@ -311,14 +311,14 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
                 href={item.soporte_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-0.5 rounded bg-[#F5F4F2] px-1.5 py-0.5 text-[10px] font-medium text-[#6B7280] hover:bg-[#E5E7EB]"
+                className="inline-flex items-center gap-0.5 rounded bg-papel px-1.5 py-0.5 text-[10px] font-medium text-tinta-suave hover:bg-[#E5E7EB]"
               >
                 <FileText className="h-2.5 w-2.5" />
                 Soporte
               </a>
             )}
             {item.created_by_name && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] text-[#6B7280]">
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-tinta-suave">
                 <UserIcon className="h-2.5 w-2.5" />
                 {item.created_by_name}
               </span>
@@ -326,7 +326,7 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
             {item.tabla === 'gastos' && (
               <Link
                 href={detailHref}
-                className="ml-auto inline-flex items-center gap-0.5 rounded bg-[#F5F4F2] px-1.5 py-0.5 text-[10px] font-medium text-[#6B7280] hover:bg-[#E5E7EB]"
+                className="ml-auto inline-flex items-center gap-0.5 rounded bg-papel px-1.5 py-0.5 text-[10px] font-medium text-tinta-suave hover:bg-[#E5E7EB]"
               >
                 Ver
               </Link>
@@ -341,8 +341,8 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
                 disabled={isPending}
                 className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${
                   item.revisado
-                    ? 'border border-[#E5E7EB] bg-white text-[#6B7280] hover:bg-[#F5F4F2]'
-                    : 'bg-[#10B981] text-white hover:bg-[#059669]'
+                    ? 'border border-[#E5E7EB] bg-white text-tinta-suave hover:bg-papel'
+                    : 'bg-acento text-white hover:bg-acento-hover'
                 }`}
               >
                 {item.revisado ? (
@@ -358,7 +358,7 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
                 )}
               </button>
               {item.revisado && item.revisado_at && (
-                <span className="ml-2 text-[10px] text-[#6B7280]">
+                <span className="ml-2 text-[10px] text-tinta-suave">
                   · Revisado {formatFechaCorta(item.revisado_at.slice(0, 10))}
                 </span>
               )}

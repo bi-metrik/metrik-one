@@ -6,6 +6,7 @@ import { getEquipoConAreas, getWorkspaceDefaultResponsables } from '@/lib/action
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYear } from '@/lib/dates/bogota'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { esBrandingPorDefecto } from '@/lib/marca/paleta'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
@@ -153,7 +154,11 @@ export default async function MiNegocioPage() {
   // §3 Perfil fiscal: 3 pts
   const fiscalScore = fiscalProfile?.is_complete ? 3 : fiscalProfile?.is_estimated ? 1.5 : 0
   // §4 Mi marca: 1 pt
-  const marcaScore = (workspace?.logo_url || (workspace?.color_primario && workspace.color_primario !== '#10B981')) ? 1 : 0
+  // "Eligio su marca" = tiene logo, o un color que NO es ninguno de los que el
+  // producto ha puesto por defecto. Ver BRANDING_SIN_PERSONALIZAR: comparar solo
+  // contra el default de hoy daria por personalizados a todos los workspaces que
+  // guardaron su marca antes del rediseno.
+  const marcaScore = (workspace?.logo_url || !esBrandingPorDefecto(workspace?.color_primario)) ? 1 : 0
   // §5 Servicios: 2 pts
   const activeServicios = servicios.filter(s => s.activo !== false)
   const serviciosScore = activeServicios.length >= 1 ? 2 : 0

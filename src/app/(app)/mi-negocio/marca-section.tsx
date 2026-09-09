@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { updateBranding, uploadLogo } from './actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import type { Workspace } from '@/types/database'
+import { BRANDING_POR_DEFECTO } from '@/lib/marca/paleta'
 
 interface Props {
   workspace: Workspace | null
@@ -19,8 +20,8 @@ export default function MarcaSection({ workspace }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [logoUrl, setLogoUrl] = useState(workspace?.logo_url || '')
-  const [colorPrimario, setColorPrimario] = useState(workspace?.color_primario || '#10B981')
-  const [colorSecundario, setColorSecundario] = useState(workspace?.color_secundario || '#1A1A1A')
+  const [colorPrimario, setColorPrimario] = useState(workspace?.color_primario || BRANDING_POR_DEFECTO.primario)
+  const [colorSecundario, setColorSecundario] = useState(workspace?.color_secundario || BRANDING_POR_DEFECTO.secundario)
 
   const processLogoFile = async (file: File) => {
     setUploading(true)

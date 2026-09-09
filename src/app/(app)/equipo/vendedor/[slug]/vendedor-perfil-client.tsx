@@ -6,10 +6,11 @@ import {
 } from 'recharts'
 import { ArrowLeft, Zap } from 'lucide-react'
 import type { VendedorPerfil } from '../../vendedores-types'
+import { PALETA, rampaAcento } from '@/lib/marca/paleta'
 
-const GREEN = '#10B981'
-const CARBON = '#1A1A1A'
-const RAMP = ['#065F46', '#047857', '#059669', '#10B981', '#34D399', '#6EE7B7']
+const GREEN = PALETA.acento
+const CARBON = PALETA.tinta
+const RAMP = rampaAcento(6)
 const SMALL_N = 15
 
 function fmtCOP(n: number): string { return `$${Math.round(n).toLocaleString('es-CO')}` }
@@ -37,17 +38,17 @@ function KpiMini({ label, value, sub }: { label: string; value: string; sub?: st
 export default function VendedorPerfilClient({ perfil }: { perfil: VendedorPerfil }) {
   const { kpis, equipo, cumplimiento, porMes, porLinea, topProductos } = perfil
   const cumpl = cumplimiento.cumplimientoPct
-  const cumplColor = cumpl === null ? '#6B7280' : cumpl >= 100 ? GREEN : cumpl >= 85 ? '#F59E0B' : '#EF4444'
+  const cumplColor = cumpl === null ? PALETA.tintaSuave : cumpl >= 100 ? GREEN : cumpl >= 85 ? PALETA.advertencia : PALETA.alerta
   const lineasTop = porLinea.map(l => ({ ...l, nombre: limpiarLinea(l.linea) }))
 
   return (
     <div className="space-y-5 pb-10">
-      <Link href="/equipo" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#1A1A1A]">
+      <Link href="/equipo" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-tinta">
         <ArrowLeft className="h-4 w-4" /> Equipo comercial
       </Link>
 
       {/* Header hero */}
-      <div className="rounded-2xl bg-[#1A1A1A] text-white p-6 relative overflow-hidden" style={{ borderTop: `3px solid ${GREEN}` }}>
+      <div className="rounded-2xl bg-tinta text-white p-6 relative overflow-hidden" style={{ borderTop: `3px solid ${GREEN}` }}>
         <div className="flex flex-col sm:flex-row sm:items-center gap-5">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 text-xl font-extrabold shrink-0">
             {iniciales(perfil.vendedor)}
@@ -64,7 +65,7 @@ export default function VendedorPerfilClient({ perfil }: { perfil: VendedorPerfi
           </div>
         </div>
         <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/70">
-          <Zap className="h-3 w-3 text-[#34D399]" /> En la operación conectada, cada vendedor vería este perfil en tiempo real.
+          <Zap className="h-3 w-3 text-acento-claro" /> En la operación conectada, cada vendedor vería este perfil en tiempo real.
         </div>
       </div>
 
@@ -97,9 +98,9 @@ export default function VendedorPerfilClient({ perfil }: { perfil: VendedorPerfi
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={porMes} margin={{ left: 0, right: 8, top: 8 }}>
               <CartesianGrid vertical={false} stroke="#F3F4F6" />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6B7280' }} tickLine={false} axisLine={false} interval={0} angle={-35} textAnchor="end" height={44} />
-              <YAxis yAxisId="l" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtAxis} />
-              <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}%`} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} interval={0} angle={-35} textAnchor="end" height={44} />
+              <YAxis yAxisId="l" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={fmtAxis} />
+              <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}%`} />
               <Tooltip contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E5E7EB' }} formatter={(val, name) => name === 'Margen %' ? [`${val === null ? '—' : val + '%'}`, name] : [fmtCOP(Number(val)), name]} />
               <Bar yAxisId="l" dataKey="ventaNeta" name="Venta neta" fill={GREEN} radius={[4, 4, 0, 0]} maxBarSize={30} />
               <Line yAxisId="r" dataKey="margenPct" name="Margen %" stroke={CARBON} strokeWidth={2} dot={{ r: 2 }} connectNulls />
@@ -147,15 +148,15 @@ function PosBar({ label, pct }: { label: string; pct: number | null }) {
     <div>
       <div className="flex justify-between text-xs mb-1">
         <span className="text-gray-600">{label}</span>
-        <span className="font-semibold text-[#1A1A1A]">{pct === null ? 'muestra insuficiente' : `percentil ${pct}`}</span>
+        <span className="font-semibold text-tinta">{pct === null ? 'muestra insuficiente' : `percentil ${pct}`}</span>
       </div>
       <div className="relative h-2.5 rounded-full bg-gray-100">
         {pct !== null && (
-          <div className="absolute top-0 h-full w-1 rounded-full bg-[#1A1A1A]" style={{ left: `${Math.min(Math.max(pct, 0), 100)}%`, transform: 'translateX(-50%)' }} />
+          <div className="absolute top-0 h-full w-1 rounded-full bg-tinta" style={{ left: `${Math.min(Math.max(pct, 0), 100)}%`, transform: 'translateX(-50%)' }} />
         )}
-        <div className="absolute inset-0 rounded-full" style={{ background: 'linear-gradient(90deg,#D1FAE5,#10B981)' }} />
+        <div className="absolute inset-0 rounded-full" style={{ background: `linear-gradient(90deg,${PALETA.acentoTinte},${PALETA.acento})` }} />
         {pct !== null && (
-          <div className="absolute top-0 h-full w-1 rounded-full bg-[#1A1A1A] z-10" style={{ left: `${Math.min(Math.max(pct, 0), 100)}%`, transform: 'translateX(-50%)' }} />
+          <div className="absolute top-0 h-full w-1 rounded-full bg-tinta z-10" style={{ left: `${Math.min(Math.max(pct, 0), 100)}%`, transform: 'translateX(-50%)' }} />
         )}
       </div>
     </div>
@@ -167,7 +168,7 @@ function BarChartLineas({ data }: { data: { nombre: string; ventaNeta: number; m
   return (
     <BarChart data={data} layout="vertical" margin={{ left: 0, right: 16 }}>
       <CartesianGrid horizontal={false} stroke="#F3F4F6" />
-      <XAxis type="number" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} tickFormatter={fmtAxis} />
+      <XAxis type="number" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={fmtAxis} />
       <YAxis dataKey="nombre" type="category" width={100} tick={{ fontSize: 11, fill: '#374151' }} tickLine={false} axisLine={false} />
       <Tooltip contentStyle={{ fontSize: 12, borderRadius: 12, border: '1px solid #E5E7EB' }} formatter={(v, _n, p) => [`${fmtCOP(Number(v))} · margen ${p.payload?.margenPct === null ? '—' : p.payload?.margenPct + '%'}`, 'Venta']} />
       <Bar dataKey="ventaNeta" radius={[0, 4, 4, 0]}>

@@ -11,10 +11,11 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
+import { PALETA } from '@/lib/marca/paleta'
 
-const GREEN = '#10B981'
-const GREEN_LIGHT = '#D1FAE5'
-const GRAY = '#6B7280'
+const GREEN = PALETA.acento
+const GREEN_LIGHT = PALETA.acentoTinte
+const GRAY = PALETA.tintaSuave
 
 interface TrendChartProps {
   data: { date: string; count: number }[]
@@ -44,7 +45,7 @@ export function TrendChart({ data, color = GREEN, label }: TrendChartProps) {
           <YAxis tick={{ fontSize: 10, fill: GRAY }} tickLine={false} axisLine={false} allowDecimals={false} />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E5E7EB' }}
-            labelStyle={{ color: '#1A1A1A', fontWeight: 600 }}
+            labelStyle={{ color: PALETA.tinta, fontWeight: 600 }}
           />
           <Area type="monotone" dataKey="count" stroke={color} fill={`url(#grad-${label})`} strokeWidth={2} />
         </AreaChart>
@@ -85,7 +86,7 @@ export function FunnelChart({ data }: FunnelChartProps) {
         <BarChart data={formatted} layout="vertical">
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" horizontal={false} />
           <XAxis type="number" tick={{ fontSize: 10, fill: GRAY }} tickLine={false} axisLine={false} />
-          <YAxis dataKey="label" type="category" tick={{ fontSize: 11, fill: '#1A1A1A' }} tickLine={false} axisLine={false} width={80} />
+          <YAxis dataKey="label" type="category" tick={{ fontSize: 11, fill: PALETA.tinta }} tickLine={false} axisLine={false} width={80} />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #E5E7EB' }}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

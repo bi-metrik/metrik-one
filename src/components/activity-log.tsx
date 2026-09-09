@@ -279,10 +279,10 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
                 {areasSel.map(a => (
                   <span
                     key={a}
-                    className="flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+                    className="flex items-center gap-1 rounded-md bg-acento-tinte px-2 py-1 text-xs font-medium text-acento dark:bg-acento/20 dark:text-acento-claro"
                   >
                     <Users className="h-3 w-3" />@{a}
-                    <button onClick={() => toggleArea(a)} className="text-emerald-500 hover:text-emerald-700">
+                    <button onClick={() => toggleArea(a)} className="text-acento hover:text-acento">
                       <X className="h-3 w-3" />
                     </button>
                   </span>
@@ -313,7 +313,7 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
                     onClick={() => toggleArea(a)}
                     className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
                       areasSel.includes(a)
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                        ? 'bg-acento/15 text-acento dark:bg-acento/30 dark:text-acento-claro'
                         : 'hover:bg-accent'
                     }`}
                   >
@@ -617,12 +617,12 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
   if (campo === 'cobro_confirmado') {
     return (
       <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
-        <Banknote className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+        <Banknote className="h-3.5 w-3.5 text-acento shrink-0" />
         <div className="flex items-center gap-1 flex-wrap min-w-0">
           <Autor nombre={autorName} />
           <span>confirmo pago</span>
           {entry.valor_nuevo && (
-            <span className="font-medium text-emerald-600">{formatCOP(entry.valor_nuevo)}</span>
+            <span className="font-medium text-acento">{formatCOP(entry.valor_nuevo)}</span>
           )}
           {entry.contenido && <span className="text-muted-foreground/70">({entry.contenido})</span>}
           <span className="text-[10px]">{timestamp}</span>

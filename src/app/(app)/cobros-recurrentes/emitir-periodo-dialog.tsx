@@ -148,7 +148,7 @@ export default function EmitirPeriodoDialog() {
       <button
         type="button"
         onClick={() => setAbierto(true)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:border-[#10B981] hover:text-[#10B981] transition-colors"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-tinta hover:border-acento hover:text-acento transition-colors"
       >
         <CalendarPlus className="h-3.5 w-3.5" /> Emitir período
       </button>
@@ -214,7 +214,7 @@ export default function EmitirPeriodoDialog() {
                   type="button"
                   onClick={verPreview}
                   disabled={!!cargando}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-tinta hover:border-acento hover:text-acento disabled:opacity-60 transition-colors"
                 >
                   {cargando === 'preview'
                     ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Calculando…</>
@@ -327,7 +327,7 @@ export default function EmitirPeriodoDialog() {
                 type="button"
                 onClick={emitir}
                 disabled={!!cargando || totalACrear === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#10B981] text-white hover:bg-[#059669] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-acento text-white hover:bg-acento-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {cargando === 'emitir'
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Emitiendo…</>

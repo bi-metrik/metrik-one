@@ -16,18 +16,18 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic'
 
 const C = {
-  black: '#1A1A1A',
-  gray: '#6B7280',
+  black: 'var(--tinta)',
+  gray: 'var(--tinta-suave)',
   grayLt: '#9CA3AF',
-  green: '#10B981',
-  greenDark: '#059669',
-  red: '#EF4444',
+  green: 'var(--acento)',
+  greenDark: 'var(--acento)',
+  red: 'var(--alerta)',
   redDark: '#B91C1C',
   amber: '#B45309',
   white: '#FFFFFF',
   line: '#E5E7EB',
   hair: '#F0EFEC',
-  bg: '#F5F4F2',
+  bg: 'var(--papel)',
 }
 
 function fmtFecha(iso: string | null): string {
@@ -121,7 +121,7 @@ export default async function CertPage({ params }: { params: Promise<{ loteId: s
               : <ShieldAlert size={34} color={C.red} strokeWidth={1.6} />}
           </div>
 
-          <h1 style={{ fontSize: 26, fontWeight: 300, letterSpacing: '-0.02em', color: C.black, lineHeight: 1.18, margin: 0 }}>
+          <h1 style={{ fontSize: 26, fontWeight: 400, letterSpacing: '-0.02em', color: C.black, lineHeight: 1.18, margin: 0 }}>
             {titulo}
           </h1>
           {subtitulo ? (

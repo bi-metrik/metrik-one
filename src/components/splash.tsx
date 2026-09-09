@@ -125,11 +125,11 @@ export default function Splash() {
         }
 
         .sp-ch {
-          font-family: var(--font-montserrat), 'Montserrat', sans-serif;
+          font-family: var(--font-schibsted), sans-serif;
           font-weight: 800;
           font-size: clamp(2.2rem, 5vw, 3.2rem);
           line-height: 1;
-          color: #1A1A1A;
+          color: var(--tinta);
           letter-spacing: -0.02em;
           display: inline-block;
           will-change: opacity, text-shadow;
@@ -148,8 +148,8 @@ export default function Splash() {
         }
 
         .sp-one {
-          font-family: var(--font-montserrat), 'Montserrat', sans-serif;
-          font-weight: 300;
+          font-family: var(--font-schibsted), sans-serif;
+          font-weight: 400;
           font-size: clamp(2.2rem, 5vw, 3.2rem);
           line-height: 1;
           letter-spacing: -0.01em;
@@ -207,7 +207,7 @@ export default function Splash() {
           position: absolute;
           left: 0; top: 0;
           height: 100%;
-          background: #10B981;
+          background: var(--acento);
           border-radius: 1px;
           will-change: width;
         }
@@ -246,7 +246,7 @@ export default function Splash() {
         .sp-ln-glow {
           position: absolute;
           inset: -3px 0;
-          background: #10B981;
+          background: var(--acento);
           border-radius: 4px;
           filter: blur(6px);
           opacity: 0;
@@ -282,7 +282,7 @@ export default function Splash() {
                 className="sp-one"
                 style={{
                   opacity: oneGreen ? 1 : 0.04,
-                  color: oneCooling ? '#1A1A1A' : (oneGreen ? '#10B981' : '#1A1A1A'),
+                  color: oneCooling ? 'var(--tinta)' : (oneGreen ? 'var(--acento)' : 'var(--tinta)'),
                   textShadow: oneGreen && !oneCooling
                     ? '0 0 16px rgba(16,185,129,0.4), 0 0 32px rgba(16,185,129,0.15)'
                     : '0 0 0 transparent',

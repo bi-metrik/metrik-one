@@ -55,9 +55,9 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
   if (!hayDatos) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center">
-        <History className="h-8 w-8 text-[#6B7280]/20" />
-        <p className="text-xs text-[#6B7280]">Sin registros financieros aún</p>
-        <p className="text-[11px] text-[#6B7280]/60">
+        <History className="h-8 w-8 text-tinta-suave/20" />
+        <p className="text-xs text-tinta-suave">Sin registros financieros aún</p>
+        <p className="text-[11px] text-tinta-suave/60">
           Gastos, horas y cobros aparecerán aquí conforme se registren
         </p>
       </div>
@@ -85,13 +85,13 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
             }`}
           >
             <div className="flex items-center justify-center gap-1">
-              <tab.icon className={`h-3 w-3 ${activeTab === tab.key ? tab.color : 'text-[#6B7280]'}`} />
-              <span className={`text-[11px] font-medium ${activeTab === tab.key ? 'text-[#1A1A1A]' : 'text-[#6B7280]'}`}>
+              <tab.icon className={`h-3 w-3 ${activeTab === tab.key ? tab.color : 'text-tinta-suave'}`} />
+              <span className={`text-[11px] font-medium ${activeTab === tab.key ? 'text-tinta' : 'text-tinta-suave'}`}>
                 {tab.label}
               </span>
-              <span className="text-[10px] text-[#6B7280]/60">({tab.count})</span>
+              <span className="text-[10px] text-tinta-suave/60">({tab.count})</span>
             </div>
-            <p className={`text-[10px] tabular-nums mt-0.5 ${activeTab === tab.key ? tab.color : 'text-[#6B7280]/60'}`}>
+            <p className={`text-[10px] tabular-nums mt-0.5 ${activeTab === tab.key ? tab.color : 'text-tinta-suave/60'}`}>
               {tab.total}
             </p>
           </button>
@@ -102,15 +102,15 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
       {activeTab === 'gastos' && (
         <div className="space-y-0.5 max-h-72 overflow-y-auto">
           {data.gastos.length === 0 ? (
-            <p className="text-[11px] text-[#6B7280] text-center py-4">Sin gastos registrados</p>
+            <p className="text-[11px] text-tinta-suave text-center py-4">Sin gastos registrados</p>
           ) : data.gastos.map(g => (
             <div key={g.id} className="flex items-center justify-between text-[11px] py-1.5 border-b border-[#E5E7EB]/50 last:border-0">
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="text-[#6B7280]/60 tabular-nums shrink-0 w-[70px]">{g.fecha}</span>
-                <span className="text-[10px] text-[#6B7280] bg-[#F3F4F6] rounded px-1.5 py-0.5 shrink-0">
+                <span className="text-tinta-suave/60 tabular-nums shrink-0 w-[70px]">{g.fecha}</span>
+                <span className="text-[10px] text-tinta-suave bg-[#F3F4F6] rounded px-1.5 py-0.5 shrink-0">
                   {CATEGORIA_LABELS[g.categoria] ?? g.categoria}
                 </span>
-                {g.descripcion && <span className="text-[#1A1A1A] truncate">{g.descripcion}</span>}
+                {g.descripcion && <span className="text-tinta truncate">{g.descripcion}</span>}
               </div>
               <span className="text-red-600 font-medium tabular-nums ml-2 shrink-0">{fmt(g.monto)}</span>
             </div>
@@ -122,13 +122,13 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
       {activeTab === 'horas' && (
         <div className="space-y-0.5 max-h-72 overflow-y-auto">
           {data.horas.length === 0 ? (
-            <p className="text-[11px] text-[#6B7280] text-center py-4">Sin horas registradas</p>
+            <p className="text-[11px] text-tinta-suave text-center py-4">Sin horas registradas</p>
           ) : data.horas.map(h => (
             <div key={h.id} className="flex items-center justify-between text-[11px] py-1.5 border-b border-[#E5E7EB]/50 last:border-0">
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="text-[#6B7280]/60 tabular-nums shrink-0 w-[70px]">{h.fecha}</span>
-                {h.staff_nombre && <span className="font-medium text-[#1A1A1A] shrink-0">{h.staff_nombre}</span>}
-                {h.descripcion && <span className="text-[#6B7280] truncate">{h.descripcion}</span>}
+                <span className="text-tinta-suave/60 tabular-nums shrink-0 w-[70px]">{h.fecha}</span>
+                {h.staff_nombre && <span className="font-medium text-tinta shrink-0">{h.staff_nombre}</span>}
+                {h.descripcion && <span className="text-tinta-suave truncate">{h.descripcion}</span>}
               </div>
               <span className="text-blue-600 font-medium tabular-nums ml-2 shrink-0">{h.horas}h</span>
             </div>
@@ -140,17 +140,17 @@ export default function BloqueHistorial({ data }: { data: HistorialData }) {
       {activeTab === 'cobros' && (
         <div className="space-y-0.5 max-h-72 overflow-y-auto">
           {data.cobros.length === 0 ? (
-            <p className="text-[11px] text-[#6B7280] text-center py-4">Sin cobros registrados</p>
+            <p className="text-[11px] text-tinta-suave text-center py-4">Sin cobros registrados</p>
           ) : data.cobros.map(c => (
             <div key={c.id} className="flex items-center justify-between text-[11px] py-1.5 border-b border-[#E5E7EB]/50 last:border-0">
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="text-[#6B7280]/60 tabular-nums shrink-0 w-[70px]">{c.fecha ?? '—'}</span>
+                <span className="text-tinta-suave/60 tabular-nums shrink-0 w-[70px]">{c.fecha ?? '—'}</span>
                 {c.tipo_cobro && c.tipo_cobro !== 'regular' && (
                   <span className="text-[10px] bg-[#F3F4F6] rounded px-1.5 py-0.5 shrink-0 capitalize">{c.tipo_cobro}</span>
                 )}
-                {c.notas && <span className="text-[#1A1A1A] truncate">{c.notas}</span>}
+                {c.notas && <span className="text-tinta truncate">{c.notas}</span>}
               </div>
-              <span className="text-[#059669] font-medium tabular-nums ml-2 shrink-0">{fmt(c.monto)}</span>
+              <span className="text-acento font-medium tabular-nums ml-2 shrink-0">{fmt(c.monto)}</span>
             </div>
           ))}
         </div>

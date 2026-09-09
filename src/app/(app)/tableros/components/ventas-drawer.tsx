@@ -22,10 +22,10 @@ import { getComercialVentasMes } from '../../equipo/comercial-actions'
 import { planPagoLabel, type ComercialVentaCaso } from '../../equipo/comercial-types'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
 
-const CARBON = '#1A1A1A'
-const GRIS = '#6B7280'
+const CARBON = 'var(--tinta)'
+const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = '#059669'
+const VERDE = 'var(--acento)'
 const OCRE = '#92400E'
 
 export interface CifraSeleccionada {
@@ -142,7 +142,7 @@ export function VentasDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-1.5 hover:bg-[#F5F4F2]"
+              className="shrink-0 rounded-lg p-1.5 hover:bg-papel"
               aria-label="Cerrar"
             >
               <X className="h-4 w-4" style={{ color: GRIS }} />
@@ -201,7 +201,7 @@ export function VentasDrawer({
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <span
                           className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                          style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                          style={{ backgroundColor: 'var(--papel)', color: GRIS }}
                           title="Valor del honorario sin IVA"
                         >
                           {fmtCOP(c.valor_sin_iva)}
@@ -209,14 +209,14 @@ export function VentasDrawer({
                         {c.caso_completo ? (
                           <span
                             className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                            style={{ backgroundColor: '#ECFDF5', color: VERDE }}
+                            style={{ backgroundColor: 'var(--acento-tinte)', color: VERDE }}
                           >
                             <CheckCircle2 className="h-2.5 w-2.5" /> Honorario cubierto
                           </span>
                         ) : (
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            style={{ backgroundColor: 'var(--papel)', color: GRIS }}
                             title="Recaudado del honorario, sin IVA"
                           >
                             {fmtCOP(c.recaudado)} recaudado
@@ -236,7 +236,7 @@ export function VentasDrawer({
                         ) : c.bonificable === false ? (
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            style={{ backgroundColor: 'var(--papel)', color: GRIS }}
                             title="Todavía no pasó el umbral que declara la línea"
                           >
                             No bonifica aún
@@ -244,7 +244,7 @@ export function VentasDrawer({
                         ) : (
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                            style={{ backgroundColor: '#F5F4F2', color: '#9CA3AF' }}
+                            style={{ backgroundColor: 'var(--papel)', color: '#9CA3AF' }}
                             title="La línea de este negocio no declaró desde qué etapa una venta bonifica, así que no se pudo medir. No significa que no bonifique."
                           >
                             Bonificable —
@@ -257,7 +257,7 @@ export function VentasDrawer({
                         {c.plan_pago === null ? (
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                            style={{ backgroundColor: '#F5F4F2', color: '#9CA3AF' }}
+                            style={{ backgroundColor: 'var(--papel)', color: '#9CA3AF' }}
                             title="Nadie declaró el plan de pago al aprobar la propuesta. No significa que sea 100% anticipado: significa que no se sabe si falta un segundo pago."
                           >
                             Plan —
@@ -265,7 +265,7 @@ export function VentasDrawer({
                         ) : (
                           <span
                             className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            style={{ backgroundColor: 'var(--papel)', color: GRIS }}
                             title={
                               c.plan_pago === 1
                                 ? 'Plan 1: mitad por adelantado y mitad al éxito. Este caso SÍ tiene un segundo pago.'
@@ -287,7 +287,7 @@ export function VentasDrawer({
                         {c.n_conversiones > 1 && (
                           <span
                             className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium"
-                            style={{ backgroundColor: '#F5F4F2', color: GRIS }}
+                            style={{ backgroundColor: 'var(--papel)', color: GRIS }}
                             title="El contacto volvió a dejar sus datos después de la primera vez"
                           >
                             <RotateCcw className="h-2.5 w-2.5" /> Reconvertido

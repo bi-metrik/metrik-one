@@ -52,7 +52,7 @@ export default function MiBolsilloClient({ initialData }: Props) {
       <Section title="Usuarios">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <MetricCard label="Total usuarios" value={data.totalUsers} />
-          <MetricCard label="Nuevos hoy" value={data.newUsersToday} color="#10B981" />
+          <MetricCard label="Nuevos hoy" value={data.newUsersToday} color="var(--acento)" />
           <MetricCard label="Nuevos esta semana" value={data.newUsersWeek} />
           <MetricCard label="Onboarding completado" value={pct(data.onboardingRate)} />
         </div>
@@ -74,7 +74,7 @@ export default function MiBolsilloClient({ initialData }: Props) {
       {/* ── Revenue ── */}
       <Section title="Revenue">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <MetricCard label="MRR total" value={formatCOP(data.mrrTotal)} color="#10B981" />
+          <MetricCard label="MRR total" value={formatCOP(data.mrrTotal)} color="var(--acento)" />
           <MetricCard label="Suscripciones activas" value={data.activeSubscriptions} />
           <MetricCard label="ARPU" value={formatCOP(data.arpu)} />
           <MetricCard label="MRR Personal" value={formatCOP(data.mrrByPlan['personal'] ?? 0)} />
@@ -95,7 +95,7 @@ export default function MiBolsilloClient({ initialData }: Props) {
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <TrendChart data={data.dailyMessages} label="Mensajes diarios (14d)" color="#60A5FA" />
-          <TrendChart data={data.dailyTransactions} label="Transacciones diarias (14d)" color="#F59E0B" />
+          <TrendChart data={data.dailyTransactions} label="Transacciones diarias (14d)" color="var(--advertencia)" />
         </div>
         <div className="mt-3">
           <TopFeaturesChart data={data.topFeatures} />
@@ -111,12 +111,12 @@ export default function MiBolsilloClient({ initialData }: Props) {
           <MetricCard
             label="Inactivos >7d"
             value={data.inactiveOver7d}
-            color={data.inactiveOver7d > data.totalUsers * 0.3 ? '#EF4444' : undefined}
+            color={data.inactiveOver7d > data.totalUsers * 0.3 ? 'var(--alerta)' : undefined}
           />
           <MetricCard
             label="Churn >30d"
             value={data.churnOver30d}
-            color={data.churnOver30d > 0 ? '#EF4444' : '#10B981'}
+            color={data.churnOver30d > 0 ? 'var(--alerta)' : 'var(--acento)'}
           />
         </div>
         {data.totalUsers > 0 && (

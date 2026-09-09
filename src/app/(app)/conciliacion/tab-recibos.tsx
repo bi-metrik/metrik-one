@@ -27,7 +27,7 @@ const fmtCOP = (n: number) =>
 const fmtFecha = (f: string | null) =>
   f ? new Date(`${f}T12:00:00`).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
-const VERDE = '#10B981'
+const VERDE = 'var(--acento)'
 
 export default function TabRecibos(
   { control, onCambio }: { control: ControlRecibos; onCambio: () => void },
@@ -58,9 +58,9 @@ export default function TabRecibos(
           { label: 'Valor sin acusar', value: fmtCOP(t.valor_pendiente) },
         ].map(x => (
           <div key={x.label} className="rounded-lg border px-3 py-2" style={{ borderColor: '#E5E7EB' }}>
-            <div className="text-[11px]" style={{ color: '#6B7280' }}>{x.label}</div>
+            <div className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>{x.label}</div>
             <div className="mt-0.5 text-[15px] font-bold tabular-nums"
-                 style={{ color: x.destaque ? '#B45309' : '#1A1A1A' }}>{x.value}</div>
+                 style={{ color: x.destaque ? '#B45309' : 'var(--tinta)' }}>{x.value}</div>
           </div>
         ))}
       </div>
@@ -86,8 +86,8 @@ export default function TabRecibos(
             className="rounded-full border px-3 py-1 text-[12px] font-medium transition"
             style={{
               borderColor: vista === o.k ? VERDE : '#E5E7EB',
-              backgroundColor: vista === o.k ? '#D1FAE5' : 'transparent',
-              color: vista === o.k ? '#047857' : '#6B7280',
+              backgroundColor: vista === o.k ? 'var(--acento-tinte)' : 'transparent',
+              color: vista === o.k ? 'var(--acento)' : 'var(--tinta-suave)',
             }}
           >
             {o.label}
@@ -97,7 +97,7 @@ export default function TabRecibos(
 
       {visibles.length === 0 ? (
         <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
-          <p className="text-[13px]" style={{ color: '#6B7280' }}>
+          <p className="text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
             {term
               ? `Sin resultados para "${q.trim()}" en esta vista.`
               : vista === 'pendiente'
@@ -159,22 +159,22 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
          style={{ borderColor: '#E5E7EB' }}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] font-semibold" style={{ color: '#1A1A1A' }}>
+          <span className="text-[12px] font-semibold" style={{ color: 'var(--tinta)' }}>
             {pago.negocio_codigo ?? '—'}
           </span>
-          <span className="truncate text-[12px]" style={{ color: '#6B7280' }}>{pago.cliente ?? '—'}</span>
+          <span className="truncate text-[12px]" style={{ color: 'var(--tinta-suave)' }}>{pago.cliente ?? '—'}</span>
           {pago.facturado && (
             <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px]"
-                  style={{ backgroundColor: '#F3F4F6', color: '#6B7280' }}>facturado</span>
+                  style={{ backgroundColor: '#F3F4F6', color: 'var(--tinta-suave)' }}>facturado</span>
           )}
         </div>
-        <div className="text-[11px]" style={{ color: '#6B7280' }}>
+        <div className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
           {fmtFecha(pago.fecha)}
           {pago.concepto && ` · ${pago.concepto}`}
         </div>
       </div>
 
-      <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: '#1A1A1A' }}>
+      <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
         {fmtCOP(pago.monto)}
       </span>
 
@@ -186,7 +186,7 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline"
-              style={{ color: '#047857' }}
+              style={{ color: 'var(--acento)' }}
             >
               <Check className="h-3.5 w-3.5" />
               {pago.recibo_numero}
@@ -195,7 +195,7 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
           ) : (
             // Emitido pero sin PDF archivado: el recibo existe en Siigo igual, y decirlo
             // es más útil que mostrar un enlace roto.
-            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#047857' }}>
+            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--acento)' }}>
               <Check className="h-3.5 w-3.5" />
               {pago.recibo_numero} · sin PDF
             </span>
@@ -203,7 +203,7 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
         )}
 
         {pago.estado === 'no_aplica' && (
-          <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#6B7280' }}>
+          <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             <Ban className="h-3.5 w-3.5" />
             {pago.no_aplica_motivo ?? 'No lleva recibo'}
           </span>
@@ -219,8 +219,8 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setAbierto(true)}
-                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[#F5F4F2]"
-                style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-papel"
+                style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
               >
                 <Receipt className="h-3.5 w-3.5" /> Emitir recibo
               </button>
@@ -238,13 +238,13 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
 
       {abierto && (
         <div className="mt-2 w-full rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
-          <p className="text-[11px]" style={{ color: '#6B7280' }}>
+          <p className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             No es una factura: acusa la plata que entregó el cliente. La factura va aparte,
             por el honorario pactado.
           </p>
 
           <label className="mt-2 block">
-            <span className="text-[10px] uppercase tracking-wide" style={{ color: '#6B7280' }}>
+            <span className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
               Valor recibido (opcional)
             </span>
             <input
@@ -254,9 +254,9 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
               inputMode="numeric"
               placeholder={String(Math.round(pago.monto))}
               className="mt-1 w-full rounded-md border px-2.5 py-1.5 text-[13px] tabular-nums disabled:opacity-50"
-              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+              style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
             />
-            <span className="text-[10px]" style={{ color: '#6B7280' }}>
+            <span className="text-[10px]" style={{ color: 'var(--tinta-suave)' }}>
               Déjalo vacío para emitir por {fmtCOP(pago.monto)}, el monto del pago registrado.
               Escríbelo solo si el soporte dice otra cosa.
             </span>
@@ -288,7 +288,7 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
               onClick={() => { setAbierto(false); setDuplicados(null) }}
               disabled={pendiente}
               className="rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors hover:bg-white disabled:opacity-50"
-              style={{ borderColor: '#E5E7EB', color: '#1A1A1A' }}
+              style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
             >
               Cancelar
             </button>

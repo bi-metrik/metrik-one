@@ -45,11 +45,11 @@ interface Props {
 
 const ESTADOS_INFO: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   borrador: { label: 'Borrador', color: 'text-muted-foreground', icon: FileCheck2 },
-  emitida_pendiente_aprobacion: { label: 'Pendiente aprobación', color: 'text-[#F59E0B]', icon: Clock },
-  aprobada_lista_envio: { label: 'Lista para envío', color: 'text-[#10B981]', icon: Send },
+  emitida_pendiente_aprobacion: { label: 'Pendiente aprobación', color: 'text-advertencia', icon: Clock },
+  aprobada_lista_envio: { label: 'Lista para envío', color: 'text-acento', icon: Send },
   enviada: { label: 'Enviada', color: 'text-blue-500', icon: Send },
-  pagada: { label: 'Pagada', color: 'text-[#10B981]', icon: CheckCircle2 },
-  conciliada: { label: 'Conciliada', color: 'text-[#059669]', icon: CheckCircle2 },
+  pagada: { label: 'Pagada', color: 'text-acento', icon: CheckCircle2 },
+  conciliada: { label: 'Conciliada', color: 'text-acento', icon: CheckCircle2 },
   anulada: { label: 'Anulada', color: 'text-destructive', icon: AlertCircle },
 }
 
@@ -155,7 +155,7 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="p-3 border border-border rounded-lg bg-card">
           <div className="text-xs text-muted-foreground">Pendientes aprobación</div>
-          <div className="text-2xl font-bold text-[#F59E0B] mt-1">{stats.pendientesAprobacion}</div>
+          <div className="text-2xl font-bold text-advertencia mt-1">{stats.pendientesAprobacion}</div>
         </div>
         <div className="p-3 border border-border rounded-lg bg-card">
           <div className="text-xs text-muted-foreground">Enviadas</div>
@@ -163,7 +163,7 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
         </div>
         <div className="p-3 border border-border rounded-lg bg-card">
           <div className="text-xs text-muted-foreground">Pagadas/Conciliadas</div>
-          <div className="text-2xl font-bold text-[#10B981] mt-1">{stats.pagadas}</div>
+          <div className="text-2xl font-bold text-acento mt-1">{stats.pagadas}</div>
         </div>
         <div className="p-3 border border-border rounded-lg bg-card">
           <div className="text-xs text-muted-foreground">Total cobrado</div>
@@ -264,7 +264,7 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
                             type="button"
                             onClick={() => handleAprobar(c.id, c.numero, c.email_destinatarios)}
                             disabled={aprobandoId === c.id}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-[#10B981] text-white hover:bg-[#059669] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-acento text-white hover:bg-acento-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                           >
                             {aprobandoId === c.id ? (
                               <><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</>
@@ -277,7 +277,7 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
                             type="button"
                             onClick={() => handleReenviar(c.id, c.numero, c.email_destinatarios)}
                             disabled={reenviandoId === c.id}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:border-[#10B981] hover:text-[#10B981] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[#E5E7EB] bg-white text-tinta hover:border-acento hover:text-acento disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                           >
                             {reenviandoId === c.id ? (
                               <><Loader2 className="h-3 w-3 animate-spin" /> Reenviando…</>

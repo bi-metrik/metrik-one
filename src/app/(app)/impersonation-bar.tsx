@@ -77,7 +77,7 @@ export default function ImpersonationBar() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={isPending}
-        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-2.5 py-1 text-xs font-medium text-[#6B7280] hover:bg-[#F9FAFB] disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] px-2.5 py-1 text-xs font-medium text-tinta-suave hover:bg-[#F9FAFB] disabled:opacity-50"
       >
         <Eye className="h-3.5 w-3.5" /> Ver como… <ChevronDown className="h-3 w-3" />
       </button>
@@ -90,8 +90,8 @@ export default function ImpersonationBar() {
               onClick={() => apply(u.id)}
               className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-[#F9FAFB]"
             >
-              <span className="truncate text-[#1A1A1A]">{u.full_name ?? 'Usuario'}</span>
-              <span className="shrink-0 text-[10px] text-[#6B7280]">{ROLE_LABEL[u.role] ?? u.role}</span>
+              <span className="truncate text-tinta">{u.full_name ?? 'Usuario'}</span>
+              <span className="shrink-0 text-[10px] text-tinta-suave">{ROLE_LABEL[u.role] ?? u.role}</span>
             </button>
           ))}
         </div>

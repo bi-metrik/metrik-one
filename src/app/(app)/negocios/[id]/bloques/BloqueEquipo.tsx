@@ -24,7 +24,7 @@ interface BloqueEquipoProps {
 function Avatar({ name }: { name: string | null }) {
   const initial = name ? name.charAt(0).toUpperCase() : '?'
   return (
-    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[#10B981]/15 text-[11px] font-bold text-[#10B981] shrink-0">
+    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-acento/15 text-[11px] font-bold text-acento shrink-0">
       {initial}
     </span>
   )
@@ -88,7 +88,7 @@ export default function BloqueEquipo({
     const assigned = roles.filter(r => values[r.key])
     if (assigned.length === 0) {
       return (
-        <p className="text-xs text-[#6B7280]">Sin responsable asignado</p>
+        <p className="text-xs text-tinta-suave">Sin responsable asignado</p>
       )
     }
     return (
@@ -97,8 +97,8 @@ export default function BloqueEquipo({
           <div key={role.key} className="flex items-center gap-2">
             <Avatar name={getProfileName(values[role.key])} />
             <div>
-              <p className="text-xs font-medium text-[#1A1A1A]">{getProfileName(values[role.key]) ?? '—'}</p>
-              {!singleRol && <p className="text-[10px] text-[#6B7280]">{role.label}</p>}
+              <p className="text-xs font-medium text-tinta">{getProfileName(values[role.key]) ?? '—'}</p>
+              {!singleRol && <p className="text-[10px] text-tinta-suave">{role.label}</p>}
             </div>
           </div>
         ))}
@@ -111,7 +111,7 @@ export default function BloqueEquipo({
       {roles.map(role => (
         <div key={role.key}>
           {!singleRol && (
-            <label className="mb-1 block text-[11px] font-medium text-[#6B7280]">
+            <label className="mb-1 block text-[11px] font-medium text-tinta-suave">
               {role.label}
             </label>
           )}
@@ -121,7 +121,7 @@ export default function BloqueEquipo({
               value={values[role.key]}
               onChange={e => handleChange(role.key, e.target.value)}
               disabled={isPending}
-              className="flex-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/15 disabled:opacity-60"
+              className="flex-1 rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1.5 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
             >
               <option value="">— Sin asignar —</option>
               {profiles.map(p => (
@@ -134,8 +134,8 @@ export default function BloqueEquipo({
         </div>
       ))}
       <div className="flex items-center gap-1.5">
-        <Users className="h-3 w-3 text-[#6B7280]" />
-        <span className="text-[10px] text-[#6B7280]">
+        <Users className="h-3 w-3 text-tinta-suave" />
+        <span className="text-[10px] text-tinta-suave">
           {isPending ? 'Guardando...' : 'Los cambios de responsable quedan en el log de actividad'}
         </span>
       </div>

@@ -128,7 +128,7 @@ export default function RiesgosExcelActions({ canImport, canExport }: Props) {
   }
 
   const btnClass =
-    'inline-flex items-center gap-1.5 rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm font-medium text-[#6B7280] transition-colors hover:bg-gray-50 hover:text-[#1A1A1A] disabled:opacity-50 disabled:cursor-not-allowed'
+    'inline-flex items-center gap-1.5 rounded-lg border border-[#E5E7EB] px-3 py-2 text-sm font-medium text-tinta-suave transition-colors hover:bg-gray-50 hover:text-tinta disabled:opacity-50 disabled:cursor-not-allowed'
 
   return (
     <>

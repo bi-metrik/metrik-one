@@ -58,9 +58,9 @@ export default function EmptyState({
           className="mb-4"
         />
       )}
-      <h3 className="text-base font-semibold text-[#1A1A1A]">{title}</h3>
+      <h3 className="text-base font-semibold text-tinta">{title}</h3>
       {description && (
-        <p className="mt-1 max-w-sm text-sm text-[#6B7280]">{description}</p>
+        <p className="mt-1 max-w-sm text-sm text-tinta-suave">{description}</p>
       )}
       {(primaryCta || secondaryCta) && (
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -68,7 +68,7 @@ export default function EmptyState({
             <button
               type="button"
               onClick={primaryCta.onClick}
-              className="inline-flex items-center justify-center rounded-lg bg-[#10B981] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#059669] focus:outline-none focus:ring-2 focus:ring-[#10B981]/40"
+              className="inline-flex items-center justify-center rounded-lg bg-acento px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-acento-hover focus:outline-none focus:ring-2 focus:ring-acento/40"
             >
               {primaryCta.label}
             </button>
@@ -77,7 +77,7 @@ export default function EmptyState({
             <button
               type="button"
               onClick={secondaryCta.onClick}
-              className="inline-flex items-center justify-center rounded-lg border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-medium text-[#1A1A1A] hover:bg-[#F5F4F2] focus:outline-none focus:ring-2 focus:ring-[#10B981]/40"
+              className="inline-flex items-center justify-center rounded-lg border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-medium text-tinta hover:bg-papel focus:outline-none focus:ring-2 focus:ring-acento/40"
             >
               {secondaryCta.label}
             </button>

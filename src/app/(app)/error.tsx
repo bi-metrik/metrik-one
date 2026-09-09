@@ -39,7 +39,7 @@ export default function AppError({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
+          className="inline-flex items-center gap-2 rounded-md bg-acento px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-acento"
         >
           <RefreshCw className="h-4 w-4" aria-hidden />
           Recargar

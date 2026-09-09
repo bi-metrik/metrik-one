@@ -65,11 +65,11 @@ export function GuiaEtapaCard({
   const hayDetalle = guiaTieneDetalle(guia)
 
   return (
-    <div className="rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] dark:border-emerald-900/60 dark:bg-emerald-950/25">
+    <div className="rounded-xl border border-[#BBF7D0] bg-[var(--acento-tinte)] dark:border-acento/60 dark:bg-acento/25">
       <div className="flex items-start gap-2.5 px-4 py-3">
-        <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#10B981]" aria-hidden="true" />
+        <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-acento" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#059669] dark:text-emerald-400">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-acento dark:text-acento-claro">
             Etapa {etapaNumero} · {etapaNombre}
           </p>
           {guia.definicion && (
@@ -81,7 +81,7 @@ export function GuiaEtapaCard({
             type="button"
             onClick={alternar}
             aria-expanded={abierto}
-            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[#059669] hover:bg-[#DCFCE7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#10B981] dark:text-emerald-400 dark:hover:bg-emerald-900/40"
+            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-acento hover:bg-[var(--acento-tinte)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acento dark:text-acento-claro dark:hover:bg-acento/40"
           >
             {abierto ? 'Ocultar' : '¿Qué hago aquí?'}
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${abierto ? 'rotate-180' : ''}`} />
@@ -90,13 +90,13 @@ export function GuiaEtapaCard({
       </div>
 
       {abierto && hayDetalle && (
-        <div className="flex flex-col gap-3 border-t border-[#BBF7D0] px-4 py-3 dark:border-emerald-900/60">
+        <div className="flex flex-col gap-3 border-t border-[#BBF7D0] px-4 py-3 dark:border-acento/60">
           {!!guia.hacer?.length && (
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Qué se hace
               </p>
-              <ol className="mt-1 flex list-decimal flex-col gap-1 pl-4 text-sm text-foreground marker:text-[#10B981]">
+              <ol className="mt-1 flex list-decimal flex-col gap-1 pl-4 text-sm text-foreground marker:text-acento">
                 {guia.hacer.map((paso, i) => (
                   <li key={i}>{paso}</li>
                 ))}

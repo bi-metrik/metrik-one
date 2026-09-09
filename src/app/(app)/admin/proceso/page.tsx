@@ -13,7 +13,7 @@ export default async function AdminProcesoPage() {
   return (
     <div className="mx-auto max-w-[1400px] p-6">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1A1A1A]">Proceso Clarity</h1>
+        <h1 className="text-2xl font-bold text-tinta">Proceso Clarity</h1>
         <p className="mt-1 text-sm text-gray-500">
           Mapa del proceso interno MéTRIK. Cada etapa define inputs, outputs, gates y bloques del skill asociado.
         </p>
@@ -21,7 +21,7 @@ export default async function AdminProcesoPage() {
           <span className="rounded-md border border-gray-200 bg-white px-2.5 py-1">
             {etapas.length} etapas
           </span>
-          <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">
+          <span className="rounded-md border border-acento-borde bg-acento-tinte px-2.5 py-1 text-acento">
             {totalListo} skills listos
           </span>
           <span className="rounded-md border border-gray-200 bg-white px-2.5 py-1">

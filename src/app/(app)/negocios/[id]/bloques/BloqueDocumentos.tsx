@@ -285,14 +285,14 @@ export default function BloqueDocumentos({
           return (
             <div key={doc.slug} className="flex items-center gap-2">
               {url ? (
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#10B981]" />
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-acento" />
               ) : (
                 <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/30" />
               )}
               <span className={`text-xs ${url ? '' : 'text-muted-foreground'}`}>{doc.label}</span>
               {url && (
                 <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto">
-                  <Download className="h-3.5 w-3.5 text-[#10B981]" />
+                  <Download className="h-3.5 w-3.5 text-acento" />
                 </a>
               )}
             </div>
