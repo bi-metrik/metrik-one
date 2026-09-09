@@ -36,11 +36,12 @@ describe('pasarela manual', () => {
 })
 
 describe('adapterPara', () => {
-  it('resuelve manual y deja las demas sin adaptador en Fase 1', () => {
+  it('resuelve manual y deja bold y epayco sin adaptador', () => {
     expect(adapterPara('manual')).toBe(pasarelaManual)
     expect(adapterPara('bold')).toBeNull()
     expect(adapterPara('epayco')).toBeNull()
-    expect(adapterPara('wompi')).toBeNull()
+    // `wompi` dejo de ser `null` al elegirse como pasarela del cobro recurrente:
+    // su adaptador vive en `wompi.ts` y se prueba en `wompi.test.ts`.
   })
 })
 

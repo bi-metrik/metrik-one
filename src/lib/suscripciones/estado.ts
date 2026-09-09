@@ -23,7 +23,9 @@
 export const ESTADOS_SUSCRIPCION = ['trial', 'activa', 'pendiente_pago', 'suspendida', 'cancelada'] as const
 export type EstadoSuscripcion = (typeof ESTADOS_SUSCRIPCION)[number]
 
-export const PASARELAS = ['manual', 'bold', 'epayco'] as const
+// `wompi` es la pasarela elegida para el cobro recurrente (decision 2026-09-09).
+// El orden importa solo para leerlo: el CHECK de la tabla lista los mismos cuatro.
+export const PASARELAS = ['manual', 'wompi', 'bold', 'epayco'] as const
 export type Pasarela = (typeof PASARELAS)[number]
 
 export type EventoSuscripcion =
