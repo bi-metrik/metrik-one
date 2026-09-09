@@ -38,7 +38,8 @@
 - ⚠️ [Duplicados: solo las facturas libres](project_duplicado_hermanos_siigo.md) — PR #561 sin mergear; el vínculo es la marca, NO el contacto (V0321/V0323 lo prueba), y la línea de hermanos no se ve en el caso que la motivó
 - [Sucursal y adopción de factura en Siigo](project_siigo_sucursal_adopcion.md) — PR #550 ya en `main`; su guardián de duplicados quedó superado por el #561
 - [Certificado UPME en Anexos](project_certificado_upme_anexos.md) — PR #548 mergeado y aplicado: cómo se verifica una migración del MCP sin leer el ledger, y por qué NO es gate
-- ⚠️⚠️ [Tokens Pino Profundo](project_tokens_pino_profundo.md) — PR #601 sin mergear: el acento es invisible sobre carbón, y el branding por workspace nunca pudo aplicar fuera del sidebar
+- ⚠️ [Tokens Pino Profundo](project_tokens_pino_profundo.md) — #601 ya mergeado: el acento es invisible sobre carbón, y el branding por workspace nunca pudo aplicar fuera del sidebar
+- ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG, no leerla del generador
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
@@ -50,6 +51,7 @@
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio; y el `User-Agent` que la Management API exige
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST, después la Management API
+- [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` ya está y rasteriza SVG; los `<link>` de icono se leen del HTML del build; el preview de Vercel está tras SSO
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte; y cómo probar que otro PDF no cambió byte a byte
 - [Renderizar el AppShell en aislamiento](reference_render_appshell_aislado.md) — sí se puede: solo `usePathname` + `useRouter` (este lo pide el FAB); Supabase no se dobla
 - [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
