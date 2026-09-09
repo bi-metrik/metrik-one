@@ -42,6 +42,11 @@ import {
   type TipoSujeto,
 } from '@/lib/compliance/sujetos';
 import { puedeLiberarContrapartes } from '@/lib/compliance/liberaciones';
+import {
+  indexarVinculaciones,
+  type RefExpediente,
+  type VinculacionDeSujeto,
+} from '@/lib/compliance/vinculacion-sujeto';
 import { revalidatePath } from 'next/cache';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -86,6 +91,13 @@ export type FilaSujeto = ComplianceSujeto & {
   segmento_nombre: string | null;
   /** Solo para el oficial: el resto no ve la nota interna. */
   notas: string | null;
+  /**
+   * El expediente de vinculación de esta contraparte, si tiene. `null` no
+   * significa "no está vinculada": significa que en ONE no hay espejo de
+   * ninguno. El espejo llega por webhook desde Valida y un workspace con el
+   * webhook sin configurar los tendría todos en null.
+   */
+  vinculacion: VinculacionDeSujeto | null;
 };
 
 export type ExpedienteSujetos = {
@@ -118,7 +130,7 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
   const svc = createServiceClient() as any;
   const hoy = todayBogotaISO();
 
-  const [sujetosRes, liberacionesRes, consultasRes, segmentosRes, perfilesRes] = await Promise.all([
+  const [sujetosRes, liberacionesRes, consultasRes, segmentosRes, perfilesRes, refsRes] = await Promise.all([
     svc
       .from('compliance_sujetos')
       .select(
@@ -142,11 +154,27 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
       .limit(TOPE_CONSULTAS),
     svc.from('compliance_segmentos').select('id, nombre').eq('workspace_id', workspaceId),
     svc.from('profiles').select('id, full_name').eq('workspace_id', workspaceId),
+    // El espejo de los expedientes de vinculación. Se lee entero por workspace
+    // porque son pocos (uno por contraparte invitada) y el cruce por documento
+    // se hace en memoria, igual que el de liberaciones y consultas.
+    svc
+      .from('kyc_expediente_ref')
+      .select(
+        'expediente_kyc_id, razon_social, nombre, documento_tipo, documento_numero, estado_cache, etapa_cache, actualizado_en',
+      )
+      .eq('workspace_id', workspaceId),
   ]);
 
   if (sujetosRes.error) return { ok: false, error: sujetosRes.error.message };
   if (liberacionesRes.error) return { ok: false, error: liberacionesRes.error.message };
   if (consultasRes.error) return { ok: false, error: consultasRes.error.message };
+
+  // El espejo NO es fuente: si falla, la pantalla vale igual sin la columna de
+  // vinculación. Tumbar la base de sujetos entera por un espejo caído sería
+  // dejar al ejecutor sin lo que sí es suyo.
+  const vinculaciones = indexarVinculaciones(
+    refsRes.error ? [] : ((refsRes.data ?? []) as RefExpediente[]),
+  );
 
   const sujetos = (sujetosRes.data ?? []) as Array<ComplianceSujeto & { notas: string | null }>;
 
@@ -200,6 +228,7 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
         ? (nombrePerfil.get(s.responsable_profile_id) ?? null)
         : null,
       segmento_nombre: s.segmento_id ? (nombreSegmento.get(s.segmento_id) ?? null) : null,
+      vinculacion: clave ? (vinculaciones.get(clave) ?? null) : null,
       // La nota interna es del oficial. Al ejecutor le llega null, y le llega
       // null desde el servidor: ocultarla en el cliente no la ocultaría.
       notas: esOficial ? s.notas : null,

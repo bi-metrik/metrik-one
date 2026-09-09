@@ -20,6 +20,12 @@ type PayloadKyc = {
   severidad?: string | null
   decision?: Record<string, unknown> | null
   razon_social?: string | null
+  nombre?: string | null
+  // La identidad con la que ONE cruza contrapartes en todo el modulo de
+  // cumplimiento. Sin ella el espejo guarda estados que no se pegan a nadie.
+  // El trigger de la tabla la normaliza: aca no se toca.
+  documento_tipo?: string | null
+  documento_numero?: string | null
   emitido_en: string
 }
 
@@ -65,6 +71,9 @@ export async function POST(request: NextRequest) {
         workspace_id: payload.workspace_one_id,
         expediente_kyc_id: payload.expediente_kyc_id,
         razon_social: payload.razon_social ?? null,
+        nombre: payload.nombre ?? null,
+        documento_tipo: payload.documento_tipo ?? null,
+        documento_numero: payload.documento_numero ?? null,
         estado_cache: payload.estado,
         etapa_cache: payload.etapa_actual ?? null,
         severidad_cache: payload.severidad ?? null,
