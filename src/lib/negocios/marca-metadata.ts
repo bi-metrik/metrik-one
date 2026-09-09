@@ -37,6 +37,29 @@ export function fusionarMarca(
   return { ...(metadataActual ?? {}), [clave]: marca }
 }
 
+/**
+ * Fusión pura de DOS niveles: `metadata[claveRaiz][subClave] = marca`.
+ *
+ * Hace falta cuando varias marcas de la misma familia viven bajo un contenedor común
+ * (`metadata.desenlaces`). Fusionar solo el nivel de arriba con `fusionarMarca` pasando
+ * un objeto armado a mano reintroduce el defecto que este módulo cierra, una capa más
+ * abajo: el contenedor se construiría sobre una lectura vieja y borraría las marcas
+ * hermanas que otro proceso escribió en el medio.
+ */
+export function fusionarMarcaAnidada(
+  metadataActual: Record<string, unknown> | null | undefined,
+  claveRaiz: string,
+  subClave: string,
+  marca: unknown,
+): Record<string, unknown> {
+  const raizActual = (metadataActual ?? {})[claveRaiz]
+  const raiz =
+    raizActual && typeof raizActual === 'object' && !Array.isArray(raizActual)
+      ? (raizActual as Record<string, unknown>)
+      : {}
+  return fusionarMarca(metadataActual, claveRaiz, { ...raiz, [subClave]: marca })
+}
+
 export type ResultadoMarca = { ok: true } | { ok: false; mensaje: string }
 
 /**
@@ -84,6 +107,53 @@ export async function guardarMarcaEnMetadata(
   }
 
   const metadata = fusionarMarca(base, clave, marca)
+  const { error } = await svc
+    .from('negocios')
+    .update({ metadata })
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+  if (error) return { ok: false, mensaje: error.message }
+  return { ok: true }
+}
+
+/**
+ * Igual que `guardarMarcaEnMetadata`, pero la marca vive DENTRO de un contenedor:
+ * `metadata[claveRaiz][subClave]`.
+ *
+ * Misma relectura justo antes del `update`, y ahora también en el nivel de adentro: las
+ * marcas hermanas del contenedor sobreviven aunque las haya escrito otro proceso después
+ * de que quien llama leyó el negocio.
+ */
+export async function guardarMarcaAnidadaEnMetadata(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  negocioId: string,
+  claveRaiz: string,
+  subClave: string,
+  marca: unknown,
+  metadataRespaldo: Record<string, unknown> | null | undefined = null,
+): Promise<ResultadoMarca> {
+  const { data, error: errLeer } = await svc
+    .from('negocios')
+    .select('metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+
+  let base: Record<string, unknown> | null | undefined
+  if (errLeer || !data) {
+    console.error(
+      `[metadata] no se pudo releer el negocio antes de guardar "${claveRaiz}.${subClave}"; ` +
+      `se fusiona sobre la copia previa y lo que otro haya escrito en el medio se pierde: ` +
+      `${errLeer?.message ?? 'sin fila'}`,
+    )
+    base = metadataRespaldo
+  } else {
+    base = (data as { metadata: Record<string, unknown> | null }).metadata
+  }
+
+  const metadata = fusionarMarcaAnidada(base, claveRaiz, subClave, marca)
   const { error } = await svc
     .from('negocios')
     .update({ metadata })

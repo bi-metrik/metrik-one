@@ -50,6 +50,8 @@ import {
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
 import { camposDeRouting, type BloqueParaRouting } from '@/lib/negocios/campos-de-routing'
+import { aplicarDesenlacesDeRetorno } from '@/lib/negocios/aplicar-desenlace'
+import { leerDesenlacesDeMetadata, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { llavesDeHerenciaDocumento } from '@/lib/negocios/herencia-documento'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
@@ -398,6 +400,13 @@ export type NegocioResumen = {
   // hay que rehacer un tramo, con un cliente esperando algo que creía resuelto: se
   // muestra en la tarjeta para que sea visible sin abrir el negocio.
   reproceso: { tipo: string; ciclo: number; etapa_retorno: string | null } | null
+  /**
+   * Desenlaces que devolvieron el caso a una etapa anterior (`metadata.desenlaces`).
+   * En SOENA: los PQR que la DIAN rechazó. Es HISTORIA del caso, no una alarma con
+   * reloj — la marca roja de atención inmediata está reservada para la cita a menos de
+   * 36 h sin documentación. Vacío si el negocio nunca dio la vuelta.
+   */
+  desenlaces: DesenlaceMarcado[]
   // ── Origen del negocio (columna, catálogo ORIGENES_NEGOCIO) ───────────────
   /** De dónde vino. null solo en negocios anteriores a la captura de origen. */
   origen: string | null
@@ -933,6 +942,7 @@ export async function getNegociosV2(
         if (!r?.activo) return null
         return { tipo: String(r.tipo ?? ''), ciclo: Number(r.ciclo ?? 1), etapa_retorno: r.etapa_retorno ?? null }
       })(),
+      desenlaces: leerDesenlacesDeMetadata(row.metadata as Record<string, unknown> | null),
       origen: (row.origen as string | null) ?? null,
       aliado_nombre: row.aliado_id ? (aliadoNombres[row.aliado_id as string] ?? null) : null,
       marcas: leerMarcasDeMetadata(row.metadata),
@@ -1153,6 +1163,45 @@ async function getNegocioDetalle(id: string): Promise<{
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
     }))
+
+    // ── Desenlace que devolvió el caso a una etapa anterior ────────────────────
+    //
+    // Cuando el routing devuelve un caso hacia atrás (la DIAN rechazó el PQR y el caso
+    // vuelve a Cita), las casillas del destino siguen ahí con las respuestas del ciclo
+    // anterior: al avanzar, el mismo routing lo manda otra vez por la misma rama. Aquí
+    // se archivan las que dependían del ciclo que se cierra —quedan `pendiente`, y como
+    // son gate, retienen— y se deja la marca en `negocios.metadata.desenlaces`.
+    //
+    // Corre al LEER porque es reintentable: la señal es la respuesta del desenlace viva
+    // en su bloque, y lo que la consume es archivar ese bloque, que va de último. Ver
+    // `aplicar-desenlace.ts`. Sale sin tocar la base si ninguna etapa de la línea declara
+    // `desenlace_retorno`, que es el caso de todas menos donde se configure.
+    const ordenActualDesenlace = ((etapas ?? []) as Array<{ id: string; orden: number }>)
+      .find(e => e.id === negocioTyped.etapa_actual_id)?.orden ?? null
+    const desenlacesAplicados = await aplicarDesenlacesDeRetorno({
+      supabase,
+      workspaceId,
+      negocioId: id,
+      etapaActualOrden: ordenActualDesenlace,
+      etapasLinea: ((etapas ?? []) as Array<Record<string, unknown>>).map(e => ({
+        orden: e.orden as number,
+        config_extra: (e.config_extra ?? null) as Record<string, unknown> | null,
+      })),
+    })
+    // La metadata en memoria se leyó ANTES de escribir la marca. Se refresca porque más
+    // abajo decide qué bloques se muestran (`mostrar_si_metadata`); sin esto, un bloque
+    // condicionado a un desenlace tardaría una recarga en aparecer. Las CASILLAS no
+    // necesitan refresco: se leen de la base después de este punto, ya archivadas.
+    if (desenlacesAplicados.length > 0) {
+      const { data: recargado } = await db(supabase)
+        .from('negocios')
+        .select('metadata')
+        .eq('id', id)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle()
+      const metaNueva = (recargado as { metadata?: Record<string, unknown> | null } | null)?.metadata
+      if (metaNueva) Object.assign(negocioMetadata, metaNueva)
+    }
   }
 
 

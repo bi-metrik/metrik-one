@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { CardLink } from '@/components/card-link'
-import { FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck, AlertTriangle, CalendarClock } from 'lucide-react'
+import { History, FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck, AlertTriangle, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
@@ -14,6 +14,7 @@ import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { STAGE_LABEL_UPPER } from '@/lib/negocios/stage-label'
 import { fechaHoraEnLetras, partesFechaHora } from '@/lib/negocios/fecha-hora-campo'
 import { textoAtencionCita } from '@/lib/negocios/seguimiento-citas'
+import { textoChipDesenlace, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 
 export type StaffAsignable = { id: string; full_name: string }
 
@@ -62,6 +63,18 @@ function formatAtraso(horas: number): string {
 
 function formatDateShort(iso: string | null): string {
   return formatBogotaFechaCorta(iso) ?? ''
+}
+
+/**
+ * El tooltip del chip de desenlace: cuántas veces, cuándo fue la última y con qué
+ * referencia. La fecha y el radicado son lo que permite ubicar el ciclo sin abrir el
+ * negocio; el chip solo dice que pasó.
+ */
+function tituloDesenlace(d: DesenlaceMarcado): string {
+  const veces = d.conteo > 1 ? `${d.conteo} veces` : '1 vez'
+  const cuando = formatDateShort(d.ultimo_at || null)
+  const ref = d.ultima_referencia ? ` — último radicado ${d.ultima_referencia}` : ''
+  return `${d.chip}: ${veces}${cuando ? `, la última el ${cuando}` : ''}${ref}.`
 }
 
 function openFolder(url: string, e: React.MouseEvent) {
@@ -616,6 +629,21 @@ export default function NegocioCard({
                 Reproceso {negocio.reproceso.ciclo > 1 ? negocio.reproceso.ciclo : ''}
               </span>
             )}
+            {/* Desenlaces que devolvieron el caso (SOENA: PQR rechazado por la DIAN).
+                Tinte suave a propósito, NO relleno sólido como el reproceso: un rechazo
+                de la DIAN es historia del caso, no una alarma con reloj — el rojo está
+                reservado para la cita a menos de 36 h sin documentación. El conteo solo
+                aparece a partir del segundo (ver `textoChipDesenlace`). */}
+            {negocio.desenlaces.map((d) => (
+              <span
+                key={d.clave}
+                className="inline-flex items-center gap-1 rounded-full bg-papel px-2 py-0.5 text-[10px] font-medium text-tinta-suave"
+                title={tituloDesenlace(d)}
+              >
+                <History className="h-2.5 w-2.5" />
+                {textoChipDesenlace(d)}
+              </span>
+            ))}
           </div>
           {/* Fila 2: contexto — L{N} Linea */}
           {negocio.linea_nombre && (
