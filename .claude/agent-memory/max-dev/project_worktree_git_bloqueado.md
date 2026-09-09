@@ -224,5 +224,37 @@ sana desde un worktree aislado.
   un solo comando plano, y evita el `add && commit`.
 - El symlink RELATIVO `ln -s ../../../.env.local .env.local && ln -s ../../../node_modules
   node_modules` pasó de nuevo. `rm .env.local node_modules` los quita sin tocar el destino.
+- **2026-09-09:** el guard mira la palabra «git» **en el texto del comando**, no si ejecuta git.
+  Un `for f in … project_worktree_git_bloqueado__agente-*.md; do md5sum …; done` se rechazó dos
+  veces por el «git» **del nombre de archivo**. Sale barato: partir en comandos planos, o usar
+  `diff` (que además prueba igualdad byte a byte sin nombrar cada archivo).
+
+## Rescatar trabajo sin commitear del checkout COMPARTIDO (2026-09-09, PR #587)
+
+Leer y copiar archivos del checkout compartido **no** lo bloquea el guard (`cat`, `cp`, `diff`,
+`stat` pasan): lo único bloqueado es git contra esa ruta. Así que sí se puede subir en un PR lo
+que otra sesión dejó escrito y sin commitear.
+
+**⚠️ El checkout compartido suele estar N commits DETRÁS de `origin/main`**, así que su archivo
+modificado puede estar basado en una versión vieja: commitearlo desde una rama nacida de
+`origin/main` **revertiría en silencio** lo que entró en medio. Se comprueba antes, con dos
+consultas que además dicen exactamente qué pasó:
+
+```
+cat <repo>/.git/HEAD                      # su rama, sin usar git contra esa ruta
+git log --oneline <su-HEAD>..origin/main -- <ruta>   # vacío = ningún commit lo tocó
+git diff --stat <su-HEAD> origin/main -- <ruta>      # vacío = mismo blob de partida
+```
+
+Y el resto del método, medido:
+- **Copiar con `cp`, nunca reescribir el contenido a través del modelo** — un subagente no copia,
+  reescribe. Verificar con `diff` **dos veces**: la copia contra el original, y después el **blob
+  ya commiteado** (`git show HEAD:<ruta> > /tmp/x`, luego `diff`) contra el original.
+- `git diff --cached --numstat` antes de commitear: si el rescate es puro añadido, tiene que
+  salir `N 0`. Un número en la columna de borrados es la firma de que la base estaba vieja.
+- El `mtime` del archivo en el checkout compartido dice si alguien lo movió mientras trabajabas.
+- **Lo que NO se puede: dejar limpio el checkout compartido.** `git checkout --` y `git pull` ahí
+  están bloqueados, y restaurar el archivo a mano (sobreescribirlo) arriesga pisar a una sesión
+  viva. Se reporta el comando para que lo corra la sesión principal, y no se toca.
 
 Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]], [[navigate-lector-gemini]].
