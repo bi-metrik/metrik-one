@@ -73,6 +73,7 @@ const negocio = (extra: Record<string, unknown>) =>
     responsables: [],
     es_meta_lead: false,
     reproceso: null,
+    desenlaces: [],
     origen: null,
     aliado_nombre: null,
     marcas: [],
