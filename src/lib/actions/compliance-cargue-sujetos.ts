@@ -59,13 +59,13 @@ export async function generarPlantillaSujetos(): Promise<
 
   const hojaDatos = XLSX.utils.aoa_to_sheet([
     [...COLUMNAS_CARGUE],
-    ['proveedor', 'NIT', '900123456', 'FERRETERIA DEL NORTE SAS', '2025-03-01', '', ''],
-    ['contratista', 'CC', '79123456', 'JUAN PEREZ EJEMPLO', '2026-01-15', '', ''],
-    ['empleado', 'CC', '52987654', 'ANA GOMEZ EJEMPLO', '2024-08-01', '2026-08-31', 'renuncio'],
+    ['proveedor', 'NIT', '900123456', 'FERRETERIA DEL NORTE SAS', 'compras@ferre.co', '2025-03-01', '', ''],
+    ['contratista', 'CC', '79123456', 'JUAN PEREZ EJEMPLO', 'juan.perez@ejemplo.co', '2026-01-15', '', ''],
+    ['empleado', 'CC', '52987654', 'ANA GOMEZ EJEMPLO', '', '2024-08-01', '2026-08-31', 'renuncio'],
   ]);
   hojaDatos['!cols'] = [
     { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 38 },
-    { wch: 16 }, { wch: 16 }, { wch: 34 },
+    { wch: 30 }, { wch: 16 }, { wch: 16 }, { wch: 34 },
   ];
 
   const instrucciones: string[][] = [
@@ -80,6 +80,7 @@ export async function generarPlantillaSujetos(): Promise<
     ['documento_tipo', 'Sí', 'NIT, CC, CE.'],
     ['documento', 'Sí', 'Cédula o NIT. Los puntos y guiones no importan.'],
     ['nombre', 'Sí', 'Razón social o nombre completo.'],
+    ['correo', 'No', 'A donde le llega el enlace para abrir su expediente.'],
     ['relacion_desde', 'No', 'Desde cuándo trabaja con ustedes. ' + FORMATO_FECHA_CARGUE],
     ['relacion_hasta', 'Solo en bajas', 'Desde cuándo dejó de trabajar. ' + FORMATO_FECHA_CARGUE],
     ['motivo', 'Solo en bajas', 'Por qué salió. Obligatorio si pones relacion_hasta.'],
@@ -99,6 +100,14 @@ export async function generarPlantillaSujetos(): Promise<
     ['Solo se acepta ' + FORMATO_FECHA_CARGUE + '. El formato 03/04/2026 no se'],
     ['adivina: leerlo como marzo o como abril cambia un mes de monitoreo, así'],
     ['que la fila se reporta con su número para que la corrijas.'],
+    [''],
+    ['Para qué sirve el correo'],
+    ['Con el correo diligenciado puedes invitar a la contraparte a abrir su'],
+    ['expediente CCBF desde la misma pantalla, sin volver a escribir sus datos.'],
+    ['Sin correo el tercero entra igual a la base: lo completas después.'],
+    ['Cargar el archivo NO manda ningún correo. Invitar es un paso aparte, con'],
+    ['su propia lista de a quién le va a llegar.'],
+    ['Un correo en blanco no borra el que ya estaba guardado.'],
     [''],
     ['Empleados'],
     ['El cargue no amarra al empleado con su ficha de personal: la nómina de ONE'],
@@ -131,7 +140,7 @@ async function cargarExistentes(
 ): Promise<SujetoExistente[]> {
   const { data } = await svc
     .from('compliance_sujetos')
-    .select('id, tipo, documento_tipo, documento_numero, nombre, relacion_hasta')
+    .select('id, tipo, documento_tipo, documento_numero, nombre, correo, relacion_hasta')
     .eq('workspace_id', workspaceId)
     .limit(LIMITE_SUJETOS);
   return (data ?? []) as SujetoExistente[];
@@ -247,6 +256,7 @@ export async function aplicarCargueSujetos(
             documento_tipo: it.documento_tipo,
             documento_numero: it.documento_numero,
             nombre: it.nombre,
+            correo: it.correo,
             relacion_desde: hoy,
             relacion_hasta: it.accion === 'alta_cerrada' ? it.relacion_hasta : null,
             motivo_cierre: it.accion === 'alta_cerrada' ? it.motivo : null,
@@ -294,9 +304,14 @@ export async function aplicarCargueSujetos(
         res.fallidas.push({ fila: it.fila, error: 'sin_sujeto' });
         continue;
       }
+      // El correo solo se pisa si el archivo trae uno. Ver `planearCargue`: un
+      // blanco es "no lo sé", no "bórralo".
+      const patch: Record<string, unknown> = { tipo: it.tipo, nombre: it.nombre };
+      if (it.correo) patch.correo = it.correo;
+
       const { error } = await svc
         .from('compliance_sujetos')
-        .update({ tipo: it.tipo, nombre: it.nombre })
+        .update(patch)
         .eq('id', it.sujeto_id)
         .eq('workspace_id', workspaceId);
       if (error) {

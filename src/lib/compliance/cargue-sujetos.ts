@@ -36,6 +36,7 @@
 
 import { claveContraparte } from './liberaciones';
 import { esTipoSujeto, normalizarDocumento, type TipoSujeto } from './sujetos';
+import { correoValido } from './solicitud-vinculacion';
 
 /**
  * El contrato de la plantilla. Lo consumen las dos puntas —la que emite el
@@ -48,6 +49,7 @@ export const COLUMNAS_CARGUE = [
   'documento_tipo',
   'documento',
   'nombre',
+  'correo',
   'relacion_desde',
   'relacion_hasta',
   'motivo',
@@ -65,6 +67,8 @@ export type FilaCargue = {
   documento_tipo: string;
   documento_numero: string;
   nombre: string;
+  /** A donde sale el enlace del expediente. Opcional: sin él el tercero entra igual. */
+  correo: string | null;
   relacion_desde: string | null;
   relacion_hasta: string | null;
   motivo: string | null;
@@ -93,6 +97,7 @@ export type ItemPlan = {
   documento_numero: string;
   nombre: string;
   tipo: TipoSujeto;
+  correo: string | null;
   relacion_hasta: string | null;
   motivo: string | null;
   /** El id del sujeto que ya existe. NULL en las altas. */
@@ -107,6 +112,7 @@ export type SujetoExistente = {
   documento_tipo: string;
   documento_numero: string;
   nombre: string;
+  correo: string | null;
   relacion_hasta: string | null;
 };
 
@@ -179,10 +185,13 @@ export function parsearFilasCargue(
     const hasta = texto(row.relacion_hasta);
     const desde = texto(row.relacion_desde);
     const motivo = texto(row.motivo);
+    const correo = texto(row.correo).toLowerCase();
 
     // Una fila enteramente en blanco es basura de Excel, no un error del
     // usuario: se salta sin reportarla para no llenar la vista previa de ruido.
-    if (!tipoCrudo && !documentoTipo && !documentoNumero && !nombre && !hasta && !desde) {
+    if (
+      !tipoCrudo && !documentoTipo && !documentoNumero && !nombre && !hasta && !desde && !correo
+    ) {
       return;
     }
 
@@ -204,6 +213,14 @@ export function parsearFilasCargue(
     }
     if (nombre.length < 2) {
       invalidas.push({ fila, motivo: 'falta_nombre', eco });
+      return;
+    }
+
+    // Un correo mal escrito se rechaza en vez de guardarse: guardado haría que
+    // el tercero apareciera como invitable y la invitación fallara después, con
+    // el oficial creyendo que ya la mandó.
+    if (correo && !correoValido(correo)) {
+      invalidas.push({ fila, motivo: 'correo_invalido', eco });
       return;
     }
 
@@ -254,6 +271,7 @@ export function parsearFilasCargue(
       documento_tipo: documentoTipo,
       documento_numero: documentoNumero,
       nombre,
+      correo: correo || null,
       relacion_desde: relacionDesde,
       relacion_hasta: relacionHasta,
       motivo: motivo || null,
@@ -304,6 +322,7 @@ export function planearCargue(
       documento_numero: f.documento_numero,
       nombre: f.nombre,
       tipo: f.tipo,
+      correo: f.correo,
       relacion_hasta: f.relacion_hasta,
       motivo: f.motivo,
     };
@@ -350,6 +369,12 @@ export function planearCargue(
     const cambios: string[] = [];
     if (ya.nombre.trim() !== f.nombre) cambios.push(`nombre: "${ya.nombre.trim()}" → "${f.nombre}"`);
     if (ya.tipo !== f.tipo) cambios.push(`tipo: ${ya.tipo} → ${f.tipo}`);
+    // Un correo en blanco en el archivo NO borra el que ya está: quien vuelve a
+    // subir una lista vieja sin la columna diligenciada dejaría a media base sin
+    // por dónde invitarla.
+    if (f.correo && (ya.correo ?? '').toLowerCase() !== f.correo) {
+      cambios.push(ya.correo ? `correo: ${ya.correo} → ${f.correo}` : `correo: ${f.correo}`);
+    }
 
     if (cambios.length === 0) {
       items.push({
@@ -395,6 +420,7 @@ export function explicarInvalida(motivo: string): string {
     relacion_hasta_ilegible: `La fecha de salida no se entiende. Usa ${FORMATO_FECHA_CARGUE}.`,
     cierre_sin_motivo: 'Si pones fecha de salida, escribe también el motivo. Queda en la bitácora.',
     motivo_muy_largo: `El motivo no puede pasar de ${MOTIVO_CARGUE_MAX} caracteres.`,
+    correo_invalido: 'El correo no tiene forma de correo. Déjalo en blanco o corrígelo.',
     cierre_antes_del_inicio: 'La fecha de salida es anterior a la de inicio.',
   };
   return mapa[motivo] ?? motivo;

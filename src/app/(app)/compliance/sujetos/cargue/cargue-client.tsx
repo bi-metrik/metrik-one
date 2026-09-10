@@ -9,6 +9,7 @@ import {
   Download,
   FileSpreadsheet,
   Loader2,
+  Mail,
   Upload,
 } from 'lucide-react';
 import {
@@ -23,6 +24,31 @@ import {
   type AccionCargue,
   type PlanCargue,
 } from '@/lib/compliance/cargue-sujetos';
+import {
+  enviarInvitacionesEnLote,
+  previsualizarInvitacionMasiva,
+  type ResultadoInvitacionMasiva,
+} from '@/lib/actions/compliance-invitacion-masiva';
+import {
+  invitables,
+  LIMITE_INVITACIONES_LOTE,
+  type EstadoInvitacion,
+  type PlanInvitacion,
+} from '@/lib/compliance/invitacion-masiva';
+
+const ETIQUETA_INVITACION: Record<EstadoInvitacion, string> = {
+  invitable: 'Se le escribe',
+  sin_correo: 'Falta correo',
+  ya_tiene_expediente: 'Ya tiene expediente',
+  relacion_cerrada: 'Ya salió',
+};
+
+const ESTILO_INVITACION: Record<EstadoInvitacion, string> = {
+  invitable: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
+  sin_correo: 'bg-[#FFFBEB] text-[#B45309] border-advertencia/30',
+  ya_tiene_expediente: 'bg-papel text-tinta-suave border-[#E5E7EB]',
+  relacion_cerrada: 'bg-papel text-tinta-suave border-[#E5E7EB]',
+};
 
 const ETIQUETA_ACCION: Record<AccionCargue, string> = {
   alta: 'Alta',
@@ -52,11 +78,13 @@ function descargarBase64(base64: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function CargueSujetosClient() {
+export default function CargueSujetosClient({ puedeInvitar }: { puedeInvitar: boolean }) {
   const [plan, setPlan] = useState<PlanCargue | null>(null);
   const [resultado, setResultado] = useState<ResultadoCargue | null>(null);
   const [archivo, setArchivo] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [invitacion, setInvitacion] = useState<PlanInvitacion | null>(null);
+  const [envio, setEnvio] = useState<ResultadoInvitacionMasiva | null>(null);
   const [pending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -99,6 +127,30 @@ export default function CargueSujetosClient() {
     });
   }
 
+  function verInvitaciones() {
+    startTransition(async () => {
+      setError(null);
+      setEnvio(null);
+      const r = await previsualizarInvitacionMasiva();
+      if (!r.ok) setError(r.error);
+      else setInvitacion(r.data);
+    });
+  }
+
+  function enviarInvitaciones() {
+    if (!invitacion) return;
+    const lista = invitables(invitacion).slice(0, LIMITE_INVITACIONES_LOTE);
+    if (lista.length === 0) return;
+    startTransition(async () => {
+      setError(null);
+      const r = await enviarInvitacionesEnLote(lista);
+      if (!r.ok) return setError(r.error);
+      setEnvio(r.data);
+      setInvitacion(null);
+    });
+  }
+
+  const porInvitar = invitacion ? invitables(invitacion) : [];
   const conEfecto = plan ? planTieneEfecto(plan) : false;
   const cierres = plan ? plan.resumen.cierre + plan.resumen.alta_cerrada : 0;
 
@@ -286,6 +338,131 @@ export default function CargueSujetosClient() {
             {conEfecto ? 'Aplicar el cargue' : 'No hay nada que aplicar'}
           </button>
         </div>
+      )}
+
+      {/* Paso 3. Separado del cargue a propósito: subir el archivo no le escribe
+          a nadie, y esto sí. */}
+      {puedeInvitar && (
+      <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 space-y-4">
+        <div className="flex items-start gap-3">
+          <Mail className="h-5 w-5 text-tinta mt-0.5" />
+          <div className="flex-1">
+            <h2 className="text-base font-bold text-tinta">Invitar a abrir expediente</h2>
+            <p className="text-sm text-tinta-suave">
+              Le abre el expediente CCBF a cada tercero de la base y le manda su enlace personal
+              al correo. <strong>Cargar el archivo no manda nada</strong>: esto sí, y no tiene
+              reversa. Primero mira a quién le va a llegar.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={verInvitaciones}
+          disabled={pending}
+          className="inline-flex items-center gap-2 text-sm font-semibold text-tinta border border-[#E5E7EB] rounded-lg px-3 py-2 hover:bg-papel disabled:opacity-50"
+        >
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Ver a quién habría que invitar
+        </button>
+
+        {envio && (
+          <div className="p-3 rounded-lg bg-[var(--acento-tinte)] border border-acento/30 text-sm space-y-1">
+            <p className="font-semibold text-acento">{envio.enviadas} invitación(es) enviada(s).</p>
+            {envio.sinCorreo.length > 0 && (
+              <div className="text-tinta">
+                <p>
+                  {envio.sinCorreo.length} expediente(s) quedaron abiertos pero el correo no
+                  salió. Cópiales el enlace:
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {envio.sinCorreo.map((s) => (
+                    <li key={s.url} className="break-all text-xs">
+                      <strong>{s.nombre}</strong> — {s.url}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {envio.fallidas.length > 0 && (
+              <p className="text-[#B91C1C]">
+                {envio.fallidas.length} fallaron:{' '}
+                {envio.fallidas.map((f) => `${f.nombre} (${f.error})`).join(', ')}
+              </p>
+            )}
+          </div>
+        )}
+
+        {invitacion && (
+          <div className="space-y-3">
+            <p className="text-sm text-tinta-suave">
+              {invitacion.resumen.invitable} recibirían correo.{' '}
+              {invitacion.resumen.ya_tiene_expediente} ya tienen expediente,{' '}
+              {invitacion.resumen.sin_correo} no tienen correo y{' '}
+              {invitacion.resumen.relacion_cerrada} ya salieron.
+            </p>
+
+            {!invitacion.espejoVivo && (
+              <p className="text-sm text-[#B45309] bg-[#FFFBEB] border border-advertencia/30 rounded-lg p-3">
+                No hay ningún expediente reflejado en esta pantalla. Si ya invitaste gente desde
+                la bandeja, el aviso de Valida no está llegando y esta lista puede volver a
+                escribirle a quien ya contestó. Revisa la configuración del webhook antes de
+                enviar.
+              </p>
+            )}
+
+            {porInvitar.length > LIMITE_INVITACIONES_LOTE && (
+              <p className="text-sm text-[#B45309]">
+                Se envían de a {LIMITE_INVITACIONES_LOTE}. Vuelve a correr esto para el resto.
+              </p>
+            )}
+
+            <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-papel text-left text-xs uppercase text-tinta-suave sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2">Qué pasa</th>
+                    <th className="px-3 py-2">Tercero</th>
+                    <th className="px-3 py-2">Detalle</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5E7EB]">
+                  {invitacion.items.map((it) => (
+                    <tr key={it.sujeto_id}>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${ESTILO_INVITACION[it.estado]}`}
+                        >
+                          {ETIQUETA_INVITACION[it.estado]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-tinta">
+                        {it.nombre}
+                        <span className="block text-xs text-tinta-suave">
+                          {it.documento_tipo} {it.documento_numero}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-tinta-suave">{it.detalle}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <button
+              type="button"
+              onClick={enviarInvitaciones}
+              disabled={pending || porInvitar.length === 0}
+              className="inline-flex items-center gap-2 bg-tinta text-white text-sm font-semibold rounded-lg px-4 py-2 disabled:opacity-50"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {porInvitar.length === 0
+                ? 'No hay a quién invitar'
+                : `Enviar ${Math.min(porInvitar.length, LIMITE_INVITACIONES_LOTE)} invitación(es)`}
+            </button>
+          </div>
+        )}
+      </div>
       )}
     </div>
   );

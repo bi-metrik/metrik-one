@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getWorkspace } from '@/lib/actions/get-workspace';
 import { createServiceClient } from '@/lib/supabase/server';
 import { puedeGestionarSujetos } from '@/lib/compliance/sujetos';
+import { puedeDecidirVinculacion } from '@/lib/compliance/vinculacion';
 import CargueSujetosClient from './cargue-client';
 
 export const dynamic = 'force-dynamic';
@@ -24,5 +25,8 @@ export default async function CargueSujetosPage() {
   // solo ver la base: quien únicamente consulta no puede llegar por la URL.
   if (!puedeGestionarSujetos(role)) redirect('/compliance/sujetos');
 
-  return <CargueSujetosClient />;
+  // Invitar no es lo mismo que mantener la base: abre expediente y le escribe a
+  // un tercero a nombre de la empresa. Quien solo gestiona no ve ese bloque, y
+  // la server action lo vuelve a comprobar por su cuenta.
+  return <CargueSujetosClient puedeInvitar={puedeDecidirVinculacion(role)} />;
 }
