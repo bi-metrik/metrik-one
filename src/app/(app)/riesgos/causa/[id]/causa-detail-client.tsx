@@ -33,7 +33,7 @@ const IMPACTO_NIVEL: Record<number, { label: string; color: string }> = {
   2: { label: 'Menor', color: 'bg-yellow-100 text-yellow-800' },
   3: { label: 'Moderado', color: 'bg-orange-100 text-orange-800' },
   4: { label: 'Mayor', color: 'bg-red-100 text-red-700' },
-  5: { label: 'Catastrofico', color: 'bg-red-200 text-red-900' },
+  5: { label: 'Catastrófico', color: 'bg-red-200 text-red-900' },
 }
 
 const FACTORES = ['clientes', 'proveedores', 'empleados', 'canales', 'jurisdicciones', 'productos', 'operaciones']
@@ -242,7 +242,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-orange-500" />
-          <h2 className="text-sm font-semibold text-tinta">Descripcion de la causa</h2>
+          <h2 className="text-sm font-semibold text-tinta">Descripción de la causa</h2>
         </div>
         {editing ? (
           <div className="space-y-3">
@@ -251,7 +251,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
               onChange={e => setDescripcion(e.target.value)}
               rows={3}
               className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm leading-relaxed focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
-              placeholder="Descripcion de la causa"
+              placeholder="Descripción de la causa"
             />
             <div>
               <label className="block text-[10px] font-medium text-tinta-suave mb-1">Contexto adicional</label>
@@ -276,7 +276,7 @@ export default function CausaDetailClient({ causaId, causa, riesgo, controles, c
 
       {/* Scoring: 4 impact dimensions + probability */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-tinta">Evaluacion de riesgo</h2>
+        <h2 className="text-sm font-semibold text-tinta">Evaluación de riesgo</h2>
 
         {/* 4 dimensions grid */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

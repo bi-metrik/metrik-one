@@ -191,13 +191,13 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
 
       {/* Section 1: Informacion del control */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-tinta">Informacion del control</h2>
+        <h2 className="text-sm font-semibold text-tinta">Información del control</h2>
 
         {/* Row 1: Referencia + Tipo */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[10px] font-medium text-tinta-suave mb-1">
-              Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automatica)</span>
+              Referencia <span className="text-[9px] font-normal text-[#9CA3AF]">(automática)</span>
             </label>
             <input
               value={referencia}
@@ -245,7 +245,7 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
             value={actividadControl}
             onChange={e => setActividadControl(e.target.value)}
             rows={2}
-            placeholder="Descripcion de la actividad de control"
+            placeholder="Descripción de la actividad de control"
             className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento resize-none"
           />
         </div>
@@ -253,15 +253,15 @@ export default function NuevoControlForm({ causas, equipo }: Props) {
         {/* Row 2: Clasificacion + Periodicidad */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] font-medium text-tinta-suave mb-1">Clasificacion</label>
+            <label className="block text-[10px] font-medium text-tinta-suave mb-1">Clasificación</label>
             <select
               value={clasificacion}
               onChange={e => setClasificacion(e.target.value)}
               className="w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm focus:border-acento focus:outline-none focus:ring-1 focus:ring-acento"
             >
               <option value="manual">Manual</option>
-              <option value="automatico">Automatico</option>
-              <option value="hibrido">Hibrido</option>
+              <option value="automatico">Automático</option>
+              <option value="hibrido">Híbrido</option>
             </select>
           </div>
           <div>
