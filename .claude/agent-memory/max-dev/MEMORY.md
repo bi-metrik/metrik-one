@@ -54,6 +54,8 @@
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
 - ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
 - ⚠️⚠️ [Acuses de Resend en avisos_cliente](project_acuses_resend_avisos_cliente.md) — PR #596 sin mergear: el orden de despliegue no es negociable, `rebotado` queda invisible en el producto, y `suppressed` es un hueco abierto
+- ⚠️ [FTO del State Dept en Valida](project_valida_fto_state_dept.md) — #33, #34 y #35 mergeados y la lista YA activa (6 fuentes); la privacidad NO enumera la FTO y la dedup de la migr. 0013 sigue abierta
+- ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — #621 (ONE, autorización v2) y #37 (Valida, política v1.3) SIN mergear; el bump de versión NO re-pide firma a un expediente ya sellado
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 
 ## Referencias
@@ -67,6 +69,7 @@
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte; y cómo probar que otro PDF no cambió byte a byte
 - [Renderizar el AppShell en aislamiento](reference_render_appshell_aislado.md) — sí se puede: solo `usePathname` + `useRouter` (este lo pide el FAB); Supabase no se dobla
 - [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
+- [SQL y publicacion en metrik-valida](reference_sql_y_publicacion_metrik_valida.md) — si el clasificador tapa las credenciales, el catalogo vivo se lee en las paginas publicas; copia archivo por archivo, PR por `gh api`, y restaurar el checkout
 - [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger; la verificación va en sentencia aparte
 - [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — el `Date` se arma con la hora de pared en componentes LOCALES; `cellDates` en las dos llamadas; medido en UTC y Bogotá
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
@@ -76,6 +79,7 @@
 - ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64; el vector oficial es la unica prueba que vale, y la ventana de 5 min descansa en un supuesto
 - ⚠️⚠️ [Landing estática en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — el DNS ya está (wildcard), la protección por defecto DEJA el dominio propio público, cómo abrirla con control negativo, y git sí corre en el scratchpad
 - ⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados; base verificada por SHA de blobs; Turbopack no acepta `node_modules` symlinkeado; la entrega es un patch
+- ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — el checkout compartido puede ir BEHIND main y mentir en silencio; el tarball da `origin/main` pristino sin tocarlo, y `next build` exige `cp -a` de node_modules
 
 ## Feedback
 
