@@ -50,7 +50,7 @@ export default function DrillDownSheet({ questionNumber, data, monthType, onClos
 }
 
 const TITLES: Record<number, string> = {
-  1: '¿Cuánta plata tengo?',
+  1: '¿Cuánto efectivo tengo?',
   2: '¿Estoy ganando?',
   3: '¿Cuánto me deben?',
   4: '¿Cuánto necesito vender?',
@@ -116,7 +116,7 @@ function DrillDownLinks({ links }: { links: { label: string; href?: string; onCl
   )
 }
 
-// ── P1: ¿Cuánta plata tengo? ────────────────────────
+// ── P1: ¿Cuánto efectivo tengo? ────────────────────────
 
 function DrillP1({ data, monthType, onChangeDrill }: { data: NumerosData; monthType: string; onChangeDrill?: (q: 1 | 2 | 3 | 4 | 5) => void }) {
   const pctRecaudo = data.metaRecaudo && data.metaRecaudo > 0

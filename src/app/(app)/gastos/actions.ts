@@ -535,7 +535,7 @@ export async function getNumerosData() {
       hasFiscal,
       hasFiscalEstimated,
 
-      // For P1: ¿Cuánta plata tengo?
+      // For P1: ¿Cuánto efectivo tengo?
       // Ingresos mes - Gastos mes = flujo neto
       ingresosMonth: totalPaymentsMonth + totalWonValue, // cobros + valor ganado
       gastosMonth: totalExpensesMonth,
