@@ -9,7 +9,7 @@
  *
  *   1. En SARLAFT la debida diligencia arranca con el obligado decidiendo a
  *      quién vincula. Un formulario abierto invierte eso: el tercero se declara
- *      contraparte solo, y la empresa termina conservando cinco años
+ *      contraparte solo, y la empresa termina conservando diez años
  *      expedientes de gente con la que nunca pensó contratar.
  *   2. El código de firma viaja al correo del expediente. Si la contraparte
  *      escribe ese correo en un formulario abierto, el OTP solo prueba que

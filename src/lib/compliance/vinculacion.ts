@@ -11,7 +11,7 @@
  * ── Por qué el dato NO se copia a ONE ─────────────────────────────────────
  *
  * El expediente vive en Valida y ONE lo lee por API en cada carga. No se
- * replica acá, y no es por pereza: el expediente tiene retención de 5 años con
+ * replica acá, y no es por pereza: el expediente tiene retención de 10 años con
  * trigger anti-DELETE y bitácora encadenada por hashes. Una copia en ONE sería
  * una segunda verdad sin ninguna de esas garantías, y ante un auditor dos
  * copias que difieren valen menos que una sola.
