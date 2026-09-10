@@ -45,7 +45,9 @@
 - [Certificado UPME en Anexos](project_certificado_upme_anexos.md) — PR #548 mergeado y aplicado: cómo se verifica una migración del MCP sin leer el ledger, y por qué NO es gate
 - ⚠️ [Tokens Pino Profundo](project_tokens_pino_profundo.md) — #601 ya mergeado: el acento es invisible sobre carbón, y el branding por workspace nunca pudo aplicar fuera del sidebar
 - ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG, no leerla del generador
-- [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — son datos FICTICIOS, no ALMA; y ONE no tiene pantalla de matriz de permisos (rescatada de un worktree abandonado)
+- ⚠️ [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS; el lockup «MéTRIK sustenta» sigue solo en la foto, pero las tildes YA se corrigieron en el producto (#613)
+- ⚠️ [QA en pantalla de las tildes de compliance](project_qa_tildes_compliance.md) — #613 quedó bien; el badge muestra el valor crudo («Automatico») y quedan 7 erratas, una pegada al título ya corregido
+- ⚠️ [Landing de Sustenta](project_landing_sustenta.md) — YA es pública, pero el noindex y el `Disallow` se quedan puestos; queda un hueco (la concesión), el repo sigue privado y el copy no se edita ahí
 - ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 (rótulo P1) y #616 (banner de alcance) cerrados; quedan ~19 visibles y `falta_plata` es identificador persistido, no copy
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
@@ -58,7 +60,9 @@
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio; y el `User-Agent` que la Management API exige
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST, después la Management API
-- [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS de verdad y el chromium de Playwright fotografía; ojo con el Splash
+- [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo subiendo el árbol, y el control antes/después que dice si tocaste de más
+- [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS y chromium fotografía; rehacer una tanda se verifica con diff de píxeles, y la foto va DESPUÉS del último render
+- ⚠️ [Cambio SOLO de tildes](reference_cambio_solo_de_tildes.md) — la equivalencia sin acentos NO dice dónde cayó la tilde; hace falta el chequeo de zonas de identidad, y el plural en -ciones ya está bien
 - [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` ya está y rasteriza SVG; los `<link>` de icono se leen del HTML del build; el preview de Vercel está tras SSO
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte; y cómo probar que otro PDF no cambió byte a byte
 - [Renderizar el AppShell en aislamiento](reference_render_appshell_aislado.md) — sí se puede: solo `usePathname` + `useRouter` (este lo pide el FAB); Supabase no se dobla
@@ -70,6 +74,7 @@
 - ⚠️ [Verificar contra el CSS compilado](reference_verificar_css_compilado.md) — un `@theme` mal declarado deja cada clase sin efecto y los cuatro checks salen verdes; y el `/15` que parece perdido está en un `@supports`
 - [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones; `hourCycle:'h23'` va igual aunque el riesgo no se reproduzca en node
 - ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64; el vector oficial es la unica prueba que vale, y la ventana de 5 min descansa en un supuesto
+- ⚠️⚠️ [Landing estática en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — el DNS ya está (wildcard), la protección por defecto DEJA el dominio propio público, cómo abrirla con control negativo, y git sí corre en el scratchpad
 - ⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados; base verificada por SHA de blobs; Turbopack no acepta `node_modules` symlinkeado; la entrega es un patch
 
 ## Feedback
