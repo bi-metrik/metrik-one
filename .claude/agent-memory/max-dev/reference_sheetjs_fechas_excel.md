@@ -1,6 +1,6 @@
 ---
 name: sheetjs-fechas-excel
-description: Cómo escribir fechas e hipervínculos con xlsx 0.18.5 (SheetJS) para que Excel las lea como fecha en el día correcto — medido en UTC y en Bogotá el 2026-09-03
+description: Cómo escribir fechas e hipervínculos con xlsx 0.18.5 (SheetJS) para que las lean Excel, Google Sheets y LibreOffice — `cellDates` SOLO en `json_to_sheet`, nunca en `write`
 metadata:
   type: reference
 ---
@@ -16,10 +16,22 @@ Medido el 2026-09-03 con `xlsx@0.18.5` corriendo el mismo script bajo `TZ=UTC` y
   con las partes de `bogotaParts()`. Un `'YYYY-MM-DD'` NUNCA pasa por `new Date(str)`
   (lo lee como UTC y en Colombia lo corre un día atrás). Implementado en
   `fechaExcel` de `src/lib/negocios/export-excel.ts`.
-- `cellDates: true` va en las DOS llamadas: en `XLSX.utils.json_to_sheet(filas, {cellDates:
-  true})` para que el `Date` sea celda `t:'d'` y no texto, y en `XLSX.write(wb, {cellDates:
-  true})` para que se escriba como fecha exacta. Sin el segundo, el serial se redondea y
-  la celda vuelve con **un milisegundo menos** (`21:29:59.999`).
+- ⚠️⚠️ **`cellDates: true` va SOLO en `json_to_sheet`, NUNCA en `XLSX.write`.** Esta linea
+  decia lo contrario («va en las DOS llamadas») y ese consejo es el que produjo el defecto:
+  en `write`, `cellDates` escribe la celda con el tipo ISO-8601 del OOXML
+  (`<c t="d"><v>2026-01-15T00:00:00.000Z</v></c>`), que Excel soporta y que **el importador
+  de Google Sheets DESCARTA en silencio** — el archivo abre bien y las columnas de fecha
+  salen VACIAS. Sin `cellDates` en el write sale serial numerico (`<v>46037</v>`) mas el
+  formato `z`, y eso lo leen los tres. Corregido el 2026-09-10 (PR #623).
+  - **La razon por la que se puso (el redondeo) esta medida y es despreciable**: barriendo
+    los 1000 ms de un minuto con `xlsx@0.18.5`, la peor desviacion del serial es de **1 ms**,
+    contra los **60.000 ms** de resolucion de `yyyy-mm-dd hh:mm`. Y el `21:29:59.999` que
+    citaba esta memoria no se reproduce: releyendo el buffer, las dos formas devuelven el
+    instante exacto.
+  - ⚠️ **El round-trip con SheetJS NO distingue las dos formas**, asi que una prueba que
+    escriba y relea pasa con el defecto puesto. Hay que **mirar el XML**: descomprimir el
+    `.xlsx` (`pizzip` ya es dependencia directa del repo) y afirmar que no aparece `t="d"`.
+    Medido: con el defecto, 6 celdas con `t="d"`; sin el, 0.
 - Formato: SheetJS deja `m/d/yy` por defecto; se cambia poniendo `celda.z = 'yyyy-mm-dd'`
   (o `'yyyy-mm-dd hh:mm'`) después de armar la hoja, celda por celda.
 - **Hipervínculo:** `ws[ref].l = { Target: url, Tooltip: '…' }` sobrevive al write/read.
@@ -28,6 +40,16 @@ Medido el 2026-09-03 con `xlsx@0.18.5` corriendo el mismo script bajo `TZ=UTC` y
 - Una prueba que muta `new Date(y, m-1, d)` por `new Date(str)` **solo cae fuera de UTC**:
   CI (UTC) no la ve. Por eso la aserción compara componentes locales y el docblock de la
   prueba lo deja escrito.
+- **Donde vive el armado del libro:** `src/lib/negocios/export-excel-libro.ts` (filas ->
+  buffer). Se extrajo del route a proposito: el defecto no se ve en las filas —siempre
+  trajeron `Date`— solo en el XML del `write`, asi que una prueba que reconstruya el libro
+  por su cuenta no tumba una regresion del route. `export-excel.ts` sigue puro y sin
+  conocer XLSX, como declara su encabezado.
+- ⚠️ `XLSX.write` esta declarado `any`: el tipo de retorno lo **afirma** quien llama. Con
+  `type: 'buffer'` el que compila contra `NextResponse` es `Buffer<ArrayBuffer>`; `Buffer`
+  a secas y `Uint8Array` los rechaza `BodyInit` por el generico de @types/node.
 
 Usado por: la descarga de negocios ([[descarga-excel-negocios]]). El precedente
-`src/app/api/revision/export/route.ts` escribe las fechas como texto, no como fecha.
+`src/app/api/revision/export/route.ts` escribe las fechas como texto, no como fecha — y
+es el unico otro export xlsx del repo; barridos los 12 `XLSX.write`, ninguno mas tenia
+`cellDates` en el write.

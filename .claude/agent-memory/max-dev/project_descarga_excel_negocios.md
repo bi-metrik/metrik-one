@@ -39,6 +39,13 @@ Otras decisiones del PR que no se deducen del código:
   trae 46 errores preexistentes (react-hooks y `no-explicit-any` en `supabase/functions/`).
   No se arreglan en un PR ajeno a ellos; el brief que pida «lint en verde» se lee así.
 
+⚠️ **El archivo llegó a producción con las fechas ilegibles en Google Sheets, y el QA en
+pantalla no lo habría visto.** Abría bien en Excel; el defecto solo aparecía al subirlo a
+Drive. Corregido el 2026-09-10 (PR #623, mergeado): `cellDates` salió del `XLSX.write`.
+Detalle y la forma de probarlo en [[sheetjs-fechas-excel]]. **Corolario para este
+entregable: «se descargó y abrió» no es la prueba — hay que abrirlo en la herramienta
+donde el cliente lo va a usar**, que en SOENA es Sheets, no Excel.
+
 **Sin QA en pantalla:** nadie descargó el archivo desde el preview. Pasos en el cuerpo del
 PR (login supervisor en soena, `?fase=venta`, contar filas contra el chip). Pasivo de QA
 de Mauricio.
