@@ -12,7 +12,7 @@ export default function FranjaConciliacion({ data }: Props) {
   if (data.saldoReal === null) {
     return (
       <div className="rounded-lg border border-dashed border-muted-foreground/30 px-4 py-2 text-center text-xs text-muted-foreground">
-        Actualiza tu saldo bancario para activar la conciliacion
+        Actualiza tu saldo bancario para activar la conciliación
       </div>
     )
   }
