@@ -35,6 +35,35 @@ altura de la captura: no hay "full page". Se ajusta a ojo mirando el PNG con la 
 y recortando (`--window-size=1440,762` para cortar justo antes de la tarjeta siguiente).
 `--force-device-scale-factor=2` lo rechazó el clasificador; a 1x se ve bien igual.
 
+## ⚠️⚠️ Cuando el QA es de COMPORTAMIENTO, el render estático no alcanza: montar la pantalla viva
+
+El render estático no tiene estado: no se puede abrir un desplegable, entrar a modo edición ni
+saber qué payload sale al guardar. Para eso hace falta la pantalla **hidratada**, y se levanta
+sin Next y sin base (probado el 2026-09-10 haciendo el QA en pantalla del #613):
+
+1. `vite build` de una mini-app (`main.tsx` con `createRoot`) que monta el componente real
+   según `?pantalla=<slug>`. **`@vitejs/plugin-react` NO está en `node_modules`**: basta
+   `esbuild: { jsx: 'automatic' }`, no se necesita Fast Refresh para abrir una vez.
+2. **Solo se doblan las salidas del navegador**, por `resolve.alias`: `@/lib/actions/riesgos`,
+   `next/navigation`, `next/link`, `sonner`. El resto del producto entra tal cual. El doble de
+   las server actions **anota el payload en `window.__GUARDADO__`** — ahí está la prueba.
+3. Servir con `python3 -m http.server --directory <dist>` (con `file://` los módulos ES mueren
+   por CORS) y manejarlo por CDP como en [[medir-contraste-en-el-render]].
+4. ⚠️ **Para que React vea el cambio hay que usar el setter nativo**, no asignar `.value`:
+   `Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(sel, v)` y
+   después `dispatchEvent(new Event('change',{bubbles:true}))`. Asignar directo actualiza el
+   DOM y **React nunca se entera**: el guardado saldría con el valor viejo y el QA daría un
+   falso verde.
+5. La foto se saca con `Page.captureScreenshot` (`captureBeyondViewport: true`), y para
+   fotografiar un `<select>` desplegado se le pone `size = n` — un select cerrado no muestra
+   sus opciones y la captura no probaría nada.
+
+Lo que esto permitió afirmar y el render estático no: que elegir «Automático» deja la opción
+marcada **y** manda `clasificacion: 'automatico'` a la acción de guardado (ídem «Híbrido» y
+«Manual»), que el modo edición del detalle de causa expone el placeholder corregido, y que
+subir el impacto a 5 pinta «Catastrófico». Las mutaciones que solo el arnés interactivo caza
+son justamente las de estado: el placeholder de un modo que no se alcanza sin clic.
+
 ## Rehacer una tanda ya aprobada: el diff de píxeles es la verificación
 
 Cuando el encargo es "las mismas capturas con estos dos cambios", mirar las imágenes no

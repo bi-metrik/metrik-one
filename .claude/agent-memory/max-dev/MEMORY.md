@@ -46,6 +46,7 @@
 - ⚠️ [Tokens Pino Profundo](project_tokens_pino_profundo.md) — #601 ya mergeado: el acento es invisible sobre carbón, y el branding por workspace nunca pudo aplicar fuera del sidebar
 - ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG, no leerla del generador
 - ⚠️ [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS; el lockup «MéTRIK sustenta» sigue solo en la foto, pero las tildes YA se corrigieron en el producto (#613)
+- ⚠️ [QA en pantalla de las tildes de compliance](project_qa_tildes_compliance.md) — #613 quedó bien; el badge muestra el valor crudo («Automatico») y quedan 7 erratas, una pegada al título ya corregido
 - ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — montada en sustenta.metrik.com.co y NO publicada: dos cierres que se quitan a mano, cuatro huecos con dueño, el copy que no se edita ahí y el contraste ya corregido
 - ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 arregló el rótulo P1; quedan ~20 visibles y `'falta_plata'` es identificador persistido, no copy
 

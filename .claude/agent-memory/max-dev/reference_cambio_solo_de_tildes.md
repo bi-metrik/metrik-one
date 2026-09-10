@@ -57,15 +57,49 @@ Tres comprobaciones que en el #613 salieron todas limpias:
 - **Mapas de etiqueta suelen ser `Record<number, …>`** (`5: { label: 'Catastrofico' }`): el
   valor va por clave numérica, la etiqueta es puro display. Y **el consumidor manda**: la
   importación de Excel resolvía el impacto con `parseInt`, nunca por etiqueta.
-- **En selects y filtros, `value` es la identidad y `label` el copy.** `revision`,
-  `validacion`, `automatico`, `hibrido` **sí** son valores almacenados — y por eso viven en
-  `key:`/`value=`, que no se tocan; solo cambia el texto que los acompaña.
+- **En selects y filtros, `value` es la identidad y `label` el copy.** `automatico` e
+  `hibrido` **sí** son valores almacenados (columna `riesgos_controles.clasificacion`), y por
+  eso viven en `value=`, que no se toca. ⚠️ **`revision` y `validacion` NO lo son**, contra lo
+  que decía el brief y lo que este mismo archivo afirmaba: son `key` de React de un arreglo
+  local (`WORKFLOW_ETAPAS`) dentro de un bloque «Próximamente», sin columna en la base, sin
+  consumidor y sin comparación. Se ve en dos greps —`grep -rn WORKFLOW_ETAPAS src/` da un
+  solo archivo, y la tabla no tiene columna de etapa de ejecución—. **Antes de tratar una
+  clave como "valor almacenado", buscar la columna: que se llame `key` no la persiste.**
 - `grep` de `=== 'Etiqueta'` en todo `src/`: si hay una comparación por string, la etiqueta
   no se toca y se dice en el reporte.
+- ⚠️ **Un importador puede leer por POSICIÓN y volver irrelevante el encabezado.** El de
+  Excel de riesgos hace `rows.slice(1)` y `row[0]`, `row[1]`… : las cabeceras del export son
+  decorativas. Vale la pena mirarlo, porque decide si acentuar el export es peligroso o gratis.
 
 **Lo que se deja fuera y se declara:** un documento **generado** (la hoja «Instrucciones» de
 una plantilla de Excel) no es interfaz, y si su bloque entero está sin tildes de forma
 consistente, corregir una sola palabra lo deja peor.
+
+## ⚠️⚠️ Lo que las dos pruebas mecánicas NO ven, y solo aparece en pantalla
+
+QA en pantalla del #613 el mismo día (método en [[capturas-ui-sin-servidor]]): las 35 tildes
+salieron bien y ningún selector se rompió, **pero el chequeo del código no podía ver dos cosas**:
+
+- **Una etiqueta corregida deja al descubierto la copia SIN corregir que tiene al lado.** En
+  «crear un riesgo», el título de la tarjeta quedó «Descripción de la causa» y la etiqueta del
+  campo, 100 px debajo, sigue diciendo «Descripcion \*». Dos ortografías de la misma palabra
+  en la misma tarjeta, y ninguna de las dos pruebas mecánicas se queja: cada línea es coherente
+  consigo misma. **El barrido de erratas hay que correrlo sobre el RENDER, no sobre el diff.**
+- **Un `value` que la pantalla imprime crudo hereda la ortografía de la BASE, no del catálogo.**
+  Tres sitios pintan `{control.clasificacion}` con `class="capitalize"`, así que el detalle
+  muestra «Automatico» mientras el formulario ya dice «Automático». Corregir el `label` de un
+  `<option>` **no alcanza** si en otra pantalla el mismo dato se muestra sin pasar por el
+  catálogo. **Al corregir la etiqueta de un enumerado, buscar quién más lo imprime.**
+
+Corolario de método: el detector de erratas debe distinguir **el copy del producto de los
+datos ficticios del propio QA** —si no, se reportan como defectos las erratas que uno acaba de
+escribir en el fixture—. La atribución fiable no es «¿está en mi fixture?» (una palabra puede
+estar en los dos) sino **«¿está escrita literalmente en el `.tsx` de esa pantalla?»**.
+
+⚠️ Y hay etiquetas que **solo se leen al pasar el cursor**: en el detalle del riesgo,
+`Catastrófico` vive únicamente en el `title` de cada dimensión. Un extractor que solo mira
+nodos de texto la da por ausente. Separar cuerpo / `placeholder` / `title` y afirmar cada uno
+por su lado, para no reportar como bug lo que es un tooltip.
 
 ## Gotchas del guard de Bash (worktree aislado)
 
