@@ -48,7 +48,7 @@ export const TIPOS_ACEPTACION: readonly TipoAceptacion[] = ['nda', 'autorizacion
  */
 export const VERSION_TEXTO: Record<TipoAceptacion, string> = {
   nda: 'metrik-confidencialidad-contraparte-v1',
-  autorizacion_datos: 'metrik-autorizacion-datos-contraparte-v1',
+  autorizacion_datos: 'metrik-autorizacion-datos-contraparte-v2',
 };
 
 export const TITULO_ACEPTACION: Record<TipoAceptacion, string> = {
@@ -103,9 +103,10 @@ export function textosAceptacion(responsable: string): TextoAceptacion[] {
         'Datos que se tratan: los de los documentos que subas y los que confirmes en el formulario, incluidos identificación, datos de contacto, información societaria y financiera, y datos de las personas relacionadas contigo que aparezcan en esos documentos.',
         'Lectura automatizada: los documentos se procesan con inteligencia artificial para proponer los datos ya escritos. Lo que la máquina propone no se da por cierto: tú lo confirmas o lo corriges antes de firmar, y la decisión final la toma una persona.',
         'Transmisión internacional: ese procesamiento automatizado se hace con proveedores ubicados fuera de Colombia, incluidos Estados Unidos, bajo las garantías del artículo 26 de la Ley 1581 de 2012.',
-        'Conservación: el expediente se conserva cinco (5) años contados desde el fin del vínculo, por deber legal de conservación. Durante ese plazo no se puede borrar, ni siquiera a petición tuya.',
+        'Conservación: el expediente se conserva diez (10) años contados desde el fin del vínculo, por deber legal de conservación (Ley 962 de 2005, artículo 28, al que remiten la Resolución 2328 de 2025 de la Superintendencia de Transporte y la Circular Externa 100-000016 de 2020 de la Superintendencia de Sociedades). Durante ese plazo no se puede borrar, ni siquiera a petición tuya.',
         `Tus derechos: puedes conocer, actualizar y rectificar tus datos, pedir prueba de esta autorización, ser informado del uso que se les ha dado, revocarla o pedir su supresión cuando no proceda un deber legal de conservarlos, y presentar quejas ante la Superintendencia de Industria y Comercio. Para ejercerlos escribe a ${empresa} o a ${ENCARGADO.correo}.`,
-        'Esta autorización es libre y voluntaria. Si no la das, no se puede continuar con el proceso de vinculación.',
+        'Datos sensibles. Los documentos de identificación que subas contienen tu fotografía, que es un dato biométrico y por tanto un dato sensible. Se trata únicamente para verificar tu identidad y sustentar la decisión de vinculación, y no para ninguna otra finalidad. Por tratarse de datos sensibles, NO estás obligado a autorizar su tratamiento. Si prefieres no autorizarlo, infórmalo a la empresa que te invitó: es ella quien decide cómo verificar tu identidad por otro medio.',
+        'Esta autorización es libre y voluntaria, y la de datos sensibles es además opcional en los términos del párrafo anterior. Sin la autorización general no se puede continuar con el proceso de vinculación.',
       ],
     },
   ];
