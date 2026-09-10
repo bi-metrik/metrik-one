@@ -10,6 +10,7 @@ import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
+import { contarCoincidenciasFuera } from '@/lib/negocios/coincidencias-fuera'
 import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-dia'
 import { agruparPorCita, GRUPO_CITA_VENCIDA } from '@/lib/negocios/agrupar-por-cita'
 import { agruparApartandoCerrados } from '@/lib/negocios/agrupar-con-cerrados'
@@ -490,6 +491,36 @@ export default function NegociosClient({
         : stagesActivos.includes(f.key),
   )
 
+  // Coincidencias del término que existen FUERA de la pestaña activa (otra fase, otra
+  // etapa, otro motivo de cierre). Es lo que impedía que el buscador dijera "no existe"
+  // sobre algo que sí existe: un cerrado no aparece bajo ningún chip de fase, así que
+  // buscar su código exacto con "Cobro" puesto devolvía el vacío de la fase. La regla y
+  // sus pruebas viven en `src/lib/negocios/coincidencias-fuera.ts`.
+  //
+  // Se cuenta con los filtros TRANSVERSALES puestos (los de `filtros`) y sin las tres
+  // dimensiones de pestaña. `cerrados` va crudo, no `cerradosFiltrados`: el motivo de
+  // cierre es justamente una de esas dimensiones.
+  const coincidenciasFuera = useMemo(
+    () =>
+      term.length === 0
+        ? 0
+        : contarCoincidenciasFuera([...negocios, ...cerrados], currentFiltrado, (xs) =>
+            aplicarFiltros(xs, filtros),
+          ),
+    [term, negocios, cerrados, currentFiltrado, filtros],
+  )
+
+  /**
+   * Salida del aviso: lleva a "Todos" conservando el término y soltando las dos
+   * subdivisiones de la pestaña que se abandona (etapa y motivo de cierre). Sin
+   * soltarlas, el destino podría seguir escondiendo lo mismo que se fue a buscar.
+   */
+  const verEnTodos = () => {
+    setFase('todos')
+    setEtapaNum(null)
+    setMotivoCierre('todos')
+  }
+
   const showEmpty = currentFiltrado.length === 0
   const isFilteringMotivo = fase === 'cerrados' && motivoCierre !== 'todos'
   // "La búsqueda no encontró nada" solo si la fase/etapa SÍ tiene negocios sin filtrar
@@ -750,7 +781,62 @@ export default function NegociosClient({
           ))}
         </div>
       )}
+
+      {/* El buscador no puede decir que algo no existe.
+          En el vacío es la respuesta a la pregunta que el usuario acaba de hacer; con
+          resultados es una nota al pie. Va DESPUÉS del bloque de lista/vacío, así que
+          cubre también el caso en que la fase está vacía sin filtrar (ahí
+          `sinResultadosBusqueda` es false y el mensaje de búsqueda ni se muestra). */}
+      {coincidenciasFuera > 0 && (
+        <AvisoOtrasPestanas
+          cantidad={coincidenciasFuera}
+          onVerEnTodos={verEnTodos}
+          variante={showEmpty ? 'vacio' : 'pie'}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * «3 coincidencias en otras pestañas · Ver en Todos».
+ *
+ * Deliberadamente NO es un banner: el chip de fase sigue mandando y la lista sigue
+ * siendo la de la pestaña. Esto solo dice que hay más y ofrece la salida.
+ */
+function AvisoOtrasPestanas({
+  cantidad,
+  onVerEnTodos,
+  variante,
+}: {
+  cantidad: number
+  onVerEnTodos: () => void
+  /** 'vacio': debajo del empty state, centrado. 'pie': nota discreta bajo la lista. */
+  variante: 'vacio' | 'pie'
+}) {
+  const enVacio = variante === 'vacio'
+  return (
+    <p
+      className={
+        enVacio
+          ? 'flex flex-wrap items-center justify-center gap-1.5 text-sm text-tinta'
+          : 'flex flex-wrap items-center gap-1.5 px-0.5 text-xs text-tinta-suave'
+      }
+    >
+      <span>
+        {cantidad} coincidencia{cantidad === 1 ? '' : 's'} en otras pestañas
+      </span>
+      <span aria-hidden="true" className="text-tinta-suave/50">
+        ·
+      </span>
+      <button
+        type="button"
+        onClick={onVerEnTodos}
+        className="rounded font-medium text-acento underline underline-offset-2 hover:text-acento-hover focus:outline-none focus:ring-2 focus:ring-acento/40"
+      >
+        Ver en Todos
+      </button>
+    </p>
   )
 }
 
