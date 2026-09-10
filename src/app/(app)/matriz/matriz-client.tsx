@@ -31,7 +31,7 @@ const IMPACTO_LABELS: Record<number, string> = {
   2: 'Menor',
   3: 'Moderado',
   4: 'Mayor',
-  5: 'Catastrofico',
+  5: 'Catastrófico',
 }
 
 // SARLAFT 5x5 lookup matrix

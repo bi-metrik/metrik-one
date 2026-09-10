@@ -10,7 +10,7 @@ import { resumirCartera, type ItemCartera } from '@/lib/negocios/cartera'
 // ── Types ─────────────────────────────────────────────
 
 export interface NumerosData {
-  // P1: Cuanta plata tengo
+  // P1: Cuanto efectivo tengo
   saldoCaja: number
   saldoEsReal: boolean          // true = from saldos_banco, false = calculated
   recaudoMes: number             // recaudo PROPIO del mes, con IVA (v_pyl_mes.ingresos_con_iva)

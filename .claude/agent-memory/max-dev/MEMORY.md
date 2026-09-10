@@ -47,6 +47,7 @@
 - ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG, no leerla del generador
 - ⚠️ [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS; el lockup «MéTRIK sustenta» sigue solo en la foto, pero las tildes YA se corrigieron en el producto (#613)
 - ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — montada en sustenta.metrik.com.co y NO publicada: dos cierres que se quitan a mano, cuatro huecos con dueño, el copy que no se edita ahí y el contraste ya corregido
+- ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 arregló el rótulo P1; quedan ~20 visibles y `'falta_plata'` es identificador persistido, no copy
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana

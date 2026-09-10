@@ -15,11 +15,11 @@ const PERIODICIDAD_LABEL: Record<string, string> = {
 }
 
 const WORKFLOW_ETAPAS = [
-  { key: 'programada', label: 'Programada', icon: Calendar, descripcion: 'Ejecucion creada segun periodicidad' },
-  { key: 'revision', label: 'En revision', icon: Eye, descripcion: 'Responsable ejecuta la actividad' },
+  { key: 'programada', label: 'Programada', icon: Calendar, descripcion: 'Ejecución creada según periodicidad' },
+  { key: 'revision', label: 'En revisión', icon: Eye, descripcion: 'Responsable ejecuta la actividad' },
   { key: 'evidencia', label: 'Evidencia', icon: ClipboardCheck, descripcion: 'Adjuntar soportes y resultados' },
-  { key: 'validacion', label: 'Validacion', icon: FileCheck2, descripcion: 'Supervisor verifica y aprueba' },
-  { key: 'cerrada', label: 'Cerrada', icon: CheckCircle2, descripcion: 'Resultado consolidado en bitacora' },
+  { key: 'validacion', label: 'Validación', icon: FileCheck2, descripcion: 'Supervisor verifica y aprueba' },
+  { key: 'cerrada', label: 'Cerrada', icon: CheckCircle2, descripcion: 'Resultado consolidado en bitácora' },
 ]
 
 const TIPO_COLORS: Record<string, string> = {
@@ -117,7 +117,7 @@ export default function ControlDetailClient({ control, causas }: Props) {
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-acento" />
-          <h2 className="text-sm font-semibold text-tinta">Informacion del control</h2>
+          <h2 className="text-sm font-semibold text-tinta">Información del control</h2>
         </div>
 
         <p className="text-sm font-medium text-tinta">{control.nombre_control}</p>
@@ -202,8 +202,8 @@ export default function ControlDetailClient({ control, causas }: Props) {
               <thead className="text-left text-[10px] font-medium uppercase tracking-wider text-tinta-suave bg-white">
                 <tr>
                   <th className="px-3 py-2">Ref</th>
-                  <th className="px-3 py-2">Categoria</th>
-                  <th className="px-3 py-2 min-w-[200px]">Descripcion</th>
+                  <th className="px-3 py-2">Categoría</th>
+                  <th className="px-3 py-2 min-w-[200px]">Descripción</th>
                   <th className="px-3 py-2 text-center">Imp.</th>
                   <th className="px-3 py-2 text-center">Prob</th>
                 </tr>
@@ -253,7 +253,7 @@ export default function ControlDetailClient({ control, causas }: Props) {
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-acento" />
-            <h2 className="text-sm font-semibold text-tinta">Workflow de ejecucion</h2>
+            <h2 className="text-sm font-semibold text-tinta">Workflow de ejecución</h2>
           </div>
           <span className="inline-flex items-center gap-1 rounded-full bg-acento/10 px-2 py-0.5 text-[10px] font-bold text-acento">
             Proximamente
@@ -283,7 +283,7 @@ export default function ControlDetailClient({ control, causas }: Props) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-acento" />
-            <h2 className="text-sm font-semibold text-tinta">Proxima ejecucion programada</h2>
+            <h2 className="text-sm font-semibold text-tinta">Próxima ejecución programada</h2>
           </div>
           <span className="inline-flex items-center gap-1 rounded-full bg-acento/10 px-2 py-0.5 text-[10px] font-bold text-acento">
             Proximamente
@@ -315,7 +315,7 @@ export default function ControlDetailClient({ control, causas }: Props) {
         </div>
         <div className="rounded-md border border-dashed border-[#E5E7EB] bg-gray-50 p-6 text-center space-y-1.5">
           <Sparkles className="mx-auto h-5 w-5 text-acento/60" />
-          <p className="text-xs font-medium text-tinta">Cada ejecucion quedara registrada aqui</p>
+          <p className="text-xs font-medium text-tinta">Cada ejecución quedará registrada aquí</p>
           <p className="text-[10px] text-tinta-suave">
             Veras fecha programada, responsable, etapa actual, evidencias adjuntas, hallazgos y resultado de cada corrida del control.
           </p>

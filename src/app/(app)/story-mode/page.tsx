@@ -137,11 +137,11 @@ const SLIDES: StorySlide[] = [
     title: 'Todo se convierte en claridad',
     subtitle: 'Las 5 preguntas de tus Números',
     description:
-      '¿Cuánta plata tengo? ¿Estoy ganando? ¿Cuánto queda para mí? ¿Cuánto necesito vender? ¿Cuánto aguanto? — Respuestas reales con tus datos.',
+      '¿Cuánto efectivo tengo? ¿Estoy ganando? ¿Cuánto queda para mí? ¿Cuánto necesito vender? ¿Cuánto aguanto? — Respuestas reales con tus datos.',
     visual: (
       <div className="space-y-2">
         {[
-          '¿Cuánta plata tengo?',
+          '¿Cuánto efectivo tengo?',
           '¿Estoy ganando?',
           '¿Cuánto queda para mí?',
           '¿Cuánto necesito vender?',

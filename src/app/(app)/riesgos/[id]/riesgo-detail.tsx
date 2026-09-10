@@ -51,7 +51,7 @@ const IMPACTO_NIVEL: Record<number, { label: string; color: string }> = {
   2: { label: 'Menor', color: 'bg-yellow-100 text-yellow-800' },
   3: { label: 'Moderado', color: 'bg-orange-100 text-orange-800' },
   4: { label: 'Mayor', color: 'bg-red-100 text-red-700' },
-  5: { label: 'Catastrofico', color: 'bg-red-200 text-red-900' },
+  5: { label: 'Catastrófico', color: 'bg-red-200 text-red-900' },
 }
 
 function getImpactoBadgeColor(value: number): string {
@@ -485,7 +485,7 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
 
       {/* Metadata */}
       <div className="rounded-lg border border-[#E5E7EB] bg-white p-5 space-y-2">
-        <h2 className="text-sm font-semibold text-tinta">Informacion</h2>
+        <h2 className="text-sm font-semibold text-tinta">Información</h2>
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
           <div>
             <span className="text-tinta-suave">Referencia:</span>{' '}
@@ -496,11 +496,11 @@ export default function RiesgoDetail({ riesgo, equipo, causas, controlesFull, ca
             <span className="text-tinta font-medium capitalize">{riesgo.factor_riesgo}</span>
           </div>
           <div>
-            <span className="text-tinta-suave">Fecha identificacion:</span>{' '}
+            <span className="text-tinta-suave">Fecha identificación:</span>{' '}
             <span className="text-tinta font-medium">{riesgo.fecha_identificacion ?? '—'}</span>
           </div>
           <div>
-            <span className="text-tinta-suave">Fecha evaluacion:</span>{' '}
+            <span className="text-tinta-suave">Fecha evaluación:</span>{' '}
             <span className="text-tinta font-medium">{riesgo.fecha_evaluacion ?? '—'}</span>
           </div>
           <div>

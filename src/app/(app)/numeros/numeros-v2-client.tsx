@@ -203,10 +203,10 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
 
           {/* P1 + P2 (2 columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* P1: ¿Cuánta plata tengo? — Saldo bancario + meta de cobro del mes */}
+            {/* P1: ¿Cuánto efectivo tengo? — Saldo bancario + meta de cobro del mes */}
             <QuestionCard
               questionNumber={1}
-              title="¿Cuánta plata tengo?"
+              title="¿Cuánto efectivo tengo?"
               value={data.saldoCaja}
               valueFormat="currency"
               trend={data.recaudoMes > data.recaudoMesAnterior ? 'up' : data.recaudoMes < data.recaudoMesAnterior * 0.95 ? 'down' : 'stable'}
