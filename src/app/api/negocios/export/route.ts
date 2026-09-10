@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import * as XLSX from 'xlsx'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { puedeDescargarNegocios } from '@/lib/roles'
 import { createServiceClient } from '@/lib/supabase/server'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { getNegociosV2 } from '@/app/(app)/negocios/negocio-v2-actions'
+import { construirLibroNegocios } from '@/lib/negocios/export-excel-libro'
 import {
-  COLUMNAS_FECHA,
-  COLUMNAS_FECHA_HORA,
-  COLUMNA_LINK,
-  ENCABEZADOS,
   armarFilasExcel,
   type BonificableNegocio,
   type CobroExportable,
@@ -249,30 +245,7 @@ export async function POST(req: NextRequest) {
       baseUrl: baseUrlDelWorkspace(slug),
     })
 
-    // `cellDates` en las DOS llamadas: en `json_to_sheet` para que un `Date` sea celda
-    // de fecha (no texto), y en `write` para que se escriba como fecha exacta (sin
-    // el redondeo de un milisegundo del serial).
-    const ws = XLSX.utils.json_to_sheet(filas, { header: [...ENCABEZADOS], cellDates: true })
-    const colDe = (h: (typeof ENCABEZADOS)[number]) => ENCABEZADOS.indexOf(h)
-    const colLink = colDe(COLUMNA_LINK)
-    const colsFecha = COLUMNAS_FECHA.map(colDe)
-    const colsFechaHora = COLUMNAS_FECHA_HORA.map(colDe)
-    for (let r = 1; r <= filas.length; r++) {
-      for (const c of colsFecha) {
-        const celda = ws[XLSX.utils.encode_cell({ c, r })]
-        if (celda) celda.z = 'yyyy-mm-dd'
-      }
-      for (const c of colsFechaHora) {
-        const celda = ws[XLSX.utils.encode_cell({ c, r })]
-        if (celda) celda.z = 'yyyy-mm-dd hh:mm'
-      }
-      const link = ws[XLSX.utils.encode_cell({ c: colLink, r })]
-      if (link && typeof link.v === 'string') link.l = { Target: link.v, Tooltip: 'Abrir en ONE' }
-    }
-
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Negocios')
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellDates: true })
+    const buffer = construirLibroNegocios(filas)
 
     const filename = `negocios-${slug}-${todayBogotaISO()}.xlsx`
     return new NextResponse(buffer, {
