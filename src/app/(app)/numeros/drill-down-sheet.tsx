@@ -131,7 +131,7 @@ function DrillP1({ data, monthType, onChangeDrill }: { data: NumerosData; monthT
     <div className="space-y-1">
       <SectionTitle>Saldo actual</SectionTitle>
       <Row label="Saldo en caja" value={data.saldoCaja} bold />
-      <Row label="Fuente" value={data.saldoEsReal ? 'Ultimo saldo reportado' : 'Calculado (estimado)'} color="muted" />
+      <Row label="Fuente" value={data.saldoEsReal ? 'Último saldo reportado' : 'Calculado (estimado)'} color="muted" />
 
       <Divider />
       <SectionTitle>Recaudo del mes</SectionTitle>
@@ -149,8 +149,8 @@ function DrillP1({ data, monthType, onChangeDrill }: { data: NumerosData; monthT
       {proyeccionRecaudo && (
         <>
           <Divider />
-          <SectionTitle>Proyeccion</SectionTitle>
-          <Row label={`Al ritmo actual (dia ${data.diaActual}/${data.diasDelMes})`} value={Math.round(proyeccionRecaudo)} />
+          <SectionTitle>Proyección</SectionTitle>
+          <Row label={`Al ritmo actual (día ${data.diaActual}/${data.diasDelMes})`} value={Math.round(proyeccionRecaudo)} />
           {data.metaRecaudo && (
             <Row
               label="vs Meta"
@@ -185,11 +185,11 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
   return (
     <div className="space-y-1">
       {/* MC + EBITDA — norte operativo (decision 2026-04-23) */}
-      <SectionTitle>Margen de contribucion y EBITDA</SectionTitle>
+      <SectionTitle>Margen de contribución y EBITDA</SectionTitle>
       <Row label="Ingresos cobrados" value={data.ingresosMes} color="green" />
       <Row label="(-) Costos variables" value={data.costosVariablesMes} color="red" indent />
       <Divider />
-      <Row label="Margen de contribucion" value={data.mcMonto} bold color={data.mcMonto >= 0 ? 'green' : 'red'} />
+      <Row label="Margen de contribución" value={data.mcMonto} bold color={data.mcMonto >= 0 ? 'green' : 'red'} />
       <Row label="MC %" value={`${Math.round(data.margenContribucion * 100)}%`} color={data.margenContribucion >= 0.4 ? 'green' : data.margenContribucion >= 0.2 ? 'yellow' : 'red'} />
       <Row label="(-) Costos fijos" value={data.fijosTotalMes} color="red" indent />
       <Divider />
@@ -199,14 +199,14 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       {data.mcLineas.length > 0 && (
         <>
           <Divider />
-          <SectionTitle>MC por linea (mes actual)</SectionTitle>
+          <SectionTitle>MC por línea (mes actual)</SectionTitle>
           {data.mcLineas.map((l, idx) => {
             const sinLinea = l.lineaId === null
             return (
               <div key={l.lineaId ?? `sin-linea-${idx}`} className="flex items-center justify-between py-1.5 border-b border-[#E5E7EB] last:border-b-0">
                 <div className="min-w-0 flex-1 mr-2">
                   <p className={`text-xs font-medium truncate ${sinLinea ? 'text-tinta-suave italic' : 'text-tinta'}`}>
-                    {l.lineaNombre ?? 'Sin linea (costos no asignados)'}
+                    {l.lineaNombre ?? 'Sin línea (costos no asignados)'}
                   </p>
                   <p className="text-[10px] text-tinta-suave">
                     Ingresos {formatCOP(l.ingresos)} · Variables {formatCOP(l.costosVariables)}
@@ -261,7 +261,7 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       <Divider />
       <SectionTitle>Utilidad operativa</SectionTitle>
       {data.componenteNomina > 0 && (
-        <Row label="(-) Nomina (Mi Equipo)" value={data.componenteNomina} color="red" indent />
+        <Row label="(-) Nómina (Mi Equipo)" value={data.componenteNomina} color="red" indent />
       )}
       {data.componenteOperativo > 0 && (
         <Row label="(-) Gastos operativos fijos" value={data.componenteOperativo} color="red" indent />
@@ -279,9 +279,9 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       {data.utilidad > 0 && (
         <>
           <Divider />
-          <Row label={`(-) Provision impuestos (~${Math.round(tasaImpuestos * 100)}%)`} value={provisionImpuestos} color="red" indent />
+          <Row label={`(-) Provisión impuestos (~${Math.round(tasaImpuestos * 100)}%)`} value={provisionImpuestos} color="red" indent />
           <Row label="Disponible para ti" value={disponibleParaTi} bold color="green" />
-          <p className="text-[10px] text-muted-foreground px-1">Estimado. Consulta a tu contador para el calculo exacto.</p>
+          <p className="text-[10px] text-muted-foreground px-1">Estimado. Consulta a tu contador para el cálculo exacto.</p>
         </>
       )}
 
@@ -299,14 +299,14 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       {data.regimenFiscal === 'simple' && (
         <>
           <Divider />
-          <p className="text-[10px] text-muted-foreground px-1 py-1">Tu regimen (SIMPLE) calcula impuestos sobre ingresos brutos. No aplican deducciones por gastos.</p>
+          <p className="text-[10px] text-muted-foreground px-1 py-1">Tu régimen (SIMPLE) calcula impuestos sobre ingresos brutos. No aplican deducciones por gastos.</p>
         </>
       )}
       {!data.regimenFiscal && (
         <>
           <Divider />
           <div className="flex items-center justify-between py-1">
-            <p className="text-[10px] text-muted-foreground">Configura tu regimen fiscal en Configuración para ver estimaciones tributarias.</p>
+            <p className="text-[10px] text-muted-foreground">Configura tu régimen fiscal en Configuración para ver estimaciones tributarias.</p>
             <Link href="/mi-negocio" className="text-[10px] font-medium text-primary hover:underline shrink-0 ml-2">Configurar →</Link>
           </div>
         </>
@@ -326,7 +326,7 @@ function DrillP2({ data }: { data: NumerosData; monthType: string }) {
       <Row label="Utilidad anterior" value={utilidadAnterior} color="muted" />
       {utilidadAnterior !== 0 && (
         <Row
-          label="Variacion"
+          label="Variación"
           value={`${data.utilidad >= utilidadAnterior ? '+' : ''}${utilidadAnterior !== 0 ? Math.round(((data.utilidad - utilidadAnterior) / Math.abs(utilidadAnterior)) * 100) : 0}%`}
           color={data.utilidad >= utilidadAnterior ? 'green' : 'red'}
         />
@@ -413,7 +413,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
       <SectionTitle>Gastos fijos mensuales</SectionTitle>
       {data.staffNomina.length > 0 && (
         <>
-          <Row label="👥 Nomina (Mi Equipo)" value={data.componenteNomina} bold />
+          <Row label="👥 Nómina (Mi Equipo)" value={data.componenteNomina} bold />
           {data.staffNomina.map((s, i) => (
             <Row key={i} label={s.nombre} value={s.salario} indent />
           ))}
@@ -429,22 +429,22 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
 
       <Divider />
       <SectionTitle>Tu margen</SectionTitle>
-      <Row label="Margen de contribucion" value={`${Math.round(data.margenContribucion * 100)}%`} />
+      <Row label="Margen de contribución" value={`${Math.round(data.margenContribucion * 100)}%`} />
       <div className="flex items-center justify-between py-1">
         <span className="text-[10px] text-muted-foreground">{margenLabel}</span>
       </div>
 
       <Divider />
-      <SectionTitle>Minimo que necesitas vender</SectionTitle>
-      <Row label="Gastos fijos / Margen de contribucion" value={data.puntoEquilibrio} bold />
-      <p className="text-[10px] text-muted-foreground px-1 -mt-1">Es la venta minima mensual para cubrir todos tus costos fijos</p>
+      <SectionTitle>Mínimo que necesitas vender</SectionTitle>
+      <Row label="Gastos fijos / Margen de contribución" value={data.puntoEquilibrio} bold />
+      <p className="text-[10px] text-muted-foreground px-1 -mt-1">Es la venta mínima mensual para cubrir todos tus costos fijos</p>
 
       <Divider />
       <SectionTitle>Avance de ventas</SectionTitle>
       <Row label="Ventas del mes" value={data.ventasMes} />
       {data.metaVentas && <Row label="Meta de ventas" value={data.metaVentas} />}
       <Row
-        label="vs Minimo necesario"
+        label="vs Mínimo necesario"
         value={data.ventasMes >= data.puntoEquilibrio ? 'Superado ✅' : `Falta ${formatCOP(faltaParaPE)}`}
         color={data.ventasMes >= data.puntoEquilibrio ? 'green' : 'red'}
         bold
@@ -454,7 +454,7 @@ function DrillP4({ data, monthType }: { data: NumerosData; monthType: string }) 
         <>
           <Divider />
           <SectionTitle>Para cubrir tus costos</SectionTitle>
-          <Row label="Dias restantes" value={`${diasRestantes} dias`} />
+          <Row label="Días restantes" value={`${diasRestantes} días`} />
           <Row label="Venta diaria requerida" value={Math.round(ventaDiariaRequerida)} color="yellow" />
         </>
       )}
@@ -493,16 +493,16 @@ function DrillP5({ data, onChangeDrill }: { data: NumerosData; monthType: string
       <SectionTitle>Escenarios</SectionTitle>
       <Row label="Si gastas menos (-20%)" value={`${escenarioOptimista.toFixed(1)} meses`} color="green" />
       <Row label="Si todo sigue igual" value={`${data.runwayMeses.toFixed(1)} meses`} />
-      <Row label="Si gastas mas (+20%)" value={`${escenarioPesimista.toFixed(1)} meses`} color="red" />
+      <Row label="Si gastas más (+20%)" value={`${escenarioPesimista.toFixed(1)} meses`} color="red" />
 
       <Divider />
-      <SectionTitle>Interpretacion</SectionTitle>
+      <SectionTitle>Interpretación</SectionTitle>
       <div className="text-xs text-muted-foreground py-1">
         {data.runwayMeses > 6
           ? 'Tu negocio tiene buena reserva. Puedes considerar invertir en crecimiento.'
           : data.runwayMeses > 3
-            ? 'Reserva moderada. Enfocate en aumentar ingresos o reducir gastos.'
-            : 'Atencion: reserva baja. Prioriza cobros pendientes y reduce gastos no esenciales.'}
+            ? 'Reserva moderada. Enfócate en aumentar ingresos o reducir gastos.'
+            : 'Atención: reserva baja. Prioriza cobros pendientes y reduce gastos no esenciales.'}
       </div>
 
       <DrillDownLinks links={[

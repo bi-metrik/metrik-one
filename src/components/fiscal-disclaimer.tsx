@@ -17,7 +17,7 @@ export function FiscalDisclaimer({ className = '' }: Props) {
     >
       <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tinta-suave" aria-hidden="true" />
       <p>
-        ONE es una herramienta de gestion operativa, no software contable, y no sustituye la asesoria de tu contador.
+        ONE es una herramienta de gestión operativa, no software contable, y no sustituye la asesoría de tu contador.
         Las causaciones, retenciones, declaraciones y obligaciones tributarias son responsabilidad del profesional contable del cliente.
       </p>
     </div>

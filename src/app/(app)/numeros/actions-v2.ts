@@ -1022,12 +1022,12 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     if (colors.includes('red')) {
       capa2Estado = 'red'
       if (runwayColor === 'red') capa2Razon = `Aguantas ${input.runwayMeses.toFixed(1)} meses — acelera cobros o reduce gastos`
-      else if (factColor === 'red') capa2Razon = `Ventas por debajo del minimo necesario — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
+      else if (factColor === 'red') capa2Razon = `Ventas por debajo del mínimo necesario — faltan $${Math.round(input.puntoEquilibrio - input.ventasMes).toLocaleString('es-CO')}`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else if (colors.includes('yellow')) {
       capa2Estado = 'yellow'
       if (runwayColor === 'yellow') capa2Razon = `Aguantas ${input.runwayMeses.toFixed(1)} meses`
-      else if (factColor === 'yellow') capa2Razon = `Ventas entre el minimo y la meta — vas bien, sigue cerrando`
+      else if (factColor === 'yellow') capa2Razon = `Ventas entre el mínimo y la meta — vas bien, sigue cerrando`
       else capa2Razon = `Cartera vencida: ${Math.round(pctCarteraVencida * 100)}% — revisa cobros pendientes`
     } else {
       capa2Estado = 'green'
@@ -1047,13 +1047,13 @@ function calcularSemaforo(input: SemaforoInput): SemaforoData {
     mensaje = `Falta: ${faltantes.join(', ')}`
   } else if (capa1Estado === 'yellow') {
     const pendientesCount = pendientes.filter(p => !p.done).length
-    mensaje = `${pendientesCount} dato${pendientesCount > 1 ? 's' : ''} por actualizar — tus numeros ya son visibles`
+    mensaje = `${pendientesCount} dato${pendientesCount > 1 ? 's' : ''} por actualizar — tus números ya son visibles`
   } else if (capa2Estado === 'green') {
-    mensaje = 'Todo al dia'
+    mensaje = 'Todo al día'
   } else if (capa2Estado === 'yellow') {
     mensaje = capa2Razon ?? 'Hay temas que atender'
   } else if (capa2Estado === 'red') {
-    mensaje = capa2Razon ?? 'Atencion requerida'
+    mensaje = capa2Razon ?? 'Atención requerida'
   } else {
     mensaje = 'Datos completos'
   }

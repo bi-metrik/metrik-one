@@ -118,7 +118,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-base font-bold">
-          Mis Numeros
+          Mis Números
         </h1>
         <div className="flex items-center gap-1">
           <button
@@ -147,7 +147,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
       {/* Cards or placeholder */}
       {!showCards ? (
         <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground space-y-2">
-          <p className="font-medium">Completa los pendientes para activar tus numeros</p>
+          <p className="font-medium">Completa los pendientes para activar tus números</p>
           <p className="text-xs">Necesitas al menos: 1 gasto fijo, meta de ventas del mes y saldo bancario</p>
         </div>
       ) : (
@@ -169,7 +169,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-tinta-suave">Margen de contribucion</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-tinta-suave">Margen de contribución</p>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-xl font-bold tabular-nums text-tinta">
                     {Math.round(data.margenContribucion * 100)}%
@@ -434,9 +434,9 @@ function VitrinaPill({ onClick }: { onClick: () => void }) {
 function EmptyOnboarding() {
   return (
     <div className="mx-auto max-w-md space-y-6 py-12 text-center">
-      <h1 className="text-xl font-bold">Bienvenido a Mis Numeros!</h1>
+      <h1 className="text-xl font-bold">Bienvenido a Mis Números!</h1>
       <p className="text-sm text-muted-foreground">
-        Para que tus numeros cobren vida, necesitas completar estos pasos:
+        Para que tus números cobren vida, necesitas completar estos pasos:
       </p>
 
       <div className="space-y-3 text-left">
@@ -463,7 +463,7 @@ function EmptyOnboarding() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Cuando completes 1, 2 y 3, tus numeros se activan automaticamente. 🚀
+        Cuando completes 1, 2 y 3, tus números se activan automáticamente. 🚀
       </p>
     </div>
   )

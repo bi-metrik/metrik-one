@@ -27,7 +27,7 @@ export default function SaldoDialog({ onClose }: Props) {
 
   const handleSubmit = () => {
     if (montoNum <= 0) {
-      toast.error('Ingresa un monto valido')
+      toast.error('Ingresa un monto válido')
       return
     }
 
@@ -65,7 +65,7 @@ export default function SaldoDialog({ onClose }: Props) {
               <span className="font-medium">{formatCOP(montoNum)}</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">Mi calculo</span>
+              <span className="text-muted-foreground">Mi cálculo</span>
               <span className="font-medium">{formatCOP(result.saldoTeorico)}</span>
             </div>
             <div className="border-t pt-2">
@@ -118,7 +118,7 @@ export default function SaldoDialog({ onClose }: Props) {
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Revisa tu app del banco y escribe tu saldo actual. Esto mantiene tus numeros precisos.
+          Revisa tu app del banco y escribe tu saldo actual. Esto mantiene tus números precisos.
         </p>
 
         {/* Monto */}
@@ -145,7 +145,7 @@ export default function SaldoDialog({ onClose }: Props) {
             type="text"
             value={nota}
             onChange={e => setNota(e.target.value)}
-            placeholder="Ej: Revise Bancolombia"
+            placeholder="Ej: Revisé Bancolombia"
             className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
           />
         </div>
