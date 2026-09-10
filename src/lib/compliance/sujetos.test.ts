@@ -22,6 +22,8 @@ import {
   porVencer,
   puedeGestionarSujetos,
   puedeVerSujetos,
+  clavesConRelacionCerrada,
+  relacionCerradaAl,
   resumirSujetos,
   situacionSujeto,
   validarMotivoCierre,
@@ -277,5 +279,82 @@ describe('resumirSujetos', () => {
     expect(r.inhabilitado).toBe(1);
     expect(r.porVencer).toBe(1);
     expect(r.relacionesCerradas).toBe(1);
+  });
+});
+
+/**
+ * Quién sale del motor de barrido.
+ *
+ * Esta es la regla que decide a quién NO se le vuelve a consultar. Equivocarse
+ * hacia el "excluir" apaga el monitoreo de alguien que sigue adentro y eso no
+ * se nota hasta la auditoría; equivocarse hacia el "no excluir" le sigue
+ * cobrando al cliente consultas de gente que ya se fue.
+ *
+ * VERIFICADO POR MUTACIÓN (2026-09-10) — cada mutación tumbó pruebas:
+ *   - tratar cualquier `relacion_hasta` no nula como cierre (quitar `<= hoy`) → caen 3
+ *   - invertir el filtro y excluir a los que siguen adentro → caen 4
+ *   - comparar el documento crudo en vez de con `claveContraparte` → caen 2
+ *   - devolver todas las claves y no solo las cerradas → caen 3
+ */
+describe('relacionCerradaAl', () => {
+  it('sin fecha de cierre la relación está viva', () => {
+    expect(relacionCerradaAl(null, HOY)).toBe(false);
+  });
+
+  it('un cierre con fecha futura NO cierra hoy', () => {
+    expect(relacionCerradaAl('2026-12-31', HOY)).toBe(false);
+  });
+
+  it('el día del cierre ya cuenta como cerrada', () => {
+    expect(relacionCerradaAl(HOY, HOY)).toBe(true);
+  });
+
+  it('un cierre pasado está cerrado', () => {
+    expect(relacionCerradaAl('2026-01-15', HOY)).toBe(true);
+  });
+});
+
+describe('clavesConRelacionCerrada', () => {
+  const sujeto = (
+    documento_numero: string,
+    relacion_hasta: string | null,
+    documento_tipo = 'NIT',
+  ) => ({ documento_tipo, documento_numero, relacion_hasta });
+
+  it('solo devuelve a los cerrados, no a todo el que tenga ficha', () => {
+    const set = clavesConRelacionCerrada(
+      [sujeto('900123456', null), sujeto('900999888', '2026-08-01')],
+      HOY,
+    );
+    expect(set.size).toBe(1);
+    expect(set.has('NIT:900999888')).toBe(true);
+  });
+
+  it('el cierre futuro no saca a nadie del barrido', () => {
+    const set = clavesConRelacionCerrada([sujeto('900123456', '2026-12-31')], HOY);
+    expect(set.size).toBe(0);
+  });
+
+  it('la clave sale normalizada, para que cruce con la de la consulta', () => {
+    const set = clavesConRelacionCerrada(
+      [sujeto('900.123.456-7', '2026-08-01', ' nit ')],
+      HOY,
+    );
+    expect(
+      set.has(claveSujeto({ documento_tipo: 'NIT', documento_numero: '9001234567' }) as string),
+    ).toBe(true);
+  });
+
+  it('un sujeto sin documento útil no ensucia el Set con la clave vacía', () => {
+    const set = clavesConRelacionCerrada([sujeto('   ', '2026-08-01')], HOY);
+    expect(set.size).toBe(0);
+  });
+
+  it('una base sin cierres no excluye a nadie', () => {
+    const set = clavesConRelacionCerrada(
+      [sujeto('900123456', null), sujeto('79123456', null, 'CC')],
+      HOY,
+    );
+    expect(set.size).toBe(0);
   });
 });

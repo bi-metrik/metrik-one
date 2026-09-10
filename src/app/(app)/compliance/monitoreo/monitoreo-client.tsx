@@ -74,10 +74,18 @@ export default function MonitoreoClient({ inicial }: { inicial: EstadoMonitoreo 
       if (!r.ok) return setError(r.error);
       await recargar();
       const d = r.data;
+      // La resta por relación cerrada se dice en voz alta. Si solo encogiera la
+      // población, un cierre masivo mal cargado se vería igual que un día sin
+      // nada que barrer.
+      const excluidas =
+        d.excluidas_relacion_cerrada > 0
+          ? ` Se dejaron por fuera ${d.excluidas_relacion_cerrada} con la relación ya cerrada.`
+          : '';
       setAviso(
-        d.modo === 'simulacion'
+        (d.modo === 'simulacion'
           ? `Simulación: ${d.candidatos} contraparte(s) entrarían al barrido. No se consumió ninguna consulta.`
-          : `Barrido: ${d.ejecutadas} consultada(s), ${d.con_delta} con cambio, ${d.notificadas} aviso(s). ${d.diferidas} quedaron para la próxima.`,
+          : `Barrido: ${d.ejecutadas} consultada(s), ${d.con_delta} con cambio, ${d.notificadas} aviso(s). ${d.diferidas} quedaron para la próxima.`) +
+          excluidas,
       );
     });
   }

@@ -164,14 +164,65 @@ export const DIAS_AVISO_SUJETO = 30;
  * `hoyISO` se recibe, no se calcula: la fecha civil de Bogotá la resuelve
  * `todayBogotaISO()` en el llamador (Vercel corre en UTC).
  */
+/**
+ * ¿La relación operativa está cerrada A la fecha que se pregunta?
+ *
+ * Está extraída y exportada porque desde R3 la usan dos consumidores muy
+ * distintos: la pantalla del sujeto, que la muestra, y el motor de barrido, que
+ * decide con ella a quién NO volver a consultar. Si cada uno escribiera su
+ * propia comparación, el día que una de las dos cambiara el tablero diría una
+ * cosa y la facturación haría otra.
+ *
+ * El `<= hoyISO` no es adorno. Un cierre con fecha futura —"este contratista
+ * sale a fin de mes"— deja la relación VIVA hoy, y hoy hay que seguir
+ * vigilándolo. Tratar la sola presencia de la fecha como cierre apagaría el
+ * monitoreo de alguien que todavía está adentro, que es el caso que más caro
+ * sale.
+ */
+export function relacionCerradaAl(
+  relacionHasta: string | null,
+  hoyISO: string,
+): boolean {
+  return relacionHasta !== null && relacionHasta <= hoyISO;
+}
+
+/**
+ * Las claves de contraparte cuya relación ya está cerrada, para que el motor de
+ * barrido las descarte.
+ *
+ * Devuelve un Set y no una lista porque el barrido pregunta una vez por cada
+ * contraparte del universo.
+ *
+ * Lo que NO hace, y es la mitad del diseño: no dice nada sobre quien no tiene
+ * ficha. Ausencia de sujeto NO es exclusión. Un tercero que se consultó alguna
+ * vez y que nadie registró en la base de sujetos sigue barriéndose, porque leer
+ * "no lo registraron" como "no lo vigilen" convierte un descuido administrativo
+ * en un apagón de monitoreo silencioso. Solo saca a quien alguien cerró
+ * explícitamente, con fecha y con motivo.
+ */
+export function clavesConRelacionCerrada(
+  sujetos: readonly Pick<
+    ComplianceSujeto,
+    'documento_tipo' | 'documento_numero' | 'relacion_hasta'
+  >[],
+  hoyISO: string,
+): Set<string> {
+  const cerradas = new Set<string>();
+  for (const s of sujetos) {
+    if (!relacionCerradaAl(s.relacion_hasta, hoyISO)) continue;
+    const clave = claveContraparte(s.documento_tipo, s.documento_numero);
+    if (clave) cerradas.add(clave);
+  }
+  return cerradas;
+}
+
 export function situacionSujeto(
   sujeto: Pick<ComplianceSujeto, 'relacion_hasta'>,
   liberaciones: readonly ComplianceLiberacion[],
   consultaLimpia: ConsultaLimpia | null,
   hoyISO: string,
 ): SituacionSujeto {
-  const relacionCerrada =
-    sujeto.relacion_hasta !== null && sujeto.relacion_hasta <= hoyISO;
+  const relacionCerrada = relacionCerradaAl(sujeto.relacion_hasta, hoyISO);
 
   const cobertura = coberturaDeContraparte(liberaciones, hoyISO);
 
