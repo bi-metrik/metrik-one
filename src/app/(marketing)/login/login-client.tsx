@@ -35,6 +35,10 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
 
+  // Codigo de ingreso (modo tenant). Ver el comentario de `handleCodigo`.
+  const [codigo, setCodigo] = useState('')
+  const [verificando, setVerificando] = useState(false)
+
   useEffect(() => {
     const baseHost = BASE_DOMAIN.split(':')[0]
     const host = window.location.hostname
@@ -81,6 +85,46 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
       setSent(true)
     }
     setLoading(false)
+  }
+
+  /**
+   * Entrar con el codigo que llego al correo, sin abrir el enlace.
+   *
+   * Por que existe: el enlace del correo es de un solo uso, y los filtros de
+   * seguridad de correo corporativo (Microsoft Defender / Safe Links y
+   * equivalentes) lo ABREN antes que la persona, para revisarlo. Cuando el
+   * usuario hace clic, el enlace ya esta gastado y la pantalla lo devuelve al
+   * login sin explicacion. Se comprobo en ALMA el 10 de septiembre de 2026: el
+   * enlace se consumio desde direcciones de datacenter de Microsoft dos minutos
+   * antes de cada clic, y tres de sus cuatro usuarios nunca habian logrado
+   * entrar.
+   *
+   * Un codigo no se puede "abrir": ningun filtro lo puede gastar. El enlace se
+   * mantiene porque para la mayoria de los correos funciona y es un clic menos.
+   *
+   * `type: 'email'` es el que corresponde a un OTP de magic link en GoTrue.
+   * Al verificar, la sesion queda sembrada en ESTE subdominio (que es el mismo
+   * que pidio el codigo), asi que basta con ir a `/` y dejar que el middleware
+   * calcule el destino segun el rol.
+   */
+  const handleCodigo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setVerificando(true)
+    setError('')
+
+    const limpio = codigo.replace(/[^0-9]/g, '')
+    const supabase = createClient()
+    const { error } = await supabase.auth.verifyOtp({ email, token: limpio, type: 'email' })
+
+    if (error) {
+      // El mensaje de GoTrue llega en ingles y dice "expired or invalid" para
+      // los dos casos. Se traduce a lo unico que la persona puede hacer.
+      setError('Ese codigo no sirvio. Revisa que sea el del ultimo correo, o pide uno nuevo.')
+      setVerificando(false)
+      return
+    }
+
+    window.location.href = redirectTo || '/'
   }
 
   // --- Co-branding del subdominio ---
@@ -181,9 +225,48 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
               Revisa tu correo
             </h1>
             <p className="text-sm text-muted-foreground">
-              Enviamos un link magico a <strong className="text-foreground">{email}</strong>. Haz clic en el link para iniciar sesion.
+              Le enviamos un correo a <strong className="text-foreground">{email}</strong> con un codigo y un enlace. Escribe el codigo aca, o abre el enlace.
             </p>
           </div>
+
+          <form onSubmit={handleCodigo} className="space-y-4 text-left">
+            <div className="space-y-2">
+              <label htmlFor="codigo" className="text-sm font-medium text-foreground">
+                Codigo del correo
+              </label>
+              <input
+                id="codigo"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="12345678"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                autoFocus
+                required
+                className="flex h-11 w-full rounded-lg border border-border bg-background px-3 py-2 text-center text-lg tracking-[0.3em] text-foreground placeholder:tracking-normal placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              />
+            </div>
+
+            {error && <p className="text-sm text-red-500">{error}</p>}
+
+            <button
+              type="submit"
+              disabled={verificando}
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {verificando ? 'Entrando...' : 'Entrar'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setSent(false); setCodigo(''); setError('') }}
+              className="w-full text-center text-xs text-muted-foreground underline"
+            >
+              Pedir otro codigo
+            </button>
+          </form>
+
           {metrikSignature}
         </div>
       </div>
@@ -238,7 +321,7 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
             disabled={loading}
             className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {loading ? 'Enviando...' : 'Enviar link magico'}
+            {loading ? 'Enviando...' : 'Enviarme el codigo'}
           </button>
         </form>
 
