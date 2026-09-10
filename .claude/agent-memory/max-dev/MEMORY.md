@@ -47,7 +47,7 @@
 - ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG, no leerla del generador
 - ⚠️ [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS; el lockup «MéTRIK sustenta» sigue solo en la foto, pero las tildes YA se corrigieron en el producto (#613)
 - ⚠️ [QA en pantalla de las tildes de compliance](project_qa_tildes_compliance.md) — #613 quedó bien; el badge muestra el valor crudo («Automatico») y quedan 7 erratas, una pegada al título ya corregido
-- ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — montada en sustenta.metrik.com.co y NO publicada: dos cierres que se quitan a mano, cuatro huecos con dueño, el copy que no se edita ahí y el contraste ya corregido
+- ⚠️ [Landing de Sustenta](project_landing_sustenta.md) — YA es pública, pero el noindex y el `Disallow` se quedan puestos; queda un hueco (la concesión), el repo sigue privado y el copy no se edita ahí
 - ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 arregló el rótulo P1; quedan ~20 visibles y `'falta_plata'` es identificador persistido, no copy
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
@@ -74,7 +74,7 @@
 - ⚠️ [Verificar contra el CSS compilado](reference_verificar_css_compilado.md) — un `@theme` mal declarado deja cada clase sin efecto y los cuatro checks salen verdes; y el `/15` que parece perdido está en un `@supports`
 - [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones; `hourCycle:'h23'` va igual aunque el riesgo no se reproduzca en node
 - ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64; el vector oficial es la unica prueba que vale, y la ventana de 5 min descansa en un supuesto
-- ⚠️⚠️ [Landing estática en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — el DNS ya está (wildcard), la protección por defecto de Vercel DEJA el dominio propio público, y git sí corre en el scratchpad
+- ⚠️⚠️ [Landing estática en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — el DNS ya está (wildcard), la protección por defecto DEJA el dominio propio público, cómo abrirla con control negativo, y git sí corre en el scratchpad
 - ⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados; base verificada por SHA de blobs; Turbopack no acepta `node_modules` symlinkeado; la entrega es un patch
 
 ## Feedback

@@ -54,6 +54,27 @@ ingenua reporta «FALLA — pública» sobre una página perfectamente protegida
   tiene que dar **200** por el mismo instrumento. Sin eso, «todo da 302» también sería el
   síntoma de un instrumento roto.
 
+## Abrirla: `all_except_custom_domains`, no `null`
+
+Es la operación inversa, hecha el 2026-09-10 en `sustenta-landing`. **`null` abre también
+los `*.vercel.app`**; `{"deploymentType": "all_except_custom_domains"}` abre solo el
+dominio propio, que es lo que se pide cuando alguien dice «que el enlace se pueda
+compartir». Es además el valor que tiene `afi-landing`, que es una landing publicada
+(`metrik-landing` sí está en `null`).
+
+```
+PATCH /v9/projects/<p>  {"ssoProtection": {"deploymentType": "all_except_custom_domains"}}
+```
+
+**El control negativo lo regala la propia decisión:** tras abrir, el dominio propio da
+**200** y la URL del deploy (`<proyecto>-<hash>-metrik-one.vercel.app`) sigue dando
+**302 al SSO**. O sea que el mismo instrumento, en la misma corrida, demuestra que sabe
+distinguir pública de protegida — sin eso, tres 200 seguidos no prueban nada.
+
+⚠️ **Abrir el dominio no toca el `noindex` ni el `robots.txt`**: son decisiones distintas
+y se pueden querer por separado (enlace compartible sin salir en buscadores). Comprobar el
+`noindex` **en la misma respuesta anónima** que dio 200, no en el archivo del repo.
+
 ## Ver lo que sirve el dominio protegido, sin abrirlo
 
 Vercel tiene *Protection Bypass for Automation*. Los verbos no son los que uno supone
@@ -68,10 +89,16 @@ Después se descarga con la cabecera `x-vercel-protection-bypass: <secreto>` y s
 **byte a byte** contra el repo (sha256), que es lo único que prueba que el deploy sirve lo
 que uno cree.
 
-⚠️ **Es intermitente en `/`:** con el secreto válido, a veces devuelve la página de login
-(se reconoce porque pesa ~340 kB y empieza con `<!DOCTYPE html><html data-dpl-id=` y trae
-`$RC(`, el React de Vercel) en vez del HTML propio de 39 kB. Los assets estáticos no
-fallaron nunca. Si `/` no cuadra, reintentar antes de concluir nada.
+⚠️ **Es intermitente en `/` y falla de DOS formas.** Con el secreto válido: a veces
+devuelve la página de login (se reconoce porque pesa ~340 kB, empieza con
+`<!DOCTYPE html><html data-dpl-id=` y trae `$RC(`, el React de Vercel), y a veces devuelve
+un **302 a `vercel.com/sso-api`** como si el secreto no viajara. El 2026-09-10 hicieron
+falta **tres intentos** para que el segundo caso cediera. Los assets estáticos no fallaron
+nunca. Reintentar (3-6 veces) antes de concluir nada.
+
+⚠️ **No mandar `x-vercel-set-bypass-cookie: true`**: con `urllib` siguiendo redirecciones
+produce `HTTP Error 307: infinite loop`. Basta la cabecera del secreto, pidiendo **sin
+seguir redirecciones** para poder ver el 302 en vez de perseguirlo.
 
 ⚠️ **Revocar se verifica releyendo el proyecto**, no por el código de salida: el intento
 con `DELETE` devolvió 404 y **dejó el secreto vivo**. La prueba es
