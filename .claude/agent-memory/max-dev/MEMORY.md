@@ -31,6 +31,7 @@
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️⚠️ ["Todos" incluye cerrados](project_todos_incluye_cerrados.md) — PR #607 mergeado: escribir `cierre_motivo` habría roto TODO cierre (CHECK contra `stage_actual`); el SLA seguía corriendo en los 33 cerrados
 - ⚠️ [El cierre se deriva de `estado`](project_cierre_desde_estado.md) — PR #609 sin mergear: el mapa es lista CERRADA (hay 2 `activo` reales) y la ficha del negocio sigue leyendo la columna muerta a propósito
+- ⚠️⚠️ [Un cerrado sale de circulación](project_negocio_cerrado_solo_lectura.md) — PR #610 sin mergear: el recibo de caja NO se corta (7 de 53 alcanzables) y la factura sí (0); el banner sigue intacto a propósito
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene); la invariante que lo sostiene y el caso de $75M
 - ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — PR #550 sin mergear; las 252 marcas se autocorrigen solas (no hay backfill) y los 6 candidatos NO son una lista para aplicar
 - [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — #578 mergeado + enmienda #581: la banda del 1%, y por qué filtrar una fila borra TODAS sus acciones

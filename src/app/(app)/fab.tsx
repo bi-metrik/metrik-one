@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Plus, X, Flame, Receipt, Clock, Play, Square, Landmark, Banknote, FileText, Loader2, Wallet, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, X, Clock, Play, Square, Loader2, Wallet, CheckCircle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
 } from './timer-actions'
-import { FEATURES } from '@/lib/feature-flags'
+import { accionesVisiblesFab, MenuAccionesFab, type AccionFab } from './fab-acciones'
 import { agregarPagoFab, getNegociosParaPagoFab, negocioPuedeRecibirCobro, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import { negocioDeContextoCerrado } from '@/lib/actions/negocio-estado-actions'
 import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
@@ -22,60 +23,6 @@ interface FABProps {
   /** Muestra la acción "Registrar pago" (opt-in por workspace, flag modules.fab_registrar_pago). */
   registrarPagoEnabled?: boolean
 }
-
-interface FABAction {
-  label: string
-  icon: typeof Flame
-  roles: string[]
-  href?: string
-  action?: string
-  feature?: keyof typeof FEATURES
-  contextAware?: boolean
-  contextOnly?: boolean  // Only visible when in a project context
-}
-
-const FAB_ACTIONS: FABAction[] = [
-  {
-    label: 'Registrar cobro',
-    icon: Banknote,
-    href: '/nuevo/cobro',
-    roles: ['owner', 'admin'],
-  },
-  {
-    label: 'Registrar horas',
-    icon: Clock,
-    href: '/nuevo/horas',
-    roles: ['owner', 'admin', 'operator', 'supervisor'],
-    contextAware: true,
-  },
-  {
-    label: 'Registrar gasto',
-    icon: Receipt,
-    href: '/nuevo/gasto',
-    roles: ['owner', 'admin', 'operator', 'supervisor'],
-    contextAware: true,
-  },
-  {
-    label: 'Nuevo negocio',
-    icon: Flame,
-    href: '/negocios/nuevo',
-    roles: ['owner', 'admin', 'supervisor', 'operator'],
-  },
-  {
-    label: 'Programar cobro',
-    icon: FileText,
-    roles: ['owner', 'admin'],
-    action: 'factura',
-    contextOnly: true,
-  },
-  {
-    label: 'Actualizar saldo',
-    icon: Landmark,
-    roles: ['owner', 'admin'],
-    action: 'saldo',
-    feature: 'CONCILIACION',
-  },
-]
 
 const STORAGE_KEY = 'metrik-timer-v2'
 
@@ -105,6 +52,23 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
   const contextNegocioId = negocioContextMatch?.[1] ?? null
   const contextEntityId = contextNegocioId
 
+  // ¿El negocio del contexto esta cerrado? El FAB solo conoce el `pathname`, asi que
+  // lo pregunta al servidor. Se guarda el ID que resulto cerrado, NO un booleano: al
+  // navegar a otro negocio el estado se apaga solo porque el id deja de coincidir, en
+  // vez de quedarse prendido con el resultado del anterior mientras la consulta del
+  // nuevo esta en vuelo. Mismo patron que `negocioSinHonorario` en el modal de pago.
+  const [negocioCerradoId, setNegocioCerradoId] = useState<string | null>(null)
+  const contextoCerrado = negocioCerradoId !== null && negocioCerradoId === contextNegocioId
+
+  useEffect(() => {
+    if (!contextNegocioId) return
+    let cancel = false
+    negocioDeContextoCerrado(contextNegocioId).then((res) => {
+      if (!cancel && res.cerrado) setNegocioCerradoId(contextNegocioId)
+    })
+    return () => { cancel = true }
+  }, [contextNegocioId])
+
   // Timer state
   const [timer, setTimer] = useState<TimerLocal>(DEFAULT_TIMER)
   const [elapsed, setElapsed] = useState(0)
@@ -113,25 +77,7 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
   const [isPending, startTransition] = useTransition()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // "Registrar pago" es opt-in por workspace (flag) y se inyecta dinámicamente.
-  // Visible para roles que tocan dinero; el guard server (rolHabilitadoParaPagoFab)
-  // es la barrera real — excluye operaciones pura aunque la UI lo muestre.
-  const dynamicActions: FABAction[] = [
-    ...(registrarPagoEnabled
-      ? [{
-          label: 'Registrar pago',
-          icon: Wallet,
-          action: 'pago',
-          roles: ['owner', 'admin', 'supervisor', 'operator'],
-        } as FABAction]
-      : []),
-  ]
-
-  const visibleActions = [...FAB_ACTIONS, ...dynamicActions].filter(a =>
-    a.roles.includes(role) &&
-    (a.feature === undefined || FEATURES[a.feature]) &&
-    (!a.contextOnly || contextEntityId !== null)
-  )
+  const visibleActions = accionesVisiblesFab({ role, registrarPagoEnabled, hayContexto: contextEntityId !== null })
 
   // ── Hydrate timer from server ──────────────────────
 
@@ -198,7 +144,10 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   }
 
-  const handleAction = useCallback((action: FABAction) => {
+  const handleAction = useCallback((action: AccionFab) => {
+    // El boton ya sale deshabilitado; esto es la segunda linea, no la primera. Un
+    // `disabled` se puede quitar desde el navegador y el atajo de teclado no lo mira.
+    if (contextoCerrado && action.alimentaElNegocio) return
     setOpen(false)
     if (action.action === 'pago') {
       setPagoModal(true)
@@ -213,7 +162,7 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
       }
       router.push(href)
     }
-  }, [router, contextNegocioId])
+  }, [router, contextNegocioId, contextoCerrado])
 
   const handleOpenTimer = () => {
     setOpen(false)
@@ -358,21 +307,11 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
               )}
 
               {/* Regular actions */}
-              {visibleActions.map((action, i) => {
-                const Icon = action.icon
-                return (
-                  <button
-                    key={action.href ?? action.action}
-                    onClick={() => handleAction(action)}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors ${
-                      i < visibleActions.length - 1 ? 'border-b' : ''
-                    }`}
-                  >
-                    <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    {action.label}
-                  </button>
-                )
-              })}
+              <MenuAccionesFab
+                acciones={visibleActions}
+                contextoCerrado={contextoCerrado}
+                onAccion={handleAction}
+              />
             </>
           )}
         </div>

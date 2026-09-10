@@ -9,6 +9,7 @@ import NegocioDetailClient from './negocio-detail-client'
 import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
+import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 
 export const maxDuration = 60
 
@@ -59,7 +60,21 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
     }
     puedeResolverAvisoRecaudo = canEditBloque(userCtx, { stage: 'cobro' }, [])
   }
-  const negocioCerrado = data.negocio.cierre_motivo !== null
+  // Dos preguntas distintas que hasta ahora compartian una sola variable, y por eso
+  // una arrastraba el defecto de la otra.
+  //
+  // (a) ¿ESTA CERRADO? Sale de `estado`, el criterio unico del producto
+  //     (`motivo-cierre.ts`). Es el que decide si el negocio sigue recibiendo plata.
+  //     Antes salia de `cierre_motivo`, que es NULL en todo cierre real: por eso los
+  //     33 cerrados de SOENA seguian ofreciendo "Registrar pago" (medido 2026-09-10).
+  const cerrado = negocioCerrado(data.negocio.estado)
+  // (b) ¿SE PINTA EL BANNER DE CIERRE? Sigue atado a `cierre_motivo` — A PROPOSITO,
+  //     no por descuido. Ese banner enciende el boton "Reabrir", y `reabrirNegocio`
+  //     corta exigiendo `stage_actual = 'cerrado'`, un stage que esta linea nunca
+  //     alcanza: prenderlo seria ofrecer una accion que la server action rechaza.
+  //     Hoy solo aparece en los 5 negocios de `metrik` que si tienen la columna
+  //     poblada. Cambiar esto es decision de producto, no de este PR.
+  const tieneBannerDeCierre = data.negocio.cierre_motivo !== null
   let validaConsultas: Awaited<ReturnType<typeof listarConsultasPorNegocio>> | null = null
   let datosSarlaft: Awaited<ReturnType<typeof getDatosSarlaft>> | null = null
   let scoreSarlaft: Awaited<ReturnType<typeof getScoreNegocio>> | null = null
@@ -82,7 +97,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       datosSarlaft = await getDatosSarlaft(id)
       scoreSarlaft = await getScoreNegocio(id)
     }
-    if (modules.conciliacion && !negocioCerrado) {
+    if (modules.conciliacion && !cerrado) {
       conciliacionActiva = true
     }
   }
@@ -93,7 +108,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // propio `mx-auto max-w-2xl`: al ensancharse el contenedor del detalle
   // quedaban desalineados. JSX del servidor se puede pasar como prop a un
   // componente cliente; convertir esta página en cliente no es opción.
-  const banner = negocioCerrado && data.negocio.cierre_motivo
+  const banner = tieneBannerDeCierre && data.negocio.cierre_motivo
     ? (
       <div className="mb-3">
         <CerradoHeaderBanner

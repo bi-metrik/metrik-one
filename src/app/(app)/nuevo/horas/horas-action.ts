@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { addHoras } from '@/lib/actions/cobros-horas-rapidos'
+import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 
 export { addHoras }
 
@@ -82,8 +83,12 @@ export async function addHorasDestino(
     .single()
 
   if (!negocio) return { success: false, error: 'Negocio no encontrado' }
-  if (negocio.estado === 'completado') {
-    return { success: false, error: 'No se pueden registrar horas en negocios completados' }
+  // Los tres estados de cierre, no solo `completado`: un negocio `perdido` o
+  // `cancelado` tampoco recibe horas. El hueco solo se alcanzaba con el negocio
+  // prellenado desde la URL — que es justo lo que hace el FAB en contexto — porque
+  // el selector del formulario ya lista solo abiertos.
+  if (negocioCerrado(negocio.estado)) {
+    return { success: false, error: MENSAJE_NEGOCIO_CERRADO }
   }
 
   // If no staff_id provided, default to principal staff
