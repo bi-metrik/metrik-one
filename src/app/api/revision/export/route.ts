@@ -3,37 +3,17 @@ import * as XLSX from 'xlsx'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
+import {
+  construirLibroRevision,
+  type FilaCobro,
+  type FilaGasto,
+  type FilaResumen,
+} from '@/lib/revision/export-excel-libro'
 
 export const runtime = 'nodejs'
 
-interface FilaGasto {
-  fecha: string
-  codigo_negocio: string | null
-  empresa: string | null
-  categoria: string | null
-  clasificacion: string | null
-  descripcion: string | null
-  monto: number
-  retencion: number
-  deducible: string
-  tercero_nit: string | null
-  estado_pago: string | null
-  revisado: string
-  revisado_at: string | null
-  soporte_url: string | null
-}
-
-interface FilaCobro {
-  fecha: string
-  codigo_negocio: string | null
-  empresa: string | null
-  descripcion: string | null
-  monto: number
-  retencion: number
-  tercero_nit: string | null
-  revisado: string
-  revisado_at: string | null
-}
+// Las filas (y sus fechas como texto) se declaran en el modulo del libro: el camino CSV
+// de abajo las emite tal cual, y el de xlsx las convierte a fecha al serializar.
 
 export async function GET(req: NextRequest) {
   const { supabase, workspaceId, role, error } = await getWorkspace()
@@ -114,7 +94,7 @@ export async function GET(req: NextRequest) {
   const cobrosRevisados = cobros.filter(c => c.revisado === 'Si').length
   const gastosDeducibles = gastos.filter(g => g.deducible === 'Si').reduce((s, g) => s + g.monto, 0)
 
-  const resumen = [
+  const resumen: FilaResumen[] = [
     { metrica: 'Mes', valor: mes },
     { metrica: 'Generado', valor: new Date().toISOString() },
     { metrica: '', valor: '' },
@@ -188,12 +168,8 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  // XLSX: 3 hojas
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen')
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cobros), 'Cobros')
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(gastos), 'Gastos')
-  const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  // XLSX: 3 hojas. Las fechas salen como fecha de Excel, no como texto (ver el modulo).
+  const xlsxBuffer = construirLibroRevision({ resumen, cobros, gastos })
 
   return new NextResponse(xlsxBuffer, {
     status: 200,
