@@ -48,7 +48,7 @@
 - ⚠️ [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS; el lockup «MéTRIK sustenta» sigue solo en la foto, pero las tildes YA se corrigieron en el producto (#613)
 - ⚠️ [QA en pantalla de las tildes de compliance](project_qa_tildes_compliance.md) — #613 quedó bien; el badge muestra el valor crudo («Automatico») y quedan 7 erratas, una pegada al título ya corregido
 - ⚠️ [Landing de Sustenta](project_landing_sustenta.md) — YA es pública, pero el noindex y el `Disallow` se quedan puestos; queda un hueco (la concesión), el repo sigue privado y el copy no se edita ahí
-- ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 arregló el rótulo P1; quedan ~20 visibles y `'falta_plata'` es identificador persistido, no copy
+- ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 (rótulo P1) y #616 (banner de alcance) cerrados; quedan ~19 visibles y `falta_plata` es identificador persistido, no copy
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana

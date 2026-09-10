@@ -157,7 +157,7 @@ export default function NumerosV2Client({ initialData, modoVitrina = false }: Pr
             <div className="rounded-xl border p-4" style={{ borderColor: 'rgba(16,185,129,0.30)', backgroundColor: 'rgba(16,185,129,0.06)' }}>
               <p className="text-sm font-semibold text-tinta">Alcance de estos números</p>
               <p className="text-xs text-[#4B5563] mt-1 leading-relaxed">
-                Con la data que compartieron hoy (ventas y costos de Siesa) podemos construir el indicador de <strong>margen bruto</strong>, que ves encendido en &quot;¿Estoy ganando?&quot;. Las otras tres preguntas del negocio (cuánta plata tienes, cuánto te deben y cuánto aguantas) necesitan el <strong>universo completo</strong>: al conectar ONE a Siesa con gastos, cartera y caja, se responden las cuatro en tiempo real.
+                Con la data que compartieron hoy (ventas y costos de Siesa) podemos construir el indicador de <strong>margen bruto</strong>, que ves encendido en &quot;¿Estoy ganando?&quot;. Las otras tres preguntas del negocio (cuánto efectivo tienes, cuánto te deben y cuánto aguantas) necesitan el <strong>universo completo</strong>: al conectar ONE a Siesa con gastos, cartera y caja, se responden las cuatro en tiempo real.
               </p>
             </div>
           )}
