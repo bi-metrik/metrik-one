@@ -46,6 +46,7 @@
 - ⚠️ [Tokens Pino Profundo](project_tokens_pino_profundo.md) — #601 ya mergeado: el acento es invisible sobre carbón, y el branding por workspace nunca pudo aplicar fuera del sidebar
 - ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG, no leerla del generador
 - [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — son datos FICTICIOS, no ALMA; y ONE no tiene pantalla de matriz de permisos (rescatada de un worktree abandonado)
+- ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 arregló el rótulo P1; quedan ~20 visibles y `'falta_plata'` es identificador persistido, no copy
 
 - ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta; el DROP de la sobrecarga es obligatorio
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana

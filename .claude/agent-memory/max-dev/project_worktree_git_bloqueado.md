@@ -53,6 +53,13 @@ list`, que es solo lectura, **se bloquea igual**.
   the worktree"*. No toca otro árbol: le molesta la sustitución de comandos y los `;`.
   La versión plana sí pasa: `until gh pr checks <n> | grep -q "Tipos y pruebas"; do sleep 10; done`.
 
+⚠️ **Pero en varias sesiones el `sleep` en primer plano también está bloqueado**, así que el bucle
+plano tampoco corre. La forma que pasa sin bucle y sin `sleep`, medida el 2026-09-10 (#614):
+**`gh pr checks <n> --watch --interval 20 --fail-fast`** — un solo comando plano que bloquea hasta
+que los checks terminan y sale con el resultado. Darle `timeout` generoso en la tool (10 min).
+Antes de lanzarlo, un `gh pr checks <n>` seco para **contar que los cuatro obligatorios se
+encolaron**: un check ausente y un check en verde se parecen demasiado.
+
 **Para comprobar que el árbol principal quedó intacto sin correr git ahí:**
 `git show <sha>:<ruta> > <scratchpad>/ref.md` y `diff` contra el archivo del árbol
 principal. Cero diferencias = está exactamente en ese commit.
