@@ -8,6 +8,12 @@
  *
  * La lista y los contadores salen de la misma base, así que el número del chip es siempre
  * el largo de la lista que ese chip abre.
+ *
+ * **"Todos" es abiertos + cerrados.** Antes era solo abiertos, y como la descarga a Excel
+ * es WYSIWYG (baja los ids que la pantalla decidió mostrar), desde "Todos" nunca salía un
+ * caso con fecha de cierre: el nombre prometía algo que la pestaña no daba. Las fases de
+ * stage siguen siendo solo abiertos — un cerrado conserva el `stage_actual` que tenía al
+ * salir, y contarlo ahí diría que sigue en Cobro.
  */
 
 type NegocioSegmentable = {
@@ -25,7 +31,8 @@ export type Segmentacion<T> = {
 /**
  * @param abiertos   negocios abiertos (ya con el alcance del rol resuelto en el servidor)
  * @param cerrados   negocios cerrados, ya filtrados por motivo de cierre
- * @param fase       'todos' | 'cerrados' | un stage ('venta' | 'ejecucion' | 'cobro')
+ * @param fase       'todos' (abiertos + cerrados) | 'cerrados' | un stage
+ *                   ('venta' | 'ejecucion' | 'cobro', solo abiertos)
  * @param etapaNum   etapa seleccionada dentro de la fase, o null
  * @param aplicar    resto de filtros (responsable, seccional, búsqueda, atrasados)
  */
@@ -38,7 +45,7 @@ export function segmentarNegocios<T extends NegocioSegmentable>(
 ): Segmentacion<T> {
   const deLaFase =
     fase === 'cerrados' ? cerrados
-    : fase === 'todos' ? abiertos
+    : fase === 'todos' ? [...abiertos, ...cerrados]
     : abiertos.filter((n) => n.stage_actual === fase)
 
   const base = aplicar(deLaFase)

@@ -146,3 +146,21 @@ export function slaHorasDeEtapa(configExtra: unknown): number | null {
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
 }
+
+/**
+ * El SLA que de verdad hay que medirle a un negocio: el de su etapa **si el negocio
+ * sigue abierto**, y null si ya salió del proceso.
+ *
+ * ⚠️ El atraso se calcula contra `ahora`, así que un cerrado lo acumula para siempre.
+ * Medido contra producción el 2026-09-10: los 33 cerrados de SOENA están parados en
+ * etapas CON `sla_horas` (Facturación 120 h, Cita 168 h, Validación 24 h…) y con
+ * `etapa_cambiada_at` poblado — los 33 darían atraso positivo, y en la pestaña "Todos"
+ * saldrían PRIMEROS ordenando por "Más atrasado", sumarían al contador de atrasados y
+ * bajarían al Excel con un reloj que dejó de correr hace meses.
+ *
+ * Va aquí, en la única fuente, y no en cada consumidor: la lista, el contador, el orden
+ * y el Excel leen todos la misma columna.
+ */
+export function slaHorasVigentes(estado: string | null | undefined, configExtra: unknown): number | null {
+  return estado === 'abierto' ? slaHorasDeEtapa(configExtra) : null
+}

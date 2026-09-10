@@ -41,7 +41,10 @@ export default async function NegociosPage({
   const sp = await searchParams
   const [abiertos, cerrados, stagesActivos, etapas, ws, staffList] = await Promise.all([
     getNegociosV2('abierto'),
-    getNegociosV2('completado'),
+    // Los TRES estados de cierre, no solo el exitoso. Tiene que ser el mismo valor que
+    // pide `POST /api/negocios/export`: si la pantalla lista un negocio que la ruta del
+    // Excel no tiene en su mapa, la fila desaparece del archivo en silencio.
+    getNegociosV2('cerrado'),
     getWorkspaceStagesActivos(),
     getEtapasSegmentador(),
     getWorkspace(),

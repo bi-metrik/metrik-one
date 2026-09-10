@@ -98,9 +98,13 @@ export async function POST(req: NextRequest) {
 
   try {
     // ── 1. Los negocios, tal como los ve la lista (mismo origen que la pantalla) ──
+    //
+    // ⚠️ Los dos argumentos tienen que ser EXACTAMENTE los de `negocios/page.tsx`. Lo que
+    // esta ruta no encuentre en su mapa se cae del archivo sin ruido (`porId.get(id)` +
+    // `filter(Boolean)`): el usuario ve N filas en pantalla y baja menos, sin error.
     const [abiertos, cerrados, wsRes] = await Promise.all([
       getNegociosV2('abierto'),
-      getNegociosV2('completado'),
+      getNegociosV2('cerrado'),
       supabase.from('workspaces').select('slug').eq('id', workspaceId).single(),
     ])
     if (wsRes.error || !wsRes.data?.slug) {

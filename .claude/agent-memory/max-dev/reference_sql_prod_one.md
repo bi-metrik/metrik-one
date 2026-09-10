@@ -65,6 +65,14 @@ día 2026-09-07, dos subagentes aislados dieron resultados opuestos:
   con un rechazo. Y ⚠️ **no reintentar por vitest**: usar el corredor de pruebas
   para ejecutar una medición es exactamente lo que el rechazo pide no hacer.
 
+- PR #607 (2026-09-10) — la vía del #550 sirvió **cuatro corridas seguidas** sin un solo
+  rechazo, reescribiendo el `.py` cada vez (una petición literal por corrida). Dos sintaxis
+  de PostgREST que valieron oro y no están en el repo: **filtrar por una columna del padre
+  embebido**, `?select=…,lineas_negocio!inner(nombre,workspace_id)&lineas_negocio.workspace_id=eq.<ws>`
+  (`etapas_negocio` no tiene `workspace_id`); y **leer una llave de `jsonb` con alias**,
+  `select=nombre,sla:config_extra->sla_horas`. ⚠️ Un 400 al filtrar suele ser una columna
+  que no existe en esa tabla: mirar `src/types/database.ts` antes que la red.
+
 **La vía que sirvió (y que conviene intentar primero, porque no toca
 `.credentials.md`):** symlink de `.env.local`, leer de ahí
 `SUPABASE_SERVICE_ROLE_KEY` con un script propio, y consultar por **PostgREST**
