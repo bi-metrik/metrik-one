@@ -129,6 +129,38 @@ ya existe, `ls -la` y mirar los mtime: si son de antes de mi primer comando, es 
 - **`supabase/functions/` NO lo ignora eslint:** un archivo Deno nuevo entra completo al
   check "Lint de lo que cambia" del PR. Conviene lintearlo antes de pushear.
 
+⚠️⚠️ **La rama se crea ANTES de leer los archivos, no después.** Medido el 2026-09-10
+(PR #619): se leyó toda la pantalla de `/numeros`, se armó el inventario de cadenas a
+corregir, y recién entonces se hizo `fetch` + `switch -c … origin/main`. El switch trajo
+dos PR mergeados en el medio (#614/#616, «plata» → «efectivo») y **los archivos cambiaron
+en disco a mitad del encargo**: el inventario recién armado describía un árbol que ya no
+existía y hubo que rehacer el barrido. El worktree suele quedar parado en una rama vieja de
+otra sesión, así que **lo que se lee antes del switch es una base arbitraria**, no `main`.
+Orden correcto: `fetch` → `switch -c` → recién ahí leer y medir. Hermano de
+[[cifras-del-brief-caducan]], pero acá lo que caduca es el propio fuente.
+
+⚠️⚠️ **Lo mismo al commitear la MEMORIA: los archivos de `.claude/agent-memory/` los mueven
+otras sesiones casi a diario.** Si se editan estando parado en la rama vieja del worktree y
+después se commitean desde una rama nacida de `origin/main` fresco, el commit **revierte en
+silencio** lo que entró en el medio. Se comprueba en dos comandos antes de escribir nada:
+
+```
+git log --oneline HEAD..origin/main -- .claude/agent-memory/max-dev/
+git diff --stat HEAD origin/main -- <los archivos que voy a tocar>
+```
+
+Si el segundo no sale vacío, **descartar las ediciones** (`git checkout -- <ruta>`), crear
+la rama desde `origin/main` y **reaplicarlas sobre la versión fresca**. Pasó el 2026-09-10:
+`MEMORY.md` y este archivo se habían movido en 3 commits (#615, #616, #618) y el commit
+habría borrado 15 líneas ajenas.
+
+⚠️ **`node scripts/lint-lineas-cambiadas.mjs origin/main` NO ve los cambios SIN COMMITEAR**,
+y no lo dice: imprime *«El PR no toca archivos de codigo. Nada que revisar.»* y sale con 0 —
+el mismo mensaje que cuando el PR de verdad no toca código. Un verde antes de commitear
+**no verificó nada**. Se corre DESPUÉS del `git commit`; ahí sí lista los archivos y separa
+la deuda vieja de las líneas del PR. Familia del arnés que miente en verde
+([[pruebas-por-mutacion]]).
+
 ⚠️ **Nunca reutilizar la rama del worktree tras un merge con squash.** El árbol suele quedar
 parado en la rama del PR anterior, cuyo contenido ya está en la rama principal pero con otro
 SHA: seguir ahí hace que el PR siguiente **revierta** lo que entró en medio. La rama nueva

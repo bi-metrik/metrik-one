@@ -56,3 +56,36 @@ certifica el árbol que existía cuando corrió; cualquier edición posterior lo
 rota. Va siempre acompañada de un caso **guard** que afirma que el elemento existe: sin él,
 apagar el módulo deja las demás pruebas pasando vacías. Y la mutación se corre igual —
 reintroducir a mano el JSX borrado y ver caer las pruebas, ver [[pruebas-por-mutacion]].
+
+## ⚠️ Un client component que importa un VALOR de un `'use server'` hay que doblarlo
+
+Medido el 2026-09-10 rindiendo `numeros/numeros-v2-client.tsx` (PR #619). Lo que decide si
+el render es viable **no es qué componente es, sino qué tipo de import hace**:
+
+- `import type { X } from './actions'` → **se borra al compilar, no hace falta nada**. Por
+  eso `numeros/drill-down-sheet.tsx` se renderiza sin un solo mock, aunque su tipo viva en
+  un archivo `'use server'`.
+- `import { getNumeros } from './actions'` (un **valor**) → al importar el componente se
+  evalúa el módulo entero, y con él `get-workspace`, `createServiceClient` y la cadena de
+  Supabase. Se dobla el módulo completo, no la función:
+
+```ts
+vi.mock('./actions-v2', () => ({
+  getNumeros: async () => null,
+  actualizarSaldo: async () => ({ success: true }),
+}))
+const { default: Cliente } = await import('./numeros-v2-client')
+```
+
+El `await import` **después** del `vi.mock` es obligatorio: un `import` estático arriba se
+iza por encima del mock. En ese archivo el doble nunca llega a ejecutarse —el cliente solo
+llama a `getNumeros` al navegar de mes— pero sin él el import ni arranca.
+
+⚠️ Esa pantalla pide **`useSearchParams` además de `useRouter`** (el `useEffect` que lee
+`?saldo=1`). Devolver `new URLSearchParams()` alcanza.
+
+⚠️ Para fijar copy que vive en ramas condicionales, el fixture se diseña para **encender
+todas** las ramas, y lo que no cabe en uno solo va en renders aparte (`regimenFiscal` es un
+enum: `null` y `'simple'` son dos llamadas). Y conviene una **lista negra** de las formas
+malas afirmada sobre CADA render: atrapa la regresión escrita en una rama que ese día no se
+estaba pintando, que es justo lo que una prueba de casos positivos no ve.

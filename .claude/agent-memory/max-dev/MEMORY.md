@@ -12,7 +12,7 @@
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
 - ⚠️ [/equipo segmentada por mes](project_equipo_por_mes.md) — PR #597 sin mergear (falta QA en pantalla): el 4925%, el reloj propio de la pestaña de operaciones y lo que NO se segmenta
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
-- ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — git fuera se bloquea (pero el mantenimiento sin `-C` pasa); otra sesión te borra la rama o commitea sobre la tuya; `gh pr merge` miente al fallar; otro repo = tarball + API (`createCommitOnBranch`); el scratchpad es COMPARTIDO
+- ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer (el switch cambia los archivos bajo tus pies); el lint de CI no ve lo sin commitear; otra sesión te borra la rama; `gh pr merge` miente al fallar; otro repo = tarball + API; el scratchpad es COMPARTIDO
 - ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote y /v/ quedó fuera; migración 10 años pendiente
 - [Verificar el deploy sin el CLI de Vercel](project_verificar_deploy_sin_vercel_cli.md) — el CLI se cuelga en un worktree aislado; el commit status y los deployments de GitHub dan fechas absolutas
 - ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate toda escritura en metrik-one se bloquea; no crear el flag a mano, pedir `/max`
@@ -65,7 +65,7 @@
 - ⚠️ [Cambio SOLO de tildes](reference_cambio_solo_de_tildes.md) — la equivalencia sin acentos NO dice dónde cayó la tilde; hace falta el chequeo de zonas de identidad, y el plural en -ciones ya está bien
 - [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` ya está y rasteriza SVG; los `<link>` de icono se leen del HTML del build; el preview de Vercel está tras SSO
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte; y cómo probar que otro PDF no cambió byte a byte
-- [Renderizar el AppShell en aislamiento](reference_render_appshell_aislado.md) — sí se puede: solo `usePathname` + `useRouter` (este lo pide el FAB); Supabase no se dobla
+- [Renderizar client components en aislamiento](reference_render_appshell_aislado.md) — el AppShell solo pide `usePathname`+`useRouter`; un import de VALOR desde un `'use server'` sí se dobla (uno de tipo no)
 - [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
 - [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger; la verificación va en sentencia aparte
 - [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — el `Date` se arma con la hora de pared en componentes LOCALES; `cellDates` en las dos llamadas; medido en UTC y Bogotá
