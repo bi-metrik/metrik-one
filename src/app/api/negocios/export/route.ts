@@ -1,22 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { puedeDescargarNegocios } from '@/lib/roles'
-import { createServiceClient } from '@/lib/supabase/server'
-import { traerTodo } from '@/lib/supabase/paginar'
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { getNegociosV2 } from '@/app/(app)/negocios/negocio-v2-actions'
-import { construirLibroNegocios } from '@/lib/negocios/export-excel-libro'
-import {
-  armarFilasExcel,
-  type BonificableNegocio,
-  type CobroExportable,
-  type ComercialNegocio,
-  type ResponsableOperaciones,
-  type StaffNombre,
-  type TramoCobro,
-  type ValorNegocio,
-  type VentaNegocio,
-} from '@/lib/negocios/export-excel'
+import { construirExportNegocios } from '@/lib/negocios/construir-export-negocios'
+import { leerIdsExport, MAX_IDS_EXPORT } from '@/lib/negocios/ids-export'
 
 /**
  * POST /api/negocios/export  { ids: string[] }  →  negocios-{slug}-{YYYY-MM-DD}.xlsx
@@ -33,6 +20,10 @@ import {
  * si el rol fuera operator, por responsable; los ids que no pertenezcan a lo que ese
  * usuario puede ver se ignoran en silencio.
  *
+ * El archivo lo arma `construirExportNegocios`, que comparte con la subida a Drive
+ * (`subirExportNegociosADrive`): las dos superficies entregan el mismo libro porque es
+ * la misma función, no dos que se parecen.
+ *
  * Si CUALQUIER lectura falla, la respuesta es 500 y queda en el log con prefijo
  * `[negocios-export]`. Nunca un Excel con ceros disfrazados: un archivo a medias con
  * cara de completo es peor que ningún archivo (ver `traerTodo`).
@@ -40,41 +31,7 @@ import {
 
 export const runtime = 'nodejs'
 
-const MAX_IDS = 5000
-
 const PREFIJO = '[negocios-export]'
-
-// Las vistas del dinero no están en `database.ts` y algunas son server-only:
-// se leen sin tipar, como hace el resto del módulo de negocios.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = (c: unknown): any => c
-
-/** `.in()` viaja en la URL: con miles de ids se pasa del largo permitido. */
-const TAMANO_LOTE_IDS = 200
-
-function lotes<T>(xs: T[], tamano: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < xs.length; i += tamano) out.push(xs.slice(i, i + tamano))
-  return out
-}
-
-function leerIds(body: unknown): string[] | null {
-  const ids = (body as { ids?: unknown } | null)?.ids
-  if (!Array.isArray(ids)) return null
-  if (ids.length === 0 || ids.length > MAX_IDS) return null
-  const limpios = new Set<string>()
-  for (const id of ids) {
-    if (typeof id !== 'string' || id.length === 0 || id.length > 64) return null
-    limpios.add(id)
-  }
-  return Array.from(limpios)
-}
-
-function baseUrlDelWorkspace(slug: string): string {
-  const dominio = (process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co').trim()
-  const protocolo = dominio.startsWith('localhost') ? 'http' : 'https'
-  return `${protocolo}://${slug}.${dominio}`
-}
 
 export async function POST(req: NextRequest) {
   const { supabase, workspaceId, role, error } = await getWorkspace()
@@ -87,165 +44,16 @@ export async function POST(req: NextRequest) {
   } catch {
     return new NextResponse('Cuerpo inválido', { status: 400 })
   }
-  const ids = leerIds(body)
+  const ids = leerIdsExport(body)
   if (!ids) {
-    return new NextResponse(`Se esperaba { ids: string[] } con entre 1 y ${MAX_IDS} ids`, { status: 400 })
+    return new NextResponse(
+      `Se esperaba { ids: string[] } con entre 1 y ${MAX_IDS_EXPORT} ids`,
+      { status: 400 },
+    )
   }
 
   try {
-    // ── 1. Los negocios, tal como los ve la lista (mismo origen que la pantalla) ──
-    //
-    // ⚠️ Los dos argumentos tienen que ser EXACTAMENTE los de `negocios/page.tsx`. Lo que
-    // esta ruta no encuentre en su mapa se cae del archivo sin ruido (`porId.get(id)` +
-    // `filter(Boolean)`): el usuario ve N filas en pantalla y baja menos, sin error.
-    const [abiertos, cerrados, wsRes] = await Promise.all([
-      getNegociosV2('abierto'),
-      getNegociosV2('cerrado'),
-      supabase.from('workspaces').select('slug').eq('id', workspaceId).single(),
-    ])
-    if (wsRes.error || !wsRes.data?.slug) {
-      throw new Error(`workspace: ${wsRes.error?.message ?? 'sin slug'}`)
-    }
-    const slug = wsRes.data.slug as string
-
-    const porId = new Map([...abiertos, ...cerrados].map((n) => [n.id, n]))
-    // En el orden en que el cliente los mandó, que es el orden de la pantalla.
-    const negocios = ids.map((id) => porId.get(id)).filter((n): n is NonNullable<typeof n> => !!n)
-    const idsValidos = negocios.map((n) => n.id)
-    const enLista = new Set(idsValidos)
-
-    // ── 2. Dinero, venta, comercial, bonificable: vistas server-only ──
-    //
-    // Van con el cliente de SERVICIO a propósito: `v_venta_mes_comercial`,
-    // `v_negocio_bonificable` y `v_negocio_comercial` están revocadas a
-    // `authenticated`, y con el cliente de la sesión devuelven `42501`, que un `?? []`
-    // convertiría en ceros sin que nadie lo note (mismo patrón que `numeros/actions-v2`,
-    // PR #518). El `.eq('workspace_id', …)` NO es adorno: el service client no pasa por
-    // RLS y sin él la lectura mezclaría los quince workspaces.
-    //
-    // Se lee todo el workspace y se filtra en memoria por los ids pedidos: mandar los
-    // ids por `.in()` rompería la URL con miles, y las vistas no tienen más filas que
-    // negocios. Todas pasan por `traerTodo` con orden estable: PostgREST corta en
-    // 1.000 filas sin avisar.
-    const svc = createServiceClient()
-    const soloPedidos = <T extends { negocio_id: string | null }>(xs: T[]) =>
-      xs.filter((x) => x.negocio_id && enLista.has(x.negocio_id))
-
-    const [valores, ventas, bonificables, comerciales, tramos, cobros, staff] = await Promise.all([
-      traerTodo<ValorNegocio>(
-        (desde, hasta) =>
-          db(svc)
-            .from('v_negocio_valor')
-            .select('negocio_id, valor_base, valor_iva, plan_pago, techo_tarifa')
-            .eq('workspace_id', workspaceId)
-            .order('negocio_id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} v_negocio_valor` },
-      ),
-      traerTodo<VentaNegocio>(
-        (desde, hasta) =>
-          db(svc)
-            .from('v_venta_mes_comercial')
-            .select('negocio_id, fecha_venta, caso_completo')
-            .eq('workspace_id', workspaceId)
-            .order('negocio_id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} v_venta_mes_comercial` },
-      ),
-      traerTodo<BonificableNegocio>(
-        (desde, hasta) =>
-          db(svc)
-            .from('v_negocio_bonificable')
-            .select('negocio_id, bonificable')
-            .eq('workspace_id', workspaceId)
-            .order('negocio_id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} v_negocio_bonificable` },
-      ),
-      traerTodo<ComercialNegocio>(
-        (desde, hasta) =>
-          db(svc)
-            .from('v_negocio_comercial')
-            .select('negocio_id, comercial_staff_id')
-            .eq('workspace_id', workspaceId)
-            .order('negocio_id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} v_negocio_comercial` },
-      ),
-      // Tramos BRUTOS (con IVA) de cada cobro: es el recaudado de honorario que se
-      // resta del honorario con IVA. Ver la cabecera de `export-excel.ts`.
-      traerTodo<TramoCobro>(
-        (desde, hasta) =>
-          db(svc)
-            .from('v_cobro_valor')
-            .select('negocio_id, a_tramo1, a_tramo2')
-            .eq('workspace_id', workspaceId)
-            .order('cobro_id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} v_cobro_valor` },
-      ),
-      // Los pagos uno a uno (para primer/segundo/otros). Con la sesión: `cobros` sí
-      // está concedida y la RLS acota por workspace; el filtro explícito lo refuerza.
-      traerTodo<CobroExportable>(
-        (desde, hasta) =>
-          db(supabase)
-            .from('cobros')
-            .select('id, negocio_id, monto, fecha, created_at, external_ref, anulado_at')
-            .eq('workspace_id', workspaceId)
-            .is('anulado_at', null)
-            .not('negocio_id', 'is', null)
-            .order('fecha', { ascending: true, nullsFirst: false })
-            .order('created_at', { ascending: true })
-            .order('id', { ascending: true })
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} cobros` },
-      ),
-      traerTodo<StaffNombre>(
-        (desde, hasta) =>
-          db(supabase)
-            .from('staff')
-            .select('id, full_name')
-            .eq('workspace_id', workspaceId)
-            .order('id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} staff` },
-      ),
-    ])
-
-    // ── 3. Responsable de operaciones (`negocio_responsables.rol`) ──
-    // No tiene `workspace_id`: se pide por ids, en lotes que quepan en la URL.
-    const operaciones: ResponsableOperaciones[] = []
-    for (const lote of lotes(idsValidos, TAMANO_LOTE_IDS)) {
-      const filas = await traerTodo<ResponsableOperaciones>(
-        (desde, hasta) =>
-          db(supabase)
-            .from('negocio_responsables')
-            .select('negocio_id, staff_id')
-            .in('negocio_id', lote)
-            .eq('rol', 'operaciones')
-            .order('negocio_id')
-            .order('staff_id')
-            .range(desde, hasta),
-        { etiqueta: `${PREFIJO} negocio_responsables` },
-      )
-      operaciones.push(...filas)
-    }
-
-    // ── 4. Filas y hoja ──
-    const filas = armarFilasExcel({
-      negocios,
-      valores: soloPedidos(valores),
-      ventas: soloPedidos(ventas),
-      bonificables: soloPedidos(bonificables),
-      comerciales: soloPedidos(comerciales),
-      tramos: soloPedidos(tramos),
-      cobros: soloPedidos(cobros),
-      operaciones,
-      staff,
-      baseUrl: baseUrlDelWorkspace(slug),
-    })
-
-    const buffer = construirLibroNegocios(filas)
+    const { buffer, slug } = await construirExportNegocios(supabase, workspaceId, ids)
 
     const filename = `negocios-${slug}-${todayBogotaISO()}.xlsx`
     return new NextResponse(buffer, {
