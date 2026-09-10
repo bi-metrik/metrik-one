@@ -49,7 +49,27 @@ Medido el 2026-09-03 con `xlsx@0.18.5` corriendo el mismo script bajo `TZ=UTC` y
   `type: 'buffer'` el que compila contra `NextResponse` es `Buffer<ArrayBuffer>`; `Buffer`
   a secas y `Uint8Array` los rechaza `BodyInit` por el generico de @types/node.
 
-Usado por: la descarga de negocios ([[descarga-excel-negocios]]). El precedente
-`src/app/api/revision/export/route.ts` escribe las fechas como texto, no como fecha — y
-es el unico otro export xlsx del repo; barridos los 12 `XLSX.write`, ninguno mas tenia
-`cellDates` en el write.
+- ⚠️⚠️ **`cellDates` en `json_to_sheet` NO arregla nada si las filas traen TEXTO.** Medido
+  el 2026-09-10 (PR #627): con las filas como string, el XML sale **identico** con y sin la
+  opcion (`<c t="str"><v>2026-09-01</v></c>` en los dos casos). Lo que convierte la celda
+  es el **`Date`**; la opcion solo decide como se guarda ese `Date`. O sea que copiar el
+  patron de negocios a otra ruta **no basta**: alli `armarFilasExcel` ya devolvia `Date`.
+  Primero se parsea con `fechaExcel`, y recien entonces la opcion sirve de algo.
+- **Una fila con `null` no deja celda en el XML**, aunque se le asigne `z`: `json_to_sheet`
+  crea un hueco (`t:'z'`, `v:null`) y el `write` no lo emite. Asi que una fecha ausente
+  queda como celda vacia sin necesidad de saltarla en el bucle de formatos — probado
+  quitando la guarda, ninguna prueba cambio. **La garantia la da la prueba, no la guarda.**
+- **Con `header` explicito, una lista VACIA deja la fila de encabezados**; sin el, la hoja
+  sale completamente en blanco. Es un cambio de comportamiento a tener en cuenta al migrar
+  una hoja que hoy no declara sus columnas.
+
+**Como se verifica que no se movio nada mas:** reconstruir el libro con la implementacion
+VIEJA (copiando las 4 lineas del route de `origin/main` dentro de un script) y comparar el
+XML hoja por hoja contra el nuevo, sobre las mismas filas. En el #627 salio: `Resumen`
+identico byte a byte, y en `Cobros`/`Gastos` cambian **solo** las celdas de fecha. Es la
+unica forma barata de probar que no se corrio ninguna columna.
+
+Usado por: la descarga de negocios ([[descarga-excel-negocios]]) y el export de
+`/revision` (PR #627, `src/lib/revision/export-excel-libro.ts`), que eran los **dos**
+unicos export xlsx del repo. Barridos los 12 `XLSX.write`, ninguno mas tenia `cellDates`
+en el write.
