@@ -1,24 +1,59 @@
 ---
 name: valida-privacidad-v13
-description: Cierre del frente de datos personales KYC (2026-09-10) — autorizacion v2 en metrik-one (PR #621) y Politica Habeas Data v1.3 en metrik-valida (PR #37), los dos SIN mergear; que invalida de verdad el bump de version y que NO
+description: Frente de datos personales KYC — autorizacion v2 en ONE (#621) y Politica Habeas Data v1.3 en Valida (#37), los dos MERGEADOS el 2026-09-10; el plazo canonico de diez anios, que invalida de verdad el bump de version, y por que los docstrings quedaron atras (#622)
 metadata:
   type: project
 ---
 
-## Estado al 2026-09-10
+## Estado al 2026-09-10 (los tres PR ya estan en `main`)
 
-Reemplaza a la memoria `valida-privacidad-v12`, que quedo caduca: **el PR #36 YA se mergeo**
-(`main` de metrik-valida = `c117f60`, v1.2 vigente desde el 10-sep).
+Reemplaza a `valida-privacidad-v12`, que quedo caduca. Ejecutan
+`proyectos/metrik/valida/docs/entrega/cierre-emilio-privacidad-kyc.md` (dictamen de cierre de
+Emilio; **manda sobre los documentos previos de Lucia**).
 
-Dos PR **abiertos y sin mergear**, ejecutan `proyectos/metrik/valida/docs/entrega/cierre-emilio-privacidad-kyc.md`
-(dictamen de cierre de Emilio; **manda sobre los documentos previos de Lucia**):
+- **metrik-one #621** (`28069ec`, mergeado 19:40Z): el texto que firma la contraparte pasa a
+  **diez (10) anios** de conservacion con su fundamentacion, gana el parrafo de **datos
+  sensibles**, cambia el cierre, y `VERSION_TEXTO.autorizacion_datos` sube a **`-v2`**.
+- **metrik-valida #37** (mergeado 19:40Z): Politica Habeas Data a **v1.3**.
+- **metrik-one #622**: la correccion de los docstrings que el #621 dejo atras (abajo).
 
-- **metrik-one #621** (`fix/autorizacion-datos-v2-diez-anios`, `0f60fe4`): el texto que firma la
-  contraparte pasa a **diez (10) anios** de conservacion con su fundamentacion, gana el parrafo de
-  **datos sensibles**, cambia el cierre, y `VERSION_TEXTO.autorizacion_datos` sube a **`-v2`**.
-  Los 6 checks en verde.
-- **metrik-valida #37** (`docs/privacidad-v13-anthropic-informa`, `dc4efff`): Politica Habeas Data
-  a **v1.3**. Vercel en verde (ahi no hay mas checks).
+## El plazo canonico, para no volver a buscarlo
+
+**Diez (10) anios**, fijado por Emilio el 2026-09-10, con fundamento en la **Ley 962 de 2005,
+articulo 28**, al que remiten la **Resolucion 2328 de 2025 de la Superintendencia de Transporte**
+(art. 5.6.11.4) y la **Circular Externa 100-000016 de 2020 de la Superintendencia de Sociedades**
+(num. 5.5). Se cuenta **desde el fin del vinculo**.
+
+## ⚠️⚠️ Subir la version del texto firmado NO arrastra lo que lo explica
+
+Lo que destapo el **#622**: el #621 cambio el texto que firma la contraparte
+(`vinculacion-publica.ts`) y la pantalla del oficial (`ESTADO_EXPEDIENTE_ACCION`), y dejo en
+**cinco anios** los docstrings de arquitectura, que son justo donde alguien va a entender *por que
+el dato no se copia a ONE*. Cuatro menciones en tres archivos
+(`compliance/vinculacion.ts`, `actions/compliance-vinculacion.ts` x2,
+`compliance/solicitud-vinculacion.ts`).
+
+**Por que sobrevivio al #621:** la prueba `vinculacion-publica.test.ts` tiene un guardian real
+(`expect(cuerpo).not.toContain('cinco (5) años')`), pero vigila **el texto firmado**, no los
+comentarios. Un guardian sobre el artefacto legal no ve la prosa que lo explica, y la prosa es la
+que se lee al construir lo siguiente.
+
+**How to apply:** al cambiar una cifra que aparece en un texto legal, barrer **la misma cifra en
+prosa** por su FORMA (`retenc|conserv|custodia` cruzado con `años|anos`), no solo el literal
+exacto — aqui convivian `5 años`, `cinco años` y `diez (10) años`. Familia de
+[[pruebas-por-mutacion]]: el verde del guardian no cubre lo que el guardian no mira.
+
+## ⚠️ Lo que en ese barrido NO se toca
+
+- `vinculacion-publica.test.ts` con `not.toContain('cinco (5) años')` — es el guardian, tiene que
+  seguir diciendo cinco.
+- El comentario que habla de **quienes firmaron la v1** («a quien acepto el texto de cinco anios»)
+  — es historia, y corregirlo la falsea.
+- `vinculacion-publica.ts:22`, «dentro de tres anios nadie puede decir QUE acepto» — es retorico.
+- ⚠️ **`src/lib/tutorials/_shared.ts:56` («Cada consulta queda registrada por 5 anos») queda
+  ABIERTO a proposito.** Habla del **historial de consultas de listas**, otro artefacto, y es copy
+  visible al usuario. El plazo de diez anios se fijo para el **expediente**; extenderlo a las
+  consultas es decision de Emilio.
 
 ## ⚠️⚠️ Que invalida de verdad el bump a `-v2`, y que NO
 
@@ -27,45 +62,35 @@ Dos PR **abiertos y sin mergear**, ejecutan `proyectos/metrik/valida/docs/entreg
 
 **Pero `pasoActual` corta antes en `firmado`** (`estaFirmado(estado)` = `estado === 'pendiente_revision'`).
 Un expediente **ya sellado no vuelve a pedir nada**: el bump solo alcanza a los que siguen en curso.
-Es coherente con la decision 1 de Emilio (los dos expedientes v1, `5f594e69` MeTRIK y `40b3ed63` AFI,
+Coherente con la decision 1 de Emilio (los dos expedientes v1, `5f594e69` MeTRIK y `40b3ed63` AFI,
 son las dos partes del contrato: **no hay remediacion y no se toca ninguna fila**), pero conviene no
 decir "todos vuelven a firmar" sin ese matiz.
 
-## Lo que aparecio y no estaba en el encargo
-
-- **`ESTADO_EXPEDIENTE_ACCION` de `src/lib/compliance/vinculacion.ts` decia "El expediente se conserva
-  5 anios"** en `aprobado` y `rechazado` — el mismo dato que el titular firma, contradiciendolo en la
-  pantalla del oficial de cumplimiento. Alineado a 10 en el #621.
-- **La v1.2 y la v1.3 quedan con la MISMA fecha de vigencia** (10 de septiembre de 2026), porque las
-  dos se publican el mismo dia. Es exacto y el historial lo dice, pero hay que saberlo.
-- ⚠️ **La vigencia esta en CUATRO sitios** (hero y pie de la pagina, portada y pie del PDF). Si el #37
-  se mergea otro dia, hay que moverla en los cuatro.
-
 ## Decisiones de Emilio que NO se revierten
 
-- **Anthropic va en el numeral 9 y su fila NO afirma certificaciones ni retencion cero** (`soc2TypeII:
-  null`), asi que no entra a la primera frase del 9.3. El compromiso de **proceso** de la segunda frase
-  la cubre igual. Si manana se comprueba, se dice.
-- **Informa Colombia va en un numeral 9 bis PROPIO, no en el 9.** Tres razones y ninguna de forma: el 9
-  se titula "internacionales" y su 9.2 invoca el art. 26 (solo datos que salen del pais); el 9.3 promete
-  clausulas de transferencia internacional que con Informa no existen; e Informa mantiene su propia base
-  y es **Responsable**, no Encargado.
+- **Anthropic va en el numeral 9 y su fila NO afirma certificaciones ni retencion cero**
+  (`soc2TypeII: null`), asi que no entra a la primera frase del 9.3. El compromiso de **proceso** de
+  la segunda frase la cubre igual. Si manana se comprueba, se dice.
+- **Informa Colombia va en un numeral 9 bis PROPIO, no en el 9.** Tres razones y ninguna de forma:
+  el 9 se titula "internacionales" y su 9.2 invoca el art. 26 (solo datos que salen del pais); el
+  9.3 promete clausulas de transferencia internacional que con Informa no existen; e Informa
+  mantiene su propia base y es **Responsable**, no Encargado.
 - **`HALLAZGOS_ABIERTOS` del guardrail queda VACIO**, con la razon escrita en el sitio. Dejar ahi un
-  hallazgo ya resuelto seria peor que el hueco original: la prueba seguiria verde y el hallazgo quedaria
-  fechado para siempre.
+  hallazgo ya resuelto seria peor que el hueco original: la prueba seguiria verde y el hallazgo
+  quedaria fechado para siempre.
 
 ## Como quedo la constante unica de terceros
 
 `lib/recursos/terceros-numeral-9.ts` se **extendio**, no se duplico: `TerceroNumeral9` gana
-`ambito: 'internacional'` y aparece `DESTINATARIOS_NACIONALES` con su propio tipo (`datosTransmitidos`,
-`finalidad`, `rol`, `noRecibe`, `host`). El barrido de hosts del guardrail **deriva**
-`HOSTS_NACIONALES_DECLARADOS` de esa constante: sacar a Informa del 9 bis vuelve a dejar su host sin
-clasificar, que es lo que debe pasar.
+`ambito: 'internacional'` y aparece `DESTINATARIOS_NACIONALES` con su propio tipo
+(`datosTransmitidos`, `finalidad`, `rol`, `noRecibe`, `host`). El barrido de hosts del guardrail
+**deriva** `HOSTS_NACIONALES_DECLARADOS` de esa constante: sacar a Informa del 9 bis vuelve a dejar
+su host sin clasificar, que es lo que debe pasar.
 
-⚠️ **El corte `ENCABEZADO_9_BIS` + `cuerpo9Bis()` salio de MIRAR el PDF rasterizado**, no de una prueba:
-con el literal completo de Emilio (que empieza por "9 bis. Destinatarios en Colombia.") bajo el titulo de
-seccion, el lector veia el encabezado **dos veces seguidas**. `texto9Bis()` sigue existiendo y devuelve el
-literal entero, que es lo que el guardrail compara.
+⚠️ **El corte `ENCABEZADO_9_BIS` + `cuerpo9Bis()` salio de MIRAR el PDF rasterizado**, no de una
+prueba: con el literal completo de Emilio (que empieza por "9 bis. Destinatarios en Colombia.") bajo
+el titulo de seccion, el lector veia el encabezado **dos veces seguidas**. `texto9Bis()` sigue
+existiendo y devuelve el literal entero, que es lo que el guardrail compara.
 
 ## Sueltos preexistentes, verificados contra `main`
 
@@ -73,6 +98,9 @@ literal entero, que es lo que el guardrail compara.
   `flex 1 / flex 2`). La fila de Anthropic no tiene el problema.
 - **El pie de pagina de `pdf-privacidad.tsx` no se imprime** (ni texto ni paginacion): el cambio de
   version del pie es invisible en el artefacto. Portada y encabezado corrido si lo llevan.
+- La v1.2 y la v1.3 quedan con la **MISMA fecha de vigencia** (10 de septiembre de 2026), porque las
+  dos se publican el mismo dia. Es exacto y el historial lo dice, pero hay que saberlo.
+- ⚠️ **La vigencia esta en CUATRO sitios** (hero y pie de la pagina, portada y pie del PDF).
 
 Relacionado: [[valida-fto-state-dept]], [[arbol-limpio-por-tarball]],
-[[sql-y-despliegue-metrik-valida]], [[mirar-pdf-renderizado]], [[pruebas-por-mutacion]].
+[[sql-y-publicacion-metrik-valida]], [[mirar-pdf-renderizado]], [[pruebas-por-mutacion]].

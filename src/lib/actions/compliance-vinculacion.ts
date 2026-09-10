@@ -4,7 +4,7 @@
  * Panel del oficial sobre los expedientes de vinculación (CCBF).
  *
  * El expediente NO vive en ONE. Vive en `metrik-valida`, que es donde están la
- * retención de 5 años, el trigger anti-DELETE y la bitácora encadenada por
+ * retención de 10 años, el trigger anti-DELETE y la bitácora encadenada por
  * hashes. Estas funciones leen por API en cada carga y no guardan nada: dos
  * copias que difieren valen menos que una sola.
  *
@@ -415,7 +415,7 @@ export async function rotarEnlaceDeSolicitud(): Promise<Result<EnlaceSolicitud>>
  * El oficial abre el expediente de una contraparte que él eligió.
  *
  * Exige permiso de decidir, no solo de mirar. Invitar no es una consulta: crea
- * sobre un tercero una obligación de custodia de cinco años, y le manda un
+ * sobre un tercero una obligación de custodia de diez años, y le manda un
  * correo a nombre de la empresa. Quien solo revisa la bandeja no carga con eso.
  *
  * Valida deduplica por documento y manda el correo. Acá no se replica nada de
