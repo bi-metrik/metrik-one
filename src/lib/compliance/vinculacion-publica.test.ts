@@ -254,7 +254,52 @@ describe('los textos dicen de quién es el tratamiento', () => {
   it('el aviso dice cuánto se conserva y que hay un deber legal detrás', () => {
     const datos = textos.find((t) => t.tipo === 'autorizacion_datos')!;
     const cuerpo = datos.parrafos.join(' ');
-    expect(cuerpo).toContain('cinco (5) años');
+    expect(cuerpo).toContain('diez (10) años');
+    expect(cuerpo).toContain('Ley 962 de 2005, artículo 28');
+    // El plazo que se firma tiene que ser el que el sistema aplica de verdad.
+    expect(cuerpo).not.toContain('cinco (5) años');
+  });
+
+  it('advierte que el dato biométrico es sensible y que autorizarlo es opcional', () => {
+    const datos = textos.find((t) => t.tipo === 'autorizacion_datos')!;
+    const cuerpo = datos.parrafos.join(' ');
+    // Las tres exigencias del parágrafo del art. 6 y del art. 5 del Decreto 1377/2013:
+    // cuáles son los datos sensibles, para qué se tratan, y que no está obligado.
+    expect(cuerpo).toContain('dato biométrico');
+    expect(cuerpo).toContain('verificar tu identidad y sustentar la decisión de vinculación');
+    expect(cuerpo).toContain('NO estás obligado a autorizar su tratamiento');
+  });
+
+  it('el párrafo de datos sensibles va inmediatamente antes del de cierre', () => {
+    const datos = textos.find((t) => t.tipo === 'autorizacion_datos')!;
+    const sensibles = datos.parrafos.findIndex((p) => p.startsWith('Datos sensibles.'));
+    const cierre = datos.parrafos.findIndex((p) =>
+      p.startsWith('Esta autorización es libre y voluntaria'),
+    );
+    expect(sensibles).toBeGreaterThan(-1);
+    expect(cierre).toBe(sensibles + 1);
+    expect(cierre).toBe(datos.parrafos.length - 1);
+  });
+
+  it('el cierre distingue la autorización general de la de datos sensibles', () => {
+    const datos = textos.find((t) => t.tipo === 'autorizacion_datos')!;
+    const cierre = datos.parrafos[datos.parrafos.length - 1];
+    expect(cierre).toContain('la de datos sensibles es además opcional');
+    expect(cierre).toContain('Sin la autorización general no se puede continuar');
+  });
+
+  it('el texto corregido viaja con una versión nueva, que invalida la anterior', () => {
+    // Subir la versión es lo que hace que `faltaAceptar` vuelva a pedir la firma
+    // a quien aceptó el texto de cinco años.
+    expect(VERSION_TEXTO.autorizacion_datos).toBe('metrik-autorizacion-datos-contraparte-v2');
+    const conLaVieja: DeclaracionRegistrada[] = [
+      dec({ tipo: 'nda', texto_version: VERSION_TEXTO.nda }),
+      dec({
+        tipo: 'autorizacion_datos',
+        texto_version: 'metrik-autorizacion-datos-contraparte-v1',
+      }),
+    ];
+    expect(faltaAceptar(conLaVieja)).toEqual(['autorizacion_datos']);
   });
 
   it('cada texto viaja con su versión, que es lo que se guarda como prueba', () => {
