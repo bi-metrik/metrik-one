@@ -55,7 +55,7 @@
 - ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
 - ⚠️⚠️ [Acuses de Resend en avisos_cliente](project_acuses_resend_avisos_cliente.md) — PR #596 sin mergear: el orden de despliegue no es negociable, `rebotado` queda invisible en el producto, y `suppressed` es un hueco abierto
 - ⚠️ [FTO del State Dept en Valida](project_valida_fto_state_dept.md) — #33, #34 y #35 mergeados y la lista YA activa (6 fuentes); la privacidad NO enumera la FTO y la dedup de la migr. 0013 sigue abierta
-- ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — #621 (ONE, autorización v2) y #37 (Valida, política v1.3) SIN mergear; el bump de versión NO re-pide firma a un expediente ya sellado
+- ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — #621 y #37 ya en main; diez (10) años es el plazo, y el guardián vigila el texto firmado pero NO los docstrings (#622)
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 
 ## Referencias
