@@ -13,7 +13,7 @@ interface Props {
 }
 
 const CATEGORIA_OPTIONS: Option[] = [
-  { value: 'todos', label: 'Todas las categorias' },
+  { value: 'todos', label: 'Todas las categorías' },
   { value: 'LA', label: 'LA' },
   { value: 'FT', label: 'FT' },
   { value: 'FPADM', label: 'FPADM' },
@@ -71,7 +71,7 @@ export default function RiesgosFilters({ categoria, nivel, estado, factor }: Pro
   return (
     <div className="flex flex-wrap items-end gap-3">
       <FilterDropdown
-        label="Categoria"
+        label="Categoría"
         value={categoria}
         options={CATEGORIA_OPTIONS}
         onChange={v => navigateWith('categoria', v)}
