@@ -10,6 +10,18 @@
  *     valida rol NO puede ser un endpoint. El guard del rol se queda en
  *     `compliance-monitoreo.ts`, que es quien decide con qué workspace llamar.
  *
+ * Quién entra al barrido, desde R3.1: la población sigue saliendo del historial
+ * de consultas (`consultas_listas_dual`), porque es lo único que dice a quién se
+ * examinó de verdad. Lo nuevo es una resta: quien tiene ficha en
+ * `compliance_sujetos` con la relación cerrada a la fecha queda afuera. Antes de
+ * esto, cerrar la relación de un empleado no lo sacaba del motor —se le seguía
+ * consultando y se le seguía cobrando la consulta— y la novedad mensual del
+ * cliente era un campo que nadie leía.
+ *
+ * La resta es en un solo sentido: sacar a quien alguien cerró explícitamente. No
+ * limita el universo a los que tienen ficha, porque eso apagaría el monitoreo de
+ * todo tercero que nadie alcanzó a registrar.
+ *
  * Por qué NO hay nada en metrik-valida: Valida ya expone la consulta como API y
  * ONE ya la consume. El reparto que el alcance imaginaba —ONE decide, Valida
  * ejecuta y difunde— agregaría un contrato entre repos para mover datos que solo
@@ -25,6 +37,7 @@ import {
   type ComplianceLiberacion,
 } from './liberaciones';
 import { etiquetaDeContraparte, type EtiquetaBandeja } from './bandeja';
+import { clavesConRelacionCerrada } from './sujetos';
 import {
   aplicarTope,
   cupoRestante,
@@ -48,6 +61,7 @@ const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metri
 /** Techo del universo que se examina. Si se topa, el barrido lo dice. */
 const LIMITE_CONSULTAS = 5000;
 const LIMITE_LIBERACIONES = 5000;
+const LIMITE_SUJETOS = 20000;
 
 export type ResumenBarrido = {
   barrido_id: string | null;
@@ -68,6 +82,13 @@ export type ResumenBarrido = {
    * en vez de callarse: es el hueco de la cobertura del barrido.
    */
   sin_documento: number;
+  /**
+   * Contrapartes que el barrido dejó fuera porque su relación operativa ya está
+   * cerrada. Se cuenta y se reporta en vez de dejar que la población encoja
+   * sola: la diferencia entre "no había a quién barrer" y "se sacó a doce
+   * desvinculados" es exactamente lo que el oficial tiene que poder mirar.
+   */
+  excluidas_relacion_cerrada: number;
   universo_truncado: boolean;
 };
 
@@ -84,6 +105,12 @@ type FilaConsulta = {
   vigente_hasta: string | null;
   tier_maximo: string | null;
   segmento_id: string | null;
+};
+
+type FilaSujetoBarrido = {
+  documento_tipo: string;
+  documento_numero: string;
+  relacion_hasta: string | null;
 };
 
 type Contraparte = {
@@ -115,7 +142,8 @@ export async function ejecutarBarrido(
   const config = await cargarConfigMonitoreo(svc, workspaceId);
   const modo = modoDelBarrido(config);
 
-  const { contrapartes, sinDocumento, truncado } = await cargarUniverso(svc, workspaceId, hoyISO);
+  const { contrapartes, sinDocumento, excluidasRelacionCerrada, truncado } =
+    await cargarUniverso(svc, workspaceId, hoyISO);
 
   const seleccionados: Seleccionado[] = [];
   for (const c of contrapartes) {
@@ -162,6 +190,7 @@ export async function ejecutarBarrido(
     // acá haría ver un tope apretado donde lo que falta es adoptarlo.
     corte_por_tope: modo === 'ejecucion' && corte.corte_por_tope,
     sin_documento: sinDocumento,
+    excluidas_relacion_cerrada: excluidasRelacionCerrada,
     universo_truncado: truncado,
   };
 
@@ -250,7 +279,12 @@ async function cargarUniverso(
   svc: any,
   workspaceId: string,
   hoyISO: string,
-): Promise<{ contrapartes: Contraparte[]; sinDocumento: number; truncado: boolean }> {
+): Promise<{
+  contrapartes: Contraparte[];
+  sinDocumento: number;
+  excluidasRelacionCerrada: number;
+  truncado: boolean;
+}> {
   const { data: consultasRaw } = await svc
     .from('consultas_listas_dual')
     .select(
@@ -268,13 +302,29 @@ async function cargarUniverso(
     .order('created_at', { ascending: false })
     .limit(LIMITE_LIBERACIONES);
 
+  // Tercera lectura: quién sigue adentro. Va por separado y no por join porque
+  // la ausencia de ficha NO excluye a nadie (ver `clavesConRelacionCerrada`), y
+  // un join dejaría esa decisión escondida en el tipo de unión.
+  const { data: sujetosRaw } = await svc
+    .from('compliance_sujetos')
+    .select('documento_tipo, documento_numero, relacion_hasta')
+    .eq('workspace_id', workspaceId)
+    .not('relacion_hasta', 'is', null)
+    .limit(LIMITE_SUJETOS);
+
   const consultas = (consultasRaw ?? []) as FilaConsulta[];
   const coberturas = indexarCoberturas(
     (liberacionesRaw ?? []) as ComplianceLiberacion[],
     hoyISO,
   );
 
+  const relacionesCerradas = clavesConRelacionCerrada(
+    (sujetosRaw ?? []) as FilaSujetoBarrido[],
+    hoyISO,
+  );
+
   const porClave = new Map<string, Contraparte>();
+  const excluidas = new Set<string>();
   let sinDocumento = 0;
 
   for (const c of consultas) {
@@ -290,6 +340,15 @@ async function cargarUniverso(
     }
     // Vienen ordenadas desc: la primera que aparece por clave es la última.
     if (porClave.has(clave)) continue;
+
+    // El corte por relación cerrada va ANTES de armar la contraparte y después
+    // de contar `sinDocumento`: a quien ya salió no se le vuelve a consultar ni
+    // se le vuelve a cobrar la consulta. Se cuenta por clave, no por fila, para
+    // que un tercero con ocho consultas viejas no reporte ocho exclusiones.
+    if (relacionesCerradas.has(clave)) {
+      excluidas.add(clave);
+      continue;
+    }
 
     const cobertura = coberturas.get(clave) ?? {
       cubierta: false,
@@ -312,6 +371,7 @@ async function cargarUniverso(
   return {
     contrapartes: [...porClave.values()],
     sinDocumento,
+    excluidasRelacionCerrada: excluidas.size,
     truncado: consultas.length >= LIMITE_CONSULTAS,
   };
 }
