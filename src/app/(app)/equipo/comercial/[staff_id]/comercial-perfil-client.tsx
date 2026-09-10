@@ -2,19 +2,24 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useRouter, usePathname } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { ArrowLeft, Trophy, Search, X, Clock, AlertTriangle } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
 import { STAGE_LABEL, MESES_ES, type ComercialPerfil, type ComercialPerfilNegocio } from '../../comercial-types'
 import type { RankingEquipo, RankingPersona } from '../../comercial-ranking'
+import SelectorMesEquipo from '../../selector-mes'
+import { VentasDrawer, type CifraSeleccionada } from '../../../tableros/components/ventas-drawer'
 import { formatFecha } from '@/lib/dates/bogota'
 import { PALETA } from '@/lib/marca/paleta'
 
 const GREEN = PALETA.acento
 const GOLD = '#D97706'
 const RED = '#B91C1C'
+
+/** Lo que no se mueve con el mes tiene que decirlo. Mismas palabras que en `/equipo`. */
+const NOTA_INVENTARIO = 'Inventario a hoy, no depende del mes'
 
 function fmtCOP(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
@@ -27,6 +32,13 @@ function fmtFecha(iso: string | null): string {
 }
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrado'
+
+/**
+ * Que responde la tabla de abajo: `mes` = lo que la persona VENDIO en el periodo elegido
+ * (desempeno), `todos` = los casos que LLEVA (carga de trabajo). Sin mes elegido solo
+ * existe el segundo.
+ */
+type CorteNegocios = 'mes' | 'todos'
 
 const FASES: { key: FaseFilter; label: string }[] = [
   { key: 'todos', label: 'Todos' },
@@ -42,50 +54,49 @@ export default function ComercialPerfilClient({
   staffId,
   anio,
   mes,
+  anioRef,
+  mesRef,
 }: {
   perfil: ComercialPerfil
   ranking: RankingEquipo
   staffId: string | null
   anio: number | null
   mes: number | null
+  /** Mes de referencia (el que esta en curso). Lo usa el selector cuando se mira el acumulado. */
+  anioRef: number
+  mesRef: number
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
-
   const titulo = perfil.sin_responsable ? 'Sin responsable' : nombreCorto(perfil.nombre)
   const miRanking = staffId ? ranking.personas.find((p) => p.responsable_id === staffId) ?? null : null
   const total = ranking.total
 
   // Etiqueta del periodo activo.
-  const periodoLabel = anio != null && mes != null ? `${MESES_ES[mes - 1]} ${anio}` : 'Acumulado'
+  const hayPeriodo = anio != null && mes != null
+  const periodoLabel = hayPeriodo ? `${MESES_ES[mes - 1]} ${anio}` : 'Acumulado'
 
-  // Opciones del selector de periodo: acumulado + los meses de la serie del vendedor.
-  //
-  // ⚠️ El periodo activo se agrega si no esta en la serie. La serie solo trae meses CON
-  // ventas, y desde que el default es el mes en curso, un vendedor que todavia no ha
-  // vendido este mes abriria el selector con un valor que no existe entre las opciones:
-  // el navegador lo pinta vacio y parece que la pantalla esta rota.
-  const opcionesPeriodo = useMemo(() => {
-    const meses = [...perfil.serie]
-      .map((p) => ({ value: `${p.anio}-${String(p.mes).padStart(2, '0')}`, label: `${MESES_ES[p.mes - 1]} ${p.anio}` }))
-      .reverse() // mas reciente primero
-    if (anio != null && mes != null) {
-      const actual = `${anio}-${String(mes).padStart(2, '0')}`
-      if (!meses.some((o) => o.value === actual)) {
-        meses.unshift({ value: actual, label: `${MESES_ES[mes - 1]} ${anio}` })
-      }
-    }
-    return meses
-  }, [perfil.serie, anio, mes])
+  // Que cifra se abrio. `null` = panel cerrado. Mismo contrato que Tableros: el panel
+  // muestra el conjunto que suma la cifra en la que se hizo clic, no una consulta
+  // paralela. Por eso solo se puede abrir con un mes elegido: la RPC del panel filtra
+  // por (anio, mes) y con `null` devolveria vacio, o sea una cifra que abre una lista
+  // en blanco. El historico se mira navegando a `?mes=acumulado`.
+  const [cifra, setCifra] = useState<CifraSeleccionada | null>(null)
 
-  const periodoValue = anio != null && mes != null ? `${anio}-${String(mes).padStart(2, '0')}` : 'acumulado'
-
-  // El acumulado ahora se declara en la URL. Antes era la ruta sin query, pero esa ruta
-  // pasa a significar "el mes en curso" (default nuevo), asi que dejarlo implicito
-  // devolveria al usuario al mes actual creyendo que eligio el historico.
-  function cambiarPeriodo(value: string) {
-    router.push(`${pathname}?mes=${value}`)
-  }
+  // La cifra se arma FUERA del manejador: asi el "hay periodo y hay ventas" se decide una
+  // sola vez y el boton solo existe cuando hay algo que abrir. Cifra en cero no es boton,
+  // igual que en Tableros: pintar como clicable algo que abre una lista vacia es peor que
+  // no ofrecerlo.
+  const cifraVentas: CifraSeleccionada | null =
+    anio != null && mes != null && perfil.kpis.num_ventas > 0
+      ? {
+          anio,
+          mes,
+          responsableId: staffId,
+          sinResponsable: perfil.sin_responsable,
+          titulo: `Ventas de ${periodoLabel}`,
+          alcance: titulo,
+        }
+      : null
+  const abrirVentas = cifraVentas ? () => setCifra(cifraVentas) : undefined
 
   return (
     <div>
@@ -103,21 +114,18 @@ export default function ComercialPerfilClient({
             {perfil.sin_responsable ? 'Negocios sin responsable asignado' : perfil.position ?? 'Comercial'}
           </p>
         </div>
-        {/* Selector de periodo: acumulado (default) o por mes. Filtra TODO el perfil y el ranking. */}
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Periodo</span>
-          <select
-            value={periodoValue}
-            onChange={(e) => cambiarPeriodo(e.target.value)}
-            aria-label="Periodo del perfil"
-            className="rounded-lg border border-[#E5E7EB] bg-white py-2 px-3 text-sm font-medium text-tinta focus:border-tinta/30 focus:outline-none"
-          >
-            <option value="acumulado">Acumulado</option>
-            {opcionesPeriodo.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
+        {/* Selector de periodo: el MISMO de `/equipo` y de Tableros (dos flechas), mas la
+            salida al acumulado que esta pantalla si sabe responder. Antes era un
+            desplegable con los meses de la SERIE, o sea solo los meses en los que la
+            persona vendio: un mes sin ventas no se podia mirar, y es justo el que hay que
+            poder mirar. Con las flechas se llega a cualquier mes. */}
+        <SelectorMesEquipo
+          anio={anio ?? anioRef}
+          mes={mes ?? mesRef}
+          conAcumulado
+          enAcumulado={!hayPeriodo}
+          className=""
+        />
       </div>
 
       {/* Leaderboard: 3 comparativos + tabla del equipo. Transparente (todos ven cifras y posiciones). */}
@@ -135,6 +143,7 @@ export default function ComercialPerfilClient({
               valor={String(miRanking.num_ventas)}
               rank={miRanking.rank_ventas}
               total={total}
+              onAbrir={miRanking.num_ventas > 0 ? abrirVentas : undefined}
             />
             <ComparativoCard
               label="Honorario recaudado"
@@ -161,17 +170,33 @@ export default function ComercialPerfilClient({
         <LeaderboardTabla ranking={ranking} destacado={staffId} />
       </section>
 
-      {/* KPIs del periodo */}
+      {/* KPIs.
+          ⚠️ Solo TRES se mueven con el mes: ventas, honorario recaudado y tarifa. Los
+          demas son INVENTARIO A HOY (la RPC no los filtra por periodo, y esta bien que no
+          lo haga: un caso abierto esta abierto hoy, no en agosto). Cada uno lo dice en su
+          etiqueta, porque sin esa nota cambiar de mes y ver la misma cifra se lee como una
+          pantalla congelada. Misma nota, mismas palabras que en `/equipo`. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <Kpi label="Ventas" value={String(perfil.kpis.num_ventas)} color={GREEN} />
-        <Kpi label="Negocios activos" value={String(perfil.kpis.negocios_abiertos)} />
-        <Kpi label="Valor aprobado (sin IVA)" value={fmtCOP(perfil.kpis.valor_aprobado)} />
-        <Kpi label="Honorario recaudado" value={fmtCOP(perfil.kpis.honorario_recaudado)} color={GREEN} />
+        <Kpi
+          label="Ventas"
+          value={String(perfil.kpis.num_ventas)}
+          color={GREEN}
+          nota={periodoLabel}
+          onAbrir={abrirVentas}
+        />
+        <Kpi label="Negocios activos" value={String(perfil.kpis.negocios_abiertos)} nota={NOTA_INVENTARIO} />
+        <Kpi label="Valor aprobado (sin IVA)" value={fmtCOP(perfil.kpis.valor_aprobado)} nota={NOTA_INVENTARIO} />
+        <Kpi label="Honorario recaudado" value={fmtCOP(perfil.kpis.honorario_recaudado)} color={GREEN} nota={periodoLabel} />
         {/* Cartera: con IVA, porque es lo que falta que entre a la cuenta. NO es
             "valor aprobado - recaudado": esas dos cifras estan en bases distintas. */}
-        <Kpi label="Pendiente de recaudo (con IVA)" value={fmtCOP(perfil.kpis.pendiente_honorario)} />
-        <Kpi label="Vencidos (SLA)" value={String(perfil.kpis.vencidos)} color={perfil.kpis.vencidos > 0 ? RED : undefined} />
-        <Kpi label="Tarifa UPME (terceros)" value={fmtCOP(perfil.kpis.tarifa_recaudada)} muted />
+        <Kpi label="Pendiente de recaudo (con IVA)" value={fmtCOP(perfil.kpis.pendiente_honorario)} nota={NOTA_INVENTARIO} />
+        <Kpi
+          label="Vencidos (SLA)"
+          value={String(perfil.kpis.vencidos)}
+          color={perfil.kpis.vencidos > 0 ? RED : undefined}
+          nota={NOTA_INVENTARIO}
+        />
+        <Kpi label="Tarifa UPME (terceros)" value={fmtCOP(perfil.kpis.tarifa_recaudada)} muted nota={periodoLabel} />
       </div>
 
       {/* Graficas historicas del vendedor: ventas/mes + recaudo/mes (12 meses) */}
@@ -203,7 +228,10 @@ export default function ComercialPerfilClient({
 
       {/* Embudo por etapa/estatus con monto pendiente de recaudo */}
       <section className="mb-6">
-        <h2 className="text-sm font-bold text-gray-900 mb-3">Embudo por etapa (pendiente de recaudo)</h2>
+        <h2 className="text-sm font-bold text-gray-900">Embudo por etapa (pendiente de recaudo)</h2>
+        {/* Tambien es inventario: son los casos que la persona lleva HOY, en la etapa en la
+            que estan hoy. No se recorta al mes, y por eso lo dice. */}
+        <p className="mb-3 mt-1 text-xs text-gray-400">{NOTA_INVENTARIO} seleccionado.</p>
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -244,8 +272,24 @@ export default function ComercialPerfilClient({
         </div>
       </section>
 
-      {/* Negocios del vendedor con filtros (fase + etapa + busqueda) y SLA/ultimo avance */}
-      <NegociosVendedor negocios={perfil.negocios} />
+      {/* Negocios del vendedor con filtros (fase + etapa + busqueda) y SLA/ultimo avance.
+          Arriba lleva el corte del periodo: lo que vendio en el mes, o todos sus casos. */}
+      <NegociosVendedor
+        negocios={perfil.negocios}
+        periodoLabel={periodoLabel}
+        hayPeriodo={hayPeriodo}
+        ventasDelPeriodo={perfil.kpis.num_ventas}
+      />
+
+      {/* `key` por cifra: al pasar de una cifra a otra el panel se remonta y arranca
+          cargando, en vez de mostrar por un instante la lista anterior. */}
+      {cifra && (
+        <VentasDrawer
+          key={`${cifra.anio}-${cifra.mes}-${cifra.responsableId ?? 'sr'}`}
+          cifra={cifra}
+          onClose={() => setCifra(null)}
+        />
+      )}
     </div>
   )
 }
@@ -253,7 +297,7 @@ export default function ComercialPerfilClient({
 // ── Leaderboard ──────────────────────────────────────────────────────────────
 
 function ComparativoCard({
-  label, valor, rank, total, color, subrayado, sinDato,
+  label, valor, rank, total, color, subrayado, sinDato, onAbrir,
 }: {
   label: string
   valor: string
@@ -262,14 +306,28 @@ function ComparativoCard({
   color?: string
   subrayado?: string
   sinDato?: boolean
+  /** Abre los casos detras de la cifra. Solo lo trae "Numero de ventas". */
+  onAbrir?: () => void
 }) {
   const esPrimero = rank === 1 && !sinDato
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
       <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: sinDato ? '#9CA3AF' : color ?? PALETA.tinta }}>
-        {valor}
-      </p>
+      {onAbrir ? (
+        <button
+          type="button"
+          onClick={onAbrir}
+          title="Ver los casos detras de esta cifra"
+          className="mt-1 block text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 hover:text-acento-hover"
+          style={{ color: sinDato ? '#9CA3AF' : color ?? PALETA.tinta }}
+        >
+          {valor}
+        </button>
+      ) : (
+        <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: sinDato ? '#9CA3AF' : color ?? PALETA.tinta }}>
+          {valor}
+        </p>
+      )}
       <div className="mt-1 flex items-center gap-1.5">
         {sinDato || !rank ? (
           <span className="text-xs text-gray-400">{subrayado ?? 'Sin posicion'}</span>
@@ -351,40 +409,71 @@ function LeaderboardTabla({ ranking, destacado }: { ranking: RankingEquipo; dest
 
 // ── Negocios del vendedor (config /negocios: fase + etapa + busqueda) ─────────
 
-function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) {
+function NegociosVendedor({ negocios, periodoLabel, hayPeriodo, ventasDelPeriodo }: {
+  negocios: ComercialPerfilNegocio[]
+  /** `Septiembre 2026` o `Acumulado`. */
+  periodoLabel: string
+  /** Hay un mes elegido (no el acumulado): solo entonces existe el corte por venta. */
+  hayPeriodo: boolean
+  /** El KPI `Ventas` de arriba. Sirve para comprobar que la lista suma lo mismo. */
+  ventasDelPeriodo: number
+}) {
+  const pathname = usePathname()
+  const [corte, setCorte] = useState<CorteNegocios>(hayPeriodo ? 'mes' : 'todos')
   const [fase, setFase] = useState<FaseFilter>('todos')
   const [etapaNum, setEtapaNum] = useState<number | null>(null)
   const [q, setQ] = useState('')
 
-  // Fases presentes en los negocios del vendedor (para no mostrar pills vacios).
+  // Las ventas del periodo. `es_venta` ya viene calculado por la RPC con EL MISMO
+  // predicado que el KPI `Ventas` de arriba (`es_venta_periodo`), asi que el corte no
+  // reinterpreta nada: filtra por lo que el servidor ya decidio.
+  const ventasDelMes = useMemo(() => negocios.filter((n) => n.es_venta), [negocios])
+
+  // El corte manda y los demas filtros operan DENTRO de el: un contador de etapa que
+  // siguiera contando el historico mientras la tabla muestra el mes seria el mismo
+  // defecto que este cambio corrige, un nivel mas abajo.
+  const base = corte === 'mes' ? ventasDelMes : negocios
+
+  // Fases presentes en el corte (para no mostrar pills vacios).
   const fasesDisponibles = useMemo(() => {
     const set = new Set<string>()
-    for (const n of negocios) if (n.stage) set.add(n.stage)
+    for (const n of base) if (n.stage) set.add(n.stage)
     return FASES.filter((f) => f.key === 'todos' || set.has(f.key))
-  }, [negocios])
+  }, [base])
 
   // Etapas de la fase seleccionada (numero+nombre, en orden de numero).
   const etapasDeFase = useMemo(() => {
     if (fase === 'todos') return []
     const map = new Map<number, string>()
-    for (const n of negocios) {
+    for (const n of base) {
       if (n.stage === fase && n.etapa_numero != null) map.set(n.etapa_numero, n.etapa_nombre ?? `E${n.etapa_numero}`)
     }
     return Array.from(map, ([numero, nombre]) => ({ numero, nombre })).sort((a, b) => a.numero - b.numero)
-  }, [negocios, fase])
+  }, [base, fase])
 
   const faseCount = (key: FaseFilter) =>
-    key === 'todos' ? negocios.length : negocios.filter((n) => n.stage === key).length
-  const etapaCount = (numero: number) => negocios.filter((n) => n.etapa_numero === numero).length
+    key === 'todos' ? base.length : base.filter((n) => n.stage === key).length
+  // Cuenta lo que el clic va a mostrar: dentro del corte Y dentro de la fase abierta.
+  const etapaCount = (numero: number) =>
+    base.filter((n) => n.etapa_numero === numero && (fase === 'todos' || n.stage === fase)).length
 
   function seleccionarFase(key: FaseFilter) {
     setFase(key)
     setEtapaNum(null)
   }
 
+  // Al cambiar de corte se sueltan fase y etapa: la fase elegida puede no existir en el
+  // otro conjunto, y entonces la pantalla mostraria "sin negocios en este filtro" sin
+  // ningun pill que explique por que.
+  function seleccionarCorte(valor: CorteNegocios) {
+    setCorte(valor)
+    setFase('todos')
+    setEtapaNum(null)
+  }
+
   const term = q.trim().toLowerCase()
   const filtrados = useMemo(() => {
-    let res = negocios
+    let res = base
     if (fase !== 'todos') res = res.filter((n) => n.stage === fase)
     if (etapaNum !== null) res = res.filter((n) => n.etapa_numero === etapaNum)
     if (term) {
@@ -393,11 +482,59 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
       )
     }
     return res
-  }, [negocios, fase, etapaNum, term])
+  }, [base, fase, etapaNum, term])
+
+  // ⚠️ El pill del mes TIENE que dar el mismo numero que el KPI `Ventas`: las dos cifras
+  // salen del mismo CTE de la misma RPC. Si un dia no coinciden, el problema no es este
+  // filtro sino que las dos definiciones de venta se separaron, y eso se dice en pantalla
+  // en vez de dejar que alguien cruce las cifras a mano y no sepa a cual creerle.
+  const listaYKpiDiscrepan = hayPeriodo && ventasDelMes.length !== ventasDelPeriodo
 
   return (
     <section>
-      <h2 className="text-sm font-bold text-gray-900 mb-3">Negocios ({filtrados.length})</h2>
+      <h2 className="text-sm font-bold text-gray-900 mb-3">
+        {corte === 'mes' ? `Vendidos en ${periodoLabel}` : 'Todos sus casos'} ({filtrados.length})
+      </h2>
+
+      {/* Nivel 0: el corte del periodo. Son DOS preguntas distintas y las dos se usan:
+          "que vendio este mes" (desempeno) y "que casos lleva" (carga de trabajo, donde
+          un caso de junio que sigue abierto es suyo hoy). Por eso la tabla no se
+          reemplaza: se le pone el corte arriba. */}
+      {hayPeriodo && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <PillCorte
+            label={`Vendidos en ${periodoLabel}`}
+            count={ventasDelMes.length}
+            active={corte === 'mes'}
+            onClick={() => seleccionarCorte('mes')}
+          />
+          <PillCorte
+            label="Todos sus casos"
+            count={negocios.length}
+            active={corte === 'todos'}
+            onClick={() => seleccionarCorte('todos')}
+          />
+          {/* La salida al historico. El clic en la cifra abre lo que la cifra CUENTA (el
+              mes); ver todas las ventas es otra pregunta y tiene su propia puerta. */}
+          <Link
+            href={`${pathname}?mes=acumulado`}
+            className="ml-auto text-xs font-semibold text-acento hover:text-acento-hover"
+          >
+            Ver todas sus ventas
+          </Link>
+        </div>
+      )}
+
+      {listaYKpiDiscrepan && (
+        <p className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            La lista trae {ventasDelMes.length} venta{ventasDelMes.length === 1 ? '' : 's'} de {periodoLabel} y el
+            indicador de arriba dice {ventasDelPeriodo}. Las dos cifras deberian salir del mismo calculo: hay que
+            revisar la definicion de venta antes de usar cualquiera de las dos.
+          </span>
+        </p>
+      )}
 
       {/* Nivel 1: fases */}
       <div className="mb-2 flex flex-wrap gap-2">
@@ -521,13 +658,49 @@ function NegociosVendedor({ negocios }: { negocios: ComercialPerfilNegocio[] }) 
                 </tr>
               ))}
               {filtrados.length === 0 && (
-                <tr><td colSpan={6} className="py-8 text-center text-sm text-gray-400">Sin negocios en este filtro.</td></tr>
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-sm text-gray-400">
+                    {/* Un mes sin ventas se dice con todas las letras. Caer a la lista
+                        historica seria contestar otra pregunta sin avisar. */}
+                    {corte === 'mes' && base.length === 0
+                      ? `Sin ventas en ${periodoLabel}.`
+                      : 'Sin negocios en este filtro.'}
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
     </section>
+  )
+}
+
+/**
+ * Pill del corte del periodo. Misma marca visual que los pills de fase que ya usa esta
+ * pantalla: es el mismo gesto (recortar la tabla), un nivel mas arriba.
+ */
+function PillCorte({ label, count, active, onClick }: {
+  label: string
+  count: number
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+        active
+          ? 'border-tinta/20 bg-papel text-tinta'
+          : 'border-[#E5E7EB] text-tinta-suave hover:border-tinta/30 hover:text-tinta'
+      }`}
+    >
+      {label}
+      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? 'bg-black/10' : 'bg-papel'}`}>
+        {count}
+      </span>
+    </button>
   )
 }
 
@@ -560,16 +733,42 @@ function ChartCard({ titulo, children }: { titulo: string; children: React.React
   )
 }
 
-function Kpi({ label, value, color, muted }: { label: string; value: string; color?: string; muted?: boolean }) {
-  return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+function Kpi({ label, value, color, muted, nota, onAbrir }: {
+  label: string
+  value: string
+  color?: string
+  muted?: boolean
+  /** De que periodo habla la cifra, o si no depende del mes. Ver `NOTA_INVENTARIO`. */
+  nota?: string
+  /** Abre los casos que hay detras. Sin manejador, la tarjeta no es un boton. */
+  onAbrir?: () => void
+}) {
+  const contenido = (
+    <>
       <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">{label}</p>
       <p
-        className={`text-xl tabular-nums mt-1 ${muted ? 'font-semibold text-gray-500' : 'font-bold text-gray-900'}`}
+        className={`text-xl tabular-nums mt-1 ${muted ? 'font-semibold text-gray-500' : 'font-bold text-gray-900'} ${
+          onAbrir ? 'underline decoration-dotted underline-offset-4' : ''
+        }`}
         style={color ? { color } : undefined}
       >
         {value}
       </p>
-    </div>
+      {nota && <p className="mt-1 text-[10px] text-gray-400">{nota}</p>}
+    </>
+  )
+  // Sin `onAbrir` queda como estaba: una tarjeta, no un boton. Mismo criterio que Tableros.
+  if (!onAbrir) {
+    return <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">{contenido}</div>
+  }
+  return (
+    <button
+      type="button"
+      onClick={onAbrir}
+      title="Ver los casos detras de esta cifra"
+      className="rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm transition-colors hover:border-gray-200 hover:bg-gray-50/60 focus:outline-none focus:ring-2 focus:ring-acento/20"
+    >
+      {contenido}
+    </button>
   )
 }

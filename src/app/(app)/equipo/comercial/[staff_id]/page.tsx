@@ -7,6 +7,7 @@ import {
   getMetasPorVendedorPeriodo,
 } from '../../comercial-actions'
 import { computeRanking } from '../../comercial-ranking'
+import { parsearPeriodo } from '../../mes-navegacion'
 import ComercialPerfilClient from './comercial-perfil-client'
 
 interface Props {
@@ -44,18 +45,16 @@ export default async function ComercialPerfilPage({ params, searchParams }: Prop
   //
   // El mes se toma en hora de Bogota: Vercel corre en UTC y despues de las 19:00 el
   // dia 30 el perfil habria saltado al mes siguiente, en blanco.
-  let anio: number | null = null
-  let mes: number | null = null
-  const periodoParam = sp.mes ?? bogotaYearMonth()
-  if (periodoParam !== 'acumulado') {
-    const [a, m] = periodoParam.split('-')
-    const an = Number(a)
-    const mn = Number(m)
-    if (an > 0 && mn >= 1 && mn <= 12) {
-      anio = an
-      mes = mn
-    }
-  }
+  //
+  // El parseo es el MISMO de `/equipo` (`parsearPeriodo`), y con eso se cierra un hueco:
+  // antes, un `?mes=` con basura no caia al mes en curso sino al acumulado, callado, y
+  // la pantalla mostraba el historico creyendo el usuario que miraba un mes. Solo la
+  // palabra `acumulado` abre el historico.
+  const enCurso = parsearPeriodo(undefined, bogotaYearMonth())
+  const esAcumulado = sp.mes === 'acumulado'
+  const periodo = esAcumulado ? null : parsearPeriodo(sp.mes, bogotaYearMonth())
+  const anio: number | null = periodo?.anio ?? null
+  const mes: number | null = periodo?.mes ?? null
 
   const [perfil, resumen, metasPorVendedor] = await Promise.all([
     getComercialPerfil(staff_id, anio, mes),
@@ -75,6 +74,8 @@ export default async function ComercialPerfilPage({ params, searchParams }: Prop
       staffId={perfil.sin_responsable ? null : staff_id}
       anio={anio}
       mes={mes}
+      anioRef={enCurso.anio}
+      mesRef={enCurso.mes}
     />
   )
 }
