@@ -14,6 +14,8 @@
  *   - adivinar la fecha en vez de exigir AAAA-MM-DD → cae 1
  *   - cruzar contra la base por documento crudo y no por `claveContraparte` → cae 1
  *   - contar como alta normal a la que ya viene cerrada → cae 1
+ *   - dejar que un correo en blanco pise el que ya estaba guardado → cae 1
+ *   - aceptar un correo mal escrito en vez de rechazar la fila → cae 1
  */
 
 import { describe, it, expect } from 'vitest';
@@ -32,6 +34,7 @@ function fila(over: Record<string, unknown> = {}): Record<string, unknown> {
     documento_tipo: 'NIT',
     documento: '900123456',
     nombre: 'Ferretería del Norte SAS',
+    correo: '',
     relacion_desde: '',
     relacion_hasta: '',
     motivo: '',
@@ -46,6 +49,7 @@ function existente(over: Partial<SujetoExistente> = {}): SujetoExistente {
     documento_tipo: 'NIT',
     documento_numero: '900123456',
     nombre: 'Ferretería del Norte SAS',
+    correo: null,
     relacion_hasta: null,
     ...over,
   };
@@ -88,7 +92,7 @@ describe('parsearFilasCargue', () => {
   });
 
   it('una fila en blanco de Excel se salta sin reportarse como error', () => {
-    const vacia = { tipo: '', documento_tipo: '', documento: '', nombre: '', relacion_desde: '', relacion_hasta: '', motivo: '' };
+    const vacia = { tipo: '', documento_tipo: '', documento: '', nombre: '', correo: '', relacion_desde: '', relacion_hasta: '', motivo: '' };
     const { validas, invalidas } = parsearFilasCargue([fila(), vacia]);
     expect(validas).toHaveLength(1);
     expect(invalidas).toHaveLength(0);
@@ -199,6 +203,35 @@ describe('planearCargue', () => {
   it('un plan de puros sin cambio no ofrece botón', () => {
     expect(planTieneEfecto(planDe([fila()], [existente()]))).toBe(false);
     expect(planTieneEfecto(planDe([fila()]))).toBe(true);
+  });
+});
+
+describe('el correo en el cargue', () => {
+  it('un correo mal escrito rechaza la fila en vez de guardarse', () => {
+    const { invalidas } = parsearFilasCargue([fila({ correo: 'juan@' })]);
+    expect(invalidas[0].motivo).toBe('correo_invalido');
+  });
+
+  it('sin correo la fila entra igual: el tercero se carga y se invita después', () => {
+    const { validas, invalidas } = parsearFilasCargue([fila({ correo: '' })]);
+    expect(invalidas).toHaveLength(0);
+    expect(validas[0].correo).toBeNull();
+  });
+
+  it('el correo se guarda en minúsculas', () => {
+    const { validas } = parsearFilasCargue([fila({ correo: '  Compras@Ferre.CO ' })]);
+    expect(validas[0].correo).toBe('compras@ferre.co');
+  });
+
+  it('un correo nuevo sobre un sujeto existente es una actualización', () => {
+    const plan = planDe([fila({ correo: 'compras@ferre.co' })], [existente()]);
+    expect(plan.items[0].accion).toBe('actualizacion');
+    expect(plan.items[0].detalle).toContain('compras@ferre.co');
+  });
+
+  it('el archivo sin correo NO borra el que ya está guardado', () => {
+    const plan = planDe([fila({ correo: '' })], [existente({ correo: 'compras@ferre.co' })]);
+    expect(plan.items[0].accion).toBe('sin_cambio');
   });
 });
 
