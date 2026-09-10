@@ -11,6 +11,7 @@ import {
   type CentroCostos,
   type OrigenAsignacion,
 } from '@/lib/actions/centro-costos-asignar'
+import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 
 // ── Upload soporte to Storage ────────────────────────────────
 
@@ -94,8 +95,10 @@ export async function createGasto(input: {
       .single()
 
     if (!negocio) return { success: false, error: 'Negocio no encontrado' }
-    if (negocio.estado === 'completado') {
-      return { success: false, error: 'No se pueden registrar gastos en negocios completados' }
+    // Los tres estados de cierre, no solo `completado`. Mismo hueco que en horas:
+    // se alcanza con el negocio prellenado desde la URL (FAB en contexto).
+    if (negocioCerrado(negocio.estado)) {
+      return { success: false, error: MENSAJE_NEGOCIO_CERRADO }
     }
 
     tipo = 'directo'

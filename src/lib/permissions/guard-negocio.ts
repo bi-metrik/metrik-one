@@ -10,6 +10,7 @@ import {
   type Role,
   type Area,
 } from './can-edit'
+import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 
 /**
  * Guards server-side de negocios. TODA server action que muta bloques/etapas o
@@ -50,10 +51,21 @@ export async function guardEditarBloque(
   if (!c) return { ok: false, error: 'No autenticado' }
   const { data: nb } = await db(c.supabase)
     .from('negocio_bloques')
-    .select('negocio_id, bloque_configs!inner(config_extra, etapas_negocio!inner(stage))')
+    .select('negocio_id, negocios!inner(estado), bloque_configs!inner(config_extra, etapas_negocio!inner(stage))')
     .eq('id', negocioBloqueId)
     .single()
   if (!nb) return { ok: false, error: 'Bloque no encontrado' }
+  // Un negocio cerrado sale de circulacion: se ve y se descarga, no se alimenta.
+  // El corte va AQUI y no en cada accion porque este es el choke point de toda
+  // mutacion de bloques: documentos, formularios, propuesta economica, guia de
+  // devolucion y lo que se agregue despues entran por la misma puerta.
+  //
+  // El estado viaja en la MISMA consulta con `!inner`, asi que no hay un caso "no
+  // pude leer el estado" que decidir aparte: si el negocio no esta, `nb` sale nulo
+  // y ya cae en la linea de arriba.
+  if (negocioCerrado((nb.negocios as { estado: string | null } | null)?.estado)) {
+    return { ok: false, error: MENSAJE_NEGOCIO_CERRADO }
+  }
   const stage = (nb.bloque_configs?.etapas_negocio?.stage ?? null) as Stage | null
   if (!stage) return { ok: false, error: 'Etapa sin stage' }
   // Áreas invitadas a editar ESTE bloque, aunque el stage sea de otra área.

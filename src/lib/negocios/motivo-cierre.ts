@@ -36,3 +36,27 @@ export function motivoCierreDeEstado(estado: string | null | undefined): MotivoC
   if (!estado) return null
   return ESTADO_A_MOTIVO[estado] ?? null
 }
+
+/**
+ * ¿Este negocio está cerrado? Mismo criterio que el desenlace: la lista CERRADA de
+ * `ESTADO_A_MOTIVO`, no un `estado !== 'abierto'`.
+ *
+ * Es el único predicado del producto para "de solo lectura". Un negocio cerrado se
+ * puede ver y descargar, pero no recibe pagos, ni horas, ni gastos, ni cobros
+ * programados, ni datos nuevos en sus bloques.
+ *
+ * ⚠️ `activo` NO es cerrado (2 negocios del workspace `metrik`, medido el
+ * 2026-09-10), y un estado que aparezca mañana tampoco: sale abierto hasta que
+ * alguien lo agregue al mapa a propósito.
+ */
+export function negocioCerrado(estado: string | null | undefined): boolean {
+  return motivoCierreDeEstado(estado) !== null
+}
+
+/**
+ * Lo que ve quien intenta alimentar un negocio cerrado. Una sola frase para todas
+ * las puertas: si cada acción escribe la suya, el mismo bloqueo se explica de
+ * cinco formas distintas y ninguna dice qué hacer.
+ */
+export const MENSAJE_NEGOCIO_CERRADO =
+  'Este negocio está cerrado y no admite cambios. Si hay que retomarlo, reábrelo primero.'

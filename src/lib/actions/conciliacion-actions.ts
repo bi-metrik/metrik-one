@@ -41,6 +41,7 @@ import type {
 } from '@/lib/negocios/retroceso-financiero'
 import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -1299,8 +1300,18 @@ export async function registrarPagoEnNegocio(
   }
 
   const { data: neg } = await db(supabase)
-    .from('negocios').select('id').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+    .from('negocios').select('id, estado').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
   if (!neg) return { success: false, error: 'Negocio no encontrado' }
+  // Un negocio cerrado no recibe plata. El corte va en la VIA UNICA de escritura
+  // (panel de conciliacion y FAB entran los dos por aqui), no en cada pantalla:
+  // asi ninguna ruta de entrada futura se lo puede saltar por olvido. Mismo motivo
+  // por el que `esAreaFinanciera` vive aqui y no en el caller.
+  //
+  // El estado sale de la MISMA consulta que ya validaba que el negocio existe y es
+  // del workspace: no cuesta un viaje mas.
+  if (negocioCerrado((neg as { estado: string | null }).estado)) {
+    return { success: false, error: MENSAJE_NEGOCIO_CERRADO }
+  }
 
   // Traza de origen FAB (autor = staff real). Va ADEMÁS del cobro creado abajo:
   // deja constancia de "un comercial registró un pago vía FAB sobre un negocio fuera

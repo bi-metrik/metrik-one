@@ -17,6 +17,8 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
+import { bloqueoPorNegocioCerrado } from '@/lib/negocios/negocio-abierto'
+import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 import { borradorCliente, borradorFactura, type RutExtraido } from '@/lib/siigo/mapeo'
 import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
@@ -697,8 +699,15 @@ export async function descartarDeFacturacion(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: neg } = await (svc as any)
-    .from('negocios').select('id, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+    .from('negocios').select('id, estado, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).single()
   if (!neg) return { ok: false, error: 'Negocio no encontrado' }
+  // Descartar y restaurar escriben `metadata.facturacion_descartada` en el negocio.
+  // Un cerrado ya esta fuera de la cola (pide `estado = 'abierto'`), asi que marcarlo
+  // no cambia lo que se ve: solo deja un dato nuevo en un expediente que se declaro
+  // terminado. El estado entra a la lectura que ya validaba workspace y existencia.
+  if (negocioCerrado((neg as { estado: string | null }).estado)) {
+    return { ok: false, error: MENSAJE_NEGOCIO_CERRADO }
+  }
 
   let nombre: string | null = null
   if (staffId) {
@@ -747,8 +756,11 @@ export async function restaurarEnFacturacion(negocioId: string): Promise<{ ok: b
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: neg } = await (svc as any)
-    .from('negocios').select('id, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).single()
+    .from('negocios').select('id, estado, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).single()
   if (!neg) return { ok: false, error: 'Negocio no encontrado' }
+  if (negocioCerrado((neg as { estado: string | null }).estado)) {
+    return { ok: false, error: MENSAJE_NEGOCIO_CERRADO }
+  }
 
   const metadata = { ...((neg.metadata ?? {}) as Record<string, unknown>) }
   delete metadata.facturacion_descartada
@@ -869,6 +881,13 @@ export async function emitirFacturaDeNegocio(
 
   const { supabase, staffId } = await getWorkspace()
   const svc = createServiceClient()
+
+  // Un negocio cerrado no se factura. Esto NO le quita trabajo a nadie: la cola ya
+  // pide `estado = 'abierto'`, asi que ningun cerrado es alcanzable desde la
+  // pantalla. Lo que agrega es que la accion diga lo mismo que la lectura — una
+  // server action exportada es una puerta publica aunque ninguna pantalla la ofrezca.
+  const cerrado = await bloqueoPorNegocioCerrado(svc, workspaceId, negocioId)
+  if (cerrado) return { ok: false, error: cerrado }
 
   let nombre: string | null = null
   if (staffId) {
@@ -1069,6 +1088,12 @@ export async function adoptarFacturaSiigoDeNegocio(
 
   const { staffId } = await getWorkspace()
   const svc = createServiceClient()
+
+  // Mismo corte que emitir, y por la misma razon: la adopcion se ofrece desde la
+  // cola, que ya excluye a los cerrados. Adoptar escribe la marca en el negocio y
+  // archiva el PDF en su bloque — es alimentarlo, no solo mirarlo.
+  const cerrado = await bloqueoPorNegocioCerrado(svc, workspaceId, negocioId)
+  if (cerrado) return { ok: false, error: cerrado }
 
   let nombre: string | null = null
   if (staffId) {

@@ -36,6 +36,7 @@ import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
 import { puedeCorregirDocumentos } from '@/lib/roles'
@@ -1174,11 +1175,15 @@ interface EtapaHistorialProps {
   historialData: HistorialData
   precioTotal: number
   userRole: string
+  /** Ver `BloqueRenderer`. Aqui importa por `editable_siempre`, que levanta el
+   *  `_forceReadOnly` con el que el historial fuerza solo lectura a todo lo demas. */
+  negocioCerrado?: boolean
 }
 
 function HistorialEtapasPrevias({
   bloques, negocioId, workspaceId, profiles, cobros, cotizacionesNegocio,
   resumenFinanciero, ejecucionData, historialData, precioTotal, userRole,
+  negocioCerrado = false,
 }: EtapaHistorialProps) {
   const [open, setOpen] = useState(false)
   const [bloqueAbierto, setBloqueAbierto] = useState<string | null>(null)
@@ -1249,6 +1254,7 @@ function HistorialEtapasPrevias({
                         historialData={historialData}
                         precioTotal={precioTotal}
                         userRole={userRole}
+                        negocioCerrado={negocioCerrado}
                       />
                     ) : (
                       <p className="text-xs text-muted-foreground italic">Sin instancia creada.</p>
@@ -1305,6 +1311,7 @@ function BloqueRenderer({
   registrarPagoEnabled = false,
   negocioFijado,
   facturaDraft,
+  negocioCerrado = false,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1339,6 +1346,12 @@ function BloqueRenderer({
   registrarPagoEnabled?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
   facturaDraft?: FacturaDraft | null
+  /**
+   * El negocio esta cerrado: todo bloque va de solo lectura, sin excepciones.
+   * Es UX — la barrera real es `guardEditarBloque` en el servidor — pero sin esto
+   * la pantalla ofrece formularios que el servidor rechaza al guardar.
+   */
+  negocioCerrado?: boolean
 }) {
   const tipo = bloque.bloque_definitions?.tipo ?? ''
   const instanciaId = bloque.instancia?.id ?? ''
@@ -1487,7 +1500,16 @@ function BloqueRenderer({
     && (configExtra as { _puedeRevertirAprobacion?: boolean })._puedeRevertirAprobacion === true
     && !(bloque.instancia?.data as { aprobado_at?: string | null } | null | undefined)?.aprobado_at
 
-  const modo: 'editable' | 'visible' = puedeRenegociarPropuesta ? 'editable' : modoBase
+  // ⚠️ El cierre manda sobre TODAS las excepciones de arriba, y por eso va al final
+  // y no dentro de `getBloqueMode()`: `editable_siempre` (010/1668, factura),
+  // `_reactivable` y la renegociacion de la propuesta levantan `_forceReadOnly` a
+  // proposito. Un negocio cerrado no las necesita: ninguna de esas correcciones
+  // aplica sobre un expediente que se declaro terminado, y el servidor las rechaza
+  // igual (`guardEditarBloque`). Esto es UX; sin ello la pantalla ofrece campos que
+  // no se pueden guardar.
+  const modo: 'editable' | 'visible' = negocioCerrado
+    ? 'visible'
+    : (puedeRenegociarPropuesta ? 'editable' : modoBase)
 
   switch (tipo) {
     case 'equipo':
@@ -1860,6 +1882,7 @@ function BloqueCard({
   registrarPagoEnabled = false,
   negocioFijado,
   facturaDraft,
+  negocioCerrado = false,
 }: {
   bloque: BloqueExtendido
   negocioId: string
@@ -1893,6 +1916,12 @@ function BloqueCard({
   registrarPagoEnabled?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
   facturaDraft?: FacturaDraft | null
+  /**
+   * El negocio esta cerrado: todo bloque va de solo lectura, sin excepciones.
+   * Es UX — la barrera real es `guardEditarBloque` en el servidor — pero sin esto
+   * la pantalla ofrece formularios que el servidor rechaza al guardar.
+   */
+  negocioCerrado?: boolean
 }) {
   const def = bloque.bloque_definitions
   const isVisualization = def?.is_visualization ?? false
@@ -2002,6 +2031,7 @@ function BloqueCard({
               registrarPagoEnabled={registrarPagoEnabled}
               negocioFijado={negocioFijado}
               facturaDraft={facturaDraft}
+              negocioCerrado={negocioCerrado}
             />
           )}
         </div>
@@ -2124,6 +2154,11 @@ export default function NegocioDetailClient({
   useEffect(() => {
     if (errorMsg) toast.error(errorMsg)
   }, [errorMsg])
+
+  // Un negocio cerrado se ve y se descarga; no se alimenta. Se deriva de `estado`
+  // con el criterio unico del producto — NO de `cierre_motivo`, que es NULL en todo
+  // cierre real de esta linea.
+  const negocioCerrado = estaCerrado(negocio.estado)
 
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
@@ -2427,6 +2462,7 @@ export default function NegocioDetailClient({
                   registrarPagoEnabled={registrarPagoEnabled}
                   negocioFijado={{ negocio_id: negocio.id, codigo: negocio.codigo, nombre: negocio.nombre }}
                   facturaDraft={negocio.factura_draft ?? null}
+                  negocioCerrado={negocioCerrado}
                 />
               ))}
             </div>
@@ -2447,6 +2483,7 @@ export default function NegocioDetailClient({
             historialData={historialData}
             precioTotal={negocio.valor_a_recaudar ?? negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
             userRole={userRole}
+            negocioCerrado={negocioCerrado}
           />
         )}
 
