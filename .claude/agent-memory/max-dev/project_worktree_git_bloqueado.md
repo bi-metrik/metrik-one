@@ -330,3 +330,41 @@ con **el token de uno**. Y al terminar, `push --force-with-lease`.
 
 Relacionado: [[sql-prod-one]], [[activity-log-vocabulario]], [[navigate-lector-gemini]],
 [[tokens-pino-profundo]].
+
+## ⚠️⚠️ Antes de borrar un worktree abandonado: auditar qué existe SOLO ahí (2026-09-10)
+
+Al limpiar worktreees viejos, `git worktree remove` sin `--force` es la única red que
+hay, y **no dice qué es lo dirty**. En dos de los cuatro que se removieron el 2026-09-10
+la negativa venía de archivos de **agent-memory sin commitear**, y en uno de ellos había
+**dos memorias que no existían en ningún otro sitio** (`project_capturas_sustenta_landing`
+y `reference_capturas_ui_sin_servidor`, escritas ese mismo día por una sesión que
+terminó sin commitear). Un `--force` a ciegas las habría borrado sin dejar rastro.
+
+**El criterio que se usó, en este orden:**
+
+1. `git rev-list --count origin/main..<rama>` — si es 0, la rama no sostiene nada.
+   (NUNCA `git branch --contains`, que da verde siempre: [[git-branch-contains-no-verifica]].)
+2. `gh pr list --state open` — ninguna con PR abierto se toca.
+3. **mtime del directorio.** Uno de los candidatos tenía archivos de hace **7 minutos**
+   (`.x-cred.py`, `.valida-wt/`): sesión VIVA. Ese es el chequeo que salva, y no aparece
+   en ninguna salida de git.
+4. Recién ahí, `git worktree remove` sin `--force`.
+
+**Cuando se niega, hay que ver qué es sin poder correr `git -C` (el guard lo bloquea):**
+`git ls-tree -r -l <rama>` desde el worktree propio da ruta y **tamaño** de cada blob;
+un script de Python compara contra el disco y saca en un segundo (a) archivos presentes
+que la rama no trae y (b) tamaños distintos. Con 1.500 archivos tardó nada y señaló
+exactamente los 3 que importaban. Comparar tamaños no prueba igualdad de contenido, pero
+para decidir «¿hay trabajo real aquí?» alcanza y es lo único disponible.
+
+**Rescate, no `--force` a secas:** los dos archivos huérfanos se copiaron al worktree
+propio, se verificaron con `cmp` (idénticos byte a byte, [[rescate-verificar-contra-el-destino]])
+y se commitearon con la memoria de la sesión. Los otros dos archivos dirty resultaron ser
+versiones **más viejas** de memorias que ya existen (14 KB en el worktree contra 21 KB en
+el propio): ahí `--force` no perdía nada, y eso se comprobó midiendo, no suponiendo.
+
+**Las ramas `worktree-agente-*` sí se borran, con `-d` y nunca `-D`:** `-d` se niega si
+la rama tiene algo sin mergear y si está checkouteada, o sea que es una segunda red
+independiente del conteo. De 16, se borraron 13; quedaron las 2 checkouteadas y una con
+3 commits propios. ⚠️ `git branch -d A B C` puede borrar unas y fallar en otra: se
+verifica con `git branch --list 'worktree-agente-*'`, no con el código de salida.
