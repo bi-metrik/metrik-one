@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  FileSpreadsheet,
   Loader2,
   Plus,
   Search,
@@ -114,12 +115,20 @@ export default function SujetosClient({
           </p>
         </div>
         {puedeGestionar && (
-          <button
-            onClick={() => setNuevo((v) => !v)}
-            className="shrink-0 px-3 py-2 rounded-lg bg-tinta text-white text-sm font-medium flex items-center gap-2 hover:bg-[#333]"
-          >
-            <Plus className="h-4 w-4" /> Agregar
-          </button>
+          <div className="shrink-0 flex items-center gap-2">
+            <Link
+              href="/compliance/sujetos/cargue"
+              className="px-3 py-2 rounded-lg border border-[#E5E7EB] text-tinta text-sm font-medium flex items-center gap-2 hover:bg-papel"
+            >
+              <FileSpreadsheet className="h-4 w-4" /> Cargue masivo
+            </Link>
+            <button
+              onClick={() => setNuevo((v) => !v)}
+              className="px-3 py-2 rounded-lg bg-tinta text-white text-sm font-medium flex items-center gap-2 hover:bg-[#333]"
+            >
+              <Plus className="h-4 w-4" /> Agregar
+            </button>
+          </div>
         )}
       </div>
 
