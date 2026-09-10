@@ -12,6 +12,7 @@ import { marcaCondicionLabel } from '@/lib/negocios/constants'
 import { segmentarNegocios } from '@/lib/negocios/segmentador'
 import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-dia'
 import { agruparPorCita, GRUPO_CITA_VENCIDA } from '@/lib/negocios/agrupar-por-cita'
+import { agruparApartandoCerrados } from '@/lib/negocios/agrupar-con-cerrados'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { CampoFiltro } from '@/lib/filtros/campos'
@@ -298,15 +299,29 @@ export default function NegociosClient({
   // DIAN. Con 'atraso' mandan los días de retraso, y agrupar por fecha pelearía con
   // ese orden; en 'cerrados' ni la etapa actual ni la cita significan nada.
   const agrupada = (sortBy === 'reciente' || sortBy === 'cita') && fase !== 'cerrados'
-  const grupos = useMemo(
-    () =>
-      !agrupada
-        ? []
-        : sortBy === 'cita'
-          ? agruparPorCita(currentFiltrado, hoyISO)
-          : agruparPorLlegada(currentFiltrado, hoyISO),
-    [agrupada, sortBy, currentFiltrado, hoyISO],
-  )
+
+  /**
+   * Quién es cerrado se decide por su ORIGEN (viene en la prop `cerrados`), no por un
+   * campo derivado: `cierre_motivo` está en NULL en todos los cierres anteriores al
+   * backfill —los 33 de SOENA, medido el 2026-09-10— y `estado` habría que enumerarlo
+   * aquí otra vez. La pertenencia al arreglo no puede desincronizarse de la consulta.
+   */
+  const idsCerrados = useMemo(() => new Set(cerrados.map((n) => n.id)), [cerrados])
+
+  // En "Todos" los cerrados NO entran a los grupos de día (la razón, en
+  // `agrupar-con-cerrados.ts`): van en un grupo propio al final, que además los deja
+  // dentro de `idsVisibles` para que el Excel los baje.
+  const grupos = useMemo(() => {
+    if (!agrupada) return []
+    return agruparApartandoCerrados(
+      currentFiltrado,
+      (n) => idsCerrados.has(n.id),
+      (abiertosDeLaLista) =>
+        sortBy === 'cita'
+          ? agruparPorCita(abiertosDeLaLista, hoyISO)
+          : agruparPorLlegada(abiertosDeLaLista, hoyISO),
+    )
+  }, [agrupada, sortBy, currentFiltrado, idsCerrados, hoyISO])
 
   // El orden por cita solo se ofrece donde significa algo. En un workspace sin
   // bloque de cita configurado toda la lista caería en «Sin cita registrada»: una
@@ -342,9 +357,12 @@ export default function NegociosClient({
   )
 
   // ── Contadores — reflejan todos los filtros activos excepto la fase/etapa. ──
+  // "Todos" suma los cerrados porque su lista los incluye: el chip tiene que ser el largo
+  // de lo que abre (en SOENA, 411 abiertos + 33 cerrados = 444), o el usuario ve un número
+  // y cuenta otro.
   const faseCount = (key: FaseFilter) =>
     key === 'todos'
-      ? negociosFiltrados.length
+      ? negociosFiltrados.length + cerradosFiltradosConFiltros.length
       : key === 'cerrados'
         ? cerradosFiltradosConFiltros.length
         : negociosFiltrados.filter((n) => n.stage_actual === key).length
@@ -661,7 +679,7 @@ export default function NegociosClient({
           <div className="py-16 text-center">
             <p className="text-sm text-tinta-suave">
               {fase === 'todos'
-                ? 'Sin negocios abiertos'
+                ? 'Sin negocios'
                 : etapaNum !== null
                   ? `Sin negocios en ${etapasDeFase.find((e) => e.numero === etapaNum)?.nombre ?? 'esta etapa'}`
                   : `Sin negocios en ${ALL_FASES.find((f) => f.key === fase)?.label}`}

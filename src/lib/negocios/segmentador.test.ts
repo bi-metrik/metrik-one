@@ -12,7 +12,12 @@ const NEGOCIOS: N[] = [
   { id: 'e', stage_actual: 'venta', etapa_numero: 3, responsable: 'deisy' },
   { id: 'f', stage_actual: 'ejecucion', etapa_numero: 7 },
 ]
-const CERRADOS: N[] = [{ id: 'z', stage_actual: 'cerrado', etapa_numero: 9 }]
+// Dos cerrados. 'y' conserva el `stage_actual` que tenía al salir del proceso (venta,
+// etapa 1): es el control de que una fase de stage NO lo cuenta ni lo lista.
+const CERRADOS: N[] = [
+  { id: 'z', stage_actual: 'cerrado', etapa_numero: 9 },
+  { id: 'y', stage_actual: 'venta', etapa_numero: 1, responsable: 'deisy' },
+]
 
 const sinFiltro = (xs: N[]) => xs
 const soloDeisy = (xs: N[]) => xs.filter((n) => n.responsable === 'deisy')
@@ -57,8 +62,35 @@ describe('segmentarNegocios', () => {
     expect(s.lista.length).toBe(5)
   })
 
-  it("'todos' y 'cerrados' usan su propia fuente", () => {
-    expect(segmentarNegocios(NEGOCIOS, CERRADOS, 'todos', null, sinFiltro).lista.length).toBe(6)
+  it("'cerrados' usa su propia fuente", () => {
     expect(segmentarNegocios(NEGOCIOS, CERRADOS, 'cerrados', null, sinFiltro).lista).toEqual(CERRADOS)
+  })
+
+  it("'todos' lista abiertos Y cerrados", () => {
+    const s = segmentarNegocios(NEGOCIOS, CERRADOS, 'todos', null, sinFiltro)
+    expect(s.lista.length).toBe(NEGOCIOS.length + CERRADOS.length)
+    // Los cerrados están, y están DESPUÉS de los abiertos.
+    expect(s.lista.map((n) => n.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'z', 'y'])
+  })
+
+  it("en 'todos' los filtros transversales también alcanzan a los cerrados", () => {
+    const s = segmentarNegocios(NEGOCIOS, CERRADOS, 'todos', null, soloDeisy)
+    expect(s.lista.map((n) => n.id)).toEqual(['c', 'e', 'y'])
+  })
+
+  it("el contador de etapa en 'todos' incluye a los cerrados de esa etapa", () => {
+    const s = segmentarNegocios(NEGOCIOS, CERRADOS, 'todos', null, sinFiltro)
+    // 'a' y 'b' abiertos + el cerrado 'y', todos en la etapa 1.
+    expect(s.contarEtapa(1)).toBe(3)
+    expect(segmentarNegocios(NEGOCIOS, CERRADOS, 'todos', 1, sinFiltro).lista.map((n) => n.id))
+      .toEqual(['a', 'b', 'y'])
+  })
+
+  it('una fase de stage NO trae cerrados, aunque conserven ese stage_actual', () => {
+    // 'y' es cerrado con stage_actual 'venta': si la fase lo listara, la pantalla diría
+    // que sigue en venta y el chip de Venta contaría un caso que ya salió del proceso.
+    const s = segmentarNegocios(NEGOCIOS, CERRADOS, 'venta', null, sinFiltro)
+    expect(s.lista.map((n) => n.id)).not.toContain('y')
+    expect(s.contarEtapa(1)).toBe(2)
   })
 })

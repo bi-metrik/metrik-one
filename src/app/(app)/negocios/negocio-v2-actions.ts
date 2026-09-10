@@ -8,7 +8,7 @@ import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
-import { horasHabilesEntre, slaHorasDeEtapa } from '@/lib/negocios/horas-habiles'
+import { horasHabilesEntre, slaHorasVigentes } from '@/lib/negocios/horas-habiles'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
@@ -568,8 +568,23 @@ function dataDesdeMetadata(
 
 // ── Listar negocios del workspace ─────────────────────────────────────────────
 
+/**
+ * Los estados con los que un negocio SALE del proceso. `completado` es el cierre
+ * exitoso; `perdido` lo escribe `perderNegocio` y `cancelado` `cancelarNegocio`.
+ *
+ * Existe porque pedir la lista de cerrados con `estado = 'completado'` dejaba fuera
+ * a los otros dos, sin error: en SOENA eran 16 de 33 cerrados que NUNCA se cargaban,
+ * y el filtro por motivo de cierre de esa pestaña ofrecía Perdido y Cancelado dando
+ * siempre cero.
+ */
+const ESTADOS_CERRADOS: string[] = ['completado', 'perdido', 'cancelado']
+
 export async function getNegociosV2(
-  estado: 'abierto' | 'completado' | 'todos' = 'abierto',
+  /**
+   * `'cerrado'` trae los tres estados de salida; `'completado'` conserva su
+   * significado literal (solo el cierre exitoso) para quien lo pida a propósito.
+   */
+  estado: 'abierto' | 'completado' | 'cerrado' | 'todos' = 'abierto',
   incluirPausados = false,
 ): Promise<NegocioResumen[]> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
@@ -621,7 +636,9 @@ export async function getNegociosV2(
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
 
-  if (estado !== 'todos') {
+  if (estado === 'cerrado') {
+    query = query.in('estado', ESTADOS_CERRADOS)
+  } else if (estado !== 'todos') {
     query = query.eq('estado', estado)
   }
   if (!incluirPausados) {
@@ -879,9 +896,10 @@ export async function getNegociosV2(
       | { nombre: string; stage: string; numero: number; config_extra: unknown }
       | null
     // SLA de etapa. Sin sla_horas configurado no se calcula nada: la tarjeta
-    // guarda silencio (no pinta "a tiempo" ni "sin SLA").
+    // guarda silencio (no pinta "a tiempo" ni "sin SLA"). Y un negocio ya cerrado no
+    // tiene SLA vivo — la razón, medida, vive en `slaHorasVigentes`.
     const etapaCambiadaAt = (row.etapa_cambiada_at as string | null) ?? null
-    const slaHoras = slaHorasDeEtapa(etapaRow?.config_extra)
+    const slaHoras = slaHorasVigentes(row.estado as string | null, etapaRow?.config_extra)
     const horasEnEtapa =
       slaHoras !== null && etapaCambiadaAt
         ? horasHabilesEntre(etapaCambiadaAt, ahoraMs, festivos)
@@ -8195,6 +8213,17 @@ async function camposDeCierre(
 
   return {
     estado: 'completado',
+    // ⚠️ Aquí NO se puede escribir `cierre_motivo: 'exitoso'`, aunque es lo que falta para
+    // que la columna "Cierre" del Excel y el filtro por motivo de la pestaña Cerrados
+    // sirvan. Lo impide un CHECK de la base, `negocios_cierre_motivo_coherente`
+    // (`20260520000003`): exige `cierre_motivo IS NOT NULL` **solo** cuando
+    // `stage_actual = 'cerrado'`, y NULL en cualquier otro caso. Los cierres de este
+    // producto no mueven el negocio a un stage `cerrado` —en SOENA la etapa de cierre es
+    // Facturación, stage `cobro`, y su línea no tiene ninguna etapa con stage `cerrado`—,
+    // así que el UPDATE completo fallaría con 23514 y el negocio NO cerraría.
+    // Medido el 2026-09-10: en toda la base hay 5 filas con `cierre_motivo` no nulo y las
+    // 5 tienen `stage_actual = 'cerrado'`. Necesita migración (redefinir la coherencia
+    // contra `estado`, no contra `stage_actual`) y esa decisión no es de este PR.
     lecciones_aprendidas: opts?.lecciones?.trim() || null,
     closed_at: now,
     cierre_snapshot: {

@@ -428,7 +428,21 @@ export default function NegocioCard({
     }
   }
 
-  const isCerrado = negocio.cierre_motivo !== null
+  /**
+   * Que un negocio salió del proceso lo dice su `estado`, no `cierre_motivo`.
+   *
+   * ⚠️ `cierre_motivo` está en NULL en TODO cierre real y va a seguir estándolo: un CHECK
+   * de la base (`negocios_cierre_motivo_coherente`, migración `20260520000003`) solo lo
+   * admite cuando `stage_actual = 'cerrado'`, y los cierres de este producto no mueven el
+   * stage. Medido contra producción el 2026-09-10: los 33 cerrados de SOENA lo tienen NULL,
+   * y en toda la base hay 5 filas con valor —las 5 con stage `cerrado`—. Con el criterio
+   * viejo la tarjeta de un cerrado se pintaba con su pill de etapa, con la fecha de llegada
+   * y sin la de cierre: indistinguible de uno abierto, justo ahora que "Todos" los lista.
+   *
+   * `motivoCierre` se conserva aparte porque solo sirve para ROTULAR (Exitoso/Perdido/
+   * Cancelado); sin él el rótulo cae a "CERRADO", que es cierto igual.
+   */
+  const isCerrado = negocio.estado !== null && negocio.estado !== 'abierto'
   const motivoCierre = negocio.cierre_motivo
 
   // Badge de origen. `es_meta_lead` sigue siendo el respaldo mientras el backfill

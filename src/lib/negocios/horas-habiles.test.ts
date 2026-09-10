@@ -3,6 +3,7 @@ import {
   horasHabilesEntre,
   horasHabilesEnJornada,
   slaHorasDeEtapa,
+  slaHorasVigentes,
   JORNADA_DIA_COMPLETO,
 } from './horas-habiles'
 
@@ -201,5 +202,32 @@ describe('horasHabilesEnJornada', () => {
       expect(brutas > 72).toBe(true)
       expect(horasHabilesEnJornada(ms(desde), ms(hasta), FESTIVOS_2026) <= 72).toBe(true)
     }
+  })
+})
+
+describe('slaHorasVigentes', () => {
+  // La etapa de cierre de SOENA es Facturación, con SLA de 120 h: el caso real.
+  const FACTURACION = { sla_horas: 120 }
+
+  it('un negocio abierto conserva el SLA de su etapa', () => {
+    expect(slaHorasVigentes('abierto', FACTURACION)).toBe(120)
+  })
+
+  it('los tres estados de cierre dejan el SLA en null', () => {
+    // Sin esto, un cerrado acumula atraso contra `ahora` para siempre: encabeza el
+    // orden por "Más atrasado", suma al contador de atrasados y viaja al Excel.
+    for (const estado of ['completado', 'perdido', 'cancelado']) {
+      expect(slaHorasVigentes(estado, FACTURACION)).toBeNull()
+    }
+  })
+
+  it('sin estado no se mide nada (no se asume que siga vivo)', () => {
+    expect(slaHorasVigentes(null, FACTURACION)).toBeNull()
+    expect(slaHorasVigentes(undefined, FACTURACION)).toBeNull()
+  })
+
+  it('un abierto en etapa sin SLA sigue sin SLA', () => {
+    expect(slaHorasVigentes('abierto', {})).toBeNull()
+    expect(slaHorasVigentes('abierto', null)).toBeNull()
   })
 })
