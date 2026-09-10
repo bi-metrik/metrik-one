@@ -170,5 +170,39 @@ select public.get_operaciones_bono_resumen('<ws>', 2026, 7);
 
 Si el resultado sale vacío, sospecha del guard antes que de los datos.
 
+## ⚠️ El correo de una persona del equipo NO está en `staff` ni en `profiles`
+
+Medido el 2026-09-10 buscando el correo de una supervisora de SOENA (PR #625). Las dos
+tablas donde uno lo buscaría **no tienen columna de correo**:
+
+- `staff` → `full_name`, `position`, `rol_plataforma`, `is_active`, `profile_id`, salario,
+  `phone_whatsapp`… y nada de correo.
+- `profiles` → `full_name`, `role`, `workspace_id`, `avatar_url`… tampoco.
+
+El correo vive en **`auth.users`**, que PostgREST no expone (no se puede consultar el
+esquema `auth` por `/rest/v1/`). `team_invitations` tampoco sirve como atajo: en SOENA
+está **vacía** (las cuentas se crearon por script, no por invitación).
+
+**La vía que sí funciona, y no necesita `.credentials.md` ni la Management API:** la **Auth
+Admin API**, con la misma `SUPABASE_SERVICE_ROLE_KEY` de `.env.local`:
+
+```
+GET {SUPABASE_URL}/auth/v1/admin/users/{profile_id}
+    apikey: <service_role>      Authorization: Bearer <service_role>
+```
+
+`profiles.id` **ES** el id de `auth.users`, así que se encadena
+`staff.profile_id` → ese GET → `email`. Devuelve además `last_sign_in_at`, que de paso
+dice si la cuenta se usa.
+
+⚠️ **Validar el instrumento con alguien cuyo correo ya se conozca.** Aquí el encargo daba
+el de una de las dos personas: se consultó a las DOS y la conocida devolvió exactamente el
+correo esperado. Sin ese control, un endpoint que devolviera el correo de otra fila (o el
+de la cuenta de servicio) se leería como acierto. Barato y descarta el error de método,
+que es el que no se ve.
+
+⚠️ Un `select` con una columna inexistente devuelve **HTTP 400 a secas**, sin decir cuál
+columna. Ante un 400, pedir `select=*&limit=1` y mirar las claves antes de adivinar.
+
 Relacionado: [[tableros-soena-ola-1]], [[medir-antes-de-construir]],
-[[activity-log-vocabulario]].
+[[activity-log-vocabulario]], [[export-negocios-a-drive]].

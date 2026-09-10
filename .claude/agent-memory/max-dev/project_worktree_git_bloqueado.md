@@ -241,6 +241,33 @@ commitear** — aquí el árbol estaba limpio al abrir y a los diez minutos ten�
 archivos ajenos modificados. La firma es que los archivos que aparecen no los menciona el
 encargo.
 
+### ⚠️⚠️ `git add <nuevos>` + `git commit` SIN rutas deja fuera los MODIFICADOS
+
+Variante propia del consejo de arriba, y muerde justo cuando uno cree que lo está
+siguiendo. Medido el 2026-09-10 (PR #625): con 8 archivos nuevos y 3 modificados se hizo
+`git add <los 8 nuevos>` y después `git commit -m …` **sin rutas**. `commit` sin `-a` y sin
+rutas commitea **solo lo que está en el índice**, así que los 3 modificados se quedaron
+fuera y el commit era **incoherente**: el árbol commiteado tenía la ruta vieja (con su
+propia vía de generación) y el módulo nuevo importando helpers que en esa versión no
+existían. Ni compilaba.
+
+**Lo que lo delató:** `gh pr create` imprime `Warning: N uncommitted changes`. Es la única
+señal, es un warning que no falla nada, y aparece **después** de crear el PR. `git status
+--short` justo antes del commit lo habría visto igual.
+
+**How to apply:** cuando hay archivos nuevos Y modificados, son dos comandos planos y el
+segundo lleva **todas** las rutas:
+
+```
+git add <rutas nuevas>
+git commit -m "…" -- <TODAS las rutas, nuevas y modificadas>
+```
+
+Y después, siempre: `git show --name-only --format="" HEAD` y contarlo contra
+`git status --short`, que tiene que quedar vacío. Se arregla con
+`git add <las que faltaban>` + `git commit --amend --no-edit` + `push --force-with-lease`,
+pero solo si se detecta antes de que alguien lea el PR.
+
 ### El mismo choque, visto desde el lado que estorba
 
 Escrito por la otra mitad del incidente del 2026-09-02: **la sesión que "borró la rama" fue una
