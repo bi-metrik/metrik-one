@@ -1,6 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#191713"/>
-  <text x="5" y="22" font-family="system-ui,sans-serif" font-weight="700" font-size="20" fill="#FFFFFF" letter-spacing="-0.5">M</text>
-  <text x="20" y="26" font-family="system-ui,sans-serif" font-weight="300" font-size="10" fill="#6FB89D">1</text>
-  <rect x="4" y="27" width="24" height="2" rx="1" fill="#6FB89D"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="MéTRIK">
+  <!--
+    Icono de aplicación MéTRIK, sistema "Pino Profundo".
+
+    El contorno de la M NO está dibujado aquí: se copió de
+    proyectos/metrik/marca/pino/svg/isotipo.svg, que lo genera vectorizar.py
+    desde Schibsted Grotesk 700. Por eso no depende de que la fuente cargue.
+    Escala, posición y radio reproducen png-one/metrik-icono-512.png.
+
+    El contenedor lleva su propio fondo (carbón), así que el icono se lee igual
+    sobre una pestaña clara que sobre una oscura: adentro va el isotipo
+    NEGATIVO — M en papel, línea en Pino 300, que es el único verde con
+    contraste sobre carbón.
+  -->
+  <rect width="512" height="512" rx="113.07" fill="#191713"/>
+  <g transform="translate(122.95 129.12) scale(0.284444)">
+    <path d="M49.882858991622925 703.125 88.94535899162292 0.0H333.8277339935303L476.17173194885254 601.3673543930054H458.55453610420227L601.3282239437103 0.0H846.4840352535248L885.5465352535248 703.125H738.7889921665192L707.3436677455902 107.42169618606567H708.8085114955902L559.9606037139893 703.125H375.62504410743713L226.6208827495575 107.42169618606567H228.0857264995575L196.64040207862854 703.125Z" fill="#F3F1EC"/>
+    <rect x="0" y="823.1" width="935.5" height="69.0" rx="34.5" fill="#6FB89D"/>
+  </g>
 </svg>

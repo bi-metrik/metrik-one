@@ -1,11 +1,11 @@
 ---
 name: tokens-pino-profundo
-description: PR #601 (sin mergear) tokeniza la paleta de ONE en Pino Profundo; el branding por workspace sigue sin aplicar fuera del sidebar y los workspaces viejos conservan el verde viejo en la base
+description: PR #601 (MERGEADO 2026-09-09) tokeniza la paleta de ONE en Pino Profundo; el branding por workspace sigue sin aplicar fuera del sidebar y los workspaces viejos conservan el verde viejo en la base
 metadata:
   type: project
 ---
 
-**PR #601, `feat/tokenizar-paleta-pino`, checks verdes, SIN MERGEAR.** Paso 4 del
+**PR #601, `feat/tokenizar-paleta-pino`, MERGEADO el 2026-09-09 (`1553fd5`).** Paso 4 del
 despliegue de `cerebro/decisiones/2026-09-07_rediseno-visual-pino-profundo.md`.
 
 **Why:** la paleta y la tipografia de MeTRIK ERAN los defaults de Tailwind y de
@@ -49,7 +49,10 @@ Configuracion no les regale un punto, pero el dato sigue viejo.
 - **Los PDF y correos cambian de color al mergear.** Las superficies que ve AFI
   (`/compliance`, `/cert`, `/vinculacion`, el PDF de metodologia de Valida) van
   dentro. Si hay que avisarle a AFI, es antes del merge.
-- `icon.svg` solo se recoloreo; los iconos oficiales estan en
-  `proyectos/metrik/marca/pino/png-one/` y cambiarlos altera la geometria.
+- ~~`icon.svg` solo se recoloreo~~ **CERRADO en el PR #602**: el icono de la
+  aplicacion pasa al isotipo oficial en contornos, mas `.ico`, `apple-icon` y
+  manifest. Ahi esta el hallazgo de que **Next declara el `.ico` antes que el
+  `.svg`** y de que la geometria hay que fitearla contra el PNG, no leerla del
+  generador. Ver [[icono-app-pino]].
 
 Relacionado: [[vistas-server-only]], [[worktree-git-bloqueado]].

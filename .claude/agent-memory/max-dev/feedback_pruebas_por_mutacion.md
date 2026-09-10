@@ -133,3 +133,26 @@ sin RUT después) para que los dos órdenes discrepen, y entonces la mutación c
 prueba», preguntarse si **los datos sembrados pueden siquiera separar el criterio mutado del
 que queda**. Para cualquier prueba de ORDEN: el fixture necesita al menos un par de filas
 donde los dos criterios manden al revés, o solo se está probando el orden de inserción.
+
+## ⚠️ Una mutación que no cae puede ser una MUTACIÓN MAL ELEGIDA, no un instrumento roto
+
+**2026-09-09 (PR #602).** Para comprobar que eslint de verdad revisaba un archivo del
+worktree —el config ignora `.claude/worktrees/**` y ese ignore ya ha mordido antes— se
+le agregó `const _basura: number = "no compila"`. Salió **exit 0**, y la conclusión
+inmediata («eslint no está mirando este archivo, el ignore me alcanza») era falsa por
+partida doble: el repo tiene `varsIgnorePattern: "^_"`, así que un nombre con guion bajo
+es exactamente lo que la regla perdona; y el desajuste de tipo es un error de **`tsc`**,
+no de eslint, que aquí no corre con información de tipos. Con `const basuraSinUsar = 1`
+eslint falla al instante. El instrumento estaba bien.
+
+**How to apply:** antes de declarar roto un verificador porque una mutación no cayó,
+comprobar que la mutación es del tipo que ESE verificador detecta:
+
+- eslint solo ve lo que tienen sus reglas; los errores de tipo son de `tsc`;
+- si el repo configura `argsIgnorePattern` / `varsIgnorePattern` / `destructuredArray…`,
+  un nombre con el prefijo perdonado **nunca** va a disparar `no-unused-vars`;
+- la mutación buena es la que viola una regla nombrada del config, no una que "se ve mal".
+
+Es la cara inversa del gotcha del arnés de arriba: allá el instrumento mentía en verde,
+acá el instrumento estaba sano y la sonda era la equivocada. Las dos se distinguen igual —
+exigiéndole al control que falle por una razón que uno pueda nombrar.
