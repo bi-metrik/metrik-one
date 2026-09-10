@@ -63,7 +63,6 @@ const negocio = (extra: Record<string, unknown>) =>
     pausado: false,
     pausado_hasta: null,
     motivo_pausa: null,
-    cierre_motivo: null,
     closed_at: null,
     razon_cierre: null,
     vehiculo_label: null,

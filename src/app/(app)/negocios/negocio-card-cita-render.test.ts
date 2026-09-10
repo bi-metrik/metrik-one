@@ -56,7 +56,6 @@ const negocio = (extra: Record<string, unknown>) =>
     pausado: false,
     pausado_hasta: null,
     motivo_pausa: null,
-    cierre_motivo: null,
     closed_at: null,
     razon_cierre: null,
     vehiculo_label: null,
@@ -105,21 +104,28 @@ describe('NegocioCard · cita en la DIAN', () => {
   it('un negocio CERRADO no muestra la marca aunque venga calculada', () => {
     // La cita de un caso cerrado ya no es accionable; pintarla en rojo sería ruido.
     //
-    // El caso está escrito como llega de verdad: `estado` cerrado y `cierre_motivo` en
-    // NULL, que es como está el 100% de los cierres reales (el CHECK
-    // `negocios_cierre_motivo_coherente` solo admite la columna con stage `cerrado`).
-    // Con el criterio viejo —`cierre_motivo !== null`— esta tarjeta se pintaba como
-    // abierta y la marca salía.
+    // El caso está escrito como llega de verdad: el desenlace vive en `estado`, no en
+    // `cierre_motivo` (columna muerta, ver `motivo-cierre.ts`). Con el criterio viejo
+    // —`cierre_motivo !== null`— esta tarjeta se pintaba como abierta y la marca salía.
     const html = pintar({
       estado: 'completado',
-      cierre_motivo: null,
       closed_at: '2026-09-09T12:00:00Z',
       fecha_cita: '2026-09-26T09:30',
       atencion_cita: { docs: ['certificado bancario'], horas: 2 },
     })
     expect(html).not.toContain('Atención inmediata')
-    // Y se reconoce como cerrado sin motivo: rótulo genérico y fecha de salida.
+    // Y se reconoce como cerrado CON su desenlace: el rótulo lo nombra.
+    expect(html).toContain('EXITOSO')
+    expect(html).toContain('Cerrado 9 de sept')
+  })
+
+  it('un estado terminal que no reconocemos cae al rótulo genérico', () => {
+    // `activo`: 2 negocios reales del workspace `metrik` (medido el 2026-09-10). No es
+    // un cierre, así que no tiene desenlace que nombrar — y aun así la tarjeta lo trata
+    // como fuera del proceso, que es el criterio de `isCerrado` (`estado !== 'abierto'`).
+    const html = pintar({ estado: 'activo', closed_at: null })
     expect(html).toContain('CERRADO')
+    expect(html).not.toContain('EXITOSO')
   })
 
   it('el chip de la cita lleva día y hora, y lee el valor como hora de pared', () => {

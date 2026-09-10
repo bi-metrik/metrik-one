@@ -28,6 +28,7 @@
 import { bogotaParts } from '@/lib/dates/bogota'
 import { etiquetaStage } from '@/lib/negocios/stage-label'
 import { marcaCondicionLabel, type MarcaCondicion } from '@/lib/negocios/constants'
+import { motivoCierreDeEstado, type MotivoCierre } from '@/lib/negocios/motivo-cierre'
 
 // ── Entradas ────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,6 @@ export type NegocioExportable = {
   etapa_stage: string | null
   etapa_nombre: string | null
   estado: string | null
-  cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
   razon_cierre: string | null
   created_at: string | null
   closed_at: string | null
@@ -276,28 +276,46 @@ export function fechaExcel(v: string | null | undefined): Date | null {
 }
 
 /**
- * Fase de la fila. Un negocio que ya no está `abierto` (completado, perdido,
- * cancelado) va como «Cerrado» aunque su etapa siga apuntando a la última fase por
- * la que pasó; el resto usa la etiqueta de la fase de su etapa, la misma que pinta
- * la lista. Sin etapa cae al `stage_actual` del negocio.
+ * Fase de la fila. Un negocio cerrado (completado, perdido, cancelado) va como
+ * «Cerrado» aunque su etapa siga apuntando a la última fase por la que pasó; el resto
+ * usa la etiqueta de la fase de su etapa, la misma que pinta la lista. Sin etapa cae al
+ * `stage_actual` del negocio.
+ *
+ * ⚠️ El criterio es la lista cerrada de `motivo-cierre.ts`, no `estado !== 'abierto'`.
+ * Con lo segundo, los 2 negocios que en producción tienen `estado = 'activo'` (workspace
+ * `metrik`, medido el 2026-09-10, los dos con `closed_at` NULL) bajaban con la fase
+ * «Cerrado» **y la columna «Cierre» vacía**: las dos celdas del mismo archivo
+ * contradiciéndose. Ahora las dos preguntan lo mismo.
  */
 export function faseDeNegocio(n: Pick<NegocioExportable, 'estado' | 'etapa_stage' | 'stage_actual'>): string | null {
-  if (n.estado && n.estado !== 'abierto') return etiquetaStage('cerrado')
+  if (motivoCierreDeEstado(n.estado)) return etiquetaStage('cerrado')
   const stage = n.etapa_stage ?? n.stage_actual
   return texto(etiquetaStage(stage))
 }
 
-const CIERRE_LABEL: Record<string, string> = {
+const CIERRE_LABEL: Record<MotivoCierre, string> = {
   exitoso: 'Exitoso',
   perdido: 'Perdido',
   cancelado: 'Cancelado',
 }
 
-function cierreDeNegocio(n: Pick<NegocioExportable, 'cierre_motivo' | 'razon_cierre'>): string | null {
-  const motivo = n.cierre_motivo ? (CIERRE_LABEL[n.cierre_motivo] ?? n.cierre_motivo) : null
+/**
+ * Columna «Cierre»: cómo terminó el negocio, y por qué cuando se registró una razón.
+ *
+ * El motivo sale de `estado`, no de `cierre_motivo` — esa columna está muerta y por qué
+ * lo está se explica en `motivo-cierre.ts`. Un negocio abierto no tiene cierre y la celda
+ * va vacía, **aunque arrastre una `razon_cierre` de una reapertura**: decir «Perdido» de
+ * uno que sigue vivo es peor que no decir nada.
+ *
+ * Medido en SOENA el 2026-09-10: los 17 completados no tienen `razon_cierre` (salen
+ * «Exitoso» a secas) y los 11 perdidos y 5 cancelados la tienen los 16.
+ */
+function cierreDeNegocio(n: Pick<NegocioExportable, 'estado' | 'razon_cierre'>): string | null {
+  const clave = motivoCierreDeEstado(n.estado)
+  if (!clave) return null
+  const motivo = CIERRE_LABEL[clave]
   const razon = texto(n.razon_cierre)
-  if (motivo && razon) return `${motivo} — ${razon}`
-  return motivo ?? razon
+  return razon ? `${motivo} — ${razon}` : motivo
 }
 
 /**

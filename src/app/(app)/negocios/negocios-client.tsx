@@ -13,6 +13,7 @@ import { segmentarNegocios } from '@/lib/negocios/segmentador'
 import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-dia'
 import { agruparPorCita, GRUPO_CITA_VENCIDA } from '@/lib/negocios/agrupar-por-cita'
 import { agruparApartandoCerrados } from '@/lib/negocios/agrupar-con-cerrados'
+import { motivoCierreDeEstado } from '@/lib/negocios/motivo-cierre'
 import { useEstadoUrl } from '@/hooks/use-estado-url'
 import { filtroDesdeSearchParams, type SearchParams, type ValorFiltro } from '@/lib/filtros/url-estado'
 import type { CampoFiltro } from '@/lib/filtros/campos'
@@ -20,6 +21,10 @@ import type { NegocioResumen } from './negocio-v2-actions'
 import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrados'
+/**
+ * Valor del filtro de motivo de la pestaña Cerrados: los tres desenlaces de
+ * `motivo-cierre.ts` más `'todos'`, que no descarta nada.
+ */
 type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
 
 // Valores admisibles desde la URL. Sin esta lista, un `?fase=basura` (enlace viejo,
@@ -241,10 +246,14 @@ export default function NegociosClient({
       .sort((a, b) => a.full_name.localeCompare(b.full_name, 'es'))
   }, [negocios])
 
-  // Cerrados filtrados por motivo
+  // Cerrados filtrados por motivo.
+  //
+  // El motivo se DERIVA de `estado` (`motivo-cierre.ts`). Con el criterio anterior
+  // —`n.cierre_motivo === motivoCierre`— los tres chips daban cero siempre, porque esa
+  // columna está en NULL en todo cierre real de este producto y no se puede poblar.
   const cerradosFiltrados = useMemo(() => {
     if (motivoCierre === 'todos') return cerrados
-    return cerrados.filter((n) => n.cierre_motivo === motivoCierre)
+    return cerrados.filter((n) => motivoCierreDeEstado(n.estado) === motivoCierre)
   }, [cerrados, motivoCierre])
 
   // Etapas de la fase seleccionada (solo cuando la fase es un stage), en orden del workflow.
@@ -301,10 +310,10 @@ export default function NegociosClient({
   const agrupada = (sortBy === 'reciente' || sortBy === 'cita') && fase !== 'cerrados'
 
   /**
-   * Quién es cerrado se decide por su ORIGEN (viene en la prop `cerrados`), no por un
-   * campo derivado: `cierre_motivo` está en NULL en todos los cierres anteriores al
-   * backfill —los 33 de SOENA, medido el 2026-09-10— y `estado` habría que enumerarlo
-   * aquí otra vez. La pertenencia al arreglo no puede desincronizarse de la consulta.
+   * Quién es cerrado se decide por su ORIGEN (viene en la prop `cerrados`), no releyendo
+   * `estado`: la prop la llenó `getNegociosV2('cerrado')`, así que la pertenencia al
+   * arreglo no puede desincronizarse de la consulta, y enumerar los estados terminales
+   * otra vez aquí sí podría.
    */
   const idsCerrados = useMemo(() => new Set(cerrados.map((n) => n.id)), [cerrados])
 
@@ -632,7 +641,7 @@ export default function NegociosClient({
             const cuenta =
               m === 'todos'
                 ? cerrados.length
-                : cerrados.filter((n) => n.cierre_motivo === m).length
+                : cerrados.filter((n) => motivoCierreDeEstado(n.estado) === m).length
             return (
               <button
                 key={m}

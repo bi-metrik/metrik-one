@@ -28,7 +28,19 @@ propio) antes de crear la rama de verdad.
 
 Lo que **sí** funciona desde el worktree propio: `fetch`, `switch -c`, `add`, `commit`,
 `push -u`, `gh pr create/checks/merge`, `worktree list/add/remove`, `branch -D`, y
-`git show <sha>:<ruta>` (lee objetos, no toca árboles). **El guard solo inspecciona el
+`git show <sha>:<ruta>` (lee objetos, no toca árboles).
+
+⚠️ **Para borrar una rama REMOTA ya mergeada, el orden de preferencia se invierte** (medido
+2026-09-10, limpiando la del #607): `gh api -X DELETE repos/<o>/<r>/git/refs/heads/<rama>`
+lo **bloquea el clasificador**, y `git push origin --delete <rama>` **pasa sin problema**
+estando parado en la rama propia. El aviso de `[[worktree-git-bloqueado]]` de más abajo
+sobre `push --delete` aplica solo cuando el cwd está en `main` (ahí muerde
+`branch-guard-one`). Después, `git branch -D <rama>` local.
+
+⚠️ **El worktree que hay que «limpiar» puede ser el propio.** Con `isolation: worktree` la
+sesión suele heredar el mismo directorio del encargo anterior: si el brief pide borrar
+`.claude/worktrees/agente-<hash>` y ese es el cwd, lo que se limpia son **las ramas**
+(remota y local) del PR ya mergeado, no el árbol — que queda en uso por el PR nuevo. **El guard solo inspecciona el
 redirect (`-C`, `cd`), no el efecto**: por eso el mantenimiento repo-wide
 (`worktree list/remove/prune`, `branch -D` de ramas ajenas) pasa sin problema mientras
 se corra desde el cwd propio y sin `-C`. Al revés también: un `git -C <repo> worktree

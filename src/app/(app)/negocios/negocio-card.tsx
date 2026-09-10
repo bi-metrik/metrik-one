@@ -15,6 +15,7 @@ import { STAGE_LABEL_UPPER } from '@/lib/negocios/stage-label'
 import { fechaHoraEnLetras, partesFechaHora } from '@/lib/negocios/fecha-hora-campo'
 import { textoAtencionCita } from '@/lib/negocios/seguimiento-citas'
 import { textoChipDesenlace, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
+import { motivoCierreDeEstado } from '@/lib/negocios/motivo-cierre'
 
 export type StaffAsignable = { id: string; full_name: string }
 
@@ -429,21 +430,20 @@ export default function NegocioCard({
   }
 
   /**
-   * Que un negocio salió del proceso lo dice su `estado`, no `cierre_motivo`.
+   * Que un negocio salió del proceso lo dice su `estado`, no `cierre_motivo` — esa columna
+   * está muerta y por qué lo está se explica en `motivo-cierre.ts`.
    *
-   * ⚠️ `cierre_motivo` está en NULL en TODO cierre real y va a seguir estándolo: un CHECK
-   * de la base (`negocios_cierre_motivo_coherente`, migración `20260520000003`) solo lo
-   * admite cuando `stage_actual = 'cerrado'`, y los cierres de este producto no mueven el
-   * stage. Medido contra producción el 2026-09-10: los 33 cerrados de SOENA lo tienen NULL,
-   * y en toda la base hay 5 filas con valor —las 5 con stage `cerrado`—. Con el criterio
-   * viejo la tarjeta de un cerrado se pintaba con su pill de etapa, con la fecha de llegada
-   * y sin la de cierre: indistinguible de uno abierto, justo ahora que "Todos" los lista.
-   *
-   * `motivoCierre` se conserva aparte porque solo sirve para ROTULAR (Exitoso/Perdido/
-   * Cancelado); sin él el rótulo cae a "CERRADO", que es cierto igual.
+   * Las dos preguntas son distintas y por eso son dos líneas:
+   *   - `isCerrado`: ¿salió del proceso? Cualquier estado que no sea `abierto`. Con el
+   *     criterio viejo (`cierre_motivo !== null`) daba **false en todo cierre real**, así
+   *     que la tarjeta de un cerrado se pintaba con su pill de etapa, con la fecha de
+   *     llegada y sin la de cierre: indistinguible de uno abierto.
+   *   - `motivoCierre`: ¿cómo terminó? Solo sirve para ROTULAR, y su mapa es una lista
+   *     cerrada de tres estados. Sin él el rótulo cae a "CERRADO", que es cierto igual —
+   *     es lo que le toca a un `estado` que no reconocemos (hay 2 en `activo` en la base).
    */
   const isCerrado = negocio.estado !== null && negocio.estado !== 'abierto'
-  const motivoCierre = negocio.cierre_motivo
+  const motivoCierre = motivoCierreDeEstado(negocio.estado)
 
   // Badge de origen. `es_meta_lead` sigue siendo el respaldo mientras el backfill
   // de la columna no esté aplicado: un negocio marcado por la integración de Meta

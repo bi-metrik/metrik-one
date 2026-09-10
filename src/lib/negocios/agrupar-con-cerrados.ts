@@ -31,8 +31,8 @@ export const ETIQUETA_CERRADOS = 'Cerrados'
  * @param negocios         la lista ya filtrada y ordenada
  * @param esCerrado        quién salió del proceso. Se recibe como predicado a propósito:
  *                         quien llama lo sabe por el ORIGEN de la fila (viene del arreglo
- *                         de cerrados), que no puede desincronizarse de la consulta —
- *                         `cierre_motivo` sí: está en NULL en todos los cierres reales.
+ *                         de cerrados), que no puede desincronizarse de la consulta; un
+ *                         criterio recalculado aquí sí podría.
  * @param agruparAbiertos  cómo se agrupan los que siguen vivos (por llegada o por cita)
  */
 export function agruparApartandoCerrados<T>(

@@ -343,8 +343,8 @@ export type NegocioResumen = {
   pausado: boolean
   pausado_hasta: string | null
   motivo_pausa: string | null
-  // Cierre (modelo roles-areas-stages Fase 3+)
-  cierre_motivo: 'exitoso' | 'perdido' | 'cancelado' | null
+  // Cierre. El desenlace se DERIVA de `estado` (`motivo-cierre.ts`): `cierre_motivo` no
+  // viaja en la lista porque está NULL en todo cierre real y nadie la lee ya.
   closed_at: string | null
   razon_cierre: string | null
   // Tarjeta config-driven (config_extra.negocio_card) — null en ws sin config
@@ -621,7 +621,6 @@ export async function getNegociosV2(
       pausado,
       pausado_hasta,
       motivo_pausa,
-      cierre_motivo,
       closed_at,
       razon_cierre,
       metadata,
@@ -927,7 +926,6 @@ export async function getNegociosV2(
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
       motivo_pausa: (row.motivo_pausa as string) ?? null,
-      cierre_motivo: (row.cierre_motivo as 'exitoso' | 'perdido' | 'cancelado' | null) ?? null,
       closed_at: (row.closed_at as string) ?? null,
       razon_cierre: (row.razon_cierre as string) ?? null,
       vehiculo_label: vehiculoPorNeg[id]?.label ?? null,

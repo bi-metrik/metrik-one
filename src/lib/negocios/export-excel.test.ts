@@ -26,6 +26,16 @@ import {
  *   5. invertir `Si`/`No` en `SI_NO`                          → caen 2 (booleanos, estimado)
  *   6. `Otros pagos` sin el corte del tercer pago             → cae 1 (vacío, no cero)
  *   7. recaudado ignorando `a_tramo2`                         → cae 1 (recaudado 150)
+ *
+ * ⚠️ La 3 caducó: `faseDeNegocio` ya no dice `estado !== 'abierto'`, sino que consulta la
+ * lista cerrada de `motivo-cierre.ts`. Su mutación equivalente está en la tanda de abajo.
+ *
+ * Segunda tanda, MEDIDA el 2026-09-10 sobre la columna «Cierre» (mismo arnés: sustituir,
+ * correr solo ESTE archivo, restaurar; línea base verde comprobada antes y después):
+ *   8.  `motivoCierreDeEstado` devuelve siempre null      → caen 4 (todo el bloque de cierre)
+ *   9.  el motivo sale de `estado !== 'abierto'`          → caen 2 (el control de `activo`)
+ *   10. `cierreDeNegocio` ignora `razon_cierre`           → caen 2 (perdido y cancelado)
+ *   11. `faseDeNegocio` vuelve a `estado !== 'abierto'`   → cae 1 (la Fase de `activo`)
  */
 
 const negocio = (p: Partial<NegocioExportable> & Pick<NegocioExportable, 'id'>): NegocioExportable => ({
@@ -39,7 +49,6 @@ const negocio = (p: Partial<NegocioExportable> & Pick<NegocioExportable, 'id'>):
   etapa_stage: 'venta',
   etapa_nombre: 'Propuesta',
   estado: 'abierto',
-  cierre_motivo: null,
   razon_cierre: null,
   created_at: null,
   closed_at: null,
@@ -318,11 +327,58 @@ describe('armarFilasExcel — identidad, personas y forma', () => {
     expect(Object.keys(f)).toEqual([...ENCABEZADOS])
   })
 
-  it('el cierre junta motivo y razón', () => {
+  /**
+   * Columna «Cierre», derivada de `estado`.
+   *
+   * Las filas están copiadas de producción (medido el 2026-09-10): en SOENA los 17
+   * completados NO tienen `razon_cierre` y los 11 perdidos y 5 cancelados la tienen los
+   * 16; la razón «Pagado 100%» sale de las 5 únicas filas de toda la base que llegaron a
+   * tener `cierre_motivo`, en el workspace `metrik`.
+   *
+   * Detalle de las mutaciones que las tumban, en el encabezado del archivo.
+   */
+  const celdaCierre = (n: Parameters<typeof negocio>[0]) =>
+    armarFilasExcel(entrada({ negocios: [negocio(n)] }))[0]['Cierre']
+
+  it('un cerrado exitoso dice «Exitoso», con o sin razón', () => {
+    expect(celdaCierre({ id: 'n1', estado: 'completado' })).toBe('Exitoso')
+    expect(celdaCierre({ id: 'n1', estado: 'completado', razon_cierre: 'Pagado 100%' })).toBe(
+      'Exitoso — Pagado 100%',
+    )
+  })
+
+  it('un perdido y un cancelado llevan su motivo delante de la razón', () => {
+    expect(celdaCierre({ id: 'n1', estado: 'perdido', razon_cierre: 'No incluido en UPME' })).toBe(
+      'Perdido — No incluido en UPME',
+    )
+    expect(celdaCierre({ id: 'n1', estado: 'cancelado', razon_cierre: 'Decision del cliente' })).toBe(
+      'Cancelado — Decision del cliente',
+    )
+  })
+
+  it('un negocio abierto deja la celda vacía, aunque arrastre una razón de cierre', () => {
+    // La segunda mitad es un caso LATENTE: hoy no hay ni un `abierto` con `razon_cierre`
+    // en toda la base (medido el 2026-09-10), pero una reapertura puede dejarlo así, y
+    // ahí «Perdido» sobre un negocio vivo sería una afirmación falsa.
+    expect(celdaCierre({ id: 'n1', estado: 'abierto' })).toBeNull()
+    expect(celdaCierre({ id: 'n1', estado: 'abierto', razon_cierre: 'No responde' })).toBeNull()
+  })
+
+  it('un estado que no es un cierre reconocido no inventa motivo ni fase', () => {
+    // `activo`: 2 negocios reales del workspace `metrik`, los dos con `closed_at` NULL.
+    // Es el control que separa «lista cerrada de tres estados» de «distinto de abierto»:
+    // con lo segundo, la Fase decía «Cerrado» y la celda de Cierre quedaba vacía.
     const [f] = armarFilasExcel(entrada({
-      negocios: [negocio({ id: 'n1', estado: 'completado', cierre_motivo: 'perdido', razon_cierre: 'No incluido en UPME' })],
+      negocios: [negocio({ id: 'n1', estado: 'activo', etapa_stage: 'cobro', stage_actual: 'cobro' })],
     }))
-    expect(f['Cierre']).toBe('Perdido — No incluido en UPME')
+    expect(f['Cierre']).toBeNull()
+    expect(f['Fase']).toBe('Financiera')
+  })
+
+  it('la fase de un cerrado es «Cerrado» aunque su etapa siga en otra fase', () => {
+    const [f] = armarFilasExcel(entrada({
+      negocios: [negocio({ id: 'n1', estado: 'perdido', etapa_stage: 'venta', stage_actual: 'venta' })],
+    }))
     expect(f['Fase']).toBe('Cerrado')
   })
 })

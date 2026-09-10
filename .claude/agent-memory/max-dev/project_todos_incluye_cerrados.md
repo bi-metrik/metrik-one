@@ -1,11 +1,11 @@
 ---
 name: todos-incluye-cerrados
-description: PR #607 (2026-09-10) — "Todos" pasa a listar cerrados; por qué escribir `cierre_motivo` es IMPOSIBLE sin migración (CHECK contra `stage_actual`), y el SLA que seguía corriendo en los cerrados
+description: PR #607 (2026-09-10, mergeado) — "Todos" pasa a listar cerrados; por qué escribir `cierre_motivo` es IMPOSIBLE (CHECK contra `stage_actual`) y el SLA que seguía corriendo en los cerrados. Su cabo suelto lo cerró el #609
 metadata:
   type: project
 ---
 
-**PR #607**, sin mergear al cierre (los 6 checks en verde, sin migración y sin escrituras).
+**PR #607**, mergeado (`9eeebbf`), sin migración y sin escrituras.
 La pestaña **Todos** de `/negocios` pasa a ser abiertos + cerrados, y la lista de cerrados
 se pide con `getNegociosV2('cerrado')` → `estado in ('completado','perdido','cancelado')`.
 
@@ -35,13 +35,14 @@ el destino no es stage `cerrado`. Update exitoso, motivo perdido, cero error.
 `cierre_motivo` no nulo y **las 5** tienen `stage_actual='cerrado'`. Si el CHECK estuviera
 muerto habría filas con valor y otro stage.
 
-**Consecuencias que siguen abiertas:**
-- El backfill que iba a correr Mauricio (`UPDATE … SET cierre_motivo='exitoso' WHERE
-  estado='completado'`) **falla igual**. Hace falta primero una migración que redefina la
-  coherencia contra `estado`, no contra `stage_actual`.
-- `perderNegocio` y `cancelarNegocio` **tampoco** escriben `cierre_motivo` (y su trigger no
-  dispara). Así que los tres chips de motivo de la pestaña Cerrados seguirán en cero incluso
-  después del backfill de los exitosos.
+**✅ Cerrado el 2026-09-10 por el camino contrario, en el PR #609: `cierre_motivo` no se
+puebla, se deja de leer.** El desenlace se deriva de `estado`
+(`src/lib/negocios/motivo-cierre.ts`), así que el backfill y la migración del CHECK ya no
+hacen falta. Detalle en [[cierre-desde-estado]].
+
+Lo que era «consecuencia abierta» y ya no aplica: el backfill que iba a correr Mauricio
+(`UPDATE … SET cierre_motivo='exitoso' …`), y que `perderNegocio` / `cancelarNegocio`
+tampoco escriban la columna. Los tres chips de motivo cuentan y filtran desde `estado`.
 
 **How to apply:** antes de escribir una columna que hoy está NULL en el 100% de las filas,
 buscar el CHECK que la gobierna (`grep -rn "<columna>" supabase/migrations/`). Un NULL
