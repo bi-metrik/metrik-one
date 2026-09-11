@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem } from './precio-item'
+import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem, margenRealDelItem } from './precio-item'
 
 /**
  * Los cuatro escenarios de la prueba de escritorio del encargo, más los bordes
@@ -145,5 +145,64 @@ describe('costoUnitarioDelItem', () => {
     ]
     const costoTotal = items.reduce((s, i) => s + costoUnitarioDelItem(i) * i.cantidad, 0)
     expect(costoTotal).toBe(20_500_000)
+  })
+})
+
+/**
+ * La convención del margen. El caso que la motiva es real: Trappvel cotiza con
+ * divisores (`costo / 0,85`) y escribe 15 queriendo decir margen real. Con la
+ * convención de siempre ese 15 valía 13,04% y nada en pantalla lo delataba.
+ */
+describe('convención del margen', () => {
+  const base = { numeroDeRubros: 3, subtotal: 1_000_000, precio_manual: false, precio_venta: 0 }
+
+  it('sin convención declarada calcula como siempre: markup sobre el costo', () => {
+    expect(precioVentaDelItem({ ...base, margen_porcentaje: 15 })).toBe(1_150_000)
+  })
+
+  it('markup explícito da exactamente lo mismo que no declarar nada', () => {
+    const item = { ...base, margen_porcentaje: 15, convencion_margen: 'markup' as const }
+    expect(precioVentaDelItem(item)).toBe(1_150_000)
+  })
+
+  it('sobre_venta al 15 reproduce el divisor /0,85 del Excel de la agencia', () => {
+    const item = { ...base, margen_porcentaje: 15, convencion_margen: 'sobre_venta' as const }
+    // 1.000.000 / 0,85 = 1.176.470,588…
+    expect(precioVentaDelItem(item)).toBe(1_176_471)
+  })
+
+  it('el margen real del precio sobre_venta ES el número escrito', () => {
+    const item = { ...base, margen_porcentaje: 15, convencion_margen: 'sobre_venta' as const }
+    const margen = margenRealDelItem(1_000_000, precioVentaDelItem(item))
+    expect(margen).toBeCloseTo(15, 3)
+  })
+
+  it('el margen real del precio markup NO es el número escrito, y esa es la trampa', () => {
+    const margen = margenRealDelItem(1_000_000, precioVentaDelItem({ ...base, margen_porcentaje: 15 }))
+    expect(margen).toBeCloseTo(13.043, 3)
+  })
+
+  it('margen 0 da el costo con cualquiera de las dos convenciones', () => {
+    expect(precioVentaDelItem({ ...base, margen_porcentaje: 0, convencion_margen: 'sobre_venta' })).toBe(1_000_000)
+    expect(precioVentaDelItem({ ...base, margen_porcentaje: 0, convencion_margen: 'markup' })).toBe(1_000_000)
+  })
+
+  it('sobre_venta al 100 no divide por cero: cae a markup', () => {
+    const item = { ...base, margen_porcentaje: 100, convencion_margen: 'sobre_venta' as const }
+    expect(precioVentaDelItem(item)).toBe(2_000_000)
+  })
+
+  it('sobre_venta por encima de 100 no devuelve un precio negativo', () => {
+    const item = { ...base, margen_porcentaje: 150, convencion_margen: 'sobre_venta' as const }
+    expect(precioVentaDelItem(item)).toBeGreaterThan(1_000_000)
+  })
+
+  it('un precio escrito a mano ignora la convención, como ignora el margen', () => {
+    const item = { ...base, margen_porcentaje: 15, precio_manual: true, precio_venta: 900_000, convencion_margen: 'sobre_venta' as const }
+    expect(precioVentaDelItem(item)).toBe(900_000)
+  })
+
+  it('sin precio no hay margen que reportar, y no es cero', () => {
+    expect(margenRealDelItem(500_000, 0)).toBeNull()
   })
 })

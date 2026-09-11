@@ -3,7 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
-import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem } from '@/lib/cotizaciones/precio-item'
+import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -151,6 +151,16 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
 
   const nextOrden = (existing?.[0]?.orden ?? 0) + 1
 
+  // El item nace con el margen por defecto de SU cotizacion, no con 0. Editable
+  // despues: el default ahorra tecleo, no impone el precio.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: cotDefault } = await (supabase as any)
+    .from('cotizaciones')
+    .select('margen_default_pct')
+    .eq('id', cotizacionId)
+    .maybeSingle()
+  const margenInicial = Number(cotDefault?.margen_default_pct) || 0
+
   const { data, error: dbError } = await supabase
     .from('items')
     .insert({
@@ -158,6 +168,7 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
       nombre: nombre.trim(),
       subtotal: 0,
       orden: nextOrden,
+      margen_porcentaje: margenInicial,
       // Un precio explicito al crear lo puso quien llama, no los rubros.
       ...(precioVenta != null ? { precio_venta: precioVenta, precio_manual: true } : {}),
       ...(descripcion ? { descripcion: descripcion.trim() } : {}),
@@ -736,6 +747,18 @@ export async function recalcularTotales(cotizacionId: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  // Que significa `margen_porcentaje` en ESTA cotizacion. Se lee de la fila, no de la
+  // linea de negocio: la convencion se congela al crear la cotizacion y no se
+  // resincroniza, para que reconfigurar la linea no le mueva el precio a una
+  // cotizacion ya enviada al cliente.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: cotConvencion } = await (supabase as any)
+    .from('cotizaciones')
+    .select('convencion_margen')
+    .eq('id', cotizacionId)
+    .maybeSingle()
+  const convencionMargen = (cotConvencion?.convencion_margen ?? null) as ConvencionMargen | null
+
   // Get all items with rubros
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
@@ -778,6 +801,7 @@ export async function recalcularTotales(cotizacionId: string) {
         precio_manual: item.precio_manual,
         numeroDeRubros: rubros.length,
         subtotal,
+        convencion_margen: convencionMargen,
       }
       if (precioSeDerivaDeRubros(parametros)) {
         pv = precioVentaDelItem(parametros)

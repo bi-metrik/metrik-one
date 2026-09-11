@@ -17,7 +17,8 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { costoUnitarioDelItem } from '@/lib/cotizaciones/precio-item'
+import { costoUnitarioDelItem, margenRealDelItem, precioVentaDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { etiquetaCampoMargen } from '@/lib/cotizaciones/convencion-margen'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
@@ -65,6 +66,8 @@ interface CotizacionData {
   aiu_admin_pct?: number | null
   aiu_imprevistos_pct?: number | null
   terminos_condiciones?: string | null
+  /** Que significa `margen_porcentaje` aqui. Ausente vale `markup`, como antes. */
+  convencion_margen?: ConvencionMargen | null
 }
 
 interface ClientFiscal {
@@ -98,6 +101,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
+  // Que significa el numero del campo de margen en ESTA cotizacion. Ausente vale
+  // `markup`, que es como se calculo todo lo anterior a esa columna.
+  const convencionMargen: ConvencionMargen = cotizacion.convencion_margen ?? 'markup'
   // Discount state
   const [discountPct, setDiscountPct] = useState(cotizacion.descuento_porcentaje?.toString() ?? '0')
   // Terminos y condiciones al final de la cotizacion
@@ -423,6 +429,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // sobreescribio. Misma condicion que aplica el servidor.
             const precioDesdeRubros = !isAjuste && tieneRubros && !precioManual
             const itemMargen = Number(item.margen_porcentaje) || 0
+            // El precio se deriva con el MISMO helper que aplica el servidor: si la
+            // pantalla lo recalcula por su cuenta, las dos formulas se separan y la
+            // que ve el comercial deja de ser la que se guarda.
+            const precioUnitarioDerivado = precioVentaDelItem({
+              es_ajuste: isAjuste,
+              precio_venta: item.precio_venta,
+              margen_porcentaje: itemMargen,
+              precio_manual: false,
+              numeroDeRubros: (item.rubros ?? []).length,
+              subtotal: costoUnitario,
+              convencion_margen: convencionMargen,
+            })
+            const margenRealPct = margenRealDelItem(costoUnitario, precioUnitarioDerivado)
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -484,7 +503,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                               </div>
                             </div>
                             <div>
-                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Margen %</label>
+                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{etiquetaCampoMargen(convencionMargen)}</label>
                               <input
                                 key={`margen-${item.id}-${itemMargen}`}
                                 type="number"
@@ -507,8 +526,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             <div>
                               <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio unitario</label>
                               <div className="rounded border bg-background px-2 py-1.5 text-sm font-medium tabular-nums">
-                                {formatCOP(Math.round(costoUnitario * (1 + itemMargen / 100)))}
+                                {formatCOP(precioUnitarioDerivado)}
                               </div>
+                              {/* Con `markup` el numero escrito arriba NO es el margen, es el
+                                  recargo. Decirlo aqui es lo unico que impide leer un 15 como
+                                  15% de margen cuando son 13,04%. */}
+                              {margenRealPct !== null && (
+                                <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                                  Margen real {margenRealPct.toFixed(1)}%
+                                </p>
+                              )}
                             </div>
                           </>
                         ) : (

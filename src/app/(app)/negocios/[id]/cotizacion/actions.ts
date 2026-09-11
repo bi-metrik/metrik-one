@@ -9,6 +9,7 @@ import { validateCorregir, type EstadoCotizacion } from '@/lib/cotizaciones/stat
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
+import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -33,6 +34,11 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // Fallback con epoch para garantizar unicidad si el RPC falla
   const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
+  // La convención del margen se COPIA de la línea al nacer la cotización y ahí se
+  // queda. Si se leyera de la línea en cada recálculo, reconfigurar la línea le
+  // movería el precio a cotizaciones ya enviadas a clientes.
+  const { convencion, defaultPct } = await politicaMargenDelNegocio(supabase, negocioId)
+
   const { data, error: dbError } = await supabase
     .from('cotizaciones')
     .insert({
@@ -43,6 +49,8 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
       modo: 'detallada',
       valor_total: 0,
       estado: 'borrador',
+      convencion_margen: convencion,
+      margen_default_pct: defaultPct,
     } as never)
     .select('id')
     .single()
