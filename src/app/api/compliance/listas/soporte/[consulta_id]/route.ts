@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { generarPDFSoporteDual, type SoporteDualData } from '@/lib/compliance/pdf-soporte-dual';
+import { nombreArchivoSoporte } from '@/lib/compliance/nombre-soporte';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
 export const dynamic = 'force-dynamic';
@@ -10,10 +11,16 @@ export const maxDuration = 30;
 // consultas_listas_dual. Se genera 100% desde ONE con los datos ya guardados;
 // NO golpea Informa/Valida. La verificacion (hash + QR) queda para una fase posterior.
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ consulta_id: string }> },
 ) {
   const { consulta_id } = await params;
+
+  // `?descargar=1` fuerza `attachment`. Sin el parametro se conserva `inline`,
+  // que es lo que espera el boton "Ver soporte" del resultado puntual.
+  const descargar = ['1', 'true'].includes(
+    (new URL(req.url).searchParams.get('descargar') ?? '').toLowerCase(),
+  );
 
   const { user } = await getCachedUser();
   if (!user) {
@@ -31,7 +38,13 @@ export async function GET(
   if (!profile?.workspace_id) {
     return Response.json({ error: 'workspace_no_encontrado' }, { status: 404 });
   }
-  if (!['owner', 'admin', 'supervisor', 'read_only'].includes(profile.role)) {
+  // `operator` entra desde 2026-09-11: en un workspace compliance-only la consulta
+  // de listas es funcion nuclear del operador (por eso el menu ya lo deja entrar a
+  // /compliance/listas) y `listarHistorialDual` no filtra por rol, asi que ya ve el
+  // historial completo del workspace. Negarle el soporte era una inconsistencia
+  // entre el menu y la ruta, no una decision de confidencialidad: el PDF no dice
+  // nada que la pantalla no le muestre. `contador` sigue fuera.
+  if (!['owner', 'admin', 'supervisor', 'operator', 'read_only'].includes(profile.role)) {
     return Response.json({ error: 'permiso_denegado' }, { status: 403 });
   }
 
@@ -77,11 +90,18 @@ export async function GET(
 
   const buf = await generarPDFSoporteDual(data);
 
+  const filename = nombreArchivoSoporte({
+    id: c.id,
+    nombre_consultado: c.nombre_consultado ?? null,
+    documento_numero: c.documento_numero ?? null,
+    created_at: c.created_at,
+  });
+
   return new Response(new Uint8Array(buf), {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="soporte-consulta-${c.id.slice(0, 8)}.pdf"`,
+      'Content-Disposition': `${descargar ? 'attachment' : 'inline'}; filename="${filename}"`,
       'Cache-Control': 'private, no-store',
     },
   });
