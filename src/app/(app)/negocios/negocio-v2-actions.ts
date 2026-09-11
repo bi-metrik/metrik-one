@@ -20,6 +20,7 @@ import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import {
   calcularPresupuestoPorRubro,
   asignarEjecutadoPorRubro,
+  agruparGastosPorCategoria,
   calcularCostoHoras,
   resolverLineaBase,
   totalPresupuestado,
@@ -6156,7 +6157,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     totalGastos: number
     totalHoras: number
     costoHoras: number
-    gastosPorCategoria: Array<{ categoria: string; total: number }>
+    /**
+     * Cada categoría trae los movimientos que la componen, para que la pantalla
+     * pueda abrirla sin otra consulta: el total de una categoría sin su detalle
+     * obliga a salir a /movimientos y filtrar a mano para saber qué lo formó.
+     */
+    gastosPorCategoria: Array<{
+      categoria: string
+      total: number
+      movimientos: Array<{ id: string; descripcion: string | null; monto: number; fecha: string }>
+    }>
     presupuestoPorRubro?: RubroPresupuestoEjecutado[]
     /** Suma de los rubros: el presupuesto de COSTO, no el precio de venta. */
     presupuestoCosto?: number
@@ -7554,17 +7564,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       })(),
     },
     ejecucionData: (() => {
-      const gastos = ((gastosData ?? []) as Array<{ monto: number; categoria: string; fecha: string }>)
+      const gastos = ((gastosData ?? []) as Array<{ id: string; descripcion: string | null; monto: number; categoria: string; fecha: string }>)
       const totalGastos = gastos.reduce((s, g) => s + (g.monto ?? 0), 0)
-      // Agrupar gastos por categoría
-      const catMap: Record<string, number> = {}
-      for (const g of gastos) {
-        const cat = g.categoria ?? 'otros'
-        catMap[cat] = (catMap[cat] ?? 0) + (g.monto ?? 0)
-      }
-      const gastosPorCategoria = Object.entries(catMap)
-        .map(([categoria, total]) => ({ categoria, total }))
-        .sort((a, b) => b.total - a.total)
+      // Cada categoría viaja con los movimientos que la forman: el detalle sale de la
+      // misma lectura que ya alimenta el historial, así que abrir una categoría en la
+      // pantalla no cuesta una consulta más.
+      const gastosPorCategoria = agruparGastosPorCategoria(gastos)
 
       const staffDataArr = (staffRes.data ?? []) as Array<{ id: string; full_name: string; salary?: number }>
       const staffNameMap: Record<string, string> = {}

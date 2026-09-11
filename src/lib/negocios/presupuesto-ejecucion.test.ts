@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   calcularPresupuestoPorRubro,
   asignarEjecutadoPorRubro,
+  agruparGastosPorCategoria,
   calcularCostoHoras,
   resolverLineaBase,
   totalPresupuestado,
@@ -448,5 +449,47 @@ describe('línea base del presupuesto', () => {
       rechazadas: 1,
       pendiente: null,
     })
+  })
+})
+
+describe('agruparGastosPorCategoria', () => {
+  const gastos = [
+    { id: 'g1', descripcion: 'Tubería 2"', monto: 3_000_000, categoria: 'materiales', fecha: '2026-09-05' },
+    { id: 'g2', descripcion: 'Flete obra', monto: 400_000, categoria: 'transporte', fecha: '2026-09-04' },
+    { id: 'g3', descripcion: 'Válvulas', monto: 1_200_000, categoria: 'materiales', fecha: '2026-09-03' },
+  ]
+
+  it('el total de una categoría es la suma de los movimientos que muestra', () => {
+    const [mayor] = agruparGastosPorCategoria(gastos)
+    expect(mayor.categoria).toBe('materiales')
+    expect(mayor.total).toBe(4_200_000)
+    // La invariante que hace útil abrir la fila: lo que se despliega explica el total.
+    expect(mayor.movimientos.reduce((s, m) => s + m.monto, 0)).toBe(mayor.total)
+    expect(mayor.movimientos.map(m => m.id)).toEqual(['g1', 'g3'])
+  })
+
+  it('ordena de mayor a menor, no por orden de llegada', () => {
+    expect(agruparGastosPorCategoria(gastos).map(c => c.categoria)).toEqual(['materiales', 'transporte'])
+  })
+
+  it('un gasto sin categoría cae en "otros" en vez de desaparecer', () => {
+    const cats = agruparGastosPorCategoria([
+      { id: 'g4', descripcion: null, monto: 50_000, categoria: null, fecha: '2026-09-06' },
+    ])
+    expect(cats).toHaveLength(1)
+    expect(cats[0].categoria).toBe('otros')
+    expect(cats[0].movimientos[0].descripcion).toBeNull()
+  })
+
+  it('un monto nulo cuenta como cero y el movimiento sigue listado', () => {
+    const [cat] = agruparGastosPorCategoria([
+      { id: 'g5', descripcion: 'Pendiente de valor', monto: null, categoria: 'otros', fecha: '2026-09-07' },
+    ])
+    expect(cat.total).toBe(0)
+    expect(cat.movimientos).toHaveLength(1)
+  })
+
+  it('sin gastos no hay categorías', () => {
+    expect(agruparGastosPorCategoria([])).toEqual([])
   })
 })

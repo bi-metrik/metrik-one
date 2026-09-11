@@ -380,3 +380,56 @@ export function resolverLineaBase<T extends CotizacionLineaBase>(cotizaciones: T
     pendiente: pendiente?.consecutivo ?? null,
   }
 }
+
+// ── Agrupar gastos por categoría, con su detalle ──────────────────────────────
+
+/** Un gasto del negocio tal como lo trae la lectura del detalle. */
+export interface GastoDelNegocio {
+  id: string
+  descripcion?: string | null
+  monto?: number | null
+  categoria?: string | null
+  fecha: string
+}
+
+/** Una categoría con su total y los movimientos que lo forman. */
+export interface CategoriaGasto {
+  categoria: string
+  total: number
+  movimientos: Array<{ id: string; descripcion: string | null; monto: number; fecha: string }>
+}
+
+/**
+ * Agrupa los gastos del negocio por categoría, de mayor a menor, y deja dentro de
+ * cada una los movimientos que la componen.
+ *
+ * El detalle viaja con el total a propósito: el bloque de Ejecución abre la categoría
+ * sin otra consulta, y sobre todo sin que la pantalla vuelva a sumar por su cuenta.
+ * Dos sumas del mismo número se desincronizan, y el síntoma sería un total que no
+ * cuadra con las filas que lo explican.
+ *
+ * Un gasto de centro de costos mixto llega ya prorrateado a este negocio, así que su
+ * monto aquí es la parte que le toca, no el gasto completo.
+ */
+export function agruparGastosPorCategoria(gastos: GastoDelNegocio[]): CategoriaGasto[] {
+  const porCategoria = new Map<string, CategoriaGasto>()
+
+  for (const g of gastos) {
+    const categoria = g.categoria ?? 'otros'
+    let entrada = porCategoria.get(categoria)
+    if (!entrada) {
+      entrada = { categoria, total: 0, movimientos: [] }
+      porCategoria.set(categoria, entrada)
+    }
+    const monto = Number(g.monto) || 0
+    entrada.total += monto
+    entrada.movimientos.push({
+      id: g.id,
+      descripcion: g.descripcion ?? null,
+      monto,
+      fecha: g.fecha,
+    })
+  }
+
+  return [...porCategoria.values()].sort((a, b) => b.total - a.total)
+}
