@@ -3,7 +3,8 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
-import { precioSeDerivaDelCosto, precioVentaDelItem, costoUnitarioDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
 
@@ -153,15 +154,11 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
 
   const nextOrden = (existing?.[0]?.orden ?? 0) + 1
 
-  // El item nace con el margen por defecto de SU cotizacion, no con 0. Editable
-  // despues: el default ahorra tecleo, no impone el precio.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: cotDefault } = await (supabase as any)
-    .from('cotizaciones')
-    .select('margen_default_pct')
-    .eq('id', cotizacionId)
-    .maybeSingle()
-  const margenInicial = Number(cotDefault?.margen_default_pct) || 0
+  // El ítem nace SIN margen propio: `null` quiere decir "usa el de la cotización", que
+  // es lo que se quiere el 90% de las veces. Copiarle el porcentaje al crearlo lo dejaba
+  // marcado como excepción desde el primer día, y entonces subir el margen de la
+  // cotización no movía ninguna línea.
+  const margenInicial = null
 
   const { data, error: dbError } = await supabase
     .from('items')
@@ -189,7 +186,8 @@ export async function updateItem(id: string, updates: {
   descuento_porcentaje?: number
   descripcion?: string | null
   cantidad?: number
-  margen_porcentaje?: number
+  /** Margen propio de la línea. `null` la devuelve al margen de la cotización. */
+  margen_porcentaje?: number | null
   precio_manual?: boolean
   /** Costo unitario escrito a mano. Solo aplica al ítem SIN rubros. */
   subtotal?: number
@@ -201,7 +199,7 @@ export async function updateItem(id: string, updates: {
   // cambiar cualquiera que abra la cotización. El valor anterior se lee ANTES de
   // pisarlo: después ya no existe en ninguna parte, y "por qué este viaje salió al 3%"
   // se queda sin respuesta. Ver `registrarCambioDeMargen`.
-  const rastreaMargen = updates.margen_porcentaje !== undefined
+  const rastreaMargen = typeof updates.margen_porcentaje === 'number'
   const antes = rastreaMargen ? await leerItemParaRastro(supabase, id) : null
 
   const patch: Record<string, unknown> = {}
@@ -252,7 +250,7 @@ export async function updateItem(id: string, updates: {
       workspaceId,
       staffId,
       antes,
-      margenNuevo: updates.margen_porcentaje as number,
+      margenNuevo: Number(updates.margen_porcentaje) || 0,
     })
   }
 
@@ -832,225 +830,138 @@ export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado:
 
 // ── Recalcular totales ────────────────────────
 
+/**
+ * Rehacer los números de una cotización: costo de cada línea, precio de cada línea y
+ * los totales de la cascada. Toda la aritmética vive en `calcularCascada`, para que el
+ * servidor y la pantalla no puedan discrepar sobre cuánto vale la cotización.
+ */
 export async function recalcularTotales(cotizacionId: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  // Que significa `margen_porcentaje` en ESTA cotizacion. Se lee de la fila, no de la
-  // linea de negocio: la convencion se congela al crear la cotizacion y no se
-  // resincroniza, para que reconfigurar la linea no le mueva el precio a una
-  // cotizacion ya enviada al cliente.
+  // Los parámetros de la cascada se leen de la fila, no de la línea de negocio: se
+  // congelan al crear la cotización y no se resincronizan, para que reconfigurar la
+  // línea no le mueva el precio a una cotización ya enviada al cliente.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: cotConvencion } = await (supabase as any)
+  const { data: cot } = await (supabase as any)
     .from('cotizaciones')
-    .select('convencion_margen')
+    .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, descuento_porcentaje')
     .eq('id', cotizacionId)
     .maybeSingle()
-  const convencionMargen = (cotConvencion?.convencion_margen ?? null) as ConvencionMargen | null
 
-  // Get all items with rubros
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
     .select('id, precio_venta, subtotal, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
-  let totalCosto = 0
-  let totalVenta = 0
-  let hayAjuste = false
-  let ajusteId: string | null = null
-  // Precio unitario vigente por item, ya derivado de rubros cuando corresponde.
-  // Se guarda porque la rama del ajuste vuelve a sumar los items mas abajo, y ahi
-  // `item.precio_venta` seria el valor viejo que trajo la lectura.
-  const precioPorItem = new Map<string, number>()
-
-  for (const item of items ?? []) {
-    const rubros = (item.rubros as { valor_total: number }[]) ?? []
-    const cant = Number(item.cantidad) || 1
-    let pv = Number(item.precio_venta) || 0
-
-    // Update subtotal from rubros (skip for adjustment item — it has no rubros)
-    if (!item.es_ajuste) {
-      // Quién manda sobre el costo del ítem (los rubros, o el costo escrito a mano) lo
-      // decide `costoUnitarioDelItem`, no este archivo: la misma regla la aplica la
-      // pantalla al pintar el costo total, y escrita dos veces se desincroniza.
-      const subtotal = costoUnitarioDelItem({
-        numeroDeRubros: rubros.length,
-        costoDeRubros: rubros.reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0),
-        subtotal: item.subtotal,
-      })
-      const patch: Record<string, unknown> = { subtotal }
-
-      // Item cotizado por rubros: el precio de venta lo deriva el sistema.
-      // Sin esto el costo suma bien y el item queda en cero, que es el defecto.
-      const parametros = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filas = (items ?? []) as any[]
+  const cascada = calcularCascada(
+    filas.map(item => {
+      const rubros = (item.rubros as { valor_total: number }[]) ?? []
+      return {
+        id: item.id as string,
         es_ajuste: item.es_ajuste,
-        precio_venta: item.precio_venta,
-        margen_porcentaje: item.margen_porcentaje,
-        precio_manual: item.precio_manual,
+        cantidad: item.cantidad,
+        subtotal: item.subtotal,
         numeroDeRubros: rubros.length,
-        subtotal,
-        convencion_margen: convencionMargen,
+        costoDeRubros: rubros.reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0),
+        descuento_porcentaje: item.descuento_porcentaje,
+        margen_porcentaje: item.margen_porcentaje,
+        precio_venta: item.precio_venta,
+        precio_manual: item.precio_manual,
       }
-      if (precioSeDerivaDelCosto(parametros)) {
-        pv = precioVentaDelItem(parametros)
-        patch.precio_venta = pv
-      }
+    }),
+    {
+      administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
+      margenPct: cot?.margen_porcentaje,
+      descuentoComercialPct: cot?.descuento_porcentaje,
+      convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
+    },
+  )
 
-      await supabase.from('items').update(patch as never).eq('id', item.id)
-      totalCosto += subtotal * cant
+  for (const linea of cascada.lineas) {
+    const fila = filas.find(f => f.id === linea.id)
+    if (!fila || fila.es_ajuste) continue
+    // `items.precio_venta` es UNITARIO: la plantilla del PDF lo multiplica por la
+    // cantidad. Guardar aquí el total de la línea la duplicaría en el documento.
+    const cantidad = Number(fila.cantidad) || 1
+    const patch: Record<string, unknown> = { subtotal: linea.costoUnitario }
+    if (linea.costoLinea > 0 && fila.precio_manual !== true) {
+      patch.precio_venta = Math.round(linea.precioLinea / cantidad)
     }
-
-    precioPorItem.set(item.id, pv)
-
-    const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-    totalVenta += pv * cant * (1 - dp / 100)
-
-    if (item.es_ajuste) {
-      hayAjuste = true
-      ajusteId = item.id
-    }
+    await supabase.from('items').update(patch as never).eq('id', fila.id)
   }
 
-  const updates: Record<string, unknown> = { costo_total: totalCosto }
-
-  if (hayAjuste) {
-    // Read the user-fixed valor_total and re-reconcile the adjustment item
-    const { data: cot } = await supabase
+  // LEGADO: cotización con ítem de cuadre, donde alguien fijó el valor total a mano.
+  // Ahí el total no se deriva: manda el número que se escribió, y el ítem de ajuste
+  // absorbe la diferencia. Sin esto, recalcular le movería el total a una cotización
+  // ya enviada al cliente.
+  const ajuste = filas.find(f => f.es_ajuste)
+  if (ajuste) {
+    const { data: fijado } = await supabase
       .from('cotizaciones')
       .select('valor_total')
       .eq('id', cotizacionId)
       .single()
+    const valorFijado = fijado?.valor_total ?? 0
+    const sumaRegulares = cascada.lineas
+      .filter(l => l.id !== ajuste.id)
+      .reduce((s, l) => s + l.precioLinea, 0)
+    const diferencia = Math.round(valorFijado - sumaRegulares)
 
-    const valorTotalFijado = cot?.valor_total ?? 0
-    // Sum net of regular items only (excluding adjustment)
-    let sumaNetaRegulares = 0
-    for (const item of items ?? []) {
-      if (!item.es_ajuste) {
-        const pv = precioPorItem.get(item.id) ?? (Number(item.precio_venta) || 0)
-        const cant = Number(item.cantidad) || 1
-        const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-        sumaNetaRegulares += pv * cant * (1 - dp / 100)
-      }
-    }
-    const nuevaDiferencia = Math.round(valorTotalFijado - sumaNetaRegulares)
-
-    if (nuevaDiferencia === 0 && ajusteId) {
-      // No longer needed — remove
-      await supabase.from('items').delete().eq('id', ajusteId)
-    } else if (ajusteId) {
-      const nombre = nuevaDiferencia > 0 ? 'Administración e imprevistos' : 'Descuento comercial'
+    if (diferencia === 0) {
+      await supabase.from('items').delete().eq('id', ajuste.id)
+    } else {
+      const nombre = diferencia > 0 ? 'Administración e imprevistos' : 'Descuento comercial'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase as any)
         .from('items')
-        .update({ precio_venta: nuevaDiferencia, nombre } as never)
-        .eq('id', ajusteId)
+        .update({ precio_venta: diferencia, nombre } as never)
+        .eq('id', ajuste.id)
     }
-    // valor_total stays as the user set it — don't overwrite
-  } else {
-    // Normal behavior: valor_total = sum of items
-    if (totalVenta > 0) updates.valor_total = Math.round(totalVenta)
+
+    await supabase
+      .from('cotizaciones')
+      .update({ costo_total: cascada.costoDirecto } as never)
+      .eq('id', cotizacionId)
+
+    return { success: true, costoTotal: cascada.costoDirecto, valorVenta: valorFijado }
   }
 
   await supabase
     .from('cotizaciones')
-    .update(updates as never)
+    .update({
+      costo_total: cascada.costoDirecto,
+      valor_total: cascada.precioVenta,
+      descuento_valor: cascada.descuentoComercial,
+    } as never)
     .eq('id', cotizacionId)
 
-  return { success: true, costoTotal: totalCosto, valorVenta: Math.round(totalVenta) }
+  return { success: true, costoTotal: cascada.costoDirecto, valorVenta: cascada.precioVenta }
 }
 
 // ── AIU (Admin + Imprevistos sobre costos) ────────────────────
 
+/**
+ * Administración e imprevistos, en % sobre el costo directo.
+ *
+ * Antes esto creaba un ítem de cuadre con el AIU adentro, y el cliente veía una línea
+ * "Administración e imprevistos" que no había pedido. Ahora es un escalón de la
+ * cascada: se guardan los porcentajes y `recalcularTotales` reparte el peso sobre el
+ * costo de cada línea, que es donde el margen lo puede ver.
+ */
 export async function aplicarAIU(cotizacionId: string, adminPct: number | null, imprevPct: number | null) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  // Guardar porcentajes en cotizacion
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (supabase as any)
     .from('cotizaciones')
     .update({ aiu_admin_pct: adminPct, aiu_imprevistos_pct: imprevPct } as never)
     .eq('id', cotizacionId)
 
-  // Si ambos son null o 0, quitar ajuste AIU y dejar flujo normal
-  const adminVal = adminPct ?? 0
-  const imprevVal = imprevPct ?? 0
-  if (adminVal === 0 && imprevVal === 0) {
-    // Eliminar item de ajuste si existe
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: ajuste } = await (supabase as any)
-      .from('items')
-      .select('id')
-      .eq('cotizacion_id', cotizacionId)
-      .eq('es_ajuste', true)
-      .maybeSingle()
-    if (ajuste) {
-      await supabase.from('items').delete().eq('id', ajuste.id)
-    }
-    // Recalcular totales normal
-    await recalcularTotales(cotizacionId)
-    return { success: true }
-  }
-
-  // Calcular costoTotal (sum de rubros de items regulares)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: items } = await (supabase as any)
-    .from('items')
-    .select('id, precio_venta, descuento_porcentaje, es_ajuste, orden, cantidad, rubros(valor_total)')
-    .eq('cotizacion_id', cotizacionId)
-
-  let costoTotal = 0
-  let sumaNetaRegulares = 0
-  let ajusteId: string | null = null
-  let maxOrden = 0
-
-  for (const item of items ?? []) {
-    if (item.es_ajuste) {
-      ajusteId = item.id
-    } else {
-      const rubrosSum = ((item.rubros as { valor_total: number }[]) ?? []).reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0)
-      const cant = Number(item.cantidad) || 1
-      costoTotal += rubrosSum * cant
-      const pv = Number(item.precio_venta) || 0
-      const dp = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-      sumaNetaRegulares += pv * cant * (1 - dp / 100)
-    }
-    if ((item.orden ?? 0) > maxOrden) maxOrden = item.orden ?? 0
-  }
-
-  // Calcular AIU sobre costos
-  const aiuAmount = Math.round(costoTotal * (adminVal + imprevVal) / 100)
-  const nombre = `Administración (${adminVal}%) e imprevistos (${imprevVal}%)`
-
-  if (ajusteId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
-      .from('items')
-      .update({ precio_venta: aiuAmount, nombre } as never)
-      .eq('id', ajusteId)
-  } else {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
-      .from('items')
-      .insert({
-        cotizacion_id: cotizacionId,
-        nombre,
-        subtotal: 0,
-        orden: maxOrden + 1,
-        precio_venta: aiuAmount,
-        descuento_porcentaje: 0,
-        es_ajuste: true,
-      })
-  }
-
-  // Actualizar valor_total = sumaNetaRegulares + aiuAmount
-  const valorTotal = Math.round(sumaNetaRegulares + aiuAmount)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (supabase as any)
-    .from('cotizaciones')
-    .update({ valor_total: valorTotal, costo_total: costoTotal } as never)
-    .eq('id', cotizacionId)
-
+  await recalcularTotales(cotizacionId)
   return { success: true }
 }

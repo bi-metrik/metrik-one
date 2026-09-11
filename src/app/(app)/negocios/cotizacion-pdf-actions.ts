@@ -159,12 +159,25 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     precio_venta: number
     descuento_porcentaje: number | null
     cantidad: number | null
+    subtotal?: number | null
   }
+
+  /**
+   * El descuento que el CLIENTE puede ver.
+   *
+   * En una línea con costo, `descuento_porcentaje` es el descuento de COMPRA: ya está
+   * descontado del costo y por tanto del precio. Mostrarlo aquí se lo cobraría al
+   * cliente por segunda vez y dejaría un documento que no cuadra con su propio total.
+   * Las líneas sin costo son las de antes del rediseño, donde ese número sí era un
+   * descuento comercial de la línea.
+   */
+  const descuentoVisible = (it: { descuento_porcentaje: number | null; subtotal?: number | null }) =>
+    (Number(it.subtotal) || 0) > 0 ? 0 : Number(it.descuento_porcentaje) || 0
   let items: ItemRow[] = []
   if (cot.modo === 'detallada') {
     const { data: itemsData } = await supabase
       .from('items')
-      .select('nombre, descripcion, precio_venta, descuento_porcentaje, cantidad')
+      .select('nombre, descripcion, precio_venta, descuento_porcentaje, cantidad, subtotal')
       .eq('cotizacion_id', cotizacionId)
       .order('orden')
     items = (itemsData ?? []) as ItemRow[]
@@ -225,7 +238,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const renderItems: CotizacionRenderItem[] = items.map((it, idx) => {
       const cant = Number(it.cantidad) || 1
       const unit = Number(it.precio_venta) || 0
-      const desc = Number(it.descuento_porcentaje) || 0
+      const desc = descuentoVisible(it)
       const total = cant * unit * (1 - desc / 100)
       return {
         numero: idx + 1,
@@ -390,7 +403,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       nombre: i.nombre ?? '',
       descripcion: i.descripcion ?? null,
       precio_venta: Number(i.precio_venta) || 0,
-      descuento_porcentaje: Number(i.descuento_porcentaje) || 0,
+      descuento_porcentaje: descuentoVisible(i),
       cantidad: Number(i.cantidad) || 1,
     })),
     fiscal,

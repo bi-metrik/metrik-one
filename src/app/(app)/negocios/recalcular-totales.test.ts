@@ -186,7 +186,7 @@ describe('recalcularTotales — cotizar por rubros', () => {
     expect(res.valorVenta).toBe(900_000)
   })
 
-  it('cantidad y descuento se aplican sobre el precio derivado', async () => {
+  it('el descuento del ítem baja el costo, no el precio', async () => {
     sembrar(
       [{ id: 'it-1', precio_venta: 0, margen_porcentaje: 50, precio_manual: false, cantidad: 3, descuento_porcentaje: 10 }],
       [{ id: 'r1', item_id: 'it-1', valor_total: 100_000 }],
@@ -194,10 +194,12 @@ describe('recalcularTotales — cotizar por rubros', () => {
 
     const res = await recalcularTotales(COT)
 
-    // Precio unitario 150.000 · 3 unidades · -10% = 405.000
-    expect(item('it-1').precio_venta).toBe(150_000)
-    expect(res.costoTotal).toBe(300_000)
+    // El descuento del ítem es de COMPRA: 100.000 · 3 · -10% = 270.000 de costo.
+    // Con 50% de margen el precio sigue siendo 405.000, el mismo de antes: lo que
+    // cambia es que el costo ya no reporta 300.000 que nadie va a pagar.
+    expect(res.costoTotal).toBe(270_000)
     expect(res.valorVenta).toBe(405_000)
+    expect(item('it-1').precio_venta).toBe(135_000) // unitario: 405.000 / 3
   })
 
   it('con ítem de ajuste, la reconciliación usa el precio YA derivado', async () => {
@@ -253,6 +255,8 @@ describe('recalcularTotales — la convención vive en la cotización', () => {
     sembrar([{ id: 'i1', margen_porcentaje: 15, cantidad: 2 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
     cotizacion().convencion_margen = 'sobre_venta'
     await recalcularTotales(COT)
-    expect(cotizacion().valor_total).toBe(2_352_942)
+    // 2.000.000 / 0,85 = 2.352.941,17. El redondeo es uno solo, al total, no uno por
+    // ítem: redondear cada línea y después sumar corre el total sin razón.
+    expect(cotizacion().valor_total).toBe(2_352_941)
   })
 })

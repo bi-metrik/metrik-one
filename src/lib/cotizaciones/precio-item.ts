@@ -90,14 +90,33 @@ export function precioSeDerivaDelCosto(item: ItemParaPrecio): boolean {
  */
 export function precioVentaDelItem(item: ItemParaPrecio): number {
   if (!precioSeDerivaDelCosto(item)) return Number(item.precio_venta) || 0
-  const margen = Number(item.margen_porcentaje)
-  const margenValido = Number.isFinite(margen) ? margen : 0
-  const subtotal = Number(item.subtotal) || 0
+  return Math.round(precioConMargen(
+    Number(item.subtotal) || 0,
+    Number(item.margen_porcentaje),
+    item.convencion_margen ?? CONVENCION_MARGEN_POR_DEFECTO,
+  ))
+}
 
-  if (item.convencion_margen === 'sobre_venta' && margenValido < 100) {
-    return Math.round(subtotal / (1 - margenValido / 100))
+/**
+ * Aplicar un margen a un costo, segun la convencion que rija.
+ *
+ * Vive aparte de `precioVentaDelItem` porque la cascada de la cotizacion aplica el
+ * mismo margen sobre un costo que ya trae administrativos: es la misma aritmetica y
+ * escrita dos veces se desincroniza. No redondea: el redondeo es del que totaliza.
+ */
+export function precioConMargen(
+  costo: number,
+  margenPorcentaje: number | null | undefined,
+  convencion: ConvencionMargen = CONVENCION_MARGEN_POR_DEFECTO,
+): number {
+  const margen = Number(margenPorcentaje)
+  const margenValido = Number.isFinite(margen) ? margen : 0
+  const base = Number(costo) || 0
+
+  if (convencion === 'sobre_venta' && margenValido < 100) {
+    return base / (1 - margenValido / 100)
   }
-  return Math.round(subtotal * (1 + margenValido / 100))
+  return base * (1 + margenValido / 100)
 }
 
 /**
