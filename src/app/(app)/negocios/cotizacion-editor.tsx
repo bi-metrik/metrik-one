@@ -19,7 +19,7 @@ import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants
 import { formatCOP } from '@/lib/contacts/constants'
 import { margenRealDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
-import { etiquetaCampoMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
+import { nombreDelMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
@@ -635,15 +635,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       <div className="rounded-md border bg-muted/20 px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[10px] text-muted-foreground">
-                            Precio de esta línea
                             {precioFijadoAMano
-                              ? ' · fijado a mano'
-                              : ` · ${etiquetaCampoMargen(convencionMargen).toLowerCase()} ${itemMargen}%${margenPropio ? ' propio' : ' de la cotización'}`}
+                              ? 'Precio de esta línea, escrito a mano'
+                              : itemMargen === 0
+                                ? 'Precio de esta línea: igual al costo, todavía sin margen'
+                                : `Precio de esta línea: costo + ${itemMargen}% ${margenPropio ? 'de esta línea' : 'de la cotización'}`}
                           </span>
                           <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
                         </div>
 
-                        {margenRealPct !== null && costoLinea > 0 && (
+                        {/* El margen real solo se enseña cuando alguien puso un margen. Un
+                            "0,0% · bajo" en naranja sobre una línea recién capturada no
+                            avisa de nada: regaña por no haber llegado todavía. */}
+                        {margenRealPct !== null && costoLinea > 0 && (itemMargen !== 0 || precioFijadoAMano) && (
                           <p
                             className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
                             title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
@@ -674,7 +678,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           {!precioFijadoAMano && margenPropio && (
                             <>
                               <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                {etiquetaCampoMargen(convencionMargen)}
+                                {nombreDelMargen(convencionMargen)}
                                 <input
                                   key={`margen-${item.id}-${itemMargen}`}
                                   type="number"
@@ -1290,7 +1294,7 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
           en su propia fila, así que el número de aquí no las alcanza. */}
       {editable && (
         <div className="flex items-center justify-between gap-2 border-t pt-2">
-          <label className="text-xs font-medium text-muted-foreground">{etiquetaCampoMargen(convencionMargen)} de la cotización</label>
+          <label className="text-xs font-medium text-muted-foreground">{nombreDelMargen(convencionMargen)} de la cotización</label>
           <div className="relative w-24">
             <input
               key={`margen-cot-${margenPct}`}
