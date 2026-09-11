@@ -53,7 +53,7 @@ export function stepHistorial(): TutorialStep {
     element: '[data-tutorial-target="tab-historial"]',
     title: 'Historial auditable',
     description:
-      'Cada consulta queda registrada por 5 anos. Filtras por fecha, severidad o tipo. Soporte de auditoria SARLAFT.',
+      'Cada consulta queda registrada por 10 años. Filtras por fecha, severidad o tipo. Soporte de auditoria SARLAFT.',
     side: 'bottom',
     align: 'center',
   };
