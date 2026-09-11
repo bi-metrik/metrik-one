@@ -11,13 +11,14 @@ import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
   addRubro, updateRubro, deleteRubro, recalcularTotales,
-  addItemFromServicio, reconciliarAjuste, aplicarAIU,
+  addItemFromServicio, aplicarAIU,
 } from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { costoUnitarioDelItem, precioSeDerivaDelCosto, margenRealDelItem, precioVentaDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { margenRealDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
 import { etiquetaCampoMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -105,7 +106,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // `markup`, que es como se calculo todo lo anterior a esa columna.
   const convencionMargen: ConvencionMargen = cotizacion.convencion_margen ?? 'markup'
   // Discount state
-  const [discountPct, setDiscountPct] = useState(cotizacion.descuento_porcentaje?.toString() ?? '0')
   // Terminos y condiciones al final de la cotizacion
   const [terminos, setTerminos] = useState(cotizacion.terminos_condiciones ?? '')
 
@@ -313,21 +313,35 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
-  // Costo total de la cotización. El ítem con rubros vale lo que suman sus rubros; el
-  // que no los tiene vale el costo que alguien le escribió a mano (`subtotal`). Misma
-  // regla que aplica `recalcularTotales` al guardar `cotizaciones.costo_total`: si las
-  // dos difieren, la pantalla muestra un número y la DB guarda otro.
-  const costoTotal = initialItems.reduce((sum, item) => {
-    if (item.es_ajuste) return sum
-    const rubros = item.rubros ?? []
-    const costoUnit = costoUnitarioDelItem({
-      numeroDeRubros: rubros.length,
-      costoDeRubros: rubros.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0),
-      subtotal: item.subtotal,
-    })
-    const cant = Number(item.cantidad) || 1
-    return sum + costoUnit * cant
-  }, 0)
+  // Los números de la cotización salen de la MISMA cascada que aplica el servidor al
+  // guardar. Calcularlos aquí por separado fue exactamente el defecto anterior: la
+  // pantalla mostraba un total y la base guardaba otro.
+  const cascada = calcularCascada(
+    initialItems.map(item => {
+      const rubros = item.rubros ?? []
+      return {
+        id: item.id,
+        es_ajuste: item.es_ajuste,
+        cantidad: item.cantidad,
+        subtotal: item.subtotal,
+        numeroDeRubros: rubros.length,
+        costoDeRubros: rubros.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0),
+        descuento_porcentaje: item.descuento_porcentaje,
+        margen_porcentaje: item.margen_porcentaje,
+        precio_venta: item.precio_venta,
+        precio_manual: item.precio_manual,
+      }
+    }),
+    {
+      administrativosPct: (Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0),
+      margenPct: cotizacion.margen_porcentaje,
+      descuentoComercialPct: cotizacion.descuento_porcentaje,
+      convencionMargen,
+    },
+  )
+  const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
+  const costoTotal = cascada.costoDirecto
+  const margenCotizacion = Number(cotizacion.margen_porcentaje) || 0
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -416,43 +430,24 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const itemCantidad = Number(item.cantidad) || 1
             const itemPrecio = Number(item.precio_venta) || 0
             const itemDescPct = Number(item.descuento_porcentaje) || 0
-            const itemLineTotal = Math.round(itemPrecio * itemCantidad)
-            const itemNeto = Math.round(itemLineTotal * (1 - itemDescPct / 100))
             const isAjuste = item.es_ajuste === true
             const isNegativo = itemPrecio < 0
-            const costoUnitario = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
             const tieneRubros = (item.rubros ?? []).length > 0
+            const costoUnitario = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
             // Costo del ítem que no se desglosa: vive en `subtotal`, escrito a mano.
             const costoManual = tieneRubros ? 0 : Number(item.subtotal) || 0
-            // Costo del item, venga del desglose o del costo directo.
             const costoDelItem = tieneRubros ? costoUnitario : costoManual
-            // Quien decide si el precio se deriva es el MISMO helper que aplica el
-            // servidor. Escrito dos veces se desincroniza, y ya paso: la regla pura
-            // empezo a derivar desde el costo directo y la pantalla siguio mirando
-            // solo los rubros, asi que un item costeado a mano derivaba su precio en
-            // la base mientras el editor le ofrecia escribirlo.
-            const precioDesdeCosto = precioSeDerivaDelCosto({
-              es_ajuste: item.es_ajuste,
-              precio_venta: item.precio_venta,
-              margen_porcentaje: item.margen_porcentaje,
-              precio_manual: item.precio_manual,
-              numeroDeRubros: (item.rubros ?? []).length,
-              subtotal: tieneRubros ? costoUnitario : Number(item.subtotal) || 0,
-            })
-            const itemMargen = Number(item.margen_porcentaje) || 0
-            // El precio se deriva con el MISMO helper que aplica el servidor: si la
-            // pantalla lo recalcula por su cuenta, las dos formulas se separan y la
-            // que ve el comercial deja de ser la que se guarda.
-            const precioUnitarioDerivado = precioVentaDelItem({
-              es_ajuste: isAjuste,
-              precio_venta: item.precio_venta,
-              margen_porcentaje: itemMargen,
-              precio_manual: false,
-              numeroDeRubros: (item.rubros ?? []).length,
-              subtotal: costoDelItem,
-              convencion_margen: convencionMargen,
-            })
-            const margenRealPct = margenRealDelItem(costoDelItem, precioUnitarioDerivado)
+            // La línea ya calculada por la cascada. Es la misma que guarda el servidor.
+            const linea = lineaPorItem.get(item.id)
+            const costoLinea = linea?.costoLinea ?? 0
+            const precioLinea = linea?.precioLinea ?? Math.round(itemPrecio * itemCantidad)
+            // El margen propio es una EXCEPCIÓN declarada, no un campo vacío: `null`
+            // quiere decir "usa el de la cotización", y 0 quiere decir "esta línea va
+            // a costo". Leer los dos como 0 borraría la diferencia.
+            const margenPropio = item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
+            const itemMargen = linea?.margenAplicado ?? margenCotizacion
+            const precioFijadoAMano = item.precio_manual === true || (costoLinea <= 0 && itemPrecio > 0)
+            const margenRealPct = margenRealDelItem(costoLinea, precioLinea)
             // Avisa, no bloquea. Un piso duro no sube el margen: enseña a escribir el
             // número que deja pasar la pantalla, y el dato que llega después no sirve.
             const avisaMargen = margenPideAviso(margenRealPct)
@@ -494,9 +489,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     {itemCantidad > 1 && (
                       <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
                     )}
-                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''}`}>{formatCOP(itemLineTotal)}</span>
-                    {!isAjuste && itemDescPct > 0 && (
-                      <span className="block text-[10px] text-red-500">-{itemDescPct}% = {formatCOP(itemNeto)}</span>
+                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''}`}>{formatCOP(precioLinea)}</span>
+                    {/* El descuento del ítem ya está dentro del costo: repetirlo aquí
+                        como rebaja del precio lo contaría dos veces. */}
+                    {!isAjuste && costoLinea > 0 && (
+                      <span className="block text-[10px] text-muted-foreground">Costo {formatCOP(costoLinea)}</span>
                     )}
                   </div>
                   {editable && !isAjuste && (
@@ -516,16 +513,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {editable && (
                     <div className="mb-3 space-y-2">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {/* COSTO — de dónde sale, dicho en la etiqueta.
-
-                            Un ítem se costea de UNA sola manera: o lo mandan sus rubros,
-                            o se escribe a mano. Mientras los dos campos se vieron iguales
-                            y editables, nadie supo cuál mandaba: la cotización de la bomba
-                            quedó con el precio lleno, el costo en cero y `costo_total` sin
-                            nada que sumar. */}
+                        {/* La captura de un ítem es COSTO, nada más: cuánto cuesta la
+                            unidad, cuántas van, y qué descuento da el proveedor. El
+                            precio no se escribe aquí, se calcula abajo con el margen.
+                            Mientras costo y precio se vieron como dos casillas iguales,
+                            nadie supo cuál mandaba: la cotización de la bomba quedó con
+                            el precio lleno, el costo en cero y `costo_total` sin nada
+                            que sumar. */}
                         <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                            {tieneRubros ? 'Costo (según rubros)' : 'Costo unitario'}
+                            {tieneRubros ? 'Costo unit. (rubros)' : 'Costo unitario'}
                           </label>
                           {tieneRubros ? (
                             <>
@@ -561,119 +558,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                   className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm tabular-nums"
                                 />
                               </div>
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">Lo que te cuesta a ti</p>
+                              <p className="mt-0.5 text-[10px] text-muted-foreground">Lo que le pagas al proveedor</p>
                             </>
                           )}
                         </div>
 
-                        {/* MARGEN — solo tiene sentido cuando el sistema calcula el precio.
-                            Con el precio fijado a mano, el margen que manda es el real y se
-                            muestra debajo del valor. */}
-                        {precioDesdeCosto && (
-                          <div>
-                            <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{etiquetaCampoMargen(convencionMargen)}</label>
-                            <input
-                              key={`margen-${item.id}-${itemMargen}`}
-                              type="number"
-                              defaultValue={itemMargen || ''}
-                              placeholder="0"
-                              step="0.01"
-                              className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
-                              onBlur={e => {
-                                const pct = Number(e.target.value) || 0
-                                if (pct === itemMargen) return
-                                startTransition(async () => {
-                                  await updateItem(item.id, { margen_porcentaje: pct })
-                                  await recalcularTotales(cotizacion.id)
-                                  router.refresh()
-                                })
-                              }}
-                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                            />
-                          </div>
-                        )}
-
-                        {/* VALOR UNITARIO — resultado, no campo gemelo del costo. El lápiz
-                            lo convierte en editable y lo marca como precio a mano. */}
-                        <div>
-                          <div className="mb-0.5 flex items-center justify-between gap-1">
-                            <label className="block text-[10px] font-medium text-muted-foreground">Valor unitario</label>
-                            {precioDesdeCosto && (
-                              <button
-                                type="button"
-                                title="Fijar este precio a mano"
-                                disabled={isPending}
-                                onClick={() => {
-                                  startTransition(async () => {
-                                    // Congela el precio derivado de hoy y se lo entrega al usuario.
-                                    await updateItem(item.id, {
-                                      precio_venta: precioUnitarioDerivado,
-                                      precio_manual: true,
-                                    })
-                                    await recalcularTotales(cotizacion.id)
-                                    router.refresh()
-                                  })
-                                }}
-                                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-                            )}
-                          </div>
-                          {precioDesdeCosto ? (
-                            <>
-                              <div className="rounded border bg-background px-2 py-1.5 text-sm font-medium tabular-nums">
-                                {formatCOP(precioUnitarioDerivado)}
-                              </div>
-                              {/* Con `markup` el número escrito arriba NO es el margen, es el
-                                  recargo. Decirlo aquí es lo único que impide leer un 15 como
-                                  15% de margen cuando son 13,04%. */}
-                              {margenRealPct !== null && (
-                                <p
-                                  className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
-                                  title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
-                                >
-                                  Margen real {margenRealPct.toFixed(1)}%
-                                  {avisaMargen && <span className="ml-1 font-medium">· bajo</span>}
-                                </p>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  placeholder="Valor"
-                                  defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
-                                  onBlur={e => {
-                                    const raw = e.target.value.replace(/[^0-9]/g, '')
-                                    const val = Number(raw) || 0
-                                    if (val === itemPrecio) return
-                                    e.target.value = val ? val.toLocaleString('es-CO') : ''
-                                    startTransition(async () => {
-                                      await updateItem(item.id, { precio_venta: val })
-                                      await recalcularTotales(cotizacion.id)
-                                      router.refresh()
-                                    })
-                                  }}
-                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                  className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm tabular-nums"
-                                />
-                              </div>
-                              {margenRealPct !== null && costoDelItem > 0 && (
-                                <p
-                                  className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
-                                  title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
-                                >
-                                  Margen real {margenRealPct.toFixed(1)}%
-                                  {avisaMargen && <span className="ml-1 font-medium">· bajo</span>}
-                                </p>
-                              )}
-                            </>
-                          )}
-                        </div>
                         <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Cantidad</label>
                           <input
@@ -682,7 +571,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             placeholder="1"
                             min="0.01"
                             step="0.01"
-                            className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                            className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
                             onBlur={e => {
                               const val = Math.max(0.01, Number(e.target.value) || 1)
                               if (val === itemCantidad) return
@@ -694,17 +583,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             }}
                           />
                         </div>
+
+                        {/* Descuento de COMPRA. Se llama así a propósito: baja el costo,
+                            no el precio. El que baja el precio es el descuento comercial
+                            y vive al final de la cotización. */}
                         <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descuento %</label>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Desc. compra %</label>
                           <input
                             type="number"
                             defaultValue={itemDescPct || ''}
                             placeholder="0"
                             min="0"
                             max="100"
-                            className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                            className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
                             onBlur={e => {
                               const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                              if (pct === itemDescPct) return
                               startTransition(async () => {
                                 await updateItem(item.id, { descuento_porcentaje: pct })
                                 await recalcularTotales(cotizacion.id)
@@ -712,30 +606,175 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                               })
                             }}
                           />
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">Del proveedor</p>
+                        </div>
+
+                        {/* Costo de la línea: el resultado de las tres casillas de la
+                            izquierda. Es lo que suma al costo total de la cotización. */}
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de la línea</label>
+                          <div className="rounded border bg-muted/40 px-2 py-1.5 text-sm font-medium tabular-nums">
+                            {formatCOP(costoLinea)}
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">Suma al costo total</p>
                         </div>
                       </div>
-                      {/* Vuelta atrás del lápiz. Solo aparece cuando hay un costo contra el
-                          cual recalcular: sin costo, "volver a calcular" dejaría el precio en
-                          cero y el ítem parecería borrado. */}
-                      {!precioDesdeCosto && costoDelItem > 0 && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-amber-600">Precio fijado a mano</span>
-                          <button
-                            type="button"
-                            disabled={isPending}
-                            onClick={() => {
-                              startTransition(async () => {
-                                await updateItem(item.id, { precio_manual: false })
-                                await recalcularTotales(cotizacion.id)
-                                router.refresh()
-                              })
-                            }}
-                            className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
-                          >
-                            Volver a calcularlo desde el costo
-                          </button>
+
+                      {/* PRECIO DE LA LÍNEA — resultado, no captura.
+                          El margen lo pone la cotización completa. Una línea puede
+                          marginar distinto, pero como excepción declarada y marcada: un
+                          equipo que el cliente puede cotizar aparte no aguanta el mismo
+                          margen que la ingeniería, y con un único porcentaje para todo se
+                          sale caro donde te comparan y barato donde no. */}
+                      <div className="rounded-md border bg-muted/20 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-muted-foreground">
+                            Precio de esta línea
+                            {precioFijadoAMano
+                              ? ' · fijado a mano'
+                              : ` · ${etiquetaCampoMargen(convencionMargen).toLowerCase()} ${itemMargen}%${margenPropio ? ' propio' : ' de la cotización'}`}
+                          </span>
+                          <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
                         </div>
-                      )}
+
+                        {margenRealPct !== null && costoLinea > 0 && (
+                          <p
+                            className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
+                            title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
+                          >
+                            Margen real {margenRealPct.toFixed(1)}%
+                            {avisaMargen && <span className="ml-1 font-medium">· bajo</span>}
+                          </p>
+                        )}
+
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          {!precioFijadoAMano && !margenPropio && (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  await updateItem(item.id, { margen_porcentaje: margenCotizacion })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                            >
+                              Marginar distinto
+                            </button>
+                          )}
+
+                          {!precioFijadoAMano && margenPropio && (
+                            <>
+                              <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                {etiquetaCampoMargen(convencionMargen)}
+                                <input
+                                  key={`margen-${item.id}-${itemMargen}`}
+                                  type="number"
+                                  defaultValue={itemMargen}
+                                  step="0.01"
+                                  className="w-16 rounded border bg-background px-1.5 py-0.5 text-[11px] tabular-nums"
+                                  onBlur={e => {
+                                    const pct = Number(e.target.value) || 0
+                                    if (pct === itemMargen) return
+                                    startTransition(async () => {
+                                      await updateItem(item.id, { margen_porcentaje: pct })
+                                      await recalcularTotales(cotizacion.id)
+                                      router.refresh()
+                                    })
+                                  }}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                />
+                                %
+                              </label>
+                              <button
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => {
+                                  startTransition(async () => {
+                                    // `null`, no 0: 0 es "esta línea va a costo" y es una
+                                    // decisión distinta a "usa el margen de la cotización".
+                                    await updateItem(item.id, { margen_porcentaje: null })
+                                    await recalcularTotales(cotizacion.id)
+                                    router.refresh()
+                                  })
+                                }}
+                                className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                              >
+                                Usar el de la cotización
+                              </button>
+                            </>
+                          )}
+
+                          {!precioFijadoAMano && costoLinea > 0 && (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  // Congela el precio calculado de hoy y se lo entrega al usuario.
+                                  await updateItem(item.id, {
+                                    precio_venta: Math.round(precioLinea / itemCantidad),
+                                    precio_manual: true,
+                                  })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+                            >
+                              <Pencil className="h-3 w-3" /> Fijar precio a mano
+                            </button>
+                          )}
+
+                          {precioFijadoAMano && (
+                            <>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">$</span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="Valor unitario"
+                                  defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
+                                  onBlur={e => {
+                                    const raw = e.target.value.replace(/[^0-9]/g, '')
+                                    const val = Number(raw) || 0
+                                    if (val === itemPrecio) return
+                                    e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                    startTransition(async () => {
+                                      await updateItem(item.id, { precio_venta: val, precio_manual: true })
+                                      await recalcularTotales(cotizacion.id)
+                                      router.refresh()
+                                    })
+                                  }}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                  className="w-32 rounded border bg-background py-0.5 pr-1.5 pl-5 text-[11px] tabular-nums"
+                                />
+                              </div>
+                              {/* Sin costo contra el cual recalcular, "volver al cálculo"
+                                  dejaría el precio en cero y la línea parecería borrada. */}
+                              {costoLinea > 0 && (
+                                <button
+                                  type="button"
+                                  disabled={isPending}
+                                  onClick={() => {
+                                    startTransition(async () => {
+                                      await updateItem(item.id, { precio_manual: false })
+                                      await recalcularTotales(cotizacion.id)
+                                      router.refresh()
+                                    })
+                                  }}
+                                  className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                                >
+                                  Volver a calcularlo desde el costo
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
                       <div>
                         <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descripción (visible al cliente)</label>
                         <input
@@ -978,81 +1017,36 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           )}
 
-          {/* Totals + editable margin */}
+          {/* La cascada de la cotización: costo, administrativos, margen, descuento. */}
           <TotalesMargen
-            costoTotal={costoTotal}
-            valorVentaInicial={cotizacion.valor_total ?? 0}
-            discountPct={discountPct}
+            cascada={cascada}
+            margenPct={margenCotizacion}
+            convencionMargen={convencionMargen}
+            descuentoPct={Number(cotizacion.descuento_porcentaje) || 0}
             editable={editable}
-            onSave={(val, pct) => {
+            aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
+            aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
+            onMargenChange={pct => {
               startTransition(async () => {
-                const dv = Math.round(val * (Math.min(100, Math.max(0, Number(pct) || 0))) / 100)
-                // Reconcile: creates/updates adjustment item + sets valor_total
-                await reconciliarAjuste(cotizacion.id, val)
-                // Also persist discount separately
-                await updateCotizacion(cotizacion.id, { descuento_porcentaje: Number(pct) || 0, descuento_valor: dv })
-                // Si el usuario cambia manualmente el valor de venta, resetear AIU
-                if ((cotizacion.aiu_admin_pct ?? 0) > 0 || (cotizacion.aiu_imprevistos_pct ?? 0) > 0) {
-                  await aplicarAIU(cotizacion.id, null, null)
-                }
+                await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+                await recalcularTotales(cotizacion.id)
                 router.refresh()
               })
             }}
-            aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
-            aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
             onAIUChange={(adminPct, imprevPct) => {
               startTransition(async () => {
                 await aplicarAIU(cotizacion.id, adminPct, imprevPct)
                 router.refresh()
               })
             }}
+            onDescuentoChange={pct => {
+              startTransition(async () => {
+                await updateCotizacion(cotizacion.id, { descuento_porcentaje: pct })
+                await recalcularTotales(cotizacion.id)
+                router.refresh()
+              })
+            }}
           />
-
-          {/* Discount */}
-          {editable && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Descuento</label>
-              <div className="flex items-center gap-2">
-                <div className="relative w-24">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={discountPct}
-                    onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9.]/g, '')
-                      setDiscountPct(raw)
-                    }}
-                    onBlur={() => {
-                      const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-                      const dv = Math.round((cotizacion.valor_total ?? 0) * pct / 100)
-                      startTransition(async () => {
-                        await updateCotizacion(cotizacion.id, { descuento_porcentaje: pct, descuento_valor: dv })
-                        router.refresh()
-                      })
-                    }}
-                    className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
-                    placeholder="0"
-                  />
-                  <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                </div>
-                {(() => {
-                  const pct = Number(discountPct) || 0
-                  const vv = cotizacion.valor_total ?? 0
-                  return pct > 0 && vv > 0 ? (
-                    <span className="text-xs text-muted-foreground">
-                      = -{formatCOP(Math.round(vv * pct / 100))}
-                    </span>
-                  ) : null
-                })()}
-              </div>
-            </div>
-          )}
-          {!editable && (cotizacion.descuento_porcentaje ?? 0) > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Descuento ({cotizacion.descuento_porcentaje}%)</span>
-              <span className="font-medium text-red-600">-{formatCOP(cotizacion.descuento_valor ?? 0)}</span>
-            </div>
-          )}
 
           {/* Terminos y condiciones (van al final de la cotizacion) */}
           {(editable || terminos.trim()) && (
@@ -1089,10 +1083,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
           {/* Fiscal result */}
           {(() => {
-            const valorBruto = cotizacion.valor_total ?? 0
-            const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-            const dVal = Math.round(valorBruto * dPct / 100)
-            const valor = valorBruto - dVal
+            // `precioVenta` ya trae el descuento comercial aplicado: restarlo otra vez
+            // aquí le bajaba el neto al vendedor sin que nada lo explicara.
+            const valor = cascada.precioVenta
             const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
             if (!hasFiscal || valor === 0) {
               return (
@@ -1162,220 +1155,199 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
 // ── Totales + Margen bidireccional ─────────────────────────────
 
-function TotalesMargen({ costoTotal, valorVentaInicial, discountPct, editable, onSave, aiuAdminPct, aiuImprevPct, onAIUChange }: {
-  costoTotal: number
-  valorVentaInicial: number
-  discountPct: string
+/** Un renglón de la cascada: qué es, cuánto vale y de dónde sale. */
+function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
+  etiqueta: string
+  valor: number
+  nota?: string
+  fuerte?: boolean
+  tono?: 'rojo' | 'verde'
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-sm">
+      <span className="text-muted-foreground">
+        {etiqueta}
+        {nota && <span className="ml-1 text-[10px]">{nota}</span>}
+      </span>
+      <span className={`tabular-nums ${fuerte ? 'font-bold' : 'font-medium'} ${tono === 'rojo' ? 'text-red-600' : tono === 'verde' ? 'text-green-600' : ''}`}>
+        {tono === 'rojo' ? '-' : ''}{formatCOP(valor)}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * El pie de la cotización: la cascada completa, de lo que cuesta a lo que se cobra.
+ *
+ * Se lee de arriba abajo y cada renglón dice de dónde sale el siguiente. Antes aquí se
+ * escribía el valor de venta y el sistema inventaba un ítem de cuadre para que la suma
+ * diera: el cliente veía una línea "Administración e imprevistos" que nadie había
+ * cotizado, y el margen no se podía leer en ninguna parte.
+ */
+function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, onMargenChange, onAIUChange, onDescuentoChange }: {
+  cascada: Cascada
+  margenPct: number
+  convencionMargen: ConvencionMargen
+  descuentoPct: number
   editable: boolean
-  onSave: (val: number, pct: string) => void
   aiuAdminPct: number | null
   aiuImprevPct: number | null
+  onMargenChange: (pct: number) => void
   onAIUChange: (adminPct: number | null, imprevPct: number | null) => void
+  onDescuentoChange: (pct: number) => void
 }) {
-  const [valorVenta, setValorVenta] = useState(valorVentaInicial)
-  const [margenInput, setMargenInput] = useState('')
-  const [ventaInput, setVentaInput] = useState(valorVentaInicial ? valorVentaInicial.toString() : '')
   const [adminPct, setAdminPct] = useState(aiuAdminPct ?? 0)
   const [imprevPct, setImprevPct] = useState(aiuImprevPct ?? 0)
-  const hasAIU = (aiuAdminPct ?? 0) > 0 || (aiuImprevPct ?? 0) > 0
-  const [showAIU, setShowAIU] = useState(hasAIU)
-
-  const dPct = Math.min(100, Math.max(0, Number(discountPct) || 0))
-  const dVal = Math.round(valorVenta * dPct / 100)
-  const valorNeto = valorVenta - dVal
-
-  // Margen deseado: sobre valor bruto (antes de descuento)
-  const margenBruto = costoTotal > 0 && valorVenta > 0
-    ? Math.round((valorVenta - costoTotal) / valorVenta * 100)
-    : 0
-  // Margen real: sobre valor neto (despues de descuento)
-  const margenReal = costoTotal > 0 && valorNeto > 0
-    ? Math.round((valorNeto - costoTotal) / valorNeto * 100)
-    : 0
-
-  const applyVenta = (val: number) => {
-    setValorVenta(val)
-    setVentaInput(val.toString())
-    setMargenInput('')
-    onSave(val, discountPct)
-  }
-
-  const handleMargenBlur = () => {
-    const m = Number(margenInput)
-    if (m > 0 && m < 100 && costoTotal > 0) {
-      // Margen deseado calcula sobre venta bruta (antes de descuento)
-      applyVenta(Math.round(costoTotal / (1 - m / 100)))
-    }
-  }
+  const hayAdministrativos = (aiuAdminPct ?? 0) > 0 || (aiuImprevPct ?? 0) > 0
+  const [showAIU, setShowAIU] = useState(hayAdministrativos)
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg bg-muted/50 p-4 space-y-2">
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground flex items-center gap-1.5">
-            Costo total
-            {hasAIU && <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">AIU activo</span>}
-          </span>
-          <span className="font-medium">{formatCOP(costoTotal)}</span>
-        </div>
-        {editable && showAIU && (
-          <div className="border-t pt-2 mt-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-muted-foreground">AIU (sobre costos)</span>
-              <button
-                onClick={() => {
-                  setAdminPct(0)
-                  setImprevPct(0)
-                  setShowAIU(false)
-                  onAIUChange(null, null)
-                }}
-                className="text-[10px] text-muted-foreground hover:text-red-500"
-              >
-                Quitar AIU
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-0.5 block text-[10px] text-muted-foreground">Admin %</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={adminPct || ''}
-                    placeholder="0"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    className="w-full rounded border bg-background px-2 py-1.5 pr-6 text-xs"
-                    onChange={e => setAdminPct(Number(e.target.value) || 0)}
-                    onBlur={() => onAIUChange(adminPct || null, imprevPct || null)}
-                  />
-                  <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                </div>
-                {costoTotal > 0 && adminPct > 0 && (
-                  <span className="text-[10px] text-muted-foreground">= {formatCOP(Math.round(costoTotal * adminPct / 100))}</span>
-                )}
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[10px] text-muted-foreground">Imprevistos %</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={imprevPct || ''}
-                    placeholder="0"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    className="w-full rounded border bg-background px-2 py-1.5 pr-6 text-xs"
-                    onChange={e => setImprevPct(Number(e.target.value) || 0)}
-                    onBlur={() => onAIUChange(adminPct || null, imprevPct || null)}
-                  />
-                  <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                </div>
-                {costoTotal > 0 && imprevPct > 0 && (
-                  <span className="text-[10px] text-muted-foreground">= {formatCOP(Math.round(costoTotal * imprevPct / 100))}</span>
-                )}
-              </div>
-            </div>
-            {(adminPct > 0 || imprevPct > 0) && costoTotal > 0 && (
-              <div className="mt-1 text-[10px] text-amber-600 font-medium">
-                Total AIU: {formatCOP(Math.round(costoTotal * (adminPct + imprevPct) / 100))} ({adminPct + imprevPct}% sobre costos)
-              </div>
-            )}
-          </div>
-        )}
-        {editable && !showAIU && (
-          <button
-            onClick={() => setShowAIU(true)}
-            className="text-[11px] text-muted-foreground hover:text-amber-600 hover:underline"
-          >
-            + Administración e imprevistos
-          </button>
-        )}
-        {!editable && hasAIU && costoTotal > 0 && (
-          <div className="flex justify-between text-sm border-t pt-1">
-            <span className="text-muted-foreground">AIU ({(aiuAdminPct ?? 0) + (aiuImprevPct ?? 0)}% sobre costos)</span>
-            <span className="font-medium text-amber-600">{formatCOP(Math.round(costoTotal * ((aiuAdminPct ?? 0) + (aiuImprevPct ?? 0)) / 100))}</span>
-          </div>
-        )}
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Valor venta</span>
-          <span className="font-bold">{formatCOP(valorVenta)}</span>
-        </div>
-        {costoTotal > 0 && valorVenta > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Margen</span>
-            <span className="font-medium text-green-600">{margenBruto}%</span>
-          </div>
-        )}
-        {dVal > 0 && (
-          <>
-            <div className="flex justify-between text-sm border-t pt-1">
-              <span className="text-muted-foreground">Descuento ({dPct}%)</span>
-              <span className="font-medium text-red-600">-{formatCOP(dVal)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-bold">{formatCOP(valorNeto)}</span>
-            </div>
-            {costoTotal > 0 && valorNeto > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Margen real</span>
-                <span className={`font-medium ${margenReal < margenBruto ? 'text-amber-600' : 'text-green-600'}`}>
-                  {margenReal}%
-                  {margenReal < margenBruto && (
-                    <span className="ml-1 text-[10px]">(-{margenBruto - margenReal}pp)</span>
-                  )}
-                </span>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+    <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+      <Renglon etiqueta="Costo directo" valor={cascada.costoDirecto} nota="suma de los ítems" />
 
-      {editable && (
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Valor de venta</label>
-            <CalcInput
-              placeholder="Valor de venta"
-              value={ventaInput}
-              onChange={v => {
-                const raw = v.replace(/[^0-9]/g, '')
-                setVentaInput(raw)
+      {/* ADMINISTRATIVOS — lo que cuesta operar el contrato, sobre el costo directo. */}
+      {editable && showAIU && (
+        <div className="border-t pt-2">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">Administrativos (sobre el costo)</span>
+            <button
+              onClick={() => {
+                setAdminPct(0)
+                setImprevPct(0)
+                setShowAIU(false)
+                onAIUChange(null, null)
               }}
-              onApply={v => {
-                const val = Number(v)
-                if (val > 0) applyVenta(val)
-              }}
-              prefix="$"
-              formatted
-            />
+              className="text-[10px] text-muted-foreground hover:text-red-500"
+            >
+              Quitar
+            </button>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Margen deseado
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={margenInput}
-                onChange={e => setMargenInput(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={handleMargenBlur}
-                onKeyDown={e => e.key === 'Enter' && handleMargenBlur()}
-                placeholder={costoTotal > 0 ? `${margenBruto}` : '—'}
-                className="w-full rounded-md border bg-background py-2 pl-3 pr-7 text-sm"
-              />
-              <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">Administración %</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={adminPct || ''}
+                  placeholder="0"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  className="w-full rounded border bg-background px-2 py-1.5 pr-6 text-xs tabular-nums"
+                  onChange={e => setAdminPct(Number(e.target.value) || 0)}
+                  onBlur={() => onAIUChange(adminPct || null, imprevPct || null)}
+                />
+                <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              </div>
             </div>
-            {costoTotal > 0 && (
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Calcula sobre venta antes de descuento
-              </p>
-            )}
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">Imprevistos %</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={imprevPct || ''}
+                  placeholder="0"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  className="w-full rounded border bg-background px-2 py-1.5 pr-6 text-xs tabular-nums"
+                  onChange={e => setImprevPct(Number(e.target.value) || 0)}
+                  onBlur={() => onAIUChange(adminPct || null, imprevPct || null)}
+                />
+                <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              </div>
+            </div>
           </div>
         </div>
       )}
+      {editable && !showAIU && (
+        <button
+          onClick={() => setShowAIU(true)}
+          className="text-[11px] text-muted-foreground hover:text-amber-600 hover:underline"
+        >
+          + Administración e imprevistos
+        </button>
+      )}
+      {cascada.administrativos > 0 && (
+        <Renglon
+          etiqueta="Administrativos"
+          valor={cascada.administrativos}
+          nota={`${(aiuAdminPct ?? 0) + (aiuImprevPct ?? 0)}% sobre el costo`}
+        />
+      )}
+
+      <div className="border-t pt-2">
+        <Renglon etiqueta="Costo de venta" valor={cascada.costoDeVenta} nota="lo que hay que poner" fuerte />
+      </div>
+
+      {/* MARGEN — el de la cotización completa. Las líneas que traen el suyo lo dicen
+          en su propia fila, así que el número de aquí no las alcanza. */}
+      {editable && (
+        <div className="flex items-center justify-between gap-2 border-t pt-2">
+          <label className="text-xs font-medium text-muted-foreground">{etiquetaCampoMargen(convencionMargen)} de la cotización</label>
+          <div className="relative w-24">
+            <input
+              key={`margen-cot-${margenPct}`}
+              type="number"
+              defaultValue={margenPct || ''}
+              placeholder="0"
+              step="0.01"
+              className="w-full rounded border bg-background py-1.5 pl-2 pr-6 text-sm tabular-nums"
+              onBlur={e => {
+                const pct = Number(e.target.value) || 0
+                if (pct === margenPct) return
+                onMargenChange(pct)
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            />
+            <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+          </div>
+        </div>
+      )}
+      <Renglon etiqueta="Venta bruta" valor={cascada.ventaBruta} />
+
+      {/* DESCUENTO COMERCIAL — el único que ve el cliente. El de cada ítem es de
+          compra y ya está adentro del costo. */}
+      {editable && (
+        <div className="flex items-center justify-between gap-2 border-t pt-2">
+          <label className="text-xs font-medium text-muted-foreground">Descuento comercial</label>
+          <div className="relative w-24">
+            <input
+              key={`desc-cot-${descuentoPct}`}
+              type="number"
+              defaultValue={descuentoPct || ''}
+              placeholder="0"
+              min="0"
+              max="100"
+              step="0.01"
+              className="w-full rounded border bg-background py-1.5 pl-2 pr-6 text-sm tabular-nums"
+              onBlur={e => {
+                const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                if (pct === descuentoPct) return
+                onDescuentoChange(pct)
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            />
+            <Percent className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+          </div>
+        </div>
+      )}
+      {cascada.descuentoComercial > 0 && (
+        <Renglon etiqueta="Descuento comercial" valor={cascada.descuentoComercial} nota={`${descuentoPct}%`} tono="rojo" />
+      )}
+
+      <div className="border-t pt-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-sm font-medium">Precio de venta</span>
+          <span className="text-base font-bold tabular-nums">{formatCOP(cascada.precioVenta)}</span>
+        </div>
+        {cascada.margenRealPct !== null && cascada.costoDeVenta > 0 && (
+          <p className={`mt-0.5 text-right text-[11px] tabular-nums ${margenPideAviso(cascada.margenRealPct) ? 'text-amber-600' : 'text-green-600'}`}>
+            Margen real {cascada.margenRealPct.toFixed(1)}%
+            {margenPideAviso(cascada.margenRealPct) && <span className="ml-1 font-medium">· bajo</span>}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
