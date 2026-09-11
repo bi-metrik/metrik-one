@@ -845,7 +845,7 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: cot } = await (supabase as any)
     .from('cotizaciones')
-    .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, descuento_porcentaje')
+    .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, margen_default_pct, descuento_porcentaje')
     .eq('id', cotizacionId)
     .maybeSingle()
 
@@ -875,7 +875,8 @@ export async function recalcularTotales(cotizacionId: string) {
     }),
     {
       administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
-      margenPct: cot?.margen_porcentaje,
+      // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
+      margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
       descuentoComercialPct: cot?.descuento_porcentaje,
       convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
     },
