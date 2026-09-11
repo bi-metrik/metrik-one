@@ -101,6 +101,56 @@ estar en los dos) sino **«¿está escrita literalmente en el `.tsx` de esa pant
 nodos de texto la da por ausente. Separar cuerpo / `placeholder` / `title` y afirmar cada uno
 por su lado, para no reportar como bug lo que es un tooltip.
 
+## ⚠️⚠️ La eñe NO es una tilde, y por eso se corrige sola
+
+Medido el 2026-09-11 (#629, copy del tutorial de Listas). `anos` sin eñe **no es un acento
+faltante: es otra palabra**, y estaba en copy que ve el cliente. Todo `src/lib/tutorials/`
+está escrito en **ASCII puro a propósito** (`auditoria`, `obligacion`, `juridica`,
+`Convencion`) — o sea que la eñe no se perdió por descuido: **la convención de "sin tildes"
+se tragó una letra que no era una tilde**.
+
+**How to apply:** en una corrección de eñe, el cambio es **quirúrgico**. Restaurar de paso
+las demás tildes del archivo es otro frente *y además rompe la convención del directorio*.
+La regla que separa los dos casos: si quitarle el signo cambia **de palabra** (`año`→`ano`,
+`niño`→`nino`), es obligatorio; si solo cambia la prosodia (`auditoría`→`auditoria`), es
+decisión de estilo del archivo.
+
+### ⚠️ El barrido de `anos` tiene dos trampas, y la segunda rompe código
+
+- **Falsos positivos por subcadena:** `anos` vive dentro de `humanos`, `hermanos`,
+  `colombianos`, `planos`, `manos`. Va con `grep -w`, no con subcadena.
+- **⚠️⚠️ Hay `anos` sin eñe que NO se pueden tocar.** `supabase/functions/_shared/cardumen/
+  navigate/idioma.ts` tiene `"anos"` en las listas de palabras funcionales ES y PT del
+  detector determinista de idioma. El detector **normaliza quitando acentos antes de
+  comparar**: ponerle la eñe al token ES haría que **no matchee nunca**, y en PT `anos` es la
+  ortografía correcta del portugués. No son copy, son *tokens*. **Antes de corregir una eñe,
+  preguntar si la cadena se compara contra algo** — es el mismo criterio de "¿es también un
+  valor almacenado?" de más arriba, aplicado a un diccionario en vez de a una columna.
+
+En el #629 el barrido de todo `src/` dio **una sola** ocurrencia en copy. Las otras cuatro
+(`ano` en `bogota.test.ts`, `agrupar-por-dia.ts` ×2, `formulario-1668.test.ts`) son
+comentarios y nombres de prueba: fuera de alcance, y conviene **declararlo** en vez de
+corregirlas por barrer parejo.
+
+### ⚠️⚠️ El instrumento: una alternancia que mezcla `ñ` con `[…]` falla en silencio
+
+Medido el mismo día, y casi cuesta un falso "no hay ocurrencias". Sobre una línea que
+**sí** contiene `5 anos`:
+
+```
+grep -nE '(año|anio|[^[:alnum:]]ano)s?' archivo   # exit 1  ← NO encuentra nada
+grep -nE '[^[:alnum:]]anos'             archivo   # exit 0  ← la encuentra
+grep -nE '(año|anos)'                   archivo   # exit 0  ← la encuentra
+```
+
+No es cosa de `-i` (falla igual sin él) ni de locale (`en_US.UTF-8`). Es la **combinación**
+de una alternativa multibyte (`ñ`) con una expresión de corchetes en la misma ERE.
+
+**How to apply:** en un barrido de ortografía, **nunca un patrón compuesto**. Un `grep`
+simple por caso, y **cada uno validado con un control que TENGA que dar resultado**
+(aquí: `grep -c 'anos'` = 1). Familia de [[pruebas-por-mutacion]]: un barrido que devuelve
+"cero ocurrencias" y un barrido roto se ven exactamente igual.
+
 ## Gotchas del guard de Bash (worktree aislado)
 
 - `xargs -a lista.txt python3 …` → **rechazado**. Que el script recorra directorios él mismo.
