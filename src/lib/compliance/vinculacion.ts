@@ -33,6 +33,7 @@
 
 // La forma de la cadena la define quien la calcula, que es Valida, y de este
 // lado la modela una sola vez. Es `import type`: no arrastra nada al bundle.
+import { RETENCION_ANIOS } from './retencion';
 import type { CadenaPublica, Socio } from './vinculacion-publica';
 
 // ─── Vocabulario del expediente (espejo de lib/kyc/types.ts en metrik-valida) ─
@@ -75,8 +76,8 @@ export const ESTADO_EXPEDIENTE_ACCION: Record<EstadoExpediente, string> = {
   invitado: 'Se le envió el enlace y todavía no lo ha abierto.',
   en_proceso: 'La contraparte está subiendo sus documentos.',
   pendiente_revision: 'Firmó y quedó listo. Te toca decidir.',
-  aprobado: 'Quedó vinculada. El expediente se conserva 10 años.',
-  rechazado: 'No quedó vinculada. El expediente se conserva 10 años.',
+  aprobado: `Quedó vinculada. El expediente se conserva ${RETENCION_ANIOS} años.`,
+  rechazado: `No quedó vinculada. El expediente se conserva ${RETENCION_ANIOS} años.`,
   devuelto: 'Se le pidió corregir algo y está de vuelta con la contraparte.',
   vencido: 'El enlace caducó antes de que terminara. Hay que reinvitarla.',
   sin_respuesta: 'Nunca contestó la invitación.',
