@@ -3,7 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
-import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { precioSeDerivaDelCosto, precioVentaDelItem, costoUnitarioDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -803,7 +803,7 @@ export async function recalcularTotales(cotizacionId: string) {
         subtotal,
         convencion_margen: convencionMargen,
       }
-      if (precioSeDerivaDeRubros(parametros)) {
+      if (precioSeDerivaDelCosto(parametros)) {
         pv = precioVentaDelItem(parametros)
         patch.precio_venta = pv
       }
