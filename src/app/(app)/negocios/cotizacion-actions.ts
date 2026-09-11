@@ -4,6 +4,8 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { precioSeDerivaDelCosto, precioVentaDelItem, costoUnitarioDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -192,8 +194,15 @@ export async function updateItem(id: string, updates: {
   /** Costo unitario escrito a mano. Solo aplica al ítem SIN rubros. */
   subtotal?: number
 }) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  // El margen es el único campo del ítem que decide cuánto gana la agencia, y lo puede
+  // cambiar cualquiera que abra la cotización. El valor anterior se lee ANTES de
+  // pisarlo: después ya no existe en ninguna parte, y "por qué este viaje salió al 3%"
+  // se queda sin respuesta. Ver `registrarCambioDeMargen`.
+  const rastreaMargen = updates.margen_porcentaje !== undefined
+  const antes = rastreaMargen ? await leerItemParaRastro(supabase, id) : null
 
   const patch: Record<string, unknown> = {}
   if (updates.nombre !== undefined) patch.nombre = updates.nombre.trim()
@@ -234,7 +243,87 @@ export async function updateItem(id: string, updates: {
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  // Después del update, y solo si de verdad se guardó: un rastro de un cambio que la
+  // base rechazó es peor que ninguno.
+  if (rastreaMargen && antes && workspaceId) {
+    await registrarCambioDeMargen({
+      supabase,
+      workspaceId,
+      staffId,
+      antes,
+      margenNuevo: updates.margen_porcentaje as number,
+    })
+  }
+
   return { success: true }
+}
+
+/**
+ * Lee el estado previo del ítem y a qué negocio cuelga.
+ *
+ * Devuelve `null` si no se puede leer. El rastro es un acompañante del cambio, no su
+ * condición: no poder anotarlo no puede impedir que alguien corrija un margen.
+ */
+async function leerItemParaRastro(
+  // Mismo criterio que el resto del archivo: el cliente tipado obliga a arrastrar el
+  // tipo generado del embed, que aquí no aporta nada.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  itemId: string,
+): Promise<ItemParaRastro | null> {
+  const { data } = await supabase
+    .from('items')
+    .select('nombre, margen_porcentaje, cotizaciones(negocio_id, oportunidad_id)')
+    .eq('id', itemId)
+    .maybeSingle()
+
+  if (!data) return null
+
+  // PostgREST devuelve el embed como objeto o como array de uno según cómo resuelva la
+  // relación; las dos formas son válidas. Mismo caso que en `politicaMargenDelNegocio`.
+  const cot = Array.isArray(data.cotizaciones) ? data.cotizaciones[0] : data.cotizaciones
+  const margen = Number(data.margen_porcentaje)
+
+  return {
+    nombre: data.nombre ?? null,
+    margenAnterior: Number.isFinite(margen) ? margen : null,
+    negocioId: cot?.negocio_id ?? null,
+    oportunidadId: cot?.oportunidad_id ?? null,
+  }
+}
+
+/**
+ * Deja en el timeline quién movió el margen de un ítem, de cuánto a cuánto.
+ *
+ * QUÉ anotar lo decide `rastroDeCambioDeMargen`, que es puro y está probado aparte.
+ * Aquí solo queda el insert, que nunca lanza: `registrarActividad` garantiza que un
+ * rechazo del log no tumbe la operación que lo originó, y reporta el motivo a consola.
+ */
+async function registrarCambioDeMargen(args: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+  workspaceId: string
+  staffId: string | null
+  antes: ItemParaRastro
+  margenNuevo: number
+}): Promise<void> {
+  const { supabase, workspaceId, staffId, antes, margenNuevo } = args
+
+  const rastro = rastroDeCambioDeMargen(antes, margenNuevo)
+  if (!rastro) return
+
+  await registrarActividad(supabase, {
+    workspace_id: workspaceId,
+    entidad_tipo: rastro.entidadTipo,
+    entidad_id: rastro.entidadId,
+    tipo: 'cambio',
+    autor_id: staffId,
+    campo_modificado: 'margen_porcentaje',
+    valor_anterior: rastro.valorAnterior,
+    valor_nuevo: rastro.valorNuevo,
+    contenido: rastro.contenido,
+  }, 'updateItem')
 }
 
 export async function deleteItem(id: string) {
