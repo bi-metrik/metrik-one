@@ -66,6 +66,8 @@ interface CotizacionData {
   descuento_valor?: number | null
   aiu_admin_pct?: number | null
   aiu_imprevistos_pct?: number | null
+  /** Margen configurado para la línea de negocio. Respalda al de la cotización. */
+  margen_default_pct?: number | null
   terminos_condiciones?: string | null
   /** Que significa `margen_porcentaje` aqui. Ausente vale `markup`, como antes. */
   convencion_margen?: ConvencionMargen | null
@@ -313,6 +315,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // El margen de la cotización, con el default de la línea de negocio como respaldo:
+  // una cotización recién creada todavía no tiene el suyo, y sin este respaldo el pie
+  // mostraría 0% sobre un negocio que sí tiene margen configurado.
+  const margenCotizacion = cotizacion.margen_porcentaje ?? Number(cotizacion.margen_default_pct) ?? 0
+
   // Los números de la cotización salen de la MISMA cascada que aplica el servidor al
   // guardar. Calcularlos aquí por separado fue exactamente el defecto anterior: la
   // pantalla mostraba un total y la base guardaba otro.
@@ -334,14 +341,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     }),
     {
       administrativosPct: (Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0),
-      margenPct: cotizacion.margen_porcentaje,
+      margenPct: margenCotizacion,
       descuentoComercialPct: cotizacion.descuento_porcentaje,
       convencionMargen,
     },
   )
   const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
   const costoTotal = cascada.costoDirecto
-  const margenCotizacion = Number(cotizacion.margen_porcentaje) || 0
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
