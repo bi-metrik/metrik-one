@@ -50,3 +50,37 @@ export function precioVentaDelItem(item: ItemParaPrecio): number {
   const subtotal = Number(item.subtotal) || 0
   return Math.round(subtotal * (1 + margenValido / 100))
 }
+
+// ── Costo unitario del ítem ───────────────────────────────────────────────────
+
+/** Lo mínimo que hace falta para saber cuánto cuesta un ítem. */
+export interface ItemParaCosto {
+  /** Cantidad de rubros del ítem. Con al menos uno, el costo lo mandan ellos. */
+  numeroDeRubros: number
+  /** Suma de `rubros.valor_total` cuando hay rubros. */
+  costoDeRubros?: number | null
+  /** `items.subtotal`: el costo escrito a mano del ítem que no se desglosa. */
+  subtotal?: number | null
+}
+
+/**
+ * Costo UNITARIO del ítem, venga de donde venga.
+ *
+ * Un ítem se puede costear de dos maneras, y como con el precio, el sistema tiene que
+ * saber cuál manda:
+ *
+ *  · POR RUBROS — el costo es la suma de los rubros. Un `subtotal` escrito a mano se
+ *                 ignora: dos costos para el mismo ítem terminan con el recálculo
+ *                 pisando uno de los dos sin que nadie lo note.
+ *  · A MANO     — el ítem no se desglosa (una bomba es una factura del proveedor) y su
+ *                 costo vive en `subtotal`. Antes se pisaba con 0 en cada recálculo, así
+ *                 que `cotizaciones.costo_total` quedaba en cero y la etapa de Ejecución
+ *                 se quedaba sin presupuesto contra el cual medir el sobrecosto.
+ *
+ * `calcularPresupuestoPorRubro` ya cuenta el costo sin desglose como rubro "otro", así
+ * que esta vía no deja huecos aguas abajo.
+ */
+export function costoUnitarioDelItem(item: ItemParaCosto): number {
+  if (item.numeroDeRubros > 0) return Number(item.costoDeRubros) || 0
+  return Number(item.subtotal) || 0
+}

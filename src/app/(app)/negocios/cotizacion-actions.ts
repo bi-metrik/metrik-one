@@ -3,7 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
-import { precioSeDerivaDeRubros, precioVentaDelItem } from '@/lib/cotizaciones/precio-item'
+import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem } from '@/lib/cotizaciones/precio-item'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -178,6 +178,8 @@ export async function updateItem(id: string, updates: {
   cantidad?: number
   margen_porcentaje?: number
   precio_manual?: boolean
+  /** Costo unitario escrito a mano. Solo aplica al ítem SIN rubros. */
+  subtotal?: number
 }) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
@@ -190,12 +192,29 @@ export async function updateItem(id: string, updates: {
   if (updates.cantidad !== undefined) patch.cantidad = updates.cantidad
   if (updates.margen_porcentaje !== undefined) patch.margen_porcentaje = updates.margen_porcentaje
   if (updates.precio_manual !== undefined) patch.precio_manual = updates.precio_manual
+  // Costo directo: el ítem que no se desglosa en rubros guarda su costo unitario en
+  // `subtotal`, que es de donde ya lo leen `costo_total` y el presupuesto de Ejecución.
+  // El guard vive abajo: con rubros, el costo lo mandan ellos.
+  if (updates.subtotal !== undefined) patch.subtotal = Math.max(0, Math.round(updates.subtotal))
 
   // Escribir el valor unitario a mano ES declarar que el precio lo pone una persona.
   // Sin esto, el siguiente recalcularTotales lo reemplazaria por el costo de rubros
   // y el usuario veria su cifra desaparecer sin explicacion.
   if (updates.precio_venta !== undefined && updates.precio_manual === undefined) {
     patch.precio_manual = true
+  }
+
+  // Un ítem con rubros toma su costo de ellos. Escribir `subtotal` a mano ahí dejaría
+  // dos costos para el mismo ítem y el recálculo pisaría uno de los dos: se rechaza en
+  // el servidor en vez de confiar en que la pantalla no ofrezca el campo.
+  if (patch.subtotal !== undefined) {
+    const { count } = await supabase
+      .from('rubros')
+      .select('id', { count: 'exact', head: true })
+      .eq('item_id', id)
+    if ((count ?? 0) > 0) {
+      return { success: false, error: 'Este ítem tiene rubros: su costo sale de ellos, no se escribe a mano' }
+    }
   }
 
   const { error: dbError } = await supabase
@@ -721,7 +740,7 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, precio_venta, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(valor_total)')
+    .select('id, precio_venta, subtotal, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
   let totalCosto = 0
@@ -740,7 +759,14 @@ export async function recalcularTotales(cotizacionId: string) {
 
     // Update subtotal from rubros (skip for adjustment item — it has no rubros)
     if (!item.es_ajuste) {
-      const subtotal = rubros.reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0)
+      // Quién manda sobre el costo del ítem (los rubros, o el costo escrito a mano) lo
+      // decide `costoUnitarioDelItem`, no este archivo: la misma regla la aplica la
+      // pantalla al pintar el costo total, y escrita dos veces se desincroniza.
+      const subtotal = costoUnitarioDelItem({
+        numeroDeRubros: rubros.length,
+        costoDeRubros: rubros.reduce((sum: number, r: { valor_total: number }) => sum + (r.valor_total ?? 0), 0),
+        subtotal: item.subtotal,
+      })
       const patch: Record<string, unknown> = { subtotal }
 
       // Item cotizado por rubros: el precio de venta lo deriva el sistema.

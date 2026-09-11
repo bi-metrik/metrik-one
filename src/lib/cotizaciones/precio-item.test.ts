@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { precioSeDerivaDeRubros, precioVentaDelItem } from './precio-item'
+import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem } from './precio-item'
 
 /**
  * Los cuatro escenarios de la prueba de escritorio del encargo, más los bordes
@@ -119,5 +119,31 @@ describe('precio de venta de un ítem de cotización', () => {
     const item = { numeroDeRubros: 1, subtotal: 500_000, precio_venta: 0 }
     expect(precioSeDerivaDeRubros(item)).toBe(true)
     expect(precioVentaDelItem(item)).toBe(500_000)
+  })
+})
+
+describe('costoUnitarioDelItem', () => {
+  it('con rubros, el costo lo mandan ellos aunque haya un subtotal escrito a mano', () => {
+    expect(costoUnitarioDelItem({ numeroDeRubros: 2, costoDeRubros: 800_000, subtotal: 999_999 })).toBe(800_000)
+  })
+
+  it('sin rubros, el costo es el subtotal escrito a mano', () => {
+    expect(costoUnitarioDelItem({ numeroDeRubros: 0, subtotal: 12_495_000 })).toBe(12_495_000)
+  })
+
+  it('sin rubros y sin costo escrito, es cero y no un NaN', () => {
+    expect(costoUnitarioDelItem({ numeroDeRubros: 0, subtotal: null })).toBe(0)
+    expect(costoUnitarioDelItem({ numeroDeRubros: 0 })).toBe(0)
+  })
+
+  it('un item de compra directa deja de valer cero: es el caso que rompia costo_total', () => {
+    // COT-2026-0003 de Termotech: 12 items con precio de venta y sin un solo rubro.
+    const items = [
+      { numeroDeRubros: 0, subtotal: 9_500_000, cantidad: 1 },
+      { numeroDeRubros: 0, subtotal: 8_000_000, cantidad: 1 },
+      { numeroDeRubros: 2, costoDeRubros: 1_000_000, cantidad: 3 },
+    ]
+    const costoTotal = items.reduce((s, i) => s + costoUnitarioDelItem(i) * i.cantidad, 0)
+    expect(costoTotal).toBe(20_500_000)
   })
 })
