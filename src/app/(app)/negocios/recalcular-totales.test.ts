@@ -88,6 +88,12 @@ function constructor(tabla: string) {
       const { data } = ejecutar()
       return Promise.resolve({ data: (data as Fila[])?.[0] ?? null, error: null })
     },
+    // `recalcularTotales` lee asi la convencion de margen de la cotizacion. Sin
+    // esto el doble no responde y la funcion se cae antes de tocar un item.
+    maybeSingle() {
+      const { data } = ejecutar()
+      return Promise.resolve({ data: (data as Fila[])?.[0] ?? null, error: null })
+    },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     then(resolve: (v: any) => unknown, reject?: (e: unknown) => unknown) {
       return Promise.resolve(ejecutar()).then(resolve, reject)
@@ -225,5 +231,28 @@ describe('recalcularTotales — cotizar por rubros', () => {
     const res = await recalcularTotales(COT)
 
     expect(res.valorVenta).toBe(100_000)
+  })
+})
+
+describe('recalcularTotales — la convención vive en la cotización', () => {
+  it('sin convención declarada calcula como siempre: markup sobre el costo', async () => {
+    sembrar([{ id: 'i1', margen_porcentaje: 15 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
+    await recalcularTotales(COT)
+    expect(item('i1').precio_venta).toBe(1_150_000)
+  })
+
+  it('con sobre_venta el 15 escrito ES el margen real del ítem', async () => {
+    sembrar([{ id: 'i1', margen_porcentaje: 15 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
+    cotizacion().convencion_margen = 'sobre_venta'
+    await recalcularTotales(COT)
+    // 1.000.000 / 0,85 — el divisor con el que cotiza la agencia
+    expect(item('i1').precio_venta).toBe(1_176_471)
+  })
+
+  it('la convención llega hasta el total de la cotización, no solo al ítem', async () => {
+    sembrar([{ id: 'i1', margen_porcentaje: 15, cantidad: 2 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
+    cotizacion().convencion_margen = 'sobre_venta'
+    await recalcularTotales(COT)
+    expect(cotizacion().valor_total).toBe(2_352_942)
   })
 })

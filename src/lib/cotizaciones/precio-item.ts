@@ -13,6 +13,35 @@
  * El ítem de ajuste (`es_ajuste`) nunca entra aquí: lo gestiona la reconciliación.
  */
 
+/**
+ * Qué significa el número que alguien escribe en el campo "margen".
+ *
+ *  · `markup`      — porcentaje SOBRE EL COSTO. `precio = costo × (1 + m/100)`.
+ *                    Es lo que ONE hizo siempre y lo que sigue rigiendo para las
+ *                    líneas que ya existían.
+ *  · `sobre_venta` — margen REAL, el que queda dentro del precio de venta.
+ *                    `precio = costo / (1 - m/100)`.
+ *
+ * No son el mismo número y la diferencia no es cosmética: con un costo de 1.000.000
+ * y un 15 escrito en el campo, `markup` vende a 1.150.000 (margen real 13,04%) y
+ * `sobre_venta` vende a 1.176.471 (margen real 15,00%). Una agencia que razona con
+ * divisores —cotizar a `costo / 0,85`— escribe 15 queriendo decir lo segundo, y con
+ * la convención equivocada pierde casi dos puntos en cada cotización sin que nada en
+ * pantalla lo delate.
+ *
+ * Por eso la convención es un dato del negocio y no una preferencia de presentación.
+ */
+export type ConvencionMargen = 'markup' | 'sobre_venta'
+
+/**
+ * La convención que se aplica cuando nadie dijo cuál.
+ *
+ * Es `markup` a propósito: las cotizaciones que ya existen se calcularon así y sus
+ * precios ya salieron a clientes. Un default distinto les movería el precio al
+ * primer recálculo.
+ */
+export const CONVENCION_MARGEN_POR_DEFECTO: ConvencionMargen = 'markup'
+
 export interface ItemParaPrecio {
   es_ajuste?: boolean | null
   precio_venta?: number | null
@@ -22,6 +51,11 @@ export interface ItemParaPrecio {
   numeroDeRubros: number
   /** Costo unitario del ítem = suma de `rubros.valor_total`. */
   subtotal: number
+  /**
+   * Qué significa `margen_porcentaje` en ESTA cotización. Ausente vale `markup`,
+   * que es como se calculó todo lo anterior a este campo.
+   */
+  convencion_margen?: ConvencionMargen | null
 }
 
 /**
@@ -42,13 +76,40 @@ export function precioSeDerivaDeRubros(item: ItemParaPrecio): boolean {
  * Devuelve el precio derivado cuando aplica, y el precio guardado cuando no.
  * Un margen ausente o inválido vale 0 — el precio queda igual al costo, que es la
  * lectura honesta de "no le he puesto margen todavía", no un ítem en cero.
+ *
+ * Con `sobre_venta`, un margen de 100 o más no tiene precio finito: `costo / 0` es la
+ * división por cero, y por encima de 100 el precio se vuelve negativo, que es peor
+ * que un error porque parece un número. En ese caso se cae a `markup`, que sí está
+ * definido en todo el rango. No es una elección de gusto: es la única salida que
+ * devuelve un precio mayor que el costo para cualquier margen positivo.
  */
 export function precioVentaDelItem(item: ItemParaPrecio): number {
   if (!precioSeDerivaDeRubros(item)) return Number(item.precio_venta) || 0
   const margen = Number(item.margen_porcentaje)
   const margenValido = Number.isFinite(margen) ? margen : 0
   const subtotal = Number(item.subtotal) || 0
+
+  if (item.convencion_margen === 'sobre_venta' && margenValido < 100) {
+    return Math.round(subtotal / (1 - margenValido / 100))
+  }
   return Math.round(subtotal * (1 + margenValido / 100))
+}
+
+/**
+ * Margen REAL de una línea, el que queda dentro del precio de venta.
+ *
+ * Es lo que hay que enseñar al lado del campo cuando la convención es `markup`, porque
+ * ahí el número escrito no es el margen: es el recargo. Sin esto, un 15 en pantalla se
+ * lee como 15% de margen y son 13,04%.
+ *
+ * Devuelve `null` cuando no hay precio: sin venta no hay margen que reportar, y un 0
+ * se confundiría con "vendido a costo".
+ */
+export function margenRealDelItem(costoUnitario: number, precioUnitario: number): number | null {
+  const precio = Number(precioUnitario) || 0
+  if (precio === 0) return null
+  const costo = Number(costoUnitario) || 0
+  return ((precio - costo) / precio) * 100
 }
 
 // ── Costo unitario del ítem ───────────────────────────────────────────────────
