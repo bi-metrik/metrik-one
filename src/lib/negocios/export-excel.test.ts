@@ -349,7 +349,7 @@ describe('armarFilasExcel — identidad, personas y forma', () => {
 
   it('un perdido y un cancelado llevan su motivo delante de la razón', () => {
     expect(celdaCierre({ id: 'n1', estado: 'perdido', razon_cierre: 'No incluido en UPME' })).toBe(
-      'Perdido — No incluido en UPME',
+      'Desistido — No incluido en UPME',
     )
     expect(celdaCierre({ id: 'n1', estado: 'cancelado', razon_cierre: 'Decision del cliente' })).toBe(
       'Cancelado — Decision del cliente',

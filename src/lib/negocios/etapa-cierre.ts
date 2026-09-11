@@ -89,8 +89,12 @@ export function permiteCierreNoFacturable(etapa: EtapaCierre, lineaDeclara: bool
 /**
  * El texto del boton de cierre.
  *
- * "Cerrar" es un final bueno; "Perder" y "Cancelar" son finales malos. Confundirlos es el
+ * "Cerrar" es un final bueno; "Desistir" y "Cancelar" son finales malos. Confundirlos es el
  * defecto visible que origino todo esto.
+ *
+ * El valor `'perder'` es la CLAVE interna, no el texto: la pantalla la traduce a
+ * "Desistir". Se dejo quieta a proposito — renombrarla tocaria el estado `perdido` que ya
+ * esta escrito en la base y en los tableros, y el texto es lo unico que se pidio cambiar.
  */
 export type AccionCierre = 'cerrar' | 'perder' | 'cancelar'
 

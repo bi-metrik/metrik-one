@@ -19,7 +19,7 @@ interface Props {
 
 const MOTIVO_LABEL: Record<'exitoso' | 'perdido' | 'cancelado', string> = {
   exitoso: 'Exitoso',
-  perdido: 'Perdido',
+  perdido: 'Desistido',
   cancelado: 'Cancelado',
 }
 

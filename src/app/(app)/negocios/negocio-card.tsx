@@ -49,7 +49,7 @@ const CIERRE_COLORS = {
 
 const CIERRE_LABELS = {
   exitoso: 'Exitoso',
-  perdido: 'Perdido',
+  perdido: 'Desistido',
   cancelado: 'Cancelado',
 } as const
 

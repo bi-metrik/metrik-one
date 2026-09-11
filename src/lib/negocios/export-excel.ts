@@ -295,7 +295,7 @@ export function faseDeNegocio(n: Pick<NegocioExportable, 'estado' | 'etapa_stage
 
 const CIERRE_LABEL: Record<MotivoCierre, string> = {
   exitoso: 'Exitoso',
-  perdido: 'Perdido',
+  perdido: 'Desistido',
   cancelado: 'Cancelado',
 }
 
@@ -304,7 +304,7 @@ const CIERRE_LABEL: Record<MotivoCierre, string> = {
  *
  * El motivo sale de `estado`, no de `cierre_motivo` — esa columna está muerta y por qué
  * lo está se explica en `motivo-cierre.ts`. Un negocio abierto no tiene cierre y la celda
- * va vacía, **aunque arrastre una `razon_cierre` de una reapertura**: decir «Perdido» de
+ * va vacía, **aunque arrastre una `razon_cierre` de una reapertura**: decir «Desistido» de
  * uno que sigue vivo es peor que no decir nada.
  *
  * Medido en SOENA el 2026-09-10: los 17 completados no tienen `razon_cierre` (salen

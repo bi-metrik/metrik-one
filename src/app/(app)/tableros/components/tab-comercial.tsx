@@ -139,12 +139,12 @@ export function TabComercial({ data }: { data: ComercialData }) {
               Ganadas: {data.ganados}
             </span>
             <span className="text-sm font-semibold px-3 py-1 rounded-full bg-red-50 text-red-700">
-              Perdidas: {data.perdidos}
+              Desistidas: {data.perdidos}
             </span>
           </div>
           {data.razonesPerdida.length > 0 && (
             <div className="mt-4 pt-4 border-t border-gray-100">
-              <p className="text-xs font-semibold text-gray-400 uppercase mb-2">Razones de perdida</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase mb-2">Razones de desistimiento</p>
               <div className="space-y-1">
                 {data.razonesPerdida.slice(0, 3).map((r, i) => (
                   <div key={i} className="flex justify-between text-sm">

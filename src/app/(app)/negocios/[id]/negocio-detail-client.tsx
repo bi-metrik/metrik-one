@@ -870,7 +870,7 @@ function SelectorEtapa({
   // trabaja en la etapa, no si el proceso termina ahi. Ver `lib/negocios/etapa-cierre.ts`.
   const cierreConfig = {
     cerrar: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
-    perder: { label: 'Perder', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    perder: { label: 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
     cancelar: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
   }[accionDeCierre(etapaParaCierre, hayEtapaCierre)]
 
