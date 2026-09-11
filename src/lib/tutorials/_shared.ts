@@ -4,6 +4,7 @@
 // Convencion: cada step recibe variantes de copy si se necesita adaptar
 // (caso `compliance_listas_dual` que NO menciona Valida/Informa por nombre).
 
+import { RETENCION_ANIOS } from '@/lib/compliance/retencion';
 import type { TutorialStep } from './types';
 
 export type SharedCopyVariant = 'valida_explicit' | 'dual_neutral';
@@ -53,7 +54,7 @@ export function stepHistorial(): TutorialStep {
     element: '[data-tutorial-target="tab-historial"]',
     title: 'Historial auditable',
     description:
-      'Cada consulta queda registrada por 10 años. Filtras por fecha, severidad o tipo. Soporte de auditoria SARLAFT.',
+      `Cada consulta queda registrada por ${RETENCION_ANIOS} años. Filtras por fecha, severidad o tipo. Soporte de auditoria SARLAFT.`,
     side: 'bottom',
     align: 'center',
   };
