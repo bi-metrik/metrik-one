@@ -160,6 +160,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // El item de ajuste no se abre nunca (no tiene detalle que mostrar), asi que no
+  // cuenta para decidir si "todos" estan abiertos: si contara, el boton se quedaria
+  // diciendo "Expandir todo" con todo ya abierto.
+  const itemsVisibles = initialItems.filter(i => !i.es_ajuste)
+  const todosExpandidos = itemsVisibles.length > 0 && itemsVisibles.every(i => expandedItems.has(i.id))
+  const toggleTodos = () => {
+    setExpandedItems(todosExpandidos ? new Set() : new Set(itemsVisibles.map(i => i.id)))
+  }
+
   const handleEnviar = () => {
     startTransition(async () => {
       const res = await enviarCotizacion(cotizacion.id)
@@ -378,6 +387,24 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
       {/* Items editor */}
       <div className="space-y-3">
+          {/* Abrir o cerrar todos los items de una. Con una cotizacion larga, abrir
+              uno por uno para ver los costos es el trabajo entero. El boton dice la
+              accion que va a ejecutar, no el estado en que esta. */}
+          {itemsVisibles.length > 1 && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={toggleTodos}
+                className="flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+              >
+                {todosExpandidos ? (
+                  <><ChevronRight className="h-3 w-3" /> Contraer todo</>
+                ) : (
+                  <><ChevronDown className="h-3 w-3" /> Expandir todo</>
+                )}
+              </button>
+            </div>
+          )}
           {/* Items */}
           {initialItems.filter(i => !i.es_ajuste).map(item => {
             const itemCantidad = Number(item.cantidad) || 1
