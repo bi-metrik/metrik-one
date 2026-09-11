@@ -710,7 +710,7 @@ export default function NegociosClient({
             illustration="/empty-states/empty-cerrados.svg"
             illustrationAlt="Sin negocios cerrados todavia"
             title="Sin negocios cerrados todavia"
-            description="Aqui veras el historial de negocios exitosos, perdidos y cancelados cuando los tengas."
+            description="Aqui veras el historial de negocios exitosos, desistidos y cancelados cuando los tengas."
           />
         ) : fase === 'cerrados' && isFilteringMotivo ? (
           <EmptyState
@@ -853,7 +853,7 @@ function motivoLabel(m: MotivoCierre): string {
     case 'exitoso':
       return 'Exitosos'
     case 'perdido':
-      return 'Perdidos'
+      return 'Desistidos'
     case 'cancelado':
       return 'Cancelados'
   }

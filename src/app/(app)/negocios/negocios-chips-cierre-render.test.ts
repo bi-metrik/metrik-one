@@ -118,7 +118,7 @@ describe('/negocios · chips de motivo de la pestaña Cerrados', () => {
     const html = pintar({ fase: 'cerrados' })
     expect(html).toContain('Todos (6)')
     expect(html).toContain('Exitosos (3)')
-    expect(html).toContain('Perdidos (2)')
+    expect(html).toContain('Desistidos (2)')
     expect(html).toContain('Cancelados (1)')
   })
 

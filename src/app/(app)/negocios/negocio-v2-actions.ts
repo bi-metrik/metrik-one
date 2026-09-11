@@ -7775,7 +7775,7 @@ export async function perderNegocio(
 
   if (!negocio) return { error: 'Negocio no encontrado' }
   if (negocio.stage_actual !== 'venta') {
-    return { error: 'Solo se puede perder un negocio en etapa de venta' }
+    return { error: 'Solo se puede desistir de un negocio en etapa de venta' }
   }
   if (negocio.estado !== 'abierto') {
     return { error: 'El negocio ya esta cerrado' }
@@ -7803,7 +7803,7 @@ export async function perderNegocio(
       entidad_id: negocioId,
       tipo: 'cambio_estado',
       autor_id: staffId,
-      contenido: `Negocio perdido. Motivo: ${razonLabel}`,
+      contenido: `Negocio desistido. Motivo: ${razonLabel}`,
       valor_nuevo: 'perdido',
     }, 'perderNegocio')
   }
@@ -7895,7 +7895,7 @@ export async function pausarNegocio(
         entidad_id: negocioId,
         tipo: 'cambio_estado',
         autor_id: staffId,
-        contenido: `Negocio auto-perdido: ${MAX_PAUSAS} pausas sin conversion`,
+        contenido: `Negocio desistido automaticamente: ${MAX_PAUSAS} pausas sin conversion`,
         valor_nuevo: 'perdido',
       }, 'pausarNegocio')
     }
@@ -8379,7 +8379,7 @@ export async function completarNegocio(
     return {
       error: ctxCierre.lineaDeclara
         ? 'Este negocio solo se puede completar desde la etapa de cierre de su linea.'
-        : 'Los negocios en etapa de venta se cierran con Perder, no con Completar',
+        : 'Los negocios en etapa de venta se cierran con Desistir, no con Completar',
     }
   }
   if (negocio.estado !== 'abierto') {

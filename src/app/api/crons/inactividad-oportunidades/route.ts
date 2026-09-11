@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     if (!nivelActual) continue
 
     const textoBase = diasSinActividad >= diaCierrePorInactividad(umbral)
-      ? `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin gestión — ¿cerrar como perdido?`
+      ? `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin gestión — ¿desistir del negocio?`
       : `"${negocio.nombre}" lleva ${diasSinActividad} días hábiles sin actividad`
 
     const destinatarios = new Set<string>()

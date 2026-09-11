@@ -45,7 +45,7 @@ interface CierreNegocioDialogProps {
   onClose: () => void
 }
 
-// ── Stage: VENTA — Perder negocio ───────────────────────────────────────────
+// ── Stage: VENTA — Desistir del negocio ─────────────────────────────────────
 
 function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; esBuzonLeads?: boolean; onClose: () => void }) {
   const router = useRouter()
@@ -63,7 +63,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
       if (res.error) {
         toast.error(res.error)
       } else {
-        toast.success('Negocio marcado como perdido')
+        toast.success('Negocio marcado como desistido')
         onClose()
         router.refresh()
       }
@@ -72,7 +72,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
 
   return (
     <>
-      <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : 'Perder negocio'}</h3>
+      <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : 'Desistir del negocio'}</h3>
       <p className="text-xs text-tinta-suave">
         {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : 'Selecciona la razon principal'}
       </p>

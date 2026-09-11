@@ -19,7 +19,7 @@ function estaAbierto(estado: string): boolean {
 function etiquetaEstado(estado: string): string {
   if (estado === 'abierto') return 'Abierto'
   if (estado === 'completado') return 'Completado'
-  if (estado === 'perdido') return 'Perdido'
+  if (estado === 'perdido') return 'Desistido'
   return estado
 }
 
