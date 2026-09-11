@@ -17,6 +17,7 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
+import { costoUnitarioDelItem } from '@/lib/cotizaciones/precio-item'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
@@ -297,11 +298,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // Costo total de la cotización. El ítem con rubros vale lo que suman sus rubros; el
+  // que no los tiene vale el costo que alguien le escribió a mano (`subtotal`). Misma
+  // regla que aplica `recalcularTotales` al guardar `cotizaciones.costo_total`: si las
+  // dos difieren, la pantalla muestra un número y la DB guarda otro.
   const costoTotal = initialItems.reduce((sum, item) => {
     if (item.es_ajuste) return sum
-    const rubrosSum = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
+    const rubros = item.rubros ?? []
+    const costoUnit = costoUnitarioDelItem({
+      numeroDeRubros: rubros.length,
+      costoDeRubros: rubros.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0),
+      subtotal: item.subtotal,
+    })
     const cant = Number(item.cantidad) || 1
-    return sum + rubrosSum * cant
+    return sum + costoUnit * cant
   }, 0)
 
   return (
@@ -379,6 +389,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const isNegativo = itemPrecio < 0
             const costoUnitario = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
             const tieneRubros = (item.rubros ?? []).length > 0
+            // Costo del ítem que no se desglosa: vive en `subtotal`, escrito a mano.
+            const costoManual = tieneRubros ? 0 : Number(item.subtotal) || 0
             const precioManual = item.precio_manual === true
             // El precio sale de los rubros cuando el item los tiene y nadie lo
             // sobreescribio. Misma condicion que aplica el servidor.
@@ -473,6 +485,51 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             </div>
                           </>
                         ) : (
+                          <>
+                          {/* Costo unitario escrito a mano. Solo para el ítem SIN rubros:
+                              con rubros el costo lo mandan ellos, y dos costos para el
+                              mismo ítem terminan con el recálculo pisando uno. Sin este
+                              campo, un ítem de compra directa (una bomba es una factura
+                              del proveedor) dejaba `costo_total` en cero y la etapa de
+                              Ejecución se quedaba sin presupuesto contra el cual medir. */}
+                          {!tieneRubros ? (
+                            <div>
+                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo unitario</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="Costo"
+                                  defaultValue={costoManual ? costoManual.toLocaleString('es-CO') : ''}
+                                  onBlur={e => {
+                                    const raw = e.target.value.replace(/[^0-9]/g, '')
+                                    const val = Number(raw) || 0
+                                    if (val === costoManual) return
+                                    e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                    startTransition(async () => {
+                                      const res = await updateItem(item.id, { subtotal: val })
+                                      if (!res.success) {
+                                        toast.error(res.error)
+                                        return
+                                      }
+                                      await recalcularTotales(cotizacion.id)
+                                      router.refresh()
+                                    })
+                                  }}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                  className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm tabular-nums"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de rubros</label>
+                              <div className="rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm tabular-nums text-muted-foreground">
+                                {formatCOP(costoUnitario)}
+                              </div>
+                            </div>
+                          )}
                           <div>
                             <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Valor unitario</label>
                             <div className="relative">
@@ -498,6 +555,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                               />
                             </div>
                           </div>
+                          </>
                         )}
                         <div>
                           <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Cantidad</label>
