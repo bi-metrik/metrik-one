@@ -1,6 +1,7 @@
 'use client'
 
-import { Activity, Clock, Receipt, TrendingUp, Target, AlertTriangle, HelpCircle } from 'lucide-react'
+import { useState } from 'react'
+import { Activity, Clock, Receipt, TrendingUp, Target, AlertTriangle, HelpCircle, ChevronRight } from 'lucide-react'
 import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import {
   TIPO_RUBRO_SIN_DETALLE,
@@ -31,11 +32,20 @@ const RUBRO_LABELS: Record<string, string> = {
   [TIPO_RUBRO_SIN_DETALLE]: 'Sin desglosar',
 }
 
+/** Un gasto tal como se lista al abrir su categoría. */
+export interface MovimientoGasto {
+  id: string
+  descripcion: string | null
+  monto: number
+  fecha: string
+}
+
 interface EjecucionData {
   totalGastos: number
   totalHoras: number
   costoHoras: number
-  gastosPorCategoria: Array<{ categoria: string; total: number }>
+  /** Cada categoría trae los movimientos que la forman: la fila se abre sin ir a otra pantalla. */
+  gastosPorCategoria: Array<{ categoria: string; total: number; movimientos?: MovimientoGasto[] }>
   /** Rubros de la cotización aceptada, cada uno con lo ya ejecutado que le cuenta. */
   presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number; ejecutado: number }>
   /** Presupuesto de COSTO (suma de los rubros). Distinto del precio de venta. */
@@ -141,7 +151,23 @@ function avisoHorasSinTarifa(sinTarifa: NonNullable<EjecucionData['horasSinTarif
   return `${horas} h entraron al costo valiendo $0 (${causas.join(' y ')}). El costo ejecutado está por debajo del real.`
 }
 
+const fmtFecha = (f: string) => {
+  const d = new Date(f.length <= 10 ? `${f}T12:00:00` : f)
+  return Number.isNaN(d.getTime())
+    ? f
+    : new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short' }).format(d)
+}
+
 export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
+  // Qué categorías están abiertas. Varias a la vez: comparar dos categorías es el uso
+  // normal, y un acordeón de una sola obliga a cerrar la que se estaba mirando.
+  const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
+  const toggleCategoria = (categoria: string) =>
+    setAbiertas(prev => {
+      const next = new Set(prev)
+      if (!next.delete(categoria)) next.add(categoria)
+      return next
+    })
   const costoTotal = data.totalGastos + data.costoHoras
   const hayDatos = data.totalGastos > 0 || data.totalHoras > 0
   const hayRubros = !!data.presupuestoPorRubro && data.presupuestoPorRubro.length > 0
@@ -393,17 +419,59 @@ export default function BloqueEjecucion({ data }: BloqueEjecucionProps) {
           <div className="space-y-1">
             {data.gastosPorCategoria.map(g => {
               const pct = data.totalGastos > 0 ? Math.round((g.total / data.totalGastos) * 100) : 0
+              const movimientos = g.movimientos ?? []
+              const abierta = abiertas.has(g.categoria)
+              // Sin movimientos la fila no se abre: un acordeón que despliega vacío se lee
+              // como un error de la pantalla, no como "esta categoría no trae detalle".
+              const puedeAbrir = movimientos.length > 0
               return (
-                <div key={g.categoria} className="flex items-center gap-2">
-                  <span className="text-[10px] text-tinta-suave w-28 truncate">
-                    {CATEGORIA_LABELS[g.categoria] ?? g.categoria}
-                  </span>
-                  <div className="flex-1 h-1.5 rounded-full bg-[#E5E7EB] overflow-hidden">
-                    <div className="h-full rounded-full bg-red-400" style={{ width: `${pct}%` }} />
+                <div key={g.categoria}>
+                  <div
+                    className={`flex items-center gap-2 rounded ${puedeAbrir ? 'cursor-pointer hover:bg-black/[0.03]' : ''}`}
+                    onClick={puedeAbrir ? () => toggleCategoria(g.categoria) : undefined}
+                    role={puedeAbrir ? 'button' : undefined}
+                    tabIndex={puedeAbrir ? 0 : undefined}
+                    aria-expanded={puedeAbrir ? abierta : undefined}
+                    onKeyDown={puedeAbrir ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        toggleCategoria(g.categoria)
+                      }
+                    } : undefined}
+                  >
+                    <span className="flex items-center gap-0.5 text-[10px] text-tinta-suave w-28 truncate">
+                      {puedeAbrir && (
+                        <ChevronRight
+                          className={`h-2.5 w-2.5 shrink-0 transition-transform ${abierta ? 'rotate-90' : ''}`}
+                        />
+                      )}
+                      <span className="truncate">{CATEGORIA_LABELS[g.categoria] ?? g.categoria}</span>
+                    </span>
+                    <div className="flex-1 h-1.5 rounded-full bg-[#E5E7EB] overflow-hidden">
+                      <div className="h-full rounded-full bg-red-400" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-[10px] font-medium text-tinta-suave tabular-nums w-20 text-right">
+                      {fmt(g.total)}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-medium text-tinta-suave tabular-nums w-20 text-right">
-                    {fmt(g.total)}
-                  </span>
+
+                  {abierta && (
+                    <ul className="mb-1.5 mt-1 ml-3 space-y-1 border-l border-[#E5E7EB] pl-2">
+                      {movimientos.map(m => (
+                        <li key={m.id} className="flex items-start gap-2">
+                          <span className="w-10 shrink-0 text-[10px] text-tinta-suave tabular-nums">
+                            {fmtFecha(m.fecha)}
+                          </span>
+                          <span className="flex-1 break-words text-[10px] text-tinta">
+                            {m.descripcion || 'Sin descripción'}
+                          </span>
+                          <span className="w-20 shrink-0 text-right text-[10px] text-tinta-suave tabular-nums">
+                            {fmt(m.monto)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )
             })}

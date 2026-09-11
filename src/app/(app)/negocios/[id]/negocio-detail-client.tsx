@@ -84,7 +84,12 @@ interface EjecucionData {
   totalGastos: number
   totalHoras: number
   costoHoras: number
-  gastosPorCategoria: Array<{ categoria: string; total: number }>
+  /** Cada categoría trae los movimientos que la forman: la fila se abre en el bloque. */
+  gastosPorCategoria: Array<{
+    categoria: string
+    total: number
+    movimientos?: Array<{ id: string; descripcion: string | null; monto: number; fecha: string }>
+  }>
   /** Cada rubro trae lo ya ejecutado que le cuenta, repartido en el servidor. */
   presupuestoPorRubro?: Array<{ tipo: string; nombre: string; total: number; ejecutado: number }>
   /** Presupuesto de COSTO. El precio aprobado va aparte porque mide otra cosa. */
