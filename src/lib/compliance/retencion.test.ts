@@ -174,6 +174,21 @@ const CIFRA_DE_ANIOS = new RegExp(
 );
 
 /**
+ * Una cifra de años escrita solo en código: `const RETENCION_ANIOS = 10`.
+ *
+ * ⚠️ `CIFRA_DE_ANIOS` exige la palabra «años» detrás del número, así que una
+ * constante desnuda le es invisible. Es el mismo punto ciego un piso más
+ * abajo: un guardián que lee prosa no lee código. En Valida ese hueco sí
+ * mordía —la constante era la que escribía la fecha de borrado en la base— y
+ * por eso el detector nació allá el 2026-09-11. Acá se porta para que los dos
+ * gemelos vigilen igual y no haya que acordarse de cuál sabe menos.
+ *
+ * Hoy el barrido encuentra exactamente una: la canónica de `retencion.ts`.
+ */
+const CONSTANTE_DE_ANIOS =
+  /\b[A-Z][A-Z0-9_]*(?:ANIOS|ANOS|A[NÑ]OS|YEARS)[A-Z0-9_]*\s*[:=]\s*(\d+)/g;
+
+/**
  * Deja el archivo en una sola línea y sin los marcadores de comentario.
  *
  * ⚠️ Quitar el ` * ` del inicio de línea NO es cosmético: los docstrings se
@@ -212,6 +227,9 @@ function cifrasDeclaradas(ruta: string, salvo: { frase: string }[] = []) {
     const valores = [/^\d+$/.test(bruto) ? Number(bruto) : NUMEROS_EN_LETRAS[bruto]];
     if (m[2]) valores.push(Number(m[2]));
     cifras.push({ literal: m[0], valores });
+  }
+  for (const m of texto.matchAll(CONSTANTE_DE_ANIOS)) {
+    cifras.push({ literal: m[0], valores: [Number(m[1])] });
   }
   return cifras;
 }
@@ -287,19 +305,18 @@ describe('plazo de conservación de datos personales', () => {
     ).toEqual([]);
   });
 
-  it('ningún archivo del repo menciona una cifra de años sin estar clasificado', () => {
+  it('ningún archivo del repo declara una cifra de años sin estar clasificado', () => {
     const sinClasificar: string[] = [];
     for (const absoluta of archivosBarridos()) {
       const ruta = relative(RAIZ, absoluta).split('\\').join('/');
       if (ruta in CLASIFICACION) continue;
-      const texto = normalizar(readFileSync(absoluta, 'utf-8'));
-      CIFRA_DE_ANIOS.lastIndex = 0;
-      const m = texto.match(CIFRA_DE_ANIOS);
-      if (m) sinClasificar.push(`${ruta}: "${m[0]}"`);
+      const [cifra] = cifrasDeclaradas(ruta);
+      if (cifra) sinClasificar.push(`${ruta}: "${cifra.literal}"`);
     }
     expect(
       sinClasificar,
-      'Estos archivos declaran una cifra de años y nadie dijo si es el plazo de conservación.\n' +
+      'Estos archivos declaran una cifra de años —en prosa o en una constante— y\n' +
+        'nadie dijo si es el plazo de conservación.\n' +
         'Clasifícalos en CLASIFICACION como "plazo" o "no-es-plazo", con su razón:\n  ' +
         sinClasificar.join('\n  '),
     ).toEqual([]);
