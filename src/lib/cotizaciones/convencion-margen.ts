@@ -72,7 +72,18 @@ export function politicaMargenDeLinea(configExtra: unknown): PoliticaMargen {
  * pieza viene a cerrar.
  */
 export function etiquetaCampoMargen(convencion: ConvencionMargen): string {
-  return convencion === 'sobre_venta' ? 'Margen %' : 'Recargo %'
+  return `${nombreDelMargen(convencion)} %`
+}
+
+/**
+ * Cómo se llama el número, sin el signo de porcentaje.
+ *
+ * Hace falta aparte porque la etiqueta se usa también dentro de una frase y al lado de
+ * un campo que ya lleva su propio `%`: "Recargo % 0% de la cotización" es lo que salía
+ * antes, y ahí el lector deja de entender cuál de los dos números manda.
+ */
+export function nombreDelMargen(convencion: ConvencionMargen): string {
+  return convencion === 'sobre_venta' ? 'Margen' : 'Recargo'
 }
 
 /**
