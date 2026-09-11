@@ -3,10 +3,10 @@
  *
  * Un ítem se puede cotizar de dos maneras y el sistema tiene que saber cuál manda:
  *
- *  · POR RUBROS  — el ítem tiene costos desglosados y el precio se DERIVA:
- *                  costo de rubros + margen %. Es el caso que quedaba en cero,
- *                  porque la suma de rubros solo se escribía en `subtotal` (costo)
- *                  y la fila / el total / el PDF muestran `precio_venta`.
+ *  · DESDE EL COSTO — el ítem tiene costo (desglosado en rubros o escrito a mano) y
+ *                  el precio se DERIVA: costo + margen %. Es el caso que quedaba en
+ *                  cero, porque el costo solo se escribía en `subtotal` y la fila /
+ *                  el total / el PDF muestran `precio_venta`.
  *  · A MANO      — alguien escribió el valor unitario. `precio_manual = true` y el
  *                  sistema no lo vuelve a tocar.
  *
@@ -64,10 +64,15 @@ export interface ItemParaPrecio {
  * Solo si NO es el ítem de ajuste, tiene al menos un rubro, y nadie sobreescribió
  * el precio a mano. Cualquier otro caso conserva el comportamiento previo al fix.
  */
-export function precioSeDerivaDeRubros(item: ItemParaPrecio): boolean {
+export function precioSeDerivaDelCosto(item: ItemParaPrecio): boolean {
   if (item.es_ajuste === true) return false
-  if (item.numeroDeRubros <= 0) return false
-  return item.precio_manual !== true
+  if (item.precio_manual === true) return false
+  // Con rubros deriva aunque el costo dé 0 (un desglose a medio llenar no es "sin
+  // costo"); sin rubros hace falta un costo escrito a mano. Lo que decide es que
+  // haya un costo contra el cual aplicar margen, no la forma en que se capturó: si
+  // mirara solo los rubros, el ítem de compra directa (una bomba es una factura del
+  // proveedor) tendría costo y seguiría sin poder derivar su precio.
+  return item.numeroDeRubros > 0 || (Number(item.subtotal) || 0) > 0
 }
 
 /**
@@ -84,7 +89,7 @@ export function precioSeDerivaDeRubros(item: ItemParaPrecio): boolean {
  * devuelve un precio mayor que el costo para cualquier margen positivo.
  */
 export function precioVentaDelItem(item: ItemParaPrecio): number {
-  if (!precioSeDerivaDeRubros(item)) return Number(item.precio_venta) || 0
+  if (!precioSeDerivaDelCosto(item)) return Number(item.precio_venta) || 0
   const margen = Number(item.margen_porcentaje)
   const margenValido = Number.isFinite(margen) ? margen : 0
   const subtotal = Number(item.subtotal) || 0

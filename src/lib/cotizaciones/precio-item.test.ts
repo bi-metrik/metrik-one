@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { precioSeDerivaDeRubros, precioVentaDelItem, costoUnitarioDelItem, margenRealDelItem } from './precio-item'
+import { precioSeDerivaDelCosto, precioVentaDelItem, costoUnitarioDelItem, margenRealDelItem } from './precio-item'
 
 /**
  * Los cuatro escenarios de la prueba de escritorio del encargo, más los bordes
@@ -15,7 +15,7 @@ describe('precio de venta de un ítem de cotización', () => {
       precio_manual: false,
       precio_venta: 0,
     }
-    expect(precioSeDerivaDeRubros(item)).toBe(true)
+    expect(precioSeDerivaDelCosto(item)).toBe(true)
     expect(precioVentaDelItem(item)).toBe(1_000_000)
   })
 
@@ -38,7 +38,7 @@ describe('precio de venta de un ítem de cotización', () => {
       precio_manual: false,
       precio_venta: 750_000,
     }
-    expect(precioSeDerivaDeRubros(item)).toBe(false)
+    expect(precioSeDerivaDelCosto(item)).toBe(false)
     expect(precioVentaDelItem(item)).toBe(750_000)
   })
 
@@ -50,7 +50,7 @@ describe('precio de venta de un ítem de cotización', () => {
       precio_manual: true,
       precio_venta: 900_000,
     }
-    expect(precioSeDerivaDeRubros(item)).toBe(false)
+    expect(precioSeDerivaDelCosto(item)).toBe(false)
     expect(precioVentaDelItem(item)).toBe(900_000)
   })
 
@@ -61,7 +61,7 @@ describe('precio de venta de un ítem de cotización', () => {
       subtotal: 0,
       precio_venta: -180_000,
     }
-    expect(precioSeDerivaDeRubros(item)).toBe(false)
+    expect(precioSeDerivaDelCosto(item)).toBe(false)
     expect(precioVentaDelItem(item)).toBe(-180_000)
   })
 
@@ -77,7 +77,7 @@ describe('precio de venta de un ítem de cotización', () => {
       precio_manual: false,
       precio_venta: -180_000,
     }
-    expect(precioSeDerivaDeRubros(item)).toBe(false)
+    expect(precioSeDerivaDelCosto(item)).toBe(false)
     expect(precioVentaDelItem(item)).toBe(-180_000)
   })
 
@@ -117,7 +117,7 @@ describe('precio de venta de un ítem de cotización', () => {
 
   it('precio_manual ausente se lee como falso: el ítem con rubros se deriva', () => {
     const item = { numeroDeRubros: 1, subtotal: 500_000, precio_venta: 0 }
-    expect(precioSeDerivaDeRubros(item)).toBe(true)
+    expect(precioSeDerivaDelCosto(item)).toBe(true)
     expect(precioVentaDelItem(item)).toBe(500_000)
   })
 })
@@ -204,5 +204,38 @@ describe('convención del margen', () => {
 
   it('sin precio no hay margen que reportar, y no es cero', () => {
     expect(margenRealDelItem(500_000, 0)).toBeNull()
+  })
+})
+
+describe('precioSeDerivaDelCosto: el costo directo tambien deriva precio', () => {
+  it('sin rubros pero con costo escrito a mano, el precio se deriva', () => {
+    const item = { numeroDeRubros: 0, subtotal: 12_495_000, margen_porcentaje: 20 }
+    expect(precioSeDerivaDelCosto(item)).toBe(true)
+    expect(precioVentaDelItem(item)).toBe(14_994_000)
+  })
+
+  it('sin rubros y sin costo, no hay contra que aplicar margen: manda el precio guardado', () => {
+    const item = { numeroDeRubros: 0, subtotal: 0, precio_venta: 900_000, margen_porcentaje: 30 }
+    expect(precioSeDerivaDelCosto(item)).toBe(false)
+    expect(precioVentaDelItem(item)).toBe(900_000)
+  })
+
+  it('con costo directo, un precio escrito a mano sigue mandando', () => {
+    const item = { numeroDeRubros: 0, subtotal: 10_000_000, precio_venta: 11_000_000, precio_manual: true, margen_porcentaje: 50 }
+    expect(precioSeDerivaDelCosto(item)).toBe(false)
+    expect(precioVentaDelItem(item)).toBe(11_000_000)
+  })
+
+  it('con rubros deriva aunque el costo de 0: un desglose a medio llenar no es "sin costo"', () => {
+    expect(precioSeDerivaDelCosto({ numeroDeRubros: 2, subtotal: 0 })).toBe(true)
+  })
+
+  it('el item de ajuste nunca deriva, tenga el costo que tenga', () => {
+    expect(precioSeDerivaDelCosto({ es_ajuste: true, numeroDeRubros: 0, subtotal: 5_000_000 })).toBe(false)
+  })
+
+  it('el costo directo respeta la convencion de margen sobre venta', () => {
+    const item = { numeroDeRubros: 0, subtotal: 1_000_000, margen_porcentaje: 15, convencion_margen: 'sobre_venta' as const }
+    expect(precioVentaDelItem(item)).toBe(1_176_471)
   })
 })

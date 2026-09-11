@@ -17,7 +17,7 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { costoUnitarioDelItem, margenRealDelItem, precioVentaDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { costoUnitarioDelItem, precioSeDerivaDelCosto, margenRealDelItem, precioVentaDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { etiquetaCampoMargen } from '@/lib/cotizaciones/convencion-margen'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -424,10 +424,21 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const tieneRubros = (item.rubros ?? []).length > 0
             // Costo del ítem que no se desglosa: vive en `subtotal`, escrito a mano.
             const costoManual = tieneRubros ? 0 : Number(item.subtotal) || 0
-            const precioManual = item.precio_manual === true
-            // El precio sale de los rubros cuando el item los tiene y nadie lo
-            // sobreescribio. Misma condicion que aplica el servidor.
-            const precioDesdeRubros = !isAjuste && tieneRubros && !precioManual
+            // Costo del item, venga del desglose o del costo directo.
+            const costoDelItem = tieneRubros ? costoUnitario : costoManual
+            // Quien decide si el precio se deriva es el MISMO helper que aplica el
+            // servidor. Escrito dos veces se desincroniza, y ya paso: la regla pura
+            // empezo a derivar desde el costo directo y la pantalla siguio mirando
+            // solo los rubros, asi que un item costeado a mano derivaba su precio en
+            // la base mientras el editor le ofrecia escribirlo.
+            const precioDesdeCosto = precioSeDerivaDelCosto({
+              es_ajuste: item.es_ajuste,
+              precio_venta: item.precio_venta,
+              margen_porcentaje: item.margen_porcentaje,
+              precio_manual: item.precio_manual,
+              numeroDeRubros: (item.rubros ?? []).length,
+              subtotal: tieneRubros ? costoUnitario : Number(item.subtotal) || 0,
+            })
             const itemMargen = Number(item.margen_porcentaje) || 0
             // El precio se deriva con el MISMO helper que aplica el servidor: si la
             // pantalla lo recalcula por su cuenta, las dos formulas se separan y la
@@ -438,10 +449,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               margen_porcentaje: itemMargen,
               precio_manual: false,
               numeroDeRubros: (item.rubros ?? []).length,
-              subtotal: costoUnitario,
+              subtotal: costoDelItem,
               convencion_margen: convencionMargen,
             })
-            const margenRealPct = margenRealDelItem(costoUnitario, precioUnitarioDerivado)
+            const margenRealPct = margenRealDelItem(costoDelItem, precioUnitarioDerivado)
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -494,14 +505,43 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {editable && (
                     <div className="mb-3 space-y-2">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {precioDesdeRubros ? (
+                        {precioDesdeCosto ? (
                           <>
-                            <div>
-                              <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de rubros</label>
-                              <div className="rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm tabular-nums text-muted-foreground">
-                                {formatCOP(costoUnitario)}
+                            {tieneRubros ? (
+                              <div>
+                                <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de rubros</label>
+                                <div className="rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm tabular-nums text-muted-foreground">
+                                  {formatCOP(costoUnitario)}
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div>
+                                <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo unitario</label>
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="Costo"
+                                    defaultValue={costoManual ? costoManual.toLocaleString('es-CO') : ''}
+                                    onBlur={e => {
+                                      const raw = e.target.value.replace(/[^0-9]/g, '')
+                                      const val = Number(raw) || 0
+                                      if (val === costoManual) return
+                                      e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                      startTransition(async () => {
+                                        const res = await updateItem(item.id, { subtotal: val })
+                                        if (!res.success) { toast.error(res.error); return }
+                                        await recalcularTotales(cotizacion.id)
+                                        router.refresh()
+                                      })
+                                    }}
+                                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                    className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm tabular-nums"
+                                  />
+                                </div>
+                              </div>
+                            )}
                             <div>
                               <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">{etiquetaCampoMargen(convencionMargen)}</label>
                               <input
@@ -650,7 +690,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             }}
                           />
                         </div>
-                        {!precioDesdeRubros && (
+                        {!precioDesdeCosto && (
                           <div className="flex items-end pb-0.5">
                             {itemLineTotal > 0 && (item.subtotal ?? 0) > 0 && (
                               <span className="text-[10px] text-green-600">
@@ -660,9 +700,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           </div>
                         )}
                       </div>
-                      {tieneRubros && (
+                      {(tieneRubros || costoManual > 0) && (
                         <div>
-                          {precioDesdeRubros ? (
+                          {precioDesdeCosto ? (
                             <button
                               type="button"
                               disabled={isPending}
@@ -670,7 +710,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 startTransition(async () => {
                                   // Congela el precio derivado de hoy y lo entrega al usuario.
                                   await updateItem(item.id, {
-                                    precio_venta: Math.round(costoUnitario * (1 + itemMargen / 100)),
+                                    precio_venta: precioUnitarioDerivado,
                                     precio_manual: true,
                                   })
                                   await recalcularTotales(cotizacion.id)
