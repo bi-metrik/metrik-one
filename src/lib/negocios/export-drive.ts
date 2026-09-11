@@ -162,6 +162,49 @@ export function decidirAccionArchivo(
   return { accion: 'actualizar', fileId }
 }
 
+// ── El reclamo del archivo ──────────────────────────────────────────────────
+
+/**
+ * Lo que la base contesto al reclamo del `file_id`.
+ *
+ * `no_se_guardo` existe para que NO se pueda confundir con `gane`. Son indistinguibles
+ * desde afuera —en los dos casos «no me devolvieron el id de otro»— y esa confusion es
+ * justo la que convierte un defecto en un fallo mudo: la version anterior de este codigo
+ * preguntaba `typeof ganador === 'string' && ganador !== elMio` y mandaba TODO lo demas
+ * al `else` del camino feliz, incluido el `null`. Con eso, un reclamo que no escribio
+ * nada le entregaba al usuario un enlace que funcionaba y dejaba el `file_id` sin
+ * guardar: el clic siguiente creaba otra hoja y abandonaba la anterior, sin un solo
+ * error en ningun lado.
+ */
+export type Reclamo =
+  | { resultado: 'gane'; fileId: string }
+  | { resultado: 'perdi'; fileId: string }
+  | { resultado: 'no_se_guardo' }
+
+/**
+ * Clasifica la respuesta de `reclamar_export_negocios_file_id`.
+ *
+ * La RPC devuelve el id que QUEDO guardado, que puede no ser el que se mando (si otra
+ * persona gano la carrera). Solo hay tres desenlaces posibles y los tres tienen que ser
+ * explicitos:
+ *
+ *   - vuelve mi id        → gane, el archivo que acabo de crear es el del workspace
+ *   - vuelve otro id      → perdi: el mio sobra y el bueno es el que vuelve
+ *   - no vuelve ningun id → NADA quedo guardado; quien llama tiene que fallar, no seguir
+ *
+ * El tercero no deberia ocurrir nunca: la funcion escribe y despues relee. Si ocurre, o
+ * el workspace no existe, o la escritura no tomo — y en los dos casos continuar deja un
+ * archivo huerfano en el Drive del cliente por cada clic. Se clasifica aqui, y no dentro
+ * de la server action, para poder ejercitarlo sin red ni base.
+ */
+export function interpretarReclamo(devuelto: unknown, fileIdPropio: string): Reclamo {
+  const guardado = typeof devuelto === 'string' ? devuelto.trim() : ''
+  if (guardado === '') return { resultado: 'no_se_guardo' }
+  return guardado === fileIdPropio.trim()
+    ? { resultado: 'gane', fileId: guardado }
+    : { resultado: 'perdi', fileId: guardado }
+}
+
 // ── Compartir ───────────────────────────────────────────────────────────────
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   correosPendientes,
   decidirAccionArchivo,
+  interpretarReclamo,
   leerConfigExportDrive,
   LLAVE_CORREOS,
   LLAVE_EXPORT_DRIVE,
@@ -192,6 +193,56 @@ describe('decidirAccionArchivo', () => {
     // lo mismo que `false`, y tratarlo como false crearia un archivo nuevo por clic.
     expect(decidirAccionArchivo('1AbC', { id: '1AbC', trashed: false }))
       .toEqual({ accion: 'actualizar', fileId: '1AbC' })
+  })
+})
+
+// ── El reclamo del archivo ──────────────────────────────────────────────────
+
+/**
+ * Mutacion probada: hacer que `interpretarReclamo` devuelva `{resultado:'gane'}` cuando
+ * no vuelve ningun id (que es exactamente lo que hacia el `else` de la server action
+ * antes de este arreglo).
+ * Cayeron: los cuatro casos de «sin id» de abajo.
+ */
+describe('interpretarReclamo', () => {
+  it('si vuelve mi id, gane la carrera', () => {
+    expect(interpretarReclamo('1AbC', '1AbC')).toEqual({ resultado: 'gane', fileId: '1AbC' })
+  })
+
+  it('si vuelve OTRO id, perdi y dice cual es el bueno', () => {
+    // El que pierde manda el suyo a la papelera y actualiza el del ganador: por eso el
+    // id tiene que viajar, no basta con saber que se perdio.
+    expect(interpretarReclamo('del-otro', '1AbC')).toEqual({
+      resultado: 'perdi',
+      fileId: 'del-otro',
+    })
+  })
+
+  it('si NO vuelve ningun id, no se guardo nada — nunca «gane»', () => {
+    // Este es el caso que el codigo anterior mandaba al camino feliz: el archivo se
+    // habia creado, el id no habia quedado guardado, y el usuario recibia un enlace
+    // bueno mientras el clic siguiente creaba otra hoja.
+    for (const vacio of [null, undefined, '', '   ']) {
+      expect(interpretarReclamo(vacio, '1AbC'), String(vacio)).toEqual({
+        resultado: 'no_se_guardo',
+      })
+    }
+  })
+
+  it('lo que no sea texto tampoco pasa por id', () => {
+    // Un `data` que llega como numero u objeto es una respuesta que no entendemos: la
+    // unica lectura segura es que no hay id guardado.
+    for (const raro of [0, 123, {}, [], true, { file_id: '1AbC' }]) {
+      expect(interpretarReclamo(raro, '1AbC'), JSON.stringify(raro)).toEqual({
+        resultado: 'no_se_guardo',
+      })
+    }
+  })
+
+  it('los espacios alrededor no convierten un gane en un perdi', () => {
+    // La columna es `text` y la funcion guarda con `btrim`; comparar en crudo haria que
+    // un espacio de mas mandara a la papelera el archivo bueno.
+    expect(interpretarReclamo(' 1AbC ', '1AbC')).toEqual({ resultado: 'gane', fileId: '1AbC' })
   })
 })
 

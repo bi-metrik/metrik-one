@@ -17,9 +17,13 @@
 --      `meta_leads.field_map_por_formulario` (que el webhook escribe en rafaga cuando
 --      arranca un formulario nuevo), `siigo_*`, `negocio_card` y la config de avisos. Un
 --      leer-modificar-escribir desde la server action borraria en silencio lo que otro
---      proceso acabe de escribir en OTRA rama del jsonb. `jsonb_set` en una sola
---      sentencia no puede: toca su rama y deja el resto intacto. Mismo motivo por el que
---      existe `guardar_field_map_formulario` (20260903000001).
+--      proceso acabe de escribir en OTRA rama del jsonb. Una sola sentencia no puede:
+--      toca su rama y deja el resto intacto. Mismo motivo por el que existe
+--      `guardar_field_map_formulario` (20260903000001).
+--
+--      ⚠️ Pero OJO con la forma de tocar esa rama: la obvia, `jsonb_set` con
+--      `create_if_missing`, NO crea el objeto contenedor y deja el id sin guardar sin
+--      dar error. Ver el bloque de `||` dentro de `reclamar_...`.
 --
 -- Esta migracion es de ESQUEMA: crea dos funciones y no lee ni escribe una sola fila de
 -- datos. No hay backfill.
@@ -49,15 +53,43 @@ begin
     raise exception 'p_file_id no puede venir vacio';
   end if;
 
+  -- ⚠️ Se construye con `||`, NO con `jsonb_set(..., create_if_missing => true)`.
+  --
+  -- `create_if_missing` crea SOLO el ultimo escalon del camino. PostgreSQL lo documenta
+  -- en el propio `jsonb_set`: «All earlier steps in the path must exist, or the target is
+  -- returned unchanged». En el camino {drive_export_negocios, file_id} el escalon
+  -- anterior es el objeto contenedor, y hoy NINGUN workspace lo tiene porque la
+  -- funcionalidad es nueva. Peor: el `where` de abajo se cumple EXACTAMENTE cuando esa
+  -- llave falta, asi que el camino roto no seria un borde raro, seria el caso por
+  -- defecto — el primer clic de cada workspace.
+  --
+  -- Y falla CALLADO, que es peor que fallar: `jsonb_set` devuelve el jsonb intacto, el
+  -- update reporta su fila, el `returning` da null y quien llama recibe «no hay id»
+  -- sobre un archivo que si se creo. El usuario ve un enlace que funciona y el clic
+  -- siguiente crea OTRA hoja, dejando huerfana la anterior. (Mismo gotcha ya medido en
+  -- este repo: el backfill de `_reconstruido` dejo 724 filas con el valor y 0 con la
+  -- marca.)
+  --
+  -- El `||` entre objetos es una fusion SUPERFICIAL: reemplaza solo la llave que se le
+  -- pasa, asi que los hermanos de `config_extra` (`siigo_*`, `meta_leads`,
+  -- `negocio_card`) quedan intactos — que es la razon 2 de la cabecera — y el `||` de
+  -- adentro conserva lo que ya hubiera DENTRO del contenedor, en particular
+  -- `compartir_con`, que lo escribe una persona y no se puede perder al guardar un id.
   update workspaces
-  set config_extra = jsonb_set(
-        -- `true` al final crea el camino: un workspace que nunca exporto no tiene
-        -- todavia el objeto contenedor.
-        coalesce(config_extra, '{}'::jsonb),
-        array['drive_export_negocios', 'file_id'],
-        to_jsonb(btrim(p_file_id)),
-        true
-      )
+  set config_extra =
+        coalesce(config_extra, '{}'::jsonb)
+        || jsonb_build_object(
+             'drive_export_negocios',
+             -- Si la llave existe y NO es un objeto (una edicion a mano), se parte de
+             -- `{}`: concatenar un escalar con un objeto no falla, devuelve un arreglo,
+             -- y eso dejaria la config peor de como estaba.
+             (case
+                when jsonb_typeof(config_extra -> 'drive_export_negocios') = 'object'
+                  then config_extra -> 'drive_export_negocios'
+                else '{}'::jsonb
+              end)
+             || jsonb_build_object('file_id', btrim(p_file_id))
+           )
   where id = p_workspace_id
     -- La guarda de la carrera. `nullif` trata la cadena vacia como ausente: una clave
     -- que quedo en "" por una edicion a mano no puede bloquear el reclamo para siempre.
@@ -107,6 +139,15 @@ as $function$
 declare
   v_filas int;
 begin
+  -- Aqui `jsonb_set` SI es correcto, y la diferencia con el reclamo de arriba vale la
+  -- pena nombrarla porque es la que decide si el defecto aparece: este camino tiene UN
+  -- solo escalon (`{drive_export_negocios}`), asi que el unico «paso anterior» es la raiz
+  -- del jsonb, que siempre existe. Y ademas el `where` exige que la llave ya tenga
+  -- `file_id`, con lo que el contenedor esta garantizado por construccion: no hay nada
+  -- que crear y el `true` del final ni siquiera llega a actuar.
+  --
+  -- Regla para quien copie de aqui: `create_if_missing` solo alcanza si el camino tiene
+  -- un escalon, o si el `where` garantiza que los anteriores existen.
   update workspaces
   set config_extra = jsonb_set(
         config_extra,

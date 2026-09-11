@@ -30,6 +30,7 @@ import { leerIdsExport, MAX_IDS_EXPORT } from '@/lib/negocios/ids-export'
 import {
   correosPendientes,
   decidirAccionArchivo,
+  interpretarReclamo,
   leerConfigExportDrive,
   nombreArchivoDrive,
 } from '@/lib/negocios/export-drive'
@@ -168,15 +169,36 @@ export async function subirExportNegociosADrive(ids: unknown): Promise<Resultado
       )
       if (rpcErr) throw new Error(`reclamar file_id: ${rpcErr.message}`)
 
-      if (typeof ganador === 'string' && ganador !== creadoEnDrive.fileId) {
+      // Los tres desenlaces son explícitos: `interpretarReclamo` no deja que «no se
+      // guardó» se cuele por el camino de «gané», que es como este bloque fallaba mudo.
+      const reclamo = interpretarReclamo(ganador, creadoEnDrive.fileId)
+
+      if (reclamo.resultado === 'no_se_guardo') {
+        // ⚠️ La hoja se creó y su id NO quedó guardado. Seguir es el peor desenlace
+        // posible: el usuario recibe un enlace que funciona y el clic siguiente vuelve
+        // a crear una hoja, dejando huérfana esta y la de cada clic que venga. Así que
+        // se deshace lo que alcanzó a hacerse y se falla fuerte, para que el defecto se
+        // vea en la primera pulsada en vez de acumularse en el Drive del cliente.
+        await moverArchivoAPapelera(creadoEnDrive.fileId, workspaceId).catch((e) =>
+          console.error(`${PREFIJO} no se pudo mandar a papelera la hoja sin reclamar`, e),
+        )
+        throw new Error(
+          `reclamar file_id: la base no devolvió ningún id para ${workspaceId}; ` +
+            'la hoja recién creada se envió a la papelera para no dejarla huérfana',
+        )
+      }
+
+      if (reclamo.resultado === 'perdi') {
         await moverArchivoAPapelera(creadoEnDrive.fileId, workspaceId).catch((e) =>
           console.error(`${PREFIJO} no se pudo enviar a papelera el archivo perdedor`, e),
         )
-        const r = await reemplazarHojaGoogleDesdeXlsx(ganador, buffer, workspaceId)
+        const r = await reemplazarHojaGoogleDesdeXlsx(reclamo.fileId, buffer, workspaceId)
         fileId = r.fileId
         url = r.webViewLink
       } else {
-        fileId = creadoEnDrive.fileId
+        // `reclamo.fileId` y no `creadoEnDrive.fileId`: el id que vale es el que la base
+        // dice que quedó guardado, aunque aquí sean el mismo.
+        fileId = reclamo.fileId
         url = creadoEnDrive.webViewLink
         creado = true
       }

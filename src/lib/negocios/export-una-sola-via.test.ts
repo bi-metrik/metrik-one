@@ -65,6 +65,31 @@ describe('el Excel de negocios se arma en un solo sitio', () => {
   })
 })
 
+describe('el reclamo del archivo se clasifica en un solo sitio', () => {
+  /**
+   * El defecto que esto congela: la accion preguntaba `typeof ganador === 'string' && …`
+   * y mandaba todo lo demas —incluido el `null` de un reclamo que no escribio nada— al
+   * `else` del camino feliz. No fallaba: entregaba un enlace bueno con el id sin
+   * guardar, y el clic siguiente creaba otra hoja.
+   *
+   * Igual que los contratos de arriba, esto mira el FUENTE: una prueba de comportamiento
+   * no distingue «la accion usa el helper» de «la accion tiene su propia copia de la
+   * regla», y la segunda se vuelve a romper sola.
+   */
+  it('la accion clasifica con `interpretarReclamo`', () => {
+    // Se busca la LLAMADA, no el nombre: un comentario que mencione el helper satisface
+    // un `toContain('interpretarReclamo')` sin que nadie lo invoque (comprobado: con esa
+    // forma, la mutacion que reponia la clasificacion a mano dejaba esta prueba verde).
+    expect(leer(RUTA_DRIVE)).toContain('interpretarReclamo(ganador')
+  })
+
+  it('la accion NO vuelve a mirar el tipo del id a mano', () => {
+    expect(leer(RUTA_DRIVE), 'la clasificacion vive en el helper puro').not.toContain(
+      'typeof ganador',
+    )
+  })
+})
+
 describe('el libro es reproducible', () => {
   /**
    * Lo que hace que «el mismo archivo» sea una afirmacion literal y no una manera de
