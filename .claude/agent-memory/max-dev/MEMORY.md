@@ -56,7 +56,8 @@
 - ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
 - ⚠️⚠️ [Acuses de Resend en avisos_cliente](project_acuses_resend_avisos_cliente.md) — PR #596 sin mergear: el orden de despliegue no es negociable, `rebotado` queda invisible en el producto, y `suppressed` es un hueco abierto
 - ⚠️ [FTO del State Dept en Valida](project_valida_fto_state_dept.md) — #33, #34 y #35 mergeados y la lista YA activa (6 fuentes); la privacidad NO enumera la FTO y la dedup de la migr. 0013 sigue abierta
-- ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — diez (10) años; el control cruzado ya son 5 superficies (#629), y ningún check de CI lo vigila
+- ⚠️⚠️ [El plazo de retencion ya se vigila en CI](project_retencion_control_en_ci.md) — #634 y #38 mergeados; el expediente KYC sigue en CINCO anios (abierto), y Valida por fin tiene CI
+- ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — diez (10) años; el control cruzado son 5 superficies (#629). ⚠️ Su parte de «ningún CI lo vigila» CADUCÓ
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 - [Soporte de listas para el operador](project_soporte_listas_operator.md) — #631 mergeado: `/compliance/listas` NO tiene gate por rol (la ruta era el único candado) y `contador` sigue fuera a propósito
 

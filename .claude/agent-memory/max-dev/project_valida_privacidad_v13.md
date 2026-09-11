@@ -62,28 +62,23 @@ exacto — aqui convivian `5 años`, `cinco años` y `diez (10) años`. Familia 
 ## El control cruzado de retencion: 5 superficies, y como se corre
 
 `/home/mauricio/Developer/metrik/.claude/hooks/control-retencion-cruzado.sh` (vive FUERA de
-los dos repos, owner Mik). Desde el #629 son **cinco** superficies: 3 de metrik-one
-(`vinculacion-publica.ts`, `vinculacion.ts`, `tutorials/_shared.ts`) y 2 de metrik-valida
-(pagina y PDF de privacidad). Al 2026-09-11 sale **verde, exit 0**.
+los dos repos, owner Mik). Cinco superficies: 3 de metrik-one y 2 de metrik-valida.
+
+✅ **Desde el 2026-09-11 ya NO es lo unico que cubre esto: cada repo lo vigila en su propio
+CI.** Ver [[retencion-control-en-ci]] para el estado vigente, que ademas trae el hallazgo
+abierto del expediente KYC. Lo de abajo sigue valiendo para el script en si:
 
 - ⚠️ **Lee de `origin/main`, no del working tree** (`git show origin/main:<ruta>`): una
   superficie agregada antes de mergear su PR da **NO VERIFICABLE / exit 2**, no verde. El
   orden es mergear primero, agregar la superficie despues.
-- ⚠️ **Su extractor es `\(?[0-9]+\)?\s+años`**, o sea que marca discrepancia cualquier numero
-  distinto de 10 seguido de "años". **Antes de agregar un archivo, simular el extractor sobre
-  el**: si declara otro plazo en anios que no sea el de conservacion, produce falsas alarmas.
-  En `_shared.ts` el unico valor extraido es `[10]` (el `500 filas` no va seguido de "años").
-  Nota: un plazo escrito **sin eñe no lo ve el extractor**, asi que "sin plazo declarado"
-  puede significar "esta mal escrito", no "no lo dice".
+- ⚠️ **Antes de agregar un archivo, simular el extractor sobre el**: si declara otro plazo en
+  anios que no sea el de conservacion, produce falsas alarmas.
 - **Validarlo por mutacion, no por el verde:** `CANONICO=5 bash <script>` tiene que sacar las
-  5 en rojo **con la ruta nueva nombrada**. Sin eso, una superficie que el script se salta en
+  5 en rojo **con la ruta nombrada**. Sin eso, una superficie que el script se salta en
   silencio y una que coincide se ven igual ([[pruebas-por-mutacion]]).
 - ⚠️ **`.claude/hooks/` es un SYMLINK a `metrik-system`**, asi que el archivo es compartido:
-  editarlo **en sitio** (python `open(w)`), no con algo que reemplace el inode.
-
-⚠️ **Ningun check de CI vigila esto.** El guardian del #621 mira el texto firmado; ya van
-**tres** superficies encontradas por fuera de el (docstrings en #622, tutorial en #629). El
-script cruzado es lo unico que las cubre, y se corre **a mano en la torre**.
+  editarlo **en sitio** (python `open(w)`), no con algo que reemplace el inode. Verificado
+  comparando el inodo antes y despues.
 
 ## ⚠️⚠️ Que invalida de verdad el bump a `-v2`, y que NO
 
