@@ -22,6 +22,59 @@ deja un archivo huérfano en el Drive del cliente por cada clic.
 **Orden obligatorio: migración → merge.** Al revés se despliega un botón que falla y
 ensucia el Drive de SOENA.
 
+## ⚠️ El `jsonb_set` que no creaba el contenedor: corregido el 2026-09-11
+
+Encontrado leyendo la migración antes de aplicarla y **corregido en el mismo PR** (commit
+`19b4f76`). Queda escrito porque el defecto es de una familia que ya mordió varias veces en
+este repo, y porque la forma de blindarlo sirve para la próxima.
+
+**Lo que estaba mal.** `reclamar_export_negocios_file_id` guardaba con
+`jsonb_set(coalesce(config_extra,'{}'), array['drive_export_negocios','file_id'], …, true)`, y
+el comentario afirmaba que el `true` «crea el camino». **No lo crea:** PostgreSQL documenta en
+el propio `jsonb_set` que *«All earlier steps in the path must exist, or the target is returned
+unchanged»* — `create_if_missing` crea el ÚLTIMO escalón, nunca el contenedor.
+
+**Por qué mordía justo donde importa:** ningún workspace tiene todavía la llave
+`drive_export_negocios`, y el `where` del reclamo se cumple **precisamente** cuando falta. El
+camino roto era el DEFAULT, no un borde: el primer clic de cada espacio.
+
+**Y fallaba en silencio, que es peor que no tener la migración.** `jsonb_set` devolvía el jsonb
+intacto → `returning` NULL → la RPC NULL → `typeof ganador === 'string'` false → caía al `else`
+del camino feliz. El usuario recibía un enlace que funciona con el `file_id` sin guardar, y el
+clic siguiente creaba OTRA hoja dejando huérfana la anterior.
+
+**Cómo quedó:** `coalesce(config_extra,'{}') || jsonb_build_object('drive_export_negocios',
+<contenedor o '{}'> || jsonb_build_object('file_id', …))`. El `||` entre objetos es fusión
+superficial: crea el contenedor, no toca los hermanos de `config_extra` y conserva lo que ya
+hubiera adentro (`compartir_con`, que lo escribe una persona). El `where` de la carrera queda
+intacto, que es lo que hace atómico el reclamo.
+
+**`soltar_…` NO tenía el defecto y no se tocó**, y la diferencia es la regla que vale la pena
+recordar: su camino tiene **un solo escalón**, así que el único «paso anterior» es la raíz del
+jsonb; y además su `where` exige que la llave ya tenga `file_id`. **`create_if_missing` solo
+alcanza si el camino tiene un escalón, o si el `where` garantiza los anteriores.**
+
+⚠️ **Hallazgo abierto, fuera de este PR:** `guardar_field_map_formulario` (`20260903000001`),
+que esta misma migración cita como precedente, escribe un camino de **tres** escalones
+(`{meta_leads, field_map_por_formulario, <form_id>}`) y su guarda solo asegura el primero
+(`config_extra ? 'meta_leads'`). Un workspace con `meta_leads` pero sin la llave
+`field_map_por_formulario` tendría el mismo fallo mudo al aprender su primer formulario. **No
+se midió** cuántos están en ese estado.
+
+## El blindaje: por qué los cinco checks pasaron con el defecto puesto
+
+Porque **ninguna prueba ejercita el SQL**, y no la hay: no existe Postgres en CI (los dos
+workflows son node y deno) ni `docker`/`psql`/`pg`/pglite en la torre. Se cerró por el otro
+lado, el que sí se puede ver caer: **que el camino TS no pueda fallar mudo.**
+
+`interpretarReclamo` (puro, `src/lib/negocios/export-drive.ts`) clasifica la respuesta de la
+RPC en **tres** desenlaces —`gane`, `perdi`, `no_se_guardo`— y la server action, ante el
+tercero, manda la hoja recién creada a la papelera y **lanza**. Un `file_id` que no quedó
+guardado ya no se puede colar por el camino feliz. El contrato de que la acción usa el helper
+vive en `export-una-sola-via.test.ts` y mira el **fuente**; ⚠️ buscar el nombre a secas no
+sirve: un comentario que lo mencione deja la prueba verde (pasó, medido). Se busca la llamada
+(`interpretarReclamo(ganador`).
+
 ## ⚠️ Ninguna llamada a Drive se ejercitó contra la API real
 
 Habría sido una escritura a producción, que el encargo prohibía. Crear, reemplazar

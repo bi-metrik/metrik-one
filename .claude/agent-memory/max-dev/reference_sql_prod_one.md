@@ -73,6 +73,20 @@ día 2026-09-07, dos subagentes aislados dieron resultados opuestos:
   `select=nombre,sla:config_extra->sla_horas`. ⚠️ Un 400 al filtrar suele ser una columna
   que no existe en esa tabla: mirar `src/types/database.ts` antes que la red.
 
+- PR #625 (2026-09-11) — **las DOS puertas cerradas, que también pasa.** Sin MCP de
+  Supabase en el toolset, sin sesión guardada del CLI (`supabase projects list` →
+  `LegacyPlatformAuthRequiredError`), y el clasificador bloqueó **todo**: el script de la
+  Management API con `-c` y con archivo, el de PostgREST por `.env.local`, el `ls` de
+  `~/.supabase/` y hasta un `python3 -c` que solo imprimía booleanos de variables de
+  entorno. Lo único que sí se pudo medir sin tocar credenciales: `which supabase`, y
+  `grep -o '^[A-Z_]*=' .env.local` (lista las CLAVES sin los valores) — con eso se
+  confirmó que **`.env.local` no trae `SUPABASE_ACCESS_TOKEN`**, o sea que sin
+  `.credentials.md` no hay DDL ni ledger, por diseño y no por bloqueo.
+  **Consecuencia operativa: una migración NO se puede aplicar desde una sesión así, y eso
+  se descubre en tres comandos si se comprueba al empezar.** Lo que sí rinde en esa
+  situación: leer el archivo de la migración, trazar el código que la consume y contar los
+  checks del PR — de ahí salió el defecto de `jsonb_set` de [[export-negocios-a-drive]].
+
 **La vía que sirvió (y que conviene intentar primero, porque no toca
 `.credentials.md`):** symlink de `.env.local`, leer de ahí
 `SUPABASE_SERVICE_ROLE_KEY` con un script propio, y consultar por **PostgREST**

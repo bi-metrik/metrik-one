@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { Clock } from 'lucide-react'
 import NegocioCard, { type StaffAsignable } from './negocio-card'
 import DescargarExcelButton from './descargar-excel-button'
+import SubirADriveButton from './subir-a-drive-button'
 import BusquedaInput from '@/components/busqueda-input'
 import BarraFiltros from '@/components/barra-filtros'
 import EmptyState from '@/components/empty-state'
@@ -656,11 +657,16 @@ export default function NegociosClient({
       {/* Descarga de autoservicio (Acta SOENA, SEXTA num. 2): la tabla tal como se ve,
           con los filtros puestos. Solo para los roles que la ruta deja pasar. */}
       {canDescargar && (
-        <div className="flex items-center justify-between gap-2 text-xs text-tinta-suave">
-          <span>
+        <div className="flex items-start justify-between gap-2 text-xs text-tinta-suave">
+          <span className="pt-1.5">
             {currentFiltrado.length} negocio{currentFiltrado.length !== 1 ? 's' : ''} en la vista
           </span>
-          <DescargarExcelButton ids={idsVisibles} />
+          {/* Las dos salidas del mismo dato: el archivo a la máquina, o la hoja viva en
+              Drive. Mismo gate y mismo libro; solo cambia dónde queda. */}
+          <div className="flex flex-wrap items-start justify-end gap-2">
+            <DescargarExcelButton ids={idsVisibles} />
+            <SubirADriveButton ids={idsVisibles} />
+          </div>
         </div>
       )}
 

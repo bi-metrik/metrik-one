@@ -402,7 +402,301 @@ export async function uploadFileToDrive(
   return { fileId: file.id, webViewLink: file.webViewLink }
 }
 
+// ── Hojas nativas de Google (conversión de .xlsx) ────────────────────────────
+//
+// Drive convierte un .xlsx a hoja NATIVA de Google cuando el metadata declara
+// `mimeType: application/vnd.google-apps.spreadsheet` y el media viaja con el
+// mimeType del .xlsx. Eso es todo: NO hace falta la API de Sheets, y por lo tanto
+// tampoco un scope nuevo. El service account de este producto ya pide
+// `https://www.googleapis.com/auth/drive` (ver `mintServiceAccountToken`), que
+// alcanza para crear, reemplazar contenido, leer la ficha y dar permisos.
+//
+// Pedir `spreadsheets` habría dejado el frente esperando a que el admin de
+// Workspace del cliente ampliara la delegación — un trámite ajeno, sin fecha, y
+// para nada que Drive no haga solo.
+
+/** El mimeType de una hoja nativa de Google. Convertir = pedir este de destino. */
+export const MIME_HOJA_GOOGLE = 'application/vnd.google-apps.spreadsheet'
+
+/** El mimeType del .xlsx que sale de SheetJS. Es el media que se sube. */
+export const MIME_XLSX =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+/** Arma el cuerpo multipart/related que Drive espera para metadata + media. */
+function cuerpoMultipart(
+  metadata: Record<string, unknown>,
+  buffer: Buffer,
+  mimeMedia: string,
+): { boundary: string; body: string } {
+  const boundary = `----MetrikUpload${Date.now()}`
+  const body = [
+    `--${boundary}\r\n`,
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+    JSON.stringify(metadata),
+    `\r\n--${boundary}\r\n`,
+    `Content-Type: ${mimeMedia}\r\n`,
+    'Content-Transfer-Encoding: base64\r\n\r\n',
+    buffer.toString('base64'),
+    `\r\n--${boundary}--`,
+  ].join('')
+  return { boundary, body }
+}
+
+export interface ArchivoDriveCreado {
+  fileId: string
+  webViewLink: string
+}
+
+/**
+ * Crea una hoja NATIVA de Google Sheets a partir de un buffer .xlsx.
+ *
+ * Devuelve el id y el enlace. El id es el que hay que guardar: el enlace se puede
+ * reconstruir siempre desde él, pero al revés no.
+ */
+export async function crearHojaGoogleDesdeXlsx(
+  buffer: Buffer,
+  nombre: string,
+  folderId: string,
+  workspaceId?: string,
+): Promise<ArchivoDriveCreado> {
+  const token = await getAccessToken(workspaceId)
+  const { boundary, body } = cuerpoMultipart(
+    { name: nombre, parents: [folderId], mimeType: MIME_HOJA_GOOGLE },
+    buffer,
+    MIME_XLSX,
+  )
+
+  const res = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    },
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error('[google-drive] Crear hoja falló:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error creando la hoja en Drive (${res.status})`)
+  }
+
+  const file = await res.json()
+  return { fileId: file.id as string, webViewLink: file.webViewLink as string }
+}
+
+/**
+ * Reemplaza el CONTENIDO de una hoja de Google ya existente con un .xlsx nuevo.
+ *
+ * Mismo id, mismo enlace, mismos permisos: quien tenga el enlace guardado ve el dato
+ * de hoy sin que nadie le mande nada. Ese es el punto del frente entero.
+ *
+ * Va por `multipart` y no por `uploadType=media` a propósito: con `media` no viaja
+ * metadata, así que la conversión queda implícita en que el archivo destino ya sea una
+ * hoja de Google. Declarando el `mimeType` de destino, la petición dice lo que quiere
+ * en vez de depender de que el estado del archivo remoto sea el que suponemos — que es
+ * justo lo que falla cuando alguien tocó el archivo por fuera.
+ */
+export async function reemplazarHojaGoogleDesdeXlsx(
+  fileId: string,
+  buffer: Buffer,
+  workspaceId?: string,
+): Promise<ArchivoDriveCreado> {
+  const token = await getAccessToken(workspaceId)
+  const { boundary, body } = cuerpoMultipart(
+    { mimeType: MIME_HOJA_GOOGLE },
+    buffer,
+    MIME_XLSX,
+  )
+
+  const res = await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    },
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error('[google-drive] Reemplazar hoja falló:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error actualizando la hoja en Drive (${res.status})`)
+  }
+
+  const file = await res.json()
+  return { fileId: file.id as string, webViewLink: file.webViewLink as string }
+}
+
+export interface FichaArchivo {
+  id: string
+  name: string
+  trashed: boolean
+  webViewLink: string | null
+  /** `false` si el archivo existe pero esta cuenta no lo puede escribir. */
+  puedeEditar: boolean
+}
+
+/**
+ * Pide la ficha de un archivo. Devuelve `null` si NO existe o no es alcanzable.
+ *
+ * ⚠️ El `null` es deliberado y es la mitad del valor de esta función: un `file_id`
+ * guardado puede apuntar a un archivo que alguien borró desde su propio Drive, y ahí
+ * `files.update` responde 404 **para siempre**. Sin preguntar antes, el botón quedaría
+ * roto de forma permanente y la única salida sería editar `config_extra` a mano.
+ *
+ * 404 y 403 se tratan igual (no alcanzable) porque para quien decide dan lo mismo: en
+ * los dos casos hay que crear uno nuevo. Cualquier otro error SÍ se lanza — un 500 de
+ * Google no es «el archivo no existe», y tratarlo como tal crearía un archivo nuevo
+ * cada vez que Drive tenga un mal minuto, dejando huérfano el bueno.
+ */
+export async function obtenerFichaArchivo(
+  fileId: string,
+  workspaceId?: string,
+): Promise<FichaArchivo | null> {
+  const token = await getAccessToken(workspaceId)
+  const params = new URLSearchParams({
+    fields: 'id,name,trashed,webViewLink,capabilities/canEdit',
+    supportsAllDrives: 'true',
+  })
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+
+  if (res.status === 404 || res.status === 403) return null
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error('[google-drive] Ficha de archivo falló:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error leyendo el archivo en Drive (${res.status})`)
+  }
+
+  const f = await res.json()
+  return {
+    id: f.id as string,
+    name: (f.name as string) ?? '',
+    trashed: !!f.trashed,
+    webViewLink: (f.webViewLink as string) ?? null,
+    puedeEditar: f.capabilities?.canEdit !== false,
+  }
+}
+
+/** Manda un archivo a la papelera (reversible, a diferencia de borrarlo). */
+export async function moverArchivoAPapelera(
+  fileId: string,
+  workspaceId?: string,
+): Promise<void> {
+  const token = await getAccessToken(workspaceId)
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ trashed: true }),
+    },
+  )
+  if (!res.ok && res.status !== 404) {
+    const errBody = await res.text()
+    console.error('[google-drive] Enviar a papelera falló:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error enviando el archivo a la papelera (${res.status})`)
+  }
+}
+
 // ── Permissions ──────────────────────────────────────────────────────────────
+
+export interface PermisoArchivo {
+  id: string
+  type: string | null
+  role: string | null
+  emailAddress: string | null
+}
+
+/** Lista los permisos de un archivo (para no volver a conceder lo ya concedido). */
+export async function listarPermisosArchivo(
+  fileId: string,
+  workspaceId?: string,
+): Promise<PermisoArchivo[]> {
+  const token = await getAccessToken(workspaceId)
+  const out: PermisoArchivo[] = []
+  let pageToken: string | undefined
+
+  do {
+    const params = new URLSearchParams({
+      fields: 'nextPageToken, permissions(id,type,role,emailAddress)',
+      pageSize: '100',
+      supportsAllDrives: 'true',
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    if (!res.ok) {
+      const errBody = await res.text()
+      console.error('[google-drive] Listar permisos falló:', res.status, errBody.slice(0, 500))
+      throw new Error(`Error leyendo los permisos del archivo (${res.status})`)
+    }
+    const data = await res.json()
+    out.push(...((data.permissions ?? []) as PermisoArchivo[]))
+    pageToken = data.nextPageToken as string | undefined
+  } while (pageToken)
+
+  return out
+}
+
+/**
+ * Da permiso de LECTURA a una persona concreta.
+ *
+ * `sendNotificationEmail=false` a propósito: quien oprime el botón puede hacerlo varias
+ * veces al día, y aunque el permiso solo se concede cuando falta, un correo automático
+ * de Google por cada cambio es ruido que se aprende a ignorar. A las personas de la
+ * lista se les avisa una vez, por fuera, con contexto — no con una notificación de
+ * Drive que parece spam.
+ */
+export async function compartirArchivoComoLector(
+  fileId: string,
+  email: string,
+  workspaceId?: string,
+): Promise<void> {
+  const token = await getAccessToken(workspaceId)
+  const params = new URLSearchParams({
+    supportsAllDrives: 'true',
+    sendNotificationEmail: 'false',
+  })
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}/permissions?${params.toString()}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ role: 'reader', type: 'user', emailAddress: email }),
+    },
+  )
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error(
+      '[google-drive] Compartir falló:',
+      res.status,
+      errBody.slice(0, 300),
+    )
+    throw new Error(`Error compartiendo con ${email} (${res.status})`)
+  }
+}
 
 /**
  * Make file accessible to anyone with the link (viewer).
