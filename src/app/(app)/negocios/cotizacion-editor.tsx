@@ -18,7 +18,7 @@ import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actio
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { costoUnitarioDelItem, precioSeDerivaDelCosto, margenRealDelItem, precioVentaDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
-import { etiquetaCampoMargen } from '@/lib/cotizaciones/convencion-margen'
+import { etiquetaCampoMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
@@ -453,6 +453,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               convencion_margen: convencionMargen,
             })
             const margenRealPct = margenRealDelItem(costoDelItem, precioUnitarioDerivado)
+            // Avisa, no bloquea. Un piso duro no sube el margen: enseña a escribir el
+            // número que deja pasar la pantalla, y el dato que llega después no sirve.
+            const avisaMargen = margenPideAviso(margenRealPct)
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -626,8 +629,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                   recargo. Decirlo aquí es lo único que impide leer un 15 como
                                   15% de margen cuando son 13,04%. */}
                               {margenRealPct !== null && (
-                                <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                                <p
+                                  className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
+                                  title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
+                                >
                                   Margen real {margenRealPct.toFixed(1)}%
+                                  {avisaMargen && <span className="ml-1 font-medium">· bajo</span>}
                                 </p>
                               )}
                             </>
@@ -656,8 +663,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 />
                               </div>
                               {margenRealPct !== null && costoDelItem > 0 && (
-                                <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                                <p
+                                  className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
+                                  title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
+                                >
                                   Margen real {margenRealPct.toFixed(1)}%
+                                  {avisaMargen && <span className="ml-1 font-medium">· bajo</span>}
                                 </p>
                               )}
                             </>

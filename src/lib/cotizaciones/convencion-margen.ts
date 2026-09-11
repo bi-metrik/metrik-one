@@ -105,3 +105,32 @@ export async function politicaMargenDelNegocio(
 
   return politicaMargenDeLinea(configExtra)
 }
+
+// ── Cuándo un margen merece un aviso ─────────────────────────────────────────
+
+/**
+ * Margen real por debajo del cual la pantalla avisa.
+ *
+ * **Avisa, no bloquea.** Un piso duro habría disparado en casi toda la operación real
+ * de una agencia: los paquetes de 2025 corrieron entre 10,6% y 13,0%, y hay viajes
+ * cerrados al 3,1%. Bloquear ahí no sube el margen, enseña a la gente a escribir el
+ * número que deja pasar la pantalla — y el dato que llega después no sirve para nada.
+ *
+ * El 10% es el punto donde la cifra deja de parecerse a la política y vale la pena
+ * mirarla, no un límite de negocio. Si alguna línea necesita el suyo, el lugar es
+ * `config_extra.margen.umbral_aviso_pct`, junto a la convención; hoy ninguna lo pide y
+ * una columna más por un color en pantalla no se paga sola.
+ */
+export const UMBRAL_AVISO_MARGEN_PCT = 10
+
+/**
+ * ¿Hay que avisar sobre este margen real?
+ *
+ * `null` (ítem sin precio) NO avisa: no hay margen que juzgar todavía, y un aviso ahí
+ * sería ruido en cada ítem recién creado. Un margen negativo sí avisa, que es el caso
+ * que más importa: vender bajo costo.
+ */
+export function margenPideAviso(margenRealPct: number | null): boolean {
+  if (margenRealPct === null || !Number.isFinite(margenRealPct)) return false
+  return margenRealPct < UMBRAL_AVISO_MARGEN_PCT
+}
