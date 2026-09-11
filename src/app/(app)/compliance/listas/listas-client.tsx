@@ -1473,11 +1473,11 @@ function HistorialTablaDual({
                     <td className="px-4 py-2.5 text-center">
                       {c.severidad !== 'error' && (
                         <a
-                          href={`/api/compliance/listas/soporte/${c.id}`}
+                          href={`/api/compliance/listas/soporte/${c.id}?descargar=1`}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          title="Ver documento de soporte"
+                          title="Descargar documento de soporte"
                           className="inline-flex items-center gap-1 text-xs font-medium text-acento hover:text-acento-hover"
                         >
                           <FileText className="h-3.5 w-3.5" />
