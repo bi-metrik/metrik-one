@@ -8,6 +8,7 @@ import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
 import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
 import { registrarMapeoAutomaticoWA } from '../../centro-costos.ts';
+import { BOTONES_SOPORTE, MSG_SOPORTE } from './soporte-foto.ts';
 
 export async function executeRegistro(ctx: HandlerContext): Promise<void> {
   const { session, supabase } = ctx;
@@ -103,10 +104,11 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
   }
 
   await ctx.sendMessage(msg);
-  await ctx.sendButtons('📷 ¿Tienes soporte fotográfico?', [
-    { id: 'btn_despues', title: '⏰ Después' },
-  ]);
-  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id });
+  // Copy imperativo, no una pregunta de si/no: "¿Tienes soporte fotográfico?" con un solo
+  // boton dejaba sin donde tocar a quien contestaba "Si". Los dos botones son las dos
+  // formas reales de NO mandar la foto ahora.
+  await ctx.sendButtons(MSG_SOPORTE.pedir, [...BOTONES_SOPORTE]);
+  await ctx.updateSession('awaiting_image', { gasto_id: gasto?.id, soporte_reintentos: 0 });
   return true;
 }
 
