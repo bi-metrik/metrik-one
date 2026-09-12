@@ -717,26 +717,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             </>
                           )}
 
-                          {!precioFijadoAMano && costoLinea > 0 && (
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() => {
-                                startTransition(async () => {
-                                  // Congela el precio calculado de hoy y se lo entrega al usuario.
-                                  await updateItem(item.id, {
-                                    precio_venta: Math.round(precioLinea / itemCantidad),
-                                    precio_manual: true,
-                                  })
-                                  await recalcularTotales(cotizacion.id)
-                                  router.refresh()
-                                })
-                              }}
-                              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
-                            >
-                              <Pencil className="h-3 w-3" /> Fijar precio a mano
-                            </button>
-                          )}
+                          {/* Ya no hay forma de entrar a "precio a mano": para poner una
+                              cifra exacta se escribe en el costo, con cantidad 1, sin
+                              descuento y sin margen. Las líneas que YA quedaron fijadas
+                              conservan su casilla y su salida de vuelta al cálculo. */}
 
                           {precioFijadoAMano && (
                             <>
