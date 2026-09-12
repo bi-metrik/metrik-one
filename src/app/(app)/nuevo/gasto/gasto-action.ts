@@ -12,6 +12,8 @@ import {
   type OrigenAsignacion,
 } from '@/lib/actions/centro-costos-asignar'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
+import { clasificarGastoConIA } from '@/lib/gastos/clasificar-gasto-ia'
+import type { PropuestaGasto } from '@/lib/gastos/clasificar-gasto'
 
 // ── Upload soporte to Storage ────────────────────────────────
 
@@ -270,4 +272,17 @@ export async function getRubrosProyecto(proyectoId: string) {
     .order('created_at')
 
   return data ?? []
+}
+
+/**
+ * Propone categoría y clasificación a partir de la descripción, para que el registro
+ * no tenga que preguntarlas. La propuesta se muestra y se cambia en un clic: aquí no
+ * se decide nada, se sugiere.
+ */
+export async function clasificarGastoAction(
+  descripcion: string,
+): Promise<PropuestaGasto | null> {
+  const { workspaceId } = await getWorkspace()
+  if (!workspaceId) return null
+  return clasificarGastoConIA(descripcion)
 }
