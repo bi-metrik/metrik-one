@@ -12,6 +12,19 @@
 -- configuración de sus etapas.
 -- ============================================================
 
+-- `bloque_definitions.tipo` tiene un CHECK con la lista cerrada de tipos. Un bloque
+-- nuevo no existe hasta que su tipo entra ahí: el insert de abajo rebota con 23514.
+alter table bloque_definitions drop constraint if exists bloque_definitions_tipo_check;
+alter table bloque_definitions add constraint bloque_definitions_tipo_check check (
+  tipo = any (array[
+    'datos', 'documentos', 'documento', 'cotizacion', 'cobros', 'checklist',
+    'checklist_soporte', 'equipo', 'aprobacion', 'cronograma', 'resumen_financiero',
+    'ejecucion', 'historial', 'formulario', 'plan_recurrente', 'historial_valida',
+    'propuesta_economica', 'guia_devolucion', 'facturacion', 'contacto',
+    'movimientos', 'resultado'
+  ])
+);
+
 insert into bloque_definitions (codigo, tipo, nombre, descripcion, is_visualization, can_be_gate, supports_array_items, default_estado, icon_name)
 values
   ('B30', 'movimientos', 'Movimientos',
