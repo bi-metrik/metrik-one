@@ -44,6 +44,14 @@ export async function middleware(request: NextRequest) {
   const slug = extractSlug(hostname)
   const { pathname } = request.nextUrl
 
+  // La tarjeta Open Graph por inquilino es publica y no depende de sesion: quien
+  // la pide es el rastreador de WhatsApp o LinkedIn, que llega sin cookies. Se
+  // corta ANTES de `updateSession` por dos razones: no gastar un viaje a Auth en
+  // cada scrape, y sobre todo que la respuesta pueda quedar cacheada en el CDN
+  // (una respuesta con `Set-Cookie` no la cachea). Su contenido depende solo del
+  // slug de la ruta. Ver `app/api/og/[slug]/route.tsx`.
+  if (pathname.startsWith('/api/og/')) return NextResponse.next()
+
   // Refresh Supabase session
   const { user, supabaseResponse, supabase } = await updateSession(request)
 
