@@ -17,7 +17,7 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { margenRealDelItem, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { margenRealDelItem, CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
 import { nombreDelMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
@@ -106,7 +106,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
   // Que significa el numero del campo de margen en ESTA cotizacion. Ausente vale
   // `markup`, que es como se calculo todo lo anterior a esa columna.
-  const convencionMargen: ConvencionMargen = cotizacion.convencion_margen ?? 'markup'
+  const convencionMargen: ConvencionMargen = cotizacion.convencion_margen ?? CONVENCION_MARGEN_POR_DEFECTO
   // Discount state
   // Terminos y condiciones al final de la cotizacion
   const [terminos, setTerminos] = useState(cotizacion.terminos_condiciones ?? '')
@@ -1228,6 +1228,12 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   const hayAdministrativos = (aiuAdminPct ?? 0) > 0 || (aiuImprevPct ?? 0) > 0
   const [showAIU, setShowAIU] = useState(hayAdministrativos)
 
+  // El margen real se separa del general cuando alguna línea margina distinto, trae
+  // precio a mano, o cuando la cotización quedó en la convención vieja de recargo
+  // sobre el costo. Si no pasa nada de eso, son el mismo número y sobra enseñarlo.
+  const margenRealEsOtraCosa =
+    cascada.margenRealPct !== null && Math.abs(cascada.margenRealPct - margenPct) >= 0.05
+
   return (
     <div className="rounded-lg bg-muted/50 p-4 space-y-2">
       <Renglon etiqueta="Costo directo" valor={cascada.costoDirecto} nota="suma de los ítems" />
@@ -1378,11 +1384,19 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
           <span className="text-sm font-medium">Precio de venta</span>
           <span className="text-base font-bold tabular-nums">{formatCOP(cascada.precioVenta)}</span>
         </div>
+        {/* "Margen real" solo aparece cuando NO es el número que ya está arriba.
+            Dos cifras del mismo dinero con nombres distintos no informan: obligan a
+            adivinar cuál manda. Con la convención sobre venta y sin líneas que
+            marginen aparte, el margen general YA es el real y basta con él. */}
         {cascada.margenRealPct !== null && cascada.costoDeVenta > 0 && (
-          <p className={`mt-0.5 text-right text-[11px] tabular-nums ${margenPideAviso(cascada.margenRealPct) ? 'text-amber-600' : 'text-green-600'}`}>
-            Margen real {cascada.margenRealPct.toFixed(1)}%
-            {margenPideAviso(cascada.margenRealPct) && <span className="ml-1 font-medium">· bajo</span>}
-          </p>
+          margenRealEsOtraCosa ? (
+            <p className={`mt-0.5 text-right text-[11px] tabular-nums ${margenPideAviso(cascada.margenRealPct) ? 'text-amber-600' : 'text-green-600'}`}>
+              Margen real {cascada.margenRealPct.toFixed(1)}%
+              {margenPideAviso(cascada.margenRealPct) && <span className="ml-1 font-medium">· bajo</span>}
+            </p>
+          ) : margenPideAviso(cascada.margenRealPct) && cascada.margenRealPct !== 0 ? (
+            <p className="mt-0.5 text-right text-[11px] font-medium tabular-nums text-amber-600">Margen bajo</p>
+          ) : null
         )}
       </div>
     </div>

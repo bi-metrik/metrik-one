@@ -40,7 +40,19 @@ export type ConvencionMargen = 'markup' | 'sobre_venta'
  * precios ya salieron a clientes. Un default distinto les movería el precio al
  * primer recálculo.
  */
-export const CONVENCION_MARGEN_POR_DEFECTO: ConvencionMargen = 'markup'
+/**
+ * La convención con la que nace una cotización nueva.
+ *
+ * `sobre_venta` porque el número que escribe quien cotiza TIENE que ser el margen
+ * real. Con `markup` la pantalla estaba obligada a enseñar dos cifras del mismo
+ * dinero, "margen general 23,99%" y "margen real 19,3%", y a explicar por qué no
+ * coinciden. Es la misma plata contra dos denominadores: nadie necesita las dos.
+ *
+ * Lo ya cotizado NO se mueve: la migración que acompaña este cambio le fija
+ * `markup` explícito a toda cotización anterior, así que este default solo alcanza
+ * a lo que nazca de aquí en adelante.
+ */
+export const CONVENCION_MARGEN_POR_DEFECTO: ConvencionMargen = 'sobre_venta'
 
 export interface ItemParaPrecio {
   es_ajuste?: boolean | null

@@ -150,6 +150,9 @@ describe('recalcularTotales — cotizar por rubros', () => {
         { id: 'r3', item_id: 'it-1', valor_total: 200_000 },
       ],
     )
+    // Explícito: el default del producto es `sobre_venta`. Esta prueba mide la
+    // aritmética del recargo sobre el costo, no cuál es el default.
+    cotizacion().convencion_margen = 'markup'
 
     const res = await recalcularTotales(COT)
 
@@ -191,6 +194,7 @@ describe('recalcularTotales — cotizar por rubros', () => {
       [{ id: 'it-1', precio_venta: 0, margen_porcentaje: 50, precio_manual: false, cantidad: 3, descuento_porcentaje: 10 }],
       [{ id: 'r1', item_id: 'it-1', valor_total: 100_000 }],
     )
+    cotizacion().convencion_margen = 'markup'
 
     const res = await recalcularTotales(COT)
 
@@ -237,8 +241,17 @@ describe('recalcularTotales — cotizar por rubros', () => {
 })
 
 describe('recalcularTotales — la convención vive en la cotización', () => {
-  it('sin convención declarada calcula como siempre: markup sobre el costo', async () => {
+  it('sin convención declarada usa el default del producto: sobre venta', async () => {
+    // 1.000.000 / 0,85. Lo ya cotizado no se mueve porque la migración le fijó
+    // `markup` explícito a toda cotización anterior al cambio de default.
     sembrar([{ id: 'i1', margen_porcentaje: 15 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
+    await recalcularTotales(COT)
+    expect(item('i1').precio_venta).toBe(1_176_471)
+  })
+
+  it('con markup declarado, el 15 escrito es un recargo sobre el costo', async () => {
+    sembrar([{ id: 'i1', margen_porcentaje: 15 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
+    cotizacion().convencion_margen = 'markup'
     await recalcularTotales(COT)
     expect(item('i1').precio_venta).toBe(1_150_000)
   })
