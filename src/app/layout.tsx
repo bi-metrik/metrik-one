@@ -3,6 +3,12 @@ import localFont from 'next/font/local'
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from 'sonner'
 import Splash from '@/components/splash'
+import {
+  DESCRIPCION_SITIO,
+  IMAGEN_OG_GENERICA,
+  TARJETA_OG,
+  TITULO_SITIO,
+} from '@/lib/marca/og'
 import './globals.css'
 
 // Fuentes autoalojadas (subset latin, variable). No se descargan de fonts.gstatic.com
@@ -50,17 +56,18 @@ const martianMono = localFont({
   display: 'swap',
 })
 
-const TITULO_SITIO = 'MéTRIK one'
-const DESCRIPCION_SITIO = 'Tus números claros para tomar mejores decisiones'
-const IMAGEN_OG = '/og/metrik-one-og.png'
-
-// La tarjeta que se ve al compartir un enlace es GENERICA, no por inquilino. El
-// comodin *.metrikone.co hace que todos los subdominios sirvan este mismo layout, y
-// por tanto estas mismas etiquetas; el rastreador que arma la vista previa llega sin
-// sesion, asi que no puede resolver de que workspace se trata; y una tarjeta
-// personalizada expondria el nombre del cliente en cualquier reenvio del enlace.
-// Por lo mismo no se declara `openGraph.url`: una url fija mentiria sobre el enlace
-// que de verdad se esta compartiendo.
+// La tarjeta de esta capa es la GENERICA: el comodin *.metrikone.co hace que el
+// dominio base y todos los subdominios sirvan este mismo layout, y aqui no hay
+// forma de saber de que workspace se trata.
+//
+// Quien SI puede saberlo es `/login`, que es donde aterriza el rastreador cuando
+// alguien pega el enlace de un subdominio (todo subdominio sin sesion redirige
+// ahi): esa pagina resuelve el inquilino y declara su propia tarjeta. Lo de aqui
+// queda como respaldo, y es lo que ve el dominio base y todo inquilino sin logo.
+// Ver `(marketing)/login/page.tsx` y `lib/og/`.
+//
+// No se declara `openGraph.url`: una url fija mentiria sobre el enlace que de
+// verdad se esta compartiendo.
 export const metadata: Metadata = {
   metadataBase: new URL('https://metrikone.co'),
   title: TITULO_SITIO,
@@ -73,9 +80,9 @@ export const metadata: Metadata = {
     description: DESCRIPCION_SITIO,
     images: [
       {
-        url: IMAGEN_OG,
-        width: 1200,
-        height: 630,
+        url: IMAGEN_OG_GENERICA,
+        width: TARJETA_OG.ancho,
+        height: TARJETA_OG.alto,
         type: 'image/png',
         alt: 'MéTRIK one: tus números claros para tomar mejores decisiones',
       },
@@ -85,7 +92,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: TITULO_SITIO,
     description: DESCRIPCION_SITIO,
-    images: [IMAGEN_OG],
+    images: [IMAGEN_OG_GENERICA],
   },
 }
 
