@@ -68,6 +68,12 @@ export interface SessionContext {
   selected_option?: number;
   disambiguation?: 'proyecto' | 'empresa';
   gasto_id?: string;
+  /**
+   * Mensajes seguidos que el bot NO entendio mientras espera la foto del soporte
+   * (`awaiting_image`). Es la guarda de bucle: a las 2 repreguntas suelta la conversacion
+   * en vez de repetirse. Ver `handlers/registro/soporte-foto.ts`.
+   */
+  soporte_reintentos?: number;
   unclear_count?: number;
   // Session memory
   last_project_id?: string;

@@ -11,6 +11,7 @@ import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
 import { showGastoConfirmation, proceedEmpresaGasto } from './gasto.ts';
 import { executeRegistro } from './execute.ts';
+import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
 
 const AWAITING_SELECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 
@@ -94,10 +95,35 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Image for soporte (W01 awaiting_image)
+  // Soporte fotografico del gasto (W01 awaiting_image).
+  //
+  // La decision de que hacer con cada mensaje vive en `soporte-foto.ts`, puro y probado.
+  // Aqui solo se ejecuta. Lo que NO puede volver a pasar: que un mensaje que no encaja en
+  // ninguna rama caiga hasta `completeSession` y expulse a quien iba a mandar la foto.
   if (session.state === 'awaiting_image') {
-    if (message.type === 'image' && message.image_id) {
-      if (context.gasto_id) {
+    const decision = decidirSoporte(
+      {
+        tipo: message.type,
+        tieneImagen: Boolean(message.image_id),
+        botonId: message.interactive_reply,
+        texto: message.text,
+      },
+      Number(context.soporte_reintentos) || 0,
+    );
+
+    if (decision.accion === 'permanecer') {
+      if (decision.conBotones) {
+        await ctx.sendButtons(decision.mensaje, [...BOTONES_SOPORTE]);
+      } else {
+        await ctx.sendMessage(decision.mensaje);
+      }
+      // El contador se persiste aunque no cambie: la sesion sigue viva y el estado es el mismo.
+      await ctx.updateSession('awaiting_image', { soporte_reintentos: decision.reintentos });
+      return;
+    }
+
+    if (decision.accion === 'guardar_foto') {
+      if (context.gasto_id && message.image_id) {
         const publicUrl = await downloadAndStoreImage(
           supabase, message.image_id, user.workspace_id, context.gasto_id,
         );
@@ -110,15 +136,10 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
           await ctx.sendMessage('⚠️ No pude guardar la foto. Puedes subirla después desde la app.');
         }
       }
-    } else if (message.type === 'audio') {
-      await ctx.sendMessage('📷 Necesito una foto del soporte, no un audio.');
-      await ctx.sendButtons('📷 Envía la foto del soporte, no un audio. Si no lo tienes, lo puedes agregar después.', [
-        { id: 'btn_despues', title: '⏰ Después' },
-      ]);
-      return;
-    } else if (message.interactive_reply === 'btn_despues' || ['después', 'despues', 'luego'].includes(text)) {
-      await ctx.sendMessage('👍 Sin problema. Puedes enviarlo después.');
+    } else {
+      await ctx.sendMessage(decision.mensaje);
     }
+
     await completeSession(supabase, session.id);
     return;
   }
