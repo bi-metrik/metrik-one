@@ -10,6 +10,7 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
+import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -438,6 +439,18 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
   })
   const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
+  // El nombre NO se hereda tal cual: dos variantes del mismo negocio con la misma
+  // etiqueta son justo lo que la comercial no puede distinguir en la lista. Se
+  // resuelve contra las demás cotizaciones de ESTE negocio.
+  const { data: hermanos } = await supabase
+    .from('cotizaciones')
+    .select('descripcion')
+    .eq('negocio_id', negocioId)
+  const descripcionCopia = nombreParaDuplicado(
+    original.descripcion,
+    (hermanos ?? []).map(h => h.descripcion),
+  )
+
   const { data, error: dbError } = await supabase
     .from('cotizaciones')
     .insert({
@@ -446,7 +459,7 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
       consecutivo,
       codigo: '',
       modo: original.modo,
-      descripcion: original.descripcion,
+      descripcion: descripcionCopia,
       valor_total: original.valor_total,
       estado: 'borrador',
     } as never)
