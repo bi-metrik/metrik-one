@@ -6,6 +6,7 @@ import {
   POLITICA_MARGEN_POR_DEFECTO,
   UMBRAL_AVISO_MARGEN_PCT,
 } from './convencion-margen'
+import { CONVENCION_MARGEN_POR_DEFECTO } from './precio-item'
 
 describe('politicaMargenDeLinea', () => {
   it('lee lo que la línea declara', () => {
@@ -14,8 +15,10 @@ describe('politicaMargenDeLinea', () => {
   })
 
   it('una línea que no declara nada conserva el comportamiento previo', () => {
-    // No es una elección de diseño: markup y 0 son exactamente lo que ONE hacía antes.
-    // Cambiarlo le movería el precio a los workspaces que ya estaban operando.
+    // Lo que importa es que una línea muda caiga SIEMPRE en la política por defecto,
+    // sea cual sea. Fijar aquí el valor concreto convertiría esta prueba en un eco de
+    // la constante, y dejaría de vigilar lo único que puede romperse: que un jsonb
+    // vacío cambie el precio por un camino distinto al del default.
     expect(politicaMargenDeLinea(null)).toEqual(POLITICA_MARGEN_POR_DEFECTO)
     expect(politicaMargenDeLinea({})).toEqual(POLITICA_MARGEN_POR_DEFECTO)
     expect(politicaMargenDeLinea({ facturacion: { desde_etapa_numero: 4 } }))
@@ -28,9 +31,9 @@ describe('politicaMargenDeLinea', () => {
     expect(politicaMargenDeLinea({ margen: null })).toEqual(POLITICA_MARGEN_POR_DEFECTO)
   })
 
-  it('una convención que no reconocemos cae en markup, no adivina', () => {
+  it('una convención que no reconocemos cae en el default, no adivina', () => {
     expect(politicaMargenDeLinea({ margen: { convencion: 'divisor', default_pct: 15 } }))
-      .toEqual({ convencion: 'markup', defaultPct: 15 })
+      .toEqual({ convencion: CONVENCION_MARGEN_POR_DEFECTO, defaultPct: 15 })
   })
 
   it('descarta un default fuera de [0, 100) en vez de acercarlo', () => {

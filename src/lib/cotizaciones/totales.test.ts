@@ -30,6 +30,9 @@ describe('cascada de la cotización', () => {
       administrativosPct: 10,
       margenPct: 20,
       descuentoComercialPct: 5,
+      // Explícito: el default del producto es `sobre_venta`, y esta prueba mide la
+      // aritmética del recargo sobre el costo.
+      convencionMargen: 'markup',
     })
     expect(c.costoDirecto).toBe(2_000_000)
     expect(c.administrativos).toBe(200_000)
@@ -51,7 +54,7 @@ describe('cascada de la cotización', () => {
   it('una línea con margen propio no rompe la suma de administrativos', () => {
     const c = calcularCascada(
       [item({ id: 'a', subtotal: 1_000_000 }), item({ id: 'b', subtotal: 1_000_000, margen_porcentaje: 50 })],
-      { administrativosPct: 10, margenPct: 20 },
+      { administrativosPct: 10, margenPct: 20, convencionMargen: 'markup' },
     )
     expect(c.costoDirecto).toBe(2_000_000)
     expect(c.administrativos).toBe(200_000)
