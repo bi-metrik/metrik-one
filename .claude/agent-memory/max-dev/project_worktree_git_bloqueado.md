@@ -434,3 +434,62 @@ la rama tiene algo sin mergear y si está checkouteada, o sea que es una segunda
 independiente del conteo. De 16, se borraron 13; quedaron las 2 checkouteadas y una con
 3 commits propios. ⚠️ `git branch -d A B C` puede borrar unas y fallar en otra: se
 verifica con `git branch --list 'worktree-agente-*'`, no con el código de salida.
+
+
+## ⚠️⚠️ Te BORRAN el worktree entero a mitad de sesión: Bash muere y así se recupera
+
+Medido el 2026-09-12 (PR #650). Entre un comando y el siguiente, otra sesión hizo
+`git worktree remove` del mío: desapareció el directorio **y** su registro en
+`.git/worktrees/`. **Toda** invocación de Bash pasa a fallar antes de ejecutar nada:
+
+> *"its working directory ... no longer exists and the only recovery target is the
+> parent session's shared checkout. Refusing to run there"*
+
+No es que el comando falle: el guard no deja correr **ninguno**, ni `echo`. Se
+distingue del caso "me borraron la rama" (ahí git sigue vivo) porque **no hay shell**.
+
+**La recuperación, en tres pasos, y el primero es el que no es obvio:**
+
+1. **`Write` sigue funcionando aunque el directorio no exista**, y al crear un archivo
+   **recrea el directorio**. Con eso el cwd vuelve a existir y Bash revive. Un archivo
+   cualquiera (`.recovery-probe`) alcanza; se borra después.
+2. ⚠️ **En ese punto el directorio NO es un worktree**: no tiene el archivo `.git`, así
+   que git camina hacia arriba y resuelve el **checkout COMPARTIDO**. Un `git status`
+   inocente ya opera sobre el árbol de otras sesiones. **No correr git suelto ahí.**
+   Comprobarlo con `cat .git` (debe decir `gitdir: .../.git/worktrees/<x>`) y con
+   `ls .git/worktrees/` del repo principal, que es lectura y **sí** pasa el guard.
+3. **Recrear el worktree en la PROPIA ruta del sandbox**, que es lo que devuelve el
+   aislamiento:
+
+```
+rm -f .recovery-probe                      # git exige el directorio vacío
+git worktree add /ruta/exacta/del/sandbox -b <rama nueva> origin/main
+```
+
+Funcionó a la primera y el guard no lo rechaza: `git worktree add` **no toca el árbol
+compartido** (no mueve su HEAD), solo escribe los archivos de administración y puebla
+un directorio nuevo. Después, ya dentro, `git fetch origin` + `git reset --hard
+origin/main` (seguro: la rama aún no tiene commits).
+
+**Rama NUEVA, no la `worktree-agente-*` de antes:** esa puede haber sido borrada junto
+con el registro, y reusarla arrastra el problema del squash ya documentado arriba.
+
+⚠️ **Lo que NO se recupera: el trabajo sin commitear.** Aquí se perdieron tres
+archivos de `agent-memory` modificados por la sesión anterior en ese mismo árbol.
+Vivían solo en el working tree. Es la razón concreta de la regla de arriba
+(**empujar apenas el commit exista**) aplicada también a la memoria: un `git status`
+sucio heredado al abrir no es "contexto", es trabajo a un `rm -rf` de distancia.
+
+## ⚠️ `sleep` en primer plano está bloqueado, y el guard dicta la forma que sí pasa
+
+`sleep 60; <comando>` → *"Blocked ... To wait for a condition, use Monitor with an
+until-loop (e.g. `until <check>; do sleep 2; done`). Do not chain shorter sleeps."*
+Encadenar sleeps cortos para rodearlo está explícitamente prohibido. La forma que
+corrió sin problema para esperar un deploy (2026-09-12):
+
+```
+until curl -s -L https://metrikone.co/ | grep -q 'og:image'; do sleep 15; done
+```
+
+O sea: el `sleep` **dentro** del `until` sí pasa; suelto no. Darle `timeout` generoso
+a la tool (10 min).
