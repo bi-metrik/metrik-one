@@ -62,6 +62,10 @@ interface WorkspaceModules {
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
   fab_registrar_pago?: boolean
+  /** FAB "Registrar cobro" (opt-in por workspace). */
+  fab_registrar_cobro?: boolean
+  /** FAB "Registrar horas" (opt-in por workspace). */
+  fab_registrar_horas?: boolean
   /** Tablero comercial sobre negocios. Abre /equipo (hoja por persona) al rol operator. */
   comercial_negocios?: boolean
   /** Directorio de aliados (/directorio/aliados). Contrapartes comerciales con acuerdo. */
@@ -1119,7 +1123,7 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
           En modo vitrina se oculta: el shell es comercial, no operativo. */}
-      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} />}
+      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} />}
       </div>
     </div>
   )
