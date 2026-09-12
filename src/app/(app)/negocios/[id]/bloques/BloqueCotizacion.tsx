@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2, PencilLine } from 'lucide-react'
 import { toast } from 'sonner'
 import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador, corregirCotizacionAceptada } from '../cotizacion/actions'
+import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 
 interface CotizacionResumen {
   id: string
@@ -215,7 +216,8 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-tinta truncate">
                       {cot.consecutivo ?? 'COT'} &middot;{' '}
-                      {cot.descripcion ?? (cot.modo === 'flash' ? 'Cotización rápida' : 'Cotización detallada')}
+                      {nombreMostrable(cot.descripcion)
+                        ?? (cot.modo === 'flash' ? 'Cotización rápida' : 'Cotización detallada')}
                     </p>
                     {cot.valor_total !== null && (
                       <p className="text-[10px] text-tinta-suave tabular-nums">{fmt(cot.valor_total)}</p>

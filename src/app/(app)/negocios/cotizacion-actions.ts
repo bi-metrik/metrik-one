@@ -7,6 +7,7 @@ import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
+import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -676,6 +677,29 @@ export async function duplicarCotizacion(id: string) {
   })
   const dupCons = dupConsRaw ?? `COT-${bogotaYear()}-0000`
 
+  // El nombre NO se hereda tal cual: dos cotizaciones con la misma etiqueta son
+  // exactamente lo que la comercial no puede distinguir en la lista, que es el
+  // problema que esto viene a resolver. Se resuelve contra los hermanos del mismo
+  // contenedor — el negocio, o la oportunidad cuando la cotización cuelga de una.
+  let hermanos: { descripcion: string | null }[] = []
+  if (negocioIdOrig) {
+    const { data } = await supabase
+      .from('cotizaciones')
+      .select('descripcion')
+      .eq('negocio_id', negocioIdOrig)
+    hermanos = data ?? []
+  } else if (original.oportunidad_id) {
+    const { data } = await supabase
+      .from('cotizaciones')
+      .select('descripcion')
+      .eq('oportunidad_id', original.oportunidad_id)
+    hermanos = data ?? []
+  }
+  const descripcionCopia = nombreParaDuplicado(
+    original.descripcion,
+    hermanos.map(h => h.descripcion),
+  )
+
   const { data: newCot, error: dbError } = await supabase
     .from('cotizaciones')
     .insert({
@@ -684,7 +708,7 @@ export async function duplicarCotizacion(id: string) {
       consecutivo: dupCons,
       codigo: '',
       modo: original.modo,
-      descripcion: original.descripcion,
+      descripcion: descripcionCopia,
       valor_total: original.valor_total,
       margen_porcentaje: original.margen_porcentaje,
       costo_total: original.costo_total,

@@ -20,6 +20,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { margenRealDelItem, CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
 import { nombreDelMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
+import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
@@ -366,6 +367,36 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               {estadoConfig?.label}
             </span>
           </div>
+          {/* El nombre con el que se distingue esta variante de las otras del mismo
+              negocio. Vacío es válido: la lista cae a la etiqueta genérica del modo. */}
+          {editable ? (
+            <input
+              type="text"
+              defaultValue={cotizacion.descripcion ?? ''}
+              placeholder="Nombre de esta cotización (ej. España, 7 días)"
+              maxLength={120}
+              aria-label="Nombre de esta cotización"
+              className="mt-0.5 w-full truncate border-0 bg-transparent p-0 text-xs text-muted-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0"
+              onBlur={e => {
+                // Se guarda null y no cadena vacía: el vacío tiene que llegar a la
+                // base de UNA sola forma, o la lista pinta un nombre en blanco.
+                const nombre = e.target.value.trim() || null
+                if (nombre === (cotizacion.descripcion ?? null)) return
+                startTransition(async () => {
+                  const res = await updateCotizacion(cotizacion.id, { descripcion: nombre })
+                  if (res.success) router.refresh()
+                  else toast.error(res.error)
+                })
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            />
+          ) : (
+            nombreMostrable(cotizacion.descripcion) && (
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {nombreMostrable(cotizacion.descripcion)}
+              </p>
+            )
+          )}
         </div>
         <div className="flex gap-1.5">
           {editable && (
