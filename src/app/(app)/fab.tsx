@@ -14,12 +14,14 @@ import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { createClient } from '@/lib/supabase/client'
+import {
+  comprobanteDelPortapapeles,
+  motivoRechazoComprobante,
+  nombreDeComprobantePegado,
+} from '@/lib/cobros/comprobante-pegado'
 
 const VERDE = 'var(--acento)'
 
-/** Lo que se acepta como comprobante de un pago: un pantallazo, una foto o el PDF. */
-const TIPOS_SOPORTE_FAB = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
-const MAX_SOPORTE_BYTES = 10 * 1024 * 1024
 
 // ── Types ─────────────────────────────────────────────
 
@@ -403,6 +405,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   // después, pero exigirlo para poder anotar la plata deja el ingreso sin registrar.
   const [soporte, setSoporte] = useState<{ storage_path: string; file_name: string; mime_type: string } | null>(null)
   const [subiendoSoporte, setSubiendoSoporte] = useState(false)
+  const [arrastrando, setArrastrando] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   // Estado de verificacion ePayco
@@ -479,28 +482,43 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     }
   }, [esEpayco, referencia])
 
-  async function subirSoporte(file: File) {
-    if (file.type && !TIPOS_SOPORTE_FAB.includes(file.type)) {
-      return toast.error('El comprobante debe ser una imagen (JPG, PNG, WebP) o un PDF')
-    }
-    if (file.size > MAX_SOPORTE_BYTES) {
-      return toast.error('El comprobante pesa más de 10 MB')
-    }
-    if (!workspaceId) return toast.error('Aún no cargó el workspace, intenta de nuevo')
+  const subirSoporte = useCallback(async (file: File, nombre?: string) => {
+    const motivo = motivoRechazoComprobante(file)
+    if (motivo) { toast.error(motivo); return }
+    if (!workspaceId) { toast.error('Aún no cargó el workspace, intenta de nuevo'); return }
+    const fileName = nombre ?? file.name
     setSubiendoSoporte(true)
     try {
       const supabase = createClient()
-      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const ext = fileName.split('.').pop()?.toLowerCase() || 'jpg'
       const path = `${workspaceId}/pagos-fab/${crypto.randomUUID()}.${ext}`
       const { error } = await supabase.storage
         .from('ve-documentos')
         .upload(path, file, { contentType: file.type || undefined, upsert: false })
-      if (error) return toast.error(`No se pudo subir el comprobante: ${error.message}`)
-      setSoporte({ storage_path: path, file_name: file.name, mime_type: file.type || '' })
+      if (error) { toast.error(`No se pudo subir el comprobante: ${error.message}`); return }
+      setSoporte({ storage_path: path, file_name: fileName, mime_type: file.type || '' })
     } finally {
       setSubiendoSoporte(false)
     }
-  }
+  }, [workspaceId])
+
+  // Ctrl+V en cualquier parte del modal. El listener va en el documento y NO en el
+  // recuadro: pegar exige tener el foco ahí, y quien acaba de recortar la pantalla no
+  // va a hacer clic en una zona antes de pegar. Se registra solo mientras el modal está
+  // abierto, así que no le roba el pegado a nada más de la app.
+  useEffect(() => {
+    function alPegar(e: ClipboardEvent) {
+      if (subiendoSoporte) return
+      const file = comprobanteDelPortapapeles(e.clipboardData?.items)
+      if (!file) return
+      // Solo aquí, cuando ya se sabe que lo pegado es un archivo: interceptar antes
+      // rompería el pegado normal de texto en la referencia o el valor.
+      e.preventDefault()
+      void subirSoporte(file, nombreDeComprobantePegado(file))
+    }
+    document.addEventListener('paste', alPegar)
+    return () => document.removeEventListener('paste', alPegar)
+  }, [subirSoporte, subiendoSoporte])
 
   function handleSubmit() {
     if (!negocioId) return toast.error('Elige el negocio')
@@ -693,11 +711,32 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
               </div>
             ) : (
               <label
-                className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed px-2.5 py-2 text-[13px] transition hover:bg-gray-50"
-                style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
+                onDragOver={(e) => { e.preventDefault(); setArrastrando(true) }}
+                onDragLeave={() => setArrastrando(false)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setArrastrando(false)
+                  const f = e.dataTransfer.files?.[0]
+                  if (f) void subirSoporte(f)
+                }}
+                className="flex cursor-pointer flex-col items-center gap-1 rounded-md border border-dashed px-2.5 py-3 text-center text-[13px] transition"
+                style={arrastrando
+                  ? { borderColor: VERDE, backgroundColor: 'var(--acento-tinte)', color: VERDE }
+                  : { borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
               >
-                {subiendoSoporte ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-                {subiendoSoporte ? 'Subiendo…' : 'Adjuntar pantallazo o foto de la transferencia'}
+                <span className="flex items-center gap-2">
+                  {subiendoSoporte ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+                  {subiendoSoporte
+                    ? 'Subiendo…'
+                    : arrastrando
+                      ? 'Suelta el comprobante aquí'
+                      : 'Pega el pantallazo con Ctrl+V'}
+                </span>
+                {!subiendoSoporte && !arrastrando && (
+                  <span className="text-[11px]" style={{ color: '#9CA3AF' }}>
+                    o arrástralo aquí, o toca para buscarlo
+                  </span>
+                )}
                 <input
                   ref={fileRef}
                   type="file"
