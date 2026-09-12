@@ -6950,7 +6950,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // historial). El componente HistorialEtapasPrevias los muestra en
       // orden de aparicion (etapa_orden ASC, bloque.orden ASC).
       const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre }]))
-      const HIDDEN_TYPES = new Set(['resumen_financiero', 'ejecucion', 'historial', 'historial_valida'])
+      const HIDDEN_TYPES = new Set(['resumen_financiero', 'resultado', 'ejecucion', 'historial', 'historial_valida'])
 
       // ── Bloques que se ACTIVARON tarde ────────────────────────────────────────
       // Un bloque condicional de una etapa ya pasada puede aplicar HOY porque

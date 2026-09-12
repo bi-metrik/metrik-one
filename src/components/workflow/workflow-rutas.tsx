@@ -33,9 +33,11 @@ const STAGE_COLOR: Record<string, string> = {
 
 const READONLY_TIPOS = new Set([
   'cobros',
+  'movimientos',
   'historial',
   'historial_valida',
   'resumen_financiero',
+  'resultado',
   'ejecucion',
 ])
 

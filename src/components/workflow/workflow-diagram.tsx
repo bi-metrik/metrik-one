@@ -72,9 +72,11 @@ const STAGE_INDICATOR_COLOR: Record<string, string> = {
 
 const READONLY_BLOQUE_TIPOS = new Set([
   'cobros',
+  'movimientos',
   'historial',
   'historial_valida',
   'resumen_financiero',
+  'resultado',
   'ejecucion',
 ])
 
