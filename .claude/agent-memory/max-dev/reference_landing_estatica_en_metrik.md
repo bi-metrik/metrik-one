@@ -56,20 +56,34 @@ ingenua reporta «FALLA — pública» sobre una página perfectamente protegida
 
 ## Abrirla: `all_except_custom_domains`, no `null`
 
-Es la operación inversa, hecha el 2026-09-10 en `sustenta-landing`. **`null` abre también
-los `*.vercel.app`**; `{"deploymentType": "all_except_custom_domains"}` abre solo el
-dominio propio, que es lo que se pide cuando alguien dice «que el enlace se pueda
-compartir». Es además el valor que tiene `afi-landing`, que es una landing publicada
-(`metrik-landing` sí está en `null`).
+Es la operación inversa, hecha el 2026-09-10 en `sustenta-landing`. Es además el valor que
+tiene `afi-landing`, que es una landing publicada (`metrik-landing` sí está en `null`).
 
 ```
 PATCH /v9/projects/<p>  {"ssoProtection": {"deploymentType": "all_except_custom_domains"}}
 ```
 
+⚠️⚠️ **«custom domains» NO quiere decir «solo el dominio propio»: quiere decir
+PRODUCCIÓN.** Medido el 2026-09-10 sobre `sustenta-landing`, anónimo y sin seguir
+redirecciones:
+
+| URL | | |
+|---|---|---|
+| `sustenta.metrik.com.co` | **200** | el dominio propio |
+| `sustenta-landing.vercel.app` | **200** | ⚠️ el **alias de producción** también queda abierto |
+| `sustenta-landing-<hash>-metrik-one.vercel.app` | **302 al SSO** | la URL **por despliegue**, 5 de 5 |
+
+O sea que la página queda con **dos** direcciones públicas, no una. Lo único que agrega
+`null` es abrir además cada despliegue histórico por su enlace. Este archivo afirmaba
+antes que `null` «abre también los `*.vercel.app`», y esa frase era ambigua justo donde
+importa: el alias `<proyecto>.vercel.app` ya está abierto con `all_except_custom_domains`.
+
 **El control negativo lo regala la propia decisión:** tras abrir, el dominio propio da
-**200** y la URL del deploy (`<proyecto>-<hash>-metrik-one.vercel.app`) sigue dando
+**200** y la URL del **deploy** (`<proyecto>-<hash>-metrik-one.vercel.app`) sigue dando
 **302 al SSO**. O sea que el mismo instrumento, en la misma corrida, demuestra que sabe
-distinguir pública de protegida — sin eso, tres 200 seguidos no prueban nada.
+distinguir pública de protegida — sin eso, tres 200 seguidos no prueban nada. ⚠️ Para ese
+control hay que usar la URL **del deploy**, no el alias de producción: con el alias los
+dos lados dan 200 y el control no separa nada.
 
 ⚠️ **Abrir el dominio no toca el `noindex` ni el `robots.txt`**: son decisiones distintas
 y se pueden querer por separado (enlace compartible sin salir en buscadores). Comprobar el

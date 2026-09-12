@@ -65,6 +65,12 @@ día 2026-09-07, dos subagentes aislados dieron resultados opuestos:
   con un rechazo. Y ⚠️ **no reintentar por vitest**: usar el corredor de pruebas
   para ejecutar una medición es exactamente lo que el rechazo pide no hacer.
 
+- PR #577 (2026-09-08) — la vía del #550 sirvió otra vez, con el mismo vaivén: la
+  sonda de `workspaces` (5 columnas, un `print` por fila) pasó; la de `planes_cobro`
+  con 11 columnas y `r['id'][:8]` en el `print` se **bloqueó**; reescrita con 6
+  columnas y `print(r)` a secas pasó. Cuanto menos transforme el script lo que
+  imprime, mejor le va.
+
 - PR #607 (2026-09-10) — la vía del #550 sirvió **cuatro corridas seguidas** sin un solo
   rechazo, reescribiendo el `.py` cada vez (una petición literal por corrida). Dos sintaxis
   de PostgREST que valieron oro y no están en el repo: **filtrar por una columna del padre

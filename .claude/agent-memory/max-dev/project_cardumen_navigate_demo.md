@@ -95,4 +95,36 @@ hablaba español recibía cuatro mensajes antes del aviso trilingüe.
 - **Hueco documentado, no cerrado:** sticker, contacto y documento no reciben respuesta
   (`parseMessage` del webhook los descarta); la sesión queda intacta.
 
-Relacionado: [[canal-wa-propio]], [[pruebas-por-mutacion]], [[medir-antes-de-construir]].
+## Tríada con botones y anclada a la historia (PR #579, merge `cebd748`, 2026-09-08)
+
+Segunda decisión de Mauricio del mismo día, misma prueba en vivo: la pregunta de la tríada no se
+entendía (polos en negrita en una frase corrida, sin vínculo con la historia, dos preguntas a la
+vez). Ahora: apertura con cita de la historia + pregunta interrogativa + polos numerados + botones
+1/2/3; segundo lugar con los restantes (SU número original) + *Ninguno*; intensidad con las tres
+etiquetas en líneas aparte y botones *Casi parejos* / *Uno mandaba más* / *Claramente el N*.
+
+- **La regla que gobierna todo: elección explícita no se confirma; lectura por modelo sí.** Solo
+  se salta `triada_confirmar` si dominante Y segundo salieron de botones o números. Un dominante
+  leído por el modelo + un segundo por botón **sí** pasa por eco. Lo decide
+  `TriadaEnCurso.dominante_por` (`boton|numero|texto`; ausente en sesiones anteriores al PR = texto,
+  o sea el camino viejo). `ec.notas` deja `orden|segundo|intensidad: <fuente>`.
+- **Un número significa cosas distintas por paso.** En `triada_orden` es el dominante (y el segundo
+  si hay dos: `1 y 3`); en `triada_segundo` el propio dominante NO vale y se repregunta; en
+  `triada_intensidad` un número es un POLO, no una opción (las opciones van con `•` a propósito):
+  solo el del dominante lee como `claramente_el_primero`, otro se repregunta sin lector. Si se
+  numeran las opciones de intensidad se crea la colisión con *Claramente el 2*.
+- `1 o 2` NO es un orden (es duda): `o`/`u` no están en el relleno de `leerNumerosTriada`.
+- **Un botón de tríada tocado en `triada_confirmar` corrige el orden** (texto "3" → dominante 3),
+  y al corregir `ec.reintentos` se reinicia: antes podía pasar de 2 por esa vía y ninguna prueba lo
+  veía porque el lector sordo nunca lee un dominante.
+- ⚠️ **`ec.reintentos` es UNO por tríada, compartido entre orden/segundo/intensidad.** Una prueba
+  que encadene dos repreguntas en la misma tríada la resuelve gruesa a la segunda; repartirlas
+  entre T1/T2/T3 (así quedó la de límites de WhatsApp).
+- `triada_intensidad` entró a `PASOS_DE_TEXTO`: un botón viejo ahí se repregunta sin gastar lector.
+- **"ninguno" ESCRITO sigue yendo al modelo con eco** (el brief dijo "texto libre como hoy"); solo el
+  botón *Ninguno* cierra directo. Candidato a seguimiento si molesta en vivo.
+- El merge NO despliega `wa-webhook`: cola de tres PRs (#570 lector Gemini, #574 idioma primero,
+  #579 tríada) esperando un solo redeploy de Mik.
+
+Relacionado: [[canal-wa-propio]], [[pruebas-por-mutacion]], [[medir-antes-de-construir]],
+[[regex-js-b-ascii]].
