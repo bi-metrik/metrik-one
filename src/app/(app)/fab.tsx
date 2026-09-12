@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Plus, X, Clock, Play, Square, Loader2, Wallet, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, X, Clock, Play, Square, Loader2, Wallet, CheckCircle, XCircle, FileUp, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
@@ -13,8 +13,13 @@ import { negocioDeContextoCerrado } from '@/lib/actions/negocio-estado-actions'
 import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
+import { createClient } from '@/lib/supabase/client'
 
 const VERDE = 'var(--acento)'
+
+/** Lo que se acepta como comprobante de un pago: un pantallazo, una foto o el PDF. */
+const TIPOS_SOPORTE_FAB = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+const MAX_SOPORTE_BYTES = 10 * 1024 * 1024
 
 // ── Types ─────────────────────────────────────────────
 
@@ -381,6 +386,9 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   // `null` mientras carga: el formulario no puede decidir si pedir una referencia
   // ePayco o una fuente libre antes de saber si el workspace tiene pasarela.
   const [cobraPorEpayco, setCobraPorEpayco] = useState<boolean | null>(null)
+  // El path del comprobante en Storage tiene que empezar por el workspace: lo exige
+  // la policy del bucket, no es una convención de nombres.
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
 
   const [negocioId, setNegocioId] = useState('')
   const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
@@ -391,6 +399,12 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [justificacion, setJustificacion] = useState('')
   const [needJust, setNeedJust] = useState(false)
   const [pending, startTransition] = useTransition()
+
+  // Comprobante: OPCIONAL. Un pantallazo de la transferencia ahorra la discusión
+  // después, pero exigirlo para poder anotar la plata deja el ingreso sin registrar.
+  const [soporte, setSoporte] = useState<{ storage_path: string; file_name: string; mime_type: string } | null>(null)
+  const [subiendoSoporte, setSubiendoSoporte] = useState(false)
+  const fileRef = useRef<HTMLInputElement | null>(null)
 
   // Estado de verificacion ePayco
   const [epaycoStatus, setEpaycoStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
@@ -417,6 +431,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
       if (res.error) setLoadError(res.error)
       else setNegocios(res.negocios)
       setCobraPorEpayco(res.cobraPorEpayco)
+      setWorkspaceId(res.workspaceId)
       // Sin pasarela la fuente nace libre: 'epayco' dejaría el formulario pidiendo
       // una ref_payco que en ese workspace no existe.
       if (!res.cobraPorEpayco) setFuente('otra')
@@ -465,6 +480,29 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     }
   }, [esEpayco, referencia])
 
+  async function subirSoporte(file: File) {
+    if (file.type && !TIPOS_SOPORTE_FAB.includes(file.type)) {
+      return toast.error('El comprobante debe ser una imagen (JPG, PNG, WebP) o un PDF')
+    }
+    if (file.size > MAX_SOPORTE_BYTES) {
+      return toast.error('El comprobante pesa más de 10 MB')
+    }
+    if (!workspaceId) return toast.error('Aún no cargó el workspace, intenta de nuevo')
+    setSubiendoSoporte(true)
+    try {
+      const supabase = createClient()
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const path = `${workspaceId}/pagos-fab/${crypto.randomUUID()}.${ext}`
+      const { error } = await supabase.storage
+        .from('ve-documentos')
+        .upload(path, file, { contentType: file.type || undefined, upsert: false })
+      if (error) return toast.error(`No se pudo subir el comprobante: ${error.message}`)
+      setSoporte({ storage_path: path, file_name: file.name, mime_type: file.type || '' })
+    } finally {
+      setSubiendoSoporte(false)
+    }
+  }
+
   function handleSubmit() {
     if (!negocioId) return toast.error('Elige el negocio')
     if (faltaHonorario) return toast.error(MENSAJE_HONORARIO_PENDIENTE)
@@ -482,6 +520,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
         monto: esEpayco ? undefined : Number(monto),
         fecha: fecha || undefined,
         justificacion: needJust ? justificacion.trim() : undefined,
+        soporte_subido: soporte ?? undefined,
       })
       if (res.success) {
         toast.success('Pago registrado')
@@ -614,6 +653,49 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
             {esEpayco && epaycoStatus === 'success' && (
               <p className="mt-1 text-[11px] font-medium" style={{ color: VERDE }}>Transaccion ePayco verificada</p>
             )}
+          </PagoField>
+
+          {/* Comprobante: opcional a propósito. El pantallazo de la transferencia es
+              lo que evita la discusión tres meses después, pero pedirlo para poder
+              anotar la plata deja el ingreso sin registrar. */}
+          <PagoField label="Comprobante (opcional)">
+            {soporte ? (
+              <div
+                className="flex items-center justify-between gap-3 rounded-md border px-2.5 py-1.5"
+                style={{ borderColor: VERDE, backgroundColor: 'var(--acento-tinte)' }}
+              >
+                <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px]" style={{ color: 'var(--tinta)' }}>
+                  <Paperclip className="h-3.5 w-3.5 shrink-0" style={{ color: VERDE }} />
+                  <span className="truncate">{soporte.file_name}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setSoporte(null); if (fileRef.current) fileRef.current.value = '' }}
+                  className="shrink-0 rounded p-0.5 hover:bg-white"
+                  aria-label="Quitar comprobante"
+                >
+                  <X className="h-3.5 w-3.5" style={{ color: 'var(--tinta-suave)' }} />
+                </button>
+              </div>
+            ) : (
+              <label
+                className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed px-2.5 py-2 text-[13px] transition hover:bg-gray-50"
+                style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
+              >
+                {subiendoSoporte ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+                {subiendoSoporte ? 'Subiendo…' : 'Adjuntar pantallazo o foto de la transferencia'}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void subirSoporte(f) }}
+                />
+              </label>
+            )}
+            <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>
+              Queda guardado junto al pago, en la carpeta del negocio.
+            </p>
           </PagoField>
 
           {esEpayco && epaycoStatus === 'success' && epaycoData && (
