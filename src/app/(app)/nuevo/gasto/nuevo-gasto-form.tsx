@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Building2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
+import { ArrowLeft, Building2, Paperclip, X, FileText, Image as ImageIcon, Sparkles, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 import {
@@ -10,7 +10,14 @@ import {
   getRubrosProyecto,
   uploadSoporteGasto,
   proponerCentroCostosAction,
+  clasificarGastoAction,
 } from './gasto-action'
+import {
+  CATEGORIA_A_CLASIFICACION,
+  type ClasificacionGasto,
+  type PropuestaGasto,
+} from '@/lib/gastos/clasificar-gasto'
+import { comprobanteDelPortapapeles, nombreDeComprobantePegado } from '@/lib/cobros/comprobante-pegado'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import CentroCostosSelector, {
@@ -21,24 +28,12 @@ import type {
   OrigenAsignacion,
 } from '@/lib/actions/centro-costos-asignar'
 
-type Clasificacion = 'variable' | 'fijo' | 'no_operativo'
+type Clasificacion = ClasificacionGasto
 
-// Mapping categoria → clasificacion default. Mismo seed que migration 20260427100001
-const CATEGORIA_TO_CLASIF: Record<string, Clasificacion> = {
-  comision: 'variable',
-  materiales: 'variable',
-  transporte: 'variable',
-  viaticos: 'variable',
-  mano_de_obra: 'variable',
-  alimentacion: 'variable',
-  servicios_profesionales: 'fijo',
-  software: 'fijo',
-  impuestos_seguros: 'fijo',
-  arriendo: 'fijo',
-  marketing: 'fijo',
-  capacitacion: 'fijo',
-  otros: 'variable',
-}
+// El mapa categoría → fijo/variable vive en `@/lib/gastos/clasificar-gasto`, junto al
+// clasificador: dos copias se desincronizan y el síntoma es que la IA propone una cosa
+// y el formulario guarda otra.
+const CATEGORIA_TO_CLASIF = CATEGORIA_A_CLASIFICACION
 
 // Categorías empresa: costos operativos del negocio
 const CATEGORIAS_EMPRESA = CATEGORIAS_GASTO.filter(c =>
@@ -67,9 +62,23 @@ interface Props {
   }
   defaultNegocioId?: string
   defaultProyectoId?: string
+  /**
+   * ¿Este workspace reparte sus gastos por centro de costos?
+   *
+   * Es una capacidad del workspace, no una verdad del producto. Medido el 2026-09-12
+   * sobre los 320 gastos de producción: solo metrik (33 de 39) y wmc-sm (11 de 28) lo
+   * usan; SOENA, dimpro y ana-demo llevan 253 gastos y CERO con centro asignado. A
+   * ellos el selector les cobraba una pregunta que nunca respondieron.
+   */
+  centroCostosEnabled?: boolean
 }
 
-export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProyectoId }: Props) {
+export default function NuevoGastoForm({
+  destinos,
+  defaultNegocioId,
+  defaultProyectoId,
+  centroCostosEnabled = false,
+}: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -94,6 +103,15 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
   const [soportePreview, setSoportePreview] = useState<string | null>(null)
   const [uploadingFile, setUploadingFile] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // La propuesta de la IA sobre la descripción, y si el operador ya la tocó a mano.
+  // Tocarla la congela: nada de que el modelo le cambie por debajo lo que acaba de
+  // corregir, que es la forma más rápida de que deje de confiar en la propuesta.
+  const [propuesta, setPropuesta] = useState<PropuestaGasto | null>(null)
+  const [clasificando, setClasificando] = useState(false)
+  const [clasifTocada, setClasifTocada] = useState(false)
+  const [verClasificacion, setVerClasificacion] = useState(false)
+  const [masOpciones, setMasOpciones] = useState(false)
 
   // Rubros for selected project
   const [rubros, setRubros] = useState<{ id: string; nombre: string; tipo: string | null }[]>([])
@@ -135,10 +153,13 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
     }
   }, [isEmpresa, categoriasVisibles, categoria])
 
-  // Auto-aplicar clasificacion default al cambiar categoria (overridable por usuario despues)
+  // Al cambiar de categoría A MANO cae la clasificación por defecto. No aplica cuando
+  // la categoría vino de la propuesta: ahí la clasificación ya viene decidida y
+  // pisarla con el default borraría el 'no_operativo' que el modelo sí supo ver.
   useEffect(() => {
+    if (!clasifTocada) return
     setClasificacion(CATEGORIA_TO_CLASIF[categoria] ?? 'variable')
-  }, [categoria])
+  }, [categoria, clasifTocada])
 
   // Auto-asignar rubro según categoría seleccionada
   useEffect(() => {
@@ -148,12 +169,32 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
     setRubroId(match?.id ?? '')
   }, [categoria, rubros, isProyecto])
 
+  // Categoría y fijo/variable salen de la descripción, no de dos preguntas antes de
+  // poder anotar la plata. Con debounce, porque corre mientras se escribe.
+  useEffect(() => {
+    if (clasifTocada) return
+    const texto = descripcion.trim()
+    if (texto.length < 3) return
+    let vivo = true
+    const handle = setTimeout(async () => {
+      setClasificando(true)
+      const res = await clasificarGastoAction(texto)
+      if (!vivo) return
+      setClasificando(false)
+      if (!res) return
+      setPropuesta(res)
+      setCategoria(res.categoria)
+      setClasificacion(res.clasificacion)
+    }, 700)
+    return () => { vivo = false; clearTimeout(handle) }
+  }, [descripcion, clasifTocada])
+
   // Fetch sugerencia centro_costos con debounce sobre descripción.
   // Si el usuario ya tocó el selector manualmente, no sobreescribimos.
   // Diseño: todos los setState ocurren dentro de timeouts / callbacks async,
   // no en la rama sincrónica del effect (cumple react-hooks/set-state-in-effect).
   useEffect(() => {
-    if (centroTocadoManual) return
+    if (!centroCostosEnabled || centroTocadoManual) return
     const descTrim = descripcion.trim()
     if (!descTrim || descTrim.length < 3) {
       // Reset diferido para no setear en el body sincrónico
@@ -182,7 +223,7 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
     }, 600)
     return () => clearTimeout(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [descripcion, centroTocadoManual])
+  }, [descripcion, centroTocadoManual, centroCostosEnabled])
 
   const handleCentroCostosChange = (v: CentroCostosValue) => {
     setCentroCostos(v)
@@ -272,6 +313,23 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
 
   // Drop del soporte: suelta la foto/PDF = mismo flujo que el botón adjuntar.
   const soporteDrop = useFileDrop({ onFiles: files => processSoporteFile(files[0]) })
+
+  // Ctrl+V en cualquier parte de la pantalla adjunta el pantallazo. Es la vía real: el
+  // soporte casi siempre nace como captura de la app del banco o de la factura, y
+  // obligar a guardarla en disco para volver a buscarla es el paso que hace que el
+  // gasto se registre sin soporte. Mismo motor que el comprobante de pago.
+  useEffect(() => {
+    function alPegar(e: ClipboardEvent) {
+      const file = comprobanteDelPortapapeles(e.clipboardData?.items)
+      if (!file) return
+      e.preventDefault()
+      const nombre = nombreDeComprobantePegado(file)
+      void processSoporteFile(new File([file], nombre, { type: file.type }))
+    }
+    document.addEventListener('paste', alPegar)
+    return () => document.removeEventListener('paste', alPegar)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSubmit = () => {
     const montoNum = parseFloat(monto)
@@ -419,74 +477,98 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
         )}
 
 
-        {/* Categoria */}
+        {/* Descripcion — arriba, porque es la que decide categoría y fijo/variable */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Categoria</label>
-          <select
-            value={categoria}
-            onChange={e => setCategoria(e.target.value)}
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            Descripción <span className="text-[10px] font-normal opacity-70">(de aquí sale la categoría)</span>
+          </label>
+          <input
+            type="text"
+            value={descripcion}
+            onChange={e => setDescripcion(e.target.value)}
+            placeholder="ej. arriendo bodega septiembre"
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
-          >
-            {categoriasVisibles.map(c => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
+          />
         </div>
 
-        {/* Clasificacion costo — toggle 3-way (decision Carmen+Santiago 2026-04-26) */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">
-            Este gasto desaparece si no hay ventas?
-          </label>
-          <div className="grid grid-cols-3 gap-1.5">
-            {([
-              { value: 'variable', label: 'Si', sub: 'Variable' },
-              { value: 'fijo', label: 'No', sub: 'Fijo' },
-              { value: 'no_operativo', label: 'No aplica', sub: 'No operativo' },
-            ] as Array<{ value: Clasificacion; label: string; sub: string }>).map(opt => {
-              const active = clasificacion === opt.value
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setClasificacion(opt.value)}
-                  className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
-                    active
-                      ? 'border-acento bg-acento/10 text-acento'
-                      : 'border-[#E5E7EB] bg-background text-tinta-suave hover:border-acento/50'
-                  }`}
-                >
-                  <div className="leading-tight">{opt.label}</div>
-                  <div className="mt-0.5 text-[10px] opacity-70">{opt.sub}</div>
-                </button>
-              )
-            })}
-          </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            Variable: cambia con tus ventas (materiales, comisiones). Fijo: igual cada mes (arriendo, salarios). No operativo: impuesto renta, intereses.
-          </p>
-        </div>
+        {/* La clasificación se PROPONE, no se pregunta. Es una línea que se lee de
+            reojo y se corrige en un clic, no dos campos obligatorios antes de poder
+            anotar la plata. */}
+        {(propuesta || clasificando || clasifTocada) && (
+          <div className="rounded-md border border-dashed bg-background px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-acento" />
+              <span className="flex-1 text-xs text-muted-foreground">
+                {clasificando && !propuesta ? (
+                  'Leyendo la descripción…'
+                ) : (
+                  <>
+                    <span className="font-medium text-foreground">
+                      {categoriasVisibles.find(c => c.value === categoria)?.label ?? categoria}
+                    </span>
+                    {' · '}
+                    {clasificacion === 'variable' ? 'Variable' : clasificacion === 'fijo' ? 'Fijo' : 'No operativo'}
+                  </>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => { setVerClasificacion(v => !v); setClasifTocada(true) }}
+                className="shrink-0 text-xs font-medium text-acento hover:underline"
+              >
+                {verClasificacion ? 'Listo' : 'Cambiar'}
+              </button>
+            </div>
 
-        {/* Retencion — campo simple para reportes contador */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">
-            Retencion <span className="text-[10px] font-normal opacity-70">(opcional)</span>
-          </label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-            <input
-              type="number"
-              value={retencion}
-              onChange={e => setRetencion(e.target.value)}
-              min="0"
-              placeholder="0"
-              className="w-full rounded-md border bg-background py-2.5 pl-7 pr-3 text-sm"
-            />
+            {verClasificacion && (
+              <div className="mt-3 space-y-3 border-t pt-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">Categoria</label>
+                  <select
+                    value={categoria}
+                    onChange={e => setCategoria(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    {categoriasVisibles.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Clasificacion costo — toggle 3-way (decision Carmen+Santiago 2026-04-26) */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Este gasto desaparece si no hay ventas?
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {([
+                      { value: 'variable', label: 'Si', sub: 'Variable' },
+                      { value: 'fijo', label: 'No', sub: 'Fijo' },
+                      { value: 'no_operativo', label: 'No aplica', sub: 'No operativo' },
+                    ] as Array<{ value: Clasificacion; label: string; sub: string }>).map(opt => {
+                      const active = clasificacion === opt.value
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setClasificacion(opt.value)}
+                          className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                            active
+                              ? 'border-acento bg-acento/10 text-acento'
+                              : 'border-[#E5E7EB] bg-background text-tinta-suave hover:border-acento/50'
+                          }`}
+                        >
+                          <div className="leading-tight">{opt.label}</div>
+                          <div className="mt-0.5 text-[10px] opacity-70">{opt.sub}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            Suma plana. Si tu contador necesita el detalle, lo registra desde su flujo.
-          </p>
-        </div>
+        )}
 
         {/* Fecha */}
         <div>
@@ -498,44 +580,6 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
             className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
           />
         </div>
-
-        {/* Ya pagado */}
-        <div>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={yaPagado}
-              onChange={e => setYaPagado(e.target.checked)}
-              className="rounded border"
-            />
-            <span className="text-sm">Ya pagado</span>
-          </label>
-          {!yaPagado && (
-            <p className="mt-1 ml-6 text-[11px] text-orange-600 dark:text-orange-400">
-              Se registra como cuenta por pagar. Podrás marcarlo como pagado después.
-            </p>
-          )}
-        </div>
-
-        {/* Descripcion */}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Descripcion</label>
-          <input
-            type="text"
-            value={descripcion}
-            onChange={e => setDescripcion(e.target.value)}
-            placeholder="Describe el gasto"
-            className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
-          />
-        </div>
-
-        {/* Centro de costos */}
-        <CentroCostosSelector
-          negocios={destinos.negocios}
-          value={centroCostos}
-          onChange={handleCentroCostosChange}
-          sugerencia={sugerencia}
-        />
 
         {/* Soporte */}
         <div>
@@ -577,9 +621,85 @@ export default function NuevoGastoForm({ destinos, defaultNegocioId, defaultProy
                   : 'bg-background text-muted-foreground hover:border-primary hover:text-foreground'
               }`}
             >
-              <Paperclip className="h-4 w-4" />
-              {soporteDrop.isDragging ? 'Suelta el soporte aquí' : 'Adjuntar foto o PDF'}
+              <Paperclip className="h-4 w-4 shrink-0" />
+              <span className="text-left leading-tight">
+                {soporteDrop.isDragging ? (
+                  'Suelta el soporte aquí'
+                ) : (
+                  <>
+                    Pega el pantallazo con Ctrl+V
+                    <span className="block text-xs opacity-70">o arrástralo aquí, o toca para buscarlo</span>
+                  </>
+                )}
+              </span>
             </button>
+          )}
+        </div>
+
+        {/* Lo que casi nadie llena no puede estar en el camino de lo que todos llenan.
+            Medido el 2026-09-12 sobre los 320 gastos de producción: CERO tienen
+            retención. El campo no se quita, se aparta. */}
+        <div className="border-t pt-3">
+          <button
+            type="button"
+            onClick={() => setMasOpciones(v => !v)}
+            className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${masOpciones ? 'rotate-180' : ''}`} />
+            Más opciones
+          </button>
+
+          {masOpciones && (
+            <div className="mt-3 space-y-4">
+              {/* Retencion — campo simple para reportes contador */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Retencion <span className="text-[10px] font-normal opacity-70">(opcional)</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                  <input
+                    type="number"
+                    value={retencion}
+                    onChange={e => setRetencion(e.target.value)}
+                    min="0"
+                    placeholder="0"
+                    className="w-full rounded-md border bg-background py-2.5 pl-7 pr-3 text-sm"
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Suma plana. Si tu contador necesita el detalle, lo registra desde su flujo.
+                </p>
+              </div>
+
+              {/* Ya pagado */}
+              <div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={yaPagado}
+                    onChange={e => setYaPagado(e.target.checked)}
+                    className="rounded border"
+                  />
+                  <span className="text-sm">Ya pagado</span>
+                </label>
+                {!yaPagado && (
+                  <p className="mt-1 ml-6 text-[11px] text-orange-600 dark:text-orange-400">
+                    Se registra como cuenta por pagar. Podrás marcarlo como pagado después.
+                  </p>
+                )}
+              </div>
+
+              {/* Centro de costos: solo donde se usa. */}
+              {centroCostosEnabled && (
+                <CentroCostosSelector
+                  negocios={destinos.negocios}
+                  value={centroCostos}
+                  onChange={handleCentroCostosChange}
+                  sugerencia={sugerencia}
+                />
+              )}
+            </div>
           )}
         </div>
 
