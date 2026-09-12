@@ -19,8 +19,23 @@
  * dato.
  */
 
-/** Columnas de `contactos` escribibles desde el bloque. Todo lo demas va a `custom_data`. */
-export const CAMPOS_NATIVOS = ['nombre', 'email', 'telefono', 'rol', 'segmento'] as const
+/**
+ * Columnas de `contactos` escribibles desde el bloque. Todo lo demas va a `custom_data`.
+ *
+ * Son SOLO las tres de identidad. `segmento` y `rol` quedaron fuera aunque parezcan
+ * candidatas obvias: las dos tienen CHECK en la base y ninguna significa lo que un
+ * bloque de negocio querria escribir ahi.
+ *
+ *  · `segmento` es el estado del EMBUDO ('primer_contacto', 'conectado', 'convertido'…),
+ *    no una tipologia de cliente. Configurar ahi un "leisure / corporativo" rebota contra
+ *    `contactos_segmento_check`, y si los valores casualmente pasaran, el bloque estaria
+ *    pisando la posicion del contacto en el funnel desde dentro de un viaje.
+ *  · `rol` es el rol en la venta ('decisor', 'influenciador'…), con su propio CHECK.
+ *
+ * Una tipologia de cliente va a `custom_data` y ahi no colisiona con nada. Si alguna
+ * merece columna propia, se agrega con su migracion y se suma a esta lista.
+ */
+export const CAMPOS_NATIVOS = ['nombre', 'email', 'telefono'] as const
 
 export type CampoNativo = (typeof CAMPOS_NATIVOS)[number]
 
