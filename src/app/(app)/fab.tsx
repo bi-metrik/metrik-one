@@ -392,7 +392,6 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
   const [negocioId, setNegocioId] = useState('')
   const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
-  const [fuenteNombre, setFuenteNombre] = useState('')
   const [referencia, setReferencia] = useState('')
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState('')
@@ -506,16 +505,14 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   function handleSubmit() {
     if (!negocioId) return toast.error('Elige el negocio')
     if (faltaHonorario) return toast.error(MENSAJE_HONORARIO_PENDIENTE)
-    if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
+    if (cobraPorEpayco && !referencia.trim()) return toast.error('Ingresa la referencia del pago')
     if (esEpayco && epaycoStatus !== 'success') return toast.error('Verifica la referencia ePayco antes de registrar')
-    if (!esEpayco && !fuenteNombre.trim()) return toast.error('Indica de dónde entró el pago')
     if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
 
     startTransition(async () => {
       const res = await agregarPagoFab({
         negocio_id: negocioId,
         fuente,
-        fuente_nombre: esEpayco ? undefined : fuenteNombre.trim(),
         referencia: referencia.trim(),
         monto: esEpayco ? undefined : Number(monto),
         fecha: fecha || undefined,
@@ -534,6 +531,31 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     })
   }
 
+  // Hasta aquí NO se sabe si el workspace tiene pasarela, y el formulario entero
+  // depende de eso: con pasarela pide una ref_payco y la verifica contra la API; sin
+  // ella pide de dónde entró la plata y el valor a mano. Pintar una versión y cambiarla
+  // al llegar la respuesta le enseña al usuario una pregunta que no era la suya, y en
+  // Termotech el salto se veía: primero el bloque de ePayco, después el campo libre.
+  // Un "Cargando" es honesto; una pantalla que se corrige sola, no.
+  if (cobraPorEpayco === null) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
+        <div className="flex w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
+          <div className="flex shrink-0 items-center justify-between border-b px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
+            <div className="flex items-center gap-2">
+              <Wallet className="h-4 w-4" style={{ color: VERDE }} />
+              <h3 className="text-[15px] font-bold" style={{ color: 'var(--tinta)' }}>Registrar pago</h3>
+            </div>
+            <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: 'var(--tinta-suave)' }} /></button>
+          </div>
+          <div className="flex items-center gap-2 px-5 py-8 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
+            <Loader2 className="h-4 w-4 animate-spin" /> Cargando…
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
       <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl sm:rounded-2xl">
@@ -547,11 +569,7 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
 
         <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
           <PagoField label="Negocio">
-            {loadingNegocios ? (
-              <div className="flex items-center gap-2 px-1 py-1.5 text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando negocios…
-              </div>
-            ) : loadError ? (
+            {loadError ? (
               <p className="text-[12px]" style={{ color: '#DC2626' }}>{loadError}</p>
             ) : (
               <select value={negocioId} onChange={(e) => setNegocioId(e.target.value)} className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: '#E5E7EB' }}>
@@ -572,88 +590,84 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
             </div>
           )}
 
-          {/* La fuente depende de por dónde cobra el workspace. Con pasarela, ePayco
-              y su verificación contra la API; sin pasarela, el nombre de la cuenta o
-              el medio por el que entró la plata, escrito por quien registra. */}
-          <PagoField label={cobraPorEpayco === false ? '¿De dónde entró el pago?' : 'Fuente del pago'}>
-            {cobraPorEpayco === false ? (
-              <>
+          {/* La fuente solo se pregunta donde hay pasarela, porque ahí decide el
+              camino: ePayco verifica la referencia contra la API. Sin pasarela la
+              pregunta no elegía nada, era un campo de texto libre que cada quien
+              llenaba distinto; lo que de verdad dice de dónde entró la plata es el
+              comprobante adjunto. */}
+          {cobraPorEpayco && (
+            <PagoField label="Fuente del pago">
+              <div className="grid grid-cols-1 gap-2">
+                {(['epayco'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => {
+                      setFuente(f)
+                      setNeedJust(false)
+                      setEpaycoStatus('idle')
+                      setEpaycoData(null)
+                      setEpaycoError(null)
+                      setMonto('')
+                      setFecha('')
+                    }}
+                    className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
+                    style={fuente === f
+                      ? { borderColor: VERDE, color: VERDE, backgroundColor: 'var(--acento-tinte)' }
+                      : { borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
+                  >
+                    ePayco
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Los comerciales registran solo pagos por ePayco.</p>
+            </PagoField>
+          )}
+
+          {/* La referencia es la llave del control de duplicados de ePayco, y ahí se
+              teclea del comprobante de la pasarela. Sin pasarela no había nada que
+              teclear: el campo salía vacío o con lo que cupiera, y el duplicado que
+              debía atrapar no existe. Cuando falta, el servidor genera la referencia
+              interna, como ya lo hace el panel de pagos externos. */}
+          {cobraPorEpayco && (
+            <PagoField label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>
+              <div className="relative">
                 <input
-                  value={fuenteNombre}
-                  onChange={(e) => setFuenteNombre(e.target.value)}
-                  placeholder="Transferencia Bancolombia, efectivo, cheque…"
-                  className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
-                  style={{ borderColor: '#E5E7EB' }}
-                />
-                <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Queda registrado como el ingreso de este negocio.</p>
-              </>
-            ) : (
-              <>
-            <div className="grid grid-cols-1 gap-2">
-              {(['epayco'] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => {
-                    setFuente(f)
-                    setNeedJust(false)
+                  value={referencia}
+                  onChange={(e) => {
+                  const val = esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value
+                  setReferencia(val)
+                  if (esEpayco) {
                     setEpaycoStatus('idle')
                     setEpaycoData(null)
                     setEpaycoError(null)
-                    setMonto('')
-                    setFecha('')
-                  }}
-                  className="rounded-md border px-2 py-1.5 text-[12px] font-semibold transition"
-                  style={fuente === f
-                    ? { borderColor: VERDE, color: VERDE, backgroundColor: 'var(--acento-tinte)' }
-                    : { borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
-                >
-                  ePayco
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Los comerciales registran solo pagos por ePayco.</p>
-              </>
-            )}
-          </PagoField>
-
-          <PagoField label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>
-            <div className="relative">
-              <input
-                value={referencia}
-                onChange={(e) => {
-                const val = esEpayco ? e.target.value.replace(/[^\d]/g, '') : e.target.value
-                setReferencia(val)
-                if (esEpayco) {
-                  setEpaycoStatus('idle')
-                  setEpaycoData(null)
-                  setEpaycoError(null)
-                }
-              }}
-                inputMode={esEpayco ? 'numeric' : 'text'}
-                placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
-                className="w-full rounded-md border px-2.5 py-1.5 pr-8 text-[13px] outline-none"
-                style={{ borderColor: epaycoStatus === 'success' ? VERDE : epaycoStatus === 'error' ? '#DC2626' : '#E5E7EB' }}
-              />
-              {esEpayco && epaycoStatus === 'loading' && (
-                <Loader2 className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" style={{ color: '#9CA3AF' }} />
+                  }
+                }}
+                  inputMode={esEpayco ? 'numeric' : 'text'}
+                  placeholder={esEpayco ? 'ej. 123456789' : 'ej. comprobante o nº de transacción'}
+                  className="w-full rounded-md border px-2.5 py-1.5 pr-8 text-[13px] outline-none"
+                  style={{ borderColor: epaycoStatus === 'success' ? VERDE : epaycoStatus === 'error' ? '#DC2626' : '#E5E7EB' }}
+                />
+                {esEpayco && epaycoStatus === 'loading' && (
+                  <Loader2 className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" style={{ color: '#9CA3AF' }} />
+                )}
+                {esEpayco && epaycoStatus === 'success' && (
+                  <CheckCircle className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: VERDE }} />
+                )}
+                {esEpayco && epaycoStatus === 'error' && (
+                  <XCircle className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: '#DC2626' }} />
+                )}
+              </div>
+              {esEpayco && epaycoStatus === 'idle' && (
+                <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada.</p>
+              )}
+              {esEpayco && epaycoStatus === 'error' && epaycoError && (
+                <p className="mt-1 text-[11px]" style={{ color: '#DC2626' }}>{epaycoError}</p>
               )}
               {esEpayco && epaycoStatus === 'success' && (
-                <CheckCircle className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: VERDE }} />
+                <p className="mt-1 text-[11px] font-medium" style={{ color: VERDE }}>Transaccion ePayco verificada</p>
               )}
-              {esEpayco && epaycoStatus === 'error' && (
-                <XCircle className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: '#DC2626' }} />
-              )}
-            </div>
-            {esEpayco && epaycoStatus === 'idle' && (
-              <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Se valida con ePayco: solo se registra si está Aceptada.</p>
-            )}
-            {esEpayco && epaycoStatus === 'error' && epaycoError && (
-              <p className="mt-1 text-[11px]" style={{ color: '#DC2626' }}>{epaycoError}</p>
-            )}
-            {esEpayco && epaycoStatus === 'success' && (
-              <p className="mt-1 text-[11px] font-medium" style={{ color: VERDE }}>Transaccion ePayco verificada</p>
-            )}
-          </PagoField>
+            </PagoField>
+          )}
 
           {/* Comprobante: opcional a propósito. El pantallazo de la transferencia es
               lo que evita la discusión tres meses después, pero pedirlo para poder

@@ -7,6 +7,9 @@ import {
   type AgregarPagoInput,
 } from '@/lib/actions/conciliacion-actions'
 import { archivarSoporte, type SoporteSubidoInput } from '@/lib/cobros/soporte-pago'
+import { PREFIJO_REF_AUTOGENERADA } from '@/lib/cobros/referencia-externa'
+import { todayBogotaISO } from '@/lib/dates/bogota'
+import { randomUUID } from 'crypto'
 
 // Cast a untyped para columnas no presentes en database.ts (config_extra).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,6 +192,19 @@ export async function agregarPagoFab(
   // el pantallazo para poder anotar la plata deja el ingreso sin registrar, que es
   // peor que registrarlo sin foto. Si viene, viaja en el mismo INSERT que el cobro.
   const { soporte_subido, ...pago } = input
+
+  // `external_ref` es la llave del registro de pagos y no puede ir vacía, pero pedirla
+  // solo tiene sentido donde hay pasarela: ahí se teclea del comprobante de ePayco y
+  // sostiene el control de duplicados. En un workspace que cobra por transferencia no
+  // hay nada que teclear, así que la referencia se genera, igual que en el panel de
+  // pagos externos. Lo que dice de dónde entró la plata es el comprobante adjunto.
+  if (!pago.referencia?.trim()) {
+    if (await workspaceCobraPorEpayco(supabase, workspaceId)) {
+      return { success: false, error: 'Ingresa la referencia del pago' }
+    }
+    const dia = (pago.fecha || todayBogotaISO()).replace(/-/g, '')
+    pago.referencia = `${PREFIJO_REF_AUTOGENERADA}${dia}-${randomUUID().slice(0, 6).toUpperCase()}`
+  }
   let soporte: Record<string, unknown> | null = null
   if (soporte_subido?.storage_path) {
     soporte = await archivarSoporte(
