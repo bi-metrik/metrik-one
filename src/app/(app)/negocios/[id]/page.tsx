@@ -83,6 +83,10 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // workspace (modules.conciliacion). El registro + reparto viven en BloqueCobros; el
   // panel financiero solo acepta/rechaza.
   let conciliacionActiva = false
+  // Registro de pago SIMPLE en la ficha (modules.fab_registrar_pago), el mismo que ya
+  // vive en el FAB global. Sin conciliación no hay reparto que proponer: la plata que
+  // entra se anota contra el negocio abierto y queda registrada de una.
+  let pagoSimpleActivo = false
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,6 +103,9 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
     }
     if (modules.conciliacion && !cerrado) {
       conciliacionActiva = true
+    }
+    if (modules.fab_registrar_pago && !modules.conciliacion && !cerrado) {
+      pagoSimpleActivo = true
     }
   }
 
@@ -167,6 +174,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         bloquesEtapasPrevias={data.bloquesEtapasPrevias as any}
         pausaEnabled={data.pausaEnabled}
         registrarPagoEnabled={conciliacionActiva}
+        registrarPagoSimple={pagoSimpleActivo}
         puedeCierreNoFacturable={puedeCierreNoFacturable}
         puedeResolverAvisoRecaudo={puedeResolverAvisoRecaudo}
         errorMsg={err}
