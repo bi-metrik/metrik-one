@@ -47,11 +47,16 @@ export function comprobanteDelPortapapeles(items: ArrayLike<ItemPegado> | null |
  * Devuelve el motivo en vez de un booleano: el usuario tiene que saber si el problema
  * fue el formato o el tamaño, porque la corrección es distinta.
  */
-export function motivoRechazoComprobante(file: File): string | null {
+export function motivoRechazoComprobante(
+  file: File,
+  maxBytes: number = MAX_COMPROBANTE_BYTES,
+): string | null {
   if (file.type && !TIPOS_COMPROBANTE.includes(file.type)) {
     return 'El comprobante debe ser una imagen (JPG, PNG, WebP) o un PDF'
   }
-  if (file.size > MAX_COMPROBANTE_BYTES) return 'El comprobante pesa más de 10 MB'
+  if (file.size > maxBytes) {
+    return `El comprobante pesa más de ${Math.round(maxBytes / (1024 * 1024))} MB`
+  }
   return null
 }
 

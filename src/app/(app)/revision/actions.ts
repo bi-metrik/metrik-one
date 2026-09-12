@@ -4,6 +4,16 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
+import { createServiceClient } from '@/lib/supabase/server'
+import { normalizarMotivoAnulacion, MOTIVO_ANULACION_MIN } from '@/lib/cobros/anulacion'
+import { anularCobro } from '@/lib/actions/pagos-externos'
+
+// La tabla `movimientos_rechazados` y `gastos_fijos_borradores` no están en los tipos
+// generados (`database.ts` va por detrás del ledger). Mismo cast que usa el resto.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function db(client: unknown): any {
+  return client
+}
 
 // ── Types ────────────────────────────────────────────────
 
@@ -178,6 +188,84 @@ export async function desmarcarRevisado(id: string, tabla: 'gastos' | 'cobros') 
 
   revalidatePath('/revision')
   revalidatePath('/movimientos')
+  return { success: true }
+}
+
+/**
+ * Rechazar un movimiento: DESAPARECE.
+ *
+ * Antes el botón llamaba a `desmarcarRevisado`, que solo pone `revisado = false`: el
+ * movimiento volvía a la fila de pendientes y el motivo que el modal exigía se tiraba.
+ * Quien rechazaba lo veía reaparecer.
+ *
+ * GASTO: se archiva la fila entera en `movimientos_rechazados` y se BORRA. Se eligió
+ * borrar y no una bandera porque `gastos` se lee desde 42 sitios, incluidas las edge
+ * functions de WhatsApp: una bandera obliga a recordar el filtro en cada uno, y el
+ * olvido no se nota — aparece como plata que no cuadra.
+ *
+ * COBRO: no se borra, se ANULA por la vía que ya existe (`anularCobro`), porque su
+ * monto sostiene el saldo del negocio y la cuenta de cobro emitida. Desaparece de la
+ * lista igual, porque `getMovimientos` dejó de mostrar los anulados.
+ */
+export async function rechazarMovimiento(
+  id: string,
+  tabla: 'gastos' | 'cobros',
+  motivo: string,
+): Promise<{ success: true } | { success: false; error: string }> {
+  const { supabase, workspaceId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const perms = getRolePermissions(role ?? 'read_only')
+  if (!perms.canMarcarRevisado) return { success: false, error: 'Sin permisos' }
+
+  const motivoLimpio = normalizarMotivoAnulacion(motivo)
+  if (!motivoLimpio) {
+    return {
+      success: false,
+      error: `Escribe por qué lo rechazas (mínimo ${MOTIVO_ANULACION_MIN} caracteres). Queda guardado con tu nombre y la fecha.`,
+    }
+  }
+
+  if (tabla === 'cobros') {
+    const res = await anularCobro(id, motivoLimpio)
+    if (!res.success) return res
+    revalidatePath('/revision')
+    revalidatePath('/movimientos')
+    return { success: true }
+  }
+
+  const { data: fila } = await supabase
+    .from('gastos').select('*').eq('id', id).eq('workspace_id', workspaceId).maybeSingle()
+  if (!fila) return { success: false, error: 'Movimiento no encontrado' }
+
+  // El archivo se escribe con el cliente de servicio: la tabla es server-only a
+  // propósito (es la copia de lo que el usuario decidió quitar de su vista). Va ANTES
+  // del borrado: si falla, el gasto sigue ahí y se puede reintentar; al revés, el
+  // rechazo se lleva la fila sin dejar rastro.
+  const { error: eArchivo } = await db(createServiceClient())
+    .from('movimientos_rechazados')
+    .insert({
+      workspace_id: workspaceId,
+      tabla: 'gastos',
+      fila_id: id,
+      fila,
+      motivo: motivoLimpio,
+      rechazado_por: userId ?? null,
+    })
+  if (eArchivo) return { success: false, error: `No se pudo guardar el rechazo: ${eArchivo.message}` }
+
+  // `gastos_fijos_borradores` apunta a la fila con NO ACTION: sin soltar esa referencia
+  // el DELETE falla con un error de llave foránea que no le dice nada a quien rechaza.
+  await db(createServiceClient())
+    .from('gastos_fijos_borradores').update({ gasto_id: null }).eq('gasto_id', id)
+
+  const { error: eBorrar } = await supabase
+    .from('gastos').delete().eq('id', id).eq('workspace_id', workspaceId)
+  if (eBorrar) return { success: false, error: eBorrar.message }
+
+  revalidatePath('/revision')
+  revalidatePath('/movimientos')
+  revalidatePath('/numeros')
   return { success: true }
 }
 

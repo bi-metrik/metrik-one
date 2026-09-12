@@ -10,8 +10,17 @@ import { toast } from 'sonner'
 import { getRolePermissions } from '@/lib/roles'
 import type { Movimiento } from './actions'
 import { marcarComoPagado, attachSoporte } from './actions'
-import { marcarRevisado, desmarcarRevisado } from '../revision/actions'
+import { marcarRevisado, desmarcarRevisado, rechazarMovimiento } from '../revision/actions'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+import {
+  comprobanteDelPortapapeles,
+  motivoRechazoComprobante,
+  nombreDeComprobantePegado,
+} from '@/lib/cobros/comprobante-pegado'
+
+/** El soporte de un gasto admite más peso que el comprobante de un pago: aquí entran
+ *  facturas escaneadas de varias páginas. */
+const MAX_SOPORTE_MOVIMIENTO = 20 * 1024 * 1024
 
 // D142: Categorías deducibles para régimen ordinario
 const CATEGORIAS_DEDUCIBLES = ['materiales', 'transporte', 'servicios_profesionales', 'viaticos', 'software', 'impuestos_seguros', 'mano_de_obra']
@@ -113,6 +122,10 @@ export default function MovimientosClient({
 
   // Soporte upload with image compression
   const [uploadingId, setUploadingId] = useState<string | null>(null)
+  // Qué movimiento está esperando su soporte. El cargue es un modal, como el del pago:
+  // sin él no hay dónde pegar con Ctrl+V, porque un `<label>` abre el diálogo de
+  // archivos en el mismo clic y no deja ventana para el portapapeles.
+  const [cargueSoporte, setCargueSoporte] = useState<{ id: string; descripcion: string } | null>(null)
 
   const compressImage = useCallback(async (file: File, maxWidth = 1600, quality = 0.8): Promise<File> => {
     if (file.type === 'application/pdf') return file
@@ -146,10 +159,15 @@ export default function MovimientosClient({
     })
   }, [])
 
-  const handleSoporteUpload = useCallback(async (gastoId: string, file: File) => {
+  const handleSoporteUpload = useCallback(async (gastoId: string, file: File, nombre?: string) => {
     setUploadingId(gastoId)
     try {
-      const compressed = await compressImage(file)
+      const comprimido = await compressImage(file)
+      // Lo pegado del portapapeles llega como "image.png" y el compresor lo renombra a
+      // ".jpg": el nombre con el que se guarda se decide aquí, no antes.
+      const compressed = nombre
+        ? new File([comprimido], nombre.replace(/\.\w+$/, comprimido.name.match(/\.\w+$/)?.[0] ?? ''), { type: comprimido.type })
+        : comprimido
       const fd = new FormData()
       fd.append('file', compressed)
       const result = await attachSoporte(gastoId, fd)
@@ -262,7 +280,8 @@ export default function MovimientosClient({
     })
   }
 
-  // D246: Rechazar handler
+  // Rechazar: el movimiento DESAPARECE. Antes esto llamaba a `desmarcarRevisado`, que
+  // solo lo devolvía a pendientes con el motivo tirado a la basura.
   function handleDesmarcarPorRechazo() {
     if (!rechazoModal) return
     if (!rechazoMotivo.trim()) {
@@ -270,7 +289,7 @@ export default function MovimientosClient({
       return
     }
     startTransition(async () => {
-      const res = await desmarcarRevisado(rechazoModal.id, rechazoModal.tabla)
+      const res = await rechazarMovimiento(rechazoModal.id, rechazoModal.tabla, rechazoMotivo)
       if (res.success) {
         toast.success('Movimiento rechazado')
         setRechazoModal(null)
@@ -705,55 +724,29 @@ export default function MovimientosClient({
                                   Ver soporte
                                 </button>
                               ) : faltaSoporte ? (
-                                <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => setCargueSoporte({ id: mov.id, descripcion: mov.descripcion })}
+                                  className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
                                   {uploadingId === mov.id ? (
                                     <Loader2 className="h-2.5 w-2.5 animate-spin" />
                                   ) : (
                                     <Upload className="h-2.5 w-2.5" />
                                   )}
                                   {uploadingId === mov.id ? 'Subiendo...' : 'Agregar soporte'}
-                                  <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp,application/pdf"
-                                    className="hidden"
-                                    onChange={async (e) => {
-                                      const file = e.target.files?.[0]
-                                      if (file) {
-                                        if (file.size > 20 * 1024 * 1024) {
-                                          toast.error('El archivo supera 20MB')
-                                        } else {
-                                          handleSoporteUpload(mov.id, file)
-                                        }
-                                      }
-                                      e.target.value = ''
-                                    }}
-                                  />
-                                </label>
+                                </button>
                               ) : !mov.soporte_url ? (
-                                <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => setCargueSoporte({ id: mov.id, descripcion: mov.descripcion })}
+                                  className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors ${uploadingId === mov.id ? 'pointer-events-none opacity-50' : ''}`}>
                                   {uploadingId === mov.id ? (
                                     <Loader2 className="h-2.5 w-2.5 animate-spin" />
                                   ) : (
                                     <Upload className="h-2.5 w-2.5" />
                                   )}
                                   {uploadingId === mov.id ? 'Subiendo...' : 'Soporte'}
-                                  <input
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp,application/pdf"
-                                    className="hidden"
-                                    onChange={async (e) => {
-                                      const file = e.target.files?.[0]
-                                      if (file) {
-                                        if (file.size > 20 * 1024 * 1024) {
-                                          toast.error('El archivo supera 20MB')
-                                        } else {
-                                          handleSoporteUpload(mov.id, file)
-                                        }
-                                      }
-                                      e.target.value = ''
-                                    }}
-                                  />
-                                </label>
+                                </button>
                               ) : null
                             )}
 
@@ -847,6 +840,18 @@ export default function MovimientosClient({
       )}
 
       {/* Soporte image lightbox */}
+      <ModalCargueSoporte
+        objetivo={cargueSoporte}
+        subiendo={uploadingId !== null}
+        onCerrar={() => setCargueSoporte(null)}
+        onArchivo={(file, nombre) => {
+          const id = cargueSoporte?.id
+          if (!id) return
+          setCargueSoporte(null)
+          void handleSoporteUpload(id, file, nombre)
+        }}
+      />
+
       <Dialog open={!!soporteModal} onOpenChange={() => setSoporteModal(null)}>
         <DialogContent className="max-h-[90vh] max-w-md overflow-hidden p-2 sm:max-w-lg">
           <DialogTitle className="sr-only">Soporte</DialogTitle>
@@ -918,13 +923,18 @@ export default function MovimientosClient({
               <p className="text-sm text-muted-foreground">
                 {rechazoModal.descripcion}
               </p>
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+                {rechazoModal.tabla === 'gastos'
+                  ? 'El movimiento desaparece de la lista y deja de contar en tus números. Queda guardado el motivo con tu nombre y la fecha.'
+                  : 'El cobro se anula: su monto queda en cero y desaparece de la lista. Queda guardado el motivo con tu nombre y la fecha.'}
+              </p>
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">Motivo del rechazo *</label>
                 <textarea
                   value={rechazoMotivo}
                   onChange={e => setRechazoMotivo(e.target.value)}
-                  placeholder="Explica por qué se rechaza este movimiento..."
+                  placeholder="Explica por qué se rechaza este movimiento (mínimo 10 caracteres)…"
                   rows={3}
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none"
                 />
@@ -1003,5 +1013,99 @@ export default function MovimientosClient({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+
+/**
+ * Cargue de un soporte: pegar, arrastrar o buscar.
+ *
+ * Misma configuración que el comprobante del pago del FAB, y por la misma razón: el
+ * soporte casi siempre es un pantallazo que ya está en el portapapeles. Lo que obliga a
+ * que esto sea un modal y no el `<label>` que había antes es justamente el Ctrl+V: un
+ * label abre el diálogo de archivos en el mismo clic y no deja ventana para pegar.
+ *
+ * El listener de `paste` va en el documento porque pegar sobre un elemento exige tener
+ * el foco ahí, y quien acaba de recortar la pantalla no va a hacer clic en una zona
+ * antes de pegar.
+ */
+function ModalCargueSoporte({
+  objetivo,
+  subiendo,
+  onCerrar,
+  onArchivo,
+}: {
+  objetivo: { id: string; descripcion: string } | null
+  subiendo: boolean
+  onCerrar: () => void
+  onArchivo: (file: File, nombre?: string) => void
+}) {
+  const [arrastrando, setArrastrando] = useState(false)
+  const abierto = objetivo !== null
+
+  const aceptar = useCallback((file: File, nombre?: string) => {
+    const motivo = motivoRechazoComprobante(file, MAX_SOPORTE_MOVIMIENTO)
+    if (motivo) { toast.error(motivo); return }
+    onArchivo(file, nombre)
+  }, [onArchivo])
+
+  useEffect(() => {
+    if (!abierto) return
+    function alPegar(e: ClipboardEvent) {
+      const file = comprobanteDelPortapapeles(e.clipboardData?.items)
+      if (!file) return
+      // Solo cuando lo pegado es de verdad un archivo: interceptar antes rompería el
+      // pegado normal de texto en cualquier campo.
+      e.preventDefault()
+      aceptar(file, nombreDeComprobantePegado(file))
+    }
+    document.addEventListener('paste', alPegar)
+    return () => document.removeEventListener('paste', alPegar)
+  }, [abierto, aceptar])
+
+  return (
+    <Dialog open={abierto} onOpenChange={() => { setArrastrando(false); onCerrar() }}>
+      <DialogContent className="max-w-sm">
+        <DialogTitle className="text-base font-semibold">Agregar soporte</DialogTitle>
+        {objetivo && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">{objetivo.descripcion}</p>
+            <label
+              onDragOver={(e) => { e.preventDefault(); setArrastrando(true) }}
+              onDragLeave={() => setArrastrando(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setArrastrando(false)
+                const f = e.dataTransfer.files?.[0]
+                if (f) aceptar(f)
+              }}
+              className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border border-dashed px-3 py-6 text-center text-sm transition ${
+                arrastrando
+                  ? 'border-acento bg-acento/10 text-acento'
+                  : 'border-border text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              <span className="flex items-center gap-2 font-medium">
+                {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {subiendo ? 'Subiendo…' : arrastrando ? 'Suelta el soporte aquí' : 'Pega el pantallazo con Ctrl+V'}
+              </span>
+              {!subiendo && !arrastrando && (
+                <span className="text-xs">o arrástralo aquí, o toca para buscarlo</span>
+              )}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) aceptar(f)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -149,6 +149,10 @@ export async function getMovimientos(filters?: {
       .eq('workspace_id', workspaceId)
       .gte('fecha', startDate)
       .lte('fecha', endDate)
+      // Un cobro anulado no es un movimiento: su monto quedó en 0 y la anulación es
+      // precisamente la forma de rechazarlo. Seguía apareciendo en la lista como plata
+      // viva, y rechazarlo desde aquí lo dejaba exactamente donde estaba.
+      .is('anulado_at', null)
 
     if (proyFilter && proyFilter !== 'empresa') {
       query = query.eq('proyecto_id', proyFilter)

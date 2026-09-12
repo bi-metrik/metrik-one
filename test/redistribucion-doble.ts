@@ -36,12 +36,19 @@ export function servicioFalso() {
       const filtros: Array<(f: Fila) => boolean> = []
       let patch: Fila | null = null
       let aInsertar: Fila | Fila[] | null = null
+      let aBorrar = false
 
       const seleccionadas = (): Fila[] =>
         (estado.fixtures[tabla] ?? []).filter(f => filtros.every(p => p(f)))
 
       /** Aplica la escritura pendiente, si la hay. Idempotente por chain. */
       const escribir = () => {
+        if (aBorrar) {
+          const fuera = new Set(seleccionadas())
+          estado.fixtures[tabla] = (estado.fixtures[tabla] ?? []).filter(f => !fuera.has(f))
+          aBorrar = false
+          return
+        }
         if (aInsertar) {
           const nuevas = Array.isArray(aInsertar) ? aInsertar : [aInsertar]
           estado.fixtures[tabla] = [...(estado.fixtures[tabla] ?? []), ...nuevas]
@@ -58,6 +65,7 @@ export function servicioFalso() {
         select: () => chain,
         update: (p: Fila) => { patch = p; return chain },
         insert: (f: Fila | Fila[]) => { aInsertar = f; return chain },
+        delete: () => { aBorrar = true; return chain },
         eq: (campo: string, valor: unknown) => {
           filtros.push(f => valorEn(f, campo) === valor)
           return chain
