@@ -1855,6 +1855,7 @@ function BloqueRenderer({
     case 'movimientos':
       return (
         <BloqueMovimientos
+          negocioId={negocioId}
           cobros={cobros}
           gastosPorCategoria={ejecucionData.gastosPorCategoria}
           totalGastos={ejecucionData.totalGastos}

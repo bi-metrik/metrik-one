@@ -23,7 +23,7 @@ import {
   agruparGastosPorCategoria,
   calcularCostoHoras,
   resolverLineaBase,
-  totalPresupuestado,
+  presupuestoDeCosto,
   type ItemPresupuesto,
   type RubroPresupuesto,
   type RubroPresupuestoEjecutado,
@@ -6055,6 +6055,8 @@ export type CotizacionResumen = {
   modo: string | null
   estado: string | null
   valor_total: number | null
+  /** Costo comprometido. Es el presupuesto cuando la cotización no trae rubros. */
+  costo_total: number | null
   descripcion: string | null
   created_at: string | null
 }
@@ -6280,7 +6282,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .order('fecha', { ascending: false }),
     supabase
       .from('cotizaciones')
-      .select('id, consecutivo, modo, estado, valor_total, descripcion, created_at')
+      .select('id, consecutivo, modo, estado, valor_total, costo_total, descripcion, created_at')
       .eq('negocio_id' as never, id)
       .order('created_at', { ascending: false }),
     supabase
@@ -6473,6 +6475,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     modo: c.modo as string | null,
     estado: c.estado as string | null,
     valor_total: c.valor_total as number | null,
+    costo_total: c.costo_total as number | null,
     descripcion: c.descripcion as string | null,
     created_at: c.created_at as string | null,
   }))
@@ -7603,8 +7606,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         gastosPorCategoria,
         presupuestoPorRubro: reparto.rubros.length > 0 ? reparto.rubros : undefined,
         // Contra esto se mide el sobrecosto. Cuadra con `cotizaciones.costo_total`.
-        presupuestoCosto:
-          presupuestoPorRubro.length > 0 ? totalPresupuestado(presupuestoPorRubro) : undefined,
+        // Sin rubros el presupuesto no desaparece: cae al costo total de la cotización.
+        // Ver `presupuestoDeCosto`.
+        presupuestoCosto: presupuestoDeCosto(presupuestoPorRubro, cotizacionAceptada?.costo_total),
         precioAprobado,
         sinPresupuesto:
           reparto.sinPresupuesto.total > 0 ? reparto.sinPresupuesto : undefined,

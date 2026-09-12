@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowDownLeft, ArrowUpRight, Clock, Plus, Wallet } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Clock, Plus, Receipt, Wallet } from 'lucide-react'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
@@ -21,6 +22,8 @@ export interface MovimientoCobro {
 }
 
 interface BloqueMovimientosProps {
+  /** Para prellenar el destino del gasto: el negocio que se está mirando. */
+  negocioId: string
   cobros: MovimientoCobro[]
   gastosPorCategoria: CategoriaGasto[]
   totalGastos: number
@@ -43,6 +46,7 @@ type Filtro = 'todo' | 'entradas' | 'salidas'
  * El resultado (margen, presupuesto, ganancia) NO va aquí: va en el bloque de Resultado.
  */
 export default function BloqueMovimientos({
+  negocioId,
   cobros,
   gastosPorCategoria,
   totalGastos,
@@ -102,7 +106,7 @@ export default function BloqueMovimientos({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1" role="group" aria-label="Filtrar movimientos">
           {(['todo', 'entradas', 'salidas'] as const).map(f => (
             <button
@@ -120,15 +124,30 @@ export default function BloqueMovimientos({
             </button>
           ))}
         </div>
-        {puedeRegistrar && (
-          <button
-            type="button"
-            onClick={() => setPagoModal(true)}
-            className="flex items-center gap-1 rounded-full bg-acento px-2.5 py-1 text-[10px] font-medium text-papel"
-          >
-            <Plus className="h-3 w-3" /> Registrar pago
-          </button>
-        )}
+        <div className="flex shrink-0 gap-1">
+          {/* El gasto es el movimiento más frecuente de una obra y era el que tenía más
+              pasos: había que salir de la ficha, abrir el FAB y volver a elegir el
+              negocio. Elegirlo mal es plata imputada a otro proyecto, así que el destino
+              viaja en la URL y el formulario lo recibe ya puesto. Es el MISMO formulario
+              de siempre (categorías, centro de costos, soporte), no una copia. */}
+          {modo === 'editable' && (
+            <Link
+              href={`/nuevo/gasto?negocio=${negocioId}`}
+              className="flex items-center gap-1 rounded-full border border-[#E5E7EB] px-2.5 py-1 text-[10px] font-medium text-tinta hover:bg-black/[0.03]"
+            >
+              <Receipt className="h-3 w-3" /> Registrar gasto
+            </Link>
+          )}
+          {puedeRegistrar && (
+            <button
+              type="button"
+              onClick={() => setPagoModal(true)}
+              className="flex items-center gap-1 rounded-full bg-acento px-2.5 py-1 text-[10px] font-medium text-papel"
+            >
+              <Plus className="h-3 w-3" /> Registrar pago
+            </button>
+          )}
+        </div>
       </div>
 
       {verEntradas && (
