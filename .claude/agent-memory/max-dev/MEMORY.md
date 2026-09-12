@@ -29,6 +29,7 @@
 - [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M, y termotech no usa rubros
+- ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía, la regla la comparten DOS rutas de duplicación, y falta QA en pantalla
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
 - ⚠️⚠️ [/negocios se publica como hoja de Google](project_export_negocios_a_drive.md) — PR #625 sin mergear: el `jsonb_set` que no creaba el contenedor ya está corregido, pero la migración sigue SIN aplicar, Drive nunca se ejercitó y el share está apagado
 - ⚠️⚠️ ["Todos" incluye cerrados](project_todos_incluye_cerrados.md) — PR #607 mergeado: escribir `cierre_motivo` habría roto TODO cierre (CHECK contra `stage_actual`); el SLA seguía corriendo en los 33 cerrados
