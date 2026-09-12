@@ -145,6 +145,9 @@ export interface ResumenFiscal {
   reteica_valor: number
   reteiva_pct: number
   reteiva_valor: number
+  /** El IVA que recaudas y le trasladas a la DIAN. No es plata tuya. */
+  iva_trasladado: number
+  /** Lo que te queda del negocio: base sin IVA, menos retefuente y reteICA. */
   neto_recibido: number
   seguridad_social: number
   ganancia_real: number
@@ -335,8 +338,13 @@ export function calcularRetenciones(
 /**
  * Provisión seguridad social independientes.
  * Base: 40% de ingresos brutos, Tarifa: 28.5% → Efectivo: 11.4%
+ *
+ * Solo aplica a persona natural. Una SAS paga la nómina de su gente como costo,
+ * no una provisión sobre el ingreso: cobrársela le bajaba el margen a toda
+ * empresa sin que nada en pantalla lo explicara.
  */
-export function calcularSeguridadSocial(precioBase: number): number {
+export function calcularSeguridadSocial(precioBase: number, tipoPersona?: string | null): number {
+  if (tipoPersona && tipoPersona !== 'persona_natural') return 0
   return Math.round(precioBase * (SEGURIDAD_SOCIAL_EFECTIVO_PCT / 100))
 }
 
@@ -357,8 +365,12 @@ export function generarResumenFiscal(
   const iva = calcularIVA(perfil, precioFinal)
   const totalPagaCliente = iva.total_con_iva
   const retenciones = calcularRetenciones(perfil, client, precioFinal, iva.iva_valor)
-  const netoRecibido = totalPagaCliente - retenciones.total_retenciones
-  const seguridadSocial = calcularSeguridadSocial(precioFinal)
+  // El IVA lo recaudas para la DIAN: entra a la cuenta y vuelve a salir. Contarlo
+  // como ingreso propio inflaba "tú recibes" hasta igualar "el cliente paga" y
+  // subía el margen neto por encima del margen real de la cotización.
+  // El reteIVA tampoco se resta aquí: es un adelanto contra ese mismo IVA ajeno.
+  const netoRecibido = precioFinal - retenciones.retefuente_valor - retenciones.reteica_valor
+  const seguridadSocial = calcularSeguridadSocial(precioFinal, perfil.person_type)
   const gananciaReal = netoRecibido - costoTotal - seguridadSocial
   const margenRealNeto = precioFinal > 0
     ? (gananciaReal / precioFinal) * 100
@@ -373,6 +385,7 @@ export function generarResumenFiscal(
     reteica_valor: retenciones.reteica_valor,
     reteiva_pct: retenciones.reteiva_pct,
     reteiva_valor: retenciones.reteiva_valor,
+    iva_trasladado: iva.iva_valor,
     neto_recibido: netoRecibido,
     seguridad_social: seguridadSocial,
     ganancia_real: gananciaReal,
