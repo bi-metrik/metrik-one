@@ -50,9 +50,43 @@ const martianMono = localFont({
   display: 'swap',
 })
 
+const TITULO_SITIO = 'MéTRIK one'
+const DESCRIPCION_SITIO = 'Tus números claros para tomar mejores decisiones'
+const IMAGEN_OG = '/og/metrik-one-og.png'
+
+// La tarjeta que se ve al compartir un enlace es GENERICA, no por inquilino. El
+// comodin *.metrikone.co hace que todos los subdominios sirvan este mismo layout, y
+// por tanto estas mismas etiquetas; el rastreador que arma la vista previa llega sin
+// sesion, asi que no puede resolver de que workspace se trata; y una tarjeta
+// personalizada expondria el nombre del cliente en cualquier reenvio del enlace.
+// Por lo mismo no se declara `openGraph.url`: una url fija mentiria sobre el enlace
+// que de verdad se esta compartiendo.
 export const metadata: Metadata = {
-  title: 'MéTRIK one',
-  description: 'Tus números claros para tomar mejores decisiones',
+  metadataBase: new URL('https://metrikone.co'),
+  title: TITULO_SITIO,
+  description: DESCRIPCION_SITIO,
+  openGraph: {
+    type: 'website',
+    locale: 'es_CO',
+    siteName: TITULO_SITIO,
+    title: TITULO_SITIO,
+    description: DESCRIPCION_SITIO,
+    images: [
+      {
+        url: IMAGEN_OG,
+        width: 1200,
+        height: 630,
+        type: 'image/png',
+        alt: 'MéTRIK one: tus números claros para tomar mejores decisiones',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: TITULO_SITIO,
+    description: DESCRIPCION_SITIO,
+    images: [IMAGEN_OG],
+  },
 }
 
 export default function RootLayout({
