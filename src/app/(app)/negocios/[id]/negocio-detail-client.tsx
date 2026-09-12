@@ -1318,6 +1318,7 @@ function BloqueRenderer({
   modeloDinero,
   epaycoCostos,
   registrarPagoEnabled = false,
+  registrarPagoSimple = false,
   negocioFijado,
   facturaDraft,
   negocioCerrado = false,
@@ -1353,6 +1354,8 @@ function BloqueRenderer({
   modeloDinero?: ModeloDinero | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
   registrarPagoEnabled?: boolean
+  /** Pago simple (sin reparto) desde el bloque de Movimientos: `modules.fab_registrar_pago`. */
+  registrarPagoSimple?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
   facturaDraft?: FacturaDraft | null
   /**
@@ -1863,6 +1866,7 @@ function BloqueRenderer({
           costoHoras={ejecucionData.costoHoras}
           modo={modo}
           registrarPagoEnabled={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? false : registrarPagoEnabled}
+          registrarPagoSimple={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? false : registrarPagoSimple}
           negocioFijado={negocioFijado}
         />
       )
@@ -1930,6 +1934,7 @@ function BloqueCard({
   modeloDinero,
   epaycoCostos,
   registrarPagoEnabled = false,
+  registrarPagoSimple = false,
   negocioFijado,
   facturaDraft,
   negocioCerrado = false,
@@ -1964,6 +1969,8 @@ function BloqueCard({
   modeloDinero?: ModeloDinero | null
   epaycoCostos?: Record<string, EpaycoCostoCobro>
   registrarPagoEnabled?: boolean
+  /** Pago simple (sin reparto) desde el bloque de Movimientos: `modules.fab_registrar_pago`. */
+  registrarPagoSimple?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
   facturaDraft?: FacturaDraft | null
   /**
@@ -2079,6 +2086,7 @@ function BloqueCard({
               modeloDinero={modeloDinero}
               epaycoCostos={epaycoCostos}
               registrarPagoEnabled={registrarPagoEnabled}
+              registrarPagoSimple={registrarPagoSimple}
               negocioFijado={negocioFijado}
               facturaDraft={facturaDraft}
               negocioCerrado={negocioCerrado}
@@ -2153,6 +2161,8 @@ interface Props {
   pausaEnabled: boolean
   /** Habilita "Registrar pago" dentro del bloque de pagos (opt-in modules.conciliacion). */
   registrarPagoEnabled?: boolean
+  /** Pago simple (sin reparto) desde el bloque de Movimientos: `modules.fab_registrar_pago`. */
+  registrarPagoSimple?: boolean
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
   /**
@@ -2195,6 +2205,7 @@ export default function NegocioDetailClient({
   bloquesEtapasPrevias = [],
   pausaEnabled,
   registrarPagoEnabled = false,
+  registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
   puedeResolverAvisoRecaudo = false,
   errorMsg,
@@ -2510,6 +2521,7 @@ export default function NegocioDetailClient({
                   modeloDinero={negocio.modelo_dinero ?? null}
                   epaycoCostos={negocio.epayco_costos ?? {}}
                   registrarPagoEnabled={registrarPagoEnabled}
+                  registrarPagoSimple={registrarPagoSimple}
                   negocioFijado={{ negocio_id: negocio.id, codigo: negocio.codigo, nombre: negocio.nombre }}
                   facturaDraft={negocio.factura_draft ?? null}
                   negocioCerrado={negocioCerrado}

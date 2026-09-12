@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowDownLeft, ArrowUpRight, Clock, Plus, Receipt, Wallet } from 'lucide-react'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
+import RegistrarPagoModal from '@/components/registrar-pago-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import GastosPorCategoria, { type CategoriaGasto } from './financiero/GastosPorCategoria'
@@ -30,8 +31,18 @@ interface BloqueMovimientosProps {
   totalHoras: number
   costoHoras: number
   modo: 'editable' | 'visible'
-  /** Habilita "Registrar pago". Solo en modo editable y fuera del historial. */
+  /**
+   * Habilita "Registrar pago" con REPARTO entre negocios (conciliación: el comercial
+   * propone y la financiera valida). Solo en modo editable y fuera del historial.
+   */
   registrarPagoEnabled?: boolean
+  /**
+   * Habilita "Registrar pago" SIMPLE, el mismo formulario del FAB con el negocio ya
+   * puesto. Es lo que necesita una operación de una sola persona: no hay reparto que
+   * proponer ni financiera que concilie. Si el workspace tiene conciliación manda
+   * aquélla, que es la que sostiene el control de dos personas.
+   */
+  registrarPagoSimple?: boolean
   negocioFijado?: { negocio_id: string; codigo: string | null; nombre: string | null }
 }
 
@@ -54,6 +65,7 @@ export default function BloqueMovimientos({
   costoHoras,
   modo,
   registrarPagoEnabled = false,
+  registrarPagoSimple = false,
   negocioFijado,
 }: BloqueMovimientosProps) {
   const router = useRouter()
@@ -70,7 +82,11 @@ export default function BloqueMovimientos({
 
   const verEntradas = filtro !== 'salidas'
   const verSalidas = filtro !== 'entradas'
-  const puedeRegistrar = modo === 'editable' && registrarPagoEnabled
+  // Con conciliación el pago se PROPONE y alguien lo valida; sin ella se registra y ya.
+  // Termotech es unipersonal: pedirle a Omar que espere la validación de un área que no
+  // existe dejaría la plata que entró sin anotar.
+  const conReparto = registrarPagoEnabled
+  const puedeRegistrar = modo === 'editable' && (conReparto || registrarPagoSimple)
 
   return (
     <div className="space-y-3">
@@ -217,13 +233,19 @@ export default function BloqueMovimientos({
         </div>
       )}
 
-      {pagoModal && (
+      {pagoModal && (conReparto ? (
         <DistribuirPagoModal
           negocioFijado={negocioFijado}
           onClose={() => setPagoModal(false)}
           onDone={() => { setPagoModal(false); router.refresh() }}
         />
-      )}
+      ) : (
+        <RegistrarPagoModal
+          negocioFijado={negocioFijado ?? { negocio_id: negocioId, codigo: null, nombre: null }}
+          onClose={() => setPagoModal(false)}
+          onDone={() => { setPagoModal(false); router.refresh() }}
+        />
+      ))}
     </div>
   )
 }
