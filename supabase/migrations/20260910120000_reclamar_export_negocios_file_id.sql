@@ -114,6 +114,9 @@ $function$;
 comment on function reclamar_export_negocios_file_id is
   'Reclama de forma atomica el file_id de la hoja de Drive donde se publica la tabla de negocios. Devuelve el id que QUEDO guardado, que puede ser el de otro si dos clics simultaneos compitieron.';
 
+-- ⚠️ `from public, anon` NO alcanza: en este proyecto `authenticated` tiene EXECUTE por
+-- privilegios por defecto del esquema, y revocarle a PUBLIC no le quita su concesion propia.
+-- Corregido en 20260912100000. Si copias de aqui, revoca tambien a `authenticated`.
 revoke execute on function reclamar_export_negocios_file_id(uuid, text) from public, anon;
 grant execute on function reclamar_export_negocios_file_id(uuid, text) to service_role;
 
