@@ -141,6 +141,13 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       precioLinea = precioConMargen(costoLinea * (1 + adminPct / 100), margenAplicado, convencion)
     }
 
+    // El precio de la línea se cuadra al peso POR UNIDAD, que es la cifra que se
+    // imprime en la cotización del cliente ("VLR. UNIT."). Sin esto, el total salía
+    // de redondear la suma exacta y la columna del PDF sumaba unos pesos distintos:
+    // un documento que no cuadra consigo mismo, y el cliente sí suma la columna.
+    const cantidadLinea = Number(item.cantidad) || 1
+    precioLinea = Math.round(precioLinea / cantidadLinea) * cantidadLinea
+
     ventaBruta += precioLinea
     lineas.push({
       id: item.id,

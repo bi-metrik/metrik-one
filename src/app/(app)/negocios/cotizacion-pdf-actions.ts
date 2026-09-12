@@ -205,7 +205,12 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     ica_city: null,
   }
 
-  const valorNeto = cot.valor_total - (cot.descuento_valor ?? 0)
+  // `valor_total` YA es el precio final: `recalcularTotales` guarda ahí el resultado
+  // de la cascada con el descuento comercial aplicado, y `descuento_valor` al lado
+  // como el monto de ese descuento. Restarlo otra vez le mostraba al cliente una base
+  // más baja que la del sistema, y liquidaba el IVA sobre esa base equivocada. Sin
+  // descuento no se notaba: por eso llevaba tiempo ahí.
+  const valorNeto = cot.valor_total
   const fiscal = calcularFiscal(valorNeto, vendorProfile, buyerProfile)
 
   // ============================================================
