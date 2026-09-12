@@ -49,6 +49,7 @@ vi.mock('@/lib/cobros/soporte-pago', () => ({
 }))
 
 import { agregarPagoFab } from './fab-pago-actions'
+import { PREFIJO_REF_AUTOGENERADA } from '@/lib/cobros/referencia-externa'
 
 const COMPROBANTE = { storage_path: `${WS}/pagos-fab/abc.jpg`, file_name: 'transferencia.jpg' }
 
@@ -102,5 +103,44 @@ describe('comprobante del pago del FAB', () => {
     archivarSoporte.mockResolvedValue({ url: 'https://drive/x' })
     await agregarPagoFab(pago({ soporte_subido: COMPROBANTE }))
     expect(archivarSoporte.mock.calls[0][1]).toBe(WS)
+  })
+})
+
+/**
+ * La referencia del pago.
+ *
+ * EL CASO QUE IMPORTA: `cobros.external_ref` no puede ir vacío, pero PEDIRLO solo tiene
+ * sentido donde hay pasarela. Ahí se teclea del comprobante de ePayco y sostiene el
+ * control de duplicados. En un workspace que cobra por transferencia no hay nada que
+ * teclear: el campo salía vacío o con lo que cupiera, y el duplicado que debía atrapar
+ * no existe. Lo que dice de dónde entró la plata es el comprobante adjunto.
+ *
+ * ⚠️ EL CONTROL ES LA MITAD DE LA PRUEBA: que sin pasarela no se pida no vale nada si
+ * con pasarela tampoco se pidiera.
+ *
+ * MUTACIÓN MEDIDA el 2026-09-12: generar la referencia también donde hay pasarela
+ * pone 1 en rojo.
+ */
+describe('referencia del pago del FAB', () => {
+  it('sin pasarela y sin referencia, el pago entra con una referencia interna', async () => {
+    const r = await agregarPagoFab(pago({ referencia: '' }))
+    expect(r.success).toBe(true)
+    expect(String(cobroGuardado()?.external_ref)).toContain(PREFIJO_REF_AUTOGENERADA)
+  })
+
+  it('CONTROL — donde SÍ hay pasarela, la referencia se sigue exigiendo', async () => {
+    estado.fixtures.workspaces = [{ id: WS, modules: { fab_pago_epayco: true } }]
+    // Fuente 'epayco' a propósito: con 'otra' lo que rechazaría el pago sería el gate
+    // de área financiera, y la prueba diría que pasa por una razón que no es la suya.
+    const r = await agregarPagoFab(pago({ referencia: '', fuente: 'epayco' }))
+    expect(r.success).toBe(false)
+    expect((r as { error: string }).error).toBe('Ingresa la referencia del pago')
+    expect(estado.fixtures.cobros ?? []).toHaveLength(0)
+  })
+
+  it('la referencia escrita a mano se respeta, no se pisa con una generada', async () => {
+    const r = await agregarPagoFab(pago({ referencia: 'TRF-0001' }))
+    expect(r.success).toBe(true)
+    expect(cobroGuardado()?.external_ref).toBe('TRF-0001')
   })
 })
