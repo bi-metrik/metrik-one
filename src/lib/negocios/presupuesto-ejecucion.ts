@@ -433,3 +433,24 @@ export function agruparGastosPorCategoria(gastos: GastoDelNegocio[]): CategoriaG
 
   return [...porCategoria.values()].sort((a, b) => b.total - a.total)
 }
+
+/**
+ * El presupuesto de COSTO contra el cual se mide lo ejecutado.
+ *
+ * Sale de los rubros cuando los hay, porque esa es la única fuente que además permite
+ * abrir el gasto por categoría. Pero una cotización puede traer su costo cargado como
+ * total, sin desglose por ítem: es lo normal en obra, donde se cotiza contra un
+ * presupuesto armado afuera. Antes eso se leía como "no hay presupuesto", y un negocio
+ * con $123 millones presupuestados aparecía sin nada contra qué compararse.
+ *
+ * `undefined` significa que de verdad no hay presupuesto, no cero: una barra con
+ * denominador cero se pinta llena y se lee como sobrecosto total.
+ */
+export function presupuestoDeCosto(
+  rubros: RubroPresupuesto[],
+  costoTotalCotizacion: number | null | undefined,
+): number | undefined {
+  if (rubros.length > 0) return totalPresupuestado(rubros)
+  const total = costoTotalCotizacion ?? 0
+  return total > 0 ? total : undefined
+}
