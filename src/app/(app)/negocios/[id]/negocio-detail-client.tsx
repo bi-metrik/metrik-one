@@ -69,6 +69,8 @@ import BloqueAprobacion from './bloques/BloqueAprobacion'
 import BloqueCronograma from './bloques/BloqueCronograma'
 import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
 import BloqueEjecucion from './bloques/BloqueEjecucion'
+import BloqueMovimientos from './bloques/BloqueMovimientos'
+import BloqueResultado from './bloques/BloqueResultado'
 import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
 import BloqueFormulario from './bloques/BloqueFormulario'
@@ -1435,6 +1437,7 @@ function BloqueRenderer({
         // La ficha del cliente la completa quien atiende la etapa, con el mismo criterio
         // que los demas bloques operativos. Cambia el destino del dato, no el permiso.
       case 'cobros':
+      case 'movimientos':
       case 'documento':
       case 'formulario':
         // Operativo: subir documentos, generar formularios (010/1668) y registrar
@@ -1451,6 +1454,7 @@ function BloqueRenderer({
           ? 'editable'
           : 'visible'
       case 'resumen_financiero':
+      case 'resultado':
       case 'ejecucion':
       case 'historial':
         return 'visible'
@@ -1845,6 +1849,31 @@ function BloqueRenderer({
 
     case 'resumen_financiero':
       return <BloqueResumenFinanciero data={resumenFinanciero} />
+
+    // Movimientos + Resultado: el par que reemplaza a Cobros + Ejecución + Resumen en
+    // los workspaces que separaron la plata en "qué se movió" y "cómo va el negocio".
+    case 'movimientos':
+      return (
+        <BloqueMovimientos
+          cobros={cobros}
+          gastosPorCategoria={ejecucionData.gastosPorCategoria}
+          totalGastos={ejecucionData.totalGastos}
+          totalHoras={ejecucionData.totalHoras}
+          costoHoras={ejecucionData.costoHoras}
+          modo={modo}
+          registrarPagoEnabled={(bloque as { _forceReadOnly?: boolean })._forceReadOnly ? false : registrarPagoEnabled}
+          negocioFijado={negocioFijado}
+        />
+      )
+
+    case 'resultado':
+      return (
+        <BloqueResultado
+          data={resumenFinanciero}
+          presupuesto={ejecucionData}
+          hayEjecucion={ejecucionData.totalGastos > 0 || ejecucionData.totalHoras > 0}
+        />
+      )
 
     case 'ejecucion':
       return <BloqueEjecucion negocioId={negocioId} data={ejecucionData} />
