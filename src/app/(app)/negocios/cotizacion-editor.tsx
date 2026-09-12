@@ -453,6 +453,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const margenPropio = item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
             const itemMargen = linea?.margenAplicado ?? margenCotizacion
             const precioFijadoAMano = item.precio_manual === true || (costoLinea <= 0 && itemPrecio > 0)
+            // Cuándo esta línea tiene algo propio que contar. Si no, su precio es el
+            // reflejo del margen general y no aporta nada repetirlo aquí.
+            const lineaDecideSuPrecio = margenPropio || precioFijadoAMano
             const margenRealPct = margenRealDelItem(costoLinea, precioLinea)
             // Avisa, no bloquea. Un piso duro no sube el margen: enseña a escribir el
             // número que deja pasar la pantalla, y el dato que llega después no sirve.
@@ -633,21 +636,29 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           margen que la ingeniería, y con un único porcentaje para todo se
                           sale caro donde te comparan y barato donde no. */}
                       <div className="rounded-md border bg-muted/20 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
+                        {/* La línea solo enseña precio cuando ELLA decide algo: margen
+                            propio, o un precio viejo escrito a mano. Mientras el margen
+                            lo ponga la cotización, repetirlo en cada ítem es el mismo
+                            número doce veces y esconde cuál de las doce es la excepción. */}
+                        {lineaDecideSuPrecio ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] text-muted-foreground">
+                              {precioFijadoAMano
+                                ? 'Precio de esta línea, escrito a mano'
+                                : `Precio de esta línea: costo + ${itemMargen}% propio de la línea`}
+                            </span>
+                            <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
+                          </div>
+                        ) : (
                           <span className="text-[10px] text-muted-foreground">
-                            {precioFijadoAMano
-                              ? 'Precio de esta línea, escrito a mano'
-                              : itemMargen === 0
-                                ? 'Precio de esta línea: igual al costo, todavía sin margen'
-                                : `Precio de esta línea: costo + ${itemMargen}% ${margenPropio ? 'de esta línea' : 'de la cotización'}`}
+                            El margen de esta línea lo pone la cotización
                           </span>
-                          <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
-                        </div>
+                        )}
 
                         {/* El margen real solo se enseña cuando alguien puso un margen. Un
                             "0,0% · bajo" en naranja sobre una línea recién capturada no
                             avisa de nada: regaña por no haber llegado todavía. */}
-                        {margenRealPct !== null && costoLinea > 0 && (itemMargen !== 0 || precioFijadoAMano) && (
+                        {margenRealPct !== null && costoLinea > 0 && lineaDecideSuPrecio && itemMargen !== 0 && (
                           <p
                             className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
                             title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
@@ -1100,35 +1111,57 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               valor,
               costoTotal
             )
+            // De la factura a la plata que de verdad queda, renglón por renglón. Antes
+            // "tú recibes" repetía la cifra de "el cliente paga" porque contaba el IVA
+            // como ingreso propio, y de ahí salía un margen neto MAYOR al de la
+            // cotización, que es imposible.
             return (
               <div className="space-y-2">
-                <div className="rounded-lg bg-blue-50 p-3 text-center">
-                  <p className="text-[10px] font-medium text-blue-600">EL CLIENTE PAGA</p>
-                  <p className="text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
+                <div className="rounded-lg bg-blue-50 p-3">
+                  <p className="text-center text-[10px] font-medium text-blue-600">EL CLIENTE TE FACTURA Y PAGA</p>
+                  <p className="text-center text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
                   {resumen.iva > 0 && (
-                    <p className="text-[10px] text-blue-500">Base {formatCOP(valor)} + IVA {formatCOP(resumen.iva)}</p>
+                    <div className="mt-1 space-y-0.5 text-[10px] text-blue-600">
+                      <div className="flex justify-between"><span>Tu cotización</span><span className="tabular-nums">{formatCOP(valor)}</span></div>
+                      <div className="flex justify-between"><span>IVA que le cobras</span><span className="tabular-nums">+{formatCOP(resumen.iva)}</span></div>
+                    </div>
                   )}
                 </div>
-                {(resumen.retefuente_valor > 0 || resumen.reteica_valor > 0 || resumen.reteiva_valor > 0) && (
-                  <div className="rounded-lg bg-amber-50 p-3">
-                    <p className="mb-1 text-center text-[10px] font-medium text-amber-700">RETENCIONES</p>
-                    <div className="space-y-0.5 text-[10px] text-amber-600">
-                      {resumen.retefuente_valor > 0 && (
-                        <div className="flex justify-between"><span>ReteFuente ({resumen.retefuente_pct}%)</span><span>-{formatCOP(resumen.retefuente_valor)}</span></div>
-                      )}
-                      {resumen.reteica_valor > 0 && (
-                        <div className="flex justify-between"><span>ReteICA ({resumen.reteica_pct}‰)</span><span>-{formatCOP(resumen.reteica_valor)}</span></div>
-                      )}
-                      {resumen.reteiva_valor > 0 && (
-                        <div className="flex justify-between"><span>ReteIVA ({resumen.reteiva_pct}%)</span><span>-{formatCOP(resumen.reteiva_valor)}</span></div>
-                      )}
+
+                <div className="rounded-lg bg-amber-50 p-3">
+                  <p className="mb-1 text-center text-[10px] font-medium text-amber-700">DE ESO, NO TODO ES TUYO</p>
+                  <div className="space-y-0.5 text-[10px] text-amber-700">
+                    {resumen.iva_trasladado > 0 && (
+                      <div className="flex justify-between">
+                        <span>IVA: se lo entregas a la DIAN</span>
+                        <span className="tabular-nums">-{formatCOP(resumen.iva_trasladado)}</span>
+                      </div>
+                    )}
+                    {resumen.retefuente_valor > 0 && (
+                      <div className="flex justify-between"><span>ReteFuente que te descuentan ({resumen.retefuente_pct}%)</span><span className="tabular-nums">-{formatCOP(resumen.retefuente_valor)}</span></div>
+                    )}
+                    {resumen.reteica_valor > 0 && (
+                      <div className="flex justify-between"><span>ReteICA que te descuentan ({resumen.reteica_pct}‰)</span><span className="tabular-nums">-{formatCOP(resumen.reteica_valor)}</span></div>
+                    )}
+                    {resumen.iva_trasladado === 0 && resumen.retefuente_valor === 0 && resumen.reteica_valor === 0 && (
+                      <p className="text-center">Sin IVA ni retenciones: te entra completo</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-green-50 p-3">
+                  <p className="text-center text-[10px] font-medium text-green-600">TE QUEDA EN CAJA</p>
+                  <p className="text-center text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
+                  <div className="mt-1 space-y-0.5 text-[10px] text-green-700">
+                    <div className="flex justify-between"><span>Menos lo que te cuestan los ítems</span><span className="tabular-nums">-{formatCOP(costoTotal)}</span></div>
+                    {resumen.seguridad_social > 0 && (
+                      <div className="flex justify-between"><span>Menos tu seguridad social</span><span className="tabular-nums">-{formatCOP(resumen.seguridad_social)}</span></div>
+                    )}
+                    <div className="flex justify-between border-t border-green-200 pt-0.5 font-semibold">
+                      <span>Te ganas</span>
+                      <span className="tabular-nums">{formatCOP(resumen.ganancia_real)} · {resumen.margen_real_neto_pct}%</span>
                     </div>
                   </div>
-                )}
-                <div className="rounded-lg bg-green-50 p-3 text-center">
-                  <p className="text-[10px] font-medium text-green-600">TÚ RECIBES</p>
-                  <p className="text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
-                  <p className="text-[10px] text-green-500">Margen real neto: {resumen.margen_real_neto_pct}%</p>
                 </div>
               </div>
             )
@@ -1278,7 +1311,17 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
           en su propia fila, así que el número de aquí no las alcanza. */}
       {editable && (
         <div className="flex items-center justify-between gap-2 border-t pt-2">
-          <label className="text-xs font-medium text-muted-foreground">{nombreDelMargen(convencionMargen)} de la cotización</label>
+          {/* Se llama "Margen general" porque es como lo nombra quien cotiza. El
+              matiz de la convención no se pierde: va en el tooltip, y el margen
+              real del negocio queda impreso abajo, al lado del precio de venta. */}
+          <label
+            className="text-xs font-medium text-muted-foreground"
+            title={convencionMargen === 'sobre_venta'
+              ? 'Se calcula sobre la venta: el número que escribes ES el margen real.'
+              : `Se calcula como ${nombreDelMargen(convencionMargen).toLowerCase()} sobre el costo, así que el margen real sale un poco por debajo. Lo ves abajo, junto al precio de venta.`}
+          >
+            Margen general
+          </label>
           <div className="relative w-24">
             <input
               key={`margen-cot-${margenPct}`}
