@@ -6,6 +6,7 @@ import {
   registrarPagoEnNegocio,
   type AgregarPagoInput,
 } from '@/lib/actions/conciliacion-actions'
+import { archivarSoporte, type SoporteSubidoInput } from '@/lib/cobros/soporte-pago'
 
 // Cast a untyped para columnas no presentes en database.ts (config_extra).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +92,9 @@ export async function ctxFabPago(): Promise<
 export interface ContextoPagoFab {
   negocios: NegocioParaPagoFab[]
   cobraPorEpayco: boolean
+  /** El modal lo necesita para el path del comprobante en Storage: la policy del
+   *  bucket exige que la primera carpeta sea el workspace. */
+  workspaceId: string | null
   error?: string
 }
 
@@ -110,7 +114,7 @@ export interface NegocioParaPagoFab {
  */
 export async function getNegociosParaPagoFab(): Promise<ContextoPagoFab> {
   const ctx = await ctxFabPago()
-  if (!ctx.ok) return { negocios: [], cobraPorEpayco: false, error: ctx.error }
+  if (!ctx.ok) return { negocios: [], cobraPorEpayco: false, workspaceId: null, error: ctx.error }
   const { supabase, workspaceId } = ctx
   const cobraPorEpayco = await workspaceCobraPorEpayco(supabase, workspaceId)
 
@@ -133,7 +137,7 @@ export async function getNegociosParaPagoFab(): Promise<ContextoPagoFab> {
     empresa: n.empresas?.nombre ?? null,
   }))
 
-  return { negocios, cobraPorEpayco }
+  return { negocios, cobraPorEpayco, workspaceId }
 }
 
 /**
@@ -171,7 +175,7 @@ export async function negocioPuedeRecibirCobro(
  * ninguna barrera de control — solo desacopla el PERMISO de STAGE_TO_AREA.
  */
 export async function agregarPagoFab(
-  input: AgregarPagoInput,
+  input: AgregarPagoInput & { soporte_subido?: SoporteSubidoInput },
 ): Promise<
   | { success: true }
   | { success: false; error: string; code?: 'epayco_no_aprobada' | 'referencia_duplicada'; negocio_existente?: { codigo: string | null } }
@@ -179,5 +183,23 @@ export async function agregarPagoFab(
   const ctx = await ctxFabPago()
   if (!ctx.ok) return { success: false, error: ctx.error }
   const { supabase, workspaceId, staffId } = ctx
-  return registrarPagoEnNegocio(supabase, workspaceId, staffId, input, 'fab')
+
+  // El comprobante es OPCIONAL aquí, al revés que en el panel de pagos externos: este
+  // modal registra ingresos que entran por transferencia, efectivo o cheque, y exigir
+  // el pantallazo para poder anotar la plata deja el ingreso sin registrar, que es
+  // peor que registrarlo sin foto. Si viene, viaja en el mismo INSERT que el cobro.
+  const { soporte_subido, ...pago } = input
+  let soporte: Record<string, unknown> | null = null
+  if (soporte_subido?.storage_path) {
+    soporte = await archivarSoporte(
+      supabase, workspaceId, input.negocio_id, soporte_subido, null, staffId ?? '',
+    )
+    // Si el archivado falla, el pago igual se registra: perder el ingreso porque el
+    // adjunto no se pudo guardar sería cambiar un problema chico por uno grande.
+    if (!soporte) console.warn('[fab-pago] el comprobante no se pudo archivar')
+  }
+
+  return registrarPagoEnNegocio(
+    supabase, workspaceId, staffId, { ...pago, soporte: soporte ?? pago.soporte }, 'fab',
+  )
 }
