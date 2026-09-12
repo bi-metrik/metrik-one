@@ -62,6 +62,7 @@
 - ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — diez (10) años; el control cruzado son 5 superficies (#629). ⚠️ Su parte de «ningún CI lo vigila» CADUCÓ
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 - [Soporte de listas para el operador](project_soporte_listas_operator.md) — #631 mergeado: `/compliance/listas` NO tiene gate por rol (la ruta era el único candado) y `contador` sigue fuera a propósito
+- ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler y el audio se clasifica a propósito
 
 ## Referencias
 
@@ -81,6 +82,7 @@
 - [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
 - ⚠️ [`\b` de JS es ASCII](reference_regex_js_b_ascii.md) — "qué" con tilde no cierra palabra y el regex salta al siguiente "que"; lookarounds `\p{L}` con `u`
 - [Probar un route handler con vitest](reference_probar_route_handler_vitest.md) — el doble de Supabase debe APLICAR los `.eq()`; un `route.ts` no puede exportar helpers; `params` es Promise
+- ⚠️ [Probar un handler del bot de WhatsApp](reference_probar_handler_wa_bot.md) — NO se colecta (`wa-parse.ts` lee `Deno.env` al importarse); la sonda de un minuto y la salida por módulo puro
 - ⚠️ [Verificar contra el CSS compilado](reference_verificar_css_compilado.md) — un `@theme` mal declarado deja cada clase sin efecto y los cuatro checks salen verdes; y el `/15` que parece perdido está en un `@supports`
 - [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones; `hourCycle:'h23'` va igual aunque el riesgo no se reproduzca en node
 - ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64; el vector oficial es la unica prueba que vale, y la ventana de 5 min descansa en un supuesto
