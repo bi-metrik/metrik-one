@@ -268,8 +268,37 @@ describe('recalcularTotales — la convención vive en la cotización', () => {
     sembrar([{ id: 'i1', margen_porcentaje: 15, cantidad: 2 }], [{ item_id: 'i1', valor_total: 1_000_000 }])
     cotizacion().convencion_margen = 'sobre_venta'
     await recalcularTotales(COT)
-    // 2.000.000 / 0,85 = 2.352.941,17. El redondeo es uno solo, al total, no uno por
-    // ítem: redondear cada línea y después sumar corre el total sin razón.
-    expect(cotizacion().valor_total).toBe(2_352_941)
+    // 2.000.000 / 0,85 = 2.352.941,17. El redondeo se hace al PRECIO UNITARIO, que es
+    // la cifra que se imprime: 1.176.471 × 2 = 2.352.942. Redondear el total exacto
+    // daría 2.352.941 y la columna del PDF sumaría un peso más que el "TOTAL NETO".
+    expect(item('i1').precio_venta).toBe(1_176_471)
+    expect(cotizacion().valor_total).toBe(2_352_942)
+  })
+
+  // EL CASO QUE IMPORTA: el cliente recibe un PDF con una columna de valores y un
+  // total, y suma la columna. En COT-2026-0003 de Termotech los 12 ítems sumaban
+  // 153.655.471 contra un "TOTAL NETO" de 153.655.469: dos pesos, pero un documento
+  // que no cuadra consigo mismo. Un solo ítem no lo destapa; hacen falta varios con
+  // decimales que se acumulen en la misma dirección.
+  it('la columna que ve el cliente suma EXACTAMENTE el total de la cotización', async () => {
+    sembrar(
+      [
+        { id: 'i1', margen_porcentaje: 23.99, cantidad: 1 },
+        { id: 'i2', margen_porcentaje: 23.99, cantidad: 3 },
+        { id: 'i3', margen_porcentaje: 23.99, cantidad: 7 },
+      ],
+      [
+        { item_id: 'i1', valor_total: 12_495_000 },
+        { item_id: 'i2', valor_total: 885_289 },
+        { item_id: 'i3', valor_total: 615_852 },
+      ],
+    )
+    await recalcularTotales(COT)
+
+    const sumaDeLaColumna = ['i1', 'i2', 'i3'].reduce((s, id) => {
+      const fila = item(id) as { precio_venta: number; cantidad?: number }
+      return s + fila.precio_venta * (fila.cantidad ?? 1)
+    }, 0)
+    expect(sumaDeLaColumna).toBe(cotizacion().valor_total)
   })
 })

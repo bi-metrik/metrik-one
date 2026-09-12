@@ -40,7 +40,15 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
   const hasItemDiscounts = itemsWithTotals.some(i => i.descuento_porcentaje > 0)
   const subtotalItems = itemsWithTotals.reduce((sum, i) => sum + i.lineTotal, 0)
   const totalDescuentoItems = itemsWithTotals.reduce((sum, i) => sum + i.descuento_valor, 0)
-  const baseGravable = cotizacion.valor_total - (cotizacion.descuento_valor ?? 0)
+  // Lo que suma la columna que ve el cliente. Es también el subtotal ANTES del
+  // descuento comercial de cabecera, y cuadra con la plataforma porque
+  // `recalcularTotales` redondea el precio de cada línea al peso por unidad.
+  const subtotalImpreso = itemsWithTotals.reduce((sum, i) => sum + i.neto, 0)
+  // `valor_total` YA trae el descuento comercial aplicado: `recalcularTotales` guarda
+  // ahí el precio final de la cascada y `descuento_valor` al lado como el monto.
+  // Restarlo otra vez enseñaba una base más baja que la del sistema y liquidaba el
+  // IVA sobre ella. Sin descuento no se notaba, por eso llevaba tiempo ahí.
+  const baseGravable = cotizacion.valor_total
   const ivaAmount = fiscal?.iva ?? 0
   const totalFinal = fiscal?.totalBruto ?? (baseGravable + ivaAmount)
 
@@ -251,7 +259,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
             <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>Subtotal</Text>
-            <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{fmt(cotizacion.valor_total)}</Text>
+            <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{fmt(subtotalImpreso)}</Text>
           </View>
 
           {(cotizacion.descuento_valor ?? 0) > 0 && (

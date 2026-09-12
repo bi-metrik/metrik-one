@@ -177,10 +177,13 @@ export default function CotizacionTermotechPDF({
     return { ...item, cantidad, neto: bruto - descuento }
   })
 
-  // El subtotal del capítulo es el mismo valor sobre el que la plataforma liquida el
-  // IVA: `valor_total` menos el descuento de cabecera. Recalcularlo aquí a partir de
-  // las filas dejaría el PDF diciendo un número y el sistema cobrando otro.
-  const subtotal = cotizacion.valor_total - (cotizacion.descuento_valor ?? 0)
+  // El subtotal ES la suma de las filas impresas. El cliente suma la columna: un
+  // documento que no cuadra consigo mismo no se defiende diciendo que el sistema
+  // calculó otra cosa.
+  //
+  // No hay desfase con la plataforma: `recalcularTotales` cuadra el precio de cada
+  // línea al peso por unidad, así que la suma de la columna ES `valor_total`.
+  const subtotal = conCantidad.reduce((s, item) => s + item.neto, 0)
   const iva = fiscal?.iva ?? 0
   const totalNeto = fiscal?.totalBruto ?? subtotal + iva
   const ivaPorcentaje = subtotal > 0 ? Math.round((iva / subtotal) * 100) : 0
