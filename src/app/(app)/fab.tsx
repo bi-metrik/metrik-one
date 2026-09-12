@@ -22,6 +22,8 @@ interface FABProps {
   role: string
   /** Muestra la acción "Registrar pago" (opt-in por workspace, flag modules.fab_registrar_pago). */
   registrarPagoEnabled?: boolean
+  /** `workspaces.modules`, para las acciones que son opt-in por workspace. */
+  modules?: Record<string, boolean | undefined>
 }
 
 const STORAGE_KEY = 'metrik-timer-v2'
@@ -42,7 +44,7 @@ const DEFAULT_TIMER: TimerLocal = {
 
 // ── FAB Component ─────────────────────────────────────
 
-export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
+export default function FAB({ role, registrarPagoEnabled = false, modules }: FABProps) {
   const [open, setOpen] = useState(false)
   const [timerPanel, setTimerPanel] = useState(false)
   const [pagoModal, setPagoModal] = useState(false)
@@ -77,7 +79,7 @@ export default function FAB({ role, registrarPagoEnabled = false }: FABProps) {
   const [isPending, startTransition] = useTransition()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const visibleActions = accionesVisiblesFab({ role, registrarPagoEnabled, hayContexto: contextEntityId !== null })
+  const visibleActions = accionesVisiblesFab({ role, registrarPagoEnabled, modules, hayContexto: contextEntityId !== null })
 
   // ── Hydrate timer from server ──────────────────────
 

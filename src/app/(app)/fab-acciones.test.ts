@@ -38,11 +38,15 @@ function pintar(opts: {
   contextoCerrado: boolean
   registrarPagoEnabled?: boolean
   hayContexto?: boolean
+  modules?: Record<string, boolean>
 }): { html: string; acciones: AccionFab[] } {
   const acciones = accionesVisiblesFab({
     role: opts.role,
     registrarPagoEnabled: opts.registrarPagoEnabled ?? true,
     hayContexto: opts.hayContexto ?? true,
+    // El default de las pruebas del CIERRE es "todo encendido": lo que miden es qué
+    // se apaga por estar sobre un negocio cerrado, no qué módulos tiene el workspace.
+    modules: opts.modules ?? { fab_registrar_cobro: true, fab_registrar_horas: true },
   })
   const html = renderToStaticMarkup(
     React.createElement(MenuAccionesFab, {
@@ -62,11 +66,11 @@ function botonDe(html: string, label: string): string {
   return trozo
 }
 
-const ALIMENTAN = ['Registrar horas', 'Registrar gasto', 'Programar cobro', 'Registrar pago']
+const ALIMENTAN = ['Registrar horas', 'Registrar gasto', 'Registrar pago']
 const NO_ALIMENTAN = ['Nuevo negocio']
 
 describe('FAB parado sobre un negocio cerrado', () => {
-  it('las cuatro que le cargan información al negocio salen deshabilitadas', () => {
+  it('las que le cargan información al negocio salen deshabilitadas', () => {
     const { html } = pintar({ role: 'owner', contextoCerrado: true })
     for (const label of ALIMENTAN) {
       expect(botonDe(html, label), label).toContain('disabled')
@@ -117,8 +121,46 @@ describe('lo que el cierre NO toca', () => {
     }
   })
 
-  it('"Programar cobro" sigue siendo solo-contexto: fuera de un negocio no aparece', () => {
-    const { acciones } = pintar({ role: 'owner', contextoCerrado: false, hayContexto: false })
+})
+
+/**
+ * El FAB es la puerta más visible del producto: un botón que este cliente no usa no es
+ * neutro, le quita el sitio a los que sí. Por eso "Registrar cobro" y "Registrar horas"
+ * dejaron de venir encendidos de fábrica y pasaron a ser capacidad declarada del
+ * workspace, igual que "Registrar pago".
+ *
+ * MUTACIÓN MEDIDA el 2026-09-12: borrar el `a.modulo === undefined || …` del filtro
+ * pone las dos primeras en rojo.
+ */
+describe('acciones que el workspace tiene que declarar', () => {
+  it('un workspace sin los flags solo ve gasto, negocio nuevo y pago', () => {
+    const { acciones } = pintar({ role: 'owner', contextoCerrado: false, modules: {} })
+    expect(acciones.map((a) => a.label)).toEqual([
+      'Registrar gasto',
+      'Nuevo negocio',
+      'Registrar pago',
+    ])
+  })
+
+  it('cada flag enciende SOLO su acción', () => {
+    const soloCobro = pintar({
+      role: 'owner', contextoCerrado: false, modules: { fab_registrar_cobro: true },
+    })
+    expect(soloCobro.acciones.map((a) => a.label)).toContain('Registrar cobro')
+    expect(soloCobro.acciones.map((a) => a.label)).not.toContain('Registrar horas')
+
+    const soloHoras = pintar({
+      role: 'owner', contextoCerrado: false, modules: { fab_registrar_horas: true },
+    })
+    expect(soloHoras.acciones.map((a) => a.label)).toContain('Registrar horas')
+    expect(soloHoras.acciones.map((a) => a.label)).not.toContain('Registrar cobro')
+  })
+
+  it('"Programar cobro" ya no existe: su destino (?action=factura) no lo leía nadie', () => {
+    const { acciones } = pintar({
+      role: 'owner', contextoCerrado: false,
+      modules: { fab_registrar_cobro: true, fab_registrar_horas: true },
+    })
     expect(acciones.map((a) => a.label)).not.toContain('Programar cobro')
   })
 })

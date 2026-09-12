@@ -1,4 +1,4 @@
-import { Flame, Receipt, Clock, Landmark, Banknote, FileText, Wallet } from 'lucide-react'
+import { Flame, Receipt, Clock, Landmark, Banknote, Wallet } from 'lucide-react'
 import { FEATURES } from '@/lib/feature-flags'
 
 /**
@@ -17,6 +17,12 @@ export interface AccionFab {
   href?: string
   action?: string
   feature?: keyof typeof FEATURES
+  /**
+   * Flag de `workspaces.modules` que enciende esta acción. Sin el flag no se pinta:
+   * el FAB es la puerta más visible del producto y un botón que el cliente no usa
+   * no es neutro, ocupa el lugar de los que sí.
+   */
+  modulo?: string
   contextAware?: boolean
   /** Solo visible parado sobre un negocio. */
   contextOnly?: boolean
@@ -34,12 +40,14 @@ export const FAB_ACTIONS: AccionFab[] = [
     icon: Banknote,
     href: '/nuevo/cobro',
     roles: ['owner', 'admin'],
+    modulo: 'fab_registrar_cobro',
   },
   {
     label: 'Registrar horas',
     icon: Clock,
     href: '/nuevo/horas',
     roles: ['owner', 'admin', 'operator', 'supervisor'],
+    modulo: 'fab_registrar_horas',
     contextAware: true,
     alimentaElNegocio: true,
   },
@@ -56,14 +64,6 @@ export const FAB_ACTIONS: AccionFab[] = [
     icon: Flame,
     href: '/negocios/nuevo',
     roles: ['owner', 'admin', 'supervisor', 'operator'],
-  },
-  {
-    label: 'Programar cobro',
-    icon: FileText,
-    roles: ['owner', 'admin'],
-    action: 'factura',
-    contextOnly: true,
-    alimentaElNegocio: true,
   },
   {
     label: 'Actualizar saldo',
@@ -93,13 +93,17 @@ export function accionesVisiblesFab(opts: {
   role: string
   registrarPagoEnabled?: boolean
   hayContexto: boolean
+  /** `workspaces.modules`. Lo que no venga aquí se lee como apagado. */
+  modules?: Record<string, boolean | undefined>
 }): AccionFab[] {
+  const modules = opts.modules ?? {}
   const todas = opts.registrarPagoEnabled
     ? [...FAB_ACTIONS, ACCION_REGISTRAR_PAGO]
     : FAB_ACTIONS
   return todas.filter((a) =>
     a.roles.includes(opts.role) &&
     (a.feature === undefined || FEATURES[a.feature]) &&
+    (a.modulo === undefined || modules[a.modulo] === true) &&
     (!a.contextOnly || opts.hayContexto),
   )
 }
