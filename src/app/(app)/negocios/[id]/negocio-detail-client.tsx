@@ -46,6 +46,8 @@ import CierreNegocioDialog from './cierre-negocio-dialog'
 // Bloques renderers
 import BloqueEquipo from './bloques/BloqueEquipo'
 import BloqueDatos from './bloques/BloqueDatos'
+import BloqueContacto from './bloques/BloqueContacto'
+import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import type { DatosField } from './bloques/BloqueDatos'
 import BloqueChecklist from './bloques/BloqueChecklist'
 import BloqueChecklistSoporte from './bloques/BloqueChecklistSoporte'
@@ -1429,6 +1431,9 @@ function BloqueRenderer({
       case 'aprobacion':
         // Aprobar/decidir sigue siendo gerencial (owner/admin).
         return GERENCIAL.includes(userRole) ? 'editable' : 'visible'
+      case 'contacto':
+        // La ficha del cliente la completa quien atiende la etapa, con el mismo criterio
+        // que los demas bloques operativos. Cambia el destino del dato, no el permiso.
       case 'cobros':
       case 'documento':
       case 'formulario':
@@ -1827,6 +1832,16 @@ function BloqueRenderer({
         />
       )
     }
+
+    case 'contacto':
+      return (
+        <BloqueContacto
+          negocioBloqueId={instanciaId}
+          modo={modo}
+          variante={configExtra.variante === 'autorizacion' ? 'autorizacion' : 'campos'}
+          campos={(configExtra.campos ?? []) as CampoContacto[]}
+        />
+      )
 
     case 'resumen_financiero':
       return <BloqueResumenFinanciero data={resumenFinanciero} />

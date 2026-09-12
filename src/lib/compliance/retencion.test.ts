@@ -140,6 +140,13 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     razon:
       'dato de demostración: la vigencia de un dominio comprado («Dominio altiplano.co — 2 años»).',
   },
+  'src/app/(app)/negocios/[id]/bloques/contacto-actions.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'antigüedad de un hallazgo del diagnóstico de Trappvel («el campo de autorización de ' +
+      'Airtable lleva dos años al 0% de llenado»), que explica por qué la autorización se ' +
+      'registra donde se consulta. No hay plazo de conservación en este archivo.',
+  },
 };
 
 const NUMEROS_EN_LETRAS: Record<string, number> = {
