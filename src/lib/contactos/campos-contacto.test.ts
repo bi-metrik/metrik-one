@@ -24,6 +24,14 @@ describe('esCampoNativo', () => {
     expect(esCampoNativo('telefono')).toBe(true)
     expect(esCampoNativo('destinos_preferidos')).toBe(false)
   })
+
+  it('segmento y rol NO son escribibles: son el embudo y el rol de venta, con CHECK propio', () => {
+    // Un "leisure / corporativo" configurado sobre `segmento` rebota contra
+    // `contactos_segmento_check`, y si pasara estaria moviendo al contacto de etapa
+    // del funnel desde dentro de un viaje.
+    expect(esCampoNativo('segmento')).toBe(false)
+    expect(esCampoNativo('rol')).toBe(false)
+  })
 })
 
 describe('leerCampo', () => {
