@@ -376,8 +376,13 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [loadingNegocios, setLoadingNegocios] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  // `null` mientras carga: el formulario no puede decidir si pedir una referencia
+  // ePayco o una fuente libre antes de saber si el workspace tiene pasarela.
+  const [cobraPorEpayco, setCobraPorEpayco] = useState<boolean | null>(null)
+
   const [negocioId, setNegocioId] = useState('')
   const [fuente, setFuente] = useState<'epayco' | 'davivienda' | 'otra'>('epayco')
+  const [fuenteNombre, setFuenteNombre] = useState('')
   const [referencia, setReferencia] = useState('')
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState('')
@@ -399,7 +404,9 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [negocioSinHonorario, setNegocioSinHonorario] = useState<string | null>(null)
   const faltaHonorario = negocioSinHonorario !== null && negocioSinHonorario === negocioId
 
-  const esEpayco = fuente === 'epayco'
+  // Sin pasarela en el workspace no se enciende ninguna rama de ePayco: ni la
+  // verificación contra la API, ni la referencia numérica, ni el bloqueo del botón.
+  const esEpayco = cobraPorEpayco === true && fuente === 'epayco'
 
   useEffect(() => {
     let cancel = false
@@ -407,6 +414,10 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
       if (cancel) return
       if (res.error) setLoadError(res.error)
       else setNegocios(res.negocios)
+      setCobraPorEpayco(res.cobraPorEpayco)
+      // Sin pasarela la fuente nace libre: 'epayco' dejaría el formulario pidiendo
+      // una ref_payco que en ese workspace no existe.
+      if (!res.cobraPorEpayco) setFuente('otra')
       setLoadingNegocios(false)
     })
     return () => { cancel = true }
@@ -457,13 +468,14 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
     if (faltaHonorario) return toast.error(MENSAJE_HONORARIO_PENDIENTE)
     if (!referencia.trim()) return toast.error('Ingresa la referencia del pago')
     if (esEpayco && epaycoStatus !== 'success') return toast.error('Verifica la referencia ePayco antes de registrar')
+    if (!esEpayco && !fuenteNombre.trim()) return toast.error('Indica de dónde entró el pago')
     if (!esEpayco && (!Number(monto) || Number(monto) <= 0)) return toast.error('Ingresa el monto del pago')
 
     startTransition(async () => {
       const res = await agregarPagoFab({
         negocio_id: negocioId,
         fuente,
-        fuente_nombre: undefined,
+        fuente_nombre: esEpayco ? undefined : fuenteNombre.trim(),
         referencia: referencia.trim(),
         monto: esEpayco ? undefined : Number(monto),
         fecha: fecha || undefined,
@@ -519,7 +531,23 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
             </div>
           )}
 
-          <PagoField label="Fuente del pago">
+          {/* La fuente depende de por dónde cobra el workspace. Con pasarela, ePayco
+              y su verificación contra la API; sin pasarela, el nombre de la cuenta o
+              el medio por el que entró la plata, escrito por quien registra. */}
+          <PagoField label={cobraPorEpayco === false ? '¿De dónde entró el pago?' : 'Fuente del pago'}>
+            {cobraPorEpayco === false ? (
+              <>
+                <input
+                  value={fuenteNombre}
+                  onChange={(e) => setFuenteNombre(e.target.value)}
+                  placeholder="Transferencia Bancolombia, efectivo, cheque…"
+                  className="w-full rounded-md border px-2.5 py-1.5 text-[13px] outline-none"
+                  style={{ borderColor: '#E5E7EB' }}
+                />
+                <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Queda registrado como el ingreso de este negocio.</p>
+              </>
+            ) : (
+              <>
             <div className="grid grid-cols-1 gap-2">
               {(['epayco'] as const).map((f) => (
                 <button
@@ -543,6 +571,8 @@ function RegistrarPagoModal({ onClose, onDone }: { onClose: () => void; onDone: 
               ))}
             </div>
             <p className="mt-1 text-[11px]" style={{ color: '#9CA3AF' }}>Los comerciales registran solo pagos por ePayco.</p>
+              </>
+            )}
           </PagoField>
 
           <PagoField label={esEpayco ? 'Referencia ePayco (ref_payco)' : 'Referencia / comprobante'}>

@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { randomUUID } from 'crypto'
 import { consultarTransaccionEpayco } from '@/lib/epayco'
+import { workspaceCobraPorEpayco } from '@/lib/actions/fab-pago-actions'
 import { ctxFabPago } from '@/lib/actions/fab-pago-actions'
 import { escalonesDelNegocio, imputarPago } from '@/lib/upme/imputacion-pago'
 import {
@@ -1287,12 +1288,20 @@ export async function registrarPagoEnNegocio(
   const negocioId = input.negocio_id
   if (!negocioId) return { success: false, error: 'Elige el negocio al que se asigna el pago' }
 
-  // Un pago que NO entra por ePayco (Davivienda u otra cuenta) es un registro
-  // EXCEPCIONAL y solo lo hace el área financiera. El comercial sigue registrando
-  // sus pagos ePayco como siempre (esa rama no cambia). El chequeo vive aquí, en la
-  // vía única de escritura, y se resuelve desde la sesión: así ningún caller —
-  // presente o futuro — puede registrar un pago fuera de ePayco sin ser financiera.
-  if (input.fuente !== 'epayco' && !(await esAreaFinanciera())) {
+  // Un pago que NO entra por ePayco es un registro EXCEPCIONAL y solo lo hace el
+  // área financiera. El comercial sigue registrando sus pagos ePayco como siempre
+  // (esa rama no cambia). El chequeo vive aquí, en la vía única de escritura, y se
+  // resuelve desde la sesión: así ningún caller puede saltárselo.
+  //
+  // La regla solo tiene sentido donde existe la pasarela. En un workspace que cobra
+  // por transferencia y consignación, TODO pago es "fuera de ePayco": aplicarla ahí
+  // no protege nada, apaga el módulo entero. Quién puede registrar un pago en ese
+  // caso lo decide `rolHabilitadoParaPagoFab`, que es el guard de ese camino.
+  if (
+    input.fuente !== 'epayco' &&
+    (await workspaceCobraPorEpayco(supabase, workspaceId)) &&
+    !(await esAreaFinanciera())
+  ) {
     return {
       success: false,
       error: 'Solo el área financiera puede registrar pagos que no entraron por ePayco.',

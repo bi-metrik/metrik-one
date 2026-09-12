@@ -43,6 +43,29 @@ function rolHabilitadoParaPagoFab(role: Role, areas: Area[]): boolean {
   return false
 }
 
+/**
+ * ¿Este workspace cobra por ePayco?
+ *
+ * Es una capacidad del workspace, no una verdad del producto. SOENA cobra por la
+ * pasarela y toda su operación de cobro se apoya en verificar la referencia contra
+ * ePayco. Termotech cobra por transferencia y consignación: pedirle una `ref_payco`
+ * dejaba el módulo de pagos inservible, con cero cobros registrados desde que se
+ * activó.
+ *
+ * Lee `modules.fab_pago_epayco`. Ausente = no, que es lo correcto para todo
+ * workspace nuevo: la pasarela se habilita cuando existe, no por defecto.
+ */
+export async function workspaceCobraPorEpayco(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('workspaces').select('modules').eq('id', workspaceId).maybeSingle()
+  const modules = (data?.modules ?? {}) as Record<string, boolean>
+  return modules.fab_pago_epayco === true
+}
+
 export async function ctxFabPago(): Promise<
   | { ok: true; supabase: unknown; workspaceId: string; staffId: string | null }
   | { ok: false; error: string }
@@ -55,6 +78,20 @@ export async function ctxFabPago(): Promise<
     return { ok: false, error: 'Tu rol no puede registrar pagos.' }
   }
   return { ok: true, supabase, workspaceId, staffId }
+}
+
+/**
+ * Lo que el modal de pago necesita saber del workspace antes de pintar el
+ * formulario: los negocios, y si hay pasarela contra la cual verificar.
+ *
+ * Va en la misma llamada que ya hacía el modal para traer los negocios. Una
+ * consulta aparte solo para un booleano abriría la ventana en la que el
+ * formulario se pinta con la fuente equivocada.
+ */
+export interface ContextoPagoFab {
+  negocios: NegocioParaPagoFab[]
+  cobraPorEpayco: boolean
+  error?: string
 }
 
 /** Negocio elegible para registrar un pago desde el FAB. */
@@ -71,13 +108,11 @@ export interface NegocioParaPagoFab {
  * recibe el pago puede registrarlo aunque el negocio esté en ejecución/cobro de
  * otra área. Guard por rol vía `ctxFabPago`.
  */
-export async function getNegociosParaPagoFab(): Promise<{
-  negocios: NegocioParaPagoFab[]
-  error?: string
-}> {
+export async function getNegociosParaPagoFab(): Promise<ContextoPagoFab> {
   const ctx = await ctxFabPago()
-  if (!ctx.ok) return { negocios: [], error: ctx.error }
+  if (!ctx.ok) return { negocios: [], cobraPorEpayco: false, error: ctx.error }
   const { supabase, workspaceId } = ctx
+  const cobraPorEpayco = await workspaceCobraPorEpayco(supabase, workspaceId)
 
   const { data: raw } = await db(supabase)
     .from('negocios')
@@ -98,7 +133,7 @@ export async function getNegociosParaPagoFab(): Promise<{
     empresa: n.empresas?.nombre ?? null,
   }))
 
-  return { negocios }
+  return { negocios, cobraPorEpayco }
 }
 
 /**
