@@ -20,6 +20,11 @@ export const BUCKET_ARCHIVOS = 'one-documentos'
 /** Endpoint que valida sesión + workspace, firma por 5 minutos y redirige. */
 export const RUTA_ABRIR_ARCHIVO = '/api/archivos/abrir'
 
+/** Vista del repositorio de archivos de un negocio (reemplaza la carpeta de Drive). */
+export function rutaRepositorioNegocio(negocioId: string): string {
+  return `/negocios/${negocioId}/archivos`
+}
+
 const CARPETA_NEGOCIOS = 'negocios'
 
 /**

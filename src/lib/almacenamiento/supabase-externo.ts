@@ -28,12 +28,14 @@ import { configAlmacenamiento } from './proveedor'
 import { ErrorAlmacenamiento } from './config'
 import {
   BUCKET_ARCHIVOS,
+  CARPETA_PENDIENTES,
   construirReferencia,
   negocioDeRuta,
   parsearReferencia,
   prefijoNegocio,
   rutaArchivoNegocio,
 } from './referencia'
+import type { ArchivoListado } from './repositorio'
 
 export const TABLA_INVENTARIO = 'archivos_one'
 
@@ -192,6 +194,69 @@ export class AlmacenamientoSupabaseExterno {
       throw new Error(`No se pudo leer el archivo (${this.slug}): ${error?.message ?? 'sin datos'}`)
     }
     return { buffer: Buffer.from(await data.arrayBuffer()), mime: data.type || null }
+  }
+
+  /**
+   * Todo lo que hay bajo `negocios/<id>/`, recorriendo subcarpetas. Lee de Storage y no
+   * de `archivos_one`: el repositorio tiene que funcionar aunque falte el inventario.
+   * Las subidas pendientes (`_pendientes/`) no se recorren.
+   *
+   * Topes para que un negocio con miles de objetos no tumbe la página: se corta y se
+   * avisa con `truncado`, nunca se devuelve una lista corta en silencio.
+   */
+  async listarNegocio(negocioId: string): Promise<{ archivos: ArchivoListado[]; truncado: boolean }> {
+    const MAX_ARCHIVOS = 1000
+    const MAX_PROFUNDIDAD = 6
+    const POR_PAGINA = 100
+
+    const archivos: ArchivoListado[] = []
+    const raiz = prefijoNegocio(negocioId).replace(/\/$/, '')
+    const pendientes: Array<{ dir: string; profundidad: number }> = [{ dir: raiz, profundidad: 0 }]
+    let truncado = false
+
+    while (pendientes.length > 0) {
+      const { dir, profundidad } = pendientes.shift()!
+      for (let offset = 0; ; offset += POR_PAGINA) {
+        const { data, error } = await this.bucket().list(dir, {
+          limit: POR_PAGINA,
+          offset,
+          sortBy: { column: 'name', order: 'asc' },
+        })
+        if (error) throw new Error(`No se pudo listar los archivos (${this.slug}): ${error.message}`)
+        const entradas = data ?? []
+
+        for (const e of entradas) {
+          // Marcador que deja el panel de Supabase al crear una carpeta vacía: no es un archivo.
+          if (e.name === '.emptyFolderPlaceholder') continue
+          const ruta = `${dir}/${e.name}`
+          // Storage devuelve las "carpetas" (prefijos) con id nulo y sin metadata.
+          if (e.id === null) {
+            if (profundidad === 0 && e.name === CARPETA_PENDIENTES) continue
+            if (profundidad + 1 >= MAX_PROFUNDIDAD) {
+              truncado = true
+              continue
+            }
+            pendientes.push({ dir: ruta, profundidad: profundidad + 1 })
+            continue
+          }
+          if (archivos.length >= MAX_ARCHIVOS) {
+            truncado = true
+            break
+          }
+          const meta = (e.metadata ?? {}) as { size?: number; mimetype?: string }
+          archivos.push({
+            path: ruta,
+            bytes: typeof meta.size === 'number' ? meta.size : null,
+            actualizado: e.updated_at ?? e.created_at ?? null,
+            mime: meta.mimetype ?? null,
+          })
+        }
+
+        if (truncado && archivos.length >= MAX_ARCHIVOS) return { archivos, truncado }
+        if (entradas.length < POR_PAGINA) break
+      }
+    }
+    return { archivos, truncado }
   }
 
   async borrar(referencia: string): Promise<void> {

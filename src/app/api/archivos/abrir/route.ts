@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getWorkspace } from '@/lib/actions/get-workspace'
-import { guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { resolverApertura } from '@/lib/almacenamiento/abrir'
+import { dependenciasDeSesion } from '@/lib/almacenamiento/sesion'
 import { almacenamientoExternoDe, SEGUNDOS_ENLACE } from '@/lib/almacenamiento/supabase-externo'
 
 // GET /api/archivos/abrir?ref=sbext://one-documentos/negocios/<id>/...[&descargar=1]
@@ -9,7 +8,8 @@ import { almacenamientoExternoDe, SEGUNDOS_ENLACE } from '@/lib/almacenamiento/s
 // Todo enlace de la pantalla a un archivo en almacenamiento externo pasa por aquí.
 // Valida sesión y workspace, firma por 5 minutos y redirige. La URL firmada no se
 // guarda en ningún lado: vence, y guardarla dejaría enlaces muertos en la base.
-// El criterio vive en `src/lib/almacenamiento/abrir.ts` (probado).
+// El criterio vive en `src/lib/almacenamiento/abrir.ts` (probado) y la validación de
+// acceso es la MISMA que usa la vista del repositorio.
 
 export const dynamic = 'force-dynamic'
 
@@ -19,28 +19,8 @@ export async function GET(req: NextRequest) {
   const ref = req.nextUrl.searchParams.get('ref')
   const descargar = req.nextUrl.searchParams.get('descargar') === '1'
 
-  let supabaseSesion: unknown = null
-
   const r = await resolverApertura(ref, descargar, {
-    async workspaceDeSesion() {
-      const ws = await getWorkspace()
-      supabaseSesion = ws.supabase
-      return ws.error ? null : ws.workspaceId
-    },
-    async negocioEsDelWorkspace(negocioId, workspaceId) {
-      // Cliente de la SESIÓN (RLS) y además el filtro explícito por workspace.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await (supabaseSesion as any)
-        .from('negocios')
-        .select('id')
-        .eq('id', negocioId)
-        .eq('workspace_id', workspaceId)
-        .maybeSingle()
-      return !!data
-    },
-    async puedeVerNegocio(negocioId) {
-      return (await guardVerNegocio(negocioId)).ok
-    },
+    ...dependenciasDeSesion(),
     async firmar(workspaceId, referencia, opciones) {
       const almacenamiento = await almacenamientoExternoDe(workspaceId)
       if (!almacenamiento) return null

@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { CardLink } from '@/components/card-link'
+import Link from 'next/link'
+import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
 import { History, FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck, AlertTriangle, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
 import type { NegocioResumen } from './negocio-v2-actions'
@@ -747,7 +749,20 @@ export default function NegocioCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1 text-right">
           <div className="flex items-center gap-1.5">
-            {negocio.carpeta_url && !negocio.almacenamiento_externo && (
+            {negocio.almacenamiento_externo ? (
+              // Workspace que guarda fuera de Drive: el botón lleva al repositorio del
+              // negocio dentro de ONE. Frena la propagación para que la tarjeta no navegue
+              // también al detalle; el <Link> conserva Cmd/Ctrl click para pestaña nueva.
+              <Link
+                href={rutaRepositorioNegocio(negocio.id)}
+                onClick={(e) => e.stopPropagation()}
+                className="rounded p-0.5 text-tinta-suave transition-colors hover:bg-papel hover:text-tinta"
+                aria-label="Abrir archivos del negocio"
+                title="Archivos del negocio"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+              </Link>
+            ) : negocio.carpeta_url ? (
               <button
                 type="button"
                 onClick={(e) => openFolder(negocio.carpeta_url!, e)}
@@ -756,7 +771,7 @@ export default function NegocioCard({
               >
                 <FolderOpen className="h-3.5 w-3.5" />
               </button>
-            )}
+            ) : null}
             {precio !== null && precio !== undefined && (
               <p className="text-sm font-bold tabular-nums text-tinta">
                 {fmt(precio)}

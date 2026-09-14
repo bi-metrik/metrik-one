@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolverApertura, type DependenciasApertura } from './abrir'
+import { resolverAccesoNegocio, resolverApertura, type DependenciasApertura } from './abrir'
 import { ErrorAlmacenamiento } from './config'
 
 const WS_TRAPPVEL = 'cdd87e5d-5a55-4f6c-a563-7a6ba7800cdc'
@@ -89,5 +89,29 @@ describe('resolverApertura', () => {
   it('el objeto no existe en el bucket: 404 genérico', async () => {
     const { d } = deps({ firmar: async () => { throw new Error('Object not found') } })
     expect(await resolverApertura(REF, false, d)).toMatchObject({ tipo: 'error', status: 404 })
+  })
+})
+
+describe('resolverAccesoNegocio (la vista del repositorio usa las mismas puertas)', () => {
+  it('del workspace y con permiso: ok con el workspace de la sesión', async () => {
+    const { d } = deps()
+    expect(await resolverAccesoNegocio(NEG_TRAPPVEL, d)).toEqual({ tipo: 'ok', workspaceId: WS_TRAPPVEL })
+  })
+
+  it('sin sesión: 401', async () => {
+    const { d } = deps({ sesion: null })
+    expect(await resolverAccesoNegocio(NEG_TRAPPVEL, d)).toMatchObject({ tipo: 'error', status: 401 })
+  })
+
+  it('negocio de otro workspace: 404, y no se pregunta el permiso', async () => {
+    let preguntado = false
+    const { d } = deps({ sesion: WS_SOENA, puedeVerNegocio: async () => { preguntado = true; return true } })
+    expect(await resolverAccesoNegocio(NEG_TRAPPVEL, d)).toMatchObject({ tipo: 'error', status: 404 })
+    expect(preguntado).toBe(false)
+  })
+
+  it('del workspace sin permiso sobre el negocio: 403', async () => {
+    const { d } = deps({ puedeVerNegocio: async () => false })
+    expect(await resolverAccesoNegocio(NEG_TRAPPVEL, d)).toMatchObject({ tipo: 'error', status: 403 })
   })
 })
