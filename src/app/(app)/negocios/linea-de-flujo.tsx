@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Clock, CornerDownRight, CornerRightUp } from 'lucide-react'
 import {
   distribuirLinea,
-  nivelDeAtraso,
+  nivelesDeAtraso,
   secuenciaDeLinea,
   type EtapaDelSegmentador,
   type NivelDeAtraso,
@@ -18,15 +18,15 @@ import { STAGE_LABEL } from '@/lib/negocios/stage-label'
  *
  * - Se ven TODAS las etapas en cualquier fase. Las de la fase puesta van resaltadas y las
  *   demás tenues; con «Todos» se resalta todo.
- * - El color de cada etapa lo deciden sus atrasados (`nivelDeAtraso`), no su volumen.
+ * - El color de cada etapa lo deciden sus atrasados (`nivelesDeAtraso`), no su volumen.
  * - Celular primero: la línea se desplaza en horizontal dentro de su contenedor, así que no
  *   empuja la lista hacia abajo, y la etapa elegida se trae a la vista.
  */
 const CLASE_NIVEL: Record<NivelDeAtraso, string> = {
   sin_sla: 'border-[#E5E7EB] bg-white',
   al_dia: 'border-[#E5E7EB] bg-white',
-  algunos: 'border-alerta/40 bg-alerta/5',
-  mayoria: 'border-alerta bg-alerta/10',
+  con_atrasados: 'border-alerta/40 bg-alerta/5',
+  concentra: 'border-alerta bg-alerta/10',
 }
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`
@@ -47,6 +47,7 @@ export default function LineaDeFlujo({
   onElegir: (etapa: EtapaDelSegmentador) => void
 }) {
   const nodos = useMemo(() => distribuirLinea(secuenciaDeLinea(etapas)), [etapas])
+  const niveles = useMemo(() => nivelesDeAtraso(etapas, conteos), [etapas, conteos])
 
   // La columna anterior de cada fila, para los tramos de línea que cruzan columnas vacías
   // (de Entrega a Facturación, por encima de la rama).
@@ -98,7 +99,7 @@ export default function LineaDeFlujo({
             const e = n.etapa
             const conteo = conteos.get(e.numero) ?? { total: 0, atrasados: 0 }
             const tieneSla = e.sla_horas !== null
-            const nivel = nivelDeAtraso(conteo, tieneSla)
+            const nivel = niveles.get(e.numero) ?? 'sin_sla'
             const resaltada = enFase(e)
             const seleccionada = etapaNum === e.numero
             const primeraFuera = n.tipo === 'fuera' && nodos.findIndex((x) => x.tipo === 'fuera') === i

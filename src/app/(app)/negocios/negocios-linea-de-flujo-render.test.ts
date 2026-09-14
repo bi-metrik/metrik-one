@@ -83,9 +83,10 @@ const caso = (codigo: string, numero: number, exceso: number | null, estado = 'a
   } as any
 }
 
-// Cita (13): 3 abiertos, 2 atrasados → mayoría. Seguimiento (18): 4 abiertos, 1 atrasado →
-// algunos. Propuesta (3): 2 a tiempo. Y un CERRADO que conserva la etapa Cita: la fase Todos
-// lo cuenta, el clic en Cita (que pone Ejecución) no lo abre.
+// Cita (13): 3 abiertos, 2 atrasados → junta la mitad de los 3 atrasados de la línea.
+// Seguimiento (18): 4 abiertos, 1 atrasado → con atrasados. Propuesta (3): 2 a tiempo. Y un
+// CERRADO que conserva la etapa Cita: la fase Todos lo cuenta, el clic en Cita (que pone
+// Ejecución) no lo abre.
 const ABIERTOS = [
   caso('C1', 13, 10),
   caso('C2', 13, -5),
@@ -168,12 +169,12 @@ describe('/negocios · línea de flujo', () => {
     const cita = boton(html, 13)
     expect(cita.etiqueta).toContain('title="Cita · 3 casos · 2 atrasados"')
     expect(cita.texto).toContain('2 atrasados')
-    expect(cita.etiqueta).toContain('data-nivel="mayoria"')
+    expect(cita.etiqueta).toContain('data-nivel="concentra"')
 
     // Seguimiento tiene MÁS casos que Cita y va menos alarmada: manda el atraso, no el volumen.
     const seguimiento = boton(html, 18)
     expect(seguimiento.etiqueta).toContain('title="Seguimiento · 4 casos · 1 atrasado"')
-    expect(seguimiento.etiqueta).toContain('data-nivel="algunos"')
+    expect(seguimiento.etiqueta).toContain('data-nivel="con_atrasados"')
 
     expect(boton(html, 3).etiqueta).toContain('data-nivel="al_dia"')
     expect(boton(html, 3).texto).not.toContain('atrasado')

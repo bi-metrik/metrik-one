@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { distribuirLinea, nivelDeAtraso, secuenciaDeLinea, type EtapaDeLinea } from './linea-de-flujo'
+import { distribuirLinea, nivelesDeAtraso, secuenciaDeLinea, type EtapaDeLinea } from './linea-de-flujo'
 import { LINEA_SOENA as SOENA } from '../../../test/linea-soena'
 
 type Etapa = EtapaDeLinea & { numero: number; nombre: string; stage: string }
@@ -137,15 +137,61 @@ describe('distribuirLinea', () => {
   })
 })
 
-describe('nivelDeAtraso', () => {
-  it('una etapa sin SLA nunca se pinta de alerta', () => {
-    expect(nivelDeAtraso({ total: 178, atrasados: 178 }, false)).toBe('sin_sla')
+describe('nivelesDeAtraso', () => {
+  // Conteos de SOENA medidos el 2026-09-14 sobre los 415 abiertos, con el mismo criterio de
+  // atraso de la lista (`slaHorasVigentes` + `horasHabilesEntre`). Por `numero` de etapa.
+  const MEDIDO: Record<string, [number, number]> = {
+    Validación: [22, 22], Inclusión: [0, 0], Propuesta: [72, 65], Negociación: [3, 3],
+    Documentación: [7, 4], Cargue: [2, 1], 'Pago UPME': [0, 0], 'Revisión radicado': [1, 0],
+    Certificación: [11, 2], 'Segundo cobro': [1, 0], Cartera: [0, 0], Entrega: [0, 0],
+    Facturación: [2, 2], Cita: [57, 25], Notificación: [34, 25], Anexos: [14, 7],
+    Generación: [10, 5], Envío: [1, 1], Seguimiento: [178, 130],
+  }
+  const conteos = new Map(
+    SOENA.map((e) => [e.numero, { total: MEDIDO[e.nombre][0], atrasados: MEDIDO[e.nombre][1] }]),
+  )
+  const nivelDe = (niveles: Map<number, string>, nombre: string) =>
+    niveles.get(SOENA.find((e) => e.nombre === nombre)!.numero)
+
+  it('con los conteos reales marca solo las etapas que juntan la mitad de los atrasados', () => {
+    const niveles = nivelesDeAtraso(SOENA, conteos)
+    const concentran = SOENA.filter((e) => niveles.get(e.numero) === 'concentra').map((e) => e.nombre)
+    expect(concentran.sort()).toEqual(['Propuesta', 'Seguimiento'])
+    expect(nivelDe(niveles, 'Cita')).toBe('con_atrasados')
+    expect(nivelDe(niveles, 'Inclusión')).toBe('al_dia')
   })
 
-  it('el color lo deciden los atrasados, no el volumen', () => {
-    expect(nivelDeAtraso({ total: 178, atrasados: 0 }, true)).toBe('al_dia')
-    expect(nivelDeAtraso({ total: 0, atrasados: 0 }, true)).toBe('al_dia')
-    expect(nivelDeAtraso({ total: 178, atrasados: 10 }, true)).toBe('algunos')
-    expect(nivelDeAtraso({ total: 14, atrasados: 7 }, true)).toBe('mayoria')
+  it('no es la proporción: una etapa chica con todo vencido no pesa como una grande', () => {
+    const niveles = nivelesDeAtraso(SOENA, conteos)
+    // Envío: 1 de 1 vencido (100 %). Seguimiento: 130 de 178 (73 %).
+    expect(nivelDe(niveles, 'Envío')).toBe('con_atrasados')
+    expect(nivelDe(niveles, 'Seguimiento')).toBe('concentra')
+  })
+
+  it('no es el volumen: más casos con menos atrasados no se pinta más fuerte', () => {
+    const linea = [
+      { numero: 1, sla_horas: 24 },
+      { numero: 2, sla_horas: 24 },
+    ]
+    const niveles = nivelesDeAtraso(linea, new Map([[1, { total: 200, atrasados: 3 }], [2, { total: 10, atrasados: 9 }]]))
+    expect(niveles.get(1)).toBe('con_atrasados')
+    expect(niveles.get(2)).toBe('concentra')
+  })
+
+  it('una etapa sin SLA nunca se pinta de alerta, aunque le lleguen atrasados', () => {
+    const sinSla = SOENA.map((e) => (e.nombre === 'Seguimiento' ? { ...e, sla_horas: null } : e))
+    const niveles = nivelesDeAtraso(sinSla, conteos)
+    expect(nivelDe(niveles, 'Seguimiento')).toBe('sin_sla')
+  })
+
+  it('los empates con la última que entra entran todos: el desempate no puede ser arbitrario', () => {
+    const linea = [1, 2, 3].map((numero) => ({ numero, sla_horas: 24 }))
+    const niveles = nivelesDeAtraso(linea, new Map([1, 2, 3].map((n) => [n, { total: 5, atrasados: 5 }])))
+    expect([...niveles.values()]).toEqual(['concentra', 'concentra', 'concentra'])
+  })
+
+  it('sin atrasados en la línea, nada se marca', () => {
+    const niveles = nivelesDeAtraso(SOENA, new Map())
+    expect([...niveles.values()].every((n) => n === 'al_dia')).toBe(true)
   })
 })

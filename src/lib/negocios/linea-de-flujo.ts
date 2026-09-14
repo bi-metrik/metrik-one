@@ -295,23 +295,57 @@ export function distribuirLinea<T extends EtapaDeLinea>(sec: SecuenciaDeLinea<T>
 
 // ── Color por atraso ───────────────────────────────────────────────────────────────
 
-export type NivelDeAtraso = 'sin_sla' | 'al_dia' | 'algunos' | 'mayoria'
+export type NivelDeAtraso = 'sin_sla' | 'al_dia' | 'con_atrasados' | 'concentra'
 
 /**
- * El color de una etapa lo deciden sus atrasados, no su volumen: Seguimiento espera a la
- * DIAN y Propuesta al cliente, así que muchos casos parados ahí no son un cuello de
- * botella por sí solos.
+ * El color de cada etapa lo deciden sus ATRASADOS, no su volumen: Seguimiento espera a la
+ * DIAN y Propuesta al cliente, así que muchos casos parados ahí no son un cuello de botella
+ * por sí solos.
  *
  * - `sin_sla`: la etapa no tiene SLA; no se mide atraso y nunca se pinta de alerta.
  * - `al_dia`: tiene SLA y ningún caso lo pasó.
- * - `algunos`: menos de la mitad de sus casos pasaron el SLA.
- * - `mayoria`: la mitad o más.
+ * - `concentra`: las etapas que, de mayor a menor, juntan la MITAD de los atrasados de la
+ *   línea. Es donde se amontona el trabajo vencido. Si varias empatan con la última que
+ *   entra, entran todas: el desempate no puede ser arbitrario.
+ * - `con_atrasados`: el resto de las que tienen alguno.
+ *
+ * ⚠️ Por qué no la proporción de atrasados de cada etapa. Medido en SOENA el 2026-09-14
+ * (415 abiertos): 10 de las 13 etapas con casos tienen la mitad o más vencidos, así que un
+ * umbral por proporción pinta casi toda la línea de rojo y no señala nada. Y castiga a las
+ * etapas chicas: Envío con 1 caso de 1 vencido saldría igual que Seguimiento con 130 de 178.
+ * Con esta regla quedan marcadas Seguimiento (130) y Propuesta (65), que suman el 67 %.
  *
  * «Atrasado» es el mismo criterio del filtro Atrasados (`sla_exceso_horas > 0`): lo cuenta
- * quien llama con esa función, no se reescribe aquí.
+ * quien arma los conteos (`contarLineaDeFlujo`), no se reescribe aquí.
  */
-export function nivelDeAtraso(conteo: { total: number; atrasados: number }, tieneSla: boolean): NivelDeAtraso {
-  if (!tieneSla) return 'sin_sla'
-  if (conteo.atrasados <= 0 || conteo.total <= 0) return 'al_dia'
-  return conteo.atrasados * 2 >= conteo.total ? 'mayoria' : 'algunos'
+export function nivelesDeAtraso(
+  etapas: ReadonlyArray<{ numero: number; sla_horas: number | null }>,
+  conteos: ReadonlyMap<number, { total: number; atrasados: number }>,
+): Map<number, NivelDeAtraso> {
+  const atrasadosDe = (numero: number) => Math.max(0, conteos.get(numero)?.atrasados ?? 0)
+  const conSla = etapas.filter((e) => e.sla_horas !== null)
+  const vencidas = conSla
+    .map((e) => ({ numero: e.numero, atrasados: atrasadosDe(e.numero) }))
+    .filter((x) => x.atrasados > 0)
+    .sort((a, b) => b.atrasados - a.atrasados)
+  const totalAtrasados = vencidas.reduce((s, x) => s + x.atrasados, 0)
+
+  const concentran = new Set<number>()
+  let acumulado = 0
+  let ultimo: number | null = null
+  for (const x of vencidas) {
+    const yaAlcanza = acumulado * 2 >= totalAtrasados
+    if (yaAlcanza && x.atrasados !== ultimo) break
+    concentran.add(x.numero)
+    acumulado += x.atrasados
+    ultimo = x.atrasados
+  }
+
+  const niveles = new Map<number, NivelDeAtraso>()
+  for (const e of etapas) {
+    if (e.sla_horas === null) niveles.set(e.numero, 'sin_sla')
+    else if (atrasadosDe(e.numero) === 0) niveles.set(e.numero, 'al_dia')
+    else niveles.set(e.numero, concentran.has(e.numero) ? 'concentra' : 'con_atrasados')
+  }
+  return niveles
 }
