@@ -1,17 +1,30 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { ShieldCheck, ShieldX, Clock } from 'lucide-react'
+import { ShieldCheck, ShieldX, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarAprobacion } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
-import { esAprobadorAsignado } from '@/lib/negocios/aprobacion-bloque'
+import {
+  esAprobadorAsignado,
+  opcionesAprobador,
+  type MotivoAprobadorInvalido,
+} from '@/lib/negocios/aprobacion-bloque'
 
 interface Profile {
   id: string
   full_name: string | null
   email?: string
+  /** Rol del profile en este workspace y si sigue activo en el equipo: deciden si puede aprobar. */
+  role?: string | null
+  activo?: boolean
+}
+
+const MOTIVO_INVALIDO: Record<MotivoAprobadorInvalido, string> = {
+  rol: 'no es dueño ni administrador',
+  inactivo: 'está desactivado en el equipo',
+  fuera_del_equipo: 'ya no está en el equipo de este workspace',
 }
 
 interface BloqueAprobacionProps {
@@ -46,12 +59,19 @@ export default function BloqueAprobacion({
   const [isPending, startTransition] = useTransition()
 
   const estado = data.estado ?? 'pendiente'
-  const isAprobador = esAprobadorAsignado(currentUserId, aprobadorId)
+  // La lista y el servidor usan la misma regla: solo quien puede decidir es elegible.
+  // Un designado que ya no la cumple no se borra: se muestra marcado para cambiarlo.
+  const { elegibles, designadoInvalido } = opcionesAprobador(profiles, aprobadorId)
+  const isAprobador = esAprobadorAsignado(currentUserId, aprobadorId) && !designadoInvalido
 
   function getProfileName(id: string | null | undefined) {
     if (!id) return null
     return profiles.find(p => p.id === id)?.full_name ?? null
   }
+
+  const nombreInvalido = designadoInvalido
+    ? (designadoInvalido.perfil?.full_name ?? designadoInvalido.perfil?.email ?? 'El aprobador designado')
+    : null
 
   function handleSetAprobador(id: string) {
     // Optimista: el selector cambia al tocarlo. Si el servidor no guarda, se devuelve
@@ -98,6 +118,9 @@ export default function BloqueAprobacion({
           <p className="text-[11px] text-tinta-suave">
             {estado === 'pendiente' ? 'Pendiente de' : estado === 'aprobado' ? 'Aprobado por' : 'Rechazado por'}:{' '}
             <span className="font-medium text-tinta">{getProfileName(data.aprobador_id)}</span>
+            {estado === 'pendiente' && designadoInvalido && (
+              <span className="ml-1 text-amber-700">(no puede aprobar)</span>
+            )}
           </p>
         )}
         {data.aprobado_at && (
@@ -152,15 +175,37 @@ export default function BloqueAprobacion({
           className="w-full rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1.5 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
         >
           <option value="">— Seleccionar aprobador —</option>
-          {profiles.map(p => (
+          {designadoInvalido && (
+            <option value={designadoInvalido.id} disabled>
+              {nombreInvalido} (no puede aprobar)
+            </option>
+          )}
+          {elegibles.map(p => (
             <option key={p.id} value={p.id}>
               {p.full_name ?? p.email ?? p.id.slice(-6)}
             </option>
           ))}
         </select>
+        {elegibles.length === 0 && (
+          <p className="mt-1 text-[11px] text-tinta-suave">
+            Nadie en el equipo puede aprobar: hace falta un dueño o administrador activo.
+          </p>
+        )}
       </div>
 
-      {aprobadorId && (
+      {designadoInvalido && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <p className="text-xs text-amber-800">
+              <span className="font-semibold">{nombreInvalido}</span> no puede aprobar:{' '}
+              {MOTIVO_INVALIDO[designadoInvalido.motivo]}. Elige otro aprobador.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {aprobadorId && !designadoInvalido && (
         <div className="rounded-lg bg-amber-50 border border-amber-100 p-2.5">
           <div className="flex items-center gap-2">
             <Clock className="h-3.5 w-3.5 text-amber-600" />

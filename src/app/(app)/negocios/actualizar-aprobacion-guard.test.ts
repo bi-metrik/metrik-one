@@ -11,7 +11,10 @@
  * - el aprobador designado escribe SOLO los campos de la aprobación y conserva el resto;
  * - un bloque que no es de aprobación se rechaza;
  * - un estado fuera de los permitidos se rechaza;
- * - el aprobador se elige entre los profiles del workspace;
+ * - el aprobador se elige entre los profiles del workspace, y solo entre quien puede decidir:
+ *   dueño o administrador del workspace, no desactivado en su equipo (la misma regla que la lista);
+ * - quitar al aprobador sigue permitido;
+ * - un designado desactivado en el equipo no decide;
  * - el registro en el timeline solo ocurre si se escribió.
  *
  * EL DOBLE APLICA LOS FILTROS `.eq()` y registra las escrituras.
@@ -133,6 +136,10 @@ import {
   MENSAJE_NO_ES_EL_APROBADOR,
   MENSAJE_YA_DECIDIDA,
   MENSAJE_APROBADOR_AJENO,
+  MENSAJE_APROBADOR_NO_PUEDE_DECIDIR,
+  MENSAJE_DECISOR_INACTIVO,
+  opcionesAprobador,
+  perfilesConEstadoEnEquipo,
 } from '@/lib/negocios/aprobacion-bloque'
 
 const NEGOCIO = 'neg-1'
@@ -159,9 +166,17 @@ beforeEach(() => {
   tablas = {
     negocio_bloques: [],
     profiles: [
-      { id: 'p-owner', workspace_id: 'ws-1' },
-      { id: 'p-admin', workspace_id: 'ws-1' },
-      { id: 'p-ajeno', workspace_id: 'ws-otro' },
+      { id: 'p-owner', workspace_id: 'ws-1', role: 'owner' },
+      { id: 'p-admin', workspace_id: 'ws-1', role: 'admin' },
+      { id: 'p-oper', workspace_id: 'ws-1', role: 'operator' },
+      { id: 'p-admin-baja', workspace_id: 'ws-1', role: 'admin' },
+      { id: 'p-ajeno', workspace_id: 'ws-otro', role: 'admin' },
+    ],
+    staff: [
+      { profile_id: 'p-owner', workspace_id: 'ws-1', is_active: true },
+      { profile_id: 'p-admin-baja', workspace_id: 'ws-1', is_active: false },
+      // Un staff desactivado en OTRO workspace no saca a nadie de este.
+      { profile_id: 'p-admin', workspace_id: 'ws-otro', is_active: false },
     ],
   }
 })
@@ -260,6 +275,65 @@ describe('designar al aprobador', () => {
     expect(filaDe('nb-apr').data).toEqual({ referencia: 'x', aprobador_id: 'p-admin', estado: 'pendiente' })
   })
 
+  it('un no gerencial no se designa: rechaza, no escribe y no anota', async () => {
+    tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion', { referencia: 'x' }))
+
+    const r = await actualizarAprobacion('nb-apr', { aprobador_id: 'p-oper', estado: 'pendiente' })
+
+    expect(r.error).toBe(MENSAJE_APROBADOR_NO_PUEDE_DECIDIR)
+    expect(escribioEnBloques()).toBe(false)
+    expect(filaDe('nb-apr').data).toEqual({ referencia: 'x' })
+    expect(registrarActividad).not.toHaveBeenCalled()
+  })
+
+  it('un administrador desactivado en el equipo no se designa', async () => {
+    tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion'))
+
+    const r = await actualizarAprobacion('nb-apr', { aprobador_id: 'p-admin-baja', estado: 'pendiente' })
+
+    expect(r.error).toBe(MENSAJE_APROBADOR_NO_PUEDE_DECIDIR)
+    expect(escribioEnBloques()).toBe(false)
+  })
+
+  it('designar a un gerencial escribe y anota en el timeline', async () => {
+    tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion'))
+
+    const r = await actualizarAprobacion('nb-apr', { aprobador_id: 'p-owner', estado: 'pendiente' })
+
+    expect(r.error).toBeNull()
+    expect(filaDe('nb-apr').data).toEqual({ aprobador_id: 'p-owner', estado: 'pendiente' })
+    expect(registrarActividad).toHaveBeenCalledTimes(1)
+  })
+
+  it('quitar al aprobador sigue funcionando, aunque el designado ya no pueda decidir', async () => {
+    tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion', { aprobador_id: 'p-oper', referencia: 'x' }))
+
+    const r = await actualizarAprobacion('nb-apr', { aprobador_id: '', estado: 'pendiente' })
+
+    expect(r.error).toBeNull()
+    expect(filaDe('nb-apr').data).toEqual({ referencia: 'x', estado: 'pendiente' })
+  })
+
+  it('la lista del selector y el servidor aceptan exactamente a las mismas personas', async () => {
+    // La lista se arma con la misma función que usa getNegocioDetalleCompleto: los profiles del
+    // workspace y la fila de staff de ESE workspace (las dos consultas filtran por workspace).
+    const perfilesDelWorkspace = perfilesConEstadoEnEquipo(
+      tablas.profiles
+        .filter(p => p.workspace_id === 'ws-1')
+        .map(p => ({ id: p.id as string, full_name: null, role: p.role as string })),
+      tablas.staff.filter(s => s.workspace_id === 'ws-1') as Array<{ profile_id: string | null; is_active: boolean | null }>,
+    )
+    const enLista = new Set(opcionesAprobador(perfilesDelWorkspace, null).elegibles.map(p => p.id))
+    expect(enLista).toEqual(new Set(['p-owner', 'p-admin']))
+
+    for (const p of perfilesDelWorkspace) {
+      tablas.negocio_bloques = [bloque('nb-apr', 'aprobacion')]
+      escrituras = []
+      const r = await actualizarAprobacion('nb-apr', { aprobador_id: p.id, estado: 'pendiente' })
+      expect({ id: p.id, acepta: r.error === null }).toEqual({ id: p.id, acepta: enLista.has(p.id) })
+    }
+  })
+
   it('un aprobador de otro workspace, o inventado, no se designa', async () => {
     tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion'))
 
@@ -268,6 +342,30 @@ describe('designar al aprobador', () => {
       expect(r.error).toBe(MENSAJE_APROBADOR_AJENO)
     }
     expect(escribioEnBloques()).toBe(false)
+  })
+})
+
+describe('decidir exige seguir activo en el equipo', () => {
+  it('el designado desactivado en el equipo no decide, aunque la designación sea vieja', async () => {
+    sesion = { role: 'admin', userId: 'p-admin-baja' }
+    tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion', { aprobador_id: 'p-admin-baja' }))
+
+    const r = await actualizarAprobacion('nb-apr', { estado: 'aprobado' })
+
+    expect(r.error).toBe(MENSAJE_DECISOR_INACTIVO)
+    expect(escribioEnBloques()).toBe(false)
+    expect(filaDe('nb-apr').estado).toBe('pendiente')
+    expect(registrarActividad).not.toHaveBeenCalled()
+  })
+
+  it('sin fila de staff en este workspace sigue decidiendo: no hay desactivación registrada', async () => {
+    sesion = { role: 'admin', userId: 'p-admin' }
+    tablas.negocio_bloques.push(bloque('nb-apr', 'aprobacion', { aprobador_id: 'p-admin' }))
+
+    const r = await actualizarAprobacion('nb-apr', { estado: 'rechazado', comentario: 'no' })
+
+    expect(r.error).toBeNull()
+    expect(filaDe('nb-apr').data).toMatchObject({ estado: 'rechazado', decidido_por: 'p-admin' })
   })
 })
 
