@@ -32,6 +32,11 @@ import { EMISOR_MAURICIO, getAnioGravableDeclaracion } from './emisor-mauricio'
 import { formatCOP, formatFechaLetras, montoEnLetrasCOP } from './format'
 import { particionarPorCronograma, planesConCronogramaExplicito } from './cronograma-explicito'
 import { siguienteNumeroCuenta } from './numero-cuenta'
+import {
+  decidirEmisionGrupo,
+  mensajeInterseccionParcial,
+  type CuentaExistente,
+} from './idempotencia-cuenta'
 
 const SUBFOLDER_CUENTAS = '4. Cuentas de cobro'
 const TEMPLATE_SLUG = 'metrik'
@@ -180,17 +185,23 @@ export async function generarCuentasCobroPeriodo(
   for (const { plan, numeroCuota } of planesEnPeriodo) {
     if (options.dryRun) continue
 
-    // Verificar si ya existe el cobro programado
-    const { data: existing } = await supabase
+    // Verificar si ya existe el cobro programado. El `error` se lee: descartado, un
+    // fallo de lectura se veia como "no existe", se insertaba un segundo cobro de
+    // la misma cuota y la cuenta agrupada lo cobraba dos veces. Sin poder leer, se
+    // para la emision del workspace y la corrida de manana reintenta.
+    const { data: existing, error: existingErr } = await supabase
       .from('cobros')
       .select('id')
       .eq('plan_cobro_id', plan.id)
       .eq('numero_cuota', numeroCuota)
       .maybeSingle()
 
+    if (existingErr) {
+      throw new Error(`Error leyendo el cobro de la cuota ${numeroCuota} del plan ${plan.id}: ${existingErr.message}`)
+    }
     if (existing) continue // ya creado por cron o emision previa
 
-    await supabase.from('cobros').insert({
+    const { error: insCobroErr } = await supabase.from('cobros').insert({
       workspace_id: workspaceId,
       negocio_id: plan.negocio_id,
       plan_cobro_id: plan.id,
@@ -200,6 +211,15 @@ export async function generarCuentasCobroPeriodo(
       fecha_esperada: fechaEsperada,
       vencido: false,
     })
+    // No se aborta: la cuota que no entra simplemente no va en la cuenta de hoy, y
+    // si entra manana la verificacion por cobros la reporta como parcial en vez de
+    // re-emitir. Pero tampoco se calla.
+    if (insCobroErr) {
+      result.errores.push({
+        empresa_id: 'COBRO_PROGRAMADO',
+        error: `No se pudo crear el cobro de la cuota ${numeroCuota} del plan ${plan.id}: ${insCobroErr.message}`,
+      })
+    }
   }
 
   // 4. Re-leer cobros programados del período con join a negocio + empresa
@@ -286,22 +306,36 @@ export async function generarCuentasCobroPeriodo(
     }
 
     try {
-      // Idempotencia: skip si ya existe cuenta para esta empresa+periodo
-      const { data: existingCuenta } = await supabase
+      // Idempotencia por COBROS, no por empresa+periodo: ver `idempotencia-cuenta.ts`.
+      // Se traen las cuentas del workspace cuyo `cobros_ids` se cruza con el grupo;
+      // la decision (anuladas fuera, cobertura total o parcial) es pura.
+      //
+      // El `error` se lee SIEMPRE. Descartarlo es exactamente lo que emitio la
+      // misma cuenta de AFI cinco dias seguidos en septiembre de 2026: sin poder
+      // verificar, no se emite.
+      const idsGrupo = cobrosGrupo.map(c => c.id)
+      const { data: cuentasPrevias, error: prevErr } = await supabase
         .from('cuentas_cobro_emitidas')
-        .select('id, numero')
+        .select('id, numero, estado, cobros_ids')
         .eq('workspace_id', workspaceId)
-        .eq('anio', anio)
-        .eq('mes', mes)
-        .eq('empresa_id_pagador', empresaId)
-        .maybeSingle()
+        .overlaps('cobros_ids', idsGrupo)
+        .order('created_at', { ascending: true })
 
-      if (existingCuenta) {
+      if (prevErr) {
+        throw new Error(`No se pudo verificar si ya hay cuenta emitida: ${prevErr.message}`)
+      }
+
+      const decision = decidirEmisionGrupo(idsGrupo, (cuentasPrevias ?? []) as CuentaExistente[])
+
+      if (decision.accion !== 'emitir') {
         result.cuentasOmitidas++
+        if (decision.accion === 'parcial') {
+          result.errores.push({ empresa_id: empresaId, error: mensajeInterseccionParcial(decision) })
+        }
         result.detalles.push({
           empresa_id: empresaId,
           empresa_nombre: empresa.razon_social ?? empresa.nombre,
-          numero: (existingCuenta as { numero: string }).numero,
+          numero: decision.cuentas[0].numero,
           monto_total: 0,
           cobros_ids: [],
           pdf_drive_url: null,
@@ -430,8 +464,10 @@ export async function generarCuentasCobroPeriodo(
         pdfDriveUrl = uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.fileId}/view`
       }
 
-      // Insertar en cuentas_cobro_emitidas
-      const { error: insErr } = await supabase
+      // Insertar en cuentas_cobro_emitidas y devolver el id en la misma sentencia.
+      // Antes se re-consultaba por numero con `.maybeSingle()` descartando el error:
+      // si esa lectura fallaba, la notificacion salia sin enlace a la cuenta.
+      const { data: cuentaInsertada, error: insErr } = await supabase
         .from('cuentas_cobro_emitidas')
         .insert({
           workspace_id: workspaceId,
@@ -449,6 +485,8 @@ export async function generarCuentasCobroPeriodo(
           fecha_vencimiento: fechaVencimiento,
           email_destinatarios: empresa.email_fiscal ? [empresa.email_fiscal] : null,
         })
+        .select('id')
+        .single()
 
       if (insErr) {
         result.errores.push({ empresa_id: empresaId, error: insErr.message })
@@ -464,18 +502,12 @@ export async function generarCuentasCobroPeriodo(
         continue
       }
 
-      // Re-query la cuenta recien insertada para obtener su id (no usamos returning porque
-      // el insert lo hacemos con la API supabase-js sin .select())
-      const { data: cuentaInsertada } = await supabase
-        .from('cuentas_cobro_emitidas')
-        .select('id')
-        .eq('workspace_id', workspaceId)
-        .eq('numero', numero)
-        .maybeSingle()
       const cuentaId = (cuentaInsertada as { id: string } | null)?.id ?? null
 
-      // Notificación in-app al owner del workspace
-      const { data: owner } = await supabase
+      // Notificación in-app al owner del workspace. La cuenta YA existe: un fallo
+      // aqui no la vuelve 'error' (la siguiente corrida la veria viva y la omitiria
+      // igual), pero tampoco se calla — queda en `errores` con el numero.
+      const { data: owner, error: ownerErr } = await supabase
         .from('profiles')
         .select('id')
         .eq('workspace_id', workspaceId)
@@ -483,8 +515,15 @@ export async function generarCuentasCobroPeriodo(
         .limit(1)
         .maybeSingle()
 
+      if (ownerErr) {
+        result.errores.push({
+          empresa_id: empresaId,
+          error: `Cuenta ${numero} emitida, pero no se pudo leer el owner para notificar: ${ownerErr.message}`,
+        })
+      }
+
       if (owner) {
-        await supabase.from('notificaciones').insert({
+        const { error: notifErr } = await supabase.from('notificaciones').insert({
           workspace_id: workspaceId,
           destinatario_id: (owner as { id: string }).id,
           tipo: 'cuenta_cobro_pendiente_aprobacion',
@@ -501,6 +540,12 @@ export async function generarCuentasCobroPeriodo(
             cobros_ids: cobrosGrupo.map(c => c.id),
           },
         })
+        if (notifErr) {
+          result.errores.push({
+            empresa_id: empresaId,
+            error: `Cuenta ${numero} emitida, pero no se pudo crear la notificación: ${notifErr.message}`,
+          })
+        }
       }
 
       result.cuentasCreadas++

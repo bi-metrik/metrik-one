@@ -23,10 +23,14 @@ export async function planesConCronogramaExplicito(
   planIds: string[],
 ): Promise<Set<string>> {
   if (planIds.length === 0) return new Set()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('plan_cobro_cuotas')
     .select('plan_cobro_id')
     .in('plan_cobro_id', planIds)
+  // Un Set vacio por un error NO es "ningun plan tiene cronograma": manda los planes
+  // explicitos al camino uniforme, que crearia sus cuotas con `plan.monto` y las
+  // meteria en la cuenta agrupada de la empresa. Sin poder leer, se para.
+  if (error) throw new Error(`Error leyendo plan_cobro_cuotas: ${error.message}`)
   return new Set(((data ?? []) as { plan_cobro_id: string }[]).map((r) => r.plan_cobro_id))
 }
 

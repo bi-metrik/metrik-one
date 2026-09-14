@@ -20,8 +20,10 @@
  * lo mismo desde la app desplegada, que es la unica via cuando las credenciales
  * de render y Drive no se pueden bajar a local.
  *
- * Idempotente: `generarCuentasCobroPeriodo` salta la cuenta si ya existe para
- * (workspace, anio, mes, empresa). Correrlo dos veces no duplica nada.
+ * Idempotente: `generarCuentasCobroPeriodo` salta el grupo si sus cobros ya estan
+ * en una cuenta viva (no anulada). Correrlo dos veces no duplica nada. Una cuenta
+ * ANULADA no bloquea: si se anula la unica cuenta de un grupo, correrlo la emite
+ * de nuevo.
  *
  * Las cuentas nacen en `emitida_pendiente_aprobacion`. Este script NO envia
  * nada al cliente: el envio lo aprueba una persona desde `/cobros-recurrentes`.
