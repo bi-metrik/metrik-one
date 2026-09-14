@@ -1,17 +1,28 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef } from 'react'
+import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
 import { CalendarDays, Plus, CheckCircle2, Circle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems } from '../../negocio-v2-actions'
+import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems, leerVersionCronograma, type VersionCronograma } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 
+/**
+ * Un paso del cronograma. Las fechas van en dos pares que NO significan lo mismo:
+ *
+ *   fecha_inicio / fecha_fin            → el PLAN, que se arma en planeación.
+ *   fecha_inicio_real / fecha_fin_real  → lo que pasó, que se marca en ejecución.
+ *
+ * Antes había un solo par y se corregía sobre la marcha, así que el cronograma siempre
+ * se cumplía. Mover el plan publica una versión nueva; marcar el real, no.
+ */
 interface CronogramaItem {
   id: string
   label: string
   fecha_inicio?: string | null
   fecha_fin?: string | null
+  fecha_inicio_real?: string | null
+  fecha_fin_real?: string | null
   responsable_id?: string | null
   link_url?: string | null
   completado: boolean
@@ -45,7 +56,18 @@ export default function BloqueCronograma({
   const [isPending, startTransition] = useTransition()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Partial<CronogramaItem>>({})
+  const [version, setVersion] = useState<VersionCronograma | null>(null)
   const preloadedRef = useRef(false)
+
+  // El sello de versión. Se recarga después de cada cambio de planeación porque ese
+  // cambio pudo haber cortado una versión nueva, y el número que se muestra tiene que
+  // ser el del documento que Omar le puede mandar al cliente ahora mismo.
+  const refrescarVersion = useCallback(() => {
+    if (!negocioBloqueId) return
+    void leerVersionCronograma(negocioBloqueId).then(setVersion)
+  }, [negocioBloqueId])
+
+  useEffect(() => { refrescarVersion() }, [refrescarVersion])
 
   // Gap 3: Inicializar items desde config_extra.items si no hay items y hay templates
   useEffect(() => {
@@ -122,6 +144,7 @@ export default function BloqueCronograma({
         } else if (result.id) {
           setItems(prev => prev.map(i => i.id === updated.id ? { ...i, id: result.id! } : i))
           evalCompletitud()
+          refrescarVersion()
         }
       } else {
         const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = { label: updated.label }
@@ -132,7 +155,25 @@ export default function BloqueCronograma({
         if (result.error) toast.error(result.error)
         // Gap 2: Re-evaluar completitud
         evalCompletitud()
+        refrescarVersion()
       }
+    })
+  }
+
+  /**
+   * Marca de avance: la fecha en que el paso ARRANCÓ o TERMINÓ de verdad.
+   *
+   * Va aparte del modo edición a propósito. Anotar el avance es lo que se hace en obra,
+   * de a un dato por vez, y obligar a entrar a editar el paso entero para eso invita a
+   * "corregir" de paso la fecha planeada, que es justamente lo que borraba el desfase.
+   */
+  function marcarAvance(item: CronogramaItem, campo: 'fecha_inicio_real' | 'fecha_fin_real', valor: string) {
+    const fecha = valor || null
+    setItems(prev => prev.map(i => (i.id === item.id ? { ...i, [campo]: fecha } : i)))
+    if (item.id.startsWith('_tmp_')) return
+    startTransition(async () => {
+      const result = await actualizarBloqueItem(item.id, { [campo]: fecha })
+      if (result.error) toast.error(result.error)
     })
   }
 
@@ -151,6 +192,7 @@ export default function BloqueCronograma({
         toast.error(result.error)
         setItems(items) // revert
       } else {
+        refrescarVersion()
         evalCompletitud()
       }
     })
@@ -194,8 +236,10 @@ export default function BloqueCronograma({
           <thead>
             <tr className="border-b border-[#E5E7EB]">
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Actividad</th>
-              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Inicio</th>
-              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Fin</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Inicio plan</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Fin plan</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-acento uppercase">Inicio real</th>
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-acento uppercase">Fin real</th>
               {profiles.length > 0 && (
                 <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Responsable</th>
               )}
@@ -247,6 +291,32 @@ export default function BloqueCronograma({
                     />
                   ) : (
                     <span className="text-tinta-suave">{fmtDate(item.fecha_fin)}</span>
+                  )}
+                </td>
+                <td className="py-2 pr-2">
+                  {modo === 'editable' ? (
+                    <input
+                      type="date"
+                      value={item.fecha_inicio_real ?? ''}
+                      onChange={e => marcarAvance(item, 'fecha_inicio_real', e.target.value)}
+                      aria-label={`Inicio real de ${item.label || 'la actividad'}`}
+                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
+                    />
+                  ) : (
+                    <span className="text-tinta">{fmtDate(item.fecha_inicio_real)}</span>
+                  )}
+                </td>
+                <td className="py-2 pr-2">
+                  {modo === 'editable' ? (
+                    <input
+                      type="date"
+                      value={item.fecha_fin_real ?? ''}
+                      onChange={e => marcarAvance(item, 'fecha_fin_real', e.target.value)}
+                      aria-label={`Fin real de ${item.label || 'la actividad'}`}
+                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
+                    />
+                  ) : (
+                    <span className="text-tinta">{fmtDate(item.fecha_fin_real)}</span>
                   )}
                 </td>
                 {profiles.length > 0 && (
@@ -325,13 +395,27 @@ export default function BloqueCronograma({
         </button>
       )}
 
-      <div className="flex items-center gap-2 pt-1">
+      <div className="flex flex-wrap items-center gap-2 pt-1">
         <CalendarDays className="h-3 w-3 text-tinta-suave" />
         <span className="text-[10px] text-tinta-suave">
           {items.filter(i => i.completado).length}/{items.length} completadas
           {requireAllDates && ' · Requiere todas las fechas'}
         </span>
+        {version && (
+          <span
+            className="rounded-full bg-acento/10 px-2 py-0.5 text-[10px] font-medium text-acento"
+            title={version.cambios.join(' · ')}
+          >
+            Versión {version.numero}
+          </span>
+        )}
       </div>
+      {version && version.cambios.length > 0 && (
+        <p className="text-[10px] leading-relaxed text-tinta-suave/70">
+          Último cambio de planeación: {version.cambios[0]}
+          {version.cambios.length > 1 && ` (+${version.cambios.length - 1} más)`}
+        </p>
+      )}
     </div>
   )
 }
