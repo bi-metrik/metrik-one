@@ -8,6 +8,7 @@
 - [Formato 010 DIAN](project_formulario_010_dian.md) — Overlay AcroForm, aplanado (flatten), seccional casilla 12 con código auto, presets config-driven, scripts de prueba
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — Solo corre en producción (credenciales sensibles en Vercel); el paso 4 del cron sigue sin decisión de Mauricio
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — un PR que cambie qué emite el cron dispara cuentas reales horas después; fuera del merge automático
+- ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: por cobros; anular la única viva = el cron la re-emite; el explícito sigue bloqueando con anuladas; paso 3 inserta cobros "pagados"
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — PR #577 sin mergear: nadie se suspende solo, la tabla nace vacía, AFI son 3 planes, y 3 decisiones esperan a Mauricio
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el módulo YA está encendido (caducó lo contrario), el sync sigue sin correr, y un throw ahí tumba `/tableros` entero
