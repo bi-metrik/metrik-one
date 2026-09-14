@@ -5,6 +5,7 @@ import { Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import { faltaEnEquipo, rolesDelEquipo } from '@/lib/negocios/cierre-bloque'
 
 interface Profile {
   id: string
@@ -30,12 +31,6 @@ function Avatar({ name }: { name: string | null }) {
   )
 }
 
-const ALL_ROLES: Array<{ key: 'comercial_id' | 'ejecucion_id' | 'financiero_id'; label: string; rol: string }> = [
-  { key: 'comercial_id', label: 'Responsable comercial', rol: 'comercial' },
-  { key: 'ejecucion_id', label: 'Responsable ejecución', rol: 'ejecucion' },
-  { key: 'financiero_id', label: 'Responsable financiero', rol: 'financiero' },
-]
-
 export default function BloqueEquipo({
   negocioBloqueId,
   instancia,
@@ -45,9 +40,7 @@ export default function BloqueEquipo({
 }: BloqueEquipoProps) {
   // Si config_extra.rol está definido, solo mostrar ese responsable
   const singleRol = (configExtra?.rol as string) ?? null
-  const roles = singleRol
-    ? ALL_ROLES.filter(r => r.rol === singleRol)
-    : ALL_ROLES
+  const roles = rolesDelEquipo(configExtra)
 
   const data = (instancia?.data ?? {}) as Record<string, string | null>
   const [values, setValues] = useState<Record<string, string>>({
@@ -63,23 +56,26 @@ export default function BloqueEquipo({
   }
 
   function handleChange(key: string, value: string) {
+    const anterior = values[key]
     const next = { ...values, [key]: value }
     setValues(next)
+    // El selector se pinta antes de guardar; si el servidor rechaza, vuelve a lo que había
+    // para que la pantalla no muestre una asignación que no quedó.
+    const revertir = () => setValues(prev => (prev[key] === value ? { ...prev, [key]: anterior } : prev))
     startTransition(async () => {
       const dataToSave: Record<string, string | null> = {
         comercial_id: next.comercial_id || null,
         ejecucion_id: next.ejecucion_id || null,
         financiero_id: next.financiero_id || null,
       }
-      // Completo si el responsable requerido está asignado
-      const relevantKeys = roles.map(r => r.key)
-      const hasRequired = relevantKeys.some(k => dataToSave[k] !== null)
-      if (hasRequired) {
-        const result = await marcarBloqueCompleto(negocioBloqueId, dataToSave)
-        if (result.error) toast.error(result.error)
-      } else {
-        const result = await actualizarBloqueData(negocioBloqueId, dataToSave)
-        if (result.error) toast.error(result.error)
+      // Completo si el responsable requerido está asignado: el mismo criterio con el que
+      // el servidor acepta el cierre (`lib/negocios/cierre-bloque.ts`).
+      const result = faltaEnEquipo(configExtra, dataToSave) === null
+        ? await marcarBloqueCompleto(negocioBloqueId, dataToSave)
+        : await actualizarBloqueData(negocioBloqueId, dataToSave)
+      if (result.error) {
+        toast.error(result.error)
+        revertir()
       }
     })
   }
