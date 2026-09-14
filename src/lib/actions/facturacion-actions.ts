@@ -45,12 +45,23 @@ import {
   estadoDeRecaudo,
   type EstadoRecaudo,
 } from '@/lib/facturacion/caso-listo'
-import { resolverFacturaDelNegocio } from '@/lib/facturacion/factura-del-negocio'
+import {
+  cargaManualPermitida,
+  decidirCargaManual,
+  resolverFacturaDelNegocio,
+  type OrigenFactura,
+} from '@/lib/facturacion/factura-del-negocio'
 import {
   gatesDeFacturaPorLinea,
+  leerFacturaDeUnNegocio,
   leerOriginalesDeFactura,
   slugFacturaDeLinea,
 } from '@/lib/facturacion/leer-factura-del-negocio'
+import { archivarPdfEnBloque } from '@/lib/siigo/archivar-documento'
+import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
+import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
+import { getServerKey } from '@/lib/server-keys'
+import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 // Toda lectura por LOTE de este archivo pasa por aquí. PostgREST corta en 1.000
 // filas sin avisar, y en esta cola eso ya escondió el RUT de 48 casos y devolvió
 // dos negocios ya facturados a la bandeja como facturables. Ver el módulo.
@@ -143,6 +154,28 @@ export interface CasoPorFacturar {
    * de un caso completo — la marca se ve igual.
    */
   factura_sin_pdf: boolean
+  /**
+   * Enlace al PDF real de la factura: el del bloque ORIGINAL o el `archivo_url` de la
+   * marca. Nunca el de una copia heredada. `null` si no está facturado o no hay PDF.
+   */
+  factura_pdf_url: string | null
+  /** Cómo llegó la factura. `null` = cargada en la ficha, sin origen declarado. */
+  factura_origen: OrigenFactura | null
+  /**
+   * El bloque original trae un documento de OTRO emisor (p. ej. la factura del
+   * vehículo). No cuenta como factura y la tarjeta lo dice, en vez de mostrarlo.
+   */
+  factura_documento_ajeno: { emisor: string; numero: string | null } | null
+  /**
+   * Si la tarjeta ofrece cargar el PDF a mano, y si sería un reemplazo (pide motivo).
+   * Lo decide `cargaManualPermitida`, la misma regla que aplica el servidor al guardar.
+   */
+  carga_manual: { permitida: boolean; reemplaza: boolean; razon: string | null }
+  /**
+   * El negocio ya no está abierto. Solo entra a la cola si está facturado, para que
+   * su factura se pueda ver y buscar; no se le ofrece ninguna acción.
+   */
+  cerrado: boolean
   /** Consecutivo del recibo de caja del recaudo UPME, si ya se emitió. */
   recibo_numero: string | null
   /**
@@ -183,6 +216,8 @@ export interface CasoPorFacturar {
 
 export interface ColaFacturacion {
   casos: CasoPorFacturar[]
+  /** Nombre del workspace, para decir de quién tiene que ser la factura que se carga. */
+  workspace_nombre: string | null
   /** Etapa (numero visible) a partir de la cual se habilita facturar. */
   desde_etapa_numero: number | null
   /** El workspace no tiene Siigo configurado: la cola se ve, pero no se emite. */
@@ -283,7 +318,8 @@ async function armarColaFacturacion(
   // ── Configuración del workspace ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: ws } = await (svc as any)
-    .from('workspaces').select('config_extra').eq('id', workspaceId).single()
+    .from('workspaces').select('name, config_extra').eq('id', workspaceId).single()
+  const workspace_nombre = (ws?.name as string | null | undefined) ?? null
   const cfgWs = (ws?.config_extra ?? {}) as Record<string, unknown>
   const siigoCfg = cfgWs.siigo_config as SiigoConfig | undefined
   const siigo_configurado = !!siigoCfg && !!cfgWs.siigo_access_key
@@ -316,12 +352,12 @@ async function armarColaFacturacion(
     facturaSlugPorLinea.set(l.id, slugFacturaDeLinea(l.config_extra))
   }
   if (desde == null) {
-    return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
+    return { data: { casos: [], workspace_nombre, desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
   }
 
   // ── Negocios candidatos ──
   type Neg = {
-    id: string; codigo: string | null; nombre: string | null
+    id: string; codigo: string | null; nombre: string | null; estado: string | null
     precio_aprobado: number | null; contacto_id: string | null
     linea_id: string | null
     metadata: Record<string, unknown> | null
@@ -334,16 +370,43 @@ async function armarColaFacturacion(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('negocios')
-      .select('id, codigo, nombre, precio_aprobado, contacto_id, linea_id, metadata, etapas_negocio!inner(nombre, numero)')
+      .select('id, codigo, nombre, estado, precio_aprobado, contacto_id, linea_id, metadata, etapas_negocio!inner(nombre, numero)')
       .eq('workspace_id', workspaceId)
-      .eq('estado', 'abierto')
       .order('id')
       .range(d, h),
     { etiqueta: 'facturacion/negocios' },
   )
-  const candidatos = negocios.filter(n => (n.etapas_negocio?.numero ?? 0) > desde!)
+  const abiertos = negocios.filter(n => n.estado === 'abierto' && (n.etapas_negocio?.numero ?? 0) > desde!)
+  const cerrados = negocios.filter(n => n.estado !== 'abierto')
+
+  // ── La factura de cada caso: bloque ORIGINAL + marca, nunca una copia ──────
+  // Hasta el 2026-09-14 se leían TODAS las copias heredadas del bloque y bastaba con
+  // que una trajera `numero_factura` para dar el caso por facturado. Las copias se
+  // llenaban por herencia con documentos ajenos: 20 copias de SOENA traían el número
+  // de la factura del VEHÍCULO (Tesla, VISSAN, «FACTURA EDDI ALIRIO»), y V0006, V0290
+  // y V0428 salían como facturados sin factura. La regla vive en
+  // `lib/facturacion/factura-del-negocio`, la misma que usan la emisión y la ficha.
+  const originalFacturaPorNegocio = await leerOriginalesDeFactura(
+    svc, [...abiertos, ...cerrados].map(n => n.id), [...new Set(facturaSlugPorLinea.values())],
+  )
+  const gateFacturaPorLinea = await gatesDeFacturaPorLinea(svc, lineas.map(l => l.id))
+  const facturaDe = (n: Neg) => {
+    const gate = gateFacturaPorLinea.get(n.linea_id ?? '')
+    return resolverFacturaDelNegocio({
+      original: originalFacturaPorNegocio.get(n.id) ?? null,
+      marca: (n.metadata?.siigo_factura ?? null) as MarcaFactura | null,
+      emisorNitEsperado: gate?.emisor_nit_esperado,
+      nitCampo: gate?.nit_campo,
+      numeroCampo: gate?.numero_campo,
+    })
+  }
+
+  // Los cerrados ya facturados entran como REGISTRO a «Ya facturados»: sin esto, una
+  // factura de un negocio cerrado no se podía encontrar desde Tesorería (15 en SOENA
+  // el 2026-09-14). Un cerrado sin factura no entra: no es trabajo de esta cola.
+  const candidatos = [...abiertos, ...cerrados.filter(n => facturaDe(n).factura != null)]
   if (candidatos.length === 0) {
-    return { data: { casos: [], desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
+    return { data: { casos: [], workspace_nombre, desde_etapa_numero: desde, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
   }
   const ids = candidatos.map(n => n.id)
 
@@ -504,15 +567,6 @@ async function armarColaFacturacion(
     facturaDocumentId: 0, reciboDocumentId: 0, sellerId: 0,
     productoCode: '', ivaId: 0, facturaPaymentId: 0, reciboPaymentId: 0,
   }
-  // ── La factura de cada caso: bloque ORIGINAL + marca, nunca una copia ──────
-  // Hasta el 2026-09-14 se leían TODAS las copias heredadas del bloque y bastaba con
-  // que una trajera `numero_factura` para dar el caso por facturado. Las copias se
-  // llenaban por herencia con documentos ajenos: 20 copias de SOENA traían el número
-  // de la factura del VEHÍCULO (Tesla, VISSAN, «FACTURA EDDI ALIRIO»), y V0006, V0290
-  // y V0428 salían como facturados sin factura. La regla vive en
-  // `lib/facturacion/factura-del-negocio`, la misma que usan la emisión y la ficha.
-  const originalFacturaPorNegocio = await leerOriginalesDeFactura(svc, ids, [...new Set(facturaSlugPorLinea.values())])
-  const gateFacturaPorLinea = await gatesDeFacturaPorLinea(svc, lineas.map(l => l.id))
 
   // Fecha del documento fiscal. Va a Siigo, asi que es el dia civil de Bogota y no
   // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
@@ -541,21 +595,16 @@ async function armarColaFacturacion(
       { tarifa_upme: tarifas.get(n.id) ?? 0, aprobado_plan: null, aprobado_honorario: honorario },
       recaudado,
     )
-    const marcaFactura = (n.metadata?.siigo_factura ?? null) as MarcaFactura | null
     const estado = estadoDeRecaudo({ falta_saldo: faltante, honorario })
     // Dos fuentes para "ya facturado": el bloque ORIGINAL donde se carga el PDF y la
     // marca que deja la emisión desde aquí. La segunda hace falta porque emitir NO
     // obliga a cargar el soporte, y sin ella el caso volvería a la cola listo para
     // re-facturarse. Ninguna copia heredada cuenta.
-    const gateFactura = gateFacturaPorLinea.get(n.linea_id ?? '')
-    const { factura } = resolverFacturaDelNegocio({
-      original: originalFacturaPorNegocio.get(n.id) ?? null,
-      marca: marcaFactura,
-      emisorNitEsperado: gateFactura?.emisor_nit_esperado,
-      nitCampo: gateFactura?.nit_campo,
-      numeroCampo: gateFactura?.numero_campo,
-    })
+    const resolucion = facturaDe(n)
+    const { factura } = resolucion
     const yaFacturado = factura != null
+    const cerrado = n.estado !== 'abierto'
+    const permisoCarga = cargaManualPermitida(originalFacturaPorNegocio.get(n.id) ?? null, resolucion)
     const descartado = (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null
 
     return {
@@ -587,6 +636,15 @@ async function armarColaFacturacion(
       ya_facturado: yaFacturado,
       factura_numero: factura?.numero ?? null,
       factura_sin_pdf: factura != null && !factura.pdfUrl,
+      factura_pdf_url: factura?.pdfUrl ?? null,
+      factura_origen: factura?.origen ?? null,
+      factura_documento_ajeno: resolucion.documentoAjeno,
+      carga_manual: cerrado
+        ? { permitida: false, reemplaza: false, razon: 'El negocio está cerrado.' }
+        : permisoCarga.permitido
+          ? { permitida: true, reemplaza: permisoCarga.reemplaza, razon: null }
+          : { permitida: false, reemplaza: false, razon: permisoCarga.razon },
+      cerrado,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,
@@ -639,6 +697,7 @@ async function armarColaFacturacion(
   return {
     data: {
       casos,
+      workspace_nombre,
       desde_etapa_numero: desde,
       siigo_configurado,
       descarte_abierto: ventanaDescarteAbierta(),
@@ -1137,6 +1196,240 @@ export async function adoptarFacturaSiigoDeNegocio(
 
   revalidatePath('/conciliacion')
   return { ok: true, numero: r.numero, rearchivada: r.rearchivada }
+}
+
+// ── Cargar a mano el PDF de la factura ───────────────────────────────────────
+//
+// Decisión de Mauricio (2026-09-14): se carga el soporte cuando la factura se hizo por
+// fuera de ONE, o cuando ONE ya la reconoce como facturada pero no tiene el PDF. Si la
+// factura existe en Siigo se trae de Siigo (la adopción, arriba); esto es el camino
+// cuando no está allá o Siigo no devuelve el archivo.
+//
+// Lo que lo vuelve seguro:
+//   - escribe SIEMPRE en el bloque ORIGINAL (`archivarPdfEnBloque` resuelve por slug),
+//     nunca en una copia heredada;
+//   - el PDF se lee con IA y, si el emisor no es el NIT del workspace, NO se guarda:
+//     es la barrera contra volver a subir la factura del vehículo como si fuera la
+//     nuestra. La regla es la del gate `factura:emitida`;
+//   - reemplazar solo vale sobre una carga manual previa y con motivo escrito;
+//   - todo lo decide `decidirCargaManual`, puro y probado; aquí solo se orquesta.
+//
+// ⚠️ El aviso al cliente NO sale. `archivarPdfEnBloque` escribe con el service role, y
+// `trg_avisar_documento_cargado` exige `auth.uid()`; tampoco se llama
+// `avisar_documento_al_cliente`. «Factura emitida» de SOENA SÍ declara
+// `avisar_al_cliente` (correo y WhatsApp): con la sesión del usuario, cargar un PDF en
+// un original con la fila vacía le escribiría al cliente. Escribirle o no es decisión
+// aparte.
+
+/** Campos que se leen si la config del bloque no declara los suyos. */
+const CAMPOS_FACTURA_POR_DEFECTO: CampoExtraccion[] = [
+  {
+    slug: 'emisor_nit', tipo: 'texto', label: 'NIT del emisor', required: true, normalizar: 'nit_sin_dv',
+    descripcion_ai: 'NIT de la empresa que EMITE la factura (el vendedor), en el encabezado superior. Solo dígitos, sin dígito de verificación ni puntos.',
+  },
+  {
+    slug: 'numero_factura', tipo: 'texto', label: 'Número de factura', required: true,
+    descripcion_ai: 'Número o consecutivo de la factura de venta. Devolver el prefijo y el número tal como aparecen.',
+  },
+]
+
+const TAMANO_MAX_PDF = 10 * 1024 * 1024
+
+export interface ResultadoCargaManual {
+  ok: boolean
+  error?: string
+  /** Modo `leer`: lo que la IA sacó del PDF, para prellenar y confirmar. */
+  leido?: { numero: string | null; emisor: string | null }
+  /** Este PDF sustituiría un documento ya cargado: la pantalla pide motivo. */
+  reemplaza?: boolean
+  /** Modo `guardar`: el número con el que quedó. */
+  numero?: string
+}
+
+/**
+ * Lee (modo `leer`) o guarda (modo `guardar`) el PDF de la factura de un negocio.
+ *
+ * El PDF viaja en las dos llamadas y se lee con IA en las dos: la barrera del emisor
+ * se aplica al guardar contra lo que dice el archivo, no contra lo que devolvió la
+ * primera lectura. Una acción de servidor es una puerta pública.
+ */
+export async function cargarFacturaManual(formData: FormData): Promise<ResultadoCargaManual> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { workspaceId } = ctx
+
+  const negocioId = String(formData.get('negocio_id') ?? '').trim()
+  const modo = formData.get('modo') === 'guardar' ? 'guardar' : 'leer'
+  const archivo = formData.get('archivo')
+  if (!negocioId) return { ok: false, error: 'Falta el negocio' }
+  if (!(archivo instanceof File) || archivo.size === 0) return { ok: false, error: 'Falta el PDF de la factura' }
+  const esPdf = archivo.type === 'application/pdf' || archivo.name.toLowerCase().endsWith('.pdf')
+  if (!esPdf) return { ok: false, error: 'La factura tiene que ser un PDF' }
+  if (archivo.size > TAMANO_MAX_PDF) return { ok: false, error: 'El PDF pesa más de 10 MB' }
+
+  const svc = createServiceClient()
+  const cerrado = await bloqueoPorNegocioCerrado(svc, workspaceId, negocioId)
+  if (cerrado) return { ok: false, error: cerrado }
+
+  const factura = await leerFacturaDeUnNegocio(svc, workspaceId, negocioId)
+  if (!factura) return { ok: false, error: 'Negocio no encontrado' }
+
+  // Antes de gastar una lectura con IA: ¿se puede cargar aquí?
+  const permiso = cargaManualPermitida(factura.original, factura.resolucion)
+  if (!permiso.permitido) return { ok: false, error: permiso.razon }
+
+  // ── Leer el PDF con los campos que declara el bloque ──
+  const campos = await camposDeExtraccionFactura(svc, factura.lineaId, factura.slug)
+  const buffer = Buffer.from(await archivo.arrayBuffer())
+  const leido = await leerCamposFactura(buffer, campos)
+  const nitCampo = factura.gate?.nit_campo ?? 'emisor_nit'
+  const numeroCampo = factura.gate?.numero_campo ?? 'numero_factura'
+  const emisorLeido = valorLeido(leido, nitCampo)
+  const numeroLeido = valorLeido(leido, numeroCampo)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ws } = await (svc as any)
+    .from('workspaces').select('name').eq('id', workspaceId).maybeSingle()
+  const nombreWorkspace = (ws?.name as string | undefined) || 'la empresa'
+
+  const decision = decidirCargaManual({
+    original: factura.original,
+    resolucion: factura.resolucion,
+    marca: factura.marca,
+    emisorLeido,
+    emisorNitEsperado: factura.gate?.emisor_nit_esperado,
+    numero: modo === 'guardar' ? String(formData.get('numero') ?? '') : numeroLeido,
+    motivo: modo === 'guardar' ? String(formData.get('motivo') ?? '') : null,
+    nombreWorkspace,
+  })
+
+  if (modo === 'leer') {
+    // Al leer solo se corta un PDF que no es del workspace. Número y motivo los
+    // completa la persona antes de guardar.
+    if (!decision.ok && (decision.rechazo === 'emisor_ajeno' || decision.rechazo === 'sin_emisor')) {
+      return { ok: false, error: decision.mensaje, leido: { numero: numeroLeido, emisor: emisorLeido } }
+    }
+    return { ok: true, leido: { numero: numeroLeido, emisor: emisorLeido }, reemplaza: permiso.reemplaza }
+  }
+
+  if (!decision.ok) {
+    return { ok: false, error: decision.mensaje, leido: { numero: numeroLeido, emisor: emisorLeido }, reemplaza: permiso.reemplaza }
+  }
+
+  // ── Guardar en el ORIGINAL ──
+  const { staffId } = await getWorkspace()
+  let nombre: string | null = null
+  if (staffId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
+    nombre = (st?.full_name as string | null) ?? null
+  }
+  const anterior = factura.original
+  const motivo = String(formData.get('motivo') ?? '').trim() || null
+  const valores: Record<string, string> = {}
+  for (const c of campos) valores[c.slug] = valorLeido(leido, c.slug) ?? ''
+  valores[numeroCampo] = decision.numero
+  if (emisorLeido) valores[nitCampo] = emisorLeido
+
+  const nombreArchivo = `${decision.numero.replace(/[^\w.-]+/g, '-')}.pdf`
+  const arch = await archivarPdfEnBloque(
+    workspaceId, negocioId, factura.slug, buffer, nombreArchivo, valores,
+    {
+      clave: '_cargas_manuales',
+      entrada: {
+        at: new Date().toISOString(),
+        por: nombre,
+        numero: decision.numero,
+        reemplaza: decision.reemplaza,
+        motivo,
+        anterior: decision.reemplaza
+          ? {
+              file_name: (anterior?.file_name as string | undefined) ?? null,
+              drive_url: (anterior?.drive_url as string | undefined) ?? null,
+              origen: (anterior?.origen as string | undefined) ?? null,
+            }
+          : null,
+      },
+    },
+    'cargada_manual',
+  )
+  if (!arch.ok) return { ok: false, error: `No se pudo guardar el PDF: ${arch.error}` }
+
+  if (staffId) {
+    const numeroAnterior = (anterior?.campos as Record<string, { value?: unknown }> | undefined)?.[numeroCampo]?.value
+    const detalle = decision.reemplaza
+      ? ` · reemplaza ${numeroAnterior ? String(numeroAnterior) : (anterior?.file_name as string | undefined) ?? 'el documento anterior'}. Motivo: ${motivo ?? ''}`
+      : ''
+    // `activity_log.contenido` tiene un CHECK de 280 caracteres: un motivo largo
+    // tumbaría el INSERT entero.
+    const contenido = `Factura ${decision.numero} cargada a mano desde Tesorería (origen: cargada_manual)${detalle}`.slice(0, 280)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await registrarActividad((svc as any), {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId, // FK a staff(id), NO a profiles
+      contenido,
+    }, 'cargarFacturaManual')
+  }
+
+  // Si el caso esperaba su factura para cerrarse, esto es lo que le faltaba.
+  try {
+    await cerrarNegocioSiQuedaResuelto(svc, workspaceId, negocioId, staffId ?? null)
+  } catch (e) {
+    console.error('[facturacion] no se pudo evaluar el cierre automatico:', (e as Error).message)
+  }
+
+  revalidatePath('/conciliacion')
+  revalidatePath(`/negocios/${negocioId}`)
+  return { ok: true, numero: decision.numero, reemplaza: decision.reemplaza }
+}
+
+/** `campos_extraccion` del bloque de factura ORIGINAL de la línea. */
+async function camposDeExtraccionFactura(
+  svc: unknown,
+  lineaId: string | null,
+  slug: string,
+): Promise<CampoExtraccion[]> {
+  if (!lineaId) return CAMPOS_FACTURA_POR_DEFECTO
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (svc as any)
+    .from('bloque_configs')
+    .select('config_extra, etapas_negocio!inner(linea_id)')
+    .eq('slug', slug)
+    .eq('etapas_negocio.linea_id', lineaId)
+    .limit(1)
+  const declarados = ((data ?? [])[0]?.config_extra?.campos_extraccion ?? []) as CampoExtraccion[]
+  return declarados.length > 0 ? declarados : CAMPOS_FACTURA_POR_DEFECTO
+}
+
+/** Una lectura con IA, con un reintento ante fallo transitorio. Nunca lanza. */
+async function leerCamposFactura(
+  buffer: Buffer,
+  campos: CampoExtraccion[],
+): Promise<Record<string, CampoResultado> | null> {
+  const apiKey = getServerKey('gemini')
+  if (!apiKey) return null
+  for (let intento = 1; intento <= 2; intento++) {
+    try {
+      const r = await extractFieldsFromDocument(buffer, 'application/pdf', campos, apiKey)
+      if (r.data) {
+        aplicarNormalizaciones(campos, r.data)
+        return r.data
+      }
+      if (r.error?.startsWith('Contenido bloqueado')) return null
+    } catch (e) {
+      console.error('[facturacion] lectura del PDF falló:', (e as Error).message)
+    }
+  }
+  return null
+}
+
+function valorLeido(leido: Record<string, CampoResultado> | null, slug: string): string | null {
+  const v = leido?.[slug]?.value
+  const t = v == null ? '' : String(v).trim()
+  return t || null
 }
 
 // ── Recibo de caja del recaudo de la tarifa UPME ─────────────────────────────

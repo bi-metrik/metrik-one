@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   cargaManualPermitida,
+  dataDeFacturaParaCopias,
+  decidirCargaManual,
   emisorImpideFactura,
   mismoNumero,
   numeroNoCoincideConMarca,
@@ -108,6 +110,35 @@ describe('resolverFacturaDelNegocio', () => {
   })
 })
 
+describe('dataDeFacturaParaCopias — lo que la ficha pinta en las copias', () => {
+  const resolver = (original: Record<string, unknown> | null, marca: Parameters<typeof resolverFacturaDelNegocio>[0]['marca'] = null) =>
+    resolverFacturaDelNegocio({ original, marca, emisorNitEsperado: NIT_SOENA })
+
+  it('con PDF en el original, la copia muestra el original', () => {
+    expect(dataDeFacturaParaCopias(CARGUE_HISTORICO, resolver(CARGUE_HISTORICO))).toBe(CARGUE_HISTORICO)
+  })
+
+  it('V0475: sin factura, la copia se ve VACÍA (no el certificado que tenía)', () => {
+    expect(dataDeFacturaParaCopias(null, resolver(null))).toEqual({})
+  })
+
+  it('V0089: con la factura del vehículo en el original, la copia se ve vacía', () => {
+    expect(dataDeFacturaParaCopias(FACTURA_DEL_VEHICULO, resolver(FACTURA_DEL_VEHICULO))).toEqual({})
+  })
+
+  it('con el PDF solo en la marca, la copia enlaza el de la marca', () => {
+    const marca = { numero: 'FV-2-373', archivo_url: 'https://drive/marca', origen: 'adoptada_de_siigo' }
+    expect(dataDeFacturaParaCopias({}, resolver({}, marca))).toEqual({
+      drive_url: 'https://drive/marca', file_name: 'FV-2-373.pdf', mime_type: 'application/pdf',
+      origen: 'adoptada_de_siigo', campos: { numero_factura: { value: 'FV-2-373', manual: true } },
+    })
+  })
+
+  it('facturada sin PDF (V0076): la copia se ve vacía', () => {
+    expect(dataDeFacturaParaCopias(null, resolver(null, MARCA_V0076))).toEqual({})
+  })
+})
+
 describe('verificarEmisorFactura — la misma regla que el gate factura:emitida', () => {
   it('compara sin dígito de verificación', () => {
     expect(verificarEmisorFactura('9018748851', NIT_SOENA)).toBe('coincide')
@@ -174,5 +205,66 @@ describe('número de la carga contra la marca', () => {
   it('mismoNumero no da por iguales dos vacíos', () => {
     expect(mismoNumero('', '')).toBe(false)
     expect(mismoNumero('FV-2-1', 'FV21')).toBe(true)
+  })
+})
+
+describe('decidirCargaManual — la barrera de Tesorería', () => {
+  const base = (p: Partial<Parameters<typeof decidirCargaManual>[0]> = {}) => {
+    const original = p.original ?? null
+    const marca = p.marca ?? null
+    return decidirCargaManual({
+      original,
+      marca,
+      resolucion: resolverFacturaDelNegocio({ original, marca, emisorNitEsperado: NIT_SOENA }),
+      emisorLeido: NIT_SOENA,
+      emisorNitEsperado: NIT_SOENA,
+      numero: 'FV-2-700',
+      motivo: null,
+      nombreWorkspace: 'SOENA',
+      ...p,
+    })
+  }
+
+  it('una factura de SOENA en un negocio sin factura se guarda', () => {
+    expect(base()).toEqual({ ok: true, reemplaza: false, numero: 'FV-2-700' })
+  })
+
+  it('la factura del VEHÍCULO no se guarda, y se dice por qué', () => {
+    const r = base({ emisorLeido: '800041629', numero: 'VNYC 638' })
+    expect(r).toMatchObject({ ok: false, rechazo: 'emisor_ajeno' })
+    expect(r.ok === false && r.mensaje).toMatch(/^Este documento no es una factura emitida por SOENA/)
+  })
+
+  it('sin NIT del emisor legible, no se guarda', () => {
+    expect(base({ emisorLeido: null })).toMatchObject({ ok: false, rechazo: 'sin_emisor' })
+  })
+
+  it('el emisor se juzga ANTES que el número: un PDF ajeno no llega a pedir número', () => {
+    expect(base({ emisorLeido: '800041629', numero: '' })).toMatchObject({ rechazo: 'emisor_ajeno' })
+  })
+
+  it('sin número no se guarda', () => {
+    expect(base({ numero: '  ' })).toMatchObject({ ok: false, rechazo: 'sin_numero' })
+  })
+
+  it('V0076: el PDF que se carga tiene que ser la factura que ONE ya registró', () => {
+    expect(base({ marca: MARCA_V0076, numero: 'FV-2-459' })).toEqual({ ok: true, reemplaza: false, numero: 'FV-2-459' })
+    expect(base({ marca: MARCA_V0076, numero: 'FV-2-460' })).toMatchObject({ ok: false, rechazo: 'numero_no_coincide' })
+  })
+
+  it('sobre un PDF que trajo Siigo no se carga nada, ni con motivo', () => {
+    expect(base({ original: CARGUE_HISTORICO, motivo: 'lo cambio porque sí, motivo largo' }))
+      .toMatchObject({ ok: false, rechazo: 'no_permitido' })
+  })
+
+  it('reemplazar una carga manual exige motivo escrito', () => {
+    const manual = { ...CARGADA_EN_FICHA, origen: 'cargada_manual' }
+    expect(base({ original: manual, motivo: 'corto' })).toMatchObject({ ok: false, rechazo: 'falta_motivo' })
+    expect(base({ original: manual, motivo: 'El PDF anterior estaba incompleto' }))
+      .toEqual({ ok: true, reemplaza: true, numero: 'FV-2-700' })
+  })
+
+  it('V0089: cambiar el documento ajeno por la factura real también pide motivo', () => {
+    expect(base({ original: FACTURA_DEL_VEHICULO })).toMatchObject({ ok: false, rechazo: 'falta_motivo' })
   })
 })

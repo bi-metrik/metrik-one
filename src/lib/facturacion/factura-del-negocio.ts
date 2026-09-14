@@ -154,6 +154,31 @@ export function mismoNumero(a: string | null | undefined, b: string | null | und
   return n(a) !== '' && n(a) === n(b)
 }
 
+/**
+ * La `data` que pinta la ficha del negocio en las COPIAS del bloque de factura.
+ *
+ * Es la misma factura que ve Tesorería: si la resolución enlaza el PDF del bloque
+ * original, la copia muestra el original; si el PDF sale de la marca, se arma una data
+ * mínima con ese enlace; si no hay PDF de una factura del workspace, la copia se ve
+ * vacía. Nunca la data propia de la copia y nunca un documento de otro emisor.
+ */
+export function dataDeFacturaParaCopias(
+  original: Record<string, unknown> | null,
+  resolucion: ResolucionFactura,
+  numeroCampo = 'numero_factura',
+): Record<string, unknown> {
+  const f = resolucion.factura
+  if (!f?.pdfUrl) return {}
+  if (f.fuentePdf === 'bloque' && original) return original
+  return {
+    drive_url: f.pdfUrl,
+    file_name: `${f.numero}.pdf`,
+    mime_type: 'application/pdf',
+    origen: f.origen,
+    campos: { [numeroCampo]: { value: f.numero, manual: true } },
+  }
+}
+
 // ── Carga manual ─────────────────────────────────────────────────────────────
 
 export type PermisoCargaManual =
@@ -200,4 +225,75 @@ export function numeroNoCoincideConMarca(
   if (!numeroMarca) return null
   if (mismoNumero(numeroCargado, numeroMarca)) return null
   return `El número ${texto(numeroCargado)} no coincide con la factura que ONE ya tiene registrada (${numeroMarca}).`
+}
+
+// ── La decisión completa de una carga manual ─────────────────────────────────
+
+/** Largo mínimo del motivo al reemplazar un soporte cargado a mano. */
+export const MOTIVO_REEMPLAZO_MIN = 10
+
+export type RechazoCargaManual =
+  | 'no_permitido'
+  | 'emisor_ajeno'
+  | 'sin_emisor'
+  | 'sin_numero'
+  | 'numero_no_coincide'
+  | 'falta_motivo'
+
+export type DecisionCargaManual =
+  | { ok: true; reemplaza: boolean; numero: string }
+  | { ok: false; rechazo: RechazoCargaManual; mensaje: string }
+
+/**
+ * ¿Se guarda este PDF como la factura del negocio?
+ *
+ * El orden importa y es el de la pantalla: primero si se puede cargar, después si el
+ * documento es una factura DEL WORKSPACE (la barrera contra subir la factura del
+ * vehículo), después el número, y al final el motivo si reemplaza algo.
+ *
+ * @param emisorLeido NIT del emisor que extrajo la IA del PDF, o null si no se leyó.
+ * @param numero número que confirma la persona (prellenado con el extraído).
+ */
+export function decidirCargaManual(p: {
+  original: unknown
+  resolucion: ResolucionFactura
+  marca: MarcaFacturaMinima | null | undefined
+  emisorLeido: string | null | undefined
+  emisorNitEsperado: string | null | undefined
+  numero: string | null | undefined
+  motivo: string | null | undefined
+  nombreWorkspace: string
+}): DecisionCargaManual {
+  const permiso = cargaManualPermitida(p.original, p.resolucion)
+  if (!permiso.permitido) return { ok: false, rechazo: 'no_permitido', mensaje: permiso.razon }
+
+  const veredicto = verificarEmisorFactura(p.emisorLeido, p.emisorNitEsperado)
+  if (veredicto === 'no_coincide') {
+    return {
+      ok: false,
+      rechazo: 'emisor_ajeno',
+      mensaje: `Este documento no es una factura emitida por ${p.nombreWorkspace}: el NIT del emisor es ${texto(p.emisorLeido)}. No se guardó.`,
+    }
+  }
+  if (veredicto === 'sin_emisor') {
+    return {
+      ok: false,
+      rechazo: 'sin_emisor',
+      mensaje: `No se pudo leer el NIT del emisor en el documento, así que no se puede confirmar que sea una factura emitida por ${p.nombreWorkspace}. No se guardó.`,
+    }
+  }
+
+  const numero = texto(p.numero)
+  if (!numero) return { ok: false, rechazo: 'sin_numero', mensaje: 'Falta el número de la factura.' }
+  const contraMarca = numeroNoCoincideConMarca(numero, p.marca)
+  if (contraMarca) return { ok: false, rechazo: 'numero_no_coincide', mensaje: contraMarca }
+
+  if (permiso.reemplaza && texto(p.motivo).length < MOTIVO_REEMPLAZO_MIN) {
+    return {
+      ok: false,
+      rechazo: 'falta_motivo',
+      mensaje: 'Este negocio ya tiene un documento cargado como factura. Para reemplazarlo, escribe por qué.',
+    }
+  }
+  return { ok: true, reemplaza: permiso.reemplaza, numero }
 }
