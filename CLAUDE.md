@@ -370,6 +370,15 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### Bot WA: un "Si" al soporte fotografico ya no expulsa, pide la foto - PR #658, `wa-webhook` v151 (2026-09-14)
+
+- **Bug:** en `awaiting_image` todo lo que no fuera foto, audio o "despues" caia a `completeSession`. Quien contestaba "Si" a "¿Tienes soporte fotografico?" (un solo boton, "Despues") quedaba fuera de la conversacion.
+- **Contrato nuevo del estado:** foto guarda y cierra; afirmacion pide la foto y permanece; negacion o `btn_sin_soporte` cierra con constancia; "despues" cierra; lo no clasificable repregunta con botones y suma reintento; al tercer mensaje no entendido cierra (`MAX_REINTENTOS_SOPORTE = 2`, contador en `session.context.soporte_reintentos`).
+- **La decision vive en `_shared/handlers/registro/soporte-foto.ts`, puro y probado; `resume.ts` solo ejecuta.** Motivo: el handler no se puede importar en pruebas (`wa-parse.ts` lee `Deno.env` al cargar). Clasificador de intencion reutilizable en `_shared/wa-intencion.ts` (`si | no | despues | cancelar | desconocido`).
+- **⚠️ `confirming` y `awaiting_timeout_confirm` siguen con sus arrays inline** porque aceptan `'1'`, `'✅'`, `'❌'`, que el clasificador no reconoce. Migrarlos exige ampliarlo primero.
+- **⚠️ Mergear no despliega la edge function.** Se desplego a mano desde la torre (`supabase functions deploy wa-webhook`).
+- **⚠️ Limitacion abierta:** `extractMessage` devuelve `null` para `document`, video y sticker antes de que exista sesion. Un PDF como soporte nunca llega al handler, en ningun flujo del bot.
+
 ### El enlace de un subdominio se comparte con el logo de ese cliente - PRs #650 `d6ec053`, #657 `b734840` (2026-09-12)
 
 - **Antes la app no tenia NINGUNA etiqueta Open Graph:** pegar un enlace de `metrikone.co` o de cualquier subdominio en WhatsApp, LinkedIn o Slack lo mostraba mudo. El #650 puso la tarjeta **generica** en el layout raiz (`metadataBase`, `openGraph`, `twitter`, `public/og/metrik-one-og.png`). El #657 puso la tarjeta **por inquilino**, con el logo del cliente, en `/api/og/[slug]`.
