@@ -6918,7 +6918,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     precioAprobado = cotizacionAceptada.valor_total ?? undefined
     const { data: itemsConRubros } = await supabase
       .from('items')
-      .select('nombre, cantidad, subtotal, es_ajuste, rubros(tipo, valor_total)')
+      // `rubros(*)`: `sugerido` lo agrega `20260914230000` y nombrarlo devolveria un
+      // 400 mientras no este aplicada. `calcularPresupuestoPorRubro` los filtra.
+      .select('nombre, cantidad, subtotal, es_ajuste, rubros(*)')
       .eq('cotizacion_id', cotizacionAceptada.id)
       .order('orden')
 

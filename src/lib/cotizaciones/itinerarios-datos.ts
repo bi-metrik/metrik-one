@@ -33,6 +33,7 @@ import {
   type ItemConGrupo,
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
+import { costoDeRubrosConfirmados } from './rubros-sugeridos'
 
 // El cliente tipado de Supabase obliga a arrastrar medio `database.ts` por cada
 // `select`, y ninguna de estas tablas está en los tipos generados todavía.
@@ -128,13 +129,14 @@ export async function contextoDeCotizacion(
 
   const { data: filas } = await supabase
     .from('items')
-    .select('*, rubros(valor_total)')
+    .select('*, rubros(*)')
     .eq('cotizacion_id', cotizacionId)
     .order('orden')
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const items: ItemDeCotizacion[] = ((filas ?? []) as any[]).map(fila => {
-    const rubros = (fila.rubros as { valor_total: number }[] | null) ?? []
+    // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
+    const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(fila.rubros)
     return {
       id: fila.id as string,
       nombre: (fila.nombre ?? null) as string | null,
@@ -144,8 +146,8 @@ export async function contextoDeCotizacion(
       orden: (fila.orden ?? 0) as number,
       cantidad: fila.cantidad ?? 1,
       subtotal: fila.subtotal ?? 0,
-      numeroDeRubros: rubros.length,
-      costoDeRubros: rubros.reduce((s, r) => s + (r.valor_total ?? 0), 0),
+      numeroDeRubros,
+      costoDeRubros,
       descuento_porcentaje: fila.descuento_porcentaje ?? 0,
       margen_porcentaje: fila.margen_porcentaje ?? null,
       precio_venta: fila.precio_venta ?? 0,
