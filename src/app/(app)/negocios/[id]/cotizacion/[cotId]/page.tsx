@@ -1,4 +1,5 @@
 import { getCotizacion, getCotizacionItems } from '@/app/(app)/negocios/cotizacion-actions'
+import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
@@ -18,10 +19,14 @@ export default async function CotizacionNegocioPage({
   const { id, cotId } = await params
 
   // getFiscalProfile tiene getWorkspace() interno que THROWS — catch para no crashear
-  const [cotizacion, items, fiscalResult] = await Promise.all([
+  const [cotizacion, items, fiscalResult, itinerarios] = await Promise.all([
     getCotizacion(cotId),
     getCotizacionItems(cotId),
     getFiscalProfile().catch(() => ({ success: false as const, data: null })),
+    // La tabla de combinaciones. Devuelve vacio cuando la cotizacion no tiene
+    // opciones —que es toda cotizacion anterior a este frente— y tambien cuando la
+    // migracion no esta aplicada: en los dos casos la pantalla se ve como hoy.
+    getEstadoItinerarios(cotId),
   ])
 
   if (!cotizacion) notFound()
@@ -162,6 +167,7 @@ export default async function CotizacionNegocioPage({
       frozen={frozen}
       lineaId={negocioLineaId}
       umbrales={umbrales}
+      itinerarios={itinerarios}
     />
   )
 }

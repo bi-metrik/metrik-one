@@ -26,8 +26,10 @@ import {
   type NivelMargen,
   type UmbralesMargen,
 } from '@/lib/cotizaciones/convencion-margen'
-import { origenDelMargen, etiquetaOrigenMargen, formatMargenPct } from '@/lib/cotizaciones/margen-vista'
+import { origenDelMargen, etiquetaOrigenMargen, formatMargenPct, claseNivelMargen } from '@/lib/cotizaciones/margen-vista'
 import RastroMargen from '@/app/(app)/negocios/rastro-margen-panel'
+import TablaCombinaciones from '@/app/(app)/negocios/tabla-combinaciones'
+import { agregarOpcionAItem, actualizarRanuraDeItem, type EstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -56,6 +58,15 @@ interface ItemRow {
   cantidad?: number | null
   margen_porcentaje?: number | null
   precio_manual?: boolean | null
+  /**
+   * Ranura en la que compite la linea. Llega `undefined` mientras la migracion
+   * `20260914200000` no este aplicada, y eso vale lo mismo que `null`: sin grupo.
+   */
+  grupo?: string | null
+  /** Titular del que esta linea es alternativa. `null`/ausente = es el titular. */
+  opcion_de?: string | null
+  /** Unidad de cara al cliente: pax, noche, trayecto. */
+  unidad?: string | null
   rubros: RubroRow[]
 }
 
@@ -112,9 +123,17 @@ interface Props {
    * el día que cambie quedarían dos reglas.
    */
   umbrales?: UmbralesMargen
+  /**
+   * Las combinaciones de esta cotizacion, ya calculadas por el servidor.
+   *
+   * Opcional a proposito: el editor se monta desde dos rutas y la que no lo pase
+   * —o una cotizacion sin opciones— simplemente no pinta la tabla, que es R6 en la
+   * pantalla.
+   */
+  itinerarios?: EstadoItinerarios
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -457,6 +476,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </div>
       )}
 
+      {/* Los grupos que ya se usaron en ESTA cotizacion. Sin esto, «hotel», «Hotel»
+          y «hoteles» serian tres ranuras distintas y nada competiria con nada: el
+          grupo es texto libre y es lo que decide que se compara con que. */}
+      <datalist id="grupos-cotizacion">
+        {[...new Set(initialItems.map(i => (i.grupo ?? '').trim()).filter(Boolean))].map(g => (
+          <option key={g} value={g} />
+        ))}
+      </datalist>
+
       {/* Items editor */}
       <div className="space-y-3">
           {/* Abrir o cerrar todos los items de una. Con una cotizacion larga, abrir
@@ -527,6 +555,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       {isAjuste && (
                         <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
                       )}
+                      {/* La ranura, visible sin abrir la linea: con nueve lineas en
+                          pantalla, saber cuales compiten entre si es la unica forma de
+                          leer la lista. «alternativa» se dice aparte porque una opcion
+                          no se suma al total salvo que un itinerario la elija. */}
+                      {!isAjuste && item.grupo && (
+                        <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          {item.grupo}{item.opcion_de ? ' · alternativa' : ''}
+                        </span>
+                      )}
                       {!isAjuste && costoDelItem === 0 && (
                         <span
                           title="Este item no tiene costo, así que no suma al costo total ni deja medir margen"
@@ -583,6 +620,88 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
               {!isAjuste && expandedItems.has(item.id) && (
                 <div className="border-t px-4 pb-3 pt-2">
+                  {/* La RANURA de la línea: en qué grupo compite y en qué unidad se
+                      vende. Dos líneas con el mismo grupo son alternativas entre sí y
+                      se comparan en la tabla de combinaciones; sin grupo, la línea
+                      entra en todos los itinerarios (R3). */}
+                  {editable && (
+                    <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                          Grupo (alternativas)
+                        </label>
+                        <input
+                          type="text"
+                          defaultValue={item.grupo ?? ''}
+                          placeholder="vuelo, hotel, día-1…"
+                          list="grupos-cotizacion"
+                          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                          onBlur={e => {
+                            const val = e.target.value.trim()
+                            if (val === (item.grupo ?? '')) return
+                            startTransition(async () => {
+                              const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                              if (!res.success) { toast.error(res.error); return }
+                              router.refresh()
+                            })
+                          }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                        />
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          Vacío: entra en todos los itinerarios
+                        </p>
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                          Unidad
+                        </label>
+                        <input
+                          type="text"
+                          defaultValue={item.unidad ?? ''}
+                          placeholder="pax, noches, trayectos…"
+                          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                          onBlur={e => {
+                            const val = e.target.value.trim()
+                            if (val === (item.unidad ?? '')) return
+                            startTransition(async () => {
+                              const res = await actualizarRanuraDeItem(item.id, { unidad: val })
+                              if (!res.success) { toast.error(res.error); return }
+                              router.refresh()
+                            })
+                          }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                        />
+                        {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
+                            pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
+                            morfología del español sobre texto libre acierta a veces. Por eso
+                            el marcador sugiere la forma en plural, que es la del caso común. */}
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          Se imprime tal cual al cliente
+                        </p>
+                      </div>
+                      <div className="col-span-2 flex items-end">
+                        {/* La alternativa nace VACÍA de costo: es otro proveedor, no
+                            una variante del mismo precio. Copiarle los rubros dejaría
+                            a WINGO costando lo que AVIANCA sin que se note. */}
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => {
+                            startTransition(async () => {
+                              const res = await agregarOpcionAItem(item.id, '')
+                              if (!res.success) { toast.error(res.error); return }
+                              toast.success(`Alternativa agregada en «${res.grupo}». Cárgale su costo.`)
+                              router.refresh()
+                            })
+                          }}
+                          className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Agregar alternativa a esta línea
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {/* Item sale fields */}
                   {editable && (
                     <div className="mb-3 space-y-2">
@@ -1108,6 +1227,18 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           )}
 
+          {/* Las combinaciones, ANTES de la cascada: son la decisión de qué se le
+              manda al cliente, y la cascada de abajo es el total del principal.
+              Leerlas después dejaría el total sin contexto. No se pinta nada si la
+              cotización no tiene opciones (R6). */}
+          {itinerarios && (
+            <TablaCombinaciones
+              cotizacionId={cotizacion.id}
+              estado={itinerarios}
+              editable={editable}
+            />
+          )}
+
           {/* La cascada de la cotización: costo, administrativos, margen, descuento. */}
           <TotalesMargen
             cascada={cascada}
@@ -1280,17 +1411,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
  * nada que juzgar todavía. `ok` tampoco se pinta de verde en la línea — con doce
  * ítems sanos, doce verdes dejan de distinguirse de nada.
  */
-function claseNivelMargen(nivel: NivelMargen): string {
-  switch (nivel) {
-    case 'bajo_piso':
-      return 'text-red-600'
-    case 'aviso':
-      return 'text-amber-600'
-    default:
-      return 'text-muted-foreground'
-  }
-}
-
 /** Qué explica el tooltip del margen, sin repetir lo que ya dice el texto. */
 function tituloNivelMargen(
   nivel: NivelMargen,

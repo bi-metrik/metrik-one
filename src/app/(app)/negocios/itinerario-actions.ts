@@ -1,0 +1,495 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
+import {
+  combinacionesCartesianas,
+  normalizarGrupo,
+  ranurasConAlternativas,
+  TOPE_COMBINACIONES,
+} from '@/lib/cotizaciones/itinerarios'
+import {
+  calcularItinerario,
+  contextoDeCotizacion,
+  desmarcarLosQueYaNoPueden,
+  leerCabecera,
+  leerItinerarios,
+  type Desmarcado,
+  type ItinerarioCalculado,
+} from '@/lib/cotizaciones/itinerarios-datos'
+
+/**
+ * Itinerarios de una cotización: leer, combinar y decidir cuáles van al cliente.
+ *
+ * Vive aparte de `cotizacion-actions.ts` —que ya son 1.100 líneas— y la lógica que
+ * toca la base vive un nivel más abajo, en `lib/cotizaciones/itinerarios-datos.ts`,
+ * para que `recalcularTotales` pueda reusarla sin cerrar un ciclo entre dos archivos
+ * `'use server'`.
+ *
+ * ## Lo que este archivo protege
+ *
+ * El piso de margen. §2.6.4 del diseño: *«El servidor RECHAZA marcar
+ * `va_en_propuesta` en un itinerario por debajo. No es aviso de pantalla.»* Toda
+ * decisión se toma con cifras **recalculadas contra la base**, nunca con las que manda
+ * el navegador: una server action exportada es un endpoint alcanzable aunque ningún
+ * botón la invoque, y lo que el piso protege es que no salga al cliente una propuesta
+ * por debajo de él.
+ */
+
+export interface EstadoItinerarios {
+  /** Las ranuras con alternativas: las columnas de la tabla de combinaciones. */
+  ranuras: { grupo: string; candidatos: { id: string; nombre: string | null }[] }[]
+  itinerarios: ItinerarioCalculado[]
+  umbrales: UmbralesMargen
+  /**
+   * `true` cuando las tablas todavía no existen en la base.
+   *
+   * NO es lo mismo que «esta cotización no tiene itinerarios»: la pantalla lo dice en
+   * vez de ofrecer un botón que va a fallar.
+   */
+  tablasAusentes: boolean
+}
+
+// ── Lectura ──────────────────────────────────────────────────────────────────
+
+/**
+ * Todo lo que la tabla de combinaciones necesita, ya calculado.
+ *
+ * Devuelve vacío y `tablasAusentes: true` si la migración no está aplicada. Para la
+ * pantalla es indistinguible de «esta cotización no tiene itinerarios» —que es el
+ * comportamiento R6— y es lo que evita que el editor deje de abrir mientras la
+ * migración esté pendiente.
+ */
+export async function getEstadoItinerarios(cotizacionId: string): Promise<EstadoItinerarios> {
+  const vacio: EstadoItinerarios = {
+    ranuras: [],
+    itinerarios: [],
+    umbrales: UMBRALES_MARGEN_POR_DEFECTO,
+    tablasAusentes: false,
+  }
+
+  const { supabase, error } = await getWorkspace()
+  if (error) return vacio
+
+  const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+  if (!ctx) return vacio
+
+  const ranuras = ranurasConAlternativas(ctx.items).map(r => ({
+    grupo: r.grupo,
+    candidatos: r.candidatos.map(id => ({
+      id,
+      nombre: ctx.items.find(i => i.id === id)?.nombre ?? null,
+    })),
+  }))
+
+  const filas = await leerItinerarios(supabase, cotizacionId)
+  if (filas === null) return { ...vacio, ranuras, umbrales: ctx.umbrales, tablasAusentes: true }
+
+  return {
+    ranuras,
+    umbrales: ctx.umbrales,
+    tablasAusentes: false,
+    itinerarios: filas.map(fila => calcularItinerario(ctx, fila)),
+  }
+}
+
+// ── Escritura ────────────────────────────────────────────────────────────────
+
+/**
+ * T1 · propone el producto cartesiano de las opciones existentes, ya calculado.
+ *
+ * T2 · **nacen con `va_en_propuesta = false`.** Ninguna combinación llega al cliente
+ * por omisión, ni siquiera la que más margen deja.
+ *
+ * No borra lo que ya está: solo agrega lo que falta. Regenerar después de sumar un
+ * hotel tiene que conservar el nombre y la marca de los itinerarios que alguien ya
+ * revisó — borrarlos y rehacerlos perdería ese trabajo en silencio.
+ */
+export async function generarCombinaciones(cotizacionId: string) {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+  if (!ctx) return { success: false, error: 'Cotización no encontrada' }
+
+  const { combinaciones, truncado, total } = combinacionesCartesianas(ctx.items)
+  if (combinaciones.length === 0) {
+    return {
+      success: false,
+      error: 'No hay opciones que combinar: agrega al menos dos alternativas en un mismo grupo',
+    }
+  }
+
+  const existentes = await leerItinerarios(supabase, cotizacionId)
+  if (existentes === null) return { success: false, error: ERROR_TABLAS_AUSENTES }
+
+  // La huella de una combinación es su selección ordenada: regenerar no duplica lo
+  // que ya existe, aunque alguien lo haya renombrado o reordenado.
+  const yaEstan = new Set(existentes.map(i => huella(i.seleccion)))
+  const nuevas = combinaciones.filter(sel => !yaEstan.has(huella(sel)))
+
+  let orden = existentes.reduce((m, i) => Math.max(m, i.orden), 0)
+  let creadas = 0
+  for (const seleccion of nuevas) {
+    orden += 1
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: fila, error: errIns } = await (supabase as any)
+      .from('cotizacion_itinerarios')
+      .insert({
+        workspace_id: workspaceId,
+        cotizacion_id: cotizacionId,
+        nombre: null,
+        orden,
+        va_en_propuesta: false,
+        es_principal: false,
+      })
+      .select('id')
+      .single()
+    if (errIns || !fila) {
+      return { success: false, error: errIns?.message ?? 'No se pudo crear el itinerario' }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errVin } = await (supabase as any)
+      .from('itinerario_opciones')
+      .insert(seleccion.map(itemId => ({ itinerario_id: fila.id, item_id: itemId })))
+    if (errVin) return { success: false, error: errVin.message }
+    creadas += 1
+  }
+
+  revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
+  return {
+    success: true,
+    creadas,
+    yaExistian: combinaciones.length - nuevas.length,
+    aviso: truncado
+      ? `Son ${total} combinaciones posibles y se generaron las primeras ${TOPE_COMBINACIONES}. Reduce las alternativas de algún grupo para verlas todas.`
+      : null,
+  }
+}
+
+/**
+ * T3 · cambiar una celda recalcula ESA fila. Las demás no se tocan.
+ *
+ * ⚠️ Si el itinerario estaba en la propuesta y el cambio lo deja bajo el piso, se
+ * **desmarca y se dice por qué** (§2.6.5). Bloquear el cambio en su lugar sería peor:
+ * dejaría a alguien sin poder corregir una combinación mala.
+ */
+export async function cambiarOpcionDeItinerario(itinerarioId: string, grupo: string, itemId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const cab = await leerCabecera(supabase, itinerarioId)
+  if (!cab) return { success: false, error: 'Itinerario no encontrado' }
+
+  const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
+  if (!ctx) return { success: false, error: 'Cotización no encontrada' }
+
+  const ranura = ranurasConAlternativas(ctx.items).find(r => r.grupo === normalizarGrupo(grupo))
+  if (!ranura) return { success: false, error: `El grupo «${grupo}» ya no tiene alternativas` }
+  if (!ranura.candidatos.includes(itemId)) {
+    return { success: false, error: 'Esa opción no pertenece a este grupo' }
+  }
+
+  // El borrado va acotado a los candidatos de ESA ranura: un `delete` por itinerario
+  // se llevaría por delante las otras ranuras.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errDel } = await (supabase as any)
+    .from('itinerario_opciones')
+    .delete()
+    .eq('itinerario_id', itinerarioId)
+    .in('item_id', ranura.candidatos)
+  if (errDel) return { success: false, error: errDel.message }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errIns } = await (supabase as any)
+    .from('itinerario_opciones')
+    .insert({ itinerario_id: itinerarioId, item_id: itemId })
+  if (errIns) return { success: false, error: errIns.message }
+
+  const desmarcados = await desmarcarLosQueYaNoPueden(supabase, cab.cotizacionId)
+  revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
+  return { success: true, desmarcados }
+}
+
+/**
+ * §2.6.4 · el candado. Aquí el piso de margen RECHAZA.
+ *
+ * Dos condiciones, comprobadas con cifras recalculadas contra la base: el itinerario
+ * tiene que estar completo (R2) y su margen real tiene que llegar al piso congelado
+ * de la cotización.
+ *
+ * Desmarcar no pide nada: sacar algo de la propuesta siempre se puede.
+ */
+export async function marcarEnPropuesta(itinerarioId: string, vaEnPropuesta: boolean) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const cab = await leerCabecera(supabase, itinerarioId)
+  if (!cab) return { success: false, error: 'Itinerario no encontrado' }
+
+  const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
+  if (!ctx) return { success: false, error: 'Cotización no encontrada' }
+
+  if (vaEnPropuesta) {
+    const calculado = calcularItinerario(ctx, cab)
+    if (calculado.bloqueo) return { success: false, error: calculado.bloqueo }
+  }
+
+  const patch: Record<string, unknown> = { va_en_propuesta: vaEnPropuesta }
+  // T5 · el principal TIENE que ir en la propuesta. Sacarlo de la propuesta sin
+  // soltar el principal dejaría `valor_total` con el precio de un itinerario que el
+  // cliente no va a ver nunca.
+  if (!vaEnPropuesta && cab.esPrincipal) patch.es_principal = false
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any)
+    .from('cotizacion_itinerarios')
+    .update(patch)
+    .eq('id', itinerarioId)
+  if (errUpd) return { success: false, error: errUpd.message }
+
+  revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
+  return { success: true, soltoPrincipal: patch.es_principal === false }
+}
+
+/**
+ * T5 y T7 · exactamente un principal, y tiene que ir en la propuesta.
+ *
+ * T7 · cuando el cliente elige, se marca ese itinerario como principal y el negocio
+ * sigue con ESE costeo: `recalcularTotales` pone su total en `cotizaciones.valor_total`.
+ * Los demás quedan como historia de la cotización; no se borran.
+ *
+ * ⚠️ El principal pasa por el MISMO candado que `va_en_propuesta`. Es el que fija el
+ * precio del negocio, así que dejarlo entrar por debajo del piso sería la puerta
+ * trasera al control que este frente construye.
+ */
+export async function marcarPrincipal(itinerarioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const cab = await leerCabecera(supabase, itinerarioId)
+  if (!cab) return { success: false, error: 'Itinerario no encontrado' }
+
+  const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
+  if (!ctx) return { success: false, error: 'Cotización no encontrada' }
+
+  const calculado = calcularItinerario(ctx, cab)
+  if (calculado.bloqueo) return { success: false, error: calculado.bloqueo }
+
+  // Soltar el anterior ANTES de marcar el nuevo: el índice único parcial
+  // `idx_itinerario_principal_unico` rechaza dos principales a la vez.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (supabase as any)
+    .from('cotizacion_itinerarios')
+    .update({ es_principal: false })
+    .eq('cotizacion_id', cab.cotizacionId)
+    .neq('id', itinerarioId)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any)
+    .from('cotizacion_itinerarios')
+    .update({ es_principal: true, va_en_propuesta: true })
+    .eq('id', itinerarioId)
+  if (errUpd) return { success: false, error: errUpd.message }
+
+  revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
+  return { success: true }
+}
+
+/** T6 · el nombre es libre y viaja al PDF. Vacío: el PDF numera. */
+export async function renombrarItinerario(itinerarioId: string, nombre: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const limpio = nombre.trim()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any)
+    .from('cotizacion_itinerarios')
+    .update({ nombre: limpio === '' ? null : limpio })
+    .eq('id', itinerarioId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  return { success: true }
+}
+
+/** Borrar una fila de la tabla. Sus vínculos se van por `on delete cascade`. */
+export async function eliminarItinerario(itinerarioId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const cab = await leerCabecera(supabase, itinerarioId)
+  if (!cab) return { success: false, error: 'Itinerario no encontrado' }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errDel } = await (supabase as any)
+    .from('cotizacion_itinerarios')
+    .delete()
+    .eq('id', itinerarioId)
+  if (errDel) return { success: false, error: errDel.message }
+
+  const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
+  revalidarCotizacion(ctx?.negocioId ?? null, ctx?.oportunidadId ?? null)
+  return { success: true, eraPrincipal: cab.esPrincipal }
+}
+
+/**
+ * Re-valida todos los itinerarios y desmarca los que ya no pueden ir a la propuesta.
+ *
+ * Se llama después de una edición que mueve costos o precios. Es pública porque quien
+ * edita un ítem vive en `cotizacion-actions.ts`; lo que hace no depende de quién llame.
+ */
+export async function revalidarItinerarios(cotizacionId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, desmarcados: [] as Desmarcado[] }
+  const desmarcados = await desmarcarLosQueYaNoPueden(supabase, cotizacionId)
+  return { success: true, desmarcados }
+}
+
+// ── Opciones dentro del ítem (2a) ────────────────────────────────────────────
+
+/**
+ * Crea una ALTERNATIVA del ítem: misma ranura, costeo propio.
+ *
+ * ⚠️ La copia nace **vacía de costo**: sin rubros y con `subtotal` en 0. Una opción es
+ * otro proveedor, no una variante del mismo precio — copiarle los rubros al titular
+ * dejaría a WINGO costando lo que AVIANCA hasta que alguien se acordara de cambiarlo,
+ * y un costo heredado que nadie tocó se ve idéntico a uno verificado.
+ *
+ * ⚠️ `margen_porcentaje: null`, NUNCA 0. `null` significa «usa el de la cotización»;
+ * 0 significa «esta línea va a costo». Es la trampa que ya costó una copia entera
+ * vendida a costo al duplicar cotizaciones, y entra aquí por la misma puerta.
+ *
+ * Si el titular no tenía grupo se le pone uno: sin ranura no hay entre qué elegir, y
+ * dos ítems sueltos se sumarían los dos en vez de competir.
+ */
+export async function agregarOpcionAItem(itemId: string, nombre: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: titular, error: errLeer } = await (supabase as any)
+    .from('items')
+    .select('id, cotizacion_id, nombre, grupo, opcion_de, unidad, cantidad, es_ajuste')
+    .eq('id', itemId)
+    .maybeSingle()
+  if (errLeer) return { success: false, error: errLeer.message }
+  if (!titular) return { success: false, error: 'Ítem no encontrado' }
+  if (titular.es_ajuste) return { success: false, error: 'El ítem de ajuste no admite opciones' }
+
+  // Una opción de una opción sigue siendo opción del MISMO titular: la ranura es
+  // plana. Anidarlas daría un árbol que la tabla de combinaciones no sabe dibujar.
+  const titularReal: string = titular.opcion_de ?? titular.id
+
+  let grupo = normalizarGrupo(titular.grupo)
+  if (grupo === null) {
+    grupo = grupoSugerido(titular.nombre)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errGrupo } = await (supabase as any)
+      .from('items')
+      .update({ grupo })
+      .eq('id', titularReal)
+    if (errGrupo) return { success: false, error: errGrupo.message }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ultimo } = await (supabase as any)
+    .from('items')
+    .select('orden')
+    .eq('cotizacion_id', titular.cotizacion_id)
+    .order('orden', { ascending: false })
+    .limit(1)
+  const orden = ((ultimo?.[0]?.orden as number | undefined) ?? 0) + 1
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: creado, error: errIns } = await (supabase as any)
+    .from('items')
+    .insert({
+      cotizacion_id: titular.cotizacion_id,
+      nombre: nombre.trim() || `${titular.nombre ?? 'Opción'} (alternativa)`,
+      grupo,
+      opcion_de: titularReal,
+      unidad: titular.unidad ?? null,
+      cantidad: titular.cantidad ?? 1,
+      subtotal: 0,
+      orden,
+      margen_porcentaje: null,
+      precio_venta: 0,
+      precio_manual: false,
+    })
+    .select('id')
+    .single()
+  if (errIns) return { success: false, error: errIns.message }
+
+  return { success: true, id: creado?.id as string | undefined, grupo }
+}
+
+/** El grupo y la unidad de una línea: los dos campos nuevos de 2a. */
+export async function actualizarRanuraDeItem(
+  itemId: string,
+  updates: { grupo?: string | null; unidad?: string | null },
+) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const patch: Record<string, unknown> = {}
+  if (updates.grupo !== undefined) patch.grupo = normalizarGrupo(updates.grupo)
+  if (updates.unidad !== undefined) {
+    const limpia = (updates.unidad ?? '').trim()
+    patch.unidad = limpia === '' ? null : limpia
+  }
+  if (Object.keys(patch).length === 0) return { success: true }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any).from('items').update(patch).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  return { success: true }
+}
+
+// ── Interno ──────────────────────────────────────────────────────────────────
+
+const ERROR_TABLAS_AUSENTES =
+  'Los itinerarios todavía no están disponibles en esta base: falta aplicar la migración 20260914200000_cotizacion_itinerarios.sql'
+
+/** Huella estable de una selección, para no duplicar combinaciones al regenerar. */
+function huella(seleccion: string[]): string {
+  return [...seleccion].sort().join('|')
+}
+
+/**
+ * Un grupo de arranque para un ítem que todavía no tiene ranura.
+ *
+ * Se deriva del nombre cuando se reconoce (vuelo, hotel, traslado, tour, seguro) y
+ * cae en el propio nombre de la línea cuando no. Lo importante es que sea ÚNICO: un
+ * genérico como «componente» juntaría dos ítems que no compiten entre sí y los
+ * volvería alternativas del mismo slot, que es peor que no adivinar nada. Se edita en
+ * la tabla.
+ */
+function grupoSugerido(nombre: string | null): string {
+  const texto = (nombre ?? '').toLowerCase()
+  const conocidos: [string, string][] = [
+    ['vuelo', 'vuelo'],
+    ['aére', 'vuelo'],
+    ['aere', 'vuelo'],
+    ['tiquete', 'vuelo'],
+    ['hotel', 'hotel'],
+    ['aloja', 'hotel'],
+    ['traslado', 'traslado'],
+    ['transfer', 'traslado'],
+    ['tour', 'tour'],
+    ['excursi', 'tour'],
+    ['seguro', 'seguro'],
+    ['asistencia', 'seguro'],
+  ]
+  for (const [fragmento, grupo] of conocidos) {
+    if (texto.includes(fragmento)) return grupo
+  }
+  const limpio = (nombre ?? '').trim().toLowerCase().slice(0, 40)
+  return limpio === '' ? 'componente' : limpio
+}
+
+function revalidarCotizacion(negocioId: string | null, oportunidadId: string | null) {
+  if (negocioId) revalidatePath(`/negocios/${negocioId}`)
+  if (oportunidadId) revalidatePath(`/pipeline/${oportunidadId}`)
+}

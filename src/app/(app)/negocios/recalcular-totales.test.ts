@@ -84,6 +84,12 @@ function constructor(tabla: string) {
       filtros.push([col, val])
       return api
     },
+    // El doble NO ordena: ordenar aqui esconderia que el codigo depende del orden
+    // que le da la base. Existe solo porque `contextoDeCotizacion` pide `.order()`,
+    // y sin el metodo la cadena revienta.
+    order() {
+      return api
+    },
     single() {
       const { data } = ejecutar()
       return Promise.resolve({ data: (data as Fila[])?.[0] ?? null, error: null })
@@ -106,6 +112,14 @@ import { recalcularTotales } from './cotizacion-actions'
 
 const COT = 'cot-1'
 
+/**
+ * ⚠️ `cotizacion_itinerarios` NO se siembra, y eso es la prueba de R6.
+ *
+ * Sin itinerarios, `totalDelPrincipal` devuelve `null` y `recalcularTotales` tiene
+ * que dar EXACTAMENTE las mismas cifras que antes de que los itinerarios existieran.
+ * Las once pruebas de este archivo son, desde este frente, tambien la comprobacion de
+ * que una cotizacion de Termotech no cambio de precio.
+ */
 function sembrar(items: Fila[], rubros: Fila[], valorTotal = 0) {
   tablas = {
     cotizaciones: [{ id: COT, valor_total: valorTotal, negocio_id: 'neg-1', oportunidad_id: null }],

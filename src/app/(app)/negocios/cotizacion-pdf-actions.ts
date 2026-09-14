@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
+import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -154,12 +155,15 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
   // Get items
   type ItemRow = {
+    id?: string
     nombre: string | null
     descripcion: string | null
     precio_venta: number
     descuento_porcentaje: number | null
     cantidad: number | null
     subtotal?: number | null
+    /** Llega `undefined` mientras `20260914200000` no este aplicada. */
+    unidad?: string | null
   }
 
   /**
@@ -175,9 +179,12 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     (Number(it.subtotal) || 0) > 0 ? 0 : Number(it.descuento_porcentaje) || 0
   let items: ItemRow[] = []
   if (cot.modo === 'detallada') {
+    // `select('*')` y no la lista de columnas: `unidad` la agrega la migracion
+    // `20260914200000` y nombrarla devolveria un 400 mientras no este aplicada, o sea
+    // que el PDF dejaria de generarse. Misma tolerancia que en duplicar.
     const { data: itemsData } = await supabase
       .from('items')
-      .select('nombre, descripcion, precio_venta, descuento_porcentaje, cantidad, subtotal')
+      .select('*')
       .eq('cotizacion_id', cotizacionId)
       .order('orden')
     items = (itemsData ?? []) as ItemRow[]
@@ -370,6 +377,49 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     }
   }
 
+  // R7 · los bloques de la propuesta. `null` cuando la cotizacion no tiene
+  // itinerarios o ninguno va en la propuesta: ahi el PDF imprime la lista plana de
+  // siempre. El corte vive en `bloquesParaPDF` y no en la plantilla porque hay mas
+  // de una plantilla, y una regla repetida es una regla que se desincroniza.
+  const bloques = await bloquesParaPDF(supabase, cotizacionId)
+  const itemPorId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
+  const itinerariosPDF = bloques
+    ? bloques.map(b => ({
+        nombre: b.nombre,
+        esPrincipal: b.esPrincipal,
+        precio: b.precio,
+        items: b.itemIds
+          .map(id => itemPorId.get(id))
+          .filter((i): i is ItemRow => i !== undefined)
+          .map(i => ({
+            nombre: i.nombre ?? '',
+            descripcion: i.descripcion ?? null,
+            precio_venta: Number(i.precio_venta) || 0,
+            descuento_porcentaje: descuentoVisible(i),
+            cantidad: Number(i.cantidad) || 1,
+            unidad: i.unidad ?? null,
+          })),
+      }))
+    : null
+
+  // ⚠️ Con itinerarios, la lista PLANA de items que alimenta el resumen fiscal se
+  // reemplaza por la del PRINCIPAL. Si no, el «Subtotal» sumaria AVIANCA **y** WINGO
+  // —los dos vuelos estan en `items`— y quedaria por encima del TOTAL, que sale de
+  // `valor_total` y es el del principal (R5). Dos cifras del mismo dinero que no
+  // cuadran, en el documento que ve el cliente.
+  //
+  // De paso resuelve el caso de UN solo itinerario en propuesta: la plantilla imprime
+  // su tabla plana, y es la del principal.
+  const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
+  const itemsParaResumen = itemsDelPrincipal ?? items.map(i => ({
+    nombre: i.nombre ?? '',
+    descripcion: i.descripcion ?? null,
+    precio_venta: Number(i.precio_venta) || 0,
+    descuento_porcentaje: descuentoVisible(i),
+    cantidad: Number(i.cantidad) || 1,
+    unidad: i.unidad ?? null,
+  }))
+
   const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {
       consecutivo: cot.consecutivo,
@@ -404,13 +454,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       direccion: vendorFiscal?.direccion_fiscal ?? null,
       ciudad: [vendorFiscal?.municipio, vendorFiscal?.departamento].filter(Boolean).join(', ') || null,
     },
-    items: items.map(i => ({
-      nombre: i.nombre ?? '',
-      descripcion: i.descripcion ?? null,
-      precio_venta: Number(i.precio_venta) || 0,
-      descuento_porcentaje: descuentoVisible(i),
-      cantidad: Number(i.cantidad) || 1,
-    })),
+    items: itemsParaResumen,
+    itinerarios: itinerariosPDF,
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,

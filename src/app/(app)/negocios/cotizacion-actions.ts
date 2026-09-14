@@ -9,6 +9,13 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
+import {
+  contextoDeCotizacion,
+  desmarcarLosQueYaNoPueden,
+  leerItinerarios,
+  totalDelPrincipal,
+} from '@/lib/cotizaciones/itinerarios-datos'
+import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -484,7 +491,18 @@ export async function deleteItem(id: string) {
       .eq('id', item.cotizacion_id)
   }
 
-  return { success: true }
+  // Borrar una LINEA puede romper un itinerario: sus vinculos se van por cascada, y
+  // el que la tenia elegida queda sin resolver esa ranura. Si ademas iba en la
+  // propuesta, sale de ella aqui — un itinerario incompleto no puede llegar al
+  // cliente (R2), y esta es la unica puerta que lo puede dejar asi sin que nadie
+  // toque la tabla de combinaciones.
+  //
+  // ⚠️ Borrar el TITULAR se lleva sus opciones por `on delete cascade` de
+  // `items.opcion_de`: la ranura entera desaparece y los itinerarios vuelven a estar
+  // completos sin ella. Es el desenlace correcto y no hace falta nada mas.
+  const desmarcados = await desmarcarLosQueYaNoPueden(supabase, item.cotizacion_id)
+
+  return { success: true, desmarcados }
 }
 
 // ── Add from servicio catalog (deep copy) ─────────
@@ -831,12 +849,22 @@ export async function duplicarCotizacion(id: string) {
 
   // If detallada, duplicate items + rubros
   if (original.modo === 'detallada' && newCot) {
+    // `select('*')` y no una lista de columnas: `grupo`, `opcion_de` y `unidad` las
+    // agrega la migracion `20260914200000` y nombrarlas devolveria un 400 mientras no
+    // este aplicada — o sea que duplicar dejaria de funcionar. Es la misma tolerancia
+    // que ya obligo `insertarCotizacionTolerante` en esta misma funcion.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: items } = await (supabase as any)
       .from('items')
-      .select('nombre, descripcion, subtotal, orden, precio_venta, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
+      .select('*, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
       .eq('cotizacion_id', id)
       .order('orden')
+
+    // Viejo id -> nuevo id. `items.opcion_de` es FK a la propia tabla y
+    // `itinerario_opciones.item_id` apunta aqui: sin este mapa la copia quedaria
+    // apuntando a los items del ORIGINAL, que no falla y mueve las combinaciones de
+    // la cotizacion de la que salio.
+    const mapaItems = new Map<string, string>()
 
     for (const item of items ?? []) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -862,9 +890,17 @@ export async function duplicarCotizacion(id: string) {
           // margen de la cotización ya no movía ninguna línea.
           margen_porcentaje: item.margen_porcentaje ?? null,
           precio_manual: item.precio_manual ?? false,
+          // La ranura viaja con la linea. Sin `grupo` la copia perderia las
+          // alternativas: tres vuelos pasarian de competir entre si a sumarse los
+          // tres. `opcion_de` se repone en la segunda pasada, cuando el mapa este
+          // completo: el titular puede venir DESPUES de su opcion en el orden.
+          grupo: item.grupo ?? null,
+          unidad: item.unidad ?? null,
         })
         .select('id')
         .single()
+
+      if (newItem) mapaItems.set(item.id as string, newItem.id as string)
 
       if (newItem && item.rubros) {
         const rubrosToInsert = (item.rubros as { tipo: string; descripcion: string | null; cantidad: number; unidad: string; valor_unitario: number }[]).map(r => ({
@@ -877,6 +913,45 @@ export async function duplicarCotizacion(id: string) {
         }))
         if (rubrosToInsert.length > 0) {
           await supabase.from('rubros').insert(rubrosToInsert)
+        }
+      }
+    }
+
+    // Segunda pasada: el vinculo entre opcion y titular, ya en el mundo de la copia.
+    for (const patch of remapearOpcionDe((items ?? []) as { id: string; opcion_de?: string | null }[], mapaItems)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).from('items').update({ opcion_de: patch.opcionDe }).eq('id', patch.nuevoId)
+    }
+
+    // Los itinerarios. Si la migracion no esta aplicada, `leerItinerarios` devuelve
+    // `null` y no hay nada que copiar: la copia queda como hoy.
+    const itinerariosOriginales = await leerItinerarios(supabase, id)
+    if (itinerariosOriginales && itinerariosOriginales.length > 0) {
+      const copias = itinerariosParaLaCopia(
+        itinerariosOriginales.map(it => ({
+          id: it.id,
+          nombre: it.nombre,
+          orden: it.orden,
+          va_en_propuesta: it.vaEnPropuesta,
+          es_principal: it.esPrincipal,
+          seleccion: it.seleccion,
+        })),
+        mapaItems,
+        newCot.id,
+        workspaceId,
+      )
+      for (const copia of copias) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: nuevoItin } = await (supabase as any)
+          .from('cotizacion_itinerarios')
+          .insert(copia.cabecera)
+          .select('id')
+          .single()
+        if (nuevoItin && copia.seleccion.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any)
+            .from('itinerario_opciones')
+            .insert(copia.seleccion.map(itemId => ({ itinerario_id: nuevoItin.id, item_id: itemId })))
         }
       }
     }
@@ -1065,16 +1140,44 @@ export async function recalcularTotales(cotizacionId: string) {
     return { success: true, costoTotal: cascada.costoDirecto, valorVenta: valorFijado }
   }
 
+  // R5 · con itinerarios, el total de la cotizacion es el del itinerario PRINCIPAL,
+  // no la suma de todos los items: sumarlos todos cobraria AVIANCA y WINGO a la vez.
+  //
+  // ⚠️ R6 · sin itinerarios —o sin ninguno marcado principal— `totalDelPrincipal`
+  // devuelve `null` y esto cae EXACTAMENTE al comportamiento de siempre. Es el corte
+  // que deja intactas a Termotech, Arca, WMC y a las cotizaciones que ya existen: no
+  // hay un flag que alguien pueda encender por error, hay una fila que no existe.
+  //
+  // ⚠️ La cotizacion, sus items y sus itinerarios se leen UNA vez y se pasan a los
+  // dos helpers. Esta funcion corre en cada tecla del editor: releerlos por cada uno
+  // eran cuatro idas y vueltas mas por recalculo, en la pantalla mas pesada.
+  const ctxItin = await contextoDeCotizacion(supabase, cotizacionId)
+  const filasItin = ctxItin ? await leerItinerarios(supabase, cotizacionId) : null
+  const principal = ctxItin ? await totalDelPrincipal(supabase, cotizacionId, ctxItin, filasItin) : null
+
   await supabase
     .from('cotizaciones')
     .update({
-      costo_total: cascada.costoDirecto,
-      valor_total: cascada.precioVenta,
+      costo_total: principal ? principal.costoDirecto : cascada.costoDirecto,
+      valor_total: principal ? principal.precioVenta : cascada.precioVenta,
       descuento_valor: cascada.descuentoComercial,
     } as never)
     .eq('id', cotizacionId)
 
-  return { success: true, costoTotal: cascada.costoDirecto, valorVenta: cascada.precioVenta }
+  // §2.6.5 · ninguna edicion puede dejar un itinerario por debajo del piso duro Y
+  // marcado para propuesta. Recalcular es justo el momento en que los costos se
+  // movieron, asi que es aqui donde se revisa — no en cada boton de la pantalla, que
+  // es como se olvida uno.
+  const desmarcados = ctxItin && filasItin && filasItin.length > 0
+    ? await desmarcarLosQueYaNoPueden(supabase, cotizacionId, { ctx: ctxItin, filas: filasItin })
+    : []
+
+  return {
+    success: true,
+    costoTotal: principal ? principal.costoDirecto : cascada.costoDirecto,
+    valorVenta: principal ? principal.precioVenta : cascada.precioVenta,
+    desmarcados,
+  }
 }
 
 // ── AIU (Admin + Imprevistos sobre costos) ────────────────────

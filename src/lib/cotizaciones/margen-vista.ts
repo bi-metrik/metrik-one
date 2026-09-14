@@ -61,3 +61,26 @@ export function formatMargenPct(margenRealPct: number | null | undefined): strin
   if (!Number.isFinite(margenRealPct)) return null
   return `${margenRealPct.toFixed(1).replace('.', ',')}%`
 }
+
+/**
+ * De qué color sale un margen según su nivel.
+ *
+ * Vive aquí, y no en la pantalla que lo usa, porque desde los itinerarios lo pintan
+ * DOS superficies: la línea del editor y la fila de la tabla de combinaciones. Un
+ * itinerario en rojo y su línea en ámbar por el mismo margen es una contradicción que
+ * el usuario no puede resolver, y son dos `switch` que se desincronizan al primer
+ * cambio de paleta.
+ *
+ * `sin_dato` NO se pinta de ningún color: regañar por no haber llegado todavía enseña
+ * a ignorar el aviso.
+ */
+export function claseNivelMargen(nivel: 'sin_dato' | 'bajo_piso' | 'aviso' | 'ok'): string {
+  switch (nivel) {
+    case 'bajo_piso':
+      return 'text-red-600'
+    case 'aviso':
+      return 'text-amber-600'
+    default:
+      return 'text-muted-foreground'
+  }
+}

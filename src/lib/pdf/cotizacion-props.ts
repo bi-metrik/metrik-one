@@ -54,7 +54,41 @@ export interface CotizacionPDFProps {
     precio_venta: number
     descuento_porcentaje: number
     cantidad: number
+    /**
+     * Unidad de cara al cliente: «pax», «noche», «trayecto». Opcional: las
+     * cotizaciones anteriores a `items.unidad` no la traen y la columna de cantidad
+     * se imprime igual que siempre.
+     */
+    unidad?: string | null
   }[]
+
+  /**
+   * R7 · los bloques de la propuesta, uno por itinerario marcado «va en propuesta».
+   *
+   * `null` o ausente —que es TODA cotización sin itinerarios, o sea todas las que
+   * existían antes de este frente— hace que la plantilla imprima la lista plana de
+   * `items`, exactamente como hoy. No hay un flag que encender: hay un arreglo que
+   * no llega.
+   *
+   * El PRINCIPAL viene primero, y es el único cuyo total coincide con
+   * `cotizacion.valor_total`: los demás son alternativas con su propio precio. Una
+   * plantilla que imprima los tres tiene que decir cuál es cuál, o el cliente no
+   * sabe qué número está aceptando.
+   */
+  itinerarios?: {
+    /** Vacío: la plantilla numera («Opción 1»). */
+    nombre: string | null
+    esPrincipal: boolean
+    precio: number
+    items: {
+      nombre: string
+      descripcion: string | null
+      precio_venta: number
+      descuento_porcentaje: number
+      cantidad: number
+      unidad?: string | null
+    }[]
+  }[] | null
   fiscal: {
     subtotal: number
     iva: number

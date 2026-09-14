@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet, Image as PdfImage } from '@reac
 
 import type { CotizacionPDFProps } from './cotizacion-props'
 import { PALETA } from '@/lib/marca/paleta'
+import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 
 // Color lightener (react-pdf no soporta rgba)
 function lighten(hex: string, amount: number): string {
@@ -24,9 +25,73 @@ function formatFecha(dateStr: string): string {
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal }: CotizacionPDFProps) {
+/** Un item ya con su total de linea calculado. */
+type ItemPDF = CotizacionPDFProps['items'][number]
+
+/**
+ * La tabla de un BLOQUE de itinerario (R7).
+ *
+ * Es deliberadamente mas simple que la tabla plana de abajo: dentro de un itinerario
+ * el cliente compara COMPONENTES, no descuentos de linea. Meterle las mismas seis
+ * columnas a tres tablas seguidas hace ilegible justo la comparacion que el
+ * documento existe para permitir.
+ */
+function TablaDeItems({ items, pc, pcLight }: { items: ItemPDF[]; pc: string; pcLight: string }) {
+  return (
+    <View>
+      {items.map((item, i) => {
+        const cant = item.cantidad ?? 1
+        const neto = Math.round(item.precio_venta * cant)
+        // La unidad se imprime solo cuando la linea la declara: «3 noches» dice mas
+        // que «3», y un «3 und» inventado dice menos que nada.
+        const unidad = (item.unidad ?? '').trim()
+        return (
+          <View
+            key={i}
+            style={{
+              flexDirection: 'row',
+              paddingVertical: 6,
+              borderBottomWidth: 0.5,
+              borderBottomColor: '#E5E7EB',
+              backgroundColor: i % 2 === 1 ? pcLight : undefined,
+              alignItems: 'flex-start',
+            }}
+          >
+            <View style={{ width: '70%', paddingLeft: 4 }}>
+              <Text style={{ fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: '#111827' }}>
+                {item.nombre}
+              </Text>
+              {item.descripcion && (
+                <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 2 }}>
+                  {item.descripcion}
+                </Text>
+              )}
+            </View>
+            <Text style={{ width: '12%', fontSize: 9, color: '#374151', textAlign: 'right' }}>
+              {cant > 1 ? (unidad ? `${cant} ${unidad}` : String(cant)) : (unidad || '')}
+            </Text>
+            <Text style={{ width: '18%', fontSize: 9, fontFamily: 'Helvetica-Bold', color: pc, textAlign: 'right', paddingRight: 4 }}>
+              {fmt(neto)}
+            </Text>
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
+export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal, itinerarios }: CotizacionPDFProps) {
   const pc = vendedor.color_primario || PALETA.acento
   const pcLight = lighten(pc, 0.08)
+
+  // R7 · los bloques que el documento imprime. Con UNO solo (o ninguno) se cae al
+  // camino de siempre: un cliente con una sola opcion no necesita que se la
+  // presenten como una eleccion entre varias.
+  const bloques = (itinerarios ?? []).map((it, i) => ({
+    titulo: tituloDeBloquePDF(it.nombre, it.esPrincipal, i + 1),
+    total: it.precio,
+    items: it.items,
+  }))
 
   // Pre-calculate item totals
   const hasQuantity = items.some(i => (i.cantidad ?? 1) > 1)
@@ -158,7 +223,35 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
         )}
 
         {/* ── S4. TABLA DE CONCEPTOS ── */}
-        {items.length > 0 && (
+        {/* R7 · con itinerarios, un bloque por cada uno que va en la propuesta, el
+            principal primero. Sin itinerarios se imprime la lista plana de siempre:
+            el corte es que el arreglo no llegue, no un flag. */}
+        {bloques.length > 1 && (
+          <View style={{ marginTop: 20 }}>
+            {bloques.map((bloque, b) => (
+              <View key={b} style={{ marginBottom: 14 }} wrap={false}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                    {bloque.titulo}
+                  </Text>
+                  <Text style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: '#111827' }}>
+                    {fmt(bloque.total)}
+                  </Text>
+                </View>
+                <TablaDeItems items={bloque.items} pc={pc} pcLight={pcLight} />
+              </View>
+            ))}
+            {/* Sin esta linea el cliente ve tres precios y un total, y no sabe cual
+                esta aceptando. El total de abajo es el del principal: es el que
+                `recalcularTotales` guardo en `valor_total`. */}
+            <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 2 }}>
+              El total y los impuestos de abajo corresponden a la opcion marcada como recomendada.
+              Las demas son alternativas con el precio indicado en su encabezado.
+            </Text>
+          </View>
+        )}
+
+        {bloques.length <= 1 && items.length > 0 && (
           <View style={{ marginTop: 20 }}>
             <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
               DETALLE
