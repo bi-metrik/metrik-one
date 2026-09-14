@@ -26,6 +26,12 @@
  *   el aviso de discrepancia se calla ........................... 1
  *   `Ver todas sus ventas` deja de apuntar al acumulado ......... 1
  *
+ * Y el 2026-09-14 (hoja por persona: venta canonica y pendiente a hoy):
+ *   el acumulado vuelve a arrancar en 'todos' .................... 1
+ *   el pendiente vuelve a rotularse "(con IVA)" ................. 1
+ *   (el `key` por periodo que remonta la tabla no se ve en un render estatico: queda
+ *   para el QA en pantalla, pasando de un mes a "Ver todas sus ventas".)
+ *
  * Y sobre el selector compartido (`selector-mes.tsx`), cada una tumba una:
  *   las flechas no se apagan en acumulado ....................... 1
  *   la salida al acumulado se pinta tambien en `/equipo` ........ 1
@@ -162,11 +168,18 @@ describe('perfil comercial: la tabla de abajo obedece al mes', () => {
     expect(html).not.toContain('Cerrado 1')
   })
 
-  it('en acumulado no se pinta el pill del mes y la tabla trae todo', async () => {
+  it('en acumulado abre TODAS sus ventas (a donde lleva "Ver todas sus ventas"), sin pill de mes', async () => {
+    // Antes: con la URL cargada de cero abria "Todos sus casos", y llegando desde un mes
+    // por el enlace abria "Vendidos en Acumulado" (el estado del corte viajaba entre
+    // meses). La misma URL, dos pantallas. Ahora las dos rutas llegan a lo mismo.
     const html = texto(await pintar({ anio: null, mes: null }))
     expect(html).not.toContain('Vendidos en')
-    expect(html).toContain('VIEJO-C')
-    expect(html).toContain('Todos sus casos (3)')
+    expect(html).toContain('Todas sus ventas (2)')
+    expect(html).toContain('Todas sus ventas 2')
+    expect(html).not.toContain('VIEJO-C')
+    // El otro corte sigue ahi, y la salida al acumulado no se ofrece estando en el.
+    expect(html).toContain('Todos sus casos 3')
+    expect(html).not.toContain('Ver todas sus ventas')
   })
 
   it('un mes sin ventas lo dice, no cae a la lista historica', async () => {
@@ -259,6 +272,17 @@ describe('perfil comercial: lo que no se mueve con el mes lo dice', () => {
     expect(html).toContain('Negocios activos 2 Inventario a hoy, no depende del mes')
     expect(html).toContain('Vencidos (SLA) 0 Inventario a hoy, no depende del mes')
     expect(html).toContain('Embudo por etapa (pendiente de recaudo) Inventario a hoy, no depende del mes')
+  })
+
+  it('el pendiente de recaudo va sin IVA, de los casos abiertos, y dice que no depende del mes', async () => {
+    // Antes decia "(con IVA)" sobre una resta de cifras sin IVA. La cifra misma la calcula
+    // la RPC (ver `comercial-venta-canonica.test.ts`); aca se fija lo que la pantalla afirma.
+    const html = texto(await pintar({}))
+    expect(html).toContain(
+      'Pendiente de recaudo (sin IVA) $1.800.000 Casos abiertos. Inventario a hoy, no depende del mes',
+    )
+    expect(html).not.toContain('con IVA')
+    expect(html).toContain('Pendiente de recaudo (sin IVA)')
   })
 
   it('los que si son del mes lo dicen tambien', async () => {

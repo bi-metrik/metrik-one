@@ -21,11 +21,11 @@ import Link from 'next/link'
 import { getComercialVentasMes } from '../../equipo/comercial-actions'
 import { planPagoLabel, type ComercialVentaCaso } from '../../equipo/comercial-types'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
+import { HonorarioCasoChip } from './honorario-caso-chip'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
 const BORDE = '#E5E7EB'
-const VERDE = 'var(--acento)'
 const OCRE = '#92400E'
 
 export interface CifraSeleccionada {
@@ -206,22 +206,9 @@ export function VentasDrawer({
                         >
                           {fmtCOP(c.valor_sin_iva)}
                         </span>
-                        {c.caso_completo ? (
-                          <span
-                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                            style={{ backgroundColor: 'var(--acento-tinte)', color: VERDE }}
-                          >
-                            <CheckCircle2 className="h-2.5 w-2.5" /> Honorario cubierto
-                          </span>
-                        ) : (
-                          <span
-                            className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
-                            style={{ backgroundColor: 'var(--papel)', color: GRIS }}
-                            title="Recaudado del honorario, sin IVA"
-                          >
-                            {fmtCOP(c.recaudado)} recaudado
-                          </span>
-                        )}
+                        {/* Una sola insignia para el honorario. Sin honorario aprobado no
+                            se dice "cubierto": ver `honorario-caso-chip.tsx`. */}
+                        <HonorarioCasoChip caso={c} />
                         {/* La tercera medida, al lado de las otras dos y con su propio
                             nombre. `null` no se pinta como "no bonifica": se dice que
                             no se pudo medir, que es lo único que se sabe. */}
@@ -273,15 +260,6 @@ export function VentasDrawer({
                             }
                           >
                             {planPagoLabel(c.plan_pago)}
-                          </span>
-                        )}
-                        {c.sin_honorario_aprobado && (
-                          <span
-                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                            style={{ backgroundColor: '#FEF3C7', color: OCRE }}
-                            title="Este caso no tiene honorario aprobado, así que el sistema compara su recaudo contra cero y lo cuenta como completo"
-                          >
-                            <AlertTriangle className="h-2.5 w-2.5" /> Sin honorario aprobado
                           </span>
                         )}
                         {c.n_conversiones > 1 && (
