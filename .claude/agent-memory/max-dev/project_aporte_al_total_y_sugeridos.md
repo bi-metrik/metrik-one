@@ -102,9 +102,11 @@ Verificado contra la server action real: con y sin la propuesta encima, `costo_t
 el CHECK ya admite. El día que el paso 3 los escriba, la barra de Ejecución leerá
 ejecutado 0. El comentario quedó donde vive el mapeo; **el mapeo no se tocó**.
 
-Sigue sin DDL el bloque 3 (campos leídos estructurados): tras recargar quedan los
-rubros, no los campos ni los avisos.
+Sigue sin DDL la parte de **campos leídos estructurados** del bloque 3 (el insumo del
+`puntaje_experiencia`): tras recargar quedan los rubros, no los campos ni los avisos.
+⚠️ La otra mitad del bloque 3, la de PRESENTACIÓN, sí se cerró en
+[[dia-relativo-sugeridos]] (#718, migración sin aplicar).
 
-Relacionado: [[pantallazo-ranuras]], [[itinerarios-cotizacion]],
+Relacionado: [[pantallazo-ranuras]], [[itinerarios-cotizacion]], [[dia-relativo-sugeridos]],
 [[margen-visible-trappvel]], [[leer-texto-de-un-pdf-de-react-pdf]],
 [[pruebas-por-mutacion]], [[cifras-del-brief-caducan]].
