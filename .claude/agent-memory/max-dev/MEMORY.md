@@ -65,6 +65,7 @@
 - ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — diez (10) años; el control cruzado son 5 superficies (#629). ⚠️ Su parte de «ningún CI lo vigila» CADUCÓ
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`); `listas.modulo` aísla el SARLAFT; el PR #15 necesita el mismo filtro
 - [Soporte de listas para el operador](project_soporte_listas_operator.md) — #631 mergeado: `/compliance/listas` NO tiene gate por rol (la ruta era el único candado) y `contador` sigue fuera a propósito
+- ⚠️ [Guards de items, cierre por tipo y aprobación](project_guard_bloque_items.md) — #676-#687 mergeados: la regla de quién aprueba es `puedeSerAprobador`; metrik sin candidatos
 - ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler y el audio se clasifica a propósito
 
 ## Referencias
