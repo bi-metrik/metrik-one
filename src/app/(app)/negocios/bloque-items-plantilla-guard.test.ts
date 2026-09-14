@@ -238,7 +238,7 @@ describe('inicializarBloqueItems', () => {
 describe('reevaluarBloqueCronograma', () => {
   it('guard rechaza: no toca el estado del bloque y devuelve el error del guard', async () => {
     puedeEditar = false
-    const r = await reevaluarBloqueCronograma(CRONOGRAMA, false)
+    const r = await reevaluarBloqueCronograma(CRONOGRAMA)
     expect(r).toEqual({ error: 'Tu rol o área no permite editar en esta fase del negocio' })
     expect(guardEditarBloque).toHaveBeenCalledWith(CRONOGRAMA)
     expect(escrituras).toEqual([])
@@ -247,22 +247,23 @@ describe('reevaluarBloqueCronograma', () => {
 
   it('guard sin mensaje: cae a "Sin permiso"', async () => {
     guardEditarBloque.mockImplementationOnce(async () => ({ ok: false }) as { ok: boolean; error: string })
-    const r = await reevaluarBloqueCronograma(CRONOGRAMA, false)
+    const r = await reevaluarBloqueCronograma(CRONOGRAMA)
     expect(r).toEqual({ error: 'Sin permiso' })
     expect(escrituras).toEqual([])
   })
 
   it('guard acepta: recalcula y marca completo el bloque', async () => {
-    const r = await reevaluarBloqueCronograma(CRONOGRAMA, false)
+    const r = await reevaluarBloqueCronograma(CRONOGRAMA)
     expect(r).toEqual({ error: null })
     expect(guardEditarBloque).toHaveBeenCalledWith(CRONOGRAMA)
     expect(tablas.negocio_bloques.find(b => b.id === CRONOGRAMA)?.estado).toBe('completo')
   })
 
-  it('guard acepta con todas las fechas exigidas: una sin fin deja el bloque pendiente', async () => {
+  it('guard acepta con todas las fechas exigidas por la config: una sin fin deja el bloque pendiente', async () => {
     const b = tablas.negocio_bloques.find(x => x.id === CRONOGRAMA)!
     b.estado = 'completo'
-    const r = await reevaluarBloqueCronograma(CRONOGRAMA, true)
+    ;(b.bloque_configs as { config_extra: Record<string, unknown> }).config_extra.require_all_dates = true
+    const r = await reevaluarBloqueCronograma(CRONOGRAMA)
     expect(r).toEqual({ error: null })
     expect(b.estado).toBe('pendiente')
   })

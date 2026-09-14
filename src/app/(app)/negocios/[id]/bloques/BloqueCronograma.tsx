@@ -98,10 +98,12 @@ export default function BloqueCronograma({
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Gap 2: Re-evaluar completitud después de cada cambio
+  // Gap 2: Re-evaluar completitud después de cada cambio. Si el bloque exige todas las
+  // fechas lo decide el servidor leyendo la config; `requireAllDates` aquí solo pinta la
+  // leyenda de abajo.
   function evalCompletitud() {
     startTransition(async () => {
-      await reevaluarBloqueCronograma(negocioBloqueId, requireAllDates)
+      await reevaluarBloqueCronograma(negocioBloqueId)
     })
   }
 
@@ -112,10 +114,11 @@ export default function BloqueCronograma({
       if (result.error) {
         toast.error(result.error)
       } else {
-        const nextItems = items.map(i =>
+        // Sobre el estado vigente y no sobre la foto del render: mientras la marca viajaba
+        // pudo cambiar otra fila, y copiar la lista vieja la desharía en pantalla.
+        setItems(prev => prev.map(i =>
           i.id === item.id ? { ...i, completado: !item.completado, completado_at: !item.completado ? new Date().toISOString() : null } : i
-        )
-        setItems(nextItems)
+        ))
       }
     })
   }
@@ -141,6 +144,9 @@ export default function BloqueCronograma({
     setItems(prev => prev.map(i => i.id === editingId ? updated : i))
     setEditingId(null)
 
+    // La edición se pinta antes de que responda el servidor. Si la rechaza, la tabla
+    // tiene que volver a lo que de verdad quedó guardado: si no, el paso se ve editado
+    // (o creado) hasta que alguien recarga, y el aviso de error se va a los segundos.
     startTransition(async () => {
       if (updated.id.startsWith('_tmp_')) {
         const extra: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = {}
@@ -150,6 +156,9 @@ export default function BloqueCronograma({
         const result = await agregarBloqueItem(negocioBloqueId, updated.label, 'texto', items.length, extra)
         if (result.error) {
           toast.error(result.error)
+          // El paso nunca existió en el servidor: se retira. Dejarlo en blanco pintaría
+          // una fila «Sin nombre» que no está guardada en ninguna parte.
+          setItems(prev => prev.filter(i => i.id !== updated.id))
         } else if (result.id) {
           setItems(prev => prev.map(i => i.id === updated.id ? { ...i, id: result.id! } : i))
           evalCompletitud()
@@ -161,7 +170,21 @@ export default function BloqueCronograma({
         if (updated.fecha_fin !== undefined) fields.fecha_fin = updated.fecha_fin || null
         if (updated.responsable_id !== undefined) fields.responsable_id = updated.responsable_id || null
         const result = await actualizarBloqueItem(updated.id, fields)
-        if (result.error) toast.error(result.error)
+        if (result.error) {
+          toast.error(result.error)
+          // Solo se devuelven los campos que tocó la edición: el avance real de la misma
+          // fila pudo marcarse mientras tanto y ese sí quedó guardado.
+          setItems(prev => prev.map(i => i.id === updated.id
+            ? {
+                ...i,
+                label: targetItem.label,
+                fecha_inicio: targetItem.fecha_inicio,
+                fecha_fin: targetItem.fecha_fin,
+                responsable_id: targetItem.responsable_id,
+              }
+            : i))
+          return
+        }
         // Gap 2: Re-evaluar completitud
         evalCompletitud()
         refrescarVersion()
@@ -177,12 +200,21 @@ export default function BloqueCronograma({
    * "corregir" de paso la fecha planeada, que es justamente lo que borraba el desfase.
    */
   function marcarAvance(item: CronogramaItem, campo: 'fecha_inicio_real' | 'fecha_fin_real', valor: string) {
-    const fecha = valor || null
-    setItems(prev => prev.map(i => (i.id === item.id ? { ...i, [campo]: fecha } : i)))
+    // Una fila sin guardar no tiene dónde escribir el avance: `agregarBloqueItem` no lo
+    // manda, así que la fecha quedaba pintada y se perdía al guardar el paso.
     if (item.id.startsWith('_tmp_')) return
+    const fecha = valor || null
+    const previo = item[campo] ?? null
+    setItems(prev => prev.map(i => (i.id === item.id ? { ...i, [campo]: fecha } : i)))
     startTransition(async () => {
       const result = await actualizarBloqueItem(item.id, { [campo]: fecha })
-      if (result.error) toast.error(result.error)
+      if (result.error) {
+        toast.error(result.error)
+        // Se devuelve la fecha anterior solo si nadie la volvió a cambiar mientras tanto.
+        setItems(prev => prev.map(i =>
+          i.id === item.id && (i[campo] ?? null) === fecha ? { ...i, [campo]: previo } : i
+        ))
+      }
     })
   }
 
@@ -193,13 +225,17 @@ export default function BloqueCronograma({
       return
     }
     if (!confirm('¿Eliminar esta actividad?')) return
-    const nextItems = items.filter(i => i.id !== item.id)
-    setItems(nextItems)
+    const posicion = items.findIndex(i => i.id === item.id)
+    setItems(prev => prev.filter(i => i.id !== item.id))
     startTransition(async () => {
       const result = await eliminarBloqueItem(item.id)
       if (result.error) {
         toast.error(result.error)
-        setItems(items) // revert
+        // Vuelve solo la fila borrada, en su lugar. Restaurar la lista entera del momento
+        // del clic desharía lo que se guardó mientras el borrado viajaba.
+        setItems(prev => prev.some(i => i.id === item.id)
+          ? prev
+          : [...prev.slice(0, Math.max(posicion, 0)), item, ...prev.slice(Math.max(posicion, 0))])
       } else {
         refrescarVersion()
         evalCompletitud()
@@ -312,8 +348,10 @@ export default function BloqueCronograma({
                       type="date"
                       value={item.fecha_inicio_real ?? ''}
                       onChange={e => marcarAvance(item, 'fecha_inicio_real', e.target.value)}
+                      disabled={item.id.startsWith('_tmp_')}
+                      title={item.id.startsWith('_tmp_') ? 'Guarda la actividad antes de marcar el avance' : undefined}
                       aria-label={`Inicio real de ${item.label || 'la actividad'}`}
-                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
+                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none disabled:opacity-50"
                     />
                   ) : (
                     <span className="text-tinta">{fmtDate(item.fecha_inicio_real)}</span>
@@ -325,8 +363,10 @@ export default function BloqueCronograma({
                       type="date"
                       value={item.fecha_fin_real ?? ''}
                       onChange={e => marcarAvance(item, 'fecha_fin_real', e.target.value)}
+                      disabled={item.id.startsWith('_tmp_')}
+                      title={item.id.startsWith('_tmp_') ? 'Guarda la actividad antes de marcar el avance' : undefined}
                       aria-label={`Fin real de ${item.label || 'la actividad'}`}
-                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
+                      className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none disabled:opacity-50"
                     />
                   ) : (
                     <span className="text-tinta">{fmtDate(item.fecha_fin_real)}</span>
