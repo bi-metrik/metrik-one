@@ -17,6 +17,12 @@
  * interaccion, cada venta en el mes de su fecha de venta.
  */
 
+import {
+  COLUMNAS_DIRECTIVO,
+  columnaDirectivo,
+  type ColumnaDirectivo,
+} from '@/lib/dian/agrupacion-directivo'
+
 /** Una fila de `v_marketing_campana`: una campana en un mes. */
 export interface FilaMarketing {
   /** `null` es la fila "Sin rastro de Meta". */
@@ -247,4 +253,162 @@ export function totales(filas: CampanaAgregada[]) {
      */
     parteDeLasVentas: recaudadoTotal > 0 ? recaudadoCampana / recaudadoTotal : null,
   }
+}
+
+// ── Ventas por ciudad ────────────────────────────────────────────────────────
+//
+// El segundo corte que pidio Mauricio el 2026-09-14: "ver en el tablero de marketing
+// por cuidades asi como se ve en el tablero directivo".
+//
+// ⚠️ SOLO las ventas se parten por ciudad. Leads, gasto, CPL, CAC y conversion se
+// quedan por campana y no se reparten. La razon es un dato, no una preferencia: la
+// ciudad es la seccional DIAN, que llega con el RUT en Documentacion. Medido contra
+// produccion el 2026-09-14 en SOENA: de 99 negocios con campana **solo 28 tienen
+// seccional, y esos 28 son exactamente las 28 ventas**. Los otros 71 son leads que no
+// llegaron a Documentacion. Repartir sus leads o su gasto entre ciudades seria inventar
+// una distribucion que nadie midio — la misma razon que ya esta escrita en la pestana
+// Direccion.
+//
+// La agrupacion en seis columnas NO se inventa aqui: sale de `columnaDirectivo`, la
+// misma funcion que usa la pestana Direccion. Una segunda copia del criterio dejaria las
+// dos pantallas discrepando por un nombre de ciudad.
+
+/**
+ * Un negocio de `v_marketing_negocio`, con la ciudad cruda tal como esta en
+ * `negocios.metadata`. Sin canonizar: de eso se encarga `columnaDirectivo`.
+ */
+export interface FilaNegocioMarketing {
+  campaignId: string | null
+  /** 'YYYY-MM-01' del mes de la venta. `null` = todavia no es venta. */
+  mesVenta: string | null
+  seccional: string | null
+  honorario: number
+  recaudado: number
+}
+
+/** Una fila de la tabla "Ventas por ciudad": una campana, las seis columnas y su total. */
+export interface FilaCiudad {
+  campaignId: string | null
+  campana: string
+  sinRastro: boolean
+  /** Las SEIS siempre, aunque valgan cero: una columna que desaparece se lee como que no existe. */
+  columnas: Record<ColumnaDirectivo, number>
+  total: number
+  honorario: number
+  recaudado: number
+}
+
+const columnasEnCero = (): Record<ColumnaDirectivo, number> =>
+  Object.fromEntries(COLUMNAS_DIRECTIVO.map(c => [c, 0])) as Record<ColumnaDirectivo, number>
+
+const LLAVE_SIN_RASTRO = '__sin_rastro__'
+const llave = (campaignId: string | null) => campaignId ?? LLAVE_SIN_RASTRO
+
+/**
+ * Las ventas de cada campana, repartidas en las seis columnas del tablero directivo.
+ *
+ * Las filas salen de `campanas` —la lista que YA pinta la tabla de arriba— y en su mismo
+ * orden. No es comodidad: asi las dos tablas hablan de las mismas campanas por
+ * construccion, y el total de esta no se puede separar del de aquella por un criterio de
+ * agrupacion distinto. Es la leccion que costo `v_venta_mes_comercial`.
+ *
+ * `mes` fija la lente, exactamente igual que en la tabla de campanas: con mes son las
+ * ventas de ESE mes; con `null`, todas las de la campana.
+ */
+export function ventasPorCiudad(
+  campanas: CampanaAgregada[],
+  negocios: FilaNegocioMarketing[],
+  mes: string | null,
+): FilaCiudad[] {
+  const ventas = negocios.filter(n => n.mesVenta !== null && (mes === null || n.mesVenta === mes))
+
+  type Acumulado = { columnas: Record<ColumnaDirectivo, number>; honorario: number; recaudado: number }
+  const acumulado = new Map<string, Acumulado>()
+  for (const n of ventas) {
+    const k = llave(n.campaignId)
+    const acc: Acumulado = acumulado.get(k) ?? { columnas: columnasEnCero(), honorario: 0, recaudado: 0 }
+    acc.columnas[columnaDirectivo(n.seccional)] += 1
+    acc.honorario += n.honorario
+    acc.recaudado += n.recaudado
+    acumulado.set(k, acc)
+  }
+
+  const fila = (campaignId: string | null, campana: string, sinRastro: boolean): FilaCiudad => {
+    const acc = acumulado.get(llave(campaignId))
+    const columnas = acc?.columnas ?? columnasEnCero()
+    return {
+      campaignId,
+      campana,
+      sinRastro,
+      columnas,
+      total: COLUMNAS_DIRECTIVO.reduce((s, c) => s + columnas[c], 0),
+      honorario: acc?.honorario ?? 0,
+      recaudado: acc?.recaudado ?? 0,
+    }
+  }
+
+  const filas = campanas.map(c => fila(c.campaignId, c.campana, c.sinRastro))
+
+  // Una venta cuya campana no esta en la tabla de arriba NO se descarta: se pinta con su
+  // id como nombre. No deberia pasar nunca —la vista crea la fila (campana, mes) en
+  // cuanto hay una venta— y justo por eso, si pasa, tiene que verse. Una venta que
+  // desaparece de la tabla en silencio es peor que una fila fea.
+  const conocidas = new Set(campanas.map(c => llave(c.campaignId)))
+  for (const k of acumulado.keys()) {
+    if (conocidas.has(k)) continue
+    const esSinRastro = k === LLAVE_SIN_RASTRO
+    filas.push(fila(esSinRastro ? null : k, esSinRastro ? 'Sin rastro de Meta' : k, esSinRastro))
+  }
+
+  return filas
+}
+
+/**
+ * La fila de totales. Separa las campanas de "Sin rastro" porque la tabla de arriba
+ * tambien las separa, y son dos cifras con significados distintos: una es lo que
+ * marketing puede reclamar, la otra lo que no se pudo atribuir. `total` es la suma de
+ * TODO lo que la tabla dibuja, para que la fila de totales diga de que esta hecha.
+ */
+export function totalesPorCiudad(filas: FilaCiudad[]) {
+  const columnas = columnasEnCero()
+  const columnasCampana = columnasEnCero()
+  let total = 0
+  let campanas = 0
+  let sinRastro = 0
+
+  for (const f of filas) {
+    for (const c of COLUMNAS_DIRECTIVO) {
+      columnas[c] += f.columnas[c]
+      if (!f.sinRastro) columnasCampana[c] += f.columnas[c]
+    }
+    total += f.total
+    if (f.sinRastro) sinRastro += f.total
+    else campanas += f.total
+  }
+
+  return { columnas, columnasCampana, total, campanas, sinRastro }
+}
+
+/**
+ * Si el panel lateral tiene que acotarse a las VENTAS.
+ *
+ * Vive aqui, puro, porque la decision es la que hace que la lista que se abre traiga
+ * exactamente tantos casos como dice la celda — y eso no se puede comprobar leyendo el
+ * encadenado de filtros de una consulta.
+ *
+ * Tres casos, y el tercero es el que se agrego con la tabla de ciudades:
+ *   · con `mes`      — la consulta ya filtra por `mes_venta`, que implica venta.
+ *   · sin rastro     — sin acotar serian los ~370 negocios que nunca dejaron huella:
+ *                      una lista que no responde ninguna pregunta.
+ *   · con `columna`  — una celda de "Ventas por ciudad" cuenta SOLO ventas, tambien en
+ *                      cohorte. Sin este corte el panel abriria los leads de la campana
+ *                      y mostraria mas casos de los que dice la celda.
+ */
+export function drillSeAcotaAVentas(args: {
+  campaignId: string | null
+  mes: string | null
+  columna?: ColumnaDirectivo
+}): boolean {
+  if (args.mes !== null) return false
+  return args.campaignId === null || args.columna !== undefined
 }

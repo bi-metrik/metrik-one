@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import Link from 'next/link'
 import { getNegociosDeCampana, type NegocioDeCampana } from '../marketing-actions'
+import type { ColumnaDirectivo } from '@/lib/dian/agrupacion-directivo'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
@@ -29,6 +30,17 @@ export interface CampanaSeleccionada {
   mes: string | null
   /** Como se llama el alcance en el encabezado, con las palabras de la pantalla. */
   alcance: string
+  /**
+   * La columna del tablero directivo, cuando el clic fue en una celda de "Ventas por
+   * ciudad". `undefined` = la fila entera de la campana.
+   *
+   * ⚠️ Viaja la COLUMNA, no la lista de seccionales que la componen. El filtro lo aplica
+   * `columnaDirectivo` en el servidor, la misma funcion que agrupo la celda, asi que la
+   * lista no puede separarse de la cifra. Una lista de seccionales seria una segunda
+   * expresion del mismo criterio — y "Sin seccional" ni siquiera se puede escribir como
+   * lista: es una negacion, no un conjunto.
+   */
+  columna?: ColumnaDirectivo
 }
 
 const fmtCOP = (n: number) =>
@@ -48,11 +60,15 @@ export function MarketingDrawer({
   // componente se remonta y el estado arranca vacio solo.
   useEffect(() => {
     let vivo = true
-    getNegociosDeCampana({ campaignId: seleccion.campaignId, mes: seleccion.mes })
+    getNegociosDeCampana({
+      campaignId: seleccion.campaignId,
+      mes: seleccion.mes,
+      columna: seleccion.columna,
+    })
       .then(r => { if (vivo) setNegocios(r) })
       .catch(e => { if (vivo) setError(e instanceof Error ? e.message : 'No se pudo cargar la lista') })
     return () => { vivo = false }
-  }, [seleccion.campaignId, seleccion.mes])
+  }, [seleccion.campaignId, seleccion.mes, seleccion.columna])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -108,7 +124,14 @@ export function MarketingDrawer({
                             {n.cliente ?? n.nombre}
                           </p>
                           <p className="mt-0.5 truncate text-[11px]" style={{ color: GRIS }}>
-                            {[n.comercial ?? 'Sin comercial', n.etapa ?? 'Sin etapa'].join(' · ')}
+                            {[
+                              n.comercial ?? 'Sin comercial',
+                              n.etapa ?? 'Sin etapa',
+                              // La ciudad se nombra siempre, tambien cuando el panel se
+                              // abrio desde la fila entera: es la que decide en que
+                              // columna cae el caso y sin ella no se puede reconciliar.
+                              n.seccional ?? 'Sin seccional',
+                            ].join(' · ')}
                           </p>
                         </div>
                         <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: BORDE }} />

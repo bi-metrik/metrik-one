@@ -28,8 +28,12 @@ import {
   mesesConDatos,
   roas,
   totales,
+  totalesPorCiudad,
+  ventasPorCiudad,
   type CampanaAgregada,
+  type FilaCiudad,
 } from '@/lib/tableros/marketing'
+import { COLUMNAS_DIRECTIVO, type ColumnaDirectivo } from '@/lib/dian/agrupacion-directivo'
 import type { MarketingData } from '../marketing-actions'
 import { MarketingDrawer, type CampanaSeleccionada } from './marketing-drawer'
 
@@ -53,6 +57,10 @@ function etiquetaMes(mes: string): string {
   return `${MESES_ES[Number(m) - 1]} ${a}`
 }
 
+/** "Sin seccional" no es una ciudad: decir "ventas en sin seccional" seria absurdo. */
+const alcanceCiudad = (col: ColumnaDirectivo) =>
+  col === 'Sin seccional' ? 'ventas sin seccional registrada' : `ventas en ${col}`
+
 type Lente = 'mes' | 'cohorte'
 
 export default function TabMarketing({ datos }: { datos: MarketingData }) {
@@ -74,12 +82,31 @@ export default function TabMarketing({ datos }: { datos: MarketingData }) {
   const sinRastro = filas.find(f => f.sinRastro) ?? null
   const idx = meses.indexOf(mes)
 
+  // Las ventas de la MISMA lente, repartidas en las seis columnas del tablero directivo.
+  // Las filas salen de `filas` —la lista que ya pinta la tabla de arriba— asi que las dos
+  // tablas hablan de las mismas campanas, en el mismo orden, por construccion.
+  const ciudades = useMemo(
+    () => ventasPorCiudad(filas, datos.ventas, lente === 'mes' ? mes : null),
+    [filas, datos.ventas, lente, mes],
+  )
+  const tc = useMemo(() => totalesPorCiudad(ciudades), [ciudades])
+
   function abrir(c: CampanaAgregada) {
     setSeleccion({
       campaignId: c.campaignId,
       titulo: c.campana,
       mes: lente === 'mes' ? mes : null,
       alcance: lente === 'mes' ? `ventas de ${etiquetaMes(mes)}` : 'todos los negocios de la campaña',
+    })
+  }
+
+  function abrirCiudad(c: FilaCiudad, col: ColumnaDirectivo) {
+    setSeleccion({
+      campaignId: c.campaignId,
+      titulo: c.campana,
+      mes: lente === 'mes' ? mes : null,
+      columna: col,
+      alcance: `${alcanceCiudad(col)} · ${lente === 'mes' ? etiquetaMes(mes) : 'todos los meses'}`,
     })
   }
 
@@ -295,6 +322,98 @@ export default function TabMarketing({ datos }: { datos: MarketingData }) {
         </>
       )}
 
+      {/* ── Ventas por ciudad ────────────────────────────────────────────
+          Mismo corte que la matriz de Operaciones del tablero directivo, que es
+          donde Mauricio ya lee sus ciudades. La agrupación sale de
+          `columnaDirectivo`: no se reinventa aquí. */}
+      <h3 className="mt-8 mb-2 text-sm font-bold" style={{ color: CARBON }}>Ventas por ciudad</h3>
+
+      {tc.total === 0 ? (
+        // La tabla no desaparece cuando no hay ventas: decirlo es la respuesta a la
+        // pregunta. Una sección que se esconde deja al lector sin saber si no hubo
+        // ventas o si la pantalla se rompió.
+        <p className="rounded-lg border px-4 py-6 text-center text-sm" style={{ borderColor: BORDE, color: GRIS }}>
+          {lente === 'mes'
+            ? `No hay ventas registradas en ${etiquetaMes(mes)}.`
+            : 'Ninguna campaña ha cerrado una venta todavía.'}
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: BORDE }}>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs uppercase" style={{ color: GRIS }}>
+              <tr>
+                <th className="px-4 py-3 text-left">Campaña</th>
+                {COLUMNAS_DIRECTIVO.map(col => (
+                  <th key={col} className="px-3 py-3 text-right">{col}</th>
+                ))}
+                <th className="px-4 py-3 text-right font-bold">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {ciudades.map(c => (
+                <tr
+                  key={c.campaignId ?? 'sin'}
+                  className={c.sinRastro ? 'border-t-2 bg-gray-50' : ''}
+                  style={c.sinRastro ? { borderColor: BORDE, color: GRIS } : undefined}
+                >
+                  <td
+                    className={`max-w-[16rem] truncate px-4 py-2.5 ${c.sinRastro ? 'italic' : ''}`}
+                    title={c.campana}
+                  >
+                    {c.campana}
+                  </td>
+                  {COLUMNAS_DIRECTIVO.map(col => (
+                    <td key={col} className="px-3 py-2.5 text-right tabular-nums">
+                      {/* Cero no es botón: abriría una lista vacía y enseña a desconfiar
+                          del panel. La raya dice que ahí no hay nada que mirar. */}
+                      {c.columnas[col] === 0 ? (
+                        <span className="text-gray-300">{RAYA}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => abrirCiudad(c, col)}
+                          className="rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-[#F9FAFB]"
+                          title={`Ver las ${fmtNum(c.columnas[col])} ventas · ${alcanceCiudad(col)}`}
+                        >
+                          {fmtNum(c.columnas[col])}
+                        </button>
+                      )}
+                    </td>
+                  ))}
+                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{fmtNum(c.total)}</td>
+                </tr>
+              ))}
+              <tr className="border-t-2 bg-gray-50 font-bold" style={{ borderColor: BORDE }}>
+                <td className="px-4 py-2.5">Total de ventas</td>
+                {COLUMNAS_DIRECTIVO.map(col => (
+                  <td key={col} className="px-3 py-2.5 text-right tabular-nums">
+                    {tc.columnas[col] === 0 ? <span className="text-gray-300">{RAYA}</span> : fmtNum(tc.columnas[col])}
+                  </td>
+                ))}
+                <td className="px-4 py-2.5 text-right tabular-nums">{fmtNum(tc.total)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="mt-2 text-xs" style={{ color: GRIS }}>
+        {/* La fila de totales dice de qué está hecha. Sumar sin decirlo fue lo que hizo
+            que la matriz del directivo y /negocios discreparan por un nombre. */}
+        La fila de totales incluye la de <strong>Sin rastro de Meta</strong>: son{' '}
+        {fmtNum(tc.campanas)} venta{tc.campanas === 1 ? '' : 's'} atribuidas a campaña y{' '}
+        {fmtNum(tc.sinRastro)} sin rastro. Las ciudades son las mismas seis del tablero
+        directivo: las cuatro que se nombran una por una, «Otras ciudades» para el resto y
+        «Sin seccional» para las que todavía no la tienen.
+      </p>
+      <p className="mb-2 text-xs" style={{ color: GRIS }}>
+        <strong>Solo las ventas se parten por ciudad.</strong> Leads, inversión, CPL, CAC y
+        conversión se quedan por campaña: la ciudad es la seccional de la DIAN y llega con el
+        RUT, en Documentación, así que un lead recién entrado no tiene ninguna. El gasto de
+        Meta tampoco tiene ciudad: se reporta por campaña. Repartirlos sería inventar una
+        distribución que nadie midió.
+      </p>
+
       <p className="mt-3 text-xs" style={{ color: GRIS }}>
         El <strong>ROAS está medido contra el recaudo atribuido</strong>, y la atribución solo
         alcanza a los negocios que dejaron huella de Meta. El retorno real es <em>mejor</em> que el
@@ -307,7 +426,7 @@ export default function TabMarketing({ datos }: { datos: MarketingData }) {
 
       {seleccion && (
         <MarketingDrawer
-          key={`${seleccion.campaignId ?? 'sin'}|${seleccion.mes ?? 'cohorte'}`}
+          key={`${seleccion.campaignId ?? 'sin'}|${seleccion.mes ?? 'cohorte'}|${seleccion.columna ?? 'todas'}`}
           seleccion={seleccion}
           onClose={() => setSeleccion(null)}
         />
