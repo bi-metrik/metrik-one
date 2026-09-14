@@ -7,6 +7,7 @@ import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
+import { extraerConReintento } from '@/lib/ai/reintentar-extraccion'
 import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
@@ -40,11 +41,12 @@ function mimeTypeFromName(fileName: string): string {
 // ── Extracción AI con reintento ante fallo transitorio ──────────────────────
 // Gemini puede fallar transitoriamente (timeout, 429/5xx, JSON malformado). Un
 // solo intento dejaba el bloque en 'pendiente' silenciosamente y bloqueaba el
-// gate aunque el documento sí estuviera cargado. Reintentamos una vez con un
-// pequeño backoff. NO reintentamos si el contenido fue bloqueado por Gemini
-// (falla permanente, no transitoria).
-const EXTRACTION_MAX_ATTEMPTS = 2
-
+// gate aunque el documento sí estuviera cargado.
+//
+// La POLÍTICA (cuántos intentos, cuánto se espera, qué error no se reintenta) salió
+// a `src/lib/ai/reintentar-extraccion.ts`: el lector de pantallazos de cotización usa
+// la misma, y dos copias se desincronizan sin que nadie lo note. Esta función se
+// queda como envoltorio porque un archivo `'use server'` no puede exportar helpers.
 async function extractWithRetry(
   buffer: Buffer,
   mimeType: string,
@@ -52,17 +54,10 @@ async function extractWithRetry(
   apiKey: string,
   tag: string,
 ): Promise<{ data: Record<string, CampoResultado> | null; error?: string }> {
-  let last: { data: Record<string, CampoResultado> | null; error?: string } = { data: null }
-  for (let attempt = 1; attempt <= EXTRACTION_MAX_ATTEMPTS; attempt++) {
-    last = await extractFieldsFromDocument(buffer, mimeType, campos, apiKey)
-    if (last.data) return last
-    if (last.error?.startsWith('Contenido bloqueado')) return last // permanente
-    if (attempt < EXTRACTION_MAX_ATTEMPTS) {
-      console.warn(`[${tag}] Extracción AI falló (intento ${attempt}/${EXTRACTION_MAX_ATTEMPTS}): ${last.error}. Reintentando...`)
-      await new Promise(r => setTimeout(r, 600))
-    }
-  }
-  return last
+  return extraerConReintento(
+    () => extractFieldsFromDocument(buffer, mimeType, campos, apiKey),
+    tag,
+  )
 }
 
 // ── Cross-check: validacion cruzada contra datos extraidos de otros bloques ──
