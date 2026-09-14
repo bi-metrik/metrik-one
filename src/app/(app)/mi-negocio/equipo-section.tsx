@@ -6,7 +6,8 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import StaffSection from '../config/staff-section'
 import { updateEquipoDeclarado } from './actions'
-import type { Staff, Workspace } from '@/types/database'
+import type { Staff } from '@/types/database'
+import type { WorkspaceMiNegocio } from './mi-negocio-client'
 import type { Area } from '@/lib/permissions/can-edit'
 import { AREAS_OPERATIVAS, AREA_LABELS } from '@/lib/permissions/areas'
 import {
@@ -16,7 +17,7 @@ import {
 } from '@/lib/actions/equipo-areas'
 
 interface Props {
-  workspace: Workspace | null
+  workspace: WorkspaceMiNegocio | null
   staffMembers: Staff[]
   licenseUsed: number
   licenseMax: number

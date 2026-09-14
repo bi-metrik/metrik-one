@@ -76,7 +76,11 @@ export async function getContextoCalidad() {
     nombreWorkspace: ctx.nombreWorkspace,
     canViewCalidadTodos: ctx.perms.canViewCalidadTodos as boolean,
     canViewCalidadDinero: ctx.perms.canViewCalidadDinero as boolean,
-    muroToken: (ctx.configExtra as { muro_token?: string }).muro_token ?? null,
+    // El token abre el muro publico: solo lo recibe quien puede ver el muro. Esta
+    // accion es invocable desde cualquier cliente del workspace, no solo desde la page.
+    muroToken: ctx.perms.canViewCalidadTodos
+      ? (ctx.configExtra as { muro_token?: string }).muro_token ?? null
+      : null,
     muroPublico: (ctx.configExtra as { muro_publico?: boolean }).muro_publico === true,
   }
 }

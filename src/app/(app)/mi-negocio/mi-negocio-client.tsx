@@ -27,8 +27,14 @@ import MargenSection from './margen-section'
 
 type FixedExpenseWithCategory = FixedExpense & { categoryName: string | null }
 
+/** Lo unico del workspace que llega al navegador. Sin `config_extra`: guarda credenciales. */
+export type WorkspaceMiNegocio = Pick<
+  Workspace,
+  'id' | 'name' | 'logo_url' | 'color_primario' | 'color_secundario' | 'equipo_declarado'
+>
+
 interface MiNegocioClientProps {
-  workspace: Workspace | null
+  workspace: WorkspaceMiNegocio | null
   modules?: Record<string, boolean>
   fiscalProfile: FiscalProfile | null
   staffMembers: Staff[]
@@ -346,7 +352,7 @@ export default function MiNegocioClient({
 function renderSection(
   key: string,
   props: {
-    workspace: Workspace | null
+    workspace: WorkspaceMiNegocio | null
     fiscalProfile: FiscalProfile | null
     staffMembers: Staff[]
     monthlyTargets: MonthlyTarget[]

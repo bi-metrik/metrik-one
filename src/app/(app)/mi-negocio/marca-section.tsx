@@ -6,11 +6,11 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { updateBranding, uploadLogo } from './actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
-import type { Workspace } from '@/types/database'
+import type { WorkspaceMiNegocio } from './mi-negocio-client'
 import { BRANDING_POR_DEFECTO } from '@/lib/marca/paleta'
 
 interface Props {
-  workspace: Workspace | null
+  workspace: WorkspaceMiNegocio | null
 }
 
 export default function MarcaSection({ workspace }: Props) {
