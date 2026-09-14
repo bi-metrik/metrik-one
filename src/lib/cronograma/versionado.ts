@@ -22,6 +22,10 @@ export interface PasoPlan {
   fecha_inicio: string | null
   fecha_fin: string | null
   responsable_id: string | null
+  /** Responsable que no es del equipo: un contratista, el cliente. Excluyente con el id. */
+  responsable_texto?: string | null
+  /** El nombre tal como quedó al publicar: el documento de la versión no cambia si mañana
+   *  la persona se renombra o sale del equipo. */
   responsable_nombre?: string | null
 }
 
@@ -31,13 +35,14 @@ export interface CambioItem {
   fecha_inicio?: string | null
   fecha_fin?: string | null
   responsable_id?: string | null
+  responsable_texto?: string | null
   fecha_inicio_real?: string | null
   fecha_fin_real?: string | null
   link_url?: string | null
   completado?: boolean
 }
 
-const CAMPOS_DE_PLANEACION = ['label', 'fecha_inicio', 'fecha_fin', 'responsable_id'] as const
+const CAMPOS_DE_PLANEACION = ['label', 'fecha_inicio', 'fecha_fin', 'responsable_id', 'responsable_texto'] as const
 
 /**
  * ¿Este guardado toca la planeación?
@@ -61,6 +66,7 @@ export function snapshotDePasos(pasos: PasoPlan[]): PasoPlan[] {
       fecha_inicio: p.fecha_inicio ?? null,
       fecha_fin: p.fecha_fin ?? null,
       responsable_id: p.responsable_id ?? null,
+      responsable_texto: p.responsable_texto ?? null,
       responsable_nombre: p.responsable_nombre ?? null,
     }))
 }
@@ -99,8 +105,15 @@ export function describirCambios(antes: PasoPlan[], despues: PasoPlan[]): string
     if (previo.fecha_fin !== paso.fecha_fin) {
       frases.push(`"${paso.label}" termina el ${fmt(paso.fecha_fin)} (antes ${fmt(previo.fecha_fin)})`)
     }
-    if (previo.responsable_id !== paso.responsable_id) {
-      frases.push(`"${paso.label}" cambió de responsable`)
+    // Las versiones anteriores al texto libre no traen `responsable_texto`: ausente es nulo.
+    const cambioResponsable =
+      (previo.responsable_id ?? null) !== (paso.responsable_id ?? null) ||
+      (previo.responsable_texto ?? null) !== (paso.responsable_texto ?? null)
+    if (cambioResponsable) {
+      const nombre = paso.responsable_nombre?.trim() || paso.responsable_texto?.trim()
+      if (nombre) frases.push(`"${paso.label}" queda a cargo de ${nombre}`)
+      else if (paso.responsable_id) frases.push(`"${paso.label}" cambió de responsable`)
+      else frases.push(`"${paso.label}" queda sin responsable`)
     }
   }
 

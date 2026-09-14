@@ -7,6 +7,7 @@ import {
   type PasoPlan,
   type VersionVigente,
 } from './versionado'
+import { nombreResponsable } from './responsable'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -49,10 +50,10 @@ export async function cortarVersionCronograma(
     const negocioId = (bloque as { negocio_id: string } | null)?.negocio_id
     if (!negocioId) return null
 
-    const [pasosRes, versionesRes] = await Promise.all([
+    const [pasosRes, versionesRes, equipoRes] = await Promise.all([
       supabase
         .from('bloque_items')
-        .select('id, orden, label, fecha_inicio, fecha_fin, responsable_id')
+        .select('id, orden, label, fecha_inicio, fecha_fin, responsable_id, responsable_texto')
         .eq('negocio_bloque_id', negocioBloqueId)
         .order('orden', { ascending: true }),
       supabase
@@ -61,9 +62,20 @@ export async function cortarVersionCronograma(
         .eq('negocio_bloque_id', negocioBloqueId)
         .order('numero', { ascending: false })
         .limit(2),
+      supabase.from('staff').select('id, full_name').eq('workspace_id', workspaceId),
     ])
 
-    const actual = snapshotDePasos((pasosRes.data ?? []) as PasoPlan[])
+    // El nombre se congela en la versión: el documento de la v3 tiene que seguir diciendo
+    // quién tenía el paso aunque esa persona cambie de nombre o salga del equipo.
+    const nombres = new Map<string, string>()
+    for (const m of (equipoRes.data ?? []) as { id: string; full_name: string | null }[]) {
+      if (m.full_name?.trim()) nombres.set(m.id, m.full_name.trim())
+    }
+    const pasos = ((pasosRes.data ?? []) as PasoPlan[]).map(p => ({
+      ...p,
+      responsable_nombre: nombreResponsable(p, nombres),
+    }))
+    const actual = snapshotDePasos(pasos)
     const versiones = (versionesRes.data ?? []) as FilaVersion[]
     const vigente = versiones[0] ?? null
     const previa = versiones[1] ?? null

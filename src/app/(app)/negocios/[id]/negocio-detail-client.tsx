@@ -1828,6 +1828,7 @@ function BloqueRenderer({
         fecha_inicio_real: (i as Record<string, unknown>).fecha_inicio_real as string | null | undefined,
         fecha_fin_real: (i as Record<string, unknown>).fecha_fin_real as string | null | undefined,
         responsable_id: (i as Record<string, unknown>).responsable_id as string | null | undefined,
+        responsable_texto: (i as Record<string, unknown>).responsable_texto as string | null | undefined,
       }))
       const preloadItems = (configExtra.items as Array<{ label: string; tipo: string }>) ?? []
       return (
@@ -1838,7 +1839,6 @@ function BloqueRenderer({
           modo={modo}
           initialItems={items}
           requireAllDates={(configExtra.require_all_dates as boolean) ?? false}
-          profiles={profilesTyped}
           preloadItems={preloadItems}
         />
       )

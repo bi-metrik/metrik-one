@@ -3,10 +3,12 @@
 import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
 import { CalendarDays, Plus, CheckCircle2, Circle, Trash2, GanttChart } from 'lucide-react'
 import { toast } from 'sonner'
-import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems, leerVersionCronograma, type VersionCronograma } from '../../negocio-v2-actions'
+import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems, leerVersionCronograma, leerEquipoCronograma, type VersionCronograma } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import GanttCronogramaModal from './GanttCronogramaModal'
+import ResponsableInput from './ResponsableInput'
+import { nombreResponsable, resolverMencionEscrita, type MiembroEquipo } from '@/lib/cronograma/responsable'
 
 /**
  * Un paso del cronograma. Las fechas van en dos pares que NO significan lo mismo:
@@ -24,7 +26,9 @@ interface CronogramaItem {
   fecha_fin?: string | null
   fecha_inicio_real?: string | null
   fecha_fin_real?: string | null
+  /** Persona del equipo (staff.id) o, si no es del equipo, texto libre. Nunca los dos. */
   responsable_id?: string | null
+  responsable_texto?: string | null
   link_url?: string | null
   completado: boolean
   completado_at?: string | null
@@ -37,7 +41,6 @@ interface BloqueCronogramaProps {
   modo: 'editable' | 'visible'
   initialItems?: CronogramaItem[]
   requireAllDates?: boolean
-  profiles?: { id: string; full_name: string | null }[]
   preloadItems?: Array<{ label: string; tipo: string }>
 }
 
@@ -50,7 +53,6 @@ export default function BloqueCronograma({
   modo,
   initialItems = [],
   requireAllDates = false,
-  profiles = [],
   preloadItems = [],
 }: BloqueCronogramaProps) {
   const [items, setItems] = useState<CronogramaItem[]>(initialItems)
@@ -59,6 +61,7 @@ export default function BloqueCronograma({
   const [editValues, setEditValues] = useState<Partial<CronogramaItem>>({})
   const [version, setVersion] = useState<VersionCronograma | null>(null)
   const [ganttAbierto, setGanttAbierto] = useState(false)
+  const [equipo, setEquipo] = useState<Array<MiembroEquipo & { activo: boolean }>>([])
   const preloadedRef = useRef(false)
   // Si la plantilla no se pudo materializar, la pantalla no puede decir "sin
   // actividades configuradas": la config SÍ las declara.
@@ -73,6 +76,15 @@ export default function BloqueCronograma({
   }, [negocioBloqueId])
 
   useEffect(() => { refrescarVersion() }, [refrescarVersion])
+
+  // El equipo sale del servidor y no de la página: la ficha del negocio trae usuarios
+  // (profiles) y el responsable de un paso es una persona del equipo (staff), que puede no
+  // tener cuenta. Mezclarlos fue lo que dejó el selector anterior sin poder guardar nada.
+  useEffect(() => {
+    if (!negocioBloqueId) return
+    void leerEquipoCronograma(negocioBloqueId).then(setEquipo)
+  }, [negocioBloqueId])
+  const equipoActivo = equipo.filter(m => m.activo)
 
   // Gap 3: Inicializar items desde config_extra.items si no hay items y hay templates.
   // La plantilla la lee el servidor de la config del bloque; aquí solo se decide si
@@ -142,7 +154,11 @@ export default function BloqueCronograma({
   function saveEdit() {
     const targetItem = items.find(i => i.id === editingId)
     if (!targetItem) return
-    const updated = { ...targetItem, ...editValues }
+    // «@Laura Gómez» escrito entero sin elegir de la lista es la persona, no el texto.
+    const responsable = editValues.responsable_id
+      ? { responsable_id: editValues.responsable_id, responsable_texto: null }
+      : resolverMencionEscrita(editValues.responsable_texto ?? null, equipoActivo)
+    const updated = { ...targetItem, ...editValues, ...responsable }
     setItems(prev => prev.map(i => i.id === editingId ? updated : i))
     setEditingId(null)
 
@@ -151,10 +167,11 @@ export default function BloqueCronograma({
     // (o creado) hasta que alguien recarga, y el aviso de error se va a los segundos.
     startTransition(async () => {
       if (updated.id.startsWith('_tmp_')) {
-        const extra: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = {}
+        const extra: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null; responsable_texto?: string | null } = {}
         if (updated.fecha_inicio) extra.fecha_inicio = updated.fecha_inicio
         if (updated.fecha_fin) extra.fecha_fin = updated.fecha_fin
         if (updated.responsable_id) extra.responsable_id = updated.responsable_id
+        else if (updated.responsable_texto) extra.responsable_texto = updated.responsable_texto
         const result = await agregarBloqueItem(negocioBloqueId, updated.label, 'texto', items.length, extra)
         if (result.error) {
           toast.error(result.error)
@@ -167,10 +184,18 @@ export default function BloqueCronograma({
           refrescarVersion()
         }
       } else {
-        const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null } = { label: updated.label }
+        const fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null; responsable_texto?: string | null } = { label: updated.label }
         if (updated.fecha_inicio !== undefined) fields.fecha_inicio = updated.fecha_inicio || null
         if (updated.fecha_fin !== undefined) fields.fecha_fin = updated.fecha_fin || null
-        if (updated.responsable_id !== undefined) fields.responsable_id = updated.responsable_id || null
+        // Solo si el responsable cambió: reenviarlo igual contaría como planeación y
+        // cortaría una versión por haber abierto y cerrado la fila.
+        const cambioResponsable =
+          (updated.responsable_id ?? null) !== (targetItem.responsable_id ?? null) ||
+          (updated.responsable_texto ?? null) !== (targetItem.responsable_texto ?? null)
+        if (cambioResponsable) {
+          fields.responsable_id = updated.responsable_id ?? null
+          fields.responsable_texto = updated.responsable_texto ?? null
+        }
         const result = await actualizarBloqueItem(updated.id, fields)
         if (result.error) {
           toast.error(result.error)
@@ -183,6 +208,7 @@ export default function BloqueCronograma({
                 fecha_inicio: targetItem.fecha_inicio,
                 fecha_fin: targetItem.fecha_fin,
                 responsable_id: targetItem.responsable_id,
+                responsable_texto: targetItem.responsable_texto,
               }
             : i))
           return
@@ -245,11 +271,6 @@ export default function BloqueCronograma({
     })
   }
 
-  function getProfileName(id: string | null | undefined) {
-    if (!id) return null
-    const p = profiles.find(pr => pr.id === id)
-    return p?.full_name ?? null
-  }
 
   if (items.length === 0 && !isPending) {
     return (
@@ -291,9 +312,7 @@ export default function BloqueCronograma({
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Fin plan</th>
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-acento uppercase">Inicio real</th>
               <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-acento uppercase">Fin real</th>
-              {profiles.length > 0 && (
-                <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Responsable</th>
-              )}
+              <th className="pb-1.5 pr-2 text-left text-[10px] font-medium text-tinta-suave uppercase">Responsable</th>
               <th className="pb-1.5 text-left text-[10px] font-medium text-tinta-suave uppercase">Estado</th>
               {modo === 'editable' && <th className="pb-1.5 w-6" />}
             </tr>
@@ -374,24 +393,23 @@ export default function BloqueCronograma({
                     <span className="text-tinta">{fmtDate(item.fecha_fin_real)}</span>
                   )}
                 </td>
-                {profiles.length > 0 && (
-                  <td className="py-2 pr-2">
-                    {editingId === item.id ? (
-                      <select
-                        value={editValues.responsable_id ?? ''}
-                        onChange={e => setEditValues(p => ({ ...p, responsable_id: e.target.value || null }))}
-                        className="rounded border border-[#E5E7EB] px-1.5 py-1 text-xs focus:border-acento focus:outline-none"
-                      >
-                        <option value="">Sin asignar</option>
-                        {profiles.map(p => (
-                          <option key={p.id} value={p.id}>{p.full_name ?? 'Sin nombre'}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="text-tinta-suave">{getProfileName(item.responsable_id) ?? '—'}</span>
-                    )}
-                  </td>
-                )}
+                <td className="py-2 pr-2">
+                  {editingId === item.id ? (
+                    <ResponsableInput
+                      equipo={equipoActivo}
+                      valor={{ responsable_id: editValues.responsable_id ?? null, responsable_texto: editValues.responsable_texto ?? null }}
+                      nombreElegido={nombreResponsable({ responsable_id: editValues.responsable_id }, equipo)}
+                      onChange={r => setEditValues(p => ({ ...p, ...r }))}
+                    />
+                  ) : item.responsable_id ? (
+                    <span className="inline-flex items-center gap-0.5 text-tinta">
+                      <span className="text-acento">@</span>
+                      {nombreResponsable(item, equipo) ?? 'Persona del equipo'}
+                    </span>
+                  ) : (
+                    <span className="text-tinta-suave">{item.responsable_texto?.trim() || '—'}</span>
+                  )}
+                </td>
                 <td className="py-2">
                   {editingId === item.id ? (
                     <div className="flex gap-1">

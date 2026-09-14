@@ -454,6 +454,7 @@ export type Database = {
           negocio_bloque_id: string
           orden: number
           responsable_id: string | null
+          responsable_texto: string | null
           tipo: string
         }
         Insert: {
@@ -471,6 +472,7 @@ export type Database = {
           negocio_bloque_id: string
           orden?: number
           responsable_id?: string | null
+          responsable_texto?: string | null
           tipo?: string
         }
         Update: {
@@ -488,6 +490,7 @@ export type Database = {
           negocio_bloque_id?: string
           orden?: number
           responsable_id?: string | null
+          responsable_texto?: string | null
           tipo?: string
         }
         Relationships: [

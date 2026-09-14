@@ -49,9 +49,21 @@ const COL_NUM = 20
 const COL_ACTIVIDAD = 190
 const COL_ESTADO = 62
 const ANCHO_EJE = ANCHO_UTIL - COL_NUM - COL_ACTIVIDAD - COL_ESTADO
-const ALTO_FILA = 26
-const FILAS_PRIMERA_PAGINA = 12
-const FILAS_POR_PAGINA = 17
+/**
+ * Dos densidades de fila. La cómoda es la de siempre; la compacta existe para que un
+ * cronograma de 13 a 15 pasos no deje dos o tres filas solas en una segunda hoja, que es
+ * lo primero que se ve feo al abrir el documento. Se usa la compacta solo si ahorra hojas.
+ */
+interface Densidad {
+  alto: number
+  primeraPagina: number
+  porPagina: number
+  /** top y alto de la barra del plan y de la real. */
+  plan: [number, number]
+  real: [number, number]
+}
+const COMODA: Densidad = { alto: 26, primeraPagina: 12, porPagina: 17, plan: [6, 5], real: [13, 7] }
+const COMPACTA: Densidad = { alto: 20, primeraPagina: 15, porPagina: 22, plan: [4, 4], real: [9, 6] }
 /** Lo que cabe en COL_ACTIVIDAD a 8 pt en negrita, medido sobre un render real. */
 const MAX_CARACTERES_ACTIVIDAD = 40
 
@@ -96,12 +108,40 @@ function enPuntos(t: Tramo, modelo: ModeloGantt): { left: number; width: number 
   }
 }
 
-function paginar(filas: FilaGantt[]): FilaGantt[][] {
-  const paginas: FilaGantt[][] = [filas.slice(0, FILAS_PRIMERA_PAGINA)]
-  for (let i = FILAS_PRIMERA_PAGINA; i < filas.length; i += FILAS_POR_PAGINA) {
-    paginas.push(filas.slice(i, i + FILAS_POR_PAGINA))
+/** Aire que queda debajo de la última fila que cabe, medido sobre un render real. */
+const HOLGURA_PAGINA = 30
+
+/** Alto del bloque «Qué cambió»: margen, título y una línea por cambio. */
+const altoCambios = (n: number) => (n > 0 ? 14 + 11 + Math.min(n, 8) * 10.5 : 0)
+
+/**
+ * Reparte las filas en hojas. Si el bloque de cambios no cabe debajo de la última fila,
+ * se le da una hoja propia con su encabezado de continuación: sin eso react-pdf lo empuja
+ * solo a una hoja en blanco que no dice de qué documento es.
+ */
+function paginar(filas: FilaGantt[], d: Densidad, reservaFinal: number): FilaGantt[][] {
+  const paginas: FilaGantt[][] = [filas.slice(0, d.primeraPagina)]
+  for (let i = d.primeraPagina; i < filas.length; i += d.porPagina) {
+    paginas.push(filas.slice(i, i + d.porPagina))
+  }
+  if (reservaFinal > 0) {
+    const cap = paginas.length === 1 ? d.primeraPagina : d.porPagina
+    const libre = (cap - paginas[paginas.length - 1].length) * d.alto + HOLGURA_PAGINA
+    if (libre < reservaFinal) paginas.push([])
   }
   return paginas
+}
+
+/**
+ * Compacta solo si pone el Gantt en menos hojas; a igual número de hojas del Gantt, la que
+ * use menos hojas en total. El Gantt entero a la vista pesa más que el bloque de cambios.
+ */
+function elegirDensidad(filas: FilaGantt[], reservaFinal: number): Densidad {
+  const costo = (d: Densidad) => {
+    const conFilas = paginar(filas, d, 0).length
+    return conFilas * 100 + paginar(filas, d, reservaFinal).length
+  }
+  return costo(COMPACTA) < costo(COMODA) ? COMPACTA : COMODA
 }
 
 // ── Piezas ───────────────────────────────────────────────────────────────────
@@ -169,12 +209,13 @@ function EncabezadoTabla({ modelo }: { modelo: ModeloGantt }) {
   )
 }
 
-function FilaPdf({ fila, numero, modelo, primario, cebra }: {
+function FilaPdf({ fila, numero, modelo, primario, cebra, densidad }: {
   fila: FilaGantt
   numero: number
   modelo: ModeloGantt
   primario: string
   cebra: boolean
+  densidad: Densidad
 }) {
   const anchoSemana = modelo.totalDias > 0 ? (ANCHO_EJE * 7) / modelo.totalDias : 0
   const hoyVisible = modelo.desde && modelo.hasta && modelo.hoy >= modelo.desde && modelo.hoy <= modelo.hasta
@@ -189,7 +230,7 @@ function FilaPdf({ fila, numero, modelo, primario, cebra }: {
       wrap={false}
       style={{
         flexDirection: 'row',
-        height: ALTO_FILA,
+        height: densidad.alto,
         alignItems: 'center',
         borderBottomWidth: 0.5,
         borderBottomColor: BORDE,
@@ -217,7 +258,7 @@ function FilaPdf({ fila, numero, modelo, primario, cebra }: {
         )}
       </View>
 
-      <View style={{ width: ANCHO_EJE, height: ALTO_FILA, position: 'relative' }}>
+      <View style={{ width: ANCHO_EJE, height: densidad.alto, position: 'relative' }}>
         {modelo.semanas.map((s, i) => (
           <View
             key={s.inicio}
@@ -225,13 +266,13 @@ function FilaPdf({ fila, numero, modelo, primario, cebra }: {
           />
         ))}
         {plan && (
-          <View style={{ position: 'absolute', left: plan.left, width: plan.width, top: 6, height: 5, borderRadius: 2.5, backgroundColor: PLAN }} />
+          <View style={{ position: 'absolute', left: plan.left, width: plan.width, top: densidad.plan[0], height: densidad.plan[1], borderRadius: densidad.plan[1] / 2, backgroundColor: PLAN }} />
         )}
         {real && (
-          <View style={{ position: 'absolute', left: real.left, width: real.width, top: 13, height: 7, borderRadius: 3.5, backgroundColor: primario }} />
+          <View style={{ position: 'absolute', left: real.left, width: real.width, top: densidad.real[0], height: densidad.real[1], borderRadius: densidad.real[1] / 2, backgroundColor: primario }} />
         )}
         {fuera && (
-          <View style={{ position: 'absolute', left: fuera.left, width: fuera.width, top: 13, height: 7, borderRadius: 3.5, backgroundColor: FUERA_DE_PLAN }} />
+          <View style={{ position: 'absolute', left: fuera.left, width: fuera.width, top: densidad.real[0], height: densidad.real[1], borderRadius: densidad.real[1] / 2, backgroundColor: FUERA_DE_PLAN }} />
         )}
         {xHoy !== null && (
           <View style={{ position: 'absolute', left: xHoy, top: 0, bottom: 0, width: 1, backgroundColor: HOY }} />
@@ -276,7 +317,9 @@ function Pie({ encabezado, version }: { encabezado: EncabezadoGantt; version: Ve
 export default function CronogramaGanttPDF({ encabezado, version, modelo }: CronogramaGanttPDFProps) {
   const primario = colorDe(encabezado.colorPrimario)
   const { kpis } = modelo
-  const paginas = paginar(modelo.filas)
+  const reservaCambios = version && version.numero > 1 ? altoCambios(version.cambios.length) : 0
+  const densidad = elegirDensidad(modelo.filas, reservaCambios)
+  const paginas = paginar(modelo.filas, densidad, reservaCambios)
   const atrasado = (kpis.desfaseDias ?? 0) > 0
   const corrida = kpis.entregaPlan && kpis.entregaProyectada && kpis.entregaProyectada > kpis.entregaPlan
 
@@ -294,7 +337,7 @@ export default function CronogramaGanttPDF({ encabezado, version, modelo }: Cron
       {paginas.map((filas, indice) => {
         const primera = indice === 0
         const ultima = indice === paginas.length - 1
-        const desplazamiento = primera ? 0 : FILAS_PRIMERA_PAGINA + (indice - 1) * FILAS_POR_PAGINA
+        const desplazamiento = primera ? 0 : densidad.primeraPagina + (indice - 1) * densidad.porPagina
         return (
           <Page key={indice} size="LETTER" orientation="landscape" style={estiloPagina}>
             {/* Franja de marca: el color del workspace en el borde, no en el fondo. */}
@@ -367,13 +410,15 @@ export default function CronogramaGanttPDF({ encabezado, version, modelo }: Cron
             ) : (
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: TINTA }}>
-                  {encabezado.negocioNombre}  <Text style={{ fontFamily: 'Helvetica', color: TINTA_SUAVE }}>· continuación</Text>
+                  {encabezado.negocioNombre}  <Text style={{ fontFamily: 'Helvetica', color: TINTA_SUAVE }}>
+                    {filas.length === 0 ? `· versión ${version?.numero ?? ''}` : '· continuación'}
+                  </Text>
                 </Text>
-                <Leyenda primario={primario} />
+                {filas.length > 0 && <Leyenda primario={primario} />}
               </View>
             )}
 
-            {modelo.filas.length === 0 ? (
+            {filas.length === 0 && !primera ? null : modelo.filas.length === 0 ? (
               <Text style={{ fontSize: 9, color: TINTA_SUAVE, marginTop: 20 }}>Este cronograma todavía no tiene actividades.</Text>
             ) : (
               <>
@@ -386,6 +431,7 @@ export default function CronogramaGanttPDF({ encabezado, version, modelo }: Cron
                     modelo={modelo}
                     primario={primario}
                     cebra={(desplazamiento + i) % 2 === 1}
+                    densidad={densidad}
                   />
                 ))}
               </>

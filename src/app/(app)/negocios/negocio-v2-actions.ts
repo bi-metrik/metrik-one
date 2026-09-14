@@ -19,6 +19,7 @@ import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreCo
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { cortarVersionCronograma } from '@/lib/cronograma/cortar-version'
 import { tocaLaPlaneacion } from '@/lib/cronograma/versionado'
+import { normalizarResponsable, type MiembroEquipo } from '@/lib/cronograma/responsable'
 import {
   calcularPresupuestoPorRubro,
   asignarEjecutadoPorRubro,
@@ -5753,6 +5754,71 @@ async function autoCrearCobrosMulti(
   return { error: null }
 }
 
+// ── Responsable de un paso del cronograma ────────────────────────────────────
+
+/**
+ * Deja el responsable listo para escribir: persona O texto, nunca los dos, y la persona
+ * tiene que ser del equipo de ESTE workspace. La FK a `staff` solo garantiza que el id
+ * exista en alguna parte; sin esta comprobación un id de otro tenant quedaría escrito.
+ *
+ * Devuelve solo las columnas que el guardado tocó: si no vino ninguna de las dos, el
+ * responsable no se está editando y no hay nada que escribir.
+ */
+async function responsableParaEscribir(
+  supabase: unknown,
+  workspaceId: string | null,
+  campos: { responsable_id?: string | null; responsable_texto?: string | null },
+): Promise<{ valores: { responsable_id?: string | null; responsable_texto?: string | null }; error: string | null }> {
+  if (campos.responsable_id === undefined && campos.responsable_texto === undefined) {
+    return { valores: {}, error: null }
+  }
+  const r = normalizarResponsable(campos)
+  if (r.responsable_id) {
+    if (!workspaceId) return { valores: {}, error: 'No autenticado' }
+    const { data } = await db(supabase)
+      .from('staff')
+      .select('id')
+      .eq('id', r.responsable_id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (!data) return { valores: {}, error: 'Esa persona no pertenece al equipo' }
+  }
+  return { valores: r, error: null }
+}
+
+/**
+ * El equipo que se puede nombrar con «@» en un cronograma. Solo lee, así que el guard es
+ * el de VER el negocio: la tabla también se pinta en solo lectura y ahí hacen falta los
+ * nombres. Incluye a los inactivos para que un paso viejo siga diciendo quién lo tuvo; la
+ * lista de «@» los filtra.
+ */
+export async function leerEquipoCronograma(
+  negocioBloqueId: string,
+): Promise<Array<MiembroEquipo & { activo: boolean }>> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+
+  const { data: bloqueRow } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id')
+    .eq('id', negocioBloqueId)
+    .maybeSingle()
+  if (!bloqueRow) return []
+  const guard = await guardVerNegocio((bloqueRow as { negocio_id: string }).negocio_id)
+  if (!guard.ok) return []
+
+  const { data } = await db(supabase)
+    .from('staff')
+    .select('id, full_name, is_active')
+    .eq('workspace_id', workspaceId)
+    .order('full_name', { ascending: true })
+  return ((data ?? []) as { id: string; full_name: string | null; is_active: boolean | null }[]).map(s => ({
+    id: s.id,
+    full_name: s.full_name,
+    activo: s.is_active !== false,
+  }))
+}
+
 // ── Agregar un bloque_item (cronograma) ───────────────────────────────────────
 
 export async function agregarBloqueItem(
@@ -5760,7 +5826,7 @@ export async function agregarBloqueItem(
   label: string,
   tipo: string,
   orden: number,
-  extra?: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null }
+  extra?: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null; responsable_texto?: string | null }
 ): Promise<{ id: string | null; error: string | null }> {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error) return { id: null, error: 'No autenticado' }
@@ -5772,7 +5838,12 @@ export async function agregarBloqueItem(
   const row: Record<string, unknown> = { negocio_bloque_id: negocioBloqueId, label, tipo, orden, completado: false, contenido: {} }
   if (extra?.fecha_inicio) row.fecha_inicio = extra.fecha_inicio
   if (extra?.fecha_fin) row.fecha_fin = extra.fecha_fin
-  if (extra?.responsable_id) row.responsable_id = extra.responsable_id
+  const responsable = await responsableParaEscribir(supabase, workspaceId ?? null, {
+    responsable_id: extra?.responsable_id,
+    responsable_texto: extra?.responsable_texto,
+  })
+  if (responsable.error) return { id: null, error: responsable.error }
+  Object.assign(row, responsable.valores)
 
   const { data, error: insertError } = await db(supabase)
     .from('bloque_items')
@@ -5805,6 +5876,7 @@ export async function actualizarBloqueItem(
     fecha_fin?: string | null
     link_url?: string | null
     responsable_id?: string | null
+    responsable_texto?: string | null
     /** Avance, no plan: lo que efectivamente pasó. NO corta versión. */
     fecha_inicio_real?: string | null
     fecha_fin_real?: string | null
@@ -5823,9 +5895,14 @@ export async function actualizarBloqueItem(
   const guard = await guardEditarBloque((itemRow as { negocio_bloque_id: string }).negocio_bloque_id)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
+  const { responsable_id, responsable_texto, ...resto } = fields
+  const responsable = await responsableParaEscribir(supabase, workspaceId ?? null, { responsable_id, responsable_texto })
+  if (responsable.error) return { error: responsable.error }
+  const cambios = { ...resto, ...responsable.valores }
+
   const { error: updateError } = await db(supabase)
     .from('bloque_items')
-    .update(fields)
+    .update(cambios)
     .eq('id', bloqueItemId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
@@ -5833,7 +5910,7 @@ export async function actualizarBloqueItem(
   // El corte de versión depende de QUÉ se guardó, no de quién guardó: mover una fecha
   // planeada publica una versión nueva; marcar el inicio real de un paso, no. Es la
   // diferencia entre replanear la obra y contar cómo va.
-  if (!tocaLaPlaneacion(fields) || !workspaceId) return { error: null }
+  if (!tocaLaPlaneacion(cambios) || !workspaceId) return { error: null }
 
   // El bloque ya se resolvió para el guard: no hace falta volver a leerlo.
   const negocioBloqueId = (itemRow as { negocio_bloque_id: string }).negocio_bloque_id
@@ -6675,7 +6752,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   if (negocioBloqueIds.length > 0) {
     const { data: itemsData } = await db(supabase)
       .from('bloque_items')
-      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id')
+      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, responsable_texto')
       .in('negocio_bloque_id', negocioBloqueIds)
       .order('orden', { ascending: true })
     if (itemsData) {
