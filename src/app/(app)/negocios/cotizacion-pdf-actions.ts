@@ -402,6 +402,24 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       }))
     : null
 
+  // ⚠️ Con itinerarios, la lista PLANA de items que alimenta el resumen fiscal se
+  // reemplaza por la del PRINCIPAL. Si no, el «Subtotal» sumaria AVIANCA **y** WINGO
+  // —los dos vuelos estan en `items`— y quedaria por encima del TOTAL, que sale de
+  // `valor_total` y es el del principal (R5). Dos cifras del mismo dinero que no
+  // cuadran, en el documento que ve el cliente.
+  //
+  // De paso resuelve el caso de UN solo itinerario en propuesta: la plantilla imprime
+  // su tabla plana, y es la del principal.
+  const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
+  const itemsParaResumen = itemsDelPrincipal ?? items.map(i => ({
+    nombre: i.nombre ?? '',
+    descripcion: i.descripcion ?? null,
+    precio_venta: Number(i.precio_venta) || 0,
+    descuento_porcentaje: descuentoVisible(i),
+    cantidad: Number(i.cantidad) || 1,
+    unidad: i.unidad ?? null,
+  }))
+
   const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {
       consecutivo: cot.consecutivo,
@@ -436,14 +454,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       direccion: vendorFiscal?.direccion_fiscal ?? null,
       ciudad: [vendorFiscal?.municipio, vendorFiscal?.departamento].filter(Boolean).join(', ') || null,
     },
-    items: items.map(i => ({
-      nombre: i.nombre ?? '',
-      descripcion: i.descripcion ?? null,
-      precio_venta: Number(i.precio_venta) || 0,
-      descuento_porcentaje: descuentoVisible(i),
-      cantidad: Number(i.cantidad) || 1,
-      unidad: i.unidad ?? null,
-    })),
+    items: itemsParaResumen,
     itinerarios: itinerariosPDF,
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,

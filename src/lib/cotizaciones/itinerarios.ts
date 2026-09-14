@@ -310,6 +310,31 @@ export function nombreDeItinerario(nombre: string | null | undefined, posicion: 
 }
 
 /**
+ * Cómo se titula un bloque del PDF (R7).
+ *
+ * ⚠️ La marca del principal NO se agrega si el nombre ya la dice. Quien cotiza llama
+ * «Recomendada» a la que recomienda —es el ejemplo del propio diseño— y pegarle el
+ * sufijo imprimía **«RECOMENDADA · RECOMENDADA»** en el documento que ve el cliente.
+ * Se vio mirando el PDF renderizado, no en una prueba.
+ *
+ * La comparación va sin tildes y en minúsculas porque el nombre es texto libre:
+ * «Recomendada», «RECOMENDADA» y «La recomendada» tienen que contar igual.
+ */
+export function tituloDeBloquePDF(
+  nombre: string | null | undefined,
+  esPrincipal: boolean,
+  posicion: number,
+): string {
+  const base = nombreDeItinerario(nombre, posicion)
+  const yaLoDice = base
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .includes('recomend')
+  return esPrincipal && !yaLoDice ? `${base} · recomendada` : base
+}
+
+/**
  * Cuál itinerario manda sobre `cotizaciones.valor_total` (R5).
  *
  * El principal. Si no hay ninguno marcado —una cotización a medio armar, o alguien

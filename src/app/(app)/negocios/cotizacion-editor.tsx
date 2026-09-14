@@ -658,7 +658,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         <input
                           type="text"
                           defaultValue={item.unidad ?? ''}
-                          placeholder="pax, noche, trayecto…"
+                          placeholder="pax, noches, trayectos…"
                           className="w-full rounded border bg-background px-2 py-1.5 text-sm"
                           onBlur={e => {
                             const val = e.target.value.trim()
@@ -671,7 +671,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           }}
                           onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
                         />
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">Lo que ve el cliente</p>
+                        {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
+                            pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
+                            morfología del español sobre texto libre acierta a veces. Por eso
+                            el marcador sugiere la forma en plural, que es la del caso común. */}
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          Se imprime tal cual al cliente
+                        </p>
                       </div>
                       <div className="col-span-2 flex items-end">
                         {/* La alternativa nace VACÍA de costo: es otro proveedor, no

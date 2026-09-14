@@ -12,6 +12,7 @@ import {
   textoDeRechazo,
   normalizarGrupo,
   nombreDeItinerario,
+  tituloDeBloquePDF,
   itinerarioPrincipal,
   TOPE_COMBINACIONES,
 } from './itinerarios'
@@ -304,6 +305,23 @@ describe('auxiliares', () => {
     expect(nombreDeItinerario('Recomendada', 1)).toBe('Recomendada')
     expect(nombreDeItinerario(null, 2)).toBe('Opción 2')
     expect(nombreDeItinerario('   ', 3)).toBe('Opción 3')
+  })
+
+  it('R7 · el título del bloque no repite «recomendada» si el nombre ya la dice', () => {
+    // Salió de mirar el PDF renderizado: el fixture llamaba «Recomendada» a la
+    // principal y el documento imprimía «RECOMENDADA · RECOMENDADA» al cliente.
+    expect(tituloDeBloquePDF('Recomendada', true, 1)).toBe('Recomendada')
+    expect(tituloDeBloquePDF('LA RECOMENDADA', true, 1)).toBe('LA RECOMENDADA')
+    // Sin tildes y sin mayúsculas: el nombre es texto libre.
+    expect(tituloDeBloquePDF('recomendadá', true, 1)).toBe('recomendadá')
+  })
+
+  it('R7 · sí la agrega cuando el nombre no la dice, y nunca al que no es principal', () => {
+    // El control que hace válida la prueba de arriba: sin él, un título que nunca
+    // agregara el sufijo pasaría igual.
+    expect(tituloDeBloquePDF('Premium', true, 1)).toBe('Premium · recomendada')
+    expect(tituloDeBloquePDF('Premium', false, 1)).toBe('Premium')
+    expect(tituloDeBloquePDF(null, true, 3)).toBe('Opción 3 · recomendada')
   })
 
   it('sin principal devuelve null, no "el primero"', () => {

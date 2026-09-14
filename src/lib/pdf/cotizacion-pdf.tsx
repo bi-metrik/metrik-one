@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet, Image as PdfImage } from '@reac
 
 import type { CotizacionPDFProps } from './cotizacion-props'
 import { PALETA } from '@/lib/marca/paleta'
+import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 
 // Color lightener (react-pdf no soporta rgba)
 function lighten(hex: string, amount: number): string {
@@ -87,7 +88,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
   // camino de siempre: un cliente con una sola opcion no necesita que se la
   // presenten como una eleccion entre varias.
   const bloques = (itinerarios ?? []).map((it, i) => ({
-    titulo: `${(it.nombre ?? '').trim() || `Opcion ${i + 1}`}${it.esPrincipal ? ' · recomendada' : ''}`,
+    titulo: tituloDeBloquePDF(it.nombre, it.esPrincipal, i + 1),
     total: it.precio,
     items: it.items,
   }))

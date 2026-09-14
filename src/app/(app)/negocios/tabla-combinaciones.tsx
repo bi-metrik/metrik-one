@@ -121,11 +121,21 @@ export default function TablaCombinaciones({
         </div>
       )}
 
+      {/* ⚠️ Mientras no haya un itinerario PRINCIPAL, el total de la cotización suma
+          TODAS las líneas, o sea las dos aerolíneas a la vez. No se corrige eligiendo
+          una por nuestra cuenta —eso es precisamente lo que el principal decide— así
+          que se DICE. Un total inflado que nadie explica es peor que uno que avisa. */}
       {!tablasAusentes && itinerarios.length === 0 && (
-        <div className="px-4 py-6 text-center text-xs text-muted-foreground">
-          Hay {ranuras.length === 1 ? 'un grupo' : `${ranuras.length} grupos`} con alternativas
-          {' '}({ranuras.map(r => r.grupo).join(', ')}).
-          {' '}Genera las combinaciones para ver el margen de cada una.
+        <div className="px-4 py-5 text-center text-xs">
+          <p className="text-muted-foreground">
+            Hay {ranuras.length === 1 ? 'un grupo' : `${ranuras.length} grupos`} con alternativas
+            {' '}({ranuras.map(r => r.grupo).join(', ')}).
+          </p>
+          <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">
+            Hasta que marques un itinerario como principal, el total de abajo suma todas las
+            alternativas a la vez.
+          </p>
+          <p className="mt-1 text-muted-foreground">Genera las combinaciones para ver el margen de cada una.</p>
         </div>
       )}
 
@@ -292,6 +302,15 @@ export default function TablaCombinaciones({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Mismo aviso cuando hay combinaciones pero ninguna es principal: el total
+          sigue sumando de más y la causa está a un clic de distancia. */}
+      {itinerarios.length > 0 && !itinerarios.some(i => i.esPrincipal) && (
+        <div className="border-t bg-amber-50 px-4 py-2 text-[11px] font-medium text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+          Ningún itinerario está marcado como principal: el total de la cotización suma todas
+          las alternativas a la vez. Marca uno con la estrella.
         </div>
       )}
 
