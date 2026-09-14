@@ -10,6 +10,7 @@ import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
+import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 
 export const maxDuration = 60
 
@@ -87,14 +88,19 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // vive en el FAB global. Sin conciliación no hay reparto que proponer: la plata que
   // entra se anota contra el negocio abierto y queda registrada de una.
   let pagoSimpleActivo = false
+  // "Omitir gate" en el modal de gates pendientes: owner/admin, o la persona declarada en
+  // `config_extra.omitir_gate.staff_ids`. MISMA función que el guard de
+  // `cambiarEtapaNegocioConGate`: el botón no se ofrece a quien el servidor rechaza.
+  let puedeOmitirGates = false
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: ws } = await (svc.from('workspaces') as any)
-      .select('modules')
+      .select('modules, config_extra')
       .eq('id', workspaceId)
       .single()
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
+    puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
     if (modules.valida_consulta) {
       validaActivo = true
       validaConsultas = await listarConsultasPorNegocio(id)
@@ -176,6 +182,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         registrarPagoEnabled={conciliacionActiva}
         registrarPagoSimple={pagoSimpleActivo}
         puedeCierreNoFacturable={puedeCierreNoFacturable}
+        puedeOmitirGates={puedeOmitirGates}
         puedeResolverAvisoRecaudo={puedeResolverAvisoRecaudo}
         errorMsg={err}
         banner={banner}

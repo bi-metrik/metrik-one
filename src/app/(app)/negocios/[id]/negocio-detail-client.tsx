@@ -600,10 +600,16 @@ function ModalConfirmarAvance({
 
 function ModalGateBloqueado({
   bloques,
+  puedeOmitir,
   onClose,
   onOverride,
 }: {
   bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
+  /**
+   * El usuario puede omitir gates con motivo (owner/admin o `omitir_gate.staff_ids`).
+   * Lo resuelve `page.tsx` con la misma función del guard del servidor.
+   */
+  puedeOmitir: boolean
   onClose: () => void
   onOverride: (motivo: string) => void
 }) {
@@ -681,6 +687,14 @@ function ModalGateBloqueado({
                 Volver
               </button>
             </div>
+          ) : !puedeOmitir ? (
+            // Sin permiso no se dibuja "Omitir gate": el servidor lo rechazaría igual.
+            <button
+              onClick={onClose}
+              className="w-full rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-tinta hover:bg-slate-50"
+            >
+              Volver
+            </button>
           ) : !showOverride ? (
             <div className="flex gap-2">
               <button
@@ -693,7 +707,7 @@ function ModalGateBloqueado({
                 onClick={() => setShowOverride(true)}
                 className="flex-1 rounded-lg border border-amber-200 bg-amber-50 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100"
               >
-                Omitir gate (owner)
+                Omitir gate
               </button>
             </div>
           ) : (
@@ -748,6 +762,7 @@ function SelectorEtapa({
   userRole,
   reprocesoMarca,
   puedeCierreNoFacturable,
+  puedeOmitirGates,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -763,6 +778,7 @@ function SelectorEtapa({
   userRole: string
   reprocesoMarca: ReprocesoVista | null
   puedeCierreNoFacturable: boolean
+  puedeOmitirGates: boolean
 }) {
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
@@ -981,6 +997,7 @@ function SelectorEtapa({
       {gateModal && (
         <ModalGateBloqueado
           bloques={gateModal.bloques}
+          puedeOmitir={puedeOmitirGates}
           onClose={() => setGateModal(null)}
           onOverride={motivo => handleOverride(gateModal.etapaId, motivo)}
         />
@@ -2173,6 +2190,8 @@ interface Props {
   registrarPagoSimple?: boolean
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
+  /** Owner/admin o persona en `config_extra.omitir_gate.staff_ids`: ve "Omitir gate". */
+  puedeOmitirGates?: boolean
   /**
    * El usuario pertenece al area financiera y puede cerrar el aviso de recaudo cambiado.
    * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
@@ -2215,6 +2234,7 @@ export default function NegocioDetailClient({
   registrarPagoEnabled = false,
   registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
+  puedeOmitirGates = false,
   puedeResolverAvisoRecaudo = false,
   errorMsg,
   banner,
@@ -2392,6 +2412,7 @@ export default function NegocioDetailClient({
             userRole={userRole}
             reprocesoMarca={reprocesoMarca}
             puedeCierreNoFacturable={puedeCierreNoFacturable}
+            puedeOmitirGates={puedeOmitirGates}
           />
         </div>
         </div>
