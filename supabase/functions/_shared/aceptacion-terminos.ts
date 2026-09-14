@@ -3,7 +3,9 @@
 // ------------------------------------------------------------
 // Quien debe aceptar un documento le escribe al bot, recibe el documento y un mensaje con dos
 // botones, y el toque queda como evidencia en `aceptaciones_terminos` (ver la migracion
-// 20260914235500). La ejecucion (base, Meta, avisos) vive en `aceptacion-terminos-flujo.ts`.
+// 20260915040000). Si acepta, se ejecutan sus acciones post-aceptacion (hoy: entregar una llave
+// de API de Valida guardada en Vault). La ejecucion (base, Vault, Meta, avisos) vive en
+// `aceptacion-terminos-flujo.ts`.
 //
 // Por que partido en dos: el webhook no se puede importar desde vitest (`wa-parse.ts` lee
 // `Deno.env` al cargarse), asi que toda DECISION sale aqui, donde se prueba, y el flujo solo
@@ -329,6 +331,7 @@ export function avisoRespuesta(p: {
   respondidoAt: string;
   negocioCodigo: string | null;
   estadoDocumento: string | null;
+  acciones?: ResultadoAccion[];
 }): string {
   const { fila } = p;
   const encabezado = p.decision === 'acepto' ? '✅ Aceptación registrada: ACEPTÓ' : '❌ Aceptación registrada: NO ACEPTÓ';
@@ -347,8 +350,75 @@ export function avisoRespuesta(p: {
     p.estadoDocumento === 'failed' || p.estadoDocumento === 'rechazado'
       ? '⚠️ Meta reporta que el documento NO se entregó: revisa antes de dar la aceptación por buena.'
       : null,
+    ...lineasAcciones(p.acciones ?? []),
   ];
   return lineas.filter((l): l is string => l !== null).join('\n');
+}
+
+// ── Acciones post-aceptacion ─────────────────────────────────────────────────────────────
+// Lo que se le entrega a la persona por el mismo chat cuando toca "Acepto". Viven en
+// `aceptaciones_terminos_acciones`; el secreto (si lo hay) vive en Vault y aqui nunca se ve.
+
+export type TipoAccion = 'enviar_credencial_valida' | 'enviar_acceso_portal';
+
+export const URL_DOCS_VALIDA = 'https://valida.metrik.com.co/docs';
+
+/** Solo la credencial se envia hoy. El acceso al portal esta modelado y espera a que exista el portal. */
+export function accionImplementada(tipo: string): tipo is 'enviar_credencial_valida' {
+  return tipo === 'enviar_credencial_valida';
+}
+
+const ETIQUETA_ACCION: Record<string, string> = {
+  enviar_credencial_valida: 'Llave de API de Valida',
+  enviar_acceso_portal: 'Acceso a la plataforma',
+};
+
+export function etiquetaAccion(tipo: string): string {
+  return ETIQUETA_ACCION[tipo] ?? tipo;
+}
+
+/**
+ * Los dos mensajes de la entrega de la llave, con el texto aprobado por Mauricio. El primero lleva
+ * la llave y sale solo, para que se pueda copiar entero; el segundo no lleva nada sensible.
+ *
+ * Para `wa_envios.preview` se llama con la llave YA enmascarada: la misma funcion arma el texto
+ * real y su version publicable, asi que las dos no se pueden desalinear.
+ */
+export function mensajesCredencialValida(llave: string): [string, string] {
+  return [
+    `Esta es su llave de API de Valida: ${llave} (guárdenla en su gestor de secretos, no en el código). Documentación: ${URL_DOCS_VALIDA}`,
+    'En unos minutos les damos acceso a la plataforma, desde donde podrán generar y regenerar sus llaves',
+  ];
+}
+
+/**
+ * Version publicable de un secreto: el prefijo (`vk_`) y 4 caracteres, nada mas. Es lo unico que
+ * puede ir a consola, a `wa_envios` o al aviso interno. Un secreto demasiado corto no muestra
+ * ningun caracter: con pocos, 4 ya serian media llave.
+ */
+export function enmascararSecreto(secreto: string): string {
+  const s = (secreto ?? '').trim();
+  const prefijo = /^[A-Za-z]{1,8}_/.exec(s)?.[0] ?? '';
+  const resto = s.slice(prefijo.length);
+  return resto.length >= 16 ? `${prefijo}${resto.slice(0, 4)}…` : `${prefijo}…`;
+}
+
+/** Como termino una accion en esta corrida. `omitida` = otro proceso ya la habia tomado. */
+export interface ResultadoAccion {
+  tipo: string;
+  estado: 'enviada' | 'fallida' | 'pendiente' | 'omitida';
+  /** Texto para el aviso interno. NUNCA el secreto: a lo sumo su version enmascarada. */
+  detalle: string;
+}
+
+/** Lineas del aviso interno sobre las acciones. Vacio si no habia acciones. */
+export function lineasAcciones(acciones: ResultadoAccion[]): string[] {
+  if (acciones.length === 0) return [];
+  const lineas = ['', 'Acciones:', ...acciones.map((a) => `• ${etiquetaAccion(a.tipo)}: ${a.estado} — ${a.detalle}`)];
+  if (acciones.some((a) => a.estado === 'fallida')) {
+    lineas.push('⚠️ Una acción falló y NO se reintenta sola. Si llevaba llave, la llave sigue en Vault.');
+  }
+  return lineas;
 }
 
 // ── Integridad del documento ─────────────────────────────────────────────────────────────

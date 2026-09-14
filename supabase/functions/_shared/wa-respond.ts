@@ -46,6 +46,30 @@ export async function sendTextMessage(phone: string, text: string, ctx: EnvioCtx
   }
 }
 
+/**
+ * Texto que tiene que llegar EXACTO, caracter por caracter: una llave de API, un codigo.
+ *
+ * No pasa por el guard de español neutro ni por `splitMessage`. El guard reemplaza palabras
+ * sueltas con lookarounds de letra, y dentro de una llave un tramo entre guiones bajos es una
+ * "palabra": podria reescribirla y ademas imprimir el cambio en consola. Partirla en dos mensajes
+ * la haria imposible de copiar entera.
+ *
+ * Devuelve el wamid, o null si la Graph API lo rechazo. Si el texto lleva un secreto, `ctx.preview`
+ * es obligatorio.
+ */
+export async function sendTextoExacto(phone: string, text: string, ctx: EnvioCtx = {}): Promise<string | null> {
+  if (text.length > 4096) {
+    // Solo el largo: el texto puede llevar un secreto y no se imprime.
+    throw new Error(`sendTextoExacto: el texto excede el limite de 4096 caracteres de Meta (${text.length})`);
+  }
+  return await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'text',
+    text: { body: text },
+  }, ctx);
+}
+
 /** Send a numbered list as text (for menus with > 3 options) */
 export async function sendNumberedMenu(
   phone: string,
@@ -382,7 +406,8 @@ async function postMessage(
   payload: Record<string, unknown>,
   ctx: EnvioCtx = {},
 ): Promise<string | null> {
-  const preview = resumenPayload(payload);
+  // `ctx.preview` gana: es como un mensaje con un secreto deja constancia sin el secreto.
+  const preview = ctx.preview ?? resumenPayload(payload);
   let res: Response;
   try {
     res = await fetch(getMetaUrl(), {

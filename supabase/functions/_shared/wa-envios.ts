@@ -30,6 +30,11 @@ export interface EnvioCtx {
   workspaceId?: string;
   intent?: string;
   templateName?: string;
+  /**
+   * Lo que se guarda en `wa_envios.preview` EN LUGAR del texto real. Obligatorio cuando el
+   * mensaje lleva un secreto (una llave de API): sin esto la llave quedaria en claro en la tabla.
+   */
+  preview?: string;
 }
 
 /** Acuse de Meta ya normalizado. `phone` viene de `recipient_id`. */

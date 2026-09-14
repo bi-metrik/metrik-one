@@ -4,7 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   MINUTOS_ENTRE_RECORDATORIOS,
+  accionImplementada,
   avisoRespuesta,
+  enmascararSecreto,
+  lineasAcciones,
+  mensajesCredencialValida,
   botonesAceptacion,
   clasificarRespuestaNoAplicada,
   decidirEntrante,
@@ -321,6 +325,74 @@ describe('textos', () => {
     expect(nombreArchivo({ ...fila, documento_url: 'https://x.com/a/anexo.DOCX' })).toBe('Términos del servicio v1.0.docx');
     expect(nombreArchivo({ ...fila, documento_url: 'https://x.com/descargar?id=9' })).toBe('Términos del servicio v1.0.pdf');
     expect(nombreArchivo({ ...fila, documento_titulo: 'Contrato 1/2: "final"' })).toBe('Contrato 1 2 final v1.0.pdf');
+  });
+});
+
+describe('acciones post-aceptacion', () => {
+  // Forma real de una llave de Valida (`vk_` + 32 bytes en hex, ver setup-valida-workspace.ts).
+  // Inventada para la prueba: no es de ningun cliente.
+  const LLAVE = 'vk_ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12';
+
+  it('solo la credencial esta implementada; el acceso al portal espera al portal', () => {
+    expect(accionImplementada('enviar_credencial_valida')).toBe(true);
+    expect(accionImplementada('enviar_acceso_portal')).toBe(false);
+    expect(accionImplementada('otra')).toBe(false);
+  });
+
+  it('los dos mensajes llevan el texto aprobado, la llave completa y la documentacion', () => {
+    const [llave, portal] = mensajesCredencialValida(LLAVE);
+    expect(llave).toBe(
+      `Esta es su llave de API de Valida: ${LLAVE} (guárdenla en su gestor de secretos, no en el código). Documentación: https://valida.metrik.com.co/docs`,
+    );
+    expect(portal).toBe('En unos minutos les damos acceso a la plataforma, desde donde podrán generar y regenerar sus llaves');
+    expect(portal).not.toContain('vk_');
+  });
+
+  it('enmascarar deja el prefijo y 4 caracteres, como vk_ab12…', () => {
+    expect(enmascararSecreto(LLAVE)).toBe('vk_ab12…');
+    expect(enmascararSecreto(`  ${LLAVE}\n`)).toBe('vk_ab12…');
+  });
+
+  it('un secreto corto o sin prefijo no muestra caracteres de mas', () => {
+    expect(enmascararSecreto('vk_abc')).toBe('vk_…');
+    expect(enmascararSecreto('0123456789abcdef0123')).toBe('0123…');
+    expect(enmascararSecreto('corta')).toBe('…');
+    expect(enmascararSecreto('')).toBe('…');
+  });
+
+  it('la version publicable (wa_envios.preview) nunca contiene la llave', () => {
+    const preview = mensajesCredencialValida(enmascararSecreto(LLAVE))[0];
+    expect(preview).toContain('vk_ab12…');
+    expect(preview).not.toContain(LLAVE);
+    expect(preview).not.toContain(LLAVE.slice(3, 20));
+  });
+
+  it('el aviso interno lista las acciones y marca la falla sin reintento', () => {
+    const fila = {
+      nombre_aceptante: 'Bayron Correa', calidad: 'apoderado', empresa_nombre: '4D SOFT S.A.S.', empresa_nit: '901220269-6',
+      documento_titulo: 'Términos', documento_version: '1.0', telefono: TEL,
+    };
+    const ok = avisoRespuesta({
+      fila, decision: 'acepto', respondidoAt: '2026-09-14T15:32:00Z', negocioCodigo: null, estadoDocumento: 'read',
+      acciones: [
+        { tipo: 'enviar_credencial_valida', estado: 'enviada', detalle: 'llave vk_ab12… entregada y borrada de Vault' },
+        { tipo: 'enviar_acceso_portal', estado: 'pendiente', detalle: 'sin implementar' },
+      ],
+    });
+    expect(ok).toContain('• Llave de API de Valida: enviada — llave vk_ab12… entregada y borrada de Vault');
+    expect(ok).toContain('• Acceso a la plataforma: pendiente — sin implementar');
+    expect(ok).not.toContain('NO se reintenta');
+
+    const fallo = avisoRespuesta({
+      fila, decision: 'acepto', respondidoAt: '2026-09-14T15:32:00Z', negocioCodigo: null, estadoDocumento: 'read',
+      acciones: [{ tipo: 'enviar_credencial_valida', estado: 'fallida', detalle: 'Meta no aceptó el mensaje con la llave vk_ab12…' }],
+    });
+    expect(fallo).toContain('fallida');
+    expect(fallo).toContain('NO se reintenta sola');
+  });
+
+  it('sin acciones el aviso no agrega la seccion', () => {
+    expect(lineasAcciones([])).toEqual([]);
   });
 });
 

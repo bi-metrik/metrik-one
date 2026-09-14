@@ -11,7 +11,7 @@
 //                                 corre para numeros registrados.
 // ============================================================
 
-import { sendButtons, sendDocument, sendTextMessage } from './wa-respond.ts';
+import { sendButtons, sendDocument, sendTextMessage, sendTextoExacto } from './wa-respond.ts';
 import type { EnvioCtx } from './wa-respond.ts';
 import { enviarAvisoInterno } from './wa-alerta.ts';
 import { logMessage } from './wa-rate-limit.ts';
@@ -26,7 +26,9 @@ import {
   avisoRespuesta,
   botonesAceptacion,
   clasificarRespuestaNoAplicada,
+  accionImplementada,
   decidirEntrante,
+  enmascararSecreto,
   esIdDeTerminos,
   estaVigente,
   estadoPorDecision,
@@ -34,14 +36,16 @@ import {
   leyendaDocumento,
   mensajeConfirmacion,
   mensajeYaRespondida,
+  mensajesCredencialValida,
   mismoHash,
   nombreArchivo,
   sha256Hex,
   telefonoE164,
 } from './aceptacion-terminos.ts';
-import type { DecisionBoton, FilaAceptacion } from './aceptacion-terminos.ts';
+import type { DecisionBoton, FilaAceptacion, ResultadoAccion } from './aceptacion-terminos.ts';
 
 const TABLA = 'aceptaciones_terminos';
+const ACCIONES = 'aceptaciones_terminos_acciones';
 
 // Todo menos `payload_respuesta`, que lleva el cuerpo crudo del webhook y no hace falta leer.
 const COLUMNAS = [
@@ -123,7 +127,12 @@ export async function atenderBotonTerminos(supabase: SupabaseClient, message: In
   if (fila) {
     await logMessage(supabase, message.phone, 'inbound', fila.workspace_id, INTENT_ACEPTACION, `[boton] ${respuesta.titulo ?? respuesta.decision}`);
     await sendTextMessage(message.phone, mensajeConfirmacion(fila, respuesta.decision, respondidoAt), ctxEnvio(fila));
-    await avisarRespuesta(supabase, fila, respuesta.decision, respondidoAt);
+    // Las acciones solo corren aqui, en el UPDATE que gano. Un reintento de Meta cae en
+    // `duplicado` y nunca llega a esta linea, asi que la llave no sale dos veces.
+    const acciones = fila.estado === 'aceptado'
+      ? await ejecutarAccionesPostAceptacion(supabase, message.phone, fila)
+      : await accionesSinEjecutar(supabase, fila.id);
+    await avisarRespuesta(supabase, fila, respuesta.decision, respondidoAt, acciones);
     // Si a esta persona le queda otro documento por aceptar, se muestra ya: la ventana de 24 h
     // esta abierta y esperar a que vuelva a escribir es perderla.
     await mostrarSiguientePendiente(supabase, message.phone, telefono);
@@ -379,7 +388,179 @@ async function verificarDocumento(url: string, esperado: string): Promise<{ ok: 
   }
 }
 
-async function avisarRespuesta(supabase: SupabaseClient, fila: FilaAceptacion, decision: DecisionBoton, respondidoAt: string): Promise<void> {
+// ── Acciones post-aceptacion ─────────────────────────────────────────────────────────────
+
+/**
+ * Ejecuta, una sola vez, las acciones pendientes de una aceptacion recien registrada como
+ * `aceptado`. Nunca lanza: lo que falle queda en la fila (`fallida`) y en el resultado, que va
+ * al aviso interno. No hay reintento automatico.
+ *
+ * ⚠️ El pago NO se verifica aqui (Bold): la accion sale si la persona acepto, y punto.
+ */
+async function ejecutarAccionesPostAceptacion(
+  supabase: SupabaseClient,
+  phone: string,
+  fila: FilaAceptacion,
+): Promise<ResultadoAccion[]> {
+  const { data, error } = await supabase
+    .from(ACCIONES)
+    .select('id, tipo')
+    .eq('aceptacion_id', fila.id)
+    .eq('estado', 'pendiente')
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error(`[aceptacion] no se pudieron leer las acciones de ${fila.id}:`, error.message);
+    return [{ tipo: 'acciones', estado: 'fallida', detalle: `no se pudieron leer (${error.message}); nada se envió` }];
+  }
+
+  const resultados: ResultadoAccion[] = [];
+  for (const accion of (data ?? []) as Array<{ id: string; tipo: string }>) {
+    if (accionImplementada(accion.tipo)) {
+      resultados.push(await entregarCredencialValida(supabase, phone, fila, accion.id));
+    } else if (accion.tipo === 'enviar_acceso_portal') {
+      resultados.push({ tipo: accion.tipo, estado: 'pendiente', detalle: 'sin implementar: el portal de autoservicio todavía no existe' });
+    } else {
+      resultados.push({ tipo: accion.tipo, estado: 'pendiente', detalle: 'tipo sin implementar' });
+    }
+  }
+  return resultados;
+}
+
+/** Lo que quedo sin ejecutar porque la persona NO acepto. Solo informa: nada se envia ni se borra. */
+async function accionesSinEjecutar(supabase: SupabaseClient, aceptacionId: string): Promise<ResultadoAccion[]> {
+  const { data, error } = await supabase
+    .from(ACCIONES)
+    .select('tipo')
+    .eq('aceptacion_id', aceptacionId)
+    .eq('estado', 'pendiente');
+  if (error) return [];
+  return ((data ?? []) as Array<{ tipo: string }>).map((a) => ({
+    tipo: a.tipo,
+    estado: 'pendiente' as const,
+    detalle: a.tipo === 'enviar_credencial_valida'
+      ? 'no se ejecuta porque no aceptó; la llave sigue en Vault hasta que borres la acción'
+      : 'no se ejecuta porque no aceptó',
+  }));
+}
+
+/**
+ * Entrega la llave de API de Valida por el chat.
+ *
+ * Orden, y cada paso tiene su razon:
+ *   1. Reclamo atomico (`intentado_at` de null a ahora). Si no se gana, otro proceso ya la tomo:
+ *      no se hace nada. Es la segunda llave contra un envio doble, detras del `duplicado`.
+ *   2. Leer el secreto de Vault por RPC (solo lo entrega a una accion reclamada de una
+ *      aceptacion `aceptado`).
+ *   3. Enviar el texto EXACTO, con `preview` enmascarado para `wa_envios`.
+ *   4. Marcar `enviada` y borrar el secreto de Vault.
+ *   5. El segundo mensaje (sin nada sensible) es de cortesia: si falla no deshace la entrega.
+ *
+ * La llave vive solo en la variable local `llave`: no se imprime, no se guarda, no viaja en un
+ * error. Todo lo que sale hacia afuera usa `enmascararSecreto`.
+ */
+async function entregarCredencialValida(
+  supabase: SupabaseClient,
+  phone: string,
+  fila: FilaAceptacion,
+  accionId: string,
+): Promise<ResultadoAccion> {
+  const tipo = 'enviar_credencial_valida';
+
+  const { data: reclamo, error: errReclamo } = await supabase
+    .from(ACCIONES)
+    .update({ intentado_at: new Date().toISOString() })
+    .eq('id', accionId)
+    .eq('estado', 'pendiente')
+    .is('intentado_at', null)
+    .select('id');
+  if (errReclamo) {
+    console.error(`[aceptacion] no se pudo reclamar la accion ${accionId}:`, errReclamo.message);
+    return { tipo, estado: 'fallida', detalle: `no se pudo reclamar (${errReclamo.message}); la llave NO se envió y sigue en Vault` };
+  }
+  if (!reclamo?.length) {
+    return { tipo, estado: 'omitida', detalle: 'ya la había tomado otro proceso; no se reenvía' };
+  }
+
+  const { data: secreto, error: errSecreto } = await supabase.rpc('leer_secreto_accion_aceptacion', { p_accion_id: accionId });
+  const llave = typeof secreto === 'string' ? secreto.trim() : '';
+  if (errSecreto || !llave) {
+    const motivo = errSecreto ? `no se pudo leer la llave de Vault (${errSecreto.message})` : 'la llave no está en Vault';
+    return await marcarFallida(supabase, accionId, tipo, motivo);
+  }
+
+  const [mensajeLlave, mensajePortal] = mensajesCredencialValida(llave);
+  const mascara = enmascararSecreto(llave);
+  const ctx: EnvioCtx = { ...ctxEnvio(fila), preview: mensajesCredencialValida(mascara)[0] };
+
+  let wamid: string | null = null;
+  try {
+    wamid = await sendTextoExacto(phone, mensajeLlave, ctx);
+  } catch (err) {
+    // El error de red no lleva el cuerpo del mensaje; igual se reporta solo su nombre.
+    console.error(`[aceptacion] error enviando la llave ${mascara} (accion ${accionId}):`, err instanceof Error ? err.name : 'desconocido');
+  }
+  if (!wamid) {
+    return await marcarFallida(supabase, accionId, tipo, `Meta no aceptó el mensaje con la llave ${mascara}`);
+  }
+
+  const { error: errEnviada } = await supabase
+    .from(ACCIONES)
+    .update({ estado: 'enviada', enviada_at: new Date().toISOString(), wamid, error: null })
+    .eq('id', accionId)
+    .eq('estado', 'pendiente');
+  if (errEnviada) {
+    console.error(`[aceptacion] la llave ${mascara} salió pero la accion ${accionId} no se pudo marcar:`, errEnviada.message);
+    return {
+      tipo,
+      estado: 'enviada',
+      detalle: `llave ${mascara} entregada (wamid ${wamid}), pero la fila no se pudo marcar y la llave SIGUE en Vault: márcala y bórrala a mano`,
+    };
+  }
+
+  const { data: borrado, error: errBorrado } = await supabase.rpc('borrar_secreto_accion_aceptacion', { p_accion_id: accionId });
+  const quedoEnVault = !!errBorrado || borrado !== true;
+  if (quedoEnVault) {
+    console.error(`[aceptacion] la llave ${mascara} salió pero no se borró de Vault:`, errBorrado?.message ?? 'la RPC no borró nada');
+  }
+
+  try {
+    await sendTextoExacto(phone, mensajePortal, ctxEnvio(fila));
+  } catch {
+    console.error(`[aceptacion] no salió el mensaje del portal (accion ${accionId}); la llave sí se entregó`);
+  }
+
+  return {
+    tipo,
+    estado: 'enviada',
+    detalle: quedoEnVault
+      ? `llave ${mascara} entregada, pero NO se pudo borrar de Vault: bórrala a mano`
+      : `llave ${mascara} entregada y borrada de Vault`,
+  };
+}
+
+async function marcarFallida(
+  supabase: SupabaseClient,
+  accionId: string,
+  tipo: string,
+  motivo: string,
+): Promise<ResultadoAccion> {
+  console.error(`[aceptacion] accion ${accionId} fallida: ${motivo}`);
+  const { error } = await supabase
+    .from(ACCIONES)
+    .update({ estado: 'fallida', error: motivo })
+    .eq('id', accionId)
+    .eq('estado', 'pendiente');
+  if (error) console.error(`[aceptacion] ni siquiera se pudo marcar fallida la accion ${accionId}:`, error.message);
+  return { tipo, estado: 'fallida', detalle: `${motivo}. No se reintenta sola; la llave sigue en Vault` };
+}
+
+async function avisarRespuesta(
+  supabase: SupabaseClient,
+  fila: FilaAceptacion,
+  decision: DecisionBoton,
+  respondidoAt: string,
+  acciones: ResultadoAccion[] = [],
+): Promise<void> {
   let negocioCodigo: string | null = null;
   if (fila.negocio_id) {
     const { data } = await supabase.from('negocios').select('codigo').eq('id', fila.negocio_id).maybeSingle();
@@ -391,7 +572,7 @@ async function avisarRespuesta(supabase: SupabaseClient, fila: FilaAceptacion, d
     estadoDocumento = (data?.status as string | undefined) ?? null;
   }
   await avisarAdmin(
-    avisoRespuesta({ fila, decision, respondidoAt, negocioCodigo, estadoDocumento }),
+    avisoRespuesta({ fila, decision, respondidoAt, negocioCodigo, estadoDocumento, acciones }),
     {
       respuesta: decision === 'acepto' ? 'Acepto' : 'No acepto',
       documento: fila.documento_titulo,
