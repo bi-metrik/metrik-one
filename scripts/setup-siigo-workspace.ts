@@ -3,11 +3,13 @@
  *
  * Autentica contra Siigo para COMPROBAR que las credenciales sirven, resuelve
  * los ids de catálogo de ESA empresa (comprobantes, vendedor, IVA, formas de
- * pago) y los persiste en workspaces.config_extra.
+ * pago). Las credenciales van a Supabase Vault (`guardar_secreto_workspace`) y
+ * el catálogo (`siigo_config`, que no es secreto) a workspaces.config_extra.
  *
  * Por qué un script y no una pantalla: el Access Key es una credencial fiscal.
- * Vive en config_extra (server-only) y se carga con revisión explícita, nunca
- * desde una server action del producto. Mismo criterio que Valida y Drive.
+ * Vive en Vault y se carga con revisión explícita, nunca desde una server action
+ * del producto. Mismo criterio que Valida y Drive. NO va en config_extra: esa
+ * columna la lee cualquier miembro del workspace por REST (frente 2026-09-14).
  *
  * Uso:
  *   npx tsx scripts/setup-siigo-workspace.ts <slug-workspace>
@@ -168,17 +170,36 @@ async function main() {
     process.exit(1);
   }
 
-  // 3. Persistir preservando el resto de config_extra. Un update del objeto
-  //    completo borraría las credenciales de Drive del mismo workspace.
+  // 3a. Credenciales a Vault.
+  const wsId = (ws as { id: string }).id;
+  for (const [clave, valor] of [
+    ['siigo_username', username],
+    ['siigo_access_key', accessKey],
+    ['siigo_partner_id', partnerId],
+  ] as const) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: vErr } = await (one as any).rpc('guardar_secreto_workspace', {
+      p_workspace_id: wsId,
+      p_clave: clave,
+      p_valor: valor,
+    });
+    if (vErr) {
+      console.error(
+        `\nNo se pudo guardar ${clave} en Vault: ${vErr.message}` +
+          (vErr.code === 'PGRST202' ? ' (falta aplicar la migración 20260915010000_secretos_workspace_vault)' : ''),
+      );
+      process.exit(1);
+    }
+  }
+
+  // 3b. Catálogo a config_extra, preservando el resto. Un update del objeto
+  //     completo borraría otras claves del mismo workspace.
   const prev = ((ws as { config_extra?: Record<string, unknown> }).config_extra ?? {}) as Record<string, unknown>;
   const { error: upErr } = await one
     .from('workspaces')
     .update({
       config_extra: {
         ...prev,
-        siigo_username: username,
-        siigo_access_key: accessKey,
-        siigo_partner_id: partnerId,
         siigo_config,
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -190,7 +211,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\nListo. Credenciales y catálogo guardados en config_extra.');
+  console.log('\nListo. Credenciales en Vault y catálogo en config_extra.');
   console.log('Recordatorio: si el Access Key circuló por chat o correo, restablécelo en Siigo y vuelve a correr este script.');
   rl?.close();
 }

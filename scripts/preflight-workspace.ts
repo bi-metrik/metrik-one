@@ -105,7 +105,20 @@ async function main() {
   }
 
   // Check 2: credenciales OAuth
-  const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
+  // Credenciales: Vault primero (`leer_secretos_workspace`), config_extra como respaldo
+  // mientras dure el traslado (frente de seguridad 2026-09-14).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: vaultRaw, error: errVault } = await (sb as any).rpc('leer_secretos_workspace', {
+    p_workspace_id: ws.id,
+  })
+  if (errVault && errVault.code !== 'PGRST202') {
+    console.error(`✗ No se pudo leer Vault: ${errVault.message}`)
+    process.exit(1)
+  }
+  const cfg = {
+    ...((ws.config_extra ?? {}) as Record<string, unknown>),
+    ...((vaultRaw ?? {}) as Record<string, unknown>),
+  }
   const perWs = {
     refreshToken: cfg.drive_refresh_token as string | undefined,
     clientId: cfg.drive_client_id as string | undefined,
@@ -126,7 +139,7 @@ async function main() {
     'OAuth credenciales presentes',
     mode !== 'none',
     mode === 'per_workspace'
-      ? 'per-workspace (config_extra.drive_*)'
+      ? 'per-workspace (Vault / config_extra drive_*)'
       : mode === 'global'
       ? 'global (env vars)'
       : 'NINGUNA — Drive no funcionara',
@@ -135,7 +148,7 @@ async function main() {
   // Check 3: triple completa si tiene parcial
   if (cfg.drive_refresh_token || cfg.drive_client_id || cfg.drive_client_secret) {
     record(
-      'Triple drive_* completa en config_extra',
+      'Triple drive_* completa (Vault / config_extra)',
       hasPerWs,
       hasPerWs
         ? 'triple completa'
