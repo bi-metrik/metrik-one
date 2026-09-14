@@ -27,7 +27,18 @@ export const CLAVE_EXIGIR_CARPETA_LOCAL = 'exigir_carpeta_local'
 const MENSAJE_RESPALDO =
   'Este negocio no puede pasar de la primera etapa sin su carpeta del cerebro: registra la ruta proyectos/{cliente}/{proyecto}/ en metadata.carpeta_local.'
 
-export type BloqueoGate = { nombre: string; es_gate: true; omitible: false }
+/**
+ * Marca del bloqueo en `bloquesPendientes`. Con ella el modal sabe que este gate se
+ * resuelve AHÍ MISMO (escribiendo la carpeta y reintentando), en vez de solo informarlo.
+ */
+export const TIPO_BLOQUEO_CARPETA_LOCAL = 'carpeta_local'
+
+export type BloqueoGate = {
+  nombre: string
+  es_gate: true
+  omitible: false
+  tipo: typeof TIPO_BLOQUEO_CARPETA_LOCAL
+}
 
 export function esRechazoCarpetaLocal(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
@@ -47,5 +58,6 @@ export function bloqueoCarpetaLocal(err: unknown): BloqueoGate | null {
     nombre: typeof msg === 'string' && msg.trim() !== '' ? msg : MENSAJE_RESPALDO,
     es_gate: true,
     omitible: false,
+    tipo: TIPO_BLOQUEO_CARPETA_LOCAL,
   }
 }

@@ -55,6 +55,8 @@ describe('bloqueoCarpetaLocal', () => {
       nombre: msg,
       es_gate: true,
       omitible: false,
+      // Sin esta marca el modal no sabe que puede resolverlo ahí mismo.
+      tipo: 'carpeta_local',
     })
   })
 

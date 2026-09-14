@@ -98,7 +98,7 @@ import {
   type PropuestaPendiente,
 } from '@/lib/correcciones/reversa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
-import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
+import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage, type UserContext } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import {
@@ -132,6 +132,8 @@ import {
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
+import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
+import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -3543,8 +3545,11 @@ export async function cambiarEtapaNegocioConGate(
    * marca la pantalla dibujaba "Omitir gate" sobre el aviso de recaudo cambiado,
    * que el servidor vuelve a rechazar: un botón que no hace nada y no explica por qué.
    * Ausente = omitible, que es como se comportan todos los demás.
+   *
+   * `tipo: 'carpeta_local'` marca el gate que el modal resuelve ahí mismo: pide la
+   * carpeta del cerebro, la guarda y reintenta el avance.
    */
-  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
+  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: BloqueoGate['tipo'] }>
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
   /** Presente solo con `error === 'requiere_confirmacion'`. */
@@ -8120,6 +8125,73 @@ export async function actualizarNombreNegocio(
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
   return { error: null }
+}
+
+// ── Carpeta del cerebro (metadata.carpeta_local) ──────────────────────────────
+
+/**
+ * Escribe o borra la ruta del negocio en el cerebro local (`metadata.carpeta_local`).
+ *
+ * Es el dato que exige el gate `trg_zz_gate_carpeta_local` para pasar de la primera etapa,
+ * y hasta ahora solo se llenaba por SQL. Lo usan dos pantallas: el campo de la ficha y el
+ * modal del gate, que la guarda y reintenta el avance.
+ *
+ * - Solo en workspaces con `config_extra.exigir_carpeta_local = true`: fuera de ellos el
+ *   campo no existe, y la acción tampoco lo acepta por llamada directa.
+ * - Formato y normalización en `normalizarCarpetaLocal`. Texto vacío = quitar la clave.
+ * - Permiso en `puedeEditarCarpetaLocal`, con las mismas lecturas que usa la ficha.
+ * - La escritura fusiona sobre la metadata de ahora (`guardarCarpetaLocal`): el resto de
+ *   las claves no se toca.
+ */
+export async function actualizarCarpetaLocalNegocio(
+  negocioId: string,
+  carpeta: string,
+): Promise<{ error: string | null; carpeta?: string | null }> {
+  const { supabase, workspaceId, role, staffId, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const normalizada = normalizarCarpetaLocal(carpeta)
+  if (!normalizada.ok) return { error: normalizada.error }
+
+  // `config_extra` es server-only: cliente de servicio acotado al workspace de la sesión,
+  // la misma lectura con la que la ficha decide si dibuja el campo.
+  const { data: ws } = await db(createServiceClient())
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', workspaceId)
+    .maybeSingle()
+  if (!exigeCarpetaLocal((ws as { config_extra?: unknown } | null)?.config_extra ?? null)) {
+    return { error: 'Este workspace no usa carpeta del cerebro' }
+  }
+
+  const user: UserContext = {
+    id: staffId ?? '',
+    role: (role ?? 'read_only') as Role,
+    areas: (areas ?? []) as Area[],
+  }
+  if (!(await resolverPermisoCarpetaLocal(supabase, user, workspaceId, negocioId))) {
+    return { error: 'Tu rol o área no permite editar la carpeta del cerebro de este negocio' }
+  }
+
+  const guardado = await guardarCarpetaLocal(supabase, workspaceId, negocioId, normalizada.carpeta)
+  if (!guardado.ok) return { error: guardado.error }
+
+  if (staffId && guardado.anterior !== normalizada.carpeta) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: 'carpeta_local',
+      valor_anterior: guardado.anterior,
+      valor_nuevo: normalizada.carpeta,
+      contenido: normalizada.carpeta ? 'Carpeta del cerebro actualizada' : 'Carpeta del cerebro eliminada',
+    }, 'actualizarCarpetaLocalNegocio')
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { error: null, carpeta: normalizada.carpeta }
 }
 
 // ── Actualizar carpeta URL del negocio ────────────────────────────────────────
