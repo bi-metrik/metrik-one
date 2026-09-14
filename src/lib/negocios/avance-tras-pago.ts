@@ -62,6 +62,28 @@ export interface EstadoTrasPago {
 }
 
 /**
+ * ¿Este gate es de los que el MOTOR cierra solo, cuando el anticipo ya está cubierto?
+ *
+ * `cambiarEtapaNegocioConGate` corre `autocompletarGatesAnticipoPorSaldo` ANTES de
+ * preguntarle a `puede_avanzar_etapa`: un bloque de pagos (`es_pagos_epayco`) cuyo
+ * anticipo esperado ya está cubierto por el saldo pasa a `completo` en ese momento, sin
+ * importar por qué vía entró la plata.
+ *
+ * Sin este filtro, el panel decía "retenido: Pagos" justo después de registrar el
+ * anticipo, escondía el botón, y el clic desde la ficha del negocio SÍ habría avanzado.
+ * O sea que fallaba precisamente en el caso que este frente viene a resolver. Medido en
+ * SOENA el 2026-09-14: los gates vivos con esa marca son dos, "Pagos" de Negociación
+ * (por donde pasa todo caso a registrar su anticipo) y "Pagos" de Cartera.
+ *
+ * ⚠️ NO decide si el anticipo está cubierto. Eso lo responde `anticipoCubiertoPorSaldo`,
+ * la misma función que usa el motor, y entra ya resuelto por parámetro: una segunda
+ * cuenta de la misma plata es el error que este repo ya pagó varias veces.
+ */
+export function esGateDeAnticipo(configExtra: Record<string, unknown> | null | undefined): boolean {
+  return (configExtra as { es_pagos_epayco?: unknown } | null | undefined)?.es_pagos_epayco === true
+}
+
+/**
  * El orden de las preguntas no es arbitrario.
  *
  * `no_aplica` va primero porque un negocio cerrado o pausado no recibe ninguna oferta,

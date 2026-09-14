@@ -8,7 +8,8 @@ import {
   leerModeloDineroCompleto,
   type AgregarPagoInput,
 } from '@/lib/actions/conciliacion-actions'
-import { ofrecimientoDeAvance, type OfrecimientoAvance } from '@/lib/negocios/avance-tras-pago'
+import { ofrecimientoDeAvance, esGateDeAnticipo, type OfrecimientoAvance } from '@/lib/negocios/avance-tras-pago'
+import { anticipoCubiertoPorSaldo } from '@/app/(app)/negocios/negocio-v2-actions'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { puedeOmitirGate } from '@/lib/negocios/gate-omitible'
 import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
@@ -405,9 +406,20 @@ async function motivosQueRetienen(
       }
     }
 
+    // El saldo solo se consulta si hay un gate de anticipo entre los pendientes, mismo
+    // corte que hace el motor: sin candidato no hay nada que preguntar.
+    const anticipoCubierto =
+      pendientes.some(p => esGateDeAnticipo(cfgPorId.get(p.bloque_config_id)))
+        ? await anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)
+        : false
+
     const usuario = { role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] }
     for (const p of pendientes) {
-      if (puedeOmitirGate(cfgPorId.get(p.bloque_config_id), usuario)) continue
+      const cfg = cfgPorId.get(p.bloque_config_id)
+      // No retiene a esta persona: ella puede declarar vencido el paso.
+      if (puedeOmitirGate(cfg, usuario)) continue
+      // No retiene a nadie: el motor lo cierra solo en cuanto alguien avance.
+      if (anticipoCubierto && esGateDeAnticipo(cfg)) continue
       motivos.push(p.nombre ?? 'Bloque pendiente')
     }
   }

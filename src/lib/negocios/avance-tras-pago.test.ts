@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ofrecimientoDeAvance, type EstadoTrasPago } from './avance-tras-pago'
+import { ofrecimientoDeAvance, esGateDeAnticipo, type EstadoTrasPago } from './avance-tras-pago'
 
 /** Caso base: negocio abierto, con destino, con permiso y sin nada que lo retenga. */
 function estado(parche: Partial<EstadoTrasPago> = {}): EstadoTrasPago {
@@ -59,6 +59,35 @@ describe('no hay permiso para avanzar esta etapa', () => {
     expect(
       ofrecimientoDeAvance(estado({ puedeAvanzar: false, motivos: ['Certificado bancario'] })).tipo,
     ).toBe('sin_permiso')
+  })
+})
+
+// El motor corre `autocompletarGatesAnticipoPorSaldo` ANTES de preguntarle a
+// `puede_avanzar_etapa`. Un gate de pagos con el anticipo cubierto no retiene a nadie:
+// se cierra solo en cuanto alguien avance. Sin este filtro el panel decía "retenido"
+// justo después de registrar el anticipo, que es el caso que este frente resuelve.
+describe('el gate que el motor cierra solo', () => {
+  it('reconoce el bloque de pagos por su marca', () => {
+    expect(esGateDeAnticipo({ es_pagos_epayco: true })).toBe(true)
+  })
+
+  it('cualquier otro gate NO es de anticipo', () => {
+    expect(esGateDeAnticipo({ es_pagos_epayco: false })).toBe(false)
+    expect(esGateDeAnticipo({ otra_cosa: true })).toBe(false)
+    expect(esGateDeAnticipo({})).toBe(false)
+  })
+
+  // Sin config no se puede afirmar nada, y el lado seguro de un control es retener: se
+  // lista de más, nunca se deja pasar de más.
+  it('sin config, retiene', () => {
+    expect(esGateDeAnticipo(null)).toBe(false)
+    expect(esGateDeAnticipo(undefined)).toBe(false)
+  })
+
+  // Una config a medio escribir no debe cambiar el comportamiento en silencio.
+  it('una marca que no es booleana se ignora', () => {
+    expect(esGateDeAnticipo({ es_pagos_epayco: 'true' })).toBe(false)
+    expect(esGateDeAnticipo({ es_pagos_epayco: 1 })).toBe(false)
   })
 })
 
