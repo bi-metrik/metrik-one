@@ -1173,7 +1173,7 @@ interface EtapaHistorialProps {
   bloques: BloqueHistorialItem[]
   negocioId: string
   workspaceId: string
-  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   cobros: Array<{
     id: string; concepto: string | null; monto: number; revisado: boolean
     tipo_cobro: string | null; fecha: string | null; fecha_esperada: string | null
@@ -1328,7 +1328,7 @@ function BloqueRenderer({
   bloque: BloqueExtendido
   negocioId: string
   workspaceId: string
-  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   cobros: Array<{
     id: string
     concepto: string | null
@@ -1374,6 +1374,8 @@ function BloqueRenderer({
     id: p.id,
     full_name: p.full_name,
     email: p.email ?? undefined,
+    role: p.role,
+    activo: p.activo,
   }))
 
   // ── Permisos de rol por tipo de bloque ─────────────────────────────────────
@@ -1948,7 +1950,7 @@ function BloqueCard({
   bloque: BloqueExtendido
   negocioId: string
   workspaceId: string
-  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   cobros: Array<{
     id: string
     concepto: string | null
@@ -2126,7 +2128,7 @@ interface Props {
   etapasLinea: EtapaNegocio[]
   /** Etapas que este caso no va a recorrer, con la respuesta que las dejo fuera. */
   etapasNoAplican?: EtapaNoAplica[]
-  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   currentUserId: string | null
   currentUserEsResponsable: boolean
   userRole: string

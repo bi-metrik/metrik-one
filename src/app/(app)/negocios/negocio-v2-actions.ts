@@ -103,9 +103,11 @@ import { puedeCorregirDocumentos } from '@/lib/roles'
 import {
   leerEntradaAprobacion,
   planAprobacion,
+  activoEnEquipo,
+  perfilesConEstadoEnEquipo,
   MENSAJE_NO_ES_APROBACION,
-  MENSAJE_APROBADOR_AJENO,
   type EstadoAprobacion,
+  type PersonaAprobacion,
 } from '@/lib/negocios/aprobacion-bloque'
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
@@ -6395,20 +6397,41 @@ export async function actualizarAprobacion(
     return { error: MENSAJE_NO_ES_APROBACION }
   }
 
+  // Rol y estado en el equipo salen de la MISMA fuente que la lista del selector
+  // (`getNegocioDetalleCompleto`): `profiles.role` del profile en este workspace y su fila
+  // de `staff` de este workspace. Así nadie aparece en la lista y luego no puede decidir.
+  const activoDe = async (profileId: string) => {
+    const { data: fila } = await db(supabase)
+      .from('staff')
+      .select('is_active')
+      .eq('profile_id', profileId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    return activoEnEquipo(fila as { is_active: boolean | null } | null)
+  }
+
   // El aprobador se elige de los profiles del workspace: un id que no esté ahí no designa a nadie.
+  let designado: PersonaAprobacion | null = null
   if (leida.accion === 'asignar' && leida.aprobadorId) {
     const { data: prof } = await db(supabase)
       .from('profiles')
-      .select('id')
+      .select('id, role')
       .eq('id', leida.aprobadorId)
       .eq('workspace_id', workspaceId)
       .maybeSingle()
-    if (!prof) return { error: MENSAJE_APROBADOR_AJENO }
+    if (prof) {
+      designado = {
+        role: (prof as { role: string | null }).role,
+        activo: await activoDe(leida.aprobadorId),
+      }
+    }
   }
 
   const ahora = new Date().toISOString()
   const plan = planAprobacion({
     role,
+    activo: userId ? await activoDe(userId) : false,
+    designado,
     profileId: userId,
     guardada: nb.data,
     bloqueEstado: nb.estado,
@@ -6530,7 +6553,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       orden: number
     }>
   }>
-  profiles: Array<{ id: string; full_name: string | null; email: string | null }>
+  /** `role` y `activo` deciden quién aparece como aprobador (`opcionesAprobador`). */
+  profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   currentUserId: string | null
   userRole: string
   cobros: Array<{
@@ -6651,15 +6675,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     role === 'operator'
       ? db(supabase).from('negocio_responsables').select('staff_id').eq('negocio_id', id)
       : Promise.resolve({ data: null }),
+    // `role` y la fila de `staff` (abajo) deciden quién puede ser aprobador: la misma
+    // fuente que `actualizarAprobacion` lee al designar y al decidir.
     supabase
       .from('profiles')
-      .select('id, full_name')
+      .select('id, full_name, role')
       .eq('workspace_id', workspaceId)
       .order('full_name', { ascending: true }),
     getCachedUser(),
     supabase
       .from('staff')
-      .select('id, full_name, salary')
+      .select('id, full_name, salary, profile_id, is_active')
       .eq('workspace_id', workspaceId),
     db(supabase)
       .from('cobros')
@@ -7927,11 +7953,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // evalúe `condition.source_bloque_slug` por identidad (no por etapa_orden).
     datosPorSlug,
     bloquesEtapasPrevias,
-    profiles: (profilesData ?? []).map(p => ({
-      id: p.id,
-      full_name: p.full_name,
-      email: null as string | null,
-    })),
+    profiles: perfilesConEstadoEnEquipo(
+      (profilesData ?? []).map(p => ({
+        id: p.id,
+        full_name: p.full_name,
+        email: null as string | null,
+        role: (p as { role?: string | null }).role ?? null,
+      })),
+      (staffRes.data ?? []) as Array<{ profile_id: string | null; is_active: boolean | null }>,
+    ),
     currentUserId,
     currentUserEsResponsable,
     userRole: role ?? 'read_only',
