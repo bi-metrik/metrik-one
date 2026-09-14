@@ -28,6 +28,8 @@
 - ⚠️ [Plantilla de cotización Termotech](project_plantilla_cotizacion_termotech.md) — PR #522: reusa `cotizacion_template_slug`, sin migración de esquema; falta UNA sentencia y la ficha del cliente está vacía
 - [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
+- ⚠️⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado: DOS migraciones de cotización SIN aplicar; el total suma todas las alternativas hasta que haya principal; la ranura es el `grupo`, no el titular
+- ⚠️⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado: la migración de umbrales sigue SIN aplicar (el código la tolera a propósito), el rastro de margen está VACÍO en producción, y la cotización que ya existe congeló `markup`
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M, y termotech no usa rubros
 - ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía, la regla la comparten DOS rutas de duplicación, y falta QA en pantalla
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
@@ -70,6 +72,7 @@
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio; y el `User-Agent` que la Management API exige
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST, después la Management API
 - [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo subiendo el árbol, y el control antes/después que dice si tocaste de más
+- [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; el setter nativo o React no se entera; `git checkout --` borra lo sin commitear
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS y chromium fotografía; rehacer una tanda se verifica con diff de píxeles, y la foto va DESPUÉS del último render
 - ⚠️ [Cambio SOLO de tildes, y la eñe aparte](reference_cambio_solo_de_tildes.md) — la eñe NO es tilde (se corrige sola); hay `anos` que rompen código si los tocas, y el grep compuesto miente
 - [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` ya está y rasteriza SVG; los `<link>` de icono se leen del HTML del build; el preview de Vercel está tras SSO
