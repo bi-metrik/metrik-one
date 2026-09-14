@@ -52,9 +52,12 @@ export default async function MiNegocioPage() {
     serviciosResult,
     featuresResult,
   ] = await Promise.all([
+    // Columnas explicitas, NUNCA `*`: el workspace viaja como prop a un componente
+    // cliente y `config_extra` guarda credenciales (Drive, Siigo, Valida). Con `*`
+    // quedaban en el payload RSC de esta pagina.
     supabase
       .from('workspaces')
-      .select('*')
+      .select('id, name, logo_url, color_primario, color_secundario, equipo_declarado, max_seats, modules, tipo')
       .eq('id', workspaceId)
       .single(),
 
@@ -104,7 +107,7 @@ export default async function MiNegocioPage() {
       .eq('workspace_id', workspaceId),
   ])
 
-  // `modules` y `tipo` ya vienen en el `select('*')` de arriba. Antes se pedian en
+  // `modules` y `tipo` ya vienen en el `select` de arriba. Antes se pedian en
   // dos consultas extra a la MISMA fila de `workspaces` porque los tipos generados
   // no las traian; hoy si estan, asi que se leen de lo que ya se trajo.
   const workspaceModules =
