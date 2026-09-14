@@ -78,7 +78,7 @@
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696 mergeado: `omitir_gate.staff_ids` inerte hasta que SOENA lo cargue
 - ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 la captura en ficha y modal SIN QA en pantalla
 - ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler
-- ⚠️⚠️ [Aceptación de términos por WhatsApp](project_aceptacion_terminos_wa.md) — #720 SIN mergear ni aplicar; la firma HMAC de wa-webhook NO se valida (sin await)
+- ⚠️⚠️ [Aceptación de términos por WhatsApp](project_aceptacion_terminos_wa.md) — #720 SIN mergear ni aplicar; llave de Valida desde Vault; la firma HMAC de wa-webhook NO se valida (sin await)
 
 ## Referencias
 
