@@ -3543,9 +3543,12 @@ export async function cambiarEtapaNegocioConGate(
   // El override de gate (omitir gates con motivo): owner/admin, o quien el workspace
   // declare por persona en `config_extra.omitir_gate.staff_ids`. Fail-closed: si la
   // config no se puede leer, solo pasan owner/admin. La pantalla decide si dibuja el
-  // botón con la MISMA función (`page.tsx`).
+  // botón con la MISMA función (`page.tsx`) y la MISMA lectura: `config_extra` es
+  // server-only y se lee con el cliente de servicio, acotado al workspace de la sesión.
+  // Leerla aquí con el cliente de sesión dejaría a la pantalla y al guard mirando por
+  // caminos distintos, que es justo la desincronización que la función única evita.
   if (motivoOverride) {
-    const { data: wsOmitir } = await db(supabase)
+    const { data: wsOmitir } = await db(createServiceClient())
       .from('workspaces')
       .select('config_extra')
       .eq('id', workspaceId)
