@@ -35,6 +35,7 @@
 - ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700 mergeado: RX1 solo probado contra capturas SINTÉTICAS
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; CADUCÓ lo de las migraciones sin aplicar
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; la migración de umbrales YA está aplicada; vigente: el rastro de margen VACÍO
+- ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado y las tres INERTES: falta la config de datos
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M
 - ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base)
