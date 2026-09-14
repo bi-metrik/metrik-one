@@ -76,6 +76,11 @@ DDL listo y **sin aplicar** en
 ⚠️ Dos avisos que van con él: `comision_proveedor` (§6.3) es **ingreso** y la cascada
 suma todo como costo; y `rubros.sugerido` **no se puede aplicar sola**.
 
+✅ El bloque 2 (`rubros.sugerido`) se cerró en [[aporte-al-total-y-sugeridos]] (#709,
+aplicado). La mitad de PRESENTACIÓN del bloque 3 se cerró en
+[[dia-relativo-sugeridos]] (#718, migración **sin aplicar**); su otra mitad, los
+campos leídos estructurados, sigue sin DDL a propósito.
+
 ## Los dos defectos de 3a eran de PANTALLA, no de servidor
 
 - El nombre del ítem no tenía input en ninguna parte (medido: cero `<input>` con él).
@@ -104,5 +109,5 @@ La ranura **se deriva de `items.grupo`**, nunca se elige aparte: un segundo desp
 sería una segunda fuente para la misma pregunta. Un ítem sin grupo no ofrece cargue, y
 eso es el contrato, no una limitación.
 
-Relacionado: [[itinerarios-cotizacion]], [[margen-visible-trappvel]],
+Relacionado: [[itinerarios-cotizacion]], [[margen-visible-trappvel]], [[dia-relativo-sugeridos]],
 [[qa-pantalla-viva-cdp]], [[pruebas-por-mutacion]], [[cifras-del-brief-caducan]].
