@@ -100,6 +100,13 @@ import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
+import {
+  leerEntradaAprobacion,
+  planAprobacion,
+  MENSAJE_NO_ES_APROBACION,
+  MENSAJE_APROBADOR_AJENO,
+  type EstadoAprobacion,
+} from '@/lib/negocios/aprobacion-bloque'
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
@@ -6346,28 +6353,75 @@ export async function actualizarPrecioAprobado(
 // Acepta `mencionId` y el trigger de DB crea la notificación.
 
 // ── Actualizar aprobación de bloque ──────────────────────────────────────────
+//
+// Dos gestos de la misma pantalla: designar al aprobador (`estado: 'pendiente'` con
+// `aprobador_id`) y decidir (`aprobado` / `rechazado` con comentario). La regla de quién
+// hace cada uno vive en `@/lib/negocios/aprobacion-bloque`, la misma que usa la pantalla.
+//
+// Antes no había guard ni se miraba el tipo, y el `data` que llegaba reemplazaba al
+// guardado: con cualquier id y `estado: 'aprobado'` cerraba el bloque, y al decidir se
+// borraba el `aprobador_id` que la pantalla había guardado al designar.
 
 export async function actualizarAprobacion(
   negocioBloqueId: string,
-  data: {
+  entrada: {
     aprobador_id?: string
-    estado?: 'pendiente' | 'aprobado' | 'rechazado'
+    estado?: EstadoAprobacion
     comentario?: string
-    aprobado_at?: string
   }
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  const isComplete = data.estado === 'aprobado'
+  const leida = leerEntradaAprobacion(entrada)
+  if ('error' in leida) return { error: leida.error }
 
-  const payload: Record<string, unknown> = {
-    data,
-    updated_at: new Date().toISOString(),
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso para editar este bloque' }
+
+  const { data: nbRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('id, negocio_id, estado, data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+    .eq('id', negocioBloqueId)
+    .single()
+  const nb = nbRaw as {
+    negocio_id: string
+    estado: string | null
+    data: Record<string, unknown> | null
+    bloque_configs: { bloque_definitions: { tipo: string } | null } | null
+  } | null
+  if (!nb) return { error: 'Bloque no encontrado' }
+  if (nb.bloque_configs?.bloque_definitions?.tipo !== 'aprobacion') {
+    return { error: MENSAJE_NO_ES_APROBACION }
   }
-  if (isComplete) {
+
+  // El aprobador se elige de los profiles del workspace: un id que no esté ahí no designa a nadie.
+  if (leida.accion === 'asignar' && leida.aprobadorId) {
+    const { data: prof } = await db(supabase)
+      .from('profiles')
+      .select('id')
+      .eq('id', leida.aprobadorId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (!prof) return { error: MENSAJE_APROBADOR_AJENO }
+  }
+
+  const ahora = new Date().toISOString()
+  const plan = planAprobacion({
+    role,
+    profileId: userId,
+    guardada: nb.data,
+    bloqueEstado: nb.estado,
+    entrada: leida,
+    ahoraISO: ahora,
+  })
+  if ('error' in plan) return { error: plan.error }
+
+  const payload: Record<string, unknown> = { data: plan.data, updated_at: ahora }
+  if (plan.completar) {
     payload.estado = 'completo'
-    payload.completado_at = new Date().toISOString()
+    payload.completado_at = ahora
+    payload.completado_por = userId
   }
 
   const { error: updateError } = await db(supabase)
@@ -6377,18 +6431,13 @@ export async function actualizarAprobacion(
 
   if (updateError) return { error: (updateError as { message: string }).message }
 
-  const { data: bloqueInfo } = await db(supabase)
-    .from('negocio_bloques')
-    .select('negocio_id')
-    .eq('id', negocioBloqueId)
-    .single()
-
-  const negocioId = (bloqueInfo as { negocio_id: string } | null)?.negocio_id
+  const negocioId = nb.negocio_id
 
   if (staffId && workspaceId && negocioId) {
-    const estadoLabel = data.estado ?? 'pendiente'
-    const contenido = data.comentario
-      ? `Aprobación: ${estadoLabel}. ${data.comentario}`
+    const estadoLabel = plan.data.estado as string
+    const comentario = leida.accion === 'decidir' ? leida.comentario : ''
+    const contenido = comentario
+      ? `Aprobación: ${estadoLabel}. ${comentario}`
       : `Aprobación: ${estadoLabel}`
     await registrarActividad(supabase, {
       workspace_id: workspaceId,

@@ -82,6 +82,7 @@ import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/t
 import { GuiaEtapaCard } from './GuiaEtapaCard'
 import { formatBogotaFechaCorta, formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import { checklistConSoporte } from '@/lib/negocios/cierre-bloque'
+import { rolGestionaAprobacion } from '@/lib/negocios/aprobacion-bloque'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -1435,8 +1436,9 @@ function BloqueRenderer({
         // Clarity puede agregar gate de aprobación por supervisor/owner.
         return 'editable'
       case 'aprobacion':
-        // Aprobar/decidir sigue siendo gerencial (owner/admin).
-        return GERENCIAL.includes(userRole) ? 'editable' : 'visible'
+        // Aprobar/decidir sigue siendo gerencial (owner/admin). La misma regla la aplica
+        // el servidor en `actualizarAprobacion`.
+        return rolGestionaAprobacion(userRole) ? 'editable' : 'visible'
       case 'contacto':
         // La ficha del cliente la completa quien atiende la etapa, con el mismo criterio
         // que los demas bloques operativos. Cambia el destino del dato, no el permiso.
