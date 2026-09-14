@@ -31,6 +31,7 @@
 - ⚠️ [Plantilla de cotización Termotech](project_plantilla_cotizacion_termotech.md) — PR #522: reusa `cotizacion_template_slug`, sin migración de esquema; falta UNA sentencia y la ficha del cliente está vacía
 - [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
+- ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700 mergeado: RX1 solo probado contra capturas SINTÉTICAS; el desglose del modelo no es estable y gana el total; la propuesta no se persiste a propósito
 - ⚠️⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado: DOS migraciones de cotización SIN aplicar; el total suma todas las alternativas hasta que haya principal; la ranura es el `grupo`, no el titular
 - ⚠️⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado: la migración de umbrales sigue SIN aplicar (el código la tolera a propósito), el rastro de margen está VACÍO en producción, y la cotización que ya existe congeló `markup`
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M, y termotech no usa rubros
