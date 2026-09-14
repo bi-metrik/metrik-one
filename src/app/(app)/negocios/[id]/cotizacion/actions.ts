@@ -10,31 +10,8 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
-import { faltaLaColumnaDeUmbrales, sinUmbralesCongelados } from '@/lib/cotizaciones/congelar-umbrales'
+import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
-
-/**
- * Inserta una cotización con su política de margen congelada.
- *
- * Si las columnas de umbral todavía no existen en la base, reintenta sin ellas: ver
- * `congelar-umbrales.ts` para por qué esa tolerancia está aquí y cuándo se borra.
- */
-async function insertarCotizacionCongelada(
-  // El cliente tipado obliga a arrastrar el tipo generado de `cotizaciones` por un
-  // solo insert con columnas que los tipos todavía no conocen.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  payload: Record<string, unknown>,
-): Promise<{ data: { id: string } | null; error: { message: string } | null }> {
-  const primerIntento = await supabase.from('cotizaciones').insert(payload).select('id').single()
-  if (!faltaLaColumnaDeUmbrales(primerIntento.error)) return primerIntento
-
-  console.warn(
-    '[cotizaciones] las columnas de umbral de margen no existen todavía: la cotización nace sin congelar ' +
-      'y cae a la política vigente de su línea. Aplicar 20260914160000_cotizaciones_umbrales_margen.sql.',
-  )
-  return supabase.from('cotizaciones').insert(sinUmbralesCongelados(payload)).select('id').single()
-}
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -65,7 +42,7 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // cotizaciones ya enviadas a clientes.
   const { convencion, defaultPct, pisoPct, avisoPct } = await politicaMargenDelNegocio(supabase, negocioId)
 
-  const { data, error: dbError } = await insertarCotizacionCongelada(supabase, {
+  const { data, error: dbError } = await insertarCotizacionTolerante(supabase, {
     workspace_id: workspaceId,
     negocio_id: negocioId,
     consecutivo,
@@ -79,7 +56,7 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     aviso_margen_pct: avisoPct,
   })
 
-  if (dbError) return { success: false as const, error: dbError.message }
+  if (dbError) return { success: false as const, error: dbError.message ?? 'Error al crear cotización' }
   if (!data) return { success: false as const, error: 'Error al crear cotización — intenta de nuevo' }
 
   // No revalidatePath aquí — esta función se llama desde server component render (nueva/page.tsx)
@@ -507,7 +484,7 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
     (hermanos ?? []).map(h => h.descripcion),
   )
 
-  const { data, error: dbError } = await insertarCotizacionCongelada(supabase, {
+  const { data, error: dbError } = await insertarCotizacionTolerante(supabase, {
     workspace_id: workspaceId,
     negocio_id: negocioId,
     consecutivo,

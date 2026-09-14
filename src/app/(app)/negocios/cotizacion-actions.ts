@@ -8,6 +8,7 @@ import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
+import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -793,9 +794,9 @@ export async function duplicarCotizacion(id: string) {
     hermanos.map(h => h.descripcion),
   )
 
-  const { data: newCot, error: dbError } = await supabase
-    .from('cotizaciones')
-    .insert({
+  // Por el insert tolerante, como las otras dos vías: sin él, duplicar desde el
+  // editor dejaría de funcionar hasta que la migración de los umbrales se aplique.
+  const { data: newCot, error: dbError } = await insertarCotizacionTolerante(supabase, {
       workspace_id: workspaceId,
       oportunidad_id: original.oportunidad_id,
       consecutivo: dupCons,
@@ -824,9 +825,7 @@ export async function duplicarCotizacion(id: string) {
       // y la copia cae a la política de su línea, como hoy.
       piso_margen_pct: politicaOriginal.piso_margen_pct ?? null,
       aviso_margen_pct: politicaOriginal.aviso_margen_pct ?? null,
-    })
-    .select('id')
-    .single()
+  })
 
   if (dbError) return { success: false, error: dbError.message }
 

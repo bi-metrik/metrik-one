@@ -50,3 +50,36 @@ export function sinUmbralesCongelados<T extends Record<string, unknown>>(payload
   for (const col of COLUMNAS_UMBRAL_MARGEN) delete copia[col]
   return copia as Omit<T, typeof COLUMNAS_UMBRAL_MARGEN[number]>
 }
+
+/** Lo mínimo que se necesita del resultado de un insert de PostgREST. */
+export interface ResultadoInsert {
+  data: { id: string } | null
+  error: ErrorPostgrest | null
+}
+
+/**
+ * Inserta una cotización con su política de margen congelada, tolerando que las
+ * columnas de umbral no existan todavía.
+ *
+ * ⚠️ Las TRES vías que crean una cotización con estas columnas pasan por aquí
+ * (`createCotizacionDetalladaNegocio`, `duplicarCotizacionNegocio` y
+ * `duplicarCotizacion`). Escribirlas de frente en una sola de ellas deja esa vía
+ * rota hasta que la migración se aplique, y «duplicar dejó de funcionar» es
+ * exactamente el modo de fallo que esta pieza viene a evitar.
+ */
+export async function insertarCotizacionTolerante(
+  // El cliente tipado obliga a arrastrar el tipo generado de `cotizaciones` por un
+  // insert con columnas que `database.ts` todavía no conoce.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  payload: Record<string, unknown>,
+): Promise<ResultadoInsert> {
+  const primerIntento = await supabase.from('cotizaciones').insert(payload).select('id').single()
+  if (!faltaLaColumnaDeUmbrales(primerIntento.error)) return primerIntento
+
+  console.warn(
+    '[cotizaciones] las columnas de umbral de margen no existen todavía: la cotización nace sin congelar ' +
+      'y cae a la política vigente de su línea. Aplicar 20260914160000_cotizaciones_umbrales_margen.sql.',
+  )
+  return supabase.from('cotizaciones').insert(sinUmbralesCongelados(payload)).select('id').single()
+}
