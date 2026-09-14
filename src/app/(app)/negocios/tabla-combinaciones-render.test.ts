@@ -74,7 +74,7 @@ function pintar(estado: Parameters<typeof TablaCombinaciones>[0]['estado'], edit
   )
 }
 
-const BASE = { umbrales: { pisoPct: 5, avisoPct: 10 }, tablasAusentes: false }
+const BASE = { umbrales: { pisoPct: 5, avisoPct: 10 }, tablasAusentes: false, fijosConAlternativas: [] }
 
 describe('R6 · una cotización sin opciones no gana una sección', () => {
   it('no pinta absolutamente nada', () => {
@@ -204,19 +204,20 @@ describe('estados de la pantalla', () => {
     expect(html).toContain('Principal')
   })
 
-  it('sin combinaciones AVISA que el total suma todas las alternativas', () => {
-    // Salió del QA en pantalla, no de una prueba: con dos vuelos declarados y ningún
-    // itinerario, el total de la cotización sumaba AVIANCA y WINGO a la vez. No se
-    // corrige eligiendo uno por nuestra cuenta —eso es lo que el principal decide—
-    // así que se dice.
+  it('sin combinaciones AVISA que el total sale de un supuesto', () => {
+    // El texto anterior decía «suma todas las alternativas a la vez», y desde R-A1 eso
+    // es FALSO: cada ranura aporta una sola vez. Una pantalla sana que miente sobre el
+    // cálculo es peor que una rota, porque no se ve.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: [] })
-    expect(html).toContain('suma todas las')
+    expect(html).toContain('por supuesto')
+    expect(html).not.toContain('suma todas las')
   })
 
   it('con combinaciones pero SIN principal, avisa lo mismo', () => {
     const sinPrincipal = itinerarios().map(i => ({ ...i, esPrincipal: false }))
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: sinPrincipal })
     expect(html).toContain('Ningún itinerario está marcado como principal')
+    expect(html).not.toContain('suma todas las alternativas')
   })
 
   it('con un principal marcado, el aviso NO aparece', () => {
@@ -224,5 +225,42 @@ describe('estados de la pantalla', () => {
     // siempre las pasaría igual.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
     expect(html).not.toContain('Ningún itinerario está marcado como principal')
+  })
+})
+
+
+// ── Regla 1 (reunión 2026-09-14): solo se cruzan vuelos y hoteles ────────────
+//
+// Lo que estas pruebas fijan es el JSX. La regla en sí vive probada en
+// `combinaciones-vuelo-hotel.test.ts`; aquí se comprueba que la pantalla la DIGA —
+// un usuario que no ve por qué su traslado perdió la columna asume que se perdió el
+// traslado.
+
+describe('Regla 1 · la tabla explica qué se cruza y qué no', () => {
+  it('el encabezado dice que se cruzan vuelos y hoteles', () => {
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
+    expect(html).toContain('vuelos y hoteles')
+    expect(html).toContain('Tours, traslados y planes no abren')
+  })
+
+  it('nombra el grupo que no se cruza, qué suma y qué queda fuera', () => {
+    const html = pintar({
+      ...BASE,
+      ranuras: RANURAS,
+      itinerarios: itinerarios(),
+      fijosConAlternativas: [
+        { grupo: 'traslado', aporta: 'Traslado privado', fuera: ['Traslado compartido'] },
+      ],
+    })
+    expect(html).toContain('traslado')
+    expect(html).toContain('Traslado privado')
+    expect(html).toContain('Traslado compartido')
+    expect(html).toContain('no se cruza')
+  })
+
+  it('sin grupos fuera de la tabla, no inventa el aviso', () => {
+    // El control: sin el, un bloque pintado siempre pasaria la prueba de arriba.
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
+    expect(html).not.toContain('no se cruza')
   })
 })

@@ -125,6 +125,7 @@ import {
   type PersonaAprobacion,
 } from '@/lib/negocios/aprobacion-bloque'
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
+import { evaluarGateMargen } from '@/lib/cotizaciones/gate-margen-datos'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
@@ -4068,6 +4069,31 @@ export async function cambiarEtapaNegocioConGate(
             ?? `Al menos uno de estos campos debe ser "${esperado}": ${camposExigidos.join(', ')}`
           return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
         }
+      }
+    }
+
+    // Gate custom: margen_sobre_piso — una cotización por debajo del piso de margen
+    // NO deja avanzar de etapa. Opt-in por etapa (config_extra.gates), mensaje propio
+    // en config_extra.gate_messages['margen_sobre_piso'].
+    //
+    // Es la mitad que le faltaba al piso: hasta hoy rechazaba marcar un itinerario
+    // para la propuesta, y una cotización sin itinerarios —toda cotización de hoy— no
+    // pasaba por ningún candado. Lo que se le anunció al equipo el 2026-09-14 fue
+    // «por debajo del piso BLOQUEA avanzar».
+    //
+    // ⚠️ El margen se recalcula contra la BASE con la misma regla del editor
+    // (`cascadaVigente`), no se lee de `cotizaciones.valor_total`: esa columna es
+    // costo DIRECTO contra precio, y con AIU declarado el margen sale por encima del
+    // real. Decidir con una cifra que la pantalla no muestra es exactamente el defecto
+    // que este frente viene a cerrar.
+    if (etapaGates.includes('margen_sobre_piso')) {
+      const veredicto = await evaluarGateMargen(supabase, negocioId)
+      if (veredicto.bloquea) {
+        const gateMessagesMargen = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+        // ⚠️ El mensaje configurado por la etapa reemplaza al del helper, que trae las
+        // tres cifras. Quien lo configure asume que su texto se entiende sin ellas.
+        const nombre = gateMessagesMargen['margen_sobre_piso'] ?? veredicto.mensaje
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
       }
     }
 

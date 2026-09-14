@@ -40,6 +40,7 @@
 
 import { calcularCascada, type Cascada, type ItemParaCascada, type ParametrosCascada } from './totales'
 import { nivelDeMargen } from './convencion-margen'
+import { grupoCombinable } from './ranuras-pantallazo'
 
 /** Lo mínimo que hace falta de un ítem para saber en qué ranura vive. */
 export interface ItemConGrupo {
@@ -57,6 +58,13 @@ export interface Ranura {
   grupo: string
   /** Ids de los ítems que compiten por esta ranura, en orden estable. */
   candidatos: string[]
+  /**
+   * ¿Abre columna en la tabla de combinaciones?
+   *
+   * Solo vuelo y hotel (ver `RANURAS_COMBINABLES`). Las demás tienen alternativas y no
+   * se cruzan: una de ellas aporta y las otras quedan fuera del total.
+   */
+  combinable: boolean
 }
 
 /**
@@ -82,7 +90,30 @@ export function ranurasConAlternativas(items: ItemConGrupo[]): Ranura[] {
   }
   return [...porGrupo.entries()]
     .filter(([, candidatos]) => candidatos.length > 1)
-    .map(([grupo, candidatos]) => ({ grupo, candidatos }))
+    .map(([grupo, candidatos]) => ({ grupo, candidatos, combinable: grupoCombinable(grupo) }))
+}
+
+/**
+ * Las ranuras que SE CRUZAN entre sí: las columnas de la tabla y el producto (T1).
+ *
+ * Solo vuelo y hotel, por decisión de la reunión del 2026-09-14. El argumento está en
+ * `RANURAS_COMBINABLES`; aquí lo que importa es la consecuencia: estas son las únicas
+ * que un itinerario tiene que RESOLVER y las únicas que multiplican.
+ */
+export function ranurasCombinables(items: ItemConGrupo[]): Ranura[] {
+  return ranurasConAlternativas(items).filter(r => r.combinable)
+}
+
+/**
+ * Las ranuras con alternativas que NO se cruzan: tours, traslados, planes, lo propio.
+ *
+ * Siguen existiendo —nada se borra— y siguen sumando, pero **una sola vez**: la regla
+ * de sumarlas todas convertiría dos traslados alternativos en dos traslados cobrados.
+ * Cuál aporta lo decide `itemsDelItinerario` y se ANUNCIA como supuesto, igual que la
+ * ranura combinable que nadie ha resuelto todavía.
+ */
+export function ranurasNoCombinables(items: ItemConGrupo[]): Ranura[] {
+  return ranurasConAlternativas(items).filter(r => !r.combinable)
 }
 
 /**
@@ -90,6 +121,10 @@ export function ranurasConAlternativas(items: ItemConGrupo[]): Ranura[] {
  *
  * Son dos familias y por la misma razón —no hay nada que decidir—: el componente sin
  * grupo (un seguro, un fee) y el grupo con un solo candidato (el traslado único).
+ *
+ * ⚠️ Un grupo NO combinable CON alternativas (dos tours cargados en la misma ranura)
+ * NO es fijo: entra uno solo, y cuál lo resuelve `itemsDelItinerario`. Meterlo aquí
+ * sumaría los dos.
  */
 export function itemsFijos(items: ItemConGrupo[]): string[] {
   const conAlternativas = new Set(ranurasConAlternativas(items).map(r => r.grupo))
@@ -114,7 +149,12 @@ export function itemsFijos(items: ItemConGrupo[]): string[] {
  */
 export function ranurasSinResolver(items: ItemConGrupo[], seleccion: string[]): string[] {
   const elegidos = new Set(seleccion)
-  return ranurasConAlternativas(items)
+  // Solo las COMBINABLES. Un tour con dos alternativas no deja incompleto a nadie: no
+  // es una decisión del itinerario, entra igual en todos. Exigirlo dejaría cada
+  // itinerario bloqueado por una columna que la tabla ya no dibuja — o sea un bloqueo
+  // que el usuario no tiene desde dónde levantar, que es la trampa que este repo ya
+  // pagó con el aviso de recaudo sin salida.
+  return ranurasCombinables(items)
     .filter(r => r.candidatos.filter(id => elegidos.has(id)).length !== 1)
     .map(r => r.grupo)
 }
@@ -136,13 +176,32 @@ export function itinerarioCompleto(items: ItemConGrupo[], seleccion: string[]): 
  */
 export function itemsDelItinerario(items: ItemConGrupo[], seleccion: string[]): string[] {
   const elegidos = new Set(seleccion)
-  const conAlternativas = new Set(ranurasConAlternativas(items).map(r => r.grupo))
+  const ranuras = ranurasConAlternativas(items)
+
+  // Qué ítem aporta por cada ranura con alternativas. Para la COMBINABLE manda la
+  // selección y punto: si no eligieron, no entra nadie y el itinerario sale incompleto.
+  // Para la NO combinable siempre entra exactamente uno — el que la selección nombre
+  // si lo nombra (así una combinación ya guardada conserva su traslado y su total no
+  // se mueve), y si no, el primero por orden.
+  const aporta = new Set<string>()
+  for (const ranura of ranuras) {
+    if (ranura.combinable) {
+      for (const id of ranura.candidatos) if (elegidos.has(id)) aporta.add(id)
+      continue
+    }
+    // ⚠️ `find`, no `filter`: una selección que nombra DOS candidatos del mismo grupo
+    // no combinable cobraría los dos. El orden de `candidatos` ya es estable.
+    const nombrado = ranura.candidatos.find(id => elegidos.has(id))
+    aporta.add(nombrado ?? ranura.candidatos[0])
+  }
+
+  const conAlternativas = new Set(ranuras.map(r => r.grupo))
   return ordenados(items)
     .filter(item => item.es_ajuste !== true)
     .filter(item => {
       const grupo = normalizarGrupo(item.grupo)
       if (grupo === null || !conAlternativas.has(grupo)) return true
-      return elegidos.has(item.id)
+      return aporta.has(item.id)
     })
     .map(item => item.id)
 }
@@ -161,6 +220,16 @@ export interface RanuraSupuesta {
   elegido: string
   /** Los que quedan fuera del total mientras nadie decida. */
   descartados: string[]
+  /**
+   * ¿El supuesto se puede levantar armando una combinación?
+   *
+   * `true` en vuelo y hotel: el supuesto dura hasta que alguien marque un itinerario
+   * principal. `false` en tour, traslado y demás: ahí el supuesto es **permanente**,
+   * porque esas ranuras no entran a la tabla y nadie va a elegir por ellas nunca. La
+   * pantalla tiene que decirlo distinto — «arma las combinaciones» sobre un traslado
+   * manda a un botón que no lo va a resolver.
+   */
+  combinable: boolean
 }
 
 /**
@@ -204,6 +273,7 @@ export function ranurasPorSupuesto(items: ItemConGrupo[]): RanuraSupuesta[] {
     grupo: r.grupo,
     elegido: r.candidatos[0],
     descartados: r.candidatos.slice(1),
+    combinable: r.combinable,
   }))
 }
 
@@ -247,7 +317,11 @@ export interface Cartesiano {
 }
 
 export function combinacionesCartesianas(items: ItemConGrupo[]): Cartesiano {
-  const ranuras = ranurasConAlternativas(items)
+  // Solo vuelo y hotel (decisión del 2026-09-14). Con tres vuelos, tres hoteles y dos
+  // traslados con alternativas esto devuelve 9 y no 18: el traslado entra en las nueve
+  // sin ocupar una columna. El tope sigue vigente porque el producto lo sigue siendo —
+  // seis destinos con vuelo y hotel propios lo alcanzan.
+  const ranuras = ranurasCombinables(items)
   if (ranuras.length === 0) return { combinaciones: [], truncado: false, total: 0 }
 
   const total = ranuras.reduce((n, r) => n * r.candidatos.length, 1)

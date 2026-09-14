@@ -99,7 +99,7 @@ describe('R-A1 · qué aporta al total cuando nadie eligió', () => {
   it('el supuesto se puede NOMBRAR: qué entró y qué quedó fuera', () => {
     // Un aviso que dice «hay una suposición» sin decir cuál no se puede corregir.
     expect(ranurasPorSupuesto(viaje)).toEqual([
-      { grupo: 'vuelo', elegido: 'avianca', descartados: ['wingo'] },
+      { grupo: 'vuelo', elegido: 'avianca', descartados: ['wingo'], combinable: true },
     ])
   })
 
