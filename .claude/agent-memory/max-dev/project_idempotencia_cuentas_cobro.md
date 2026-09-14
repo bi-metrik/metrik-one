@@ -1,6 +1,6 @@
 ---
 name: idempotencia-cuentas-cobro
-description: #694 (2026-09-14) — la idempotencia del emisor de cuentas es POR COBROS y una anulada libera; anular la unica cuenta viva hace que el cron la re-emita; el camino explicito sigue bloqueando con anuladas; y el paso 3 que insertaba cobros "pagados" tiene arreglo en #698, retenido por el gate de emision
+description: #694 (2026-09-14) — la idempotencia del emisor de cuentas es POR COBROS y una anulada libera; anular la unica cuenta viva hace que el cron la re-emita; el camino explicito sigue bloqueando con anuladas; y el paso 3 que insertaba cobros "pagados" se arreglo en #698, mergeado tras medir impacto cero contra los planes vivos
 metadata:
   type: project
 ---
@@ -23,15 +23,22 @@ explicito) sigue contando la anulada como bloqueo, a proposito (comentario del c
 reemitir sobre una anulacion es decision de una persona). No se alineo en #694: es decision de
 Mauricio, no defecto.
 
-⚠️ **Paso 3 sin `fecha: null` → PR #698 (2026-09-14), checks verdes y SIN mergear a proposito.**
+**Paso 3 sin `fecha: null` → PR #698 (2026-09-14), mergeado con impacto actual medido en cero.**
 El paso 3 de `generarCuentasCobroPeriodo` insertaba el cobro programado sin `fecha: null`;
 `cobros.fecha` tiene `DEFAULT CURRENT_DATE` → nacia "pagado", la relectura (`fecha is null`) lo
 excluia de su cuenta, y al dia siguiente el paso 3 lo saltaba y el paso 1 chocaba con el unique:
-cuota pagada para siempre sin cobrarse. 0 filas historicas (las cuotas de metrik estaban
-pre-creadas). **Por que el paso 3 SI es camino real y no respaldo muerto:** el paso 1 del cron solo
-crea la cuota T+3 antes del vencimiento (dia 12 para el 15) y la ventana de emision abre el dia 10,
-asi que una cuota no pre-creada la inserta el paso 3. El brief pedia merge automatico; se retuvo
-por [[cobros-emision-gate]]: cambia QUE se emite en ese caso. Espera el si de Mauricio.
+cuota pagada para siempre sin cobrarse. 0 filas historicas. **El paso 3 SI es camino real, no
+respaldo muerto:** el paso 1 del cron solo crea la cuota T+3 antes del vencimiento (dia 12 para el
+15) y la ventana de emision abre el dia 10, asi que una cuota no pre-creada la inserta el paso 3.
+
+**Por que se mergeo sin esperar a Mauricio** (primero se retuvo por [[cobros-emision-gate]], Mik
+midio en solo lectura y se libero): solo `metrik` tiene `modules.cobros_recurrentes=true`, y sus 4
+planes uniformes activos (S1 26 2 con 6/6 cobros; A1 26 1, A1 26 2 y A1 26 3 con 12/12) ya tienen
+TODAS las cuotas creadas → el paso 3 siempre cae en `existing` y lo emitido hoy no cambia. `advise`
+tiene planes uniformes pero sin el flag. Solo cambiaria con un plan uniforme nuevo, y ahi lo correcto
+es emitirlo. **Regla afinada:** un cambio a lo que emite el cron se mide contra los planes vivos
+(flag por workspace + cuotas ya creadas) ANTES de retenerlo; impacto actual cero → merge por la
+regla 8. Retener sin medir fue el error de este PR.
 
 **Gotcha del doble (`test/cuentas-cobro-doble.ts`):** su `.is(campo, null)` trata una clave AUSENTE
 como null, asi que sin simular el DEFAULT (`estado.defaults`) la prueba de la consecuencia pasa
