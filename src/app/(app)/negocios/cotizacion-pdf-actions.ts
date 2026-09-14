@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
+import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -162,8 +163,12 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     descuento_porcentaje: number | null
     cantidad: number | null
     subtotal?: number | null
-    /** Llega `undefined` mientras `20260914200000` no este aplicada. */
+    es_ajuste?: boolean | null
+    orden?: number | null
+    /** Las tres llegan `undefined` mientras `20260914200000` no este aplicada. */
     unidad?: string | null
+    grupo?: string | null
+    opcion_de?: string | null
   }
 
   /**
@@ -189,6 +194,31 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       .order('orden')
     items = (itemsData ?? []) as ItemRow[]
   }
+
+  /**
+   * R-A1 · qué líneas aportan al total cuando no hay itinerario principal.
+   *
+   * Una ranura con dos vuelos imprimía las DOS líneas al cliente y sumaba las dos en
+   * el Subtotal, contra un TOTAL que salía de `valor_total`. Dos cifras del mismo
+   * dinero que no cuadran, en el documento que el cliente sí suma.
+   *
+   * Es el MISMO helper que usa `recalcularTotales` para escribir `valor_total`, así
+   * que el documento no puede discrepar con la pantalla. Sin ranuras con alternativas
+   * devuelve todos los ítems y el PDF de siempre no cambia una línea.
+   */
+  const aportanAlTotal = new Set(
+    itemsQueAportanAlTotal(
+      items.filter(i => i.id).map(i => ({
+        id: i.id as string,
+        grupo: i.grupo ?? null,
+        opcion_de: i.opcion_de ?? null,
+        es_ajuste: i.es_ajuste ?? false,
+        orden: i.orden ?? 0,
+      })),
+    ),
+  )
+  /** El ítem de cuadre entra siempre: su rama vive fuera de las ranuras. */
+  const aporta = (i: ItemRow) => !i.id || aportanAlTotal.has(i.id) || i.es_ajuste === true
 
   // Calculate fiscal
   type Regimen = FiscalProfile['regimen_tributario']
@@ -247,7 +277,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const ivaValor = fiscal.iva ?? 0
     const totalConIva = subtotal + ivaValor
 
-    const renderItems: CotizacionRenderItem[] = items.map((it, idx) => {
+    // R-A1 · solo las que aportan: ver `aporta`. Sin alternativas, es `items` entero.
+    const renderItems: CotizacionRenderItem[] = items.filter(aporta).map((it, idx) => {
       const cant = Number(it.cantidad) || 1
       const unit = Number(it.precio_venta) || 0
       const desc = descuentoVisible(it)
@@ -410,15 +441,26 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   //
   // De paso resuelve el caso de UN solo itinerario en propuesta: la plantilla imprime
   // su tabla plana, y es la del principal.
+  //
+  // ⚠️ R-A1 · cuando NO hay principal, la lista plana tampoco puede ser «todos los
+  // ítems»: una cotización con dos vuelos en la misma ranura imprimía las dos líneas
+  // al cliente y sumaba las dos en el Subtotal. `itemsQueAportanAlTotal` deja un
+  // candidato por ranura —el mismo que toma `recalcularTotales` para `valor_total`—
+  // así que el documento cuadra consigo mismo y con la pantalla.
+  //
+  // Sin ranuras con alternativas devuelve todos los ítems: el PDF de Termotech, Arca
+  // y WMC no cambia una línea.
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
-  const itemsParaResumen = itemsDelPrincipal ?? items.map(i => ({
-    nombre: i.nombre ?? '',
-    descripcion: i.descripcion ?? null,
-    precio_venta: Number(i.precio_venta) || 0,
-    descuento_porcentaje: descuentoVisible(i),
-    cantidad: Number(i.cantidad) || 1,
-    unidad: i.unidad ?? null,
-  }))
+  const itemsParaResumen = itemsDelPrincipal ?? items
+    .filter(aporta)
+    .map(i => ({
+      nombre: i.nombre ?? '',
+      descripcion: i.descripcion ?? null,
+      precio_venta: Number(i.precio_venta) || 0,
+      descuento_porcentaje: descuentoVisible(i),
+      cantidad: Number(i.cantidad) || 1,
+      unidad: i.unidad ?? null,
+    }))
 
   const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {

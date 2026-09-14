@@ -147,6 +147,85 @@ export function itemsDelItinerario(items: ItemConGrupo[], seleccion: string[]): 
     .map(item => item.id)
 }
 
+// ── Qué aporta al total cuando nadie eligió todavía (R-A1) ───────────────────
+
+/**
+ * Una ranura resuelta por SUPUESTO: nadie eligió, y el total toma un candidato.
+ *
+ * Existe para que la pantalla pueda decir *cuál* tomó y *cuáles* dejó fuera. Un aviso
+ * que dice «hay una suposición» sin nombrarla no se puede corregir.
+ */
+export interface RanuraSupuesta {
+  grupo: string
+  /** El candidato que aporta al total. */
+  elegido: string
+  /** Los que quedan fuera del total mientras nadie decida. */
+  descartados: string[]
+}
+
+/**
+ * Cómo se resuelve una ranura con alternativas cuando NO hay itinerario principal.
+ *
+ * ## La regla
+ *
+ * *«Un ítem con opciones alternativas aporta UNA sola vez al total.»* Cuando hay un
+ * itinerario principal, quién aporta lo dice él (R5). Cuando no —la cotización recién
+ * armada, dos capturas pegadas en la misma ranura y ninguna combinación construida—
+ * aporta el **primer candidato por `orden`**, y se declara como supuesto.
+ *
+ * ## Por qué el primero y no «ninguno»
+ *
+ * Las dos alternativas cumplen la regla dura (nunca sumar dos). Se eligió ésta porque
+ * los errores que producen no son simétricos:
+ *
+ *  · **No sumar ninguna** deja el total por DEBAJO del real: la cotización sale sin el
+ *    vuelo. Es un documento coherente consigo mismo al que le falta un componente
+ *    entero, y el precio que se manda es demasiado bajo. Ésa es exactamente la
+ *    dirección que pierde plata y la que este motor existe para evitar (viajes
+ *    cerrados al 3,1%, uno con pérdida de -6,5%).
+ *  · **Tomar el primero** deja un total completo, con sus líneas cuadrando contra él, y
+ *    la única forma de equivocarse es elegir la aerolínea que no era — que se ve en la
+ *    propia línea, con su nombre y su precio.
+ *
+ * ⚠️ NO contradice a `itinerarioPrincipal`, que sigue devolviendo `null` en vez de
+ * elegir. Esa pregunta es *«cuál de las combinaciones que alguien construyó fija el
+ * precio»*, y ahí la decisión existe y está sin tomar. Aquí no hay combinaciones: hay
+ * una ranura que nadie ha mirado, y el supuesto es explícito y reversible.
+ *
+ * El supuesto se ANUNCIA: quien lo consuma tiene que decirlo.
+ *
+ * ⚠️ `seleccionSupuesta` DERIVA de `ranurasPorSupuesto` y no al revés. Escritas por
+ * separado, las dos tomaban `candidatos[0]` cada una por su cuenta: el día que la
+ * regla cambiara, la pantalla anunciaría un supuesto y el total usaría otro. Se vio
+ * mutando `seleccionSupuesta` y comprobando que la prueba del aviso seguía en verde.
+ */
+export function ranurasPorSupuesto(items: ItemConGrupo[]): RanuraSupuesta[] {
+  return ranurasConAlternativas(items).map(r => ({
+    grupo: r.grupo,
+    elegido: r.candidatos[0],
+    descartados: r.candidatos.slice(1),
+  }))
+}
+
+/** Los ids que el total toma por supuesto: uno por ranura. Ver `ranurasPorSupuesto`. */
+export function seleccionSupuesta(items: ItemConGrupo[]): string[] {
+  return ranurasPorSupuesto(items).map(r => r.elegido)
+}
+
+/**
+ * Los ítems que aportan al TOTAL de la cotización, sin itinerario principal (R-A1).
+ *
+ * Los fijos más un candidato por ranura. Es lo que tienen que usar el total en
+ * pantalla, `recalcularTotales` y el PDF: si cada uno resolviera esto por su cuenta,
+ * el documento del cliente y la pantalla dirían precios distintos del mismo viaje.
+ *
+ * ⚠️ El ítem de ajuste queda fuera, igual que en `itemsDelItinerario`: es cuadre de
+ * precio y su rama vive aparte, antes de llegar aquí.
+ */
+export function itemsQueAportanAlTotal(items: ItemConGrupo[]): string[] {
+  return itemsDelItinerario(items, seleccionSupuesta(items))
+}
+
 /**
  * El producto cartesiano de las ranuras: todas las combinaciones posibles (T1).
  *

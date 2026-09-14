@@ -16,6 +16,7 @@ import {
   totalDelPrincipal,
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
+import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -1058,38 +1059,51 @@ export async function recalcularTotales(cotizacionId: string) {
     .eq('id', cotizacionId)
     .maybeSingle()
 
+  // `select('*')` y no la lista de columnas: `grupo`, `opcion_de` y `orden` los agrega
+  // la migración `20260914200000`, y nombrarlos devolvería un 400 mientras no esté
+  // aplicada — o sea que el editor dejaría de recalcular en cada tecla. Misma
+  // tolerancia que `contextoDeCotizacion`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('id, precio_venta, subtotal, descuento_porcentaje, es_ajuste, cantidad, margen_porcentaje, precio_manual, rubros(valor_total)')
+    .select('*, rubros(valor_total)')
     .eq('cotizacion_id', cotizacionId)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filas = (items ?? []) as any[]
-  const cascada = calcularCascada(
-    filas.map(item => {
-      const rubros = (item.rubros as { valor_total: number }[]) ?? []
-      return {
-        id: item.id as string,
-        es_ajuste: item.es_ajuste,
-        cantidad: item.cantidad,
-        subtotal: item.subtotal,
-        numeroDeRubros: rubros.length,
-        costoDeRubros: rubros.reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0),
-        descuento_porcentaje: item.descuento_porcentaje,
-        margen_porcentaje: item.margen_porcentaje,
-        precio_venta: item.precio_venta,
-        precio_manual: item.precio_manual,
-      }
-    }),
-    {
-      administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
-      // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
-      margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
-      descuentoComercialPct: cot?.descuento_porcentaje,
-      convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
-    },
-  )
+  const paraCascada = filas.map(item => {
+    const rubros = (item.rubros as { valor_total: number }[]) ?? []
+    return {
+      id: item.id as string,
+      es_ajuste: item.es_ajuste,
+      cantidad: item.cantidad,
+      subtotal: item.subtotal,
+      numeroDeRubros: rubros.length,
+      costoDeRubros: rubros.reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0),
+      descuento_porcentaje: item.descuento_porcentaje,
+      margen_porcentaje: item.margen_porcentaje,
+      precio_venta: item.precio_venta,
+      precio_manual: item.precio_manual,
+    }
+  })
+  const params = {
+    administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
+    // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
+    margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
+    descuentoComercialPct: cot?.descuento_porcentaje,
+    convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
+  }
+
+  // ⚠️ DOS cascadas, y la diferencia es deliberada.
+  //
+  //  · `cascada` corre sobre TODAS las líneas y es la que escribe el precio unitario
+  //    de cada una. Una alternativa que no aporta al total igual necesita su precio:
+  //    es justo el número con el que alguien la compara contra la otra.
+  //  · `cascadaTotal` corre solo sobre las que APORTAN (R-A1) y es la que fija el
+  //    total. Sin esta separación, una ranura con dos vuelos cobraba los dos.
+  //
+  // Con una sola ranura y sin alternativas las dos son idénticas, que es R6.
+  const cascada = calcularCascada(paraCascada, params)
 
   for (const linea of cascada.lineas) {
     const fila = filas.find(f => f.id === linea.id)
@@ -1108,6 +1122,24 @@ export async function recalcularTotales(cotizacionId: string) {
   // Ahí el total no se deriva: manda el número que se escribió, y el ítem de ajuste
   // absorbe la diferencia. Sin esto, recalcular le movería el total a una cotización
   // ya enviada al cliente.
+  // R-A1 · el total suma cada ranura UNA vez. Sin ranuras con alternativas, `aportan`
+  // es exactamente el juego completo de líneas y esto es un no-op (R6).
+  const aportan = new Set(
+    itemsQueAportanAlTotal(
+      filas.map(f => ({
+        id: f.id as string,
+        grupo: f.grupo ?? null,
+        opcion_de: f.opcion_de ?? null,
+        es_ajuste: f.es_ajuste ?? false,
+        orden: f.orden ?? 0,
+      })),
+    ),
+  )
+  const cascadaTotal = calcularCascada(
+    paraCascada.filter(i => aportan.has(i.id)),
+    params,
+  )
+
   const ajuste = filas.find(f => f.es_ajuste)
   if (ajuste) {
     const { data: fijado } = await supabase
@@ -1116,7 +1148,10 @@ export async function recalcularTotales(cotizacionId: string) {
       .eq('id', cotizacionId)
       .single()
     const valorFijado = fijado?.valor_total ?? 0
-    const sumaRegulares = cascada.lineas
+    // Las que APORTAN, no todas: con dos alternativas en la misma ranura, sumarlas
+    // las dos dejaba la diferencia corta y el ítem de cuadre absorbía un vuelo entero.
+    // Sin ranuras con alternativas es la misma suma de siempre.
+    const sumaRegulares = cascadaTotal.lineas
       .filter(l => l.id !== ajuste.id)
       .reduce((s, l) => s + l.precioLinea, 0)
     const diferencia = Math.round(valorFijado - sumaRegulares)
@@ -1134,10 +1169,10 @@ export async function recalcularTotales(cotizacionId: string) {
 
     await supabase
       .from('cotizaciones')
-      .update({ costo_total: cascada.costoDirecto } as never)
+      .update({ costo_total: cascadaTotal.costoDirecto } as never)
       .eq('id', cotizacionId)
 
-    return { success: true, costoTotal: cascada.costoDirecto, valorVenta: valorFijado }
+    return { success: true, costoTotal: cascadaTotal.costoDirecto, valorVenta: valorFijado }
   }
 
   // R5 · con itinerarios, el total de la cotizacion es el del itinerario PRINCIPAL,
@@ -1158,9 +1193,9 @@ export async function recalcularTotales(cotizacionId: string) {
   await supabase
     .from('cotizaciones')
     .update({
-      costo_total: principal ? principal.costoDirecto : cascada.costoDirecto,
-      valor_total: principal ? principal.precioVenta : cascada.precioVenta,
-      descuento_valor: cascada.descuentoComercial,
+      costo_total: principal ? principal.costoDirecto : cascadaTotal.costoDirecto,
+      valor_total: principal ? principal.precioVenta : cascadaTotal.precioVenta,
+      descuento_valor: cascadaTotal.descuentoComercial,
     } as never)
     .eq('id', cotizacionId)
 
@@ -1174,8 +1209,8 @@ export async function recalcularTotales(cotizacionId: string) {
 
   return {
     success: true,
-    costoTotal: principal ? principal.costoDirecto : cascada.costoDirecto,
-    valorVenta: principal ? principal.precioVenta : cascada.precioVenta,
+    costoTotal: principal ? principal.costoDirecto : cascadaTotal.costoDirecto,
+    valorVenta: principal ? principal.precioVenta : cascadaTotal.precioVenta,
     desmarcados,
   }
 }

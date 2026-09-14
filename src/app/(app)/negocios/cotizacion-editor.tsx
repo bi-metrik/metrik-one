@@ -33,6 +33,11 @@ import { agregarOpcionAItem, actualizarRanuraDeItem, type EstadoItinerarios } fr
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import PantallazoItem from '@/app/(app)/negocios/pantallazo-item'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import {
+  itemsDelItinerario,
+  itemsQueAportanAlTotal,
+  ranurasPorSupuesto,
+} from '@/lib/cotizaciones/itinerarios'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -361,31 +366,70 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Los números de la cotización salen de la MISMA cascada que aplica el servidor al
   // guardar. Calcularlos aquí por separado fue exactamente el defecto anterior: la
   // pantalla mostraba un total y la base guardaba otro.
-  const cascada = calcularCascada(
-    initialItems.map(item => {
-      const rubros = item.rubros ?? []
-      return {
-        id: item.id,
-        es_ajuste: item.es_ajuste,
-        cantidad: item.cantidad,
-        subtotal: item.subtotal,
-        numeroDeRubros: rubros.length,
-        costoDeRubros: rubros.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0),
-        descuento_porcentaje: item.descuento_porcentaje,
-        margen_porcentaje: item.margen_porcentaje,
-        precio_venta: item.precio_venta,
-        precio_manual: item.precio_manual,
-      }
-    }),
-    {
-      administrativosPct: (Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0),
-      margenPct: margenCotizacion,
-      descuentoComercialPct: cotizacion.descuento_porcentaje,
-      convencionMargen,
-    },
+  const paraCascada = initialItems.map(item => {
+    const rubros = item.rubros ?? []
+    return {
+      id: item.id,
+      es_ajuste: item.es_ajuste,
+      cantidad: item.cantidad,
+      subtotal: item.subtotal,
+      numeroDeRubros: rubros.length,
+      costoDeRubros: rubros.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0),
+      descuento_porcentaje: item.descuento_porcentaje,
+      margen_porcentaje: item.margen_porcentaje,
+      precio_venta: item.precio_venta,
+      precio_manual: item.precio_manual,
+    }
+  })
+  const paramsCascada = {
+    administrativosPct: (Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0),
+    margenPct: margenCotizacion,
+    descuentoComercialPct: cotizacion.descuento_porcentaje,
+    convencionMargen,
+  }
+
+  // Por LÍNEA: sobre todas, porque una alternativa que no aporta al total igual
+  // necesita su precio — es el número con el que se la compara contra la otra.
+  const cascada = calcularCascada(paraCascada, paramsCascada)
+
+  // R-A1 · el TOTAL suma cada ranura una sola vez. Es el mismo helper y la misma
+  // cascada que aplica `recalcularTotales` al guardar: si la pantalla tuviera su
+  // propia regla, el total de arriba y el de la base volverían a discrepar, que fue
+  // exactamente el defecto que obligó a compartir `calcularCascada`.
+  const itemsParaRanuras = initialItems.map(i => ({
+    id: i.id,
+    grupo: i.grupo ?? null,
+    opcion_de: i.opcion_de ?? null,
+    es_ajuste: i.es_ajuste ?? false,
+    orden: i.orden ?? 0,
+  }))
+  /**
+   * Con principal, la decisión está tomada y el total sale de ÉL (R5): no hay supuesto
+   * que anunciar, y el pie tiene que mostrar su precio. Antes mostraba la suma de
+   * todas las líneas mientras la base guardaba la del principal — dos cifras del
+   * mismo dinero en la misma pantalla.
+   *
+   * La tabla de combinaciones ya avisa el caso «itinerarios armados y ninguno
+   * principal», así que el aviso de abajo solo cubre el hueco que quedaba:
+   * alternativas cargadas y NINGUNA combinación construida.
+   */
+  const seleccionPrincipal = (itinerarios?.itinerarios ?? []).find(i => i.esPrincipal)?.seleccion ?? null
+  const hayPrincipal = seleccionPrincipal !== null
+
+  const aportanAlTotal = new Set(
+    seleccionPrincipal
+      ? itemsDelItinerario(itemsParaRanuras, seleccionPrincipal)
+      : itemsQueAportanAlTotal(itemsParaRanuras),
   )
+  const cascadaTotal = calcularCascada(
+    paraCascada.filter(i => aportanAlTotal.has(i.id) || i.es_ajuste === true),
+    paramsCascada,
+  )
+  const supuestos = ranurasPorSupuesto(itemsParaRanuras)
+  const nombrePorItem = new Map(initialItems.map(i => [i.id, i.nombre ?? 'Sin nombre']))
+
   const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
-  const costoTotal = cascada.costoDirecto
+  const costoTotal = cascadaTotal.costoDirecto
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
@@ -1268,9 +1312,44 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             />
           )}
 
+          {/* R-A1 · qué ranura se resolvió sola. Va ARRIBA de la cascada porque
+              explica el número que sigue: sin esto el total se lee como si alguien
+              hubiera elegido, y nadie eligió. Se nombra la opción tomada y las que
+              quedaron fuera — «hay una suposición» sin decir cuál no se puede
+              corregir. No aparece cuando hay itinerario principal: ahí la decisión
+              está tomada y la toma la tabla de combinaciones. */}
+          {supuestos.length > 0 && !hayPrincipal && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="font-medium">
+                {supuestos.length === 1
+                  ? 'Una ranura no tiene elección: el total toma una opción por supuesto.'
+                  : `${supuestos.length} ranuras no tienen elección: el total toma una opción por supuesto en cada una.`}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {supuestos.map(s => (
+                  <li key={s.grupo}>
+                    <span className="font-medium">{s.grupo}</span>: cuenta{' '}
+                    <span className="font-medium">«{nombrePorItem.get(s.elegido)}»</span>
+                    {s.descartados.length > 0 && (
+                      <>
+                        {' '}y queda fuera del total{' '}
+                        {s.descartados.map(id => `«${nombrePorItem.get(id)}»`).join(', ')}
+                      </>
+                    )}
+                    .
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5">
+                Arma las combinaciones y marca la principal para decidirlo tú. Mientras
+                tanto, cada ranura aporta una sola vez: el total nunca suma las dos.
+              </p>
+            </div>
+          )}
+
           {/* La cascada de la cotización: costo, administrativos, margen, descuento. */}
           <TotalesMargen
-            cascada={cascada}
+            cascada={cascadaTotal}
             margenPct={margenCotizacion}
             convencionMargen={convencionMargen}
             descuentoPct={Number(cotizacion.descuento_porcentaje) || 0}
@@ -1341,7 +1420,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           {(() => {
             // `precioVenta` ya trae el descuento comercial aplicado: restarlo otra vez
             // aquí le bajaba el neto al vendedor sin que nada lo explicara.
-            const valor = cascada.precioVenta
+            //
+            // Sale de `cascadaTotal`, no de `cascada`: lo que el vendedor recibe es lo
+            // que se cobra, y lo que se cobra suma cada ranura UNA vez (R-A1).
+            const valor = cascadaTotal.precioVenta
             const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
             if (!hasFiscal || valor === 0) {
               return (
