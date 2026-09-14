@@ -24,7 +24,7 @@
  *   - el caso del final llega completo        → identificacion: null
  *   - el concepto sale del servicio           → servicio: null (cae al default)
  *   - un ya facturado no vuelve como listo    → ya_facturado: false
- *   - las copias del bloque también se leen   → ya_facturado: false
+ *   - el original se lee aunque haya copias   → ya_facturado: false
  *   - los candidatos se leen completos        → 1.000 casos de 1.050
  *   - los totales cuentan la cola entera      → 299 listos donde hay 298
  *   - una lectura que falla devuelve error    → devolvía la cola como si nada (×2)
@@ -105,16 +105,31 @@ describe('cola de facturación — lotes por encima del techo de PostgREST', () 
     expect(data!.totales.listos).toBe(299)
   })
 
-  it('las copias heredadas del bloque de factura también se recorren enteras', async () => {
-    // Aquí la segunda fuente de "ya facturado" (las 5 copias del bloque a lo
-    // largo de la línea) son 1.500 filas por sí solas: 500 por encima del techo.
+  it('una COPIA heredada con número NO da el caso por facturado', async () => {
+    // Medido en SOENA el 2026-09-14: 20 copias de «Factura emitida» traían el número
+    // de la factura del VEHÍCULO, heredado del documento equivocado. Con que una sola
+    // lo trajera, la cola daba el caso por facturado (V0006, V0290, V0428).
     sembrar({
       casos: 300, facturados: [299], copiasFactura: 5,
       bloqueFacturaSlug: true, facturaEnCopia: 4,
     })
     const { data } = await getColaFacturacion()
+    const caso = data!.casos.find(c => c.codigo === 'V0299')!
+    expect(caso.ya_facturado).toBe(false)
+    expect(caso.factura_numero).toBeNull()
+  })
+
+  it('el bloque ORIGINAL se lee entero aunque las copias multipliquen las filas', async () => {
+    // 5 configs del bloque × 300 casos = 1.500 filas en la tabla; la factura vive en la
+    // nativa del ÚLTIMO caso, que es la que el techo se llevaría sin paginar.
+    sembrar({
+      casos: 300, facturados: [299], copiasFactura: 5,
+      bloqueFacturaSlug: true, facturaEnCopia: 0,
+    })
+    const { data } = await getColaFacturacion()
     const facturado = data!.casos.find(c => c.codigo === 'V0299')!
     expect(facturado.ya_facturado).toBe(true)
+    expect(facturado.factura_numero).toBe('FV-299')
   })
 
   it('los negocios candidatos se leen completos aunque pasen de mil', async () => {

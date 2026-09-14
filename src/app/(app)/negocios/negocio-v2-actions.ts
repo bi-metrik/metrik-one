@@ -70,7 +70,14 @@ import { camposDeRoutingDelNegocio } from '@/lib/negocios/campos-de-routing-del-
 import { aplicarDesenlacesDeRetorno } from '@/lib/negocios/aplicar-desenlace'
 import { leerDesenlacesDeMetadata, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
-import { llavesDeHerenciaDocumento } from '@/lib/negocios/herencia-documento'
+import {
+  fuenteDeHerencia,
+  indicesDeHerencia,
+  origenesPorSlugDe,
+  type FilaDelNegocio,
+  type FuenteHerencia,
+} from '@/lib/negocios/herencia-casilla'
+import { emisorImpideFactura, verificarEmisorFactura } from '@/lib/facturacion/factura-del-negocio'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
@@ -2989,115 +2996,78 @@ export async function cambiarEtapaNegocio(
       )
     )
 
-    // Obtener bloques completados de este negocio (de cualquier etapa) con su definition_id + bloque_items
+    // Filas completas del negocio (de cualquier etapa) con la config que las gobierna.
+    // Solo las de ORIGEN alimentan la herencia: ver `herencia-casilla.ts`.
     const { data: completadosRaw } = await db(supabase)
       .from('negocio_bloques')
-      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id, nombre, config_extra, bloque_definitions(tipo))')
+      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id, nombre, estado, slug, config_extra, bloque_definitions(tipo))')
       .eq('negocio_id', negocioId)
       .eq('estado', 'completo')
 
-    const completadosPorDef = new Map<string, { id: string; data: Record<string, unknown>; completado_at: string | null }>()
-    for (const c of ((completadosRaw ?? []) as Record<string, unknown>[])) {
-      const defId = (c.bloque_configs as Record<string, unknown> | null)?.bloque_definition_id as string | null
-      if (defId) {
-        completadosPorDef.set(defId, {
-          id: c.id as string,
-          data: (c.data ?? {}) as Record<string, unknown>,
-          completado_at: c.completado_at as string | null,
-        })
+    const aFila = (c: Record<string, unknown>): FilaDelNegocio => {
+      const cfg = (c.bloque_configs ?? {}) as Record<string, unknown>
+      return {
+        id: c.id as string,
+        estado: c.estado as string,
+        data: (c.data ?? null) as Record<string, unknown> | null,
+        completado_at: (c.completado_at ?? null) as string | null,
+        config: {
+          bloque_definition_id: (cfg.bloque_definition_id ?? null) as string | null,
+          nombre: (cfg.nombre ?? null) as string | null,
+          estado: (cfg.estado ?? null) as string | null,
+          slug: (cfg.slug ?? null) as string | null,
+          config_extra: (cfg.config_extra ?? null) as Record<string, unknown> | null,
+          tipo: ((cfg.bloque_definitions as Record<string, unknown> | null)?.tipo ?? null) as string | null,
+        },
       }
+    }
+    const indices = indicesDeHerencia(((completadosRaw ?? []) as Record<string, unknown>[]).map(aFila))
+
+    // Una copia de documento hereda el archivo de SU origen, que se busca por slug y en
+    // cualquier estado (la factura que archiva Siigo queda `pendiente` con archivo).
+    const slugsOrigenDocumento = [...new Set(
+      typedConfigs
+        .filter(bc => !existingIds.has(bc.id) && bc.estado === 'visible' && bc.bloque_definitions?.tipo === 'documento')
+        .map(bc => (bc.config_extra as { source_bloque_slug?: unknown } | null)?.source_bloque_slug)
+        .filter((x): x is string => typeof x === 'string' && x !== ''),
+    )]
+    let origenesPorSlug = new Map<string, FilaDelNegocio>()
+    if (slugsOrigenDocumento.length > 0) {
+      const { data: origenesRaw } = await db(supabase)
+        .from('negocio_bloques')
+        .select('id, estado, data, completado_at, bloque_configs!inner(bloque_definition_id, nombre, estado, slug, config_extra, bloque_definitions(tipo))')
+        .eq('negocio_id', negocioId)
+        .in('bloque_configs.slug', slugsOrigenDocumento)
+      origenesPorSlug = origenesPorSlugDe(((origenesRaw ?? []) as Record<string, unknown>[]).map(aFila))
     }
 
-    // Mapa adicional para tipos que comparten bloque_definition_id:
-    // - documento: keyed por {definition_id}:{config_extra.label}
-    // - datos: keyed por {definition_id}:{bloque_configs.nombre}
-    const completadosPorLabel = new Map<string, { id: string; data: Record<string, unknown>; completado_at: string | null }>()
-    for (const c of ((completadosRaw ?? []) as Record<string, unknown>[])) {
-      const config = c.bloque_configs as Record<string, unknown> | null
-      const defId = config?.bloque_definition_id as string | null
-      const tipo = (config?.bloque_definitions as Record<string, unknown> | null)?.tipo as string | null
-      const entry = {
-        id: c.id as string,
-        data: (c.data ?? {}) as Record<string, unknown>,
-        completado_at: c.completado_at as string | null,
-      }
-      if (tipo === 'documento' && defId) {
-        const label = (config?.config_extra as Record<string, unknown> | null)?.label as string | null
-        if (label) completadosPorLabel.set(`${defId}:${label}`, entry)
-        // Segunda llave por nombre, para los documentos que no declaran `label`
-        // («Factura emitida», «Propuesta económica firmada»…). Sin ella, sus copias
-        // de solo lectura se quedarían sin pareja y nacerían vacías.
-        const nombreDoc = config?.nombre as string | null
-        if (nombreDoc) completadosPorLabel.set(`${defId}:${nombreDoc}`, entry)
-      }
-      if (tipo === 'datos' && defId) {
-        const nombre = config?.nombre as string | null
-        if (nombre) completadosPorLabel.set(`${defId}:${nombre}`, entry)
-      }
-    }
+    // De qué fila heredó cada casilla nueva. Los `bloque_items` se copian de esa misma
+    // fila, nunca de otra con el mismo `definition_id`.
+    const fuentePorConfig = new Map<string, FuenteHerencia>()
 
     const nuevas = typedConfigs
       .filter(bc => !existingIds.has(bc.id))
       .map(bc => {
         const isVisible = bc.estado === 'visible'
-        const tipo = bc.bloque_definitions?.tipo
-        const isDocumento = tipo === 'documento'
-        const isDatos = tipo === 'datos'
+        const isDatos = bc.bloque_definitions?.tipo === 'datos'
 
-        let prevCompleto
-        if (isVisible) {
-          if (isDatos) {
-            // Los bloques `datos` COMPARTEN un mismo `bloque_definition_id` genérico, así
-            // que ese id NO identifica la casilla: solo dice "esto es un bloque de datos".
-            // La identidad real es el nombre. Antes, si el nombre no encontraba pareja se
-            // caía a `completadosPorDef`, que devuelve CUALQUIER bloque `datos` ya
-            // completado del negocio — sin ninguna relación semántica.
-            //
-            // Eso copiaba respuestas ajenas: medido el 2026-07-31 en SOENA, 321 instancias
-            // con data que no corresponde a sus propios campos ("Vehículo a reemplazar"
-            // con `requiere_devolucion_iva` adentro, "Radicado de inclusión" con el
-            // radicado de certificación). El motor de routing hace `Object.assign` de
-            // TODAS las data de los bloques `datos` de la etapa antes de evaluar sus
-            // condiciones, así que una clave prestada puede decidir una rama.
-            //
-            // Medido antes de cambiarlo: ningún valor prestado contradice al de su dueño
-            // (se copian dentro del mismo negocio), y las 10 herencias legítimas de la
-            // línea coinciden por nombre. El caso dañino es el otro: cuando el dueño NO
-            // tiene valor y el prestado ocupa su lugar — así nació completo y con basura
-            // el bloque de la cita DIAN.
-            //
-            // Sin pareja por nombre: nace pendiente y vacío. No se adivina.
-            prevCompleto = bc.nombre
-              ? completadosPorLabel.get(`${bc.bloque_definition_id}:${bc.nombre}`)
-              : undefined
-          } else if (isDocumento) {
-            // Mismo defecto que arriba, en los bloques `documento`: comparten un único
-            // `bloque_definition_id`, así que `completadosPorDef` devolvía cualquier
-            // documento del negocio. Ver `llavesDeHerenciaDocumento` para la medición
-            // (206 archivos cruzados, 508 casillas mostrando el documento de otra).
-            const label = (bc.config_extra as Record<string, unknown> | null)?.label as string | null
-            for (const llave of llavesDeHerenciaDocumento(bc.bloque_definition_id, label, bc.nombre)) {
-              prevCompleto = completadosPorLabel.get(llave)
-              if (prevCompleto) break
-            }
-          } else {
-            // Tipos con definition_id propio (propuesta, cobros, historial…): el id SÍ
-            // identifica al bloque, así que heredar por definition_id es correcto.
-            prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
-          }
-        } else if (isDocumento) {
-          // Casilla editable: hereda solo por `label`, sin el respaldo por nombre. Aquí
-          // carga una persona, y preferimos que nazca vacía a que aparezca llena con algo
-          // que nadie subió ahí. Ver `llavesDeHerenciaDocumento`.
-          const label = (bc.config_extra as Record<string, unknown> | null)?.label as string | null
-          for (const llave of llavesDeHerenciaDocumento(bc.bloque_definition_id, label)) {
-            prevCompleto = completadosPorLabel.get(llave)
-            if (prevCompleto) break
-          }
-        } else if (tipo === 'cotizacion') {
-          // Cotización: inherit completion state across etapas (unique definition_id)
-          prevCompleto = completadosPorDef.get(bc.bloque_definition_id)
-        }
+        // Los bloques `datos` y `documento` COMPARTEN `bloque_definition_id`: su identidad
+        // es el nombre (datos) o el label (documento). Heredar por definition_id copiaba
+        // respuestas y archivos ajenos (321 instancias de datos en julio, 508 casillas de
+        // documento en septiembre). Y una COPIA no puede ser fuente: una copia sucia se
+        // perpetuaba en cada avance de etapa. Toda la regla vive en `fuenteDeHerencia`.
+        const prevCompleto = fuenteDeHerencia(
+          {
+            bloque_definition_id: bc.bloque_definition_id,
+            estado: bc.estado,
+            nombre: bc.nombre,
+            config_extra: bc.config_extra,
+            tipo: bc.bloque_definitions?.tipo,
+          },
+          indices,
+          origenesPorSlug,
+        )
+        if (prevCompleto) fuentePorConfig.set(bc.id, prevCompleto)
 
         // If no inherited data, initialize with field defaults from config
         const data = prevCompleto?.data
@@ -3118,7 +3088,7 @@ export async function cambiarEtapaNegocio(
           bloque_config_id: bc.id,
           estado: heredaCompleto ? 'completo' : 'pendiente',
           data,
-          completado_at: heredaCompleto ? (prevCompleto?.completado_at ?? null) : null,
+          completado_at: heredaCompleto ? (prevCompleto?.completado_at ?? new Date().toISOString()) : null,
         }
       })
 
@@ -3133,7 +3103,7 @@ export async function cambiarEtapaNegocio(
         for (const inst of (insertadas as Array<{ id: string; bloque_config_id: string }>)) {
           const bc = typedConfigs.find(c => c.id === inst.bloque_config_id)
           if (!bc || bc.estado !== 'visible') continue
-          const prev = completadosPorDef.get(bc.bloque_definition_id)
+          const prev = fuentePorConfig.get(bc.id)
           if (!prev) continue
 
           // Copiar items del bloque fuente al nuevo bloque visible
@@ -8672,9 +8642,9 @@ async function validarGateFacturaEmitida(
   const numero = String(campos[numero_campo]?.value ?? '').trim()
   if (!numero) return 'Carga la factura emitida (falta el consecutivo) antes de cerrar el negocio.'
 
-  const emisor = nitSinDv(String(campos[nit_campo]?.value ?? '').trim())
-  const esperado = emisor_nit_esperado ? nitSinDv(emisor_nit_esperado) : null
-  if (esperado && emisor !== esperado) {
+  // La misma comparación que usa la carga manual de Tesorería: una sola regla de emisor.
+  const veredicto = verificarEmisorFactura(String(campos[nit_campo]?.value ?? ''), emisor_nit_esperado)
+  if (emisorImpideFactura(veredicto)) {
     return 'La factura cargada no es de SOENA (el NIT del emisor no coincide). No se puede cerrar el negocio.'
   }
   return null

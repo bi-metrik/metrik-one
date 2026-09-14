@@ -19,8 +19,7 @@ import { resolverConceptoDeNegocio } from './concepto-negocio'
 import { asegurarClienteSiigo, corregirContactoParaFactura, identificacionDelNegocio } from './clientes'
 import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
-import { numeroFacturaEnData } from './factura-cargada'
-import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
+import { leerFacturaDeUnNegocio } from '@/lib/facturacion/leer-factura-del-negocio'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { bandaMaterialidadFacturacion } from '@/lib/facturacion/caso-listo'
 import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
@@ -374,33 +373,23 @@ export interface MarcaFactura {
 }
 
 /**
- * Busca en TODAS las copias del bloque, no solo en la nativa: el PDF se carga desde
- * la etapa donde esté el caso hoy, y cada copia guarda en su propia fila. Ver
- * `idsDeCopiasDelBloque`.
+ * El consecutivo de la factura que ya está en el bloque ORIGINAL del negocio, si la
+ * hay y es del workspace.
  *
- * Sin slug o sin línea no hay dónde mirar y responde null: la emisión queda como
- * estaba, con la marca como única señal.
+ * Hasta el 2026-09-14 buscaba en TODAS las copias heredadas del bloque, y las copias
+ * se llenaban por herencia con documentos ajenos: V0006, V0290 y V0428 quedaban
+ * bloqueados para emitir con el número de la factura de su VEHÍCULO («ya se facturó
+ * (SV6588)»). La regla es la misma de la cola y de la ficha:
+ * `lib/facturacion/factura-del-negocio`.
  */
 async function numeroFacturaCargado(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   svc: any,
+  workspaceId: string,
   negocioId: string,
-  lineaId: string | null,
-  slugBloque: string | undefined,
 ): Promise<string | null> {
-  if (!slugBloque || !lineaId) return null
-  const copias = await idsDeCopiasDelBloque(svc, lineaId, slugBloque)
-  if (copias.length === 0) return null
-  const { data } = await svc
-    .from('negocio_bloques')
-    .select('data')
-    .eq('negocio_id', negocioId)
-    .in('bloque_config_id', copias)
-  for (const fila of ((data ?? []) as Array<{ data?: unknown }>)) {
-    const numero = numeroFacturaEnData(fila.data ?? null)
-    if (numero) return numero
-  }
-  return null
+  const f = await leerFacturaDeUnNegocio(svc, workspaceId, negocioId)
+  return f?.resolucion.factura?.numero ?? null
 }
 
 interface DatosNegocio {
@@ -443,7 +432,7 @@ export async function emitirFacturaNegocio(
   if (yaFacturado?.numero) {
     return { ok: false, motivo: 'ya_facturado_en_one', numero: yaFacturado.numero }
   }
-  const cargada = await numeroFacturaCargado(svc, negocioId, negocio.linea_id, opciones.bloqueFacturaSlug)
+  const cargada = await numeroFacturaCargado(svc, workspaceId, negocioId)
   if (cargada) return { ok: false, motivo: 'ya_facturado_en_one', numero: cargada }
 
   // ── 2. Saldo ──────────────────────────────────────────────────────────────
