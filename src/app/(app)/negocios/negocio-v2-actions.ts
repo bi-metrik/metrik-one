@@ -66,7 +66,7 @@ import {
   type RoutingEtapa,
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
-import { camposDeRouting, type BloqueParaRouting } from '@/lib/negocios/campos-de-routing'
+import { camposDeRoutingDelNegocio } from '@/lib/negocios/campos-de-routing-del-negocio'
 import { aplicarDesenlacesDeRetorno } from '@/lib/negocios/aplicar-desenlace'
 import { leerDesenlacesDeMetadata, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
@@ -3506,63 +3506,9 @@ async function camposDecisionDelNegocio(
   return resultado
 }
 
-// ── El bolsillo de datos con el que el motor decide ───────────────────────────
-//
-// Arma el mapa de campos de una etapa fuente para un negocio, DESCARTANDO los bloques que
-// no le aplican al caso (su `condition` no se cumple) y los `desactivado: true`. Lo usan los
-// DOS sitios que resuelven routing —el avance de etapa y el salto encadenado por saldo— y
-// alimenta tanto el gate de dato de decisión como la evaluación de `routing.conditional`:
-// el gate y el conditional tienen que ver EXACTAMENTE el mismo mapa, o un caso puede pasar
-// el gate con un valor que el routing luego ignora.
-//
-// La regla pura (qué se descarta, en qué orden, cómo se cachea) vive en
-// `lib/negocios/campos-de-routing.ts` con sus pruebas. Aquí solo se leen los bloques y se
-// conecta el evaluador: `condicion_cumplida`, la MISMA función SQL que usan los gates y el
-// render, llamada con `p_etapa_actual_id = sourceEtapaId` igual que en
-// `camposDecisionDelNegocio`.
-async function camposDeRoutingDelNegocio(
-  supabase: unknown,
-  negocioId: string,
-  lineaId: string,
-  sourceEtapaId: string,
-): Promise<Record<string, unknown>> {
-  const { data: bloquesDatos } = await db(supabase)
-    .from('negocio_bloques')
-    .select(`
-      data,
-      bloque_configs!inner(
-        etapa_id,
-        config_extra,
-        bloque_definitions!inner(tipo)
-      )
-    `)
-    .eq('negocio_id', negocioId)
-    .eq('bloque_configs.etapa_id', sourceEtapaId)
-
-  type FilaBloque = {
-    data: unknown
-    bloque_configs: {
-      config_extra: Record<string, unknown> | null
-      bloque_definitions: { tipo: string } | null
-    } | null
-  }
-
-  const bloques: BloqueParaRouting[] = ((bloquesDatos ?? []) as FilaBloque[]).map(b => ({
-    data: b.data,
-    config_extra: b.bloque_configs?.config_extra ?? null,
-    tipo: b.bloque_configs?.bloque_definitions?.tipo ?? null,
-  }))
-
-  return camposDeRouting(bloques, async condicion => {
-    const { data: cumple } = await db(supabase).rpc('condicion_cumplida', {
-      p_negocio_id: negocioId,
-      p_linea_id: lineaId,
-      p_etapa_actual_id: sourceEtapaId,
-      p_cond: condicion,
-    })
-    return cumple === true
-  })
-}
+// El bolsillo de datos con el que el motor decide vive en
+// `@/lib/negocios/campos-de-routing-del-negocio`: lo comparten el avance de etapa, el
+// salto encadenado por saldo y el retorno de un reproceso.
 
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 

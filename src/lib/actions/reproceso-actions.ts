@@ -30,11 +30,14 @@ import { getWorkspace } from './get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
 import {
+  CICLO_SIN_RETORNO,
   resolverAtribucionReproceso,
   type CausaReproceso,
   type TipoReproceso,
 } from '@/lib/negocios/atribucion-reproceso'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { resolverRetornoDelNegocio } from '@/lib/negocios/retorno-reproceso-datos'
+import { avisoDelRetorno, contenidoErrorSinRetorno } from '@/lib/negocios/reproceso-textos'
 
 /**
  * Los tipos generados de Supabase van por detrás del esquema real: `negocios.metadata`
@@ -94,13 +97,47 @@ async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
  * confundirlos es facil.
  */
 /**
+ * Quién puede abrir un reproceso o registrar un error de calidad: dirección, o un
+ * supervisor con área de operaciones. Las dos acciones mueven el 40% del bono, así que
+ * comparten la misma puerta.
+ */
+async function puertaReproceso(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  role: string | null | undefined,
+  staffId: string | null | undefined,
+): Promise<string | null> {
+  if (role === 'owner' || role === 'admin') return null
+  if (role !== 'supervisor') return 'Solo supervisores de operaciones, admin u owner pueden reprocesar'
+  if (!staffId) return 'Sin staff vinculado'
+  const areas = await getStaffAreas(supabase, staffId)
+  const areasEf = getAreasEfectivas({ id: staffId, role: 'supervisor', areas })
+  if (!areasEf.has('operaciones')) return 'Necesitas área de operaciones para reprocesar'
+  return null
+}
+
+export type ResultadoReproceso = {
+  ok: boolean
+  error?: string
+  etapaNombre?: string
+  ciclo?: number
+  /** Algo que quien reprocesa tiene que saber del retorno (ver `avisoDelRetorno`). */
+  aviso?: string
+  /**
+   * El caso está antes del punto de retorno: no hay tramo que rehacer. La pantalla ofrece
+   * registrar el error sin devolver el caso (`registrarErrorSinDevolver`).
+   */
+  antesDelRetorno?: { etapaActual: string; etapaRetorno: string }
+}
+
+/**
  * Devuelve el negocio a la etapa que corresponda al tipo de reproceso, archivando
  * el ciclo anterior y dejando marca visible.
  */
 export async function reprocesarNegocio(
   negocioId: string,
   input: { tipo: TipoReproceso; causa: CausaReproceso; detalle: string },
-): Promise<{ ok: boolean; error?: string; etapaNombre?: string; ciclo?: number }> {
+): Promise<ResultadoReproceso> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
 
@@ -134,17 +171,8 @@ export async function reprocesarNegocio(
   // ── Permisos ──────────────────────────────────────────────────────────
   // Un reproceso rehace trabajo ya hecho y penaliza indicadores de calidad, así
   // que no lo dispara cualquiera: dirección, o un supervisor de operaciones.
-  if (role !== 'owner' && role !== 'admin') {
-    if (role !== 'supervisor') {
-      return { ok: false, error: 'Solo supervisores de operaciones, admin u owner pueden reprocesar' }
-    }
-    if (!staffId) return { ok: false, error: 'Sin staff vinculado' }
-    const areas = await getStaffAreas(supabase, staffId)
-    const areasEf = getAreasEfectivas({ id: staffId, role: 'supervisor', areas })
-    if (!areasEf.has('operaciones')) {
-      return { ok: false, error: 'Necesitas área de operaciones para reprocesar' }
-    }
-  }
+  const sinPermiso = await puertaReproceso(supabase, role, staffId)
+  if (sinPermiso) return { ok: false, error: sinPermiso }
 
   // ── Etapa destino, declarada por la propia etapa ──────────────────────
   const { data: etapas } = await supabase
@@ -156,24 +184,51 @@ export async function reprocesarNegocio(
   type EtapaRow = { id: string; nombre: string; orden: number; config_extra: Record<string, unknown> | null }
   const todas = (etapas ?? []) as EtapaRow[]
 
-  const destino = todas.find((e) => {
+  const destinoDeclarado = todas.find((e) => {
     const decl = (e.config_extra?.reproceso_de ?? null) as string[] | string | null
     if (!decl) return false
     return Array.isArray(decl) ? decl.includes(input.tipo) : decl === input.tipo
   })
-  if (!destino) {
+  if (!destinoDeclarado) {
     return {
       ok: false,
       error: `Ninguna etapa está declarada como punto de retorno para "${LABEL_TIPO[input.tipo]}"`,
     }
   }
 
+  // ── ¿El caso pasa por la etapa declarada? ─────────────────────────────
+  // La etapa declarada puede ser una rama que este caso no pisa (una devolución DIAN
+  // vuelve a Cita, y un caso de Manizales nunca lleva cita). Se decide con la MISMA
+  // respuesta con la que el motor lo enrutó al avanzar; si falta, con la que el flujo
+  // habría sembrado desde la seccional; y si tampoco, se vuelve a la declarada y se avisa.
+  // Reglas en `@/lib/negocios/retorno-reproceso`.
+  const seccionalNegocio = n.metadata?.seccional
+  const retorno = await resolverRetornoDelNegocio(supabase, {
+    negocioId,
+    lineaId: n.linea_id,
+    etapas: todas,
+    destinoOrden: destinoDeclarado.orden,
+    seccional: typeof seccionalNegocio === 'string' ? seccionalNegocio : null,
+  })
+  const destino = todas.find((e) => e.orden === retorno.orden) ?? destinoDeclarado
+  const aviso = avisoDelRetorno({
+    motivo: retorno.motivo,
+    declarada: destinoDeclarado.nombre,
+    efectiva: destino.nombre,
+    seccional: typeof seccionalNegocio === 'string' ? seccionalNegocio : null,
+  })
+
   const etapaActual = todas.find((e) => e.id === n.etapa_actual_id)
   if (!etapaActual) return { ok: false, error: 'Etapa actual no encontrada en la línea' }
+  // ⚠️ `orden` no ordena el recorrido: en SOENA, Generación (13) y Envío (14) van
+  // DESPUÉS de Cita (16) en el flujo y aun así caen aquí como "antes". Se conserva el
+  // criterio porque de él cuelga también el tramo que se archiva; cambiarlo es decisión
+  // de negocio (archivaría formularios y envíos en cada devolución DIAN).
   if (etapaActual.orden < destino.orden) {
     return {
       ok: false,
       error: `El negocio está en ${etapaActual.nombre}, antes de ${destino.nombre}. No hay nada que reprocesar.`,
+      antesDelRetorno: { etapaActual: etapaActual.nombre, etapaRetorno: destino.nombre },
     }
   }
 
@@ -289,7 +344,10 @@ export async function reprocesarNegocio(
   // entre el 13 y el 27 de agosto. La politica estaba bien; el que se quedo
   // atras fue el escritor.
   const admin = createServiceClient()
-  const atribuidoA = await resolverAtribucionReproceso(supabase, negocioId, input.tipo)
+  const atribuidoA = await resolverAtribucionReproceso(supabase, negocioId, input.tipo, {
+    workspaceId,
+    antesDe: archivadoAt,
+  })
   const { error: errEvento } = await db(admin).from('reproceso_eventos').insert({
     workspace_id: workspaceId,
     negocio_id: negocioId,
@@ -378,7 +436,102 @@ export async function reprocesarNegocio(
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
-  return { ok: true, etapaNombre: destino.nombre, ciclo }
+  return { ok: true, etapaNombre: destino.nombre, ciclo, ...(aviso ? { aviso } : {}) }
+}
+
+/**
+ * Registra un error de calidad SIN devolver el caso.
+ *
+ * Existe porque un error propio no siempre deja un tramo que rehacer. V0388: la
+ * documentación no se le envió al cliente antes de la cita del 8-sep, y el caso sigue en
+ * Envío. `reprocesarNegocio` lo rechaza («antes de Cita, no hay nada que reprocesar»), y
+ * con eso el fallo no llegaba a `reproceso_eventos`, que es de donde sale el 40% del bono.
+ * Decisión de Mauricio (2026-09-14): el evento se registra y el caso no se toca.
+ *
+ * Lo que SÍ hace: inserta el evento con la misma atribución que un reproceso, nacido
+ * cerrado (`cerrado_at = abierto_at`) y con `ciclo = CICLO_SIN_RETORNO`, y deja la línea
+ * en el timeline. Lo que NO hace: mover de etapa, archivar bloques, tocar
+ * `negocios.metadata.reproceso` ni notificar (no hay nada que atender).
+ *
+ * A diferencia del reproceso, aquí el evento ES todo el efecto: si el insert falla, se
+ * devuelve el error en vez de seguir.
+ */
+export async function registrarErrorSinDevolver(
+  negocioId: string,
+  input: { tipo: TipoReproceso; causa: CausaReproceso; detalle: string },
+): Promise<{ ok: boolean; error?: string }> {
+  const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
+
+  const detalle = (input.detalle ?? '').trim()
+  if (!detalle) return { ok: false, error: 'Describe qué pasó' }
+  if (!(input.tipo in LABEL_TIPO)) return { ok: false, error: 'Tipo de error no válido' }
+  if (input.causa !== 'error_propio' && input.causa !== 'criterio_tercero') {
+    return { ok: false, error: 'Causa no válida' }
+  }
+
+  const sinPermiso = await puertaReproceso(supabase, role, staffId)
+  if (sinPermiso) return { ok: false, error: sinPermiso }
+
+  const { data: negocio } = await db(supabase)
+    .from('negocios')
+    .select('id, etapa_actual_id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  if (!negocio) return { ok: false, error: 'Negocio no encontrado' }
+
+  let etapaActual: string | null = null
+  const etapaId = (negocio as { etapa_actual_id: string | null }).etapa_actual_id
+  if (etapaId) {
+    const { data: et } = await db(supabase).from('etapas_negocio').select('nombre').eq('id', etapaId).maybeSingle()
+    etapaActual = (et as { nombre?: string } | null)?.nombre ?? null
+  }
+
+  const ahora = new Date().toISOString()
+  const atribuidoA = await resolverAtribucionReproceso(supabase, negocioId, input.tipo, {
+    workspaceId,
+    antesDe: ahora,
+  })
+
+  // Con `service_role`: `authenticated` solo tiene SELECT sobre esta tabla. Con el cliente
+  // de la sesión el insert muere con 42501 (PR #440).
+  const { error: errEvento } = await db(createServiceClient()).from('reproceso_eventos').insert({
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    ciclo: CICLO_SIN_RETORNO,
+    tipo: input.tipo,
+    causa: input.causa,
+    detalle,
+    atribuido_a: atribuidoA,
+    abierto_por: staffId ?? null,
+    abierto_at: ahora,
+    cerrado_at: ahora,
+  })
+  if (errEvento) {
+    console.error('[reproceso] no se pudo registrar el error sin devolver:', errEvento)
+    return { ok: false, error: 'No se pudo registrar el error. Intenta de nuevo o avísale a MeTRIK.' }
+  }
+
+  if (staffId) {
+    // `sistema`: no hay cambio de etapa. Ver la nota del CHECK en `reprocesarNegocio`.
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: staffId,
+      contenido: contenidoErrorSinRetorno({
+        tipo: LABEL_TIPO[input.tipo],
+        causa: input.causa,
+        etapaActual,
+        detalle,
+      }),
+    }, 'registrarErrorSinDevolver')
+  }
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { ok: true }
 }
 
 /**

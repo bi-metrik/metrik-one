@@ -116,7 +116,10 @@ async function main() {
       continue
     }
 
-    const atribuidoA = await resolverAtribucionReproceso(supabase, n.id, m.tipo)
+    const atribuidoA = await resolverAtribucionReproceso(supabase, n.id, m.tipo, {
+      workspaceId,
+      antesDe: m.abierto_at,
+    })
     if (!atribuidoA) sinAtribuir++
 
     const fila = {
