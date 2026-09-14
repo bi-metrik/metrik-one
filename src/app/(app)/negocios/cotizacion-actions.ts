@@ -1147,8 +1147,13 @@ export async function recalcularTotales(cotizacionId: string) {
   // devuelve `null` y esto cae EXACTAMENTE al comportamiento de siempre. Es el corte
   // que deja intactas a Termotech, Arca, WMC y a las cotizaciones que ya existen: no
   // hay un flag que alguien pueda encender por error, hay una fila que no existe.
+  //
+  // ⚠️ La cotizacion, sus items y sus itinerarios se leen UNA vez y se pasan a los
+  // dos helpers. Esta funcion corre en cada tecla del editor: releerlos por cada uno
+  // eran cuatro idas y vueltas mas por recalculo, en la pantalla mas pesada.
   const ctxItin = await contextoDeCotizacion(supabase, cotizacionId)
-  const principal = ctxItin ? await totalDelPrincipal(supabase, cotizacionId, ctxItin) : null
+  const filasItin = ctxItin ? await leerItinerarios(supabase, cotizacionId) : null
+  const principal = ctxItin ? await totalDelPrincipal(supabase, cotizacionId, ctxItin, filasItin) : null
 
   await supabase
     .from('cotizaciones')
@@ -1163,7 +1168,9 @@ export async function recalcularTotales(cotizacionId: string) {
   // marcado para propuesta. Recalcular es justo el momento en que los costos se
   // movieron, asi que es aqui donde se revisa — no en cada boton de la pantalla, que
   // es como se olvida uno.
-  const desmarcados = ctxItin ? await desmarcarLosQueYaNoPueden(supabase, cotizacionId) : []
+  const desmarcados = ctxItin && filasItin && filasItin.length > 0
+    ? await desmarcarLosQueYaNoPueden(supabase, cotizacionId, { ctx: ctxItin, filas: filasItin })
+    : []
 
   return {
     success: true,

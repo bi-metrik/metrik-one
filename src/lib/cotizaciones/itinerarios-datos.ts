@@ -274,8 +274,12 @@ export async function totalDelPrincipal(
   supabase: Supabase,
   cotizacionId: string,
   ctx: ContextoCotizacion,
+  /** Las filas ya leídas, si quien llama las tiene. Evita releerlas. */
+  filasYaLeidas?: FilaItinerario[] | null,
 ): Promise<{ precioVenta: number; costoDirecto: number; itinerarioId: string } | null> {
-  const filas = await leerItinerarios(supabase, cotizacionId)
+  const filas = filasYaLeidas !== undefined
+    ? filasYaLeidas
+    : await leerItinerarios(supabase, cotizacionId)
   if (filas === null || filas.length === 0) return null
   const principal = filas.find(f => f.esPrincipal)
   if (!principal) return null
@@ -303,10 +307,21 @@ export async function totalDelPrincipal(
 export async function desmarcarLosQueYaNoPueden(
   supabase: Supabase,
   cotizacionId: string,
+  /**
+   * El contexto y las filas ya leídos, si quien llama los tiene.
+   *
+   * ⚠️ No es una micro-optimización: `recalcularTotales` corre en cada tecla del
+   * editor, y sin esto esta función volvía a pedir la cotización, sus ítems con
+   * rubros y sus itinerarios — cuatro idas y vueltas más por recálculo, en la
+   * pantalla más pesada del producto.
+   */
+  yaLeidos?: { ctx: ContextoCotizacion; filas: FilaItinerario[] | null },
 ): Promise<Desmarcado[]> {
-  const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+  const ctx = yaLeidos?.ctx ?? (await contextoDeCotizacion(supabase, cotizacionId))
   if (!ctx) return []
-  const filas = await leerItinerarios(supabase, cotizacionId)
+  const filas = yaLeidos !== undefined
+    ? yaLeidos.filas
+    : await leerItinerarios(supabase, cotizacionId)
   if (filas === null) return []
 
   const desmarcados: Desmarcado[] = []

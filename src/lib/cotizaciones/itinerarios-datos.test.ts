@@ -23,6 +23,8 @@ type Fila = Record<string, unknown>
 let tablas: Record<string, Fila[]> = {}
 /** Tablas que el doble finge que NO existen (migración sin aplicar). */
 let ausentes = new Set<string>()
+/** Cuántas lecturas hizo el doble, por tabla. Para probar que no se relee de más. */
+let lecturas: Record<string, number> = {}
 
 function clienteFalso() {
   return { from: (tabla: string) => constructor(tabla) }
@@ -63,6 +65,7 @@ function constructor(tabla: string) {
         error: { code: '42P01', message: `relation "public.${tabla}" does not exist` },
       }
     }
+    if (operacion === 'select') lecturas[tabla] = (lecturas[tabla] ?? 0) + 1
     const filas = (tablas[tabla] ?? []).filter(aplica)
     if (operacion === 'update') {
       for (const f of filas) Object.assign(f, payload)
@@ -124,6 +127,7 @@ const COT = 'cot-1'
  */
 function sembrarViaje(opciones: { pisoPct?: number } = {}) {
   ausentes = new Set()
+  lecturas = {}
   tablas = {
     cotizaciones: [{
       id: COT,
@@ -276,6 +280,42 @@ describe('§2.6.5 · desmarcar lo que ya no puede ir a la propuesta', () => {
     tablas.cotizaciones[0].piso_margen_pct = 99
     const desmarcados = await desmarcarLosQueYaNoPueden(clienteFalso(), COT)
     expect(desmarcados.map(d => d.id)).toEqual(['it-cara'])
+  })
+})
+
+describe('reutilizar lo ya leído', () => {
+  it('con el contexto y las filas dados, NO vuelve a leer la base', async () => {
+    // `recalcularTotales` corre en cada tecla del editor. Sin esto, desmarcar volvía
+    // a pedir la cotización, sus ítems con rubros y sus itinerarios.
+    const ctx = (await contextoDeCotizacion(clienteFalso(), COT))!
+    const filas = await leerItinerarios(clienteFalso(), COT)
+    lecturas = {}
+
+    const desmarcados = await desmarcarLosQueYaNoPueden(clienteFalso(), COT, { ctx, filas })
+
+    // El desenlace es el mismo que sin reutilizar: la Económica sale por el piso.
+    expect(desmarcados.map(d => d.nombre)).toEqual(['Económica'])
+    expect(itinerario('it-barata').va_en_propuesta).toBe(false)
+    // Y no se leyó nada de nuevo.
+    expect(lecturas.cotizaciones ?? 0).toBe(0)
+    expect(lecturas.items ?? 0).toBe(0)
+    expect(lecturas.cotizacion_itinerarios ?? 0).toBe(0)
+  })
+
+  it('sin darle nada, sí lee: el control de la prueba de arriba', async () => {
+    lecturas = {}
+    await desmarcarLosQueYaNoPueden(clienteFalso(), COT)
+    expect(lecturas.cotizaciones).toBeGreaterThan(0)
+    expect(lecturas.cotizacion_itinerarios).toBeGreaterThan(0)
+  })
+
+  it('totalDelPrincipal también acepta las filas ya leídas', async () => {
+    const ctx = (await contextoDeCotizacion(clienteFalso(), COT))!
+    const filas = await leerItinerarios(clienteFalso(), COT)
+    lecturas = {}
+    const principal = await totalDelPrincipal(clienteFalso(), COT, ctx, filas)
+    expect(principal?.itinerarioId).toBe('it-cara')
+    expect(lecturas.cotizacion_itinerarios ?? 0).toBe(0)
   })
 })
 
