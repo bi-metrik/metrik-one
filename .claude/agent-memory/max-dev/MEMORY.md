@@ -37,6 +37,7 @@
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; CADUCÓ lo de las migraciones sin aplicar
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; la migración de umbrales YA está aplicada; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado y las tres INERTES: falta la config de datos
+- ⚠️⚠️ [Archivos de trappvel en su propio Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: config ONE puede ir antes del merge, `archivos_one` sin crear, con la marca Drive se cierra
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M
 - ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base)
@@ -83,6 +84,7 @@
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST
+- ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD con conteo sobre tabla inexistente da 204 sin error; Storage rechaza tildes
 - [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo subiendo el árbol
 - [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; el setter nativo o React no se entera
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS y chromium fotografía
