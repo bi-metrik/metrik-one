@@ -10,6 +10,7 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
+import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 
 export async function getCotizacionesNegocio(negocioId: string) {
@@ -35,28 +36,27 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // Fallback con epoch para garantizar unicidad si el RPC falla
   const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
-  // La convención del margen se COPIA de la línea al nacer la cotización y ahí se
-  // queda. Si se leyera de la línea en cada recálculo, reconfigurar la línea le
-  // movería el precio a cotizaciones ya enviadas a clientes.
-  const { convencion, defaultPct } = await politicaMargenDelNegocio(supabase, negocioId)
+  // La convención del margen y sus umbrales se COPIAN de la línea al nacer la
+  // cotización y ahí se quedan. Si se leyeran de la línea en cada recálculo,
+  // reconfigurar la línea le movería el precio —y el veredicto del margen— a
+  // cotizaciones ya enviadas a clientes.
+  const { convencion, defaultPct, pisoPct, avisoPct } = await politicaMargenDelNegocio(supabase, negocioId)
 
-  const { data, error: dbError } = await supabase
-    .from('cotizaciones')
-    .insert({
-      workspace_id: workspaceId,
-      negocio_id: negocioId,
-      consecutivo,
-      codigo: '',
-      modo: 'detallada',
-      valor_total: 0,
-      estado: 'borrador',
-      convencion_margen: convencion,
-      margen_default_pct: defaultPct,
-    } as never)
-    .select('id')
-    .single()
+  const { data, error: dbError } = await insertarCotizacionTolerante(supabase, {
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    consecutivo,
+    codigo: '',
+    modo: 'detallada',
+    valor_total: 0,
+    estado: 'borrador',
+    convencion_margen: convencion,
+    margen_default_pct: defaultPct,
+    piso_margen_pct: pisoPct,
+    aviso_margen_pct: avisoPct,
+  })
 
-  if (dbError) return { success: false as const, error: dbError.message }
+  if (dbError) return { success: false as const, error: dbError.message ?? 'Error al crear cotización' }
   if (!data) return { success: false as const, error: 'Error al crear cotización — intenta de nuevo' }
 
   // No revalidatePath aquí — esta función se llama desde server component render (nueva/page.tsx)
@@ -424,14 +424,47 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
-  // Leer cotización original
-  const { data: original, error: origErr } = await supabase
+  // Leer cotización original.
+  //
+  // ⚠️ La política de margen (convención + default + umbrales) se COPIA de la
+  // original, no se vuelve a resolver contra la línea. Duplicar es corregir el mismo
+  // documento, así que tiene que cotizar con las mismas reglas: resolverla de nuevo
+  // haría que una copia de una cotización vieja saliera con OTRO precio para los
+  // mismos ítems, sin que nada en pantalla lo explique. Antes esto no se copiaba y la
+  // copia caía al default de la columna (`markup`) — con `sobre_venta` en la línea,
+  // un costo de 1.000.000 al 15% pasaba de 1.176.471 a 1.150.000 al duplicar.
+  // `convencion_margen` y `margen_default_pct` existen en la base desde
+  // `20260911220000` pero todavía no están en los tipos generados (`database.ts`),
+  // igual que el `as never` del insert de `createCotizacionDetalladaNegocio`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: originalRaw, error: origErr } = await (supabase as any)
     .from('cotizaciones')
-    .select('modo, descripcion, valor_total')
+    .select('modo, descripcion, valor_total, convencion_margen, margen_porcentaje, margen_default_pct, aiu_admin_pct, aiu_imprevistos_pct, descuento_porcentaje')
     .eq('id', cotizacionId)
     .single()
 
-  if (origErr || !original) return { success: false as const, error: 'Cotización no encontrada' }
+  if (origErr || !originalRaw) return { success: false as const, error: 'Cotización no encontrada' }
+  const original = originalRaw as {
+    modo: string | null
+    descripcion: string | null
+    valor_total: number | null
+    convencion_margen: string | null
+    margen_porcentaje: number | null
+    margen_default_pct: number | null
+    aiu_admin_pct: number | null
+    aiu_imprevistos_pct: number | null
+    descuento_porcentaje: number | null
+  }
+
+  // Los umbrales se piden APARTE y tolerando el error: si la migración no está
+  // aplicada, pedirlos en el `select` de arriba lo tumbaría entero y duplicar
+  // dejaría de funcionar. Misma tolerancia que el insert.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: umbralesOriginal } = await (supabase as any)
+    .from('cotizaciones')
+    .select('piso_margen_pct, aviso_margen_pct')
+    .eq('id', cotizacionId)
+    .maybeSingle()
 
   // Nuevo consecutivo
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
@@ -451,20 +484,26 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
     (hermanos ?? []).map(h => h.descripcion),
   )
 
-  const { data, error: dbError } = await supabase
-    .from('cotizaciones')
-    .insert({
-      workspace_id: workspaceId,
-      negocio_id: negocioId,
-      consecutivo,
-      codigo: '',
-      modo: original.modo,
-      descripcion: descripcionCopia,
-      valor_total: original.valor_total,
-      estado: 'borrador',
-    } as never)
-    .select('id')
-    .single()
+  const { data, error: dbError } = await insertarCotizacionTolerante(supabase, {
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    consecutivo,
+    codigo: '',
+    modo: original.modo,
+    descripcion: descripcionCopia,
+    valor_total: original.valor_total,
+    estado: 'borrador',
+    // La cascada entera de la original: cambiar cualquiera de estos al duplicar le
+    // mueve el precio a la copia sin que nadie lo haya pedido.
+    convencion_margen: original.convencion_margen,
+    margen_porcentaje: original.margen_porcentaje,
+    margen_default_pct: original.margen_default_pct,
+    aiu_admin_pct: original.aiu_admin_pct,
+    aiu_imprevistos_pct: original.aiu_imprevistos_pct,
+    descuento_porcentaje: original.descuento_porcentaje,
+    piso_margen_pct: umbralesOriginal?.piso_margen_pct ?? null,
+    aviso_margen_pct: umbralesOriginal?.aviso_margen_pct ?? null,
+  })
 
   if (dbError) return { success: false as const, error: dbError.message }
 

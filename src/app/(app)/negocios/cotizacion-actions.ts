@@ -8,6 +8,7 @@ import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
+import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -323,6 +324,95 @@ async function registrarCambioDeMargen(args: {
     valor_nuevo: rastro.valorNuevo,
     contenido: rastro.contenido,
   }, 'updateItem')
+}
+
+/**
+ * El rastro de cambios de margen, para poder LEERLO.
+ *
+ * `registrarCambioDeMargen` lo escribe desde el 2026-09-11 y hasta hoy no lo mostraba
+ * ninguna pantalla: medido contra producción el 2026-09-14, `activity_log` tiene CERO
+ * filas con `campo_modificado = 'margen_porcentaje'` en los 17 workspaces. O sea que
+ * "el dato ya está en base" era cierto como mecanismo y falso como hecho — lo que se
+ * puede leer aquí es lo que pase de ahora en adelante.
+ *
+ * ⚠️ El rastro cuelga del NEGOCIO (o de la oportunidad), no de la cotización:
+ * `activity_log` no tiene `cotizacion_id`. Así que esta lista cubre los cambios de
+ * margen de TODAS las cotizaciones del mismo negocio, y la pantalla tiene que decirlo.
+ * Filtrarla por los nombres de los ítems de esta cotización sería peor: los nombres se
+ * repiten entre variantes del mismo viaje y el filtro escondería cambios reales.
+ *
+ * Devuelve el error en vez de una lista vacía: un `?? []` convertiría un fallo de
+ * permisos en "nadie ha tocado el margen", que es la afirmación contraria.
+ */
+export async function getRastroDeMargen(cotizacionId: string): Promise<
+  | { ok: true; entradas: RastroMargenEntrada[]; alcance: 'negocio' | 'oportunidad' }
+  | { ok: false; error: string }
+> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const { data: cot, error: cotErr } = await supabase
+    .from('cotizaciones')
+    .select('negocio_id, oportunidad_id, workspace_id')
+    .eq('id', cotizacionId)
+    .maybeSingle()
+
+  if (cotErr) return { ok: false, error: cotErr.message }
+  const fila = cot as { negocio_id: string | null; oportunidad_id: string | null; workspace_id: string | null } | null
+  // El filtro por workspace es explícito, no un efecto secundario del RLS.
+  if (!fila || fila.workspace_id !== workspaceId) return { ok: false, error: 'Cotización no encontrada' }
+
+  const entidadId = fila.negocio_id ?? fila.oportunidad_id
+  const alcance = fila.negocio_id ? ('negocio' as const) : ('oportunidad' as const)
+  if (!entidadId) return { ok: true, entradas: [], alcance }
+
+  const { data, error: logErr } = await supabase
+    .from('activity_log')
+    .select('id, contenido, valor_anterior, valor_nuevo, created_at, autor:staff!activity_log_autor_id_fkey(full_name)')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', alcance)
+    .eq('entidad_id', entidadId)
+    .eq('campo_modificado', 'margen_porcentaje')
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (logErr) return { ok: false, error: logErr.message }
+
+  const entradas = ((data ?? []) as unknown as RastroMargenFila[]).map((f) => {
+    // El embed llega como objeto o como array de uno según cómo resuelva PostgREST la
+    // relación. Mismo caso que en `politicaMargenDelNegocio`.
+    const autor = Array.isArray(f.autor) ? f.autor[0] : f.autor
+    return {
+      id: f.id,
+      contenido: f.contenido ?? '',
+      valorAnterior: f.valor_anterior ?? null,
+      valorNuevo: f.valor_nuevo ?? null,
+      creadoEn: f.created_at,
+      autor: autor?.full_name ?? null,
+    }
+  })
+
+  return { ok: true, entradas, alcance }
+}
+
+/** Una línea del rastro, ya lista para pintar. */
+export interface RastroMargenEntrada {
+  id: string
+  contenido: string
+  valorAnterior: string | null
+  valorNuevo: string | null
+  creadoEn: string
+  /** `null` cuando el cambio quedó sin autor (proceso automático o staff borrado). */
+  autor: string | null
+}
+
+type RastroMargenFila = {
+  id: string
+  contenido: string | null
+  valor_anterior: string | null
+  valor_nuevo: string | null
+  created_at: string
+  autor: { full_name: string | null } | { full_name: string | null }[] | null
 }
 
 export async function deleteItem(id: string) {
@@ -670,6 +760,10 @@ export async function duplicarCotizacion(id: string) {
   const descPct = discountData?.descuento_porcentaje ?? 0
   const descVal = discountData?.descuento_valor ?? 0
   const negocioIdOrig = discountData?.negocio_id ?? null
+  // `convencion_margen` y `margen_default_pct` existen en la base pero no en los tipos
+  // generados; `piso_margen_pct` y `aviso_margen_pct` puede que ni existan todavía
+  // (migración `20260914160000`). El `select('*')` de arriba las trae si están.
+  const politicaOriginal = (discountData ?? {}) as Record<string, unknown>
 
   // Get new consecutivo
   const { data: dupConsRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
@@ -700,9 +794,9 @@ export async function duplicarCotizacion(id: string) {
     hermanos.map(h => h.descripcion),
   )
 
-  const { data: newCot, error: dbError } = await supabase
-    .from('cotizaciones')
-    .insert({
+  // Por el insert tolerante, como las otras dos vías: sin él, duplicar desde el
+  // editor dejaría de funcionar hasta que la migración de los umbrales se aplique.
+  const { data: newCot, error: dbError } = await insertarCotizacionTolerante(supabase, {
       workspace_id: workspaceId,
       oportunidad_id: original.oportunidad_id,
       consecutivo: dupCons,
@@ -719,9 +813,19 @@ export async function duplicarCotizacion(id: string) {
       negocio_id: negocioIdOrig,
       aiu_admin_pct: discountData?.aiu_admin_pct ?? null,
       aiu_imprevistos_pct: discountData?.aiu_imprevistos_pct ?? null,
-    })
-    .select('id')
-    .single()
+      // ⚠️ La política de margen se COPIA, no se vuelve a resolver contra la línea:
+      // duplicar es corregir el mismo documento y tiene que cotizar con las mismas
+      // reglas. Sin esto la copia caía al default de la columna (`markup`) y, con
+      // una línea en `sobre_venta`, un costo de 1.000.000 al 15% pasaba de
+      // 1.176.471 a 1.150.000 sin que nada en pantalla lo explicara.
+      convencion_margen: politicaOriginal.convencion_margen ?? null,
+      margen_default_pct: politicaOriginal.margen_default_pct ?? null,
+      // Los umbrales congelados viajan igual. `discountData` sale de un `select('*')`,
+      // así que mientras la migración no esté aplicada estas dos claves valen `null`
+      // y la copia cae a la política de su línea, como hoy.
+      piso_margen_pct: politicaOriginal.piso_margen_pct ?? null,
+      aviso_margen_pct: politicaOriginal.aviso_margen_pct ?? null,
+  })
 
   if (dbError) return { success: false, error: dbError.message }
 
@@ -750,7 +854,13 @@ export async function duplicarCotizacion(id: string) {
           cantidad: item.cantidad ?? 1,
           // Sin heredar estas dos, la copia perderia el precio que alguien escribio:
           // nace con precio_manual = false y el primer recalculo la baja al costo.
-          margen_porcentaje: item.margen_porcentaje ?? 0,
+          //
+          // ⚠️ `?? null`, NUNCA `?? 0`. `margen_porcentaje` es NULLABLE y `null`
+          // significa "usa el de la cotización"; 0 significa "esta línea va a costo".
+          // Con `?? 0` toda línea que heredaba el margen se duplicaba marcada como
+          // excepción al 0%, así que la copia salía vendida al costo y subir el
+          // margen de la cotización ya no movía ninguna línea.
+          margen_porcentaje: item.margen_porcentaje ?? null,
           precio_manual: item.precio_manual ?? false,
         })
         .select('id')
