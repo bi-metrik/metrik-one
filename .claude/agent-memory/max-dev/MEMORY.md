@@ -4,7 +4,7 @@
 
 - [sprint-10 supervisor y contador](project_sprint10_roles.md) — Patrones para agregar roles nuevos, decisiones de supervisor/contador, campo area y display_role
 - [SOENA pipeline VE 2026-04-05](project_soena_ve_pipeline.md) — Etapas, gates, custom fields, estado_ve, gotchas del flujo operativo VE/HEV/PHEV
-- ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #690/#692 mergeados; #705 (tramo por flujo) SIN mergear: V0388 pierde el registro sin devolver
+- ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge; backfill de 72 bloques sin aplicar; V0388 cae en supervisora (no pesa)
 - [Formato 010 DIAN](project_formulario_010_dian.md) — Overlay AcroForm, aplanado (flatten), seccional casilla 12 con código auto, presets config-driven, scripts de prueba
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — Solo corre en producción (credenciales sensibles en Vercel); el paso 4 del cron sigue sin decisión de Mauricio
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — un PR que cambie qué emite el cron dispara cuentas reales horas después; fuera del merge automático
@@ -86,7 +86,7 @@
 - [Renderizar client components en aislamiento](reference_render_appshell_aislado.md) — el AppShell solo pide `usePathname`+`useRouter`; un import de VALOR desde un `'use server'` sí se dobla (uno de tipo no)
 - [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
 - [SQL y publicacion en metrik-valida](reference_sql_y_publicacion_metrik_valida.md) — si el clasificador tapa las credenciales, el catalogo vivo se lee en las paginas publicas; copia archivo por archivo, PR por `gh api`, y restaurar el checkout
-- [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger; la verificación va en sentencia aparte
+- [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger; SQL que no se puede ensayar se valida con `pglast`
 - ⚠️⚠️ [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — `cellDates` SOLO en `json_to_sheet`, y ahí no sirve de nada si la fila trae texto: hay que parsear a `Date` antes
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO; `hyphenationCallback` no lo evita
 - [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
