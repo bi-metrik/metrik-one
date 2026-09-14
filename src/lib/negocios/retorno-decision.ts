@@ -56,6 +56,9 @@ export interface EtapaRetorno {
   routing?: RoutingEtapa | null
 }
 
+/** Lo único que necesita el recorrido del flujo: el `orden` y el routing. */
+export type EtapaDelFlujo = Pick<EtapaRetorno, 'orden' | 'routing'>
+
 /**
  * Lee las declaraciones de una etapa. Solo formas bien escritas cuentan: devolver un caso
  * a otra etapa es demasiado caro para hacerlo por una config a medio escribir.
@@ -96,7 +99,7 @@ export function leerDeclaraciones(
  * es contiguo). La diferencia es que aquí interesan TODAS las salidas, no solo la de por
  * defecto: para saber si un caso está aguas abajo hay que recorrer las ramas.
  */
-export function destinosDeEtapa(etapa: EtapaRetorno, etapas: readonly EtapaRetorno[]): number[] {
+export function destinosDeEtapa(etapa: EtapaDelFlujo, etapas: readonly EtapaDelFlujo[]): number[] {
   const routing = etapa.routing
   if (!routing) {
     const siguiente = [...etapas].sort((a, b) => a.orden - b.orden).find(e => e.orden > etapa.orden)
@@ -121,8 +124,10 @@ export function destinosDeEtapa(etapa: EtapaRetorno, etapas: readonly EtapaRetor
  * hacia atrás.
  *
  * Devuelve órdenes, no ids, porque el routing habla en órdenes.
+ *
+ * También la usa el reproceso (`retorno-reproceso.ts`) para decidir qué tramo se rehace.
  */
-export function etapasAguasAbajo(etapas: readonly EtapaRetorno[], origenOrden: number): Set<number> {
+export function etapasAguasAbajo(etapas: readonly EtapaDelFlujo[], origenOrden: number): Set<number> {
   const porOrden = new Map(etapas.map(e => [e.orden, e]))
   const vistas = new Set<number>()
   const cola = [origenOrden]

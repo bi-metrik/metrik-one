@@ -21,14 +21,26 @@
  *    sembrado (`derivados`, ver `derivarRespuestaDeCita`). Mismo criterio.
  * 4. Si tampoco, vuelve a D como hoy, y quien llama avisa que no se pudo confirmar.
  *
- * ⚠️ El "antes de D" se mide con `orden`, igual que el resto de `reproceso-actions.ts`,
- * aunque `orden` no ordena el recorrido (ver el aviso en ese archivo). Mezclar dos
- * vocabularios en la misma operación la haría decir cosas distintas en dos pasos.
+ * ── "Antes" y "después" se miden por el FLUJO, no por `orden` ───────────────────────
+ * El `orden` no ordena el recorrido. En la línea GIT EV/HEV de SOENA el flujo DIAN es
+ * Cita (16) → Notificación (17) → Anexos (18) → Generación (13) → Envío (14) →
+ * Seguimiento (19) → Facturación (15). Comparando `orden`, un reproceso desde Seguimiento
+ * archivaba Cita, Notificación, Anexos y Seguimiento pero NO Generación ni Envío (13 y 14
+ * «van antes» de 16), y un caso en Generación o Envío no se podía reprocesar nunca. Medido
+ * el 2026-09-14: 15 devoluciones DIAN desde Seguimiento, ninguna archivó esas dos etapas.
+ * Decisión de Mauricio (2026-09-14): cuando la DIAN devuelve el caso, Generación y Envío
+ * también se reabren.
+ *
+ * Por eso las TRES preguntas de esta operación usan el mismo vocabulario —qué decisiones
+ * van antes de D, si el caso está antes del retorno y qué tramo se rehace—: el recorrido
+ * del routing (`etapasAguasAbajo`, el mismo de `retorno-decision.ts`). Una línea que no
+ * declara routing en ninguna etapa se sigue midiendo por `orden`, exactamente como antes.
  *
  * Puro: no toca base ni red.
  */
 
 import { esRespuesta, type RoutingEtapa } from './dato-de-decision'
+import { etapasAguasAbajo } from './retorno-decision'
 
 export interface EtapaRetorno {
   id: string
@@ -42,10 +54,72 @@ export function routingDeEtapa(etapa: EtapaRetorno): RoutingEtapa | null {
   return r && typeof r === 'object' ? r : null
 }
 
-/** Las etapas anteriores a D que tienen alguna rama condicional hacia D. */
+/** ¿Alguna etapa de la línea declara routing? Sin ninguno, el recorrido es el `orden`. */
+export function lineaConRouting(etapas: readonly EtapaRetorno[]): boolean {
+  return etapas.some((e) => routingDeEtapa(e) !== null)
+}
+
+/**
+ * Los `orden` que un caso puede pisar saliendo de `origenOrden`, incluida ella misma.
+ *
+ * Con routing en la línea, se recorren TODAS las salidas (default y ramas) con
+ * `etapasAguasAbajo`. Sin routing en ninguna etapa, las de `orden` mayor o igual: es el
+ * criterio de siempre y ninguna línea sin routing cambia de comportamiento.
+ */
+export function alcanzablesPorFlujo(etapas: readonly EtapaRetorno[], origenOrden: number): Set<number> {
+  if (!lineaConRouting(etapas)) {
+    return new Set(etapas.filter((e) => e.orden >= origenOrden).map((e) => e.orden))
+  }
+  const flujo = etapas.map((e) => ({ orden: e.orden, routing: routingDeEtapa(e) }))
+  const out = etapasAguasAbajo(flujo, origenOrden)
+  out.add(origenOrden)
+  return out
+}
+
+export type TramoReproceso =
+  | { antesDelRetorno: true }
+  | { antesDelRetorno: false; etapas: EtapaRetorno[] }
+
+/**
+ * El tramo que se rehace al devolver un caso de `actualOrden` a `retornoOrden`.
+ *
+ * - **Antes del retorno**: la etapa actual no se alcanza desde el retorno. No hay tramo que
+ *   rehacer; quien llama ofrece registrar el error sin devolver el caso.
+ * - **Tramo**: toda etapa que esté en ALGÚN camino del retorno a la actual (se alcanza desde
+ *   el retorno y desde ella se alcanza la actual). Así, en SOENA, volver de Seguimiento a
+ *   Cita rehace Cita, Notificación, Anexos, Generación, Envío y Seguimiento, y deja fuera
+ *   Facturación, que va después.
+ *
+ * Con un ciclo en el flujo (Notificación → Cita por PQR rechazado) la etapa del ciclo entra
+ * al tramo aunque el caso esté en la misma etapa de retorno: un caso en Cita pudo haber
+ * pasado ya por Notificación y volver. Si no pasó, sus bloques no tienen datos de ese ciclo
+ * y el archivado los salta.
+ */
+export function tramoDelReproceso(
+  etapas: readonly EtapaRetorno[],
+  retornoOrden: number,
+  actualOrden: number,
+): TramoReproceso {
+  const desdeRetorno = alcanzablesPorFlujo(etapas, retornoOrden)
+  if (!desdeRetorno.has(actualOrden)) return { antesDelRetorno: true }
+  return {
+    antesDelRetorno: false,
+    etapas: etapas.filter((e) => desdeRetorno.has(e.orden) && alcanzablesPorFlujo(etapas, e.orden).has(actualOrden)),
+  }
+}
+
+/**
+ * Las etapas ANTES de D (D no las alcanza por el flujo) que tienen alguna rama condicional
+ * hacia D, la más cercana primero. Notificación también manda a Cita, pero va después: es el
+ * desenlace del PQR, no una decisión de entrada.
+ *
+ * "La más cercana" se sigue ordenando por `orden`: en SOENA coincide con el flujo (Cartera
+ * → Entrega → Cita) y no hay otra línea que declare un punto de retorno.
+ */
 export function decisionesHaciaDestino(etapas: readonly EtapaRetorno[], destinoOrden: number): EtapaRetorno[] {
+  const despuesDeD = alcanzablesPorFlujo(etapas, destinoOrden)
   return etapas
-    .filter((e) => e.orden < destinoOrden)
+    .filter((e) => !despuesDeD.has(e.orden))
     .filter((e) => (routingDeEtapa(e)?.conditional ?? []).some((c) => c?.etapa_orden === destinoOrden))
     .sort((a, b) => b.orden - a.orden)
 }

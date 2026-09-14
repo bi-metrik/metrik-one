@@ -90,8 +90,8 @@ export function ReprocesoBanner({
 /**
  * Confirmación de un error que se registra SIN devolver el caso.
  *
- * Aparece cuando el caso está antes del punto de retorno y no hay tramo que rehacer
- * (V0388: en Envío, con la cita ya pasada). Lo que tiene que quedar claro ANTES de
+ * Aparece cuando el caso está antes del punto de retorno por el flujo y no hay tramo que
+ * rehacer (un caso en Entrega, antes de Cita). Lo que tiene que quedar claro ANTES de
  * confirmar es que el caso no se mueve: por eso va en su propia vista y no como un
  * segundo botón junto a "Abrir reproceso", donde se confunde con él.
  *
