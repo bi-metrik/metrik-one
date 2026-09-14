@@ -212,6 +212,77 @@ describe('generarCuentasCobroPeriodo · idempotencia contra el caso real de sept
   })
 })
 
+// ─── Paso 3: el cobro programado que crea el generador nace SIN pagar ────────
+//
+// `cobros.fecha` tiene `DEFAULT CURRENT_DATE` y "fecha NULL" es lo que el producto
+// entiende por "no pagado". Si el insert del paso 3 no manda `fecha: null`, el cobro
+// nace con la fecha de hoy (parece recaudado) y la relectura del paso 4, que filtra
+// `.is('fecha', null)`, no lo encuentra: la cuota nunca entra en su propia cuenta.
+// Pasaba con un plan uniforme cuya cuota del mes todavia no existia, porque el paso 1
+// del cron solo la crea tres dias antes del vencimiento y la emision abre el dia 10.
+
+describe('generarCuentasCobroPeriodo · paso 3, cobro programado nuevo', () => {
+  const EMPRESA = 'emp-nueva'
+  const NEGOCIO = 'neg-nuevo'
+  const PLAN = 'plan-nuevo'
+
+  function sembrarPlanSinCobro() {
+    estado.fixtures = {
+      planes_cobro: [plan(PLAN, NEGOCIO, 900_000, '2026-09-15', 6)],
+      plan_cobro_cuotas: [],
+      cobros: [],
+      negocios: [{ id: NEGOCIO, codigo: 'N1 26 1', nombre: 'Negocio nuevo', empresa_id: EMPRESA, carpeta_url: null }],
+      empresas: [{ id: EMPRESA, nombre: 'Nueva', razon_social: 'Empresa Nueva SAS' }],
+      planillas_pila_periodo: [],
+      cuentas_cobro_emitidas: [],
+      profiles: [],
+    }
+    // La base, no el codigo: DEFAULT de la columna y el join de la relectura.
+    estado.defaults = { cobros: { fecha: '2026-09-14' } }
+    estado.embebidos = { cobros: { negocios: { fk: 'negocio_id', tabla: 'negocios' } } }
+  }
+
+  async function emitirDeVerdad() {
+    return generarCuentasCobroPeriodo(clienteFalso() as unknown as SupabaseClient, WS, 2026, 9, {
+      dryRun: false,
+    })
+  }
+
+  it('manda fecha: null explicito en el insert del cobro programado', async () => {
+    sembrarPlanSinCobro()
+
+    await emitirDeVerdad()
+
+    const insertCobro = estado.insertados.filter((i) => i.tabla === 'cobros')
+    expect(insertCobro).toHaveLength(1)
+    expect(insertCobro[0].fila).toMatchObject({ plan_cobro_id: PLAN, numero_cuota: 1, tipo_cobro: 'programado' })
+    expect(insertCobro[0].fila).toHaveProperty('fecha', null)
+  })
+
+  it('con el DEFAULT de la base, el cobro recien creado entra en su propia cuenta', async () => {
+    sembrarPlanSinCobro()
+
+    const r = await emitirDeVerdad()
+
+    const cobroNuevo = (estado.fixtures.cobros ?? []).find((c) => c.plan_cobro_id === PLAN)
+    expect(cobroNuevo).toBeDefined()
+
+    // La consecuencia primero: con el codigo viejo la relectura no ve el cobro y
+    // no hay grupo que emitir.
+    expect(r.errores).toEqual([])
+    expect(r.cuentasCreadas).toBe(1)
+    const detalle = detalleDe(r, EMPRESA)
+    expect(detalle?.estado).toBe('creada')
+    expect(detalle?.cobros_ids).toEqual([cobroNuevo?.id])
+
+    const cuenta = estado.insertados.find((i) => i.tabla === 'cuentas_cobro_emitidas')
+    expect(cuenta?.fila.cobros_ids).toEqual([cobroNuevo?.id])
+
+    // Y la causa: persistido sin pagar pese al DEFAULT.
+    expect(cobroNuevo?.fecha ?? null).toBeNull()
+  })
+})
+
 describe('planesConCronogramaExplicito', () => {
   it('lanza si no puede leer plan_cobro_cuotas en vez de tratar todo plan como uniforme', async () => {
     // Un Set vacio por error manda los planes explicitos al generador uniforme:
