@@ -11,7 +11,7 @@
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — mergeado y aplicado, pero el módulo NO está encendido y el sync NO está desplegado; la atribución es last-touch
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
-- ⚠️ [/equipo segmentada por mes](project_equipo_por_mes.md) — PR #597 sin mergear (falta QA en pantalla): el 4925%, el reloj propio de la pestaña de operaciones y lo que NO se segmenta
+- ⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 YA en main, #626 sin mergear (falta QA): el 4925%, el corte de la tabla, y el brief cuya premisa caducó en 3 horas
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
 - ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer (el switch cambia los archivos bajo tus pies); el lint de CI no ve lo sin commitear; otra sesión te borra la rama; `gh pr merge` miente al fallar; otro repo = tarball + API; el scratchpad es COMPARTIDO
 - ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote y /v/ quedó fuera; migración 10 años pendiente
