@@ -5400,18 +5400,48 @@ export async function actualizarBloqueData(
   return { error: null }
 }
 
-// ── Inicializar bloque_items desde templates ─────────────────────────────────
-// Llamar en primer render de BloqueChecklist cuando initialItems está vacío
+// ── Inicializar bloque_items desde la plantilla del bloque ───────────────────
+// La llaman BloqueChecklist y BloqueCronograma AL MONTAR, para cualquiera que abra
+// el negocio: también quien lo ve de solo lectura, desde otra área o en el historial.
+// No es un gesto de edición, es materializar la plantilla que declara la config.
+// Por eso el guard es el de VER el negocio (el mismo acceso que la página) y no
+// guardEditarBloque: con ese, el primero sin permiso de edición que abriera el
+// negocio vería el checklist vacío y un error. Lo que quien llama NO decide es qué
+// se escribe: la plantilla se lee de la config aquí, solo en los tipos que la usan
+// y solo si el bloque todavía no tiene items.
+
+const TIPOS_CON_PLANTILLA_DE_ITEMS = new Set(['checklist', 'checklist_soporte', 'cronograma'])
 
 export async function inicializarBloqueItems(
-  negocioBloqueId: string,
-  templates: Array<{ label: string; tipo: string }>
+  negocioBloqueId: string
 ): Promise<{
   items: Array<{ id: string; label: string; tipo: string; completado: boolean; completado_por: string | null; completado_at: string | null; link_url: string | null }>
   error: string | null
 }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { items: [], error: 'No autenticado' }
+
+  // Guard: resolver el negocio y la plantilla del bloque, y validar que quien llama puede ver el negocio
+  const { data: bloqueRow } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, bloque_configs!inner(config_extra, bloque_definitions!inner(tipo))')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!bloqueRow) return { items: [], error: 'Bloque no encontrado' }
+  const bloque = bloqueRow as {
+    negocio_id: string
+    bloque_configs: { config_extra: { items?: unknown } | null; bloque_definitions: { tipo: string } | null } | null
+  }
+  const guard = await guardVerNegocio(bloque.negocio_id)
+  if (!guard.ok) return { items: [], error: guard.error ?? 'Sin permiso' }
+
+  const tipoBloque = bloque.bloque_configs?.bloque_definitions?.tipo ?? ''
+  const plantillaConfig = bloque.bloque_configs?.config_extra?.items
+  const templates = TIPOS_CON_PLANTILLA_DE_ITEMS.has(tipoBloque) && Array.isArray(plantillaConfig)
+    ? (plantillaConfig as Array<{ label?: unknown; tipo?: unknown }>)
+        .filter(t => typeof t?.label === 'string' && t.label.trim() !== '')
+        .map(t => ({ label: t.label as string, tipo: typeof t.tipo === 'string' ? t.tipo : 'texto' }))
+    : []
 
   // Verificar si ya existen items
   const { data: existentes } = await db(supabase)
@@ -5442,7 +5472,10 @@ export async function inicializarBloqueItems(
     }
   }
 
-  // Crear items desde templates
+  // Sin plantilla declarada no hay nada que materializar
+  if (templates.length === 0) return { items: [], error: null }
+
+  // Crear items desde la plantilla de la config
   const rows = templates.map((t, i) => ({
     negocio_bloque_id: negocioBloqueId,
     label: t.label,
@@ -5936,6 +5969,10 @@ export async function reevaluarBloqueCronograma(
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
+
+  // Guard: validar permiso sobre el bloque (rol+área+responsable) antes de escribir
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
   // Leer items actuales
   const { data: itemsData } = await db(supabase)

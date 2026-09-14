@@ -45,6 +45,9 @@ export default function BloqueChecklist({
   const [items, setItems] = useState<BloqueItem[]>(initialItems)
   const [isPending, startTransition] = useTransition()
   const [initializing, setInitializing] = useState(false)
+  // Si la plantilla no se pudo materializar, la pantalla no puede decir "sin ítems
+  // configurados": la config SÍ los declara.
+  const [errorInicializando, setErrorInicializando] = useState(false)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   useEffect(() => {
@@ -55,9 +58,12 @@ export default function BloqueChecklist({
   useEffect(() => {
     if (initialItems.length === 0 && itemTemplates.length > 0 && negocioBloqueId) {
       setInitializing(true)
-      inicializarBloqueItems(negocioBloqueId, itemTemplates).then(result => {
+      // La plantilla la lee el servidor de la config del bloque; aquí solo se decide
+      // si hace falta pedirla.
+      inicializarBloqueItems(negocioBloqueId).then(result => {
         setInitializing(false)
         if (result.error) {
+          setErrorInicializando(true)
           toast.error('Error inicializando checklist: ' + result.error)
         } else {
           setItems(result.items)
@@ -126,6 +132,10 @@ export default function BloqueChecklist({
 
   if (initializing) {
     return <p className="text-xs text-tinta-suave">Cargando checklist...</p>
+  }
+
+  if (items.length === 0 && errorInicializando) {
+    return <p className="text-xs text-tinta-suave">No se pudieron cargar los ítems de este checklist.</p>
   }
 
   if (items.length === 0) {
