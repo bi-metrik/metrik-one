@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
-import { CalendarDays, Plus, CheckCircle2, Circle, Trash2 } from 'lucide-react'
+import { CalendarDays, Plus, CheckCircle2, Circle, Trash2, GanttChart } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems, leerVersionCronograma, type VersionCronograma } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import GanttCronogramaModal from './GanttCronogramaModal'
 
 /**
  * Un paso del cronograma. Las fechas van en dos pares que NO significan lo mismo:
@@ -57,6 +58,7 @@ export default function BloqueCronograma({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Partial<CronogramaItem>>({})
   const [version, setVersion] = useState<VersionCronograma | null>(null)
+  const [ganttAbierto, setGanttAbierto] = useState(false)
   const preloadedRef = useRef(false)
   // Si la plantilla no se pudo materializar, la pantalla no puede decir "sin
   // actividades configuradas": la config SÍ las declara.
@@ -462,7 +464,21 @@ export default function BloqueCronograma({
             Versión {version.numero}
           </span>
         )}
+        {/* La vista que se comparte con el cliente. Se ofrece también en modo visible:
+            quien solo mira el negocio es justamente quien más necesita el documento. */}
+        {negocioBloqueId && items.some(i => !i.id.startsWith('_tmp_')) && (
+          <button
+            type="button"
+            onClick={() => setGanttAbierto(true)}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] px-2.5 py-1 text-[10px] font-medium text-tinta hover:bg-black/[0.03]"
+          >
+            <GanttChart className="h-3 w-3" /> Ver Gantt y PDF
+          </button>
+        )}
       </div>
+      {ganttAbierto && (
+        <GanttCronogramaModal negocioBloqueId={negocioBloqueId} onClose={() => setGanttAbierto(false)} />
+      )}
       {version && version.cambios.length > 0 && (
         <p className="text-[10px] leading-relaxed text-tinta-suave/70">
           Último cambio de planeación: {version.cambios[0]}
