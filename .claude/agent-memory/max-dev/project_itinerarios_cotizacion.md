@@ -14,7 +14,17 @@ Trappvel (`proyectos/trappvel/clarity/docs/diseno/motor-cotizacion.md`, §9): se
 el margen de cada combinación no se ve. Caso medido: mismo hotel y fechas, AVIANCA deja
 13,0% y WINGO **3,1%**.
 
-## ⚠️⚠️ DOS migraciones de cotización sin aplicar, y se pisan de frente
+## ✅ CADUCÓ · las dos migraciones YA están aplicadas
+
+**Medido el 2026-09-14 contra el ledger:** `20260914160000 cotizaciones_umbrales_margen` y
+`20260914200000 cotizacion_itinerarios` están las dos aplicadas y registradas. Lo de
+abajo se conserva porque el MÉTODO sigue valiendo (comprobar el estado real antes de
+asumir cualquiera de los dos mundos), pero el hecho ya no.
+
+Las dos piezas de tolerancia (`congelar-umbrales.ts`, `tolerar-itinerarios.ts`) ya se
+pueden borrar: llevan escrita su fecha de defunción.
+
+## ~~DOS migraciones de cotización sin aplicar~~
 
 1. `20260914160000_cotizaciones_umbrales_margen.sql` (del #682) — `cotizaciones.piso_margen_pct`, `aviso_margen_pct`.
 2. `20260914200000_cotizacion_itinerarios.sql` (de este) — `items.grupo/opcion_de/unidad` + `cotizacion_itinerarios` + `itinerario_opciones`.
@@ -38,15 +48,17 @@ Mientras no se apliquen, **todo funciona como antes** a propósito:
 Las dos piezas de tolerancia (`congelar-umbrales.ts`, `tolerar-itinerarios.ts`) llevan
 escrita su fecha de defunción: se borran cuando las migraciones estén aplicadas.
 
-## ⚠️⚠️ Hueco vivo: el total suma TODAS las alternativas hasta que haya principal
+## ✅ CERRADO por el #709 · el total ya NO suma todas las alternativas
 
 Con dos vuelos declarados en el mismo `grupo` y **ningún itinerario marcado principal**,
 `recalcularTotales` suma AVIANCA **y** WINGO — porque `totalDelPrincipal` devuelve `null`
 y cae a la rama de siempre (que es lo que sostiene R6).
 
-**No se corrigió eligiendo una por cuenta propia: eso es exactamente lo que el principal
-decide.** Se DICE, en ámbar, en los dos estados en que pasa (sin combinaciones, y con
-combinaciones sin principal). Salió del QA en pantalla, no de una prueba.
+Se cerró en [[aporte-al-total-y-sugeridos]] (#709): una ranura con alternativas aporta
+UNA vez, y sin principal aporta el primero por `orden`, declarado supuesto en pantalla.
+El aviso ámbar de la tabla de combinaciones sigue cubriendo su caso (combinaciones
+armadas y ninguna principal); el hueco que faltaba era **alternativas cargadas y cero
+combinaciones**, que es el que llegó vivo a producción.
 
 ## La ranura es el `grupo`, NO el titular
 

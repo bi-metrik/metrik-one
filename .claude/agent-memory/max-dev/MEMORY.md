@@ -31,9 +31,10 @@
 - ⚠️ [Plantilla de cotización Termotech](project_plantilla_cotizacion_termotech.md) — PR #522: reusa `cotizacion_template_slug`, sin migración de esquema; falta UNA sentencia y la ficha del cliente está vacía
 - [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
+- ⚠️⚠️ [Aporte al total y rubros sugeridos](project_aporte_al_total_y_sugeridos.md) — #709 mergeado y migración APLICADA: el defecto del brief que ya estaba cerrado, el TOTAL del PDF trae IVA y el Subtotal no, y por qué gana «tomar el primero»
 - ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700 mergeado: RX1 solo probado contra capturas SINTÉTICAS; el desglose del modelo no es estable y gana el total; la propuesta no se persiste a propósito
-- ⚠️⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado: DOS migraciones de cotización SIN aplicar; el total suma todas las alternativas hasta que haya principal; la ranura es el `grupo`, no el titular
-- ⚠️⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado: la migración de umbrales sigue SIN aplicar (el código la tolera a propósito), el rastro de margen está VACÍO en producción, y la cotización que ya existe congeló `markup`
+- ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; CADUCÓ lo de las migraciones sin aplicar y el hueco del total (lo cerró #709). Vigente: la ranura es el `grupo`, no el titular
+- ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; la migración de umbrales YA está aplicada (caducó). Vigente: el rastro de margen VACÍO y la cotización que congeló `markup`
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M, y termotech no usa rubros
 - ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía, la regla la comparten DOS rutas de duplicación, y falta QA en pantalla
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base); punteros del spec caducos; sin QA en pantalla
@@ -85,6 +86,7 @@
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS y chromium fotografía; rehacer una tanda se verifica con diff de píxeles, y la foto va DESPUÉS del último render
 - ⚠️ [Cambio SOLO de tildes, y la eñe aparte](reference_cambio_solo_de_tildes.md) — la eñe NO es tilde (se corrige sola); hay `anos` que rompen código si los tocas, y el grep compuesto miente
 - [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` ya está y rasteriza SVG; los `<link>` de icono se leen del HTML del build; el preview de Vercel está tras SSO
+- ⚠️ [Leer el texto de un PDF de @react-pdf](reference_leer_texto_de_un_pdf_de_react_pdf.md) — el texto va en HEX y no en `(...)`; y `TOTAL` buscado por subcadena cae dentro de `SUBTOTAL`
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte; y cómo probar que otro PDF no cambió byte a byte
 - [Renderizar client components en aislamiento](reference_render_appshell_aislado.md) — el AppShell solo pide `usePathname`+`useRouter`; un import de VALOR desde un `'use server'` sí se dobla (uno de tipo no)
 - [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía

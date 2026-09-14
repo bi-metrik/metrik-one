@@ -1,6 +1,6 @@
 ---
 name: margen-visible-trappvel
-description: PR #682 mergeado — la migración de umbrales sigue SIN aplicar (por diseño, el código la tolera), el rastro de margen está VACÍO en producción, y la única cotización de trappvel congeló markup
+description: PR #682 mergeado — ⚠️ CADUCÓ lo de «migración sin aplicar» (ya está aplicada); vigente el rastro de margen VACÍO y la cotización que congeló markup
 metadata:
   type: project
 ---
@@ -14,8 +14,11 @@ margen no se veía mientras se cotizaba.
 
 **How to apply — lo que hay que verificar antes de construir encima:**
 
-⚠️⚠️ **La migración `20260914160000_cotizaciones_umbrales_margen.sql` está en `main` y
-NO aplicada.** DDL puro: `cotizaciones.piso_margen_pct` y `aviso_margen_pct`, anulables.
+✅ **CADUCÓ: la migración `20260914160000_cotizaciones_umbrales_margen.sql` YA ESTÁ
+APLICADA** (medido contra el ledger el 2026-09-14). Lo que sigue describe el mundo
+anterior y se conserva por el método, no por el hecho.
+
+~~Está en `main` y NO aplicada.~~ DDL puro: `cotizaciones.piso_margen_pct` y `aviso_margen_pct`, anulables.
 **El código la tolera a propósito** — `insertarCotizacionTolerante`
 (`src/lib/cotizaciones/congelar-umbrales.ts`) reintenta el insert sin esas columnas ante
 un `42703`, con `console.warn`. Mientras no se aplique, **nada se congela** y todo cae a
