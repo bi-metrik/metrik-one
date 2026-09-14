@@ -185,12 +185,16 @@ export async function emitirCuentaDesdeCuota(
   }
 
   // 2. Cobro de la cuota (idempotente por unique plan+numero_cuota)
-  const { data: cobroExist } = await supabase
+  const { data: cobroExist, error: cobroErr } = await supabase
     .from('cobros')
     .select('id')
     .eq('plan_cobro_id', plan.id)
     .eq('numero_cuota', cuota.numero)
     .maybeSingle()
+  // Con el error descartado, un fallo de lectura se veia como "la cuota no tiene
+  // cobro": se insertaba otro y la verificacion de abajo buscaba la cuenta por ESE
+  // id nuevo, que no esta en ninguna. Resultado: una segunda cuenta para la cuota.
+  if (cobroErr) return fallo(`No se pudo leer el cobro de la cuota: ${cobroErr.message}`)
 
   let cobroId = (cobroExist as { id: string } | null)?.id ?? null
   if (!cobroId && !options.dryRun) {
@@ -223,13 +227,17 @@ export async function emitirCuentaDesdeCuota(
   // anulada incluida: reemitir sobre una anulación es decisión de una persona,
   // no de un cron.
   if (cobroId) {
-    const { data: cuentasPrevias } = await supabase
+    const { data: cuentasPrevias, error: prevErr } = await supabase
       .from('cuentas_cobro_emitidas')
       .select('id, numero, pdf_drive_url, created_at')
       .eq('workspace_id', workspaceId)
       .contains('cobros_ids', [cobroId])
       .order('created_at', { ascending: true })
       .limit(1)
+    // El mismo defecto que emitio cinco veces la cuenta de AFI en septiembre de
+    // 2026, en su otra forma: un error descartado deja `data` en null, que se lee
+    // como "no hay cuenta previa". Sin poder verificar, no se emite.
+    if (prevErr) return fallo(`No se pudo verificar si la cuota ya tiene cuenta: ${prevErr.message}`)
     const cuentaPrevia = ((cuentasPrevias ?? []) as {
       id: string
       numero: string

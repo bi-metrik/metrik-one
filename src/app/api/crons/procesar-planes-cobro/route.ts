@@ -256,10 +256,18 @@ export async function GET(req: NextRequest) {
   // sin facturar, en silencio y sin reintento: paso el 2026-08-10, cuando el
   // proyecto todavia estaba en plan Hobby de Vercel (precision por hora, no por
   // minuto) y ese cron no se disparo ese dia, mientras el de las 13:00 si corrio.
-  // La emision ya es idempotente (`generarCuentasCobroPeriodo` salta la cuenta si
-  // ya existe para workspace + anio + mes + empresa), asi que reintentar cada dia
-  // no duplica nada: el dia 11 emite lo que el 10 no pudo, y del 12 en adelante
-  // no hace nada. La fecha de emision sigue clavada al dia 13 para que la cuenta
+  // Reintentar cada dia no duplica porque la emision es idempotente POR COBROS:
+  // `generarCuentasCobroPeriodo` salta el grupo si sus cobros ya estan en una
+  // cuenta viva (`idempotencia-cuenta.ts`). El dia 11 emite lo que el 10 no pudo,
+  // y del 12 en adelante no hace nada.
+  //
+  // ⚠️ Hasta el 2026-09-14 la idempotencia era "una cuenta por empresa+periodo"
+  // leida con `.maybeSingle()` y el error descartado. Con la agrupada de AFI y su
+  // cuenta de licencias en el mismo mes habia DOS filas, `maybeSingle` devolvia
+  // null y este cron emitio la misma cuenta todos los dias desde el 10
+  // (CC-2026-09-002, 005, 006, 007, 008). La ventana abierta es la que convirtio
+  // ese defecto en uno diario: cualquier cambio a la idempotencia se prueba contra
+  // ese caso (`generar-cuentas-cobro.test.ts`). La fecha de emision sigue clavada al dia 13 para que la cuenta
   // no cambie de forma segun el dia en que el cron logre correr.
   let cuentasEmitidas = 0
   let cuentasOmitidas = 0
