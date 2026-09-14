@@ -134,6 +134,23 @@ prueba», preguntarse si **los datos sembrados pueden siquiera separar el criter
 que queda**. Para cualquier prueba de ORDEN: el fixture necesita al menos un par de filas
 donde los dos criterios manden al revés, o solo se está probando el orden de inserción.
 
+**2026-09-14 (PR #689), dos caras del mismo día y las dos son de FIXTURE:**
+
+1. **La mutación huérfana otra vez, y la cura fue traerse los datos reales.** «Las columnas
+   en cero desaparecen» no tumbaba nada: en la lente que probaba el fixture, **todas** las
+   campañas tenían ventas, así que el camino del valor por defecto no se ejecutaba jamás. Se
+   repuso volcando las **16 filas reales** de `v_marketing_campana` —dos de ellas con leads y
+   cero ventas— y entonces cayó con 4 rojas. Corolario práctico: cuando el fixture se
+   inventa «lo que se necesita para la prueba», tiende a quedarse con el caso típico; el
+   volcado real trae los casos raros gratis.
+2. **Una prueba de render puede mirar el nodo EQUIVOCADO y pasar.** «La fila de WEBINAR no
+   tiene botón» era **cierta** — sobre la fila de otra tabla. El nombre de una campaña
+   aparece tres veces en esa página (tabla de campañas, tarjeta de celular, tabla de
+   ciudades) y el helper tomaba la primera coincidencia. **Todo helper que busque «la fila
+   que dice X» en un HTML se acota primero a la sección**, y si la sección no está, lanza.
+   Se descubrió porque OTRA aserción de la misma prueba falló; sola habría pasado para
+   siempre.
+
 ## ⚠️ Una mutación que no cae puede ser una MUTACIÓN MAL ELEGIDA, no un instrumento roto
 
 **2026-09-09 (PR #602).** Para comprobar que eslint de verdad revisaba un archivo del

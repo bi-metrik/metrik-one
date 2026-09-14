@@ -9,7 +9,8 @@
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — un PR que cambie qué emite el cron dispara cuentas reales horas después; fuera del merge automático
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — PR #577 sin mergear: nadie se suspende solo, la tabla nace vacía, AFI son 3 planes, y 3 decisiones esperan a Mauricio
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
-- ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — mergeado y aplicado, pero el módulo NO está encendido y el sync NO está desplegado; la atribución es last-touch
+- ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el módulo YA está encendido (caducó lo contrario), el sync sigue sin correr, y un throw ahí tumba `/tableros` entero
+- ⚠️⚠️ [Ventas por ciudad en Marketing](project_marketing_ventas_por_ciudad.md) — PR #689 sin mergear: la migración va ANTES del merge, la ciudad solo existe para las ventas, y «Sin seccional» no es cero
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
 - ⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 YA en main, #626 sin mergear (falta QA): el 4925%, el corte de la tabla, y el brief cuya premisa caducó en 3 horas
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch

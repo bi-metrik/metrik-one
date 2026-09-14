@@ -1,6 +1,6 @@
 ---
 name: tablero-marketing-soena
-description: Pestaña Marketing de SOENA — qué quedó en producción, las dos decisiones que esperan el sí de Mauricio, y el hallazgo de que la atribución es LAST-touch (la spec dice first)
+description: Pestaña Marketing de SOENA — el módulo YA está encendido (caducó lo contrario), el sync de Meta sigue sin correr, la atribución es LAST-touch, y el corte por ciudad del #689
 metadata:
   type: project
 ---
@@ -13,21 +13,29 @@ registrada en el ledger con la versión del archivo.
 **Why:** cierra el punto **#45** del frente de tableros, que desde el 2026-08-31 estaba
 declarado en pantalla como no replicable. Daniela decide con esto qué campaña apagar.
 
-## ⚠️⚠️ Dos cosas quedaron SIN aplicar y esperan el sí de Mauricio
+## ⚠️⚠️ El módulo YA está encendido, y eso cambia el riesgo de cada cambio
 
-1. **El módulo no está encendido.** `modules.marketing_campanas` sigue ausente en el
-   workspace de SOENA, así que **la pestaña no se ve todavía**. El `update` está escrito
-   y sin correr en
-   `proyectos/soena/ve/migrations/PENDIENTE_20260903_modulo_marketing_campanas.sql`.
-2. **La edge function `meta-insights-sync` está construida pero NO desplegada ni
-   programada**, y `campana_insights` está **vacía** (0 filas). Sin ella la pestaña pinta
-   leads, ventas, conversión y recaudo, y declara con un aviso que el gasto no se ha
-   sincronizado — nunca un cero. Falta: `supabase functions deploy meta-insights-sync`,
-   el secreto `META_INSIGHTS_SYNC_SECRET` (cae a `META_LEADS_VERIFY_TOKEN` si no existe) y
-   el cron diario.
+**Medido el 2026-09-14: `modules.marketing_campanas` está en `true` en soena**, 1 de los
+17 workspaces. Esta memoria decía lo contrario hasta ese día: caducó.
 
-**How to apply:** desplegar y correr el sync **antes** de encender el módulo, para que la
-pestaña nazca con las seis cifras y no con la mitad en raya.
+Consecuencia que importa más que el dato: `getMarketingData()` vive dentro del
+`Promise.all` de `src/app/(app)/tableros/page.tsx` y **esa rama NO tiene catch propio**.
+Un throw suyo (una columna que no existe, una vista sin grant) **tumba `/tableros`
+entero**, no solo la pestaña. Y la acción está escrita para lanzar a propósito («una
+pestaña que no pudo armar sus datos DICE que falló»).
+
+**How to apply:** cualquier PR que cambie lo que esta pestaña consulta lleva la migración
+**ANTES** del merge. Al revés siempre es inofensivo: agregar una columna que nadie pide
+todavía no rompe nada.
+
+## ⚠️ El sync de Meta sigue sin correr (2026-09-14)
+
+`campana_insights` con `sincronizado_at` **null en las 16 filas** de campaña de soena, o
+sea que la edge function `meta-insights-sync` nunca ha corrido. La pestaña pinta leads,
+ventas, conversión y recaudo, y el gasto / CPL / CAC / ROAS salen **con raya y un aviso**
+— nunca un cero. Falta: `supabase functions deploy meta-insights-sync`, el secreto
+`META_INSIGHTS_SYNC_SECRET` (cae a `META_LEADS_VERIFY_TOKEN` si no existe) y el cron
+diario. Pasos en `proyectos/soena/ve/2026-09-03_activar-sync-marketing.md`.
 
 ## ⚠️⚠️ La atribución es LAST-touch, no first-touch — la spec afirma lo contrario
 
@@ -53,17 +61,11 @@ los números de QA cuadran igual. Pero **al leer esa vista, no asumir first-touc
 - **Meta confirmó el renombre contra la API real:** el id `52656511383228`, que ONE guarda
   como `CLIENTES POTENCIALES AGO 2026 PLUS`, hoy se llama `CLIENTES POTENCIALES AGO
   ($100)`. Las **dos** cuentas publicitarias (`1603671527655761` y `3229968600725628`)
-  están en **COP**.
+  están en **COP**. ⚠️ Como el sync nunca corrió, `v_marketing_campana` todavía sirve el
+  nombre del **payload** («…AGO 2026 PLUS»): el nombre vigente no se ve en pantalla.
 - **El system user lee campañas por id pero NO puede enumerar cuentas.** Consecuencia
   asumida: una campaña que nunca trajo un lead a ONE es **invisible** para el sync. Su
   gasto existe en Meta y no aparece. Cambiarlo pide `business_management`.
 
-## Cifras del cierre (2026-09-03, ~20:40 Bogotá)
-
-Agosto, lente Mes: **15 ventas con campaña y $7.752.685,77 recaudados**, 47 sin rastro
-(62 en total). La spec decía 14 y $7.216.971: la diferencia es **V0451 (JOSE NOEL
-GONZALEZ)**, cuyo cobro se registró a las 12:44 de ese mismo día. Las otras 14 suman
-exacto $7.216.971,48 — el criterio es idéntico, lo que se movió fue la base.
-
-Relacionado: [[tableros-soena-olas-1-y-2]], [[cifras-del-brief-caducan]],
-[[medir-antes-de-construir]], [[sql-prod-one]].
+Relacionado: [[marketing-ventas-por-ciudad]], [[tableros-soena-olas-1-y-2]],
+[[cifras-del-brief-caducan]], [[medir-antes-de-construir]], [[sql-prod-one]].
