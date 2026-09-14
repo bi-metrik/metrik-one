@@ -58,6 +58,9 @@ export default function BloqueCronograma({
   const [editValues, setEditValues] = useState<Partial<CronogramaItem>>({})
   const [version, setVersion] = useState<VersionCronograma | null>(null)
   const preloadedRef = useRef(false)
+  // Si la plantilla no se pudo materializar, la pantalla no puede decir "sin
+  // actividades configuradas": la config SÍ las declara.
+  const [errorInicializando, setErrorInicializando] = useState(false)
 
   // El sello de versión. Se recarga después de cada cambio de planeación porque ese
   // cambio pudo haber cortado una versión nueva, y el número que se muestra tiene que
@@ -69,15 +72,21 @@ export default function BloqueCronograma({
 
   useEffect(() => { refrescarVersion() }, [refrescarVersion])
 
-  // Gap 3: Inicializar items desde config_extra.items si no hay items y hay templates
+  // Gap 3: Inicializar items desde config_extra.items si no hay items y hay templates.
+  // La plantilla la lee el servidor de la config del bloque; aquí solo se decide si
+  // hace falta pedirla.
   useEffect(() => {
     if (preloadedRef.current) return
     if (items.length > 0 || preloadItems.length === 0 || !negocioBloqueId) return
     preloadedRef.current = true
 
     startTransition(async () => {
-      const result = await inicializarBloqueItems(negocioBloqueId, preloadItems)
-      if (!result.error && result.items.length > 0) {
+      const result = await inicializarBloqueItems(negocioBloqueId)
+      if (result.error) {
+        setErrorInicializando(true)
+        return
+      }
+      if (result.items.length > 0) {
         setItems(result.items.map(i => ({
           id: i.id,
           label: i.label,
@@ -207,7 +216,11 @@ export default function BloqueCronograma({
   if (items.length === 0 && !isPending) {
     return (
       <div className="space-y-2">
-        <p className="text-xs text-tinta-suave">Sin actividades configuradas en el cronograma</p>
+        <p className="text-xs text-tinta-suave">
+          {errorInicializando
+            ? 'No se pudieron cargar las actividades de este cronograma.'
+            : 'Sin actividades configuradas en el cronograma'}
+        </p>
         {modo === 'editable' && (
           <button
             onClick={() => {
