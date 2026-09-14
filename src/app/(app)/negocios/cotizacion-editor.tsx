@@ -30,6 +30,9 @@ import { origenDelMargen, etiquetaOrigenMargen, formatMargenPct, claseNivelMarge
 import RastroMargen from '@/app/(app)/negocios/rastro-margen-panel'
 import TablaCombinaciones from '@/app/(app)/negocios/tabla-combinaciones'
 import { agregarOpcionAItem, actualizarRanuraDeItem, type EstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
+import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
+import PantallazoItem from '@/app/(app)/negocios/pantallazo-item'
+import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -476,15 +479,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </div>
       )}
 
-      {/* Los grupos que ya se usaron en ESTA cotizacion. Sin esto, «hotel», «Hotel»
-          y «hoteles» serian tres ranuras distintas y nada competiria con nada: el
-          grupo es texto libre y es lo que decide que se compara con que. */}
-      <datalist id="grupos-cotizacion">
-        {[...new Set(initialItems.map(i => (i.grupo ?? '').trim()).filter(Boolean))].map(g => (
-          <option key={g} value={g} />
-        ))}
-      </datalist>
-
       {/* Items editor */}
       <div className="space-y-3">
           {/* Abrir o cerrar todos los items de una. Con una cotizacion larga, abrir
@@ -540,6 +534,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // llega con los itinerarios.
             const nivelMargen = nivelDeMargen(margenRealPct, umbrales)
             const origenMargen = origenDelMargen({ margenPropio, precioManual: precioFijadoAMano })
+            // La ranura de captura se DERIVA del grupo. `null` es respuesta legítima
+            // y frecuente: el método día a día y los componentes propios no tienen
+            // contrato de pantallazo y se costean a mano, como hoy.
+            const ranuraDeItem = ranuraDeGrupo(item.grupo)
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -620,27 +618,34 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
               {!isAjuste && expandedItems.has(item.id) && (
                 <div className="border-t px-4 pb-3 pt-2">
-                  {/* La RANURA de la línea: en qué grupo compite y en qué unidad se
-                      vende. Dos líneas con el mismo grupo son alternativas entre sí y
-                      se comparan en la tabla de combinaciones; sin grupo, la línea
-                      entra en todos los itinerarios (R3). */}
+                  {/* La FICHA de la línea: cómo se llama, en qué ranura compite y en
+                      qué unidad se vende.
+
+                      · El NOMBRE no tenía input en ninguna parte: se pintaba como
+                        texto en el encabezado. Una alternativa nace llamándose
+                        «Vuelo BOG-PUJ (alternativa)» y no había forma de renombrarla a
+                        «WINGO», que es justo lo que distingue una opción de otra en la
+                        tabla de combinaciones y en el PDF. Va aquí y no en el
+                        encabezado porque ese renglón alterna la línea al hacer clic.
+                      · El GRUPO pasa de texto libre a lista: ver `SelectorRanura`. */}
                   {editable && (
                     <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <div>
+                      <div className="col-span-2">
                         <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                          Grupo (alternativas)
+                          Nombre de la línea
                         </label>
                         <input
                           type="text"
-                          defaultValue={item.grupo ?? ''}
-                          placeholder="vuelo, hotel, día-1…"
-                          list="grupos-cotizacion"
+                          defaultValue={item.nombre ?? ''}
+                          placeholder="AVIANCA BOG–PUJ, Hard Rock Punta Cana…"
+                          maxLength={200}
+                          aria-label="Nombre de la línea"
                           className="w-full rounded border bg-background px-2 py-1.5 text-sm"
                           onBlur={e => {
                             const val = e.target.value.trim()
-                            if (val === (item.grupo ?? '')) return
+                            if (val === (item.nombre ?? '')) return
                             startTransition(async () => {
-                              const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                              const res = await updateItem(item.id, { nombre: val })
                               if (!res.success) { toast.error(res.error); return }
                               router.refresh()
                             })
@@ -648,9 +653,21 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
                         />
                         <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          Vacío: entra en todos los itinerarios
+                          Es lo que distingue una alternativa de otra y lo que imprime el PDF
                         </p>
                       </div>
+                      <SelectorRanura
+                        valor={item.grupo ?? null}
+                        gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                        disabled={isPending}
+                        onCambio={val => {
+                          startTransition(async () => {
+                            const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                      />
                       <div>
                         <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
                           Unidad
@@ -679,7 +696,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           Se imprime tal cual al cliente
                         </p>
                       </div>
-                      <div className="col-span-2 flex items-end">
+                      <div className="col-span-2 flex items-end sm:col-span-4">
                         {/* La alternativa nace VACÍA de costo: es otro proveedor, no
                             una variante del mismo precio. Copiarle los rubros dejaría
                             a WINGO costando lo que AVIANCA sin que se note. */}
@@ -701,6 +718,18 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         </button>
                       </div>
                     </div>
+                  )}
+
+                  {/* El cargue de pantallazo SOLO existe si la ranura de la línea tiene
+                      contrato de captura (§3.1). Un ítem sin grupo, o con un grupo propio
+                      como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
+                      parezca y ese número acaba dentro de un costo. */}
+                  {editable && ranuraDeItem && (
+                    <PantallazoItem
+                      itemId={item.id}
+                      ranura={ranuraDeItem}
+                      onConfirmado={() => router.refresh()}
+                    />
                   )}
                   {/* Item sale fields */}
                   {editable && (
