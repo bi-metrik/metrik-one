@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { CheckCircle2, Circle, Download, Copy, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { marcarBloqueCompleto } from '../../negocio-v2-actions'
+import { faltaEnDocumentos } from '@/lib/negocios/cierre-bloque'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import {
   getUploadUrlDocumentoNegocio,
@@ -247,9 +248,8 @@ export default function BloqueDocumentos({
       uploadedSlugsRef.current.add(slug)
       setSlotStates(prev => ({ ...prev, [slug]: 'uploaded' as SlotState }))
 
-      const shouldComplete = documentos
-        .filter(d => d.required)
-        .every(d => uploadedSlugsRef.current.has(d.slug))
+      // Mismo criterio con el que el servidor acepta el cierre (`lib/negocios/cierre-bloque.ts`).
+      const shouldComplete = faltaEnDocumentos(documentos, uploadedSlugsRef.current) === null
 
       if (shouldComplete && instancia?.estado !== 'completo') {
         // No pasar docs del cliente — el servidor ya tiene todos via confirmarUploadDocumentoNegocio

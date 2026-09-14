@@ -34,6 +34,19 @@ import {
   type LineaBase,
 } from '@/lib/negocios/presupuesto-ejecucion'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
+import {
+  modoCierre,
+  MENSAJE_ACCION_PROPIA,
+  MENSAJE_SALDO_POR_COBRAR,
+  exigeTodasLasFechas,
+  faltaEnCronograma,
+  checklistConSoporte,
+  faltaEnChecklist,
+  documentosSubidos,
+  faltaEnDocumentos,
+  faltaEnEquipo,
+  type DocumentoRequerido,
+} from '@/lib/negocios/cierre-bloque'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
@@ -4601,6 +4614,35 @@ export async function marcarBloqueCompleto(
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
   let mergedData = { ...currentData, ...data }
 
+  // ── Cómo se cierra este tipo de bloque ────────────────────────────────────
+  //
+  // Hasta aquí la función escribía `completo` sobre cualquier bloque que el guard dejara
+  // editar, sin mirar su tipo. Ver `lib/negocios/cierre-bloque.ts`: los tipos que se
+  // cierran con su propia acción se rechazan, y los de completitud derivada solo se
+  // aceptan si su criterio se cumple sobre lo GUARDADO (lo que manda el navegador no
+  // cuenta como ítem marcado ni como documento subido). Los manuales siguen igual.
+  const { data: cfgRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
+    .eq('id', negocioBloqueId)
+    .single()
+  const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
+  const tipoBloque = cfg?.bloque_definitions?.tipo
+  const configExtraBloque = cfg?.config_extra ?? {}
+  const modo = modoCierre(tipoBloque, configExtraBloque)
+  if (modo === 'accion_propia') return { error: MENSAJE_ACCION_PROPIA }
+  if (modo === 'criterio') {
+    const falta = await faltaParaCerrarPorCriterio(supabase, {
+      negocioBloqueId,
+      negocioId,
+      tipo: tipoBloque as string,
+      configExtra: configExtraBloque,
+      dataGuardada: currentData,
+      dataConCambios: mergedData,
+    })
+    if (falta) return { error: falta }
+  }
+
   // ── Corrección post-avance ────────────────────────────────────────────────
   // Mismo criterio que `actualizarBloqueData`: sobre una etapa ya superada esto no
   // es trabajo de la etapa sino una corrección, y exige opt-in del bloque, causa y
@@ -4625,7 +4667,8 @@ export async function marcarBloqueCompleto(
 
   // ── Barrera de completitud (bloques `datos` que son GATE) ─────────────────
   //
-  // Hasta acá esta función solo validaba PERMISOS. La completitud la decidía el
+  // `datos` es de cierre manual (ver arriba), pero cuando es gate se le exigen sus
+  // campos obligatorios. Antes de esta barrera la función solo validaba PERMISOS. La completitud la decidía el
   // cliente (`BloqueDatos.isComplete`) y el servidor escribía `estado='completo'`
   // con lo que le llegara. Cualquier llamador que no fuera ese camino podía marcar
   // completo un bloque incompleto — `handleConfirm` (bloques `require_confirm`)
@@ -4635,13 +4678,7 @@ export async function marcarBloqueCompleto(
   // (deja avanzar de etapa). Un bloque no-gate mal marcado no rompe nada, y
   // exigirlo aquí cambiaría el comportamiento de workspaces que hoy funcionan.
   {
-    const { data: cfgRaw } = await db(supabase)
-      .from('negocio_bloques')
-      .select('bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
-      .eq('id', negocioBloqueId)
-      .single()
-    const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
-    const esDatosGate = cfg?.es_gate === true && cfg?.bloque_definitions?.tipo === 'datos'
+    const esDatosGate = cfg?.es_gate === true && tipoBloque === 'datos'
     if (esDatosGate) {
       const fields = (cfg?.config_extra?.fields ?? []) as CampoConfig[]
       const faltantes = camposRequeridosFaltantes(fields, mergedData)
@@ -5911,31 +5948,7 @@ async function reevaluarBloquesCobros(
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  // Precio del negocio, sus cobros y el modelo de dinero, en paralelo. El modelo hace
-  // falta porque lo que el cliente debe es honorario MAS tarifa pasante confirmada:
-  // comparar contra el honorario pelado daba el bloque por completo en 42 negocios de
-  // SOENA que no habian pagado la tarifa. Ver `lib/cobros/saldo-negocio.ts`.
-  const [negocioRes, cobrosRes, modelo] = await Promise.all([
-    db(supabase)
-      .from('negocios')
-      .select('precio_aprobado, precio_estimado')
-      .eq('id', negocioId)
-      .single(),
-    supabase
-      .from('cobros')
-      .select('monto, fecha')
-      .eq('negocio_id', negocioId)
-      ,
-    leerModeloDineroCompleto(supabase, negocioId),
-  ])
-
-  const neg = negocioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
-  const precio = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
-  // Un workspace sin modelo de dinero (sin tarifa pasante) da tarifa 0, y entonces el
-  // valor a recaudar es el precio: el comportamiento generico no cambia.
-  const aRecaudar = valorARecaudar(precio, modelo)
-  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null }>)
-  const shouldBeComplete = bloqueCobrosCompleto({ valorARecaudar: aRecaudar, cobrado: totalCobrado })
+  const shouldBeComplete = await saldoCobrosCubierto(supabase, negocioId)
 
   // Buscar todas las instancias de bloques cobros del negocio
   const { data: bloquesRaw } = await db(supabase)
@@ -5979,6 +5992,108 @@ async function reevaluarBloquesCobros(
   return { error: null }
 }
 
+/**
+ * ¿El saldo del negocio da el bloque de cobros por completo? Es el criterio de
+ * `reevaluarBloquesCobros`, y lo usa también `marcarBloqueCompleto` para no aceptar a
+ * mano un cierre que el evaluador desharía en el siguiente cobro.
+ */
+async function saldoCobrosCubierto(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioId: string,
+): Promise<boolean> {
+  // Precio del negocio, sus cobros y el modelo de dinero, en paralelo. El modelo hace
+  // falta porque lo que el cliente debe es honorario MAS tarifa pasante confirmada:
+  // comparar contra el honorario pelado daba el bloque por completo en 42 negocios de
+  // SOENA que no habian pagado la tarifa. Ver `lib/cobros/saldo-negocio.ts`.
+  const [negocioRes, cobrosRes, modelo] = await Promise.all([
+    db(supabase)
+      .from('negocios')
+      .select('precio_aprobado, precio_estimado')
+      .eq('id', negocioId)
+      .single(),
+    supabase
+      .from('cobros')
+      .select('monto, fecha')
+      .eq('negocio_id', negocioId)
+      ,
+    leerModeloDineroCompleto(supabase, negocioId),
+  ])
+
+  const neg = negocioRes.data as { precio_aprobado: number | null; precio_estimado: number | null } | null
+  const precio = neg?.precio_aprobado ?? neg?.precio_estimado ?? 0
+  // Un workspace sin modelo de dinero (sin tarifa pasante) da tarifa 0, y entonces el
+  // valor a recaudar es el precio: el comportamiento generico no cambia.
+  const aRecaudar = valorARecaudar(precio, modelo)
+  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null }>)
+  return bloqueCobrosCompleto({ valorARecaudar: aRecaudar, cobrado: totalCobrado })
+}
+
+/**
+ * ¿Qué le falta a un bloque de completitud derivada para darse por completo? `null` si
+ * nada. El criterio de cada tipo vive en `lib/negocios/cierre-bloque.ts` (el de cobros,
+ * en `saldoCobrosCubierto`) y es el mismo que usan sus evaluadores y sus pantallas: aquí
+ * solo se lee lo que cada uno necesita.
+ *
+ * Se evalúa sobre lo GUARDADO: los ítems y las fechas desde `bloque_items`, los
+ * documentos desde `data.docs` tal como estaba antes de este llamado. Lo único que se
+ * toma de lo que llega es la asignación del equipo, porque en ese bloque la asignación
+ * ES lo que se guarda al completarlo. Si una lectura falla, se retiene: el lado seguro
+ * de un control es frenar, no dejar pasar por falta de información.
+ */
+async function faltaParaCerrarPorCriterio(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  p: {
+    negocioBloqueId: string
+    negocioId: string | null
+    tipo: string
+    configExtra: Record<string, unknown>
+    dataGuardada: Record<string, unknown>
+    dataConCambios: Record<string, unknown>
+  },
+): Promise<string | null> {
+  switch (p.tipo) {
+    case 'cronograma': {
+      const { data, error } = await db(supabase)
+        .from('bloque_items')
+        .select('fecha_inicio, fecha_fin')
+        .eq('negocio_bloque_id', p.negocioBloqueId)
+      if (error) return 'No se pudo comprobar el cronograma'
+      return faltaEnCronograma(
+        (data ?? []) as { fecha_inicio: string | null; fecha_fin: string | null }[],
+        exigeTodasLasFechas(p.configExtra),
+      )
+    }
+    case 'checklist':
+    case 'checklist_soporte': {
+      const { data, error } = await db(supabase)
+        .from('bloque_items')
+        .select('completado, link_url')
+        .eq('negocio_bloque_id', p.negocioBloqueId)
+      if (error) return 'No se pudo comprobar el checklist'
+      return faltaEnChecklist(
+        (data ?? []) as { completado: boolean | null; link_url: string | null }[],
+        checklistConSoporte(p.tipo, p.configExtra),
+      )
+    }
+    case 'documentos':
+      return faltaEnDocumentos(
+        (p.configExtra.documentos ?? []) as DocumentoRequerido[],
+        documentosSubidos(p.dataGuardada.docs),
+      )
+    case 'equipo':
+      return faltaEnEquipo(p.configExtra, p.dataConCambios)
+    case 'cobros':
+      if (!p.negocioId) return 'No se pudo comprobar el saldo del negocio'
+      return (await saldoCobrosCubierto(supabase, p.negocioId)) ? null : MENSAJE_SALDO_POR_COBRAR
+    default:
+      // Un tipo marcado como `criterio` sin rama aquí es un error de programación: se
+      // retiene en vez de cerrarlo a ciegas, que es justo lo que esta función evita.
+      return 'Este bloque no se puede dar por completo a mano'
+  }
+}
+
 // ── Re-evaluar completitud de bloque cronograma ─────────────────────────────
 // Si el bloque exige todas las fechas planeadas lo dice su config
 // (`config_extra.require_all_dates`), y se lee aquí. Antes llegaba como parámetro desde
@@ -6005,12 +6120,11 @@ export async function reevaluarBloqueCronograma(
 
   const bloqueRow = bloque as {
     estado: string
-    bloque_configs: { config_extra: { require_all_dates?: unknown } | null } | null
+    bloque_configs: { config_extra: Record<string, unknown> | null } | null
   }
-  // Misma lectura que hace la tarjeta para pintar «Requiere todas las fechas» (verdadero
-  // si el valor lo es), para que lo que dice la pantalla y lo que exige el servidor no
-  // puedan separarse.
-  const requireAllDates = Boolean(bloqueRow.bloque_configs?.config_extra?.require_all_dates)
+  // Misma lectura que hace la tarjeta para pintar «Requiere todas las fechas», para que lo
+  // que dice la pantalla y lo que exige el servidor no puedan separarse.
+  const requireAllDates = exigeTodasLasFechas(bloqueRow.bloque_configs?.config_extra)
 
   // Leer items actuales
   const { data: itemsData } = await db(supabase)
@@ -6020,14 +6134,8 @@ export async function reevaluarBloqueCronograma(
 
   const items = (itemsData ?? []) as { id: string; fecha_inicio: string | null; fecha_fin: string | null }[]
 
-  let shouldBeComplete = false
-  if (items.length > 0) {
-    if (requireAllDates) {
-      shouldBeComplete = items.every(i => i.fecha_inicio && i.fecha_fin)
-    } else {
-      shouldBeComplete = true // al menos 1 item existe
-    }
-  }
+  // El mismo criterio que aplica `marcarBloqueCompleto` (`lib/negocios/cierre-bloque.ts`).
+  const shouldBeComplete = faltaEnCronograma(items, requireAllDates) === null
 
   const estadoActual = bloqueRow.estado
 

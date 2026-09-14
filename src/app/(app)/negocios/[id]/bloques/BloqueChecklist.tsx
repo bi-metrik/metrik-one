@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { marcarBloqueItem, marcarBloqueCompleto, inicializarBloqueItems } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import { faltaEnChecklist } from '@/lib/negocios/cierre-bloque'
 
 interface ChecklistItemTemplate {
   label: string
@@ -73,10 +74,16 @@ export default function BloqueChecklist({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const allComplete = items.length > 0 && items.every(i => {
-    if (withSupport) return i.completado && i.link_url
-    return i.completado
-  })
+  // Mismo criterio con el que el servidor acepta el cierre (`lib/negocios/cierre-bloque.ts`).
+  const allComplete = faltaEnChecklist(items, withSupport) === null
+
+  // El servidor vuelve a mirar los ítems guardados antes de aceptar el cierre: si algo no
+  // quedó guardado, lo dice aquí en vez de fallar en silencio.
+  async function pedirCierre() {
+    if (!negocioBloqueId) return
+    const res = await marcarBloqueCompleto(negocioBloqueId, { completado_via: 'checklist' })
+    if (res.error) toast.error(res.error)
+  }
 
   // ── Checklist normal: toggle manual ──
   function handleToggle(item: BloqueItem) {
@@ -93,10 +100,7 @@ export default function BloqueChecklist({
             : i
         )
         setItems(nextItems)
-        const nowAllComplete = nextItems.every(i => i.completado)
-        if (nowAllComplete && negocioBloqueId) {
-          await marcarBloqueCompleto(negocioBloqueId, { completado_via: 'checklist' })
-        }
+        if (faltaEnChecklist(nextItems, withSupport) === null) await pedirCierre()
       }
     })
   }
@@ -121,10 +125,7 @@ export default function BloqueChecklist({
               : i
           )
           setItems(nextItems)
-          const nowAllComplete = nextItems.every(i => i.completado && i.link_url)
-          if (nowAllComplete && negocioBloqueId) {
-            await marcarBloqueCompleto(negocioBloqueId, { completado_via: 'checklist' })
-          }
+          if (faltaEnChecklist(nextItems, withSupport) === null) await pedirCierre()
         }
       })
     }, 600)

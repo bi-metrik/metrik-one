@@ -81,6 +81,7 @@ import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { GuiaEtapaCard } from './GuiaEtapaCard'
 import { formatBogotaFechaCorta, formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import { checklistConSoporte } from '@/lib/negocios/cierre-bloque'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -1628,7 +1629,8 @@ function BloqueRenderer({
         completado_at: i.completado_at,
         link_url: i.link_url,
       }))
-      const withSupport = (configExtra.withSupport as boolean) ?? false
+      // La misma lectura que usa el servidor para aceptar el cierre del checklist.
+      const withSupport = checklistConSoporte('checklist', configExtra)
       return (
         <BloqueChecklist
           negocioId={negocioId}
