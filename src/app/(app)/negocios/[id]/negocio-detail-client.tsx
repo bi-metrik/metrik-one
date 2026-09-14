@@ -25,7 +25,9 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarCarpetaLocalNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { CarpetaLocalEditor, CarpetaLocalGateForm } from './carpeta-local'
+import { gateSeResuelveConCarpeta, leerCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
@@ -603,8 +605,9 @@ function ModalGateBloqueado({
   puedeOmitir,
   onClose,
   onOverride,
+  carpeta,
 }: {
-  bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
+  bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: string }>
   /**
    * El usuario puede omitir gates con motivo (owner/admin o `omitir_gate.staff_ids`).
    * Lo resuelve `page.tsx` con la misma función del guard del servidor.
@@ -612,6 +615,8 @@ function ModalGateBloqueado({
   puedeOmitir: boolean
   onClose: () => void
   onOverride: (motivo: string) => void
+  /** Resolver el gate de carpeta del cerebro aquí mismo: guardarla y reintentar. */
+  carpeta?: { pendiente: boolean; error: string | null; onGuardar: (carpeta: string) => void }
 }) {
   const [motivo, setMotivo] = useState('')
   const [showOverride, setShowOverride] = useState(false)
@@ -621,6 +626,8 @@ function ModalGateBloqueado({
   // sin decirle cuál es la salida. Basta uno para esconderlo: si el avance está frenado
   // por algo no omitible, omitir los demás no lo destraba.
   const hayNoOmitible = bloques.some(b => b.omitible === false)
+  // El de carpeta también es no omitible, pero tiene salida aquí mismo: se evalúa ANTES.
+  const resuelveConCarpeta = carpeta !== undefined && gateSeResuelveConCarpeta(bloques)
 
   // Bloquear scroll del body mientras el modal está abierto + cerrar con Escape.
   // Sin esto, el overlay dejaba seleccionable el header sticky de fondo
@@ -656,7 +663,9 @@ function ModalGateBloqueado({
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-tinta">Bloques gate pendientes</h3>
             <p className="mt-0.5 text-xs text-tinta-suave">
-              Los siguientes bloques deben completarse antes de avanzar:
+              {resuelveConCarpeta
+                ? 'Registra la carpeta del cerebro y el negocio avanza:'
+                : 'Los siguientes bloques deben completarse antes de avanzar:'}
             </p>
           </div>
           <button onClick={onClose} className="shrink-0 text-tinta-suave hover:text-tinta">
@@ -675,7 +684,14 @@ function ModalGateBloqueado({
         </div>
 
         <div className="shrink-0 border-t border-[#E5E7EB] p-4 space-y-3">
-          {hayNoOmitible ? (
+          {resuelveConCarpeta && carpeta ? (
+            <CarpetaLocalGateForm
+              pendiente={carpeta.pendiente}
+              errorServidor={carpeta.error}
+              onVolver={onClose}
+              onGuardar={carpeta.onGuardar}
+            />
+          ) : hayNoOmitible ? (
             <div className="space-y-3">
               <p className="text-[11px] leading-relaxed text-tinta-suave">
                 Este bloqueo no se puede omitir. Hay que resolverlo para que el negocio avance.
@@ -783,8 +799,16 @@ function SelectorEtapa({
   const [isPending, startTransition] = useTransition()
   const [gateModal, setGateModal] = useState<{
     etapaId: string
-    bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean }>
+    bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: string }>
+    /**
+     * Cómo fue el intento que frenó el gate. Resolver la carpeta REINTENTA ese mismo
+     * intento: sin el motivo, un override volvería a toparse con los gates que omitió;
+     * sin `confirmado`, se le volvería a preguntar lo que ya aceptó.
+     */
+    confirmado?: boolean
+    motivo?: string
   } | null>(null)
+  const [errorCarpeta, setErrorCarpeta] = useState<string | null>(null)
   const [confirmarModal, setConfirmarModal] = useState<{
     etapaId: string
     nombreFallback: string
@@ -831,7 +855,8 @@ function SelectorEtapa({
     startTransition(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado)
       if (result.error === 'gate_bloqueado') {
-        setGateModal({ etapaId: siguienteEtapa.id, bloques: result.bloquesPendientes ?? [] })
+        setErrorCarpeta(null)
+        setGateModal({ etapaId: siguienteEtapa.id, bloques: result.bloquesPendientes ?? [], confirmado })
       } else if (result.error === 'requiere_confirmacion' && result.confirmacion) {
         // El caso NO se movió: el servidor resolvió el destino y devolvió qué preguntar.
         setConfirmarModal({
@@ -859,7 +884,8 @@ function SelectorEtapa({
       // el operador recibía el literal "Error: gate_bloqueado": frenaba sin decir por qué,
       // que es tan inútil como no frenar. Se vuelve a abrir el modal con el motivo real.
       if (result.error === 'gate_bloqueado') {
-        setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [] })
+        setErrorCarpeta(null)
+        setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [], motivo })
         return
       }
       if (result.error) {
@@ -867,6 +893,43 @@ function SelectorEtapa({
       } else {
         toast.success('Etapa actualizada con override')
       }
+    })
+  }
+
+  // El gate de carpeta del cerebro se resuelve en el modal: se guarda la carpeta y se
+  // reintenta el MISMO avance. Si la carpeta no se guarda, el modal sigue abierto con el
+  // motivo; si se guarda pero aparece otro gate, el modal pasa a mostrar ese.
+  function handleResolverCarpeta(carpeta: string) {
+    if (!gateModal) return
+    const intento = gateModal
+    setErrorCarpeta(null)
+    startTransition(async () => {
+      const guardado = await actualizarCarpetaLocalNegocio(negocioId, carpeta)
+      if (guardado.error) {
+        setErrorCarpeta(guardado.error)
+        return
+      }
+      const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado)
+      if (result.error === 'gate_bloqueado') {
+        setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
+        return
+      }
+      setGateModal(null)
+      const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
+      if (result.error === 'requiere_confirmacion' && result.confirmacion) {
+        toast.success('Carpeta del cerebro guardada')
+        setConfirmarModal({
+          etapaId: intento.etapaId,
+          nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
+          confirmacion: result.confirmacion,
+        })
+        return
+      }
+      if (result.error) {
+        toast.error('La carpeta quedó guardada, pero el negocio no avanzó: ' + result.error)
+        return
+      }
+      toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
     })
   }
 
@@ -998,8 +1061,9 @@ function SelectorEtapa({
         <ModalGateBloqueado
           bloques={gateModal.bloques}
           puedeOmitir={puedeOmitirGates}
-          onClose={() => setGateModal(null)}
+          onClose={() => { setGateModal(null); setErrorCarpeta(null) }}
           onOverride={motivo => handleOverride(gateModal.etapaId, motivo)}
+          carpeta={{ pendiente: isPending, error: errorCarpeta, onGuardar: handleResolverCarpeta }}
         />
       )}
 
@@ -2197,6 +2261,12 @@ interface Props {
    * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
    */
   puedeResolverAvisoRecaudo?: boolean
+  /**
+   * Carpeta del cerebro (`metadata.carpeta_local`). `visible` solo en workspaces con
+   * `config_extra.exigir_carpeta_local = true`; `puedeEditar` sale del MISMO predicado y
+   * las MISMAS lecturas que la server action que la guarda.
+   */
+  carpetaLocal?: { visible: boolean; puedeEditar: boolean }
   errorMsg?: string
   /**
    * JSX ya renderizado en el servidor (`page.tsx`) que va ARRIBA de todo, dentro
@@ -2236,6 +2306,7 @@ export default function NegocioDetailClient({
   puedeCierreNoFacturable = false,
   puedeOmitirGates = false,
   puedeResolverAvisoRecaudo = false,
+  carpetaLocal,
   errorMsg,
   banner,
   extras,
@@ -2287,6 +2358,9 @@ export default function NegocioDetailClient({
   // congelado (paso con V0442/V0443 el 2026-09-07).
   const avisoRecaudo = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
     ?.recaudo_cambiado_pendiente ?? null) as AvisoRecaudoVista | null)
+
+  // Carpeta del cerebro guardada (mismo criterio de "vacía" que el trigger del gate).
+  const carpetaLocalGuardada = leerCarpetaLocal((negocio as unknown as { metadata?: unknown }).metadata)
 
   const bloquesExtendidos = allBloques.filter(b => {
     // Bloques marcados no-visibles (ej. "Tipo de solicitante", auto-poblado en la
@@ -2474,12 +2548,22 @@ export default function NegocioDetailClient({
           )}
         </div>
 
-        {/* Fila 4 — carpeta Drive */}
-        <div>
+        {/* Fila 4 — carpeta Drive y, donde el workspace la exige, carpeta del cerebro */}
+        <div className="flex flex-wrap items-center gap-2">
           <CarpetaUrlEditor
             negocioId={negocio.id}
             initialUrl={negocio.carpeta_url}
           />
+          {carpetaLocal?.visible && (
+            <CarpetaLocalEditor
+              // Remonta cuando el servidor trae otro valor: el modal del gate también la
+              // escribe, y sin esto el campo seguiría pintando lo de antes.
+              key={carpetaLocalGuardada ?? ''}
+              negocioId={negocio.id}
+              inicial={carpetaLocalGuardada}
+              puedeEditar={carpetaLocal.puedeEditar}
+            />
+          )}
         </div>
 
         {/* Fila 5 — progreso */}

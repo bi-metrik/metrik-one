@@ -11,6 +11,8 @@ import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
+import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 
 export const maxDuration = 60
 
@@ -27,7 +29,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   if (!data) notFound()
 
   // Cargar consultas Valida solo si el workspace tiene el flag activo
-  const { workspaceId, staffId, role } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, areas } = await getWorkspace()
 
   // Areas efectivas del staff actual (para gatear boton "Reabrir" como supervisor
   // y la casilla de cierre no facturable)
@@ -92,6 +94,9 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // `config_extra.omitir_gate.staff_ids`. MISMA función que el guard de
   // `cambiarEtapaNegocioConGate`: el botón no se ofrece a quien el servidor rechaza.
   let puedeOmitirGates = false
+  // Carpeta del cerebro: el campo solo existe donde el workspace exige la carpeta, y se
+  // edita con el MISMO resolvedor que usa `actualizarCarpetaLocalNegocio`.
+  const carpetaLocal = { visible: false, puedeEditar: false }
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,6 +106,15 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       .single()
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
+    if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
+      carpetaLocal.visible = true
+      carpetaLocal.puedeEditar = await resolverPermisoCarpetaLocal(
+        supabase,
+        { id: staffId ?? '', role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] },
+        workspaceId,
+        id,
+      )
+    }
     if (modules.valida_consulta) {
       validaActivo = true
       validaConsultas = await listarConsultasPorNegocio(id)
@@ -184,6 +198,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         puedeCierreNoFacturable={puedeCierreNoFacturable}
         puedeOmitirGates={puedeOmitirGates}
         puedeResolverAvisoRecaudo={puedeResolverAvisoRecaudo}
+        carpetaLocal={carpetaLocal}
         errorMsg={err}
         banner={banner}
         extras={extras}
