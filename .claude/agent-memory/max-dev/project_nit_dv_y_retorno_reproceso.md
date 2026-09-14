@@ -1,6 +1,6 @@
 ---
 name: nit-dv-y-retorno-reproceso
-description: PRs #690 y #692 (2026-09-14) mergeados — el NIT con DV pegado se corrige con TESTIGO (Bancolombia es la trampa), el reproceso vuelve a la etapa que el caso pisa derivando de la seccional, y el error sin retorno se marca con ciclo 0; el orden/numero del tramo quedó sin decidir
+description: PRs #690 y #692 (2026-09-14) mergeados y #705 sin mergear — el NIT con DV pegado se corrige con TESTIGO (Bancolombia es la trampa), el reproceso vuelve a la etapa que el caso pisa, el error sin retorno es ciclo 0, y el tramo pasa al flujo del routing (V0388 pierde el registro sin devolver)
 metadata:
   type: project
 ---
@@ -38,14 +38,27 @@ Dos PRs del mismo encargo SOENA (frentes 1B, 3B, 3C), los dos mergeados con chec
   generó la supervisora 5 min DESPUÉS de abrir el evento, para corregirlo. Sin el corte se lleva
   la culpa quien arregló.
 
-## ⚠️ Abierto: el tramo y el «antes de» usan `orden`, no `numero`
+## #705 — el tramo y el «antes de» pasan al FLUJO (decidido por Mauricio el 2026-09-14)
 
-**Why:** en SOENA Generación (13) y Envío (14) van DESPUÉS de Cita (16) en el flujo. Las 15
-devoluciones DIAN abiertas desde Seguimiento (26-ago a 14-sep) no archivaron Generación ni
-Envío, y un caso en esas etapas nunca puede reprocesarse (cae en «antes de Cita»).
-**How to apply:** no cambiarlo sin Mauricio: pasar a `numero` archivaría formularios y envíos en
-cada devolución. Si alguien reporta «el 010 del ciclo anterior sigue completo después de un
-reproceso», es esto.
+Ya no es `orden` ni `numero`: `tramoDelReproceso` toma las etapas en algún camino del retorno a
+la actual, recorriendo el routing con `etapasAguasAbajo`. Línea sin routing = `orden` literal.
+PR #705 con checks verdes y **NO mergeado a propósito** (ver abajo).
+
+- **⚠️ V0388 pierde «Registrar sin devolver».** Está en Envío, que ahora va después de Cita: la
+  pantalla solo ofrece ese registro cuando `reprocesarNegocio` responde `antesDelRetorno`, así que
+  el mismo clic lo devuelve a Cita y reabre cinco etapas. Al 14-sep no tenía evento ciclo 0.
+- **Facturación queda alcanzable desde Cita** (Seguimiento → Facturación). No hay botón en la
+  etapa de cierre; solo muerde una llamada directa a la acción.
+- **Revisión radicado (orden 20) arreglado de rebote:** con `orden`, un reproceso UPME desde ahí
+  archivaba la línea entera (7..20) y un DIAN desde ahí era «reprocesable».
+- Al reabrir Generación se archivan también los `campos_override` (V0142, V0244, V0403 los tenían).
+- **Medición al 14-sep:** 0 bloques de Generación/Envío archivados por reprocesos DIAN. V0109
+  cruzó Generación en 12 min con los documentos viejos; V0234 entró a Generación con los 4 de
+  agosto completos (el gate no lo retiene). Tabla completa en el cuerpo del PR #705.
+
+**How to apply:** si reportan «el 010 del ciclo anterior sigue completo después de un reproceso»,
+mirar si el reproceso es anterior al deploy del #705. Una mutación que vuelva
+`decisionesHaciaDestino` a `orden` solo la tumba la línea sintética: en SOENA coinciden.
 
 Relacionado: [[reproceso-documentos-migrados]], [[formulario-010-dian]], [[pruebas-por-mutacion]],
 [[cifras-del-brief-caducan]].
