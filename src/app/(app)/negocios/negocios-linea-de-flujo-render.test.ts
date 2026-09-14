@@ -140,6 +140,8 @@ describe('/negocios · línea de flujo', () => {
       expect(html).toMatch(new RegExp(`data-fila="2"[^>]*>(?:(?!data-fila=)[\\s\\S])*?data-etapa="${numero}"`))
     }
     expect(html).toMatch(/data-fila="1"[^>]*>(?:(?!data-fila=)[\s\S])*?data-etapa="12"/)
+    // En el celular la rama empieza fuera de la pantalla: el renglón dice de dónde sale.
+    expect(html).toContain('Sale de Cartera o Entrega')
   })
 
   it('con una fase puesta solo se resaltan sus etapas; las demás siguen ahí, tenues', () => {

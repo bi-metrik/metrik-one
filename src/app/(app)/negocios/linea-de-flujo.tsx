@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useRef } from 'react'
-import { Clock, CornerDownRight, CornerRightUp } from 'lucide-react'
+import { ArrowRight, Clock, CornerDownRight, CornerRightUp } from 'lucide-react'
 import {
   distribuirLinea,
   nivelesDeAtraso,
@@ -46,7 +46,8 @@ export default function LineaDeFlujo({
   etapaNum: number | null
   onElegir: (etapa: EtapaDelSegmentador) => void
 }) {
-  const nodos = useMemo(() => distribuirLinea(secuenciaDeLinea(etapas)), [etapas])
+  const secuencia = useMemo(() => secuenciaDeLinea(etapas), [etapas])
+  const nodos = useMemo(() => distribuirLinea(secuencia), [secuencia])
   const niveles = useMemo(() => nivelesDeAtraso(etapas, conteos), [etapas, conteos])
 
   // La columna anterior de cada fila, para los tramos de línea que cruzan columnas vacías
@@ -57,6 +58,21 @@ export default function LineaDeFlujo({
         .filter((n) => n.columnaAnterior !== null && n.columnaAnterior < n.columna - 1)
         .map((n) => ({ fila: n.fila, desde: n.columnaAnterior! + 1, hasta: n.columna })),
     [nodos],
+  )
+
+  // Rótulo de cada rama, pegado al borde izquierdo mientras la rama no está a la vista. En el
+  // celular la rama empieza muy a la derecha y, sin esto, el segundo renglón se ve vacío.
+  const rotulos = useMemo(
+    () =>
+      secuencia.ramas.flatMap((rama, r) => {
+        const fila = r + 2
+        const inicio = Math.min(...nodos.filter((n) => n.fila === fila).map((n) => n.columna))
+        if (!Number.isFinite(inicio) || inicio <= 1) return []
+        const desde = rama.desde.map((e) => e.nombre)
+        const texto = desde.length > 0 ? `Sale de ${desde.join(' o ')}` : 'Rama'
+        return [{ fila, inicio, texto }]
+      }),
+    [secuencia, nodos],
   )
 
   const enFase = (e: EtapaDelSegmentador) => fase === 'todos' || e.stage === fase
@@ -92,6 +108,20 @@ export default function LineaDeFlujo({
               style={{ gridRow: t.fila, gridColumn: `${t.desde} / ${t.hasta}` }}
             >
               <span className="h-px w-full bg-tinta/20" />
+            </div>
+          ))}
+
+          {rotulos.map((r) => (
+            <div
+              key={`rotulo-${r.fila}`}
+              aria-hidden="true"
+              className="self-stretch"
+              style={{ gridRow: r.fila, gridColumn: `1 / ${r.inicio}` }}
+            >
+              <span className="sticky left-0 inline-flex h-full items-center gap-1 whitespace-nowrap pr-2 text-[10px] text-tinta-suave">
+                {r.texto}
+                <ArrowRight className="h-3 w-3" />
+              </span>
             </div>
           ))}
 
