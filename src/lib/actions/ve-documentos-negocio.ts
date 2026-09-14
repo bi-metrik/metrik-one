@@ -8,6 +8,14 @@ import { getServerKey } from '@/lib/server-keys'
 import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
 import { parseRut } from '@/lib/rut/parse-rut'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
+import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
+import {
+  esReferenciaExterna,
+  esRutaPendienteDe,
+  extensionSegura,
+  parsearReferencia,
+  rutaPendiente,
+} from '@/lib/almacenamiento/referencia'
 
 const BUCKET = 've-documentos'
 
@@ -66,14 +74,43 @@ export async function getUploadUrlDocumentoNegocio(
   negocioId: string,
   slug: string,
   fileExtension: string,
-): Promise<{ success: boolean; path?: string; token?: string; error?: string }> {
-  const { workspaceId, role, error } = await getWorkspace()
+): Promise<{ success: boolean; path?: string; token?: string; signedUrl?: string; error?: string }> {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
   if (!permiso.ok) return { success: false, error: permiso.error }
 
   const ext = fileExtension.toLowerCase().replace(/^\./, '') || 'pdf'
+
+  // Almacenamiento externo: URL firmada de subida DIRECTA al proyecto del cliente, a una
+  // ruta pendiente de este negocio. `path` viaja como referencia `sbext://` y `signedUrl`
+  // es a donde el navegador hace el PUT. Nada pasa por `ve-documentos`.
+  let almacenamiento: Awaited<ReturnType<typeof almacenamientoExternoDe>>
+  try {
+    almacenamiento = await almacenamientoExternoDe(workspaceId)
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (almacenamiento) {
+    if (!extensionSegura(ext)) return { success: false, error: 'Extensión de archivo no válida' }
+    const { data: bloque } = await db(supabase)
+      .from('negocio_bloques')
+      .select('negocio_id')
+      .eq('id', negocioBloqueId)
+      .maybeSingle()
+    if ((bloque?.negocio_id as string | undefined)?.toLowerCase() !== negocioId.toLowerCase()) {
+      return { success: false, error: 'Bloque no encontrado en este negocio' }
+    }
+    try {
+      const { signedUrl, referencia } = await almacenamiento.urlSubida(
+        rutaPendiente(negocioId, negocioBloqueId, ext, Date.now()),
+      )
+      return { success: true, path: referencia, signedUrl }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
   const filePath = `${workspaceId}/negocios/${negocioId}/${negocioBloqueId}/${slug}.${ext}`
 
   const admin = createServiceClient()
@@ -126,7 +163,46 @@ export async function confirmarUploadDocumentoNegocio(
   // Si no → comportamiento legacy (URL publica de Supabase Storage).
   let url: string
 
-  if (driveSubfolder) {
+  if (esReferenciaExterna(filePath)) {
+    // Almacenamiento externo: la subida pendiente de ESTE negocio se consolida con el
+    // nombre del slot. Nunca Drive, nunca `ve-documentos`.
+    const negocioId = (bloqueRaw.negocio_id as string | undefined) ?? ''
+    const partes = parsearReferencia(filePath)
+    if (!partes || !esRutaPendienteDe(partes.path, negocioId)) {
+      return { success: false, error: 'La subida no corresponde a este negocio' }
+    }
+    let almacenamiento: Awaited<ReturnType<typeof almacenamientoExternoDe>>
+    try {
+      almacenamiento = await almacenamientoExternoDe(workspaceId)
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+    if (!almacenamiento) {
+      return { success: false, error: 'Este espacio guarda sus archivos en Google Drive' }
+    }
+    const docsConfig = (configExtra.documentos ?? []) as Array<{ slug: string; label: string }>
+    const slotLabel = docsConfig.find(d => d.slug === slug)?.label ?? slug
+    const ext = partes.path.split('.').pop()?.toLowerCase() ?? 'pdf'
+    try {
+      const guardado = await almacenamiento.consolidarPendiente({
+        origen: filePath,
+        negocioId,
+        subcarpeta: driveSubfolder ?? null,
+        nombre: `${slotLabel}.${ext}`,
+        mime: mimeTypeFromUrl(partes.path),
+        tipoBloque: 'documentos',
+      })
+      url = guardado.referencia
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+    const anterior = currentDocs[slug]
+    if (esReferenciaExterna(anterior) && anterior !== url) {
+      await almacenamiento.borrar(anterior).catch(err => {
+        console.warn('[ve-documentos] no se pudo borrar el archivo anterior:', err instanceof Error ? err.message : err)
+      })
+    }
+  } else if (driveSubfolder) {
     const negocio = bloqueRaw.negocios as { codigo: string | null; carpeta_url: string | null }
     const folderIdMatch = negocio.carpeta_url?.match(/folders\/([-\w]+)/)
     const negocioFolderId = folderIdMatch?.[1]
@@ -219,14 +295,30 @@ export async function procesarDocumentoNegocio(
 
   let buffer: ArrayBuffer
   let mimeType: string
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return { success: false, error: `Error descargando (HTTP ${res.status})` }
-    buffer = await res.arrayBuffer()
-    const ct = res.headers.get('content-type') || ''
-    mimeType = ct.split(';')[0].trim() || mimeTypeFromUrl(url)
-  } catch (err) {
-    return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
+  if (esReferenciaExterna(url)) {
+    // Una referencia externa no se puede pedir por `fetch`: se lee con la llave del workspace.
+    try {
+      const { workspaceId } = await getWorkspace()
+      const almacenamiento = workspaceId ? await almacenamientoExternoDe(workspaceId) : null
+      if (!almacenamiento) return { success: false, error: 'Archivo en almacenamiento externo no disponible' }
+      const leido = await almacenamiento.descargar(url)
+      const copia = new Uint8Array(leido.buffer.length)
+      copia.set(leido.buffer)
+      buffer = copia.buffer
+      mimeType = leido.mime || mimeTypeFromUrl(url)
+    } catch (err) {
+      return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
+    }
+  } else {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return { success: false, error: `Error descargando (HTTP ${res.status})` }
+      buffer = await res.arrayBuffer()
+      const ct = res.headers.get('content-type') || ''
+      mimeType = ct.split(';')[0].trim() || mimeTypeFromUrl(url)
+    } catch (err) {
+      return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
+    }
   }
 
   const campos: CamposExtraidos = {}

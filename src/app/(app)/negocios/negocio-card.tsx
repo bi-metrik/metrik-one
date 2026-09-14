@@ -747,7 +747,7 @@ export default function NegocioCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1 text-right">
           <div className="flex items-center gap-1.5">
-            {negocio.carpeta_url && (
+            {negocio.carpeta_url && !negocio.almacenamiento_externo && (
               <button
                 type="button"
                 onClick={(e) => openFolder(negocio.carpeta_url!, e)}

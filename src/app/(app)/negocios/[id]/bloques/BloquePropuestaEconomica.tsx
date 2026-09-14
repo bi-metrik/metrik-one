@@ -11,6 +11,7 @@ import {
   revertirAprobacionPropuesta,
 } from '@/lib/actions/propuesta-economica-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
+import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 
 interface PropuestaVersion {
   n: number
@@ -939,7 +940,7 @@ function VersionList({
             </div>
             {v.pdf_url ? (
               <a
-                href={v.pdf_url}
+                href={hrefArchivo(v.pdf_url) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent"

@@ -88,6 +88,7 @@ import { GuiaEtapaCard } from './GuiaEtapaCard'
 import { formatBogotaFechaCorta, formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import { checklistConSoporte } from '@/lib/negocios/cierre-bloque'
 import { rolGestionaAprobacion } from '@/lib/negocios/aprobacion-bloque'
+import { AlmacenamientoExternoProvider } from '@/lib/almacenamiento/contexto'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -2192,6 +2193,12 @@ interface Props {
    * las MISMAS lecturas que la server action que la guarda.
    */
   carpetaLocal?: { visible: boolean; puedeEditar: boolean }
+  /**
+   * El workspace guarda sus archivos en su propio proyecto (`storage_provider =
+   * supabase_externo`): no hay carpeta de Drive que abrir ni que editar, y los bloques
+   * de documentos suben directo a ese proyecto. Lo decide `page.tsx` con la config.
+   */
+  almacenamientoExterno?: boolean
   errorMsg?: string
   /**
    * JSX ya renderizado en el servidor (`page.tsx`) que va ARRIBA de todo, dentro
@@ -2232,6 +2239,7 @@ export default function NegocioDetailClient({
   puedeOmitirGates = false,
   puedeResolverAvisoRecaudo = false,
   carpetaLocal,
+  almacenamientoExterno = false,
   errorMsg,
   banner,
   extras,
@@ -2321,6 +2329,7 @@ export default function NegocioDetailClient({
        contacto pegado a la derecha. Por debajo de `lg` no hay segunda columna
        (no cabe) y el panel entra como tarjeta plegable dentro de la misma
        columna, justo debajo del header. */
+    <AlmacenamientoExternoProvider externo={almacenamientoExterno}>
     <div className="mx-auto max-w-2xl lg:max-w-5xl px-4 py-4">
       <div className="lg:grid lg:grid-cols-[1fr_18rem] lg:items-start lg:gap-6">
         {/* ── COLUMNA PRINCIPAL ── */}
@@ -2475,10 +2484,12 @@ export default function NegocioDetailClient({
 
         {/* Fila 4 — carpeta Drive y, donde el workspace la exige, carpeta del cerebro */}
         <div className="flex flex-wrap items-center gap-2">
-          <CarpetaUrlEditor
-            negocioId={negocio.id}
-            initialUrl={negocio.carpeta_url}
-          />
+          {!almacenamientoExterno && (
+            <CarpetaUrlEditor
+              negocioId={negocio.id}
+              initialUrl={negocio.carpeta_url}
+            />
+          )}
           {carpetaLocal?.visible && (
             <CarpetaLocalEditor
               // Remonta cuando el servidor trae otro valor: el modal del gate también la
@@ -2623,5 +2634,6 @@ export default function NegocioDetailClient({
         </aside>
       </div>
     </div>
+    </AlmacenamientoExternoProvider>
   )
 }

@@ -21,6 +21,10 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
+import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
+import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
+import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
+import { esReferenciaExterna, hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { puedeCorregirDocumentos } from '@/lib/roles'
@@ -517,6 +521,8 @@ export default function BloqueDocumento({
   esResponsable,
 }: BloqueDocumentoProps) {
   const router = useRouter()
+  // Workspace con almacenamiento externo: la subida va directo al proyecto del cliente.
+  const almacenamientoExterno = useAlmacenamientoExterno()
   const fileRef = useRef<HTMLInputElement>(null)
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
 
@@ -652,23 +658,45 @@ export default function BloqueDocumento({
     setErrorMsg(null)
 
     try {
-      // Upload directo a Supabase Storage desde el cliente
-      const supabase = createClient()
       const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf'
-      const storagePath = `${workspaceId}/negocios/${negocioId}/${negocioBloqueId}/documento.${ext}`
+      let storagePath: string
 
-      const { error: uploadErr } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, file, {
-          contentType: resolvedType || undefined,
-          upsert: true,
-        })
+      if (almacenamientoExterno) {
+        // Directo al proyecto del cliente, a una ruta PENDIENTE de su negocio. Nunca al
+        // bucket público de ONE: ver `src/lib/almacenamiento/`.
+        const prep = await prepararSubidaExterna(negocioBloqueId, negocioId, ext)
+        if (!prep.ok) {
+          setUploadState('error')
+          setErrorMsg(prep.error)
+          toast.error(prep.error)
+          return
+        }
+        const subida = await subirAUrlFirmada(prep.signedUrl, file, resolvedType)
+        if (!subida.ok) {
+          setUploadState('error')
+          setErrorMsg(subida.error)
+          toast.error(subida.error)
+          return
+        }
+        storagePath = prep.referencia
+      } else {
+        // Upload directo a Supabase Storage desde el cliente
+        const supabase = createClient()
+        storagePath = `${workspaceId}/negocios/${negocioId}/${negocioBloqueId}/documento.${ext}`
 
-      if (uploadErr) {
-        setUploadState('error')
-        setErrorMsg(uploadErr.message)
-        toast.error(`Error subiendo: ${uploadErr.message}`)
-        return
+        const { error: uploadErr } = await supabase.storage
+          .from(BUCKET)
+          .upload(storagePath, file, {
+            contentType: resolvedType || undefined,
+            upsert: true,
+          })
+
+        if (uploadErr) {
+          setUploadState('error')
+          setErrorMsg(uploadErr.message)
+          toast.error(`Error subiendo: ${uploadErr.message}`)
+          return
+        }
       }
 
       // Go to confirmation state
@@ -739,8 +767,13 @@ export default function BloqueDocumento({
     // Clean up the Storage file
     if (pendingStoragePath) {
       try {
-        const supabase = createClient()
-        await supabase.storage.from(BUCKET).remove([pendingStoragePath])
+        if (esReferenciaExterna(pendingStoragePath)) {
+          // La pendiente vive en el proyecto del cliente: la borra el servidor.
+          await descartarSubidaExterna(negocioBloqueId, negocioId, pendingStoragePath)
+        } else {
+          const supabase = createClient()
+          await supabase.storage.from(BUCKET).remove([pendingStoragePath])
+        }
       } catch {
         // ignore cleanup errors
       }
@@ -789,7 +822,7 @@ export default function BloqueDocumento({
           {driveUrl ? (
             <div className="ml-auto flex items-center gap-1.5">
               <a
-                href={driveUrl}
+                href={hrefArchivo(driveUrl) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5"
@@ -798,7 +831,7 @@ export default function BloqueDocumento({
                 Ver
               </a>
               <a
-                href={driveUrl}
+                href={hrefArchivo(driveUrl, { descargar: true }) ?? undefined}
                 download
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5"
               >
@@ -1099,13 +1132,13 @@ export default function BloqueDocumento({
             </span>
             {driveUrl && (
               <a
-                href={driveUrl}
+                href={hrefArchivo(driveUrl) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[11px] text-green-600 hover:underline"
               >
                 <ExternalLink className="h-3 w-3" />
-                Ver en Drive
+                {esReferenciaExterna(driveUrl) ? 'Ver archivo' : 'Ver en Drive'}
               </a>
             )}
           </div>

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getAccessToken } from '@/lib/google-drive'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
+import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 
 // Cron de health check diario sobre Drive de cada workspace.
 //
@@ -144,7 +145,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const workspaces = (data ?? []) as WorkspaceRow[]
+  // Un workspace con almacenamiento externo no usa Drive: revisarlo aquí solo produciría
+  // un `drive_health_failed` diario falso (su token de Drive está cerrado a propósito).
+  // Su salud la vigila `/api/crons/almacenamiento-externo`.
+  const workspaces = ((data ?? []) as WorkspaceRow[]).filter(ws => !esAlmacenamientoExterno(ws.config_extra))
   const results: Array<{ slug: string; ok: boolean; oauth_mode: string }> = []
   for (const ws of workspaces) {
     const r = await checkWorkspace(supabase, ws)

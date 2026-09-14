@@ -20,6 +20,8 @@ import {
   type CotizacionRenderItem,
 } from '@/lib/pdf/pdf-render-client'
 import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
+import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
+import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -45,6 +47,43 @@ function extractDriveFolderId(url: string | null | undefined): string | null {
   if (!url) return null
   const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
   return match ? match[1] : null
+}
+
+/**
+ * Workspace con almacenamiento externo: el PDF queda en `negocios/<id>/cotizaciones/`
+ * del proyecto del cliente. En un workspace en Drive no hace nada (`externo: false`)
+ * y cada camino sigue exactamente como estaba.
+ *
+ * Como la subida a Drive de siempre, NUNCA tumba el PDF: si no se puede guardar, el
+ * PDF se entrega igual y el motivo vuelve como `aviso` para que la pantalla lo diga.
+ * Si la marca de proveedor no se puede leer, se asume externo: sin Drive por las dudas.
+ */
+async function guardarPdfEnAlmacenamientoExterno(
+  workspaceId: string,
+  negocioId: string | null,
+  nombre: string,
+  buffer: Buffer,
+): Promise<{ externo: boolean; referencia: string | null; aviso: string | null }> {
+  try {
+    if (!(await usaAlmacenamientoExterno(workspaceId))) return { externo: false, referencia: null, aviso: null }
+    // Cotización de oportunidad (legacy, sin negocio): no hay prefijo de negocio donde guardarla.
+    if (!negocioId) return { externo: true, referencia: null, aviso: null }
+    const almacenamiento = await almacenamientoExternoDe(workspaceId)
+    if (!almacenamiento) return { externo: true, referencia: null, aviso: null }
+    const guardado = await almacenamiento.subirArchivo({
+      negocioId,
+      subcarpeta: 'cotizaciones',
+      nombre,
+      buffer,
+      mime: 'application/pdf',
+      tipoBloque: 'cotizacion',
+    })
+    return { externo: true, referencia: guardado.referencia, aviso: null }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[cotizacion-pdf] el PDF no quedó guardado en el almacenamiento externo:', msg)
+    return { externo: true, referencia: null, aviso: `El PDF se generó pero no quedó guardado: ${msg}` }
+  }
 }
 
 export async function generateCotizacionPDF(cotizacionId: string) {
@@ -345,12 +384,15 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       const buffer = await renderViaService(templateSlug, payload)
       const filename = `${cot.codigo ?? cot.consecutivo}.pdf`
 
+      // Almacenamiento externo: el PDF va al proyecto del cliente y Drive ni se intenta.
+      const externo = await guardarPdfEnAlmacenamientoExterno(workspaceId, negocioInfo?.id ?? null, filename, buffer)
+
       // Subida opcional a Drive si el negocio tiene carpeta configurada.
       // createDriveFolder() es find-or-create (busca por nombre+parent antes de crear).
       let driveFileId: string | null = null
       let driveWebViewLink: string | null = null
       const driveFolderId = extractDriveFolderId(negocioInfo?.carpeta_url)
-      if (driveFolderId && negocioInfo) {
+      if (!externo.externo && driveFolderId && negocioInfo) {
         try {
           const subFolderId = await createDriveFolder(
             'cotizaciones',
@@ -379,6 +421,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         fiscal,
         driveFileId,
         driveWebViewLink,
+        archivoReferencia: externo.referencia,
+        aviso: externo.aviso,
         renderedVia: 'weasyprint' as const,
       }
     } catch (e) {
@@ -585,12 +629,25 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer = await renderToBuffer(element as any)
   const base64 = Buffer.from(buffer).toString('base64')
+  const filename = `${cot.consecutivo}.pdf`
+
+  // Este camino nunca guardó el PDF en ningún lado (solo lo devuelve para descargar), y
+  // en un workspace en Drive sigue igual. Con almacenamiento externo queda además en el
+  // proyecto del cliente.
+  const externo = await guardarPdfEnAlmacenamientoExterno(
+    workspaceId,
+    negocioInfo?.id ?? null,
+    filename,
+    Buffer.from(buffer),
+  )
 
   return {
     success: true,
     pdf: base64,
-    filename: `${cot.consecutivo}.pdf`,
+    filename,
     fiscal,
+    archivoReferencia: externo.referencia,
+    aviso: externo.aviso,
     renderedVia: 'react-pdf' as const,
   }
 }
