@@ -15,6 +15,11 @@
  * EL DOBLE APLICA LOS FILTROS (`eq`, `in` con rutas embebidas) y separa las escrituras por
  * cliente: una escritura con el cliente de la sesión y otra con el de servicio no son lo
  * mismo, y confundirlas es exactamente el defecto del #440.
+ *
+ * Mutaciones sobre `reproceso-actions.ts` medidas el 2026-09-14, cada una tumba 1 prueba:
+ * evento nacido abierto, insert con el cliente de la sesión, `ciclo: 1` en vez de la marca,
+ * ignorar el retorno resuelto, quitar `antesDelRetorno`, tragarse el error del insert, y
+ * registrar sin pasar por la puerta de permisos.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
