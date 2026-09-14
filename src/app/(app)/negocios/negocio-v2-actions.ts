@@ -5821,12 +5821,30 @@ export interface VersionCronograma {
  *
  * Es la que se le manda al cliente, así que se muestra siempre: un cronograma sin
  * número no se puede citar en una reunión de obra.
+ *
+ * Solo lee, así que el guard es el de VER el negocio, igual que `inicializarBloqueItems`:
+ * la tarjeta la pide al montar para cualquiera que abra el negocio, también en solo
+ * lectura y en el historial. La RLS de `cronograma_versiones` acota por workspace y
+ * nada más; el guard agrega lo que la página ya exige (el contador no ve negocios y un
+ * operador solo ve los suyos). Sin acceso devuelve null, igual que sin versión: quien
+ * no puede abrir el negocio no tiene tarjeta donde pintar el sello.
  */
 export async function leerVersionCronograma(
   negocioBloqueId: string,
 ): Promise<VersionCronograma | null> {
   const { supabase, error } = await getWorkspace()
   if (error) return null
+
+  // El negocio sale del bloque y no de la versión: sin versiones todavía, el guard
+  // tiene que correr igual.
+  const { data: bloqueRow } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!bloqueRow) return null
+  const guard = await guardVerNegocio((bloqueRow as { negocio_id: string }).negocio_id)
+  if (!guard.ok) return null
 
   const { data } = await db(supabase)
     .from('cronograma_versiones')
@@ -5962,10 +5980,13 @@ async function reevaluarBloquesCobros(
 }
 
 // ── Re-evaluar completitud de bloque cronograma ─────────────────────────────
+// Si el bloque exige todas las fechas planeadas lo dice su config
+// (`config_extra.require_all_dates`), y se lee aquí. Antes llegaba como parámetro desde
+// el navegador, así que quien tuviera permiso de edición podía dar el cronograma por
+// completo sin fechas mandando `false`. Un segundo argumento, si llega, se ignora.
 
 export async function reevaluarBloqueCronograma(
-  negocioBloqueId: string,
-  requireAllDates: boolean
+  negocioBloqueId: string
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
@@ -5973,6 +5994,23 @@ export async function reevaluarBloqueCronograma(
   // Guard: validar permiso sobre el bloque (rol+área+responsable) antes de escribir
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  // Estado actual y regla de fechas del bloque, en una sola lectura
+  const { data: bloque } = await db(supabase)
+    .from('negocio_bloques')
+    .select('estado, bloque_configs!inner(config_extra)')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!bloque) return { error: 'Bloque no encontrado' }
+
+  const bloqueRow = bloque as {
+    estado: string
+    bloque_configs: { config_extra: { require_all_dates?: unknown } | null } | null
+  }
+  // Misma lectura que hace la tarjeta para pintar «Requiere todas las fechas» (verdadero
+  // si el valor lo es), para que lo que dice la pantalla y lo que exige el servidor no
+  // puedan separarse.
+  const requireAllDates = Boolean(bloqueRow.bloque_configs?.config_extra?.require_all_dates)
 
   // Leer items actuales
   const { data: itemsData } = await db(supabase)
@@ -5991,14 +6029,7 @@ export async function reevaluarBloqueCronograma(
     }
   }
 
-  // Leer estado actual del bloque
-  const { data: bloque } = await db(supabase)
-    .from('negocio_bloques')
-    .select('estado')
-    .eq('id', negocioBloqueId)
-    .single()
-
-  const estadoActual = (bloque as { estado: string } | null)?.estado
+  const estadoActual = bloqueRow.estado
 
   if (shouldBeComplete && estadoActual !== 'completo') {
     await db(supabase)
