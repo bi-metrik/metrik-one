@@ -23,6 +23,7 @@ import type {
   OperacionesBonoData, OperacionesDetalleData, PersonaOperaciones,
 } from '../operaciones-types'
 import { getOperacionesDetalle } from '../operaciones-actions'
+import { CICLO_SIN_RETORNO } from '@/lib/negocios/atribucion-reproceso'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
@@ -348,7 +349,9 @@ function ListaCalidad({ detalle }: { detalle: OperacionesDetalleData }) {
         <Caso key={`${r.negocio_id}-${i}`} id={r.negocio_id} codigo={r.codigo} nombre={r.nombre}
           estado={r.causa === 'error_propio' ? false : null}
           lineas={[
-            `Ciclo ${r.ciclo} · abierto el ${soloFecha(r.abierto_at)}`,
+            r.ciclo === CICLO_SIN_RETORNO
+              ? `Registrado sin devolver el caso · el ${soloFecha(r.abierto_at)}`
+              : `Ciclo ${r.ciclo} · abierto el ${soloFecha(r.abierto_at)}`,
             ...(r.detalle ? [r.detalle] : []),
           ]}
           etiquetas={[

@@ -14,7 +14,7 @@
 import { useState, useTransition } from 'react'
 import { RotateCcw, AlertTriangle, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { reprocesarNegocio, cerrarReproceso } from '@/lib/actions/reproceso-actions'
+import { reprocesarNegocio, cerrarReproceso, registrarErrorSinDevolver } from '@/lib/actions/reproceso-actions'
 import type { TipoReproceso, CausaReproceso } from '@/lib/negocios/atribucion-reproceso'
 
 const GERENCIAL = ['owner', 'admin', 'supervisor']
@@ -87,6 +87,85 @@ export function ReprocesoBanner({
   )
 }
 
+/**
+ * Confirmación de un error que se registra SIN devolver el caso.
+ *
+ * Aparece cuando el caso está antes del punto de retorno y no hay tramo que rehacer
+ * (V0388: en Envío, con la cita ya pasada). Lo que tiene que quedar claro ANTES de
+ * confirmar es que el caso no se mueve: por eso va en su propia vista y no como un
+ * segundo botón junto a "Abrir reproceso", donde se confunde con él.
+ *
+ * Exportado para la prueba de render (`reproceso-control-render.test.ts`).
+ */
+export function PanelErrorSinRetorno({
+  etapaActual,
+  etapaRetorno,
+  tipoLabel,
+  causa,
+  detalle,
+  pending,
+  onVolver,
+  onConfirmar,
+}: {
+  etapaActual: string
+  etapaRetorno: string
+  tipoLabel: string
+  causa: CausaReproceso
+  detalle: string
+  pending: boolean
+  onVolver: () => void
+  onConfirmar: () => void
+}) {
+  return (
+    <div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        El negocio está en <strong className="text-foreground">{etapaActual}</strong>, antes de{' '}
+        <strong className="text-foreground">{etapaRetorno}</strong>: no hay un tramo que rehacer.
+      </p>
+
+      <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+        <p className="text-xs font-semibold text-amber-900">El caso no se mueve.</p>
+        <p className="mt-1 text-xs text-amber-800">
+          Sigue en {etapaActual}. No se archiva nada ni se abre un reproceso: solo queda el error en el
+          indicador de calidad del mes, cargado a quien hizo el trabajo.
+        </p>
+      </div>
+
+      <dl className="mb-4 space-y-1 text-xs">
+        <div className="flex gap-1">
+          <dt className="text-muted-foreground">Qué:</dt>
+          <dd>{tipoLabel}</dd>
+        </div>
+        <div className="flex gap-1">
+          <dt className="text-muted-foreground">Causa:</dt>
+          <dd>{causa === 'error_propio' ? 'Error propio — cuenta en el indicador' : 'Criterio del funcionario — no cuenta'}</dd>
+        </div>
+        <div className="flex gap-1">
+          <dt className="text-muted-foreground">Qué pasó:</dt>
+          <dd className="italic">{detalle}</dd>
+        </div>
+      </dl>
+
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={onVolver}
+          disabled={pending}
+          className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent disabled:opacity-40"
+        >
+          Volver
+        </button>
+        <button
+          onClick={onConfirmar}
+          disabled={pending}
+          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-40"
+        >
+          {pending ? 'Registrando…' : 'Registrar el error sin devolver el caso'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function ReprocesoBoton({
   negocioId,
   reprocesoActivo,
@@ -100,7 +179,13 @@ export function ReprocesoBoton({
   const [tipo, setTipo] = useState<TipoReproceso>('devolucion_dian')
   const [causa, setCausa] = useState<CausaReproceso>('criterio_tercero')
   const [detalle, setDetalle] = useState('')
+  const [sinRetorno, setSinRetorno] = useState<{ etapaActual: string; etapaRetorno: string } | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  const cerrar = () => {
+    setAbierto(false)
+    setSinRetorno(null)
+  }
 
   // Solo dirección y supervisión. El servidor lo vuelve a validar, y además exige
   // área de operaciones al supervisor; esto es únicamente para no mostrar un botón
@@ -123,12 +208,38 @@ export function ReprocesoBoton({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Abrir reproceso</h2>
-              <button onClick={() => setAbierto(false)} className="text-muted-foreground hover:text-foreground">
+              <h2 className="text-sm font-semibold">
+                {sinRetorno ? 'Registrar el error sin devolver el caso' : 'Abrir reproceso'}
+              </h2>
+              <button onClick={cerrar} className="text-muted-foreground hover:text-foreground">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
+            {sinRetorno ? (
+              <PanelErrorSinRetorno
+                etapaActual={sinRetorno.etapaActual}
+                etapaRetorno={sinRetorno.etapaRetorno}
+                tipoLabel={LABEL_TIPO[tipo] ?? tipo}
+                causa={causa}
+                detalle={detalle.trim()}
+                pending={isPending}
+                onVolver={() => setSinRetorno(null)}
+                onConfirmar={() =>
+                  startTransition(async () => {
+                    const r = await registrarErrorSinDevolver(negocioId, { tipo, causa, detalle })
+                    if (r.ok) {
+                      toast.success(`Error registrado. El caso sigue en ${sinRetorno.etapaActual}.`)
+                      cerrar()
+                      setDetalle('')
+                    } else {
+                      toast.error(r.error ?? 'No se pudo registrar el error')
+                    }
+                  })
+                }
+              />
+            ) : (
+            <>
             <p className="mb-3 text-xs text-muted-foreground">
               El caso vuelve a la etapa donde empieza el tramo que hay que rehacer. Lo que ya se
               había llenado queda archivado como historial, no se pierde. Se notifica a
@@ -170,7 +281,7 @@ export function ReprocesoBoton({
 
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => setAbierto(false)}
+                onClick={cerrar}
                 className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
               >
                 Cancelar
@@ -182,8 +293,14 @@ export function ReprocesoBoton({
                     const r = await reprocesarNegocio(negocioId, { tipo, causa, detalle })
                     if (r.ok) {
                       toast.success(`Reproceso ${r.ciclo} abierto. El caso volvió a ${r.etapaNombre}.`)
-                      setAbierto(false)
+                      // El retorno puede no ser el declarado (un caso sin cita vuelve a
+                      // Anexos): quien reprocesa tiene que saberlo, no descubrirlo después.
+                      if (r.aviso) toast.warning(r.aviso, { duration: 10000 })
+                      cerrar()
                       setDetalle('')
+                    } else if (r.antesDelRetorno) {
+                      // Sin tramo que rehacer: se ofrece registrar el error sin mover el caso.
+                      setSinRetorno(r.antesDelRetorno)
                     } else {
                       toast.error(r.error ?? 'No se pudo abrir el reproceso')
                     }
@@ -194,6 +311,8 @@ export function ReprocesoBoton({
                 {isPending ? 'Abriendo…' : 'Abrir reproceso'}
               </button>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}
