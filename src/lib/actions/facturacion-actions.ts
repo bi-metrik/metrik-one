@@ -45,8 +45,12 @@ import {
   estadoDeRecaudo,
   type EstadoRecaudo,
 } from '@/lib/facturacion/caso-listo'
-import { numeroFacturaEnData } from '@/lib/siigo/factura-cargada'
-import { idsDeCopiasDelBloque } from '@/lib/negocios/copias-del-bloque'
+import { resolverFacturaDelNegocio } from '@/lib/facturacion/factura-del-negocio'
+import {
+  gatesDeFacturaPorLinea,
+  leerOriginalesDeFactura,
+  slugFacturaDeLinea,
+} from '@/lib/facturacion/leer-factura-del-negocio'
 // Toda lectura por LOTE de este archivo pasa por aquí. PostgREST corta en 1.000
 // filas sin avisar, y en esta cola eso ya escondió el RUT de 48 casos y devolvió
 // dos negocios ya facturados a la bandeja como facturables. Ver el módulo.
@@ -124,13 +128,17 @@ export interface CasoPorFacturar {
    * la carpeta de Drive.
    */
   sin_rut: boolean
-  /** Ya tiene número de factura registrado en el negocio. */
+  /**
+   * Tiene factura: la marca de Siigo o un número en el bloque ORIGINAL cuyo emisor
+   * no contradice al del workspace. Ninguna copia heredada cuenta. Ver
+   * `lib/facturacion/factura-del-negocio`.
+   */
   ya_facturado: boolean
-  /** Número de la factura, cuando la emitió ONE contra Siigo. */
+  /** Número de la factura, venga de la marca o del bloque original. */
   factura_numero: string | null
   /**
-   * `true` si el negocio tiene marca de factura pero su PDF **no** quedó en el
-   * bloque. Son los casos que hay que re-archivar: medido el 2026-09-07, V0076
+   * `true` si el negocio está facturado pero no hay PDF ni en el bloque original ni
+   * en la marca. Son los casos que hay que re-archivar: medido el 2026-09-07, V0076
    * (FV-2-459) y V0177 (FV-2-373). Sin decirlo en pantalla, nadie los distingue
    * de un caso completo — la marca se ve igual.
    */
@@ -305,7 +313,7 @@ async function armarColaFacturacion(
       conceptos?: ConceptosConfig; bloque_factura_slug?: string
     }
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
-    if (s.bloque_factura_slug) facturaSlugPorLinea.set(l.id, s.bloque_factura_slug)
+    facturaSlugPorLinea.set(l.id, slugFacturaDeLinea(l.config_extra))
   }
   if (desde == null) {
     return { data: { casos: [], desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
@@ -356,7 +364,7 @@ async function armarColaFacturacion(
       .from('negocio_bloques')
       .select('negocio_id, data, bloque_configs!inner(slug)')
       .in('negocio_id', ids)
-      .in('bloque_configs.slug', ['rut', 'comprobante_pago_upme', 'factura_emitida', 'servicio_contratado'])
+      .in('bloque_configs.slug', ['rut', 'comprobante_pago_upme', 'servicio_contratado'])
       .order('id')
       .range(d, h),
     { etiqueta: 'facturacion/negocio_bloques(borradores)' },
@@ -364,7 +372,6 @@ async function armarColaFacturacion(
 
   const rutPorNegocio = new Map<string, RutExtraido>()
   const upmePorNegocio = new Map<string, number>()
-  const facturadoPorNegocio = new Set<string>()
   const servicioPorNegocio = new Map<string, unknown>()
 
   for (const b of bloques) {
@@ -379,8 +386,6 @@ async function armarColaFacturacion(
     } else if (slug === 'comprobante_pago_upme') {
       const v = num(campos.valor_pagado?.value)
       if (v && v > 0) upmePorNegocio.set(b.negocio_id, v)
-    } else if (slug === 'factura_emitida') {
-      if (numeroFacturaEnData(b.data)) facturadoPorNegocio.add(b.negocio_id)
     } else if (slug === 'servicio_contratado') {
       // Plano, no bajo `campos`. Conserva la primera instancia con valor: el
       // bloque vive en Negociación y se hereda de solo lectura aguas abajo.
@@ -499,35 +504,15 @@ async function armarColaFacturacion(
     facturaDocumentId: 0, reciboDocumentId: 0, sellerId: 0,
     productoCode: '', ivaId: 0, facturaPaymentId: 0, reciboPaymentId: 0,
   }
-  // La factura que se cargó a mano NO tiene por qué estar en la copia nativa del
-  // bloque: se sube desde la etapa donde esté el caso, y cada copia guarda en su
-  // propia fila. Sin leerlas todas, un negocio con su factura ya cargada adentro
-  // vuelve a la cola como si nunca se hubiera facturado. Ver `idsDeCopiasDelBloque`.
-  const copiasFactura: string[] = []
-  for (const [lineaId, slugFactura] of facturaSlugPorLinea) {
-    copiasFactura.push(...(await idsDeCopiasDelBloque(svc, lineaId, slugFactura)))
-  }
-  if (copiasFactura.length > 0) {
-    // ⚠️ La más peligrosa de todas: 13 copias heredadas del bloque POR NEGOCIO, así
-    // que escala trece veces más rápido que la cola. Si aquí se cae una fila, un
-    // caso YA FACTURADO vuelve a la bandeja como facturable. Medido el 2026-09-02
-    // sin paginar: V0089 y V0428 estaban facturados y la cola no los veía, y V0428
-    // aparecía listo para emitir. Una factura electrónica aceptada no se deshace.
-    const filasFactura = await traerTodo<{ negocio_id: string; data: unknown }>(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (d, h) => (svc as any)
-        .from('negocio_bloques')
-        .select('id, negocio_id, data')
-        .in('negocio_id', ids)
-        .in('bloque_config_id', copiasFactura)
-        .order('id')
-        .range(d, h),
-      { etiqueta: 'facturacion/negocio_bloques(factura)' },
-    )
-    for (const f of filasFactura) {
-      if (numeroFacturaEnData(f.data)) facturadoPorNegocio.add(f.negocio_id)
-    }
-  }
+  // ── La factura de cada caso: bloque ORIGINAL + marca, nunca una copia ──────
+  // Hasta el 2026-09-14 se leían TODAS las copias heredadas del bloque y bastaba con
+  // que una trajera `numero_factura` para dar el caso por facturado. Las copias se
+  // llenaban por herencia con documentos ajenos: 20 copias de SOENA traían el número
+  // de la factura del VEHÍCULO (Tesla, VISSAN, «FACTURA EDDI ALIRIO»), y V0006, V0290
+  // y V0428 salían como facturados sin factura. La regla vive en
+  // `lib/facturacion/factura-del-negocio`, la misma que usan la emisión y la ficha.
+  const originalFacturaPorNegocio = await leerOriginalesDeFactura(svc, ids, [...new Set(facturaSlugPorLinea.values())])
+  const gateFacturaPorLinea = await gatesDeFacturaPorLinea(svc, lineas.map(l => l.id))
 
   // Fecha del documento fiscal. Va a Siigo, asi que es el dia civil de Bogota y no
   // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
@@ -558,11 +543,19 @@ async function armarColaFacturacion(
     )
     const marcaFactura = (n.metadata?.siigo_factura ?? null) as MarcaFactura | null
     const estado = estadoDeRecaudo({ falta_saldo: faltante, honorario })
-    // Dos fuentes para "ya facturado": el bloque donde se carga el PDF y la marca
-    // que deja la emisión desde aquí. La segunda hace falta porque emitir NO
-    // obliga a cargar el soporte, y sin ella el caso volvería a la cola listo
-    // para re-facturarse.
-    const yaFacturado = facturadoPorNegocio.has(n.id) || !!marcaFactura?.numero
+    // Dos fuentes para "ya facturado": el bloque ORIGINAL donde se carga el PDF y la
+    // marca que deja la emisión desde aquí. La segunda hace falta porque emitir NO
+    // obliga a cargar el soporte, y sin ella el caso volvería a la cola listo para
+    // re-facturarse. Ninguna copia heredada cuenta.
+    const gateFactura = gateFacturaPorLinea.get(n.linea_id ?? '')
+    const { factura } = resolverFacturaDelNegocio({
+      original: originalFacturaPorNegocio.get(n.id) ?? null,
+      marca: marcaFactura,
+      emisorNitEsperado: gateFactura?.emisor_nit_esperado,
+      nitCampo: gateFactura?.nit_campo,
+      numeroCampo: gateFactura?.numero_campo,
+    })
+    const yaFacturado = factura != null
     const descartado = (n.metadata?.facturacion_descartada as CasoPorFacturar['descartado']) ?? null
 
     return {
@@ -592,8 +585,8 @@ async function armarColaFacturacion(
       // con documento cargado del que no se pudo extraer la cédula o el NIT.
       sin_rut: !rutPorNegocio.has(n.id),
       ya_facturado: yaFacturado,
-      factura_numero: marcaFactura?.numero ?? null,
-      factura_sin_pdf: !!marcaFactura?.numero && !marcaFactura.archivo_url,
+      factura_numero: factura?.numero ?? null,
+      factura_sin_pdf: factura != null && !factura.pdfUrl,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
       base_gravable: fac.payload.items[0]?.price ?? null,
       falta_saldo: faltante,

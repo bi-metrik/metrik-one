@@ -104,7 +104,7 @@ vi.mock('./archivar-documento', () => ({
   archivarPdfEnBloque: async () => ({ ok: true as const, url: null }),
 }))
 
-vi.mock('@/lib/negocios/copias-del-bloque', () => ({ idsDeCopiasDelBloque: async () => [] }))
+vi.mock('@/lib/facturacion/leer-factura-del-negocio', () => ({ leerFacturaDeUnNegocio: async () => null }))
 
 // Arrastra media aplicación y no interviene en lo que se mide.
 vi.mock('@/app/(app)/negocios/negocio-v2-actions', () => ({

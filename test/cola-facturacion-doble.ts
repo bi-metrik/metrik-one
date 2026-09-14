@@ -255,7 +255,7 @@ export function sembrar(opciones: {
 
   // El orden de inserción ES el orden que devuelve el servidor cuando nadie pide
   // uno: lo último que se siembra es lo primero que el techo se lleva.
-  const push = (rango: number, i: number, slug: string, cfg: string, data: Fila) =>
+  const push = (rango: number, i: number, slug: string | null, cfg: string, data: Fila) =>
     estado.fixtures.negocio_bloques.push({
       id: `blq-${rango}-${pad(i)}`, negocio_id: `neg-${pad(i)}`,
       bloque_config_id: cfg, data, bloque_configs: { slug },
@@ -269,7 +269,8 @@ export function sembrar(opciones: {
       for (let c = 0; c < copiasFactura; c++) {
         for (let i = 0; i < casos; i++) {
           const tieneNumero = yaFacturado.has(i) && c === facturaEnCopia
-          push(r + c, i, 'factura_emitida', `cfg-fact-${c}`,
+          // Las copias heredadas NO tienen slug: solo la nativa lo lleva.
+          push(r + c, i, c === 0 ? 'factura_emitida' : null, `cfg-fact-${c}`,
             tieneNumero ? { campos: { numero_factura: { value: `FV-${i}` } } } : { campos: {} })
         }
       }
