@@ -58,14 +58,18 @@ export async function sendNumberedMenu(
   await sendTextMessage(phone, text, ctx);
 }
 
-/** Send interactive buttons (max 3 buttons) */
+/**
+ * Send interactive buttons (max 3 buttons).
+ * Devuelve el wamid (o null si Meta lo rechazo): el flujo de aceptacion de terminos lo guarda
+ * para saber a que mensaje con botones respondio la persona. Los demas llamadores lo ignoran.
+ */
 export async function sendButtons(
   phone: string,
   body: string,
   buttons: Array<{ id: string; title: string }>,
   ctx: EnvioCtx = {},
-): Promise<void> {
-  await postMessage(phone, {
+): Promise<string | null> {
+  return await postMessage(phone, {
     messaging_product: 'whatsapp',
     to: phone,
     type: 'interactive',
@@ -78,6 +82,31 @@ export async function sendButtons(
           reply: { id: b.id, title: b.title.slice(0, 20) },
         })),
       },
+    },
+  }, ctx);
+}
+
+/**
+ * Envia un documento por URL (dentro de la ventana de 24 h). Meta lo DESCARGA de `link`, asi que
+ * tiene que ser https y publico o firmado; si no puede bajarlo, el POST igual devuelve wamid y el
+ * fallo llega despues como acuse `failed` en `wa_envios`. Devuelve el wamid, o null si la Graph
+ * API lo rechazo de entrada.
+ */
+export async function sendDocument(
+  phone: string,
+  link: string,
+  filename: string,
+  caption: string,
+  ctx: EnvioCtx = {},
+): Promise<string | null> {
+  return await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'document',
+    document: {
+      link,
+      filename: filename.slice(0, 240),
+      ...(caption ? { caption: caption.slice(0, 1024) } : {}),
     },
   }, ctx);
 }

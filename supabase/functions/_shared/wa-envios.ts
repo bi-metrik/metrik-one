@@ -114,5 +114,9 @@ export function resumenPayload(payload: Record<string, unknown>): string {
     return `[${i?.type ?? 'interactive'}] ${i?.body?.text ?? ''}`.trim();
   }
   if (tipo === 'contacts') return '[tarjeta de contacto]';
+  if (tipo === 'document') {
+    const d = payload.document as { filename?: string } | undefined;
+    return `[documento] ${d?.filename ?? ''}`.trim();
+  }
   return `[${tipo}]`;
 }

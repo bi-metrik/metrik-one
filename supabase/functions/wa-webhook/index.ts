@@ -19,6 +19,7 @@ import { handleRegistro } from '../_shared/handlers/registro/index.ts';
 import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleActividad } from '../_shared/handlers/actividad.ts';
 import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
+import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -72,9 +73,20 @@ Deno.serve(async (req) => {
         return new Response('OK', { status: 200 }); // Otros eventos (plantillas, cuenta, etc.)
       }
 
-      // Process async — respond 200 immediately (Meta expects < 20s)
-      processMessage(message).catch((err) =>
-        console.error('[wa-webhook] Process error:', err)
+      // Un toque de boton puede ser la aceptacion de un documento: se guarda el cuerpo tal cual
+      // llego y su firma, que es lo unico que permite demostrar despues que lo mando Meta.
+      if (message.type === 'interactive') {
+        message.webhook_crudo = { cuerpo: body, firma: signature };
+      }
+
+      // Process async — respond 200 immediately (Meta expects < 20s).
+      // `enBackground` (waitUntil) y no un `.catch` suelto: sin el, el worker puede reciclarse a
+      // mitad y lo que faltaba se pierde sin que Meta reintente, porque ya recibio su 200. Es el
+      // mismo motivo por el que los acuses de arriba ya van asi.
+      enBackground(
+        processMessage(message).catch((err) =>
+          console.error('[wa-webhook] Process error:', err)
+        ),
       );
 
       return new Response('OK', { status: 200 });
@@ -169,6 +181,11 @@ async function avisoReciente(
 
 async function processMessage(message: IncomingMessage): Promise<void> {
   const supabase = getServiceClient();
+
+  // 0. Aceptacion de terminos — toque de "Acepto" / "No acepto". Va PRIMERO, antes que cualquier
+  //    aislamiento: el id del boton es inequivoco (`terminos:...`) y ese toque no puede terminar
+  //    como texto dentro de una entrevista de Cardumen o en el flujo de gastos.
+  if (await atenderBotonTerminos(supabase, message)) return;
 
   // 0a. Cardumen — Flow completado: guardar la respuesta y agradecer. Va PRIMERO (participantes ≠ usuarios ONE).
   if (message.type === 'flow_response') {
@@ -292,6 +309,13 @@ async function processMessage(message: IncomingMessage): Promise<void> {
 
   // 1. Identify user by phone number
   const user = await identifyUser(supabase, message.phone);
+
+  // 1a. Aceptacion de terminos pendiente para este telefono: se le muestra el documento con los
+  //     botones (o se le recuerdan). ANTES del "no reconozco este numero", porque quien tiene que
+  //     aceptar casi nunca es del equipo; y tambien para numeros registrados, que en ese caso
+  //     siguen al flujo normal (ver `decidirEntrante`).
+  if (await atenderPendienteTerminos(supabase, message, !!user)) return;
+
   if (!user) {
     await atenderDesconocido(supabase, message);
     return;
@@ -396,7 +420,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       const numbered = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join('\n');
       return sendTextMessage(message.phone, `${body}\n\n${numbered}\n\nResponde con el número.`);
     },
-    sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
+    sendButtons: async (body: string, btns: Array<{ id: string; title: string }>) => { await sendButtons(message.phone, body, btns); },
     updateSession: async (state, context) => {
       await updateSession(supabase, session.id, state, context);
       // Sync in-memory session so subsequent reads see updated data
@@ -563,7 +587,7 @@ async function handleSessionResponse(
       const numbered = options.map((opt, i) => `${i + 1}️⃣ ${opt}`).join('\n');
       return sendTextMessage(message.phone, `${body}\n\n${numbered}\n\nResponde con el número.`);
     },
-    sendButtons: (body: string, btns: Array<{ id: string; title: string }>) => sendButtons(message.phone, body, btns),
+    sendButtons: async (body: string, btns: Array<{ id: string; title: string }>) => { await sendButtons(message.phone, body, btns); },
     updateSession: async (state, context) => {
       await updateSession(supabase, session.id, state, context);
       session.state = state;
@@ -690,6 +714,8 @@ type MetaMensaje = {
     button_reply?: { id?: string; title?: string };
     list_reply?: { id?: string; title?: string };
   };
+  // wamid del mensaje nuestro al que responde (en toques de boton, el mensaje con los botones).
+  context?: { from?: string; id?: string };
   location?: { latitude: number; longitude: number; name?: string; address?: string };
 };
 
@@ -841,6 +867,8 @@ function extractMessage(payload: MetaWebhookPayload): IncomingMessage | null {
         type: 'interactive',
         interactive_reply: reply?.id,
         timestamp: msg.timestamp,
+        // Crudo, para el flujo de aceptacion de terminos (id del toque, context.id, timestamp).
+        meta_mensaje: msg as unknown as Record<string, unknown>,
       };
     }
 

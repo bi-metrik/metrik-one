@@ -154,6 +154,18 @@ export interface IncomingMessage {
   wa_message_id?: string; // wamid del mensaje entrante (marcar leido / indicador "escribiendo")
   bot_phone?: string; // display_phone_number del webhook = numero del bot (para compartir su contacto)
   timestamp: string;
+  /**
+   * Solo en mensajes `interactive`: el elemento crudo de `value.messages[]` tal como llego de Meta
+   * (con `context.id`, `timestamp` y el `button_reply`). Lo guarda como evidencia el flujo de
+   * aceptacion de terminos.
+   */
+  meta_mensaje?: Record<string, unknown>;
+  /**
+   * Solo en mensajes `interactive`: el cuerpo del webhook como texto y su cabecera
+   * `x-hub-signature-256`. Van sin re-serializar porque la firma HMAC es sobre esos bytes exactos:
+   * es lo que permite comprobar despues que el toque vino de Meta.
+   */
+  webhook_crudo?: { cuerpo: string; firma: string | null };
 }
 
 // --- Handler Context ---
