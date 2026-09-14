@@ -38,6 +38,11 @@ import {
   itemsQueAportanAlTotal,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
+import {
+  costoDeRubrosConfirmados,
+  soloConfirmados,
+  soloSugeridos,
+} from '@/lib/cotizaciones/rubros-sugeridos'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -52,6 +57,12 @@ interface RubroRow {
   unidad: string | null
   valor_unitario: number | null
   valor_total: number | null
+  /**
+   * Propuesto por la lectura de un pantallazo y sin confirmar. Llega `undefined`
+   * mientras la migración `20260914230000` no esté aplicada, y eso vale lo mismo que
+   * `false`: cuenta al costo, que es el comportamiento de siempre.
+   */
+  sugerido?: boolean | null
 }
 
 interface ItemRow {
@@ -373,8 +384,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
       subtotal: item.subtotal,
-      numeroDeRubros: rubros.length,
-      costoDeRubros: rubros.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0),
+      // R-P1 · los SUGERIDOS no entran al costo hasta que alguien confirme.
+      ...costoDeRubrosConfirmados(rubros),
       descuento_porcentaje: item.descuento_porcentaje,
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: item.precio_venta,
@@ -550,8 +561,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const itemDescPct = Number(item.descuento_porcentaje) || 0
             const isAjuste = item.es_ajuste === true
             const isNegativo = itemPrecio < 0
-            const tieneRubros = (item.rubros ?? []).length > 0
-            const costoUnitario = (item.rubros ?? []).reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
+            const rubrosConfirmados = soloConfirmados(item.rubros ?? [])
+            const rubrosSugeridos = soloSugeridos(item.rubros ?? [])
+            const tieneRubros = rubrosConfirmados.length > 0
+            const costoUnitario = rubrosConfirmados.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
             // Costo del ítem que no se desglosa: vive en `subtotal`, escrito a mano.
             const costoManual = tieneRubros ? 0 : Number(item.subtotal) || 0
             const costoDelItem = tieneRubros ? costoUnitario : costoManual
@@ -772,6 +785,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     <PantallazoItem
                       itemId={item.id}
                       ranura={ranuraDeItem}
+                      sugeridosGuardados={rubrosSugeridos}
                       onConfirmado={() => router.refresh()}
                     />
                   )}
@@ -796,7 +810,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 {formatCOP(costoUnitario)}
                               </div>
                               <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                Suma de {(item.rubros ?? []).length} rubro{(item.rubros ?? []).length === 1 ? '' : 's'}
+                                Suma de {rubrosConfirmados.length} rubro{rubrosConfirmados.length === 1 ? '' : 's'}
                               </p>
                             </>
                           ) : (
@@ -1073,8 +1087,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       </div>
                     </div>
                   )}
-                  {/* Rubros table (internal costs) */}
-                  {(item.rubros ?? []).length > 0 && (
+                  {/* Rubros table (internal costs).
+                      ⚠️ Solo los CONFIRMADOS. Los sugeridos por un pantallazo se
+                      revisan en su propio panel, con la captura al lado: mezclarlos
+                      aquí los haría ver como costo ya aceptado, que es lo que R-P1
+                      prohíbe, y ademas el total de la tabla no cuadraría con el
+                      costo del item. */}
+                  {rubrosConfirmados.length > 0 && (
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
@@ -1089,7 +1108,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           </tr>
                         </thead>
                         <tbody>
-                          {(item.rubros ?? []).map((r: RubroRow) => (
+                          {rubrosConfirmados.map((r: RubroRow) => (
                             <tr key={r.id} className="border-b border-dashed">
                               <td className="py-1.5 pr-2">
                                 {TIPOS_RUBRO.find(t => t.value === r.tipo)?.label ?? r.tipo}

@@ -6,6 +6,8 @@ import { toast } from 'sonner'
 
 import {
   confirmarLecturaDePantallazo,
+  confirmarRubrosSugeridos,
+  descartarPropuestaDePantallazo,
   leerPantallazoDeItem,
   type PropuestaPantallazo,
   type RechazoPantallazo,
@@ -25,21 +27,28 @@ import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
  *  3. **El rechazo con su instrucción**, no con un código. Quien lee está con el
  *     proveedor abierto en otra pestaña: necesita saber qué capturar, no qué falló.
  *
- * ## Por qué la propuesta vive aquí y no en la base
+ * ## La propuesta sobrevive a una recarga
  *
- * `rubros` no tiene columna de «sugerido» y agregarla es una migración que hoy no se
- * puede aplicar. Un rubro sugerido guardado contra una base sin esa columna entra al
- * costo como confirmado, que es justo lo que R-P1 prohíbe. Se sostiene en pantalla:
- * recargar descarta la propuesta y hay que volver a pegar — eso cuesta una captura, lo
- * otro cuesta el margen del viaje.
+ * Se guarda como `rubros.sugerido = true`, fuera de todo costo. Esta pantalla tiene
+ * entonces DOS estados con propuesta y no uno:
+ *
+ *  · **Fresca** — se acaba de leer la captura. Están los campos leídos, los avisos y
+ *    los textos que la lectura propone para la línea.
+ *  · **Rehidratada** — la propuesta estaba guardada de antes. Quedan los rubros, que
+ *    es lo que se persiste; los campos leídos y los avisos no, porque su sitio es el
+ *    bloque 3 del DDL y ése no existe. Confirmarla NO reescribe el nombre ni la
+ *    descripción del ítem: escribir algo que ya no tenemos sería inventarlo.
  */
 export default function PantallazoItem({
   itemId,
   ranura,
+  sugeridosGuardados,
   onConfirmado,
 }: {
   itemId: string
   ranura: DefinicionRanura
+  /** Lo que quedó guardado de una lectura anterior. Vacío = no hay nada pendiente. */
+  sugeridosGuardados?: { id: string; descripcion: string | null; cantidad: number | null; unidad: string | null; valor_unitario: number | null }[]
   onConfirmado: () => void
 }) {
   const [leyendo, setLeyendo] = useState(false)
@@ -48,6 +57,14 @@ export default function PantallazoItem({
   const [rechazo, setRechazo] = useState<RechazoPantallazo | null>(null)
   const [tasa, setTasa] = useState('')
   const [isPending, startTransition] = useTransition()
+
+  /**
+   * La propuesta rehidratada: existe solo mientras no haya una lectura fresca en
+   * pantalla. Si alguien vuelve a pegar una captura, manda la nueva — el servidor ya
+   * reemplazó los sugeridos guardados con esa misma lectura.
+   */
+  const pendientes = propuesta ? [] : (sugeridosGuardados ?? [])
+  const hayPendientes = pendientes.length > 0
 
   const enCOP = (propuesta?.moneda ?? 'COP') === 'COP'
   const tasaNum = Number(tasa.replace(/[^\d.,]/g, '').replace(',', '.'))
@@ -107,6 +124,26 @@ export default function PantallazoItem({
     })
   }
 
+  /** Confirmar la propuesta que ya estaba guardada: `sugerido` pasa a `false`. */
+  function confirmarGuardada() {
+    startTransition(async () => {
+      const r = await confirmarRubrosSugeridos(itemId)
+      if (!r.success) { toast.error(r.error ?? 'No se pudo confirmar la propuesta'); return }
+      toast.success('Costo cargado. Revisa el margen de la línea.')
+      onConfirmado()
+    })
+  }
+
+  /** Quitar la propuesta guardada sin confirmarla. No mueve un peso del costo. */
+  function descartarGuardada() {
+    startTransition(async () => {
+      const r = await descartarPropuestaDePantallazo(itemId)
+      if (!r.success) { toast.error(r.error ?? 'No se pudo descartar'); return }
+      toast.success('Propuesta descartada. El costo de la línea no cambió.')
+      onConfirmado()
+    })
+  }
+
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
       <div className="mb-2">
@@ -116,6 +153,62 @@ export default function PantallazoItem({
         <p className="text-[10px] text-muted-foreground">{ranura.queSePide}</p>
         <p className="text-[10px] text-muted-foreground">No sirve: {ranura.queNoSirve}</p>
       </div>
+
+      {/* La propuesta que sobrevivió a la recarga. Va ARRIBA de la zona de pegado
+          porque es lo que hay que resolver: dejarla debajo la esconde detrás de un
+          recuadro que invita a empezar de nuevo, y quedaría un pendiente que nadie ve. */}
+      {hayPendientes && (
+        <div className="mb-2 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2.5">
+          <p className="text-[11px] font-medium text-amber-900">
+            Hay una propuesta sin confirmar de una lectura anterior. No está en el costo.
+          </p>
+          <div className="rounded border border-amber-200 bg-background">
+            <table className="w-full text-[11px]">
+              <thead className="border-b bg-muted/40 text-[9px] uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1 text-left">Concepto</th>
+                  <th className="px-2 py-1 text-right">Cant.</th>
+                  <th className="px-2 py-1 text-left">Unidad</th>
+                  <th className="px-2 py-1 text-right">Valor unit.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendientes.map(r => (
+                  <tr key={r.id} className="border-b last:border-0">
+                    <td className="px-2 py-1">{r.descripcion || 'Tarifa'}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{r.cantidad ?? 1}</td>
+                    <td className="px-2 py-1">{r.unidad || 'und'}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{formatCOP(r.valor_unitario ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={confirmarGuardada}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+            >
+              <Check className="h-3 w-3" />
+              Confirmar y cargar el costo
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={descartarGuardada}
+              className="inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              <X className="h-3 w-3" />
+              Descartar
+            </button>
+          </div>
+          <p className="text-[10px] text-amber-800">
+            Los valores están en pesos. Vuelve a pegar la captura si quieres releerla.
+          </p>
+        </div>
+      )}
 
       {/* La zona lleva etiqueta: un recuadro que solo reacciona a Ctrl+V, sin texto
           propio una vez pegada la imagen, no le dice nada a quien navega con teclado
@@ -162,6 +255,19 @@ export default function PantallazoItem({
           <p className="text-[11px] font-medium">
             Esto es una propuesta. Nada entra al costo hasta que confirmes.
           </p>
+
+          {/* Una propuesta que no se guardó se pierde al recargar, y eso hay que
+              decirlo ANTES de que alguien lo descubra recargando. Pasa cuando la
+              captura no está en pesos: el valor todavía depende de una tasa que nadie
+              ha escrito, y guardar un número cuya moneda nadie pueda recuperar es peor
+              que no guardarlo. */}
+          {!propuesta.persistida && (
+            <p className="flex items-start gap-1.5 rounded bg-amber-50 p-1.5 text-[10px] text-amber-800">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              Esta propuesta no se guardó: si recargas la página tendrás que volver a
+              pegar la captura. Confírmala para que quede.
+            </p>
+          )}
 
           {propuesta.avisos.map((a, i) => (
             <p key={i} className="flex items-start gap-1.5 rounded bg-amber-50 p-1.5 text-[10px] text-amber-800">

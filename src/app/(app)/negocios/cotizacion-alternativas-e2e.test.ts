@@ -68,9 +68,9 @@ function constructor(tabla: string) {
   const proyectar = (f: Fila) => {
     const salida: Fila = { ...f }
     if (embebeRubros) {
-      salida.rubros = (tablas.rubros ?? [])
-        .filter(r => r.item_id === f.id)
-        .map(r => ({ valor_total: r.valor_total }))
+      // Se proyecta la fila ENTERA, como `rubros(*)`: si el codigo dejara de pedir
+      // `sugerido`, el doble no lo taparia y la prueba de abajo caeria.
+      salida.rubros = (tablas.rubros ?? []).filter(r => r.item_id === f.id).map(r => ({ ...r }))
     }
     if (embebeEmpresas) {
       salida.empresas = (tablas.empresas ?? []).find(e => e.id === f.empresa_id) ?? null
@@ -470,6 +470,45 @@ describe('R-A1 · las tres cifras cuadran, con y sin alternativas', () => {
     expect(Number(wingo.subtotal)).toBe(1_825_000)
     // Y la más barata cuesta menos, que es el dato que sostiene la comparación.
     expect(Number(wingo.precio_venta)).toBeLessThan(Number(avianca.precio_venta))
+  }, 30_000)
+
+  it('R-P1 · una propuesta GUARDADA no mueve el costo ni el margen', async () => {
+    // La comprobación que autoriza `rubros.sugerido`. Misma cotización, medida dos
+    // veces contra la server action real: sin la propuesta y con la propuesta encima.
+    sembrar({ conAlternativa: false })
+    // AVIANCA deja de costar por `subtotal` y pasa a costear por un rubro confirmado,
+    // para que la propuesta caiga sobre un ítem que YA se desglosa (el caso real:
+    // se relee la captura de una línea que ya tenía costo).
+    const avianca = (tablas.items as Fila[]).find(i => i.id === 'avianca') as Fila
+    avianca.subtotal = 0
+    tablas.rubros = [
+      { id: 'r1', item_id: 'avianca', valor_total: 2_000_000, sugerido: false },
+    ]
+
+    await recalcularTotales(COT)
+    const antes = { ...(tablas.cotizaciones[0] as Fila) }
+
+    // Llega la propuesta de un pantallazo: se guarda, y no la confirma nadie.
+    tablas.rubros.push({ id: 'r2', item_id: 'avianca', valor_total: 1_825_000, sugerido: true })
+    await recalcularTotales(COT)
+    const despues = tablas.cotizaciones[0] as Fila
+
+    expect(Number(despues.costo_total)).toBe(Number(antes.costo_total))
+    expect(Number(despues.valor_total)).toBe(Number(antes.valor_total))
+
+    // Y el PDF tampoco se movió.
+    const res = await generateCotizacionPDF(COT)
+    expect(cifraJuntoA(textoDelPDF((res as { pdf: string }).pdf), 'Subtotal')).toBe(
+      Number(antes.valor_total),
+    )
+
+    // El control: confirmarla SÍ mueve el costo. Sin esto, una cascada que ignorara el
+    // segundo rubro por cualquier otra razón pasaría igual.
+    ;(tablas.rubros[1] as Fila).sugerido = false
+    await recalcularTotales(COT)
+    expect(Number((tablas.cotizaciones[0] as Fila).costo_total)).toBeGreaterThan(
+      Number(antes.costo_total),
+    )
   }, 30_000)
 
   it('el costo guardado tampoco cuenta el vuelo dos veces', async () => {

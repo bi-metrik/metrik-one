@@ -31,14 +31,22 @@ import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
  *  · `leerPantallazoDeItem` NO escribe nada. Devuelve una propuesta.
  *  · `confirmarLecturaDePantallazo` escribe, con lo que la persona dejó en pantalla.
  *
- * ⚠️ **La propuesta no se persiste en ningún estado intermedio, a propósito.** El
- * diseño dice «crea rubros en estado sugerido», y `rubros` no tiene esa columna:
- * agregarla es una migración que hoy no se puede aplicar, y un rubro sugerido guardado
- * contra una base sin la columna entraría al costo como uno confirmado — exactamente
- * lo que R-P1 prohíbe. Sostener la propuesta en pantalla cumple la invariante que
- * importa (nadie toca el costo hasta que una persona confirme) sin esa deuda. Lo que
- * se pierde: recargar la página descarta la propuesta y hay que volver a pegar. Eso
- * cuesta una captura; lo otro cuesta el margen.
+ * ## La propuesta SÍ se persiste, como `rubros.sugerido = true`
+ *
+ * Desde `20260914230000`. Un rubro sugerido no lo suma nadie: el filtro vive en
+ * `src/lib/cotizaciones/rubros-sugeridos.ts` y lo aplican los cinco que leen rubros.
+ * Confirmar es ponerlo en `false`; no hay un segundo estado ni una tabla aparte.
+ *
+ * ⚠️ **Solo se persiste lo que está en COP.** El valor de la captura se convierte con
+ * una tasa que la persona escribe DESPUÉS de leer, así que una propuesta en USD no se
+ * puede guardar sin inventar la tasa o sin guardar un número cuya moneda nadie pueda
+ * recuperar. Lo segundo es una mina: el día que alguien lea ese `valor_total` como
+ * pesos, el costo queda ~4.000 veces corto. Cuando la captura no es COP la propuesta
+ * se sostiene en pantalla y el panel lo dice.
+ *
+ * ⚠️ Lo que NO se persiste: los campos leídos, el desglose y los avisos. Eso es la
+ * JUSTIFICACIÓN de la lectura, y su sitio es el bloque 3 del DDL, que a propósito no
+ * tiene DDL escrito. Tras recargar quedan los rubros, que es la propuesta.
  *
  * ## La imagen no se persiste
  *
@@ -65,6 +73,14 @@ export interface PropuestaPantallazo {
   /** Unidad y cantidad de venta que se le pondrían al ítem. */
   unidad: string
   cantidad: number
+  /**
+   * `true` si la propuesta quedó guardada y sobrevive a una recarga.
+   *
+   * `false` solo cuando la captura no está en COP: ahí el valor todavía depende de una
+   * tasa que nadie ha escrito. La pantalla lo dice en vez de dejar que alguien lo
+   * descubra recargando.
+   */
+  persistida: boolean
 }
 
 export interface RechazoPantallazo {
@@ -140,6 +156,10 @@ export async function leerPantallazoDeItem(
   const { nombre, descripcion } = resumenDeLinea(ranura, veredicto.campos)
   const moneda = (veredicto.campos.find(c => c.slug === 'moneda')?.valor ?? 'COP').toUpperCase()
 
+  // R-P1 · la propuesta se guarda como SUGERIDA: visible, recuperable tras una
+  // recarga, y fuera de todo costo hasta que una persona la confirme.
+  const persistida = moneda === 'COP' && (await guardarSugeridos(supabase, itemId, rubros))
+
   return {
     ok: true,
     itemId,
@@ -156,7 +176,59 @@ export async function leerPantallazoDeItem(
     // La cantidad de VENTA de la línea. Sale del multiplicador del primer rubro cuando
     // el precio venía por unidad; si el proveedor cotizó un total, la línea es una.
     cantidad: Math.max(1, Math.round(rubros[0]?.cantidad ?? 1)),
+    persistida,
   }
+}
+
+/**
+ * Reemplaza los rubros SUGERIDOS del ítem por los de esta lectura.
+ *
+ * ⚠️ Reemplaza los sugeridos y **no toca los confirmados**. Volver a pegar una captura
+ * corregida es el caso normal; acumular propuestas dejaría tres versiones de la misma
+ * tarifa esperando confirmación, y borrar los confirmados aquí tiraría un costo que
+ * alguien ya aprobó sin que nadie lo pidiera.
+ *
+ * Devuelve `false` en vez de lanzar: una lectura correcta que no se pudo guardar sigue
+ * siendo una lectura correcta, y el panel la muestra igual diciendo que no sobrevive a
+ * una recarga. Tumbar la lectura entera por esto sería perder el trabajo hecho.
+ */
+async function guardarSugeridos(
+  supabase: unknown,
+  itemId: string,
+  rubros: RubroPropuesto[],
+): Promise<boolean> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+
+  const { error: errBorrar } = await sb
+    .from('rubros')
+    .delete()
+    .eq('item_id', itemId)
+    .eq('sugerido', true)
+  if (errBorrar) {
+    console.warn('[pantallazo] no se pudieron limpiar los sugeridos:', errBorrar.message)
+    return false
+  }
+  if (rubros.length === 0) return true
+
+  const { error: errInsertar } = await sb.from('rubros').insert(
+    rubros.map((r, i) => ({
+      item_id: itemId,
+      // Mismo tipo que al confirmar: `rubros.tipo` no admite los conceptos del viaje.
+      tipo: 'servicios_prof',
+      descripcion: (r.concepto ?? '').trim() || 'Tarifa',
+      cantidad: r.cantidad,
+      unidad: (r.unidad ?? '').trim() || 'und',
+      valor_unitario: r.valorUnitario,
+      orden: i,
+      sugerido: true,
+    })),
+  )
+  if (errInsertar) {
+    console.warn('[pantallazo] no se pudo guardar la propuesta:', errInsertar.message)
+    return false
+  }
+  return true
 }
 
 // ── Confirmar ────────────────────────────────────────────────────────────────
@@ -246,6 +318,9 @@ export async function confirmarLecturaDePantallazo(args: {
       unidad: r.unidad,
       valor_unitario: r.valorCOP,
       orden: i,
+      // Explícito aunque el default de la columna ya sea `false`: esta es LA línea
+      // que hace que lo confirmado entre al costo, y no puede quedar implícita.
+      sugerido: false,
     })),
   )
   if (errInsertar) return { success: false, error: errInsertar.message }
@@ -269,6 +344,101 @@ export async function confirmarLecturaDePantallazo(args: {
   // escribe `subtotal` ni `precio_venta`.
   await recalcularTotales(item.cotizacionId)
 
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return { success: true }
+}
+
+// ── La propuesta que ya estaba guardada ──────────────────────────────────────
+
+/**
+ * Confirma la propuesta que sobrevivió a una recarga: `sugerido` pasa a `false`.
+ *
+ * Es el camino del que vuelve a la pantalla y encuentra su propuesta ahí. NO toca el
+ * nombre ni la descripción del ítem: los textos que proponía la lectura no se
+ * persisten (ver el encabezado), y escribir algo inventado sobre lo que el usuario ya
+ * tenía sería peor que no escribir nada.
+ *
+ * ⚠️ El costo lo mandan los rubros, así que `subtotal` vuelve a cero: es el mismo
+ * guard que aplica `confirmarLecturaDePantallazo` y el que impide que un ítem tenga
+ * dos costos y el recálculo pise uno de los dos.
+ */
+export async function confirmarRubrosSugeridos(
+  itemId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const item = await leerItem(supabase, itemId)
+  if (!item) return { success: false, error: 'Ítem no encontrado' }
+  if (!isEditable(item.estado)) {
+    return { success: false, error: 'Esta cotización ya no se edita' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+
+  const { data: sugeridos, error: errLeer } = await sb
+    .from('rubros')
+    .select('id')
+    .eq('item_id', itemId)
+    .eq('sugerido', true)
+  if (errLeer) return { success: false, error: errLeer.message }
+  if (!sugeridos || sugeridos.length === 0) {
+    return { success: false, error: 'No hay ninguna propuesta pendiente en esta línea' }
+  }
+
+  // Los confirmados que ya había se van: la propuesta REEMPLAZA el desglose, igual que
+  // al confirmar una lectura fresca. Dejar los dos sumaría la tarifa dos veces.
+  const { error: errBorrar } = await sb
+    .from('rubros')
+    .delete()
+    .eq('item_id', itemId)
+    .eq('sugerido', false)
+  if (errBorrar) return { success: false, error: errBorrar.message }
+
+  const { error: errConfirmar } = await sb
+    .from('rubros')
+    .update({ sugerido: false })
+    .eq('item_id', itemId)
+    .eq('sugerido', true)
+  if (errConfirmar) return { success: false, error: errConfirmar.message }
+
+  const { error: errItem } = await sb.from('items').update({ subtotal: 0 }).eq('id', itemId)
+  if (errItem) return { success: false, error: errItem.message }
+
+  await recalcularTotales(item.cotizacionId)
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return { success: true }
+}
+
+/**
+ * Descarta la propuesta sin confirmarla. Borra SOLO los sugeridos.
+ *
+ * Hace falta porque una propuesta persistida que no se puede quitar es un pendiente
+ * eterno: quien lee mal una captura tiene que poder dejar la línea como estaba.
+ */
+export async function descartarPropuestaDePantallazo(
+  itemId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const item = await leerItem(supabase, itemId)
+  if (!item) return { success: false, error: 'Ítem no encontrado' }
+  if (!isEditable(item.estado)) {
+    return { success: false, error: 'Esta cotización ya no se edita' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errBorrar } = await (supabase as any)
+    .from('rubros')
+    .delete()
+    .eq('item_id', itemId)
+    .eq('sugerido', true)
+  if (errBorrar) return { success: false, error: errBorrar.message }
+
+  // No se recalcula nada: un sugerido nunca estuvo en el costo, así que quitarlo no
+  // mueve un peso. Recalcular aquí solo escondería un defecto si alguna vez entrara.
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
   return { success: true }
 }

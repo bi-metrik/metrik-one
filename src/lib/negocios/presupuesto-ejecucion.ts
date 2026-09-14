@@ -21,7 +21,7 @@ export interface ItemPresupuesto {
   cantidad?: number | null
   subtotal?: number | null
   es_ajuste?: boolean | null
-  rubros?: Array<{ tipo?: string | null; valor_total?: number | null }> | null
+  rubros?: Array<{ tipo?: string | null; valor_total?: number | null; sugerido?: boolean | null }> | null
 }
 
 export interface RubroPresupuesto {
@@ -39,6 +39,8 @@ export interface RubroPresupuestoEjecutado extends RubroPresupuesto {
  * `TIPOS_RUBRO` (`src/lib/catalogos/constants.ts`): existe solo para que ese costo
  * tenga dónde caer en la comparación en vez de desaparecer.
  */
+import { soloConfirmados } from '@/lib/cotizaciones/rubros-sugeridos'
+
 export const TIPO_RUBRO_SIN_DETALLE = 'otro'
 
 /**
@@ -54,6 +56,22 @@ export const TIPO_RUBRO_SIN_DETALLE = 'otro'
  * Las categorías que no aparecen aquí (`comision`, `arriendo`, `marketing`,
  * `capacitacion`) no tienen rubro equivalente. Su gasto ya no desaparece: sale por
  * `sinPresupuesto`, que es plata gastada fuera de lo cotizado y merece verse.
+ */
+/**
+ * ⚠️ DEUDA ABIERTA — este mapa no conoce los tipos de viaje, y cuando los conozca
+ * tiene que actualizarse ANTES de que algo los escriba.
+ *
+ * `rubros.tipo` admite desde el 2026-09-14 tres valores nuevos (`tarifa`, `impuestos`,
+ * `fee_proveedor`, migración `rubros_tipo_conceptos_viaje`) y NINGUNA categoría de
+ * gasto apunta a ellos. Hoy no pasa nada porque el cargue de pantallazo escribe
+ * `servicios_prof`. El día que empiece a escribir los tipos del diseño, la barra de
+ * Ejecución leerá ejecutado 0 contra ellos y el gasto real caerá en `sinPresupuesto`.
+ *
+ * Es el precedente exacto que este archivo ya documenta: de cinco tipos reales solo
+ * coincidía uno, y nadie lo notó porque un mapeo equivocado no falla, miente.
+ *
+ * NO se toca sin encargo propio: decidir a qué categoría de gasto corresponde una
+ * tarifa aérea es una pregunta de negocio, no de código.
  */
 export const CATEGORIA_GASTO_A_TIPOS_RUBRO: Record<string, string[]> = {
   materiales: ['materiales'],
@@ -105,7 +123,11 @@ export function calcularPresupuestoPorRubro(items: ItemPresupuesto[]): RubroPres
     if (item.es_ajuste) continue
 
     const cantidad = Number(item.cantidad) || 1
-    const rubros = item.rubros ?? []
+    // R-P1 · un rubro SUGERIDO es la propuesta de un pantallazo que nadie confirmó:
+    // no es presupuesto. Contarlo dejaría la barra midiendo contra un costo que la
+    // cotización no tiene, y un mapeo que miente en silencio es el precedente que
+    // este archivo ya documenta más arriba.
+    const rubros = soloConfirmados(item.rubros ?? [])
 
     if (rubros.length > 0) {
       for (const rubro of rubros) {

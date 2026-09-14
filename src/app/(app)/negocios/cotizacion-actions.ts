@@ -17,6 +17,7 @@ import {
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -236,11 +237,18 @@ export async function updateItem(id: string, updates: {
   // dos costos para el mismo ítem y el recálculo pisaría uno de los dos: se rechaza en
   // el servidor en vez de confiar en que la pantalla no ofrezca el campo.
   if (patch.subtotal !== undefined) {
-    const { count } = await supabase
+    // Solo los CONFIRMADOS bloquean. Un item que solo tiene la propuesta de un
+    // pantallazo todavia no tiene costo por rubros, asi que escribirlo a mano vale:
+    // confirmar despues reemplaza el desglose y `subtotal` vuelve a cero, que es el
+    // mismo guard que ya aplica `confirmarLecturaDePantallazo`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: rubrosDelItem } = await (supabase as any)
       .from('rubros')
-      .select('id', { count: 'exact', head: true })
+      .select('*')
       .eq('item_id', id)
-    if ((count ?? 0) > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const confirmados = ((rubrosDelItem ?? []) as any[]).filter(esConfirmado)
+    if (confirmados.length > 0) {
       return { success: false, error: 'Este ítem tiene rubros: su costo sale de ellos, no se escribe a mano' }
     }
   }
@@ -638,9 +646,16 @@ export async function updateRubro(id: string, updates: Record<string, unknown>) 
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  // ⚠️ `sugerido` NO se escribe por aquí. Confirmar una propuesta es un acto con su
+  // propia accion (`confirmarRubrosSugeridos`), que ademas reemplaza el desglose y
+  // recalcula. Dejarlo entrar en este saco abriria una puerta trasera al costo desde
+  // un endpoint que acepta cualquier columna.
+  const { sugerido: _sugerido, ...permitidos } = updates as Record<string, unknown> & { sugerido?: unknown }
+  void _sugerido
+
   const { error: dbError } = await supabase
     .from('rubros')
-    .update(updates)
+    .update(permitidos)
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
@@ -857,7 +872,7 @@ export async function duplicarCotizacion(id: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: items } = await (supabase as any)
       .from('items')
-      .select('*, rubros(tipo, descripcion, cantidad, unidad, valor_unitario)')
+      .select('*, rubros(*)')
       .eq('cotizacion_id', id)
       .order('orden')
 
@@ -904,7 +919,12 @@ export async function duplicarCotizacion(id: string) {
       if (newItem) mapaItems.set(item.id as string, newItem.id as string)
 
       if (newItem && item.rubros) {
-        const rubrosToInsert = (item.rubros as { tipo: string; descripcion: string | null; cantidad: number; unidad: string; valor_unitario: number }[]).map(r => ({
+        // Solo los CONFIRMADOS. Una propuesta de pantallazo sin confirmar es una
+        // pregunta abierta sobre ESA cotizacion; llevarla a la copia le mete a
+        // alguien una decision que nunca pidio, y ademas nacería sin la captura que
+        // la origino.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rubrosToInsert = ((item.rubros ?? []) as any[]).filter(esConfirmado).map(r => ({
           item_id: newItem.id,
           tipo: r.tipo,
           descripcion: r.descripcion,
@@ -1066,20 +1086,24 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: items } = await (supabase as any)
     .from('items')
-    .select('*, rubros(valor_total)')
+    // `rubros(*)` y no la lista de columnas: `sugerido` lo agrega
+    // `20260914230000` y nombrarlo devolveria un 400 mientras no este aplicada.
+    // Un rubro son cinco numeros y un texto corto: traerlo entero no cuesta nada.
+    .select('*, rubros(*)')
     .eq('cotizacion_id', cotizacionId)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filas = (items ?? []) as any[]
   const paraCascada = filas.map(item => {
-    const rubros = (item.rubros as { valor_total: number }[]) ?? []
+    // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
+    const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(item.rubros)
     return {
       id: item.id as string,
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
       subtotal: item.subtotal,
-      numeroDeRubros: rubros.length,
-      costoDeRubros: rubros.reduce((s: number, r: { valor_total: number }) => s + (r.valor_total ?? 0), 0),
+      numeroDeRubros,
+      costoDeRubros,
       descuento_porcentaje: item.descuento_porcentaje,
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: item.precio_venta,
