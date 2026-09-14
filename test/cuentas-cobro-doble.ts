@@ -12,18 +12,46 @@
 
 export type Fila = Record<string, unknown>
 
+/** Relacion embebida de PostgREST (`negocios:negocio_id (...)`), resuelta al leer. */
+export type Embebido = { fk: string; tabla: string }
+
 export const estado: {
   fixtures: Record<string, Fila[]>
   /** Tablas cuya lectura devuelve error, para probar que nadie lo disimula. */
   tablasQueFallan: Set<string>
   /** Numero que devuelve el RPC del correlativo. */
   siguienteNumero: string
-} = { fixtures: {}, tablasQueFallan: new Set(), siguienteNumero: 'CC-2026-09-099' }
+  /**
+   * DEFAULT de columna por tabla, aplicado al insertar SOLO si el payload no trae la
+   * clave. ⚠️ Tambien reproduce un defecto: `cobros.fecha` tiene `DEFAULT CURRENT_DATE`
+   * en la base, asi que un cobro programado insertado sin `fecha: null` nace con
+   * aspecto de pagado. Sin simular el DEFAULT, el filtro `.is('fecha', null)` del
+   * doble lo encontraria igual y la prueba pasaria contra el codigo roto.
+   */
+  defaults: Record<string, Fila>
+  /** Relaciones embebidas por tabla: alias -> FK y tabla destino. */
+  embebidos: Record<string, Record<string, Embebido>>
+  /** Payloads tal cual los mando el codigo, antes de aplicar DEFAULTs. */
+  insertados: { tabla: string; fila: Fila }[]
+} = {
+  fixtures: {},
+  tablasQueFallan: new Set(),
+  siguienteNumero: 'CC-2026-09-099',
+  defaults: {},
+  embebidos: {},
+  insertados: [],
+}
+
+let secuenciaIds = 0
 
 export function reiniciarDoble(): void {
   estado.fixtures = {}
   estado.tablasQueFallan = new Set()
   estado.siguienteNumero = 'CC-2026-09-099'
+  estado.defaults = {}
+  estado.embebidos = {}
+  estado.insertados = []
+  secuenciaIds = 0
 }
 
 function valorEn(fila: Fila, ruta: string): unknown {
@@ -43,8 +71,20 @@ export function clienteFalso() {
       let orden: string | null = null
       let tope: number | null = null
 
+      // Un fixture sembrado a mano ya trae su relacion; solo se resuelve si falta.
+      const embeber = (fila: Fila): Fila => {
+        const rel = estado.embebidos[tabla]
+        if (!rel) return fila
+        const out = { ...fila }
+        for (const [alias, { fk, tabla: destino }] of Object.entries(rel)) {
+          if (alias in out) continue
+          out[alias] = (estado.fixtures[destino] ?? []).find((d) => d.id === out[fk]) ?? null
+        }
+        return out
+      }
+
       const resolver = (): Fila[] => {
-        let filas = (estado.fixtures[tabla] ?? []).filter((f) => filtros.every((p) => p(f)))
+        let filas = (estado.fixtures[tabla] ?? []).map(embeber).filter((f) => filtros.every((p) => p(f)))
         if (orden) {
           const campo = orden
           filas = [...filas].sort((a, b) =>
@@ -57,7 +97,29 @@ export function clienteFalso() {
 
       const falla = () => estado.tablasQueFallan.has(tabla)
 
+      const insert = (valor: Fila | Fila[]) => {
+        const persistidas = (Array.isArray(valor) ? valor : [valor]).map((v) => {
+          estado.insertados.push({ tabla, fila: { ...v } })
+          const fila: Fila = { id: `${tabla}-nuevo-${++secuenciaIds}`, ...v }
+          for (const [col, porDefecto] of Object.entries(estado.defaults[tabla] ?? {})) {
+            if (!(col in v)) fila[col] = porDefecto
+          }
+          ;(estado.fixtures[tabla] ??= []).push(fila)
+          return fila
+        })
+        const insertChain = {
+          select: () => insertChain,
+          single: async () => ({ data: persistidas[0] ?? null, error: null }),
+          then: (
+            ok: (r: { data: Fila[] | null; error: null }) => unknown,
+            ko?: (e: unknown) => unknown,
+          ) => Promise.resolve({ data: persistidas, error: null }).then(ok, ko),
+        }
+        return insertChain
+      }
+
       const chain = {
+        insert,
         select: () => chain,
         eq: (campo: string, valor: unknown) => {
           filtros.push((f) => valorEn(f, campo) === valor)

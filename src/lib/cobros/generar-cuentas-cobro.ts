@@ -208,6 +208,7 @@ export async function generarCuentasCobroPeriodo(
       numero_cuota: numeroCuota,
       tipo_cobro: 'programado',
       monto: plan.monto,
+      fecha: null, // override DEFAULT CURRENT_DATE — emitido, no pagado
       fecha_esperada: fechaEsperada,
       vencido: false,
     })
