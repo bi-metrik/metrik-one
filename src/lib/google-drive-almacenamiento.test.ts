@@ -9,6 +9,8 @@ let configExtra: Record<string, unknown> = {}
 
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
+    // Vault (#717): sin secretos guardados, las credenciales salen de config_extra.
+    rpc: async () => ({ data: {}, error: null }),
     from: () => ({
       select: () => ({
         eq: () => ({
