@@ -705,7 +705,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             propio, o un precio viejo escrito a mano. Mientras el margen
                             lo ponga la cotización, repetirlo en cada ítem es el mismo
                             número doce veces y esconde cuál de las doce es la excepción. */}
-                        {lineaDecideSuPrecio ? (
+                        {/* Cuando la línea hereda el margen NO se escribe ninguna frase
+                            aquí: la fila de abajo ya dice «hereda el margen de la
+                            cotización» al lado del porcentaje. Decirlo dos veces con
+                            palabras distintas hace dudar de si son dos cosas. */}
+                        {lineaDecideSuPrecio && (
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[10px] text-muted-foreground">
                               {precioFijadoAMano
@@ -714,10 +718,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             </span>
                             <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
                           </div>
-                        ) : (
-                          <span className="text-[10px] text-muted-foreground">
-                            El margen de esta línea lo pone la cotización
-                          </span>
                         )}
 
                         {/* El margen real de la línea y DE DÓNDE SALE.
