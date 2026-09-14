@@ -73,6 +73,7 @@ import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoN
 import { llavesDeHerenciaDocumento } from '@/lib/negocios/herencia-documento'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
+import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import {
   resumenCampanasContacto,
   type InteraccionCampana,
@@ -3538,8 +3539,8 @@ export async function cambiarEtapaNegocioConGate(
 ): Promise<{
   error: string | null
   /**
-   * `omitible: false` marca el bloqueo que NO cede al override de owner/admin. Sin esa
-   * marca la pantalla dibujaba "Omitir gate (owner)" sobre el aviso de recaudo cambiado,
+   * `omitible: false` marca el bloqueo que NO cede al override (de nadie). Sin esa
+   * marca la pantalla dibujaba "Omitir gate" sobre el aviso de recaudo cambiado,
    * que el servidor vuelve a rechazar: un botón que no hace nada y no explica por qué.
    * Ausente = omitible, que es como se comportan todos los demás.
    */
@@ -3552,9 +3553,23 @@ export async function cambiarEtapaNegocioConGate(
   const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  // El override de gate (omitir gates con motivo) es exclusivo de owner/admin.
-  if (motivoOverride && role !== 'owner' && role !== 'admin') {
-    return { error: 'Solo el dueño o administrador puede omitir gates' }
+  // El override de gate (omitir gates con motivo): owner/admin, o quien el workspace
+  // declare por persona en `config_extra.omitir_gate.staff_ids`. Fail-closed: si la
+  // config no se puede leer, solo pasan owner/admin. La pantalla decide si dibuja el
+  // botón con la MISMA función (`page.tsx`) y la MISMA lectura: `config_extra` es
+  // server-only y se lee con el cliente de servicio, acotado al workspace de la sesión.
+  // Leerla aquí con el cliente de sesión dejaría a la pantalla y al guard mirando por
+  // caminos distintos, que es justo la desincronización que la función única evita.
+  if (motivoOverride) {
+    const { data: wsOmitir } = await db(createServiceClient())
+      .from('workspaces')
+      .select('config_extra')
+      .eq('id', workspaceId)
+      .maybeSingle()
+    const configWs = (wsOmitir as { config_extra?: unknown } | null)?.config_extra ?? null
+    if (!puedeOmitirGatesConMotivo({ role, staffId }, configWs)) {
+      return { error: 'No tienes permiso para omitir gates' }
+    }
   }
 
   // Obtener etapa actual del negocio
@@ -3654,7 +3669,7 @@ export async function cambiarEtapaNegocioConGate(
       // error y sin aviso. En SOENA eso mandó 17 casos de Entrega a Facturación, la etapa de
       // cierre. Opt-in por etapa (`exigir_dato_de_decision`); sin el flag, nada cambia.
       //
-      // Respeta el override de owner/admin como cualquier otro gate: si alguien decide
+      // Respeta el override (owner/admin o `omitir_gate.staff_ids`) como cualquier otro gate: si alguien decide
       // avanzar sabiendo que el dato falta, queda el motivo en el log. Un freno que no se
       // pueda levantar dejaría casos varados sin salida.
       if (!motivoOverride && exigeDatoDeDecision(etapaActualData.config_extra)) {
@@ -4199,7 +4214,7 @@ export async function cambiarEtapaNegocioConGate(
   // (external_ref NO-split) con OTRO negocio abierto del workspace, queda CONGELADO →
   // no puede avanzar de etapa hasta que la pestaña Duplicados resuelva el conflicto
   // ("Aceptar duplicado"). Server-side (no solo UI). Opt-in por módulo: solo workspaces
-  // con modules.conciliacion lo aplican; el resto no cambia. El override de owner/admin
+  // con modules.conciliacion lo aplican; el resto no cambia. El override de gates
   // (motivoOverride) lo respeta igual que los demás gates.
   if (!motivoOverride) {
     const { data: wsRow } = await db(supabase)
@@ -4230,7 +4245,7 @@ export async function cambiarEtapaNegocioConGate(
   // retroceso financiero viene a evitar. Por eso vuelve a frenar aquí, hasta que alguien
   // lo resuelva de forma explícita y con motivo escrito.
   //
-  // ⚠️ Este gate NO cede al override de owner/admin, a diferencia de los demás.
+  // ⚠️ Este gate NO cede al override (ni de owner/admin ni de la lista), a diferencia de los demás.
   // Decisión de Mauricio (2026-08-11): "es un gate, no avanza hasta que no se resuelva,
   // no importa quién". Un override aquí deja al caso avanzando con plata que ya no
   // tiene, que es exactamente el estado que esto viene a evitar — y quien más
