@@ -117,9 +117,13 @@ export default function PantallazoItem({
         <p className="text-[10px] text-muted-foreground">No sirve: {ranura.queNoSirve}</p>
       </div>
 
+      {/* La zona lleva etiqueta: un recuadro que solo reacciona a Ctrl+V, sin texto
+          propio una vez pegada la imagen, no le dice nada a quien navega con teclado
+          o lector de pantalla. */}
       <div
         onPaste={pegar}
         tabIndex={0}
+        aria-label={`Pegar el pantallazo de ${ranura.label.toLowerCase()}`}
         className="flex min-h-[72px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed bg-muted/30 p-3 focus:outline-none focus:ring-2 focus:ring-primary/20"
       >
         {preview ? (
