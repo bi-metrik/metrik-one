@@ -21,6 +21,7 @@ import { mimeEfectivo } from '@/lib/documentos/mime'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
+import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { esReferenciaExterna, esRutaPendienteDe, parsearReferencia } from '@/lib/almacenamiento/referencia'
 
 const BUCKET = 've-documentos'
@@ -1166,6 +1167,18 @@ export async function subirImagenClipboard(
 
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  // Un workspace que guarda fuera de Drive NO escribe en el bucket público de ONE:
+  // su contrato es que sus archivos viven en su propio almacenamiento. Mientras el
+  // pantallazo no tenga ruta allá, se rechaza (lado seguro) en vez de caer aquí.
+  // Si la marca no se puede leer, también se rechaza: no se sabe a dónde iría.
+  try {
+    if (await usaAlmacenamientoExterno(workspaceId)) {
+      return { success: false, error: 'Este espacio guarda sus archivos en su propio almacenamiento: pegar imágenes aún no está disponible aquí.' }
+    }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'No se pudo resolver el almacenamiento del espacio' }
+  }
 
   const m = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(dataUrl)
   if (!m) return { success: false, error: 'Imagen inválida' }
