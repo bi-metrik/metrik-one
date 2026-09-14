@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { actualizarAprobacion } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
+import { esAprobadorAsignado } from '@/lib/negocios/aprobacion-bloque'
 
 interface Profile {
   id: string
@@ -45,7 +46,7 @@ export default function BloqueAprobacion({
   const [isPending, startTransition] = useTransition()
 
   const estado = data.estado ?? 'pendiente'
-  const isAprobador = currentUserId && aprobadorId === currentUserId
+  const isAprobador = esAprobadorAsignado(currentUserId, aprobadorId)
 
   function getProfileName(id: string | null | undefined) {
     if (!id) return null
@@ -53,20 +54,23 @@ export default function BloqueAprobacion({
   }
 
   function handleSetAprobador(id: string) {
+    // Optimista: el selector cambia al tocarlo. Si el servidor no guarda, se devuelve
+    // SOLO lo que tocó este gesto, y solo si nadie lo cambió después.
+    const anterior = aprobadorId
     setAprobadorId(id)
     startTransition(async () => {
       const result = await actualizarAprobacion(negocioBloqueId, { aprobador_id: id, estado: 'pendiente' })
-      if (result.error) toast.error(result.error)
+      if (result.error) {
+        toast.error(result.error)
+        setAprobadorId(actual => (actual === id ? anterior : actual))
+      }
     })
   }
 
   function handleDecision(decision: 'aprobado' | 'rechazado') {
     startTransition(async () => {
-      const result = await actualizarAprobacion(negocioBloqueId, {
-        estado: decision,
-        comentario,
-        aprobado_at: new Date().toISOString(),
-      })
+      // Quién decide y cuándo los pone el servidor.
+      const result = await actualizarAprobacion(negocioBloqueId, { estado: decision, comentario })
       if (result.error) toast.error(result.error)
       else toast.success(decision === 'aprobado' ? 'Aprobado correctamente' : 'Rechazado')
     })
