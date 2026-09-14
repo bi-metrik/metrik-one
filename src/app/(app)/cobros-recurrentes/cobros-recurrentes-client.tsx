@@ -63,8 +63,15 @@ function formatFecha(iso: string): string {
   return `${m[3]}/${m[2]}/${m[1]}`
 }
 
+/**
+ * La tabla abre mostrando solo las cuentas `enviada`: son las que esperan pago del
+ * cliente, el trabajo vivo de esta pantalla. Pendientes de aprobacion, pagadas y
+ * anuladas se buscan con el filtro de estado, que sigue ofreciendo "Todos".
+ */
+const ESTADO_POR_DEFECTO = 'enviada'
+
 export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props) {
-  const [filtroEstado, setFiltroEstado] = useState<string>('todos')
+  const [filtroEstado, setFiltroEstado] = useState<string>(ESTADO_POR_DEFECTO)
   const [filtroAnio, setFiltroAño] = useState<number>(new Date().getFullYear())
   const [aprobandoId, setAprobandoId] = useState<string | null>(null)
   const [reenviandoId, setReenviandoId] = useState<string | null>(null)
@@ -120,15 +127,19 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
     })
   }, [cuentas, filtroEstado, filtroAnio])
 
+  // Los contadores miran el AÑO, no el filtro de estado. Con la tabla abriendo en
+  // `enviada`, contar sobre la lista filtrada pintaria "Pendientes aprobación: 0"
+  // teniendo cuentas por aprobar: el contador es justo lo que avisa que existen.
   const stats = useMemo(() => {
-    const pendientesAprobacion = cuentasFiltradas.filter(c => c.estado === 'emitida_pendiente_aprobacion').length
-    const enviadas = cuentasFiltradas.filter(c => c.estado === 'enviada').length
-    const pagadas = cuentasFiltradas.filter(c => c.estado === 'pagada' || c.estado === 'conciliada').length
-    const totalCobrado = cuentasFiltradas
+    const delAnio = cuentas.filter(c => c.anio === filtroAnio)
+    const pendientesAprobacion = delAnio.filter(c => c.estado === 'emitida_pendiente_aprobacion').length
+    const enviadas = delAnio.filter(c => c.estado === 'enviada').length
+    const pagadas = delAnio.filter(c => c.estado === 'pagada' || c.estado === 'conciliada').length
+    const totalCobrado = delAnio
       .filter(c => c.estado === 'pagada' || c.estado === 'conciliada')
       .reduce((sum, c) => sum + Number(c.monto_total), 0)
     return { pendientesAprobacion, enviadas, pagadas, totalCobrado }
-  }, [cuentasFiltradas])
+  }, [cuentas, filtroAnio])
 
   const aniosDisponibles = useMemo(() => {
     const set = new Set(cuentas.map(c => c.anio))
