@@ -17,6 +17,8 @@ import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { cortarVersionCronograma } from '@/lib/cronograma/cortar-version'
+import { tocaLaPlaneacion } from '@/lib/cronograma/versionado'
 import {
   calcularPresupuestoPorRubro,
   asignarEjecutadoPorRubro,
@@ -5690,7 +5692,7 @@ export async function agregarBloqueItem(
   orden: number,
   extra?: { fecha_inicio?: string | null; fecha_fin?: string | null; responsable_id?: string | null }
 ): Promise<{ id: string | null; error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error) return { id: null, error: 'No autenticado' }
 
   // Guard: validar permiso sobre el bloque (rol+área+responsable) antes de escribir
@@ -5709,6 +5711,17 @@ export async function agregarBloqueItem(
     .single()
 
   if (insertError) return { id: null, error: (insertError as { message: string }).message }
+
+  // Un paso nuevo es planeación: corta versión. La primera tanda de pasos de una obra
+  // cae toda en la v1 por la ventana de edición.
+  if (workspaceId) {
+    await cortarVersionCronograma(db(supabase), {
+      negocioBloqueId,
+      workspaceId,
+      userId: userId ?? null,
+    })
+  }
+
   return { id: (data as { id: string }).id, error: null }
 }
 
@@ -5716,9 +5729,18 @@ export async function agregarBloqueItem(
 
 export async function actualizarBloqueItem(
   bloqueItemId: string,
-  fields: { label?: string; fecha_inicio?: string | null; fecha_fin?: string | null; link_url?: string | null; responsable_id?: string | null }
-): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  fields: {
+    label?: string
+    fecha_inicio?: string | null
+    fecha_fin?: string | null
+    link_url?: string | null
+    responsable_id?: string | null
+    /** Avance, no plan: lo que efectivamente pasó. NO corta versión. */
+    fecha_inicio_real?: string | null
+    fecha_fin_real?: string | null
+  }
+): Promise<{ error: string | null; version?: number }> {
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   // Guard: resolver el bloque del item y validar permiso (rol+área+responsable)
@@ -5737,7 +5759,57 @@ export async function actualizarBloqueItem(
     .eq('id', bloqueItemId)
 
   if (updateError) return { error: (updateError as { message: string }).message }
-  return { error: null }
+
+  // El corte de versión depende de QUÉ se guardó, no de quién guardó: mover una fecha
+  // planeada publica una versión nueva; marcar el inicio real de un paso, no. Es la
+  // diferencia entre replanear la obra y contar cómo va.
+  if (!tocaLaPlaneacion(fields) || !workspaceId) return { error: null }
+
+  // El bloque ya se resolvió para el guard: no hace falta volver a leerlo.
+  const negocioBloqueId = (itemRow as { negocio_bloque_id: string }).negocio_bloque_id
+  const version = await cortarVersionCronograma(db(supabase), {
+    negocioBloqueId,
+    workspaceId,
+    userId: userId ?? null,
+  })
+  return { error: null, version: version?.numero }
+}
+
+// ── Versión vigente del cronograma ───────────────────────────────────────────
+
+export interface VersionCronograma {
+  numero: number
+  created_at: string
+  cambios: string[]
+}
+
+/**
+ * La última versión del cronograma de este bloque, para sellar la tarjeta.
+ *
+ * Es la que se le manda al cliente, así que se muestra siempre: un cronograma sin
+ * número no se puede citar en una reunión de obra.
+ */
+export async function leerVersionCronograma(
+  negocioBloqueId: string,
+): Promise<VersionCronograma | null> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return null
+
+  const { data } = await db(supabase)
+    .from('cronograma_versiones')
+    .select('numero, created_at, cambios')
+    .eq('negocio_bloque_id', negocioBloqueId)
+    .order('numero', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!data) return null
+  const fila = data as { numero: number; created_at: string; cambios: unknown }
+  return {
+    numero: fila.numero,
+    created_at: fila.created_at,
+    cambios: Array.isArray(fila.cambios) ? (fila.cambios as string[]) : [],
+  }
 }
 
 // ── Eliminar un bloque_item ──────────────────────────────────────────────────
@@ -5745,17 +5817,20 @@ export async function actualizarBloqueItem(
 export async function eliminarBloqueItem(
   bloqueItemId: string
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  // Guard: resolver el bloque del item y validar permiso (rol+área+responsable)
+  // Guard: resolver el bloque del item y validar permiso (rol+área+responsable). El
+  // bloque se resuelve ANTES de borrar: después la fila ya no existe y no habría contra
+  // qué cortar la versión.
   const { data: itemRow } = await db(supabase)
     .from('bloque_items')
     .select('negocio_bloque_id')
     .eq('id', bloqueItemId)
     .single()
   if (!itemRow) return { error: 'Item no encontrado' }
-  const guard = await guardEditarBloque((itemRow as { negocio_bloque_id: string }).negocio_bloque_id)
+  const negocioBloqueId = (itemRow as { negocio_bloque_id: string }).negocio_bloque_id
+  const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
   const { error: delError } = await db(supabase)
@@ -5764,6 +5839,14 @@ export async function eliminarBloqueItem(
     .eq('id', bloqueItemId)
 
   if (delError) return { error: (delError as { message: string }).message }
+
+  if (negocioBloqueId && workspaceId) {
+    await cortarVersionCronograma(db(supabase), {
+      negocioBloqueId,
+      workspaceId,
+      userId: userId ?? null,
+    })
+  }
   return { error: null }
 }
 
@@ -6416,7 +6499,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   if (negocioBloqueIds.length > 0) {
     const { data: itemsData } = await db(supabase)
       .from('bloque_items')
-      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, responsable_id')
+      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id')
       .in('negocio_bloque_id', negocioBloqueIds)
       .order('orden', { ascending: true })
     if (itemsData) {

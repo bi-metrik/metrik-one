@@ -1823,6 +1823,8 @@ function BloqueRenderer({
         link_url: i.link_url,
         fecha_inicio: (i as Record<string, unknown>).fecha_inicio as string | null | undefined,
         fecha_fin: (i as Record<string, unknown>).fecha_fin as string | null | undefined,
+        fecha_inicio_real: (i as Record<string, unknown>).fecha_inicio_real as string | null | undefined,
+        fecha_fin_real: (i as Record<string, unknown>).fecha_fin_real as string | null | undefined,
         responsable_id: (i as Record<string, unknown>).responsable_id as string | null | undefined,
       }))
       const preloadItems = (configExtra.items as Array<{ label: string; tipo: string }>) ?? []
