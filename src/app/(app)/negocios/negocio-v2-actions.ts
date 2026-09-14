@@ -77,7 +77,14 @@ import {
   type FilaDelNegocio,
   type FuenteHerencia,
 } from '@/lib/negocios/herencia-casilla'
-import { emisorImpideFactura, verificarEmisorFactura } from '@/lib/facturacion/factura-del-negocio'
+import {
+  dataDeFacturaParaCopias,
+  emisorImpideFactura,
+  resolverFacturaDelNegocio,
+  verificarEmisorFactura,
+  type MarcaFacturaMinima,
+} from '@/lib/facturacion/factura-del-negocio'
+import { gatesDeFacturaPorLinea, slugFacturaDeLinea, type GateFactura } from '@/lib/facturacion/leer-factura-del-negocio'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
@@ -7574,6 +7581,29 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // entre uno y otro. Bogotá y no UTC (después de las 19:00 el día ya cambió allá).
   const hoyBogotaISO = todayBogotaISO()
 
+  // ── La factura que muestran las COPIAS del bloque de factura ───────────────
+  // Misma resolución que la cola de Tesorería (`lib/facturacion/factura-del-negocio`):
+  // bloque ORIGINAL o marca de Siigo, nunca la data de una copia, y nunca un documento
+  // de otro emisor. Así la ficha y Tesorería no pueden mostrar archivos distintos para
+  // el mismo negocio. Solo se consulta el gate si la etapa tiene copias de la factura.
+  const slugFacturaLinea = slugFacturaDeLinea(lineaConfigExtra)
+  let dataFacturaParaCopias: Record<string, unknown> = {}
+  const hayCopiasDeFactura = base.bloques.some(b =>
+    ((bloqueConfigsExtra[b.id] ?? {}) as { source_bloque_slug?: unknown }).source_bloque_slug === slugFacturaLinea)
+  if (hayCopiasDeFactura) {
+    const gates = base.negocio.linea_id
+      ? await gatesDeFacturaPorLinea(supabase, [base.negocio.linea_id])
+      : new Map<string, GateFactura>()
+    const gate = base.negocio.linea_id ? gates.get(base.negocio.linea_id) : undefined
+    const original = documentoDataPorSlug.get(slugFacturaLinea) ?? null
+    const marca = ((negMetaRow?.metadata as Record<string, unknown> | null)?.siigo_factura ?? null) as MarcaFacturaMinima | null
+    const resolucion = resolverFacturaDelNegocio({
+      original, marca,
+      emisorNitEsperado: gate?.emisor_nit_esperado, nitCampo: gate?.nit_campo, numeroCampo: gate?.numero_campo,
+    })
+    dataFacturaParaCopias = dataDeFacturaParaCopias(original, resolucion, gate?.numero_campo)
+  }
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -7605,9 +7635,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // Vía preferida: slug estable del origen. Fallback legacy: por (etapa::nombre).
       const srcSlug = configExtra.source_bloque_slug as string | undefined
       const bNombre = (b.nombre ?? (b as { bloque_definitions?: { nombre?: string } | null }).bloque_definitions?.nombre ?? '').trim().toLowerCase()
-      const srcData =
-        (srcSlug ? documentoDataPorSlug.get(srcSlug) : undefined)
-        ?? documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
+      const srcData = srcSlug === slugFacturaLinea
+        ? dataFacturaParaCopias
+        : (srcSlug ? documentoDataPorSlug.get(srcSlug) : undefined)
+          ?? documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
+          // Con el origen declarado por slug y sin fila de origen, la copia NO muestra
+          // su propia data: la llenó la herencia, y antes del 2026-09-14 la herencia
+          // podía traer el documento de otra casilla (19 negocios mostraban otro
+          // documento como «Factura emitida»).
+          ?? (srcSlug ? {} : undefined)
       if (srcData) {
         b = { ...b, instancia: { ...b.instancia, data: srcData } }
       }

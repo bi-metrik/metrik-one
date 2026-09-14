@@ -69,8 +69,15 @@ export async function archivarPdfEnBloque(
    * `adoptada_de_siigo` es para la factura que YA existía en Siigo y que alguien
    * reconoce como la de este negocio: ONE no la emitió, solo la trajo. Decir lo
    * contrario dejaría escrito en el expediente que la emitimos nosotros.
+   *
+   * `cargada_manual` es el PDF que una persona subió desde Tesorería porque la
+   * factura se hizo por fuera de ONE o Siigo no devolvió el archivo. Es el único
+   * origen que se puede reemplazar a mano después.
+   *
+   * ⚠️ Escribe con el service role, así que `trg_avisar_documento_cargado` (que exige
+   * `auth.uid()`) NO le avisa al cliente, venga el archivo de donde venga.
    */
-  origen: 'emitido_en_siigo' | 'adoptada_de_siigo' = 'emitido_en_siigo',
+  origen: 'emitido_en_siigo' | 'adoptada_de_siigo' | 'cargada_manual' = 'emitido_en_siigo',
 ): Promise<ResultadoArchivado> {
   try {
     const svc = createServiceClient()

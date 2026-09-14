@@ -29,6 +29,7 @@ import type { ColaFacturacion, CasoPorFacturar } from '@/lib/actions/facturacion
 import type { FacturasParaAdoptar } from '@/lib/actions/facturacion-actions'
 import {
   adoptarFacturaSiigoDeNegocio,
+  cargarFacturaManual,
   descartarDeFacturacion,
   emitirFacturaDeNegocio,
   listarFacturasSiigoDelNegocio,
@@ -36,6 +37,7 @@ import {
 } from '@/lib/actions/facturacion-actions'
 import type { FacturaAdoptable, FacturaEnSiigo, FacturaHermana } from '@/lib/siigo/facturas'
 import { casoListoParaFacturar, faltantesDelCaso, razonDeRetencion } from '@/lib/facturacion/caso-listo'
+import { MOTIVO_REEMPLAZO_MIN } from '@/lib/facturacion/factura-del-negocio'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 import type { ControlRecibos } from '@/lib/actions/recibos-control-actions'
@@ -991,8 +993,25 @@ export function ofreceEmitirFactura(caso: CasoPorFacturar, siigoConfigurado: boo
  */
 export function ofreceAdoptarFactura(caso: CasoPorFacturar, siigoConfigurado: boolean): boolean {
   if (!siigoConfigurado) return false
+  if (caso.cerrado) return false
   if (caso.descartado != null) return false
   return !caso.ya_facturado || caso.factura_sin_pdf
+}
+
+/**
+ * ¿La tarjeta ofrece cargar el PDF a mano, FUERA del panel de Siigo?
+ *
+ * El orden lo fijó Mauricio (2026-09-14): si la factura existe en Siigo, se trae de
+ * Siigo. Por eso, cuando la tarjeta ofrece la adopción, la carga manual vive DENTRO de
+ * ese panel, debajo de la lista del cliente. Afuera solo aparece cuando no hay Siigo
+ * que consultar, o para reemplazar un PDF que ya se había cargado a mano.
+ *
+ * Si se puede o no lo decide el servidor (`carga_manual`, de `cargaManualPermitida`),
+ * la misma regla que aplica al guardar.
+ */
+export function ofreceCargaManualDirecta(caso: CasoPorFacturar, siigoConfigurado: boolean): boolean {
+  if (caso.cerrado || caso.descartado != null || !caso.carga_manual.permitida) return false
+  return !ofreceAdoptarFactura(caso, siigoConfigurado)
 }
 
 function TabFacturacion(
@@ -1190,6 +1209,7 @@ function TabFacturacion(
               descarteAbierto={cola.descarte_abierto}
               siigoConfigurado={cola.siigo_configurado}
               productos={cola.productos}
+              workspaceNombre={cola.workspace_nombre}
               onCambio={() => router.refresh()}
             />
           ))}
@@ -1238,6 +1258,7 @@ function TabFacturacion(
                     descarteAbierto={cola.descarte_abierto}
                     siigoConfigurado={cola.siigo_configurado}
                     productos={cola.productos}
+                    workspaceNombre={cola.workspace_nombre}
                     onCambio={() => router.refresh()}
                   />
                 ))}
@@ -1252,12 +1273,14 @@ function TabFacturacion(
 
 /** Exportada para la prueba de render: lo que se afirma es qué OFRECE la tarjeta. */
 export function FilaPorFacturar({
-  caso, descarteAbierto, siigoConfigurado, productos, onCambio,
+  caso, descarteAbierto, siigoConfigurado, productos, workspaceNombre, onCambio,
 }: {
   caso: CasoPorFacturar
   descarteAbierto: boolean
   siigoConfigurado: boolean
   productos: ColaFacturacion['productos']
+  /** Para decir de quién tiene que ser la factura. Opcional: sin él, «la empresa». */
+  workspaceNombre?: string | null
   onCambio: () => void
 }) {
   const [isPending, startTransition] = useTransition()
@@ -1385,7 +1408,36 @@ export function FilaPorFacturar({
                 {caso.factura_numero ?? 'Facturado'}
               </span>
             )}
+            {caso.cerrado && (
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    style={{ backgroundColor: '#F3F4F6', color: 'var(--tinta-suave)' }}>
+                Cerrado
+              </span>
+            )}
           </div>
+          {/* La factura se VE desde aquí, venga de donde venga. El enlace sale del
+              bloque original o de la marca de Siigo, nunca de una copia heredada: es
+              la misma resolución que usa la ficha del negocio. */}
+          {caso.ya_facturado && (
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+              {caso.factura_pdf_url ? (
+                <a href={caso.factura_pdf_url} target="_blank" rel="noopener noreferrer"
+                   className="inline-flex items-center gap-1 font-semibold hover:underline"
+                   style={{ color: 'var(--acento)' }}>
+                  <ExternalLink className="h-3 w-3" />
+                  Ver factura
+                </a>
+              ) : (
+                <span className="rounded-full px-2 py-0.5 font-semibold"
+                      style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+                  Facturada, sin soporte
+                </span>
+              )}
+              {caso.factura_origen && (
+                <span style={{ color: 'var(--tinta-suave)' }}>{ETIQUETA_ORIGEN_FACTURA[caso.factura_origen]}</span>
+              )}
+            </div>
+          )}
           <div className="mt-0.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
             {[caso.cliente, caso.identificacion, caso.etapa].filter(Boolean).join(' · ')}
           </div>
@@ -1419,6 +1471,19 @@ export function FilaPorFacturar({
           )}
         </div>
       </div>
+
+      {/* Lo que hay cargado como factura no es de la empresa (la del vehículo, casi
+          siempre). Se dice aquí para que nadie crea que el caso ya se facturó, y NO se
+          enlaza: mostrarlo como factura es justo el error que esto cierra. */}
+      {!caso.ya_facturado && caso.factura_documento_ajeno && (
+        <div className="mt-2 flex items-start gap-1.5 rounded-md border p-2"
+             style={{ borderColor: '#FDE68A', backgroundColor: '#FFFBEB' }}>
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: '#B45309' }} />
+          <p className="text-[12px]" style={{ color: '#92400E' }}>
+            {textoDocumentoAjeno(caso, workspaceNombre)}
+          </p>
+        </div>
+      )}
 
       {!caso.ya_facturado && faltas.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -1768,7 +1833,15 @@ export function FilaPorFacturar({
           incompleto por una razón que no tiene que ver. Por eso los retenidos la
           conservan — es lo único que pueden hacer aquí. */}
       {ofreceAdoptarFactura(caso, siigoConfigurado) && (
-        <AdoptarFacturaExistente caso={caso} onCambio={onCambio} />
+        <AdoptarFacturaExistente caso={caso} workspaceNombre={workspaceNombre} onCambio={onCambio} />
+      )}
+
+      {/* Sin Siigo que consultar, o para reemplazar un PDF cargado a mano, la carga
+          manual va directo. Con Siigo, vive dentro del panel de arriba. */}
+      {ofreceCargaManualDirecta(caso, siigoConfigurado) && (
+        <div className="mt-2">
+          <CargarFacturaManual caso={caso} workspaceNombre={workspaceNombre} onCambio={onCambio} />
+        </div>
       )}
 
       {/* Descartado: se dice quién y por qué, y se puede deshacer */}
@@ -1841,6 +1914,189 @@ export function FilaPorFacturar({
 
 
 
+/** Cómo llegó la factura, dicho para quien la mira. */
+const ETIQUETA_ORIGEN_FACTURA: Record<NonNullable<CasoPorFacturar['factura_origen']>, string> = {
+  emitido_en_siigo: 'emitida en Siigo',
+  adoptada_de_siigo: 'traída de Siigo',
+  cargada_manual: 'cargada a mano',
+}
+
+/** El aviso de documento ajeno. Exportada para la prueba de render. */
+export function textoDocumentoAjeno(caso: CasoPorFacturar, workspaceNombre?: string | null): string | null {
+  const a = caso.factura_documento_ajeno
+  if (!a) return null
+  const numero = a.numero ? `${a.numero}, ` : ''
+  return `Lo cargado como factura no es de ${workspaceNombre || 'la empresa'} (${numero}NIT del emisor ${a.emisor}). No cuenta como factura.`
+}
+
+/**
+ * Cargar a mano el PDF de la factura.
+ *
+ * Dos pasos, porque la persona tiene que ver lo que leyó la IA antes de guardar:
+ * escoger el PDF (el servidor lo lee y, si el emisor no es la empresa, lo rechaza ahí
+ * mismo) y confirmar el número. Si reemplaza un documento, pide motivo.
+ *
+ * Todo se re-decide en el servidor al guardar (`decidirCargaManual`). Esta pantalla
+ * solo muestra lo que el servidor contestó.
+ */
+function CargarFacturaManual({
+  caso, workspaceNombre, onCambio,
+}: { caso: CasoPorFacturar; workspaceNombre?: string | null; onCambio: () => void }) {
+  const [abierto, setAbierto] = useState(false)
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [leyendo, setLeyendo] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [emisor, setEmisor] = useState<string | null>(null)
+  const [numero, setNumero] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [reemplaza, setReemplaza] = useState(caso.carga_manual.reemplaza)
+  const [leido, setLeido] = useState(false)
+  const [pendiente, startTransition] = useTransition()
+
+  const cerrar = () => {
+    setAbierto(false); setArchivo(null); setError(null); setEmisor(null)
+    setNumero(''); setMotivo(''); setLeido(false)
+  }
+
+  const formulario = (modo: 'leer' | 'guardar', pdf: File) => {
+    const fd = new FormData()
+    fd.set('negocio_id', caso.negocio_id)
+    fd.set('modo', modo)
+    fd.set('archivo', pdf)
+    if (modo === 'guardar') {
+      fd.set('numero', numero.trim())
+      fd.set('motivo', motivo.trim())
+    }
+    return fd
+  }
+
+  const escoger = (pdf: File | null) => {
+    setArchivo(pdf); setError(null); setLeido(false); setEmisor(null)
+    if (!pdf) return
+    setLeyendo(true)
+    cargarFacturaManual(formulario('leer', pdf))
+      .then(r => {
+        setEmisor(r.leido?.emisor ?? null)
+        if (!r.ok) { setError(r.error ?? 'No se pudo leer el PDF'); return }
+        setNumero(r.leido?.numero ?? '')
+        setReemplaza(r.reemplaza ?? caso.carga_manual.reemplaza)
+        setLeido(true)
+      })
+      .catch(() => setError('No se pudo leer el PDF'))
+      .finally(() => setLeyendo(false))
+  }
+
+  const guardar = () => {
+    if (!archivo) return
+    startTransition(async () => {
+      const r = await cargarFacturaManual(formulario('guardar', archivo))
+      if (!r.ok) { setError(r.error ?? 'No se pudo guardar la factura'); return }
+      toast.success(`Factura ${r.numero} guardada en el negocio`)
+      cerrar()
+      onCambio()
+    })
+  }
+
+  const etiqueta = caso.ya_facturado && caso.factura_pdf_url ? 'Reemplazar el PDF cargado a mano' : 'Cargar el PDF a mano'
+
+  if (!abierto) {
+    return (
+      <div className="flex justify-end">
+        <button
+          onClick={() => setAbierto(true)}
+          className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition"
+          style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
+        >
+          <FileText className="h-3.5 w-3.5" style={{ color: 'var(--tinta-suave)' }} />
+          {etiqueta}
+        </button>
+      </div>
+    )
+  }
+
+  const faltaMotivo = reemplaza && motivo.trim().length < MOTIVO_REEMPLAZO_MIN
+
+  return (
+    <div className="rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' }}>
+      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
+        {etiqueta}
+      </div>
+      <p className="mt-1 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+        Solo facturas emitidas por {workspaceNombre || 'la empresa'}, en PDF. Se lee el NIT del emisor:
+        si es de otra empresa, no se guarda.
+      </p>
+
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        disabled={leyendo || pendiente}
+        onChange={e => escoger(e.target.files?.[0] ?? null)}
+        className="mt-2 block w-full text-[12px]"
+      />
+
+      {leyendo && (
+        <div className="mt-2 flex items-center gap-1.5 text-[12px]" style={{ color: 'var(--tinta-suave)' }}>
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Leyendo el PDF…
+        </div>
+      )}
+
+      {error && <p className="mt-2 text-[12px]" style={{ color: '#B91C1C' }}>{error}</p>}
+
+      {leido && (
+        <div className="mt-2 space-y-2">
+          {emisor && (
+            <p className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+              NIT del emisor leído: <span className="font-semibold" style={{ color: 'var(--tinta)' }}>{emisor}</span>
+            </p>
+          )}
+          <label className="block text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+            Número de la factura
+            <input
+              value={numero}
+              onChange={e => setNumero(e.target.value)}
+              placeholder="FV-2-000"
+              className="mt-0.5 w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
+              style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
+            />
+          </label>
+          {reemplaza && (
+            <label className="block text-[11px]" style={{ color: '#92400E' }}>
+              Ya hay un documento cargado como factura. ¿Por qué se reemplaza?
+              <textarea
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+                rows={2}
+                className="mt-0.5 w-full rounded-md border px-2 py-1 text-[12px] focus:outline-none"
+                style={{ borderColor: '#FCD34D', color: 'var(--tinta)' }}
+              />
+            </label>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={guardar}
+          disabled={!leido || !numero.trim() || faltaMotivo || pendiente}
+          className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
+          style={{ backgroundColor: VERDE }}
+        >
+          {pendiente && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Guardar factura
+        </button>
+        <button
+          onClick={cerrar}
+          disabled={pendiente}
+          className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
+          style={{ borderColor: '#E5E7EB', color: 'var(--tinta-suave)' }}
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * "Esta factura ya existe": marca en el negocio una factura que ya está en Siigo
  * y trae su PDF al bloque.
@@ -1857,8 +2113,8 @@ export function FilaPorFacturar({
  * decide, caso por caso.
  */
 function AdoptarFacturaExistente({
-  caso, onCambio,
-}: { caso: CasoPorFacturar; onCambio: () => void }) {
+  caso, workspaceNombre, onCambio,
+}: { caso: CasoPorFacturar; workspaceNombre?: string | null; onCambio: () => void }) {
   const [abierto, setAbierto] = useState(false)
   const [cargando, setCargando] = useState(false)
   const [datos, setDatos] = useState<FacturasParaAdoptar | null>(null)
@@ -2019,6 +2275,17 @@ function AdoptarFacturaExistente({
           Cancelar
         </button>
       </div>
+
+      {/* El segundo camino, siempre DESPUÉS de consultar Siigo: la factura no está allá
+          o Siigo no devolvió el PDF. Visible también si la consulta falló. */}
+      {!cargando && caso.carga_manual.permitida && (
+        <div className="mt-3 border-t pt-3" style={{ borderColor: '#E5E7EB' }}>
+          <p className="mb-1.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+            ¿No está en Siigo, o Siigo no trae el PDF?
+          </p>
+          <CargarFacturaManual caso={caso} workspaceNombre={workspaceNombre} onCambio={onCambio} />
+        </div>
+      )}
     </div>
   )
 }
