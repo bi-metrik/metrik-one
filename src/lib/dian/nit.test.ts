@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { calcularDvNit, separarNitDv, nitSinDv, nitConGuion } from './nit'
+import {
+  calcularDvNit,
+  separarNitDv,
+  nitSinDv,
+  nitConGuion,
+  nitTraeDvDeLaIdentificacion,
+  diagnosticarNitDv,
+} from './nit'
 
 /**
  * Los pares NIT-DV de `NITS_PUBLICOS` NO salen de este código: son NIT de
@@ -123,5 +130,108 @@ describe('nitSinDv — tampoco es seguro sobre un NIT de empresa limpio', () => 
     expect(calcularDvNit('890903938')).toBe('8')  // su DV real, impreso aparte
     expect(separarNitDv('890903938')).toEqual({ base: '89090393', dv: '8' })
     expect(nitSinDv('890903938')).toBe('89090393') // ← un dígito menos que el NIT real
+  })
+})
+
+/**
+ * El NIT del RUT con el DV pegado (2026-09-14).
+ *
+ * Los cinco pares de `DV_REALES` son de casos de SOENA medidos en producción: la
+ * identificación de la casilla 26 y el DV que la extracción pegó al final del NIT.
+ * En los 20 bloques afectados el dígito sobrante era EXACTAMENTE ese DV.
+ *
+ * A diferencia de la trampa de arriba, aquí el recorte exige un TESTIGO: la
+ * identificación, o el DV leído en la casilla 6. Y el testigo solo no alcanza:
+ * Bancolombia prueba que un NIT limpio puede cumplir las dos condiciones.
+ */
+const DV_REALES: Array<[identificacion: string, dv: string]> = [
+  ['52217225', '2'],
+  ['16727057', '9'],
+  ['1032392837', '6'],
+  ['75072970', '0'],
+  ['43970194', '8'],
+]
+
+describe('calcularDvNit — identificaciones reales del RUT', () => {
+  it.each(DV_REALES)('%s → DV %s', (id, dv) => {
+    expect(calcularDvNit(id)).toBe(dv)
+  })
+})
+
+describe('nitTraeDvDeLaIdentificacion', () => {
+  it.each(DV_REALES)('%s con su DV %s pegado → sí', (id, dv) => {
+    expect(nitTraeDvDeLaIdentificacion(id + dv, id)).toBe(true)
+  })
+
+  it('el NIT igual a la identificación → no', () => {
+    expect(nitTraeDvDeLaIdentificacion('52217225', '52217225')).toBe(false)
+  })
+
+  it('un dígito de más que NO es el DV → no (es otro error, no este)', () => {
+    expect(nitTraeDvDeLaIdentificacion('522172257', '52217225')).toBe(false)
+  })
+
+  it('el DV correcto pero otro prefijo → no', () => {
+    expect(nitTraeDvDeLaIdentificacion('522172262', '52217225')).toBe(false)
+  })
+
+  it('sin identificación no hay testigo → no', () => {
+    expect(nitTraeDvDeLaIdentificacion('522172252', null)).toBe(false)
+    expect(nitTraeDvDeLaIdentificacion('522172252', '')).toBe(false)
+  })
+})
+
+describe('diagnosticarNitDv', () => {
+  it.each(DV_REALES)('con identificación %s: quita el DV %s pegado', (id, dv) => {
+    expect(diagnosticarNitDv({ nit: id + dv, numeroIdentificacion: id, dvLeido: dv }))
+      .toEqual({ accion: 'quitar_dv', nit: id, motivo: 'pegado_a_la_identificacion' })
+  })
+
+  it('con identificación, aunque el DV leído falte o esté mal', () => {
+    expect(diagnosticarNitDv({ nit: '522172252', numeroIdentificacion: '52217225', dvLeido: null }).nit)
+      .toBe('52217225')
+    expect(diagnosticarNitDv({ nit: '522172252', numeroIdentificacion: '52217225', dvLeido: '7' }).nit)
+      .toBe('52217225')
+  })
+
+  it('NIT que calza con la identificación: limpio, aunque cumpla la trampa', () => {
+    // 12345672 → su último dígito es el DV de 1234567. La identificación lo salva.
+    expect(diagnosticarNitDv({ nit: '12345672', numeroIdentificacion: '12345672', dvLeido: '2' }))
+      .toEqual({ accion: 'sin_cambio', nit: '12345672', motivo: 'limpio' })
+  })
+
+  it('sin identificación: quita el DV si el leído lo confirma y el NIT completo no lo explica', () => {
+    // 522172252: DV(52217225)=2 = último = leído, y DV(522172252) ≠ 2.
+    expect(calcularDvNit('522172252')).not.toBe('2')
+    expect(diagnosticarNitDv({ nit: '522172252', dvLeido: '2' }))
+      .toEqual({ accion: 'quitar_dv', nit: '52217225', motivo: 'pegado_segun_dv_leido' })
+  })
+
+  it('Bancolombia: NIT limpio que cumple todo → dudoso, NUNCA recortado', () => {
+    // 890903938 con DV 8: DV(89090393)=8 = último = leído, y DV(890903938) también es 8.
+    expect(diagnosticarNitDv({ nit: '890903938', dvLeido: '8' }))
+      .toEqual({ accion: 'dudoso', nit: '890903938', motivo: 'ambiguo_dv_leido_valido_para_ambos' })
+  })
+
+  it('sin identificación y con el DV correcto leído, la trampa de las cédulas no muerde', () => {
+    // 12345672: DV real 4. El leído no coincide con el último dígito → no hay recorte.
+    expect(diagnosticarNitDv({ nit: '12345672', dvLeido: '4' }).accion).toBe('sin_cambio')
+  })
+
+  it('RIESGO RESIDUAL, fijado: sin identificación y con el DV MAL leído igual al último dígito, recorta', () => {
+    // Pasó en producción (V0309, rut_solicitante_2: 34545752 con dv guardado 2, real 3).
+    // Allá la identificación estaba y lo salva; este test documenta qué pasaría sin ella.
+    expect(diagnosticarNitDv({ nit: '34545752', dvLeido: '2' }).accion).toBe('quitar_dv')
+    expect(diagnosticarNitDv({ nit: '34545752', numeroIdentificacion: '34545752', dvLeido: '2' }).accion)
+      .toBe('sin_cambio')
+  })
+
+  it('sin DV leído no hay testigo: no toca nada', () => {
+    expect(diagnosticarNitDv({ nit: '522172252' }).accion).toBe('sin_cambio')
+  })
+
+  it('sin NIT', () => {
+    expect(diagnosticarNitDv({ nit: null }).motivo).toBe('sin_nit')
+    expect(diagnosticarNitDv({ nit: '  ' }).motivo).toBe('sin_nit')
   })
 })

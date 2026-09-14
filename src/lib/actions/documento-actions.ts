@@ -7,8 +7,7 @@ import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
-import { nitSinDv, calcularDvNit } from '@/lib/dian/nit'
-import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
+import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -436,76 +435,6 @@ async function runCrossCheck(
   }
 }
 
-/**
- * Normalizaciones deterministas post-extracción (config-driven, opt-in por campo
- * vía `campos_extraccion[].normalizar`). Muta `campos` en sitio.
- *
- * Orden importa: primero `nit_sin_dv` (limpia el NIT base quitando el DV pegado),
- * luego `dv_desde_nit` (recalcula el DV por módulo 11 sobre el NIT ya limpio). Así
- * el DV nunca depende de la lectura inestable de la IA en las casillas 5/6.
- */
-function aplicarNormalizaciones(
-  campos: CampoExtraccion[],
-  resultado: Record<string, CampoResultado>,
-): void {
-  // Pasada 1: nit_sin_dv (deja el NIT base sin el DV pegado).
-  //
-  // ⚠️ `nitSinDv` ADIVINA si el valor trae DV (ver el aviso de ÁMBITO en
-  // `@/lib/dian/nit`): cuando el último dígito resulta ser el DV válido de los
-  // anteriores, recorta — acierte o no. Sobre una identificación limpia eso borra
-  // un dígito REAL ~1 de cada 11 veces. Por eso, cuando de verdad recorta, se
-  // deja rastro en el log: la mutilación dejó de ser silenciosa (así se colaron
-  // 14 cédulas mutiladas antes de que alguien lo notara).
-  for (const campo of campos) {
-    if (campo.normalizar === 'nit_sin_dv') {
-      const cr = resultado[campo.slug]
-      if (cr?.value) {
-        const antes = cr.value
-        cr.value = nitSinDv(antes)
-        if (cr.value !== antes) {
-          console.warn(`[documento] nit_sin_dv RECORTÓ ${campo.slug}: "${antes}" → "${cr.value}"`)
-        }
-      }
-    }
-  }
-  // Pasada 2: dv_desde_nit (recalcula el DV desde el NIT base ya normalizado).
-  for (const campo of campos) {
-    if (campo.normalizar === 'dv_desde_nit') {
-      const nitSlug = campo.normalizar_desde ?? 'nit'
-      const nitVal = resultado[nitSlug]?.value ?? null
-      const dvCalc = calcularDvNit(nitVal)
-      if (dvCalc != null) {
-        const cr = resultado[campo.slug]
-        if (cr) cr.value = dvCalc
-        else resultado[campo.slug] = { value: dvCalc, confidence: 1, manual: false }
-      }
-    }
-  }
-  // Pasada 3: divipola_desde_nombres (códigos de ubicación desde los NOMBRES).
-  // Mismo criterio que el DV: el código es función del nombre y el nombre se lee
-  // bien. Se hace UNA vez para los tres códigos porque el municipio solo se puede
-  // resolver dentro de su departamento (hay 67 nombres repetidos en el país).
-  if (campos.some((c) => c.normalizar === 'divipola_desde_nombres')) {
-    const valor = (slug: string) => (resultado[slug]?.value ?? null) as string | null
-    const codes = resolverCodigosUbicacion(
-      valor('pais'), valor('departamento'), valor('municipio'),
-      {
-        codigo_pais: valor('codigo_pais'),
-        codigo_departamento: valor('codigo_departamento'),
-        codigo_municipio: valor('codigo_municipio'),
-      },
-    )
-    for (const campo of campos) {
-      if (campo.normalizar !== 'divipola_desde_nombres') continue
-      const nuevo = codes[campo.slug as keyof typeof codes]
-      if (nuevo == null) continue
-      const cr = resultado[campo.slug]
-      if (cr) { cr.value = nuevo; cr.confidence = 1 }
-      else resultado[campo.slug] = { value: nuevo, confidence: 1, manual: false }
-    }
-  }
-}
-
 // ── Instancias heredadas: copias de solo lectura ─────────────────────────────
 //
 // Un bloque cuyo `config_extra.source_etapa_orden` está definido es una COPIA de
@@ -711,9 +640,9 @@ export async function procesarDocumento(
         const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'documento')
         if (extraction.data) {
           camposResult = extraction.data
-          // Normalización determinista post-extracción (config-driven). Ej.:
-          // nit_sin_dv deja el NIT base sin el DV pegado por la extracción;
-          // dv_desde_nit recalcula el DV por módulo 11 desde el NIT base.
+          // Normalización determinista post-extracción. Incluye la del NIT y el DV, que
+          // aplica a todo bloque con campo `nit` sin necesidad de declararla
+          // (ver `@/lib/documentos/normalizaciones`).
           aplicarNormalizaciones(camposExtraccion, camposResult)
           newData.campos = camposResult
           extraccionStatus = 'ok'
@@ -915,9 +844,6 @@ export async function reprocesarDocumento(
       return { success: false, error: extraction.error ?? 'Error en extracción AI' }
     }
 
-    // 4b. Normalización determinista post-extracción (config-driven, ver procesarDocumento)
-    aplicarNormalizaciones(camposExtraccion, extraction.data)
-
     // 5. Merge con data existente preservando campos manuales
     const existingCampos = (currentData.campos as Record<string, CampoResultado>) ?? {}
     const mergedCampos: Record<string, CampoResultado> = { ...extraction.data }
@@ -926,6 +852,12 @@ export async function reprocesarDocumento(
         mergedCampos[slug] = campo
       }
     }
+
+    // 5b. Normalización determinista, DESPUÉS del merge (ver `@/lib/documentos/normalizaciones`).
+    // Antes corría sobre la extracción cruda y el merge venía detrás: con un NIT corregido a
+    // mano, el DV salía del NIT recién extraído y quedaba desalineado del que sí se guarda.
+    // Sobre el merge, lo protegido no se toca y lo derivado sale de lo que va a quedar.
+    aplicarNormalizaciones(camposExtraccion, mergedCampos)
 
     // 6. Determinar completitud
     const requiredCampos = camposExtraccion.filter(c => c.required)

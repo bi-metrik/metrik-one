@@ -15,6 +15,7 @@ import CartaAutorizacionPDF from '@/lib/pdf/carta-autorizacion-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
+import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
@@ -499,9 +500,12 @@ export async function generarFormularioCore(
     }
 
     // 2. Resolve source campos
+    // Las sondas leen la identificación del mismo bloque de cada NIT, para la guarda de
+    // abajo. Se resuelven en la misma consulta y se retiran antes de armar el PDF.
     const { datos, faltantes } = await resolverCamposFuente(
-      supabase, negocioId, lineaId, camposFuente,
+      supabase, negocioId, lineaId, [...camposFuente, ...sondasDeIdentificacion(template, camposFuente)],
     )
+    const sondas = separarSondas(datos)
 
     // Capa editable: el operador puede sobreescribir/llenar cualquier casilla desde
     // la plataforma (data.campos_override). Los overrides tienen prioridad sobre el
@@ -513,6 +517,11 @@ export async function generarFormularioCore(
       if (k in constantesFinal) constantesFinal[k] = (v ?? '') as string
       else datosFinal[k] = v
     }
+
+    // El NIT con el DV pegado no sale en un formulario DIAN: identifica a otra persona.
+    // Se mira DESPUÉS de los overrides, porque lo que cuenta es lo que se va a imprimir.
+    const nitPegado = nitConDvPegadoEnFormulario(template, camposFuente, datosFinal, sondas)
+    if (nitPegado) return { success: false, error: nitPegado }
 
     // ── Seccional DIAN (010): preset config-driven vía helper compartido con la
     //    capa editable (display ⟺ generación). Override manual > preset > fuente.

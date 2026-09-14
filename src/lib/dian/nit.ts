@@ -108,3 +108,101 @@ export function nitConGuion(raw: string | null | undefined): string | null {
   if (!sep) return raw
   return sep.dv != null ? `${sep.base}-${sep.dv}` : sep.base
 }
+
+// ── El NIT del RUT con el DV pegado ──────────────────────────────────────────
+//
+// Desde ~2026-08-21 la extracción del RUT devuelve la casilla 5 con el DV de la
+// casilla 6 pegado al final (`numero_identificacion` 52217225, DV 2 → `nit`
+// 522172252), aunque la instrucción del campo dice lo contrario. Medido en SOENA
+// el 2026-09-14: 20 bloques, y en los 20 el dígito sobrante es EXACTAMENTE el DV
+// módulo 11 de la identificación. Más prompt no lo arregló, así que se corrige de
+// forma determinista.
+//
+// ⚠️ Esto NO es `separarNitDv` con otro nombre. Aquella ADIVINA mirando solo el
+// NIT, y por eso mutiló 14 cédulas (ver el aviso de ÁMBITO arriba). Aquí se
+// recorta únicamente con un TESTIGO independiente:
+//
+//  1. `numero_identificacion` (casilla 26): si el NIT es esa identificación más su
+//     DV, el sobrante es el DV. Dos casillas distintas coinciden; no hay azar.
+//  2. Sin identificación que calce, el DV que la extracción leyó en la casilla 6.
+//     Pero ese testigo solo NO alcanza, y el caso que lo prueba es público:
+//     Bancolombia, 890903938 con DV 8. El 8 final es a la vez el DV de 89090393
+//     y el DV leído — y el NIT está limpio. Lo que separa los dos casos es el DV
+//     del NIT COMPLETO: en un NIT limpio coincide con el leído (siempre); en uno
+//     con el DV pegado solo por azar (1 de cada 11). Cuando coinciden los tres, no
+//     hay forma de saberlo desde el dato, y se devuelve `dudoso` en vez de recortar.
+
+export type AccionNitDv = 'sin_cambio' | 'quitar_dv' | 'dudoso'
+
+export interface DiagnosticoNitDv {
+  accion: AccionNitDv
+  /** NIT a guardar: la base sin el DV cuando `quitar_dv`, el valor intacto si no. */
+  nit: string
+  /** Por qué. Sirve para el log y para las pruebas, no para la pantalla. */
+  motivo:
+    | 'sin_nit'
+    | 'limpio'
+    | 'pegado_a_la_identificacion'
+    | 'pegado_segun_dv_leido'
+    | 'ambiguo_dv_leido_valido_para_ambos'
+}
+
+/**
+ * ¿`nit` es exactamente `numeroIdentificacion` seguido de su DV?
+ *
+ * Es la condición que usa la guarda del Formulario 010 y la primera regla de la
+ * normalización. Exige las tres cosas —un dígito más, mismo prefijo y ese dígito
+ * igual al DV— porque cualquiera sola ocurre por azar.
+ */
+export function nitTraeDvDeLaIdentificacion(
+  nit: string | null | undefined,
+  numeroIdentificacion: string | null | undefined,
+): boolean {
+  const n = soloDigitos(nit)
+  const id = soloDigitos(numeroIdentificacion)
+  if (!n || !id) return false
+  if (n.length !== id.length + 1) return false
+  if (!n.startsWith(id)) return false
+  return n.slice(-1) === calcularDvNit(id)
+}
+
+/**
+ * Decide si el NIT extraído trae el DV pegado. Puro: no muta nada.
+ *
+ * @param nit                   valor extraído del campo `nit`.
+ * @param numeroIdentificacion  valor extraído de la casilla 26, si el bloque lo tiene.
+ * @param dvLeido               DV que la extracción leyó en la casilla 6, ANTES de
+ *                              cualquier recálculo. Si ya viene recalculado sobre el
+ *                              NIT crudo, es inútil como testigo.
+ */
+export function diagnosticarNitDv(input: {
+  nit: string | null | undefined
+  numeroIdentificacion?: string | null
+  dvLeido?: string | null
+}): DiagnosticoNitDv {
+  const crudo = (input.nit ?? '').trim()
+  const n = soloDigitos(crudo)
+  if (!n) return { accion: 'sin_cambio', nit: crudo, motivo: 'sin_nit' }
+
+  const id = soloDigitos(input.numeroIdentificacion)
+  if (nitTraeDvDeLaIdentificacion(n, id)) {
+    return { accion: 'quitar_dv', nit: id, motivo: 'pegado_a_la_identificacion' }
+  }
+  // La identificación calza con el NIT tal cual: es la prueba de que está limpio.
+  if (id && id === n) return { accion: 'sin_cambio', nit: crudo, motivo: 'limpio' }
+
+  // Sin identificación, o una que no calza: el único testigo es el DV leído.
+  const dv = soloDigitos(input.dvLeido)
+  if (n.length < 2 || dv.length !== 1) return { accion: 'sin_cambio', nit: crudo, motivo: 'limpio' }
+  const ultimo = n.slice(-1)
+  const base = n.slice(0, -1)
+  const ultimoEsDvDeLaBase = calcularDvNit(base) === ultimo
+  const dvLeidoEsElUltimo = dv === ultimo
+  if (!ultimoEsDvDeLaBase || !dvLeidoEsElUltimo) {
+    return { accion: 'sin_cambio', nit: crudo, motivo: 'limpio' }
+  }
+  if (calcularDvNit(n) === dv) {
+    return { accion: 'dudoso', nit: crudo, motivo: 'ambiguo_dv_leido_valido_para_ambos' }
+  }
+  return { accion: 'quitar_dv', nit: base, motivo: 'pegado_segun_dv_leido' }
+}
