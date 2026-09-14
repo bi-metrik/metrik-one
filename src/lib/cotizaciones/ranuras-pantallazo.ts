@@ -237,6 +237,41 @@ const RANURAS: Record<string, DefinicionRanura> = {
   [TRASLADO.slug]: TRASLADO,
 }
 
+// ── Qué ranuras entran al producto cartesiano ────────────────────────────────
+
+/**
+ * Las DOS ranuras que la tabla de combinaciones cruza entre sí.
+ *
+ * Decisión de la reunión del 2026-09-14 con Daniela y Alejandra, y el argumento es
+ * suyo: *un traslado al aeropuerto no cambia según la aerolínea que se escoja*.
+ * Multiplicar por él no le da al comercial ninguna decisión que tomar; solo infla la
+ * tabla. Tres vuelos por tres hoteles son nueve filas revisables; meter dos traslados
+ * las vuelve dieciocho, idénticas de a pares.
+ *
+ * Tours, traslados, planes y cualquier grupo propio (`seguro`, `dia-1`) siguen
+ * existiendo y siguen sumando: entran en TODOS los itinerarios, iguales para todos.
+ * Lo que dejan de hacer es abrir una columna.
+ *
+ * ⚠️ Vive AQUÍ, en el catálogo de ranuras, y no como una lista nueva en el motor de
+ * itinerarios. El catálogo ya es la única pieza que sabe qué es un vuelo y qué es un
+ * hotel —con sus sinónimos declarados, «hoteles» y «alojamiento» incluidos— y una
+ * segunda lista para la misma pregunta se desincroniza el día que se agregue un
+ * sinónimo: el síntoma sería una columna que desaparece de la tabla sin que nada falle.
+ */
+export const RANURAS_COMBINABLES: readonly string[] = [VUELO.slug, HOTEL.slug]
+
+/**
+ * ¿Un `items.grupo` abre columna en la tabla de combinaciones?
+ *
+ * Solo si resuelve a una ranura combinable. Un grupo que no resuelve a ninguna ranura
+ * (`seguro`, `dia-1`, «propina») devuelve `false`, que es lo correcto: nunca se cruzó
+ * con nada y ahora tampoco.
+ */
+export function grupoCombinable(grupo: string | null | undefined): boolean {
+  const ranura = ranuraDeGrupo(grupo)
+  return ranura !== null && RANURAS_COMBINABLES.includes(ranura.slug)
+}
+
 // ── Resolución ───────────────────────────────────────────────────────────────
 
 /**

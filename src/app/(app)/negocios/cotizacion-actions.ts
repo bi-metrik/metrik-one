@@ -8,7 +8,6 @@ import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
-import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
 import {
   contextoDeCotizacion,
   desmarcarLosQueYaNoPueden,
@@ -828,9 +827,18 @@ export async function duplicarCotizacion(id: string) {
     hermanos.map(h => h.descripcion),
   )
 
-  // Por el insert tolerante, como las otras dos vías: sin él, duplicar desde el
-  // editor dejaría de funcionar hasta que la migración de los umbrales se aplique.
-  const { data: newCot, error: dbError } = await insertarCotizacionTolerante(supabase, {
+  // ⚠️ Insert DIRECTO. Hasta el 2026-09-14 esto pasaba por `insertarCotizacionTolerante`,
+  // que reintentaba sin las columnas de umbral si la migración no estaba aplicada. La
+  // migración `20260914160000_cotizaciones_umbrales_margen.sql` YA está aplicada en
+  // producción (comprobado leyendo `piso_margen_pct` y `aviso_margen_pct` por PostgREST)
+  // y esta base es la única que el producto usa, así que la tolerancia solo servía para
+  // tragarse un `42703` real como «nació sin congelar» — el fallo mudo que ella misma
+  // decía combatir. La pieza se borró, como decía su propio comentario.
+  // Los tipos generados de `cotizaciones` todavia no declaran `piso_margen_pct` ni
+  // `aviso_margen_pct` (falta regenerar `database.ts`), asi que el cliente tipado
+  // rechaza el objeto entero.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: newCot, error: dbError } = await (supabase as any).from('cotizaciones').insert({
       workspace_id: workspaceId,
       oportunidad_id: original.oportunidad_id,
       consecutivo: dupCons,
@@ -859,7 +867,7 @@ export async function duplicarCotizacion(id: string) {
       // y la copia cae a la política de su línea, como hoy.
       piso_margen_pct: politicaOriginal.piso_margen_pct ?? null,
       aviso_margen_pct: politicaOriginal.aviso_margen_pct ?? null,
-  })
+  }).select('id').single()
 
   if (dbError) return { success: false, error: dbError.message }
 
@@ -867,8 +875,9 @@ export async function duplicarCotizacion(id: string) {
   if (original.modo === 'detallada' && newCot) {
     // `select('*')` y no una lista de columnas: `grupo`, `opcion_de` y `unidad` las
     // agrega la migracion `20260914200000` y nombrarlas devolveria un 400 mientras no
-    // este aplicada — o sea que duplicar dejaria de funcionar. Es la misma tolerancia
-    // que ya obligo `insertarCotizacionTolerante` en esta misma funcion.
+    // este aplicada — o sea que duplicar dejaria de funcionar. La migracion
+    // `20260914200000` SI esta aplicada hoy; el `select('*')` se queda porque es la
+    // forma barata de no depender de eso en cada entorno.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: items } = await (supabase as any)
       .from('items')

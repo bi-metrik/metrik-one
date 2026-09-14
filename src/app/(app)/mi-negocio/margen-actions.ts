@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { politicaMargenDeLinea } from '@/lib/cotizaciones/convencion-margen'
+import { politicaRecargoDeLinea } from '@/lib/cotizaciones/recargo-linea'
 import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 
 /**
@@ -24,6 +25,8 @@ export interface LineaConMargen {
   avisoPct: number
   /** `true` si la línea no declara nada y estos valores son los del producto. */
   sinConfigurar: boolean
+  /** Regla 2 · el recargo fijo que se le ofrece a quien cotiza. */
+  recargo: { activo: boolean; etiqueta: string; valor: number }
 }
 
 export interface MargenPorLineaVista {
@@ -60,11 +63,13 @@ export async function getMargenPorLinea(): Promise<{ error: string } | MargenPor
     lineas: filas.map((f) => {
       const politica = politicaMargenDeLinea(f.config_extra)
       const margen = (f.config_extra as { margen?: Record<string, unknown> } | null)?.margen
+      const recargo = politicaRecargoDeLinea(f.config_extra)
       return {
         id: f.id,
         nombre: f.nombre ?? 'Línea sin nombre',
         ...politica,
         sinConfigurar: !margen || typeof margen !== 'object',
+        recargo: { activo: recargo.activo, etiqueta: recargo.etiqueta, valor: recargo.valor },
       }
     }),
   }
@@ -119,6 +124,79 @@ export async function guardarUmbralesMargen(
       config_extra: {
         ...configExtra,
         margen: { ...margenPrevio, piso_pct: umbrales.pisoPct, aviso_pct: umbrales.avisoPct },
+      },
+    })
+    .eq('id', lineaId)
+    .eq('workspace_id', workspaceId)
+
+  if (updErr) return { error: updErr.message as string }
+
+  revalidatePath('/mi-negocio')
+  return { ok: true }
+}
+
+
+/**
+ * Guarda el recargo fijo de una línea (Regla 2 del 2026-09-14).
+ *
+ * ⚠️ Mismo criterio que `guardarUmbralesMargen`: toca SOLO la clave `recargo` y
+ * preserva el resto de `config_extra` —ahí viven `margen`, `rutas`, `siigo`,
+ * `facturacion` de varios clientes— y valida los rangos AQUÍ, porque esta función es
+ * un endpoint alcanzable aunque el formulario valide bien.
+ *
+ * El valor y la etiqueta son de Trappvel, no del código: por eso se editan en una
+ * pantalla y no en una constante. Lo único que el código fija es a qué ranura aplica
+ * (`vuelo_detalle`), que es lo que la reunión dejó dicho: *tiquetes*.
+ */
+export async function guardarRecargo(
+  lineaId: string,
+  recargo: { activo: boolean; etiqueta: string; valor: number },
+): Promise<{ error: string } | { ok: true }> {
+  const { supabase, workspaceId, role, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: error ?? 'Sin workspace' }
+  if (!ROLES_QUE_EDITAN.includes(role ?? '')) {
+    return { error: 'Solo el dueño o un administrador pueden cambiar el recargo' }
+  }
+
+  const etiqueta = (recargo.etiqueta ?? '').trim()
+  if (etiqueta === '') return { error: 'El recargo necesita un nombre: es el que sale impreso en la cotización' }
+  if (etiqueta.length > 80) return { error: 'El nombre del recargo no puede pasar de 80 caracteres' }
+  if (!Number.isFinite(recargo.valor) || recargo.valor < 0) {
+    return { error: 'El recargo no puede ser negativo. Un descuento fijo es otra decisión y va con ese nombre.' }
+  }
+  if (recargo.activo && recargo.valor <= 0) {
+    return { error: 'Un recargo activo en cero no ofrece nada: pon el valor o déjalo apagado' }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: linea, error: leerErr } = await (supabase as any)
+    .from('lineas_negocio')
+    .select('config_extra')
+    .eq('id', lineaId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+
+  if (leerErr) return { error: leerErr.message as string }
+  if (!linea) return { error: 'Línea no encontrada en este workspace' }
+
+  const configExtra = ((linea as { config_extra: unknown }).config_extra ?? {}) as Record<string, unknown>
+  const recargoPrevio = (configExtra.recargo ?? {}) as Record<string, unknown>
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: updErr } = await (supabase as any)
+    .from('lineas_negocio')
+    .update({
+      config_extra: {
+        ...configExtra,
+        recargo: {
+          // `aplica_a` se preserva si la línea ya lo declaró: la pantalla no lo edita
+          // y pisarlo con el default apagaría un recargo de hotel configurado por SQL.
+          aplica_a: ['vuelo_detalle'],
+          ...recargoPrevio,
+          activo: recargo.activo,
+          etiqueta,
+          valor: Math.round(recargo.valor),
+        },
       },
     })
     .eq('id', lineaId)

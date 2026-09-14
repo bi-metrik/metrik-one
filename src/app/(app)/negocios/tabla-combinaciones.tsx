@@ -53,7 +53,7 @@ export default function TablaCombinaciones({
   const [isPending, startTransition] = useTransition()
   const [nombres, setNombres] = useState<Record<string, string>>({})
 
-  const { ranuras, itinerarios, umbrales, tablasAusentes } = estado
+  const { ranuras, fijosConAlternativas, itinerarios, umbrales, tablasAusentes } = estado
 
   // R6 · sin opciones y sin itinerarios no hay nada que decidir: la sección no se
   // pinta. Una cotización que ya existía no gana una sección al abrirla.
@@ -82,6 +82,12 @@ export default function TablaCombinaciones({
           <p className="text-[11px] text-muted-foreground">
             Cada fila es un itinerario completo con su propio costo y su propio margen.
             {' '}Solo las marcadas «va en propuesta» salen en el PDF.
+          </p>
+          {/* La regla de la reunión del 15, dicha donde se aplica. Sin esto, «¿por qué
+              el traslado no tiene columna?» no tiene respuesta en pantalla. */}
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Se cruzan <strong>vuelos y hoteles</strong>. Tours, traslados y planes no abren
+            columna: suman igual en todos los itinerarios.
           </p>
         </div>
         {editable && ranuras.length > 0 && !tablasAusentes && (
@@ -121,21 +127,35 @@ export default function TablaCombinaciones({
         </div>
       )}
 
-      {/* ⚠️ Mientras no haya un itinerario PRINCIPAL, el total de la cotización suma
-          TODAS las líneas, o sea las dos aerolíneas a la vez. No se corrige eligiendo
-          una por nuestra cuenta —eso es precisamente lo que el principal decide— así
-          que se DICE. Un total inflado que nadie explica es peor que uno que avisa. */}
-      {!tablasAusentes && itinerarios.length === 0 && (
+      {/* ⚠️ Desde R-A1 el total NO suma las dos aerolíneas: cada ranura aporta una vez y
+          la que aporta se toma por supuesto (el primero por orden). Lo que falta
+          mientras no haya principal es la DECISIÓN, no la suma — y el aviso que nombra
+          cuál se tomó vive en el editor, arriba de la cascada, que es donde está el
+          número que explica. Aquí solo se invita a armarlas. */}
+      {!tablasAusentes && itinerarios.length === 0 && ranuras.length > 0 && (
         <div className="px-4 py-5 text-center text-xs">
           <p className="text-muted-foreground">
-            Hay {ranuras.length === 1 ? 'un grupo' : `${ranuras.length} grupos`} con alternativas
+            Hay {ranuras.length === 1 ? 'un grupo' : `${ranuras.length} grupos`} con alternativas que se cruzan
             {' '}({ranuras.map(r => r.grupo).join(', ')}).
           </p>
           <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">
-            Hasta que marques un itinerario como principal, el total de abajo suma todas las
-            alternativas a la vez.
+            Todavía nadie eligió: el total toma una opción por supuesto en cada grupo.
           </p>
           <p className="mt-1 text-muted-foreground">Genera las combinaciones para ver el margen de cada una.</p>
+        </div>
+      )}
+
+      {/* Lo que NO se cruza, dicho con nombre propio. Un traslado con dos alternativas
+          aporta una sola; callar cuál deja un total que nadie puede reconciliar. */}
+      {!tablasAusentes && fijosConAlternativas.length > 0 && (
+        <div className="border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
+          {fijosConAlternativas.map(f => (
+            <p key={f.grupo}>
+              <span className="font-medium capitalize">{f.grupo}</span> no se cruza: suma
+              {' '}<span className="font-medium">«{f.aporta ?? 'Sin nombre'}»</span> en todos los
+              {' '}itinerarios{f.fuera.length > 0 && <> y deja fuera del total a {f.fuera.map(n => `«${n}»`).join(', ')}</>}.
+            </p>
+          ))}
         </div>
       )}
 
@@ -305,12 +325,13 @@ export default function TablaCombinaciones({
         </div>
       )}
 
-      {/* Mismo aviso cuando hay combinaciones pero ninguna es principal: el total
-          sigue sumando de más y la causa está a un clic de distancia. */}
+      {/* Mismo aviso cuando hay combinaciones pero ninguna es principal: el precio de
+          la cotización sale de un supuesto y no de una decisión, y la causa está a un
+          clic de distancia. */}
       {itinerarios.length > 0 && !itinerarios.some(i => i.esPrincipal) && (
         <div className="border-t bg-amber-50 px-4 py-2 text-[11px] font-medium text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-          Ningún itinerario está marcado como principal: el total de la cotización suma todas
-          las alternativas a la vez. Marca uno con la estrella.
+          Ningún itinerario está marcado como principal: el valor de la cotización sale de
+          una opción tomada por supuesto, no de esta tabla. Marca uno con la estrella.
         </div>
       )}
 

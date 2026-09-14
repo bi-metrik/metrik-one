@@ -1,5 +1,6 @@
 import { getCotizacion, getCotizacionItems } from '@/app/(app)/negocios/cotizacion-actions'
 import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
+import { getPoliticaRecargo } from '@/app/(app)/negocios/recargo-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
@@ -28,6 +29,10 @@ export default async function CotizacionNegocioPage({
     // migracion no esta aplicada: en los dos casos la pantalla se ve como hoy.
     getEstadoItinerarios(cotId),
   ])
+
+  // Regla 2 · el recargo fijo que declara la línea del negocio. Sin línea, o sin la
+  // clave en su `config_extra`, llega apagado y la pantalla no ofrece nada.
+  const politicaRecargo = await getPoliticaRecargo(id)
 
   if (!cotizacion) notFound()
 
@@ -149,6 +154,31 @@ export default async function CotizacionNegocioPage({
     }
   }
 
+  // ¿El piso BLOQUEA avanzar de etapa desde donde el negocio está parado hoy?
+  //
+  // El gate `margen_sobre_piso` es opt-in por etapa, así que la pantalla no puede
+  // afirmar ni negar el bloqueo por su cuenta: en un workspace sin el gate, decir «no
+  // deja avanzar» sería falso, y en Trappvel decir «es una marca, no un bloqueo»
+  // —que es lo que decía hasta hoy— también. Se pregunta, y si no se puede leer, no
+  // se afirma nada.
+  let pisoBloqueaAvance = false
+  try {
+    const { supabase: sbGate } = await getWorkspace()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negGate } = await (sbGate as any)
+      .from('negocios')
+      .select('etapas_negocio!negocios_etapa_actual_id_fkey(config_extra)')
+      .eq('id', id)
+      .maybeSingle()
+    const etapa = (negGate as { etapas_negocio?: unknown } | null)?.etapas_negocio
+    const filaEtapa = Array.isArray(etapa) ? etapa[0] : etapa
+    const gates = ((filaEtapa as { config_extra?: { gates?: unknown } } | null)?.config_extra?.gates ?? []) as unknown[]
+    pisoBloqueaAvance = Array.isArray(gates) && gates.includes('margen_sobre_piso')
+  } catch {
+    // Sin respuesta, la pantalla no afirma que bloquea. Un aviso que promete un
+    // bloqueo inexistente enseña a ignorar los avisos.
+  }
+
   const cotRow = cotizacion as unknown as { piso_margen_pct?: number | null; aviso_margen_pct?: number | null }
   const umbrales = umbralesDeCotizacion(
     { pisoPct: cotRow.piso_margen_pct, avisoPct: cotRow.aviso_margen_pct },
@@ -167,6 +197,8 @@ export default async function CotizacionNegocioPage({
       frozen={frozen}
       lineaId={negocioLineaId}
       umbrales={umbrales}
+      pisoBloqueaAvance={pisoBloqueaAvance}
+      politicaRecargo={politicaRecargo}
       itinerarios={itinerarios}
     />
   )

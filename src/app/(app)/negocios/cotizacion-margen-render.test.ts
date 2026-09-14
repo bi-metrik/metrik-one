@@ -101,6 +101,8 @@ const pintar = (
   items: unknown[],
   over: Record<string, unknown> = {},
   umbrales = { pisoPct: 5, avisoPct: 10 },
+  /** Props del editor que NO son de la cotización (el gate de etapa, por ejemplo). */
+  extra: Record<string, unknown> = {},
 ) =>
   renderToStaticMarkup(
     React.createElement(CotizacionEditor, {
@@ -109,6 +111,7 @@ const pintar = (
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       initialItems: items as any,
       umbrales,
+      ...extra,
     }),
   )
 
@@ -227,5 +230,45 @@ describe('editor de cotización · margen consolidado del viaje', () => {
 describe('editor de cotización · rastro de margen', () => {
   it('el historial es alcanzable desde la cotización', () => {
     expect(pintar([item()])).toContain('Historial de cambios de margen')
+  })
+})
+
+
+// ── Regla 3 (reunión 2026-09-14): el rojo bloquea, el ámbar avisa ────────────
+//
+// El copy hasta hoy decía, en los DOS casos, «es una marca, no un bloqueo». Con el
+// gate `margen_sobre_piso` declarado en la etapa eso es falso para el rojo, y lo que
+// el equipo tiene que poder leer sin preguntar es justamente la diferencia.
+
+describe('el piso se distingue del aviso en pantalla', () => {
+  const UMBRALES = { pisoPct: 5, avisoPct: 10 }
+  const bajoPiso = [item({ margen_porcentaje: 3, subtotal: 1_000_000 })]
+  const bajoAviso = [item({ margen_porcentaje: 7, subtotal: 1_000_000 })]
+
+  it('con el gate declarado, el rojo DICE que no deja avanzar', () => {
+    const html = pintar(bajoPiso, {}, UMBRALES, { pisoBloqueaAvance: true })
+    expect(html).toContain('no deja avanzar')
+    expect(html).toContain('NO avanza de etapa')
+  })
+
+  it('el ámbar NUNCA dice que bloquea, ni con el gate declarado', () => {
+    // El control que hace valer la prueba de arriba: si el texto se pintara siempre,
+    // esta caería.
+    const html = pintar(bajoAviso, {}, UMBRALES, { pisoBloqueaAvance: true })
+    expect(html).not.toContain('no deja avanzar')
+    expect(html).toContain('Avisa, no bloquea')
+  })
+
+  it('SIN el gate, el rojo no promete un bloqueo que no existe', () => {
+    const html = pintar(bajoPiso, {}, UMBRALES, { pisoBloqueaAvance: false })
+    expect(html).not.toContain('no deja avanzar')
+    expect(html).toContain('se puede enviar igual')
+  })
+
+  it('ya no queda el texto viejo cuando el gate SÍ bloquea', () => {
+    // «Es una marca, no un bloqueo: la cotización se puede enviar igual» era la
+    // pantalla sana que miente. Con el gate puesto no puede aparecer en ninguna parte.
+    const html = pintar(bajoPiso, {}, UMBRALES, { pisoBloqueaAvance: true })
+    expect(html).not.toContain('se puede enviar igual')
   })
 })

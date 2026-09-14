@@ -7,7 +7,8 @@ import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaci
 import {
   combinacionesCartesianas,
   normalizarGrupo,
-  ranurasConAlternativas,
+  ranurasCombinables,
+  ranurasNoCombinables,
   TOPE_COMBINACIONES,
 } from '@/lib/cotizaciones/itinerarios'
 import {
@@ -39,8 +40,21 @@ import {
  */
 
 export interface EstadoItinerarios {
-  /** Las ranuras con alternativas: las columnas de la tabla de combinaciones. */
+  /**
+   * Las columnas de la tabla: SOLO vuelo y hotel (decisión del 2026-09-14).
+   *
+   * Un grupo con alternativas que no es ninguno de los dos no abre columna; sale en
+   * `fijosConAlternativas` para que la pantalla pueda decir cuál de sus opciones está
+   * sumando, que es lo que un supuesto callado no permite corregir.
+   */
   ranuras: { grupo: string; candidatos: { id: string; nombre: string | null }[] }[]
+  /**
+   * Los grupos con alternativas que NO se cruzan (tour, traslado, plan, lo propio).
+   *
+   * Entran en todos los itinerarios y aportan UNA vez. `aporta` es el nombre del que
+   * suma; `fuera`, los que quedan afuera del total.
+   */
+  fijosConAlternativas: { grupo: string; aporta: string | null; fuera: string[] }[]
   itinerarios: ItinerarioCalculado[]
   umbrales: UmbralesMargen
   /**
@@ -65,6 +79,7 @@ export interface EstadoItinerarios {
 export async function getEstadoItinerarios(cotizacionId: string): Promise<EstadoItinerarios> {
   const vacio: EstadoItinerarios = {
     ranuras: [],
+    fijosConAlternativas: [],
     itinerarios: [],
     umbrales: UMBRALES_MARGEN_POR_DEFECTO,
     tablasAusentes: false,
@@ -76,19 +91,30 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
   const ctx = await contextoDeCotizacion(supabase, cotizacionId)
   if (!ctx) return vacio
 
-  const ranuras = ranurasConAlternativas(ctx.items).map(r => ({
+  const nombreDe = (id: string) => ctx.items.find(i => i.id === id)?.nombre ?? null
+
+  const ranuras = ranurasCombinables(ctx.items).map(r => ({
     grupo: r.grupo,
-    candidatos: r.candidatos.map(id => ({
-      id,
-      nombre: ctx.items.find(i => i.id === id)?.nombre ?? null,
-    })),
+    candidatos: r.candidatos.map(id => ({ id, nombre: nombreDe(id) })),
+  }))
+
+  // El supuesto permanente: en estos grupos aporta el primero por orden y nadie va a
+  // elegir por ellos. Se nombra la opción que suma y las que no, porque «hay una
+  // suposición» sin decir cuál no se puede corregir.
+  const fijosConAlternativas = ranurasNoCombinables(ctx.items).map(r => ({
+    grupo: r.grupo,
+    aporta: nombreDe(r.candidatos[0]),
+    fuera: r.candidatos.slice(1).map(id => nombreDe(id) ?? 'Sin nombre'),
   }))
 
   const filas = await leerItinerarios(supabase, cotizacionId)
-  if (filas === null) return { ...vacio, ranuras, umbrales: ctx.umbrales, tablasAusentes: true }
+  if (filas === null) {
+    return { ...vacio, ranuras, fijosConAlternativas, umbrales: ctx.umbrales, tablasAusentes: true }
+  }
 
   return {
     ranuras,
+    fijosConAlternativas,
     umbrales: ctx.umbrales,
     tablasAusentes: false,
     itinerarios: filas.map(fila => calcularItinerario(ctx, fila)),
@@ -118,7 +144,7 @@ export async function generarCombinaciones(cotizacionId: string) {
   if (combinaciones.length === 0) {
     return {
       success: false,
-      error: 'No hay opciones que combinar: agrega al menos dos alternativas en un mismo grupo',
+      error: 'No hay opciones que combinar: agrega al menos dos alternativas de vuelo o de hotel. Tours y traslados no se combinan, entran igual en todos los itinerarios.',
     }
   }
 
@@ -187,8 +213,13 @@ export async function cambiarOpcionDeItinerario(itinerarioId: string, grupo: str
   const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
   if (!ctx) return { success: false, error: 'Cotización no encontrada' }
 
-  const ranura = ranurasConAlternativas(ctx.items).find(r => r.grupo === normalizarGrupo(grupo))
-  if (!ranura) return { success: false, error: `El grupo «${grupo}» ya no tiene alternativas` }
+  // Solo las combinables: un tour o un traslado no es una celda de esta tabla, así que
+  // tampoco se cambia por aquí. Mandar un grupo que no abre columna es un cliente
+  // desactualizado o una llamada directa, y en los dos casos la respuesta es la misma.
+  const ranura = ranurasCombinables(ctx.items).find(r => r.grupo === normalizarGrupo(grupo))
+  if (!ranura) {
+    return { success: false, error: `El grupo «${grupo}» no es una columna de la tabla: solo vuelo y hotel se combinan` }
+  }
   if (!ranura.candidatos.includes(itemId)) {
     return { success: false, error: 'Esa opción no pertenece a este grupo' }
   }

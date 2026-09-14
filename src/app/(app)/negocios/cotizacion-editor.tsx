@@ -33,6 +33,12 @@ import { agregarOpcionAItem, actualizarRanuraDeItem, type EstadoItinerarios } fr
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import PantallazoItem from '@/app/(app)/negocios/pantallazo-item'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
+import {
+  estadoDelRecargo,
+  RECARGO_POR_DEFECTO,
+  type PoliticaRecargo,
+} from '@/lib/cotizaciones/recargo-linea'
 import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
@@ -143,6 +149,22 @@ interface Props {
    */
   umbrales?: UmbralesMargen
   /**
+   * ¿La etapa donde el negocio está parado declara el gate `margen_sobre_piso`?
+   *
+   * Decide el TEXTO del rojo, no el color: donde el gate está declarado, bajo el
+   * piso no se avanza; donde no, el rojo sigue siendo una marca. Prometer un bloqueo
+   * que no existe enseña a ignorar el aviso, y negar el que sí existe deja a alguien
+   * descubriéndolo cuando le rebota el avance.
+   */
+  pisoBloqueaAvance?: boolean
+  /**
+   * El recargo fijo que declara la línea (Regla 2 del 2026-09-14).
+   *
+   * Ausente vale APAGADO: un recargo que aparece solo en un workspace que no lo pidió
+   * es una línea de más en un documento que sale a un cliente.
+   */
+  politicaRecargo?: PoliticaRecargo
+  /**
    * Las combinaciones de esta cotizacion, ya calculadas por el servidor.
    *
    * Opcional a proposito: el editor se monta desde dos rutas y la que no lo pase
@@ -152,7 +174,7 @@ interface Props {
   itinerarios?: EstadoItinerarios
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -436,7 +458,37 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     paraCascada.filter(i => aportanAlTotal.has(i.id) || i.es_ajuste === true),
     paramsCascada,
   )
-  const supuestos = ranurasPorSupuesto(itemsParaRanuras)
+  /**
+   * Los supuestos que TODAVÍA aplican.
+   *
+   * Un supuesto de vuelo u hotel se levanta marcando un itinerario principal, así que
+   * con principal desaparece. El de un tour o un traslado **no se levanta nunca**: esos
+   * grupos no abren columna en la tabla (decisión del 2026-09-14) y nadie va a elegir
+   * por ellos, así que el aviso se queda mientras haya dos alternativas cargadas. Sin
+   * esa distinción, marcar la principal ocultaría un supuesto que sigue decidiendo qué
+   * traslado se cobra.
+   */
+  /**
+   * Regla 2 · en qué estado está el recargo fijo de esta cotización.
+   *
+   * Se deriva de lo que hay en pantalla, no se guarda: un estado guardado quedaría
+   * contradiciendo la línea el día que alguien le cambie el precio, que es justo el
+   * caso que esto existe para hacer visible.
+   */
+  const recargo = estadoDelRecargo(
+    initialItems.map(i => ({
+      id: i.id,
+      nombre: i.nombre,
+      grupo: i.grupo ?? null,
+      precio_venta: i.precio_venta,
+      cantidad: i.cantidad,
+      es_ajuste: i.es_ajuste ?? false,
+    })),
+    politicaRecargo,
+  )
+
+  const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s => s.combinable ? !hayPrincipal : true)
+  const hayCombinable = supuestos.some(s => s.combinable)
   const nombrePorItem = new Map(initialItems.map(i => [i.id, i.nombre ?? 'Sin nombre']))
 
   const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
@@ -656,7 +708,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     {!isAjuste && margenTexto && (
                       <span
                         className={`block text-[10px] font-medium tabular-nums ${claseNivelMargen(nivelMargen)}`}
-                        title={tituloNivelMargen(nivelMargen, umbrales, origenMargen)}
+                        title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
                       >
                         Margen {margenTexto}
                       </span>
@@ -941,6 +993,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             {nivelMargen === 'bajo_piso' && (
                               <span className="ml-1 font-semibold">
                                 · bajo el piso de {formatMargenPct(umbrales.pisoPct)}
+                                {pisoBloqueaAvance && ' · no deja avanzar'}
                               </span>
                             )}
                             {nivelMargen === 'aviso' && (
@@ -1337,7 +1390,47 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               quedaron fuera — «hay una suposición» sin decir cuál no se puede
               corregir. No aparece cuando hay itinerario principal: ahí la decisión
               está tomada y la toma la tabla de combinaciones. */}
-          {supuestos.length > 0 && !hayPrincipal && (
+          {/* Regla 2 · el recargo fijo. Se OFRECE donde corresponde y, cuando el
+              número de la línea no es el vigente, se dicen los DOS. Lo que no se hace
+              nunca es agregarlo solo: una línea de precio que aparece sin que nadie la
+              pida es peor que una que falta, porque sale impresa al cliente. */}
+          {recargo.estado === 'falta' && editable && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900">
+              <p>
+                <span className="font-medium">{recargo.etiqueta}</span> de{' '}
+                <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>: esta
+                {' '}cotización tiene un componente al que le corresponde y todavía no lo lleva.
+              </p>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const r = await aplicarRecargo(cotizacion.id)
+                    if (!r.success) { toast.error(r.error); return }
+                    await recalcularTotales(cotizacion.id)
+                    toast.success(`${r.etiqueta} agregado por ${formatCOP(r.valor)}`)
+                    router.refresh()
+                  })
+                }
+                className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                Agregar recargo
+              </button>
+            </div>
+          )}
+
+          {recargo.estado === 'distinto' && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-900">
+              <span className="font-medium">{recargo.etiqueta}</span>: esta cotización lo lleva por{' '}
+              <span className="font-medium tabular-nums">{formatCOP(recargo.valorEnLaLinea)}</span> y el
+              {' '}vigente de la línea es{' '}
+              <span className="font-medium tabular-nums">{formatCOP(recargo.valorVigente)}</span>. Se
+              {' '}respeta el de la cotización; se cambia editando esa línea.
+            </div>
+          )}
+
+          {supuestos.length > 0 && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
               <p className="font-medium">
                 {supuestos.length === 1
@@ -1355,13 +1448,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         {s.descartados.map(id => `«${nombrePorItem.get(id)}»`).join(', ')}
                       </>
                     )}
-                    .
+                    {!s.combinable && <span className="text-amber-800"> · no se cruza en la tabla</span>}.
                   </li>
                 ))}
               </ul>
               <p className="mt-1.5">
-                Arma las combinaciones y marca la principal para decidirlo tú. Mientras
-                tanto, cada ranura aporta una sola vez: el total nunca suma las dos.
+                {hayCombinable
+                  ? 'Arma las combinaciones y marca la principal para decidir los vuelos y hoteles.'
+                  : 'Tours, traslados y planes no abren columna en la tabla: para cambiar cuál suma, borra la alternativa o reordena las líneas.'}
+                {' '}Cada ranura aporta una sola vez: el total nunca suma las dos.
               </p>
             </div>
           )}
@@ -1376,6 +1471,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
             aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
             umbrales={umbrales}
+            pisoBloqueaAvance={pisoBloqueaAvance}
             onMargenChange={pct => {
               startTransition(async () => {
                 await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
@@ -1541,15 +1637,34 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
  * nada que juzgar todavía. `ok` tampoco se pinta de verde en la línea — con doce
  * ítems sanos, doce verdes dejan de distinguirse de nada.
  */
+/**
+ * Qué dice el ROJO, según si el piso bloquea o solo marca.
+ *
+ * ⚠️ Hasta el 2026-09-14 este texto decía *«Es una marca, no un bloqueo: la cotización
+ * se puede enviar igual»* en todas partes. Con el gate `margen_sobre_piso` declarado
+ * eso es FALSO —el negocio no avanza— y una pantalla sana que miente sobre una regla
+ * de plata es peor que una rota, porque no se ve. Lo que decide es la etapa, así que
+ * el texto entra por parámetro y no se afirma sin saber.
+ *
+ * El ÁMBAR no cambia: avisa y deja pasar, en los dos casos. Esa es la distinción que
+ * el equipo tiene que poder leer sin preguntar.
+ */
+function textoPiso(pisoPct: number, bloqueaAvance: boolean): string {
+  return bloqueaAvance
+    ? `Está por debajo del piso de ${formatMargenPct(pisoPct)}: con este margen el negocio NO avanza de etapa. Sube el margen o el precio.`
+    : `Está por debajo del piso de ${formatMargenPct(pisoPct)}. Aquí es una marca: la cotización se puede enviar igual.`
+}
+
 /** Qué explica el tooltip del margen, sin repetir lo que ya dice el texto. */
 function tituloNivelMargen(
   nivel: NivelMargen,
   umbrales: UmbralesMargen,
   origen: ReturnType<typeof origenDelMargen>,
+  bloqueaAvance = false,
 ): string {
   const deDonde = `El margen de esta línea ${etiquetaOrigenMargen(origen)}.`
   if (nivel === 'bajo_piso') {
-    return `${deDonde} Está por debajo del piso de ${formatMargenPct(umbrales.pisoPct)}. Es una marca, no un bloqueo: la cotización se puede enviar igual.`
+    return `${deDonde} ${textoPiso(umbrales.pisoPct, bloqueaAvance)}`
   }
   if (nivel === 'aviso') {
     return `${deDonde} Está por debajo del ${formatMargenPct(umbrales.avisoPct)} de margen. Avisa, no bloquea.`
@@ -1588,7 +1703,7 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
  * diera: el cliente veía una línea "Administración e imprevistos" que nadie había
  * cotizado, y el margen no se podía leer en ninguna parte.
  */
-function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, onMargenChange, onAIUChange, onDescuentoChange }: {
+function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, onMargenChange, onAIUChange, onDescuentoChange }: {
   cascada: Cascada
   margenPct: number
   convencionMargen: ConvencionMargen
@@ -1597,6 +1712,8 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   aiuAdminPct: number | null
   aiuImprevPct: number | null
   umbrales: UmbralesMargen
+  /** Ver el prop del mismo nombre en `Props`: decide el TEXTO del rojo, no el color. */
+  pisoBloqueaAvance?: boolean
   onMargenChange: (pct: number) => void
   onAIUChange: (adminPct: number | null, imprevPct: number | null) => void
   onDescuentoChange: (pct: number) => void
@@ -1787,14 +1904,16 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
               }`}
               title={
                 nivelConsolidado === 'bajo_piso'
-                  ? `Por debajo del piso de ${formatMargenPct(umbrales.pisoPct)}. Es una marca, no un bloqueo: la cotización se puede enviar igual.`
+                  ? textoPiso(umbrales.pisoPct, pisoBloqueaAvance)
                   : nivelConsolidado === 'aviso'
                     ? `Por debajo del ${formatMargenPct(umbrales.avisoPct)} de margen. Avisa, no bloquea.`
                     : undefined
               }
             >
               {margenConsolidado}
-              {nivelConsolidado === 'bajo_piso' && <span className="ml-1">· bajo el piso</span>}
+              {nivelConsolidado === 'bajo_piso' && (
+                <span className="ml-1">· bajo el piso{pisoBloqueaAvance && ' · no deja avanzar'}</span>
+              )}
               {nivelConsolidado === 'aviso' && <span className="ml-1">· bajo</span>}
             </span>
           </div>

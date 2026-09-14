@@ -106,8 +106,8 @@ describe('ranuras', () => {
 
   it('solo son ranura los grupos con MÁS DE UN candidato', () => {
     expect(ranurasConAlternativas(viaje)).toEqual([
-      { grupo: 'vuelo', candidatos: ['vuelo-avianca', 'vuelo-wingo'] },
-      { grupo: 'hotel', candidatos: ['hotel-occ', 'hotel-hr'] },
+      { grupo: 'vuelo', candidatos: ['vuelo-avianca', 'vuelo-wingo'], combinable: true },
+      { grupo: 'hotel', candidatos: ['hotel-occ', 'hotel-hr'], combinable: true },
     ])
   })
 
@@ -192,14 +192,17 @@ describe('T1 · generar combinaciones', () => {
   })
 
   it('se corta en el tope y lo DICE, en vez de colgar la pantalla', () => {
-    // 6 ranuras de 4 opciones = 4.096 filas. Eso no es una tabla que alguien
-    // revise: es 4.096 inserts y un navegador pegado.
+    // Desde que solo se cruzan vuelo y hotel el tope cuesta mas alcanzarlo, y esa es
+    // justo la intencion de la regla del 2026-09-14. Pero sigue siendo alcanzable:
+    // ocho vuelos por ocho hoteles son 64 filas, y eso no es una tabla que alguien
+    // revise. El tope NO se quito.
     const items = []
-    for (let g = 0; g < 6; g++) {
-      for (let o = 0; o < 4; o++) items.push(item(`g${g}-o${o}`, { grupo: `g${g}`, orden: g * 10 + o }))
+    for (let o = 0; o < 8; o++) {
+      items.push(item(`vuelo-${o}`, { grupo: 'vuelo', orden: o }))
+      items.push(item(`hotel-${o}`, { grupo: 'hotel', orden: 100 + o }))
     }
     const { combinaciones, truncado, total } = combinacionesCartesianas(items)
-    expect(total).toBe(4096)
+    expect(total).toBe(64)
     expect(truncado).toBe(true)
     expect(combinaciones.length).toBeLessThanOrEqual(TOPE_COMBINACIONES)
     expect(combinaciones.length).toBeGreaterThan(0)

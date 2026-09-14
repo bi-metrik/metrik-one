@@ -10,7 +10,6 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
-import { insertarCotizacionTolerante } from '@/lib/cotizaciones/congelar-umbrales'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 
 export async function getCotizacionesNegocio(negocioId: string) {
@@ -42,7 +41,18 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // cotizaciones ya enviadas a clientes.
   const { convencion, defaultPct, pisoPct, avisoPct } = await politicaMargenDelNegocio(supabase, negocioId)
 
-  const { data, error: dbError } = await insertarCotizacionTolerante(supabase, {
+  // ⚠️ Insert DIRECTO. Hasta el 2026-09-14 esto pasaba por `insertarCotizacionTolerante`,
+  // que reintentaba sin las columnas de umbral si la migración no estaba aplicada. La
+  // migración `20260914160000_cotizaciones_umbrales_margen.sql` YA está aplicada en
+  // producción (comprobado leyendo `piso_margen_pct` y `aviso_margen_pct` por PostgREST)
+  // y esta base es la única que el producto usa, así que la tolerancia solo servía para
+  // tragarse un `42703` real como «nació sin congelar» — el fallo mudo que ella misma
+  // decía combatir. La pieza se borró, como decía su propio comentario.
+  // Los tipos generados de `cotizaciones` todavia no declaran `piso_margen_pct` ni
+  // `aviso_margen_pct` (falta regenerar `database.ts`), asi que el cliente tipado
+  // rechaza el objeto entero.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: dbError } = await (supabase as any).from('cotizaciones').insert({
     workspace_id: workspaceId,
     negocio_id: negocioId,
     consecutivo,
@@ -54,7 +64,7 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     margen_default_pct: defaultPct,
     piso_margen_pct: pisoPct,
     aviso_margen_pct: avisoPct,
-  })
+  }).select('id').single()
 
   if (dbError) return { success: false as const, error: dbError.message ?? 'Error al crear cotización' }
   if (!data) return { success: false as const, error: 'Error al crear cotización — intenta de nuevo' }
@@ -484,7 +494,11 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
     (hermanos ?? []).map(h => h.descripcion),
   )
 
-  const { data, error: dbError } = await insertarCotizacionTolerante(supabase, {
+  // Los tipos generados de `cotizaciones` todavia no declaran `piso_margen_pct` ni
+  // `aviso_margen_pct` (falta regenerar `database.ts`), asi que el cliente tipado
+  // rechaza el objeto entero.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error: dbError } = await (supabase as any).from('cotizaciones').insert({
     workspace_id: workspaceId,
     negocio_id: negocioId,
     consecutivo,
@@ -503,7 +517,7 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
     descuento_porcentaje: original.descuento_porcentaje,
     piso_margen_pct: umbralesOriginal?.piso_margen_pct ?? null,
     aviso_margen_pct: umbralesOriginal?.aviso_margen_pct ?? null,
-  })
+  }).select('id').single()
 
   if (dbError) return { success: false as const, error: dbError.message }
 

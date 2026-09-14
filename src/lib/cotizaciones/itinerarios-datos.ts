@@ -16,7 +16,7 @@
  * R6 sostenida desde el dato, no desde un `if` en la pantalla.
  */
 
-import { type Cascada } from './totales'
+import { calcularCascada, type Cascada } from './totales'
 import { type ConvencionMargen } from './precio-item'
 import {
   politicaMargenDeLinea,
@@ -27,6 +27,7 @@ import {
 import {
   cascadaDeItinerario,
   itemsDelItinerario,
+  itemsQueAportanAlTotal,
   motivoDeRechazo,
   ranurasSinResolver,
   textoDeRechazo,
@@ -262,6 +263,37 @@ export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario
     margenRealPct: cascada.margenRealPct,
     bloqueo: motivo ? textoDeRechazo(motivo) : null,
   }
+}
+
+/**
+ * La cascada VIGENTE de una cotización: la misma cifra que el comercial tiene delante.
+ *
+ * Con itinerario principal sale de ÉL (R5). Sin principal, de lo que aporta al total
+ * (R-A1: cada ranura una sola vez). Es exactamente la regla que aplica el pie del
+ * editor, escrita una vez: si el gate del piso midiera por su cuenta, podría frenar un
+ * avance citando un margen que la pantalla no muestra en ninguna parte — y contra eso
+ * el usuario no tiene nada que hacer.
+ *
+ * ⚠️ El ítem de cuadre (`es_ajuste`) entra siempre. Es precio real de la cotización,
+ * aunque no salga de ninguna ranura; dejarlo fuera subiría o bajaría el margen contra
+ * el que se decide.
+ */
+export function cascadaVigente(ctx: ContextoCotizacion, filas: FilaItinerario[] | null): Cascada {
+  // ⚠️ `esPrincipal`, no `itinerarioPrincipal`: ese helper lee la columna CRUDA
+  // (`es_principal`) y su tipo la declara opcional, así que pasarle una `FilaItinerario`
+  // compila y devuelve `null` SIEMPRE. El síntoma es que el gate mide la suma por
+  // supuesto en vez del itinerario elegido — o sea deja avanzar una combinación al
+  // 3,1% porque la alternativa cara aporta al total. Lo cazó el doble, no el tipo.
+  const principal = filas?.find(f => f.esPrincipal) ?? null
+  const aportan = new Set(
+    principal
+      ? itemsDelItinerario(ctx.items, principal.seleccion)
+      : itemsQueAportanAlTotal(ctx.items),
+  )
+  return calcularCascada(
+    ctx.items.filter(i => aportan.has(i.id) || i.es_ajuste === true),
+    ctx.params,
+  )
 }
 
 /**
