@@ -29,7 +29,14 @@ import {
 import { origenDelMargen, etiquetaOrigenMargen, formatMargenPct, claseNivelMargen } from '@/lib/cotizaciones/margen-vista'
 import RastroMargen from '@/app/(app)/negocios/rastro-margen-panel'
 import TablaCombinaciones from '@/app/(app)/negocios/tabla-combinaciones'
-import { agregarOpcionAItem, actualizarRanuraDeItem, type EstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
+import { agregarOpcionAItem, actualizarRanuraDeItem, actualizarDiaDeItem, type EstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
+
+import {
+  avisoSugeridosQueCobran,
+  hayDiasAsignados,
+  itemsSugeridos,
+  puedeLlevarDia,
+} from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import PantallazoItem from '@/app/(app)/negocios/pantallazo-item'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -92,6 +99,14 @@ interface ItemRow {
   opcion_de?: string | null
   /** Unidad de cara al cliente: pax, noche, trayecto. */
   unidad?: string | null
+  /**
+   * Día del viaje al que pertenece la línea (1 = primer día). Llega `undefined`
+   * mientras la migración `20260915000000` no esté aplicada, y eso vale lo mismo que
+   * `null`: sin día, o sea el comportamiento de hoy.
+   */
+  dia_relativo?: number | null
+  /** ¿La sugerencia se le muestra al cliente? Ausente cuenta como sí. */
+  mostrar_en_sugeridos?: boolean | null
   rubros: RubroRow[]
 }
 
@@ -491,6 +506,42 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const hayCombinable = supuestos.some(s => s.combinable)
   const nombrePorItem = new Map(initialItems.map(i => [i.id, i.nombre ?? 'Sin nombre']))
 
+  /**
+   * El DÍA: un solo interruptor para dos superficies del documento.
+   *
+   * Mientras nadie asigne un día, `porDias` es `false` y nada de esto existe: ni
+   * sección de itinerario, ni paquete de sugeridos, ni aviso. El PDF sale como hoy.
+   */
+  const itemsParaDia = initialItems.map(i => ({
+    id: i.id,
+    grupo: i.grupo ?? null,
+    dia_relativo: i.dia_relativo ?? null,
+    mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
+    es_ajuste: i.es_ajuste ?? false,
+    orden: i.orden ?? 0,
+    precio_venta: i.precio_venta ?? 0,
+    cantidad: i.cantidad ?? 1,
+  }))
+  const porDias = hayDiasAsignados(itemsParaDia)
+  const idsSugeridos = new Set(itemsSugeridos(itemsParaDia))
+
+  /**
+   * ⚠️⚠️ EL AVISO DE DINERO, y es el punto de plata del frente.
+   *
+   * Una línea sin día, con grupo no combinable y con precio se imprime en el PDF como
+   * «actividad adicional NO INCLUIDA» mientras está sumando al total que el cliente
+   * paga. El documento dice una cosa y la factura cobra otra, y lo ve el cliente.
+   *
+   * No se arregla solo ni se bloquea en silencio: se nombra, con su plata, y con las
+   * dos salidas. Descontarlo aquí le cambiaría el precio a una cotización que alguien
+   * ya revisó; bloquear el PDF dejaría a la comercial sin saber qué mover.
+   *
+   * Se alimenta de `aportanAlTotal`, que es el MISMO juego que escribe `valor_total`:
+   * una alternativa que la ranura ya descartó no la está pagando nadie y no avisa.
+   */
+  const avisoSugeridos = avisoSugeridosQueCobran(itemsParaDia, aportanAlTotal)
+  const plataEnAviso = avisoSugeridos.reduce((s, a) => s + a.precioLinea, 0)
+
   const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
   const costoTotal = cascadaTotal.costoDirecto
 
@@ -671,6 +722,24 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           {item.grupo}{item.opcion_de ? ' · alternativa' : ''}
                         </span>
                       )}
+                      {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
+                          líneas en pantalla, en qué sección del documento sale cada una
+                          es justo lo que hay que poder leer de un vistazo. Solo se
+                          pintan cuando la cotización ya usa días, para no meterle ruido
+                          a una cotización que no es un viaje. */}
+                      {!isAjuste && porDias && item.dia_relativo != null && (
+                        <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                          Día {item.dia_relativo}
+                        </span>
+                      )}
+                      {!isAjuste && idsSugeridos.has(item.id) && (
+                        <span
+                          title="Sin día: se imprime al final como actividad adicional no incluida"
+                          className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                        >
+                          Sugerida{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
+                        </span>
+                      )}
                       {!isAjuste && costoDelItem === 0 && (
                         <span
                           title="Este item no tiene costo, así que no suma al costo total ni deja medir margen"
@@ -805,6 +874,76 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           Se imprime tal cual al cliente
                         </p>
                       </div>
+                      {/* EL DÍA. Un solo interruptor: con día la línea imprime en el
+                          itinerario día por día; sin día, y si declara un grupo que no
+                          se combina, cae al paquete de «actividades adicionales no
+                          incluidas». No hay un segundo desplegable de sección.
+
+                          Los vuelos y hoteles no lo muestran: se comparan en la tabla
+                          de combinaciones y su sitio lo decide el itinerario elegido.
+                          Ofrecer un campo que el servidor va a rechazar es peor que no
+                          ofrecerlo. */}
+                      {puedeLlevarDia({ id: item.id, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false }) && (
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                            Día del viaje
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            defaultValue={item.dia_relativo ?? ''}
+                            placeholder="Sin día"
+                            aria-label="Día del viaje"
+                            className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                            onBlur={e => {
+                              const txt = e.target.value.trim()
+                              const val = txt === '' ? null : Number(txt)
+                              if (val === (item.dia_relativo ?? null)) return
+                              startTransition(async () => {
+                                const res = await actualizarDiaDeItem(item.id, { dia_relativo: val })
+                                if (!res.success) { toast.error(res.error); return }
+                                router.refresh()
+                              })
+                            }}
+                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          />
+                          {/* El día es RELATIVO: el itinerario se arma antes de que la
+                              salida tenga fecha. */}
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            {idsSugeridos.has(item.id)
+                              ? 'Sin día: sale como actividad adicional no incluida'
+                              : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
+                          </p>
+                        </div>
+                      )}
+                      {/* El check de la sugerencia. Solo aparece cuando la línea ES una
+                          sugerencia: un interruptor que no aplica confunde más que
+                          ayudar, y aquí «no aplica» se sabe con certeza. */}
+                      {idsSugeridos.has(item.id) && (
+                        <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
+                          <input
+                            type="checkbox"
+                            defaultChecked={item.mostrar_en_sugeridos !== false}
+                            disabled={isPending}
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                            onChange={e => {
+                              const val = e.target.checked
+                              startTransition(async () => {
+                                const res = await actualizarDiaDeItem(item.id, { mostrar_en_sugeridos: val })
+                                if (!res.success) { toast.error(res.error); return }
+                                router.refresh()
+                              })
+                            }}
+                          />
+                          <span className="text-[11px] text-muted-foreground">
+                            Mostrarla al cliente entre las actividades sugeridas.{' '}
+                            <span className="text-amber-700">
+                              Ocultarla NO la saca del total: para eso, quítale el precio.
+                            </span>
+                          </span>
+                        </label>
+                      )}
                       <div className="col-span-2 flex items-end sm:col-span-4">
                         {/* La alternativa nace VACÍA de costo: es otro proveedor, no
                             una variante del mismo precio. Copiarle los rubros dejaría
@@ -1427,6 +1566,39 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               {' '}vigente de la línea es{' '}
               <span className="font-medium tabular-nums">{formatCOP(recargo.valorVigente)}</span>. Se
               {' '}respeta el de la cotización; se cambia editando esa línea.
+            </div>
+          )}
+
+          {/* ⚠️⚠️ El aviso de dinero: sugerencias que están sumando al total.
+              Va ROJO y no ámbar, y va pegado a los totales, porque no es un supuesto
+              que alguien pueda dejar pasar: el documento va a decir «no incluida»
+              sobre una línea que el cliente está pagando. */}
+          {avisoSugeridos.length > 0 && (
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+              <p className="font-medium">
+                {avisoSugeridos.length === 1
+                  ? 'Una línea se va a imprimir como «no incluida» y está sumando al total.'
+                  : `${avisoSugeridos.length} líneas se van a imprimir como «no incluidas» y están sumando al total.`}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {avisoSugeridos.map(a => (
+                  <li key={a.id}>
+                    <span className="font-medium">«{nombrePorItem.get(a.id)}»</span>: suma{' '}
+                    <span className="font-medium tabular-nums">{formatCOP(a.precioLinea)}</span> al total
+                    {a.oculta && (
+                      <span className="font-medium"> y además está oculta, así que el cliente ni la ve</span>
+                    )}
+                    .
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5">
+                Son{' '}
+                <span className="font-medium tabular-nums">{formatCOP(plataEnAviso)}</span>{' '}
+                que el cliente paga y el documento declara como no incluidos. Dos salidas:
+                {' '}<span className="font-medium">asígnale un día</span> para que entre al itinerario,
+                o <span className="font-medium">déjala en cero</span> si de verdad es solo una sugerencia.
+              </p>
             </div>
           )}
 

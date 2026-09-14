@@ -5,6 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { diasDelItinerario, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -450,17 +451,91 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   //
   // Sin ranuras con alternativas devuelve todos los ítems: el PDF de Termotech, Arca
   // y WMC no cambia una línea.
+  const paraPlantilla = (i: ItemRow) => ({
+    nombre: i.nombre ?? '',
+    descripcion: i.descripcion ?? null,
+    precio_venta: Number(i.precio_venta) || 0,
+    descuento_porcentaje: descuentoVisible(i),
+    cantidad: Number(i.cantidad) || 1,
+    unidad: i.unidad ?? null,
+  })
+
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
-  const itemsParaResumen = itemsDelPrincipal ?? items
-    .filter(aporta)
+  const itemsParaResumen = itemsDelPrincipal ?? items.filter(aporta).map(paraPlantilla)
+
+  /**
+   * El itinerario DÍA POR DÍA y el paquete de sugeridos.
+   *
+   * ⚠️ `dias` + `itemsSinDia` son una PARTICIÓN de lo que ya aporta al total, no algo
+   * nuevo: el Subtotal, el IVA y el TOTAL salen de `itemsParaResumen` y no cambian un
+   * peso por asignar o quitar un día. El día es presentación.
+   *
+   * ⚠️ Los sugeridos NO entran en esa partición: no aportan al documento... pero HOY
+   * SÍ aportan al total, porque `itemsQueAportanAlTotal` no mira el día. Esa es la
+   * contradicción que el editor avisa con nombre propio antes de generar el PDF.
+   * Descontarlos aquí le cambiaría el precio a una cotización ya revisada, y hacerlo
+   * en silencio es justo lo que no se puede.
+   *
+   * ⚠️ Con itinerarios en propuesta (bloques de alternativas) esto queda en `null`: el
+   * documento ya está organizado por opciones y meterle días encima daría dos
+   * organizaciones del mismo contenido en la misma página.
+   */
+  const itemsConDia = items
+    .filter(i => i.id)
     .map(i => ({
-      nombre: i.nombre ?? '',
-      descripcion: i.descripcion ?? null,
-      precio_venta: Number(i.precio_venta) || 0,
-      descuento_porcentaje: descuentoVisible(i),
-      cantidad: Number(i.cantidad) || 1,
-      unidad: i.unidad ?? null,
+      id: i.id as string,
+      grupo: i.grupo ?? null,
+      dia_relativo: (i as { dia_relativo?: number | null }).dia_relativo ?? null,
+      mostrar_en_sugeridos: (i as { mostrar_en_sugeridos?: boolean | null }).mostrar_en_sugeridos ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
     }))
+  const porId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
+  const bloquesDeDia = itinerariosPDF ? [] : diasDelItinerario(itemsConDia)
+  const idsConDia = new Set(bloquesDeDia.flatMap(d => d.itemIds))
+
+  const diasPDF = bloquesDeDia.length > 0
+    ? bloquesDeDia.map(d => ({
+        dia: d.dia,
+        items: d.itemIds
+          .map(id => porId.get(id))
+          .filter((i): i is ItemRow => i !== undefined && aporta(i))
+          .map(paraPlantilla),
+      }))
+    : null
+
+  const idsSugeridos = new Set(itinerariosPDF ? [] : itemsSugeridos(itemsConDia))
+
+  /**
+   * ⚠️ Las sugerencias NO entran aquí, y el defecto se vio en el documento renderizado,
+   * no razonándolo: sin este filtro el traslado se imprimía DOS veces, una en «Incluye
+   * también» y otra en «actividades adicionales no incluidas» — el mismo documento
+   * diciendo que una línea está incluida y que no lo está.
+   *
+   * Consecuencia asumida y declarada: cuando una sugerencia trae precio, la columna
+   * impresa ya no suma el Subtotal, porque esa línea sigue aportando al total. Es la
+   * cara visible de la contradicción que el editor avisa en rojo, y la salida es
+   * ponerla en cero o darle un día. Con la sugerencia en cero —que es su estado
+   * sano— la columna vuelve a cuadrar sola.
+   */
+  const itemsSinDiaPDF = diasPDF
+    ? items
+        .filter(i => aporta(i) && !(i.id && (idsConDia.has(i.id) || idsSugeridos.has(i.id))))
+        .map(paraPlantilla)
+    : null
+
+  const sugeridosPDF = itinerariosPDF
+    ? null
+    : sugeridosVisibles(itemsConDia)
+        .map(id => porId.get(id))
+        .filter((i): i is ItemRow => i !== undefined)
+        .map(i => ({
+          nombre: i.nombre ?? '',
+          descripcion: i.descripcion ?? null,
+          precio_venta: Number(i.precio_venta) || 0,
+          cantidad: Number(i.cantidad) || 1,
+          unidad: i.unidad ?? null,
+        }))
 
   const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {
@@ -498,6 +573,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     },
     items: itemsParaResumen,
     itinerarios: itinerariosPDF,
+    dias: diasPDF,
+    itemsSinDia: itemsSinDiaPDF,
+    sugeridos: sugeridosPDF && sugeridosPDF.length > 0 ? sugeridosPDF : null,
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
