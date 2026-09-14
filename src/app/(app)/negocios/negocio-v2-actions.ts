@@ -130,6 +130,7 @@ import {
 } from '@/lib/negocios/seguimiento-citas'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
+import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -2915,7 +2916,15 @@ export async function cambiarEtapaNegocio(
    * factura que ya existe. Sin este parametro, comportamiento identico.
    */
   camposExtra?: Record<string, unknown>,
-): Promise<{ error: string | null }> {
+): Promise<{
+  error: string | null
+  /**
+   * Presente cuando la BASE rechazó el cambio con un gate propio (hoy solo la carpeta
+   * local, trigger `trg_zz_gate_carpeta_local`). Viaja aparte del texto para que quien
+   * llama lo muestre como gate y no como un error cualquiera.
+   */
+  bloqueo?: BloqueoGate
+}> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
@@ -2939,7 +2948,11 @@ export async function cambiarEtapaNegocio(
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
 
-  if (updateError) return { error: (updateError as { message: string }).message }
+  if (updateError) {
+    const bloqueo = bloqueoCarpetaLocal(updateError)
+    if (bloqueo) return { error: bloqueo.nombre, bloqueo }
+    return { error: (updateError as { message: string }).message }
+  }
 
   // Crear negocio_bloques para la nueva etapa si no existen
   // Solo heredar estado/data para bloques VISIBLE (editable siempre empieza pendiente)
@@ -4461,7 +4474,13 @@ export async function cambiarEtapaNegocioConGate(
 
   // Cambiar etapa
   const resultCambio = await cambiarEtapaNegocio(negocioId, resolvedEtapaId, camposCierreAuto)
-  if (resultCambio.error) return resultCambio
+  // El gate de carpeta local vive en la base y llega aquí como rechazo del UPDATE. Se
+  // devuelve con la forma de los demás gates para que la pantalla abra su modal (sin
+  // "Omitir gate": el override no pasa por la base) en vez de un toast de error genérico.
+  if (resultCambio.bloqueo) {
+    return { error: 'gate_bloqueado', bloquesPendientes: [resultCambio.bloqueo] }
+  }
+  if (resultCambio.error) return { error: resultCambio.error }
 
   // El cierre automático deja su propia línea en el timeline: un negocio que aparece cerrado
   // sin que nadie lo cerrara es un misterio para quien lo lea después.

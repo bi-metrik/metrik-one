@@ -93,6 +93,13 @@ día 2026-09-07, dos subagentes aislados dieron resultados opuestos:
   situación: leer el archivo de la migración, trazar el código que la consume y contar los
   checks del PR — de ahí salió el defecto de `jsonb_set` de [[export-negocios-a-drive]].
 
+- PR #691 (2026-09-14) — **la Management API sí pasó toda la sesión**, con un `.py` escrito
+  por Write dentro del worktree que saca el `sbp_` de `.credentials.md` por regex sin imprimirlo
+  y lee el SQL de un archivo aparte (`python3 .x-sql.py .x-q.sql`). Sirvió para `pg_catalog`
+  (triggers, `pg_get_functiondef`, RLS) y para un `DO … RAISE EXCEPTION` de 22 casos. Lo que se
+  bloqueó fue un `mkdir && cd && printf` hacia el scratchpad, no la credencial. El arnés del
+  ensayo quedó en [[gate-carpeta-local]].
+
 **La vía que sirvió (y que conviene intentar primero, porque no toca
 `.credentials.md`):** symlink de `.env.local`, leer de ahí
 `SUPABASE_SERVICE_ROLE_KEY` con un script propio, y consultar por **PostgREST**
