@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
 
@@ -21,6 +21,7 @@ import FlujoSection from './flujo-section'
 import ReglasValidacionSection from './reglas-validacion-section'
 import PilaSection from './pila-section'
 import TerminosSection from './terminos-section'
+import MargenSection from './margen-section'
 
 // ── Types ──────────────────────────────────────────
 
@@ -81,6 +82,10 @@ const SECTIONS: SectionDef[] = [
   // Sin `wsTipo`: SOENA, el workspace para el que se construyo la pantalla, es
   // `clarity`. Copiar el filtro de 'mi-flujo' la escondia justo donde hacia falta.
   { key: 'terminos-propuesta', label: 'Términos de la propuesta', icon: FileText, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'] },
+  // Sin `wsTipo`, igual que los términos: el workspace para el que se construyó
+  // (Trappvel) es `clarity`, y copiar el filtro de 'mi-flujo' la escondería justo
+  // donde hace falta.
+  { key: 'margen', label: 'Margen mínimo', icon: Percent, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'] },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
@@ -389,6 +394,9 @@ function renderSection(
 
     case 'terminos-propuesta':
       return <TerminosSection />
+
+    case 'margen':
+      return <MargenSection />
 
     case 'mi-marca':
       return (
