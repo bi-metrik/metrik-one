@@ -1,6 +1,7 @@
 import 'server-only'
 import type { PasoParaGantt } from './gantt'
 import type { PasoPlan } from './versionado'
+import { nombreResponsable } from './responsable'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -36,6 +37,7 @@ interface FilaItem {
   fecha_inicio_real: string | null
   fecha_fin_real: string | null
   responsable_id: string | null
+  responsable_texto: string | null
   completado: boolean | null
 }
 
@@ -62,7 +64,7 @@ export async function leerDatosGantt(
     supabase.from('fiscal_profiles').select('razon_social, nit').eq('workspace_id', workspaceId).maybeSingle(),
     supabase
       .from('bloque_items')
-      .select('id, orden, label, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, completado')
+      .select('id, orden, label, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, responsable_texto, completado')
       .eq('negocio_bloque_id', negocioBloqueId)
       .order('orden', { ascending: true }),
     supabase
@@ -72,7 +74,9 @@ export async function leerDatosGantt(
       .order('numero', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase.from('profiles').select('id, full_name').eq('workspace_id', workspaceId),
+    // `responsable_id` es un staff.id (FK a staff), no un profile: el equipo incluye a
+    // quien no tiene cuenta en la plataforma.
+    supabase.from('staff').select('id, full_name').eq('workspace_id', workspaceId),
   ])
 
   const negocio = negocioRes.data as { codigo: string | null; nombre: string; empresas: { nombre: string | null } | null } | null
@@ -93,12 +97,15 @@ export async function leerDatosGantt(
   const snapshot = filaVersion && Array.isArray(filaVersion.snapshot) ? (filaVersion.snapshot as PasoPlan[]) : null
 
   const vivos = new Map(items.map(i => [i.id, i]))
-  const aPaso = (plan: Pick<PasoPlan, 'id' | 'label' | 'fecha_inicio' | 'fecha_fin' | 'responsable_id'>): PasoParaGantt => {
+  type PlanDePaso = Pick<PasoPlan, 'id' | 'label' | 'fecha_inicio' | 'fecha_fin' | 'responsable_id' | 'responsable_texto' | 'responsable_nombre'>
+  const aPaso = (plan: PlanDePaso): PasoParaGantt => {
     const vivo = vivos.get(plan.id)
     return {
       id: plan.id,
       label: plan.label ?? '',
-      responsable: plan.responsable_id ? nombres.get(plan.responsable_id) ?? null : null,
+      // El nombre congelado en la versión manda; sin él (versiones viejas o borrador) se
+      // resuelve contra el equipo de hoy y, si no está, se usa el texto libre.
+      responsable: plan.responsable_nombre?.trim() || nombreResponsable(plan, nombres),
       plan_inicio: plan.fecha_inicio,
       plan_fin: plan.fecha_fin,
       real_inicio: vivo?.fecha_inicio_real ?? null,
@@ -114,11 +121,11 @@ export async function leerDatosGantt(
     const enVersion = new Set(snapshot.map(p => p.id))
     for (const i of items) {
       if (!enVersion.has(i.id)) {
-        pasos.push({ ...aPaso({ id: i.id, label: i.label ?? '', fecha_inicio: null, fecha_fin: null, responsable_id: i.responsable_id }) })
+        pasos.push(aPaso({ id: i.id, label: i.label ?? '', fecha_inicio: null, fecha_fin: null, responsable_id: i.responsable_id, responsable_texto: i.responsable_texto }))
       }
     }
   } else {
-    pasos = items.map(i => aPaso({ id: i.id, label: i.label ?? '', fecha_inicio: i.fecha_inicio, fecha_fin: i.fecha_fin, responsable_id: i.responsable_id }))
+    pasos = items.map(i => aPaso({ id: i.id, label: i.label ?? '', fecha_inicio: i.fecha_inicio, fecha_fin: i.fecha_fin, responsable_id: i.responsable_id, responsable_texto: i.responsable_texto }))
   }
 
   return {

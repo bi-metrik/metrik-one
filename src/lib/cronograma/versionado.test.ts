@@ -39,6 +39,10 @@ describe('tocaLaPlaneacion', () => {
     expect(tocaLaPlaneacion({ fecha_inicio: '2026-09-15' })).toBe(true)
   })
 
+  it('cambiar el responsable de texto libre es planeación', () => {
+    expect(tocaLaPlaneacion({ responsable_texto: 'Contratista' })).toBe(true)
+  })
+
   it('un guardado vacío no corta nada', () => {
     expect(tocaLaPlaneacion({})).toBe(false)
   })
@@ -80,6 +84,24 @@ describe('describirCambios', () => {
     const antes = [paso({ id: 'a', label: 'Dossier' })]
     const despues = [paso({ id: 'a', label: 'Dossier', fecha_inicio: '2026-11-17' })]
     expect(describirCambios(antes, despues)[0]).toContain('antes sin fecha')
+  })
+
+  it('nombra a quien queda a cargo, sea del equipo o texto libre', () => {
+    const antes = [paso({ id: 'a', label: 'Montaje' })]
+    expect(describirCambios(antes, [paso({ id: 'a', label: 'Montaje', responsable_id: 's1', responsable_nombre: 'Laura Gómez' })]))
+      .toEqual(['"Montaje" queda a cargo de Laura Gómez'])
+    expect(describirCambios(antes, [paso({ id: 'a', label: 'Montaje', responsable_texto: 'Electro Andina' })]))
+      .toEqual(['"Montaje" queda a cargo de Electro Andina'])
+  })
+
+  it('quitar el responsable también es un cambio de planeación', () => {
+    const antes = [paso({ id: 'a', label: 'Montaje', responsable_texto: 'Electro Andina' })]
+    expect(describirCambios(antes, [paso({ id: 'a', label: 'Montaje' })])).toEqual(['"Montaje" queda sin responsable'])
+  })
+
+  it('una versión anterior al texto libre (sin la clave) no se lee como cambio', () => {
+    const vieja = [{ id: 'a', orden: 0, label: 'Montaje', fecha_inicio: null, fecha_fin: null, responsable_id: null }]
+    expect(describirCambios(vieja, [paso({ id: 'a', label: 'Montaje', responsable_texto: null })])).toEqual([])
   })
 
   it('el avance real no aparece: el snapshot solo lleva plan', () => {
