@@ -71,7 +71,7 @@
 - [Soporte de listas para el operador](project_soporte_listas_operator.md) — #631 mergeado: `/compliance/listas` NO tiene gate por rol (la ruta era el único candado) y `contador` sigue fuera a propósito
 - ⚠️ [Guards de items, cierre por tipo y aprobación](project_guard_bloque_items.md) — #676-#687 mergeados: la regla de quién aprueba es `puedeSerAprobador`; metrik sin candidatos
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696 mergeado: `omitir_gate.staff_ids` inerte hasta que SOENA lo cargue; NO confundir con `puedeOmitirGate` singular
-- ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — PR #691 sin mergear: migracion SIN aplicar, clave SIN encender; y el arnes DO + tabla temporal que no dispara los AFTER
+- ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 la captura en ficha y modal SIN QA en pantalla; el permiso debe contener canAdvanceStage
 - ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler y el audio se clasifica a propósito
 
 ## Referencias
