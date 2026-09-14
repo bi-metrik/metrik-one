@@ -37,6 +37,7 @@ import {
 } from '@/lib/negocios/atribucion-reproceso'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { resolverRetornoDelNegocio } from '@/lib/negocios/retorno-reproceso-datos'
+import { tramoDelReproceso } from '@/lib/negocios/retorno-reproceso'
 import { avisoDelRetorno, contenidoErrorSinRetorno } from '@/lib/negocios/reproceso-textos'
 
 /**
@@ -220,11 +221,13 @@ export async function reprocesarNegocio(
 
   const etapaActual = todas.find((e) => e.id === n.etapa_actual_id)
   if (!etapaActual) return { ok: false, error: 'Etapa actual no encontrada en la línea' }
-  // ⚠️ `orden` no ordena el recorrido: en SOENA, Generación (13) y Envío (14) van
-  // DESPUÉS de Cita (16) en el flujo y aun así caen aquí como "antes". Se conserva el
-  // criterio porque de él cuelga también el tramo que se archiva; cambiarlo es decisión
-  // de negocio (archivaría formularios y envíos en cada devolución DIAN).
-  if (etapaActual.orden < destino.orden) {
+  // "Antes" y "tramo" se miden por el FLUJO del routing, no por `orden`: en SOENA
+  // Generación (13) y Envío (14) van DESPUÉS de Cita (16), y comparando `orden` una
+  // devolución DIAN no las reabría y un caso en ellas no se podía reprocesar. Decisión de
+  // Mauricio (2026-09-14): se reabren. Una línea sin routing sigue midiéndose por `orden`.
+  // Reglas en `tramoDelReproceso`.
+  const tramo = tramoDelReproceso(todas, destino.orden, etapaActual.orden)
+  if (tramo.antesDelRetorno) {
     return {
       ok: false,
       error: `El negocio está en ${etapaActual.nombre}, antes de ${destino.nombre}. No hay nada que reprocesar.`,
@@ -233,9 +236,9 @@ export async function reprocesarNegocio(
   }
 
   // ── Archivar el ciclo y limpiar los bloques del tramo ─────────────────
-  // Solo el tramo que se va a rehacer: desde la etapa de retorno hasta la actual.
-  // Lo anterior no se toca, porque no se vuelve a recorrer.
-  const idsTramo = todas.filter((e) => e.orden >= destino.orden && e.orden <= etapaActual.orden).map((e) => e.id)
+  // Solo el tramo que se va a rehacer: lo que está en el camino de la etapa de retorno a
+  // la actual. Lo anterior no se toca, porque no se vuelve a recorrer.
+  const idsTramo = tramo.etapas.map((e) => e.id)
 
   const marcaPrevia = (n.metadata?.reproceso ?? null) as ReprocesoMarca | null
   const ciclo = (marcaPrevia?.ciclo ?? 0) + 1
@@ -442,11 +445,15 @@ export async function reprocesarNegocio(
 /**
  * Registra un error de calidad SIN devolver el caso.
  *
- * Existe porque un error propio no siempre deja un tramo que rehacer. V0388: la
- * documentación no se le envió al cliente antes de la cita del 8-sep, y el caso sigue en
- * Envío. `reprocesarNegocio` lo rechaza («antes de Cita, no hay nada que reprocesar»), y
- * con eso el fallo no llegaba a `reproceso_eventos`, que es de donde sale el 40% del bono.
+ * Existe porque un error propio no siempre deja un tramo que rehacer. Un caso ANTES del
+ * punto de retorno por el flujo (en Entrega, antes de Cita) no se puede reprocesar, y con
+ * eso el fallo no llegaba a `reproceso_eventos`, que es de donde sale el 40% del bono.
  * Decisión de Mauricio (2026-09-14): el evento se registra y el caso no se toca.
+ *
+ * ⚠️ Nació por V0388 (en Envío, la documentación no se envió antes de la cita del 8-sep),
+ * cuando «antes» se medía por `orden` y Envío (14) caía antes de Cita (16). Desde que se
+ * mide por el flujo, Envío va DESPUÉS de Cita: V0388 ya no llega aquí desde la pantalla,
+ * que solo ofrece este registro cuando `reprocesarNegocio` responde `antesDelRetorno`.
  *
  * Lo que SÍ hace: inserta el evento con la misma atribución que un reproceso, nacido
  * cerrado (`cerrado_at = abierto_at`) y con `ciclo = CICLO_SIN_RETORNO`, y deja la línea

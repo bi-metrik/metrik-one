@@ -26,7 +26,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CICLO_SIN_RETORNO } from '@/lib/negocios/atribucion-reproceso'
 
 type Fila = Record<string, unknown>
-type Escritura = { cliente: 'sesion' | 'servicio'; tabla: string; op: 'insert' | 'update'; payload: Fila }
+type Escritura = { cliente: 'sesion' | 'servicio'; tabla: string; op: 'insert' | 'update'; payload: Fila; ids?: unknown[] }
 
 let tablas: Record<string, Fila[]> = {}
 let escrituras: Escritura[] = []
@@ -95,7 +95,7 @@ function constructor(nombre: 'sesion' | 'servicio', tabla: string) {
     }
     const filas = (tablas[tabla] ?? []).filter((f) => filtros.every((p) => p(f)))
     if (operacion === 'update') {
-      escrituras.push({ cliente: nombre, tabla, op: 'update', payload })
+      escrituras.push({ cliente: nombre, tabla, op: 'update', payload, ids: filas.map((f) => f.id) })
       return { data: filas, error: null }
     }
     return { data: filas.map((f) => structuredClone(f)), error: null }
@@ -125,7 +125,29 @@ const etapa = (orden: number, nombre: string, config_extra: Fila = {}) => ({
   id: `etapa-${orden}`, linea_id: LINEA, orden, nombre, config_extra,
 })
 
-function sembrar(etapaActualOrden: number) {
+/**
+ * El routing real de esas etapas en la línea GIT EV/HEV (2026-09-14). Con `conRouting` la
+ * línea recorre Cita → Notificación → Anexos → Generación → Envío → Seguimiento →
+ * Facturación; sin él, la línea no declara routing y se mide por `orden`.
+ */
+const si = (field: string, value: string, etapa_orden: number) => ({ condition: { field, value }, etapa_orden })
+const ROUTING_SOENA: Record<number, Fila> = {
+  12: { conditional: [si('requiere_cita_dian_iva', 'true', 16), si('requiere_cita_dian_iva', 'false', 18)], default_etapa_orden: 15 },
+  14: { conditional: [], default_etapa_orden: 19 },
+  15: { conditional: [], default_etapa_orden: 15 },
+  16: { conditional: [si('via_solicitud', 'pqrs', 17), si('via_solicitud', 'agenda', 18)], default_etapa_orden: 17 },
+  17: { conditional: [si('resultado_pqr', 'pqr_rechazado', 16)], default_etapa_orden: 18 },
+  18: { conditional: [], default_etapa_orden: 13 },
+  19: { conditional: [], default_etapa_orden: 15 },
+}
+
+const bloque = (id: string, orden: number) => ({
+  id, negocio_id: 'neg-v0388', data: { dato: id }, estado: 'completo', bloque_configs: { etapa_id: `etapa-${orden}`, config_extra: {} },
+})
+
+function sembrar(etapaActualOrden: number, { conRouting = false }: { conRouting?: boolean } = {}) {
+  const r = (orden: number, extra: Fila = {}) =>
+    conRouting && ROUTING_SOENA[orden] ? { ...extra, routing: ROUTING_SOENA[orden] } : extra
   tablas = {
     negocios: [{
       id: 'neg-v0388', workspace_id: 'ws-soena', estado: 'abierto', stage_actual: 'ejecucion',
@@ -133,17 +155,23 @@ function sembrar(etapaActualOrden: number) {
       codigo: 'V0388', nombre: 'Caso',
     }],
     etapas_negocio: [
-      etapa(12, 'Entrega'),
-      etapa(13, 'Generación'),
-      etapa(14, 'Envío'),
-      etapa(16, 'Cita', { reproceso_de: ['devolucion_dian'] }),
-      etapa(17, 'Notificación'),
-      etapa(18, 'Anexos'),
-      etapa(19, 'Seguimiento'),
+      etapa(12, 'Entrega', r(12)),
+      etapa(13, 'Generación', r(13)),
+      etapa(14, 'Envío', r(14)),
+      etapa(15, 'Facturación', r(15)),
+      etapa(16, 'Cita', r(16, { reproceso_de: ['devolucion_dian'] })),
+      etapa(17, 'Notificación', r(17)),
+      etapa(18, 'Anexos', r(18)),
+      etapa(19, 'Seguimiento', r(19)),
     ],
     negocio_bloques: [
-      { id: 'b-anexos', negocio_id: 'neg-v0388', data: { x: 1 }, estado: 'completo', bloque_configs: { etapa_id: 'etapa-18', config_extra: {} } },
-      { id: 'b-seg', negocio_id: 'neg-v0388', data: { y: 2 }, estado: 'completo', bloque_configs: { etapa_id: 'etapa-19', config_extra: {} } },
+      bloque('b-entrega', 12),
+      bloque('b-gen', 13),
+      bloque('b-envio', 14),
+      bloque('b-fact', 15),
+      bloque('b-cita', 16),
+      bloque('b-anexos', 18),
+      bloque('b-seg', 19),
     ],
     staff: [{ id: 'staff-deisy', full_name: 'Deisy Ramirez' }],
     staff_areas: [{ staff_id: 'staff-deisy', area: 'operaciones' }],
@@ -164,12 +192,57 @@ beforeEach(() => {
 })
 
 describe('reprocesarNegocio — antes del punto de retorno', () => {
-  it('V0388 en Envío: no reprocesa, no escribe, y ofrece registrar el error', async () => {
-    sembrar(14)
+  it('en Entrega (antes de Cita por el flujo): no reprocesa, no escribe, y ofrece registrar el error', async () => {
+    sembrar(12, { conRouting: true })
     const r = await reprocesarNegocio('neg-v0388', input)
     expect(r.ok).toBe(false)
+    expect(r.antesDelRetorno).toEqual({ etapaActual: 'Entrega', etapaRetorno: 'Cita' })
+    expect(escrituras).toEqual([])
+  })
+
+  it('línea SIN routing: un caso en Envío (orden 14) sigue antes de Cita (16), como siempre', async () => {
+    sembrar(14)
+    const r = await reprocesarNegocio('neg-v0388', input)
     expect(r.antesDelRetorno).toEqual({ etapaActual: 'Envío', etapaRetorno: 'Cita' })
     expect(escrituras).toEqual([])
+  })
+})
+
+/**
+ * El tramo por el flujo, sobre la acción real (2026-09-14). Las tres se corrieron contra el
+ * `reproceso-actions.ts` anterior (comparaba `orden`) y fallaron las tres: el caso en Envío
+ * devolvía `antesDelRetorno`, y desde Seguimiento Generación y Envío no se archivaban.
+ */
+describe('reprocesarNegocio — el tramo se mide por el flujo', () => {
+  const archivados = () =>
+    escrituras
+      .filter((e) => e.tabla === 'negocio_bloques' && e.op === 'update')
+      .flatMap((e) => (e.ids ?? []) as string[])
+      .sort()
+
+  it('devolución desde Seguimiento: archiva Cita, Anexos, Generación, Envío y Seguimiento; no Entrega ni Facturación', async () => {
+    sembrar(19, { conRouting: true })
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r).toMatchObject({ ok: true, etapaNombre: 'Cita' })
+    expect(archivados()).toEqual(['b-anexos', 'b-cita', 'b-envio', 'b-gen', 'b-seg'])
+  })
+
+  it('V0388 en Envío SÍ se reprocesa: vuelve a Cita y reabre Generación y Envío', async () => {
+    sembrar(14, { conRouting: true })
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r.antesDelRetorno).toBeUndefined()
+    expect(r).toMatchObject({ ok: true, etapaNombre: 'Cita' })
+    const mov = escrituras.find((e) => e.tabla === 'negocios' && e.op === 'update')
+    expect(mov?.payload.etapa_actual_id).toBe('etapa-16')
+    expect(archivados()).toEqual(['b-anexos', 'b-cita', 'b-envio', 'b-gen'])
+  })
+
+  it('sin cita: el retorno resuelto es Anexos y el tramo arranca ahí, con Generación y Envío', async () => {
+    sembrar(19, { conRouting: true })
+    retornoResuelto = { orden: 18, motivo: 'no_aplica', rama: null }
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r).toMatchObject({ ok: true, etapaNombre: 'Anexos' })
+    expect(archivados()).toEqual(['b-anexos', 'b-envio', 'b-gen', 'b-seg'])
   })
 })
 

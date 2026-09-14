@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { requiereCitaDian } from '@/lib/dian/seccionales'
 import {
+  alcanzablesPorFlujo,
   decisionesHaciaDestino,
   derivarRespuestaDeCita,
   resolverRetornoReproceso,
+  tramoDelReproceso,
   type EtapaRetorno,
 } from './retorno-reproceso'
 
@@ -74,6 +76,128 @@ describe('decisionesHaciaDestino', () => {
 
   it('Cargue no es bifurcación: Documentación llega por default, no por una rama', () => {
     expect(decisionesHaciaDestino(SOENA, 7)).toEqual([])
+  })
+
+  it('"antes de D" es por el flujo: una decisión con `orden` mayor que D pero previa en el recorrido cuenta', () => {
+    // Inicio (1) → Decide (5) → Destino (3), que cierra. Por `orden`, Decide quedaría "después".
+    const etapas = [
+      e(1, 'Inicio', { conditional: [], default_etapa_orden: 5 }),
+      e(3, 'Destino', { conditional: [], default_etapa_orden: 3 }),
+      e(4, 'Otra', { conditional: [], default_etapa_orden: 4 }),
+      e(5, 'Decide', { conditional: [si('x', 'si', 3)], default_etapa_orden: 4 }),
+    ]
+    expect(decisionesHaciaDestino(etapas, 3).map((d) => d.nombre)).toEqual(['Decide'])
+  })
+})
+
+/**
+ * El tramo y el «antes de» se miden por el FLUJO (2026-09-14). Secuencia DIAN real de la
+ * línea: Cita (16) → Notificación (17) → Anexos (18) → Generación (13) → Envío (14) →
+ * Seguimiento (19) → Facturación (15).
+ *
+ * Mutaciones medidas el 2026-09-14 sobre este archivo y `reproceso-sin-retorno.test.ts`
+ * (54 pruebas entre los dos):
+ *  - tramo = todo lo alcanzable desde el retorno, sin exigir que llegue a la actual: 12;
+ *  - `alcanzablesPorFlujo` sin la propia etapa de origen: 10;
+ *  - medir por `orden` también con routing (el comportamiento de antes): 12;
+ *  - `decisionesHaciaDestino` de vuelta a `orden`: 1 (en SOENA las dos formas coinciden;
+ *    solo la línea sintética lo distingue);
+ *  - recorrer el grafo aunque la línea no tenga routing: 0 — sin routing, la siguiente
+ *    etapa es la de `orden` mayor, así que las dos formas son EQUIVALENTES. La rama existe
+ *    para que el criterio de una línea sin routing sea literalmente el de siempre.
+ *
+ * Y contra el `reproceso-actions.ts` anterior (el que comparaba `orden`), las tres pruebas
+ * de «el tramo se mide por el flujo» de `reproceso-sin-retorno.test.ts` fallaron.
+ */
+const nombres = (t: ReturnType<typeof tramoDelReproceso>) =>
+  t.antesDelRetorno ? null : t.etapas.map((x) => x.nombre).sort()
+const GENERACION = 13
+const ENVIO = 14
+const FACTURACION = 15
+const SEGUIMIENTO = 19
+const CARGUE = 7
+
+describe('tramoDelReproceso — por el flujo de la línea', () => {
+  it('devolución DIAN desde Seguimiento: rehace Cita…Seguimiento, Generación y Envío incluidas', () => {
+    expect(nombres(tramoDelReproceso(SOENA, CITA, SEGUIMIENTO))).toEqual(
+      ['Anexos', 'Cita', 'Envío', 'Generación', 'Notificación', 'Seguimiento'],
+    )
+  })
+
+  it('…y no toca lo que va después (Facturación) ni lo anterior (Entrega, Cartera)', () => {
+    const t = nombres(tramoDelReproceso(SOENA, CITA, SEGUIMIENTO))
+    expect(t).not.toContain('Facturación')
+    expect(t).not.toContain('Entrega')
+    expect(t).not.toContain('Cartera')
+  })
+
+  it('un caso en Envío (V0388) SÍ se puede reprocesar: Envío va después de Cita', () => {
+    expect(nombres(tramoDelReproceso(SOENA, CITA, ENVIO))).toEqual(
+      ['Anexos', 'Cita', 'Envío', 'Generación', 'Notificación'],
+    )
+  })
+
+  it('un caso en Generación también, y Envío queda fuera: todavía no lo pisó', () => {
+    expect(nombres(tramoDelReproceso(SOENA, CITA, GENERACION))).toEqual(
+      ['Anexos', 'Cita', 'Generación', 'Notificación'],
+    )
+  })
+
+  it('un caso en Entrega sí está antes de Cita: no hay tramo', () => {
+    expect(tramoDelReproceso(SOENA, CITA, ENTREGA)).toEqual({ antesDelRetorno: true })
+    expect(tramoDelReproceso(SOENA, CITA, CARTERA)).toEqual({ antesDelRetorno: true })
+  })
+
+  it('ciudad sin cita: el retorno cae en Anexos y el tramo arranca ahí, con Generación y Envío', () => {
+    expect(nombres(tramoDelReproceso(SOENA, ANEXOS, SEGUIMIENTO))).toEqual(
+      ['Anexos', 'Envío', 'Generación', 'Seguimiento'],
+    )
+  })
+
+  it('el ciclo del PQR: un caso en Cita rehace también Notificación (pudo pasar y volver)', () => {
+    expect(nombres(tramoDelReproceso(SOENA, CITA, CITA))).toEqual(['Cita', 'Notificación'])
+  })
+
+  it('un caso en Facturación está después de Cita por el flujo (Seguimiento → Facturación)', () => {
+    // La pantalla no ofrece reprocesar en la etapa de cierre (no hay «siguiente etapa»);
+    // esto fija lo que respondería la acción si alguien la llamara igual.
+    expect(tramoDelReproceso(SOENA, CITA, FACTURACION).antesDelRetorno).toBe(false)
+  })
+})
+
+describe('tramoDelReproceso — certificación UPME (retorno a Cargue)', () => {
+  it('desde Revisión radicado rehace Cargue, Pago UPME y Revisión, no la línea entera', () => {
+    // Por `orden` eran 7..20: las 14 etapas, Cita y Facturación incluidas.
+    expect(nombres(tramoDelReproceso(SOENA, CARGUE, 20))).toEqual(['Cargue', 'Pago UPME', 'Revisión radicado'])
+  })
+
+  it('desde Certificación incluye Revisión radicado (orden 20), que el `orden` dejaba fuera', () => {
+    expect(nombres(tramoDelReproceso(SOENA, CARGUE, 9))).toEqual(
+      ['Cargue', 'Certificación', 'Pago UPME', 'Revisión radicado'],
+    )
+  })
+
+  it('Documentación sigue antes de Cargue', () => {
+    expect(tramoDelReproceso(SOENA, CARGUE, 6)).toEqual({ antesDelRetorno: true })
+  })
+})
+
+describe('tramoDelReproceso — línea sin routing: por `orden`, como siempre', () => {
+  // Las mismas etapas de SOENA sin una sola regla de routing.
+  const SIN_ROUTING = SOENA.map((x) => ({ ...x, config_extra: {} }))
+
+  it('Envío (14) queda antes de Cita (16)', () => {
+    expect(tramoDelReproceso(SIN_ROUTING, CITA, ENVIO)).toEqual({ antesDelRetorno: true })
+  })
+
+  it('desde Seguimiento el tramo es 16..19', () => {
+    expect(nombres(tramoDelReproceso(SIN_ROUTING, CITA, SEGUIMIENTO))).toEqual(
+      ['Anexos', 'Cita', 'Notificación', 'Seguimiento'],
+    )
+  })
+
+  it('alcanzables = orden mayor o igual', () => {
+    expect([...alcanzablesPorFlujo(SIN_ROUTING, 18)].sort((a, b) => a - b)).toEqual([18, 19, 20])
   })
 })
 

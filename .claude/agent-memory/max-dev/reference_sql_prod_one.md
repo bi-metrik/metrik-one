@@ -239,5 +239,17 @@ que es el que no se ve.
 ⚠️ Un `select` con una columna inexistente devuelve **HTTP 400 a secas**, sin decir cuál
 columna. Ante un 400, pedir `select=*&limit=1` y mirar las claves antes de adivinar.
 
+## SQL que NO se puede ensayar: validarlo sin base
+
+Cuando el encargo prohíbe escribir (ni dry-run), la sintaxis se valida con el parser real de
+Postgres y sin base: `pglast` en un venv del scratchpad (`pip install pglast` pasó el
+2026-09-14). `pglast.parse_sql` valida lo de arriba, pero un `DO $$ … $$` lo acepta aunque
+su cuerpo esté roto: hay que envolver el cuerpo en `create function _x() returns void
+language plpgsql as $f$…$f$` y pasarlo por `pglast.parse_plpgsql`, y después re-parsear
+cada `"query"` del árbol (las expresiones y asignaciones van con `select ` delante).
+**No mira columnas ni tipos**: esas se comprueban aparte con un GET de PostgREST
+`select=<las columnas del SQL>&limit=1` por tabla (un 400 = columna que no existe), y las
+guardas se simulan en Python contra la foto fresca antes de entregar.
+
 Relacionado: [[tableros-soena-ola-1]], [[medir-antes-de-construir]],
 [[activity-log-vocabulario]], [[export-negocios-a-drive]].
