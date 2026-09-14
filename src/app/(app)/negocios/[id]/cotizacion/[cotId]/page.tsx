@@ -3,6 +3,12 @@ import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
+import {
+  politicaMargenDeLinea,
+  umbralesDeCotizacion,
+  UMBRALES_MARGEN_POR_DEFECTO,
+  type UmbralesMargen,
+} from '@/lib/cotizaciones/convencion-margen'
 
 export default async function CotizacionNegocioPage({
   params,
@@ -112,6 +118,38 @@ export default async function CotizacionNegocioPage({
     // Staff data is not critical for the editor
   }
 
+  // Los umbrales de margen: manda lo que la cotización CONGELÓ al nacer y la política
+  // de la línea solo entra donde la cotización no diga nada. La precedencia se resuelve
+  // aquí, una sola vez, con el helper puro — la pantalla recibe dos números y ya.
+  //
+  // Mientras la migración `20260914160000` no esté aplicada, las dos columnas llegan
+  // como `undefined` (el `select('*')` de `getCotizacion` no falla por columnas que no
+  // existen) y todo cae a la línea, que es el comportamiento de hoy.
+  let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
+  if (negocioLineaId) {
+    try {
+      const { supabase: sbLinea } = await getWorkspace()
+      const { data: linea } = await sbLinea
+        .from('lineas_negocio')
+        .select('config_extra')
+        .eq('id', negocioLineaId)
+        .maybeSingle()
+      const { pisoPct, avisoPct } = politicaMargenDeLinea(
+        (linea as { config_extra?: unknown } | null)?.config_extra,
+      )
+      politicaLinea = { pisoPct, avisoPct }
+    } catch {
+      // Sin la línea rigen los umbrales por defecto: el color de una cifra no puede
+      // depender de que una consulta secundaria responda.
+    }
+  }
+
+  const cotRow = cotizacion as unknown as { piso_margen_pct?: number | null; aviso_margen_pct?: number | null }
+  const umbrales = umbralesDeCotizacion(
+    { pisoPct: cotRow.piso_margen_pct, avisoPct: cotRow.aviso_margen_pct },
+    politicaLinea,
+  )
+
   return (
     <CotizacionEditor
       oportunidadId={id}
@@ -123,6 +161,7 @@ export default async function CotizacionNegocioPage({
       staffMembers={staffMembers}
       frozen={frozen}
       lineaId={negocioLineaId}
+      umbrales={umbrales}
     />
   )
 }

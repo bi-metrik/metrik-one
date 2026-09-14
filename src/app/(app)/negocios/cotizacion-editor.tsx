@@ -17,9 +17,17 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { margenRealDelItem, CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
-import { nombreDelMargen, margenPideAviso, UMBRAL_AVISO_MARGEN_PCT } from '@/lib/cotizaciones/convencion-margen'
+import {
+  nombreDelMargen,
+  nivelDeMargen,
+  UMBRALES_MARGEN_POR_DEFECTO,
+  type NivelMargen,
+  type UmbralesMargen,
+} from '@/lib/cotizaciones/convencion-margen'
+import { origenDelMargen, etiquetaOrigenMargen, formatMargenPct } from '@/lib/cotizaciones/margen-vista'
+import RastroMargen from '@/app/(app)/negocios/rastro-margen-panel'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
@@ -97,9 +105,16 @@ interface Props {
   staffMembers?: StaffMember[]
   frozen?: boolean
   lineaId?: string | null
+  /**
+   * Piso (rojo) y aviso (ámbar) del margen, YA resueltos por el servidor: manda lo
+   * que la cotización congeló al nacer y la política de su línea solo entra donde la
+   * cotización no diga nada. La pantalla no repite esa precedencia — si la repitiera,
+   * el día que cambie quedarían dos reglas.
+   */
+  umbrales?: UmbralesMargen
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -487,10 +502,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // Cuándo esta línea tiene algo propio que contar. Si no, su precio es el
             // reflejo del margen general y no aporta nada repetirlo aquí.
             const lineaDecideSuPrecio = margenPropio || precioFijadoAMano
-            const margenRealPct = margenRealDelItem(costoLinea, precioLinea)
-            // Avisa, no bloquea. Un piso duro no sube el margen: enseña a escribir el
-            // número que deja pasar la pantalla, y el dato que llega después no sirve.
-            const avisaMargen = margenPideAviso(margenRealPct)
+            // El margen REAL de la línea sale de la cascada, no se recalcula aquí: es
+            // la misma aritmética que aplica el servidor al guardar, y ya trae la parte
+            // de los administrativos que le toca a esta línea.
+            const margenRealPct = linea?.margenRealPct ?? null
+            const margenTexto = formatMargenPct(margenRealPct)
+            // Ni bloquean ni avisan lo mismo: bajo el piso es ROJO, entre piso y aviso
+            // es ámbar. Ninguno de los dos frena el envío — el rechazo en servidor
+            // llega con los itinerarios.
+            const nivelMargen = nivelDeMargen(margenRealPct, umbrales)
+            const origenMargen = origenDelMargen({ margenPropio, precioManual: precioFijadoAMano })
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -534,6 +555,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         como rebaja del precio lo contaría dos veces. */}
                     {!isAjuste && costoLinea > 0 && (
                       <span className="block text-[10px] text-muted-foreground">Costo {formatCOP(costoLinea)}</span>
+                    )}
+                    {/* El margen de la línea, SIEMPRE que se pueda medir — también
+                        cuando lo hereda de la cotización. Antes solo aparecía en las
+                        líneas con excepción propia, así que armar un viaje entero sin
+                        una sola excepción dejaba la pantalla sin un solo margen a la
+                        vista: exactamente lo que hay que poder ver mientras se arma. */}
+                    {!isAjuste && margenTexto && (
+                      <span
+                        className={`block text-[10px] font-medium tabular-nums ${claseNivelMargen(nivelMargen)}`}
+                        title={tituloNivelMargen(nivelMargen, umbrales, origenMargen)}
+                      >
+                        Margen {margenTexto}
+                      </span>
                     )}
                   </div>
                   {editable && !isAjuste && (
@@ -686,16 +720,37 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           </span>
                         )}
 
-                        {/* El margen real solo se enseña cuando alguien puso un margen. Un
-                            "0,0% · bajo" en naranja sobre una línea recién capturada no
-                            avisa de nada: regaña por no haber llegado todavía. */}
-                        {margenRealPct !== null && costoLinea > 0 && lineaDecideSuPrecio && itemMargen !== 0 && (
-                          <p
-                            className={`mt-0.5 text-[10px] tabular-nums ${avisaMargen ? 'text-amber-600' : 'text-muted-foreground'}`}
-                            title={avisaMargen ? `Por debajo del ${UMBRAL_AVISO_MARGEN_PCT}% de margen. Es un aviso, no un bloqueo: la cotización se puede enviar igual.` : undefined}
-                          >
-                            Margen real {margenRealPct.toFixed(1)}%
-                            {avisaMargen && <span className="ml-1 font-medium">· bajo</span>}
+                        {/* El margen real de la línea y DE DÓNDE SALE.
+                            Un "0,0%" no dice lo mismo si la línea va a costo por
+                            decisión de alguien que si simplemente hereda el margen de
+                            la cotización: sin el origen al lado, los dos casos se leen
+                            igual y uno de los dos es un viaje regalado.
+                            Una línea sin margen medible (recién capturada, sin costo o
+                            sin precio) no muestra nada: regañar por no haber llegado
+                            todavía enseña a ignorar el aviso. */}
+                        {margenTexto && (
+                          <p className={`mt-0.5 text-[10px] tabular-nums ${claseNivelMargen(nivelMargen)}`}>
+                            Margen real {margenTexto}
+                            <span className="ml-1 text-muted-foreground">· {etiquetaOrigenMargen(origenMargen)}</span>
+                            {nivelMargen === 'bajo_piso' && (
+                              <span className="ml-1 font-semibold">
+                                · bajo el piso de {formatMargenPct(umbrales.pisoPct)}
+                              </span>
+                            )}
+                            {nivelMargen === 'aviso' && (
+                              <span className="ml-1 font-medium">
+                                · bajo el aviso de {formatMargenPct(umbrales.avisoPct)}
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        {/* El descuento comercial vive al final de la cascada y NO se
+                            reparte por línea, así que el margen de arriba está por
+                            encima del que queda de verdad. Decirlo cuesta una línea;
+                            callarlo deja una pantalla sana diciendo algo falso. */}
+                        {margenTexto && (Number(cotizacion.descuento_porcentaje) || 0) > 0 && (
+                          <p className="text-[10px] text-muted-foreground">
+                            Antes del descuento comercial de {cotizacion.descuento_porcentaje}%.
                           </p>
                         )}
 
@@ -1062,6 +1117,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             editable={editable}
             aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
             aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
+            umbrales={umbrales}
             onMargenChange={pct => {
               startTransition(async () => {
                 await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
@@ -1083,6 +1139,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               })
             }}
           />
+
+          {/* Quién movió el margen y cuándo. Debajo de la cascada a propósito: se
+              consulta cuando la cifra de arriba sorprende, no mientras se captura. */}
+          <RastroMargen cotizacionId={cotizacion.id} />
 
           {/* Terminos y condiciones (van al final de la cotizacion) */}
           {(editable || terminos.trim()) && (
@@ -1211,6 +1271,42 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   )
 }
 
+// ── Cómo se pinta un margen ────────────────────────────────────
+
+/**
+ * El color de un margen según su nivel.
+ *
+ * `sin_dato` NO es gris de "apagado": es el color normal del texto, porque no hay
+ * nada que juzgar todavía. `ok` tampoco se pinta de verde en la línea — con doce
+ * ítems sanos, doce verdes dejan de distinguirse de nada.
+ */
+function claseNivelMargen(nivel: NivelMargen): string {
+  switch (nivel) {
+    case 'bajo_piso':
+      return 'text-red-600'
+    case 'aviso':
+      return 'text-amber-600'
+    default:
+      return 'text-muted-foreground'
+  }
+}
+
+/** Qué explica el tooltip del margen, sin repetir lo que ya dice el texto. */
+function tituloNivelMargen(
+  nivel: NivelMargen,
+  umbrales: UmbralesMargen,
+  origen: ReturnType<typeof origenDelMargen>,
+): string {
+  const deDonde = `El margen de esta línea ${etiquetaOrigenMargen(origen)}.`
+  if (nivel === 'bajo_piso') {
+    return `${deDonde} Está por debajo del piso de ${formatMargenPct(umbrales.pisoPct)}. Es una marca, no un bloqueo: la cotización se puede enviar igual.`
+  }
+  if (nivel === 'aviso') {
+    return `${deDonde} Está por debajo del ${formatMargenPct(umbrales.avisoPct)} de margen. Avisa, no bloquea.`
+  }
+  return deDonde
+}
+
 // ── Totales + Margen bidireccional ─────────────────────────────
 
 /** Un renglón de la cascada: qué es, cuánto vale y de dónde sale. */
@@ -1242,7 +1338,7 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
  * diera: el cliente veía una línea "Administración e imprevistos" que nadie había
  * cotizado, y el margen no se podía leer en ninguna parte.
  */
-function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, onMargenChange, onAIUChange, onDescuentoChange }: {
+function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, onMargenChange, onAIUChange, onDescuentoChange }: {
   cascada: Cascada
   margenPct: number
   convencionMargen: ConvencionMargen
@@ -1250,6 +1346,7 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   editable: boolean
   aiuAdminPct: number | null
   aiuImprevPct: number | null
+  umbrales: UmbralesMargen
   onMargenChange: (pct: number) => void
   onAIUChange: (adminPct: number | null, imprevPct: number | null) => void
   onDescuentoChange: (pct: number) => void
@@ -1261,9 +1358,12 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
 
   // El margen real se separa del general cuando alguna línea margina distinto, trae
   // precio a mano, o cuando la cotización quedó en la convención vieja de recargo
-  // sobre el costo. Si no pasa nada de eso, son el mismo número y sobra enseñarlo.
+  // sobre el costo. Si no pasa nada de eso, son el mismo número.
   const margenRealEsOtraCosa =
     cascada.margenRealPct !== null && Math.abs(cascada.margenRealPct - margenPct) >= 0.05
+
+  const nivelConsolidado = nivelDeMargen(cascada.margenRealPct, umbrales)
+  const margenConsolidado = formatMargenPct(cascada.margenRealPct)
 
   return (
     <div className="rounded-lg bg-muted/50 p-4 space-y-2">
@@ -1415,19 +1515,39 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
           <span className="text-sm font-medium">Precio de venta</span>
           <span className="text-base font-bold tabular-nums">{formatCOP(cascada.precioVenta)}</span>
         </div>
-        {/* "Margen real" solo aparece cuando NO es el número que ya está arriba.
-            Dos cifras del mismo dinero con nombres distintos no informan: obligan a
-            adivinar cuál manda. Con la convención sobre venta y sin líneas que
-            marginen aparte, el margen general YA es el real y basta con él. */}
-        {cascada.margenRealPct !== null && cascada.costoDeVenta > 0 && (
-          margenRealEsOtraCosa ? (
-            <p className={`mt-0.5 text-right text-[11px] tabular-nums ${margenPideAviso(cascada.margenRealPct) ? 'text-amber-600' : 'text-green-600'}`}>
-              Margen real {cascada.margenRealPct.toFixed(1)}%
-              {margenPideAviso(cascada.margenRealPct) && <span className="ml-1 font-medium">· bajo</span>}
-            </p>
-          ) : margenPideAviso(cascada.margenRealPct) && cascada.margenRealPct !== 0 ? (
-            <p className="mt-0.5 text-right text-[11px] font-medium tabular-nums text-amber-600">Margen bajo</p>
-          ) : null
+        {/* El margen del viaje completo, SIEMPRE en pantalla mientras se arma.
+            Antes solo aparecía cuando difería del margen general o cuando era bajo,
+            así que la cotización sana no mostraba ninguna cifra consolidada: el
+            número que hay que conocer antes de mandar la cotización solo se veía
+            cuando ya era malo.
+            La etiqueta cambia a "Margen real" cuando NO coincide con el general,
+            que es lo que obliga a mirar los dos por separado. */}
+        {margenConsolidado && cascada.costoDeVenta > 0 && (
+          <div className="mt-0.5 flex items-baseline justify-between gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              {margenRealEsOtraCosa ? 'Margen real del viaje' : 'Margen del viaje'}
+            </span>
+            <span
+              className={`text-[11px] font-semibold tabular-nums ${
+                nivelConsolidado === 'bajo_piso'
+                  ? 'text-red-600'
+                  : nivelConsolidado === 'aviso'
+                    ? 'text-amber-600'
+                    : 'text-green-600'
+              }`}
+              title={
+                nivelConsolidado === 'bajo_piso'
+                  ? `Por debajo del piso de ${formatMargenPct(umbrales.pisoPct)}. Es una marca, no un bloqueo: la cotización se puede enviar igual.`
+                  : nivelConsolidado === 'aviso'
+                    ? `Por debajo del ${formatMargenPct(umbrales.avisoPct)} de margen. Avisa, no bloquea.`
+                    : undefined
+              }
+            >
+              {margenConsolidado}
+              {nivelConsolidado === 'bajo_piso' && <span className="ml-1">· bajo el piso</span>}
+              {nivelConsolidado === 'aviso' && <span className="ml-1">· bajo</span>}
+            </span>
+          </div>
         )}
       </div>
     </div>

@@ -4,11 +4,22 @@
  * Vive en `lineas_negocio.config_extra -> 'margen'`, un jsonb que ya existía, así que
  * no hay columnas nuevas ni un lugar más que mantener:
  *
- *     {"margen": {"convencion": "sobre_venta", "default_pct": 15}}
+ *     {"margen": {"convencion": "sobre_venta", "default_pct": 15,
+ *                 "piso_pct": 5, "aviso_pct": 10}}
  *
  * Este archivo es la ÚNICA pieza que sabe leer ese jsonb. La forma del dato entra por
  * aquí y sale tipada; nadie más hace `config_extra?.margen?.convencion` a mano, que es
  * como se desincronizan las dos mitades de una regla.
+ *
+ * ## Por qué los umbrales viven aquí y no en una columna de `workspaces`
+ *
+ * Porque la pregunta que responden —«¿a partir de qué margen este trabajo deja de
+ * valer la pena?»— es de la LÍNEA, no de la empresa: una agencia puede cotizar
+ * viajes a medida con piso 5% y un corporativo con piso 12%, y una columna por
+ * workspace obliga a elegir uno de los dos. Es además donde ya viven `convencion` y
+ * `default_pct`, que son de la misma familia (cómo se le pone precio a esta línea) y
+ * las lee este mismo módulo: partirlas entre un jsonb y dos columnas crea una segunda
+ * regla de precedencia para un dato que ya tiene la suya. Y no cuesta migración.
  */
 
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from './precio-item'
@@ -18,7 +29,40 @@ export interface PoliticaMargen {
   convencion: ConvencionMargen
   /** Margen con el que nace un ítem nuevo. Editable después, ítem por ítem. */
   defaultPct: number
+  /**
+   * Margen real por debajo del cual el trabajo no vale la pena. Se pinta en ROJO.
+   *
+   * **Hoy solo se muestra.** El rechazo en servidor llega con los itinerarios: hasta
+   * que exista, un piso que bloquee no subiría el margen, enseñaría a escribir el
+   * número que deja pasar la pantalla.
+   */
+  pisoPct: number
+  /** Margen real por debajo del cual la pantalla avisa en ámbar. Nunca bloquea. */
+  avisoPct: number
 }
+
+/**
+ * Margen real por debajo del cual el trabajo deja de valer la pena. Se pinta ROJO.
+ *
+ * **Hoy no bloquea nada.** El rechazo en servidor llega con los itinerarios; hasta
+ * entonces esto es una marca, no una barrera, y la cotización se envía igual. La
+ * razón es la de siempre: un piso duro no sube el margen, enseña a escribir el
+ * número que deja pasar la pantalla, y el dato que llega después no sirve para nada.
+ *
+ * El 5% sale de la operación real de una agencia de viajes: 2025 corrió entre 10,6%
+ * y 13,0%, con viajes cerrados al 3,1% y uno con pérdida de -6,5%. Cada línea puede
+ * poner el suyo en `config_extra.margen.piso_pct`.
+ */
+export const PISO_MARGEN_PCT_POR_DEFECTO = 5
+
+/**
+ * Margen real por debajo del cual la pantalla avisa en ámbar. Nunca bloquea.
+ *
+ * El 10% es el punto donde la cifra deja de parecerse a la política y vale la pena
+ * mirarla, no un límite de negocio. Cada línea puede poner el suyo en
+ * `config_extra.margen.aviso_pct`.
+ */
+export const AVISO_MARGEN_PCT_POR_DEFECTO = 10
 
 /**
  * La política que rige cuando la línea no declara nada, o cuando el negocio no
@@ -27,14 +71,38 @@ export interface PoliticaMargen {
  * `markup` y 0 no son una elección de diseño: son exactamente lo que ONE hacía antes
  * de que esta pieza existiera. Un default distinto le cambiaría el precio a los
  * workspaces que ya estaban operando.
+ *
+ * Los umbrales sí traen un valor con opinión (5 y 10) porque no cambian ningún
+ * precio: solo deciden de qué color sale un número que antes no se veía.
  */
 export const POLITICA_MARGEN_POR_DEFECTO: PoliticaMargen = {
   convencion: CONVENCION_MARGEN_POR_DEFECTO,
   defaultPct: 0,
+  pisoPct: PISO_MARGEN_PCT_POR_DEFECTO,
+  avisoPct: AVISO_MARGEN_PCT_POR_DEFECTO,
 }
 
 /** Solo lo que interesa de `config_extra`. Todo opcional: el jsonb es libre. */
-type ConfigExtra = { margen?: { convencion?: unknown; default_pct?: unknown } | null } | null
+type ConfigExtra = {
+  margen?: {
+    convencion?: unknown
+    default_pct?: unknown
+    piso_pct?: unknown
+    aviso_pct?: unknown
+  } | null
+} | null
+
+/**
+ * Lee un porcentaje del jsonb, o devuelve el default.
+ *
+ * Mismo criterio que `default_pct`: fuera de [0, 100) se DESCARTA en vez de
+ * corregirse a un número cercano. Un 150 en el piso no es "150 que quisimos decir
+ * 99": es un jsonb mal escrito, y adivinar por él inventa una regla que nadie tomó.
+ */
+function pctDelJsonb(crudo: unknown, porDefecto: number): number {
+  const n = Number(crudo)
+  return Number.isFinite(n) && n >= 0 && n < 100 ? n : porDefecto
+}
 
 /**
  * Lee la política de margen del `config_extra` de una línea.
@@ -62,7 +130,12 @@ export function politicaMargenDeLinea(configExtra: unknown): PoliticaMargen {
       ? pctCrudo
       : POLITICA_MARGEN_POR_DEFECTO.defaultPct
 
-  return { convencion, defaultPct }
+  return {
+    convencion,
+    defaultPct,
+    pisoPct: pctDelJsonb(margen.piso_pct, POLITICA_MARGEN_POR_DEFECTO.pisoPct),
+    avisoPct: pctDelJsonb(margen.aviso_pct, POLITICA_MARGEN_POR_DEFECTO.avisoPct),
+  }
 }
 
 /**
@@ -117,31 +190,83 @@ export async function politicaMargenDelNegocio(
   return politicaMargenDeLinea(configExtra)
 }
 
-// ── Cuándo un margen merece un aviso ─────────────────────────────────────────
+// ── Umbrales de margen: uno avisa, el otro marca en rojo ─────────────────────
+
+
+
+/** Los dos números que deciden de qué color sale un margen. */
+export interface UmbralesMargen {
+  pisoPct: number
+  avisoPct: number
+}
+
+/** Los umbrales que rigen mientras nadie configure nada. */
+export const UMBRALES_MARGEN_POR_DEFECTO: UmbralesMargen = {
+  pisoPct: PISO_MARGEN_PCT_POR_DEFECTO,
+  avisoPct: AVISO_MARGEN_PCT_POR_DEFECTO,
+}
 
 /**
- * Margen real por debajo del cual la pantalla avisa.
+ * Cómo se lee un margen real contra los umbrales.
  *
- * **Avisa, no bloquea.** Un piso duro habría disparado en casi toda la operación real
- * de una agencia: los paquetes de 2025 corrieron entre 10,6% y 13,0%, y hay viajes
- * cerrados al 3,1%. Bloquear ahí no sube el margen, enseña a la gente a escribir el
- * número que deja pasar la pantalla — y el dato que llega después no sirve para nada.
+ *  · `sin_dato`   — no hay margen que juzgar (ítem recién creado, sin precio o sin
+ *                   costo). NO se pinta de ningún color: regañar por no haber
+ *                   llegado todavía enseña a ignorar el aviso.
+ *  · `bajo_piso`  — rojo.
+ *  · `aviso`      — ámbar.
+ *  · `ok`         — sin marca.
  *
- * El 10% es el punto donde la cifra deja de parecerse a la política y vale la pena
- * mirarla, no un límite de negocio. Si alguna línea necesita el suyo, el lugar es
- * `config_extra.margen.umbral_aviso_pct`, junto a la convención; hoy ninguna lo pide y
- * una columna más por un color en pantalla no se paga sola.
+ * Un piso por ENCIMA del aviso no es un error de configuración que haya que
+ * corregir: deja la banda ámbar vacía y todo lo que no llega al piso sale en rojo,
+ * que es exactamente lo que esa configuración pide.
  */
-export const UMBRAL_AVISO_MARGEN_PCT = 10
+export type NivelMargen = 'sin_dato' | 'bajo_piso' | 'aviso' | 'ok'
+
+export function nivelDeMargen(
+  margenRealPct: number | null | undefined,
+  umbrales: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO,
+): NivelMargen {
+  if (margenRealPct === null || margenRealPct === undefined) return 'sin_dato'
+  if (!Number.isFinite(margenRealPct)) return 'sin_dato'
+  // Un margen negativo cae en `bajo_piso`, que es el caso que más importa: vender
+  // por debajo del costo.
+  if (margenRealPct < umbrales.pisoPct) return 'bajo_piso'
+  if (margenRealPct < umbrales.avisoPct) return 'aviso'
+  return 'ok'
+}
 
 /**
- * ¿Hay que avisar sobre este margen real?
+ * Los umbrales que le aplican a UNA cotización, resolviendo la congelación.
  *
- * `null` (ítem sin precio) NO avisa: no hay margen que juzgar todavía, y un aviso ahí
- * sería ruido en cada ítem recién creado. Un margen negativo sí avisa, que es el caso
- * que más importa: vender bajo costo.
+ * Manda lo que la cotización tenga CONGELADO al nacer; la política de la línea solo
+ * entra donde la cotización no diga nada. Es la misma regla de `convencion_margen`, y
+ * por la misma razón: subir el piso de la línea no puede cambiarle el color —ni, el
+ * día que bloquee, el desenlace— a una cotización que ya salió al cliente.
+ *
+ * Las cotizaciones anteriores a la columna la traen en `null` y caen a la línea. Es
+ * deliberado: congelar hacia atrás exigiría inventar qué umbral regía el día en que
+ * se crearon, y nadie lo sabe.
  */
-export function margenPideAviso(margenRealPct: number | null): boolean {
-  if (margenRealPct === null || !Number.isFinite(margenRealPct)) return false
-  return margenRealPct < UMBRAL_AVISO_MARGEN_PCT
+export function umbralesDeCotizacion(
+  congelados: { pisoPct?: number | null; avisoPct?: number | null } | null | undefined,
+  politicaDeLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO,
+): UmbralesMargen {
+  return {
+    pisoPct: congelado(congelados?.pisoPct, politicaDeLinea.pisoPct),
+    avisoPct: congelado(congelados?.avisoPct, politicaDeLinea.avisoPct),
+  }
+}
+
+/**
+ * Un umbral congelado, o el de la línea si la cotización no congeló nada.
+ *
+ * ⚠️ `null` y `0` NO son lo mismo, y `Number(null)` vale **0**: sin el corte
+ * explícito, una columna nula se leería como un piso declarado del 0% y ninguna
+ * cotización vieja volvería a marcarse en rojo jamás. Es la misma trampa que
+ * `items.margen_porcentaje`, un nivel más arriba.
+ */
+function congelado(valor: number | null | undefined, deLaLinea: number): number {
+  if (valor === null || valor === undefined) return deLaLinea
+  const n = Number(valor)
+  return Number.isFinite(n) ? n : deLaLinea
 }

@@ -66,12 +66,35 @@ export interface LineaCalculada {
   costoUnitario: number
   /** Costo de la línea ya con cantidad y descuento de compra. */
   costoLinea: number
+  /**
+   * Costo de la línea CON su parte de los administrativos.
+   *
+   * Los administrativos se reparten proporcionalmente al costo, así que la suma de
+   * este campo sobre todas las líneas es exactamente `costoDeVenta`. Es el costo
+   * contra el que hay que medir el margen de la línea: medirlo contra `costoLinea`
+   * pelado lo deja por encima del margen real de la cotización, y dos cifras del
+   * mismo dinero que no cuadran entre sí es lo que obliga a adivinar cuál manda.
+   */
+  costoDeVentaLinea: number
   /** Margen que se le aplicó, sea el propio o el de la cotización. */
   margenAplicado: number
   /** `true` si la línea trae margen propio distinto al de la cotización. */
   margenPropio: boolean
   /** Precio de la línea, ya con administrativos y margen. */
   precioLinea: number
+  /**
+   * Margen REAL de la línea: lo que queda dentro de su precio después de pagar su
+   * costo y su parte de los administrativos.
+   *
+   * `null` cuando no se puede medir —línea sin precio, o sin costo contra el cual
+   * compararlo—. Un 0 ahí se leería como "vendida a costo", que es otra cosa.
+   *
+   * ⚠️ NO incluye el descuento comercial: ese vive al final de la cascada y no se
+   * reparte por línea. Con descuento comercial > 0, la suma ponderada de estos
+   * márgenes queda POR ENCIMA del margen real de la cotización. Quien lo muestre
+   * tiene que decirlo.
+   */
+  margenRealPct: number | null
 }
 
 export interface Cascada {
@@ -88,6 +111,22 @@ export interface Cascada {
    * "vendido a costo" y es otra cosa.
    */
   margenRealPct: number | null
+}
+
+/**
+ * Margen real de un par (costo de venta, precio), en porcentaje sobre el precio.
+ *
+ * Es la MISMA aritmética que `margenRealPct` de la cascada, escrita una sola vez:
+ * si el total y las líneas la calcularan por separado, el día que una cambie
+ * quedarían dos definiciones de "margen" en la misma pantalla.
+ *
+ * `null` cuando no hay precio o no hay costo: sin uno de los dos no hay margen que
+ * reportar, y un 0 se leería como "vendido a costo".
+ */
+function margenRealDeLinea(costoDeVenta: number, precio: number): number | null {
+  if (precio <= 0) return null
+  if (costoDeVenta <= 0) return null
+  return ((precio - costoDeVenta) / precio) * 100
 }
 
 /** Costo de una línea: unitario × cantidad, menos el descuento de compra. */
@@ -149,13 +188,24 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     precioLinea = Math.round(precioLinea / cantidadLinea) * cantidadLinea
 
     ventaBruta += precioLinea
+
+    // La parte de los administrativos que le toca a esta línea. Proporcional al
+    // costo, que es la propiedad que permite que una línea margine distinto sin
+    // romper la suma (ver el encabezado del archivo).
+    const costoDeVentaLinea = costoLinea * (1 + adminPct / 100)
+
     lineas.push({
       id: item.id,
       costoUnitario,
       costoLinea: Math.round(costoLinea),
+      costoDeVentaLinea: Math.round(costoDeVentaLinea),
       margenAplicado,
       margenPropio,
       precioLinea: Math.round(precioLinea),
+      // Se mide sobre los valores REDONDEADOS, que son los que la pantalla enseña:
+      // calcularlo con los exactos deja un porcentaje que no cuadra con las dos
+      // cifras impresas al lado, y el usuario no tiene cómo saber cuál falla.
+      margenRealPct: margenRealDeLinea(Math.round(costoDeVentaLinea), Math.round(precioLinea)),
     })
   }
 
