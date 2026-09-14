@@ -55,3 +55,41 @@ export function segmentarNegocios<T extends NegocioSegmentable>(
     contarEtapa: (numero: number) => base.filter((n) => n.etapa_numero === numero).length,
   }
 }
+
+export type ConteoDeEtapa = { total: number; atrasados: number }
+
+/**
+ * Conteos de la línea de flujo: por etapa, cuántos casos y cuántos atrasados.
+ *
+ * La línea muestra TODAS las etapas en cualquier fase, y un clic en una etapa fija la fase
+ * a la de la etapa. Por eso el número de cada etapa se cuenta con SU fase y no con la que
+ * está puesta: tiene que ser el largo de la lista que ese clic abre. Contarlo con la fase
+ * «Todos» sumaría los cerrados que siguen marcados con esa etapa, y el clic abriría menos
+ * casos de los que el número promete.
+ *
+ * Sale de `segmentarNegocios` (una llamada por fase, no una por etapa), así que respeta
+ * los demás filtros exactamente como la lista.
+ *
+ * @param esAtrasado  el criterio del filtro «Atrasados»; entra por parámetro para que haya
+ *                    uno solo.
+ */
+export function contarLineaDeFlujo<T extends NegocioSegmentable>(
+  abiertos: T[],
+  etapas: ReadonlyArray<{ numero: number; stage: string }>,
+  aplicar: (xs: T[]) => T[],
+  esAtrasado: (n: T) => boolean,
+): Map<number, ConteoDeEtapa> {
+  const conteos = new Map<number, ConteoDeEtapa>()
+  for (const e of etapas) conteos.set(e.numero, { total: 0, atrasados: 0 })
+
+  for (const stage of new Set(etapas.map((e) => e.stage))) {
+    const deLaFase = new Set(etapas.filter((e) => e.stage === stage).map((e) => e.numero))
+    for (const n of segmentarNegocios(abiertos, [], stage, null, aplicar).lista) {
+      if (n.etapa_numero == null || !deLaFase.has(n.etapa_numero)) continue
+      const c = conteos.get(n.etapa_numero)!
+      c.total += 1
+      if (esAtrasado(n)) c.atrasados += 1
+    }
+  }
+  return conteos
+}

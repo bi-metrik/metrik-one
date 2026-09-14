@@ -10,7 +10,9 @@ import EmptyState from '@/components/empty-state'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { ORIGENES_NEGOCIO, origenNegocioLabel } from '@/lib/catalogos/constants'
 import { marcaCondicionLabel } from '@/lib/negocios/constants'
-import { segmentarNegocios } from '@/lib/negocios/segmentador'
+import { contarLineaDeFlujo, segmentarNegocios } from '@/lib/negocios/segmentador'
+import type { EtapaDelSegmentador } from '@/lib/negocios/linea-de-flujo'
+import LineaDeFlujo from './linea-de-flujo'
 import { contarCoincidenciasFuera } from '@/lib/negocios/coincidencias-fuera'
 import { agruparPorLlegada } from '@/lib/negocios/agrupar-por-dia'
 import { agruparPorCita, GRUPO_CITA_VENCIDA } from '@/lib/negocios/agrupar-por-cita'
@@ -34,8 +36,8 @@ type MotivoCierre = 'todos' | 'exitoso' | 'perdido' | 'cancelado'
 const FASES_VALIDAS: readonly FaseFilter[] = ['todos', 'venta', 'ejecucion', 'cobro', 'cerrados']
 const MOTIVOS_VALIDOS: readonly MotivoCierre[] = ['todos', 'exitoso', 'perdido', 'cancelado']
 
-/** Etapa del workflow de la línea, para el segmentador de nivel 2. */
-export type EtapaSeg = { numero: number; nombre: string; stage: string; orden: number }
+/** Etapa del workflow de la línea, para la línea de flujo (nivel 2). */
+export type EtapaSeg = EtapaDelSegmentador
 
 interface FaseSpec {
   key: FaseFilter
@@ -258,19 +260,22 @@ export default function NegociosClient({
     return cerrados.filter((n) => motivoCierreDeEstado(n.estado) === motivoCierre)
   }, [cerrados, motivoCierre])
 
-  // Etapas de la fase seleccionada (solo cuando la fase es un stage), en orden del workflow.
-  const etapasDeFase = useMemo(
-    () =>
-      fase === 'venta' || fase === 'ejecucion' || fase === 'cobro'
-        ? etapas.filter((e) => e.stage === fase).sort((a, b) => a.orden - b.orden)
-        : [],
-    [etapas, fase],
-  )
-
   // Al cambiar de fase se limpia la etapa seleccionada.
   const seleccionarFase = (key: FaseFilter) => {
     setFase(key)
     setEtapaNum(null)
+  }
+
+  // Clic en una etapa de la línea: filtra por ella y pone SU fase, aunque la puesta sea
+  // otra (o «Todos»). Así el número que mostraba la etapa es el largo de la lista que abre
+  // (ver `contarLineaDeFlujo`). Un segundo clic en la etapa elegida la suelta.
+  const elegirEtapa = (e: EtapaSeg) => {
+    if (etapaNum === e.numero && fase === e.stage) {
+      setEtapaNum(null)
+      return
+    }
+    if ((FASES_VALIDAS as readonly string[]).includes(e.stage)) setFase(e.stage as FaseFilter)
+    setEtapaNum(e.numero)
   }
 
   // Búsqueda libre (código, nombre/contacto, empresa, vehículo, celular, cédula, radicado) + filtro de seccional DIAN
@@ -291,7 +296,13 @@ export default function NegociosClient({
     [negocios, cerradosFiltrados, fase, etapaNum, filtros],
   )
   const currentFiltradoSinOrden = segmentacion.lista
-  const etapaCount = segmentacion.contarEtapa
+
+  // Conteos de la línea de flujo: por etapa, casos y atrasados, con los demás filtros
+  // puestos. El atraso es el mismo criterio del filtro «Atrasados».
+  const conteosLinea = useMemo(
+    () => contarLineaDeFlujo(negocios, etapas, (xs) => aplicarFiltros(xs, filtros), estaAtrasado),
+    [negocios, etapas, filtros],
+  )
 
   // Orden. 'reciente' y 'cita' se resuelven al agrupar por día (más abajo), así
   // que aquí solo hay que respetar el orden del servidor.
@@ -563,49 +574,16 @@ export default function NegociosClient({
         })}
       </div>
 
-      {/* Nivel 2: etapas de la fase seleccionada (solo stages) */}
-      {etapasDeFase.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 text-xs">
-          <button
-            type="button"
-            onClick={() => setEtapaNum(null)}
-            className={`shrink-0 rounded-full border px-2.5 py-1 transition-colors ${
-              etapaNum === null
-                ? 'border-tinta/30 bg-papel text-tinta'
-                : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
-            }`}
-          >
-            Todas
-          </button>
-          {etapasDeFase.map((e) => {
-            const count = etapaCount(e.numero)
-            const active = etapaNum === e.numero
-            const vacia = count === 0
-            return (
-              <button
-                key={e.numero}
-                type="button"
-                onClick={() => setEtapaNum(e.numero)}
-                className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 transition-colors ${
-                  active
-                    ? 'border-tinta/30 bg-papel text-tinta'
-                    : vacia
-                      ? 'border-[#E5E7EB] text-tinta-suave/50 hover:text-tinta-suave'
-                      : 'border-[#E5E7EB] text-tinta-suave hover:text-tinta'
-                }`}
-              >
-                {e.nombre}
-                <span
-                  className={`rounded-full px-1 py-0.5 text-[10px] font-bold ${
-                    active ? 'bg-black/10' : vacia ? 'bg-papel text-tinta-suave/50' : 'bg-papel'
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            )
-          })}
-        </div>
+      {/* Nivel 2: la línea de flujo completa, en el orden del recorrido (tronco + ramas).
+          En «Cerrados» no aplica: un cerrado ya no está en ninguna etapa del proceso. */}
+      {fase !== 'cerrados' && etapas.length > 0 && (
+        <LineaDeFlujo
+          etapas={etapas}
+          conteos={conteosLinea}
+          fase={fase}
+          etapaNum={etapaNum}
+          onElegir={elegirEtapa}
+        />
       )}
 
       {/* Barra de búsqueda */}
@@ -727,7 +705,7 @@ export default function NegociosClient({
               {fase === 'todos'
                 ? 'Sin negocios'
                 : etapaNum !== null
-                  ? `Sin negocios en ${etapasDeFase.find((e) => e.numero === etapaNum)?.nombre ?? 'esta etapa'}`
+                  ? `Sin negocios en ${etapas.find((e) => e.numero === etapaNum)?.nombre ?? 'esta etapa'}`
                   : `Sin negocios en ${ALL_FASES.find((f) => f.key === fase)?.label}`}
             </p>
             {fase === 'todos' && (

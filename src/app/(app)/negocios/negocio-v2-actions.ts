@@ -8,7 +8,9 @@ import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
-import { horasHabilesEntre, slaHorasVigentes } from '@/lib/negocios/horas-habiles'
+import { horasHabilesEntre, slaHorasDeEtapa, slaHorasVigentes } from '@/lib/negocios/horas-habiles'
+import { routingDeEtapa } from '@/lib/negocios/retorno-reproceso'
+import type { EtapaDelSegmentador } from '@/lib/negocios/linea-de-flujo'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { bloqueTipoCode } from '@/components/workflow/types'
@@ -1034,13 +1036,13 @@ export async function getWorkspaceStagesActivos(): Promise<string[]> {
 }
 
 /**
- * Etapas de la línea activa del workspace, para el segmentador Fase → Etapa de
- * /negocios. Devuelve numero (ID estable por línea, para contar), nombre, stage
- * y orden (para ordenar). Vacío si el workspace no tiene línea activa.
+ * Etapas de la línea activa del workspace, para la línea de flujo de /negocios.
+ * Devuelve numero (ID estable por línea, para contar), nombre, stage, orden, y de
+ * `config_extra` solo el routing y el SLA: con el routing la pantalla dibuja el
+ * recorrido real (`secuenciaDeLinea`) en vez del `orden`, que no lo es. Vacío si el
+ * workspace no tiene línea activa.
  */
-export async function getEtapasSegmentador(): Promise<
-  { numero: number; nombre: string; stage: string; orden: number }[]
-> {
+export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
@@ -1054,13 +1056,21 @@ export async function getEtapasSegmentador(): Promise<
 
   const { data } = await db(supabase)
     .from('etapas_negocio')
-    .select('numero, nombre, stage, orden')
+    .select('numero, nombre, stage, orden, config_extra')
     .eq('linea_id', lineaId)
     .order('orden', { ascending: true })
 
-  return ((data as { numero: number | null; nombre: string; stage: string | null; orden: number }[] | null) ?? [])
+  type Fila = { numero: number | null; nombre: string; stage: string | null; orden: number; config_extra: Record<string, unknown> | null }
+  return ((data as Fila[] | null) ?? [])
     .filter((e) => e.numero != null && e.stage != null)
-    .map((e) => ({ numero: e.numero as number, nombre: e.nombre, stage: e.stage as string, orden: e.orden }))
+    .map((e) => ({
+      numero: e.numero as number,
+      nombre: e.nombre,
+      stage: e.stage as string,
+      orden: e.orden,
+      routing: routingDeEtapa({ id: String(e.numero), nombre: e.nombre, orden: e.orden, config_extra: e.config_extra }),
+      sla_horas: slaHorasDeEtapa(e.config_extra),
+    }))
 }
 
 // ── Detalle de un negocio ─────────────────────────────────────────────────────
