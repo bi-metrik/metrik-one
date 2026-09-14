@@ -39,7 +39,7 @@
  */
 
 import { calcularCascada, type Cascada, type ItemParaCascada, type ParametrosCascada } from './totales'
-import { nivelDeMargen, type UmbralesMargen } from './convencion-margen'
+import { nivelDeMargen } from './convencion-margen'
 
 /** Lo mínimo que hace falta de un ítem para saber en qué ranura vive. */
 export interface ItemConGrupo {

@@ -16,7 +16,7 @@
  * R6 sostenida desde el dato, no desde un `if` en la pantalla.
  */
 
-import { calcularCascada, type Cascada } from './totales'
+import { type Cascada } from './totales'
 import { type ConvencionMargen } from './precio-item'
 import {
   politicaMargenDeLinea,
