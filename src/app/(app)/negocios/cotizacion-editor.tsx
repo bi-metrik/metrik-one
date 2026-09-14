@@ -310,6 +310,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
         toast.success('PDF descargado')
+        // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
+        // proyecto del cliente. El servidor dice por qué; aquí solo se muestra.
+        const aviso = (res as { aviso?: string | null }).aviso
+        if (aviso) toast.error(aviso)
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
