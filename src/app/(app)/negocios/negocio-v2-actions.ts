@@ -5693,6 +5693,10 @@ export async function agregarBloqueItem(
   const { supabase, error } = await getWorkspace()
   if (error) return { id: null, error: 'No autenticado' }
 
+  // Guard: validar permiso sobre el bloque (rol+área+responsable) antes de escribir
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { id: null, error: guard.error ?? 'Sin permiso' }
+
   const row: Record<string, unknown> = { negocio_bloque_id: negocioBloqueId, label, tipo, orden, completado: false, contenido: {} }
   if (extra?.fecha_inicio) row.fecha_inicio = extra.fecha_inicio
   if (extra?.fecha_fin) row.fecha_fin = extra.fecha_fin
@@ -5717,6 +5721,16 @@ export async function actualizarBloqueItem(
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
+  // Guard: resolver el bloque del item y validar permiso (rol+área+responsable)
+  const { data: itemRow } = await db(supabase)
+    .from('bloque_items')
+    .select('negocio_bloque_id')
+    .eq('id', bloqueItemId)
+    .single()
+  if (!itemRow) return { error: 'Item no encontrado' }
+  const guard = await guardEditarBloque((itemRow as { negocio_bloque_id: string }).negocio_bloque_id)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
   const { error: updateError } = await db(supabase)
     .from('bloque_items')
     .update(fields)
@@ -5733,6 +5747,16 @@ export async function eliminarBloqueItem(
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
+
+  // Guard: resolver el bloque del item y validar permiso (rol+área+responsable)
+  const { data: itemRow } = await db(supabase)
+    .from('bloque_items')
+    .select('negocio_bloque_id')
+    .eq('id', bloqueItemId)
+    .single()
+  if (!itemRow) return { error: 'Item no encontrado' }
+  const guard = await guardEditarBloque((itemRow as { negocio_bloque_id: string }).negocio_bloque_id)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
   const { error: delError } = await db(supabase)
     .from('bloque_items')
