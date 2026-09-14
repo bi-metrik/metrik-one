@@ -30,6 +30,31 @@ efectos, así que un componente que carga sus datos en `useEffect` solo pinta «
    `chrome --headless --screenshot --virtual-time-budget=4000 <url>`: sin el
    `virtual-time-budget` la captura sale antes de que el efecto resuelva.
 
+**Repetida el 2026-09-14 (modal de pago, #707) y volvió a servir, con cuatro datos que
+ahorran tiempo:**
+
+- **El CSS de Tailwind NO sale por CLI.** `npx tailwindcss` da *«could not determine
+  executable to run»*: en el repo solo está `@tailwindcss/postcss`. Se enchufa en el
+  propio vite (`css: { postcss: { plugins: [tailwind()] } }`) e `import
+  '../src/app/globals.css'` desde el `main.tsx` del arnés. Sale una hoja completa (~150 kB)
+  y las fotos quedan legibles.
+- **El binario está en `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`**
+  (`chrome-linux64`, no `chrome-linux`), y hay que darle `--headless=new --no-sandbox`.
+- **`node_modules` NO está en el worktree y no hace falta**: node resuelve hacia arriba
+  hasta `metrik-one/node_modules`, así que `npx vite`, `ws` y vitest funcionan igual. Un
+  `ls node_modules` que devuelve vacío NO significa que falte nada.
+- ⚠️ **Un formulario con validación exige llenarlo antes de llegar al estado que se quiere
+  ver.** La primera corrida entera salió con el formulario intacto y un toast «Ingresa el
+  monto del pago»: el clic en Guardar no hizo nada y los seis casos se leyeron como si el
+  panel no existiera. Si el guion rinde SIEMPRE la misma pantalla, sospechar de una
+  validación antes que del componente.
+
+⚠️ **Que un overlay esté encima se prueba con un hit-test, no con `innerText`.** El texto
+de un diálogo aparece en `document.body.innerText` aunque otro elemento lo tape. Lo que
+vale: `document.elementFromPoint(centro del botón)` y comprobar que devuelve ese botón (o
+un hijo suyo). Hace falta cuando el diálogo se monta sobre otro modal `fixed` — con
+`createPortal` a `body` los dos quedan como hermanos y decide el `z-index`.
+
 ⚠️ **El setter NATIVO, no `.value`.** `Object.getOwnPropertyDescriptor(
 HTMLInputElement.prototype,'value').set.call(input, '7')` + `dispatchEvent(new
 Event('input',{bubbles:true}))`. Asignar directo actualiza el DOM y **React nunca se

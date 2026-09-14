@@ -3,7 +3,11 @@
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { X, Loader2, Wallet, CheckCircle, XCircle, FileUp, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
-import { agregarPagoFab, getNegociosParaPagoFab, negocioPuedeRecibirCobro, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import { agregarPagoFab, getNegociosParaPagoFab, negocioPuedeRecibirCobro, estadoAvanceTrasPago, type NegocioParaPagoFab, type AvanceTrasPago } from '@/lib/actions/fab-pago-actions'
+import { cambiarEtapaNegocioConGate } from '@/app/(app)/negocios/negocio-v2-actions'
+import type { ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
+import PanelTrasPago from '@/components/panel-tras-pago'
+import ModalConfirmarAvance from '@/components/modal-confirmar-avance'
 import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
@@ -70,6 +74,19 @@ export default function RegistrarPagoModal({
   const [subiendoSoporte, setSubiendoSoporte] = useState(false)
   const [arrastrando, setArrastrando] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+
+  // ── Lo que pasa DESPUÉS de registrar el pago ────────────────────────────────
+  //
+  // El modal deja de cerrarse a secas: revisa el estado del negocio y, si el caso ya
+  // puede seguir, ofrece el avance ahí mismo. Con `resultado` puesto, el formulario
+  // desaparece y queda el panel. Nunca avanza solo (ver `avance-tras-pago.ts`).
+  const [resultado, setResultado] = useState<AvanceTrasPago | null>(null)
+  // Etapa a la que el caso LLEGÓ, según el servidor. Puede no ser la que el panel
+  // anunciaba: el routing bifurca y el salto por saldo encadena etapas.
+  const [etapaLlegada, setEtapaLlegada] = useState<string | null>(null)
+  // Confirmación que exige la etapa destino (`confirmar_al_avanzar`). No es un caso raro:
+  // en SOENA, el destino por defecto de "Segundo cobro" es "Cartera", que la pide.
+  const [confirmacion, setConfirmacion] = useState<ConfirmacionAvance | null>(null)
 
   // Estado de verificacion ePayco
   const [epaycoStatus, setEpaycoStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
@@ -202,7 +219,10 @@ export default function RegistrarPagoModal({
       })
       if (res.success) {
         toast.success('Pago registrado')
-        onDone()
+        // El pago YA quedó. Lo que sigue solo puede AGREGAR una oferta, nunca deshacerlo:
+        // si la lectura falla, `estadoAvanceTrasPago` devuelve `no_aplica` y el panel se
+        // limita a confirmar el registro.
+        setResultado(await estadoAvanceTrasPago(negocioId))
       } else if (res.code === 'referencia_duplicada') {
         setNeedJust(true)
         toast.error(res.error)
@@ -210,6 +230,66 @@ export default function RegistrarPagoModal({
         toast.error(res.error)
       }
     })
+  }
+
+  /**
+   * Mueve el caso. NO escribe un movedor nuevo: llama a `cambiarEtapaNegocioConGate`, el
+   * único del producto, y maneja sus tres salidas igual que la ficha del negocio.
+   *
+   * ⚠️ `confirmado` solo se manda en el SEGUNDO intento, cuando la persona ya vio y
+   * aceptó el diálogo de la etapa destino. En el primero el servidor resuelve el destino
+   * y devuelve `requiere_confirmacion` sin mover nada: pasarle `true` de entrada haría
+   * que el avance se ejecutara saltándose la pregunta.
+   */
+  function handleAvanzar(confirmado = false) {
+    const etapaDestinoId = resultado?.etapaDestinoId
+    if (!etapaDestinoId) return
+    startTransition(async () => {
+      const res = await cambiarEtapaNegocioConGate(negocioId, etapaDestinoId, undefined, confirmado)
+
+      if (res.error === 'gate_bloqueado') {
+        // Los gates que este panel no puede ver (saldo, handoff, campo, conciliación,
+        // duplicado, aviso de recaudo) aparecen aquí, con el nombre que les da el motor.
+        setConfirmacion(null)
+        const motivos = (res.bloquesPendientes ?? []).map(b => b.nombre).filter(Boolean)
+        setResultado({
+          ...resultado,
+          ofrecimiento: {
+            tipo: 'retenido',
+            motivos: motivos.length > 0
+              ? motivos
+              : ['Algo retiene el caso. Ábrelo desde la ficha del negocio para ver qué falta.'],
+          },
+        })
+        return
+      }
+
+      if (res.error === 'requiere_confirmacion' && res.confirmacion) {
+        setConfirmacion(res.confirmacion)
+        return
+      }
+
+      if (res.error) {
+        toast.error('No se pudo avanzar: ' + res.error)
+        return
+      }
+
+      setConfirmacion(null)
+      // El destino REAL lo nombra el servidor: el routing puede bifurcar y el salto por
+      // saldo encadena varias etapas de un solo avance.
+      setEtapaLlegada(res.etapaDestinoNombre ?? null)
+      toast.success(`Avanzado a: ${res.etapaDestinoNombre ?? 'la siguiente etapa'}`)
+    })
+  }
+
+  /**
+   * Cerrar el modal. Con un pago ya registrado sale por `onDone`, que además refresca la
+   * pantalla de atrás: cerrar con la X después de anotar plata no puede dejar la lista
+   * mostrando el estado anterior.
+   */
+  function cerrar() {
+    if (resultado) onDone()
+    else onClose()
   }
 
   // Hasta aquí NO se sabe si el workspace tiene pasarela, y el formulario entero
@@ -245,9 +325,26 @@ export default function RegistrarPagoModal({
             <Wallet className="h-4 w-4" style={{ color: VERDE }} />
             <h3 className="text-[15px] font-bold" style={{ color: 'var(--tinta)' }}>Registrar pago</h3>
           </div>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: 'var(--tinta-suave)' }} /></button>
+          <button onClick={cerrar} className="rounded p-1 hover:bg-gray-100"><X className="h-4 w-4" style={{ color: 'var(--tinta-suave)' }} /></button>
         </div>
 
+        {resultado ? (
+          <>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <PanelTrasPago
+                ofrecimiento={resultado.ofrecimiento}
+                saldo={resultado.saldo}
+                etapaLlegada={etapaLlegada}
+                avanzando={pending}
+                onAvanzar={() => handleAvanzar()}
+              />
+            </div>
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: '#E5E7EB' }}>
+              <button onClick={cerrar} disabled={pending} className="rounded-md px-3 py-1.5 text-[13px] font-semibold disabled:opacity-50" style={{ color: 'var(--tinta-suave)' }}>Listo</button>
+            </div>
+          </>
+        ) : (
+        <>
         <div className="flex-1 space-y-3.5 overflow-y-auto px-5 py-4">
           {/* Desde la ficha el negocio no se vuelve a preguntar: viene fijado y se
               muestra para que quede claro a dónde entra la plata. */}
@@ -470,7 +567,21 @@ export default function RegistrarPagoModal({
             Registrar pago
           </button>
         </div>
+        </>
+        )}
       </div>
+
+      {/* La etapa destino puede exigir confirmar la entrega antes de recibir el caso. Se
+          muestra: lo que no puede pasar es que el avance se ejecute saltándose la
+          pregunta. Es el mismo diálogo de la ficha del negocio, no una copia. */}
+      {confirmacion && (
+        <ModalConfirmarAvance
+          confirmacion={confirmacion}
+          pendiente={pending}
+          onClose={() => setConfirmacion(null)}
+          onConfirmar={() => handleAvanzar(true)}
+        />
+      )}
     </div>
   )
 }

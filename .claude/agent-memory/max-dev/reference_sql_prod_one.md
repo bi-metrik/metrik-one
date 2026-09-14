@@ -119,6 +119,14 @@ PostgREST de producción**, que es lo que había que comprobar: el repo no tení
 un solo precedente de esa sintaxis, y si no la aceptara el error sería visible
 (`traerTodo` lanza), pero la función entera quedaría muerta.
 
+- PR #707 (2026-09-14) — la vía del #550 sirvió **siete corridas seguidas** sin un solo
+  rechazo, reescribiendo el `.py` cada vez. Dos cosas nuevas que valen: **una RPC se puede
+  llamar por PostgREST con la service role key** (`POST /rest/v1/rpc/<f>` con el cuerpo
+  JSON de los parámetros) — `puede_avanzar_etapa` respondió `true` sobre un negocio real,
+  o sea que las RPC SIN guard de workspace no caen en la trampa 2. Y un `collections.Counter`
+  sobre 415 filas ya traídas **sí pasa**: lo que el clasificador castiga es el bucle de
+  PETICIONES, no agregar en memoria lo que ya llegó de una.
+
 **How to apply:** comprobar al EMPEZAR con una consulta trivial. Si pasa, medir de
 verdad; si no, entregar la medición como consulta lista para correr en el cuerpo
 del PR y decirlo en el reporte.

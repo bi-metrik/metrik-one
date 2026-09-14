@@ -1,11 +1,20 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
+import { getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
+import { guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import {
   registrarPagoEnNegocio,
+  leerModeloDineroCompleto,
   type AgregarPagoInput,
 } from '@/lib/actions/conciliacion-actions'
+import { ofrecimientoDeAvance, esGateDeAnticipo, type OfrecimientoAvance } from '@/lib/negocios/avance-tras-pago'
+import { anticipoCubiertoPorSaldo } from '@/app/(app)/negocios/negocio-v2-actions'
+import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
+import { puedeOmitirGate } from '@/lib/negocios/gate-omitible'
+import { sumarRecaudoConfirmado, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
+import { saldoConciliacion } from '@/lib/upme/modelo-dinero'
+import { leerAviso } from '@/lib/correcciones/retroceso'
 import { archivarSoporte, type SoporteSubidoInput } from '@/lib/cobros/soporte-pago'
 import { PREFIJO_REF_AUTOGENERADA } from '@/lib/cobros/referencia-externa'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -218,4 +227,210 @@ export async function agregarPagoFab(
   return registrarPagoEnNegocio(
     supabase, workspaceId, staffId, { ...pago, soporte: soporte ?? pago.soporte }, 'fab',
   )
+}
+
+/**
+ * Lo que la pantalla necesita para OFRECER el avance justo después de registrar el pago.
+ *
+ * La decisión de qué ofrecer vive en `ofrecimientoDeAvance` (puro, con sus pruebas);
+ * aquí solo se resuelve el estado contra la base, sin reimplementar ningún criterio:
+ *
+ *   - el destino, con `siguienteEtapaPorDefecto`, la MISMA fuente que usan la ficha del
+ *     negocio y el diagrama de `/flujo`;
+ *   - el permiso, con `guardAvanzarStage`. ⚠️ Se le pasa el `stage_actual`, NO el del
+ *     destino: es exactamente como lo llama `cambiarEtapaNegocioConGate`, y medirlo
+ *     contra el destino daría una respuesta distinta de la del servidor;
+ *   - los gates, con `puede_avanzar_etapa` y `gates_pendientes_etapa`, las mismas RPC
+ *     que consulta el motor;
+ *   - el saldo, con `saldoConciliacion`, que es `descuadreConciliacion` puesto en un
+ *     solo número. No hay una segunda resta en este archivo.
+ *
+ * Se llama SOLO después de que el pago quedó registrado, y solo para ese negocio.
+ */
+export interface AvanceTrasPago {
+  ofrecimiento: OfrecimientoAvance
+  /**
+   * Saldo del cliente CON SIGNO: `> 0` falta plata, `< 0` sobra, `0` está cuadrado.
+   * Se muestra siempre, decida lo que decida el ofrecimiento: quien acaba de anotar la
+   * plata quiere ver en qué quedó la cuenta aunque el caso no se pueda mover.
+   */
+  saldo: number
+  /** Id de la etapa destino por defecto, con el que la pantalla llama al movedor. */
+  etapaDestinoId: string | null
+}
+
+export async function estadoAvanceTrasPago(negocioId: string): Promise<AvanceTrasPago> {
+  // Ante cualquier tropiezo se calla. El pago YA quedó registrado y eso es lo que
+  // importaba: un panel que grita un error encima de una operación que salió bien
+  // enseña a desconfiar del registro del pago, que es lo último que conviene.
+  const mudo: AvanceTrasPago = { ofrecimiento: { tipo: 'no_aplica' }, saldo: 0, etapaDestinoId: null }
+
+  const ctx = await ctxFabPago()
+  if (!ctx.ok) return mudo
+  const { supabase, workspaceId } = ctx
+
+  const { data: negRaw } = await db(supabase)
+    .from('negocios')
+    .select('estado, pausado, etapa_actual_id, stage_actual, linea_id, precio_aprobado, precio_estimado')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const negocio = negRaw as {
+    estado: string | null; pausado: boolean | null; etapa_actual_id: string | null
+    stage_actual: string | null; linea_id: string | null
+    precio_aprobado: number | null; precio_estimado: number | null
+  } | null
+  if (!negocio) return mudo
+
+  // El saldo se resuelve SIEMPRE, incluso para un negocio cerrado o sin etapa: es la
+  // parte del panel que confirma en qué quedó la cuenta.
+  const [cobrosRes, conciliadoRes, modelo] = await Promise.all([
+    db(supabase).from('cobros').select('monto, split_json')
+      .eq('negocio_id', negocioId).eq('workspace_id', workspaceId),
+    db(supabase).from('negocio_conciliacion').select('conciliado')
+      .eq('negocio_id', negocioId).eq('workspace_id', workspaceId).maybeSingle(),
+    leerModeloDineroCompleto(supabase, negocioId),
+  ])
+  const recaudado = sumarRecaudoConfirmado(
+    (cobrosRes.data ?? []) as CobroParaRecaudo[],
+    (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true,
+  )
+  const honorario = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
+  const saldo = saldoConciliacion(honorario, modelo, recaudado)
+
+  if (!negocio.etapa_actual_id || !negocio.linea_id) {
+    return {
+      ofrecimiento: ofrecimientoDeAvance({
+        estado: negocio.estado,
+        pausado: negocio.pausado === true,
+        etapaDestinoNombre: null,
+        puedeAvanzar: false,
+        motivos: [],
+      }),
+      saldo,
+      etapaDestinoId: null,
+    }
+  }
+
+  // Por dónde sigue el proceso: misma regla que la ficha y que `/flujo`.
+  const { data: etapasRaw } = await db(supabase)
+    .from('etapas_negocio')
+    .select('id, nombre, orden, config_extra')
+    .eq('linea_id', negocio.linea_id)
+    .order('orden', { ascending: true })
+  const etapas = ((etapasRaw ?? []) as Array<{
+    id: string; nombre: string; orden: number; config_extra: Record<string, unknown> | null
+  }>).map((e) => ({
+    id: e.id,
+    nombre: e.nombre,
+    orden: e.orden,
+    config_extra: e.config_extra,
+    routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
+  }))
+  const etapaActual = etapas.find((e) => e.id === negocio.etapa_actual_id) ?? null
+  const destino = etapaActual ? siguienteEtapaPorDefecto(etapaActual, etapas) : null
+
+  // La etapa puede invitar a otra área a avanzarla, igual que en el motor.
+  const areasQueAvanzan = ((etapaActual?.config_extra as { areas_que_avanzan?: unknown } | null)
+    ?.areas_que_avanzan ?? []) as Area[]
+  const permiso = await guardAvanzarStage(
+    negocioId, (negocio.stage_actual ?? 'venta') as Stage, areasQueAvanzan,
+  )
+
+  const motivos = await motivosQueRetienen(supabase, workspaceId, negocioId, negocio.etapa_actual_id)
+
+  return {
+    ofrecimiento: ofrecimientoDeAvance({
+      estado: negocio.estado,
+      pausado: negocio.pausado === true,
+      etapaDestinoNombre: destino?.nombre ?? null,
+      puedeAvanzar: permiso.ok,
+      motivos,
+    }),
+    saldo,
+    etapaDestinoId: destino?.id ?? null,
+  }
+}
+
+/**
+ * Lo que retiene el caso HOY, con los nombres que el equipo reconoce. Dos fuentes, las
+ * dos ya existentes:
+ *
+ *   - `gates_pendientes_etapa`, la misma RPC que lista el motor. Se le quitan los gates
+ *     que ESTA persona puede declarar vencidos (`puedeOmitirGate`), porque a ella no la
+ *     retienen: el motor los marca como "no aplica" y sigue. Sin ese filtro el panel
+ *     afirmaría que algo retiene cuando el servidor la dejaría pasar. En producción es
+ *     un solo bloque el que lo declara (el aviso del enlace de la DIAN, en SOENA), pero
+ *     está vivo y el criterio es el mismo.
+ *   - el aviso de recaudo cambiado, que es un gate duro y ADEMÁS no cede al override de
+ *     nadie. Se nombra aparte porque su salida no es completar un bloque sino resolver
+ *     el aviso desde la ficha del negocio, y decirlo aquí ahorra el viaje.
+ *
+ * Los demás gates del motor (saldo, handoff, campo, sobrepago, conciliación, duplicado)
+ * NO se consultan: reimplementarlos sería una segunda vara para lo mismo, que es el
+ * error que este repo ya pagó varias veces. Si retienen, el clic devuelve
+ * `gate_bloqueado` y la pantalla los lista entonces.
+ */
+async function motivosQueRetienen(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+  etapaActualId: string,
+): Promise<string[]> {
+  const motivos: string[] = []
+
+  const { data: puedeAvanzar } = await db(supabase).rpc('puede_avanzar_etapa', {
+    p_negocio_id: negocioId,
+    p_etapa_id: etapaActualId,
+  })
+
+  if (puedeAvanzar === false) {
+    const { role, areas } = await getWorkspace()
+    const { data: pendientesRaw } = await db(supabase).rpc('gates_pendientes_etapa', {
+      p_negocio_id: negocioId,
+      p_etapa_id: etapaActualId,
+    })
+    const pendientes = (pendientesRaw ?? []) as Array<{ bloque_config_id: string; nombre: string | null }>
+
+    let cfgPorId = new Map<string, Record<string, unknown> | null>()
+    if (pendientes.length > 0) {
+      const { data: cfgs, error: errCfgs } = await db(supabase)
+        .from('bloque_configs')
+        .select('id, config_extra')
+        .in('id', pendientes.map((p) => p.bloque_config_id))
+      // Sin la config, ningún gate se da por omitible: el lado seguro de un control es
+      // retener. Aquí eso solo significa listar de más, nunca dejar pasar de más.
+      if (!errCfgs) {
+        cfgPorId = new Map(((cfgs ?? []) as Array<{ id: string; config_extra: Record<string, unknown> | null }>)
+          .map((c) => [c.id, c.config_extra]))
+      }
+    }
+
+    // El saldo solo se consulta si hay un gate de anticipo entre los pendientes, mismo
+    // corte que hace el motor: sin candidato no hay nada que preguntar.
+    const anticipoCubierto =
+      pendientes.some(p => esGateDeAnticipo(cfgPorId.get(p.bloque_config_id)))
+        ? await anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)
+        : false
+
+    const usuario = { role: (role ?? 'read_only') as Role, areas: (areas ?? []) as Area[] }
+    for (const p of pendientes) {
+      const cfg = cfgPorId.get(p.bloque_config_id)
+      // No retiene a esta persona: ella puede declarar vencido el paso.
+      if (puedeOmitirGate(cfg, usuario)) continue
+      // No retiene a nadie: el motor lo cierra solo en cuanto alguien avance.
+      if (anticipoCubierto && esGateDeAnticipo(cfg)) continue
+      motivos.push(p.nombre ?? 'Bloque pendiente')
+    }
+  }
+
+  const aviso = await leerAviso(supabase, workspaceId, negocioId)
+  if (aviso) {
+    motivos.push(
+      `El recaudo de este negocio cambió (referencia ${aviso.referencia}) y todavía nadie lo resolvió. ` +
+      'Lo resuelve el área financiera desde el aviso del negocio.',
+    )
+  }
+
+  return motivos
 }

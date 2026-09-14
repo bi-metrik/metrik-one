@@ -3172,7 +3172,11 @@ const ANTICIPO_PCT_PLAN1 = 0.5
  * Devuelve true solo si `anticipoEsperado > 0` Y `cobrado >= anticipoEsperado - 1`
  * (tolerancia de 1 peso). Con cobrado=0 y precio>0 devuelve false (sigue bloqueando).
  */
-async function anticipoCubiertoPorSaldo(
+// Exportada porque el panel que aparece tras registrar un pago necesita saber si el
+// motor va a cerrar solo el gate de anticipo, para no anunciar como retenido un caso que
+// el clic SÍ habría movido. Se lee, no se escribe: la que cierra el gate sigue siendo
+// `autocompletarGatesAnticipoPorSaldo`, dentro del avance.
+export async function anticipoCubiertoPorSaldo(
   supabase: unknown,
   workspaceId: string,
   negocioId: string,

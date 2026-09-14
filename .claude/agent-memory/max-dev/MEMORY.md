@@ -64,6 +64,7 @@
 - ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente; `manual:true` es confianza baja, no edición humana
 - ⚠️ [Routing respeta el `condition` del bloque](project_routing_condition_bloque.md) — PR #586 mergeado: el radio real es UN routing de todo el sistema; los 177 huérfanos siguen sin limpiar
 - ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa, y el punto ciego que eso evita
+- ⚠️⚠️ [Avanzar tras registrar el pago](project_avance_tras_pago_fab.md) — PR #707 sin mergear: el motor CIERRA gates antes de su propio chequeo (falso «retenido»), la confirmación es la ruta principal y el alcance son 2 workspaces
 - ⚠️⚠️ [Acuses de Resend en avisos_cliente](project_acuses_resend_avisos_cliente.md) — PR #596 sin mergear: el orden de despliegue no es negociable, `rebotado` queda invisible en el producto, y `suppressed` es un hueco abierto
 - ⚠️ [FTO del State Dept en Valida](project_valida_fto_state_dept.md) — #33, #34 y #35 mergeados y la lista YA activa (6 fuentes); la privacidad NO enumera la FTO y la dedup de la migr. 0013 sigue abierta
 - ⚠️⚠️ [El plazo de retencion ya se vigila en CI](project_retencion_control_en_ci.md) — #634 y #38 mergeados; el expediente KYC sigue en CINCO anios (abierto), y Valida por fin tiene CI
