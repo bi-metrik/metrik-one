@@ -2,8 +2,12 @@
  * Setup canónico de Google Drive OAuth per-workspace.
  *
  * Persiste la triple drive_refresh_token + drive_client_id + drive_client_secret
- * en workspaces.config_extra del workspace destino, y opcionalmente actualiza
- * workspaces.drive_folder_id. Valida acceso al folder ANTES de persistir.
+ * en Supabase Vault (`ws:<workspace_id>:<clave>`, via `guardar_secreto_workspace`),
+ * y opcionalmente actualiza workspaces.drive_folder_id. Valida acceso al folder
+ * ANTES de persistir.
+ *
+ * Las credenciales NO van en config_extra: esa columna la lee cualquier miembro
+ * del workspace por REST (frente de seguridad del 2026-09-14).
  *
  * Único punto de entrada autorizado para configurar Drive per-workspace —
  * reemplaza updates SQL manuales que generaban borrados accidentales.
@@ -176,24 +180,36 @@ async function main() {
   await testCreateAndDelete(accessToken)
   console.log(`  OK (permisos write/delete validados)`)
 
-  const currentConfig = ws.config_extra ?? {}
-  const newConfig: Record<string, unknown> = {
-    ...currentConfig,
-    drive_refresh_token: refreshToken,
-    drive_client_id: clientId,
-    drive_client_secret: clientSecret,
+  console.log(`\n→ Guardando la triple drive_* en Vault...`)
+  // Las tres se validaron al arrancar; dentro de la funcion TS pierde ese estrechamiento.
+  const secretos: Array<[string, string]> = [
+    ['drive_refresh_token', refreshToken as string],
+    ['drive_client_id', clientId as string],
+    ['drive_client_secret', clientSecret as string],
+  ]
+  for (const [clave, valor] of secretos) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (sb as any).rpc('guardar_secreto_workspace', {
+      p_workspace_id: ws.id,
+      p_clave: clave,
+      p_valor: valor,
+    })
+    if (error) {
+      console.error(
+        `Fallo guardando ${clave} en Vault: ${error.message}` +
+          (error.code === 'PGRST202' ? ' (falta aplicar la migracion 20260915010000_secretos_workspace_vault)' : ''),
+      )
+      process.exit(1)
+    }
   }
+
+  // Solo datos NO secretos van a config_extra.
+  const currentConfig = ws.config_extra ?? {}
+  const newConfig: Record<string, unknown> = { ...currentConfig }
   if (sharedDriveId) newConfig.drive_shared_drive_id = sharedDriveId
   if (gcpProject) newConfig.drive_gcp_project = gcpProject
 
-  const preservedKeys = Object.keys(currentConfig).filter(
-    k => !['drive_refresh_token', 'drive_client_id', 'drive_client_secret', 'drive_shared_drive_id', 'drive_gcp_project'].includes(k),
-  )
-  if (preservedKeys.length > 0) {
-    console.log(`\n→ Preservando keys existentes en config_extra: ${preservedKeys.join(', ')}`)
-  }
-
-  console.log(`\n→ Persistiendo config_extra.drive_* + drive_folder_id...`)
+  console.log(`\n→ Persistiendo drive_folder_id (+ datos no secretos en config_extra)...`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (sb as any)
     .from('workspaces')
@@ -206,7 +222,7 @@ async function main() {
 
   console.log(`\n✓ OK — workspace "${slug}" configurado con Drive OAuth per-workspace`)
   console.log(`  drive_folder_id: ${folderId}`)
-  console.log(`  config_extra.drive_*: triple completa persistida`)
+  console.log(`  Vault ws:${ws.id}:drive_*: triple completa persistida`)
   console.log(`\nSiguientes pasos:`)
   console.log(`  1. Anotar refresh_token en .credentials.md (responsabilidad Kaori)`)
   console.log(`  2. Correr preflight: npx tsx scripts/preflight-workspace.ts ${slug}`)

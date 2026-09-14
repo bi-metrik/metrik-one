@@ -1,6 +1,7 @@
 'use server';
 
 import { createServiceClient } from '@/lib/supabase/server';
+import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
 import { resolverNombresUsuarios } from './_usuarios';
 import { getWorkspace } from './get-workspace';
 import * as XLSX from 'xlsx';
@@ -107,8 +108,13 @@ async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | n
     .select('config_extra')
     .eq('id', workspaceId)
     .single();
-  const key = (data?.config_extra as Record<string, unknown> | null)?.valida_api_key;
-  if (typeof key === 'string' && key.length > 0) return key;
+  // Vault primero; config_extra solo mientras dure el traslado (frente 2026-09-14).
+  const key = secretoConRespaldo(
+    await leerSecretosWorkspace(workspaceId),
+    data?.config_extra as Record<string, unknown> | null,
+    'valida_api_key',
+  );
+  if (key) return key;
   return process.env.VALIDA_API_KEY ?? null;
 }
 

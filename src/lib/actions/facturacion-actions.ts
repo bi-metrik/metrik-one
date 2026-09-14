@@ -16,6 +16,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
+import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { bloqueoPorNegocioCerrado } from '@/lib/negocios/negocio-abierto'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
@@ -322,7 +323,8 @@ async function armarColaFacturacion(
   const workspace_nombre = (ws?.name as string | null | undefined) ?? null
   const cfgWs = (ws?.config_extra ?? {}) as Record<string, unknown>
   const siigoCfg = cfgWs.siigo_config as SiigoConfig | undefined
-  const siigo_configurado = !!siigoCfg && !!cfgWs.siigo_access_key
+  const siigo_configurado =
+    !!siigoCfg && !!secretoConRespaldo(await leerSecretosWorkspace(workspaceId), cfgWs, 'siigo_access_key')
 
   // ── Desde qué etapa se habilita ──
   // Opt-in por línea. Sin el dato NO se asume nada: la cola sale vacía y la

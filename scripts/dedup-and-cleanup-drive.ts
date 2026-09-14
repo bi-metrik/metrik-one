@@ -88,7 +88,12 @@ function folderIdFromUrl(url: string | null): string | null {
 async function main() {
   const { data: ws } = await supa.from('workspaces').select('slug, drive_folder_id, config_extra').eq('id', WS_ID).single()
   if (!ws?.drive_folder_id) throw new Error('Workspace sin drive_folder_id')
-  const ce = (ws.config_extra ?? {}) as Record<string, string>
+  // Vault primero (frente de seguridad 2026-09-14); config_extra como respaldo. Sin esto,
+  // tras el traslado caeria EN SILENCIO a las credenciales globales de MeTRIK.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: vault, error: errVault } = await (supa as any).rpc('leer_secretos_workspace', { p_workspace_id: WS_ID })
+  if (errVault && errVault.code !== 'PGRST202') throw new Error(`No se pudo leer Vault: ${errVault.message}`)
+  const ce = { ...(ws.config_extra ?? {}), ...(vault ?? {}) } as Record<string, string>
   const token = await getToken(
     ce.drive_client_id ?? process.env.GOOGLE_DRIVE_CLIENT_ID!,
     ce.drive_client_secret ?? process.env.GOOGLE_DRIVE_CLIENT_SECRET!,

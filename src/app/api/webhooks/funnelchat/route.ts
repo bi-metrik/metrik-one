@@ -9,6 +9,7 @@ import {
 } from '@/lib/funnelchat/evento'
 import { decidirSegmento, extraerEtiqueta, type DecisionSegmento } from '@/lib/funnelchat/segmento'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { workspacePorSecreto } from '@/lib/secretos/workspace'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,6 +93,19 @@ async function registrar(request: NextRequest, crudo: string) {
   } else {
     const fallidos: string[] = []
     for (const c of candidatosToken) {
+      // Vault primero (frente de seguridad 2026-09-14). Un fallo de Vault se reporta
+      // igual que uno de la consulta: no se lee como "token invalido".
+      try {
+        const desdeVault = await workspacePorSecreto('funnelchat_webhook_token', c.valor, supabase)
+        if (desdeVault) {
+          workspaceId = desdeVault
+          break
+        }
+      } catch (e) {
+        motivo = `no se pudo resolver el token (${c.origen}): ${(e as Error).message}`
+        break
+      }
+      // Respaldo mientras la clave siga en config_extra.
       const { data, error } = await supabase
         .from('workspaces')
         .select('id')

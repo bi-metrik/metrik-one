@@ -2,7 +2,12 @@
  * Setup de cliente Valida para un workspace ONE.
  *
  * Crea cliente_api + api_key en metrik-valida, y persiste la api_key plana
- * en workspaces.config_extra.valida_api_key del workspace en metrik-one.
+ * en Supabase Vault del proyecto ONE (`ws:<workspace_id>:valida_api_key`, via
+ * `guardar_secreto_workspace`). `valida_cliente_id` (no secreto) sigue en
+ * workspaces.config_extra.
+ *
+ * La api_key NO va en config_extra: esa columna la lee cualquier miembro del
+ * workspace por REST (frente de seguridad del 2026-09-14).
  *
  * Uso:
  *   npx tsx scripts/setup-valida-workspace.ts <slug-workspace> "<nombre descriptivo>"
@@ -56,7 +61,22 @@ async function main() {
   }
   console.log(`  workspace_id = ${ws.id}`);
 
-  const existingKey = (ws.config_extra as Record<string, unknown> | null)?.valida_api_key;
+  // Vault se consulta ANTES de crear nada en metrik-valida: si la migracion no esta
+  // aplicada, fallar despues dejaria un cliente_api huerfano con una llave perdida.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: vault, error: errVault } = await (one as any).rpc('leer_secretos_workspace', {
+    p_workspace_id: ws.id,
+  });
+  if (errVault) {
+    console.error(
+      `No se pudo leer Vault: ${errVault.message}` +
+        (errVault.code === 'PGRST202' ? ' (falta aplicar la migracion 20260915010000_secretos_workspace_vault)' : ''),
+    );
+    process.exit(1);
+  }
+  const existingKey =
+    (vault as Record<string, unknown> | null)?.valida_api_key ??
+    (ws.config_extra as Record<string, unknown> | null)?.valida_api_key;
   if (existingKey) {
     console.log(`\n[ATENCION] El workspace ya tiene valida_api_key configurada.`);
     console.log(`  Si quieres rotarla, primero revoca la actual en metrik-valida y vuelve a correr.`);
@@ -100,10 +120,22 @@ async function main() {
   }
   console.log(`  prefix = ${prefix}...`);
 
-  console.log(`\n→ Persistiendo api_key en workspace.${slug}.config_extra...`);
+  console.log(`\n→ Persistiendo api_key en Vault (ws:${ws.id}:valida_api_key)...`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errSec } = await (one as any).rpc('guardar_secreto_workspace', {
+    p_workspace_id: ws.id,
+    p_clave: 'valida_api_key',
+    p_valor: plain,
+  });
+  if (errSec) {
+    console.error(`Fallo guardando la api_key en Vault: ${errSec.message}`);
+    console.error(`  La llave YA existe en metrik-valida (cliente ${cliente.cliente_id}): revocala o guardala a mano.`);
+    process.exit(1);
+  }
+
+  console.log(`\n→ Persistiendo valida_cliente_id en workspace.${slug}.config_extra...`);
   const newConfig = {
     ...((ws.config_extra as Record<string, unknown> | null) ?? {}),
-    valida_api_key: plain,
     valida_cliente_id: cliente.cliente_id,
   };
   const { error: errUpd } = await one
@@ -131,7 +163,7 @@ async function main() {
   console.log(`  modules.valida_consulta = true`);
 
   console.log(`\nLISTO. Workspace ${slug} habilitado para Valida:`);
-  console.log(`  1. api_key emitida y persistida en config_extra (server-only)`);
+  console.log(`  1. api_key emitida y persistida en Vault`);
   console.log(`  2. modules.valida_consulta = true (sidebar muestra item Valida)`);
   console.log(`  3. Tutorial in-app auto-arrancara al primer ingreso de cada usuario`);
   console.log(`\nEntregar a Kaori para que guarde la api_key en .credentials.md (seccion Valida — workspace ${slug}):`);

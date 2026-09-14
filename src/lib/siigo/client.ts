@@ -11,6 +11,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
 
 const SIIGO_BASE = 'https://api.siigo.com'
 
@@ -82,9 +83,11 @@ async function resolveCredentials(workspaceId: string): Promise<SiigoCredentials
   if (error || !ws) throw new SiigoError(`Workspace ${workspaceId} no encontrado`, 0)
 
   const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
-  const username = cfg.siigo_username as string | undefined
-  const accessKey = cfg.siigo_access_key as string | undefined
-  const partnerId = cfg.siigo_partner_id as string | undefined
+  // Vault primero; config_extra solo mientras dure el traslado (frente 2026-09-14).
+  const vault = await leerSecretosWorkspace(workspaceId)
+  const username = secretoConRespaldo(vault, cfg, 'siigo_username')
+  const accessKey = secretoConRespaldo(vault, cfg, 'siigo_access_key')
+  const partnerId = secretoConRespaldo(vault, cfg, 'siigo_partner_id')
 
   const slug = (ws.slug as string) ?? workspaceId
   const faltantes = [
@@ -95,7 +98,7 @@ async function resolveCredentials(workspaceId: string): Promise<SiigoCredentials
 
   if (faltantes.length > 0) {
     throw new SiigoError(
-      `Workspace ${slug}: faltan credenciales de Siigo en config_extra (${faltantes.join(', ')}). ` +
+      `Workspace ${slug}: faltan credenciales de Siigo (${faltantes.join(', ')}). ` +
       `Se cargan con scripts/setup-siigo-workspace.ts, nunca desde la app.`,
       0,
     )

@@ -76,6 +76,11 @@ function valorEn(fila: Fila, ruta: string): unknown {
 
 export function servicioFalso() {
   return {
+    // Vault vacio: las credenciales salen del respaldo en `config_extra` sembrado abajo.
+    rpc: async (fn: string) =>
+      fn === 'leer_secretos_workspace'
+        ? { data: {}, error: null }
+        : { data: null, error: { code: 'PGRST202', message: `rpc ${fn} no existe en el doble` } },
     from(tabla: string) {
       const filtros: Array<(f: Fila) => boolean> = []
       let orden: string | null = null

@@ -15,6 +15,8 @@ const WS = 'ws-soena'
 
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
+    // Vault vacio: las credenciales salen del respaldo en config_extra.
+    rpc: async () => ({ data: {}, error: null }),
     from: () => ({
       select: () => ({
         eq: () => ({

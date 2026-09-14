@@ -21,6 +21,7 @@
 
 import { createSign } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
+import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
 
 // ── Token cache (por workspace) ──────────────────────────────────────────────
 
@@ -151,9 +152,11 @@ async function resolveCredentials(workspaceId?: string): Promise<DriveCredential
         }
       }
 
-      const refreshToken = cfg.drive_refresh_token as string | undefined
-      const clientId = cfg.drive_client_id as string | undefined
-      const clientSecret = cfg.drive_client_secret as string | undefined
+      // Vault primero; config_extra solo mientras dure el traslado (frente 2026-09-14).
+      const vault = await leerSecretosWorkspace(workspaceId)
+      const refreshToken = secretoConRespaldo(vault, cfg, 'drive_refresh_token')
+      const clientId = secretoConRespaldo(vault, cfg, 'drive_client_id')
+      const clientSecret = secretoConRespaldo(vault, cfg, 'drive_client_secret')
 
       const hasAny = !!(refreshToken || clientId || clientSecret)
       const hasAll = !!(refreshToken && clientId && clientSecret)
@@ -171,7 +174,7 @@ async function resolveCredentials(workspaceId?: string): Promise<DriveCredential
       if (hasAny && !hasAll) {
         const slug = (ws.slug as string) ?? workspaceId
         throw new Error(
-          `Workspace ${slug}: credenciales Drive incompletas en config_extra ` +
+          `Workspace ${slug}: credenciales Drive incompletas (Vault / config_extra) ` +
           `(requiere drive_refresh_token + drive_client_id + drive_client_secret)`,
         )
       }

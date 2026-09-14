@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getAccessToken } from '@/lib/google-drive'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
 
 // Cron de health check diario sobre Drive de cada workspace.
 //
@@ -33,8 +34,12 @@ async function checkWorkspace(
 ): Promise<{ ok: boolean; oauth_mode: string; folder_accessible: boolean }> {
   const started = Date.now()
   const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
+  // Vault primero; config_extra solo mientras dure el traslado (frente 2026-09-14).
+  const vault = await leerSecretosWorkspace(ws.id, supabase)
   const hasPerWs =
-    !!(cfg.drive_refresh_token && cfg.drive_client_id && cfg.drive_client_secret)
+    !!secretoConRespaldo(vault, cfg, 'drive_refresh_token') &&
+    !!secretoConRespaldo(vault, cfg, 'drive_client_id') &&
+    !!secretoConRespaldo(vault, cfg, 'drive_client_secret')
   const oauth_mode = hasPerWs ? 'per_workspace' : 'global'
 
   let token_refresh_ok = false
