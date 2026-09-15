@@ -173,3 +173,15 @@ comprobar que la mutación es del tipo que ESE verificador detecta:
 Es la cara inversa del gotcha del arnés de arriba: allá el instrumento mentía en verde,
 acá el instrumento estaba sano y la sonda era la equivocada. Las dos se distinguen igual —
 exigiéndole al control que falle por una razón que uno pueda nombrar.
+
+## ⚠️ La restauración de una mutación NUNCA lleva `git checkout --`
+
+**2026-09-15 (PR #724).** Al final de una tanda de mutaciones metí `git checkout -- types.ts` en
+el mismo comando "para dejar todo limpio". Ese archivo no estaba mutado: tenía **mi edición del
+PR sin commitear**, y el checkout la borró en silencio (lo delató la nota de archivo cambiado en
+disco). Y al revés, los tres archivos mutados eran **nuevos**, así que `git checkout` no los habría
+restaurado aunque se lo pidiera.
+
+**How to apply:** respaldar con `cp` al scratchpad ANTES de mutar y restaurar con `cp` + `cmp`
+contra ese respaldo; o commitear primero y mutar sobre lo commiteado. Después de restaurar,
+`git status --short` y volver a correr la suite **y** `deno check` antes del commit.
