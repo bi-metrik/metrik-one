@@ -53,6 +53,7 @@
 - ⚠️⚠️ [Factura: herencia sin copias y soporte en Tesorería](project_factura_soporte_tesoreria.md) — #704/#706 desplegados; limpieza 1B SIN aplicar
 - [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — #578 mergeado + enmienda #581: la banda del 1%
 - ⚠️⚠️ [PQR rechazado: el desenlace que devuelve el caso](project_pqr_rechazado_desenlace.md) — #603 mergeado, config SOENA SIN aplicar
+- ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — #731; SQL PENDIENTE va DESPUÉS del deploy; un lock_when con fuente en etapa anterior nunca persiste
 - ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — #598 mergeado, config SOENA SIN aplicar; el `solo_si` que evitó el único falso positivo
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos)
