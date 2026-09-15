@@ -20,6 +20,7 @@ import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { revisarTarifaEnBloque } from '@/lib/upme/tarifa-confirmada'
 import { cortarVersionCronograma } from '@/lib/cronograma/cortar-version'
 import { tocaLaPlaneacion } from '@/lib/cronograma/versionado'
 import { normalizarResponsable, type MiembroEquipo } from '@/lib/cronograma/responsable'
@@ -4657,6 +4658,16 @@ export async function marcarBloqueCompleto(
   const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
   const tipoBloque = cfg?.bloque_definitions?.tipo
   const configExtraBloque = cfg?.config_extra ?? {}
+  // ── Tarifa UPME confirmada ────────────────────────────────────────────────
+  // Barrera real del número que se guarda: la pantalla ya avisa mientras se escribe,
+  // pero esta función es un endpoint exportado y se alcanza sin pasar por ella.
+  // `revisarTarifaEnBloque` no hace nada en un bloque que no la declare, y se salta
+  // sola cuando el valor entrante es el mismo que ya estaba guardado.
+  {
+    const rechazo = revisarTarifaEnBloque(configExtraBloque, currentData, data)
+    if (rechazo) return { error: rechazo.mensaje }
+  }
+
   const modo = modoCierre(tipoBloque, configExtraBloque)
   if (modo === 'accion_propia') return { error: MENSAJE_ACCION_PROPIA }
   if (modo === 'criterio') {
@@ -5382,19 +5393,35 @@ export async function actualizarBloqueData(
     const ce = ((abierto as Record<string, unknown> | null)?.bloque_configs as
       { config_extra?: Record<string, unknown> | null } | null)?.config_extra ?? null
 
-    if ((ce as { editable_solo_si_vacio?: boolean } | null)?.editable_solo_si_vacio === true) {
-      // Se evalúa contra el DESTINO (el origen en un bloque compartido), que es donde
-      // vive el dato de verdad; la copia local está vacía por diseño.
+    // El `data` del DESTINO (el origen en un bloque compartido) se lee una sola vez y
+    // solo cuando alguna de las dos revisiones lo necesita: la copia local está vacía
+    // por diseño, y una lectura extra por autosave se paga en cada pulsación.
+    const necesitaDestino =
+      (ce as { editable_solo_si_vacio?: boolean } | null)?.editable_solo_si_vacio === true ||
+      (ce as { tarifa_confirmacion?: { enabled?: boolean } } | null)?.tarifa_confirmacion?.enabled === true
+    let dataDestino: Record<string, unknown> | null = null
+    if (necesitaDestino) {
       const { data: filaDestino, error: errDestino } = await db(supabase)
         .from('negocio_bloques')
         .select('data')
         .eq('id', destinoId)
         .single()
       if (errDestino) return { error: `No se pudo leer el bloque origen: ${errDestino.message}` }
-      const dataDestino = (filaDestino as { data: Record<string, unknown> | null } | null)?.data ?? null
+      dataDestino = (filaDestino as { data: Record<string, unknown> | null } | null)?.data ?? null
+    }
+
+    if ((ce as { editable_solo_si_vacio?: boolean } | null)?.editable_solo_si_vacio === true) {
       if (soloLecturaPorDatoLleno(ce, dataDestino)) {
         return { error: 'Este dato ya viene registrado de la etapa anterior. Para cambiarlo, corrígelo en la etapa donde se capturó.' }
       }
+    }
+
+    // ── Tarifa UPME confirmada ──────────────────────────────────────────────
+    // Misma barrera que en `marcarBloqueCompleto`: el autosave del borrador también
+    // escribe `negocio_bloques.data`, así que también tiene que juzgar el número.
+    {
+      const rechazo = revisarTarifaEnBloque(ce, dataDestino, dataFinal)
+      if (rechazo) return { error: rechazo.mensaje }
     }
   }
 

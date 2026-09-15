@@ -26,6 +26,8 @@ import {
   componerFechaHora,
   faltaHoraDeCita,
 } from '@/lib/negocios/fecha-hora-campo'
+import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negocios/numero-colombiano'
+import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
 
 export interface DatosField {
   slug: string
@@ -111,6 +113,18 @@ interface BloqueDatosProps {
   // el rol y el área (`_areaReadonly`). El servidor revalida las tres cosas: esto es
   // UX, no seguridad.
   puedeCorregir?: boolean
+  // `config_extra.tarifa_confirmacion` del bloque (opt-in). Cuando viene, el campo de la
+  // tarifa se revisa MIENTRAS se escribe con el mismo criterio que aplica el servidor
+  // (`lib/upme/tarifa-confirmada.ts`): así el aviso llega donde está el error y no sobre
+  // un botón que no explica nada. El servidor vuelve a revisar: esto es UX.
+  tarifaConfirmacion?: ConfigTarifaConfirmacionUI
+}
+
+/** Lo que la pantalla necesita saber de `config_extra.tarifa_confirmacion`. */
+export interface ConfigTarifaConfirmacionUI extends ReglasTarifaConfirmada {
+  enabled?: boolean
+  ref_field?: string
+  confirmada_field?: string
 }
 
 /** Marca de quién corrigió un campo después de que el negocio avanzó de etapa. */
@@ -190,6 +204,7 @@ export default function BloqueDatos({
   autoFillDefaults,
   datosPorSlug,
   puedeCorregir,
+  tarifaConfirmacion,
 }: BloqueDatosProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   // Corrección post-avance: el bloque entra en modo visible y el usuario habilitado
@@ -261,8 +276,16 @@ export default function BloqueDatos({
   // `subiendo`: por slug del campo imagen, true mientras el pantallazo viaja a Storage.
   const [subiendo, setSubiendo] = useState<Record<string, boolean>>({})
   const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
-  // Rechazo de validación por campo (hoy solo `fecha_hora`). Cadena vacía = sin error.
+  // Rechazo de validación por campo (`fecha_hora` y la tarifa UPME). Cadena vacía = sin error.
   const [errorCampo, setErrorCampo] = useState<Record<string, string>>({})
+  // Espejo en ref: el guardado diferido corre dentro de un `setTimeout` y ahí el estado
+  // todavía es el viejo. Sin este espejo, un valor rechazado se guardaría igual 2,5 s
+  // después de escribirlo, que es justo lo que el rechazo viene a impedir.
+  const erroresRef = useRef<Record<string, string>>({})
+  // Número a medio escribir. Vive SOLO aquí: el valor persistido es el número ya
+  // interpretado, así que sin este borrador escribir `769.` se convertiría en `769` y
+  // sería imposible teclear el punto de miles. Mismo patrón que `borradorCita`.
+  const [borradorNumero, setBorradorNumero] = useState<Record<string, string>>({})
   // Cita a medio escribir: día ya elegido, hora todavía no. Vive SOLO aquí — un día
   // sin hora no se guarda (ver `componerFechaHora`), y sin este borrador la casilla
   // del día se vaciaría sola en cuanto el valor compuesto quedara vacío.
@@ -281,7 +304,9 @@ export default function BloqueDatos({
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       // Si quedó un borrador sin guardar (el usuario navegó sin blur), persistir ya.
-      if (dirtyRef.current) {
+      // Salvo que un campo esté rechazado: irse de la pantalla no convierte un número
+      // imposible en uno válido, y esta escritura no la ve nadie.
+      if (dirtyRef.current && !Object.values(erroresRef.current).some(Boolean)) {
         void actualizarBloqueData(negocioBloqueId, valuesRef.current, undefined, {
           revalidate: false,
           correccion: correccionRef.current,
@@ -388,7 +413,15 @@ export default function BloqueDatos({
   function scheduleBorrador(vals: Record<string, unknown>) {
     dirtyRef.current = true
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => { void persist(vals, false) }, 2500)
+    saveTimer.current = setTimeout(() => {
+      if (hayRechazoPendiente()) return
+      void persist(vals, false)
+    }, 2500)
+  }
+
+  /** ¿Algún campo quedó rechazado? Se lee del ref: el estado llega tarde a un timer. */
+  function hayRechazoPendiente() {
+    return Object.values(erroresRef.current).some(Boolean)
   }
 
   function handleConfirm() {
@@ -450,6 +483,73 @@ export default function BloqueDatos({
     // El operador corrige el dato → ya fue verificado, quitar el badge "Revisar".
     if (aiFilled[slug]) setAiFilled(prev => ({ ...prev, [slug]: false }))
     scheduleBorrador(next)
+  }
+
+  // ── Tarifa UPME confirmada ────────────────────────────────────────────────
+  // El criterio NO se reimplementa aquí: es el mismo módulo puro que aplican las dos
+  // server actions. Si se escribiera dos veces, la pantalla y el rechazo del servidor
+  // terminarían diciendo cosas distintas sobre el mismo número.
+  const slugTarifa = tarifaConfirmacion?.enabled
+    ? tarifaConfirmacion.confirmada_field ?? 'tarifa_upme_confirmada'
+    : null
+
+  function marcarError(slug: string, mensaje: string) {
+    erroresRef.current = { ...erroresRef.current, [slug]: mensaje }
+    setErrorCampo(prev => ({ ...prev, [slug]: mensaje }))
+  }
+
+  /** Revisa el valor entrante de la tarifa y devuelve `true` si hay que frenar el guardado. */
+  function frenaPorTarifa(slug: string, valores: Record<string, unknown>): boolean {
+    if (slug !== slugTarifa) return false
+    // Solo se juzga lo que se escribe ahora: si el valor no cambió respecto de lo
+    // guardado, un caso viejo con una diferencia grande sigue siendo editable.
+    const guardado = parsearNumeroColombiano(saved[slug])
+    const entrante = parsearNumeroColombiano(valores[slug])
+    if (guardado !== null && guardado === entrante) {
+      marcarError(slug, '')
+      return false
+    }
+    const rechazo = revisarTarifaConfirmada({
+      valor: valores[slug],
+      referencia: valores[tarifaConfirmacion?.ref_field ?? 'tarifa_upme_ref'],
+      justificacion: tarifaConfirmacion?.justificacion_field
+        ? valores[tarifaConfirmacion.justificacion_field]
+        : undefined,
+      reglas: tarifaConfirmacion,
+    })
+    marcarError(slug, rechazo?.mensaje ?? '')
+    return !!rechazo
+  }
+
+  // Escritura de un número: se conserva el texto crudo mientras el campo está en uso y
+  // se persiste el número ya interpretado a la colombiana (`769.898` → 769898).
+  function handleNumeroChange(f: DatosField, raw: string) {
+    setBorradorNumero(prev => ({ ...prev, [f.slug]: raw }))
+    const n = parsearNumeroColombiano(raw)
+    const next = { ...valuesRef.current, [f.slug]: n === null ? '' : n }
+    valuesRef.current = next
+    setValues(next)
+    if (aiFilled[f.slug]) setAiFilled(prev => ({ ...prev, [f.slug]: false }))
+    // La regla muerde al ESCRIBIR, no al avanzar de etapa.
+    if (frenaPorTarifa(f.slug, next)) {
+      dirtyRef.current = true
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+      return
+    }
+    scheduleBorrador(next)
+  }
+
+  // Salir del campo numérico → se suelta el borrador (la casilla pasa a mostrar el número
+  // canónico, que es el eco de lo que el sistema entendió) y se guarda.
+  function handleNumeroBlur(f: DatosField) {
+    setBorradorNumero(prev => {
+      const sig = { ...prev }
+      delete sig[f.slug]
+      return sig
+    })
+    if (frenaPorTarifa(f.slug, valuesRef.current)) return
+    if (!dirtyRef.current) return
+    void persist(valuesRef.current, !!f.revalida)
   }
 
   // Salir de un campo de escritura → flush inmediato. Revalida solo si el campo
@@ -832,39 +932,64 @@ export default function BloqueDatos({
             )
           )}
 
-          {f.tipo === 'numero' && (
-            isTriggerField(f.slug) ? (
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={(values[f.slug] as string) ?? ''}
-                  onChange={e => handleTextChange(f.slug, e.target.value ? Number(e.target.value) : '')}
-                  onBlur={() => handleTextBlur(f)}
-                  className={`flex-1 ${inputBaseClass} bg-white`}
-                />
-                <button
-                  onClick={handleEpaycoLookup}
-                  disabled={epaycoLoading || isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#3B82F6] px-3 py-2 text-[10px] font-medium text-white hover:bg-[#2563EB] disabled:opacity-60 transition-colors whitespace-nowrap"
-                >
-                  {epaycoLoading ? (
-                    'Consultando...'
-                  ) : (
-                    <><Search className="h-3 w-3" />Consultar</>
-                  )}
-                </button>
-              </div>
-            ) : (
+          {/*
+            El campo numérico es `text` con teclado numérico, NO `type="number"`.
+            Con `type="number"` el valor se leía con `Number(...)` y `769.898` —el punto
+            de miles colombiano— entraba a la base como 769,898 pesos, sin que el
+            navegador se quejara. Ahora lo interpreta `parsearNumeroColombiano` y debajo
+            se muestra el eco de lo que el sistema entendió.
+          */}
+          {f.tipo === 'numero' && (() => {
+            const enUso = borradorNumero[f.slug] !== undefined
+            const crudo = enUso
+              ? borradorNumero[f.slug]
+              : values[f.slug] === '' || values[f.slug] === null || values[f.slug] === undefined
+              ? ''
+              : String(values[f.slug])
+            const interpretado = parsearNumeroColombiano(crudo)
+            const rechazo = errorCampo[f.slug]
+            const claseError = rechazo ? 'border-[#DC2626] bg-[#FEF2F2]' : ''
+            const campo = (
               <input
-                type="number"
-                value={(values[f.slug] as string) ?? ''}
-                onChange={e => handleTextChange(f.slug, e.target.value ? Number(e.target.value) : '')}
-                onBlur={() => handleTextBlur(f)}
+                type="text"
+                inputMode="decimal"
+                value={crudo}
+                onChange={e => handleNumeroChange(f, e.target.value)}
+                onBlur={() => handleNumeroBlur(f)}
                 readOnly={isEpaycoFilled(f.slug)}
-                className={`${inputBaseClass} ${inputBg(f.slug)}`}
+                className={`${isTriggerField(f.slug) ? 'flex-1 ' : ''}${inputBaseClass} ${rechazo ? claseError : inputBg(f.slug)}`}
               />
             )
-          )}
+            return (
+              <>
+                {isTriggerField(f.slug) ? (
+                  <div className="flex gap-2">
+                    {campo}
+                    <button
+                      onClick={handleEpaycoLookup}
+                      disabled={epaycoLoading || isPending}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#3B82F6] px-3 py-2 text-[10px] font-medium text-white hover:bg-[#2563EB] disabled:opacity-60 transition-colors whitespace-nowrap"
+                    >
+                      {epaycoLoading ? (
+                        'Consultando...'
+                      ) : (
+                        <><Search className="h-3 w-3" />Consultar</>
+                      )}
+                    </button>
+                  </div>
+                ) : campo}
+                {/* Eco: solo mientras el campo está en uso y el texto no coincide con el
+                    número interpretado. Sin él, escribir `769.898` y guardar `769.898`
+                    o `769,898` se ven exactamente igual. */}
+                {enUso && interpretado !== null && crudo.trim() !== formatearNumeroColombiano(interpretado) && (
+                  <p className="mt-1 text-[11px] text-tinta-suave">
+                    Se guardará <span className="font-medium tabular-nums text-tinta">{formatearNumeroColombiano(interpretado)}</span>
+                  </p>
+                )}
+                {rechazo && <p className="mt-1 text-[11px] text-[#DC2626]">{rechazo}</p>}
+              </>
+            )
+          })()}
 
           {f.tipo === 'fecha' && (
             <input

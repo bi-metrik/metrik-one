@@ -50,7 +50,7 @@ import BloqueEquipo from './bloques/BloqueEquipo'
 import BloqueDatos from './bloques/BloqueDatos'
 import BloqueContacto from './bloques/BloqueContacto'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
-import type { DatosField } from './bloques/BloqueDatos'
+import type { DatosField, ConfigTarifaConfirmacionUI } from './bloques/BloqueDatos'
 import BloqueChecklist from './bloques/BloqueChecklist'
 import BloqueChecklistSoporte from './bloques/BloqueChecklistSoporte'
 import BloqueDocumentos from './bloques/BloqueDocumentos'
@@ -1617,6 +1617,9 @@ function BloqueRenderer({
           confirmLabel={configExtra.confirm_label as string | undefined}
           autoFillDefaults={(configExtra._auto_fill ?? undefined) as Record<string, unknown> | undefined}
           datosPorSlug={datosPorSlug}
+          // Revisión de la tarifa UPME mientras se escribe (opt-in por bloque). El
+          // servidor la vuelve a aplicar con el mismo módulo: esto es UX.
+          tarifaConfirmacion={(configExtra.tarifa_confirmacion ?? undefined) as ConfigTarifaConfirmacionUI | undefined}
           // Corrección post-avance (opt-in). Las tres condiciones se revalidan
           // server-side en `actualizarBloqueData`; aquí solo se decide si el botón
           // aparece. `_areaReadonly` lo calcula el servidor: si el área del usuario
