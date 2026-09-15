@@ -1,34 +1,35 @@
 ---
 name: linea-de-flujo-negocios
-description: PR #711 (mergeado 2026-09-14) — /negocios dibuja las etapas como línea de flujo desde el routing; la regla de color es una decisión mía que Mauricio no validó, y en SOENA `numero` ya coincide con el recorrido
+description: La línea de flujo del #711 en /negocios NO gustó y se retiró (2026-09-15); volvió el segmentador de dos niveles, con las etapas de cada fase en orden de ocurrencia. En SOENA el `numero` coincide con el recorrido, así que una prueba contra `numero` tiene que barajar los números
 metadata:
   type: project
 ---
 
-`/negocios` pinta las etapas con `secuenciaDeLinea` + `distribuirLinea`
-(`src/lib/negocios/linea-de-flujo.ts`) y cuenta con `contarLineaDeFlujo` (`segmentador.ts`).
-Fixture real de la línea GIT EV/HEV en `test/linea-soena.ts` (routing + SLA del 2026-09-14).
+**Estado:** `/negocios` pinta el segmentador de siempre (nivel 1 fases, nivel 2 etapas de la
+fase con contador, filas con `flex-wrap`). Lo único que cambió respecto a antes del #711: las
+etapas de la fase salen por `etapasEnOrdenDeOcurrencia` (`src/lib/negocios/linea-de-flujo.ts`),
+que sigue el routing con `secuenciaDeLinea` (tronco, después ramas, después lo que queda fuera).
+Contadores y lista siguen saliendo de `segmentarNegocios`.
 
-⚠️⚠️ **La regla de color NO la pidió nadie así; la elegí midiendo.** El brief decía «el color
-depende de los atrasados, no del volumen». Por proporción (≥50 % vencidos) salían en rojo 10 de
-13 etapas y Envío 1/1 pesaba igual que Seguimiento 130/178. Quedó: fuerte = las etapas que, de
-mayor a menor, juntan la mitad de los atrasados (hoy Seguimiento y Propuesta). Costo aceptado:
-Validación 22 de 22 vencidos va en tono suave.
-**Why:** un control que pinta todo de rojo enseña a ignorarlo.
-**How to apply:** si Mauricio pide otra lectura (proporción, o marcar etapas 100 % vencidas),
-el cambio vive solo en `nivelesDeAtraso`; las pruebas con los conteos medidos lo delatan.
+**Why:** decisión de Mauricio del 2026-09-15 — «No terminó de gustar el cambio. Volvamos a como
+lo teníamos antes, solo que deja las etapas en orden de ocurrencia». La línea (todas las etapas
+en cualquier fase, rama en otro renglón, color por atrasados) se retiró completa: componente,
+`distribuirLinea`, `nivelesDeAtraso`, `contarLineaDeFlujo` y `sla_horas` en `getEtapasSegmentador`.
+La regla de color que yo había elegido midiendo nunca se validó y ya no existe.
 
-- **En SOENA `etapas_negocio.numero` ya está en el orden del recorrido** (1…19 = tronco + rama).
-  Ordenar por `numero` habría arreglado la fila, pero no muestra la rama ni sirve a líneas que
-  no se renumeraron. Útil como control rápido: la secuencia del helper, leída por `numero`, da 1..19.
-- **El clic en una etapa pone SU fase**, por eso el número se cuenta con la fase de la etapa y no
-  con la puesta: en «Todos» `contarEtapa` suma cerrados que conservan la etapa.
-- **Riesgo previo, no resuelto:** `getNegociosV2` no filtra por línea y todo el conteo va por
-  `etapa_numero` (único por línea). Un workspace con dos líneas abiertas mezclaría conteos de
-  etapas con el mismo `numero` y `stage`. SOENA tiene una sola.
-- `/flujo` (`workflow-diagram.tsx`) conserva su propio `computeLayout` de tronco y ramas; podría
-  consumir `secuenciaDeLinea`. Fuera de la superficie del #711.
-- ⚠️ El guard de Bash rechaza un heredoc cuyo TEXTO contiene «GIT EV/HEV» (el nombre de la línea):
-  lo lee como git. Scripts con ese texto van por Write y `python3 archivo.py`.
+**How to apply:**
+- Si vuelve a pedirse ver el flujo en la lista, partir del segmentador conocido y cambiar lo
+  mínimo; una visualización nueva sobre una superficie de uso diario no se propone sin que la pidan.
+- ⚠️ **En SOENA `etapas_negocio.numero` coincide con el orden de ocurrencia en las tres fases.**
+  Una prueba con la línea real pasa igual si alguien ordena por `numero`: por eso las pruebas
+  (pura y de render) invierten los números y exigen el mismo orden. El brief pedía «que caiga si
+  se ordena por `numero`» con la línea real, y así tal cual no caía.
+- Orden resultante en SOENA (fixture `test/linea-soena.ts`, routing del 2026-09-14):
+  Comercial: Validación, Inclusión, Propuesta, Negociación, Documentación, Segundo cobro, Entrega,
+  Anexos, Seguimiento · Operaciones: Cargue, Revisión radicado, Certificación, Cita, Notificación,
+  Generación, Envío · Financiera: Pago UPME, Cartera, Facturación.
+- Riesgo previo, sin resolver: `getNegociosV2` no filtra por línea y todo el conteo va por
+  `etapa_numero` (único por línea). Dos líneas abiertas en un workspace mezclarían conteos.
+- ⚠️ El guard de Bash rechaza un heredoc cuyo TEXTO contiene «GIT EV/HEV» (lo lee como git).
 
-Relacionado: [[worktree-git-bloqueado]], [[capturas-ui-sin-servidor]], [[pruebas-por-mutacion]].
+Relacionado: [[worktree-git-bloqueado]], [[arbol-limpio-por-tarball]], [[pruebas-por-mutacion]].

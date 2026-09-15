@@ -46,7 +46,7 @@
 - ⚠️ [El cierre se deriva de `estado`](project_cierre_desde_estado.md) — PR #609 sin mergear: el mapa es lista CERRADA (hay 2 `activo` reales)
 - ⚠️⚠️ [Un cerrado sale de circulación](project_negocio_cerrado_solo_lectura.md) — PR #610 sin mergear: el recibo de caja NO se corta (7 de 53 alcanzables)
 - ⚠️ [El buscador avisa de otras pestañas](project_aviso_otras_pestanas.md) — PR #611 sin mergear: por qué NO se ignora el chip de fase
-- ⚠️ [Línea de flujo en /negocios](project_linea_de_flujo_negocios.md) — #711 mergeado: la regla de color la elegí midiendo (no validada)
+- ⚠️ [Línea de flujo en /negocios, retirada](project_linea_de_flujo_negocios.md) — no gustó: volvió el segmentador, etapas por ocurrencia; en SOENA `numero` = recorrido
 - ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene)
 - ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — #550 en main: las 252 marcas se autocorrigen solas; los 6 candidatos NO son lista para aplicar; guardián superado por #561
 - ⚠️⚠️ [Factura: herencia sin copias y soporte en Tesorería](project_factura_soporte_tesoreria.md) — #704/#706 desplegados; limpieza 1B SIN aplicar
@@ -110,7 +110,7 @@
 - ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64
 - ⚠️⚠️ [Landing estática en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — el DNS ya está (wildcard); `all_except_custom_domains` abre PRODUCCIÓN (dominio propio **y** alias `.vercel.app`) y solo cierra la URL por deploy; y git sí corre en el scratchpad
 - ⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados
-- ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — el checkout compartido puede ir BEHIND main y mentir en silencio
+- ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — checkout BEHIND main; `node_modules/node_modules` rompe el build de la copia
 
 ## Feedback
 

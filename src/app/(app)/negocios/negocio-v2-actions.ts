@@ -9,7 +9,7 @@ import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
-import { horasHabilesEntre, slaHorasDeEtapa, slaHorasVigentes } from '@/lib/negocios/horas-habiles'
+import { horasHabilesEntre, slaHorasVigentes } from '@/lib/negocios/horas-habiles'
 import { routingDeEtapa } from '@/lib/negocios/retorno-reproceso'
 import type { EtapaDelSegmentador } from '@/lib/negocios/linea-de-flujo'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
@@ -1045,11 +1045,11 @@ export async function getWorkspaceStagesActivos(): Promise<string[]> {
 }
 
 /**
- * Etapas de la línea activa del workspace, para la línea de flujo de /negocios.
- * Devuelve numero (ID estable por línea, para contar), nombre, stage, orden, y de
- * `config_extra` solo el routing y el SLA: con el routing la pantalla dibuja el
- * recorrido real (`secuenciaDeLinea`) en vez del `orden`, que no lo es. Vacío si el
- * workspace no tiene línea activa.
+ * Etapas de la línea activa del workspace, para el segmentador Fase → Etapa de
+ * /negocios. Devuelve numero (ID estable por línea, para contar), nombre, stage, orden,
+ * y de `config_extra` solo el routing: con él la pantalla ordena las etapas de cada fase
+ * por ocurrencia en el recorrido (`etapasEnOrdenDeOcurrencia`), no por `orden` ni por
+ * `numero`, que no lo son. Vacío si el workspace no tiene línea activa.
  */
 export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -1078,7 +1078,6 @@ export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
       stage: e.stage as string,
       orden: e.orden,
       routing: routingDeEtapa({ id: String(e.numero), nombre: e.nombre, orden: e.orden, config_extra: e.config_extra }),
-      sla_horas: slaHorasDeEtapa(e.config_extra),
     }))
 }
 

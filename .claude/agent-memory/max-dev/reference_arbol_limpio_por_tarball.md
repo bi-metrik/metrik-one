@@ -66,5 +66,21 @@ en el PR #36 confirmo que dos defectos de maquetacion del PDF eran preexistentes
 ⚠️ Para `pdf-to-img` y `pdfjs-dist`, el script tiene que vivir **dentro del prefijo** donde
 se instalaron (`node` resuelve el paquete desde la ruta del script, no desde el cwd).
 
+## ⚠️ metrik-one: el `node_modules` compartido trae un symlink que rompe el build de la copia
+
+Medido el 2026-09-15 (segmentador de `/negocios`). `metrik-one/node_modules/node_modules` es un
+symlink **a sí mismo por ruta absoluta** (creado el 2026-08-26 por un `ln -s` mal parado). Con
+`cp -a` viaja a la copia y `next build` falla con **283 errores `Cannot find module
+'@vercel/turbopack/postcss'`** sobre todo CSS, sin nombrar el symlink. Borrarlo **en la copia**
+(`rm <copia>/node_modules/node_modules`) y el build pasa. `tsc`, vitest y eslint no se enteran.
+El del checkout compartido no se tocó: es de todas las sesiones.
+
+## Cuando otra sesión ocupa el worktree propio, este flujo sirve para metrik-one también
+
+El 2026-09-15 una sesión hermana hizo `git merge origin/main` **en mi worktree** entre dos
+comandos míos (y compartía el scratchpad). Todo el trabajo se hizo en `<scratchpad>/seg-wt/`
+desde el tarball — `Write`/`Edit` **sí** entraron al scratchpad esa sesión — y se publicó por la
+API (`git/refs` + `createCommitOnBranch`), sin tocar HEAD ni índice ajenos.
+
 Relacionado: [[publicar-otro-repo-desde-worktree-aislado]], [[mirar-pdf-renderizado]],
-[[valida-privacidad-v12]].
+[[valida-privacidad-v12]], [[worktree-git-bloqueado]].
