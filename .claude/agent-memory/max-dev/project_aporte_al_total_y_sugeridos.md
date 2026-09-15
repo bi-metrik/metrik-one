@@ -99,8 +99,9 @@ Verificado contra la server action real: con y sin la propuesta encima, `costo_t
 ## ⚠️ Deuda abierta, anotada y NO resuelta
 
 `CATEGORIA_GASTO_A_TIPOS_RUBRO` no mapea `tarifa`, `impuestos` ni `fee_proveedor`, que
-el CHECK ya admite. El día que el paso 3 los escriba, la barra de Ejecución leerá
-ejecutado 0. El comentario quedó donde vive el mapeo; **el mapeo no se tocó**.
+el CHECK ya admite. ⚠️ **Cerrado a medias por #729 (2026-09-15):** la barra ya no pinta
+0% sobre esos rubros (`tipoRubroMedible`), pero NINGUNA categoría de gasto les
+corresponde y crearla quedó como pregunta de producto. Ver [[entra-al-precio]].
 
 Sigue sin DDL la parte de **campos leídos estructurados** del bloque 3 (el insumo del
 `puntaje_experiencia`): tras recargar quedan los rubros, no los campos ni los avisos.
