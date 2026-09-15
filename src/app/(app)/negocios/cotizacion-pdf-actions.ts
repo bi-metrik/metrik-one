@@ -5,7 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
-import { diasDelItinerario, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
+import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -209,6 +209,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     unidad?: string | null
     grupo?: string | null
     opcion_de?: string | null
+    /** `20260915000000`. Ausente = sin dia y se muestra, el comportamiento de antes. */
+    dia_relativo?: number | null
+    mostrar_en_sugeridos?: boolean | null
+    /** `20260915120000`. Ausente = entra al precio, el comportamiento de antes. */
+    entra_al_precio?: boolean | null
   }
 
   /**
@@ -245,6 +250,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * Es el MISMO helper que usa `recalcularTotales` para escribir `valor_total`, así
    * que el documento no puede discrepar con la pantalla. Sin ranuras con alternativas
    * devuelve todos los ítems y el PDF de siempre no cambia una línea.
+   *
+   * Una sugerencia FUERA DEL PRECIO no aporta: no entra al detalle ni al Subtotal, y
+   * se imprime con su precio en «actividades adicionales no incluidas» (abajo).
    */
   const aportanAlTotal = new Set(
     itemsQueAportanAlTotal(
@@ -254,6 +262,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         opcion_de: i.opcion_de ?? null,
         es_ajuste: i.es_ajuste ?? false,
         orden: i.orden ?? 0,
+        dia_relativo: i.dia_relativo ?? null,
+        entra_al_precio: i.entra_al_precio ?? null,
       })),
     ),
   )
@@ -514,11 +524,13 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * nuevo: el Subtotal, el IVA y el TOTAL salen de `itemsParaResumen` y no cambian un
    * peso por asignar o quitar un día. El día es presentación.
    *
-   * ⚠️ Los sugeridos NO entran en esa partición: no aportan al documento... pero HOY
-   * SÍ aportan al total, porque `itemsQueAportanAlTotal` no mira el día. Esa es la
-   * contradicción que el editor avisa con nombre propio antes de generar el PDF.
-   * Descontarlos aquí le cambiaría el precio a una cotización ya revisada, y hacerlo
-   * en silencio es justo lo que no se puede.
+   * ⚠️ Los sugeridos NO entran en esa partición. Una sugerencia FUERA DEL PRECIO
+   * tampoco aporta al total (`itemsQueAportanAlTotal` la saca), así que el documento
+   * cuadra. Una que SÍ entra al precio sigue sumando mientras se imprime como «no
+   * incluida»: esa es la contradicción que el editor avisa en rojo antes de generar
+   * el PDF. Descontarla aquí le cambiaría el precio a una cotización ya revisada, y
+   * hacerlo en silencio es justo lo que no se puede: el precio lo decide el
+   * interruptor, no el PDF.
    *
    * ⚠️ Con itinerarios en propuesta (bloques de alternativas) esto queda en `null`: el
    * documento ya está organizado por opciones y meterle días encima daría dos
@@ -529,8 +541,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     .map(i => ({
       id: i.id as string,
       grupo: i.grupo ?? null,
-      dia_relativo: (i as { dia_relativo?: number | null }).dia_relativo ?? null,
-      mostrar_en_sugeridos: (i as { mostrar_en_sugeridos?: boolean | null }).mostrar_en_sugeridos ?? null,
+      dia_relativo: i.dia_relativo ?? null,
+      mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
+      entra_al_precio: i.entra_al_precio ?? null,
       es_ajuste: i.es_ajuste ?? false,
       orden: i.orden ?? 0,
     }))
@@ -556,11 +569,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * también» y otra en «actividades adicionales no incluidas» — el mismo documento
    * diciendo que una línea está incluida y que no lo está.
    *
-   * Consecuencia asumida y declarada: cuando una sugerencia trae precio, la columna
-   * impresa ya no suma el Subtotal, porque esa línea sigue aportando al total. Es la
-   * cara visible de la contradicción que el editor avisa en rojo, y la salida es
-   * ponerla en cero o darle un día. Con la sugerencia en cero —que es su estado
-   * sano— la columna vuelve a cuadrar sola.
+   * Consecuencia asumida y declarada: cuando una sugerencia trae precio Y entra al
+   * precio, la columna impresa ya no suma el Subtotal, porque esa línea sigue
+   * aportando al total. Es la cara visible de la contradicción que el editor avisa en
+   * rojo, y las salidas son sacarla del precio, ponerla en cero o darle un día. Fuera
+   * del precio o en cero —sus dos estados sanos— la columna cuadra sola.
    */
   const itemsSinDiaPDF = diasPDF
     ? items
@@ -568,9 +581,21 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         .map(paraPlantilla)
     : null
 
-  const sugeridosPDF = itinerariosPDF
+  /**
+   * Con itinerarios en propuesta el documento no se reparte por días, pero una
+   * sugerencia FUERA DEL PRECIO sí se imprime: no está en ningún bloque de opción
+   * (no aporta a ninguno), y sin esta sección desaparecería del documento sin que
+   * nadie lo haya pedido. Las que sí entran al precio siguen dentro de sus bloques.
+   */
+  const conDiaPorId = new Map(itemsConDia.map(i => [i.id, i]))
+  const idsSugeridosVisibles = sugeridosVisibles(itemsConDia).filter(id => {
+    if (!itinerariosPDF) return true
+    const item = conDiaPorId.get(id)
+    return item !== undefined && fueraDelPrecio(item)
+  })
+  const sugeridosPDF = idsSugeridosVisibles.length === 0
     ? null
-    : sugeridosVisibles(itemsConDia)
+    : idsSugeridosVisibles
         .map(id => porId.get(id))
         .filter((i): i is ItemRow => i !== undefined)
         .map(i => ({

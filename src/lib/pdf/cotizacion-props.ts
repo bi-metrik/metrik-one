@@ -142,16 +142,17 @@ export interface CotizacionPDFProps {
    * El paquete de sugeridos: «actividades adicionales no incluidas».
    *
    * Son las líneas que declaran un grupo NO combinable (tour, traslado, plan) y se
-   * quedaron sin día, en una cotización que sí usa días. Un vuelo o un hotel no entran
-   * nunca aquí: aparecerían como no incluidos mientras el cliente los está pagando.
+   * quedaron sin día, en una cotización que sí usa días; y, con o sin días, las que
+   * alguien sacó del precio a propósito. Un vuelo o un hotel no entran nunca aquí:
+   * aparecerían como no incluidos mientras el cliente los está pagando.
    *
    * ⚠️ Llegan ya filtradas por el check de mostrar u ocultar. La plantilla imprime lo
    * que recibe.
    *
-   * ⚠️⚠️ El precio que traen es INFORMATIVO y el bloque lo dice: estas líneas NO se
-   * descuentan del total. Mientras «asignar día es incluirlo» siga siendo el único
-   * interruptor, una sugerencia con precio sigue sumando — por eso el editor avisa con
-   * nombre propio antes de generar el documento.
+   * ⚠️⚠️ El precio que traen es INFORMATIVO y el bloque lo dice. Si la línea está fuera
+   * del precio (`items.entra_al_precio = false`), no suma al total y el documento
+   * cuadra. Si entra al precio, sigue sumando: esa contradicción la avisa el editor con
+   * nombre propio antes de generar el documento. La plantilla no la resuelve.
    */
   sugeridos?: {
     nombre: string

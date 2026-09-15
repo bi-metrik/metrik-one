@@ -921,6 +921,14 @@ export async function duplicarCotizacion(id: string) {
           // completo: el titular puede venir DESPUES de su opcion en el orden.
           grupo: item.grupo ?? null,
           unidad: item.unidad ?? null,
+          // El día, el check de la sugerencia y el segundo interruptor viajan con la
+          // línea. Sin `entra_al_precio`, una sugerencia fuera del precio nacería
+          // cobrando en la copia y su total saldría más alto que el del original.
+          // Solo se nombran si la lectura los trajo: con `select('*')` una columna sin
+          // aplicar llega `undefined`, y nombrarla en el insert tumbaría el duplicado.
+          ...(item.dia_relativo !== undefined ? { dia_relativo: item.dia_relativo } : {}),
+          ...(item.mostrar_en_sugeridos !== undefined ? { mostrar_en_sugeridos: item.mostrar_en_sugeridos } : {}),
+          ...(item.entra_al_precio !== undefined ? { entra_al_precio: item.entra_al_precio } : {}),
         })
         .select('id')
         .single()
@@ -1157,6 +1165,10 @@ export async function recalcularTotales(cotizacionId: string) {
   // ya enviada al cliente.
   // R-A1 · el total suma cada ranura UNA vez. Sin ranuras con alternativas, `aportan`
   // es exactamente el juego completo de líneas y esto es un no-op (R6).
+  //
+  // Una sugerencia FUERA DEL PRECIO tampoco aporta: no suma al total ni mete su costo a
+  // `costo_total`. Su precio unitario sí se escribe arriba (la cascada por línea corre
+  // sobre todas), porque es justo el número que el documento le muestra al cliente.
   const aportan = new Set(
     itemsQueAportanAlTotal(
       filas.map(f => ({
@@ -1165,6 +1177,8 @@ export async function recalcularTotales(cotizacionId: string) {
         opcion_de: f.opcion_de ?? null,
         es_ajuste: f.es_ajuste ?? false,
         orden: f.orden ?? 0,
+        dia_relativo: f.dia_relativo ?? null,
+        entra_al_precio: f.entra_al_precio ?? null,
       })),
     ),
   )

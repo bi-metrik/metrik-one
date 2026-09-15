@@ -21,6 +21,14 @@ export interface ItemPresupuesto {
   cantidad?: number | null
   subtotal?: number | null
   es_ajuste?: boolean | null
+  /**
+   * Los tres que decide `fueraDelPrecio`. Una sugerencia fuera del precio no es costo
+   * comprometido: el cliente no la compró, así que sus rubros no son presupuesto.
+   * Ausentes, la línea cuenta como antes.
+   */
+  grupo?: string | null
+  dia_relativo?: number | null
+  entra_al_precio?: boolean | null
   rubros?: Array<{ tipo?: string | null; valor_total?: number | null; sugerido?: boolean | null }> | null
 }
 
@@ -41,6 +49,7 @@ export interface RubroPresupuestoEjecutado extends RubroPresupuesto {
  */
 import { soloConfirmados } from '@/lib/cotizaciones/rubros-sugeridos'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
+import { fueraDelPrecio } from '@/lib/cotizaciones/dia-relativo'
 
 export const TIPO_RUBRO_SIN_DETALLE = 'otro'
 
@@ -161,6 +170,9 @@ export function calcularPresupuestoPorRubro(items: ItemPresupuesto[]): RubroPres
 
   for (const item of items) {
     if (item.es_ajuste) continue
+    // Una sugerencia fuera del precio tampoco entra a `costo_total` (la saca
+    // `itemsQueAportanAlTotal`): contarla aquí rompería la suma contra ese número.
+    if (fueraDelPrecio({ id: '', grupo: item.grupo, dia_relativo: item.dia_relativo, entra_al_precio: item.entra_al_precio })) continue
 
     const cantidad = Number(item.cantidad) || 1
     // R-P1 · un rubro SUGERIDO es la propuesta de un pantallazo que nadie confirmó:

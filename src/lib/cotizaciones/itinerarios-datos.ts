@@ -145,6 +145,10 @@ export async function contextoDeCotizacion(
       opcion_de: (fila.opcion_de ?? null) as string | null,
       es_ajuste: fila.es_ajuste ?? false,
       orden: (fila.orden ?? 0) as number,
+      // El segundo interruptor y su condicion del dia. Sin ellos el gate del piso y
+      // el total del principal medirian con la sugerencia fuera del precio adentro.
+      dia_relativo: (fila.dia_relativo ?? null) as number | null,
+      entra_al_precio: (fila.entra_al_precio ?? null) as boolean | null,
       cantidad: fila.cantidad ?? 1,
       subtotal: fila.subtotal ?? 0,
       numeroDeRubros,

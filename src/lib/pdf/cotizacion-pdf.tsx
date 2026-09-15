@@ -427,8 +427,9 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
         {/* ── S5b. ACTIVIDADES ADICIONALES NO INCLUIDAS (condicional) ──
             El paquete de sugeridos. Va DESPUES del total a proposito: lo primero que
             el cliente tiene que poder leer es que esta pagando, y estas lineas no
-            estan en esa cifra. Solo existe cuando la cotizacion se organiza por dias;
-            sin un solo dia asignado este bloque no aparece nunca. */}
+            estan en esa cifra. Existe cuando la cotizacion se organiza por dias, o
+            cuando alguien saco una sugerencia del precio a proposito: sin dias y sin
+            ninguna linea fuera del precio, este bloque no aparece nunca. */}
         {sugeridosVisibles.length > 0 && (
           <View style={{ marginTop: 20, borderWidth: 0.5, borderColor: '#E5E7EB', borderRadius: 4, padding: 12 }}>
             <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1.5 }}>
