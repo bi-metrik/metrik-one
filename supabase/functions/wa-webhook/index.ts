@@ -6,7 +6,16 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
-import { sendTextMessage, sendButtons, sendCtaUrl, sendFlow, enBackground } from '../_shared/wa-respond.ts';
+import { sendTextMessage, sendTextMessageABsuid, sendButtons, sendCtaUrl, sendFlow, enBackground } from '../_shared/wa-respond.ts';
+import { extraerEntrante, extraerStatuses } from '../_shared/wa-webhook-payload.ts';
+import type { MensajeSinTelefono } from '../_shared/wa-webhook-payload.ts';
+import {
+  INTENT_SIN_TELEFONO,
+  avisoSinTelefono,
+  decidirSinTelefono,
+  previewSinTelefono,
+  variablesAvisoSinTelefono,
+} from '../_shared/wa-sin-telefono.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
 import { resolverEstudioChat, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
@@ -51,10 +60,12 @@ Deno.serve(async (req) => {
 
       const payload = JSON.parse(body);
 
+      const propioPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+
       // Acuses de entrega. Van primero y no compiten con los mensajes: un webhook trae
       // `messages` o `statuses`, nunca los dos. Antes caian en el `return 200` de abajo
       // y se perdian, que es la razon de que no se supiera si un contrato llego.
-      const statuses = extractStatuses(payload);
+      const statuses = extraerStatuses(payload, propioPhoneNumberId);
       if (statuses.length > 0) {
         // `enBackground` y no un `.catch` suelto: sin `waitUntil` el worker puede
         // reciclarse a mitad y el acuse se pierde, que es justo lo que paso con
@@ -68,10 +79,23 @@ Deno.serve(async (req) => {
       }
 
       // Extract message from Meta webhook format
-      const message = extractMessage(payload);
-      if (!message) {
+      const entrante = extraerEntrante(payload, propioPhoneNumberId);
+      if (!entrante) {
         return new Response('OK', { status: 200 }); // Otros eventos (plantillas, cuenta, etc.)
       }
+
+      // Sin telefono (la persona tiene nombre de usuario de WhatsApp): sale aqui, antes de
+      // `processMessage`, porque todo lo que viene despues esta indexado por telefono. Antes
+      // seguia con `phone` indefinido y reventaba en `identifyUser` sin contestar ni avisar.
+      if (entrante.tipo === 'sin_telefono') {
+        enBackground(
+          atenderSinTelefono(getServiceClient(), entrante.mensaje).catch((err) =>
+            console.error('[wa-webhook] Sin telefono error:', err)
+          ),
+        );
+        return new Response('OK', { status: 200 });
+      }
+      const message = entrante.mensaje;
 
       // Un toque de boton puede ser la aceptacion de un documento: se guarda el cuerpo tal cual
       // llego y su firma, que es lo unico que permite demostrar despues que lo mando Meta.
@@ -173,6 +197,65 @@ async function avisoReciente(
     return false;
   }
   return (count ?? 0) > 0;
+}
+
+// ============================================================
+// Remitentes sin telefono (nombre de usuario de WhatsApp)
+// ============================================================
+
+/**
+ * Meta mando el mensaje con BSUID y sin telefono. Las decisiones y los textos viven en
+ * `wa-sin-telefono.ts`; aqui solo se lee la bitacora, se envia y se avisa.
+ *
+ * Los tres pasos son independientes a proposito: que Meta rechace la respuesta por BSUID no
+ * puede dejar a quien opera sin aviso, y un aviso fallido no puede borrar el registro.
+ */
+async function atenderSinTelefono(
+  supabase: ReturnType<typeof getServiceClient>,
+  m: MensajeSinTelefono,
+): Promise<void> {
+  // Se cuenta ANTES de registrar: si no, la fila recien escrita cuenta como mensaje previo.
+  const decision = decidirSinTelefono(await contarSinTelefonoRecientes(supabase, m.user_id));
+  console.warn(`[wa-webhook] mensaje sin telefono de ${m.user_id} (${m.username ? `@${m.username}` : 'sin usuario'}, ${m.tipo})`);
+
+  // El BSUID va en `phone` (texto libre en la tabla): es la unica llave que se tiene y la que
+  // sirve para contar los mensajes previos de esta misma persona.
+  await logMessage(supabase, m.user_id, 'inbound', undefined, INTENT_SIN_TELEFONO, previewSinTelefono(m));
+
+  try {
+    await sendTextMessageABsuid(m.user_id, decision.mensaje, { origen: 'bot', intent: INTENT_SIN_TELEFONO });
+  } catch (err) {
+    console.error(`[wa-webhook] no se pudo responder al BSUID ${m.user_id}:`, err);
+  }
+
+  if (!decision.avisar) return;
+  const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
+  if (!admin) {
+    console.warn(`[wa-webhook] ${m.user_id} sin telefono y sin avisar: falta WA_ADMIN_NOTIFY_PHONE`);
+    return;
+  }
+  // Mismo canal y misma salvedad que `atenderDesconocido`: sin plantilla declarada sale como
+  // texto libre y Meta solo lo entrega si el admin le escribio al bot en las ultimas 24 h.
+  await enviarAvisoInterno(admin, INTENT_SIN_TELEFONO, avisoSinTelefono(m), variablesAvisoSinTelefono(m));
+}
+
+/** Mensajes de este BSUID en las ultimas 24 h. `null` si la consulta falla. */
+async function contarSinTelefonoRecientes(
+  supabase: ReturnType<typeof getServiceClient>,
+  bsuid: string,
+): Promise<number | null> {
+  const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from('wa_message_log')
+    .select('*', { count: 'exact', head: true })
+    .eq('phone', bsuid)
+    .eq('intent', INTENT_SIN_TELEFONO)
+    .gte('created_at', desde);
+  if (error) {
+    console.error('[wa-webhook] no se pudo contar los mensajes previos sin telefono:', error.message);
+    return null;
+  }
+  return count ?? 0;
 }
 
 // ============================================================
@@ -697,203 +780,8 @@ async function identifyUser(
 // Meta Webhook Helpers
 // ============================================================
 
-// Forma del webhook de Meta, limitada a lo que extractMessage lee. Los campos
-// base (from/id/timestamp/type) van obligatorios porque el codigo ya los asume;
-// lo que depende del tipo de mensaje va opcional y se lee con `?.`.
-type MetaMensaje = {
-  from: string;
-  id: string;
-  timestamp: string;
-  type: string;
-  text?: { body: string };
-  image?: { id?: string; caption?: string };
-  audio?: { id?: string };
-  interactive?: {
-    type?: string;
-    nfm_reply?: { response_json?: string };
-    button_reply?: { id?: string; title?: string };
-    list_reply?: { id?: string; title?: string };
-  };
-  // wamid del mensaje nuestro al que responde (en toques de boton, el mensaje con los botones).
-  context?: { from?: string; id?: string };
-  location?: { latitude: number; longitude: number; name?: string; address?: string };
-};
-
-// Acuse de entrega de un mensaje que MeTRIK mando. Llega por el mismo webhook que los
-// mensajes entrantes, en `value.statuses` en vez de `value.messages`.
-type MetaStatus = {
-  id?: string;            // wamid del mensaje NUESTRO al que se refiere
-  status?: string;        // sent | delivered | read | failed
-  timestamp?: string;     // epoch en segundos, como string
-  recipient_id?: string;  // telefono del destinatario
-  errors?: Array<{ code?: number; title?: string; message?: string }>;
-};
-
-type MetaWebhookPayload = {
-  entry?: Array<{
-    changes?: Array<{
-      value?: {
-        metadata?: { phone_number_id?: string; display_phone_number?: string };
-        messages?: MetaMensaje[];
-        statuses?: MetaStatus[];
-      };
-    }>;
-  }>;
-};
-
-/** Los unicos que la tabla `wa_envios` acepta. Ver el CHECK de la migracion 20260901000003. */
-const STATUS_CONOCIDOS = ['sent', 'delivered', 'read', 'failed'];
-
-/**
- * Saca los acuses de entrega del payload.
- *
- * Recorre TODAS las entries y changes, no solo la primera: Meta agrupa varios acuses en
- * un mismo webhook cuando salieron varios mensajes seguidos (un texto largo se parte en
- * chunks y cada chunk trae el suyo). Quedarse con `[0]`, como hace `extractMessage` para
- * los mensajes entrantes, perderia el resto en silencio.
- */
-function extractStatuses(payload: MetaWebhookPayload): StatusEntrega[] {
-  const salida: StatusEntrega[] = [];
-  const propio = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
-  try {
-    for (const entry of payload?.entry ?? []) {
-      for (const change of entry?.changes ?? []) {
-        const value = change?.value;
-        if (!value?.statuses?.length) continue;
-
-        // Mismo criterio que extractMessage: lo que sea de otro numero (Mi Bolsillo) no es nuestro.
-        const recibido = value?.metadata?.phone_number_id;
-        if (propio && recibido && recibido !== propio) continue;
-
-        for (const st of value.statuses) {
-          if (!st?.id || !st?.status) continue;
-          // La tabla acota los estados con un CHECK. Un valor que Meta agregue manana
-          // haria fallar el insert entero, asi que aqui se filtra y se deja dicho en el
-          // log: mejor un acuse que no se entiende visible, que un error de constraint.
-          if (!STATUS_CONOCIDOS.includes(st.status)) {
-            console.warn(`[wa-webhook] status desconocido de Meta: ${st.status} (${st.id})`);
-            continue;
-          }
-          const err = st.errors?.[0];
-          salida.push({
-            waMessageId: st.id,
-            status: st.status,
-            statusAt: st.timestamp ? new Date(Number(st.timestamp) * 1000).toISOString() : undefined,
-            phone: st.recipient_id,
-            errorCode: err?.code,
-            errorTitle: err?.title ?? err?.message,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[wa-webhook] no se pudieron leer los statuses:', err);
-  }
-  return salida;
-}
-
 async function procesarStatuses(statuses: StatusEntrega[]): Promise<void> {
   await aplicarStatuses(getServiceClient(), statuses);
-}
-
-function extractMessage(payload: MetaWebhookPayload): IncomingMessage | null {
-  try {
-    const entry = payload?.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-
-    if (!value?.messages?.[0]) return null;
-
-    // Ignore messages sent to other phone numbers (e.g. Mi Bolsillo)
-    const receivedPhoneNumberId = value?.metadata?.phone_number_id;
-    const ownPhoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-    if (ownPhoneNumberId && receivedPhoneNumberId && receivedPhoneNumberId !== ownPhoneNumberId) {
-      console.log(`[wa-webhook] Ignoring message for phone_number_id ${receivedPhoneNumberId} (not ours: ${ownPhoneNumberId})`);
-      return null;
-    }
-
-    const msg = value.messages[0];
-    const phone = msg.from;
-    const botPhone = value?.metadata?.display_phone_number; // numero del bot (para compartir su contacto)
-
-    if (msg.type === 'text' && msg.text) {
-      return {
-        phone,
-        text: msg.text.body,
-        type: 'text',
-        wa_message_id: msg.id,
-        bot_phone: botPhone,
-        timestamp: msg.timestamp,
-      };
-    }
-
-    if (msg.type === 'image') {
-      return {
-        phone,
-        text: msg.image?.caption || '',
-        type: 'image',
-        image_id: msg.image?.id,
-        timestamp: msg.timestamp,
-      };
-    }
-
-    if (msg.type === 'audio') {
-      return {
-        phone,
-        text: '',
-        type: 'audio',
-        audio_id: msg.audio?.id,
-        wa_message_id: msg.id,
-        bot_phone: botPhone,
-        timestamp: msg.timestamp,
-      };
-    }
-
-    if (msg.type === 'interactive') {
-      // Flow completado → llega como nfm_reply con response_json (datos del cuestionario Cardumen).
-      if (msg.interactive?.type === 'nfm_reply' || msg.interactive?.nfm_reply) {
-        return {
-          phone,
-          text: '',
-          type: 'flow_response',
-          flow_response: msg.interactive?.nfm_reply?.response_json || '',
-          timestamp: msg.timestamp,
-        };
-      }
-      const reply = msg.interactive?.button_reply || msg.interactive?.list_reply;
-      return {
-        phone,
-        text: reply?.title || reply?.id || '',
-        type: 'interactive',
-        interactive_reply: reply?.id,
-        timestamp: msg.timestamp,
-        // Crudo, para el flujo de aceptacion de terminos (id del toque, context.id, timestamp).
-        meta_mensaje: msg as unknown as Record<string, unknown>,
-      };
-    }
-
-    if (msg.type === 'location' && msg.location) {
-      return {
-        phone,
-        text: '',
-        type: 'location',
-        location: {
-          latitude: msg.location.latitude,
-          longitude: msg.location.longitude,
-          name: msg.location.name,
-          address: msg.location.address,
-        },
-        wa_message_id: msg.id,
-        bot_phone: botPhone,
-        timestamp: msg.timestamp,
-      };
-    }
-
-    // Unsupported message type
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 async function verifySignature(body: string, signature: string | null): Promise<boolean> {

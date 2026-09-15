@@ -143,7 +143,16 @@ export interface WaUser {
 // --- WhatsApp Message ---
 
 export interface IncomingMessage {
+  /**
+   * Siempre presente y no vacio: un mensaje del que Meta no mando telefono no se construye como
+   * `IncomingMessage` (ver `MensajeSinTelefono` en `wa-webhook-payload.ts`). Todo el bot esta
+   * indexado por este campo, asi que no puede llegar indefinido a ninguna parte.
+   */
   phone: string;
+  /** BSUID del remitente (`messages[].from_user_id`). Meta lo manda desde abril de 2026. */
+  user_id?: string;
+  /** Nombre de usuario de WhatsApp, sin arroba. Solo si la persona lo activo. */
+  username?: string;
   text: string;
   type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response' | 'location';
   image_id?: string;
