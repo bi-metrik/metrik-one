@@ -24,6 +24,7 @@ import { revalidatePath } from 'next/cache'
 import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { clausulasAHtml, normalizarTerminos } from '@/lib/propuesta/terminos'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
+import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
 import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
@@ -694,7 +695,31 @@ export async function generarVersionPropuesta(
   // al path historico para compat.
   let pdfDriveId: string | null = null
   let pdfUrl: string | null = null
-  if (pdfBuffer) {
+  // Almacenamiento externo: el PDF va al proyecto del cliente y Drive no se toca. Mismo
+  // trato que la subida a Drive de abajo: si falla, la versión queda registrada sin PDF.
+  let almacenamiento: Awaited<ReturnType<typeof almacenamientoExternoDe>> = null
+  let almacenamientoExternoFallo = false
+  try {
+    almacenamiento = await almacenamientoExternoDe(workspaceId)
+  } catch (e) {
+    almacenamientoExternoFallo = true
+    console.error('[propuesta] almacenamiento externo mal configurado, el PDF no se guarda:', e instanceof Error ? e.message : e)
+  }
+  if (pdfBuffer && almacenamiento) {
+    try {
+      const guardado = await almacenamiento.subirArchivo({
+        negocioId: ctx.negocioId,
+        subcarpeta: (ctx.driveSubfolder ?? '1. Legal/Propuestas') as string,
+        nombre: `Propuesta Economica v${nuevaN} - ${fechaCorta(ahora)}.pdf`,
+        buffer: pdfBuffer,
+        mime: 'application/pdf',
+        tipoBloque: 'propuesta_economica',
+      })
+      pdfUrl = guardado.referencia
+    } catch (e) {
+      console.error(`[propuesta] error guardando PDF en almacenamiento externo:`, e)
+    }
+  } else if (pdfBuffer && !almacenamientoExternoFallo) {
     try {
       if (!negocio?.carpeta_url) {
         console.warn(`[propuesta] negocio ${ctx.negocioId} sin carpeta_url — PDF no se sube a Drive`)

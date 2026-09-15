@@ -13,6 +13,7 @@ import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
+import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 
 export const maxDuration = 60
 
@@ -97,6 +98,9 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
   // Carpeta del cerebro: el campo solo existe donde el workspace exige la carpeta, y se
   // edita con el MISMO resolvedor que usa `actualizarCarpetaLocalNegocio`.
   const carpetaLocal = { visible: false, puedeEditar: false }
+  // Archivos en el proyecto propio del cliente (`storage_provider`): sin carpeta de Drive
+  // y con subida directa a ese proyecto. Se lee de la MISMA fila de config de abajo.
+  let almacenamientoExterno = false
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -106,6 +110,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
       .single()
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
+    almacenamientoExterno = esAlmacenamientoExterno(ws?.config_extra ?? null)
     if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
       carpetaLocal.visible = true
       carpetaLocal.puedeEditar = await resolverPermisoCarpetaLocal(
@@ -199,6 +204,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         puedeOmitirGates={puedeOmitirGates}
         puedeResolverAvisoRecaudo={puedeResolverAvisoRecaudo}
         carpetaLocal={carpetaLocal}
+        almacenamientoExterno={almacenamientoExterno}
         errorMsg={err}
         banner={banner}
         extras={extras}

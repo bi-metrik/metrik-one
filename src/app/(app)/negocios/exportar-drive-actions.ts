@@ -24,6 +24,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { puedeDescargarNegocios } from '@/lib/roles'
+import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 import { createServiceClient } from '@/lib/supabase/server'
 import { construirExportNegocios } from '@/lib/negocios/construir-export-negocios'
 import { leerIdsExport, MAX_IDS_EXPORT } from '@/lib/negocios/ids-export'
@@ -105,6 +106,16 @@ export async function subirExportNegociosADrive(ids: unknown): Promise<Resultado
 
     if (wsErr || !ws) {
       throw new Error(`workspace: ${wsErr?.message ?? 'no encontrado'}`)
+    }
+
+    // Un workspace con almacenamiento externo no publica nada en Drive: la tabla de
+    // negocios trae datos de sus clientes, y sacarlos de su proyecto hacia el Drive de
+    // MeTRIK es lo que esa configuración existe para impedir. La descarga a Excel sigue.
+    if (esAlmacenamientoExterno((ws as { config_extra: Record<string, unknown> | null }).config_extra)) {
+      return {
+        ok: false,
+        error: 'Este espacio guarda sus archivos fuera de Google Drive: la hoja de negocios no se publica en Drive. Usa «Descargar Excel».',
+      }
     }
 
     const carpeta = (ws as { drive_folder_id: string | null }).drive_folder_id

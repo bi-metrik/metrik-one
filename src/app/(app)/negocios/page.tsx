@@ -10,6 +10,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
 import { getRolePermissions, puedeDescargarNegocios, puedeMarcarCondicionNegocio } from '@/lib/roles'
 import NegociosClient from './negocios-client'
+import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { SearchParams } from '@/lib/filtros/url-estado'
 
@@ -58,6 +59,11 @@ export default async function NegociosPage({
   const canMarcar = puedeMarcarCondicionNegocio(ws.role)
   // Mismo gate que aplica `POST /api/negocios/export` (owner/admin/supervisor).
   const canDescargar = puedeDescargarNegocios(ws.role)
+  // La hoja viva en Drive no se ofrece donde el workspace guarda sus archivos fuera de
+  // Drive (el servidor tambien la rechaza). Si la marca no se puede leer, no se ofrece.
+  const canPublicarEnDrive = ws.workspaceId
+    ? !(await usaAlmacenamientoExterno(ws.workspaceId).catch(() => true))
+    : false
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
@@ -86,6 +92,7 @@ export default async function NegociosPage({
         canAsignar={canAsignar}
         canMarcar={canMarcar}
         canDescargar={canDescargar}
+        canPublicarEnDrive={canPublicarEnDrive}
         searchParams={sp}
         hoyISO={todayBogotaISO()}
       />

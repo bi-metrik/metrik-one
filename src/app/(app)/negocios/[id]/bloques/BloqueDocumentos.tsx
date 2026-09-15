@@ -15,6 +15,8 @@ import {
   actualizarCamposNegocioBloque,
   type CamposExtraidos,
 } from '@/lib/actions/ve-documentos-negocio'
+import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
+import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import DocUploadSlot from './DocUploadSlot'
 import type { SlotState } from './DocUploadSlot'
 
@@ -212,23 +214,33 @@ export default function BloqueDocumentos({
       // 1. Obtener URL firmada
       const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf'
       const uploadInfo = await getUploadUrlDocumentoNegocio(negocioBloqueId, negocioId, slug, ext)
-      if (!uploadInfo.success || !uploadInfo.path || !uploadInfo.token) {
+      if (!uploadInfo.success || !uploadInfo.path || (!uploadInfo.token && !uploadInfo.signedUrl)) {
         setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
         toast.error(uploadInfo.error ?? 'Error obteniendo URL de subida')
         return
       }
 
-      // 2. Subir a Supabase Storage
-      const supabase = createClient()
-      const { error: uploadError } = await supabase.storage
-        .from('ve-documentos')
-        .uploadToSignedUrl(uploadInfo.path, uploadInfo.token, file, {
-          contentType: file.type || 'application/octet-stream',
-        })
-      if (uploadError) {
-        setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
-        toast.error(`Error al subir: ${uploadError.message}`)
-        return
+      // 2. Subir. Con almacenamiento externo el servidor devuelve la URL firmada del
+      //    proyecto del cliente y el archivo va directo allá; si no, a Supabase Storage.
+      if (uploadInfo.signedUrl) {
+        const subida = await subirAUrlFirmada(uploadInfo.signedUrl, file, file.type || 'application/octet-stream')
+        if (!subida.ok) {
+          setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+          toast.error(subida.error)
+          return
+        }
+      } else {
+        const supabase = createClient()
+        const { error: uploadError } = await supabase.storage
+          .from('ve-documentos')
+          .uploadToSignedUrl(uploadInfo.path, uploadInfo.token as string, file, {
+            contentType: file.type || 'application/octet-stream',
+          })
+        if (uploadError) {
+          setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
+          toast.error(`Error al subir: ${uploadError.message}`)
+          return
+        }
       }
 
       // 3. Confirmar y guardar URL en bloque data
@@ -291,7 +303,7 @@ export default function BloqueDocumentos({
               )}
               <span className={`text-xs ${url ? '' : 'text-muted-foreground'}`}>{doc.label}</span>
               {url && (
-                <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto">
+                <a href={hrefArchivo(url) ?? undefined} target="_blank" rel="noopener noreferrer" className="ml-auto">
                   <Download className="h-3.5 w-3.5 text-acento" />
                 </a>
               )}

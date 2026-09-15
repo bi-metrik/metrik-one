@@ -188,6 +188,7 @@ export default function NegociosClient({
   canAsignar = false,
   canMarcar = false,
   canDescargar = false,
+  canPublicarEnDrive = true,
   searchParams,
   hoyISO,
 }: {
@@ -204,6 +205,8 @@ export default function NegociosClient({
   canMarcar?: boolean
   /** owner/admin/supervisor: pinta «Descargar Excel» (el gate real está en la ruta). */
   canDescargar?: boolean
+  /** false en un workspace con almacenamiento externo: la hoja no se publica en Drive. */
+  canPublicarEnDrive?: boolean
   /** Parámetros de la URL ya resueltos por el server component: filtros iniciales. */
   searchParams?: SearchParams
   /**
@@ -643,7 +646,7 @@ export default function NegociosClient({
               Drive. Mismo gate y mismo libro; solo cambia dónde queda. */}
           <div className="flex flex-wrap items-start justify-end gap-2">
             <DescargarExcelButton ids={idsVisibles} />
-            <SubirADriveButton ids={idsVisibles} />
+            {canPublicarEnDrive && <SubirADriveButton ids={idsVisibles} />}
           </div>
         </div>
       )}

@@ -6,6 +6,7 @@ import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { uploadFileToDrive, setFilePublicByLink, createSubfolderPath } from '@/lib/google-drive'
+import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
 import { TIPO_DOCUMENTO_DIAN } from '@/lib/dian/tipo-documento'
@@ -591,7 +592,21 @@ export async function generarFormularioCore(
     const negocioFolderId = ((negocio?.carpeta_url as string | null)?.match(/folders\/([-\w]+)/)?.[1]) ?? null
     let driveUrl: string | null = null
 
-    if (wsDriveFolderId && negocioFolderId) {
+    // Almacenamiento externo: el formulario va al proyecto del cliente y Drive no se toca.
+    // Aquí un fallo SÍ corta: generar el formulario es la acción misma, y marcar el bloque
+    // completo sin archivo guardado dejaría un gate cerrado sobre nada.
+    const almacenamiento = await almacenamientoExternoDe(workspaceId)
+    if (almacenamiento) {
+      const guardado = await almacenamiento.subirArchivo({
+        negocioId,
+        subcarpeta: (configExtra.drive_subfolder as string | undefined) ?? null,
+        nombre: `${label}.pdf`,
+        buffer,
+        mime: 'application/pdf',
+        tipoBloque: 'formulario',
+      })
+      driveUrl = guardado.referencia
+    } else if (wsDriveFolderId && negocioFolderId) {
       // Resolver subfolder canonico (config_extra.drive_subfolder, ej. "4. DIAN/Formularios")
       const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
       const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)

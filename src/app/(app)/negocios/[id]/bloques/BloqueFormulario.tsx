@@ -21,6 +21,7 @@ import {
   type FormularioVersionItem,
 } from '@/lib/actions/formulario-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
+import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 
 interface BloqueFormularioProps {
   negocioBloqueId: string
@@ -145,7 +146,7 @@ export default function BloqueFormulario({
         <span className="text-xs font-medium">{label}</span>
         {versionActual && <span className="text-[10px] text-muted-foreground">v{versionActual}</span>}
         {driveUrl && (
-          <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline">
+          <a href={hrefArchivo(driveUrl) ?? undefined} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline">
             <ExternalLink className="h-3 w-3" /> Ver PDF
           </a>
         )}
@@ -178,7 +179,7 @@ export default function BloqueFormulario({
           )}
         </div>
         {driveUrl && (
-          <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+          <a href={hrefArchivo(driveUrl) ?? undefined} target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
             <ExternalLink className="h-3 w-3" /> Ver PDF actual
           </a>
         )}
@@ -285,7 +286,7 @@ export default function BloqueFormulario({
               <span className="text-muted-foreground">{fmtFecha(v.generated_at)}</span>
               {v.autor && <span className="text-muted-foreground/70">· {v.autor}</span>}
               {v.drive_url && (
-                <a href={v.drive_url} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-primary hover:underline">
+                <a href={hrefArchivo(v.drive_url) ?? undefined} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-primary hover:underline">
                   <ExternalLink className="h-3 w-3" /> PDF
                 </a>
               )}

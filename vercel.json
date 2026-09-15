@@ -25,6 +25,10 @@
       "schedule": "0 13 * * *"
     },
     {
+      "path": "/api/crons/almacenamiento-externo",
+      "schedule": "30 13 * * *"
+    },
+    {
       "path": "/api/crons/ensure-negocio-folders",
       "schedule": "0 5 * * *"
     },
