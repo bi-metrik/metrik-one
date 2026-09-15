@@ -43,6 +43,7 @@ import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
 import ImpersonationBar from './impersonation-bar'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
+import { rutaPermitida } from '@/lib/modulos/gate'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -399,6 +400,16 @@ export default function AppShell({
   const vitrinaGate = <T extends { href: string }>(items: T[]): T[] =>
     modoVitrina ? items.filter((i) => (VITRINA_HREFS as readonly string[]).includes(i.href)) : items
 
+  // ── Gate por módulo ──
+  // El menú no ofrece lo que el middleware no deja abrir (`lib/modulos/gate.ts`, la misma
+  // función). Sin este filtro un item visible rebota al aterrizaje. Medido el 2026-09-15
+  // sobre los 17 workspaces: pasaba con Workflows en advise (sin Clarity, con una línea
+  // activa) y con Validación en metrik (sin Sustenta). El platform admin pasa, como en el
+  // middleware.
+  const ctxGate = { modules: mod, modoVitrina, platformAdmin: platformAdminState != null }
+  const moduloGate = <T extends { href: string }>(items: T[]): T[] =>
+    items.filter((i) => rutaPermitida(i.href, ctxGate))
+
   // En modo vitrina, Números y Tableros se FUERZAN aunque sus módulos (business)
   // estén off — son vitrinas de upsell. Sin esto no aparecen en un workspace
   // Valida-only porque sus grupos no se construyen. Se muestran para cualquier rol
@@ -415,18 +426,18 @@ export default function AppShell({
           : i,
       )
     : BUSINESS_NAV_ITEMS
-  const businessItems = modoVitrina
+  const businessItems = moduloGate(modoVitrina
     ? [VITRINA_NUMEROS_ITEM]
-    : (mod.business ? filterByRole(applyOverride(businessNavItems), role) : [])
-  const contabilidadItems = vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : [])
+    : (mod.business ? filterByRole(applyOverride(businessNavItems), role) : []))
+  const contabilidadItems = moduloGate(vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : []))
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
-  const complianceItems = vitrinaGate((mod.compliance || mod.compliance_audit)
+  const complianceItems = moduloGate(vitrinaGate((mod.compliance || mod.compliance_audit)
     ? filterCompliance(COMPLIANCE_NAV_ITEMS, role, mod)
-    : [])
+    : []))
   // Validacion — segmentacion + listas, mismo gating que compliance, grupo propio en sidebar
-  const validacionItems = vitrinaGate((mod.compliance || mod.compliance_audit)
+  const validacionItems = moduloGate(vitrinaGate((mod.compliance || mod.compliance_audit)
     ? filterCompliance(VALIDACION_NAV_ITEMS, role, mod)
-    : [])
+    : []))
   // En vitrina, "Compartidos" = solo Tableros, forzado para cualquier rol del ws.
   //
   // En un workspace de SOLO CALIDAD, Tableros tiene una sola pestaña y es la de
@@ -434,18 +445,18 @@ export default function AppShell({
   // menu una entrada que abre una pantalla vacia — que es exactamente el
   // defecto que este cambio vino a reparar, movido de sitio.
   const soloCalidad = !mod.business && !mod.compliance && !mod.rentabilidad_comercial && !!mod.calidad_llamadas
-  const sharedItems = modoVitrina
+  const sharedItems = moduloGate(modoVitrina
     ? [VITRINA_TABLEROS_ITEM]
     : filterByRole(applyOverride(SHARED_NAV_ITEMS), role).filter(
         (i) => !(soloCalidad && i.href === '/tableros' && role !== 'owner'),
-      )
+      ))
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
   // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
-  const workflowsItems = vitrinaGate(hasLineas
+  const workflowsItems = moduloGate(vitrinaGate(hasLineas
     ? filterByRole(applyOverride(WORKFLOWS_NAV_ITEMS), role).map(item =>
         isAdminWorkspace && role === 'owner' ? { ...item, href: '/admin/workflows' } : item
       )
-    : [])
+    : []))
   // En modo vitrina, Valida se muestra aunque el flag valida_consulta no esté (el
   // shell vitrina ES para clientes Valida-only). Fuera de vitrina, opt-in normal.
   // Calidad de llamadas — opt-in por flag. Sin el flag, ningun workspace
@@ -456,21 +467,21 @@ export default function AppShell({
   // ninguno asi (regat es calidad-only; SOENA y HJBC son business), pero la
   // condicion se deja escrita para que el primero que lo cree se estrelle con
   // esta linea y no con una pantalla que muestra Equipo dos veces.
-  const calidadItems = vitrinaGate(mod.calidad_llamadas
+  const calidadItems = moduloGate(vitrinaGate(mod.calidad_llamadas
     ? filterByRole(applyOverride(CALIDAD_NAV_ITEMS), role).filter(
         (i) => !(i.href === '/equipo' && mod.business),
       )
-    : [])
-  const validaItems = (modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : []
-  const certItems = vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : [])
-  const solicitudesItems = vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : [])
+    : []))
+  const validaItems = moduloGate((modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : [])
+  const certItems = moduloGate(vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []))
+  const solicitudesItems = moduloGate(vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : []))
   const extrasItems = [...solicitudesItems, ...validaItems, ...certItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
-  const cajaItems = vitrinaGate([
+  const cajaItems = moduloGate(vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
     ...(mod.conciliacion && roleAllowed(CAJA_CONCILIACION_ITEM.href, CAJA_CONCILIACION_ITEM.roles) ? [CAJA_CONCILIACION_ITEM] : []),
     ...(mod.cobros_recurrentes && roleAllowed(CAJA_COBROS_ITEM.href, CAJA_COBROS_ITEM.roles) ? [CAJA_COBROS_ITEM] : []),
-  ])
+  ]))
   const adminItems = modoVitrina ? [] : (isAdminWorkspace ? getAdminItemsForRole(role) : [])
 
   // Home href based on active modules. En modo vitrina el home es Valida (la única

@@ -3,6 +3,8 @@ import { updateSession } from '@/lib/supabase/middleware'
 import { landingForWorkspace } from '@/lib/auth/landing'
 import { extractSlug } from '@/lib/tenant/extract-slug'
 import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
+import { destinoSiBloqueada, rutaGateada } from '@/lib/modulos/gate'
+import { leerPerfilDeAcceso, type ClientePerfil } from '@/lib/modulos/perfil-de-acceso'
 
 const IS_DEV = process.env.NODE_ENV === 'development'
 
@@ -121,17 +123,21 @@ export async function middleware(request: NextRequest) {
     // `/suscripcion-suspendida` queda fuera del guard: es a donde manda el layout de
     // la app cuando el workspace está suspendido, y sin esta excepción un contador
     // rebotaría entre /revision (layout → suspendida) y aquí (guard → /revision).
-    if (
+    const aplicaGuardContador =
       pathname !== '/revision' && !pathname.startsWith('/revision/') && !pathname.startsWith('/auth/') &&
       pathname !== '/suscripcion-suspendida'
-    ) {
-      const { data: tenantProfile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-      if (tenantProfile?.role === 'contador') {
+    // Gate por módulo: una pantalla de un módulo apagado no abre (ver `lib/modulos/gate.ts`,
+    // que explica por qué vive aquí y no en el layout). Comparte la lectura del perfil con
+    // el guard del contador: una sola ida a la base, como antes.
+    const aplicaGateModulo = rutaGateada(pathname)
+    if (aplicaGuardContador || aplicaGateModulo) {
+      const perfil = await leerPerfilDeAcceso(supabase as unknown as ClientePerfil, user.id, aplicaGateModulo)
+      if (aplicaGuardContador && perfil.role === 'contador') {
         return withAuthCookies(NextResponse.redirect(new URL('/revision', request.url)), supabaseResponse)
+      }
+      const destino = perfil.gate ? destinoSiBloqueada(pathname, perfil.gate) : null
+      if (destino) {
+        return withAuthCookies(NextResponse.redirect(new URL(destino, request.url)), supabaseResponse)
       }
     }
 
@@ -239,6 +245,17 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirectTo', pathname)
     return withAuthCookies(NextResponse.redirect(loginUrl), supabaseResponse)
+  }
+
+  // Gate por módulo también en el dominio base: la app se renderiza sin subdominio (un
+  // preview de Vercel, `localhost`, o `metrikone.co/negocios` con la sesión del dominio
+  // base), y el layout pinta el workspace del perfil igual que en el subdominio.
+  if (user && rutaGateada(pathname)) {
+    const perfil = await leerPerfilDeAcceso(supabase as unknown as ClientePerfil, user.id, true)
+    const destino = perfil.gate ? destinoSiBloqueada(pathname, perfil.gate) : null
+    if (destino) {
+      return withAuthCookies(NextResponse.redirect(new URL(destino, request.url)), supabaseResponse)
+    }
   }
 
   return supabaseResponse
