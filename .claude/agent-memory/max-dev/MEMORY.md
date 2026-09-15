@@ -56,6 +56,7 @@
 - ⚠️⚠️ [PQR rechazado: el desenlace que devuelve el caso](project_pqr_rechazado_desenlace.md) — #603 mergeado, config SOENA SIN aplicar
 - ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — #731; SQL PENDIENTE va DESPUÉS del deploy; un lock_when con fuente en etapa anterior nunca persiste
 - ⚠️⚠️ [Aviso de sobrepago a financiera](project_aviso_sobrepago_financiera.md) — #734 mergeado, config SOENA SIN aplicar: va ANTES de apagar conciliar_sobrepago; V0498 falso
+- ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — #736 mergeado, config SOENA SIN aplicar (va DESPUÉS del deploy); el caso vivo es V0497, no V0498
 - ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — #598 mergeado, config SOENA SIN aplicar; el `solo_si` que evitó el único falso positivo
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto
 - ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos)
@@ -101,8 +102,10 @@
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte
 - [Renderizar client components en aislamiento](reference_render_appshell_aislado.md) — el AppShell solo pide `usePathname`+`useRouter`
 - [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
+- [Renderizar BloqueDatos en aislamiento](reference_render_bloque_datos_aislado.md) — 4 dobles; React SSR emite `inputMode` en camelCase y lo que nace de un evento NO se puede afirmar
+- ⚠️ [Un `\uXXXX` escrito con Write queda como carácter LITERAL](reference_escapes_unicode_se_normalizan.md) — invisible en el código; `String.fromCharCode` y verificar con `cat -A`
 - [SQL y publicacion en metrik-valida](reference_sql_y_publicacion_metrik_valida.md) — sin credenciales, el catálogo vivo se lee en las páginas públicas; PR por `gh api`
-- [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger
+- [SQL contra prod de ONE](reference_sql_prod_one.md) — el acceso varía por sesión; en #736 el `.py` se bloqueó y `grep|cut` a variables + `curl` pasó toda la sesión
 - ⚠️⚠️ [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — `cellDates` SOLO en `json_to_sheet`, y ahí no sirve de nada si la fila trae texto
 - ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO
 - [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
