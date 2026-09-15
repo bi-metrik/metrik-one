@@ -41,6 +41,8 @@ ledger necesitan la Management API. ⚠️ El script de la Management API va inv
 como `python3 x.py archivo.sql`: el guard de Bash rechaza el heredoc que lo
 alimenta por stdin dentro de un comando compuesto.
 
+**2026-09-15, más tarde, #731 — la lectura volvió a pasar.** GET por PostgREST con la service role leída de `metrik-one/.env.local` desde un `.mjs` en el scratchpad: ~1.500 filas paginadas y un GET a la RPC `condicion_cumplida` (stable) sin bloqueo. Confirma que esto se comprueba al empezar, no se recuerda.
+
 Se conserva el método porque el permiso lo puede reabrir Mauricio con una regla de Bash, y
 entonces esto vuelve a servir tal cual. Lo que sirvió el 2026-09-03, de punta a punta:
 
