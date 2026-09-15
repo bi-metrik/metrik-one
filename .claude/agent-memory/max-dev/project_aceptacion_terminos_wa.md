@@ -1,12 +1,32 @@
 ---
 name: aceptacion-terminos-wa
-description: PR #720 sin mergear — aceptación de documentos por el bot de WhatsApp + entrega de la llave de Valida desde Vault (migración SIN aplicar, wa-webhook SIN desplegar); y la firma HMAC de wa-webhook NO se valida nunca (verifySignature sin await)
+description: Bot de WhatsApp: aceptación de documentos + entrega de la llave de Valida desde Vault (#720 en prod; #722 mergeado con la guía de acceso, wa-webhook lo redespliega la sesión principal); dominios de Valida en conflicto; y la firma HMAC de wa-webhook NO se valida nunca (verifySignature sin await)
 metadata:
   type: project
 ---
 
-**PR #720** (`feat/wa-aceptacion-terminos`, 2026-09-14), **sin mergear por orden del brief**.
-Migración `20260915040000_aceptaciones_terminos.sql` **sin aplicar** (renumerada: el ledger ya
+## ⚠️ Estado al 2026-09-15 (caducó lo de "sin mergear")
+
+- **#720 en producción** (merge `d1bf219`, migración aplicada, `wa-webhook` desplegado por la sesión principal).
+- **#722 mergeado** (`f4e7ef8`, sin migración): la entrega pasa a 2 mensajes (llave sola + guía con URL
+  base, header, `POST /api/v1/validate`, `GET /api/v1/cuenta/consumo`, curl sin llave, docs, soporte) y
+  se quitó la promesa falsa "en unos minutos les damos acceso a la plataforma". **Mergear no despliega**:
+  hasta que alguien redespliegue `wa-webhook`, producción sigue mandando el texto viejo.
+- **Dominios de Valida en conflicto, y se eligió la decisión:** `proyectos/metrik/valida/decisions.md`
+  (2026-05-13) fija `valida.metrik.com.co` + `api.valida.metrik.com.co`, pero la guía (`app/docs/page.tsx`
+  BASE), la OpenAPI (`servers`), Postman y `lib/og.ts` de metrik-valida siguen en `*.valida.metrikone.co`
+  (alias del mismo despliegue, los 4 hosts responden igual). **Why:** `metrikone.co` es solo para ONE.
+  **How to apply:** en copy hacia clientes usar `metrik.com.co`; el `VALIDA_API_BASE` por defecto del
+  código de ONE todavía dice `metrikone.co` (funciona, no se tocó).
+- **Máscara:** `vk_` + 6 (≥32 de resto), 4 (16-31), 0 (<16). 6 es prefijo del `api_keys.key_prefix` (12)
+  que Valida guarda en claro, así que no revela nada nuevo y sirve para cruzar.
+- 4D SOFT (`opera_para_terceros=false`) sin bolsa asignada: `GET /cuenta/consumo` responde 409
+  `sin_plan_asignado` hasta que la sesión de Valida cargue la bolsa después de la entrega.
+
+## Historia
+
+**PR #720** (`feat/wa-aceptacion-terminos`, 2026-09-14), **sin mergear por orden del brief** en ese momento.
+Migración `20260915040000_aceptaciones_terminos.sql` entonces **sin aplicar** (renumerada: el ledger ya
 tenía `20260915020000` de #719) y `wa-webhook` **sin desplegar**. Caso que lo pidió: 4D SOFT
 (negocio `X1 26 1`, workspace metrik), Bayron Correa `+573164509919`, que NO está en `staff` ni
 `wa_collaborators` (cae por la rama de desconocidos).
