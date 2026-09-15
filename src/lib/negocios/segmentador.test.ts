@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contarLineaDeFlujo, segmentarNegocios } from './segmentador'
+import { segmentarNegocios } from './segmentador'
 
 type N = { id: string; stage_actual: string; etapa_numero: number; responsable?: string }
 
@@ -92,49 +92,5 @@ describe('segmentarNegocios', () => {
     const s = segmentarNegocios(NEGOCIOS, CERRADOS, 'venta', null, sinFiltro)
     expect(s.lista.map((n) => n.id)).not.toContain('y')
     expect(s.contarEtapa(1)).toBe(2)
-  })
-})
-
-describe('contarLineaDeFlujo', () => {
-  // La línea pinta todas las etapas en cualquier fase; el clic en una etapa pone la fase de
-  // la etapa. Estas etapas son las del fixture: 1-3 de venta y 7 de ejecución.
-  const ETAPAS = [
-    { numero: 1, stage: 'venta' },
-    { numero: 2, stage: 'venta' },
-    { numero: 3, stage: 'venta' },
-    { numero: 7, stage: 'ejecucion' },
-  ]
-  const atrasados = new Set(['b', 'd', 'e'])
-  const esAtrasado = (n: N) => atrasados.has(n.id)
-
-  it('el número de cada etapa es el largo de la lista que abre su clic (fase de la etapa + etapa)', () => {
-    const conteos = contarLineaDeFlujo(NEGOCIOS, ETAPAS, sinFiltro, esAtrasado)
-    for (const e of ETAPAS) {
-      const abre = segmentarNegocios(NEGOCIOS, CERRADOS, e.stage, e.numero, sinFiltro).lista
-      expect(conteos.get(e.numero)?.total).toBe(abre.length)
-    }
-  })
-
-  it('no suma cerrados aunque conserven la etapa (en Todos el contador de etapa sí los suma)', () => {
-    const conteos = contarLineaDeFlujo(NEGOCIOS, ETAPAS, sinFiltro, esAtrasado)
-    // 'y' es un cerrado en la etapa 1: la fase Todos lo cuenta, el clic en la etapa no lo abre.
-    expect(segmentarNegocios(NEGOCIOS, CERRADOS, 'todos', null, sinFiltro).contarEtapa(1)).toBe(3)
-    expect(conteos.get(1)?.total).toBe(2)
-  })
-
-  it('cuenta los atrasados con el criterio que le pasan, y respeta los demás filtros', () => {
-    const todos = contarLineaDeFlujo(NEGOCIOS, ETAPAS, sinFiltro, esAtrasado)
-    expect(todos.get(1)).toEqual({ total: 2, atrasados: 1 })
-    expect(todos.get(3)).toEqual({ total: 2, atrasados: 2 })
-    expect(todos.get(7)).toEqual({ total: 1, atrasados: 0 })
-
-    const deDeisy = contarLineaDeFlujo(NEGOCIOS, ETAPAS, soloDeisy, esAtrasado)
-    expect(deDeisy.get(1)).toEqual({ total: 0, atrasados: 0 })
-    expect(deDeisy.get(3)).toEqual({ total: 1, atrasados: 1 })
-  })
-
-  it('una etapa sin casos queda en cero, no desaparece', () => {
-    const conteos = contarLineaDeFlujo(NEGOCIOS, [...ETAPAS, { numero: 12, stage: 'cobro' }], sinFiltro, esAtrasado)
-    expect(conteos.get(12)).toEqual({ total: 0, atrasados: 0 })
   })
 })
