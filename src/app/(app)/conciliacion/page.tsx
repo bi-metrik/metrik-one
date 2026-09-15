@@ -5,10 +5,15 @@ import { getColaFacturacion } from '@/lib/actions/facturacion-actions'
 import { getControlRecibos } from '@/lib/actions/recibos-control-actions'
 import ConciliacionClient from './conciliacion-client'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { destinoInicialConciliacion } from './destino-inicial'
 
 export const runtime = 'nodejs'
 
-export default async function ConciliacionPage() {
+export default async function ConciliacionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ pestana?: string | string[]; saldo?: string | string[] }>
+}) {
   const supabase = await createClient()
 
   const { user } = await getCachedUser()
@@ -51,5 +56,19 @@ export default async function ConciliacionPage() {
   // depende de la cola de facturación, y por eso se carga aparte y falla aparte.
   const { data: recibos, error: recibosError } = await getControlRecibos()
 
-  return <ConciliacionClient data={data} cola={cola} recibos={recibos} recibosError={recibosError ?? null} />
+  // A qué pestaña se llega por un enlace (el aviso de sobrepago manda a Saldos → Sobrantes).
+  // Se resuelve aquí y no en el cliente: si no, el servidor pinta otra pestaña y la
+  // hidratación la descarta.
+  const destino = destinoInicialConciliacion(await searchParams)
+
+  return (
+    <ConciliacionClient
+      data={data}
+      cola={cola}
+      recibos={recibos}
+      recibosError={recibosError ?? null}
+      pestanaInicial={destino.pestana}
+      saldoInicial={destino.saldo}
+    />
+  )
 }

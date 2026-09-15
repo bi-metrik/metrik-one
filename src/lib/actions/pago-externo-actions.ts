@@ -5,6 +5,7 @@ import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
+import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 
 // Cast a untyped para columnas/tipos nuevos no en database.ts (tipo_cobro 'externo')
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -169,6 +170,10 @@ export async function registrarPagoExterno(
     // Solo si la línea lo declara. No devuelve error: el pago ya quedó registrado y
     // eso es lo que la persona pidió.
     await emitirReciboAutomatico(workspaceId, cobroId)
+
+    // Si este pago dejó el negocio con plata de más, se le avisa a la financiera
+    // (opt-in `aviso_sobrepago`). Nunca devuelve error.
+    await avisarSobrepagoSiCorresponde(workspaceId, negocioId)
 
     // ── 6. Revalidar y retornar ──────────────────────────────────────────────
     revalidatePath(`/negocios/${negocioId}`)

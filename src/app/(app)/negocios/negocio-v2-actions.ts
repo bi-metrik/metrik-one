@@ -131,6 +131,7 @@ import {
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { evaluarGateMargen } from '@/lib/cotizaciones/gate-margen-datos'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
+import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
@@ -4596,6 +4597,12 @@ export async function cambiarEtapaNegocioConGate(
     staffId ?? null,
   )
 
+  // Aviso de sobrepago a la financiera (opt-in `aviso_sobrepago`). Va aquí, después de
+  // mover, porque es la red de seguridad del salto por saldo: un caso con plata de más que
+  // atraviesa una etapa de cobro sin detenerse pasa por esta línea en la misma llamada.
+  // No frena nada y no deja rastro en el negocio; si ya se avisó ese monto, no repite.
+  await avisarSobrepagoSiCorresponde(workspaceId, negocioId)
+
   return { ...resultCambio, etapaDestinoNombre: nuevaEtapaNombre }
 }
 
@@ -6042,10 +6049,15 @@ export async function eliminarBloqueItem(
 async function reevaluarBloquesCobros(
   negocioId: string
 ): Promise<{ error: string | null }> {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
   const shouldBeComplete = await saldoCobrosCubierto(supabase, negocioId)
+
+  // Todo camino de este archivo que cambia la plata del negocio termina aquí (auto-cobros
+  // del bloque, confirmar pago, cambio de precio, anulación, redistribución): es el punto
+  // único para avisar un sobrepago a la financiera. Nunca lanza.
+  await avisarSobrepagoSiCorresponde(workspaceId, negocioId)
 
   // Buscar todas las instancias de bloques cobros del negocio
   const { data: bloquesRaw } = await db(supabase)

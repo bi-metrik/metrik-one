@@ -42,6 +42,7 @@ import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 import type { ControlRecibos } from '@/lib/actions/recibos-control-actions'
 import TabRecibos from './tab-recibos'
+import type { FiltroSaldo, PestanaConciliacion } from './destino-inicial'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -49,7 +50,7 @@ const fmtCOP = (n: number) =>
 const VERDE = 'var(--acento)'
 const FONT = { fontFamily: 'var(--font-schibsted), sans-serif' }
 
-type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion' | 'recibos'
+type TabKey = PestanaConciliacion
 
 /**
  * Panel de conciliación de la FINANCIERA — SOLO aceptar o rechazar lo que el
@@ -67,10 +68,17 @@ type TabKey = 'bandeja' | 'saldos' | 'general' | 'fuera_epayco' | 'facturacion' 
  *     tenerlo dentro obligaba a buscar pagos sin acusar en la pestaña "Ya facturados".
  */
 export default function ConciliacionClient(
-  { data, cola, recibos, recibosError }:
+  { data, cola, recibos, recibosError, pestanaInicial = null, saldoInicial = null }:
   {
     data: ConciliacionV2; cola: ColaFacturacion | null
     recibos: ControlRecibos | null
+    /**
+     * Pestaña y filtro con que abre la pantalla cuando se llega por un enlace (el aviso
+     * de sobrepago manda a Saldos → Sobrantes). Los resuelve el servidor desde la URL;
+     * ver `destino-inicial.ts`. Sin ellos, el comportamiento de siempre.
+     */
+    pestanaInicial?: TabKey | null
+    saldoInicial?: SaldoFiltro | null
     /**
      * Por qué no se pudo armar el control.
      *
@@ -91,11 +99,16 @@ export default function ConciliacionClient(
     [data],
   )
 
-  const [tab, setTab] = useState<TabKey>(pendientes.length > 0 ? 'bandeja' : 'general')
+  // La pestaña "Por facturar" solo existe con cola: un enlace que la pida sin cola cae
+  // al default en vez de abrir una pestaña que no se pinta.
+  const pestanaDelEnlace = pestanaInicial === 'facturacion' && !cola ? null : pestanaInicial
+  const [tab, setTab] = useState<TabKey>(pestanaDelEnlace ?? (pendientes.length > 0 ? 'bandeja' : 'general'))
   // Sube desde `TabSaldos` para que el contador de retenidos de la cola de
   // facturación pueda mandar a esta pestaña YA filtrada por faltante.
   const [filtrosSaldo, setFiltrosSaldo] = useState<Record<SaldoFiltro, boolean>>(
-    { sobrante: true, faltante: false, cero: false },
+    saldoInicial
+      ? { sobrante: saldoInicial === 'sobrante', faltante: saldoInicial === 'faltante', cero: saldoInicial === 'cero' }
+      : { sobrante: true, faltante: false, cero: false },
   )
 
   const tabs: { key: TabKey; label: string; count?: number }[] = [
@@ -654,7 +667,7 @@ function ModalAnularPorcion({
 // SALDOS — vista de solo lectura de la cartera
 // ════════════════════════════════════════════════════════════════════════════
 
-type SaldoFiltro = 'sobrante' | 'faltante' | 'cero'
+type SaldoFiltro = FiltroSaldo
 
 /**
  * Las dos bolsas de la fila, separadas: el HONORARIO (que sí es cartera de SOENA) y la
