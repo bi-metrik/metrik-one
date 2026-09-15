@@ -4,6 +4,7 @@ import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
 import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
+import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
 
@@ -405,6 +406,10 @@ export async function registrarPagoEpayco(
     // El recibo de caja de esta plata. Solo si la línea lo declara, y nunca devuelve
     // error: el pago ya quedó registrado y eso es lo que la persona pidió.
     if (cobroId) await emitirReciboAutomatico(workspaceId, cobroId)
+
+    // Si este pago dejó el negocio con plata de más, se le avisa a la financiera
+    // (opt-in `aviso_sobrepago`). Nunca devuelve error.
+    await avisarSobrepagoSiCorresponde(workspaceId, negocioId)
 
     revalidatePath(`/negocios/${negocioId}`)
     return { success: true, pagos: updatedPagos }

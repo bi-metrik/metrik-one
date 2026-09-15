@@ -41,6 +41,7 @@ import type {
   PropuestaRetroceso,
 } from '@/lib/negocios/retroceso-financiero'
 import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
+import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 
@@ -1429,6 +1430,10 @@ export async function registrarPagoEnNegocio(
     .update({ conciliado: false, updated_at: new Date().toISOString() })
     .eq('workspace_id', workspaceId).eq('negocio_id', negocioId)
 
+  // Si este pago dejó el negocio con plata de más, se le avisa a la financiera (opt-in
+  // `aviso_sobrepago`). Por aquí entran el FAB y el pago fuera de ePayco de Tesorería.
+  await avisarSobrepagoSiCorresponde(workspaceId, negocioId)
+
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/conciliacion')
   return { success: true }
@@ -1767,6 +1772,10 @@ export async function aceptarRepartoComercial(
   // Lo resolvió una de las dos -> el pendiente desaparece de la campana de
   // TODA el área financiera, no solo de quien hizo clic.
   await resolverPendienteConciliacion(supabase, workspaceId, ref)
+
+  // Al aceptar, las porciones del comercial pasan a contar como recaudo: es el momento en
+  // que un reparto puede dejar a un negocio con plata de más.
+  for (const id of negociosTocados) await avisarSobrepagoSiCorresponde(workspaceId, id)
 
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
   revalidatePath('/conciliacion')
