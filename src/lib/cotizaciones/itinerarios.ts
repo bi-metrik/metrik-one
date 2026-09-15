@@ -41,6 +41,7 @@
 import { calcularCascada, type Cascada, type ItemParaCascada, type ParametrosCascada } from './totales'
 import { nivelDeMargen } from './convencion-margen'
 import { grupoCombinable } from './ranuras-pantallazo'
+import { fueraDelPrecio } from './dia-relativo'
 
 /** Lo mínimo que hace falta de un ítem para saber en qué ranura vive. */
 export interface ItemConGrupo {
@@ -51,6 +52,32 @@ export interface ItemConGrupo {
   opcion_de?: string | null
   es_ajuste?: boolean | null
   orden?: number | null
+  /**
+   * El segundo interruptor y el día, que es una de sus condiciones. Los dos son
+   * necesarios para `fueraDelPrecio`: sin el día, una línea con día y marcada fuera
+   * del precio saldría del total mientras se imprime en el itinerario.
+   *
+   * ⚠️ Quien arme un `ItemConGrupo` desde una fila TIENE que pasar los dos. Omitirlos
+   * compila (son opcionales, por las lecturas anteriores a la columna) y deja la
+   * sugerencia sumando al total. Lo delata el aviso rojo, que se alimenta del mismo
+   * juego de ids.
+   */
+  dia_relativo?: number | null
+  entra_al_precio?: boolean | null
+}
+
+/**
+ * ¿La línea compite por el total? No compiten el cuadre ni una sugerencia fuera del
+ * precio.
+ *
+ * ⚠️ La sugerencia fuera del precio sale ANTES de armar las ranuras, no después. Si
+ * entrara como candidata, dos tours en el mismo grupo (uno cobrado y uno ofrecido)
+ * formarían una ranura con alternativas, el supuesto tomaría el primero por `orden`, y
+ * si el primero es el ofrecido el total se quedaría SIN ninguno de los dos.
+ */
+function compitePorElTotal(item: ItemConGrupo): boolean {
+  if (item.es_ajuste === true) return false
+  return !fueraDelPrecio(item)
 }
 
 /** Una ranura de la cotización, con sus candidatos ya resueltos. */
@@ -81,7 +108,7 @@ export interface Ranura {
 export function ranurasConAlternativas(items: ItemConGrupo[]): Ranura[] {
   const porGrupo = new Map<string, string[]>()
   for (const item of ordenados(items)) {
-    if (item.es_ajuste === true) continue
+    if (!compitePorElTotal(item)) continue
     const grupo = normalizarGrupo(item.grupo)
     if (grupo === null) continue
     const lista = porGrupo.get(grupo) ?? []
@@ -129,7 +156,7 @@ export function ranurasNoCombinables(items: ItemConGrupo[]): Ranura[] {
 export function itemsFijos(items: ItemConGrupo[]): string[] {
   const conAlternativas = new Set(ranurasConAlternativas(items).map(r => r.grupo))
   return ordenados(items)
-    .filter(item => item.es_ajuste !== true)
+    .filter(compitePorElTotal)
     .filter(item => {
       const grupo = normalizarGrupo(item.grupo)
       return grupo === null || !conAlternativas.has(grupo)
@@ -197,7 +224,9 @@ export function itemsDelItinerario(items: ItemConGrupo[], seleccion: string[]): 
 
   const conAlternativas = new Set(ranuras.map(r => r.grupo))
   return ordenados(items)
-    .filter(item => item.es_ajuste !== true)
+    // Sin esto, una sugerencia fuera del precio y sin grupo con alternativas pasaría
+    // el filtro de abajo como «componente fijo» y sumaría al total.
+    .filter(compitePorElTotal)
     .filter(item => {
       const grupo = normalizarGrupo(item.grupo)
       if (grupo === null || !conAlternativas.has(grupo)) return true

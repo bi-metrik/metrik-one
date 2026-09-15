@@ -1,0 +1,78 @@
+-- El segundo interruptor de una linea de cotizacion: ¿entra al precio?
+--
+-- Decision de Mauricio del 2026-09-15 («Sí, adelante»), sobre la pregunta que dejo
+-- abierta el PR #718. El caso que la motivo: la agencia carga «Tour Isla Catalina,
+-- $551.724» como sugerencia y quiere que el cliente VEA el precio pero que NO este
+-- en el total. Con un solo interruptor (el dia) no se podia: una sugerencia con
+-- precio seguia sumando mientras el documento la declaraba «no incluida», y lo unico
+-- que lo frenaba era el aviso rojo del editor.
+--
+-- ⚠️ ESTA MIGRACION NO LA APLICA EL SUBAGENTE. El PR que la acompana queda ABIERTO
+-- hasta que la sesion principal la aplique y corrija el ledger. Sin la columna, las
+-- escrituras del interruptor fallan con 42703 (ruidoso, que es lo correcto) y el
+-- producto se comporta exactamente como hoy: toda lectura de `items` usa
+-- `select('*')`, asi que el campo llega `undefined` y eso significa «entra al precio».
+--
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Que gana
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+--   · Una sugerencia (grupo declarado no combinable, sin dia) marcada fuera del
+--     precio imprime su precio en «actividades adicionales no incluidas» y NO suma
+--     ni al subtotal, ni al total, ni al costo, ni al margen.
+--   · El aviso rojo del editor deja de disparar para ese caso (ya no es una
+--     contradiccion, es una sugerencia declarada) y sigue disparando para el caso
+--     peligroso: una linea que SI entra al precio y se imprime como «no incluida».
+--
+-- ⚠️ NO es `mostrar_en_sugeridos`, y no se fusionan. Aquel es visibilidad en el
+-- documento; este es dinero. Las cuatro combinaciones tienen sentido (ver
+-- `fueraDelPrecio` en `src/lib/cotizaciones/dia-relativo.ts`).
+--
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Por que el default es `true`
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- El criterio del encargo: ninguna cotizacion existente puede cambiar su total al
+-- aplicar esto. `true` es «entra al precio», o sea el comportamiento de hoy para
+-- toda linea. Ademas la regla que lee la columna exige TRES condiciones a la vez
+-- (`false` explicito, sin dia, grupo declarado y no combinable), asi que ni siquiera
+-- un `false` sembrado por error moveria una linea que no sea una sugerencia.
+--
+-- Medido contra produccion el 2026-09-15, LEYENDO las filas y no razonando:
+--   · 41 items en toda la base, en 16 cotizaciones con items.
+--   · `grupo`: 37 nulos y 4 `vuelo` (combinable). CERO lineas con un grupo no
+--     combinable, o sea cero lineas que el interruptor pueda alcanzar.
+--   · `dia_relativo`: 41 nulos. `mostrar_en_sugeridos`: 41 en `true`.
+-- O sea: al aplicar esto, CERO cotizaciones cambian de total. Se comprobo tambien
+-- corriendo las 41 filas reales por el codigo de `main` y por el de este PR, con la
+-- columna ausente y con la columna en `true`: el mismo juego de lineas que aporta y
+-- el mismo total de cascada en las 16 cotizaciones (cifras en el cuerpo del PR).
+--
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Que cuesta
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Nada medible. La columna es ADITIVA, nace `true` en las 41 filas y no se toca
+-- una sola fila de datos. `not null` porque un nulo seria una tercera respuesta a
+-- una pregunta de si o no, y la lectura ya trata la ausencia como «entra».
+--
+-- ─────────────────────────────────────────────────────────────────────────────
+-- A quien avisarle
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+--   · Mauricio: ya autorizo la aplicacion. El PR no se mergea antes.
+--   · Trappvel (Daniela, Alejandra): en el editor, una linea con grupo de tour o
+--     traslado y sin dia muestra «Entra al precio de la cotizacion». Desmarcarla la
+--     ofrece como actividad adicional con su valor a la vista y la saca del total.
+--   · Nadie mas: Termotech, Arca, WMC y los demas workspaces no usan `grupo`, y el
+--     interruptor ni siquiera se les ofrece.
+--
+-- ⚠️ Vuelta atras: la columna se puede dropear. Las lineas que alguien haya sacado
+-- del precio volverian a sumar en el proximo recalculo, que es el comportamiento de
+-- antes; hay que recalcular esas cotizaciones para que `valor_total` lo refleje.
+
+alter table public.items
+  add column if not exists entra_al_precio boolean not null default true;
+
+comment on column public.items.entra_al_precio is
+  'Segundo interruptor de la linea: si es false y la linea es una sugerencia (grupo declarado no combinable y sin dia), se imprime con su precio en actividades adicionales no incluidas y NO suma al total, al costo ni al margen. En cualquier otra linea se ignora y la linea entra al precio. NO es mostrar_en_sugeridos, que es solo visibilidad.';

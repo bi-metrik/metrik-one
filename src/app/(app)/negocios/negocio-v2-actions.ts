@@ -6963,7 +6963,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .from('items')
       // `rubros(*)`: `sugerido` lo agrega `20260914230000` y nombrarlo devolveria un
       // 400 mientras no este aplicada. `calcularPresupuestoPorRubro` los filtra.
-      .select('nombre, cantidad, subtotal, es_ajuste, rubros(*)')
+      // `*` en el item por la misma razon: `entra_al_precio` (con `grupo` y
+      // `dia_relativo`) decide si una sugerencia fuera del precio cuenta como costo.
+      .select('*, rubros(*)')
       .eq('cotizacion_id', cotizacionAceptada.id)
       .order('orden')
 

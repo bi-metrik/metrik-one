@@ -33,9 +33,12 @@ import { agregarOpcionAItem, actualizarRanuraDeItem, actualizarDiaDeItem, type E
 
 import {
   avisoSugeridosQueCobran,
+  diaDeItem,
+  fueraDelPrecio,
   hayDiasAsignados,
   itemsSugeridos,
   puedeLlevarDia,
+  puedeSerSugerido,
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import PantallazoItem from '@/app/(app)/negocios/pantallazo-item'
@@ -107,6 +110,8 @@ interface ItemRow {
   dia_relativo?: number | null
   /** ¿La sugerencia se le muestra al cliente? Ausente cuenta como sí. */
   mostrar_en_sugeridos?: boolean | null
+  /** ¿La línea cobra? `false` = sugerencia con precio a la vista que no suma. Ausente = sí. */
+  entra_al_precio?: boolean | null
   rubros: RubroRow[]
 }
 
@@ -454,6 +459,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     opcion_de: i.opcion_de ?? null,
     es_ajuste: i.es_ajuste ?? false,
     orden: i.orden ?? 0,
+    // El segundo interruptor: una sugerencia fuera del precio no aporta al total.
+    // Sin estos dos, la pantalla sumaría lo que `recalcularTotales` ya no suma.
+    dia_relativo: i.dia_relativo ?? null,
+    entra_al_precio: i.entra_al_precio ?? null,
   }))
   /**
    * Con principal, la decisión está tomada y el total sale de ÉL (R5): no hay supuesto
@@ -521,6 +530,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     grupo: i.grupo ?? null,
     dia_relativo: i.dia_relativo ?? null,
     mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
+    entra_al_precio: i.entra_al_precio ?? null,
     es_ajuste: i.es_ajuste ?? false,
     orden: i.orden ?? 0,
     precio_venta: i.precio_venta ?? 0,
@@ -668,6 +678,21 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             const itemDescPct = Number(item.descuento_porcentaje) || 0
             const isAjuste = item.es_ajuste === true
             const isNegativo = itemPrecio < 0
+            // El segundo interruptor. `esFueraDelPrecio` es la regla completa (la misma
+            // que saca la línea del total); `puedeSalirDelPrecio` dice si el interruptor
+            // tiene sentido en esta línea: una sugerencia, o sea grupo no combinable y
+            // sin día. En cualquier otra línea no se ofrece, porque el servidor lo
+            // rechazaría.
+            const lineaDelInterruptor = {
+              id: item.id,
+              grupo: item.grupo ?? null,
+              es_ajuste: item.es_ajuste ?? false,
+              dia_relativo: item.dia_relativo ?? null,
+              entra_al_precio: item.entra_al_precio ?? null,
+            }
+            const esFueraDelPrecio = fueraDelPrecio(lineaDelInterruptor)
+            const puedeSalirDelPrecio =
+              puedeSerSugerido(lineaDelInterruptor) && diaDeItem(lineaDelInterruptor) === null
             const rubrosConfirmados = soloConfirmados(item.rubros ?? [])
             const rubrosSugeridos = soloSugeridos(item.rubros ?? [])
             const tieneRubros = rubrosConfirmados.length > 0
@@ -738,10 +763,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       )}
                       {!isAjuste && idsSugeridos.has(item.id) && (
                         <span
-                          title="Sin día: se imprime al final como actividad adicional no incluida"
+                          title={
+                            esFueraDelPrecio
+                              ? 'Se imprime al final como actividad adicional no incluida, con su precio a la vista. No suma al total.'
+                              : 'Sin día: se imprime al final como actividad adicional no incluida'
+                          }
                           className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                         >
-                          Sugerida{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
+                          Sugerida{esFueraDelPrecio ? ' · fuera del precio' : ''}{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
                         </span>
                       )}
                       {!isAjuste && costoDelItem === 0 && (
@@ -767,7 +796,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     {itemCantidad > 1 && (
                       <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
                     )}
-                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''}`}>{formatCOP(precioLinea)}</span>
+                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''} ${esFueraDelPrecio ? 'text-muted-foreground' : ''}`}>{formatCOP(precioLinea)}</span>
+                    {/* Fuera del precio la cifra sigue a la vista (es la que el cliente
+                        lee en el documento), pero se dice que no suma: una columna de
+                        precios donde una no cuenta, sin decirlo, se lee mal. */}
+                    {esFueraDelPrecio && (
+                      <span className="block text-[10px] text-muted-foreground">No suma al total</span>
+                    )}
                     {/* El descuento del ítem ya está dentro del costo: repetirlo aquí
                         como rebaja del precio lo contaría dos veces. */}
                     {!isAjuste && costoLinea > 0 && (
@@ -899,7 +934,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             defaultValue={item.dia_relativo ?? ''}
                             placeholder="Sin día"
                             aria-label="Día del viaje"
-                            className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                            // Fuera del precio no lleva día: con día entraría al
+                            // itinerario, o sea incluida. El servidor lo rechaza, así
+                            // que la pantalla no lo ofrece.
+                            disabled={esFueraDelPrecio}
+                            className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
                             onBlur={e => {
                               const txt = e.target.value.trim()
                               const val = txt === '' ? null : Number(txt)
@@ -915,11 +954,44 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           {/* El día es RELATIVO: el itinerario se arma antes de que la
                               salida tenga fecha. */}
                           <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            {idsSugeridos.has(item.id)
-                              ? 'Sin día: sale como actividad adicional no incluida'
-                              : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
+                            {esFueraDelPrecio
+                              ? 'Fuera del precio: márcala para que entre al precio antes de darle un día'
+                              : idsSugeridos.has(item.id)
+                                ? 'Sin día: sale como actividad adicional no incluida'
+                                : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
                           </p>
                         </div>
+                      )}
+                      {/* EL SEGUNDO INTERRUPTOR: ¿entra al precio? Separa MOSTRAR el
+                          precio de COBRARLO. Solo se ofrece en una sugerencia (grupo que
+                          no se combina, sin día): en cualquier otra línea sacarla del
+                          precio la haría desaparecer del documento sin sumar, y el
+                          servidor lo rechaza. No es el check de mostrar: aquel es
+                          visibilidad, este es plata, y por eso recalcula el total. */}
+                      {puedeSalirDelPrecio && (
+                        <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
+                          <input
+                            type="checkbox"
+                            defaultChecked={!esFueraDelPrecio}
+                            disabled={isPending}
+                            aria-label="Entra al precio de la cotización"
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                            onChange={e => {
+                              const val = e.target.checked
+                              startTransition(async () => {
+                                const res = await actualizarDiaDeItem(item.id, { entra_al_precio: val })
+                                if (!res.success) { toast.error(res.error); return }
+                                router.refresh()
+                              })
+                            }}
+                          />
+                          <span className="text-[11px] text-muted-foreground">
+                            <span className="font-medium text-foreground">Entra al precio de la cotización.</span>{' '}
+                            {esFueraDelPrecio
+                              ? 'Fuera del precio: se ofrece con su valor a la vista y no suma ni al total, ni al costo, ni al margen.'
+                              : 'Desmárcala para ofrecerla como actividad adicional: el cliente ve su precio y no suma al total.'}
+                          </span>
+                        </label>
                       )}
                       {/* El check de la sugerencia. Solo aparece cuando la línea ES una
                           sugerencia: un interruptor que no aplica confunde más que
@@ -942,9 +1014,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           />
                           <span className="text-[11px] text-muted-foreground">
                             Mostrarla al cliente entre las actividades sugeridas.{' '}
-                            <span className="text-amber-700">
-                              Ocultarla NO la saca del total: para eso, quítale el precio.
-                            </span>
+                            {esFueraDelPrecio ? (
+                              <span>Fuera del precio: oculta, ni se ve ni se cobra.</span>
+                            ) : (
+                              <span className="text-amber-700">
+                                Ocultarla NO la saca del total: para eso, desmarca «Entra al precio».
+                              </span>
+                            )}
                           </span>
                         </label>
                       )}
@@ -1599,9 +1675,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               <p className="mt-1.5">
                 Son{' '}
                 <span className="font-medium tabular-nums">{formatCOP(plataEnAviso)}</span>{' '}
-                que el cliente paga y el documento declara como no incluidos. Dos salidas:
+                que el cliente paga y el documento declara como no incluidos. Tres salidas:
                 {' '}<span className="font-medium">asígnale un día</span> para que entre al itinerario,
-                o <span className="font-medium">déjala en cero</span> si de verdad es solo una sugerencia.
+                {' '}<span className="font-medium">desmarca «Entra al precio»</span> si es una sugerencia
+                (el cliente sigue viendo su valor), o <span className="font-medium">déjala en cero</span>.
               </p>
             </div>
           )}

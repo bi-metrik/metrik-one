@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { puedeLlevarDia } from '@/lib/cotizaciones/dia-relativo'
+import { diaDeItem, puedeLlevarDia, puedeSerSugerido } from '@/lib/cotizaciones/dia-relativo'
+import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
 import {
   combinacionesCartesianas,
@@ -473,6 +474,27 @@ export async function actualizarRanuraDeItem(
   }
   if (Object.keys(patch).length === 0) return { success: true }
 
+  // Una sugerencia FUERA DEL PRECIO deja de serlo si su grupo pasa a vuelo, a hotel o
+  // a nada: `fueraDelPrecio` la ignoraría y la línea volvería a sumar sin que nadie
+  // recalcule. Se pide primero devolverla al precio, que sí recalcula.
+  if (updates.grupo !== undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: actual } = await (supabase as any)
+      .from('items')
+      .select('*')
+      .eq('id', itemId)
+      .maybeSingle()
+    if (
+      actual?.entra_al_precio === false &&
+      !puedeSerSugerido({ id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual.es_ajuste ?? false })
+    ) {
+      return {
+        success: false,
+        error: 'Esta línea está fuera del precio. Márcala para que entre al precio antes de cambiarle el grupo.',
+      }
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any).from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message }
@@ -480,19 +502,31 @@ export async function actualizarRanuraDeItem(
 }
 
 /**
- * El DÍA de una línea, y el check de si una sugerencia se le muestra al cliente.
+ * El DÍA de una línea, el check de si una sugerencia se le muestra al cliente, y el
+ * segundo interruptor: si la sugerencia ENTRA AL PRECIO.
  *
- * Los dos son PRESENTACIÓN: no mueven un peso del total. Quien decide qué aporta sigue
- * siendo `itemsQueAportanAlTotal`, y esta función no lo toca ni lo recalcula.
+ * El día y el check son PRESENTACIÓN: no mueven un peso del total. `entra_al_precio`
+ * sí es dinero, y por eso esta función recalcula los totales cuando lo cambia: una
+ * server action exportada es un endpoint alcanzable sin la pantalla, y dejar
+ * `valor_total` viejo hasta el próximo recálculo sería un total que miente.
  *
  * ⚠️ El guard lee el GRUPO de la base, no del navegador. Una server action exportada
  * es un endpoint alcanzable con cualquier id aunque ningún botón la invoque: si el
  * grupo llegara por parámetro, bastaría mandar `grupo: 'tour'` sobre el id de un vuelo
  * para meterlo al itinerario día por día y sacarlo de la tabla de combinaciones.
+ *
+ * ⚠️ Los dos guards del segundo interruptor escriben la misma regla que lee
+ * `fueraDelPrecio`, para que la base nunca guarde una marca que la lectura ignora:
+ *  - Sacar del precio exige una SUGERENCIA: grupo declarado no combinable y sin día.
+ *    Un vuelo, un hotel o una línea sin grupo fuera del precio desaparecerían del
+ *    documento sin sumar.
+ *  - Asignarle día a una línea fuera del precio se rechaza. Con día entra al
+ *    itinerario, o sea incluida: el total tendría que moverse solo por un cambio de
+ *    presentación, y eso lo decide el interruptor, no el día.
  */
 export async function actualizarDiaDeItem(
   itemId: string,
-  updates: { dia_relativo?: number | null; mostrar_en_sugeridos?: boolean },
+  updates: { dia_relativo?: number | null; mostrar_en_sugeridos?: boolean; entra_al_precio?: boolean },
 ) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
@@ -517,6 +551,10 @@ export async function actualizarDiaDeItem(
 
   if (updates.mostrar_en_sugeridos !== undefined) {
     patch.mostrar_en_sugeridos = updates.mostrar_en_sugeridos === true
+  }
+
+  if (updates.entra_al_precio !== undefined) {
+    patch.entra_al_precio = updates.entra_al_precio !== false
   }
 
   if (Object.keys(patch).length === 0) return { success: true }
@@ -547,9 +585,49 @@ export async function actualizarDiaDeItem(
     }
   }
 
+  // El estado en que quedaría la línea: lo guardado, con el patch encima. Los dos
+  // guards del interruptor miran este estado y no las piezas sueltas, porque el día
+  // y el interruptor pueden llegar en la misma llamada.
+  const quedaria = {
+    id: itemId,
+    grupo: (item.grupo ?? null) as string | null,
+    es_ajuste: (item.es_ajuste ?? false) as boolean,
+    dia_relativo: (patch.dia_relativo !== undefined ? patch.dia_relativo : item.dia_relativo ?? null) as number | null,
+    entra_al_precio: (patch.entra_al_precio !== undefined ? patch.entra_al_precio : item.entra_al_precio ?? null) as boolean | null,
+  }
+
+  const tocaElInterruptor = patch.entra_al_precio !== undefined || patch.dia_relativo !== undefined
+  if (tocaElInterruptor && quedaria.entra_al_precio === false) {
+    if (!puedeSerSugerido(quedaria)) {
+      return {
+        success: false,
+        error:
+          'Solo una sugerencia puede quedar fuera del precio: la línea tiene que declarar un grupo que no sea vuelo ni hotel.',
+      }
+    }
+    if (diaDeItem(quedaria) !== null) {
+      return {
+        success: false,
+        error:
+          patch.entra_al_precio === false
+            ? 'Una línea con día está en el itinerario, o sea incluida. Quítale el día antes de sacarla del precio.'
+            : 'Esta línea está fuera del precio. Márcala para que entre al precio antes de asignarle un día.',
+      }
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any).from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message }
+
+  // El interruptor mueve plata: el total, el costo y el margen se rehacen aquí mismo.
+  // Mismo patrón que el cargue de pantallazo, que también escribe algo que cambia la
+  // cascada y recalcula en el servidor.
+  const cambiaElPrecio =
+    patch.entra_al_precio !== undefined && patch.entra_al_precio !== (item.entra_al_precio !== false)
+  if (cambiaElPrecio && item.cotizacion_id) {
+    await recalcularTotales(item.cotizacion_id as string)
+  }
   return { success: true }
 }
 

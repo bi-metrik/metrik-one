@@ -50,16 +50,27 @@
  * puede caer a sugerida (nadie la saca del precio por omisión). Meter algo de más al
  * itinerario se ve; sacar algo del documento sin querer, no.
  *
- * ## Lo que este módulo NO decide: el precio
+ * ## El día NO decide el precio: lo decide el segundo interruptor
  *
- * El día es PRESENTACIÓN. Asignarlo o quitarlo no mueve un peso del total: quien
- * decide qué aporta sigue siendo `itemsQueAportanAlTotal`, y este archivo no lo toca.
+ * El día es PRESENTACIÓN. Asignarlo o quitarlo no mueve un peso del total.
  *
- * Eso deja viva una contradicción, y es el punto de plata del frente: una línea sin
- * día, con grupo no combinable y con precio cargado se imprime como «no incluida»
- * mientras suma al total que el cliente paga. No se arregla sola ni se bloquea en
- * silencio — se avisa con nombre propio (`avisoSugeridosQueCobran`), antes de generar
- * el PDF, donde la comercial mira.
+ * Con un solo interruptor quedaba viva una contradicción: una línea sin día, con grupo
+ * no combinable y con precio cargado se imprimía como «no incluida» mientras sumaba al
+ * total que el cliente paga. El caso que lo destapó, textual: la agencia carga «Tour
+ * Isla Catalina, $551.724» como sugerencia y quiere que el cliente VEA el precio pero
+ * que NO esté en el total. Con un solo interruptor no se podía.
+ *
+ * Por eso existe `items.entra_al_precio` (decisión de Mauricio del 2026-09-15: «Sí,
+ * adelante»). Separa MOSTRAR el precio de COBRARLO. Una sugerencia fuera del precio
+ * imprime su precio en «actividades adicionales no incluidas» y no suma ni al
+ * subtotal, ni al total, ni al costo, ni al margen (`fueraDelPrecio`).
+ *
+ * ⚠️ `mostrar_en_sugeridos` NO es este interruptor y no se fusionan: aquel es
+ * visibilidad en el documento; éste es dinero. Son cuatro combinaciones y las cuatro
+ * tienen sentido (ver `fueraDelPrecio`).
+ *
+ * El aviso rojo (`avisoSugeridosQueCobran`) sigue existiendo para el caso de verdad
+ * peligroso: una línea que SÍ entra al precio y se imprime como «no incluida».
  */
 
 import { grupoCombinable } from './ranuras-pantallazo'
@@ -85,6 +96,14 @@ export interface ItemConDia {
    * dejaría el paquete de sugeridos vacío sin que nadie supiera por qué.
    */
   mostrar_en_sugeridos?: boolean | null
+  /**
+   * ¿La línea cobra? `false` = es una sugerencia con precio a la vista que NO suma.
+   *
+   * Ausente o `null` cuenta como **sí entra**: es lo que llega de toda lectura anterior
+   * a la columna, y al revés una lectura vieja sacaría líneas del total sin que nadie
+   * lo hubiera pedido. Solo tiene efecto sobre una sugerencia (ver `fueraDelPrecio`).
+   */
+  entra_al_precio?: boolean | null
   es_ajuste?: boolean | null
   orden?: number | null
 }
@@ -150,6 +169,42 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
 }
 
 /**
+ * ¿Esta línea está FUERA DEL PRECIO? Es la única regla del segundo interruptor.
+ *
+ * Tres condiciones, y las tres son de la LÍNEA (ninguna mira el resto de la cotización):
+ *
+ *  1. `entra_al_precio` es `false` explícito. Ausente entra, como hoy.
+ *  2. No lleva día. Con día la línea está en el itinerario, o sea incluida: dejarla
+ *     fuera del precio imprimiría una línea del viaje con precio que no suma.
+ *  3. Puede ser sugerida (grupo declarado y no combinable, no es cuadre). Un vuelo, un
+ *     hotel o una línea sin grupo nunca se imprimen como «no incluidas», así que
+ *     sacarlas del precio las haría desaparecer del documento sin que sumen.
+ *
+ * ⚠️ Por qué ninguna condición mira la COTIZACIÓN (si usa días o no). Si la regla
+ * dependiera de que haya un día asignado en alguna parte, quitarle el último día a un
+ * tour le devolvería al total el precio de OTRA línea: un cambio de presentación
+ * moviendo plata. Con la regla por línea, asignar o quitar días nunca mueve el total.
+ *
+ * Una marca que no cumple 2 o 3 (llegó por SQL, o por un dato viejo) se IGNORA y la
+ * línea entra al precio: es la dirección segura, porque el documento sigue sumando lo
+ * que imprime. Las server actions impiden escribirla así.
+ *
+ * Las cuatro combinaciones con `mostrar_en_sugeridos`, todas legítimas:
+ *
+ * | entra al precio | se muestra | qué pasa                                            |
+ * |-----------------|------------|-----------------------------------------------------|
+ * | sí              | sí         | «no incluida» que cobra: AVISO ROJO                  |
+ * | sí              | no         | oculta que cobra: AVISO ROJO, el peor caso           |
+ * | no              | sí         | sugerencia con precio a la vista: sano, sin aviso    |
+ * | no              | no         | ni se ve ni se cobra: sano, sin aviso                |
+ */
+export function fueraDelPrecio(item: ItemConDia): boolean {
+  if (item.entra_al_precio !== false) return false
+  if (diaDeItem(item) !== null) return false
+  return puedeSerSugerido(item)
+}
+
+/**
  * ¿La cotización está organizada por días?
  *
  * Basta UNA línea con día. Es el interruptor entero del frente: mientras devuelva
@@ -184,16 +239,23 @@ export function diasDelItinerario(items: ItemConDia[]): DiaDelItinerario[] {
 /**
  * Las líneas que caen al paquete de sugeridos: «actividades adicionales no incluidas».
  *
- * SOLO si la cotización está organizada por días. Sin un solo día asignado devuelve
- * vacío aunque haya diez tours cargados — porque entonces no es una cotización con
- * itinerario, es la lista plana de siempre, y sus tours están incluidos.
+ * Con la cotización organizada por días: toda línea sin día que pueda ser sugerida.
+ *
+ * Sin un solo día asignado: SOLO las que alguien sacó del precio a propósito. Diez
+ * tours cargados y ningún día siguen siendo la lista plana de siempre, con sus tours
+ * incluidos — pero una línea fuera del precio es una declaración explícita de «no
+ * incluida», y si no cayera aquí desaparecería del documento: no suma (no está en la
+ * lista plana) y tampoco se ofrecería. Como la columna nace en `true`, ninguna
+ * cotización que ya exista cambia por esto.
  *
  * ⚠️ Incluye las que tienen el check apagado: quien decide si se imprimen es el PDF,
  * no este helper. Separarlo importa porque el AVISO de dinero tiene que ver también
  * las ocultas — una línea que el cliente no ve y sí paga es peor, no mejor.
  */
 export function itemsSugeridos(items: ItemConDia[]): string[] {
-  if (!hayDiasAsignados(items)) return []
+  if (!hayDiasAsignados(items)) {
+    return ordenados(items).filter(fueraDelPrecio).map(i => i.id)
+  }
   return ordenados(items)
     .filter(i => diaDeItem(i) === null && puedeSerSugerido(i))
     .map(i => i.id)
@@ -246,7 +308,12 @@ export interface ItemConPrecio extends ItemConDia {
  * Deliberadamente NO se arregla sola y NO bloquea. Descontarla del total le cambiaría
  * el precio a una cotización que alguien ya revisó, y bloquear la generación del PDF
  * dejaría a la comercial sin saber qué mover. Se nombra, con su plata, y se ofrecen
- * las dos salidas (asignarle día, o quitarle el precio).
+ * las salidas (asignarle día, sacarla del precio, o quitarle el precio).
+ *
+ * Una sugerencia FUERA del precio no avisa, y no porque este helper la excluya: no
+ * está en `aportanAlTotal`. Es deliberado no filtrarla aquí otra vez. Si algún
+ * llamador armara `aportanAlTotal` sin pasar `entra_al_precio`, la línea estaría
+ * sumando de verdad, y el aviso tiene que decirlo en vez de taparlo.
  *
  * `aportanAlTotal` entra por parámetro y sale de `itemsQueAportanAlTotal`: reimplementar
  * aquí quién aporta crearía una segunda regla del mismo dinero, que es el defecto que
