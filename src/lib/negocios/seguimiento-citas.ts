@@ -23,6 +23,8 @@
  * la cita dentro de las 36 h. Es una red preventiva, no un represamiento.
  */
 
+import { valorCumpleCondicion } from './condicion-bloque'
+
 /** Un documento que tiene que estar antes de la cita. */
 export type DocRequerido = {
   /** `bloque_configs.nombre`. Se usa el nombre y no el slug a propósito: las copias
@@ -34,14 +36,20 @@ export type DocRequerido = {
   /**
    * El documento solo se exige si este campo de otro bloque tiene este valor.
    *
-   * ⚠️ No es adorno. El certificado bancario de SOENA cuelga de
-   * `requiere_devolucion_iva`; sin esta condición, el ÚNICO caso que la marca roja
+   * ⚠️ No es adorno. El certificado bancario de SOENA cuelga de la rama de IVA
+   * (antes `requiere_devolucion_iva`; la config del 15-sep-2026 la pasa a `servicio`
+   * ∈ {completo, solo_iva}); sin esta condición, el ÚNICO caso que la marca roja
    * habría encendido el 9-sep-2026 (V0136, cita ese mismo día, certificado en
    * `pendiente`) era un falso positivo: ese negocio no pide devolución de IVA y no
    * necesita el certificado. La primera marca roja que ve la operación no puede
    * ser una equivocada.
+   *
+   * `valor` compara exacto (sin espacios al borde). `valor_in` acepta VARIAS respuestas,
+   * con la misma comparación que `condition.value_in`: hace falta desde que la rama de IVA
+   * se decide con el servicio contratado, donde dos respuestas (`completo` y `solo_iva`)
+   * piden el certificado.
    */
-  solo_si?: { bloque: string; campo: string; valor: string }
+  solo_si?: { bloque: string; campo: string; valor?: string; valor_in?: string[] }
 }
 
 export type SeguimientoCitasConfig = {
@@ -82,11 +90,15 @@ export function leerSeguimientoCitas(configExtra: unknown): SeguimientoCitasConf
     }
     const o = d as { bloque?: unknown; etiqueta?: unknown; solo_si?: unknown }
     if (!o || typeof o.bloque !== 'string' || !o.bloque.trim()) continue
-    const s = o.solo_si as { bloque?: unknown; campo?: unknown; valor?: unknown } | undefined
-    const solo_si =
-      s && typeof s.bloque === 'string' && typeof s.campo === 'string' && typeof s.valor === 'string'
-        ? { bloque: s.bloque, campo: s.campo, valor: s.valor }
-        : undefined
+    const s = o.solo_si as { bloque?: unknown; campo?: unknown; valor?: unknown; valor_in?: unknown } | undefined
+    const valorIn = Array.isArray(s?.valor_in)
+      ? s.valor_in.filter((v): v is string => typeof v === 'string')
+      : []
+    let solo_si: DocRequerido['solo_si']
+    if (s && typeof s.bloque === 'string' && typeof s.campo === 'string') {
+      if (typeof s.valor === 'string') solo_si = { bloque: s.bloque, campo: s.campo, valor: s.valor }
+      else if (valorIn.length > 0) solo_si = { bloque: s.bloque, campo: s.campo, valor_in: valorIn }
+    }
     docs.push({
       bloque: o.bloque.trim(),
       etiqueta: typeof o.etiqueta === 'string' && o.etiqueta.trim() ? o.etiqueta.trim() : undefined,
@@ -132,7 +144,10 @@ export function docsFaltantes(
   for (const doc of docs) {
     if (doc.solo_si) {
       const v = valorDe(doc.solo_si.bloque, doc.solo_si.campo)
-      if ((v ?? '').trim() !== doc.solo_si.valor) continue
+      const cumple = doc.solo_si.valor_in
+        ? valorCumpleCondicion(v, { value_in: doc.solo_si.valor_in })
+        : (v ?? '').trim() === doc.solo_si.valor
+      if (!cumple) continue
     }
     const e = estados[doc.bloque]
     if (!e || e.instancias === 0) continue

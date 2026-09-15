@@ -89,6 +89,7 @@ import {
 } from '@/lib/facturacion/factura-del-negocio'
 import { gatesDeFacturaPorLinea, slugFacturaDeLinea, type GateFactura } from '@/lib/facturacion/leer-factura-del-negocio'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
+import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import {
@@ -1612,7 +1613,7 @@ async function getNegocioDetalle(id: string): Promise<{
               seccional_ref_field?: string
               requiere_field?: string
               tipo_persona_slug?: string
-              solo_si?: { bloque_slug: string; field: string; value: string }
+              solo_si?: SoloSiBloque
             }
           | null
         if (bc.bloque_definitions?.tipo !== 'datos' || ccfg?.enabled !== true) continue
@@ -1630,10 +1631,11 @@ async function getNegocioDetalle(id: string): Promise<{
             .select('data, bloque_configs!inner(slug)')
             .eq('negocio_id', id)
             .eq('bloque_configs.slug', ccfg.solo_si.bloque_slug)
-          let cumple = false
-          for (const gb of ((guardBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
-            if (String((gb.data ?? {})[ccfg.solo_si.field] ?? '') === ccfg.solo_si.value) { cumple = true; break }
-          }
+          // `value` o `value_in`, con la misma comparación que `condition` (ver `soloSiCumple`).
+          const cumple = soloSiCumple(
+            ccfg.solo_si,
+            ((guardBloques ?? []) as Array<{ data: Record<string, unknown> | null }>).map(gb => gb.data),
+          )
           if (!cumple) {
             // El guard dejó de cumplirse (alguien corrigió la respuesta de arriba) y el
             // bloque tiene un valor sembrado antes. NO basta con dejar de mostrarlo: el

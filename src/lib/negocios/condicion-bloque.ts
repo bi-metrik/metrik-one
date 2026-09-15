@@ -64,6 +64,57 @@ export function resolverFuente(
   return fuentes.etapaActual ?? {}
 }
 
+/**
+ * ¿Este valor satisface la comparación de una condición? Solo la COMPARACIÓN, sin resolver
+ * de dónde sale el dato.
+ *
+ * Existe aparte porque hay guardias que no son `condition` pero preguntan lo mismo (el
+ * `solo_si` de la confirmación de cita DIAN). Si cada una comparara a su manera, una podría
+ * aceptar `value_in` y otra no — que es exactamente cómo un bloque termina aplicando para
+ * la pantalla y no para la siembra. Misma asimetría documentada arriba: `value` exacto,
+ * `value_in` normalizado. Un valor vacío nunca está en una lista sin cadena vacía.
+ */
+export function valorCumpleCondicion(
+  valor: unknown,
+  cond: Pick<CondicionBloque, 'value' | 'value_in'>,
+): boolean {
+  const raw = String(valor ?? '')
+  if (Array.isArray(cond.value_in)) {
+    const target = norm(raw)
+    return cond.value_in.some(v => norm(v) === target)
+  }
+  return raw === cond.value
+}
+
+/**
+ * El valor esperado de una condición, como texto para mostrarlo ("completo o solo_iva").
+ * `null` si la condición no declara ninguno. Sin esto el diagrama pintaba "= null" en toda
+ * condición escrita con `value_in`.
+ */
+export function textoValorCondicion(cond: { value?: unknown; value_in?: unknown } | null | undefined): string | null {
+  if (!cond) return null
+  if (typeof cond.value === 'string') return cond.value
+  if (Array.isArray(cond.value_in) && cond.value_in.length > 0) return cond.value_in.map(v => String(v)).join(' o ')
+  return null
+}
+
+/**
+ * Guardia `solo_si` de `cita_dian_confirmacion`: la siembra de "¿requiere cita?" solo corre
+ * si un campo de otro bloque (por slug) vale lo esperado en ALGUNA de sus instancias.
+ *
+ * ⚠️ Antes comparaba solo `value`. Un `solo_si` escrito con `value_in` daba `false` siempre,
+ * y un `false` aquí no es inocuo: la siembra lo lee como "el bloque dejó de aplicar" y
+ * RETIRA la respuesta ya sembrada. Por eso acepta la misma comparación que `condition`.
+ */
+export type SoloSiBloque = { bloque_slug: string; field: string; value?: string; value_in?: unknown[] }
+
+export function soloSiCumple(
+  soloSi: SoloSiBloque,
+  datosDelBloque: ReadonlyArray<Record<string, unknown> | null | undefined>,
+): boolean {
+  return datosDelBloque.some(d => valorCumpleCondicion((d ?? {})[soloSi.field], soloSi))
+}
+
 /** Un bloque sin `condition` aplica siempre. */
 export function cumpleCondicion(
   cond: CondicionBloque | null | undefined,
@@ -71,10 +122,5 @@ export function cumpleCondicion(
 ): boolean {
   if (!cond) return true
   const fuente = resolverFuente(cond, fuentes)
-  const raw = String(fuente[cond.field] ?? '')
-  if (Array.isArray(cond.value_in)) {
-    const target = norm(raw)
-    return cond.value_in.some(v => norm(v) === target)
-  }
-  return raw === cond.value
+  return valorCumpleCondicion(fuente[cond.field], cond)
 }
