@@ -130,6 +130,21 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'copy del historial auditable. La frase se autodescribe como «Soporte de auditoria SARLAFT», ' +
       'o sea que ES la bitácora que la política publicada de Valida declara en el mismo plazo.',
   },
+  'supabase/migrations/20260915060000_purga_registros_bot.sql': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'la purga de los registros del bot de WhatsApp: una aceptación de términos se conserva ' +
+      'mientras dure el contrato más el mismo plazo, y ese es el `interval` que calcula su ' +
+      '`retencion_hasta`. Publicado en la Política de Datos de Valida v1.4.',
+  },
+  'src/lib/retencion-bot/plazos.ts': {
+    tipo: 'plazo',
+    declara: 'derivado',
+    razon:
+      'los plazos del bot contra los que `purga-sql.test.ts` ejecuta la migración de la purga; ' +
+      'los años de la aceptación salen de la constante canónica.',
+  },
   'src/app/(onboarding)/onboarding/page.tsx': {
     tipo: 'no-es-plazo',
     razon:

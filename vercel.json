@@ -41,6 +41,10 @@
       "schedule": "0 4 * * *"
     },
     {
+      "path": "/api/crons/purgar-objetos-bot",
+      "schedule": "30 8 * * *"
+    },
+    {
       "path": "/api/crons/actas-diarias",
       "schedule": "0 0 * * *"
     },
