@@ -339,32 +339,115 @@ describe('acciones post-aceptacion', () => {
     expect(accionImplementada('otra')).toBe(false);
   });
 
-  it('los dos mensajes llevan el texto aprobado, la llave completa y la documentacion', () => {
-    const [llave, portal] = mensajesCredencialValida(LLAVE);
+  it('el primer mensaje lleva la llave completa, sola en su renglon, y la advertencia de guardarla', () => {
+    const [llave] = mensajesCredencialValida(LLAVE);
     expect(llave).toBe(
-      `Esta es su llave de API de Valida: ${LLAVE} (guárdenla en su gestor de secretos, no en el código). Documentación: https://valida.metrik.com.co/docs`,
+      [
+        'Esta es su llave de API de Valida:',
+        '',
+        LLAVE,
+        '',
+        'Guárdenla en su gestor de secretos, no en el código. No se puede recuperar: si se pierde, escríbannos y les emitimos una nueva.',
+      ].join('\n'),
     );
-    expect(portal).toBe('En unos minutos les damos acceso a la plataforma, desde donde podrán generar y regenerar sus llaves');
-    expect(portal).not.toContain('vk_');
+    expect(llave.split('\n')).toContain(LLAVE);
   });
 
-  it('enmascarar deja el prefijo y 4 caracteres, como vk_ab12…', () => {
-    expect(enmascararSecreto(LLAVE)).toBe('vk_ab12…');
-    expect(enmascararSecreto(`  ${LLAVE}\n`)).toBe('vk_ab12…');
+  it('la guia trae URL base, header exacto, las dos rutas, un curl sin la llave, la documentacion y el soporte', () => {
+    const [, guia] = mensajesCredencialValida(LLAVE);
+    for (const parte of [
+      'https://api.valida.metrik.com.co',
+      'Authorization: Bearer <su llave>',
+      'POST /api/v1/validate',
+      'GET /api/v1/cuenta/consumo',
+      'curl -X POST https://api.valida.metrik.com.co/api/v1/validate \\',
+      '-H "Authorization: Bearer $VALIDA_API_KEY"',
+      '-H "Idempotency-Key: $(uuidgen)"',
+      `-d '{"tipo":"natural","nombre":"NOMBRE COMPLETO","documento":{"tipo":"CC","numero":"NUMERO"}}'`,
+      'curl https://api.valida.metrik.com.co/api/v1/cuenta/consumo \\',
+      'https://valida.metrik.com.co/docs',
+      'WhatsApp +57 315 950 9103',
+      'mauricio.moreno@metrik.com.co',
+      'request_id',
+    ]) {
+      expect(guia).toContain(parte);
+    }
+    // Los ejemplos van en un bloque monoespaciado cerrado: sin eso WhatsApp formatea los `_`.
+    expect(guia.match(/```/g)).toHaveLength(2);
+  });
+
+  it('la guia nunca lleva la llave ni un pedazo de ella', () => {
+    const [, guia] = mensajesCredencialValida(LLAVE, { conAccesoPortal: true });
+    expect(guia).not.toContain(LLAVE);
+    expect(guia).not.toContain('vk_');
+    expect(guia).not.toContain(LLAVE.slice(3, 9));
+  });
+
+  it('ya no promete la plataforma "en unos minutos"; el acceso solo se menciona si la aceptacion trae la accion', () => {
+    for (const conAccesoPortal of [false, true]) {
+      const texto = mensajesCredencialValida(LLAVE, { conAccesoPortal }).join('\n');
+      expect(texto).not.toMatch(/minutos/i);
+    }
+    const [, sinPortal] = mensajesCredencialValida(LLAVE);
+    expect(sinPortal).not.toMatch(/plataforma/i);
+    expect(sinPortal).not.toMatch(/regenerar/i);
+    const [, conPortal] = mensajesCredencialValida(LLAVE, { conAccesoPortal: true });
+    expect(conPortal).toContain('Aparte les enviaremos el acceso a la plataforma de Valida, desde donde podrán generar y regenerar sus llaves.');
+  });
+
+  it('cada mensaje cabe en el tope de 4096 caracteres de un texto de WhatsApp', () => {
+    for (const conAccesoPortal of [false, true]) {
+      for (const m of mensajesCredencialValida(LLAVE, { conAccesoPortal })) {
+        expect(m.length).toBeLessThanOrEqual(4096);
+      }
+    }
+  });
+
+  it('enmascarar una llave real de Valida deja el prefijo vk_ y 6 caracteres', () => {
+    expect(enmascararSecreto(LLAVE)).toBe('vk_ab12cd…');
+    expect(enmascararSecreto(`  ${LLAVE}\n`)).toBe('vk_ab12cd…');
+    // Nunca mas que los 12 caracteres que Valida ya guarda como api_keys.key_prefix.
+    expect(enmascararSecreto(LLAVE).replace('…', '').length).toBeLessThanOrEqual(LLAVE.slice(0, 12).length);
+    expect(LLAVE.startsWith(enmascararSecreto(LLAVE).replace('…', ''))).toBe(true);
   });
 
   it('un secreto corto o sin prefijo no muestra caracteres de mas', () => {
     expect(enmascararSecreto('vk_abc')).toBe('vk_…');
     expect(enmascararSecreto('0123456789abcdef0123')).toBe('0123…');
+    expect(enmascararSecreto('PRUEBA-FICTICIA-SIN-EFECTO-0000000')).toBe('PRUEBA…');
     expect(enmascararSecreto('corta')).toBe('…');
     expect(enmascararSecreto('')).toBe('…');
   });
 
   it('la version publicable (wa_envios.preview) nunca contiene la llave', () => {
-    const preview = mensajesCredencialValida(enmascararSecreto(LLAVE))[0];
-    expect(preview).toContain('vk_ab12…');
-    expect(preview).not.toContain(LLAVE);
-    expect(preview).not.toContain(LLAVE.slice(3, 20));
+    for (const conAccesoPortal of [false, true]) {
+      const mascara = enmascararSecreto(LLAVE);
+      const preview = mensajesCredencialValida(mascara, { conAccesoPortal })[0];
+      expect(preview).toContain('vk_ab12cd…');
+      expect(preview).not.toContain(LLAVE);
+      // Ningun tramo de 7 caracteres de la llave despues del prefijo visible.
+      expect(preview).not.toContain(LLAVE.slice(3, 10));
+      // wa_envios.preview guarda 300 caracteres: la constancia enmascarada entra completa.
+      expect(preview.length).toBeLessThanOrEqual(300);
+    }
+  });
+
+  it('el aviso interno armado con la mascara no filtra la llave', () => {
+    const mascara = enmascararSecreto(LLAVE);
+    const aviso = avisoRespuesta({
+      fila: {
+        nombre_aceptante: 'Juan Guillermo', calidad: 'apoderado', empresa_nombre: '4D SOFT S.A.S.', empresa_nit: '901220269-6',
+        documento_titulo: 'Términos', documento_version: '1.0', telefono: TEL,
+      },
+      decision: 'acepto', respondidoAt: '2026-09-15T15:32:00Z', negocioCodigo: 'X1 26 1', estadoDocumento: 'read',
+      acciones: [
+        { tipo: 'enviar_credencial_valida', estado: 'enviada', detalle: `llave ${mascara} entregada y borrada de Vault` },
+        { tipo: 'enviar_credencial_valida', estado: 'fallida', detalle: `Meta no aceptó el mensaje con la llave ${mascara}` },
+      ],
+    });
+    expect(aviso).toContain('llave vk_ab12cd…');
+    expect(aviso).not.toContain(LLAVE);
+    expect(aviso).not.toContain(LLAVE.slice(3, 10));
   });
 
   it('el aviso interno lista las acciones y marca la falla sin reintento', () => {
@@ -375,17 +458,17 @@ describe('acciones post-aceptacion', () => {
     const ok = avisoRespuesta({
       fila, decision: 'acepto', respondidoAt: '2026-09-14T15:32:00Z', negocioCodigo: null, estadoDocumento: 'read',
       acciones: [
-        { tipo: 'enviar_credencial_valida', estado: 'enviada', detalle: 'llave vk_ab12… entregada y borrada de Vault' },
+        { tipo: 'enviar_credencial_valida', estado: 'enviada', detalle: 'llave vk_ab12cd… entregada y borrada de Vault' },
         { tipo: 'enviar_acceso_portal', estado: 'pendiente', detalle: 'sin implementar' },
       ],
     });
-    expect(ok).toContain('• Llave de API de Valida: enviada — llave vk_ab12… entregada y borrada de Vault');
+    expect(ok).toContain('• Llave de API de Valida: enviada — llave vk_ab12cd… entregada y borrada de Vault');
     expect(ok).toContain('• Acceso a la plataforma: pendiente — sin implementar');
     expect(ok).not.toContain('NO se reintenta');
 
     const fallo = avisoRespuesta({
       fila, decision: 'acepto', respondidoAt: '2026-09-14T15:32:00Z', negocioCodigo: null, estadoDocumento: 'read',
-      acciones: [{ tipo: 'enviar_credencial_valida', estado: 'fallida', detalle: 'Meta no aceptó el mensaje con la llave vk_ab12…' }],
+      acciones: [{ tipo: 'enviar_credencial_valida', estado: 'fallida', detalle: 'Meta no aceptó el mensaje con la llave vk_ab12cd…' }],
     });
     expect(fallo).toContain('fallida');
     expect(fallo).toContain('NO se reintenta sola');
