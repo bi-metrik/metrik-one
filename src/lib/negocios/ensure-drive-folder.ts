@@ -18,6 +18,7 @@
 
 import { createDriveFolder } from '@/lib/google-drive'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 
 // Estructura canónica de subcarpetas — el operador y el cliente
 // ven los compartimentos desde el primer día, aunque no haya archivos.
@@ -32,7 +33,7 @@ const CARPETAS_INICIALES = [
 export interface EnsureDriveFolderResult {
   created: boolean
   carpeta_url: string | null
-  reason?: 'ya_tiene' | 'sin_parent' | 'error' | 'creada'
+  reason?: 'ya_tiene' | 'sin_parent' | 'error' | 'creada' | 'almacenamiento_externo'
 }
 
 /**
@@ -58,6 +59,22 @@ export async function ensureNegocioDriveFolder(
   workspaceId: string,
   negocioId: string,
 ): Promise<EnsureDriveFolderResult> {
+  // ── -1. Workspace con almacenamiento externo: sus negocios no tienen carpeta en Drive ──
+  // Va primero y sin actividad en el timeline: no es un salto anómalo, es el diseño.
+  // Si la marca no se puede leer, NO se crea la carpeta (fail-closed): una carpeta de
+  // más en el Drive de MeTRIK es justo lo que la marca existe para evitar.
+  try {
+    if (await usaAlmacenamientoExterno(workspaceId)) {
+      return { created: false, carpeta_url: null, reason: 'almacenamiento_externo' }
+    }
+  } catch (err) {
+    console.error(
+      `[ensureNegocioDriveFolder] no se pudo leer el proveedor de almacenamiento (workspace=${workspaceId}):`,
+      err instanceof Error ? err.message : err,
+    )
+    return { created: false, carpeta_url: null, reason: 'error' }
+  }
+
   // ── 0. Leer el negocio (idempotencia + datos para el nombre) ──
   const { data: negocioRaw, error: negErr } = await supabase
     .from('negocios')

@@ -32,10 +32,12 @@
 - [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
 - ⚠️⚠️ [Aporte al total y rubros sugeridos](project_aporte_al_total_y_sugeridos.md) — #709 mergeado y migración APLICADA: el defecto del brief que ya estaba cerrado
+- ⚠️⚠️ [El día: itinerario y sugeridos, un solo interruptor](project_dia_relativo_sugeridos.md) — #718 SIN mergear: una línea SIN grupo nunca cae a «no incluidas»
 - ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700 mergeado: RX1 solo probado contra capturas SINTÉTICAS
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; CADUCÓ lo de las migraciones sin aplicar
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; la migración de umbrales YA está aplicada; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado y las tres INERTES: falta la config de datos
+- ⚠️⚠️ [Archivos de trappvel en su propio Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: config YA aplicada, corte de Drive DESPUÉS del merge, `archivos_one` sin crear
 - ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M
 - ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía
 - [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base)
@@ -77,12 +79,15 @@
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696 mergeado: `omitir_gate.staff_ids` inerte hasta que SOENA lo cargue
 - ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 la captura en ficha y modal SIN QA en pantalla
 - ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler
+- ⚠️⚠️ [WhatsApp sin teléfono (nombre de usuario, BSUID)](project_wa_bsuid_sin_telefono.md) — #724 mergeado SIN redesplegar; envío por `recipient` no verificado en vivo
+- ⚠️⚠️ [Aceptación de términos por WhatsApp](project_aceptacion_terminos_wa.md) — #720 en prod, #722 mergeado SIN redesplegar; dominios de Valida en conflicto; HMAC de wa-webhook NO se valida
 
 ## Referencias
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST
 - [Ensayar una función SQL con PGlite](reference_ensayo_sql_pglite.md) — cuerpo viejo y nuevo sobre una foto de producción, sin escribir; el viejo debe reproducir la pantalla
+- ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD con conteo sobre tabla inexistente da 204 sin error; Storage rechaza tildes
 - [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo subiendo el árbol
 - [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; el setter nativo o React no se entera
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS y chromium fotografía

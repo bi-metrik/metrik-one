@@ -20,6 +20,9 @@ import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
+import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
+import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
+import { esReferenciaExterna, esRutaPendienteDe, parsearReferencia } from '@/lib/almacenamiento/referencia'
 
 const BUCKET = 've-documentos'
 
@@ -461,6 +464,71 @@ async function bloqueHeredadoError(
   return `Este bloque es una copia de solo lectura de la etapa ${srcOrden}. Corrige el documento en su etapa de origen.`
 }
 
+// ── Almacenamiento externo (proveedor `supabase_externo`) ─────────────────────
+//
+// La subida del navegador llega como referencia a un objeto PENDIENTE dentro del
+// prefijo del negocio en el proyecto del cliente. Se valida que la pendiente sea de
+// ESTE negocio, que el negocio sea del workspace de la sesión y que el bloque cuelgue
+// de él, y se consolida con su nombre definitivo. El archivo anterior se borra solo
+// si tenía otro nombre (el reemplazo con el mismo nombre ya lo pisó al consolidar).
+async function consolidarDocumentoExterno(a: {
+  supabase: unknown
+  workspaceId: string
+  negocioId: string
+  bloqueId: string
+  referencia: string
+  subcarpeta: string | null
+  nombre: string
+  mime: string
+  anterior: unknown
+}): Promise<{ ok: true; buffer: Buffer; referencia: string } | { ok: false; error: string }> {
+  let almacenamiento: Awaited<ReturnType<typeof almacenamientoExternoDe>>
+  try {
+    almacenamiento = await almacenamientoExternoDe(a.workspaceId)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!almacenamiento) {
+    return { ok: false, error: 'Este espacio guarda sus archivos en Google Drive: la subida no corresponde a este flujo.' }
+  }
+
+  const pendiente = parsearReferencia(a.referencia)
+  if (!pendiente || !esRutaPendienteDe(pendiente.path, a.negocioId)) {
+    return { ok: false, error: 'La subida no corresponde a este negocio' }
+  }
+
+  const { data: bloque } = await db(a.supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, negocios!inner(workspace_id)')
+    .eq('id', a.bloqueId)
+    .maybeSingle()
+  const bloqueNegocio = (bloque?.negocio_id as string | undefined)?.toLowerCase()
+  const bloqueWorkspace = (bloque?.negocios as { workspace_id?: string } | null)?.workspace_id
+  if (bloqueNegocio !== a.negocioId.toLowerCase() || bloqueWorkspace !== a.workspaceId) {
+    return { ok: false, error: 'Negocio no encontrado en este workspace' }
+  }
+
+  const guardado = await almacenamiento.consolidarPendiente({
+    origen: a.referencia,
+    negocioId: a.negocioId,
+    subcarpeta: a.subcarpeta,
+    nombre: a.nombre,
+    mime: a.mime,
+    tipoBloque: 'documento',
+  })
+
+  if (esReferenciaExterna(a.anterior) && a.anterior !== guardado.referencia) {
+    try {
+      await almacenamiento.borrar(a.anterior)
+    } catch (e) {
+      // El documento nuevo ya quedó bien guardado; el viejo huérfano no rompe nada.
+      console.warn('[documento] no se pudo borrar el archivo anterior:', e instanceof Error ? e.message : e)
+    }
+  }
+
+  return { ok: true, buffer: guardado.buffer, referencia: guardado.referencia }
+}
+
 // ── 1. Procesar documento ya subido a Storage ─────────────────────────────────
 
 /**
@@ -502,21 +570,6 @@ export async function procesarDocumento(
   const ext = fileName.split('.').pop()?.toLowerCase() || 'pdf'
 
   try {
-    // ── 1. Descargar archivo de Storage ──────────────────────────────────
-    console.log(`[documento] Step 1: downloading ${fileName} from Storage...`)
-    const { data: fileData, error: dlError } = await admin.storage
-      .from(BUCKET)
-      .download(storagePath)
-
-    if (dlError || !fileData) {
-      console.error('[documento] Step 1 FAILED:', dlError?.message)
-      return { success: false, error: `Error leyendo archivo: ${dlError?.message ?? 'no data'}` }
-    }
-
-    const arrayBuf = await fileData.arrayBuffer()
-    const buffer = Buffer.from(arrayBuf)
-    console.log(`[documento] Step 1 OK: ${(buffer.length / 1024).toFixed(0)}KB`)
-
     // ── 2. Leer config del bloque (label, campos_extraccion) ────────────
     const { data: bloqueData } = await db(supabase)
       .from('negocio_bloques')
@@ -532,84 +585,120 @@ export async function procesarDocumento(
     const label = (configExtra.label as string) ?? 'Documento'
     const camposExtraccion = (configExtra.campos_extraccion ?? []) as CampoExtraccion[]
 
-    // ── 3. Obtener drive_folder_id del workspace ────────────────────────
-    const { data: workspace } = await db(supabase)
-      .from('workspaces')
-      .select('drive_folder_id')
-      .eq('id', workspaceId)
-      .single()
-
-    const driveFolderId = workspace?.drive_folder_id as string | null
-    console.log(`[documento] Step 3 OK: drive_folder_id=${driveFolderId ? 'yes' : 'none'}`)
-
+    let buffer: Buffer
     let driveUrl: string | null = null
     let driveFileId: string | null = null
 
-    // ── 4. Resolver la carpeta CANONICA del negocio desde negocios.carpeta_url
-    //    (la que crea crearNegocio y usa la propuesta economica). Antes se
-    //    re-creaba una carpeta por `codigo` a secas bajo el root del workspace →
-    //    como crearNegocio la nombra "{codigo} - {cliente}", no la encontraba y
-    //    creaba una carpeta HUERFANA distinta; por eso solo la propuesta caia en
-    //    la carpeta real y los documentos quedaban dispersos. Ahora se resuelve
-    //    el folder id desde carpeta_url, igual que la propuesta. ──
-    let negocioFolderId: string | null = null
-    if (driveFolderId) {
-      const { data: negocio } = await db(supabase)
-        .from('negocios')
-        .select('codigo, carpeta_url')
-        .eq('id', negocioId)
-        .eq('workspace_id', workspaceId)
+    if (esReferenciaExterna(storagePath)) {
+      // ── 1-7 (almacenamiento externo): el navegador ya subió el archivo al proyecto del
+      //    cliente como PENDIENTE; aquí se mueve a su nombre definitivo. Nada pasa por
+      //    el bucket público de ONE ni por Drive (ver `src/lib/almacenamiento/`). ──
+      const externo = await consolidarDocumentoExterno({
+        supabase,
+        workspaceId,
+        negocioId,
+        bloqueId,
+        referencia: storagePath,
+        subcarpeta: (configExtra.drive_subfolder as string | undefined) ?? null,
+        nombre: `${label}.${ext}`,
+        mime: mimeType,
+        anterior: (bloqueData?.data as Record<string, unknown> | null)?.drive_url,
+      })
+      if (!externo.ok) return { success: false, error: externo.error }
+      buffer = externo.buffer
+      driveUrl = externo.referencia
+    } else {
+      // ── 1. Descargar archivo de Storage ──────────────────────────────────
+      console.log(`[documento] Step 1: downloading ${fileName} from Storage...`)
+      const { data: fileData, error: dlError } = await admin.storage
+        .from(BUCKET)
+        .download(storagePath)
+
+      if (dlError || !fileData) {
+        console.error('[documento] Step 1 FAILED:', dlError?.message)
+        return { success: false, error: `Error leyendo archivo: ${dlError?.message ?? 'no data'}` }
+      }
+
+      const arrayBuf = await fileData.arrayBuffer()
+      buffer = Buffer.from(arrayBuf)
+      console.log(`[documento] Step 1 OK: ${(buffer.length / 1024).toFixed(0)}KB`)
+
+      // ── 3. Obtener drive_folder_id del workspace ────────────────────────
+      const { data: workspace } = await db(supabase)
+        .from('workspaces')
+        .select('drive_folder_id')
+        .eq('id', workspaceId)
         .single()
 
-      if (!negocio) {
-        return { success: false, error: 'Negocio no encontrado en este workspace' }
-      }
+      const driveFolderId = workspace?.drive_folder_id as string | null
+      console.log(`[documento] Step 3 OK: drive_folder_id=${driveFolderId ? 'yes' : 'none'}`)
 
-      const carpetaUrl = negocio.carpeta_url as string | null
-      if (carpetaUrl) {
-        negocioFolderId = carpetaUrl.match(/folders\/([-\w]+)/)?.[1] ?? null
-      }
-      if (!negocioFolderId) {
-        console.warn(`[documento] negocio ${negocioId} sin carpeta_url usable — se guarda en Storage, no en Drive`)
-      }
-    }
+      // ── 4. Resolver la carpeta CANONICA del negocio desde negocios.carpeta_url
+      //    (la que crea crearNegocio y usa la propuesta economica). Antes se
+      //    re-creaba una carpeta por `codigo` a secas bajo el root del workspace →
+      //    como crearNegocio la nombra "{codigo} - {cliente}", no la encontraba y
+      //    creaba una carpeta HUERFANA distinta; por eso solo la propuesta caia en
+      //    la carpeta real y los documentos quedaban dispersos. Ahora se resuelve
+      //    el folder id desde carpeta_url, igual que la propuesta. ──
+      let negocioFolderId: string | null = null
+      if (driveFolderId) {
+        const { data: negocio } = await db(supabase)
+          .from('negocios')
+          .select('codigo, carpeta_url')
+          .eq('id', negocioId)
+          .eq('workspace_id', workspaceId)
+          .single()
 
-    if (negocioFolderId) {
-      // ── 4a. Resolver subfolder canonico segun config_extra.drive_subfolder ──
-      const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
-      const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
-      if (subfolderPath) console.log(`[documento] Step 4a OK: subfolder "${subfolderPath}" -> ${targetFolderId}`)
+        if (!negocio) {
+          return { success: false, error: 'Negocio no encontrado en este workspace' }
+        }
 
-      // ── 4b. Eliminar archivo anterior de Drive si existe ────────────────
-      if (oldDriveFileId) {
-        try {
-          await deleteDriveFile(oldDriveFileId, workspaceId)
-          console.log(`[documento] Step 4b OK: old file ${oldDriveFileId} deleted`)
-        } catch (delErr) {
-          console.warn('[documento] Step 4b WARN: could not delete old file:', delErr)
-          // Continue — don't fail the upload because of a delete failure
+        const carpetaUrl = negocio.carpeta_url as string | null
+        if (carpetaUrl) {
+          negocioFolderId = carpetaUrl.match(/folders\/([-\w]+)/)?.[1] ?? null
+        }
+        if (!negocioFolderId) {
+          console.warn(`[documento] negocio ${negocioId} sin carpeta_url usable — se guarda en Storage, no en Drive`)
         }
       }
 
-      // ── 5. Subir archivo a Drive ──────────────────────────────────────
-      const driveFileName = `${label}.${ext}`
-      console.log(`[documento] Step 5: uploading "${driveFileName}" to Drive...`)
-      const result = await uploadFileToDrive(buffer, driveFileName, mimeType, targetFolderId, workspaceId)
-      driveFileId = result.fileId
-      driveUrl = result.webViewLink
-      console.log(`[documento] Step 5 OK: fileId=${driveFileId}`)
+      if (negocioFolderId) {
+        // ── 4a. Resolver subfolder canonico segun config_extra.drive_subfolder ──
+        const subfolderPath = (configExtra.drive_subfolder as string | undefined) ?? null
+        const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
+        if (subfolderPath) console.log(`[documento] Step 4a OK: subfolder "${subfolderPath}" -> ${targetFolderId}`)
 
-      // ── 6. Hacer accesible por link ───────────────────────────────────
-      await setFilePublicByLink(driveFileId, workspaceId)
-      console.log('[documento] Step 6 OK: permissions set')
+        // ── 4b. Eliminar archivo anterior de Drive si existe ────────────────
+        if (oldDriveFileId) {
+          try {
+            await deleteDriveFile(oldDriveFileId, workspaceId)
+            console.log(`[documento] Step 4b OK: old file ${oldDriveFileId} deleted`)
+          } catch (delErr) {
+            console.warn('[documento] Step 4b WARN: could not delete old file:', delErr)
+            // Continue — don't fail the upload because of a delete failure
+          }
+        }
 
-      // ── 7. Borrar archivo temporal de Supabase Storage ────────────────
-      await admin.storage.from(BUCKET).remove([storagePath])
-      console.log('[documento] Step 7 OK: temp file removed')
-    } else {
-      // Sin Drive (no configurado o negocio sin carpeta_url): guardar URL de Storage
-      const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
-      driveUrl = publicData.publicUrl
+        // ── 5. Subir archivo a Drive ──────────────────────────────────────
+        const driveFileName = `${label}.${ext}`
+        console.log(`[documento] Step 5: uploading "${driveFileName}" to Drive...`)
+        const result = await uploadFileToDrive(buffer, driveFileName, mimeType, targetFolderId, workspaceId)
+        driveFileId = result.fileId
+        driveUrl = result.webViewLink
+        console.log(`[documento] Step 5 OK: fileId=${driveFileId}`)
+
+        // ── 6. Hacer accesible por link ───────────────────────────────────
+        await setFilePublicByLink(driveFileId, workspaceId)
+        console.log('[documento] Step 6 OK: permissions set')
+
+        // ── 7. Borrar archivo temporal de Supabase Storage ────────────────
+        await admin.storage.from(BUCKET).remove([storagePath])
+        console.log('[documento] Step 7 OK: temp file removed')
+      } else {
+        // Sin Drive (no configurado o negocio sin carpeta_url): guardar URL de Storage
+        const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
+        driveUrl = publicData.publicUrl
+      }
     }
 
     // ── 8. Guardar en negocio_bloques.data ──────────────────────────────
@@ -803,11 +892,14 @@ export async function reprocesarDocumento(
     // teniendo el archivo delante. La url trae el id, y `extraerDriveFileId` ya
     // existe y está probada — no hace falta un backfill para desatascarlos.
     const driveUrl = currentData.drive_url as string | undefined
-    const driveFileId =
-      (currentData.drive_file_id as string | undefined) ??
-      (driveUrl ? extraerDriveFileId(driveUrl) ?? undefined : undefined)
+    // Un archivo en almacenamiento externo no tiene id de Drive: se lee por su referencia.
+    const referenciaExterna = esReferenciaExterna(driveUrl) ? driveUrl : null
+    const driveFileId = referenciaExterna
+      ? undefined
+      : (currentData.drive_file_id as string | undefined) ??
+        (driveUrl ? extraerDriveFileId(driveUrl) ?? undefined : undefined)
 
-    if (!driveFileId) {
+    if (!driveFileId && !referenciaExterna) {
       return { success: false, error: 'No hay archivo en Drive para reprocesar' }
     }
 
@@ -822,9 +914,18 @@ export async function reprocesarDocumento(
     const apiKey = getServerKey('gemini')
     if (!apiKey) return { success: false, error: 'API key de Gemini no configurada' }
 
-    // 3. Descargar archivo de Drive
-    console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
-    const buffer = await downloadDriveFile(driveFileId, workspaceId)
+    // 3. Descargar archivo de Drive (o del almacenamiento externo del workspace)
+    let buffer: Buffer
+    if (referenciaExterna) {
+      const almacenamiento = await almacenamientoExternoDe(workspaceId)
+      if (!almacenamiento) {
+        return { success: false, error: 'El archivo está en almacenamiento externo y este espacio usa Drive' }
+      }
+      buffer = (await almacenamiento.descargar(referenciaExterna)).buffer
+    } else {
+      console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
+      buffer = await downloadDriveFile(driveFileId as string, workspaceId)
+    }
     // El tipo lo decide el ARCHIVO, no su nombre. El cargue masivo bautiza todo
     // «Factura.pdf» / «RUT.pdf» sin mirar lo que mandó el cliente, y la gente manda
     // fotos: el «Factura.pdf» de V0181 son 9.507 bytes cuya cabecera es `\x89PNG`.
@@ -1066,6 +1167,18 @@ export async function subirImagenClipboard(
 
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  // Un workspace que guarda fuera de Drive NO escribe en el bucket público de ONE:
+  // su contrato es que sus archivos viven en su propio almacenamiento. Mientras el
+  // pantallazo no tenga ruta allá, se rechaza (lado seguro) en vez de caer aquí.
+  // Si la marca no se puede leer, también se rechaza: no se sabe a dónde iría.
+  try {
+    if (await usaAlmacenamientoExterno(workspaceId)) {
+      return { success: false, error: 'Este espacio guarda sus archivos en su propio almacenamiento: pegar imágenes aún no está disponible aquí.' }
+    }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'No se pudo resolver el almacenamiento del espacio' }
+  }
 
   const m = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(dataUrl)
   if (!m) return { success: false, error: 'Imagen inválida' }

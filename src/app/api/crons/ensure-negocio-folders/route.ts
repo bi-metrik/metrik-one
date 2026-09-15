@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
+import { esValorProveedorExterno } from '@/lib/almacenamiento/config'
 
 // Reconciliador continuo de carpetas de Drive.
 //
@@ -48,14 +49,19 @@ export async function GET(req: NextRequest) {
   // Workspaces con carpeta padre configurada (drive_folder_id no-null).
   const { data: wsData, error: wsErr } = await supabase
     .from('workspaces')
-    .select('id, slug')
+    .select('id, slug, proveedor:config_extra->>storage_provider')
     .not('drive_folder_id', 'is', null)
 
   if (wsErr) {
     return NextResponse.json({ error: wsErr.message }, { status: 500 })
   }
 
-  const workspaces = (wsData ?? []) as Array<{ id: string; slug: string }>
+  // ⚠️ Los workspaces con almacenamiento externo salen AQUÍ, en la lista de workspaces,
+  // y no solo dentro del helper. Sus negocios nunca tienen carpeta, así que si entraran
+  // al lote (50, del más viejo al más nuevo) lo ocuparían en cada corrida para siempre
+  // y los negocios de los demás workspaces se quedarían sin carpeta.
+  const workspaces = ((wsData ?? []) as Array<{ id: string; slug: string; proveedor: unknown }>)
+    .filter(w => !esValorProveedorExterno(w.proveedor))
   const wsIds = workspaces.map(w => w.id)
 
   if (wsIds.length === 0) {

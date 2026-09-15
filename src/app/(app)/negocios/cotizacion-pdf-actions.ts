@@ -5,6 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { diasDelItinerario, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -19,6 +20,8 @@ import {
   type CotizacionRenderItem,
 } from '@/lib/pdf/pdf-render-client'
 import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
+import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
+import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -44,6 +47,43 @@ function extractDriveFolderId(url: string | null | undefined): string | null {
   if (!url) return null
   const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
   return match ? match[1] : null
+}
+
+/**
+ * Workspace con almacenamiento externo: el PDF queda en `negocios/<id>/cotizaciones/`
+ * del proyecto del cliente. En un workspace en Drive no hace nada (`externo: false`)
+ * y cada camino sigue exactamente como estaba.
+ *
+ * Como la subida a Drive de siempre, NUNCA tumba el PDF: si no se puede guardar, el
+ * PDF se entrega igual y el motivo vuelve como `aviso` para que la pantalla lo diga.
+ * Si la marca de proveedor no se puede leer, se asume externo: sin Drive por las dudas.
+ */
+async function guardarPdfEnAlmacenamientoExterno(
+  workspaceId: string,
+  negocioId: string | null,
+  nombre: string,
+  buffer: Buffer,
+): Promise<{ externo: boolean; referencia: string | null; aviso: string | null }> {
+  try {
+    if (!(await usaAlmacenamientoExterno(workspaceId))) return { externo: false, referencia: null, aviso: null }
+    // Cotización de oportunidad (legacy, sin negocio): no hay prefijo de negocio donde guardarla.
+    if (!negocioId) return { externo: true, referencia: null, aviso: null }
+    const almacenamiento = await almacenamientoExternoDe(workspaceId)
+    if (!almacenamiento) return { externo: true, referencia: null, aviso: null }
+    const guardado = await almacenamiento.subirArchivo({
+      negocioId,
+      subcarpeta: 'cotizaciones',
+      nombre,
+      buffer,
+      mime: 'application/pdf',
+      tipoBloque: 'cotizacion',
+    })
+    return { externo: true, referencia: guardado.referencia, aviso: null }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[cotizacion-pdf] el PDF no quedó guardado en el almacenamiento externo:', msg)
+    return { externo: true, referencia: null, aviso: `El PDF se generó pero no quedó guardado: ${msg}` }
+  }
 }
 
 export async function generateCotizacionPDF(cotizacionId: string) {
@@ -344,12 +384,15 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       const buffer = await renderViaService(templateSlug, payload)
       const filename = `${cot.codigo ?? cot.consecutivo}.pdf`
 
+      // Almacenamiento externo: el PDF va al proyecto del cliente y Drive ni se intenta.
+      const externo = await guardarPdfEnAlmacenamientoExterno(workspaceId, negocioInfo?.id ?? null, filename, buffer)
+
       // Subida opcional a Drive si el negocio tiene carpeta configurada.
       // createDriveFolder() es find-or-create (busca por nombre+parent antes de crear).
       let driveFileId: string | null = null
       let driveWebViewLink: string | null = null
       const driveFolderId = extractDriveFolderId(negocioInfo?.carpeta_url)
-      if (driveFolderId && negocioInfo) {
+      if (!externo.externo && driveFolderId && negocioInfo) {
         try {
           const subFolderId = await createDriveFolder(
             'cotizaciones',
@@ -378,6 +421,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         fiscal,
         driveFileId,
         driveWebViewLink,
+        archivoReferencia: externo.referencia,
+        aviso: externo.aviso,
         renderedVia: 'weasyprint' as const,
       }
     } catch (e) {
@@ -450,17 +495,91 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   //
   // Sin ranuras con alternativas devuelve todos los ítems: el PDF de Termotech, Arca
   // y WMC no cambia una línea.
+  const paraPlantilla = (i: ItemRow) => ({
+    nombre: i.nombre ?? '',
+    descripcion: i.descripcion ?? null,
+    precio_venta: Number(i.precio_venta) || 0,
+    descuento_porcentaje: descuentoVisible(i),
+    cantidad: Number(i.cantidad) || 1,
+    unidad: i.unidad ?? null,
+  })
+
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
-  const itemsParaResumen = itemsDelPrincipal ?? items
-    .filter(aporta)
+  const itemsParaResumen = itemsDelPrincipal ?? items.filter(aporta).map(paraPlantilla)
+
+  /**
+   * El itinerario DÍA POR DÍA y el paquete de sugeridos.
+   *
+   * ⚠️ `dias` + `itemsSinDia` son una PARTICIÓN de lo que ya aporta al total, no algo
+   * nuevo: el Subtotal, el IVA y el TOTAL salen de `itemsParaResumen` y no cambian un
+   * peso por asignar o quitar un día. El día es presentación.
+   *
+   * ⚠️ Los sugeridos NO entran en esa partición: no aportan al documento... pero HOY
+   * SÍ aportan al total, porque `itemsQueAportanAlTotal` no mira el día. Esa es la
+   * contradicción que el editor avisa con nombre propio antes de generar el PDF.
+   * Descontarlos aquí le cambiaría el precio a una cotización ya revisada, y hacerlo
+   * en silencio es justo lo que no se puede.
+   *
+   * ⚠️ Con itinerarios en propuesta (bloques de alternativas) esto queda en `null`: el
+   * documento ya está organizado por opciones y meterle días encima daría dos
+   * organizaciones del mismo contenido en la misma página.
+   */
+  const itemsConDia = items
+    .filter(i => i.id)
     .map(i => ({
-      nombre: i.nombre ?? '',
-      descripcion: i.descripcion ?? null,
-      precio_venta: Number(i.precio_venta) || 0,
-      descuento_porcentaje: descuentoVisible(i),
-      cantidad: Number(i.cantidad) || 1,
-      unidad: i.unidad ?? null,
+      id: i.id as string,
+      grupo: i.grupo ?? null,
+      dia_relativo: (i as { dia_relativo?: number | null }).dia_relativo ?? null,
+      mostrar_en_sugeridos: (i as { mostrar_en_sugeridos?: boolean | null }).mostrar_en_sugeridos ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
     }))
+  const porId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
+  const bloquesDeDia = itinerariosPDF ? [] : diasDelItinerario(itemsConDia)
+  const idsConDia = new Set(bloquesDeDia.flatMap(d => d.itemIds))
+
+  const diasPDF = bloquesDeDia.length > 0
+    ? bloquesDeDia.map(d => ({
+        dia: d.dia,
+        items: d.itemIds
+          .map(id => porId.get(id))
+          .filter((i): i is ItemRow => i !== undefined && aporta(i))
+          .map(paraPlantilla),
+      }))
+    : null
+
+  const idsSugeridos = new Set(itinerariosPDF ? [] : itemsSugeridos(itemsConDia))
+
+  /**
+   * ⚠️ Las sugerencias NO entran aquí, y el defecto se vio en el documento renderizado,
+   * no razonándolo: sin este filtro el traslado se imprimía DOS veces, una en «Incluye
+   * también» y otra en «actividades adicionales no incluidas» — el mismo documento
+   * diciendo que una línea está incluida y que no lo está.
+   *
+   * Consecuencia asumida y declarada: cuando una sugerencia trae precio, la columna
+   * impresa ya no suma el Subtotal, porque esa línea sigue aportando al total. Es la
+   * cara visible de la contradicción que el editor avisa en rojo, y la salida es
+   * ponerla en cero o darle un día. Con la sugerencia en cero —que es su estado
+   * sano— la columna vuelve a cuadrar sola.
+   */
+  const itemsSinDiaPDF = diasPDF
+    ? items
+        .filter(i => aporta(i) && !(i.id && (idsConDia.has(i.id) || idsSugeridos.has(i.id))))
+        .map(paraPlantilla)
+    : null
+
+  const sugeridosPDF = itinerariosPDF
+    ? null
+    : sugeridosVisibles(itemsConDia)
+        .map(id => porId.get(id))
+        .filter((i): i is ItemRow => i !== undefined)
+        .map(i => ({
+          nombre: i.nombre ?? '',
+          descripcion: i.descripcion ?? null,
+          precio_venta: Number(i.precio_venta) || 0,
+          cantidad: Number(i.cantidad) || 1,
+          unidad: i.unidad ?? null,
+        }))
 
   const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {
@@ -498,6 +617,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     },
     items: itemsParaResumen,
     itinerarios: itinerariosPDF,
+    dias: diasPDF,
+    itemsSinDia: itemsSinDiaPDF,
+    sugeridos: sugeridosPDF && sugeridosPDF.length > 0 ? sugeridosPDF : null,
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
@@ -507,12 +629,25 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer = await renderToBuffer(element as any)
   const base64 = Buffer.from(buffer).toString('base64')
+  const filename = `${cot.consecutivo}.pdf`
+
+  // Este camino nunca guardó el PDF en ningún lado (solo lo devuelve para descargar), y
+  // en un workspace en Drive sigue igual. Con almacenamiento externo queda además en el
+  // proyecto del cliente.
+  const externo = await guardarPdfEnAlmacenamientoExterno(
+    workspaceId,
+    negocioInfo?.id ?? null,
+    filename,
+    Buffer.from(buffer),
+  )
 
   return {
     success: true,
     pdf: base64,
-    filename: `${cot.consecutivo}.pdf`,
+    filename,
     fiscal,
+    archivoReferencia: externo.referencia,
+    aviso: externo.aviso,
     renderedVia: 'react-pdf' as const,
   }
 }

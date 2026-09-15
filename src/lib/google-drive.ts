@@ -22,6 +22,7 @@
 import { createSign } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
+import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 
 // ── Token cache (por workspace) ──────────────────────────────────────────────
 
@@ -126,6 +127,19 @@ async function resolveCredentials(workspaceId?: string): Promise<DriveCredential
 
     if (!error && ws) {
       const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
+
+      // ── Workspace con almacenamiento externo: Drive cerrado por cualquier vía ──
+      // Toda operación de este archivo pasa por aquí antes de hablar con Google, así
+      // que un flujo que se haya quedado sin convertir falla fuerte en vez de dejar
+      // documentos de terceros en el Drive de MeTRIK (que es lo que pasaría si cayera
+      // a las credenciales globales de abajo). Ver `src/lib/almacenamiento/config.ts`.
+      if (esAlmacenamientoExterno(cfg)) {
+        const slug = (ws.slug as string) ?? workspaceId
+        throw new Error(
+          `Workspace ${slug}: guarda sus archivos fuera de Google Drive ` +
+          `(config_extra.storage_provider). Esta operación de Drive no está permitida.`,
+        )
+      }
 
       // ── Modo service account (domain-wide delegation) — preferido ──
       // No caduca ni requiere reautorización. Se chequea ANTES del OAuth.

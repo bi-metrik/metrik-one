@@ -80,9 +80,22 @@ function TablaDeItems({ items, pc, pcLight }: { items: ItemPDF[]; pc: string; pc
   )
 }
 
-export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal, itinerarios }: CotizacionPDFProps) {
+export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal, itinerarios, dias, sugeridos, itemsSinDia }: CotizacionPDFProps) {
   const pc = vendedor.color_primario || PALETA.acento
   const pcLight = lighten(pc, 0.08)
+
+  /**
+   * ¿El documento se organiza por días?
+   *
+   * El interruptor es que LLEGUEN días, no un flag. Sin un solo día asignado esto es
+   * `false` y todo lo de abajo se comporta exactamente como antes de este frente —que
+   * es la regla 1 de la reunión del 2026-09-14, y lo que deja intactos a Termotech,
+   * Arca y WMC.
+   */
+  const bloquesDia = (dias ?? []).filter(d => d.items.length > 0)
+  const porDias = bloquesDia.length > 0
+  const restoSinDia = porDias ? (itemsSinDia ?? []) : []
+  const sugeridosVisibles = sugeridos ?? []
 
   // R7 · los bloques que el documento imprime. Con UNO solo (o ninguno) se cae al
   // camino de siempre: un cliente con una sola opcion no necesita que se la
@@ -251,7 +264,36 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
           </View>
         )}
 
-        {bloques.length <= 1 && items.length > 0 && (
+        {/* ── El itinerario DÍA POR DÍA ──
+            Reemplaza la tabla plana cuando alguien asignó al menos un día. No es una
+            sección extra: es la MISMA lista repartida, así que la suma no cambia.
+            Los vuelos y hoteles (y lo que no declara grupo) van en su propio bloque
+            debajo, porque son parte del viaje aunque no caigan en un día. */}
+        {bloques.length <= 1 && porDias && (
+          <View style={{ marginTop: 20 }}>
+            <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
+              ITINERARIO
+            </Text>
+            {bloquesDia.map(bloque => (
+              <View key={bloque.dia} style={{ marginBottom: 12 }} wrap={false}>
+                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>
+                  {`Día ${bloque.dia}`}
+                </Text>
+                <TablaDeItems items={bloque.items} pc={pc} pcLight={pcLight} />
+              </View>
+            ))}
+            {restoSinDia.length > 0 && (
+              <View style={{ marginBottom: 12 }} wrap={false}>
+                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4 }}>
+                  Incluye también
+                </Text>
+                <TablaDeItems items={restoSinDia} pc={pc} pcLight={pcLight} />
+              </View>
+            )}
+          </View>
+        )}
+
+        {bloques.length <= 1 && !porDias && items.length > 0 && (
           <View style={{ marginTop: 20 }}>
             <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
               DETALLE
@@ -381,6 +423,55 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
             </Text>
           )}
         </View>
+
+        {/* ── S5b. ACTIVIDADES ADICIONALES NO INCLUIDAS (condicional) ──
+            El paquete de sugeridos. Va DESPUES del total a proposito: lo primero que
+            el cliente tiene que poder leer es que esta pagando, y estas lineas no
+            estan en esa cifra. Solo existe cuando la cotizacion se organiza por dias;
+            sin un solo dia asignado este bloque no aparece nunca. */}
+        {sugeridosVisibles.length > 0 && (
+          <View style={{ marginTop: 20, borderWidth: 0.5, borderColor: '#E5E7EB', borderRadius: 4, padding: 12 }}>
+            <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: PALETA.tintaSuave, textTransform: 'uppercase', letterSpacing: 1.5 }}>
+              ACTIVIDADES ADICIONALES NO INCLUIDAS
+            </Text>
+            <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 3, marginBottom: 8 }}>
+              Sugerencias para complementar el viaje. No están incluidas en el valor de arriba.
+            </Text>
+            {sugeridosVisibles.map((s, i) => {
+              // El precio es INFORMATIVO. Se imprime solo si la linea lo declara: un
+              // «$0» sobre una actividad que todavia no se ha costeado dice algo falso.
+              const cant = s.cantidad ?? 1
+              const valor = Math.round((s.precio_venta || 0) * cant)
+              const unidad = (s.unidad ?? '').trim()
+              return (
+                <View
+                  key={i}
+                  style={{
+                    flexDirection: 'row',
+                    paddingVertical: 5,
+                    borderTopWidth: i === 0 ? 0 : 0.5,
+                    borderTopColor: '#E5E7EB',
+                    alignItems: 'flex-start',
+                  }}
+                >
+                  <View style={{ width: '72%' }}>
+                    <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>
+                      {s.nombre}
+                    </Text>
+                    {s.descripcion && (
+                      <Text style={{ fontSize: 8, color: PALETA.tintaSuave, marginTop: 2 }}>
+                        {s.descripcion}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={{ width: '28%', fontSize: 9, color: PALETA.tintaSuave, textAlign: 'right' }}>
+                    {valor > 0 ? (unidad ? `${fmt(valor)} / ${unidad}` : fmt(valor)) : 'Consultar'}
+                  </Text>
+                </View>
+              )
+            })}
+          </View>
+        )}
 
         {/* ── S6. VALIDEZ (condicional) ── */}
         {cotizacion.fecha_validez && (

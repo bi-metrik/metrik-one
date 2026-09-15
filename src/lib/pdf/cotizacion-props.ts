@@ -89,6 +89,79 @@ export interface CotizacionPDFProps {
       unidad?: string | null
     }[]
   }[] | null
+  /**
+   * El itinerario DÍA POR DÍA: un bloque por día, con las líneas que le tocan.
+   *
+   * `null`, ausente o vacío —que es TODA cotización sin un solo día asignado, o sea
+   * las 20 que existen hoy— hace que la plantilla imprima la tabla plana de siempre.
+   * Igual que con `itinerarios`: no hay un flag que encender, hay un arreglo que no
+   * llega. Esa es la regla 1 de la reunión del 14, y es lo que protege a Termotech,
+   * Arca y WMC, que cotizan bombas y no viajes.
+   *
+   * ⚠️ Los días vienen TAL COMO alguien los asignó: si hay 1 y 3 y ninguno 2, llegan
+   * 1 y 3. Rellenar el hueco inventaría un día vacío en el documento del cliente.
+   *
+   * ⚠️ INVARIANTE que sostiene el documento: `dias` e `itemsSinDia` son una PARTICIÓN
+   * de `items`, no algo aparte. `items` sigue trayendo todas las líneas que aportan al
+   * total —sin cambiar una coma— porque de ahí salen el Subtotal y los impuestos; los
+   * dos arreglos nuevos solo dicen cómo se reparten en la página. Una plantilla que
+   * los ignore (Termotech) imprime `items` plano y su salida no cambia un píxel.
+   */
+  dias?: {
+    /** El ordinal del viaje. Se imprime «Día 3», nunca una fecha. */
+    dia: number
+    items: {
+      nombre: string
+      descripcion: string | null
+      precio_venta: number
+      descuento_porcentaje: number
+      cantidad: number
+      unidad?: string | null
+    }[]
+  }[] | null
+
+  /**
+   * La otra mitad de la partición: lo que aporta al total y NO tiene día.
+   *
+   * Son los vuelos y hoteles (su sitio lo decide la tabla de combinaciones, no un día)
+   * y las líneas que no declaran grupo (el seguro, un fee). Se imprimen en su propio
+   * bloque, debajo de los días, porque son parte del viaje aunque no caigan en uno.
+   *
+   * Solo se consume cuando `dias` trae algo. Sin días, la plantilla imprime `items`.
+   */
+  itemsSinDia?: {
+    nombre: string
+    descripcion: string | null
+    precio_venta: number
+    descuento_porcentaje: number
+    cantidad: number
+    unidad?: string | null
+  }[] | null
+
+  /**
+   * El paquete de sugeridos: «actividades adicionales no incluidas».
+   *
+   * Son las líneas que declaran un grupo NO combinable (tour, traslado, plan) y se
+   * quedaron sin día, en una cotización que sí usa días. Un vuelo o un hotel no entran
+   * nunca aquí: aparecerían como no incluidos mientras el cliente los está pagando.
+   *
+   * ⚠️ Llegan ya filtradas por el check de mostrar u ocultar. La plantilla imprime lo
+   * que recibe.
+   *
+   * ⚠️⚠️ El precio que traen es INFORMATIVO y el bloque lo dice: estas líneas NO se
+   * descuentan del total. Mientras «asignar día es incluirlo» siga siendo el único
+   * interruptor, una sugerencia con precio sigue sumando — por eso el editor avisa con
+   * nombre propio antes de generar el documento.
+   */
+  sugeridos?: {
+    nombre: string
+    descripcion: string | null
+    /** Por persona si la línea declara `pax`; si no, el valor de la línea. 0 = sin precio. */
+    precio_venta: number
+    cantidad: number
+    unidad?: string | null
+  }[] | null
+
   fiscal: {
     subtotal: number
     iva: number

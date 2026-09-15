@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
+import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
@@ -443,6 +444,8 @@ export type NegocioResumen = {
   responsables: Array<{ id: string; full_name: string }>
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
   es_meta_lead: boolean
+  /** El workspace guarda sus archivos fuera de Drive: la tarjeta no ofrece "abrir carpeta". */
+  almacenamiento_externo?: boolean
   // Reproceso abierto (metadata.reproceso.activo). Un tercero rechazó el trabajo y
   // hay que rehacer un tramo, con un cliente esperando algo que creía resuelto: se
   // muestra en la tarjeta para que sea visible sin abrir el negocio.
@@ -772,6 +775,10 @@ export async function getNegociosV2(
   // ── Tarjeta config-driven: vehículo + seccional desde un bloque (ej. Factura) ──
   // config_extra.negocio_card = { vehiculo_bloque, vehiculo_campos[], ciudad_campo }
   // Solo workspaces con ese config (ej. SOENA) lo llenan; el resto queda null.
+  // Una sola lectura para toda la lista: la marca es del workspace, no del negocio.
+  const almacenamientoExterno = esAlmacenamientoExterno(
+    (wsRes.data as { config_extra?: Record<string, unknown> } | null)?.config_extra,
+  )
   const cardCfg = ((wsRes.data as { config_extra?: Record<string, unknown> } | null)
     ?.config_extra?.negocio_card) as
     { vehiculo_bloque?: string; vehiculo_campos?: string[]; ciudad_campo?: string
@@ -997,6 +1004,7 @@ export async function getNegociosV2(
       })(),
       responsables: responsablesPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
+      almacenamiento_externo: almacenamientoExterno,
       reproceso: (() => {
         const r = (row.metadata as Record<string, unknown> | null)?.reproceso as
           | { activo?: boolean; tipo?: string; ciclo?: number; etapa_retorno?: string | null }

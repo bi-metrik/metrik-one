@@ -32,6 +32,35 @@ let ausentes = new Set<string>()
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
 
+// ── Almacenamiento: Drive por defecto, explícito ─────────────────────────────
+// Sin este doble la lectura del proveedor revienta (no hay Supabase en la prueba), cae
+// al "externo por las dudas" y el PDF sale con un aviso: las pruebas de cifras seguían
+// verdes, pero por el camino equivocado.
+let almacenamientoExterno = false
+let falloAlGuardar: Error | null = null
+const subidas: Array<{ negocioId: string; subcarpeta?: string | null; nombre: string; mime: string; buffer: Buffer }> = []
+const llamadasDrive: string[] = []
+
+vi.mock('@/lib/almacenamiento/proveedor', () => ({
+  usaAlmacenamientoExterno: async () => almacenamientoExterno,
+}))
+vi.mock('@/lib/almacenamiento/supabase-externo', () => ({
+  almacenamientoExternoDe: async () =>
+    almacenamientoExterno
+      ? {
+          subirArchivo: async (a: { negocioId: string; subcarpeta?: string | null; nombre: string; mime: string; buffer: Buffer }) => {
+            if (falloAlGuardar) throw falloAlGuardar
+            subidas.push(a)
+            return { referencia: `sbext://one-documentos/negocios/${a.negocioId}/cotizaciones/${a.nombre}`, path: '', bytes: a.buffer.length, sha256: '' }
+          },
+        }
+      : null,
+}))
+vi.mock('@/lib/google-drive', () => ({
+  uploadFileToDrive: async () => { llamadasDrive.push('upload'); throw new Error('Drive no debe llamarse') },
+  createDriveFolder: async () => { llamadasDrive.push('folder'); throw new Error('Drive no debe llamarse') },
+}))
+
 vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({
     supabase: clienteFalso(),
@@ -338,6 +367,10 @@ async function medir() {
 beforeEach(() => {
   tablas = {}
   ausentes = new Set()
+  almacenamientoExterno = false
+  falloAlGuardar = null
+  subidas.length = 0
+  llamadasDrive.length = 0
 })
 
 describe('R-A1 · las tres cifras cuadran, con y sin alternativas', () => {
@@ -516,5 +549,43 @@ describe('R-A1 · las tres cifras cuadran, con y sin alternativas', () => {
     await recalcularTotales(COT)
     const cot = tablas.cotizaciones[0] as Fila
     expect(Number(cot.costo_total)).toBe(2_000_000 + 1_350_000 + 200_000)
+  }, 30_000)
+})
+
+describe('dónde queda el PDF de la cotización', () => {
+  it('workspace en Drive (plantilla metrik): se descarga y no se guarda en ningún lado, como siempre', async () => {
+    sembrar({ conAlternativa: false })
+    const res = (await generateCotizacionPDF(COT)) as { success: boolean; pdf: string; aviso?: string | null; archivoReferencia?: string | null }
+    expect(res.success).toBe(true)
+    expect(res.pdf.length).toBeGreaterThan(0)
+    expect(subidas).toHaveLength(0)
+    expect(llamadasDrive).toHaveLength(0)
+    expect(res.aviso ?? null).toBeNull()
+    expect(res.archivoReferencia ?? null).toBeNull()
+  }, 30_000)
+
+  it('almacenamiento externo: el PDF queda en cotizaciones/ del negocio y Drive ni se intenta', async () => {
+    sembrar({ conAlternativa: false })
+    almacenamientoExterno = true
+    const res = (await generateCotizacionPDF(COT)) as { success: boolean; pdf: string; aviso?: string | null; archivoReferencia?: string | null }
+    expect(res.success).toBe(true)
+    expect(subidas).toHaveLength(1)
+    expect(subidas[0]).toMatchObject({ negocioId: 'neg-1', subcarpeta: 'cotizaciones', nombre: 'COT-2026-0003.pdf', mime: 'application/pdf' })
+    // Lo que se guarda es el MISMO documento que se descarga.
+    expect(subidas[0].buffer.subarray(0, 4).toString('latin1')).toBe('%PDF')
+    expect(subidas[0].buffer.toString('base64')).toBe(res.pdf)
+    expect(res.archivoReferencia).toBe('sbext://one-documentos/negocios/neg-1/cotizaciones/COT-2026-0003.pdf')
+    expect(llamadasDrive).toHaveLength(0)
+  }, 30_000)
+
+  it('almacenamiento externo mal configurado: el PDF se entrega igual y la pantalla recibe el motivo', async () => {
+    sembrar({ conAlternativa: false })
+    almacenamientoExterno = true
+    falloAlGuardar = new Error('Workspace trappvel: falta la variable de entorno WS_STORAGE_SECRET_TRAPPVEL.')
+    const res = (await generateCotizacionPDF(COT)) as { success: boolean; pdf: string; aviso?: string | null }
+    expect(res.success).toBe(true)
+    expect(res.pdf.length).toBeGreaterThan(0)
+    expect(res.aviso).toContain('WS_STORAGE_SECRET_TRAPPVEL')
+    expect(llamadasDrive).toHaveLength(0)
   }, 30_000)
 })

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { puedeLlevarDia } from '@/lib/cotizaciones/dia-relativo'
 import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
 import {
   combinacionesCartesianas,
@@ -471,6 +472,80 @@ export async function actualizarRanuraDeItem(
     patch.unidad = limpia === '' ? null : limpia
   }
   if (Object.keys(patch).length === 0) return { success: true }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any).from('items').update(patch).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  return { success: true }
+}
+
+/**
+ * El DÍA de una línea, y el check de si una sugerencia se le muestra al cliente.
+ *
+ * Los dos son PRESENTACIÓN: no mueven un peso del total. Quien decide qué aporta sigue
+ * siendo `itemsQueAportanAlTotal`, y esta función no lo toca ni lo recalcula.
+ *
+ * ⚠️ El guard lee el GRUPO de la base, no del navegador. Una server action exportada
+ * es un endpoint alcanzable con cualquier id aunque ningún botón la invoque: si el
+ * grupo llegara por parámetro, bastaría mandar `grupo: 'tour'` sobre el id de un vuelo
+ * para meterlo al itinerario día por día y sacarlo de la tabla de combinaciones.
+ */
+export async function actualizarDiaDeItem(
+  itemId: string,
+  updates: { dia_relativo?: number | null; mostrar_en_sugeridos?: boolean },
+) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const patch: Record<string, unknown> = {}
+
+  if (updates.dia_relativo !== undefined) {
+    const bruto = updates.dia_relativo
+    if (bruto === null) {
+      patch.dia_relativo = null
+    } else {
+      // Un 0, un negativo o un decimal no son un día del viaje. Se RECHAZAN aquí (a
+      // diferencia de la lectura, que los trata como ausencia): el que escribe sí
+      // puede fallar ruidosamente, y guardar un 0 dejaría una línea que la pantalla
+      // ve sin día y la base ve con uno.
+      if (!Number.isInteger(bruto) || bruto < 1) {
+        return { success: false, error: 'El día tiene que ser un número entero desde 1.' }
+      }
+      patch.dia_relativo = bruto
+    }
+  }
+
+  if (updates.mostrar_en_sugeridos !== undefined) {
+    patch.mostrar_en_sugeridos = updates.mostrar_en_sugeridos === true
+  }
+
+  if (Object.keys(patch).length === 0) return { success: true }
+
+  // El grupo y el ajuste, leídos de la base. RLS acota la lectura al workspace de la
+  // sesión, así que un id ajeno no resuelve y la función corta aquí.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: item, error: errLee } = await (supabase as any)
+    .from('items')
+    .select('*')
+    .eq('id', itemId)
+    .maybeSingle()
+  if (errLee) return { success: false, error: errLee.message }
+  if (!item) return { success: false, error: 'La línea no existe o no es de este workspace.' }
+
+  if (patch.dia_relativo !== undefined && patch.dia_relativo !== null) {
+    if (!puedeLlevarDia({ id: itemId, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false })) {
+      // Un vuelo o un hotel se cruzan en la tabla de combinaciones: su sitio en el
+      // documento lo decide el itinerario elegido, no un día. El ítem de cuadre es
+      // precio, no un componente del viaje.
+      return {
+        success: false,
+        error:
+          item.es_ajuste === true
+            ? 'La línea de cuadre no lleva día: es ajuste de precio, no un componente del viaje.'
+            : 'Los vuelos y los hoteles no llevan día: se comparan en la tabla de combinaciones.',
+      }
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any).from('items').update(patch).eq('id', itemId)

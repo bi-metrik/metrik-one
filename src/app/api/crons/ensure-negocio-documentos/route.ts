@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { pushDocumentoBloqueToDrive } from '@/lib/negocios/push-documento-drive'
+import { esValorProveedorExterno } from '@/lib/almacenamiento/config'
 
 // Reconciliador continuo de documentos atascados en Supabase Storage.
 //
@@ -52,14 +53,18 @@ export async function GET(req: NextRequest) {
   // Workspaces con carpeta padre configurada (drive_folder_id no-null).
   const { data: wsData, error: wsErr } = await supabase
     .from('workspaces')
-    .select('id')
+    .select('id, proveedor:config_extra->>storage_provider')
     .not('drive_folder_id', 'is', null)
 
   if (wsErr) {
     return NextResponse.json({ error: wsErr.message }, { status: 500 })
   }
 
-  const wsIds = ((wsData ?? []) as Array<{ id: string }>).map(w => w.id)
+  // Un workspace con almacenamiento externo no empuja nada a Drive: sus archivos ya
+  // viven en su propio proyecto y nunca pasan por Storage de ONE.
+  const wsIds = ((wsData ?? []) as Array<{ id: string; proveedor: unknown }>)
+    .filter(w => !esValorProveedorExterno(w.proveedor))
+    .map(w => w.id)
   if (wsIds.length === 0) {
     return NextResponse.json({ checked: 0, pushed: 0, skipped: 0, errors: 0, results: [] })
   }
