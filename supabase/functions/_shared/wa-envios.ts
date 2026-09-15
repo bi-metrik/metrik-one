@@ -30,6 +30,11 @@ export interface EnvioCtx {
   workspaceId?: string;
   intent?: string;
   templateName?: string;
+  /**
+   * Lo que se guarda en `wa_envios.preview` EN LUGAR del texto real. Obligatorio cuando el
+   * mensaje lleva un secreto (una llave de API): sin esto la llave quedaria en claro en la tabla.
+   */
+  preview?: string;
 }
 
 /** Acuse de Meta ya normalizado. `phone` viene de `recipient_id`. */
@@ -114,5 +119,9 @@ export function resumenPayload(payload: Record<string, unknown>): string {
     return `[${i?.type ?? 'interactive'}] ${i?.body?.text ?? ''}`.trim();
   }
   if (tipo === 'contacts') return '[tarjeta de contacto]';
+  if (tipo === 'document') {
+    const d = payload.document as { filename?: string } | undefined;
+    return `[documento] ${d?.filename ?? ''}`.trim();
+  }
   return `[${tipo}]`;
 }

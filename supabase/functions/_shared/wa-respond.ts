@@ -46,6 +46,30 @@ export async function sendTextMessage(phone: string, text: string, ctx: EnvioCtx
   }
 }
 
+/**
+ * Texto que tiene que llegar EXACTO, caracter por caracter: una llave de API, un codigo.
+ *
+ * No pasa por el guard de español neutro ni por `splitMessage`. El guard reemplaza palabras
+ * sueltas con lookarounds de letra, y dentro de una llave un tramo entre guiones bajos es una
+ * "palabra": podria reescribirla y ademas imprimir el cambio en consola. Partirla en dos mensajes
+ * la haria imposible de copiar entera.
+ *
+ * Devuelve el wamid, o null si la Graph API lo rechazo. Si el texto lleva un secreto, `ctx.preview`
+ * es obligatorio.
+ */
+export async function sendTextoExacto(phone: string, text: string, ctx: EnvioCtx = {}): Promise<string | null> {
+  if (text.length > 4096) {
+    // Solo el largo: el texto puede llevar un secreto y no se imprime.
+    throw new Error(`sendTextoExacto: el texto excede el limite de 4096 caracteres de Meta (${text.length})`);
+  }
+  return await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'text',
+    text: { body: text },
+  }, ctx);
+}
+
 /** Send a numbered list as text (for menus with > 3 options) */
 export async function sendNumberedMenu(
   phone: string,
@@ -58,14 +82,18 @@ export async function sendNumberedMenu(
   await sendTextMessage(phone, text, ctx);
 }
 
-/** Send interactive buttons (max 3 buttons) */
+/**
+ * Send interactive buttons (max 3 buttons).
+ * Devuelve el wamid (o null si Meta lo rechazo): el flujo de aceptacion de terminos lo guarda
+ * para saber a que mensaje con botones respondio la persona. Los demas llamadores lo ignoran.
+ */
 export async function sendButtons(
   phone: string,
   body: string,
   buttons: Array<{ id: string; title: string }>,
   ctx: EnvioCtx = {},
-): Promise<void> {
-  await postMessage(phone, {
+): Promise<string | null> {
+  return await postMessage(phone, {
     messaging_product: 'whatsapp',
     to: phone,
     type: 'interactive',
@@ -78,6 +106,31 @@ export async function sendButtons(
           reply: { id: b.id, title: b.title.slice(0, 20) },
         })),
       },
+    },
+  }, ctx);
+}
+
+/**
+ * Envia un documento por URL (dentro de la ventana de 24 h). Meta lo DESCARGA de `link`, asi que
+ * tiene que ser https y publico o firmado; si no puede bajarlo, el POST igual devuelve wamid y el
+ * fallo llega despues como acuse `failed` en `wa_envios`. Devuelve el wamid, o null si la Graph
+ * API lo rechazo de entrada.
+ */
+export async function sendDocument(
+  phone: string,
+  link: string,
+  filename: string,
+  caption: string,
+  ctx: EnvioCtx = {},
+): Promise<string | null> {
+  return await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'document',
+    document: {
+      link,
+      filename: filename.slice(0, 240),
+      ...(caption ? { caption: caption.slice(0, 1024) } : {}),
     },
   }, ctx);
 }
@@ -353,7 +406,8 @@ async function postMessage(
   payload: Record<string, unknown>,
   ctx: EnvioCtx = {},
 ): Promise<string | null> {
-  const preview = resumenPayload(payload);
+  // `ctx.preview` gana: es como un mensaje con un secreto deja constancia sin el secreto.
+  const preview = ctx.preview ?? resumenPayload(payload);
   let res: Response;
   try {
     res = await fetch(getMetaUrl(), {
