@@ -4,6 +4,7 @@ import type { AdminFlujoDetalle } from '../../actions'
 import type { WorkflowEtapa, WorkflowRouting } from '@/components/workflow/types'
 import { WorkflowDiagram } from '@/components/workflow/workflow-diagram'
 import { WorkflowConventions } from '@/components/workflow/workflow-conventions'
+import { textoValorCondicion } from '@/lib/negocios/condicion-bloque'
 
 export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDetalle }) {
   if (detalle.etapas.length === 0) {
@@ -31,7 +32,7 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
         const ce = (b.config_extra ?? {}) as {
           readonly?: boolean
           source_etapa_orden?: number
-          condition?: { field?: string; value?: string }
+          condition?: { field?: string; value?: string; value_in?: unknown[] }
         }
         return {
           config_id: b.config_id,
@@ -44,7 +45,7 @@ export default function FlujoDetalleClient({ detalle }: { detalle: AdminFlujoDet
           source_etapa_orden:
             typeof ce.source_etapa_orden === 'number' ? ce.source_etapa_orden : null,
           condition_field: typeof ce.condition?.field === 'string' ? ce.condition.field : null,
-          condition_value: typeof ce.condition?.value === 'string' ? ce.condition.value : null,
+          condition_value: textoValorCondicion(ce.condition),
           block_id: b.block_id,
           config_extra: b.config_extra ?? {},
         }

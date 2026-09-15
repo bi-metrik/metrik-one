@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { bloqueTipoCode } from '@/components/workflow/types'
+import { textoValorCondicion } from '@/lib/negocios/condicion-bloque'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -333,7 +334,7 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
           desactivado?: boolean
           readonly?: boolean
           source_etapa_orden?: number
-          condition?: { field?: string; value?: string }
+          condition?: { field?: string; value?: string; value_in?: unknown[] }
           label?: string
           nombre?: string
         }
@@ -372,10 +373,8 @@ export async function getFlujoData(lineaIdParam?: string | null): Promise<FlujoD
         typeof cfgExtra?.condition?.field === 'string'
           ? cfgExtra.condition.field
           : null,
-      condition_value:
-        typeof cfgExtra?.condition?.value === 'string'
-          ? cfgExtra.condition.value
-          : null,
+      // `value` o `value_in` ("completo o solo_iva"): sin lo segundo el diagrama pintaba "= null".
+      condition_value: textoValorCondicion(cfgExtra?.condition),
       block_id: blockIdByConfigId.get(b.id) ?? '',
     })
     bloquesByEtapa.set(b.etapa_id, arr)

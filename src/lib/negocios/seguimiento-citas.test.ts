@@ -29,6 +29,20 @@ const CONFIG_SOENA = {
   },
 }
 
+/** El mismo documento, tras retirar el interruptor: la rama de IVA sale del servicio contratado. */
+const CONFIG_SOENA_POR_SERVICIO = {
+  seguimiento_citas: {
+    horas_alerta: 36,
+    docs_requeridos: [
+      {
+        bloque: 'Certificado bancario',
+        etiqueta: 'certificado bancario',
+        solo_si: { bloque: 'Servicio contratado', campo: 'servicio', valor_in: ['completo', 'solo_iva'] },
+      },
+    ],
+  },
+}
+
 const DOCS = leerSeguimientoCitas(CONFIG_SOENA)!.docs_requeridos
 const sinValores = () => null
 const conIva = (v: string) => (bloque: string, campo: string) =>
@@ -75,6 +89,24 @@ describe('leerSeguimientoCitas', () => {
     expect(leerSeguimientoCitas({ seguimiento_citas: { docs_requeridos: [{ etiqueta: 'x' }] } })).toBeNull()
   })
 
+  it('lee un solo_si con varias respuestas (valor_in)', () => {
+    const cfg = leerSeguimientoCitas(CONFIG_SOENA_POR_SERVICIO)
+    expect(cfg?.docs_requeridos[0].solo_si).toEqual({
+      bloque: 'Servicio contratado',
+      campo: 'servicio',
+      valor_in: ['completo', 'solo_iva'],
+    })
+  })
+
+  it('un valor_in vacío o sin cadenas no cuenta como condición', () => {
+    for (const valor_in of [[], [1, null], 'completo']) {
+      const cfg = leerSeguimientoCitas({
+        seguimiento_citas: { docs_requeridos: [{ bloque: 'B', solo_si: { bloque: 'C', campo: 'x', valor_in } }] },
+      })
+      expect(cfg?.docs_requeridos[0].solo_si).toBeUndefined()
+    }
+  })
+
   it('descarta un solo_si a medias en vez de exigir el documento a ciegas', () => {
     const cfg = leerSeguimientoCitas({
       seguimiento_citas: { docs_requeridos: [{ bloque: 'B', solo_si: { bloque: 'C' } }] },
@@ -107,6 +139,17 @@ describe('docsFaltantes', () => {
   it('no exige un documento que no aplica: solo_si en false lo saca', () => {
     const estados = { 'Certificado bancario': { instancias: 1, completos: 0 } }
     expect(docsFaltantes(DOCS, estados, conIva('false'))).toEqual([])
+  })
+
+  it('con valor_in exige el certificado a completo y a solo_iva, y no a solo_upme', () => {
+    const docs = leerSeguimientoCitas(CONFIG_SOENA_POR_SERVICIO)!.docs_requeridos
+    const estados = { 'Certificado bancario': { instancias: 1, completos: 0 } }
+    const servicio = (v: string | null) => (bloque: string, campo: string) =>
+      bloque === 'Servicio contratado' && campo === 'servicio' ? v : null
+    expect(docsFaltantes(docs, estados, servicio('completo'))).toEqual(['certificado bancario'])
+    expect(docsFaltantes(docs, estados, servicio('solo_iva'))).toEqual(['certificado bancario'])
+    expect(docsFaltantes(docs, estados, servicio('solo_upme'))).toEqual([])
+    expect(docsFaltantes(docs, estados, servicio(null))).toEqual([])
   })
 
   it('sin el dato de la condicion tampoco lo exige', () => {
