@@ -6786,7 +6786,7 @@ export type Database = {
           intent: string | null
           message_preview: string | null
           parser_source: string | null
-          phone: string
+          phone: string | null
           workspace_id: string | null
         }
         Insert: {
@@ -6801,7 +6801,7 @@ export type Database = {
           intent?: string | null
           message_preview?: string | null
           parser_source?: string | null
-          phone: string
+          phone?: string | null
           workspace_id?: string | null
         }
         Update: {
@@ -6816,7 +6816,7 @@ export type Database = {
           intent?: string | null
           message_preview?: string | null
           parser_source?: string | null
-          phone?: string
+          phone?: string | null
           workspace_id?: string | null
         }
         Relationships: [
