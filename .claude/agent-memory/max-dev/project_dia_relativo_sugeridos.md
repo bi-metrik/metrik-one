@@ -1,12 +1,16 @@
 ---
 name: dia-relativo-sugeridos
-description: PR #718 SIN mergear (migración sin aplicar) — una línea SIN grupo nunca cae a «no incluidas» (grupoCombinable(null) es false y habría barrido a Termotech); la sugerencia con precio deja el documento sin sumar; y el caso concreto de los dos interruptores
+description: PR #718 mergeado (aeadee74) y migración APLICADA — una línea SIN grupo nunca cae a «no incluidas» (grupoCombinable(null) es false y habría barrido a Termotech); la sugerencia con precio deja el documento sin sumar; y el caso concreto de los dos interruptores
 metadata:
   type: project
 ---
 
+⚠️ **CADUCÓ lo de «sin mergear»:** #718 entró como `aeadee74` y la migración
+`20260915000000` está aplicada (medido 2026-09-15). Los dos interruptores ya existen:
+ver [[entra-al-precio]] (#728).
+
 **PR [#718](https://github.com/bi-metrik/metrik-one/pull/718)**, rama
-`feat/dia-relativo-itinerario-sugeridos`, **6 checks verdes** y **SIN MERGEAR**. Paso
+`feat/dia-relativo-itinerario-sugeridos` (borrada), **6 checks verdes**. Paso
 que cierra la parte de presentación del bloque 3 del
 [[pantallazo-ranuras]]. Sin escrituras a producción.
 

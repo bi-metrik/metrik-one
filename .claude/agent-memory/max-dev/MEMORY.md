@@ -32,7 +32,8 @@
 - [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
 - [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
 - ⚠️⚠️ [Aporte al total y rubros sugeridos](project_aporte_al_total_y_sugeridos.md) — #709 mergeado y migración APLICADA: el defecto del brief que ya estaba cerrado
-- ⚠️⚠️ [El día: itinerario y sugeridos, un solo interruptor](project_dia_relativo_sugeridos.md) — #718 SIN mergear: una línea SIN grupo nunca cae a «no incluidas»
+- ⚠️ [El día: itinerario y sugeridos](project_dia_relativo_sugeridos.md) — #718 mergeado y aplicado: una línea SIN grupo nunca cae a «no incluidas»
+- ⚠️⚠️ [Entra al precio: el segundo interruptor](project_entra_al_precio.md) — #728 SIN mergear (migración sin aplicar); regla por línea; #729 tipos de viaje sin categoría
 - ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700 mergeado: RX1 solo probado contra capturas SINTÉTICAS
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; CADUCÓ lo de las migraciones sin aplicar
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; la migración de umbrales YA está aplicada; vigente: el rastro de margen VACÍO
