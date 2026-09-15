@@ -6,6 +6,7 @@ import { splitMessage } from './wa-format.ts';
 import { aEspanolNeutro } from './es-neutro.ts';
 import { registrarEnvio, resumenPayload } from './wa-envios.ts';
 import type { EnvioCtx } from './wa-envios.ts';
+import { camposDestino } from './wa-destino.ts';
 
 export type { EnvioCtx } from './wa-envios.ts';
 
@@ -40,6 +41,29 @@ export async function sendTextMessage(phone: string, text: string, ctx: EnvioCtx
     await postMessage(phone, {
       messaging_product: 'whatsapp',
       to: phone,
+      type: 'text',
+      text: { body: chunk },
+    }, ctx);
+  }
+}
+
+/**
+ * Texto a alguien de quien solo se conoce el BSUID (`CO.1234...`): la persona tiene nombre de
+ * usuario de WhatsApp y Meta no mando su telefono. Va con `recipient` y sin `to` (ver
+ * `wa-destino.ts`). Mismo guard de español neutro y mismo partido que `sendTextMessage`.
+ *
+ * En `wa_envios` la fila queda con el BSUID en `phone`, que es tambien lo que trae el acuse
+ * (`recipient_user_id`). Si Meta lo rechaza, queda `rechazado` como cualquier otro envio.
+ */
+export async function sendTextMessageABsuid(bsuid: string, text: string, ctx: EnvioCtx = {}): Promise<void> {
+  const neutro = aEspanolNeutro(text);
+  if (neutro.correcciones.length) {
+    console.warn(`[wa-respond] voseo corregido antes de enviar: ${neutro.correcciones.join(', ')}`);
+  }
+  for (const chunk of splitMessage(neutro.texto)) {
+    await postMessage(bsuid, {
+      messaging_product: 'whatsapp',
+      ...camposDestino({ bsuid }),
       type: 'text',
       text: { body: chunk },
     }, ctx);
