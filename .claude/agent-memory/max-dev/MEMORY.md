@@ -14,7 +14,7 @@
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el módulo YA está encendido (caducó lo contrario), el sync sigue sin correr
 - ⚠️⚠️ [Ventas por ciudad en Marketing](project_marketing_ventas_por_ciudad.md) — PR #689 sin mergear: la migración va ANTES del merge
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
-- ⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 YA en main, #626 sin mergear (falta QA): el 4925%, el corte de la tabla
+- ⚠️⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 y #626 en main; #721 SIN MERGEAR: migración (venta canónica + pendiente a hoy) va antes del merge
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
 - ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer (el switch cambia los archivos bajo tus pies)
 - ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote
@@ -86,6 +86,7 @@
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST
+- [Ensayar una función SQL con PGlite](reference_ensayo_sql_pglite.md) — cuerpo viejo y nuevo sobre una foto de producción, sin escribir; el viejo debe reproducir la pantalla
 - ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD con conteo sobre tabla inexistente da 204 sin error; Storage rechaza tildes
 - [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo subiendo el árbol
 - [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; el setter nativo o React no se entera

@@ -1,9 +1,32 @@
 ---
 name: equipo-por-mes
-description: /equipo por mes ya está en main (#597 mergeado); el perfil individual va en el PR #626 sin mergear — el 4925%, el corte de la tabla, el reloj propio de la pestaña de operaciones y lo que NO se segmenta
+description: /equipo por mes (#597) y el perfil individual (#626) en main; el #721 SIN MERGEAR trae la migración que une la venta del perfil con la del panel y saca el pendiente del mes — el 4925%, el corte de la tabla, el reloj propio y lo que NO se segmenta
 metadata:
   type: project
 ---
+
+## ⚠️⚠️ #721 (2026-09-14) — migración SIN APLICAR, va antes del merge
+
+El QA en pantalla del #626 encontró dos cosas que el render no podía ver:
+
+- **KPI 31 / panel 32 (ago), 33 / 34 (jul) de Jessica.** `get_comercial_perfil_soena` y
+  `get_comercial_resumen_soena` seguían con la venta vieja (`MIN(v_cobro_valor.fecha)`).
+  `20260903140000` pasó las SERIES a `v_venta_mes_comercial` y se olvidó de estas dos. Los
+  casos que faltaban (V0066, V0429) son **ventas en cero sin un solo cobro**, no "ventas
+  con pago sin honorario" como decía el brief: la premisa estaba mal y la conclusión (que
+  cuentan) salía igual, por la decisión del 2026-09-03. En SOENA no existe ninguna venta
+  con pago y sin honorario aprobado (3 de 330 sin honorario, las 3 en cero).
+- **Pendiente de recaudo** = valor de todo el inventario − honorario recaudado DEL MES.
+  Ahora: casos abiertos, contra todo lo recaudado, sin IVA. Jessica $9.309.846 fijo.
+
+El #721 cambia las dos RPC (venta y `bonificable` de la vista; si el resumen leyera
+`v_negocio_bonificable`, la venta en cero bonificaría), una insignia única en el panel
+("Sin honorario aprobado" gana a "Honorario cubierto") y el corte de la tabla: `key` por
+periodo y en acumulado arranca en "Todas sus ventas". ⚠️ Eso contradice lo que esta nota
+dice más abajo ("sin mes elegido solo existe el segundo"): caducó con el #721.
+
+V0022 BIOCIRCULO (venta de $0, Juan Bruce) es **dato correcto**: overrides "no se cobra",
+cierre no facturable "Cortesía o compensación", 0 cobros.
 
 `/equipo` (hoja por persona con ranking, workspaces con `modules.comercial_negocios`) se
 segmenta por mes con el periodo en la URL (`?mes=YYYY-MM`).

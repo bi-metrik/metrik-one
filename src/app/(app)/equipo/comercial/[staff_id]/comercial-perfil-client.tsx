@@ -21,6 +21,13 @@ const RED = '#B91C1C'
 /** Lo que no se mueve con el mes tiene que decirlo. Mismas palabras que en `/equipo`. */
 const NOTA_INVENTARIO = 'Inventario a hoy, no depende del mes'
 
+/**
+ * El pendiente es inventario a hoy y ademas solo de los casos ABIERTOS: un caso perdido o
+ * cerrado no es plata por recaudar. Lo dice, porque al lado esta "Valor aprobado", que suma
+ * todos los casos, y las dos cifras no se restan entre si.
+ */
+const NOTA_PENDIENTE = `Casos abiertos. ${NOTA_INVENTARIO}`
+
 function fmtCOP(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
 }
@@ -34,11 +41,12 @@ function fmtFecha(iso: string | null): string {
 type FaseFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro' | 'cerrado'
 
 /**
- * Que responde la tabla de abajo: `mes` = lo que la persona VENDIO en el periodo elegido
- * (desempeno), `todos` = los casos que LLEVA (carga de trabajo). Sin mes elegido solo
- * existe el segundo.
+ * Que responde la tabla de abajo: `ventas` = lo que la persona VENDIO en el periodo
+ * (desempeno): el mes elegido, o todo su historico en acumulado, que es a donde lleva
+ * "Ver todas sus ventas". `todos` = los casos que LLEVA (carga de trabajo), que no depende
+ * del periodo.
  */
-type CorteNegocios = 'mes' | 'todos'
+type CorteNegocios = 'ventas' | 'todos'
 
 const FASES: { key: FaseFilter; label: string }[] = [
   { key: 'todos', label: 'Todos' },
@@ -187,9 +195,11 @@ export default function ComercialPerfilClient({
         <Kpi label="Negocios activos" value={String(perfil.kpis.negocios_abiertos)} nota={NOTA_INVENTARIO} />
         <Kpi label="Valor aprobado (sin IVA)" value={fmtCOP(perfil.kpis.valor_aprobado)} nota={NOTA_INVENTARIO} />
         <Kpi label="Honorario recaudado" value={fmtCOP(perfil.kpis.honorario_recaudado)} color={GREEN} nota={periodoLabel} />
-        {/* Cartera: con IVA, porque es lo que falta que entre a la cuenta. NO es
-            "valor aprobado - recaudado": esas dos cifras estan en bases distintas. */}
-        <Kpi label="Pendiente de recaudo (con IVA)" value={fmtCOP(perfil.kpis.pendiente_honorario)} nota={NOTA_INVENTARIO} />
+        {/* Pendiente SIN IVA, como el resto de la hoja: valor aprobado base menos TODO el
+            honorario recaudado base, de los casos abiertos, sin importar el mes. Antes decia
+            "con IVA" y restaba cifras sin IVA, y ademas restaba solo lo recaudado en el mes
+            elegido, asi que cambiaba con el mes pese a su nota. */}
+        <Kpi label="Pendiente de recaudo (sin IVA)" value={fmtCOP(perfil.kpis.pendiente_honorario)} nota={NOTA_PENDIENTE} />
         <Kpi
           label="Vencidos (SLA)"
           value={String(perfil.kpis.vencidos)}
@@ -231,7 +241,9 @@ export default function ComercialPerfilClient({
         <h2 className="text-sm font-bold text-gray-900">Embudo por etapa (pendiente de recaudo)</h2>
         {/* Tambien es inventario: son los casos que la persona lleva HOY, en la etapa en la
             que estan hoy. No se recorta al mes, y por eso lo dice. */}
-        <p className="mb-3 mt-1 text-xs text-gray-400">{NOTA_INVENTARIO} seleccionado.</p>
+        <p className="mb-3 mt-1 text-xs text-gray-400">
+          {NOTA_INVENTARIO} seleccionado. El pendiente cuenta solo los casos abiertos.
+        </p>
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -240,7 +252,7 @@ export default function ComercialPerfilClient({
                   <th className="py-3 px-4 text-left">Etapa</th>
                   <th className="py-3 px-4 text-right">Negocios</th>
                   <th className="py-3 px-4 text-right">Valor aprobado (sin IVA)</th>
-                  <th className="py-3 px-4 text-right">Pendiente de recaudo</th>
+                  <th className="py-3 px-4 text-right" title="Casos abiertos: valor aprobado menos todo lo recaudado, sin IVA">Pendiente de recaudo (sin IVA)</th>
                 </tr>
               </thead>
               <tbody>
@@ -273,8 +285,13 @@ export default function ComercialPerfilClient({
       </section>
 
       {/* Negocios del vendedor con filtros (fase + etapa + busqueda) y SLA/ultimo avance.
-          Arriba lleva el corte del periodo: lo que vendio en el mes, o todos sus casos. */}
+          Arriba lleva el corte del periodo: lo que vendio en el mes, o todos sus casos.
+          ⚠️ `key` por periodo: cambiar de mes es la misma ruta con otro `?mes=`, asi que
+          React reusa la instancia y el `useState` del corte, la fase y la etapa se
+          quedaban con lo del mes anterior. Asi se llegaba a "Vendidos en Acumulado" por
+          navegacion y a otra pantalla distinta abriendo la misma URL de cero. */}
       <NegociosVendedor
+        key={hayPeriodo ? `${anio}-${mes}` : 'acumulado'}
         negocios={perfil.negocios}
         periodoLabel={periodoLabel}
         hayPeriodo={hayPeriodo}
@@ -413,13 +430,16 @@ function NegociosVendedor({ negocios, periodoLabel, hayPeriodo, ventasDelPeriodo
   negocios: ComercialPerfilNegocio[]
   /** `Septiembre 2026` o `Acumulado`. */
   periodoLabel: string
-  /** Hay un mes elegido (no el acumulado): solo entonces existe el corte por venta. */
+  /** Hay un mes elegido. En acumulado el corte de ventas abre todo el historico. */
   hayPeriodo: boolean
   /** El KPI `Ventas` de arriba. Sirve para comprobar que la lista suma lo mismo. */
   ventasDelPeriodo: number
 }) {
   const pathname = usePathname()
-  const [corte, setCorte] = useState<CorteNegocios>(hayPeriodo ? 'mes' : 'todos')
+  // Arranca SIEMPRE en ventas, tambien en acumulado: es a donde lleva "Ver todas sus
+  // ventas", y el KPI `Ventas` de arriba cuenta ese mismo conjunto. El padre remonta este
+  // componente al cambiar de periodo (`key`), asi que el estado no viaja entre meses.
+  const [corte, setCorte] = useState<CorteNegocios>('ventas')
   const [fase, setFase] = useState<FaseFilter>('todos')
   const [etapaNum, setEtapaNum] = useState<number | null>(null)
   const [q, setQ] = useState('')
@@ -427,12 +447,13 @@ function NegociosVendedor({ negocios, periodoLabel, hayPeriodo, ventasDelPeriodo
   // Las ventas del periodo. `es_venta` ya viene calculado por la RPC con EL MISMO
   // predicado que el KPI `Ventas` de arriba (`es_venta_periodo`), asi que el corte no
   // reinterpreta nada: filtra por lo que el servidor ya decidio.
-  const ventasDelMes = useMemo(() => negocios.filter((n) => n.es_venta), [negocios])
+  const ventasDelPeriodoLista = useMemo(() => negocios.filter((n) => n.es_venta), [negocios])
+  const etiquetaVentas = hayPeriodo ? `Vendidos en ${periodoLabel}` : 'Todas sus ventas'
 
   // El corte manda y los demas filtros operan DENTRO de el: un contador de etapa que
   // siguiera contando el historico mientras la tabla muestra el mes seria el mismo
   // defecto que este cambio corrige, un nivel mas abajo.
-  const base = corte === 'mes' ? ventasDelMes : negocios
+  const base = corte === 'ventas' ? ventasDelPeriodoLista : negocios
 
   // Fases presentes en el corte (para no mostrar pills vacios).
   const fasesDisponibles = useMemo(() => {
@@ -488,48 +509,48 @@ function NegociosVendedor({ negocios, periodoLabel, hayPeriodo, ventasDelPeriodo
   // salen del mismo CTE de la misma RPC. Si un dia no coinciden, el problema no es este
   // filtro sino que las dos definiciones de venta se separaron, y eso se dice en pantalla
   // en vez de dejar que alguien cruce las cifras a mano y no sepa a cual creerle.
-  const listaYKpiDiscrepan = hayPeriodo && ventasDelMes.length !== ventasDelPeriodo
+  const listaYKpiDiscrepan = ventasDelPeriodoLista.length !== ventasDelPeriodo
 
   return (
     <section>
       <h2 className="text-sm font-bold text-gray-900 mb-3">
-        {corte === 'mes' ? `Vendidos en ${periodoLabel}` : 'Todos sus casos'} ({filtrados.length})
+        {corte === 'ventas' ? etiquetaVentas : 'Todos sus casos'} ({filtrados.length})
       </h2>
 
       {/* Nivel 0: el corte del periodo. Son DOS preguntas distintas y las dos se usan:
-          "que vendio este mes" (desempeno) y "que casos lleva" (carga de trabajo, donde
-          un caso de junio que sigue abierto es suyo hoy). Por eso la tabla no se
-          reemplaza: se le pone el corte arriba. */}
-      {hayPeriodo && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <PillCorte
-            label={`Vendidos en ${periodoLabel}`}
-            count={ventasDelMes.length}
-            active={corte === 'mes'}
-            onClick={() => seleccionarCorte('mes')}
-          />
-          <PillCorte
-            label="Todos sus casos"
-            count={negocios.length}
-            active={corte === 'todos'}
-            onClick={() => seleccionarCorte('todos')}
-          />
-          {/* La salida al historico. El clic en la cifra abre lo que la cifra CUENTA (el
-              mes); ver todas las ventas es otra pregunta y tiene su propia puerta. */}
+          "que vendio" (desempeno) y "que casos lleva" (carga de trabajo, donde un caso de
+          junio que sigue abierto es suyo hoy). Por eso la tabla no se reemplaza: se le
+          pone el corte arriba, tambien en acumulado. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <PillCorte
+          label={etiquetaVentas}
+          count={ventasDelPeriodoLista.length}
+          active={corte === 'ventas'}
+          onClick={() => seleccionarCorte('ventas')}
+        />
+        <PillCorte
+          label="Todos sus casos"
+          count={negocios.length}
+          active={corte === 'todos'}
+          onClick={() => seleccionarCorte('todos')}
+        />
+        {/* La salida al historico. El clic en la cifra abre lo que la cifra CUENTA (el
+            mes); ver todas las ventas es otra pregunta y tiene su propia puerta. */}
+        {hayPeriodo && (
           <Link
             href={`${pathname}?mes=acumulado`}
             className="ml-auto text-xs font-semibold text-acento hover:text-acento-hover"
           >
             Ver todas sus ventas
           </Link>
-        </div>
-      )}
+        )}
+      </div>
 
       {listaYKpiDiscrepan && (
         <p className="mb-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
-            La lista trae {ventasDelMes.length} venta{ventasDelMes.length === 1 ? '' : 's'} de {periodoLabel} y el
+            La lista trae {ventasDelPeriodoLista.length} venta{ventasDelPeriodoLista.length === 1 ? '' : 's'} de {periodoLabel} y el
             indicador de arriba dice {ventasDelPeriodo}. Las dos cifras deberian salir del mismo calculo: hay que
             revisar la definicion de venta antes de usar cualquiera de las dos.
           </span>
@@ -662,8 +683,8 @@ function NegociosVendedor({ negocios, periodoLabel, hayPeriodo, ventasDelPeriodo
                   <td colSpan={6} className="py-8 text-center text-sm text-gray-400">
                     {/* Un mes sin ventas se dice con todas las letras. Caer a la lista
                         historica seria contestar otra pregunta sin avisar. */}
-                    {corte === 'mes' && base.length === 0
-                      ? `Sin ventas en ${periodoLabel}.`
+                    {corte === 'ventas' && base.length === 0
+                      ? hayPeriodo ? `Sin ventas en ${periodoLabel}.` : 'Sin ventas registradas.'
                       : 'Sin negocios en este filtro.'}
                   </td>
                 </tr>

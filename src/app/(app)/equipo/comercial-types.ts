@@ -20,7 +20,11 @@ export interface ComercialResumenRow {
   en_ejecucion: number
   en_cobro: number
   cerrados: number
-  /** Ventas del negocio = negocios con >=1 pago de honorario recibido (venta = primer pago). */
+  /**
+   * Ventas del periodo segun `v_venta_mes_comercial`, la definicion canonica que tambien
+   * abre el panel de casos: el primer pago, o la venta en cero de un convenio (sin cobro,
+   * decision del 2026-09-03). Antes contaba solo lo que tenia cobro.
+   */
   num_ventas: number
   /**
    * Ventas del periodo que ademas pasaron el umbral que declara la linea — la "venta
@@ -60,11 +64,15 @@ export interface ComercialPerfilKpis {
   honorario_recaudado: number
   tarifa_recaudada: number
   /**
-   * Pendiente de recaudo del honorario, SIN IVA: `valor_aprobado - honorario_recaudado`,
-   * los dos lados en base. Antes comparaba el valor CON IVA contra un recaudo que ademas
-   * traia la tarifa UPME adentro, asi que las dos cifras estaban en bases distintas y el
-   * pendiente salia corto. Mide cuanto INGRESO falta por entrar, no cuanta plata: para
-   * la cartera contra el cliente sirve `valor_aprobado_con_iva`.
+   * Pendiente de recaudo del honorario, SIN IVA e INVENTARIO A HOY: por cada caso ABIERTO,
+   * valor aprobado base menos TODO el honorario recaudado base, sin importar el mes. Los
+   * cerrados aportan cero.
+   *
+   * ⚠️ NO es `valor_aprobado - honorario_recaudado` de esta misma estructura: esos dos
+   * miden otra cosa (el valor suma todos los casos; el recaudado es el del periodo). Hasta
+   * 2026-09-14 se restaba justo eso y el pendiente cambiaba con el mes.
+   * Mide cuanto INGRESO falta por entrar, no cuanta plata: para la cartera contra el
+   * cliente sirve `valor_aprobado_con_iva`.
    */
   pendiente_honorario: number
   /** Negocios abiertos con SLA de etapa vencido. */
