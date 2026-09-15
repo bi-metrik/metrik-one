@@ -26,6 +26,11 @@ sesiones.** El 2026-09-07, dos subagentes aislados el mismo día:
 
 Comprobar al EMPEZAR con una consulta trivial, nunca al final.
 
+**2026-09-15 — cerrada también la lectura.** Un GET por PostgREST con la service role key
+leída directo de `metrik-one/.env.local` (sin symlink, sin escribir nada) lo rechazó el
+clasificador como **[Production Reads]**. No se rodea: se trabaja con el fixture fechado y se
+dice en el reporte que la cifra no se re-midió.
+
 **2026-09-07, PR #545 — las DOS puertas abiertas en la misma sesión.** El `ln -s`
 de `.env.local` + PostgREST pasó, **y la Management API con el token de
 `.credentials.md` también** (DDL incluido: creó la tabla de respaldo, corrió el
