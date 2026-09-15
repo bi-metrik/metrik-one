@@ -1,7 +1,7 @@
 'use client'
 
 import { Target, HelpCircle } from 'lucide-react'
-import { CONCEPTO_HORAS_STAFF, type LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
+import { CONCEPTO_HORAS_STAFF, tipoRubroMedible, type LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { CATEGORIA_LABELS, RUBRO_LABELS, fmt, barColor, barTextColor } from './formato'
 
 export interface PresupuestoData {
@@ -156,6 +156,26 @@ export default function PresupuestoVsEjecutado({ data, costoTotal, hayDatos }: P
           // contra ninguno, y las horas de staff caen en mano de obra propia.
           const pct = rubro.total > 0 ? Math.round((rubro.ejecutado / rubro.total) * 100) : 0
           const label = RUBRO_LABELS[rubro.tipo] ?? rubro.nombre ?? rubro.tipo
+
+          // Un rubro contra el que ninguna categoría de gasto puede contar (hoy, los de
+          // viaje) va SIN barra: pintaría 0% sobre un gasto real que en verdad está en
+          // «Sin presupuesto», y un 0% se lee como holgura. Se dice por qué y se deja
+          // el presupuesto a la vista, para que la sección siga reconciliando.
+          if (!tipoRubroMedible(rubro.tipo)) {
+            return (
+              <div key={rubro.tipo}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] text-tinta-suave truncate">{label}</span>
+                  <span className="text-[10px] text-tinta-suave tabular-nums whitespace-nowrap">
+                    Presupuesto {fmt(rubro.total)}
+                  </span>
+                </div>
+                <p className="text-[10px] leading-snug text-tinta-suave">
+                  Ningún tipo de gasto cuenta contra este rubro todavía: lo gastado aparece en «Sin presupuesto».
+                </p>
+              </div>
+            )
+          }
 
           return (
             <div key={rubro.tipo}>

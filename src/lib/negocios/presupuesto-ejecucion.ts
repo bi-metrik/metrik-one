@@ -40,6 +40,7 @@ export interface RubroPresupuestoEjecutado extends RubroPresupuesto {
  * tenga dónde caer en la comparación en vez de desaparecer.
  */
 import { soloConfirmados } from '@/lib/cotizaciones/rubros-sugeridos'
+import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 
 export const TIPO_RUBRO_SIN_DETALLE = 'otro'
 
@@ -58,20 +59,42 @@ export const TIPO_RUBRO_SIN_DETALLE = 'otro'
  * `sinPresupuesto`, que es plata gastada fuera de lo cotizado y merece verse.
  */
 /**
- * ⚠️ DEUDA ABIERTA — este mapa no conoce los tipos de viaje, y cuando los conozca
- * tiene que actualizarse ANTES de que algo los escriba.
+ * ⚠️ Los tipos de viaje NO tienen categoría de gasto, y eso es una decisión abierta,
+ * no un olvido. Lo que sí quedó cerrado es que la barra deje de mentir.
  *
- * `rubros.tipo` admite desde el 2026-09-14 tres valores nuevos (`tarifa`, `impuestos`,
- * `fee_proveedor`, migración `rubros_tipo_conceptos_viaje`) y NINGUNA categoría de
- * gasto apunta a ellos. Hoy no pasa nada porque el cargue de pantallazo escribe
- * `servicios_prof`. El día que empiece a escribir los tipos del diseño, la barra de
- * Ejecución leerá ejecutado 0 contra ellos y el gasto real caerá en `sinPresupuesto`.
+ * `rubros.tipo` admite desde el 2026-09-14 tres valores de viaje (`tarifa`,
+ * `impuestos`, `fee_proveedor`, migración `rubros_tipo_conceptos_viaje`, versión
+ * `20260914172108`, aplicada por MCP y SIN archivo en el repo). Leído del CHECK de
+ * producción el 2026-09-15, `gastos.categoria` admite once valores: `materiales`,
+ * `transporte`, `alimentacion`, `servicios_profesionales`, `software`, `arriendo`,
+ * `marketing`, `capacitacion`, `otros`, `comision` e `impuestos_recuperables`.
+ * NINGUNO corresponde a un tipo de viaje, y forzarlo mentiría:
  *
- * Es el precedente exacto que este archivo ya documenta: de cinco tipos reales solo
- * coincidía uno, y nadie lo notó porque un mapeo equivocado no falla, miente.
+ *  - `tarifa` es lo que cobra el proveedor (aerolínea, hotel, operador del tour).
+ *    `transporte` cubriría el vuelo y el traslado pero no el hotel ni el tour: como
+ *    el presupuesto se agrupa por TIPO y no por línea, la barra de `tarifa` mediría
+ *    solo los tiquetes contra el costo de vuelos, hoteles y tours juntos, y se leería
+ *    holgada. Es el mapeo que miente, dicho arriba.
+ *  - `impuestos` son los que vienen dentro del costo del proveedor (tasas del tiquete,
+ *    impuesto hotelero). `impuestos_recuperables` es exactamente lo contrario: IVA y
+ *    retenciones que se recuperan, fuera del margen.
+ *  - `fee_proveedor` es el cargo del proveedor por su servicio. `comision` es la de la
+ *    pasarela de pago (ePayco escribe 172 filas así): contaría la comisión del cobro
+ *    contra el fee del mayorista.
  *
- * NO se toca sin encargo propio: decidir a qué categoría de gasto corresponde una
- * tarifa aérea es una pregunta de negocio, no de código.
+ * Crear la categoría (por ejemplo, pago a proveedores de viaje) es decisión de
+ * producto: se pregunta, no se inventa. Mientras no exista, `tipoRubroMedible`
+ * devuelve `false` para estos tres y la pantalla pinta el rubro SIN barra, diciendo
+ * que ninguna categoría de gasto cuenta contra él. Antes de eso la barra habría
+ * mostrado 0% ejecutado sobre un gasto real: la trampa.
+ *
+ * Hoy nadie escribe estos tipos (el pantallazo escribe `servicios_prof`) y el bloque
+ * de Ejecución solo existe en ana-demo, dimpro y wmc-sm, ninguno con rubros de viaje:
+ * medido el 2026-09-15, cero rubros `tarifa`, `impuestos` o `fee_proveedor`.
+ *
+ * ⚠️ `viaticos` y `mano_de_obra` NO están en ese CHECK: sus dos entradas de abajo no
+ * las puede alcanzar ningún gasto nuevo. Se dejan porque no estorban y porque las
+ * pruebas de este archivo las usan como categorías de ejemplo.
  */
 export const CATEGORIA_GASTO_A_TIPOS_RUBRO: Record<string, string[]> = {
   materiales: ['materiales'],
@@ -86,6 +109,23 @@ export const CATEGORIA_GASTO_A_TIPOS_RUBRO: Record<string, string[]> = {
 
 /** Rubro contra el que cuentan las horas de staff registradas en el negocio. */
 export const TIPO_RUBRO_HORAS_STAFF = 'mo_propia'
+
+/**
+ * ¿Algún peso ejecutado puede contar contra un rubro de este tipo?
+ *
+ * Sí si lo alcanza alguna categoría del mapa, si es el rubro de las horas, o si una
+ * categoría del catálogo se llama igual (el respaldo por nombre de
+ * `asignarEjecutadoPorRubro`). Si no, su barra NO se puede leer: marcaría 0% sobre un
+ * gasto real que en verdad cayó en «Sin presupuesto», y un 0% se lee como holgura.
+ *
+ * Se deriva del mapa y no de una lista aparte: el día que una categoría apunte a
+ * `tarifa`, el rubro pasa a medirse solo, sin tocar esta función.
+ */
+export function tipoRubroMedible(tipo: string): boolean {
+  if (tipo === TIPO_RUBRO_HORAS_STAFF) return true
+  if (Object.values(CATEGORIA_GASTO_A_TIPOS_RUBRO).some(tipos => tipos.includes(tipo))) return true
+  return CATEGORIAS_GASTO.some(c => c.value === tipo)
+}
 
 /**
  * Concepto con el que las horas de staff aparecen en `sinPresupuesto`. No es una
