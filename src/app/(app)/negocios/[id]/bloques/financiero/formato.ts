@@ -30,6 +30,12 @@ export const CATEGORIA_LABELS: Record<string, string> = {
 export const RUBRO_LABELS: Record<string, string> = {
   ...Object.fromEntries(TIPOS_RUBRO.map(t => [t.value, t.label])),
   [TIPO_RUBRO_SIN_DETALLE]: 'Sin desglosar',
+  // Los tres tipos de viaje los admite el CHECK de `rubros.tipo` pero no están en el
+  // catálogo seleccionable (`TIPOS_RUBRO`): meterlos ahí los ofrecería en el editor
+  // de rubros de cualquier cotización. Sin rótulo, la barra mostraría el slug.
+  tarifa: 'Tarifa del proveedor',
+  impuestos: 'Impuestos del proveedor',
+  fee_proveedor: 'Fee del proveedor',
 }
 
 export const fmt = (v: number) =>
