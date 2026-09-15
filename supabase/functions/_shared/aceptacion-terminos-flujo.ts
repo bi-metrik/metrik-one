@@ -413,10 +413,13 @@ async function ejecutarAccionesPostAceptacion(
     return [{ tipo: 'acciones', estado: 'fallida', detalle: `no se pudieron leer (${error.message}); nada se envió` }];
   }
 
+  const acciones = (data ?? []) as Array<{ id: string; tipo: string }>;
+  // La guia de la llave solo menciona el acceso a la plataforma si esta aceptacion lo trae.
+  const conAccesoPortal = acciones.some((a) => a.tipo === 'enviar_acceso_portal');
   const resultados: ResultadoAccion[] = [];
-  for (const accion of (data ?? []) as Array<{ id: string; tipo: string }>) {
+  for (const accion of acciones) {
     if (accionImplementada(accion.tipo)) {
-      resultados.push(await entregarCredencialValida(supabase, phone, fila, accion.id));
+      resultados.push(await entregarCredencialValida(supabase, phone, fila, accion.id, conAccesoPortal));
     } else if (accion.tipo === 'enviar_acceso_portal') {
       resultados.push({ tipo: accion.tipo, estado: 'pendiente', detalle: 'sin implementar: el portal de autoservicio todavía no existe' });
     } else {
@@ -453,7 +456,8 @@ async function accionesSinEjecutar(supabase: SupabaseClient, aceptacionId: strin
  *      aceptacion `aceptado`).
  *   3. Enviar el texto EXACTO, con `preview` enmascarado para `wa_envios`.
  *   4. Marcar `enviada` y borrar el secreto de Vault.
- *   5. El segundo mensaje (sin nada sensible) es de cortesia: si falla no deshace la entrega.
+ *   5. El segundo mensaje (la guia: URL base, header, rutas, documentacion y soporte; sin nada
+ *      sensible) va despues: si falla no deshace la entrega, pero queda dicho en el aviso.
  *
  * La llave vive solo en la variable local `llave`: no se imprime, no se guarda, no viaja en un
  * error. Todo lo que sale hacia afuera usa `enmascararSecreto`.
@@ -463,6 +467,7 @@ async function entregarCredencialValida(
   phone: string,
   fila: FilaAceptacion,
   accionId: string,
+  conAccesoPortal: boolean,
 ): Promise<ResultadoAccion> {
   const tipo = 'enviar_credencial_valida';
 
@@ -488,9 +493,9 @@ async function entregarCredencialValida(
     return await marcarFallida(supabase, accionId, tipo, motivo);
   }
 
-  const [mensajeLlave, mensajePortal] = mensajesCredencialValida(llave);
+  const [mensajeLlave, mensajeGuia] = mensajesCredencialValida(llave, { conAccesoPortal });
   const mascara = enmascararSecreto(llave);
-  const ctx: EnvioCtx = { ...ctxEnvio(fila), preview: mensajesCredencialValida(mascara)[0] };
+  const ctx: EnvioCtx = { ...ctxEnvio(fila), preview: mensajesCredencialValida(mascara, { conAccesoPortal })[0] };
 
   let wamid: string | null = null;
   try {
@@ -523,18 +528,21 @@ async function entregarCredencialValida(
     console.error(`[aceptacion] la llave ${mascara} salió pero no se borró de Vault:`, errBorrado?.message ?? 'la RPC no borró nada');
   }
 
+  let guiaEnviada = false;
   try {
-    await sendTextoExacto(phone, mensajePortal, ctxEnvio(fila));
+    guiaEnviada = !!(await sendTextoExacto(phone, mensajeGuia, ctxEnvio(fila)));
   } catch {
-    console.error(`[aceptacion] no salió el mensaje del portal (accion ${accionId}); la llave sí se entregó`);
+    // El error no lleva el cuerpo; la guia no tiene nada sensible, pero igual solo se nombra.
+    console.error(`[aceptacion] error enviando la guía de acceso (accion ${accionId}); la llave sí se entregó`);
   }
+  const avisoGuia = guiaEnviada ? '' : '. ⚠️ La guía de acceso (URL, rutas, soporte) NO salió: envíala a mano';
 
   return {
     tipo,
     estado: 'enviada',
-    detalle: quedoEnVault
+    detalle: (quedoEnVault
       ? `llave ${mascara} entregada, pero NO se pudo borrar de Vault: bórrala a mano`
-      : `llave ${mascara} entregada y borrada de Vault`,
+      : `llave ${mascara} entregada y borrada de Vault`) + avisoGuia,
   };
 }
 

@@ -361,7 +361,20 @@ export function avisoRespuesta(p: {
 
 export type TipoAccion = 'enviar_credencial_valida' | 'enviar_acceso_portal';
 
+// Datos de acceso a Valida que viajan en la entrega. Verificados el 2026-09-15 contra el repo
+// bi-metrik/metrik-valida (main db63fb8) y contra produccion, no escritos de memoria:
+// - Dominios: decision de Mauricio 2026-05-13 (`proyectos/metrik/valida/decisions.md`):
+//   `metrik.com.co` para productos publicos. `api.valida.metrik.com.co` responde /api/v1/health
+//   200, y el 401 de produccion ya apunta su `doc_url` a `valida.metrik.com.co/docs`. Los
+//   `*.valida.metrikone.co` que todavia imprime la guia son alias del mismo despliegue.
+// - Autenticacion: `lib/auth/api-key.ts` solo acepta `Authorization: Bearer <api_key>`.
+// - Rutas: `app/api/v1/validate/route.ts` (POST, `tipo` + nombre o documento) y
+//   `app/api/v1/cuenta/consumo/route.ts` (GET). Las dos estan en la OpenAPI publicada.
+// - Soporte: contacto oficial de MeTRIK (CLAUDE.md raiz), el mismo de la seccion 16 de la guia.
+export const URL_API_VALIDA = 'https://api.valida.metrik.com.co';
 export const URL_DOCS_VALIDA = 'https://valida.metrik.com.co/docs';
+export const SOPORTE_WHATSAPP = '+57 315 950 9103';
+export const SOPORTE_CORREO = 'mauricio.moreno@metrik.com.co';
 
 /** Solo la credencial se envia hoy. El acceso al portal esta modelado y espera a que exista el portal. */
 export function accionImplementada(tipo: string): tipo is 'enviar_credencial_valida' {
@@ -378,29 +391,90 @@ export function etiquetaAccion(tipo: string): string {
 }
 
 /**
- * Los dos mensajes de la entrega de la llave, con el texto aprobado por Mauricio. El primero lleva
- * la llave y sale solo, para que se pueda copiar entero; el segundo no lleva nada sensible.
+ * Los dos mensajes de la entrega, en orden:
+ *   1. La llave, sola en su renglon (para poder seleccionarla) y la advertencia de guardarla.
+ *   2. La guia para empezar: URL base, header, las dos rutas, un curl sin la llave, la
+ *      documentacion y el soporte. No lleva nada sensible.
+ *
+ * Los ejemplos van entre triple comilla invertida: WhatsApp los pinta en monoespaciado y no
+ * interpreta los `_` ni los `*` de adentro. Los dos salen por `sendTextoExacto` por lo mismo.
+ *
+ * Nada promete un acceso a la plataforma "en unos minutos": el portal no existe todavia. Solo si
+ * la aceptacion trae la accion `enviar_acceso_portal` se avisa que ese acceso llega aparte, y sin
+ * plazo.
  *
  * Para `wa_envios.preview` se llama con la llave YA enmascarada: la misma funcion arma el texto
  * real y su version publicable, asi que las dos no se pueden desalinear.
  */
-export function mensajesCredencialValida(llave: string): [string, string] {
-  return [
-    `Esta es su llave de API de Valida: ${llave} (guárdenla en su gestor de secretos, no en el código). Documentación: ${URL_DOCS_VALIDA}`,
-    'En unos minutos les damos acceso a la plataforma, desde donde podrán generar y regenerar sus llaves',
-  ];
+export function mensajesCredencialValida(
+  llave: string,
+  opciones: { conAccesoPortal?: boolean } = {},
+): [string, string] {
+  const mensajeLlave = [
+    'Esta es su llave de API de Valida:',
+    '',
+    llave,
+    '',
+    'Guárdenla en su gestor de secretos, no en el código. No se puede recuperar: si se pierde, escríbannos y les emitimos una nueva.',
+  ].join('\n');
+
+  const guia = [
+    'Cómo empezar a usar Valida por API',
+    '',
+    'URL base de producción:',
+    URL_API_VALIDA,
+    '',
+    'Autenticación, en cada petición:',
+    'Authorization: Bearer <su llave>',
+    '',
+    'Consultar a una persona o empresa en las listas (cada consulta cuenta en su paquete):',
+    'POST /api/v1/validate',
+    '',
+    'Ver el consumo y el saldo de su paquete:',
+    'GET /api/v1/cuenta/consumo',
+    '',
+    'Ejemplo, con la llave en la variable de entorno VALIDA_API_KEY:',
+    '```',
+    `curl -X POST ${URL_API_VALIDA}/api/v1/validate \\`,
+    '  -H "Authorization: Bearer $VALIDA_API_KEY" \\',
+    '  -H "Content-Type: application/json" \\',
+    '  -H "Idempotency-Key: $(uuidgen)" \\',
+    `  -d '{"tipo":"natural","nombre":"NOMBRE COMPLETO","documento":{"tipo":"CC","numero":"NUMERO"}}'`,
+    '',
+    `curl ${URL_API_VALIDA}/api/v1/cuenta/consumo \\`,
+    '  -H "Authorization: Bearer $VALIDA_API_KEY"',
+    '```',
+    'El Idempotency-Key evita que un reintento se cobre dos veces.',
+    '',
+    `Documentación completa (errores, reintentos y ejemplos en curl, JavaScript y Python): ${URL_DOCS_VALIDA}`,
+    ...(opciones.conAccesoPortal
+      ? ['', 'Aparte les enviaremos el acceso a la plataforma de Valida, desde donde podrán generar y regenerar sus llaves.']
+      : []),
+    '',
+    'Soporte:',
+    `WhatsApp ${SOPORTE_WHATSAPP}`,
+    SOPORTE_CORREO,
+    'Si algo falla, envíennos el request_id que trae la respuesta.',
+  ].join('\n');
+
+  return [mensajeLlave, guia];
 }
 
 /**
- * Version publicable de un secreto: el prefijo (`vk_`) y 4 caracteres, nada mas. Es lo unico que
- * puede ir a consola, a `wa_envios` o al aviso interno. Un secreto demasiado corto no muestra
- * ningun caracter: con pocos, 4 ya serian media llave.
+ * Version publicable de un secreto: el prefijo (`vk_`) y unos pocos caracteres, nada mas. Es lo
+ * unico que puede ir a consola, a `wa_envios` o al aviso interno.
+ *
+ * Una llave de Valida es `vk_` + 64 hex: muestra 6 (`vk_8a3430…`), que es a su vez un prefijo del
+ * `api_keys.key_prefix` que Valida ya guarda (12 caracteres), asi que sirve para cruzarla sin
+ * revelar nada que Valida no tenga a la vista. Un secreto mas corto muestra menos, y uno de menos
+ * de 16 caracteres no muestra ninguno: con pocos, 4 ya serian media llave.
  */
 export function enmascararSecreto(secreto: string): string {
   const s = (secreto ?? '').trim();
   const prefijo = /^[A-Za-z]{1,8}_/.exec(s)?.[0] ?? '';
   const resto = s.slice(prefijo.length);
-  return resto.length >= 16 ? `${prefijo}${resto.slice(0, 4)}…` : `${prefijo}…`;
+  const visibles = resto.length >= 32 ? 6 : resto.length >= 16 ? 4 : 0;
+  return `${prefijo}${resto.slice(0, visibles)}…`;
 }
 
 /** Como termino una accion en esta corrida. `omitida` = otro proceso ya la habia tomado. */
