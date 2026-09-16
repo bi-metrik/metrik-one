@@ -6,6 +6,7 @@
  */
 
 import type { MotivoNoDisponible } from './cliente-nucleo'
+import type { DocumentoPorAceptar, RazonNoAcepta } from './terminos'
 import type { ListadoLlaves, ResumenValidaApi } from './tipos'
 
 /** Por qué una pestaña no carga. `sin_acceso` y `no_disponible` se explican distinto. */
@@ -90,4 +91,22 @@ export interface ServicioConPagos {
 }
 
 export type ResultadoDocumentos = Carga<DocumentosValidaApi>
+
+/**
+ * Lo que la entrada del módulo necesita saber de los términos del contrato. `pendientes` trae
+ * el PRIMER documento por aceptar (se aceptan de a uno) y si la persona de la sesión puede
+ * aceptarlo.
+ */
+export type EstadoTerminosPagina =
+  | { estado: 'aceptados' }
+  | { estado: 'sin_documentos' }
+  | { estado: 'no_disponible' }
+  | {
+      estado: 'pendientes'
+      totalPendientes: number
+      documento: DocumentoPorAceptar
+      aceptante: { puede: true } | { puede: false; razon: RazonNoAcepta }
+    }
+
+export type ResultadoAceptarTerminos = { ok: true; yaEstaba: boolean } | { ok: false; error: string }
 export type ResultadoPagos = Carga<ServicioConPagos[]>

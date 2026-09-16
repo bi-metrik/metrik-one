@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import { llamarValida } from './cliente'
 import { contextoValidaApi, origenPeticion, type ContextoValidaApi } from './contexto'
 import { POLITICA_DATOS_VALIDA, requiereAceptacion } from './politica'
@@ -10,16 +11,19 @@ import { huellaAvisoPolitica } from './politica-huella'
 import {
   armarServicioConPagos,
   esFuncionAusente,
-  mapearDocumentos,
   mapearLlaveEmitida,
   serviciosQuePaga,
 } from './mapeo'
 import { esUuid, nombreLlaveValido, puedeOperarLlaves, puedeVerPagos } from './reglas'
+import { prepararAceptacion, puedeAceptarTerminos } from './terminos'
+import { documentosDelCliente, perfilReal, terminosDelCliente, versionContratada } from './terminos-servidor'
 import type { ListadoLlaves, ResumenValidaApi } from './tipos'
 import type {
   Carga,
   EstadoPolitica,
+  EstadoTerminosPagina,
   ResultadoAceptar,
+  ResultadoAceptarTerminos,
   ResultadoDocumentos,
   ResultadoEmitir,
   ResultadoLlaves,
@@ -51,6 +55,18 @@ function sinAcceso<T>(ctx: Exclude<ContextoValidaApi, { tipo: 'ok' }>): Carga<T>
         ? 'Tu usuario no tiene un correo registrado, así que la operación no se puede atribuir.'
         : 'Este espacio no tiene el módulo Valida API.'
   return { estado: 'sin_acceso', razon }
+}
+
+/**
+ * Cláusula 3.1 de los términos: las credenciales se entregan después de la aceptación. Leer,
+ * generar y regenerar llaves exige que toda versión vigente del contrato esté aceptada. Un fallo
+ * de lectura CIERRA: no poder comprobarlo no es haberlo aceptado.
+ */
+const MENSAJE_TERMINOS_PENDIENTES =
+  'Las llaves se habilitan cuando el dueño del espacio acepte la versión vigente de los términos de tu contrato.'
+
+async function terminosAceptados(): Promise<boolean> {
+  return (await terminosDelCliente()).estado === 'aceptados'
 }
 
 /** La aceptación de la Política es previa a TODO lo demás del módulo (§5.4). */
@@ -143,6 +159,7 @@ export async function leerLlavesValidaApi(): Promise<ResultadoLlaves> {
   if (!puedeOperarLlaves(ctx.role)) {
     return { estado: 'sin_acceso', razon: 'Las llaves las administran el dueño y los administradores del espacio.' }
   }
+  if (!(await terminosAceptados())) return { estado: 'sin_acceso', razon: MENSAJE_TERMINOS_PENDIENTES }
 
   const r = await llamarValida<ListadoLlaves>({
     metodo: 'GET',
@@ -165,6 +182,8 @@ export async function generarLlaveValidaApi(input: {
   if ((await politicaAceptada(ctx.actor.usuario_id)) !== true) {
     return { ok: false, error: 'Acepta la Política de Datos antes de operar el módulo.' }
   }
+  // Regenerar también pasa por aquí: entrega una llave nueva, así que exige los términos igual.
+  if (!(await terminosAceptados())) return { ok: false, error: MENSAJE_TERMINOS_PENDIENTES }
 
   const reemplazaA = input.reemplazaA?.trim() || null
   if (reemplazaA && !esUuid(reemplazaA)) return { ok: false, error: 'La llave a regenerar no es válida.' }
@@ -198,6 +217,10 @@ export async function generarLlaveValidaApi(input: {
   return { ok: true, llave }
 }
 
+/**
+ * Revocar NO exige los términos: quita acceso, no lo entrega. Si una versión nueva de los términos
+ * queda pendiente, el cliente tiene que poder cortar una llave comprometida mientras la acepta.
+ */
 export async function revocarLlaveValidaApi(keyId: string): Promise<ResultadoRevocar> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
@@ -226,12 +249,10 @@ export async function leerDocumentosValidaApi(): Promise<ResultadoDocumentos> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return sinAcceso(ctx)
 
-  // Cliente de SESIÓN, no de servicio: la RPC deriva el workspace de `current_user_workspace_id()`,
-  // que con el cliente de servicio no tiene de dónde leerlo y devolvería nada.
-  const { supabase } = await getWorkspace()
+  // La RPC va con el cliente de SESIÓN (ver `terminos-servidor.ts`) y se comparte en el request
+  // con la puerta de las llaves.
   const [docs, politica] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any).rpc('mis_documentos_de_servicio'),
+    documentosDelCliente(),
     createServiceClient()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .from('documentos_aceptaciones_usuario' as any)
@@ -241,11 +262,7 @@ export async function leerDocumentosValidaApi(): Promise<ResultadoDocumentos> {
       .order('aceptada_at', { ascending: false }),
   ])
 
-  if (docs.error) {
-    if (esFuncionAusente(docs.error)) return { estado: 'no_disponible', motivo: 'sin_migracion' }
-    console.error('[valida-api] mis_documentos_de_servicio:', docs.error.message)
-    return { estado: 'no_disponible', motivo: 'base' }
-  }
+  if (!docs.ok) return { estado: 'no_disponible', motivo: docs.motivo }
   if (politica.error) {
     console.error('[valida-api] aceptaciones de la Política:', politica.error.message)
     return { estado: 'no_disponible', motivo: 'base' }
@@ -255,10 +272,128 @@ export async function leerDocumentosValidaApi(): Promise<ResultadoDocumentos> {
   return {
     estado: 'ok',
     datos: {
-      contractuales: mapearDocumentos(docs.data ?? []),
+      contractuales: docs.documentos,
       politica: filasPolitica.map((p) => ({ version: p.documento_version, aceptadaAt: p.aceptada_at })),
     },
   }
+}
+
+// ── Términos del contrato ───────────────────────────────────────────────────
+
+/**
+ * Qué muestra la entrada del módulo sobre los términos. Todos los roles lo ven: quien no puede
+ * aceptar necesita saber por qué no hay llaves y quién las habilita.
+ */
+export async function estadoTerminosValidaApi(): Promise<EstadoTerminosPagina> {
+  const ctx = await contextoValidaApi()
+  if (ctx.tipo !== 'ok') return { estado: 'no_disponible' }
+
+  const estado = await terminosDelCliente()
+  if (estado.estado !== 'pendientes') return estado
+
+  const doc = estado.pendientes[0]
+  const [perfil, version] = await Promise.all([
+    perfilReal(ctx.actor.usuario_id),
+    versionContratada(ctx.workspaceId, doc.documentoId),
+  ])
+  if (!perfil || !version || version === 'error') return { estado: 'no_disponible' }
+
+  return {
+    estado: 'pendientes',
+    totalPendientes: estado.pendientes.length,
+    documento: {
+      documentoId: doc.documentoId,
+      titulo: doc.titulo,
+      version: doc.version,
+      textoMd: doc.textoMd,
+      pdfSha256: doc.pdfSha256,
+      empresaNombre: version.empresaNombre,
+      empresaNit: version.empresaNit,
+    },
+    aceptante: puedeAceptarTerminos(perfil, ctx.workspaceId),
+  }
+}
+
+/**
+ * Registra la aceptación de una versión vigente de los términos por el dueño del espacio.
+ *
+ * Todo lo que va a la constancia sale de la base (huellas, empresa, contrato, perfil); del
+ * navegador solo llegan el documento elegido, los datos de la persona y el texto que tenía a la
+ * vista, que tiene que coincidir con el que arma el servidor. La base vuelve a comprobarlo todo
+ * en `aceptaciones_terminos_modulo()`: esta acción no es la única barrera.
+ */
+export async function aceptarTerminosValidaApi(input: {
+  documentoId: string
+  nombre: string
+  cedula: string
+  calidad: string
+  declaraFacultades: boolean
+  declaracionMostrada: string
+}): Promise<ResultadoAceptarTerminos> {
+  const ctx = await contextoValidaApi()
+  if (ctx.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
+  if ((await politicaAceptada(ctx.actor.usuario_id)) !== true) {
+    return { ok: false, error: 'Acepta la Política de Datos antes de aceptar los términos.' }
+  }
+
+  const documentoId = typeof input?.documentoId === 'string' ? input.documentoId.trim() : ''
+  if (!esUuid(documentoId)) return { ok: false, error: 'El documento no es válido.' }
+
+  const perfil = await perfilReal(ctx.actor.usuario_id)
+  if (!perfil) return { ok: false, error: 'No se pudo verificar tu usuario. Intenta de nuevo.' }
+  const aceptante = puedeAceptarTerminos(perfil, ctx.workspaceId)
+  if (!aceptante.puede) {
+    return {
+      ok: false,
+      error:
+        aceptante.razon === 'soporte'
+          ? 'El soporte de MeTRIK no acepta términos por un cliente: los acepta el dueño del espacio.'
+          : 'Los términos los acepta el dueño del espacio, que es quien puede obligar a la empresa.',
+    }
+  }
+
+  const [docs, version, origen] = await Promise.all([
+    documentosDelCliente(),
+    versionContratada(ctx.workspaceId, documentoId),
+    origenPeticion(),
+  ])
+  if (!docs.ok || version === 'error') {
+    return { ok: false, error: 'No se pudieron leer los términos de tu contrato. Intenta de nuevo.' }
+  }
+
+  const preparacion = prepararAceptacion({
+    documentos: docs.documentos,
+    hoy: todayBogotaISO(),
+    documentoId,
+    version,
+    input,
+    declaracionMostrada: input.declaracionMostrada,
+    // El usuario real de la sesión: acepta quien marca la casilla, no el impersonado.
+    usuarioId: ctx.actor.usuario_id,
+    workspaceClienteId: ctx.workspaceId,
+    ip: origen.ip,
+    userAgent: origen.userAgent,
+  })
+  if (preparacion.tipo === 'ya_aceptado') return { ok: true, yaEstaba: true }
+  if (preparacion.tipo === 'error') return { ok: false, error: preparacion.error }
+
+  const { error } = await createServiceClient()
+    // `aceptaciones_terminos` no está en `database.ts`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .from('aceptaciones_terminos' as any)
+    .insert(preparacion.fila as never)
+  if (error) {
+    // Otra pestaña (o WhatsApp) la registró primero: la versión ya quedó aceptada.
+    if (error.code === '23505') {
+      revalidatePath('/valida-api')
+      return { ok: true, yaEstaba: true }
+    }
+    console.error('[valida-api] no se pudo registrar la aceptación de los términos:', error.message)
+    return { ok: false, error: 'No se pudo registrar la aceptación. Nada quedó guardado; intenta de nuevo.' }
+  }
+
+  revalidatePath('/valida-api')
+  return { ok: true, yaEstaba: false }
 }
 
 export async function leerPagosValidaApi(): Promise<ResultadoPagos> {

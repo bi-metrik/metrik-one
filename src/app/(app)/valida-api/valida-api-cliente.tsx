@@ -17,14 +17,23 @@ import {
 } from 'lucide-react'
 import {
   aceptarPoliticaValidaApi,
+  aceptarTerminosValidaApi,
   generarLlaveValidaApi,
   revocarLlaveValidaApi,
 } from '@/lib/valida-api/acciones'
 import { extraerClausula } from '@/lib/valida-api/clausula'
 import { vistaConsumo } from '@/lib/valida-api/consumo-vista'
+import {
+  CALIDADES_ACEPTANTE,
+  etiquetaCalidad,
+  textoDeclaracionTerminos,
+  validarDatosAceptante,
+  type DocumentoPorAceptar,
+} from '@/lib/valida-api/terminos'
 import type {
   Carga,
   DocumentosValidaApi,
+  EstadoTerminosPagina,
   LlaveRecienEmitida,
   ResultadoDocumentos,
   ResultadoLlaves,
@@ -93,6 +102,230 @@ export function AceptarPolitica({
         </div>
       </div>
     </section>
+  )
+}
+
+// ── Términos del contrato: antes de las llaves ──────────────────────────────
+
+type EstadoTerminosNoAceptados = Exclude<EstadoTerminosPagina, { estado: 'aceptados' }>
+
+/**
+ * La entrada del módulo cuando los términos vigentes no están aceptados. Las demás pestañas cargan
+ * igual; lo que falta son las llaves, y aquí se dice por qué y quién las habilita.
+ */
+export function TerminosPendientes({ estado }: { estado: EstadoTerminosNoAceptados }) {
+  if (estado.estado === 'sin_documentos') {
+    return (
+      <AvisoTerminos titulo="Los términos de tu contrato todavía no están registrados">
+        Las llaves de la API se habilitan cuando MeTRIK registre los términos de tu contrato y el dueño del espacio los
+        acepte. Mientras tanto puedes ver el consumo, los documentos y la ayuda.
+      </AvisoTerminos>
+    )
+  }
+  if (estado.estado === 'no_disponible') {
+    return (
+      <AvisoTerminos titulo="No se pudo verificar la aceptación de tus términos">
+        Las llaves no se muestran hasta poder comprobar que los términos vigentes están aceptados. Intenta de nuevo en
+        un momento.
+      </AvisoTerminos>
+    )
+  }
+
+  const { documento, aceptante, totalPendientes } = estado
+  return (
+    <section className="rounded-lg border border-border bg-white p-5">
+      <div className="flex items-start gap-3">
+        <FileText className="mt-0.5 h-5 w-5 shrink-0 text-acento" />
+        <div className="min-w-0 flex-1 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-tinta">Antes de usar las llaves: los términos de tu contrato</h2>
+            <p className="text-sm text-tinta-suave">
+              Las credenciales de la API se entregan después de que {documento.empresaNombre} acepte la versión vigente de
+              sus términos.
+              {totalPendientes > 1 && ` Hay ${totalPendientes} documentos por aceptar; van de uno en uno.`}
+            </p>
+          </div>
+
+          <DocumentoParaLeer documento={documento} />
+
+          {aceptante.puede ? (
+            <FormularioAceptacion documento={documento} />
+          ) : (
+            <p className="rounded-md border border-border bg-papel p-3 text-sm text-tinta-suave">
+              {aceptante.razon === 'soporte'
+                ? 'Estás en este espacio como soporte de MeTRIK. Los términos los acepta el dueño del espacio del cliente, no el soporte.'
+                : 'Los términos los acepta el dueño del espacio, que es quien puede obligar a la empresa. Mientras no los acepte, la pestaña Llaves no está disponible.'}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AvisoTerminos({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <section className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <div>
+        <p className="font-semibold">{titulo}</p>
+        <p className="mt-1">{children}</p>
+      </div>
+    </section>
+  )
+}
+
+function DocumentoParaLeer({ documento }: { documento: DocumentoPorAceptar }) {
+  const [abierto, setAbierto] = useState(false)
+  return (
+    <div className="rounded-md border border-border p-3 text-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-semibold text-tinta">{documento.titulo}</span>
+        <span className="text-xs text-tinta-suave">{documento.version}</span>
+      </div>
+      <p className="mt-1 break-all text-xs text-tinta-suave">Huella SHA-256 del PDF: {documento.pdfSha256}</p>
+      <div className="mt-2 flex flex-wrap gap-4">
+        <button type="button" onClick={() => setAbierto(!abierto)} className="text-xs font-semibold text-acento">
+          {abierto ? 'Ocultar el texto' : 'Leer el texto completo'}
+        </button>
+        <a href={`/api/valida-api/archivo/documento/${documento.documentoId}`} className="text-xs font-semibold text-acento">
+          Descargar PDF
+        </a>
+      </div>
+      {abierto && (
+        <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-papel p-3 font-sans text-xs text-tinta">
+          {documento.textoMd}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+function FormularioAceptacion({ documento }: { documento: DocumentoPorAceptar }) {
+  const router = useRouter()
+  const [nombre, setNombre] = useState('')
+  const [cedula, setCedula] = useState('')
+  const [calidad, setCalidad] = useState('')
+  const [marcada, setMarcada] = useState(false)
+  const [pendiente, iniciar] = useTransition()
+
+  // El texto que se firma se arma con la MISMA función que usa el servidor. Si los datos cambian,
+  // la casilla se desmarca: lo firmado tiene que ser lo que está a la vista.
+  const validos = validarDatosAceptante({ nombre, cedula, calidad, declaraFacultades: true })
+  const declaracion = validos.ok ? textoDeclaracionTerminos(documento, validos.datos) : null
+
+  function cambiar(setter: (v: string) => void) {
+    return (valor: string) => {
+      setter(valor)
+      setMarcada(false)
+    }
+  }
+
+  function aceptar() {
+    if (!declaracion) return
+    iniciar(async () => {
+      const r = await aceptarTerminosValidaApi({
+        documentoId: documento.documentoId,
+        nombre,
+        cedula,
+        calidad,
+        declaraFacultades: marcada,
+        declaracionMostrada: declaracion,
+      })
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      toast.success(r.yaEstaba ? 'Estos términos ya estaban aceptados.' : 'Términos aceptados.')
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-tinta">
+        Acepta en nombre de {documento.empresaNombre} solo si tienes facultades para obligarla: como su representante
+        legal o como apoderado.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-sm">
+          <span className="font-medium text-tinta">Nombre completo</span>
+          <input
+            name="nombre"
+            value={nombre}
+            onChange={(e) => cambiar(setNombre)(e.target.value)}
+            maxLength={120}
+            autoComplete="name"
+            className="w-full rounded-md border border-border px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="space-y-1 text-sm">
+          <span className="font-medium text-tinta">Cédula</span>
+          <input
+            name="cedula"
+            value={cedula}
+            onChange={(e) => cambiar(setCedula)(e.target.value)}
+            inputMode="numeric"
+            maxLength={16}
+            className="w-full rounded-md border border-border px-3 py-2 text-sm"
+          />
+        </label>
+      </div>
+      <fieldset className="space-y-1 text-sm">
+        <legend className="font-medium text-tinta">Actúo como</legend>
+        <div className="flex flex-wrap gap-4">
+          {(Object.keys(CALIDADES_ACEPTANTE) as (keyof typeof CALIDADES_ACEPTANTE)[]).map((clave) => (
+            <label key={clave} className="flex items-center gap-2 text-tinta">
+              <input
+                type="radio"
+                name="calidad"
+                value={clave}
+                checked={calidad === clave}
+                onChange={() => cambiar(setCalidad)(clave)}
+              />
+              {CALIDADES_ACEPTANTE[clave]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="rounded-md border border-border bg-papel p-3 text-sm text-tinta">
+        <p className="mb-1 text-xs font-semibold text-tinta-suave">Declaración que vas a firmar</p>
+        {declaracion ? (
+          <p data-declaracion>{declaracion}</p>
+        ) : (
+          <p className="text-tinta-suave">
+            {/* El error se dice cuando ya están los tres datos: antes, es solo un formulario a medio llenar. */}
+            {nombre && cedula && calidad && !validos.ok
+              ? validos.error
+              : 'Completa tu nombre completo, tu cédula y en qué calidad actúas para ver la declaración.'}
+          </p>
+        )}
+      </div>
+
+      {/* La casilla nace SIN marcar y no se puede marcar sin una declaración completa a la vista. */}
+      <label className="flex items-start gap-2 text-sm text-tinta">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={marcada}
+          disabled={!declaracion}
+          onChange={(e) => setMarcada(e.target.checked)}
+        />
+        <span>
+          Leí los términos y declaro bajo la gravedad de juramento que tengo facultades para obligar a{' '}
+          {documento.empresaNombre}. Firmo la declaración de arriba.
+        </span>
+      </label>
+      <button
+        type="button"
+        disabled={!declaracion || !marcada || pendiente}
+        onClick={aceptar}
+        className="rounded-md bg-acento px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        {pendiente ? 'Registrando…' : 'Aceptar los términos'}
+      </button>
+    </div>
   )
 }
 
@@ -428,7 +661,7 @@ function PestanaSuscripcion() {
 
 // ── Documentos ──────────────────────────────────────────────────────────────
 
-function PestanaDocumentos({ carga }: { carga: ResultadoDocumentos }) {
+export function PestanaDocumentos({ carga }: { carga: ResultadoDocumentos }) {
   const [abierto, setAbierto] = useState<string | null>(null)
   if (carga.estado !== 'ok') return <AvisoCarga carga={carga} />
   const { contractuales, politica }: DocumentosValidaApi = carga.datos
@@ -453,8 +686,8 @@ function PestanaDocumentos({ carga }: { carga: ResultadoDocumentos }) {
               {d.aceptadoAt ? (
                 <p className="mt-2 text-xs text-tinta-suave">
                   Aceptado el {formatBogotaFechaHora(d.aceptadoAt)} (hora Colombia) · {d.aceptadoPor}
-                  {d.aceptadoCalidad && `, en calidad de ${d.aceptadoCalidad}`}
-                  {d.aceptadoCanal === 'whatsapp' && ' · por WhatsApp'}
+                  {d.aceptadoCalidad && `, en calidad de ${etiquetaCalidad(d.aceptadoCalidad)}`}
+                  {d.aceptadoCanal === 'whatsapp' ? ' · por WhatsApp' : ' · en este módulo'}
                   {' · '}huella del PDF aceptado: {d.pdfSha256.slice(0, 8)}…{d.pdfSha256.slice(-4)}
                 </p>
               ) : (
