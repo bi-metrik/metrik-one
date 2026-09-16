@@ -4,10 +4,10 @@ import { POLITICA_DATOS_VALIDA, requiereAceptacion, textoAvisoPolitica } from '.
 import { huellaAvisoPolitica } from './politica-huella'
 
 describe('versión de la Política', () => {
-  it('es la publicada hoy en Valida (1.4), no la 1.5 que todavía no existe', () => {
-    // Si alguien sube esto a 1.5 antes de que Valida la publique, esta línea lo obliga a
+  it('es la publicada hoy en Valida (1.5, que corrige la razón social del Responsable)', () => {
+    // Si alguien la sube antes de que Valida publique la siguiente, esta línea lo obliga a
     // decidirlo a propósito: la constancia quedaría sobre un texto que nadie puede leer.
-    expect(POLITICA_DATOS_VALIDA.version).toBe('1.4')
+    expect(POLITICA_DATOS_VALIDA.version).toBe('1.5')
     expect(POLITICA_DATOS_VALIDA.url).toBe('https://valida.metrik.com.co/recursos/privacidad')
   })
 })
@@ -15,6 +15,10 @@ describe('versión de la Política', () => {
 describe('aviso y su huella', () => {
   it('el aviso nombra la versión que se registra', () => {
     expect(textoAvisoPolitica()).toContain(`v${POLITICA_DATOS_VALIDA.version}`)
+  })
+
+  it('el aviso autoriza a METRIK IA S.A.S., no a la sociedad homónima sin «IA»', () => {
+    expect(textoAvisoPolitica()).toContain('autoriza a METRIK IA S.A.S. a tratar')
   })
 
   it('la huella es el sha256 del texto exacto del aviso', () => {
@@ -30,10 +34,10 @@ describe('requiereAceptacion', () => {
   })
 
   it('con la versión vigente aceptada, no se vuelve a pedir', () => {
-    expect(requiereAceptacion([{ documento_version: '1.4', aceptada_at: '2026-09-16T10:00:00Z' }])).toBe(false)
+    expect(requiereAceptacion([{ documento_version: '1.5', aceptada_at: '2026-09-16T10:00:00Z' }])).toBe(false)
   })
 
   it('una versión anterior no autoriza la vigente: se vuelve a pedir', () => {
-    expect(requiereAceptacion([{ documento_version: '1.3', aceptada_at: '2026-01-01T00:00:00Z' }])).toBe(true)
+    expect(requiereAceptacion([{ documento_version: '1.4', aceptada_at: '2026-09-15T10:00:00Z' }])).toBe(true)
   })
 })

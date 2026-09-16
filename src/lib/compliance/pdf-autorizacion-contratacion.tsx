@@ -205,7 +205,7 @@ function DocumentoAutorizacion({ data, fechaGen }: { data: AutorizacionData; fec
     data.estado === 'vigente' ? C.verdeClaro : data.estado === 'vencida' ? C.rojoClaro : C.crema;
 
   return (
-    <Document title="Autorización de contratación — Compliance SARLAFT" author="MeTRIK SAS">
+    <Document title="Autorización de contratación — Compliance SARLAFT" author="METRIK IA S.A.S.">
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <MetrikWordmark />

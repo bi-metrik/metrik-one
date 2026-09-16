@@ -70,9 +70,9 @@ describe('la llave en claro, una sola vez', () => {
 describe('Política de Datos en el primer ingreso', () => {
   const html = renderToStaticMarkup(
     React.createElement(AceptarPolitica, {
-      aviso: 'Al continuar, autoriza a MeTRIK SAS ... v1.4.',
+      aviso: 'Al continuar, autoriza a METRIK IA S.A.S. ... v1.5.',
       politicaUrl: 'https://valida.metrik.com.co/recursos/privacidad',
-      politicaTitulo: 'Política de Tratamiento de Datos Personales v1.4',
+      politicaTitulo: 'Política de Tratamiento de Datos Personales v1.5',
     }),
   )
 
@@ -85,7 +85,7 @@ describe('Política de Datos en el primer ingreso', () => {
   })
 
   it('muestra el aviso completo que se registra y el enlace a la Política', () => {
-    expect(texto(html)).toContain('Al continuar, autoriza a MeTRIK SAS')
+    expect(texto(html)).toContain('Al continuar, autoriza a METRIK IA S.A.S.')
     expect(html).toContain('href="https://valida.metrik.com.co/recursos/privacidad"')
   })
 })

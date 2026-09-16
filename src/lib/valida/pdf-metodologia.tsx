@@ -203,7 +203,7 @@ function MapeoValida() {
 function DocumentoMetodologia({ data, hash, fechaGen }: { data: MetodologiaData; hash: string; fechaGen: string }) {
   const c = data.config;
   return (
-    <Document title="Metodología de segmentación SARLAFT" author="MeTRIK SAS · Valida">
+    <Document title="Metodología de segmentación SARLAFT" author="METRIK IA S.A.S. · Valida">
       <Page size="A4" style={s.page}>
         {/* Header */}
         <View style={s.header}>
