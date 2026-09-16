@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:migraciones": "node scripts/check-migracion-grants.mjs",
+    "check:migracion-version": "node scripts/check-migracion-version-duplicada.mjs",
     "check:muerto": "knip"
   },
   "dependencies": {
