@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { puertaModuloLlamadas } from '@/lib/calidad/puerta-modulo'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
   NOMBRE_BLOQUE,
@@ -47,6 +48,8 @@ export async function POST(req: NextRequest) {
   if (!getRolePermissions(role).canViewCalidadTodos) {
     return NextResponse.json({ error: 'Sin permiso para auditar llamadas' }, { status: 403 })
   }
+  const sinModulo = await puertaModuloLlamadas()
+  if (sinModulo) return sinModulo
 
   const cuerpo = (await req.json()) as {
     auditoria?: Auditoria

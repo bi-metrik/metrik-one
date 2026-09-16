@@ -15,6 +15,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
   debeMoverElCaso,
@@ -83,6 +84,7 @@ export async function devolverBloque(
 ): Promise<{ ok: boolean; error?: string; bloqueNombre?: string; movidoA?: string | null }> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   if (!esMotivoValido(input.motivo)) {
     return { ok: false, error: 'Escoge por qué se devuelve el documento' }

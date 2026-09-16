@@ -59,6 +59,10 @@ vi.mock('./get-workspace', () => ({
   }),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: () => cliente('servicio') }))
+// La puerta de Clarity (riesgo 11, cuarta ronda) se ejercita con el criterio real sobre un
+// workspace con Clarity: lo que se prueba aqui es lo que pasa DESPUES de la puerta.
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 vi.mock('@/lib/activity/registrar-actividad', () => ({
   registrarActividad: (...a: unknown[]) => registrarActividad(...a),
 }))

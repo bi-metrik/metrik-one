@@ -21,11 +21,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { puertaModuloLlamadas } from '@/lib/calidad/puerta-modulo'
 import { createServiceClient } from '@/lib/supabase/server'
 import { redactarTranscripcion } from '@/lib/calidad/redactar'
 import { MAX_BYTES_AUDIO, mensajeAudioMuyPesado } from '@/lib/calidad/tope-audio'
 import { transcribirAudio } from '@/lib/calidad/transcribir'
 import { BUCKET_AUDIO } from '@/lib/calidad/audio-bucket'
+import { esRutaDeWorkspace } from '@/lib/almacenamiento/referencia'
 
 export const runtime = 'nodejs'
 // 300 s: el maximo del plan, no un default que se pueda subir. El tope de 45
@@ -41,6 +43,8 @@ export async function POST(req: NextRequest) {
   if (!getRolePermissions(role).canViewCalidadTodos) {
     return NextResponse.json({ error: 'Sin permiso para auditar llamadas' }, { status: 403 })
   }
+  const sinModulo = await puertaModuloLlamadas()
+  if (sinModulo) return sinModulo
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
@@ -56,7 +60,12 @@ export async function POST(req: NextRequest) {
   // que caer dentro del prefijo de SU workspace. Sin esto, un supervisor podria
   // pedir la transcripcion del audio de otro workspace con solo cambiar el
   // texto que manda. El prefijo no es decoracion: es el control de acceso.
-  if (!ruta.startsWith(`${workspaceId}/`) || ruta.includes('..')) {
+  //
+  // `esRutaDeWorkspace` y no un `startsWith` + `includes('..')`: storage-js pega la ruta a
+  // la URL sin codificar y `fetch` normaliza `%2e%2e`, `.%2E` y `\`, asi que
+  // `<ws>/%2e%2e/<otro ws>/x.mp3` pasaba el control viejo y `download` bajaba el audio del
+  // otro workspace.
+  if (typeof ruta !== 'string' || !esRutaDeWorkspace(ruta, workspaceId)) {
     return NextResponse.json({ error: 'Audio no encontrado.' }, { status: 404 })
   }
 

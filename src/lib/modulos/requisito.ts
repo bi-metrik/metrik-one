@@ -42,6 +42,10 @@ export const REQUISITO = {
   sustentaVinculacion: { modulos: ['sustenta'], funcion: 'compliance_vinculacion' },
   /** La cuenta de ePayco de las variables de entorno (la de SOENA). */
   pagoEpayco: { modulos: ['clarity'], funcion: 'fab_pago_epayco' },
+  /** `/calidad`: auditoría de llamadas con la llave de Gemini de MeTRIK. */
+  llamadas: { modulos: ['llamadas'] },
+  /** Cuentas de cobro recurrentes y su planilla PILA (Drive con las credenciales de MeTRIK). */
+  cobrosRecurrentes: { modulos: ['clarity'], funcion: 'cobros_recurrentes' },
 } as const satisfies Record<string, RequisitoModulo>
 
 export function cumpleRequisitoModulo(req: RequisitoModulo, ctx: ContextoGate): boolean {

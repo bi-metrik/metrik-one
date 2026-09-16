@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
@@ -79,6 +80,10 @@ async function guardDocumentoNegocio(
   negocioBloqueId: string,
   role?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
+  // El módulo va ANTES y aparte: el rol de corrección de la línea de abajo abre aunque
+  // `guardEditarBloque` diga que no, y un owner de un workspace sin Clarity pasaba por ahí
+  // a la extracción con Gemini y al almacenamiento de MeTRIK.
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
   const guard = await guardEditarBloque(negocioBloqueId)
   if (guard.ok || puedeCorregirDocumentos(role)) return { ok: true }
   return { ok: false, error: guard.error ?? 'Tu rol no permite editar este documento' }

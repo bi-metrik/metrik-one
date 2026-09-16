@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getServerKey } from '@/lib/server-keys'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { extraerRanuraDesdeImagen } from '@/lib/ai/extraer-ranura'
 import {
   evaluarLectura,
@@ -106,6 +107,10 @@ export async function leerPantallazoDeItem(
 ): Promise<ResultadoPantallazo> {
   const { supabase, error } = await getWorkspace()
   if (error) return rechazo('AUTH', 'No autenticado', 'Vuelve a entrar y reinténtalo.')
+  // Lee con la llave de Gemini de MeTRIK: la puerta de Clarity va antes de tocar el ítem.
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) {
+    return rechazo('MODULO', MENSAJE_MODULO_NO_ACTIVO, 'Esta lectura es de Clarity.')
+  }
 
   const item = await leerItem(supabase, itemId)
   if (!item) {
