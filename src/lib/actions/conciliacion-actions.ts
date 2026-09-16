@@ -351,6 +351,12 @@ export async function repartirPagoComercial(
   const esEpayco = (input.fuente ?? 'manual') === 'epayco'
 
   if (esEpayco) {
+    // La cuenta de ePayco es GLOBAL (la de SOENA): solo la consulta un workspace que cobra
+    // por la pasarela. Sin esto, cualquier workspace con el FAB de pago recorría referencias
+    // y, por el techo de plata de abajo, leía cuánto pagó cada cliente de SOENA.
+    if (!(await workspaceCobraPorEpayco(supabase, workspaceId))) {
+      return { success: false, error: MENSAJE_SIN_EPAYCO }
+    }
     const refNum = parseInt(referencia, 10)
     if (isNaN(refNum) || refNum <= 0) return { success: false, error: 'Referencia ePayco inválida' }
     let desglose
@@ -431,6 +437,9 @@ async function avisarConciliacionPendiente(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const ESTADO_APROBADO_EPAYCO = 'Aceptada'
+
+/** Sin `export`: un archivo `'use server'` que exporta una constante pierde todos sus exports. */
+const MENSAJE_SIN_EPAYCO = 'Este espacio no cobra por ePayco: registra el pago con su fuente real.'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -1399,6 +1408,12 @@ export async function registrarPagoEnNegocio(
   const fecha = (input.fecha ?? '').trim() || todayBogotaISO()
 
   if (input.fuente === 'epayco') {
+    // Misma barrera que en `repartirPagoComercial`: la cuenta de ePayco es la de SOENA. Sin
+    // ella, un workspace Clarity sin pasarela (Termotech) registraba en SU negocio un pago
+    // ePayco aprobado de otro cliente.
+    if (!(await workspaceCobraPorEpayco(supabase, workspaceId))) {
+      return { success: false, error: MENSAJE_SIN_EPAYCO }
+    }
     const refNum = parseInt(referencia, 10)
     if (isNaN(refNum) || refNum <= 0) return { success: false, error: 'Referencia ePayco inválida' }
 

@@ -14,6 +14,16 @@
  * VISTO FALLAR (2026-09-16) contra `epayco-actions.ts` y `valida.ts` de `origin/main`:
  * caen los 2 casos sin sesion; los 2 con sesion siguen verdes. Quitando cada guarda del
  * archivo nuevo cae 1 caso por guarda.
+ *
+ * TERCERA RONDA (2026-09-16): la sesion no basta. La cuenta de ePayco es la de SOENA y la
+ * llave de Valida es la GLOBAL de MeTRIK: ahora las abre el modulo del workspace
+ * (`fab_pago_epayco`; Sustenta, que es de quien es `/compliance/validacion`). Los casos
+ * "con sesion" pasan a declarar el workspace con el que corren, y se agregan los de un
+ * workspace con sesion y sin el modulo (4D SOFT, Termotech, un CDA).
+ * VISTO FALLAR contra `origin/main`: caen los 5 casos con sesion y sin modulo; los de control
+ * siguen verdes. Quitando la guarda de modulo (que ahora tambien pide la sesion) de
+ * `consultarEpayco` caen 3; de `registrarPagoEpayco`, 1; de `validarPersona`, 1; de
+ * `listarConsultas`, 2.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -40,12 +50,22 @@ vi.mock('@/lib/epayco', () => ({
 }))
 vi.mock('@/lib/siigo/recibo-automatico', () => ({ emitirReciboAutomatico: async () => null }))
 vi.mock('@/lib/cobros/aviso-sobrepago-servidor', () => ({ avisarSobrepagoSiCorresponde: async () => null }))
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
-import { consultarEpayco } from './epayco-actions'
-import { listarConsultas } from './valida'
+import { consultarEpayco, registrarPagoEpayco } from './epayco-actions'
+import { listarConsultas, validarPersona } from './valida'
+import { estadoModulo, MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
+
+/** La sesion de las pruebas: `getWorkspace` y la puerta de modulo ven el mismo workspace. */
+function conSesion(workspaceId: string | null, modules: Record<string, boolean> | null) {
+  sesion.workspaceId = workspaceId
+  reiniciarModulo(workspaceId ?? '', modules)
+  estadoModulo.workspaceId = workspaceId
+}
 
 beforeEach(() => {
-  sesion.workspaceId = null
+  conSesion(null, null)
   consultarTransaccionEpayco.mockClear()
   fetchValida.mockClear()
   vi.stubGlobal('fetch', fetchValida)
@@ -59,24 +79,60 @@ describe('consultarEpayco', () => {
     expect(consultarTransaccionEpayco).not.toHaveBeenCalled()
   })
 
-  it('con sesion consulta', async () => {
-    sesion.workspaceId = 'ws-1'
+  it('SOENA (cobra por ePayco) consulta', async () => {
+    conSesion('ws-soena', { ...MODULES.soena })
     await consultarEpayco('123456')
     expect(consultarTransaccionEpayco).toHaveBeenCalledWith(123456)
   })
+
+  it('4D SOFT, con sesion y sin Clarity, no recorre los pagos de SOENA', async () => {
+    conSesion('ws-4dsoft', { ...MODULES.cuatroDSoft })
+    const r = await consultarEpayco('123456')
+    expect(r.success).toBe(false)
+    expect(consultarTransaccionEpayco).not.toHaveBeenCalled()
+  })
+
+  it('Termotech, Clarity sin pasarela, tampoco: la cuenta es la de SOENA', async () => {
+    conSesion('ws-termotech', { ...MODULES.termotech })
+    const r = await consultarEpayco('123456')
+    expect(r.success).toBe(false)
+    expect(consultarTransaccionEpayco).not.toHaveBeenCalled()
+  })
+
+  it('registrar un pago ePayco tampoco re-consulta la cuenta sin el modulo', async () => {
+    conSesion('ws-termotech', { ...MODULES.termotech })
+    const desglose = { ref_payco: 123456 } as unknown as Parameters<typeof registrarPagoEpayco>[2]
+    const r = await registrarPagoEpayco('bloque-1', 'neg-1', desglose, 'pago', { validarEpayco: true })
+    expect(r.success).toBe(false)
+    expect(consultarTransaccionEpayco).not.toHaveBeenCalled()
+  })
 })
 
-describe('listarConsultas (Valida con la llave global)', () => {
+describe('listarConsultas y validarPersona (Valida con la llave global)', () => {
   it('sin sesion no llama a Valida', async () => {
     const r = await listarConsultas()
     expect(r.ok).toBe(false)
     expect(fetchValida).not.toHaveBeenCalled()
   })
 
-  it('con sesion llama', async () => {
-    sesion.workspaceId = 'ws-1'
+  it('alma-afi (Sustenta, de quien es /compliance/validacion) llama', async () => {
+    conSesion('ws-alma', { ...MODULES.almaAfi })
     const r = await listarConsultas()
     expect(r.ok).toBe(true)
     expect(fetchValida).toHaveBeenCalledTimes(1)
+  })
+
+  it('4D SOFT no lista las consultas de la llave de MeTRIK', async () => {
+    conSesion('ws-4dsoft', { ...MODULES.cuatroDSoft })
+    const r = await listarConsultas()
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' })
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('un CDA con su propio modulo Valida tampoco consulta con la llave de MeTRIK', async () => {
+    conSesion('ws-cda', { ...MODULES.cda })
+    const r = await validarPersona({ tipo: 'natural', nombre: 'Juan Perez' })
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' })
+    expect(fetchValida).not.toHaveBeenCalled()
   })
 })

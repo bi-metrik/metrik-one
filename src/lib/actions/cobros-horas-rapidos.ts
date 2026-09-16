@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -16,6 +17,7 @@ export async function addHoras(proyectoId: string, input: {
 }): Promise<ActionResult> {
   const { supabase, workspaceId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   const { data: proyecto } = await supabase
     .from('proyectos')
@@ -74,6 +76,7 @@ export async function addCobro(facturaId: string, input: {
 }): Promise<ActionResult> {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   const { data: factura } = await supabase
     .from('facturas')

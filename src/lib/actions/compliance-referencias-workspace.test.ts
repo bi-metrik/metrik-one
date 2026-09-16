@@ -59,6 +59,10 @@ vi.mock('@/lib/supabase/server', () => ({
     rpc: async () => ({ data: null, error: null }),
   }),
 }))
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
+const ejecutarBarrido = vi.fn(async (_ws: string) => ({ ejecutadas: 0 }))
+vi.mock('@/lib/compliance/barrido', () => ({ ejecutarBarrido: (ws: string) => ejecutarBarrido(ws) }))
 
 function constructor(tabla: string) {
   const eqs: Fila = {}
@@ -68,6 +72,12 @@ function constructor(tabla: string) {
   const q = {
     select: () => q,
     eq: (c: string, v: unknown) => {
+      eqs[c] = v
+      return q
+    },
+    // `verificarEnlacesExpediente` filtra las versiones vigentes; sin esto la prueba de
+    // `origin/main` caería por un TypeError del doble y no por el fetch que se quiere ver.
+    is: (c: string, v: unknown) => {
       eqs[c] = v
       return q
     },
@@ -92,13 +102,56 @@ function constructor(tabla: string) {
 }
 
 import { crearSujeto, actualizarSujeto } from './compliance-sujetos'
-import { crearDocumento, actualizarDocumento } from './compliance-documentos'
+import { crearDocumento, actualizarDocumento, verificarEnlacesExpediente } from './compliance-documentos'
+import { correrBarridoAhora } from './compliance-monitoreo'
+import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const SUJETO = { tipo: 'proveedor', documento_tipo: 'NIT', documento_numero: '900123456', nombre: 'Acme SAS' }
 const DOC = { codigo: 'MAN-01', tipo: 'manual', nombre: 'Manual SAGRILAFT' }
 
 beforeEach(() => {
   escrituras.length = 0
+  // alma-afi: Sustenta, el único workspace que usa estas pantallas.
+  reiniciarModulo('ws-1', { ...MODULES.almaAfi })
+})
+
+/**
+ * TERCERA RONDA (2026-09-16): el expediente documental y el monitoreo son de Sustenta; el
+ * rol de oficial no basta. Un owner de 4D SOFT registraba enlaces para que el servidor los
+ * pidiera (`verificarEnlacesExpediente` hace `fetch` y responde si existen) y corría el
+ * barrido, que consulta con la llave global de MeTRIK.
+ * VISTO FALLAR contra `origin/main`: caen los 3; quitando la guarda de módulo de
+ * `compliance-documentos` caen 2 y la de `compliance-monitoreo`, 1.
+ */
+describe('expediente documental y monitoreo — sin Sustenta no', () => {
+  const fetchEspia = vi.fn(async () => new Response('', { status: 200 }))
+  beforeEach(() => {
+    reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft })
+    fetchEspia.mockClear()
+    ejecutarBarrido.mockClear()
+    vi.stubGlobal('fetch', fetchEspia)
+    TABLAS.compliance_documento_versiones = [
+      { id: 'v-1', workspace_id: 'ws-1', url: 'http://169.254.169.254/latest/meta-data/', vigente_hasta: null },
+    ]
+  })
+
+  it('4D SOFT no registra documentos', async () => {
+    const r = await crearDocumento({ ...DOC })
+    expect(r.ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
+  })
+
+  it('4D SOFT no hace que el servidor pida sus enlaces', async () => {
+    const r = await verificarEnlacesExpediente()
+    expect(r.ok).toBe(false)
+    expect(fetchEspia).not.toHaveBeenCalled()
+  })
+
+  it('4D SOFT no corre el barrido', async () => {
+    const r = await correrBarridoAhora()
+    expect(r.ok).toBe(false)
+    expect(ejecutarBarrido).not.toHaveBeenCalled()
+  })
 })
 
 describe('crearSujeto — referencias', () => {

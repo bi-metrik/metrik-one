@@ -45,12 +45,22 @@ const efectos = {
   descargasOne: [] as string[],
   borradosDrive: [] as string[],
   subidasDrive: [] as string[],
+  descargasDrive: [] as string[],
   updates: [] as Array<{ tabla: string; filtros: Fila; payload: Fila }>,
 }
 
-const escenario: { tablas: Record<string, Fila[]>; descargaFalla: boolean } = {
+const escenario: {
+  tablas: Record<string, Fila[]>
+  descargaFalla: boolean
+  /** El workspace habla con Drive con las credenciales GLOBALES de MeTRIK (sin Drive propio). */
+  driveGlobal: boolean
+  /** Padres de cada id en el Drive de MeTRIK, que guarda archivos de varios clientes. */
+  padres: Record<string, string[]>
+} = {
   tablas: {},
   descargaFalla: true,
+  driveGlobal: true,
+  padres: {},
 }
 
 function limpiar() {
@@ -59,6 +69,7 @@ function limpiar() {
   efectos.descargasOne.length = 0
   efectos.borradosDrive.length = 0
   efectos.subidasDrive.length = 0
+  efectos.descargasDrive.length = 0
   efectos.updates.length = 0
 }
 
@@ -143,7 +154,12 @@ vi.mock('@/lib/google-drive', () => ({
   deleteDriveFile: async (id: string) => {
     efectos.borradosDrive.push(id)
   },
-  downloadDriveFile: async () => Buffer.from('x'),
+  downloadDriveFile: async (id: string) => {
+    efectos.descargasDrive.push(id)
+    return Buffer.from('%PDF-1.4')
+  },
+  usaCredencialesDriveGlobales: async () => escenario.driveGlobal,
+  padresDeArchivoDrive: async (id: string) => escenario.padres[id] ?? null,
 }))
 vi.mock('@/lib/correcciones/registrar', () => ({
   registrarCorrecciones: async () => {},
@@ -169,10 +185,24 @@ vi.mock('@/lib/ve/parse-ve-docs', () => ({ parseVeDocuments: async () => ({ data
 vi.mock('@/lib/rut/parse-rut', () => ({ parseRut: async () => ({ data: null, error: 'x' }) }))
 
 import { procesarDocumento, reprocesarDocumento } from './documento-actions'
-import { confirmarUploadDocumentoNegocio, procesarDocumentoNegocio } from './ve-documentos-negocio'
+import {
+  actualizarCamposNegocioBloque,
+  confirmarUploadDocumentoNegocio,
+  procesarDocumentoNegocio,
+} from './ve-documentos-negocio'
 
 function sembrar(dataBloque: Fila = {}, configExtra: Fila = {}) {
   escenario.descargaFalla = true
+  escenario.driveGlobal = true
+  // Los archivos de ESTE negocio cuelgan de su carpeta; los del otro cliente, de la suya.
+  escenario.padres = {
+    'drv-viejo': ['sub-2-documentos'],
+    'drv-propio': ['sub-2-documentos'],
+    'sub-2-documentos': ['carpeta-neg'],
+    'carpeta-neg': ['raiz-drive'],
+    'drv-de-otro-cliente': ['carpeta-de-otro-negocio'],
+    'carpeta-de-otro-negocio': ['raiz-de-otro-cliente'],
+  }
   escenario.tablas = {
     negocio_bloques: [
       {
@@ -296,5 +326,109 @@ describe('procesarDocumentoNegocio — la referencia guardada', () => {
     const r = await procesarDocumentoNegocio(BLOQUE, 'factura')
     expect(r.success).toBe(false)
     expect(efectos.descargasOne).toHaveLength(0)
+  })
+})
+
+/**
+ * TERCERA RONDA (2026-09-16).
+ *
+ * 1. Un id de Drive guardado en `data` no se opera si no cuelga de una carpeta del
+ *    workspace, cuando el workspace no tiene Drive propio: esas credenciales son las
+ *    GLOBALES de MeTRIK, que guardan archivos de varios clientes.
+ * 2. `procesarDocumentoNegocio` no hace `fetch` a la URL guardada (SSRF): solo lee
+ *    referencias y archivos de Drive por su API.
+ * 3. `actualizarCamposNegocioBloque` solo escribe los campos extraídos.
+ *
+ * VISTO FALLAR contra `origin/main`: caen 7 (los dos borrados ajenos, la descarga ajena del
+ * reproceso, la URL arbitraria, los dos enlaces de Drive y la clave `docs`); los 2 CONTROL
+ * siguen verdes. Mutaciones sobre los archivos nuevos: sin la comprobación de ancestros en
+ * `procesarDocumento` caen 2; en `reprocesarDocumento`, 1; en `procesarDocumentoNegocio`, 1;
+ * volviendo a `fetch(url)`, 3; sin la lista blanca de `actualizarCamposNegocioBloque`, 1;
+ * contando la propia carpeta como ancestro, 1.
+ */
+describe('ids de Drive guardados en data — sin Drive propio', () => {
+  it('el archivo anterior de otro cliente no se borra', async () => {
+    sembrar({ drive_file_id: 'drv-de-otro-cliente' })
+    escenario.descargaFalla = false
+    const r = await procesarDocumento(BLOQUE, NEG, RUTA_PROPIA, 'documento.pdf')
+    expect(r.success).toBe(true)
+    expect(efectos.borradosDrive).toEqual([])
+  })
+
+  it('la carpeta del negocio no pasa por "archivo anterior"', async () => {
+    sembrar({ drive_file_id: 'carpeta-neg' })
+    escenario.descargaFalla = false
+    await procesarDocumento(BLOQUE, NEG, RUTA_PROPIA, 'documento.pdf')
+    expect(efectos.borradosDrive).toEqual([])
+  })
+
+  it('CONTROL — con Drive propio el anterior se borra sin preguntar por carpetas', async () => {
+    sembrar({ drive_file_id: 'drv-sin-padres-conocidos' })
+    escenario.driveGlobal = false
+    escenario.descargaFalla = false
+    await procesarDocumento(BLOQUE, NEG, RUTA_PROPIA, 'documento.pdf')
+    expect(efectos.borradosDrive).toEqual(['drv-sin-padres-conocidos'])
+  })
+
+  it('reprocesar no descarga el archivo de otro cliente', async () => {
+    sembrar(
+      { drive_file_id: 'drv-de-otro-cliente', file_name: 'Factura.pdf' },
+      { campos_extraccion: [{ slug: 'nit', label: 'NIT', tipo: 'texto' }] },
+    )
+    const r = await reprocesarDocumento(BLOQUE, NEG)
+    expect(r).toEqual({ success: false, error: 'Archivo no encontrado' })
+    expect(efectos.descargasDrive).toEqual([])
+  })
+
+  it('CONTROL — reprocesar sí descarga uno de este negocio', async () => {
+    sembrar(
+      { drive_file_id: 'drv-propio', file_name: 'Factura.pdf' },
+      { campos_extraccion: [{ slug: 'nit', label: 'NIT', tipo: 'texto' }] },
+    )
+    await reprocesarDocumento(BLOQUE, NEG)
+    expect(efectos.descargasDrive).toEqual(['drv-propio'])
+  })
+})
+
+describe('procesarDocumentoNegocio — nunca fetch a la URL guardada', () => {
+  const fetchEspia = vi.fn(async () => new Response('secreto', { status: 200 }))
+  beforeEach(() => {
+    fetchEspia.mockClear()
+    vi.stubGlobal('fetch', fetchEspia)
+  })
+
+  it('una URL arbitraria no se pide desde el servidor', async () => {
+    sembrar({ docs: { factura: 'http://169.254.169.254/latest/meta-data/' } })
+    const r = await procesarDocumentoNegocio(BLOQUE, 'factura')
+    expect(r.success).toBe(false)
+    expect(fetchEspia).not.toHaveBeenCalled()
+    expect(efectos.descargasDrive).toEqual([])
+  })
+
+  it('un enlace de Drive de este negocio se baja por la API', async () => {
+    sembrar({ docs: { factura: 'https://drive.google.com/file/d/drv-propio/view?usp=drivesdk' } })
+    await procesarDocumentoNegocio(BLOQUE, 'factura')
+    expect(fetchEspia).not.toHaveBeenCalled()
+    expect(efectos.descargasDrive).toEqual(['drv-propio'])
+  })
+
+  it('un enlace de Drive de otro cliente no se baja', async () => {
+    sembrar({ docs: { factura: 'https://drive.google.com/file/d/drv-de-otro-cliente/view' } })
+    const r = await procesarDocumentoNegocio(BLOQUE, 'factura')
+    expect(r.success).toBe(false)
+    expect(fetchEspia).not.toHaveBeenCalled()
+    expect(efectos.descargasDrive).toEqual([])
+  })
+})
+
+describe('actualizarCamposNegocioBloque — solo campos extraídos', () => {
+  it('no escribe la referencia de un documento', async () => {
+    sembrar({ docs: { factura: `one://ve-documentos/${RUTA_PROPIA}` } })
+    const campos = { marca: 'BYD', docs: { factura: 'http://169.254.169.254/' } }
+    const r = await actualizarCamposNegocioBloque(BLOQUE, campos as unknown as Parameters<typeof actualizarCamposNegocioBloque>[1])
+    expect(r.success).toBe(true)
+    const data = efectos.updates.at(-1)?.payload.data as Fila
+    expect(data.marca).toBe('BYD')
+    expect(data.docs).toEqual({ factura: `one://ve-documentos/${RUTA_PROPIA}` })
   })
 })

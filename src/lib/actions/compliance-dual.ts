@@ -2,6 +2,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import { resolverNombresUsuarios } from './_usuarios';
 import { listarSegmentos } from './compliance-segmentos';
 import {
@@ -201,6 +202,21 @@ function getApiKey(): string {
   return key;
 }
 
+/**
+ * La consulta dual usa la llave GLOBAL de MeTRIK (`VALIDA_API_KEY`) y cada llamada se le cobra.
+ * Sirve a `/compliance/listas` (alma-afi): la sesión no basta, el workspace tiene que tener
+ * Sustenta con `compliance_dual_informa`, el mismo criterio con el que el menú muestra la
+ * pantalla. Un workspace de solo `valida_api` (4D SOFT) no consulta aquí.
+ *
+ * Las funciones de auditoría de abajo no pasan por aquí: son del workspace `metrik` y ya lo
+ * exigen por slug (`ensureWorkspaceMetrik`).
+ */
+async function accesoConsultaDual(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await exigirModulo(REQUISITO.sustentaDual);
+  if (r.ok) return { ok: true };
+  return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
+}
+
 function getAuditSecret(): string {
   const s = process.env.METRIK_AUDIT_SECRET;
   if (!s) throw new Error('METRIK_AUDIT_SECRET no esta configurado');
@@ -260,6 +276,8 @@ export type DualConsultaInput = DualConsultaBase & {
 export async function consultaDual(
   input: DualConsultaBase
 ): Promise<Result<DualConsultaPublica>> {
+  const acceso = await accesoConsultaDual();
+  if (!acceso.ok) return acceso;
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
   const slug = await getWorkspaceSlug(workspaceId);
@@ -309,6 +327,8 @@ export async function consultaDual(
 export async function consultaDualBatch(formData: FormData): Promise<
   Result<{ base64: string; filename: string }>
 > {
+  const acceso = await accesoConsultaDual();
+  if (!acceso.ok) return acceso;
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
   const slug = await getWorkspaceSlug(workspaceId);
@@ -700,6 +720,9 @@ export async function consultaDualPersistente(
   input: DualConsultaInput,
   meta: DualConsultaMeta = {},
 ): Promise<Result<DualConsultaPersistida>> {
+  // Antes de escribir nada, ni siquiera la fila de error de un lote.
+  const acceso = await accesoConsultaDual();
+  if (!acceso.ok) return acceso;
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
@@ -967,6 +990,8 @@ function asStr(v: unknown): string {
 export async function prepararLoteDual(
   formData: FormData,
 ): Promise<Result<DualLotePreparado>> {
+  const acceso = await accesoConsultaDual();
+  if (!acceso.ok) return acceso;
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 

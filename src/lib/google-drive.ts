@@ -276,6 +276,39 @@ export async function getAccessToken(workspaceId?: string): Promise<string> {
   return data.access_token as string
 }
 
+/**
+ * ¿Este workspace habla con Drive con las credenciales GLOBALES de MeTRIK? Es el caso de todo
+ * workspace sin Drive propio, y ahí un id de archivo es peligroso: esa cuenta guarda archivos
+ * de varios clientes, así que con el id de uno ajeno se lee o se borra lo de otro. Lanza igual
+ * que `getAccessToken` (credenciales incompletas, almacenamiento externo).
+ */
+export async function usaCredencialesDriveGlobales(workspaceId: string): Promise<boolean> {
+  const creds = await resolveCredentials(workspaceId)
+  return creds.cacheKey === GLOBAL_CACHE_KEY
+}
+
+/**
+ * Carpetas padre de un archivo o carpeta. `null` si Drive no lo encuentra o no deja verlo
+ * (404/403: para quien pregunta es lo mismo, no es alcanzable). Cualquier otro error se lanza.
+ */
+export async function padresDeArchivoDrive(fileId: string, workspaceId?: string): Promise<string[] | null> {
+  if (!/^[-\w]+$/.test(fileId)) return null
+  const token = await getAccessToken(workspaceId)
+  const params = new URLSearchParams({ fields: 'parents', supportsAllDrives: 'true' })
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (res.status === 404 || res.status === 403) return null
+  if (!res.ok) {
+    const errBody = await res.text()
+    console.error('[google-drive] Padres de archivo falló:', res.status, errBody.slice(0, 500))
+    throw new Error(`Error leyendo el archivo en Drive (${res.status})`)
+  }
+  const f = await res.json()
+  return Array.isArray(f.parents) ? (f.parents as string[]) : []
+}
+
 // ── Folder operations ────────────────────────────────────────────────────────
 
 /**

@@ -7,7 +7,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
 import { parseRut } from '@/lib/rut/parse-rut'
-import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
+import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, downloadDriveFile } from '@/lib/google-drive'
+import { archivoDriveOperable } from '@/lib/almacenamiento/drive-del-workspace'
+import { extraerDriveFileId } from '@/lib/compliance/documentos'
+import { mimeEfectivo } from '@/lib/documentos/mime'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { descargarDeOne } from '@/lib/almacenamiento/one'
 import {
@@ -33,6 +36,14 @@ function db(client: unknown): any { return client }
 // - factura, cedula, soporte_upme → parseVeDocuments
 // - rut → parseRut
 const SLUGS_CON_AI = ['factura', 'cedula', 'soporte_upme', 'rut']
+
+// Las claves de `CamposExtraidos`, en valor: son las ÚNICAS que `actualizarCamposNegocioBloque`
+// escribe. Sin `export`: un archivo `'use server'` que exporta una constante pierde sus exports.
+const CLAVES_CAMPOS_EXTRAIDOS = [
+  'nombre_propietario', 'numero_identificacion', 'marca', 'linea', 'modelo', 'tecnologia', 'tipo',
+  'numero_cus', 'regimen_tributario_cliente', 'tipo_persona_cliente', 'telefono_propietario',
+  'municipio_propietario', 'correo_propietario', 'direccion_propietario',
+] as const satisfies readonly (keyof CamposExtraidos)[]
 
 // Todos los campos extraibles de los 4 documentos de radicación
 export interface CamposExtraidos {
@@ -270,6 +281,16 @@ export async function confirmarUploadDocumentoNegocio(
 
 // ── 3. Procesar documento con IA ──────────────────────────────────────────────
 
+/** Enlaces de Drive: el único origen `https` del que se lee un documento, y por su API. */
+function esEnlaceDrive(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && (u.hostname === 'drive.google.com' || u.hostname === 'docs.google.com')
+  } catch {
+    return false
+  }
+}
+
 function mimeTypeFromUrl(url: string): string {
   const p = url.split('?')[0].toLowerCase()
   if (p.endsWith('.pdf')) return 'application/pdf'
@@ -342,12 +363,29 @@ export async function procesarDocumentoNegocio(
       return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
     }
   } else {
+    // Ni `fetch` a la URL guardada: esa URL viene de `data`, y pedir lo que diga ahí desde el
+    // servidor es SSRF (y el contenido se le manda a Gemini). El único origen fuera de las
+    // referencias es un archivo de Drive, que se baja por la API con las credenciales del
+    // workspace y solo si cuelga de una carpeta suya (ver `drive-del-workspace.ts`).
+    const fileId = esEnlaceDrive(url) ? extraerDriveFileId(url) : null
+    if (!fileId) return { success: false, error: `Documento '${slug}' no cargado` }
+    const { data: filaNegocio } = await db(supabase)
+      .from('negocio_bloques')
+      .select('negocio_id')
+      .eq('id', negocioBloqueId)
+      .maybeSingle()
+    const operable = await archivoDriveOperable({
+      fileId,
+      workspaceId: workspaceSesion,
+      negocioId: (filaNegocio?.negocio_id as string | undefined) ?? null,
+    })
+    if (!operable) return { success: false, error: `Documento '${slug}' no cargado` }
     try {
-      const res = await fetch(url)
-      if (!res.ok) return { success: false, error: `Error descargando (HTTP ${res.status})` }
-      buffer = await res.arrayBuffer()
-      const ct = res.headers.get('content-type') || ''
-      mimeType = ct.split(';')[0].trim() || mimeTypeFromUrl(url)
+      const leido = await downloadDriveFile(fileId, workspaceSesion)
+      const copia = new Uint8Array(leido.length)
+      copia.set(leido)
+      buffer = copia.buffer
+      mimeType = mimeEfectivo(leido, mimeTypeFromUrl(url))
     } catch (err) {
       return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
     }
@@ -447,9 +485,18 @@ export async function actualizarCamposNegocioBloque(
 
   const currentData = (bloque?.data as Record<string, unknown>) ?? {}
 
+  // Solo los campos extraídos, y solo como texto. Antes se mezclaba `campos` entero: con
+  // `{ docs: { factura: '<cualquier url>' } }` se escribía la referencia que después
+  // `procesarDocumentoNegocio` descarga con credenciales del servidor.
+  const permitidos: Record<string, string> = {}
+  for (const clave of CLAVES_CAMPOS_EXTRAIDOS) {
+    const valor = (campos as Record<string, unknown> | null | undefined)?.[clave]
+    if (typeof valor === 'string') permitidos[clave] = valor
+  }
+
   const { error: updateError } = await db(supabase)
     .from('negocio_bloques')
-    .update({ data: { ...currentData, ...campos }, updated_at: new Date().toISOString() })
+    .update({ data: { ...currentData, ...permitidos }, updated_at: new Date().toISOString() })
     .eq('id', negocioBloqueId)
 
   if (updateError) return { success: false, error: updateError.message }

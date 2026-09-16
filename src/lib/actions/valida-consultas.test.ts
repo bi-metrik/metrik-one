@@ -28,6 +28,12 @@
  * que el helper deje de mirar el workspace tumba 3 (los dos ajenos de `consultarValida`
  * y el del lote; el del id inexistente sigue verde, porque ese id no existe en ningun
  * workspace y la mutacion no lo toca).
+ *
+ * TERCERA RONDA (2026-09-16): la sesion no basta, lo abre el modulo Valida; y sin llave
+ * propia no se usa la global de MeTRIK. VISTO FALLAR contra `origin/main`: caen los 6 de
+ * 4D SOFT que llegan a la red o a la base y los 2 sin llave; el CONTROL del CDA y el de la
+ * llave del workspace siguen verdes. Quitando cada `accesoValida` cae su caso (6
+ * mutaciones); volviendo a poner el respaldo a `VALIDA_API_KEY` caen 2.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -51,6 +57,12 @@ const TABLAS: Record<string, Fila[]> = {
       id: 'c-vieja', workspace_id: 'ws-1', negocio_id: 'neg-ajeno', tipo: 'puntual',
       tipo_persona: 'natural', nombre_consultado: 'X', severidad: 'sin_hallazgo',
       total_matches: 0, created_at: '2026-09-01T00:00:00Z', created_by: null, lote_id: null,
+    },
+    // Un item de lote con reporte en Valida: `generarPDFLoteValida` llega a la red con el.
+    {
+      id: 'c-lote', workspace_id: 'ws-1', negocio_id: null, tipo: 'masiva_item',
+      tipo_persona: 'natural', nombre_consultado: 'Y', severidad: 'sin_hallazgo', valida_consulta_id: 'val-9',
+      total_matches: 0, created_at: '2026-09-02T00:00:00Z', created_by: null, lote_id: 'lote-1',
     },
   ],
 }
@@ -76,10 +88,15 @@ vi.mock('@/lib/supabase/auth-user', () => ({
   getCachedUser: async () => ({ user: { id: 'user-1' } }),
 }))
 
+const llave: { delWorkspace: string | undefined } = { delWorkspace: 'llave-de-prueba' }
+
 vi.mock('@/lib/secretos/workspace', () => ({
   leerSecretosWorkspace: async () => ({}),
-  secretoConRespaldo: () => 'llave-de-prueba',
+  secretoConRespaldo: () => llave.delWorkspace,
 }))
+
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
 vi.mock('@/lib/actions/_usuarios', () => ({
   resolverNombresUsuarios: async () => new Map(),
@@ -115,6 +132,10 @@ function constructor(tabla: string) {
     limit: () => q,
     gte: () => q,
     lte: () => q,
+    not: () => q,
+    // `buscarNegociosParaValida` filtra por codigo o nombre: sin esto la prueba de
+    // `origin/main` caeria por un TypeError del doble y no por la busqueda que se quiere ver.
+    or: () => q,
     eq: (columna: string, valor: unknown) => {
       eqs[columna] = valor
       return q
@@ -136,7 +157,15 @@ function constructor(tabla: string) {
   return q
 }
 
-import { consultarValida, prepararLoteValida, listarConsultasValida } from './valida-consultas'
+import {
+  consultarValida,
+  prepararLoteValida,
+  listarConsultasValida,
+  descargarPDFConsultaValida,
+  generarPDFLoteValida,
+  buscarNegociosParaValida,
+} from './valida-consultas'
+import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const PERSONA = { tipo: 'natural' as const, nombre: 'Juan Perez' }
 
@@ -159,6 +188,77 @@ beforeEach(() => {
   persistirScore.mockClear()
   fetchValida.mockClear()
   vi.stubGlobal('fetch', fetchValida)
+  // AFI: Clarity con el módulo Valida y su propia llave.
+  reiniciarModulo('ws-1', { ...MODULES.afi })
+  llave.delWorkspace = 'llave-de-prueba'
+  process.env.VALIDA_API_KEY = 'llave-global-de-metrik'
+})
+
+describe('el módulo Valida, no la sesión, abre estas acciones (tercera ronda)', () => {
+  // 4D SOFT: sesión válida, workspace con solo `valida_api`. Nada de este archivo le sirve.
+  beforeEach(() => reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft }))
+
+  it('no consulta Valida ni persiste', async () => {
+    const r = await consultarValida(PERSONA)
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' })
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('no descarga reportes', async () => {
+    expect((await descargarPDFConsultaValida('val-1')).ok).toBe(false)
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('no arma el PDF de un lote', async () => {
+    expect((await generarPDFLoteValida('lote-1')).ok).toBe(false)
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('no lista las consultas', async () => {
+    expect((await listarConsultasValida()).ok).toBe(false)
+  })
+
+  it('no prepara lotes', async () => {
+    expect((await prepararLoteValida(loteSinCodigo())).ok).toBe(false)
+  })
+
+  it('no busca negocios', async () => {
+    expect((await buscarNegociosParaValida('P')).ok).toBe(false)
+  })
+
+
+  it('CONTROL — un CDA de solo Valida sí consulta', async () => {
+    reiniciarModulo('ws-1', { ...MODULES.cda })
+    expect((await consultarValida(PERSONA)).ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('sin llave propia no se usa la de MeTRIK (tercera ronda)', () => {
+  beforeEach(() => {
+    llave.delWorkspace = undefined
+  })
+
+  it('la consulta falla a la vista en vez de cobrarse a MeTRIK', async () => {
+    const r = await consultarValida(PERSONA)
+    expect(r).toEqual({ ok: false, error: 'valida_api_key_no_configurada' })
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('el reporte no se baja con la llave global', async () => {
+    const r = await descargarPDFConsultaValida('val-de-otro-cliente')
+    expect(r).toEqual({ ok: false, error: 'valida_api_key_no_configurada' })
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('CONTROL — con llave propia, la que viaja es la del workspace', async () => {
+    llave.delWorkspace = 'llave-de-prueba'
+    await consultarValida(PERSONA)
+    const init = fetchValida.mock.calls[0][1] as { headers: Record<string, string> }
+    expect(init.headers.Authorization).toBe('Bearer llave-de-prueba')
+  })
 })
 
 describe('consultarValida — de quien es el negocio', () => {

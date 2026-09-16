@@ -45,7 +45,11 @@ vi.mock('./compliance-segmentos', () => ({
   listarSegmentos: (...args: unknown[]) => listarSegmentosMock(...args),
 }));
 
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo());
+
 import { prepararLoteDual, consultaDualPersistente } from './compliance-dual';
+import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble';
 
 // ─── Dobles ────────────────────────────────────────────────────────────────
 
@@ -56,6 +60,9 @@ const CATALOGO = [
 
 /** Fila que devuelve `compliance_segmentos` en la validación previa al fetch. */
 let filaSegmento: Record<string, unknown> | null = null;
+
+/** Cada insert, por tabla: la prueba de "no escribe" mira el efecto, no el mensaje. */
+const insertados: string[] = [];
 
 /**
  * El doble tiene que ser consciente de la tabla: si `workspaces` no devuelve
@@ -75,7 +82,10 @@ function servicioFalso() {
           tabla === 'workspaces'
             ? { data: { slug: 'alma-afi' }, error: null }
             : { data: { id: 'consulta-1' }, error: null },
-        insert: () => chain,
+        insert: () => {
+          insertados.push(tabla);
+          return chain;
+        },
       };
       return chain;
     },
@@ -103,6 +113,8 @@ beforeEach(() => {
   listarSegmentosMock.mockReset();
   listarSegmentosMock.mockResolvedValue({ ok: true, data: CATALOGO });
   filaSegmento = null;
+  insertados.length = 0;
+  reiniciarModulo('ws-test', { ...MODULES.almaAfi });
 });
 
 afterEach(() => {
@@ -235,5 +247,47 @@ describe('consultaDualPersistente — el segmento se valida antes de consultar',
     if (r.ok) throw new Error('inalcanzable');
     expect(r.error).toContain('Cliente VIP');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * TERCERA RONDA (2026-09-16): sin Sustenta dual no se prepara el lote, no se consulta y no
+ * se escribe ni la fila de error. VISTO FALLAR contra `origin/main`: caen los 3; quitando la
+ * guarda de `consultaDualPersistente` cae 1 (la fila de error: con un segmento valido la
+ * sigue frenando la guarda de `consultaDual`) y la de `prepararLoteDual`, 1.
+ */
+describe('consulta dual persistente — sin el modulo no hay nada', () => {
+  beforeEach(() => {
+    reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft });
+    // Una respuesta valida por si la guarda falta: la prueba cae por el fetch, no por el doble.
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ dual_id: 'd-1', total_matches: 0, matches: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  });
+
+  it('con un segmento valido, 4D SOFT no consulta ni persiste', async () => {
+    filaSegmento = { id: 'seg-contraparte', nombre: 'Contraparte', activo: true };
+    const r = await consultaDualPersistente({ tipo: 'natural', identificacion: '1077089147', segmento_id: 'seg-contraparte' });
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(insertados).toEqual([]);
+  });
+
+  it('tampoco deja la fila de error de un lote', async () => {
+    const r = await consultaDualPersistente(
+      { tipo: 'natural', identificacion: '123', segmento_id: null },
+      { tipo: 'masiva_item', lote_id: 'lote-1', error_fila: 'segmento_invalido "X"' },
+    );
+    expect(r.ok).toBe(false);
+    expect(insertados).toEqual([]);
+  });
+
+  it('ni prepara el lote', async () => {
+    const r = await prepararLoteDual(xlsx([{ tipo: 'natural', identificacion: '1', nombre: 'A', segmento: 'Contraparte' }]));
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' });
+    expect(listarSegmentosMock).not.toHaveBeenCalled();
   });
 });

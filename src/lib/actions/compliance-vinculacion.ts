@@ -9,8 +9,8 @@
  * copias que difieren valen menos que una sola.
  *
  * Autenticación: el mismo Bearer por workspace que ya usa la consulta de listas
- * (`valida_api_key` en `config_extra`, con el key de entorno como respaldo). No
- * se inventa un canal nuevo.
+ * (`valida_api_key` del workspace, en Vault). SIN respaldo a la llave global de
+ * MeTRIK desde el 2026-09-16: ver `apiKeyDelWorkspace`. No se inventa un canal nuevo.
  *
  * Todo sale del servidor. El navegador nunca ve el api key ni habla con Valida.
  */
@@ -21,6 +21,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 import { getWorkspace } from './get-workspace';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import {
   alertasDeExpediente,
   exigeConstanciaSinLectura,
@@ -69,11 +70,19 @@ async function apiKeyDelWorkspace(workspaceId: string): Promise<string | null> {
     data?.config_extra as Record<string, unknown> | null,
     'valida_api_key',
   );
-  if (key) return key;
-  return process.env.VALIDA_API_KEY ?? null;
+  // Sin respaldo a `VALIDA_API_KEY`: con él, un workspace sin llave propia creaba
+  // expedientes e invitaba contrapartes a nombre de MeTRIK. alma-afi, el único con
+  // `compliance_vinculacion`, tiene la suya (medido el 2026-09-14).
+  return key ?? null;
 }
 
 async function guardVinculacion(): Promise<Result<Guard>> {
+  // La sesión no basta: el workspace tiene que tener Sustenta con la vinculación encendida,
+  // el mismo criterio que muestra `/compliance/vinculacion` en el menú.
+  const modulo = await exigirModulo(REQUISITO.sustentaVinculacion);
+  if (!modulo.ok) {
+    return { ok: false, error: modulo.error === 'no_autenticado' ? 'workspace_no_encontrado' : modulo.error };
+  }
   const { workspaceId, role } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
   if (!puedeVerVinculacion(role)) return { ok: false, error: 'forbidden_sin_acceso_a_vinculacion' };
@@ -328,6 +337,10 @@ export async function traducirErrorVinculacion(error: string): Promise<string> {
       return 'El expediente quedó creado, pero no se pudo enviar el correo con el enlace.';
     case 'estado_invalido':
       return 'El expediente ya no está por revisar: alguien más lo decidió mientras lo mirabas.';
+    case 'modulo_no_activo':
+      return 'Este espacio de trabajo no tiene activa la vinculación de contrapartes.';
+    case 'lectura_fallida':
+      return 'No se pudo comprobar el acceso de este espacio de trabajo. Vuelve a intentar en un momento.';
     default:
       return error;
   }

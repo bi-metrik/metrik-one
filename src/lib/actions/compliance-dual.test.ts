@@ -49,7 +49,11 @@ vi.mock('./_usuarios', () => ({
   resolverNombresUsuarios: async () => new Map<string, string>(),
 }));
 
-import { consultaDual } from './compliance-dual';
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo());
+
+import { consultaDual, consultaDualBatch } from './compliance-dual';
+import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble';
 
 const fetchMock = vi.fn();
 
@@ -57,6 +61,45 @@ beforeEach(() => {
   process.env.VALIDA_API_KEY = 'test-key';
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  // alma-afi: Sustenta con la consulta dual, el unico workspace que la usa en produccion.
+  reiniciarModulo('ws-test', { ...MODULES.almaAfi });
+});
+
+/**
+ * TERCERA RONDA (2026-09-16): la consulta dual va con la llave GLOBAL de MeTRIK y se cobra.
+ * La sesion no basta: la abre Sustenta con `compliance_dual_informa`.
+ * VISTO FALLAR contra `origin/main`: caen los 3 casos sin modulo; quitando la guarda de
+ * `consultaDual` caen 2 y la de `consultaDualBatch`, 1.
+ */
+describe('consultaDual — el modulo, no la sesion, abre la llave global', () => {
+  // Una respuesta valida por si la guarda falta: asi la prueba cae por el fetch que se hizo
+  // y no por un TypeError del doble.
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(respuesta(200, { dual_id: 'd-1', total_matches: 0, matches: [] }));
+  });
+
+  it('4D SOFT (solo valida_api) no consulta', async () => {
+    reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft });
+    const r = await consultaDual({ tipo: 'natural', identificacion: '1077089147' });
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('metrik, con Valida pero sin Sustenta dual, tampoco', async () => {
+    reiniciarModulo('ws-test', { ...MODULES.metrik });
+    const r = await consultaDual({ tipo: 'natural', nombre: 'Juan Perez' });
+    expect(r.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('ni por el lote', async () => {
+    reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft });
+    const fd = new FormData();
+    fd.set('archivo', new File([new Uint8Array([1])], 'lote.xlsx'));
+    const r = await consultaDualBatch(fd);
+    expect(r.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 afterEach(() => {

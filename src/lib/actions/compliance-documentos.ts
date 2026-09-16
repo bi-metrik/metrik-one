@@ -19,6 +19,7 @@ import { revalidatePath } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCachedUser } from '@/lib/supabase/auth-user';
 import { getWorkspace } from './get-workspace';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import { puedeLiberarContrapartes } from '@/lib/compliance/liberaciones';
 import { todayBogotaISO } from '@/lib/dates/bogota';
 import {
@@ -48,6 +49,10 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 async function guardOficial(): Promise<
   { ok: true; workspaceId: string; userId: string | null } | { ok: false; error: string }
 > {
+  // La sesión y el rol no bastan: es Sustenta. Sin esto, un owner de un workspace de otro
+  // módulo (4D SOFT) registraba enlaces y hacía que el servidor pidiera cualquier URL
+  // (`verificarEnlacesExpediente`), que responde si existe: un sondeo de red desde ONE.
+  if (!(await exigirModulo(REQUISITO.sustenta)).ok) return { ok: false, error: 'modulo_no_activo' };
   const { workspaceId, role } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
   if (!puedeLiberarContrapartes(role)) {

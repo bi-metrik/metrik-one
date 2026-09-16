@@ -19,7 +19,6 @@ import {
   NIVELES,
   esNivel,
   validarMeses,
-  type ConfigPeriodicidad,
   type NivelPeriodicidad,
 } from '@/lib/compliance/periodicidad';
 import { puedeLiberarContrapartes } from '@/lib/compliance/liberaciones';
@@ -86,23 +85,10 @@ export async function listarPeriodicidad(): Promise<Result<FilaPeriodicidad[]>> 
   };
 }
 
-/** La misma configuración, en la forma que consume la regla pura. */
-export async function cargarConfigPeriodicidad(
-  workspaceId: string,
-): Promise<ConfigPeriodicidad> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = createServiceClient() as any;
-  const { data } = await svc
-    .from('compliance_periodicidad_config')
-    .select('nivel, meses')
-    .eq('workspace_id', workspaceId);
-
-  const config: Record<string, number> = { ...DEFAULT_SUGERIDO };
-  for (const f of (data ?? []) as Array<{ nivel: string; meses: number }>) {
-    if (esNivel(f.nivel)) config[f.nivel] = f.meses;
-  }
-  return config as ConfigPeriodicidad;
-}
+// `cargarConfigPeriodicidad(workspaceId)` vivía aquí y era un endpoint: recibía el workspace
+// por parámetro y no pedía sesión, así que devolvía la política de cualquier workspace. Se
+// mudó a `@/lib/compliance/periodicidad-config` (server-only), porque su consumidor
+// (`persistencia-consulta.ts`) corre también desde el cron del barrido, sin sesión.
 
 /**
  * Guarda los meses de un nivel.

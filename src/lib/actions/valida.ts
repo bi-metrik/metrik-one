@@ -1,6 +1,6 @@
 'use server';
 
-import { getWorkspace } from './get-workspace';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -44,6 +44,18 @@ export type ConsultaResumen = {
   creada_en: string;
 };
 
+/**
+ * Estas dos acciones usan la llave GLOBAL de MeTRIK (`VALIDA_API_KEY`): cada consulta se le
+ * cobra a MeTRIK y el listado trae las consultas de todos los que la usan. Sirven a
+ * `/compliance/validacion`, que es de Sustenta: la sesión no basta, el workspace tiene que
+ * tener ese módulo. Un workspace de solo `valida_api` (4D SOFT) no consulta ni lista aquí.
+ */
+async function accesoLlaveGlobal(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await exigirModulo(REQUISITO.sustenta);
+  if (r.ok) return { ok: true };
+  return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
+}
+
 function getApiKey(): string {
   const key = process.env.VALIDA_API_KEY;
   if (!key) {
@@ -55,8 +67,8 @@ function getApiKey(): string {
 export async function validarPersona(input: ValidaConsultaInput): Promise<
   { ok: true; data: ValidaResultado } | { ok: false; error: string }
 > {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoLlaveGlobal();
+  if (!acceso.ok) return acceso;
 
   try {
     const res = await fetch(`${VALIDA_API_BASE}/api/v1/validate`, {
@@ -86,8 +98,8 @@ export async function listarConsultas(opts: { limite?: number; severidad?: Sever
 > {
   // Sin sesion no se lista nada: con la llave global devolvia nombres y documentos
   // consultados a cualquiera que invocara la accion, con o sin cuenta.
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoLlaveGlobal();
+  if (!acceso.ok) return acceso;
 
   try {
     const url = new URL(`${VALIDA_API_BASE}/api/v1/consultas`);

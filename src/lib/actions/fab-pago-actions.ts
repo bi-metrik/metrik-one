@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
 import { guardAvanzarStage } from '@/lib/permissions/guard-negocio'
 import {
@@ -85,6 +86,9 @@ export async function ctxFabPago(): Promise<
 > {
   const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: error ?? 'No autenticado' }
+  // El pago se registra sobre un negocio: es de Clarity. Sin el módulo, ni la lista de
+  // negocios ni el registro, aunque la acción se llame directo.
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
   const r = (role ?? 'read_only') as Role
   const a = (areas ?? []) as Area[]
   if (!rolHabilitadoParaPagoFab(r, a)) {

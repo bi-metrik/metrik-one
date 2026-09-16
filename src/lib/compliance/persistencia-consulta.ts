@@ -15,7 +15,7 @@
  */
 
 import { cargarCatalogoTierVigente } from '@/lib/actions/compliance-tier-catalogo';
-import { cargarConfigPeriodicidad } from '@/lib/actions/compliance-periodicidad';
+import { cargarConfigPeriodicidad } from './periodicidad-config';
 import { clasificarConsulta, verificarCeroSupresion, type TierResuelto } from './tier-fuentes';
 import { calcularVigencia } from './periodicidad';
 import { todayBogotaISO } from '@/lib/dates/bogota';

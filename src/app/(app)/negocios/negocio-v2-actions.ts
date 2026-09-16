@@ -104,6 +104,8 @@ import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { resolverDestinoCompartido } from '@/lib/negocios/casilla-compartida'
+import { sanearDataDelNavegador } from '@/lib/negocios/data-escribible'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
@@ -2148,6 +2150,9 @@ export async function crearNegocio(input: {
 }> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
+  // Crear un negocio es la puerta a todo Clarity (bloques, carpeta de Drive, cobros): un
+  // workspace sin el módulo no crea negocios sobre sí mismo aunque llame a la acción.
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { negocio_id: null, error: MENSAJE_MODULO_NO_ACTIVO }
 
   // ── Origen: validación server-side (la del formulario es solo UX) ──
   // Se exige AL CREAR y no después: un origen que se pide "más tarde" no se
@@ -2582,6 +2587,7 @@ export async function crearNegocioDesdeInteraccion(input: {
   // (para negocio_responsables.staff_id y como fallback de responsable del negocio).
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { negocio_id: null, error: MENSAJE_MODULO_NO_ACTIVO }
 
   // 1. Cargar la interacción (RLS ya la acota al workspace del usuario).
   const { data: interRaw, error: interErr } = await db(supabase)
@@ -4641,7 +4647,6 @@ export async function marcarBloqueCompleto(
 
   const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
-  let mergedData = { ...currentData, ...data }
 
   // ── Cómo se cierra este tipo de bloque ────────────────────────────────────
   //
@@ -4658,13 +4663,26 @@ export async function marcarBloqueCompleto(
   const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
   const tipoBloque = cfg?.bloque_definitions?.tipo
   const configExtraBloque = cfg?.config_extra ?? {}
+
+  // Lista blanca de lo que el navegador escribe (ver `lib/negocios/data-escribible.ts`):
+  // antes se mezclaba `data` entero, así que por aquí entraban `docs`, `drive_url` o
+  // `drive_file_id` sobre CUALQUIER tipo de bloque, incluido uno de documentos.
+  let mergedData = sanearDataDelNavegador({
+    entrante: data,
+    guardada: currentData,
+    tipo: tipoBloque,
+    configExtra: configExtraBloque,
+    workspaceId,
+    modo: 'mezcla',
+  })
+
   // ── Tarifa UPME confirmada ────────────────────────────────────────────────
   // Barrera real del número que se guarda: la pantalla ya avisa mientras se escribe,
   // pero esta función es un endpoint exportado y se alcanza sin pasar por ella.
   // `revisarTarifaEnBloque` no hace nada en un bloque que no la declare, y se salta
   // sola cuando el valor entrante es el mismo que ya estaba guardado.
   {
-    const rechazo = revisarTarifaEnBloque(configExtraBloque, currentData, data)
+    const rechazo = revisarTarifaEnBloque(configExtraBloque, currentData, mergedData)
     if (rechazo) return { error: rechazo.mensaje }
   }
 
@@ -5349,12 +5367,55 @@ export async function actualizarBloqueData(
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
+  // Bloque compartido entre etapas: la escritura va a la fila del origen, no a la copia
+  // local. Es lo que hace que el dato sea UNO solo y no dos que pueden divergir.
+  const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
+
+  // El bloque ABIERTO (su config y su tipo) y lo que YA hay guardado en el destino. Se leen
+  // antes de todo lo demás: lo que el navegador manda se sanea contra ellos (ver
+  // `lib/negocios/data-escribible.ts`) antes de que la corrección compare o se escriba nada.
+  const { data: abierto, error: errAbierto } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(config_extra, bloque_definitions!inner(tipo))')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (errAbierto) return { error: `No se pudo leer el bloque: ${errAbierto.message}` }
+  const cfgAbierto = (abierto as Record<string, unknown> | null)?.bloque_configs as
+    { config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } | null
+  const ce = cfgAbierto?.config_extra ?? null
+  const tipoAbierto = cfgAbierto?.bloque_definitions?.tipo ?? null
+
+  // La copia local de un bloque compartido está vacía por diseño: el dato vive en el origen.
+  let dataDestino: Record<string, unknown> | null =
+    ((abierto as { data?: Record<string, unknown> | null } | null)?.data ?? null)
+  if (destinoId !== negocioBloqueId) {
+    const { data: filaDestino, error: errDestino } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data')
+      .eq('id', destinoId)
+      .single()
+    if (errDestino) return { error: `No se pudo leer el bloque origen: ${errDestino.message}` }
+    dataDestino = (filaDestino as { data: Record<string, unknown> | null } | null)?.data ?? null
+  }
+
+  // Lista blanca: el navegador escribe los campos que el bloque declara y las pocas claves
+  // propias de su componente. Referencias a archivos (`docs`, `drive_url`, `drive_file_id`)
+  // y la traza del servidor (`_ediciones`, …) conservan lo guardado.
+  const dataSaneada = sanearDataDelNavegador({
+    entrante: data,
+    guardada: dataDestino ?? {},
+    tipo: tipoAbierto,
+    configExtra: ce,
+    workspaceId,
+    modo: 'reemplazo',
+  })
+
   // ── Corrección post-avance ────────────────────────────────────────────────
   // Escribir en un bloque de una etapa YA SUPERADA no es trabajo de la etapa, es
   // una corrección: exige el opt-in `corregir_campos_gerencial` del bloque y deja
   // marca de quién y cuándo. El área ya la validó el guard de arriba.
   const corr = await contextoCorreccion(supabase, negocioBloqueId)
-  let dataFinal = data
+  let dataFinal = dataSaneada
   let cambiosCorreccion: CampoCorregido[] = []
   let nombreCorrector: string | null = null
   if (corr?.esPostAvance) {
@@ -5369,47 +5430,17 @@ export async function actualizarBloqueData(
     if (!esCausaValida(causa) || !sesionId) {
       return { error: 'Indica por qué se corrige antes de guardar' }
     }
-    const estampado = await estamparEdiciones(supabase, userId, corr.dataPrevia, data)
+    const estampado = await estamparEdiciones(supabase, userId, corr.dataPrevia, dataSaneada)
     dataFinal = estampado.data
     cambiosCorreccion = estampado.cambios
     nombreCorrector = estampado.nombre
   }
-
-  // Bloque compartido entre etapas: la escritura va a la fila del origen, no a la copia
-  // local. Es lo que hace que el dato sea UNO solo y no dos que pueden divergir.
-  const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
 
   // Heredado `editable_solo_si_vacio`: si el dato YA vino lleno de la etapa anterior, el
   // bloque se muestra de solo lectura y aquí no se escribe. El render lo refleja, pero el
   // render es UX: esta es la barrera. Corregir un dato ya puesto se hace en su etapa
   // origen, que es donde vive la responsabilidad de ese campo.
   {
-    const { data: abierto, error: errAbierto } = await db(supabase)
-      .from('negocio_bloques')
-      .select('bloque_configs!inner(config_extra)')
-      .eq('id', negocioBloqueId)
-      .single()
-    if (errAbierto) return { error: `No se pudo leer el bloque: ${errAbierto.message}` }
-    const ce = ((abierto as Record<string, unknown> | null)?.bloque_configs as
-      { config_extra?: Record<string, unknown> | null } | null)?.config_extra ?? null
-
-    // El `data` del DESTINO (el origen en un bloque compartido) se lee una sola vez y
-    // solo cuando alguna de las dos revisiones lo necesita: la copia local está vacía
-    // por diseño, y una lectura extra por autosave se paga en cada pulsación.
-    const necesitaDestino =
-      (ce as { editable_solo_si_vacio?: boolean } | null)?.editable_solo_si_vacio === true ||
-      (ce as { tarifa_confirmacion?: { enabled?: boolean } } | null)?.tarifa_confirmacion?.enabled === true
-    let dataDestino: Record<string, unknown> | null = null
-    if (necesitaDestino) {
-      const { data: filaDestino, error: errDestino } = await db(supabase)
-        .from('negocio_bloques')
-        .select('data')
-        .eq('id', destinoId)
-        .single()
-      if (errDestino) return { error: `No se pudo leer el bloque origen: ${errDestino.message}` }
-      dataDestino = (filaDestino as { data: Record<string, unknown> | null } | null)?.data ?? null
-    }
-
     if ((ce as { editable_solo_si_vacio?: boolean } | null)?.editable_solo_si_vacio === true) {
       if (soloLecturaPorDatoLleno(ce, dataDestino)) {
         return { error: 'Este dato ya viene registrado de la etapa anterior. Para cambiarlo, corrígelo en la etapa donde se capturó.' }

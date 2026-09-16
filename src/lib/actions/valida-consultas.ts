@@ -3,7 +3,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
 import { resolverNombresUsuarios } from './_usuarios';
-import { getWorkspace } from './get-workspace';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
@@ -101,6 +101,17 @@ export type FilaLotePreparada = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+/**
+ * Todo lo de este archivo es del módulo Valida (`/valida`, y su sección en el detalle del
+ * negocio de un workspace que lo tenga). La sesión no basta: un workspace sin el módulo
+ * (4D SOFT, con solo `valida_api`) no consulta, no lista ni descarga reportes aquí.
+ */
+async function accesoValida(): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
+  const r = await exigirModulo(REQUISITO.validaConsulta);
+  if (r.ok) return r;
+  return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
+}
+
 async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
   const svc = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -114,8 +125,15 @@ async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | n
     data?.config_extra as Record<string, unknown> | null,
     'valida_api_key',
   );
-  if (key) return key;
-  return process.env.VALIDA_API_KEY ?? null;
+  // SIN respaldo a la llave global de MeTRIK. Hasta el 2026-09-16 caía a `VALIDA_API_KEY`:
+  // un workspace sin llave propia consultaba a cargo de MeTRIK, y sus reportes quedaban
+  // bajo la llave de MeTRIK, donde `descargarPDFConsultaValida` los devolvía a cualquiera
+  // que tuviera un id. Medido ese día: `config_extra` ya no guarda ninguna llave (el
+  // traslado a Vault corrió y aborta si Vault no tiene exactamente las que había), y las
+  // 7 llaves de Valida medidas el 2026-09-14 son de afi, alma-afi, cda-caqueta,
+  // cda-elcarmen, cda-puertotest, maxitec y metrik: todos los workspaces con
+  // `valida_consulta` tienen la suya. Sin llave, la consulta falla a la vista.
+  return key ?? null;
 }
 
 async function llamarValida(
@@ -219,8 +237,9 @@ export async function consultarValida(
   | { ok: true; data: ValidaResultado; consulta_local_id: string }
   | { ok: false; error: string }
 > {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
 
   const { user } = await getCachedUser();
 
@@ -344,8 +363,9 @@ export async function prepararLoteValida(
   | { ok: true; data: { lote_id: string; total: number; filas: FilaLotePreparada[] } }
   | { ok: false; error: string }
 > {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
 
   const file = fd.get('archivo');
   if (!(file instanceof File)) return { ok: false, error: 'archivo_no_provisto' };
@@ -448,8 +468,9 @@ export async function descargarPDFConsultaValida(
 ): Promise<
   { ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }
 > {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
 
   const apiKey = await getWorkspaceValidaApiKey(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
@@ -485,8 +506,9 @@ export async function generarPDFLoteValida(
 ): Promise<
   { ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }
 > {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
 
   const apiKey = await getWorkspaceValidaApiKey(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
@@ -546,8 +568,9 @@ export async function generarPDFLoteValida(
 export async function listarConsultasValida(
   filtros: FiltrosHistorial = {}
 ): Promise<{ ok: true; consultas: ConsultaHistorialItem[] } | { ok: false; error: string }> {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
@@ -626,8 +649,9 @@ export async function listarConsultasPorNegocio(
 export async function buscarNegociosParaValida(
   query: string
 ): Promise<{ ok: true; negocios: NegocioBusqueda[] } | { ok: false; error: string }> {
-  const { workspaceId } = await getWorkspace();
-  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;

@@ -11,6 +11,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCachedUser } from '@/lib/supabase/auth-user';
 import { getWorkspace } from './get-workspace';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import { todayBogotaISO } from '@/lib/dates/bogota';
 import { puedeLiberarContrapartes } from '@/lib/compliance/liberaciones';
 import {
@@ -28,6 +29,9 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 async function guardOficial(): Promise<
   { ok: true; workspaceId: string; userId: string | null } | { ok: false; error: string }
 > {
+  // La sesión y el rol no bastan: es Sustenta. El barrido consulta con la llave GLOBAL de
+  // MeTRIK; un workspace de otro módulo no lo configura ni lo corre.
+  if (!(await exigirModulo(REQUISITO.sustenta)).ok) return { ok: false, error: 'modulo_no_activo' };
   const { workspaceId, role } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
   if (!puedeLiberarContrapartes(role)) {
