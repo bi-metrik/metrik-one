@@ -47,6 +47,38 @@ describe('leerPerfilDeAcceso', () => {
     expect(perfil.gate).toEqual({ role: 'operator', platformAdmin: false, modules: null, modoVitrina: false })
   })
 
+  it('el platform admin pasa el gate en su propio espacio y no visitando el de un cliente', async () => {
+    const enCasa = cliente({
+      data: {
+        role: 'owner',
+        platform_admin: true,
+        workspace_id: 'ws-metrik',
+        home_workspace_id: 'ws-metrik',
+        workspace: { modules: { business: true }, modo_vitrina: null },
+      },
+      error: null,
+    })
+    expect((await leerPerfilDeAcceso(enCasa.c, 'u1', true)).gate?.platformAdmin).toBe(true)
+    expect(SELECT_PERFIL_CON_MODULOS).toMatch(/\bworkspace_id\b.*\bhome_workspace_id\b/)
+
+    const visitando = cliente({
+      data: {
+        role: 'owner',
+        platform_admin: true,
+        workspace_id: 'ws-4dsoft',
+        home_workspace_id: 'ws-metrik',
+        workspace: { modules: { valida_api: true }, modo_vitrina: null },
+      },
+      error: null,
+    })
+    expect((await leerPerfilDeAcceso(visitando.c, 'u1', true)).gate).toEqual({
+      role: 'owner',
+      platformAdmin: false,
+      modules: { valida_api: true },
+      modoVitrina: false,
+    })
+  })
+
   it('sin módulos pide solo el rol, como el guard del contador de antes', async () => {
     const { c, pedido } = cliente({ data: { role: 'contador' }, error: null })
     expect(await leerPerfilDeAcceso(c, 'u1', false)).toEqual({ role: 'contador', gate: null })

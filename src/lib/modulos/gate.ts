@@ -34,10 +34,38 @@ export interface ContextoGate {
   modules: Record<string, boolean | undefined> | null | undefined
   /** `workspaces.config_extra.modo_vitrina === true`. */
   modoVitrina: boolean
-  /** `profiles.platform_admin`: soporte de MeTRIK, pasa el gate como pasa el de suscripción. */
+  /**
+   * El soporte de MeTRIK pasa el gate, pero SOLO en su propio espacio: se arma con
+   * `soportePasaGate`, nunca con `profiles.platform_admin` a secas.
+   */
   platformAdmin: boolean
   /** Rol del perfil. Solo importa para el aterrizaje y para el contador. */
   role?: string | null
+}
+
+/**
+ * ¿La persona de la sesión es soporte de MeTRIK que pasa el gate por módulo?
+ *
+ * Solo cuando está en su propio espacio. Visitando el de un cliente (`workspace_id` distinto de
+ * `home_workspace_id`, el mismo criterio de `isAway` en `getPlatformAdminState`) ve y abre lo que
+ * ese cliente tiene contratado, ni más ni menos.
+ *
+ * Por qué: hasta el 2026-09-16 el platform admin pasaba siempre, y en `4d-soft` (solo Valida API)
+ * el menú le ofrecía Directorio y Tableros, que son de Clarity, Sustenta y Llamadas. Juan
+ * Guillermo no las veía; Mauricio sí, y revisaba un menú que el cliente no tiene. En su propio
+ * espacio (metrik) conserva el paso: ahí usa herramientas que metrik no tiene como módulo (la
+ * Validación de Sustenta), y cortarlas no lo pidió nadie.
+ *
+ * Un `home_workspace_id` nulo cuenta como «en casa», igual que `isAway`.
+ */
+export function soportePasaGate(perfil: {
+  platformAdmin: boolean | null | undefined
+  workspaceId: string | null | undefined
+  homeWorkspaceId: string | null | undefined
+}): boolean {
+  if (perfil.platformAdmin !== true) return false
+  const visitante = perfil.homeWorkspaceId != null && perfil.workspaceId !== perfil.homeWorkspaceId
+  return !visitante
 }
 
 /** `/negocios` cubre `/negocios` y `/negocios/...`, pero no `/negocios-x`. */

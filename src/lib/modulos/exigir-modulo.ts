@@ -3,7 +3,7 @@ import { cache } from 'react'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
-import type { ContextoGate } from './gate'
+import { soportePasaGate, type ContextoGate } from './gate'
 import { cumpleRequisitoModulo, type RequisitoModulo } from './requisito'
 
 /**
@@ -12,7 +12,8 @@ import { cumpleRequisitoModulo, type RequisitoModulo } from './requisito'
  * Se lee con el cliente de SERVICIO, acotado por el workspace de la sesión:
  *   - `workspaces.modules` del workspace activo (el de `getWorkspace`, que ya aplica "Ver como");
  *   - `profiles.platform_admin` de la persona que de verdad tiene la sesión, no de la
- *     impersonada: es el mismo criterio del middleware, que mira la sesión real.
+ *     impersonada: es el mismo criterio del middleware, que mira la sesión real. Y, como en el
+ *     middleware, el soporte solo pasa en su propio espacio (`soportePasaGate`).
  *
  * ⚠️ A diferencia del middleware, aquí un fallo de lectura CIERRA. El middleware deja pasar
  * porque no es la frontera de aislamiento y un corte de red no puede rebotar a todo el
@@ -43,7 +44,7 @@ async function leerContexto(): Promise<Contexto> {
   const svc = createServiceClient()
   const [ws, perfil] = await Promise.all([
     svc.from('workspaces').select('modules').eq('id', workspaceId).maybeSingle(),
-    svc.from('profiles').select('platform_admin').eq('id', user.id).maybeSingle(),
+    svc.from('profiles').select('platform_admin, workspace_id, home_workspace_id').eq('id', user.id).maybeSingle(),
   ])
   if (ws.error || perfil.error || !ws.data) {
     console.error(
@@ -53,12 +54,19 @@ async function leerContexto(): Promise<Contexto> {
     return { tipo: 'error' }
   }
 
+  const fila = perfil.data as
+    | { platform_admin?: boolean | null; workspace_id?: string | null; home_workspace_id?: string | null }
+    | null
   return {
     tipo: 'ok',
     workspaceId,
     gate: {
       modules: ((ws.data as { modules?: Record<string, boolean> | null }).modules ?? null),
-      platformAdmin: (perfil.data as { platform_admin?: boolean | null } | null)?.platform_admin === true,
+      platformAdmin: soportePasaGate({
+        platformAdmin: fila?.platform_admin,
+        workspaceId: fila?.workspace_id,
+        homeWorkspaceId: fila?.home_workspace_id,
+      }),
       modoVitrina: false,
     },
   }
