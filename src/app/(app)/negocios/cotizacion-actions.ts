@@ -15,7 +15,7 @@ import {
   totalDelPrincipal,
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
-import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 
 export async function getCotizaciones(oportunidadId: string) {
@@ -150,7 +150,12 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
 
 // ── Items CRUD ────────────────────────────────
 
-export async function addItem(cotizacionId: string, nombre: string, precioVenta?: number, descripcion?: string) {
+/**
+ * `grupo` es opcional: lo pasan los botones de tipo del editor («+ Vuelo», «+ Hotel»), que
+ * crean la línea ya con su ranura en UN solo insert. Sin él, la línea nace sin grupo, como
+ * siempre.
+ */
+export async function addItem(cotizacionId: string, nombre: string, precioVenta?: number, descripcion?: string, grupo?: string | null) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
@@ -169,6 +174,7 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
   // marcado como excepción desde el primer día, y entonces subir el margen de la
   // cotización no movía ninguna línea.
   const margenInicial = null
+  const grupoInicial = normalizarGrupo(grupo)
 
   const { data, error: dbError } = await supabase
     .from('items')
@@ -181,6 +187,7 @@ export async function addItem(cotizacionId: string, nombre: string, precioVenta?
       // Un precio explicito al crear lo puso quien llama, no los rubros.
       ...(precioVenta != null ? { precio_venta: precioVenta, precio_manual: true } : {}),
       ...(descripcion ? { descripcion: descripcion.trim() } : {}),
+      ...(grupoInicial ? { grupo: grupoInicial } : {}),
     } as never)
     .select('id')
     .single()
