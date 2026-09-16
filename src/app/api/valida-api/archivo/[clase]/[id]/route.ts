@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { contextoValidaApi } from '@/lib/valida-api/contexto'
+import { entradaAprobada } from '@/lib/valida-api/entrada-servidor'
 import { esUuid, puedeVerPagos } from '@/lib/valida-api/reglas'
 import { nombreDescargaRecibo } from '@/lib/valida-api/recibo-manual'
 
@@ -23,6 +24,12 @@ export const dynamic = 'force-dynamic'
  *
  * Un id que no existe y uno de otro cliente responden el MISMO 404: no se confirma nada.
  *
+ * ## Sin la entrada aprobada, nada
+ *
+ * Mientras la persona no haya hecho la aprobación única de la entrada (`entrada.ts`), esta ruta
+ * responde 403, igual que las acciones del servidor: la pantalla no muestra las pestañas, y una URL
+ * escrita a mano tampoco entrega el archivo.
+ *
  * ## Qué entrega
  *
  * Un redirect a una URL firmada de **60 segundos** del bucket privado. **Nunca un enlace de
@@ -40,6 +47,7 @@ export async function GET(
 
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return NextResponse.json({ error: 'sin_acceso' }, { status: 403 })
+  if (!(await entradaAprobada())) return NextResponse.json({ error: 'entrada_pendiente' }, { status: 403 })
 
   const { supabase } = await getWorkspace()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

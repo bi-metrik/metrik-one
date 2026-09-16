@@ -3,11 +3,12 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import { todayBogotaISO } from '@/lib/dates/bogota'
 import { llamarValida } from './cliente'
 import { contextoValidaApi, origenPeticion, type ContextoValidaApi } from './contexto'
-import { POLITICA_DATOS_VALIDA, requiereAceptacion } from './politica'
-import { huellaAvisoPolitica } from './politica-huella'
+import { filasAceptacionUsuario, textoCasillaEntrada } from './entrada'
+import { entradaAprobada, entradaDelUsuario } from './entrada-servidor'
+import { POLITICA_DATOS_VALIDA } from './politica'
+import { huellaAvisoPolitica, huellaTexto } from './politica-huella'
 import {
   armarServicioConPagos,
   esFuncionAusente,
@@ -15,15 +16,13 @@ import {
   serviciosQuePaga,
 } from './mapeo'
 import { esUuid, nombreLlaveValido, puedeOperarLlaves, puedeVerPagos } from './reglas'
-import { prepararAceptacion, puedeAceptarTerminos } from './terminos'
-import { documentosDelCliente, perfilReal, terminosDelCliente, versionContratada } from './terminos-servidor'
+import { prepararAceptacion, type FilaAceptacionModulo, type RazonNoAcepta, type VersionContratada } from './terminos'
+import { documentosDelCliente, versionContratada } from './terminos-servidor'
 import type { ListadoLlaves, ResumenValidaApi } from './tipos'
 import type {
   Carga,
-  EstadoPolitica,
-  EstadoTerminosPagina,
-  ResultadoAceptar,
-  ResultadoAceptarTerminos,
+  EstadoEntradaPagina,
+  ResultadoAprobarEntrada,
   ResultadoDocumentos,
   ResultadoEmitir,
   ResultadoLlaves,
@@ -42,6 +41,10 @@ import type {
  * llave a revocar, y ese id Valida lo busca DENTRO del cliente que puso el servidor, así que el
  * de otro cliente responde «no encontrada».
  *
+ * ⚠️ Y TODAS, salvo las de la entrada, exigen además la aprobación completa de `entrada.ts`
+ * (Política + términos leídos por el usuario + contrato aceptado). La página no pinta pestañas sin
+ * ella, pero eso es la pantalla: la puerta de verdad es esta.
+ *
  * ⚠️ La llave en claro: `generarLlaveValidaApi` la devuelve UNA vez a quien la pidió. No se
  * escribe en `console`, ni en la base de ONE, ni en `activity_log`, ni en un correo.
  */
@@ -58,88 +61,233 @@ function sinAcceso<T>(ctx: Exclude<ContextoValidaApi, { tipo: 'ok' }>): Carga<T>
 }
 
 /**
- * Cláusula 3.1 de los términos: las credenciales se entregan después de la aceptación. Leer,
- * generar y regenerar llaves exige que toda versión vigente del contrato esté aceptada. Un fallo
- * de lectura CIERRA: no poder comprobarlo no es haberlo aceptado.
+ * Lo que se responde a cualquier acción mientras la entrada no esté aprobada. Incluye revocar una
+ * llave: sin la aprobación no hay NINGUNA operación desde ONE (pedido de Mauricio, 2026-09-16). Una
+ * llave comprometida mientras tanto la revoca el soporte de MeTRIK desde Valida.
  */
-const MENSAJE_TERMINOS_PENDIENTES =
-  'Las llaves se habilitan cuando el dueño del espacio acepte la versión vigente de los términos de tu contrato.'
+const MENSAJE_ENTRADA_PENDIENTE =
+  'Antes de usar el módulo tienes que leer y aceptar los términos de tu contrato y la Política de Datos al entrar.'
 
-async function terminosAceptados(): Promise<boolean> {
-  return (await terminosDelCliente()).estado === 'aceptados'
-}
+// ── La entrada: una sola aprobación ─────────────────────────────────────────
 
-/** La aceptación de la Política es previa a TODO lo demás del módulo (§5.4). */
-async function politicaAceptada(userId: string): Promise<boolean | null> {
-  const { data, error } = await createServiceClient()
-    // La tabla nace en la migración de C2; hasta aplicarla no está en `database.ts`.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .from('documentos_aceptaciones_usuario' as any)
-    .select('documento_version, aceptada_at')
-    .eq('usuario_id', userId)
-    .eq('documento_slug', POLITICA_DATOS_VALIDA.slug)
-  if (error) {
-    console.error('[valida-api] no se pudo leer la aceptación de la Política:', error.message)
-    return null
-  }
-  const filas = (data ?? []) as unknown as { documento_version: string; aceptada_at: string }[]
-  return !requiereAceptacion(filas)
-}
-
-// ── Política de Datos ────────────────────────────────────────────────────────
-
-export async function estadoPoliticaValidaApi(): Promise<EstadoPolitica> {
-  const ctx = await contextoValidaApi()
-  if (ctx.tipo !== 'ok') {
-    const s = sinAcceso(ctx)
-    return s.estado === 'sin_acceso' ? { estado: 'sin_acceso', razon: s.razon } : { estado: 'no_disponible' }
-  }
-  const aceptada = await politicaAceptada(ctx.actor.usuario_id)
-  if (aceptada === null) return { estado: 'no_disponible' }
-  return { estado: aceptada ? 'aceptada' : 'pendiente' }
+const MENSAJE_NO_FIRMA: Record<RazonNoAcepta, string> = {
+  soporte: 'El soporte de MeTRIK no acepta términos por un cliente: los acepta el dueño del espacio.',
+  no_owner: 'Los términos del contrato los acepta primero el dueño del espacio, que es quien puede obligar a la empresa.',
+  otro_espacio: 'Los términos del contrato los acepta primero el dueño de este espacio.',
 }
 
 /**
- * Registra la aceptación de la Política vigente por el usuario de la sesión. Idempotente: la
- * misma versión no crea dos filas (la base lo impide con un UNIQUE), y reintentar responde ok.
+ * Qué muestra la entrada. Todos los roles la ven: quien no puede firmar el contrato necesita saber
+ * por qué no entra y quién lo habilita.
  */
-export async function aceptarPoliticaValidaApi(): Promise<ResultadoAceptar> {
-  const ctx = await contextoValidaApi()
-  if (ctx.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
+export async function estadoEntradaValidaApi(): Promise<EstadoEntradaPagina> {
+  const entrada = await entradaDelUsuario()
+  if (entrada.tipo !== 'ok') return { estado: 'no_disponible' }
+  const { ctx, estado } = entrada
+  if (estado.estado !== 'pendiente') return estado
 
-  const { ip, userAgent } = await origenPeticion()
-  const { error } = await createServiceClient()
+  let contrato: Extract<EstadoEntradaPagina, { estado: 'pendiente' }>['contrato']
+  if (estado.aceptante === null) {
+    contrato = { estado: 'aceptado' }
+  } else if (!estado.aceptante.puede) {
+    contrato = { estado: 'pendiente', puede: false, razon: estado.aceptante.razon }
+  } else {
+    const versiones = await versionesPorFirmar(ctx.workspaceId, estado.contratoPendiente.map((d) => d.documentoId))
+    if (!versiones) return { estado: 'no_disponible' }
+    contrato = {
+      estado: 'pendiente',
+      puede: true,
+      empresas: empresasDe(versiones),
+      porFirmar: versiones.map((v) => ({
+        documentoId: v.documentoId,
+        titulo: v.titulo,
+        version: v.version,
+        pdfSha256: v.pdfSha256,
+        empresaNombre: v.empresaNombre,
+        empresaNit: v.empresaNit,
+      })),
+    }
+  }
+
+  return {
+    estado: 'pendiente',
+    documentos: estado.documentos.map(({ doc }) => ({
+      documentoId: doc.documentoId,
+      slug: doc.slug,
+      titulo: doc.titulo,
+      version: doc.version,
+      textoMd: doc.textoMd,
+    })),
+    contrato,
+    conflicto: estado.conflictos.length > 0,
+  }
+}
+
+/** La versión con su contrato de cada documento por firmar. `null` si alguna no se pudo leer. */
+async function versionesPorFirmar(workspaceId: string, documentoIds: string[]): Promise<VersionContratada[] | null> {
+  const versiones = await Promise.all(documentoIds.map((id) => versionContratada(workspaceId, id)))
+  const validas = versiones.filter((v): v is VersionContratada => v !== null && v !== 'error')
+  return validas.length === versiones.length && validas.length > 0 ? validas : null
+}
+
+function empresasDe(versiones: readonly VersionContratada[]): string[] {
+  return [...new Set(versiones.map((v) => v.empresaNombre))]
+}
+
+/**
+ * El único «Acepto» de la entrada. En este orden, y todo lo que se decide se decide ANTES de
+ * escribir:
+ *
+ *   1. Tiene que haber llegado al final de los términos y tener a la vista la casilla que arma el
+ *      servidor con los documentos de la base (si no coincide, algo cambió: no se registra).
+ *   2. Si el contrato del espacio está pendiente, solo sigue el dueño real, con sus datos y la
+ *      declaración exacta de cada documento.
+ *   3. Se escribe primero la aceptación contractual. Si falla, no se registra nada más.
+ *   4. Después, en UNA sola sentencia, las constancias del usuario: la Política y cada documento.
+ *
+ * La base vuelve a exigir lo contractual en `aceptaciones_terminos_modulo()`: esta acción no es la
+ * única barrera.
+ */
+export async function aprobarEntradaValidaApi(input: {
+  leyoHastaElFinal: boolean
+  casillaMostrada: string
+  firma?: {
+    nombre: string
+    cedula: string
+    calidad: string
+    declaraciones: { documentoId: string; texto: string }[]
+  } | null
+}): Promise<ResultadoAprobarEntrada> {
+  const entrada = await entradaDelUsuario()
+  if (entrada.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
+  if (input?.leyoHastaElFinal !== true) {
+    return { ok: false, error: 'Lee los términos hasta el final para poder aceptar.' }
+  }
+
+  const { ctx, estado, hoy } = entrada
+  if (estado.estado === 'aprobada') return { ok: true, yaEstaba: true }
+  if (estado.estado === 'sin_documentos') {
+    return { ok: false, error: 'Los términos de tu contrato todavía no están registrados. Escríbenos para habilitarlos.' }
+  }
+  if (estado.estado === 'no_disponible') {
+    return { ok: false, error: 'No se pudieron leer los términos de tu contrato. Intenta de nuevo en un momento.' }
+  }
+  if (estado.conflictos.length > 0) {
+    return {
+      ok: false,
+      error: 'Ya tienes registrada la aceptación de otro documento con el mismo nombre y versión. Escríbenos para resolverlo.',
+    }
+  }
+
+  const origen = await origenPeticion()
+
+  // ── Lo contractual, si falta ──
+  const filasContrato: FilaAceptacionModulo[] = []
+  let empresas: string[] | null = null
+  if (estado.aceptante !== null) {
+    if (!estado.aceptante.puede) return { ok: false, error: MENSAJE_NO_FIRMA[estado.aceptante.razon] }
+    const firma = input.firma
+    if (!firma || !Array.isArray(firma.declaraciones)) {
+      return { ok: false, error: 'Completa tu nombre, tu cédula y en qué calidad aceptas en nombre de la empresa.' }
+    }
+
+    const [docs, versiones] = await Promise.all([
+      documentosDelCliente(),
+      versionesPorFirmar(ctx.workspaceId, estado.contratoPendiente.map((d) => d.documentoId)),
+    ])
+    if (!docs.ok || !versiones) {
+      return { ok: false, error: 'No se pudieron leer los términos de tu contrato. Intenta de nuevo.' }
+    }
+    empresas = empresasDe(versiones)
+
+    for (const version of versiones) {
+      const preparacion = prepararAceptacion({
+        documentos: docs.documentos,
+        hoy,
+        documentoId: version.documentoId,
+        version,
+        // La única casilla de la entrada es la que declara las facultades: sin marcarla no hay clic.
+        input: { nombre: firma.nombre, cedula: firma.cedula, calidad: firma.calidad, declaraFacultades: true },
+        declaracionMostrada: firma.declaraciones.find((d) => d?.documentoId === version.documentoId)?.texto,
+        // El usuario real de la sesión: acepta quien marca la casilla, no el impersonado.
+        usuarioId: ctx.actor.usuario_id,
+        workspaceClienteId: ctx.workspaceId,
+        ip: origen.ip,
+        userAgent: origen.userAgent,
+      })
+      if (preparacion.tipo === 'error') return { ok: false, error: preparacion.error }
+      if (preparacion.tipo === 'fila') filasContrato.push(preparacion.fila)
+    }
+  }
+
+  // ── La casilla: tiene que ser la que arma el servidor ──
+  const documentos = estado.documentos.map((d) => d.doc)
+  const casilla = textoCasillaEntrada({ documentos, firmaPor: empresas })
+  if (input.casillaMostrada !== casilla) {
+    return {
+      ok: false,
+      error: 'Los términos cambiaron mientras los leías. Recarga la página y vuelve a leerlos antes de aceptar.',
+    }
+  }
+
+  const svc = createServiceClient()
+
+  // ── 1. Primero lo contractual ──
+  let contratoRegistrado = false
+  if (filasContrato.length > 0) {
+    const { error } = await svc
+      // `aceptaciones_terminos` no está en `database.ts`.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from('aceptaciones_terminos' as any)
+      .insert(filasContrato as never)
+    if (error && error.code !== '23505') {
+      console.error('[valida-api] no se pudo registrar la aceptación de los términos:', error.message)
+      return { ok: false, error: 'No se pudo registrar la aceptación de los términos. Nada quedó guardado; intenta de nuevo.' }
+    }
+    // 23505: otra pestaña (o WhatsApp) registró primero esa versión. La puerta lo vuelve a mirar
+    // al recargar; si quedara alguna pendiente, se pide de nuevo.
+    contratoRegistrado = !error
+  }
+
+  // ── 2. Las constancias del usuario, en una sola sentencia ──
+  const filasUsuario = filasAceptacionUsuario({
+    documentos,
+    workspaceId: ctx.workspaceId,
+    usuarioId: ctx.actor.usuario_id,
+    huellaAvisoPolitica: huellaAvisoPolitica(),
+    huellaCasilla: huellaTexto(casilla),
+    ip: origen.ip,
+    userAgent: origen.userAgent,
+  })
+  const { error: errorUsuario } = await svc
+    // La tabla nace en la migración de C2; hasta aplicarla no está en `database.ts`.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .from('documentos_aceptaciones_usuario' as any)
-    .upsert(
-      {
-        workspace_id: ctx.workspaceId,
-        // El usuario real de la sesión, no uno impersonado: acepta quien marca la casilla.
-        usuario_id: ctx.actor.usuario_id,
-        documento_slug: POLITICA_DATOS_VALIDA.slug,
-        documento_version: POLITICA_DATOS_VALIDA.version,
-        documento_url: POLITICA_DATOS_VALIDA.url,
-        documento_sha256: null,
-        aviso_texto_sha256: huellaAvisoPolitica(),
-        ip,
-        user_agent: userAgent,
-      } as never,
-      { onConflict: 'usuario_id,documento_slug,documento_version', ignoreDuplicates: true },
-    )
-  if (error) {
-    console.error('[valida-api] no se pudo registrar la aceptación:', error.message)
-    return { ok: false, error: 'No se pudo registrar la aceptación. Intenta de nuevo.' }
+    .upsert(filasUsuario as never, {
+      onConflict: 'usuario_id,documento_slug,documento_version',
+      ignoreDuplicates: true,
+    })
+  if (errorUsuario) {
+    console.error('[valida-api] no se pudo registrar la aprobación del usuario:', errorUsuario.message)
+    return {
+      ok: false,
+      error: contratoRegistrado
+        ? 'La aceptación del contrato quedó registrada, pero no tu aprobación. Intenta de nuevo.'
+        : 'No se pudo registrar tu aprobación. Intenta de nuevo.',
+    }
   }
+
   revalidatePath('/valida-api')
-  return { ok: true }
+  return { ok: true, yaEstaba: false }
 }
 
 // ── Consumo ─────────────────────────────────────────────────────────────────
 
-/** Todos los roles del workspace ven el consumo (§5.4). */
+/** Todos los roles del workspace ven el consumo (§5.4), con la entrada aprobada. */
 export async function leerResumenValidaApi(): Promise<ResultadoResumen> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return sinAcceso(ctx)
+  if (!(await entradaAprobada())) return { estado: 'sin_acceso', razon: MENSAJE_ENTRADA_PENDIENTE }
 
   const r = await llamarValida<ResumenValidaApi>({
     metodo: 'GET',
@@ -159,7 +307,8 @@ export async function leerLlavesValidaApi(): Promise<ResultadoLlaves> {
   if (!puedeOperarLlaves(ctx.role)) {
     return { estado: 'sin_acceso', razon: 'Las llaves las administran el dueño y los administradores del espacio.' }
   }
-  if (!(await terminosAceptados())) return { estado: 'sin_acceso', razon: MENSAJE_TERMINOS_PENDIENTES }
+  // Cláusula 3.1 de los términos: las credenciales se entregan después de la aceptación.
+  if (!(await entradaAprobada())) return { estado: 'sin_acceso', razon: MENSAJE_ENTRADA_PENDIENTE }
 
   const r = await llamarValida<ListadoLlaves>({
     metodo: 'GET',
@@ -179,11 +328,8 @@ export async function generarLlaveValidaApi(input: {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
   if (!puedeOperarLlaves(ctx.role)) return { ok: false, error: 'Solo el dueño y los administradores generan llaves.' }
-  if ((await politicaAceptada(ctx.actor.usuario_id)) !== true) {
-    return { ok: false, error: 'Acepta la Política de Datos antes de operar el módulo.' }
-  }
-  // Regenerar también pasa por aquí: entrega una llave nueva, así que exige los términos igual.
-  if (!(await terminosAceptados())) return { ok: false, error: MENSAJE_TERMINOS_PENDIENTES }
+  // Regenerar también pasa por aquí: entrega una llave nueva, así que exige la entrada igual.
+  if (!(await entradaAprobada())) return { ok: false, error: MENSAJE_ENTRADA_PENDIENTE }
 
   const reemplazaA = input.reemplazaA?.trim() || null
   if (reemplazaA && !esUuid(reemplazaA)) return { ok: false, error: 'La llave a regenerar no es válida.' }
@@ -217,17 +363,12 @@ export async function generarLlaveValidaApi(input: {
   return { ok: true, llave }
 }
 
-/**
- * Revocar NO exige los términos: quita acceso, no lo entrega. Si una versión nueva de los términos
- * queda pendiente, el cliente tiene que poder cortar una llave comprometida mientras la acepta.
- */
+/** Revocar también exige la entrada: ver `MENSAJE_ENTRADA_PENDIENTE`. */
 export async function revocarLlaveValidaApi(keyId: string): Promise<ResultadoRevocar> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
   if (!puedeOperarLlaves(ctx.role)) return { ok: false, error: 'Solo el dueño y los administradores revocan llaves.' }
-  if ((await politicaAceptada(ctx.actor.usuario_id)) !== true) {
-    return { ok: false, error: 'Acepta la Política de Datos antes de operar el módulo.' }
-  }
+  if (!(await entradaAprobada())) return { ok: false, error: MENSAJE_ENTRADA_PENDIENTE }
   if (!esUuid(keyId)) return { ok: false, error: 'La llave no es válida.' }
 
   const r = await llamarValida<{ ok: true; key_id: string; ya_estaba_revocada?: boolean }>({
@@ -248,9 +389,10 @@ export async function revocarLlaveValidaApi(keyId: string): Promise<ResultadoRev
 export async function leerDocumentosValidaApi(): Promise<ResultadoDocumentos> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return sinAcceso(ctx)
+  if (!(await entradaAprobada())) return { estado: 'sin_acceso', razon: MENSAJE_ENTRADA_PENDIENTE }
 
   // La RPC va con el cliente de SESIÓN (ver `terminos-servidor.ts`) y se comparte en el request
-  // con la puerta de las llaves.
+  // con la puerta de la entrada.
   const [docs, politica] = await Promise.all([
     documentosDelCliente(),
     createServiceClient()
@@ -278,130 +420,13 @@ export async function leerDocumentosValidaApi(): Promise<ResultadoDocumentos> {
   }
 }
 
-// ── Términos del contrato ───────────────────────────────────────────────────
-
-/**
- * Qué muestra la entrada del módulo sobre los términos. Todos los roles lo ven: quien no puede
- * aceptar necesita saber por qué no hay llaves y quién las habilita.
- */
-export async function estadoTerminosValidaApi(): Promise<EstadoTerminosPagina> {
-  const ctx = await contextoValidaApi()
-  if (ctx.tipo !== 'ok') return { estado: 'no_disponible' }
-
-  const estado = await terminosDelCliente()
-  if (estado.estado !== 'pendientes') return estado
-
-  const doc = estado.pendientes[0]
-  const [perfil, version] = await Promise.all([
-    perfilReal(ctx.actor.usuario_id),
-    versionContratada(ctx.workspaceId, doc.documentoId),
-  ])
-  if (!perfil || !version || version === 'error') return { estado: 'no_disponible' }
-
-  return {
-    estado: 'pendientes',
-    totalPendientes: estado.pendientes.length,
-    documento: {
-      documentoId: doc.documentoId,
-      titulo: doc.titulo,
-      version: doc.version,
-      textoMd: doc.textoMd,
-      pdfSha256: doc.pdfSha256,
-      empresaNombre: version.empresaNombre,
-      empresaNit: version.empresaNit,
-    },
-    aceptante: puedeAceptarTerminos(perfil, ctx.workspaceId),
-  }
-}
-
-/**
- * Registra la aceptación de una versión vigente de los términos por el dueño del espacio.
- *
- * Todo lo que va a la constancia sale de la base (huellas, empresa, contrato, perfil); del
- * navegador solo llegan el documento elegido, los datos de la persona y el texto que tenía a la
- * vista, que tiene que coincidir con el que arma el servidor. La base vuelve a comprobarlo todo
- * en `aceptaciones_terminos_modulo()`: esta acción no es la única barrera.
- */
-export async function aceptarTerminosValidaApi(input: {
-  documentoId: string
-  nombre: string
-  cedula: string
-  calidad: string
-  declaraFacultades: boolean
-  declaracionMostrada: string
-}): Promise<ResultadoAceptarTerminos> {
-  const ctx = await contextoValidaApi()
-  if (ctx.tipo !== 'ok') return { ok: false, error: 'No tienes acceso a este módulo.' }
-  if ((await politicaAceptada(ctx.actor.usuario_id)) !== true) {
-    return { ok: false, error: 'Acepta la Política de Datos antes de aceptar los términos.' }
-  }
-
-  const documentoId = typeof input?.documentoId === 'string' ? input.documentoId.trim() : ''
-  if (!esUuid(documentoId)) return { ok: false, error: 'El documento no es válido.' }
-
-  const perfil = await perfilReal(ctx.actor.usuario_id)
-  if (!perfil) return { ok: false, error: 'No se pudo verificar tu usuario. Intenta de nuevo.' }
-  const aceptante = puedeAceptarTerminos(perfil, ctx.workspaceId)
-  if (!aceptante.puede) {
-    return {
-      ok: false,
-      error:
-        aceptante.razon === 'soporte'
-          ? 'El soporte de MeTRIK no acepta términos por un cliente: los acepta el dueño del espacio.'
-          : 'Los términos los acepta el dueño del espacio, que es quien puede obligar a la empresa.',
-    }
-  }
-
-  const [docs, version, origen] = await Promise.all([
-    documentosDelCliente(),
-    versionContratada(ctx.workspaceId, documentoId),
-    origenPeticion(),
-  ])
-  if (!docs.ok || version === 'error') {
-    return { ok: false, error: 'No se pudieron leer los términos de tu contrato. Intenta de nuevo.' }
-  }
-
-  const preparacion = prepararAceptacion({
-    documentos: docs.documentos,
-    hoy: todayBogotaISO(),
-    documentoId,
-    version,
-    input,
-    declaracionMostrada: input.declaracionMostrada,
-    // El usuario real de la sesión: acepta quien marca la casilla, no el impersonado.
-    usuarioId: ctx.actor.usuario_id,
-    workspaceClienteId: ctx.workspaceId,
-    ip: origen.ip,
-    userAgent: origen.userAgent,
-  })
-  if (preparacion.tipo === 'ya_aceptado') return { ok: true, yaEstaba: true }
-  if (preparacion.tipo === 'error') return { ok: false, error: preparacion.error }
-
-  const { error } = await createServiceClient()
-    // `aceptaciones_terminos` no está en `database.ts`.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .from('aceptaciones_terminos' as any)
-    .insert(preparacion.fila as never)
-  if (error) {
-    // Otra pestaña (o WhatsApp) la registró primero: la versión ya quedó aceptada.
-    if (error.code === '23505') {
-      revalidatePath('/valida-api')
-      return { ok: true, yaEstaba: true }
-    }
-    console.error('[valida-api] no se pudo registrar la aceptación de los términos:', error.message)
-    return { ok: false, error: 'No se pudo registrar la aceptación. Nada quedó guardado; intenta de nuevo.' }
-  }
-
-  revalidatePath('/valida-api')
-  return { ok: true, yaEstaba: false }
-}
-
 export async function leerPagosValidaApi(): Promise<ResultadoPagos> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return sinAcceso(ctx)
   if (!puedeVerPagos(ctx.role)) {
     return { estado: 'sin_acceso', razon: 'Los pagos los ven el dueño y los administradores del espacio.' }
   }
+  if (!(await entradaAprobada())) return { estado: 'sin_acceso', razon: MENSAJE_ENTRADA_PENDIENTE }
 
   const { supabase } = await getWorkspace()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

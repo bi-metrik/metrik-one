@@ -1,16 +1,15 @@
 import 'server-only'
 import { cache } from 'react'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { esFuncionAusente, mapearDocumentos } from './mapeo'
 import type { DocumentoContractual } from './resultados'
-import { estadoTerminos, type EstadoTerminos, type VersionContratada } from './terminos'
+import type { VersionContratada } from './terminos'
 
 /**
  * Lecturas de servidor de los términos del contrato. Las reglas viven en `terminos.ts`; aquí solo
  * se traen los datos, y cada lectura dice si falló en vez de devolver una lista vacía (un `?? []`
- * convertiría «no pude leer» en «no hay términos», y eso abriría las llaves).
+ * convertiría «no pude leer» en «no hay términos», y eso abriría el módulo).
  */
 
 export type LecturaDocumentos =
@@ -30,14 +29,8 @@ async function leerDocumentos(): Promise<LecturaDocumentos> {
   return { ok: true, documentos: mapearDocumentos(r.data ?? []) }
 }
 
-/** Una sola lectura por request aunque la pidan la página, la pestaña y la puerta de llaves. */
+/** Una sola lectura por request aunque la pidan la página, la pestaña y la puerta del módulo. */
 export const documentosDelCliente = cache(leerDocumentos)
-
-export async function terminosDelCliente(): Promise<EstadoTerminos | { estado: 'no_disponible' }> {
-  const lectura = await documentosDelCliente()
-  if (!lectura.ok) return { estado: 'no_disponible' }
-  return estadoTerminos(lectura.documentos, todayBogotaISO())
-}
 
 export interface PerfilReal {
   role: string | null
