@@ -33,6 +33,25 @@ export type ScoreNegocioItem = {
   actualizado_at: string;
 };
 
+/**
+ * El negocio existe y pertenece al workspace de la sesion. No se exporta: en un archivo
+ * `'use server'` todo export es un endpoint.
+ */
+async function negocioEsDelWorkspace(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  negocioId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  const { data } = await svc
+    .from('negocios')
+    .select('id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
 export async function getDatosSarlaft(
   negocioId: string,
 ): Promise<{ ok: true; datos: DatosSarlaftNegocio | null } | { ok: false; error: string }> {
@@ -63,6 +82,15 @@ export async function guardarDatosSarlaft(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+
+  // Los dos upserts de abajo van por `onConflict: 'negocio_id'` con el cliente de
+  // servicio. Sin esta comprobacion, con el id de un negocio de OTRO workspace se le
+  // sobrescribian los datos SARLAFT y el score, ambas filas quedaban reasignadas al
+  // workspace de quien llama, y si el nivel cambiaba el codigo y nombre del negocio
+  // ajeno llegaban como notificacion a los owner/admin/supervisor de este workspace.
+  if (!(await negocioEsDelWorkspace(svc, negocioId, workspaceId))) {
+    return { ok: false, error: 'negocio_no_encontrado' };
+  }
 
   const { error } = await svc.from('valida_sarlaft_datos_negocio').upsert(
     {
@@ -137,16 +165,25 @@ export async function recalcularScoreNegocio(
   const { workspaceId } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+
+  // Antes de calcular y persistir: `persistirScore` escribe con el cliente de servicio
+  // por `onConflict: 'negocio_id'`, asi que un negocio ajeno quedaba con un score
+  // calculado bajo la config de este workspace y reasignado a el.
+  if (!(await negocioEsDelWorkspace(svc, negocioId, workspaceId))) {
+    return { ok: false, error: 'negocio_no_encontrado' };
+  }
+
   const calc = await calcularScoreNegocio({ workspaceId, negocioId });
   if (!calc.ok) return { ok: false, error: calc.error };
 
   // Necesitamos universo del datos
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = createServiceClient() as any;
   const { data: datos } = await svc
     .from('valida_sarlaft_datos_negocio')
     .select('universo')
     .eq('negocio_id', negocioId)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
 
   if (!datos) return { ok: false, error: 'datos_sarlaft_no_configurados' };

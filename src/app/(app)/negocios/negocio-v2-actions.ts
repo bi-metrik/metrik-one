@@ -1527,7 +1527,7 @@ async function getNegocioDetalle(id: string): Promise<{
         const inst = instanciasMap[bc.id]
         if (!inst || (inst.data as Record<string, unknown> | null)?.precio_base_con_iva !== undefined) continue
         try {
-          const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
+          const { crearV1Automatica } = await import('@/lib/propuesta/v1-automatica')
           await crearV1Automatica(inst.id, autoProp.servicio_id)
           const { data: refreshed } = await db(supabase).from('negocio_bloques').select('data').eq('id', inst.id).single()
           if (refreshed) instanciasMap[bc.id] = { ...inst, data: (refreshed as { data: unknown }).data } as NegocioBloque
@@ -2493,7 +2493,7 @@ export async function crearNegocio(input: {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const inst = instanciaRow as any
             if (inst?.id) {
-              const { crearV1Automatica } = await import('@/lib/actions/propuesta-economica-actions')
+              const { crearV1Automatica } = await import('@/lib/propuesta/v1-automatica')
               await crearV1Automatica(inst.id, autoProp.servicio_id)
             }
           } catch (e) {

@@ -21,9 +21,13 @@ export async function POST(
   const { negocio_id } = await ctx.params
 
   const svc = createServiceClient()
+  // El negocio se busca DENTRO del workspace de la sesion. Antes se buscaba solo por
+  // id y despues se miraba que fuera de afi: cualquier owner/admin de OTRO workspace
+  // podia disparar el motor sobre un negocio de AFI con solo tener el id. Un negocio
+  // ajeno responde igual que uno inexistente (404, no 403) para no confirmar que existe.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: neg } = await (svc as any).from('negocios')
-    .select('id, workspace_id').eq('id', negocio_id).maybeSingle()
+    .select('id, workspace_id').eq('id', negocio_id).eq('workspace_id', workspaceId).maybeSingle()
   if (!neg) return NextResponse.json({ error: 'Negocio no encontrado' }, { status: 404 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
