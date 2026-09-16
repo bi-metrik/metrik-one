@@ -11,6 +11,10 @@
  *
  * Además, `transcribir` rechaza una ruta de audio con `%2e%2e`: el control viejo
  * (`startsWith` + `includes('..')`) la dejaba pasar y `fetch` la normaliza hacia otro workspace.
+ *
+ * VISTO FALLAR (2026-09-16) contra `origin/main`: caen los 5 casos sin módulo y las 2 rutas con
+ * `%2e%2e`; los 4 CONTROL y las 2 rutas que el control viejo ya rechazaba siguen verdes. Quitando
+ * la puerta de `auditar` caen sus 2 casos.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'

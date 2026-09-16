@@ -23,6 +23,11 @@
  * Medido el 2026-09-16 por PostgREST: fuera de un workspace con Clarity solo hay 2 negocios
  * (advise, sin tocar desde el 2026-07-30 y ya fuera de su alcance por el gate de `/negocios`), y
  * `cobros_recurrentes` solo lo tiene metrik. Ninguna de estas puertas cierra algo que se use hoy.
+ *
+ * VISTO FALLAR (2026-09-16) contra `origin/main`: caen 21 (las 17 acciones, `esGerencial`, advise y
+ * los 2 de PILA); los CONTROL siguen verdes. «No llega a Gemini» pasa en los dos lados: el ítem no
+ * existe en el doble, así que vigila una regresión, no el hueco. Mutaciones: sin la puerta de
+ * `ve-documentos` caen 2 (el paso por rol de corrección); sin la de `guard-negocio` caen 4.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'

@@ -11,6 +11,10 @@
  *   - el cableado en `wa-webhook/index.ts`, leyendo el fuente: el handler no se puede colectar
  *     desde node (lee `Deno.env` al importarse), y lo que importa es el ORDEN: la puerta va
  *     despues de la aceptacion de terminos y antes de Gemini, la sesion y los handlers.
+ *
+ * VISTO FALLAR (2026-09-16) contra `origin/main`: caen las 2 del cableado (las 3 del criterio son
+ * del modulo nuevo). Mutaciones: mover la puerta despues del parseo tumba la del orden; abrir sin
+ * fila de workspace tumba la de la fila nula.
  */
 
 import { readFileSync } from 'node:fs'
