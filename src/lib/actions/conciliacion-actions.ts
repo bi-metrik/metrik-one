@@ -23,10 +23,17 @@ import {
 } from '@/lib/upme/modelo-dinero'
 import { TOLERANCIA_SALDO_COP, saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { diasDesde, compararPorAntiguedad } from '@/lib/negocios/antiguedad'
-import { sumarRecaudoConfirmado, recaudoPendienteDeConfirmar, type CobroParaRecaudo } from '@/lib/negocios/recaudo-confirmado'
+import {
+  sumarRecaudoConfirmado,
+  recaudoPendienteDeConfirmar,
+  esPorcionPendienteDeConfirmar,
+  porcionConfirmadaPorFinanciera,
+  type CobroParaRecaudo,
+} from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
 import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
+import { porcionesPorConfirmar as contarPorcionesPorConfirmar } from '@/lib/cobros/confirmacion-por-referencia'
 import { esCobroAnulado, montoRegistrado } from '@/lib/cobros/anulacion'
 import {
   guardarAviso,
@@ -289,6 +296,10 @@ async function repartirPagoCore(
   // Cualquier negocio tocado deja de estar conciliado (cambió su cobrado). El check
   // de conciliación lo pone SIEMPRE la financiera (control de dos personas) — el
   // reparto del comercial es solo una PROPUESTA hasta que ella lo valide.
+  //
+  // Acá bajar el flag SÍ es lo correcto y no pierde nada: las porciones de repartos
+  // anteriores conservan su propia marca de aceptación en `split_json.confirmado_at`, y
+  // las de este reparto nacen sin ella porque nadie las ha validado todavía.
   await db(supabase)
     .from('negocio_conciliacion')
     .update({ conciliado: false, updated_at: new Date().toISOString() })
@@ -448,6 +459,13 @@ export interface RefPorcion {
   anulable: boolean
   /** Si no es anulable, por que. Texto listo para mostrar. */
   bloqueo_anulacion: string | null
+  /**
+   * Porción propuesta por el comercial que TODAVÍA espera el visto bueno de la
+   * financiera. Lo decide `esPorcionPendienteDeConfirmar`, el mismo criterio con el que
+   * el motor de saldos decide si esta plata cuenta: la pantalla no puede ofrecer una
+   * acción sobre algo que el motor ya dio por resuelto, ni callar lo que sigue abierto.
+   */
+  pendiente_de_confirmar: boolean
 }
 
 /** Una referencia de pago cargada al workspace, con sus porciones. */
@@ -465,8 +483,24 @@ export interface ReferenciaPago {
    * "Propuesto por el comercial — pendiente de confirmar".
    */
   propuesto_por_comercial: boolean
-  /** true si algún negocio de la referencia ya tiene el check de conciliación. */
+  /**
+   * true si algún negocio de la referencia tiene el check de conciliación. Es estado por
+   * NEGOCIO, así que **no decide si la referencia sigue accionable** — solo acompaña al
+   * badge cuando ya no queda nada pendiente. Ver `porciones_por_confirmar`.
+   */
   algun_conciliado: boolean
+  /**
+   * Cuántas porciones de esta referencia siguen esperando el visto bueno de la
+   * financiera.
+   *
+   * ⚠️⚠️ Es lo que decide si la referencia aparece en "Por confirmar", y reemplaza a
+   * `!algun_conciliado` en esa decisión. Con el criterio viejo, una referencia repartida
+   * entre dos negocios desaparecía entera de la pestaña en cuanto UNO de los dos quedaba
+   * conciliado: la porción del otro no tenía desde dónde aceptarse, y nadie podía
+   * devolverle su plata al negocio. Pasó en SOENA con la referencia 385563083
+   * (V0497/V0498, 15-sep-2026) y hubo que restituir el check por SQL.
+   */
+  porciones_por_confirmar: number
   /**
    * Total declarado del pago (split_json.split_total) cuando es un reparto. Para un
    * reparto del comercial parcial, puede ser mayor que `valor_pagado` (lo asignado).
@@ -649,7 +683,17 @@ interface CobroRow {
   anulado_at: string | null
   monto_anulado: number | null
   anulacion_motivo: string | null
-  split_json: { split_id?: string; por_reparto?: boolean; ref_total?: number; por_devolver?: boolean; origen?: string; split_total?: number } | null
+  split_json: {
+    split_id?: string
+    por_reparto?: boolean
+    ref_total?: number
+    por_devolver?: boolean
+    origen?: string
+    split_total?: number
+    /** Marca de aceptación de ESTA porción por el área financiera. Ver `recaudo-confirmado.ts`. */
+    confirmado_at?: string | null
+    confirmado_por?: string | null
+  } | null
 }
 
 /**
@@ -997,6 +1041,10 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
         anulacion_motivo: r.anulacion_motivo,
         anulable: veredicto.anulable,
         bloqueo_anulacion: veredicto.anulable ? null : veredicto.error,
+        pendiente_de_confirmar: esPorcionPendienteDeConfirmar(
+          r,
+          r.negocio_id ? (conciliadoNegocio.get(r.negocio_id) ?? false) : false,
+        ),
       }
     })
     const valorPagado = porciones.filter((p) => !p.por_devolver).reduce((s, p) => s + p.monto, 0)
@@ -1005,6 +1053,14 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
     )
     const propuestoPorComercial = rows.some((r) => r.split_json?.origen === 'comercial')
     const algunConciliado = negociosImplicados.some((id) => conciliadoNegocio.get(id) === true)
+    // El conteo sale del MISMO módulo que la pantalla usa para filtrar la bandeja.
+    const porcionesPorConfirmar = contarPorcionesPorConfirmar(
+      rows.map((r) => ({
+        cobro: r as unknown as CobroParaRecaudo,
+        negocioConciliado: r.negocio_id ? (conciliadoNegocio.get(r.negocio_id) ?? false) : false,
+        anulada: esCobroAnulado(r),
+      })),
+    )
     // Total declarado del reparto (si lo hay): el mayor split_total entre las porciones.
     const totalDeclarado = rows.reduce<number | null>((max, r) => {
       const st = r.split_json?.split_total
@@ -1019,6 +1075,7 @@ export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null
       es_split: esSplit,
       propuesto_por_comercial: propuestoPorComercial,
       algun_conciliado: algunConciliado,
+      porciones_por_confirmar: porcionesPorConfirmar,
       total_declarado: totalDeclarado,
       sin_asignar: sinAsignar,
       porciones,
@@ -1425,6 +1482,12 @@ export async function registrarPagoEnNegocio(
     await logFabOrigen(referencia)
   }
 
+  // Entró plata nueva: la foto que la financiera dio por buena cambió, así que el negocio
+  // vuelve a la cola de revisión. **Esto NO desconfirma ningún reparto**: la aceptación
+  // de una referencia vive en su porción (`split_json.confirmado_at`) y este `update` no
+  // la toca. Ese era justo el defecto — un pago de septiembre borraba el visto bueno que
+  // la financiera le había dado en otra referencia, y el gate de saldo volvía a exigir
+  // plata que ya estaba aceptada (SOENA V0498). Ver `lib/negocios/recaudo-confirmado.ts`.
   await db(supabase)
     .from('negocio_conciliacion')
     .update({ conciliado: false, updated_at: new Date().toISOString() })
@@ -1696,7 +1759,9 @@ export async function crearCobrosSoenaCore(
     if (insErr) return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar el reparto' }
   }
 
-  // Cambió el cobrado → des-conciliar.
+  // Cambió el cobrado → des-conciliar. Igual que en `registrarPagoEnNegocio`: devuelve el
+  // negocio a la cola de revisión de la financiera, sin desconfirmar las porciones que
+  // ella ya aceptó (esas llevan su marca en `split_json.confirmado_at`).
   await db(supabase)
     .from('negocio_conciliacion')
     .update({ conciliado: false, updated_at: new Date().toISOString() })
@@ -1711,9 +1776,17 @@ export async function crearCobrosSoenaCore(
 
 /**
  * ACEPTA (concilia) un reparto/pago PROPUESTO por el comercial para una referencia.
- * Marca el check de conciliación en TODOS los negocios que reciben una porción
- * `origen='comercial'` de esa referencia. Cada negocio cuadra su propia parte del
- * pago — la financiera valida que el dinero real corresponde y da el visto bueno.
+ *
+ * La aceptación se estampa en la PORCIÓN (`cobros.split_json.confirmado_at`), no solo en
+ * el negocio: un check confirma ESTA referencia, y ningún hecho posterior del negocio
+ * —un pago nuevo, otro reparto— puede invalidarlo. El flag por negocio se sigue
+ * poniendo, porque es el que gobierna las pestañas del panel, pero ya no carga con la
+ * confirmación de nadie. Ver `lib/negocios/recaudo-confirmado.ts`.
+ *
+ * Solo toca lo que está PENDIENTE: una porción ya confirmada no se vuelve a estampar y
+ * su negocio no se vuelve a conciliar. Sin ese corte, aceptar la porción que falta
+ * re-conciliaría de paso a un negocio cuya situación de plata cambió después —
+ * borrándole a la financiera un sobrepago que sí tiene que mirar.
  *
  * Permisos: solo área financiera (Diana) vía ctxFinanciero.
  */
@@ -1729,20 +1802,72 @@ export async function aceptarRepartoComercial(
 
   const { data: cobrosRaw } = await db(supabase)
     .from('cobros')
-    .select('negocio_id, split_json')
+    .select('id, negocio_id, split_json, anulado_at')
     .eq('workspace_id', workspaceId)
     .eq('external_ref', ref)
-  const negociosTocados = Array.from(new Set(
-    ((cobrosRaw ?? []) as Array<{ negocio_id: string | null; split_json: { origen?: string } | null }>)
-      .filter((c) => c.split_json?.origen === 'comercial' && c.negocio_id)
-      .map((c) => c.negocio_id as string),
-  ))
+  const comercial = ((cobrosRaw ?? []) as Array<{
+    id: string
+    negocio_id: string | null
+    split_json: Record<string, unknown> | null
+    anulado_at: string | null
+  }>).filter((c) => (c.split_json as { origen?: string } | null)?.origen === 'comercial' && c.negocio_id && !c.anulado_at)
 
-  if (negociosTocados.length === 0) {
+  if (comercial.length === 0) {
     return { success: false, error: 'No hay un reparto propuesto por el comercial para esta referencia.' }
   }
 
+  // El estado por negocio vale como confirmación heredada: las porciones aceptadas antes
+  // de que existiera la marca en el cobro no tienen otra evidencia.
+  const negociosDeLaRef = Array.from(new Set(comercial.map((c) => c.negocio_id as string)))
+  const { data: concRaw } = await db(supabase)
+    .from('negocio_conciliacion')
+    .select('negocio_id, conciliado')
+    .eq('workspace_id', workspaceId)
+    .in('negocio_id', negociosDeLaRef)
+  const conciliadoPrevio = new Map<string, boolean>()
+  for (const r of ((concRaw ?? []) as Array<{ negocio_id: string; conciliado: boolean }>)) {
+    conciliadoPrevio.set(r.negocio_id, r.conciliado)
+  }
+
+  const pendientes = comercial.filter((c) =>
+    esPorcionPendienteDeConfirmar(
+      c as unknown as CobroParaRecaudo,
+      conciliadoPrevio.get(c.negocio_id as string) ?? false,
+    ),
+  )
+  if (pendientes.length === 0) {
+    return { success: false, error: 'Este reparto ya está confirmado: no queda ninguna porción por aceptar.' }
+  }
+
+  const negociosTocados = Array.from(new Set(pendientes.map((c) => c.negocio_id as string)))
   const nowIso = new Date().toISOString()
+
+  // La marca va en la porción PRIMERO: si algo falla después, la plata ya quedó
+  // confirmada y el motor de saldos la cuenta — el orden inverso deja al negocio
+  // conciliado con porciones que nadie estampó.
+  //
+  // ⚠️ `split_json` se RELEE justo antes de escribir, no se arma sobre la copia de
+  // arriba: es un jsonb acumulador (split_id, split_total, origen, propuesto_por) y un
+  // `{...copia vieja}` pierde cualquier escritura intermedia sin hacer ruido. Misma
+  // lección que `guardarMarcaEnMetadata` (PR #500).
+  for (const c of pendientes) {
+    const { data: fresco } = await db(supabase)
+      .from('cobros')
+      .select('split_json')
+      .eq('id', c.id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    const splitVigente = ((fresco as { split_json: Record<string, unknown> | null } | null)?.split_json) ?? c.split_json ?? {}
+    const { error: marcaErr } = await db(supabase)
+      .from('cobros')
+      .update({ split_json: { ...splitVigente, confirmado_at: nowIso, confirmado_por: staffId } })
+      .eq('id', c.id)
+      .eq('workspace_id', workspaceId)
+    if (marcaErr) {
+      return { success: false, error: (marcaErr as { message?: string }).message ?? 'No se pudo confirmar una porción del reparto' }
+    }
+  }
+
   for (const id of negociosTocados) {
     const { error: upErr } = await db(supabase).from('negocio_conciliacion').upsert(
       {
@@ -1810,6 +1935,11 @@ async function resolverPendienteConciliacion(
  *
  * NO toca cobros que no sean del reparto comercial (ePayco directo, pasante/honorario
  * del auto-cobro, etc.). Permisos: solo área financiera (Diana) vía ctxFinanciero.
+ *
+ * ⚠️⚠️ Tampoco toca una porción YA CONFIRMADA. Desde que una referencia parcialmente
+ * confirmada vuelve a ser accionable (2026-09-16), rechazarla alcanzaría con un clic a la
+ * plata que la financiera ya había aceptado en OTRO negocio, y borrar un cobro no se
+ * deshace. Rechazar devuelve al comercial lo que sigue en duda, nada más.
  */
 export async function rechazarRepartoComercial(
   externalRef: string,
@@ -1831,21 +1961,31 @@ export async function rechazarRepartoComercial(
   const comercial = ((cobrosRaw ?? []) as Array<{
     id: string
     negocio_id: string | null
-    split_json: { origen?: string } | null
+    split_json: { origen?: string; confirmado_at?: string | null } | null
   }>).filter((c) => c.split_json?.origen === 'comercial' && c.negocio_id)
 
   if (comercial.length === 0) {
     return { success: false, error: 'No hay un reparto propuesto por el comercial para esta referencia.' }
   }
 
-  const negociosTocados = Array.from(new Set(comercial.map((c) => c.negocio_id as string)))
+  const yaConfirmadas = comercial.filter((c) => porcionConfirmadaPorFinanciera(c as unknown as CobroParaRecaudo))
+  const porRechazar = comercial.filter((c) => !porcionConfirmadaPorFinanciera(c as unknown as CobroParaRecaudo))
+  if (porRechazar.length === 0) {
+    return {
+      success: false,
+      error: 'Todas las porciones de esta referencia ya están confirmadas: para deshacerlas hay que anular cada cobro desde el negocio.',
+    }
+  }
 
-  for (const c of comercial) {
+  const negociosTocados = Array.from(new Set(porRechazar.map((c) => c.negocio_id as string)))
+
+  for (const c of porRechazar) {
     const { error: delErr } = await db(supabase).from('cobros').delete().eq('id', c.id).eq('workspace_id', workspaceId)
     if (delErr) return { success: false, error: (delErr as { message?: string }).message ?? 'No se pudo rechazar el reparto' }
   }
 
-  // Cambió el cobrado → des-conciliar los negocios tocados (defensivo).
+  // Cambió el cobrado → des-conciliar los negocios tocados (defensivo). Un negocio cuya
+  // porción de esta referencia ya estaba confirmada NO entra: no se le quitó nada.
   await db(supabase)
     .from('negocio_conciliacion')
     .update({ conciliado: false, updated_at: new Date().toISOString() })
@@ -1874,8 +2014,9 @@ export async function rechazarRepartoComercial(
   await resolverPendienteConciliacion(supabase, workspaceId, ref)
 
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
+  for (const c of yaConfirmadas) if (c.negocio_id) revalidatePath(`/negocios/${c.negocio_id}`)
   revalidatePath('/conciliacion')
-  return { success: true, eliminados: comercial.length }
+  return { success: true, eliminados: porRechazar.length }
 }
 
 // El registro, listado, correccion y anulacion de pagos fuera de la pasarela vive en
