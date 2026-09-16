@@ -17,11 +17,13 @@ sobrepago salte la etapa. Si se apaga antes de encender el aviso, nadie ve esos 
 **How to apply:**
 - Orden: deploy de Vercel en Ready → SQL de la linea GIT EV/HEV → recien ahi apagar
   `conciliar_sobrepago`. Si alguien pide el paso 2, verificar primero que la clave este puesta.
-- ⚠️ **V0498 no es sobrepago**: tarifa confirmada guardada como `769.898` (referencia `770159`),
-  tecleada con punto de miles. La pestana Saldos ya lo lista y el aviso le llegara a la
-  financiera por $556.628. Se corrige en el bloque "Confirmar tarifa UPME", no en codigo.
+- ⚠️ **CADUCO lo de V0498** (re-medido 2026-09-16, #738): su tarifa ya esta en `770.159`,
+  el valor a recaudar en $1.195.159 y el saldo es **$261 de FALTANTE**, no un sobrante de
+  $556.628. Ya no dispara el aviso.
 - Backlog medido al encender: 6 abiertos con sobrante (V0498, V0398, V0310, V0365, V0442,
   V0048). Llegan de a uno, en el siguiente avance o pago de cada caso — no de golpe.
+  ⚠️ **Esa lista se re-mide antes de encender**: V0498 ya salio, y los otros cinco no se
+  volvieron a comprobar.
 - La idempotencia es por **monto**, en cualquier estado del aviso
   (`sobrepago:negocio:<id>:exceso:<n>:area:<a>`). Un sobrepago identico que reaparece despues
   de resuelto NO se vuelve a avisar: limite aceptado, escrito en el modulo.

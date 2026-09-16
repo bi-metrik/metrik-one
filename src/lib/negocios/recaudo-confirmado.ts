@@ -26,9 +26,33 @@
  *      comercial. Lo escribe `repartirPagoCore` (conciliacion-actions.ts), que ya declara
  *      en su comentario que el check "lo pone SIEMPRE la financiera (control de dos
  *      personas)".
- *   2. `negocio_conciliacion.conciliado` — la financiera validó. Lo escribe
- *      `aceptarRepartoComercial`, que NO borra la marca de origen: por eso hay que cruzar
- *      las dos y no basta con mirar una.
+ *   2. `cobros.split_json.confirmado_at` — la financiera validó ESA porción. Lo escribe
+ *      `aceptarRepartoComercial`.
+ *   3. `negocio_conciliacion.conciliado` — respaldo por NEGOCIO, para las porciones
+ *      aceptadas antes de que existiera la marca (2) y para las conciliaciones que la
+ *      financiera hace sobre el negocio entero.
+ *
+ * ── Por qué la confirmación bajó a la PORCIÓN (2026-09-16) ───────────────────
+ *
+ * Hasta hoy la única evidencia era (3), el flag por NEGOCIO, y eso hacía que un hecho
+ * nuevo en el negocio borrara una confirmación que era de OTRA referencia. El caso
+ * (SOENA, V0498): el 12-sep la financiera aceptó el reparto de la referencia 385563083
+ * ($637.500 entre V0497 y V0498); el 15-sep entraron dos pagos ePayco nuevos a V0498 y
+ * `registrarPagoEnNegocio` puso `conciliado = false` — un `update` por negocio que no
+ * mira qué referencia se está tocando. Con el flag abajo, la porción de $212.500 que ya
+ * estaba aceptada dejó de contar y el gate `saldo:handoff` pasó a exigir $212.761 cuando
+ * al cliente le faltaban $261.
+ *
+ * **Un check confirma una REFERENCIA concreta, no el saldo global del negocio**, así que
+ * un pago posterior no puede invalidarlo: es plata distinta, de otro hecho. El flag por
+ * negocio conserva su otro significado —"la situación de plata de este negocio cambió,
+ * vuelve a mirarla"— y por eso los `conciliado = false` se quedan donde están: lo que
+ * cambia es que ya no cargan con la confirmación de nadie.
+ *
+ * ⚠️ Las porciones aceptadas ANTES de este cambio no tienen `confirmado_at`: su única
+ * evidencia es (3). Mientras su negocio siga conciliado cuentan igual que antes, pero el
+ * primer pago nuevo las devuelve al limbo. El backfill que lo cierra está propuesto en el
+ * PR de este cambio y NO se aplicó desde aquí.
  *
  * Esto hace el cambio seguro por construcción: un cobro normal (una referencia, un
  * negocio) nunca lleva `origen='comercial'`, así que siempre cuenta. Medido contra
@@ -54,8 +78,11 @@
 /** Fila mínima de un cobro para decidir si su plata está confirmada. */
 export interface CobroParaRecaudo {
   monto: number | null
-  /** `split_json` del cobro. La llave que importa es `origen`. */
-  split_json?: { origen?: string } | null
+  /**
+   * `split_json` del cobro. Las llaves que importan son `origen` (quién propuso la
+   * porción) y `confirmado_at` (cuándo la aceptó la financiera).
+   */
+  split_json?: { origen?: string; confirmado_at?: string | null } | null
   tipo_cobro?: string | null
 }
 
@@ -68,6 +95,38 @@ export interface CobroParaRecaudo {
  */
 export function esPorcionRepartoPropuesto(cobro: CobroParaRecaudo | null | undefined): boolean {
   return cobro?.split_json?.origen === 'comercial'
+}
+
+/**
+ * ¿La financiera ya aceptó ESTA porción?
+ *
+ * La marca la estampa `aceptarRepartoComercial` sobre el cobro, así que viaja con la
+ * porción y con su referencia: nada de lo que pase después en el negocio la borra. Una
+ * cadena vacía no es una fecha y no confirma nada.
+ */
+export function porcionConfirmadaPorFinanciera(cobro: CobroParaRecaudo | null | undefined): boolean {
+  const marca = cobro?.split_json?.confirmado_at
+  return typeof marca === 'string' && marca.trim() !== ''
+}
+
+/**
+ * CRITERIO ÚNICO: ¿esta porción es plata que todavía espera el visto bueno del área
+ * financiera? Lo consultan la suma, el pendiente y el panel de conciliación, para que
+ * "cuánto cuenta", "cuánto falta confirmar" y "qué referencia sigue accionable" no
+ * puedan contestar cosas distintas.
+ *
+ * Tres formas de NO estar pendiente, y las tres valen:
+ *   - no es una propuesta del comercial (un cobro normal, o un reparto de la financiera);
+ *   - la porción trae su propia marca de aceptación;
+ *   - el negocio está conciliado (respaldo para lo aceptado antes de que existiera la marca).
+ */
+export function esPorcionPendienteDeConfirmar(
+  cobro: CobroParaRecaudo | null | undefined,
+  negocioConciliado: boolean,
+): boolean {
+  if (!esPorcionRepartoPropuesto(cobro)) return false
+  if (porcionConfirmadaPorFinanciera(cobro)) return false
+  return !negocioConciliado
 }
 
 /** Opciones de suma para los llamadores que ya excluían algún tipo de cobro. */
@@ -99,7 +158,7 @@ export function sumarRecaudoConfirmado(
   return (cobros ?? []).reduce((suma, c) => {
     if (!c) return suma
     if (c.tipo_cobro && excluir.has(c.tipo_cobro)) return suma
-    if (!negocioConciliado && esPorcionRepartoPropuesto(c)) return suma
+    if (esPorcionPendienteDeConfirmar(c, negocioConciliado)) return suma
     const monto = Number(c.monto ?? 0)
     return Number.isFinite(monto) ? suma + monto : suma
   }, 0)
@@ -116,12 +175,11 @@ export function recaudoPendienteDeConfirmar(
   negocioConciliado: boolean,
   opts?: OpcionesRecaudo,
 ): number {
-  if (negocioConciliado) return 0
   const excluir = new Set(opts?.excluirTipos ?? [])
   return (cobros ?? []).reduce((suma, c) => {
     if (!c) return suma
     if (c.tipo_cobro && excluir.has(c.tipo_cobro)) return suma
-    if (!esPorcionRepartoPropuesto(c)) return suma
+    if (!esPorcionPendienteDeConfirmar(c, negocioConciliado)) return suma
     const monto = Number(c.monto ?? 0)
     return Number.isFinite(monto) ? suma + monto : suma
   }, 0)

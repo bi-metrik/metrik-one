@@ -19,6 +19,7 @@ import {
 } from '@/lib/actions/conciliacion-actions'
 import { anularCobro } from '@/lib/actions/pagos-externos'
 import { MOTIVO_ANULACION_MIN } from '@/lib/cobros/anulacion'
+import { referenciaEsperaConfirmacion } from '@/lib/cobros/confirmacion-por-referencia'
 import PagosExternosTab from './pagos-externos-tab'
 import BusquedaInput from '@/components/busqueda-input'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
@@ -95,7 +96,11 @@ export default function ConciliacionClient(
 
   // Repartos propuestos por el comercial, pendientes de confirmar.
   const pendientes = useMemo(
-    () => data.referencias.filter((r) => r.propuesto_por_comercial && !r.algun_conciliado),
+    // ⚠️ El listón es "queda alguna porción SIN confirmar", no "ningún negocio de la
+    // referencia está conciliado". Con lo segundo, una referencia repartida entre dos
+    // negocios desaparecía de esta pestaña en cuanto uno quedaba conciliado, y la porción
+    // del otro se quedaba sin ningún lugar desde donde aceptarse.
+    () => data.referencias.filter(referenciaEsperaConfirmacion),
     [data],
   )
 
@@ -217,6 +222,10 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
 
   const porcionesReales = r.porciones.filter((p) => !p.por_devolver)
   const esReparto = porcionesReales.length > 1
+  // Una referencia puede volver a esta bandeja con parte de sus porciones ya aceptadas
+  // (la financiera confirmó una y el otro negocio siguió pendiente). Se dice cuáles son:
+  // sin eso, la tarjeta reaparece sin explicar qué cambió y qué queda por decidir.
+  const yaConfirmadas = porcionesReales.filter((p) => !p.pendiente_de_confirmar).length
 
   function aceptar() {
     startTransition(async () => {
@@ -280,11 +289,26 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
                   )}
                 </td>
                 <td className="py-1.5" style={{ color: 'var(--tinta-suave)' }}>{p.etapa_nombre ?? '—'}</td>
-                <td className="py-1.5 text-right font-semibold tabular-nums" style={{ color: 'var(--tinta)' }}>{fmtCOP(p.monto)}</td>
+                <td className="py-1.5 text-right font-semibold tabular-nums" style={{ color: 'var(--tinta)' }}>
+                  <span className="inline-flex items-center justify-end gap-1.5">
+                    {!p.pendiente_de_confirmar && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-1.5 py-0.5 text-[10px] font-semibold text-acento">
+                        <CheckCircle2 className="h-3 w-3" /> Ya confirmada
+                      </span>
+                    )}
+                    {fmtCOP(p.monto)}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {yaConfirmadas > 0 && (
+          <p className="mt-1.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+            {yaConfirmadas === 1 ? 'Una porción ya estaba confirmada' : `${yaConfirmadas} porciones ya estaban confirmadas`}: aceptar
+            solo alcanza a {r.porciones_por_confirmar === 1 ? 'la que falta' : 'las que faltan'}.
+          </p>
+        )}
         {r.sin_asignar > 1 && (
           <p className="mt-1.5 text-right text-[11px] font-semibold" style={{ color: '#B45309' }}>
             Sin asignar: {fmtCOP(r.sin_asignar)}
@@ -355,7 +379,7 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
 
 function VistaGeneral({ data, onTab }: { data: ConciliacionV2; onTab: (t: TabKey) => void }) {
   const m = data.metricas
-  const pendientes = data.referencias.filter((r) => r.propuesto_por_comercial && !r.algun_conciliado).length
+  const pendientes = data.referencias.filter(referenciaEsperaConfirmacion).length
   const tiles: { label: string; value: number; tab: TabKey; icon: React.ReactNode }[] = [
     { label: 'Referencias cargadas', value: m.referencias_cargadas, tab: 'general', icon: <LayoutGrid className="h-4 w-4" /> },
     { label: 'Por confirmar', value: pendientes, tab: 'bandeja', icon: <Scale className="h-4 w-4" /> },
@@ -460,12 +484,14 @@ function RegistroReferencias({ referencias }: { referencias: ReferenciaPago[] })
                         <ArrowRightLeft className="h-3 w-3" /> Repartido · {r.negocios_ids.length}
                       </span>
                     )}
-                    {r.propuesto_por_comercial && !r.algun_conciliado && (
+                    {referenciaEsperaConfirmacion(r) && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
-                        Propuesto por el comercial · pendiente de confirmar
+                        Propuesto por el comercial · {r.porciones_por_confirmar === 1 ? 'pendiente de confirmar' : `${r.porciones_por_confirmar} porciones por confirmar`}
                       </span>
                     )}
-                    {r.algun_conciliado && (
+                    {/* "Conciliado" solo cuando NO queda nada pendiente: una referencia a
+                        medio confirmar se anuncia por lo que falta, no por lo que ya pasó. */}
+                    {r.algun_conciliado && !referenciaEsperaConfirmacion(r) && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-acento-tinte px-1.5 py-0.5 text-[10px] font-semibold text-acento">
                         <CheckCircle2 className="h-3 w-3" /> Conciliado
                       </span>
