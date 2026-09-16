@@ -132,4 +132,13 @@ describe('la base usa las mismas llaves de módulo que el catálogo', () => {
     expect(arreglo, `${archivo}: no se encontró v_claves_modulo`).not.toBeNull()
     expect(literales(arreglo![1]), archivo).toEqual(esperadas)
   })
+
+  // Tercera copia de la misma lista, de la entrega A2: un tipo de servicio del catálogo enciende
+  // un módulo, y si nombrara uno que no existe proyectaría una llave que nadie lee.
+  it('CHECK catalogo_servicios_modulo', () => {
+    const { archivo, sql } = ultimaQueDefine(/constraint\s+catalogo_servicios_modulo\s+check/i)
+    const lista = sql.match(/constraint\s+catalogo_servicios_modulo\s+check\s*\(\s*modulo\s+in\s*\(([^)]*)\)/i)
+    expect(lista, `${archivo}: no se encontró la lista del CHECK`).not.toBeNull()
+    expect(literales(lista![1]), archivo).toEqual(esperadas)
+  })
 })

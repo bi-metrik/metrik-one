@@ -1,0 +1,67 @@
+# Publica el catálogo de servicios del cerebro en MéTRIK ONE, y revisa la deriva de noche.
+#
+# ⚠️ ESTE ARCHIVO VIVE EN EL REPOSITORIO DEL CEREBRO (`bi-metrik/metrik-system`), en
+# `.github/workflows/catalogo-servicios.yml`. Está versionado en metrik-one porque lo escribe
+# Max y lo aprueba Mik, y porque su contrato con ONE se rompe si se cambia un solo lado.
+# Cómo instalarlo: `docs/catalogo-servicios/README.md`.
+#
+# Spec: `proyectos/metrik/one/2026-09-15_spec-modulos-servicios-cobro.md`, §3.2 (entrega A2).
+
+name: Catálogo de servicios → ONE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cerebro/catalogo/servicios/**'
+      - 'scripts/sync-catalogo-servicios.mjs'
+      - '.github/workflows/catalogo-servicios.yml'
+  # La revisión de deriva. No alcanza con el push: un archivo se puede editar y no empujar, un
+  # push puede fallar a mitad, y una versión puede quedar publicada en ONE mientras el cerebro
+  # la revirtió. La única forma de saber que las dos puntas dicen lo mismo es compararlas.
+  schedule:
+    - cron: '0 8 * * *' # 03:00 en Bogotá
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: publicar o revisar
+        required: true
+        default: revisar
+        type: choice
+        options: [revisar, publicar]
+
+concurrency:
+  # Dos publicaciones a la vez sobre el mismo catálogo no se pisan (la ruta es idempotente por
+  # (slug, version) y devuelve 409 ante un conflicto), pero encolarlas hace legible el registro.
+  group: catalogo-servicios
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    # Solo lee el repositorio: no escribe nada en el cerebro.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Publicar (push a main)
+        # El script no revalida el esquema a propósito: la autoridad es ONE. Lo único que
+        # comprueba de este lado es que las decisiones citadas existan como archivo, que es
+        # justo lo que ONE no puede ver.
+        if: github.event_name == 'push' || inputs.modo == 'publicar'
+        env:
+          ONE_URL: ${{ vars.ONE_URL }}
+          CATALOGO_SYNC_SECRET: ${{ secrets.CATALOGO_SYNC_SECRET }}
+        run: node scripts/sync-catalogo-servicios.mjs publicar
+
+      - name: Revisar deriva (nocturno)
+        if: github.event_name == 'schedule' || inputs.modo == 'revisar'
+        env:
+          ONE_URL: ${{ vars.ONE_URL }}
+          CATALOGO_SYNC_SECRET: ${{ secrets.CATALOGO_SYNC_SECRET }}
+        run: node scripts/sync-catalogo-servicios.mjs revisar
