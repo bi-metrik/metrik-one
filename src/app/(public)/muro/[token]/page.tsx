@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { createServiceClient } from '@/lib/supabase/server'
-import { getMuroPorWorkspace } from '@/app/(app)/calidad/actions'
+import { getMuroPublico } from '@/app/(app)/calidad/muro-publico'
 import MuroView from '@/app/(app)/calidad/components/muro-view'
 
 // Desde v2 el muro lleva facturacion (cierres del dia y montos en dolares), asi
@@ -30,7 +29,7 @@ export const dynamic = 'force-dynamic'
  * Va en (public) como ya hace /cert: el middleware deja pasar /muro/ sin login,
  * porque un televisor del piso no tiene quien inicie sesion cada manana.
  *
- * TRES gates, no uno:
+ * TRES gates, no uno (aplicados en `getMuroPublico`, `calidad/muro-publico.ts`):
  *   1. El workspace tiene modules.calidad_llamadas.
  *   2. El workspace declaro explicitamente config_extra.muro_publico. Tener el
  *      modulo NO alcanza: exponer el muro a internet es una decision aparte.
@@ -48,25 +47,12 @@ export default async function MuroPublicoPage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
-  if (!token || token.length < 8) notFound()
 
-  const svc = createServiceClient()
-  const { data: ws } = await svc
-    .from('workspaces')
-    .select('id, name, modules, config_extra')
-    .eq('config_extra->>muro_token', token)
-    .maybeSingle()
+  // Los tres gates (token, modulo y opt-in) los aplica `getMuroPublico`, dentro de la
+  // misma funcion que lee con service_role. Antes vivian aqui y la lectura era una
+  // server action aparte que no validaba nada.
+  const muro = await getMuroPublico(token)
+  if (!muro) notFound()
 
-  if (!ws) notFound()
-
-  const modules = (ws as { modules: Record<string, boolean> | null }).modules
-  const configExtra = (ws as { config_extra: Record<string, unknown> | null }).config_extra ?? {}
-
-  if (!modules?.calidad_llamadas) notFound()
-  if ((configExtra as { muro_publico?: boolean }).muro_publico !== true) notFound()
-
-  const data = await getMuroPorWorkspace(ws.id as string)
-  if (!data) notFound()
-
-  return <MuroView data={data} nombreWorkspace={ws.name as string} proyectable />
+  return <MuroView data={muro.data} nombreWorkspace={muro.nombreWorkspace} proyectable />
 }

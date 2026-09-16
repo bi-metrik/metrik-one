@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getRolePermissions } from '@/lib/roles'
 import { slugAgente } from './types'
+import { leerMuroDeWorkspace } from './muro-publico'
 import type {
   DuenoData,
   EquipoCalidad,
@@ -261,25 +262,14 @@ export async function getLlamadaDetalle(id: string): Promise<LlamadaDetalle | nu
 export async function getMuro(fecha?: string): Promise<MuroData | null> {
   const ctx = await ctxCalidad()
   if (!ctx) return null
-  return getMuroPorWorkspace(ctx.workspaceId, fecha)
+  return leerMuroDeWorkspace(ctx.workspaceId, fecha)
 }
 
-/**
- * Version sin sesion, para el muro publico por enlace. La usa
- * (public)/muro/[token], que ya valido el modulo, el opt-in y el token.
- * Corre con service_role.
- */
-export async function getMuroPorWorkspace(workspaceId: string, fecha?: string): Promise<MuroData | null> {
-  const svc = createServiceClient()
-  // La RPC tampoco esta en el database.ts generado todavia (misma deuda que las
-  // tablas): pasa por `sinTipar`.
-  const { data, error } = await sinTipar(svc).rpc('get_calidad_muro', {
-    p_workspace_id: workspaceId,
-    ...(fecha ? { p_fecha: fecha } : {}),
-  })
-  if (error || !data) return null
-  return data as MuroData
-}
+// El muro publico por enlace NO tiene accion aqui. Estuvo como
+// `getMuroPorWorkspace(workspaceId)` exportada desde este archivo `'use server'`: un
+// endpoint sin sesion que leia con service_role el muro de cualquier workspace, porque
+// el token lo validaba solo la pagina. Ahora vive en `./muro-publico` (server-only), con
+// la validacion del token dentro de la funcion que lee.
 
 /**
  * Vista de dueno: vendido contra recaudado hasta la cuota 6.

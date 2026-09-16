@@ -25,7 +25,6 @@ import { renderPropuestaEconomica } from '@/lib/pdf/pdf-render-client'
 import { clausulasAHtml, normalizarTerminos } from '@/lib/propuesta/terminos'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
-import { createServiceClient } from '@/lib/supabase/server'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
 import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
 import { fuenteDeLaTarifa, faltaConfirmarTarifa } from '@/lib/upme/tarifa-propuesta'
@@ -38,6 +37,7 @@ import {
 } from '@/lib/negocios/requisitos-bloque'
 import { uvtDelAnio } from '@/lib/upme/uvt'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { calcularPropuesta } from '@/lib/propuesta/calculo'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -119,41 +119,8 @@ export type PropuestaData = {
 
 // ── Helpers de calculo ──────────────────────────────────────────────────────
 
-export type CalculoPropuesta = {
-  base: number
-  plan1_valor: number       // base * (1 - desc1)
-  plan1_anticipo: number    // 50% Plan 1
-  plan1_exito_iva: number   // 50% Plan 1
-  plan2_valor: number       // base * (1 - desc2)
-  ahorro_plan1: number      // base - plan1 (vs tarifa plena)
-  ahorro_plan2: number      // base - plan2 (vs tarifa plena)
-  descuento_pct_plan1: number
-  descuento_pct_plan2: number
-}
-
-// NOTA: no exportada — Next.js exige que TODOS los exports de archivos
-// `'use server'` sean async. Como calcularPropuesta es pura (sync), queda
-// como helper interno del modulo.
-function calcularPropuesta(
-  precioBaseConIva: number,
-  descuentoPctPlan1: number,
-  descuentoPctPlan2: number,
-): CalculoPropuesta {
-  const base = Math.round(precioBaseConIva)
-  const plan1 = Math.round(base * (1 - descuentoPctPlan1 / 100))
-  const plan2 = Math.round(base * (1 - descuentoPctPlan2 / 100))
-  return {
-    base,
-    plan1_valor: plan1,
-    plan1_anticipo: Math.round(plan1 / 2),
-    plan1_exito_iva: Math.round(plan1 / 2),
-    plan2_valor: plan2,
-    ahorro_plan1: base - plan1,
-    ahorro_plan2: base - plan2,
-    descuento_pct_plan1: descuentoPctPlan1,
-    descuento_pct_plan2: descuentoPctPlan2,
-  }
-}
+// `calcularPropuesta` vive en `@/lib/propuesta/calculo`: la comparte la inicialización
+// de la v1, que salió de este archivo.
 
 // ── Helpers de formato (para PDF) ───────────────────────────────────────────
 
@@ -1082,80 +1049,12 @@ export async function revertirAprobacionPropuesta(
   return { ok: true }
 }
 
-// ── Action: crear v1 automatica (llamada desde crearNegocio) ────────────────
-
-export async function crearV1Automatica(
-  bloqueId: string,
-  servicioId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  // Esta funcion se llama desde crearNegocio con service client
-  // (no podemos usar getWorkspace porque la creacion del negocio ya ocurrio
-  //  pero el usuario no necesariamente está autenticado en el contexto)
-  const sb = createServiceClient()
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: bloque } = await (sb as any)
-    .from('negocio_bloques')
-    .select(`
-      id, data, negocio_id,
-      bloque_configs ( config_extra, workspace_id, bloque_definitions(tipo) )
-    `)
-    .eq('id', bloqueId)
-    .single()
-  if (!bloque) return { ok: false, error: 'Bloque no encontrado' }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const b = bloque as any
-  if (b.bloque_configs?.bloque_definitions?.tipo !== 'propuesta_economica') {
-    return { ok: false, error: 'Bloque no es propuesta_economica' }
-  }
-
-  const workspaceId = b.bloque_configs.workspace_id as string
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: servicio } = await (sb as any)
-    .from('servicios')
-    .select('precio_estandar, tarifa_iva')
-    .eq('id', servicioId)
-    .single()
-  if (!servicio) return { ok: false, error: 'Servicio no encontrado' }
-
-  const ivaPct = Number(servicio.tarifa_iva ?? 0.19)
-  const precioBase = Math.round(Number(servicio.precio_estandar ?? 0) * (1 + ivaPct))
-  const calc = calcularPropuesta(precioBase, 0, 0)
-
-  // Inicializar data con ambos descuentos en 0, SIN generar PDF
-  // (PDF se genera cuando el usuario edite o explicitamente lo pida)
-  const dataInicial: PropuestaData = {
-    precio_base_con_iva: precioBase,
-    iva_pct: ivaPct,
-    descuento_pct_plan1: 0,
-    descuento_pct_plan2: 0,
-    valor_final_plan1: calc.plan1_valor,
-    valor_final_plan2: calc.plan2_valor,
-    // Tarifa se computa al generar la 1ª versión (necesita la Factura del negocio).
-    tarifa_upme: 0,
-    tarifa_upme_editada: false,
-    tarifa_upme_detalle: null,
-    versiones: [],
-    version_activa: null,
-    aprobado_at: null,
-    aprobado_por: null,
-    aprobado_version: null,
-    aprobado_plan: null,
-    aprobado_honorario: null,
-    aprobado_tarifa_upme: null,
-    aprobado_servicio: null,
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (sb as any)
-    .from('negocio_bloques')
-    .update({ data: dataInicial })
-    .eq('id', bloqueId)
-
-  console.log(`[propuesta] v1 base inicializada para bloque ${bloqueId} (ws=${workspaceId})`)
-  return { ok: true }
-}
+// ── Inicialización de la v1: vive en `@/lib/propuesta/v1-automatica` ────────
+//
+// NO se exporta desde aquí. Todo export de este archivo `'use server'` es una server
+// action alcanzable por POST, y la inicialización no pide sesión (la llaman
+// `crearNegocio` y el auto-init de `getNegocioDetalle` con el cliente de servicio).
+// Estuvo aquí y cualquiera con un `bloqueId` podía vaciar una propuesta aprobada.
 
 // ── Action: editar la tarifa UPME (informativa, editable) ───────────────────
 //
