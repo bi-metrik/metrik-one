@@ -11,6 +11,7 @@ import {
   plantillaCotizacionPropia,
 } from '@/lib/pdf/plantillas-cotizacion'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
+import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import { createElement } from 'react'
 import {
@@ -214,6 +215,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     mostrar_en_sugeridos?: boolean | null
     /** `20260915120000`. Ausente = entra al precio, el comportamiento de antes. */
     entra_al_precio?: boolean | null
+    /** `20260916231500`. Ausente = la línea se cobra por el grupo, como antes. */
+    tarifa_pax?: unknown
+    rubros?: { valor_total: number | null; sugerido?: boolean | null }[] | null
   }
 
   /**
@@ -232,12 +236,14 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     // `select('*')` y no la lista de columnas: `unidad` la agrega la migracion
     // `20260914200000` y nombrarla devolveria un 400 mientras no este aplicada, o sea
     // que el PDF dejaria de generarse. Misma tolerancia que en duplicar.
+    // Los rubros viajan con la línea para saber si el costo por pasajero confirmado sigue
+    // siendo su costo: si alguien los editó después, el reparto ya no se imprime.
     const { data: itemsData } = await supabase
       .from('items')
-      .select('*')
+      .select('*, rubros(*)')
       .eq('cotizacion_id', cotizacionId)
       .order('orden')
-    items = (itemsData ?? []) as ItemRow[]
+    items = (itemsData ?? []) as unknown as ItemRow[]
   }
 
   /**
@@ -484,6 +490,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
             descuento_porcentaje: descuentoVisible(i),
             cantidad: Number(i.cantidad) || 1,
             unidad: i.unidad ?? null,
+            precioPorPasajero: precioPorPasajeroDeItem(i),
           })),
       }))
     : null
@@ -512,6 +519,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     descuento_porcentaje: descuentoVisible(i),
     cantidad: Number(i.cantidad) || 1,
     unidad: i.unidad ?? null,
+    precioPorPasajero: precioPorPasajeroDeItem(i),
   })
 
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
@@ -645,6 +653,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     dias: diasPDF,
     itemsSinDia: itemsSinDiaPDF,
     sugeridos: sugeridosPDF && sugeridosPDF.length > 0 ? sugeridosPDF : null,
+    // Sobre lo que SUMA el total impreso: el principal si hay itinerarios, si no la lista
+    // plana. Mismo arreglo que alimenta el Subtotal, así que no puede contar otra cosa.
+    preciosPorPasajero: preciosPorPasajeroDelViaje(itemsParaResumen),
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,

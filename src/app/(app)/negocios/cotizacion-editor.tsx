@@ -41,8 +41,15 @@ import {
   puedeSerSugerido,
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
-import PantallazoItem from '@/app/(app)/negocios/pantallazo-item'
+import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import {
+  confirmadaVigente,
+  leerTarifaPax,
+  lineaPorPasajero,
+  precioPorPasajero,
+  type Composicion,
+} from '@/lib/cotizaciones/tarifa-pasajero'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
@@ -112,6 +119,11 @@ interface ItemRow {
   mostrar_en_sugeridos?: boolean | null
   /** ¿La línea cobra? `false` = sugerencia con precio a la vista que no suma. Ausente = sí. */
   entra_al_precio?: boolean | null
+  /**
+   * Tarifa por tipo de pasajero (`20260916231500`): composición propia, lecturas por
+   * casilla y costo por pasajero confirmado. Ausente = la línea se ve como hoy.
+   */
+  tarifa_pax?: unknown
   rubros: RubroRow[]
 }
 
@@ -192,9 +204,14 @@ interface Props {
    * pantalla.
    */
   itinerarios?: EstadoItinerarios
+  /**
+   * Quiénes viajan, de la etapa 1 del negocio. Cada línea con pantallazo la hereda como
+   * punto de partida (tarifa por pasajero §4). `null` o ausente: la línea pide escribirla.
+   */
+  composicionViaje?: Composicion | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -727,6 +744,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // y frecuente: el método día a día y los componentes propios no tienen
             // contrato de pantallazo y se costean a mano, como hoy.
             const ranuraDeItem = ranuraDeGrupo(item.grupo)
+            // El precio por pasajero de la línea (P6): el precio que ya calculó la
+            // cascada, repartido en proporción al costo confirmado de cada tipo. Solo si
+            // ese costo sigue siendo el de la línea: si alguien editó los rubros después,
+            // el reparto describiría otra versión.
+            const tarifaDelItem = leerTarifaPax(item.tarifa_pax)
+            const precioPorPax = tarifaDelItem.confirmada && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
+              ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
+              : null
 
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
@@ -1053,11 +1078,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
                       parezca y ese número acaba dentro de un costo. */}
                   {editable && ranuraDeItem && (
-                    <PantallazoItem
+                    <TarifaPasajeroItem
                       itemId={item.id}
                       ranura={ranuraDeItem}
+                      composicionViaje={composicionViaje}
+                      tarifaPax={item.tarifa_pax}
+                      costoUnitarioLinea={costoUnitario}
                       sugeridosGuardados={rubrosSugeridos}
-                      onConfirmado={() => router.refresh()}
+                      onCambio={() => router.refresh()}
                     />
                   )}
                   {/* Item sale fields */}
@@ -1229,6 +1257,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         {margenTexto && (Number(cotizacion.descuento_porcentaje) || 0) > 0 && (
                           <p className="text-[10px] text-muted-foreground">
                             Antes del descuento comercial de {cotizacion.descuento_porcentaje}%.
+                          </p>
+                        )}
+                        {/* Precio por pasajero: lo que ve el cliente en el PDF (P6). */}
+                        {precioPorPax && precioPorPax.length > 0 && (
+                          <p className="mt-0.5 text-[11px] tabular-nums">
+                            <span className="text-muted-foreground">Precio por pasajero: </span>
+                            <span className="font-medium">
+                              {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
+                            </span>
                           </p>
                         )}
 

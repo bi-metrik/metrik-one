@@ -113,6 +113,83 @@ const PRECIO_TOTAL: CampoRanura = {
     'y declara en base_precio cuál de los dos es.',
 }
 
+/**
+ * La ocupación que muestra la captura, por tipo de pasajero (TP3).
+ *
+ * ⚠️ Son CONTEOS leídos, no una composición deducida: con «3 huéspedes» la pantalla no
+ * dice cuántos son adultos, y adivinarlo es inventar el dato contra el que se valida la
+ * captura. Por eso va aparte `ocupacion_total`.
+ */
+/**
+ * Lo que NO es ocupación y el modelo tomó por ella, medido contra el banco real del 2026-09-16:
+ * «1 x Standard Room» (habitaciones) leído como 1 adulto, y «Standard Room W... AD» (régimen
+ * alojamiento y desayuno) devuelto como «1 Adulto». Va en cada campo de conteo porque el
+ * modelo los llena por separado.
+ */
+const NO_ES_OCUPACION =
+  'El número de habitaciones («1 x Standard Room», «1 Habitación») NO es la ocupación, y el código de régimen ' +
+  'que sigue al nombre de la habitación (SA, AD, MP, PC, TI) tampoco: «Standard Room AD» es alojamiento y ' +
+  'desayuno, no un adulto. No los uses como número de personas.'
+
+const OCUPACION: CampoRanura[] = [
+  {
+    slug: 'ocupacion_adultos',
+    label: 'Adultos en la captura',
+    tipo: 'numero',
+    min: false,
+    descripcion_ai:
+      'Cuántos ADULTOS muestra la pantalla para esta búsqueda o reserva (buscador, resumen de la reserva, ' +
+      'o la fila ADT de una tabla por tipo de pasajero). null si la pantalla no separa adultos de menores o no se ve. ' +
+      NO_ES_OCUPACION,
+  },
+  {
+    slug: 'ocupacion_ninos',
+    label: 'Niños en la captura',
+    tipo: 'numero',
+    min: false,
+    descripcion_ai:
+      'Cuántos NIÑOS muestra la pantalla (niño, child, CHD). 0 si la pantalla muestra la ocupación y no hay niños. ' +
+      'null si no se ve la ocupación. ' + NO_ES_OCUPACION,
+  },
+  {
+    slug: 'ocupacion_infantes',
+    label: 'Infantes en la captura',
+    tipo: 'numero',
+    min: false,
+    descripcion_ai:
+      'Cuántos INFANTES muestra la pantalla (infante, bebé, INF). 0 si la pantalla muestra la ocupación y no hay ' +
+      'infantes. null si no se ve la ocupación. ' + NO_ES_OCUPACION,
+  },
+  {
+    slug: 'ocupacion_total',
+    label: 'Personas en la captura',
+    tipo: 'numero',
+    min: false,
+    descripcion_ai:
+      'Total de personas cuando la pantalla solo da el total sin separar adultos y menores (ej. «3 huéspedes»). ' +
+      'null si no se ve. ' + NO_ES_OCUPACION,
+  },
+]
+
+/**
+ * Lo que paga la agencia cuando la pantalla lo muestra aparte del valor al pasajero.
+ *
+ * Hallazgo 7.1 del diseño: en la liquidación de Decameron la resta de comisión y
+ * prestación NO da el «total a pagar agencia» (faltan 7.287 sin concepto). El costo es el
+ * número leído, nunca uno recalculado.
+ */
+const A_PAGAR_AGENCIA: CampoRanura = {
+  slug: 'total_a_pagar_agencia',
+  label: 'Total a pagar agencia',
+  tipo: 'currency',
+  min: false,
+  alerta_revision: true,
+  descripcion_ai:
+    'El valor NETO que paga la agencia cuando la pantalla lo muestra aparte del valor al pasajero ' +
+    '(ej. «TOTAL A PAGAR AGENCIA» en una liquidación con comisión). Cópialo tal cual: NO lo calcules ' +
+    'restando comisiones. null si la pantalla no lo muestra.',
+}
+
 /** El enum que decide si el número leído se multiplica o no (R-P6). */
 function basePrecio(opciones: string[], nota: string): CampoRanura {
   return {
@@ -142,16 +219,18 @@ const VUELO: DefinicionRanura = {
     { slug: 'aerolinea', label: 'Aerolínea', tipo: 'texto', min: true, descripcion_ai: 'Nombre de la aerolínea que opera el itinerario.' },
     { slug: 'origen', label: 'Origen', tipo: 'texto', min: true, descripcion_ai: 'Ciudad o código IATA de salida del primer trayecto.' },
     { slug: 'destino', label: 'Destino', tipo: 'texto', min: true, descripcion_ai: 'Ciudad o código IATA de llegada final de la ida.' },
-    { slug: 'fecha_salida', label: 'Salida', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida del vuelo de ida, en formato AAAA-MM-DD.' },
-    { slug: 'fecha_regreso', label: 'Regreso', tipo: 'fecha', min: false, descripcion_ai: 'Fecha del vuelo de regreso en formato AAAA-MM-DD. null si es solo ida.' },
+    { slug: 'fecha_salida', label: 'Salida', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida del vuelo de ida, en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
+    { slug: 'fecha_regreso', label: 'Regreso', tipo: 'fecha', min: false, descripcion_ai: 'Fecha del vuelo de regreso en formato AAAA-MM-DD. null si es solo ida. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'numero_vuelo', label: 'Nº de vuelo', tipo: 'texto', min: false, descripcion_ai: 'Número o números de vuelo tal como aparecen (ej. AV8520).' },
     { slug: 'escalas', label: 'Escalas', tipo: 'numero', min: false, descripcion_ai: 'Cuántas escalas tiene la ida. 0 si es directo. null si la pantalla no lo dice.' },
     { slug: 'familia_tarifa', label: 'Tarifa', tipo: 'texto', min: false, descripcion_ai: 'Nombre de la familia tarifaria: basic, light, full, flex, economy...' },
     { slug: 'equipaje_bodega', label: 'Equipaje de bodega', tipo: 'boolean', min: false, alerta_revision: true, descripcion_ai: 'true si la tarifa INCLUYE equipaje de bodega, false si lo excluye explícitamente, null si no se ve.' },
     { slug: 'equipaje_mano', label: 'Equipaje de mano', tipo: 'boolean', min: false, alerta_revision: true, descripcion_ai: 'true si INCLUYE equipaje de mano, false si solo artículo personal, null si no se ve.' },
     { slug: 'pax', label: 'Pasajeros', tipo: 'numero', min: true, descripcion_ai: 'Número de pasajeros de la reserva. Si la pantalla no lo dice, devuelve null: no supongas 1.' },
+    ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
+    A_PAGAR_AGENCIA,
     { slug: 'precio_por_pax', label: 'Precio por pax', tipo: 'currency', min: false, descripcion_ai: 'Precio unitario por pasajero, solo si la pantalla lo muestra aparte del total.' },
     basePrecio(['total', 'por_pax'], 'total = es el precio de toda la reserva; por_pax = es el precio de un solo pasajero.'),
   ],
@@ -165,27 +244,50 @@ const HOTEL: DefinicionRanura = {
   queNoSirve: 'El listado de hoteles o la grilla de habitaciones: ahí hay varias tarifas y el sistema no elige por ti.',
   unidadPorDefecto: 'noches',
   campos: [
-    { slug: 'hotel', label: 'Hotel', tipo: 'texto', min: true, descripcion_ai: 'Nombre del hotel tal como aparece.' },
+    { slug: 'hotel', label: 'Hotel', tipo: 'texto', min: true, descripcion_ai: 'Nombre del HOTEL tal como aparece. No el nombre de una promoción, de un plan o de una tarifa: si la pantalla no muestra el nombre del hotel, devuelve null.' },
     { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad o zona del hotel según la pantalla. Si no aparece, devuelve null: NO la deduzcas del destino del viaje.' },
     { slug: 'tipo_habitacion', label: 'Habitación', tipo: 'texto', min: true, descripcion_ai: 'Tipo de habitación seleccionada (doble estándar, suite, vista al mar...).' },
     { slug: 'regimen', label: 'Régimen', tipo: 'texto', min: false, descripcion_ai: 'Régimen de alimentación: solo alojamiento, desayuno, media pensión, todo incluido.' },
-    { slug: 'check_in', label: 'Check-in', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de entrada en formato AAAA-MM-DD.' },
-    { slug: 'check_out', label: 'Check-out', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida en formato AAAA-MM-DD.' },
+    { slug: 'check_in', label: 'Check-in', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de entrada en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
+    { slug: 'check_out', label: 'Check-out', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'noches', label: 'Noches', tipo: 'numero', min: false, descripcion_ai: 'Número de noches si la pantalla lo dice. Si no, devuelve null: se deriva de las fechas.' },
-    { slug: 'ocupacion', label: 'Ocupación', tipo: 'texto', min: false, descripcion_ai: 'Ocupación de la habitación tal como aparece (ej. 2 adultos + 1 menor).' },
+    { slug: 'ocupacion', label: 'Ocupación', tipo: 'texto', min: false, descripcion_ai: 'El texto literal donde la pantalla dice cuántas PERSONAS se alojan (ej. «2 Adultos - 1 Niño», «3 Huéspedes»), copiado tal cual. Si no hay texto de personas, devuelve null. ' + NO_ES_OCUPACION },
     { slug: 'politica_cancelacion', label: 'Cancelación', tipo: 'texto', min: false, alerta_revision: true, descripcion_ai: 'Política de cancelación en una línea: no reembolsable, gratis hasta tal fecha...' },
     {
+      // ⚠️ NO es mínimo desde la tarifa por pasajero (2026-09-16). La tarjeta de hotel del
+      // listado —la forma real en que Trappvel cotiza— no dice nada de impuestos, y con
+      // `min: true` se rechazaba entera. El dato sigue marcado para revisión y, si la
+      // captura no lo dice, la lectura lo AVISA en vez de suponer que están incluidos.
       slug: 'impuestos_incluidos',
       label: 'Impuestos incluidos',
       tipo: 'boolean',
-      min: true,
+      min: false,
       alerta_revision: true,
       descripcion_ai:
         'true si el precio mostrado YA incluye impuestos y tasas; false si la pantalla dice que se pagan aparte ' +
         '(resort fee, city tax, IVA no incluido). Si no lo dice, devuelve null: no supongas que están incluidos.',
     },
+    {
+      slug: 'impuestos_destino_valor',
+      label: 'Impuestos en destino',
+      tipo: 'currency',
+      min: false,
+      alerta_revision: true,
+      descripcion_ai:
+        'Impuestos o tasas que la pantalla dice que se pagan EN DESTINO, en el hotel, fuera del precio ' +
+        '(ej. «Impuestos y tasas a pagar en destino: 329,44 MXN»). Solo el número. null si no aparece.',
+    },
+    {
+      slug: 'impuestos_destino_moneda',
+      label: 'Moneda de los impuestos en destino',
+      tipo: 'texto',
+      min: false,
+      descripcion_ai: 'Código ISO 4217 de la moneda de esos impuestos en destino (MXN, USD, EUR...). null si no aparece.',
+    },
+    ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
+    A_PAGAR_AGENCIA,
     basePrecio(['total', 'por_noche'], 'total = es el precio de toda la estadía; por_noche = es el precio de una sola noche.'),
   ],
 }
@@ -201,12 +303,14 @@ const ACTIVIDAD: DefinicionRanura = {
     { slug: 'proveedor', label: 'Proveedor', tipo: 'texto', min: true, descripcion_ai: 'Quién vende la actividad: Civitatis, GetYourGuide, Viator, o el operador directo.' },
     { slug: 'nombre', label: 'Actividad', tipo: 'texto', min: true, descripcion_ai: 'Nombre de la actividad tal como aparece.' },
     { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad donde se presta. Si no aparece, null: no la deduzcas del viaje.' },
-    { slug: 'fecha', label: 'Fecha', tipo: 'fecha', min: false, descripcion_ai: 'Fecha de la actividad en formato AAAA-MM-DD.' },
+    { slug: 'fecha', label: 'Fecha', tipo: 'fecha', min: false, descripcion_ai: 'Fecha de la actividad en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'duracion', label: 'Duración', tipo: 'texto', min: false, descripcion_ai: 'Duración tal como aparece (3 horas, día completo...).' },
     { slug: 'idioma', label: 'Idioma', tipo: 'texto', min: false, descripcion_ai: 'Idioma en que se presta el servicio.' },
     { slug: 'pax', label: 'Personas', tipo: 'numero', min: true, descripcion_ai: 'Número de personas de la reserva. Si no se ve, null: no supongas 1.' },
+    ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
+    A_PAGAR_AGENCIA,
     basePrecio(['total', 'por_pax'], 'total = es el precio de todas las personas; por_pax = es el precio de una sola.'),
   ],
 }
@@ -222,10 +326,12 @@ const TRASLADO: DefinicionRanura = {
     { slug: 'proveedor', label: 'Proveedor', tipo: 'texto', min: true, descripcion_ai: 'Quién presta el traslado.' },
     { slug: 'trayecto', label: 'Trayecto', tipo: 'texto', min: true, descripcion_ai: 'De dónde a dónde (aeropuerto - hotel, ida y vuelta...).' },
     { slug: 'tipo_vehiculo', label: 'Vehículo', tipo: 'texto', min: false, descripcion_ai: 'Tipo de vehículo y si es privado o compartido.' },
-    { slug: 'fecha_hora', label: 'Fecha', tipo: 'fecha', min: false, descripcion_ai: 'Fecha del servicio en formato AAAA-MM-DD.' },
+    { slug: 'fecha_hora', label: 'Fecha', tipo: 'fecha', min: false, descripcion_ai: 'Fecha del servicio en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'pax', label: 'Personas', tipo: 'numero', min: true, descripcion_ai: 'Número de personas. Si no se ve, null: no supongas 1.' },
+    ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
+    A_PAGAR_AGENCIA,
     basePrecio(['total', 'por_pax'], 'total = es el precio del trayecto completo; por_pax = es el precio por persona.'),
   ],
 }
@@ -327,6 +433,17 @@ export function gruposCanonicos(): { grupo: string; label: string; ranura: strin
 export function camposMinimos(ranura: DefinicionRanura): CampoRanura[] {
   return ranura.campos.filter(c => c.min)
 }
+
+/**
+ * Los mínimos que deciden el COSTO: sin ellos el número leído no se puede costear.
+ *
+ * En el cargue por casillas (tarifa por pasajero) la línea ya existe y la nombró quien
+ * cotiza, así que los mínimos DESCRIPTIVOS (hotel, ciudad, habitación, fechas) que la
+ * captura no muestre se avisan en vez de rechazar. La liquidación de un proveedor trae el
+ * desglose y el total a pagar agencia sin el nombre del hotel: rechazarla por el nombre
+ * tiraría el único documento que parte el costo por pasajero.
+ */
+export const MINIMOS_DE_COSTO: readonly string[] = ['moneda', 'precio_total', 'base_precio']
 
 /** Slugs del registro. Expuesto para pruebas y para el PR. */
 export function slugsDeRanura(): string[] {

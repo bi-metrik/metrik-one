@@ -1,8 +1,9 @@
 import { Document, Page, Text, View, StyleSheet, Image as PdfImage } from '@react-pdf/renderer'
 
-import type { CotizacionPDFProps } from './cotizacion-props'
+import type { CotizacionPDFProps, PrecioPorPasajeroPDF } from './cotizacion-props'
 import { PALETA } from '@/lib/marca/paleta'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
+import { NOMBRE_TIPO } from '@/lib/cotizaciones/tarifa-pasajero'
 
 // Color lightener (react-pdf no soporta rgba)
 function lighten(hex: string, amount: number): string {
@@ -27,6 +28,20 @@ const fmt = (v: number) =>
 
 /** Un item ya con su total de linea calculado. */
 type ItemPDF = CotizacionPDFProps['items'][number]
+
+/**
+ * «Por pasajero: Adulto $1.907.063 · Niño $1.771.063» debajo de la descripción de la línea
+ * (tarifa por pasajero, diseño §4). Sin reparto no imprime nada: la línea se cobra por el
+ * grupo, como siempre.
+ */
+function PorPasajero({ precios, color }: { precios?: PrecioPorPasajeroPDF; color: string }) {
+  if (!precios || precios.length === 0) return null
+  return (
+    <Text style={{ fontSize: 8, color, marginTop: 2 }}>
+      {'Por pasajero: ' + precios.map(p => `${NOMBRE_TIPO[p.tipo]} ${fmt(p.precioUnitario)}`).join(' · ')}
+    </Text>
+  )
+}
 
 /**
  * La tabla de un BLOQUE de itinerario (R7).
@@ -66,6 +81,7 @@ function TablaDeItems({ items, pc, pcLight }: { items: ItemPDF[]; pc: string; pc
                   {item.descripcion}
                 </Text>
               )}
+              <PorPasajero precios={item.precioPorPasajero} color="#374151" />
             </View>
             <Text style={{ width: '12%', fontSize: 9, color: '#374151', textAlign: 'right' }}>
               {cant > 1 ? (unidad ? `${cant} ${unidad}` : String(cant)) : (unidad || '')}
@@ -80,7 +96,7 @@ function TablaDeItems({ items, pc, pcLight }: { items: ItemPDF[]; pc: string; pc
   )
 }
 
-export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal, itinerarios, dias, sugeridos, itemsSinDia }: CotizacionPDFProps) {
+export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fiscal, itinerarios, dias, sugeridos, itemsSinDia, preciosPorPasajero }: CotizacionPDFProps) {
   const pc = vendedor.color_primario || PALETA.acento
   const pcLight = lighten(pc, 0.08)
 
@@ -352,6 +368,7 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
                       {item.descripcion}
                     </Text>
                   )}
+                  <PorPasajero precios={item.precioPorPasajero} color="#374151" />
                 </View>
                 {hasQuantity && (
                   <Text style={{ width: '8%', fontSize: 9, color: '#374151', textAlign: 'right' }}>
@@ -423,6 +440,36 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
             </Text>
           )}
         </View>
+
+        {/* ── S5a. PRECIO POR PASAJERO (condicional) ──
+            Por cada tipo, la suma del precio de cada componente que lo incluye. Solo existe
+            cuando alguna línea trae precio por pasajero: sin eso no llega el arreglo y el
+            documento no cambia. Lo que se cobra por el grupo se NOMBRA en el pie: sumar sin
+            decirlo daría un precio por pasajero que no cubre el viaje entero. */}
+        {preciosPorPasajero && preciosPorPasajero.filas.length > 0 && (
+          <View style={{ alignSelf: 'flex-end', width: '45%', marginTop: 14 }} wrap={false}>
+            <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: pc, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+              PRECIO POR PASAJERO
+            </Text>
+            {preciosPorPasajero.filas.map(f => (
+              <View key={f.tipo} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                <Text style={{ fontSize: 9, color: PALETA.tintaSuave }}>{NOMBRE_TIPO[f.tipo]}</Text>
+                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{fmt(f.precioUnitario)}</Text>
+              </View>
+            ))}
+            <Text style={{ fontSize: 7.5, color: '#9CA3AF', marginTop: 3 }}>
+              {'Suma, por tipo de pasajero, el precio de cada componente que lo incluye'
+                + ((cotizacion.descuento_porcentaje ?? 0) > 0 ? `, antes del descuento de ${cotizacion.descuento_porcentaje}%` : '')
+                + (ivaAmount > 0 ? ', antes de IVA' : '')
+                + '.'}
+            </Text>
+            {preciosPorPasajero.sinReparto.length > 0 && (
+              <Text style={{ fontSize: 7.5, color: '#9CA3AF', marginTop: 2 }}>
+                {`No incluye lo que se cobra por el grupo: ${preciosPorPasajero.sinReparto.join(', ')}.`}
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* ── S5b. ACTIVIDADES ADICIONALES NO INCLUIDAS (condicional) ──
             El paquete de sugeridos. Va DESPUES del total a proposito: lo primero que

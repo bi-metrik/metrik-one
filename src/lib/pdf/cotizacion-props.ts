@@ -10,6 +10,18 @@
  * defecto los ignora y su salida no cambia un píxel.
  */
 
+/**
+ * El precio de UN pasajero de cada tipo en una línea (tarifa por pasajero, diseño §4).
+ *
+ * Opcional en toda línea: solo lo traen las que tienen costo por pasajero confirmado y
+ * vigente. Una plantilla que lo ignore imprime la línea como siempre.
+ */
+export type PrecioPorPasajeroPDF = {
+  tipo: 'adulto' | 'nino' | 'infante'
+  cantidad: number
+  precioUnitario: number
+}[] | null
+
 export interface CotizacionPDFProps {
   cotizacion: {
     consecutivo: string
@@ -60,6 +72,8 @@ export interface CotizacionPDFProps {
      * se imprime igual que siempre.
      */
     unidad?: string | null
+    /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
+    precioPorPasajero?: PrecioPorPasajeroPDF
   }[]
 
   /**
@@ -87,6 +101,8 @@ export interface CotizacionPDFProps {
       descuento_porcentaje: number
       cantidad: number
       unidad?: string | null
+      /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
+      precioPorPasajero?: PrecioPorPasajeroPDF
     }[]
   }[] | null
   /**
@@ -117,6 +133,8 @@ export interface CotizacionPDFProps {
       descuento_porcentaje: number
       cantidad: number
       unidad?: string | null
+      /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
+      precioPorPasajero?: PrecioPorPasajeroPDF
     }[]
   }[] | null
 
@@ -136,6 +154,8 @@ export interface CotizacionPDFProps {
     descuento_porcentaje: number
     cantidad: number
     unidad?: string | null
+    /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
+    precioPorPasajero?: PrecioPorPasajeroPDF
   }[] | null
 
   /**
@@ -162,6 +182,19 @@ export interface CotizacionPDFProps {
     cantidad: number
     unidad?: string | null
   }[] | null
+
+  /**
+   * El precio por pasajero de TODO el viaje: por cada tipo, la suma del precio de cada
+   * componente que lo incluye (diseño §4: «por ítem y en total»).
+   *
+   * `null` o ausente cuando ninguna línea trae precio por pasajero: la sección no se imprime
+   * y el documento de Termotech, Arca y WMC no cambia un píxel.
+   */
+  preciosPorPasajero?: {
+    filas: { tipo: 'adulto' | 'nino' | 'infante'; precioUnitario: number }[]
+    /** Componentes que se cobran por el grupo y NO están en la suma. Se nombran en el pie. */
+    sinReparto: string[]
+  } | null
 
   fiscal: {
     subtotal: number

@@ -31,7 +31,15 @@ describe('el prompt lleva el rechazo por N opciones (RX1)', () => {
   })
 
   it('el empate se resuelve hacia el rechazo, no hacia la extracción', () => {
-    expect(construirPrompt(VUELO)).toContain('Si dudas entre "detalle_unico" y "varias_opciones", responde "varias_opciones"')
+    expect(construirPrompt(VUELO)).toContain('Si no puedes decir con certeza cuantas opciones se ven, responde "varias_opciones"')
+  })
+
+  it('cuenta las opciones antes de clasificar, y el listado filtrado a UN hotel es detalle (regla 7.5)', () => {
+    const p = construirPrompt(HOTEL)
+    expect(p.indexOf('"opciones_vistas"')).toBeLessThan(p.indexOf('"varias_opciones": se ven DOS O MAS'))
+    expect(p).toContain('Un precio TACHADO')
+    expect(p).toContain('"2 Hoteles (de 267)" no es un producto')
+    expect(p).toContain('la tarjeta de UN hotel dentro de un listado filtrado a ese hotel')
   })
 
   it('clasifica ANTES de extraer: el orden está en el prompt', () => {
@@ -52,6 +60,32 @@ describe('el prompt lleva el rechazo por N opciones (RX1)', () => {
     // Y los campos mínimos se marcan como obligatorios.
     expect(construirPrompt(VUELO)).toContain('pax (Pasajeros, OBLIGATORIO)')
     expect(construirPrompt(VUELO)).toContain('numero_vuelo (Nº de vuelo):')
+  })
+
+  it('por tipo de pasajero: lee cantidad y subtotal de la fila, sin operar columnas (TP1)', () => {
+    const p = construirPrompt(VUELO)
+    expect(p).toContain('"por_tipo_pax"')
+    expect(p).toContain('NO multipliques, NO dividas y NO sumes columnas')
+    expect(p).toContain('tasa de embarque, fee, total tasa')
+    expect(p).toContain('NUNCA repartas un total entre tipos de pasajero')
+  })
+
+  it('una fecha sin año se devuelve sin año: el modelo inventaba 2023', () => {
+    expect(construirPrompt(VUELO)).toContain('devuelve --MM-DD')
+    expect(construirPrompt(VUELO)).toContain('NUNCA inventes el ano')
+  })
+
+  it('ningún campo de ocupación se lee de las habitaciones ni del régimen: «AD» volvió como «1 Adulto»', () => {
+    // Medido el 2026-09-16 contra la tarjeta de París («1 x Standard Room W... AD»): una de dos
+    // corridas devolvió `ocupacion: '1 Adulto'` y TP3 rechazó una captura buena.
+    const lineas = construirPrompt(HOTEL).split('\n').filter(l => /^- ocupacion/.test(l))
+    expect(lineas.map(l => l.slice(2).split(' ')[0])).toEqual([
+      'ocupacion', 'ocupacion_adultos', 'ocupacion_ninos', 'ocupacion_infantes', 'ocupacion_total',
+    ])
+    for (const l of lineas) {
+      expect(l).toContain('«1 x Standard Room»')
+      expect(l).toContain('alojamiento y desayuno, no un adulto')
+    }
   })
 
   it('prohíbe inventar un desglose y repetir el total como fila', () => {
@@ -160,5 +194,54 @@ describe('normalizar lo que llega · el lado seguro ante lo que no se entiende',
   it('una confianza ausente cuenta como cero, no como certeza', () => {
     const r = normalizarRespuesta({ veredicto: 'detalle_unico', campos: { pax: { value: '2' } } })
     expect(r.campos.pax.confidence).toBe(0)
+  })
+})
+
+describe('normalizar las filas por tipo de pasajero', () => {
+  it('conserva la fila del infante con subtotal CERO: es un dato, no un hueco', () => {
+    const r = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      por_tipo_pax: [
+        { tipo: 'adulto', cantidad: 2, subtotal_tipo: 1017600, moneda: 'COP' },
+        { tipo: 'infante', cantidad: 1, subtotal_tipo: 0, moneda: 'COP' },
+      ],
+      total_general: 1017600,
+    })
+    expect(r.porTipoPax?.map(f => [f.tipo, f.cantidad, f.subtotal_tipo])).toEqual([['adulto', 2, 1017600], ['infante', 1, 0]])
+    expect(r.totalGeneral).toBe(1017600)
+  })
+
+  it('descarta filas sin cantidad, con tipo desconocido o cantidad no entera', () => {
+    const r = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      por_tipo_pax: [
+        { tipo: 'senior', cantidad: 1, subtotal_tipo: 10 },
+        { tipo: 'adulto', cantidad: null, subtotal_tipo: 10 },
+        { tipo: 'adulto', cantidad: 1.5, subtotal_tipo: 10 },
+        { tipo: 'niño', cantidad: 1, subtotal_tipo: 10 },
+      ],
+    })
+    expect(r.porTipoPax?.map(f => f.tipo)).toEqual(['nino'])
+  })
+
+  it('la cadena "null" en la moneda de una fila es ausencia (medido: Decameron)', () => {
+    const r = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      por_tipo_pax: [{ tipo: 'adulto', cantidad: 2, subtotal_tipo: 2019412, moneda: 'null' }],
+    })
+    expect(r.porTipoPax?.[0].moneda).toBeNull()
+  })
+
+  it('cuenta las opciones DISTINTAS que el modelo dice ver, no un número declarado', () => {
+    expect(normalizarRespuesta({ veredicto: 'detalle_unico', opciones_vistas: [{ nombre: 'Crown Paradise', precio: '3.780.884' }] }).opcionesVisibles).toBe(1)
+    expect(normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      opciones_vistas: [{ nombre: 'Crown Paradise', precio: '3.780.884' }, { nombre: 'crown paradise', precio: '3.780.884' }],
+    }).opcionesVisibles).toBe(1)
+    expect(normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      opciones_vistas: [{ nombre: 'Crown Paradise', precio: '3.780.884' }, { nombre: 'Crown Paradise Golden', precio: '4.100.000' }],
+    }).opcionesVisibles).toBe(2)
+    expect(normalizarRespuesta({ veredicto: 'detalle_unico' }).opcionesVisibles).toBeNull()
   })
 })

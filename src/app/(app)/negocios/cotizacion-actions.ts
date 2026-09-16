@@ -929,6 +929,10 @@ export async function duplicarCotizacion(id: string) {
           ...(item.dia_relativo !== undefined ? { dia_relativo: item.dia_relativo } : {}),
           ...(item.mostrar_en_sugeridos !== undefined ? { mostrar_en_sugeridos: item.mostrar_en_sugeridos } : {}),
           ...(item.entra_al_precio !== undefined ? { entra_al_precio: item.entra_al_precio } : {}),
+          // La tarifa por pasajero viaja con la línea: sin ella la copia conservaría los
+          // rubros por adulto y niño pero perdería el reparto que imprime el PDF, y las
+          // lecturas de donde salió cada número.
+          ...(item.tarifa_pax !== undefined ? { tarifa_pax: item.tarifa_pax } : {}),
         })
         .select('id')
         .single()

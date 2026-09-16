@@ -15,6 +15,7 @@ import { templatesAGenerar, TEMPLATE_NAMES, type ProductosContratados } from '@/
 import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug, seccionalDesdeRut } from '@/lib/dian/seccionales'
 import { campoVisible, camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
+import { aplicarSumas } from '@/lib/negocios/campo-suma'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { formatFecha } from '@/lib/dates/bogota'
@@ -77,6 +78,10 @@ export interface DatosField {
   //    respuesta, y quien tiene que exigirla es el gate de la pregunta, no este campo.
   // `source_etapa_orden` lo usa el server para cargar el bloque fuente en `datosPorSlug`.
   lock_when?: LockWhen
+  // Campo que es la SUMA de otros campos numéricos del mismo bloque (opt-in). No se
+  // digita: se calcula al escribir las fuentes y el servidor lo vuelve a calcular al
+  // guardar. Ej.: numero_pasajeros = adultos + ninos + infantes. Ver `campo-suma.ts`.
+  suma_de?: string[]
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
   doc_link?: {
     source_bloque_slug?: string // referencia estable (preferida sobre nombre/orden)
@@ -265,7 +270,7 @@ export default function BloqueDatos({
       const sec = getSeccionalBySlug(init[secField.slug] as string)
       if (sec) init['correo_seccional'] = sec.email
     }
-    return init
+    return aplicarSumas(fields, init)
   })
   const [isPending, startTransition] = useTransition()
   const [pasteImgs, setPasteImgs] = useState<Record<string, string>>({})
@@ -527,7 +532,9 @@ export default function BloqueDatos({
   function handleNumeroChange(f: DatosField, raw: string) {
     setBorradorNumero(prev => ({ ...prev, [f.slug]: raw }))
     const n = parsearNumeroColombiano(raw)
-    const next = { ...valuesRef.current, [f.slug]: n === null ? '' : n }
+    // Los campos `suma_de` se recalculan con cada número que se escribe: el total que se
+    // ve es el que se guarda.
+    const next = aplicarSumas(fields, { ...valuesRef.current, [f.slug]: n === null ? '' : n })
     valuesRef.current = next
     setValues(next)
     if (aiFilled[f.slug]) setAiFilled(prev => ({ ...prev, [f.slug]: false }))
@@ -940,7 +947,19 @@ export default function BloqueDatos({
             navegador se quejara. Ahora lo interpreta `parsearNumeroColombiano` y debajo
             se muestra el eco de lo que el sistema entendió.
           */}
-          {f.tipo === 'numero' && (() => {
+          {f.tipo === 'numero' && Array.isArray(f.suma_de) && f.suma_de.length > 0 && (
+            <>
+              <div className={`${inputBaseClass} bg-[#F9FAFB] tabular-nums`} aria-label={`${f.label} (se calcula)`}>
+                {values[f.slug] === '' || values[f.slug] === null || values[f.slug] === undefined
+                  ? <span className="text-tinta-suave">Se calcula al escribir {f.suma_de.map(slug => fields.find(x => x.slug === slug)?.label?.toLowerCase() ?? slug).join(', ')}</span>
+                  : String(values[f.slug])}
+              </div>
+              <p className="mt-1 text-[11px] text-tinta-suave">
+                No se escribe: es la suma de {f.suma_de.map(slug => fields.find(x => x.slug === slug)?.label?.toLowerCase() ?? slug).join(' + ')}.
+              </p>
+            </>
+          )}
+          {f.tipo === 'numero' && !(Array.isArray(f.suma_de) && f.suma_de.length > 0) && (() => {
             const enUso = borradorNumero[f.slug] !== undefined
             const crudo = enUso
               ? borradorNumero[f.slug]

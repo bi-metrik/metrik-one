@@ -33,7 +33,7 @@
  */
 
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
-import type { LecturaCruda, VeredictoImagen } from '@/lib/cotizaciones/lectura-pantallazo'
+import type { FilaTipoPaxCruda, LecturaCruda, VeredictoImagen } from '@/lib/cotizaciones/lectura-pantallazo'
 import { extraerConReintento, type ResultadoExtraccion } from './reintentar-extraccion'
 
 /**
@@ -104,12 +104,21 @@ RANURA DE ESTA CAPTURA: ${ranura.label} (${ranura.slug})
 QUE SE ESPERA: ${ranura.queSePide}
 QUE NO SIRVE: ${ranura.queNoSirve}
 
-PASO 1 — CLASIFICA LA IMAGEN ANTES DE EXTRAER NADA. Devuelve "veredicto" con uno de:
+PASO 1 — LISTA LAS OPCIONES QUE SE VEN, ANTES DE EXTRAER NADA. En "opciones_vistas"
+devuelve una entrada por cada producto con SU PROPIO precio que aparece DIBUJADO en la
+imagen: { "nombre": el nombre tal como se ve, "precio": el precio tal como se ve }.
+Tarjetas de hotel, filas de vuelos, habitaciones o tarifas entre las que habria que elegir.
+- Solo lo que SE VE. Un contador o un filtro como "2 Hoteles (de 267)" no es un producto
+  visible: no inventes una entrada por el. Si solo se ve una tarjeta, hay una entrada.
+- Un precio TACHADO (el de antes de un descuento) no es otra opcion: va en la misma entrada.
+- Una tabla que separa el precio de UNA reserva por tipo de pasajero (adultos, ninos,
+  infantes) es UNA opcion, no varias.
 
-- "varias_opciones": la imagen muestra MAS DE UNA opcion tarifaria. Un listado de
-  resultados, un comparador, una grilla de aerolineas, una lista de habitaciones con
-  varios precios, un calendario de precios por dia, o cualquier pantalla donde
-  convivan dos o mas precios entre los que habria que ELEGIR.
+PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
+
+- "varias_opciones": se ven DOS O MAS opciones con precio propio entre las que habria que
+  ELEGIR (dos o mas entradas en opciones_vistas): un listado con varios hoteles, un comparador, una
+  grilla de aerolineas, varias habitaciones con precio, un calendario de precios.
   ⚠️ REGLA ABSOLUTA: ante varias opciones NO ELIJAS NINGUNA. No tomes la primera, ni
   la mas barata, ni la resaltada. Devuelve este veredicto y deja "campos" vacio. Elegir
   por tu cuenta produce un precio que parece correcto y no lo es; eso cuesta dinero
@@ -118,15 +127,16 @@ PASO 1 — CLASIFICA LA IMAGEN ANTES DE EXTRAER NADA. Devuelve "veredicto" con u
   pedia un vuelo, un traslado donde se pedia una actividad).
 - "no_es_pantalla_de_precio": no es una pantalla de reserva ni de cotizacion (un correo,
   un chat, una foto, un documento, una pantalla sin precio).
-- "detalle_unico": es la pantalla de UNA sola opcion ya seleccionada, con su precio.
-  Solo en este caso extraes campos.
+- "detalle_unico": se ve UNA sola opcion con su precio (una entrada en opciones_vistas). Incluye
+  la tarjeta de UN hotel dentro de un listado filtrado a ese hotel, y la liquidacion o
+  el resumen de una sola reserva. Solo en este caso extraes campos.
 
-Si dudas entre "detalle_unico" y "varias_opciones", responde "varias_opciones".
+Si no puedes decir con certeza cuantas opciones se ven, responde "varias_opciones".
 
 En "observacion" escribe UNA linea diciendo que viste. Si rechazas, es lo que la
 persona va a leer para saber que capturar.
 
-PASO 2 — SOLO si el veredicto es "detalle_unico", extrae estos campos:
+PASO 3 — SOLO si el veredicto es "detalle_unico", extrae estos campos:
 
 ${campos}
 
@@ -140,16 +150,33 @@ REGLAS DE EXTRACCION:
 - Valores monetarios: devuelve SOLO el numero, sin simbolo ni separadores de miles.
   Respeta la convencion de la pantalla: si dice 1.234,56 el valor es 1234.56; si dice
   1,234.56 tambien es 1234.56.
-- Fechas en formato AAAA-MM-DD. Si el ano no aparece en la pantalla, devuelve null:
-  no lo supongas.
+- Fechas en formato AAAA-MM-DD. Si la pantalla muestra dia y mes pero NO el ano
+  (ej. "Vie, 23 Oct"), devuelve --MM-DD (ej. --10-23). NUNCA inventes el ano.
 - Booleanos: la cadena "true" o "false". null si la pantalla no lo dice.
 
-PASO 3 — DESGLOSE. En "desglose" devuelve las filas de precio que la pantalla muestre
+PASO 4 — DESGLOSE. En "desglose" devuelve las filas de precio que la pantalla muestre
 DESGLOSADAS (tarifa, impuestos y tasas, resort fee, cargo por servicio, equipaje).
 - Copia lo que la pantalla lista. NO inventes un desglose que no esta: si solo hay un
   precio total, devuelve desglose vacio.
 - Cada fila: { "concepto", "cantidad", "unidad", "valor_unitario", "moneda", "confidence" }
-- NO incluyas el total general como una fila mas: seria contar el mismo dinero dos veces.`
+- NO incluyas el total general como una fila mas: seria contar el mismo dinero dos veces.
+
+PASO 5 — POR TIPO DE PASAJERO. Solo si la pantalla trae el precio SEPARADO por tipo de
+pasajero (una tabla con una fila por ADT / CHD / INF, o "ADULTOS" / "INFANTES"), devuelve
+en "por_tipo_pax" una fila por cada tipo:
+- "tipo": "adulto" (ADT, adultos), "nino" (CHD, ninos, child) o "infante" (INF, infantes, bebes).
+- "cantidad": el numero de la columna Cantidad de esa fila, tal cual.
+- "subtotal_tipo": el valor TOTAL de esa fila para TODOS los pasajeros de ese tipo: la
+  columna "Subtotal" o "Total" de la fila. Si la fila tiene una columna "Valor" y otra
+  "Total", usa "Total". NO uses la tarifa unitaria.
+- NO multipliques, NO dividas y NO sumes columnas: las columnas intermedias (tarifa
+  unitaria, total tarifa, tasa de embarque, fee, total tasa) tienen bases distintas y
+  combinarlas da un numero falso. Copia el subtotal que la pantalla ya muestra.
+- "moneda": codigo ISO de ese valor.
+En "total_general" devuelve el total de ESA tabla (la fila "Total General" o "Sub-Total"
+que suma todas las filas). Si la pantalla NO separa el precio por tipo de pasajero (un
+solo precio para todo el grupo), devuelve "por_tipo_pax" vacio y "total_general" null:
+NUNCA repartas un total entre tipos de pasajero.`
 }
 
 // ── Esquema de salida ────────────────────────────────────────────────────────
@@ -158,6 +185,13 @@ function construirEsquema(ranura: DefinicionRanura) {
   return {
     type: 'OBJECT',
     properties: {
+      opciones_vistas: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: { nombre: { type: 'STRING' }, precio: { type: 'STRING' } },
+        },
+      },
       veredicto: { type: 'STRING', enum: VEREDICTOS },
       observacion: { type: 'STRING' },
       campos: {
@@ -186,8 +220,23 @@ function construirEsquema(ranura: DefinicionRanura) {
           required: ['concepto', 'valor_unitario'],
         },
       },
+      por_tipo_pax: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            tipo: { type: 'STRING', enum: ['adulto', 'nino', 'infante'] },
+            cantidad: { type: 'NUMBER' },
+            subtotal_tipo: { type: 'NUMBER' },
+            moneda: { type: 'STRING' },
+            confidence: { type: 'NUMBER' },
+          },
+          required: ['tipo', 'cantidad', 'subtotal_tipo'],
+        },
+      },
+      total_general: { type: 'NUMBER', nullable: true },
     },
-    required: ['veredicto', 'campos', 'desglose'],
+    required: ['opciones_vistas', 'veredicto', 'campos', 'desglose', 'por_tipo_pax'],
   }
 }
 
@@ -237,7 +286,44 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
     ? null
     : String(obj.observacion).trim() || null
 
-  return { veredicto, observacion, campos, desglose }
+  const porTipoCrudo = Array.isArray(obj.por_tipo_pax) ? obj.por_tipo_pax : []
+  const porTipoPax: FilaTipoPaxCruda[] = []
+  for (const f of porTipoCrudo) {
+    const fila = (f ?? {}) as Record<string, unknown>
+    const tipo = String(fila.tipo ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    if (tipo !== 'adulto' && tipo !== 'nino' && tipo !== 'infante') continue
+    const cantidad = numeroONulo(fila.cantidad)
+    const subtotal = numeroONulo(fila.subtotal_tipo)
+    // Una fila sin cantidad no reparte nada. Un subtotal en CERO sí se conserva: el
+    // infante que viaja sin tarifa es un dato, no un hueco (R-P2 al revés).
+    if (cantidad === null || cantidad <= 0 || !Number.isInteger(cantidad)) continue
+    if (subtotal === null || subtotal < 0) continue
+    porTipoPax.push({
+      tipo,
+      cantidad,
+      subtotal_tipo: subtotal,
+      moneda: textoOVacio(fila.moneda),
+      confidence: Number(fila.confidence ?? 0) || 0,
+    })
+  }
+  const totalGeneral = numeroONulo(obj.total_general)
+  // RX1 con EVIDENCIA: no un número que el modelo declara, sino las opciones que dice ver.
+  // Medido el 2026-09-16: con un conteo, el mismo listado filtrado de Bedsonline salió 1 en
+  // una corrida y 2 en otra (el contador «2 Hoteles (de 267)» se contaba como opción). Se
+  // cuentan las entradas DISTINTAS: la misma tarjeta repetida no son dos opciones.
+  const vistas = Array.isArray(obj.opciones_vistas) ? obj.opciones_vistas : null
+  const opcionesVisibles = vistas === null
+    ? null
+    : new Set(
+        vistas
+          .map(v => {
+            const o = (v ?? {}) as Record<string, unknown>
+            return `${textoOVacio(o.nombre) ?? ''}|${textoOVacio(o.precio) ?? ''}`.toLowerCase()
+          })
+          .filter(k => k !== '|'),
+      ).size
+
+  return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles }
 }
 
 /**

@@ -112,6 +112,7 @@ import { reprocesarNegocio, registrarErrorSinDevolver, cerrarReproceso } from '@
 import { devolverBloque } from '@/lib/actions/devolucion-actions'
 import { reabrirNegocio, crearNegocioDesdeCerrado } from '@/lib/actions/reapertura'
 import { leerPantallazoDeItem } from '@/app/(app)/negocios/pantallazo-actions'
+import { leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { getUploadUrlDocumentoNegocio } from '@/lib/actions/ve-documentos-negocio'
 import { uploadPlanillaPila } from '@/app/(app)/mi-negocio/pila-actions'
 import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
@@ -146,6 +147,7 @@ const ACCIONES: Array<{ nombre: string; llamar: () => Promise<unknown>; error: (
   { nombre: 'reabrirNegocio', llamar: () => reabrirNegocio(NEGOCIO), error: (r) => (r as { error?: string }).error },
   { nombre: 'crearNegocioDesdeCerrado', llamar: () => crearNegocioDesdeCerrado(NEGOCIO), error: (r) => (r as { error?: string }).error },
   { nombre: 'leerPantallazoDeItem', llamar: () => leerPantallazoDeItem('item-1', PNG), error: (r) => (r as { motivo?: string }).motivo },
+  { nombre: 'leerCasillaDeItem', llamar: () => leerCasillaDeItem('item-1', 'grupo_completo', PNG), error: (r) => (r as { mensaje?: string }).mensaje },
   { nombre: 'getUploadUrlDocumentoNegocio', llamar: () => getUploadUrlDocumentoNegocio(BLOQUE, NEGOCIO, 'rut', 'pdf'), error: (r) => (r as { error?: string }).error },
 ]
 
@@ -174,6 +176,11 @@ describe('4D SOFT (solo valida_api) no opera bloques ni etapas', () => {
 
   it('leerPantallazoDeItem no llega a Gemini', async () => {
     await leerPantallazoDeItem('item-1', PNG)
+    expect(extraerRanura).not.toHaveBeenCalled()
+  })
+
+  it('leerCasillaDeItem (tarifa por pasajero) no llega a Gemini', async () => {
+    await leerCasillaDeItem('item-1', 'grupo_completo', PNG)
     expect(extraerRanura).not.toHaveBeenCalled()
   })
 

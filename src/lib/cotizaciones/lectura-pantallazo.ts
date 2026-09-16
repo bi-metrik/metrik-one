@@ -31,7 +31,7 @@
  */
 
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
-import { camposMinimos } from './ranuras-pantallazo'
+import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
 
 // ── Lo que devuelve el modelo, antes de juzgarlo ─────────────────────────────
 
@@ -61,12 +61,79 @@ export interface FilaDesglose {
   confidence: number
 }
 
+/**
+ * Una fila de la tabla por tipo de pasajero, tal como la leyó el modelo (TP1).
+ *
+ * ⚠️ `subtotal_tipo` es el valor de TODA la fila. El modelo no divide ni multiplica: el
+ * unitario lo calcula el servidor (`tarifa-pasajero.ts`).
+ */
+export interface FilaTipoPaxCruda {
+  tipo: 'adulto' | 'nino' | 'infante'
+  cantidad: number
+  subtotal_tipo: number
+  moneda: string | null
+  confidence: number
+}
+
 export interface LecturaCruda {
   veredicto: VeredictoImagen
   /** Una línea del modelo explicando qué vio. Se usa para el mensaje de rechazo. */
   observacion: string | null
   campos: Record<string, ValorLeido>
   desglose: FilaDesglose[]
+  /** Filas por tipo de pasajero. Vacío cuando la pantalla trae un solo total. */
+  porTipoPax?: FilaTipoPaxCruda[]
+  /** El total de la tabla por tipo de pasajero («Total General», «Sub-Total»). */
+  totalGeneral?: number | null
+  /** Cuántas opciones con precio propio contó el modelo en la captura (RX1, regla 7.5). */
+  opcionesVisibles?: number | null
+}
+
+/**
+ * Lo que la lectura puede tomar del ítem cuando la captura no lo muestra (regla 7.4).
+ *
+ * Trappvel cotiza hoteles desde la TARJETA del listado, y la tarjeta no trae fechas. Sin
+ * esto, RX2 rechazaría su forma real de trabajar. Lo tomado va marcado para revisión y
+ * NUNCA cuenta como evidencia para comparar dos capturas (CC1).
+ */
+export interface ContextoLectura {
+  fechasViaje?: { inicio: string | null; fin: string | null } | null
+  /**
+   * La moneda que la persona indicó a mano porque la captura solo muestra «$» (RX3). Se
+   * usa SOLO si la captura no la trae, y queda marcada para revisión.
+   */
+  monedaIndicada?: string | null
+  /**
+   * Cargue por casillas: RX2 solo por los mínimos de COSTO (`MINIMOS_DE_COSTO`). Los
+   * descriptivos que falten se avisan. Ver el comentario de `MINIMOS_DE_COSTO`.
+   */
+  soloMinimosDeCosto?: boolean
+}
+
+/** «--MM-DD»: la pantalla mostró día y mes, sin año. */
+const SIN_ANIO = /^--(\d{2})-(\d{2})$/
+
+/**
+ * Completa el año de una fecha que la pantalla muestra sin él, con el año del viaje.
+ *
+ * Medido contra el modelo vivo el 2026-09-16: con la instrucción de devolver null cuando
+ * no hay año, el modelo **inventó 2023** en dos pantallazos de Amadeus («Vie, 23 Oct») y
+ * en LATAM sí devolvió null — que rechazaba la captura por la fecha de salida. Darle una
+ * forma legítima de decir «sin año» y completarlo aquí con el viaje es lo único estable.
+ *
+ * El año es el del inicio del viaje; si así la fecha queda más de 30 días ANTES del
+ * inicio, es del año siguiente (un regreso «02 Ene» de un viaje que sale el 29 de dic).
+ */
+export function completarAnio(valor: string, inicioViaje: string | null): string | null {
+  const m = SIN_ANIO.exec(valor.trim())
+  if (!m) return valor
+  const inicio = /^(\d{4})-(\d{2})-(\d{2})/.exec(inicioViaje ?? '')
+  if (!inicio) return null
+  const anio = Number(inicio[1])
+  const candidato = Date.UTC(anio, Number(m[1]) - 1, Number(m[2]))
+  const base = Date.UTC(anio, Number(inicio[2]) - 1, Number(inicio[3]))
+  const final = candidato < base - 30 * 86_400_000 ? anio + 1 : anio
+  return `${final}-${m[1]}-${m[2]}`
 }
 
 // ── El veredicto del sistema ─────────────────────────────────────────────────
@@ -92,6 +159,8 @@ export interface CampoLeido {
   valor: string | null
   confidence: number
   alertaRevision: boolean
+  /** El valor no está en la imagen: se tomó del ítem o del viaje (7.4). */
+  delItem?: boolean
 }
 
 export interface Aceptacion {
@@ -101,6 +170,8 @@ export interface Aceptacion {
   desglose: FilaDesglose[]
   /** Avisos que NO bloquean pero que alguien tiene que ver antes de confirmar. */
   avisos: string[]
+  porTipoPax: FilaTipoPaxCruda[]
+  totalGeneral: number | null
 }
 
 export type VeredictoLectura = Aceptacion | Rechazo
@@ -130,8 +201,16 @@ function limpio(v: ValorLeido | undefined): string | null {
  * la prueba de campos mínimos —los tiene todos, seis veces— y el rechazo llegaría con
  * el mensaje equivocado, o no llegaría.
  */
-export function evaluarLectura(ranura: DefinicionRanura, cruda: LecturaCruda): VeredictoLectura {
-  if (cruda.veredicto === 'varias_opciones') {
+export function evaluarLectura(
+  ranura: DefinicionRanura,
+  cruda: LecturaCruda,
+  contexto: ContextoLectura = {},
+): VeredictoLectura {
+  // RX1 en dos capas: si el modelo dice «detalle único» pero contó dos o más opciones con
+  // precio, se contradice a sí mismo, y la duda se resuelve rechazando.
+  const contradice = cruda.veredicto === 'detalle_unico'
+    && typeof cruda.opcionesVisibles === 'number' && cruda.opcionesVisibles >= 2
+  if (cruda.veredicto === 'varias_opciones' || contradice) {
     return {
       ok: false,
       codigo: 'RX1',
@@ -164,6 +243,59 @@ export function evaluarLectura(ranura: DefinicionRanura, cruda: LecturaCruda): V
     alertaRevision: def.alerta_revision === true,
   }))
   const porSlug = new Map(campos.map(c => [c.slug, c]))
+  const avisosDelItem: string[] = []
+
+  // RX3 · la moneda que la persona indicó porque la captura solo muestra «$».
+  const moneda = porSlug.get('moneda')
+  const indicada = (contexto.monedaIndicada ?? '').trim().toUpperCase()
+  if (moneda && moneda.valor === null && /^[A-Z]{3}$/.test(indicada)) {
+    moneda.valor = indicada
+    moneda.alertaRevision = true
+    moneda.delItem = true
+    avisosDelItem.push(`La captura no muestra la moneda: se usa ${indicada}, indicada a mano. Confírmala.`)
+  }
+
+  // Fechas sin año: se completan con el año del viaje, marcadas.
+  const inicioViaje = contexto.fechasViaje?.inicio ?? null
+  const completadas: string[] = []
+  for (const def of ranura.campos.filter(d => d.tipo === 'fecha')) {
+    const campo = porSlug.get(def.slug)
+    if (!campo || campo.valor === null || !SIN_ANIO.test(campo.valor)) continue
+    const completa = completarAnio(campo.valor, inicioViaje)
+    campo.valor = completa
+    if (completa !== null) {
+      campo.alertaRevision = true
+      completadas.push(def.label.toLowerCase())
+    }
+  }
+  if (completadas.length > 0 && inicioViaje) {
+    avisosDelItem.push(
+      `La captura no muestra el año de ${completadas.join(' y ')}: se completa con el del viaje ` +
+      `(${inicioViaje.slice(0, 4)}). Confírmalo.`,
+    )
+  }
+
+  // 7.4 · la tarjeta de hotel no muestra las fechas: se toman las del viaje, marcadas.
+  // Solo si el viaje las tiene LAS DOS: media estadía inventada es peor que el rechazo.
+  if (ranura.slug === 'hotel_detalle') {
+    const entrada = porSlug.get('check_in')
+    const salida = porSlug.get('check_out')
+    const inicio = contexto.fechasViaje?.inicio ?? null
+    const fin = contexto.fechasViaje?.fin ?? null
+    if (entrada && salida && (entrada.valor === null || salida.valor === null) && inicio && fin) {
+      for (const [campo, valor] of [[entrada, inicio], [salida, fin]] as const) {
+        if (campo.valor !== null) continue
+        campo.valor = valor
+        campo.alertaRevision = true
+        campo.delItem = true
+        campo.confidence = 0
+      }
+      avisosDelItem.push(
+        `La captura no muestra las fechas: se toman las del viaje (${entrada.valor} a ${salida.valor}). ` +
+        'Confírmalas contra el proveedor.',
+      )
+    }
+  }
 
   // RX3 antes que RX2 aunque `moneda` sea un mínimo más: es el error más caro del
   // motor y su instrucción es distinta (se puede indicar a mano, no hace falta otra
@@ -179,7 +311,24 @@ export function evaluarLectura(ranura: DefinicionRanura, cruda: LecturaCruda): V
     }
   }
 
-  const faltantes = camposMinimos(ranura).filter(def => porSlug.get(def.slug)?.valor == null)
+  const tieneTablaPorTipo = (cruda.porTipoPax ?? []).length > 0
+  const todosFaltantes = camposMinimos(ranura).filter(def => porSlug.get(def.slug)?.valor == null)
+  const faltantes = contexto.soloMinimosDeCosto
+    ? todosFaltantes.filter(def =>
+        MINIMOS_DE_COSTO.includes(def.slug)
+        // Con tabla por tipo de pasajero el total ya es el de la tabla: `base_precio` no
+        // multiplica nada y exigirlo rechazaría una captura que ya se puede costear.
+        && !(tieneTablaPorTipo && def.slug === 'base_precio'))
+    : todosFaltantes
+  if (contexto.soloMinimosDeCosto) {
+    const descriptivos = todosFaltantes.filter(def => !faltantes.includes(def))
+    if (descriptivos.length > 0) {
+      avisosDelItem.push(
+        `La captura no muestra: ${descriptivos.map(d => d.label.toLowerCase()).join(', ')}. ` +
+        'La línea conserva los datos que ya tiene: complétalos si hace falta.',
+      )
+    }
+  }
   if (faltantes.length > 0) {
     return {
       ok: false,
@@ -194,7 +343,9 @@ export function evaluarLectura(ranura: DefinicionRanura, cruda: LecturaCruda): V
     ranura: ranura.slug,
     campos,
     desglose: cruda.desglose,
-    avisos: avisosDeLectura(ranura, porSlug, cruda.desglose),
+    avisos: [...avisosDelItem, ...avisosDeLectura(ranura, porSlug, cruda.desglose)],
+    porTipoPax: cruda.porTipoPax ?? [],
+    totalGeneral: cruda.totalGeneral ?? null,
   }
 }
 
@@ -238,10 +389,24 @@ function avisosDeLectura(
     )
   }
 
-  if (ranura.slug === 'hotel_detalle' && porSlug.get('impuestos_incluidos')?.valor === 'false') {
+  // 7.3 · impuestos que se pagan en destino, en otra moneda: nota al cliente, no costo.
+  const impuestosDestino = numero(porSlug.get('impuestos_destino_valor')?.valor)
+  const monedaDestino = (porSlug.get('impuestos_destino_moneda')?.valor ?? moneda ?? '').toUpperCase()
+  if (ranura.slug === 'hotel_detalle' && impuestosDestino !== null && impuestosDestino > 0) {
+    avisos.push(
+      `Impuestos y tasas a pagar en destino: ${impuestosDestino.toLocaleString('es-CO', { maximumFractionDigits: 2 })} ` +
+      `${monedaDestino}. Los paga el pasajero en el hotel: van al cliente como nota, no al costo.`,
+    )
+  } else if (ranura.slug === 'hotel_detalle' && porSlug.get('impuestos_incluidos')?.valor === 'false') {
     avisos.push(
       'La captura dice que los impuestos NO están incluidos. El costo que se cargue no los tiene: ' +
       'agrégalos como rubro aparte si van por cuenta del pasajero.',
+    )
+  } else if (ranura.slug === 'hotel_detalle' && porSlug.get('impuestos_incluidos')?.valor == null) {
+    // No es mínimo (la tarjeta del listado no lo dice), pero tampoco se supone.
+    avisos.push(
+      'La captura no dice si el precio incluye impuestos y tasas. Confírmalo con el proveedor antes de ' +
+      'confirmar el costo.',
     )
   }
 
@@ -404,6 +569,11 @@ function fecha(valor: string | null | undefined): number | null {
   // UTC a propósito: la resta solo mide días entre dos fechas de calendario, y usar
   // la zona local haría que un cambio de huso moviera una noche.
   return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+/** Un número leído por el modelo (sin separadores de miles), o `null`. */
+export function numeroLeido(valor: string | null | undefined): number | null {
+  return numero(valor)
 }
 
 function numero(valor: string | null | undefined): number | null {

@@ -5,6 +5,8 @@ import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   politicaMargenDeLinea,
   umbralesDeCotizacion,
@@ -179,6 +181,18 @@ export default async function CotizacionNegocioPage({
     // bloqueo inexistente enseña a ignorar los avisos.
   }
 
+  // Quiénes viajan (etapa 1), para la tarifa por pasajero. Si no se puede leer, las líneas
+  // piden escribir su composición: preferible a inventar un grupo que no es el del viaje.
+  let composicionViaje: Composicion | null = null
+  try {
+    const { supabase: sbViaje } = await getWorkspace()
+    const { viaje, error: errViaje } = await leerViajeDelNegocio(sbViaje, id)
+    if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
+    composicionViaje = viaje.composicion
+  } catch {
+    // Sin composición del viaje la pantalla la pide por línea.
+  }
+
   const cotRow = cotizacion as unknown as { piso_margen_pct?: number | null; aviso_margen_pct?: number | null }
   const umbrales = umbralesDeCotizacion(
     { pisoPct: cotRow.piso_margen_pct, avisoPct: cotRow.aviso_margen_pct },
@@ -200,6 +214,7 @@ export default async function CotizacionNegocioPage({
       pisoBloqueaAvance={pisoBloqueaAvance}
       politicaRecargo={politicaRecargo}
       itinerarios={itinerarios}
+      composicionViaje={composicionViaje}
     />
   )
 }
