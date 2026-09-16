@@ -397,3 +397,108 @@ describe('la ranura se deriva del grupo', () => {
     expect(ranuraPorSlug('toString')).toBeNull()
   })
 })
+
+describe('tarifa por pasajero · las reglas aprobadas el 2026-09-16', () => {
+  it('RX1 en dos capas: «detalle único» con dos opciones contadas se rechaza igual', () => {
+    const r = evaluarLectura(HOTEL, { ...hotelOk(), opcionesVisibles: 2 })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.codigo).toBe('RX1')
+  })
+
+  it('RX1: una sola opción contada no rechaza (listado filtrado a un hotel, 7.5)', () => {
+    expect(evaluarLectura(HOTEL, { ...hotelOk(), opcionesVisibles: 1 }).ok).toBe(true)
+  })
+
+  it('7.4: la tarjeta sin fechas las toma del viaje, marcadas para revisión', () => {
+    const r = evaluarLectura(
+      HOTEL,
+      hotelOk({ check_in: v(null, 0), check_out: v(null, 0) }),
+      { fechasViaje: { inicio: '2026-10-07', fin: '2026-10-10' } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const entrada = r.campos.find(c => c.slug === 'check_in')
+    expect(entrada).toMatchObject({ valor: '2026-10-07', delItem: true, alertaRevision: true })
+    expect(r.avisos[0]).toContain('se toman las del viaje (2026-10-07 a 2026-10-10)')
+  })
+
+  it('7.4: sin fechas en el viaje tampoco se inventan, y RX2 sigue en el cargue de siempre', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ check_in: v(null, 0), check_out: v(null, 0) }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.codigo).toBe('RX2')
+  })
+
+  it('fecha sin año: se completa con el del viaje, y un regreso de enero cae en el año siguiente', () => {
+    const r = evaluarLectura(
+      VUELO,
+      vueloOk({ fecha_salida: v('--12-29'), fecha_regreso: v('--01-02') }),
+      { fechasViaje: { inicio: '2026-12-29', fin: '2027-01-02' } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'fecha_salida')?.valor).toBe('2026-12-29')
+    expect(r.campos.find(c => c.slug === 'fecha_regreso')?.valor).toBe('2027-01-02')
+    expect(r.avisos.some(a => a.includes('no muestra el año'))).toBe(true)
+  })
+
+  it('fecha sin año y sin viaje: queda vacía, nunca con un año inventado', () => {
+    const r = evaluarLectura(VUELO, vueloOk({ fecha_regreso: v('--01-02') }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'fecha_regreso')?.valor).toBeNull()
+  })
+
+  it('RX3 con moneda indicada a mano: se acepta, marcada', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ moneda: v(null, 0) }), { monedaIndicada: 'cop' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'moneda')).toMatchObject({ valor: 'COP', alertaRevision: true, delItem: true })
+    expect(r.avisos[0]).toContain('indicada a mano')
+  })
+
+  it('por casillas: faltan mínimos descriptivos y se AVISA; faltan los de costo y se rechaza', () => {
+    const sinNombre = hotelOk({ hotel: v(null, 0), ciudad: v(null, 0), tipo_habitacion: v(null, 0) })
+    const ok = evaluarLectura(HOTEL, sinNombre, { soloMinimosDeCosto: true })
+    expect(ok.ok).toBe(true)
+    if (ok.ok) expect(ok.avisos.some(a => a.startsWith('La captura no muestra: hotel, ciudad, habitación.'))).toBe(true)
+
+    const sinPrecio = evaluarLectura(HOTEL, hotelOk({ precio_total: v(null, 0) }), { soloMinimosDeCosto: true })
+    expect(sinPrecio.ok).toBe(false)
+    if (!sinPrecio.ok) expect(sinPrecio.codigo).toBe('RX2')
+
+    // El cargue de siempre no cambia: sin el nombre del hotel, RX2.
+    expect(evaluarLectura(HOTEL, sinNombre).ok).toBe(false)
+  })
+
+  it('con tabla por tipo de pasajero, base_precio no hace falta', () => {
+    const cruda = {
+      ...hotelOk({ base_precio: v(null, 0) }),
+      porTipoPax: [{ tipo: 'adulto' as const, cantidad: 2, subtotal_tipo: 360, moneda: 'USD', confidence: 1 }],
+      totalGeneral: 360,
+    }
+    expect(evaluarLectura(HOTEL, cruda, { soloMinimosDeCosto: true }).ok).toBe(true)
+    expect(evaluarLectura(HOTEL, { ...cruda, porTipoPax: [] }, { soloMinimosDeCosto: true }).ok).toBe(false)
+  })
+
+  it('7.3: impuestos en destino son nota, no costo', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({
+      impuestos_incluidos: v('false'),
+      impuestos_destino_valor: v('329.44'),
+      impuestos_destino_moneda: v('MXN'),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avisos.join(' ')).toContain('329,44 MXN')
+    expect(r.avisos.join(' ')).toContain('no al costo')
+    expect(r.avisos.join(' ')).not.toContain('agrégalos como rubro')
+  })
+
+  it('impuestos sin decir: ya no rechaza, pero se avisa', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ impuestos_incluidos: v(null, 0) }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avisos.join(' ')).toContain('no dice si el precio incluye impuestos')
+  })
+})
