@@ -154,7 +154,7 @@ function DocumentoSoporte({ data, fechaGen }: { data: SoporteDualData; fechaGen:
         : 'No se encontraron novedades en las listas restrictivas evaluadas a la fecha de la consulta.';
 
   return (
-    <Document title="Soporte de consulta — Listas restrictivas SARLAFT" author="MeTRIK SAS">
+    <Document title="Soporte de consulta — Listas restrictivas SARLAFT" author="METRIK IA S.A.S.">
       <Page size="A4" style={s.page}>
         <View style={s.header}>
           <MetrikWordmark />
