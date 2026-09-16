@@ -13,7 +13,7 @@
 - ⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 aplicado; un NULL en un CHECK deja pasar
 - ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 mergeado, migración SIN aplicar, 4d-soft no existe
 - ⚠️⚠️ [Alta de 4D SOFT en ONE](project_alta_4dsoft_one.md) — preparada SIN ejecutar; fix de Documentos en #753 SIN mergear ni aplicar; comisión = AFI
-- ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #759 exigirModulo en acciones; /api/calidad y el bot siguen sin módulo
+- ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761 cierra calidad, bot, PILA y negocios; wa-webhook SIN redesplegar
 - ⚠️ [Ensayar una migración con PGlite, versión exacta](reference_pglite_version_de_ci.md) — no está en node_modules de la torre; instalar la versión de `package.json`
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — #577 sin mergear: nadie se suspende solo, AFI son 3 planes
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto
