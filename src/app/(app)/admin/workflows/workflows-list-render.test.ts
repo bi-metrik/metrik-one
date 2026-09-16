@@ -32,6 +32,7 @@ const ITEMS: AdminLineaItem[] = [
   linea('maxitec', 'Maxitec — CDA S.A.S.', 'valida', 5),
   linea('soena', 'SOENA', 'clarity', 6),
   linea('suelto', 'Workspace sin grupo', 'sin_clasificar', 7),
+  linea('alma-afi', 'ALMA — Concesion Alto Magdalena', 'sustenta', 8),
 ]
 
 function desplegable(html: string): Array<[string, string[]]> {
@@ -52,6 +53,7 @@ describe('desplegable de workspaces en /admin/workflows', () => {
       ['MéTRIK', ['MeTRIK']],
       ['Valida', ['Maxitec — CDA S.A.S.']],
       ['Clarity', ['AFI International Group S.A.S.', 'SOENA']],
+      ['Sustenta', ['ALMA — Concesion Alto Magdalena']],
       ['Demo', ['Estudio Creativo Lúmina']],
       ['Sin clasificar', ['Workspace sin grupo']],
     ])

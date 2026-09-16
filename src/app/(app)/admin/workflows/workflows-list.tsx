@@ -17,7 +17,7 @@ export default function WorkflowsList({ items }: Props) {
 
   const tipos = useMemo(() => Array.from(new Set(items.map(i => i.linea_tipo))).sort(), [items])
   // Mismo orden y encabezados que el selector del platform admin (MéTRIK, Valida,
-  // Clarity, Demo, Sin clasificar); alfabético dentro de cada grupo.
+  // Clarity, Sustenta, Demo, Sin clasificar); alfabético dentro de cada grupo.
   const workspaceGroups = useMemo(() => {
     const map = new Map<string, { slug: string; name: string; grupo: AdminLineaItem['workspace_grupo'] }>()
     for (const it of items) {
