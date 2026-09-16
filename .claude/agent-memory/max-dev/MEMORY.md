@@ -9,11 +9,12 @@
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — solo corre en producción (credenciales en Vercel)
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — cambiar qué emite el cron dispara cuentas reales
 - ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: anular la única viva = el cron la re-emite
-- ⚠️ [Módulos y gate por ruta (A1)](project_modulos_gate_ruta_a1.md) — #733 mergeado y aplicado; gate en middleware
+- ⚠️ [Módulos y gate por ruta (A1)](project_modulos_gate_ruta_a1.md) — #733 aplicado; #767: el soporte solo pasa el gate en su casa
 - ⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 aplicado; un NULL en un CHECK deja pasar
-- ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 mergeado, migración SIN aplicar, 4d-soft no existe
+- ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 mergeado; 4d-soft ya existe (medido 2026-09-16)
+- ⚠️⚠️ [Términos dentro de /valida-api](project_terminos_modulo_valida_api.md) — #769 SIN mergear: migración 20260917014500 antes del merge
 - ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad; Política ya es 1.5, la de Wompi será otra
-- ⚠️⚠️ [Alta de 4D SOFT en ONE](project_alta_4dsoft_one.md) — preparada SIN ejecutar; fix de Documentos en #753 SIN mergear ni aplicar; comisión = AFI
+- ⚠️⚠️ [Alta de 4D SOFT en ONE](project_alta_4dsoft_one.md) — ejecutada (medido 2026-09-16); comisión = AFI
 - ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761 cierra calidad, bot, PILA y negocios; wa-webhook SIN redesplegar
 - ⚠️ [Ensayar una migración con PGlite, versión exacta](reference_pglite_version_de_ci.md) — no está en node_modules de la torre; instalar la versión de `package.json`
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — #577 sin mergear: nadie se suspende solo, AFI son 3 planes

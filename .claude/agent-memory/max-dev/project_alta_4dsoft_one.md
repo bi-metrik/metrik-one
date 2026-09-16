@@ -1,9 +1,12 @@
 ---
 name: alta-4dsoft-one
-description: Alta de 4D SOFT en ONE (workspace, contrato, usuario, documentos) PREPARADA y sin ejecutar el 2026-09-16; mis_documentos_de_servicio muestra la aceptacion de PRUEBA de Mauricio; la comision es de AFI, no de Yessica
+description: Alta de 4D SOFT en ONE (workspace, contrato, usuario, documentos) preparada el 2026-09-16 y ya ejecutada (medido el mismo día); mis_documentos_de_servicio muestra la aceptacion de PRUEBA de Mauricio; la comision es de AFI, no de Yessica
 metadata:
   type: project
 ---
+
+⚠️ CADUCÓ el «sin ejecutar» (medido 2026-09-16 por PostgREST): el workspace, su contrato, Juan
+Guillermo como owner y la versión v1.0 (`b91b4a14`) ya están en producción.
 
 El 2026-09-16 quedó **preparada, sin ejecutar**, el alta de 4D SOFT para el módulo Valida API
 (spec `proyectos/metrik/one/2026-09-15_spec-modulos-servicios-cobro.md` §5.2 y §5.4). Los archivos
