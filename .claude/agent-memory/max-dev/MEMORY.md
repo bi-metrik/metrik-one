@@ -20,6 +20,7 @@
 - ⚠️⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 y #626 en main; #721 SIN MERGEAR: migración (venta canónica + pendiente a hoy) va antes del merge
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
 - ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer (el switch cambia los archivos bajo tus pies)
+- ⚠️ [Hook de presupuesto al editar CLAUDE.md](project_hook_presupuesto_claude_md.md) — salta siempre y las cifras son de `.claude/rules/`, no de tu cambio; esa carpeta es de Mik
 - ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote
 - [Verificar el deploy sin el CLI de Vercel](project_verificar_deploy_sin_vercel_cli.md) — el CLI se cuelga en un worktree aislado; las fechas absolutas salen del commit status de GitHub
 - ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate toda escritura en metrik-one se bloquea
