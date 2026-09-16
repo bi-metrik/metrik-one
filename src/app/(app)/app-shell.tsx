@@ -36,6 +36,7 @@ import {
   PhoneCall,
   Tags,
   FileText,
+  KeyRound,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -58,6 +59,8 @@ interface WorkspaceModules {
   compliance_dual_informa?: boolean
   compliance_audit?: boolean
   valida_consulta?: boolean
+  /** Módulo de clientes de API directa (4D SOFT). Ver `src/lib/valida-api/`. */
+  valida_api?: boolean
   cobros_recurrentes?: boolean
   cert_qr?: boolean
   conciliacion?: boolean
@@ -253,6 +256,12 @@ const SOLICITUDES_NAV_ITEMS = [
 // Valida (extra inferior, activable por flag)
 const VALIDA_NAV_ITEMS = [
   { href: '/valida', label: 'Valida', icon: ShieldCheck, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+]
+
+// Valida API: clientes de API directa (entrega C2). Todos los roles ven el consumo; la
+// pantalla decide por dentro quién opera llaves y quién ve pagos.
+const VALIDA_API_NAV_ITEMS = [
+  { href: '/valida-api', label: 'Valida API', icon: KeyRound, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
 // Certificaciones con QR (extra inferior, activable por flag cert_qr)
@@ -473,9 +482,10 @@ export default function AppShell({
       )
     : []))
   const validaItems = moduloGate((modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : [])
+  const validaApiItems = moduloGate(vitrinaGate(mod.valida_api ? filterByRole(VALIDA_API_NAV_ITEMS, role) : []))
   const certItems = moduloGate(vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []))
   const solicitudesItems = moduloGate(vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : []))
-  const extrasItems = [...solicitudesItems, ...validaItems, ...certItems]
+  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = moduloGate(vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -492,14 +502,17 @@ export default function AppShell({
       ? '/numeros'
       : (mod.compliance
         ? '/riesgos'
-        : (mod.calidad_llamadas ? '/calidad' : '/mi-negocio')))
+        : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : '/mi-negocio'))))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...certItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     ? ['/valida', '/tableros', '/numeros']
     : (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
+    // Cliente de API directa: una sola pantalla, que es su primaria.
+    : (!mod.business && mod.valida_api)
+    ? ['/valida-api']
     // Workspace de solo calidad (call center): sus tres rutas son las primarias.
     // Son las mismas del sidebar — la operacion, las personas y los indicadores.
     : (!mod.business && mod.calidad_llamadas)

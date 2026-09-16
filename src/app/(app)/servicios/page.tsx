@@ -66,7 +66,7 @@ export default async function ServiciosPage() {
       ) : (
         <ul className="space-y-3">
           {modulos.map((m) => (
-            <li key={m.id} className="rounded-lg border border-borde bg-white p-4">
+            <li key={m.id} className="rounded-lg border border-border bg-white p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="text-base font-semibold text-tinta">{m.nombre}</h2>
                 {m.servicio ? (
@@ -137,7 +137,7 @@ function etiquetaIva(t: string | null): string {
  */
 function Catalogo({ servicios }: { servicios: ServicioDelCatalogo[] }) {
   return (
-    <section className="space-y-3 border-t border-borde pt-6">
+    <section className="space-y-3 border-t border-border pt-6">
       <div>
         <h2 className="text-base font-semibold text-tinta">Catálogo de servicios</h2>
         <p className="text-xs text-tinta-suave">
@@ -155,7 +155,7 @@ function Catalogo({ servicios }: { servicios: ServicioDelCatalogo[] }) {
       ) : (
         <ul className="space-y-2">
           {servicios.map((s) => (
-            <li key={s.slug} className="rounded-lg border border-borde bg-white p-3 text-sm">
+            <li key={s.slug} className="rounded-lg border border-border bg-white p-3 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="font-medium text-tinta">{s.nombre}</span>
                 <span className="text-xs text-tinta-suave">

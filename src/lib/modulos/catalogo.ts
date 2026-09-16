@@ -78,7 +78,7 @@ export const MODULOS = {
     funciones: [],
   },
   // Clientes de API directa (4D SOFT). Es un módulo distinto de Valida: otro cliente, otra
-  // pantalla, otro cobro. La carpeta `/valida-api` todavía no existe (entrega C2).
+  // pantalla, otro cobro. La pantalla vive en `src/app/(app)/valida-api` (entrega C2).
   valida_api: {
     nombre: 'Valida API',
     clave: 'valida_api',
