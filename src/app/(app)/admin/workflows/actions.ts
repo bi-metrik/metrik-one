@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { estaArchivado } from '@/lib/workspace/archivado'
+import { grupoDeWorkspace, type GrupoDeWorkspace } from '@/lib/workspace/grupo'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -11,6 +12,8 @@ export interface AdminLineaItem {
   workspace_id: string
   workspace_slug: string | null
   workspace_name: string | null
+  /** `config_extra.grupo` normalizado: ordena y agrupa el desplegable de workspaces. */
+  workspace_grupo: GrupoDeWorkspace
   linea_id: string
   linea_nombre: string
   linea_tipo: string
@@ -84,7 +87,7 @@ export async function listAdminWorkflows(): Promise<AdminLineaItem[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: lineasRaw } = await (svc as any)
     .from('lineas_negocio')
-    .select('id, nombre, tipo, is_active, workspace_id, workspaces(id, slug, name, archivado:config_extra->archivado)')
+    .select('id, nombre, tipo, is_active, workspace_id, workspaces(id, slug, name, archivado:config_extra->archivado, grupo:config_extra->grupo)')
     .not('workspace_id', 'is', null)
     .order('nombre')
 
@@ -94,7 +97,7 @@ export async function listAdminWorkflows(): Promise<AdminLineaItem[]> {
     tipo: string
     is_active: boolean
     workspace_id: string
-    workspaces: { id: string; slug: string | null; name: string | null; archivado?: unknown } | null
+    workspaces: { id: string; slug: string | null; name: string | null; archivado?: unknown; grupo?: unknown } | null
   }
   // La biblioteca no lista los flujos de workspaces archivados (muestras comerciales
   // muertas). El detalle de cada flujo NO se filtra: sigue abriendo por su URL.
@@ -140,6 +143,7 @@ export async function listAdminWorkflows(): Promise<AdminLineaItem[]> {
       workspace_id: l.workspace_id,
       workspace_slug: l.workspaces?.slug ?? null,
       workspace_name: l.workspaces?.name ?? null,
+      workspace_grupo: grupoDeWorkspace(l.workspaces?.grupo),
       linea_id: l.id,
       linea_nombre: l.nombre,
       linea_tipo: l.tipo,

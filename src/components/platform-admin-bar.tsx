@@ -7,6 +7,7 @@ import {
   returnHome,
   type PlatformAdminState,
 } from '@/lib/actions/platform-admin'
+import { agruparWorkspaces } from '@/lib/workspace/grupo'
 
 // Redirige al subdomain target via magic link cuando se proporciona (caso normal
 // — siembra sesion en subdomain destino) o directo (fallback local/dev).
@@ -41,6 +42,8 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
     const q = query.toLowerCase()
     return w.name.toLowerCase().includes(q) || w.slug.toLowerCase().includes(q)
   })
+  // Agrupa DESPUÉS de filtrar: un grupo sin coincidencias no deja su encabezado vacío.
+  const grupos = agruparWorkspaces(filtered)
 
   function handleSwitch(targetId: string, targetSlug: string) {
     setOpen(false)
@@ -133,35 +136,42 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
                   Sin resultados
                 </div>
               )}
-              {filtered.map(w => {
-                const isCurrent = w.id === state.currentWorkspace?.id
-                return (
-                  <button
-                    key={w.id}
-                    type="button"
-                    onClick={() => handleSwitch(w.id, w.slug)}
-                    disabled={isCurrent || isPending}
-                    className={
-                      'flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 disabled:cursor-default disabled:opacity-50 ' +
-                      (isCurrent ? 'bg-slate-50' : '')
-                    }
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-slate-800">
-                        {w.name}
-                      </div>
-                      <div className="truncate text-[10px] text-slate-400">
-                        {w.slug}
-                      </div>
-                    </div>
-                    {isCurrent && (
-                      <span className="shrink-0 rounded bg-acento/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-acento">
-                        Aqui
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
+              {grupos.map(g => (
+                <div key={g.clave} role="group" aria-label={g.etiqueta}>
+                  <div className="sticky top-0 bg-white px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {g.etiqueta}
+                  </div>
+                  {g.workspaces.map(w => {
+                    const isCurrent = w.id === state.currentWorkspace?.id
+                    return (
+                      <button
+                        key={w.id}
+                        type="button"
+                        onClick={() => handleSwitch(w.id, w.slug)}
+                        disabled={isCurrent || isPending}
+                        className={
+                          'flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 disabled:cursor-default disabled:opacity-50 ' +
+                          (isCurrent ? 'bg-slate-50' : '')
+                        }
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium text-slate-800">
+                            {w.name}
+                          </div>
+                          <div className="truncate text-[10px] text-slate-400">
+                            {w.slug}
+                          </div>
+                        </div>
+                        {isCurrent && (
+                          <span className="shrink-0 rounded bg-acento/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-acento">
+                            Aqui
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           </div>
         )}

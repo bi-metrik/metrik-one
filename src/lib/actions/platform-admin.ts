@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { armarSelectorDeWorkspaces, type WorkspaceConMarca } from '@/lib/workspace/archivado'
+import type { GrupoDeWorkspace } from '@/lib/workspace/grupo'
 
 // ============================================================
 // Tipos compartidos (cliente + servidor)
@@ -14,6 +15,8 @@ export type WorkspaceSummary = {
   id: string
   slug: string
   name: string
+  /** `config_extra.grupo` normalizado: el selector agrupa por aquí (no por `tipo`). */
+  grupo: GrupoDeWorkspace
 }
 
 export type PlatformAdminState = {
@@ -109,11 +112,11 @@ export async function getPlatformAdminState(): Promise<PlatformAdminState | null
 
   const svc = createServiceClient()
 
-  // Solo la marca de archivado, no el `config_extra` entero (ahí viven credenciales
-  // por workspace). Flecha simple: conserva el booleano JSON.
+  // Solo las marcas de archivado y grupo, no el `config_extra` entero (ahí viven
+  // credenciales por workspace). Flecha simple: conserva el booleano JSON.
   const { data: allWorkspaces, error: wsError } = await svc
     .from('workspaces')
-    .select('id, slug, name, archivado:config_extra->archivado')
+    .select('id, slug, name, archivado:config_extra->archivado, grupo:config_extra->grupo')
     .order('name')
   if (wsError) {
     console.error('[platform-admin] no se pudo leer la lista de workspaces:', wsError.message)
