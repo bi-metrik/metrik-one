@@ -83,5 +83,26 @@ con un arnés temporal dentro de `src/` que hace ese mismo fetch
 ([[medicion-con-vitest]]), `npx vite build`, el binario de chromium, y `node .mjs` dentro
 del worktree que habla CDP.
 
+## Con server actions y `router.refresh()` de verdad: Next en vez de vite (2026-09-16, QA del #763)
+
+Vite no tiene router ni server actions. Para ver qué pinta una pantalla DESPUÉS de una acción:
+
+- Ruta temporal `src/app/qa-<frente>/` **fuera de `(app)`** (el layout pide sesión): `page.tsx`
+  server con `dynamic = 'force-dynamic'` que lee un store en `globalThis`, y un `actions.ts`
+  `'use server'` que dobla las acciones reales con la MISMA forma de respuesta.
+- El componente real se COPIA con `sed` cambiando solo la importación de las acciones (`@/…` no
+  se puede aliasar en Next). Sirvió también con el editor de cotización entero.
+- `npx next dev -p <puerto libre>` con `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:9` y una anon
+  key falsa: sin cookies el middleware no llama a producción. `next build` + `next start` también
+  corre en el worktree (compila la app entera).
+- **Clic confiable:** `Input.dispatchMouseEvent` (moved, pressed, released) en el centro del
+  `getBoundingClientRect`, tras confirmar con `elementFromPoint` que no lo tapa el splash.
+- **Pegar una imagen:** `new ClipboardEvent('paste', { clipboardData: dt })` con un `DataTransfer`
+  que lleva un `File`. React lo recibe en `onPaste`.
+- **Simular un refresco que llega sin los datos nuevos:** la página pinta una foto congelada del
+  store mientras la acción escribe el store real. Fue lo único que reprodujo el síntoma de producción.
+- ⚠️ `qa-*` rompe `next build` si tiene errores de tipos: los dobles tienen que tipar como las reales.
+  Borrar la carpeta, `.next` y el `.mjs` antes de commitear.
+
 Relacionado: [[capturas-ui-sin-servidor]], [[medir-contraste-render]],
-[[medicion-con-vitest]], [[pruebas-por-mutacion]].
+[[medicion-con-vitest]], [[pruebas-por-mutacion]], [[vercel-logs-por-cli]].
