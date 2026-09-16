@@ -5,7 +5,6 @@ import {
   documentoVigente,
   estadoTerminos,
   etiquetaCalidad,
-  llavesHabilitadas,
   prepararAceptacion,
   puedeAceptarTerminos,
   textoDeclaracionTerminos,
@@ -97,16 +96,6 @@ describe('estadoTerminos: qué falta aceptar', () => {
     expect(documentoVigente(doc({ vigenteHasta: HOY }), HOY)).toBe(true)
     expect(documentoVigente(doc({ vigenteDesde: HOY }), HOY)).toBe(true)
     expect(documentoVigente(doc({ vigenteHasta: '2026-09-16' }), HOY)).toBe(false)
-  })
-})
-
-describe('llaves: permiso de rol Y términos aceptados', () => {
-  it('sin términos aceptados ni el dueño ve la pestaña', () => {
-    expect(llavesHabilitadas(true, { estado: 'pendientes' })).toBe(false)
-    expect(llavesHabilitadas(true, { estado: 'sin_documentos' })).toBe(false)
-    expect(llavesHabilitadas(true, { estado: 'no_disponible' })).toBe(false)
-    expect(llavesHabilitadas(true, { estado: 'aceptados' })).toBe(true)
-    expect(llavesHabilitadas(false, { estado: 'aceptados' })).toBe(false)
   })
 })
 

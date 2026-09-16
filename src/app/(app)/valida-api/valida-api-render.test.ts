@@ -5,7 +5,8 @@
  * JSX pintar otra cosa. Aquí se fija lo que un cliente ve:
  *
  *   - la llave en claro aparece con su aviso de «única vez» y un botón de copiar;
- *   - la casilla de la Política nace SIN marcar y el botón de continuar, deshabilitado;
+ *   - la entrada muestra los términos COMO TEXTO, el aviso de la Política y una sola casilla que
+ *     nace sin marcar y deshabilitada (hasta leer hasta el final), con el botón «Acepto» apagado;
  *   - si Valida no responde, la pestaña dice «no disponible» y NO pinta una lista vacía;
  *   - quien no opera llaves no ve la pestaña de llaves.
  *
@@ -21,13 +22,12 @@ vi.mock('sonner', () => ({ toast: { error: () => {}, success: () => {} } }))
 // Las acciones arrastran `server-only` y el cliente de Supabase; la pantalla solo necesita sus
 // referencias para los botones.
 vi.mock('@/lib/valida-api/acciones', () => ({
-  aceptarPoliticaValidaApi: async () => ({ ok: true }),
-  aceptarTerminosValidaApi: async () => ({ ok: true, yaEstaba: false }),
+  aprobarEntradaValidaApi: async () => ({ ok: true, yaEstaba: false }),
   generarLlaveValidaApi: async () => ({ ok: false, error: 'x' }),
   revocarLlaveValidaApi: async () => ({ ok: false, error: 'x' }),
 }))
 
-const { AceptarPolitica, LlaveUnaVez, PestanaDocumentos, TerminosPendientes, ValidaApiCliente } = await import('./valida-api-cliente')
+const { EntradaValidaApi, LlaveUnaVez, PestanaDocumentos, ValidaApiCliente } = await import('./valida-api-cliente')
 
 const LLAVE = 'vld_live_1a2b3c4d5e6f_ESTA_ES_LA_LLAVE_EN_CLARO'
 
@@ -65,29 +65,6 @@ describe('la llave en claro, una sola vez', () => {
 
   it('ofrece copiarla', () => {
     expect(t).toContain('Copiar')
-  })
-})
-
-describe('Política de Datos en el primer ingreso', () => {
-  const html = renderToStaticMarkup(
-    React.createElement(AceptarPolitica, {
-      aviso: 'Al continuar, autoriza a METRIK IA S.A.S. ... v1.5.',
-      politicaUrl: 'https://valida.metrik.com.co/recursos/privacidad',
-      politicaTitulo: 'Política de Tratamiento de Datos Personales v1.5',
-    }),
-  )
-
-  it('la casilla nace sin marcar y el botón deshabilitado', () => {
-    const casilla = /<input[^>]*type="checkbox"[^>]*>/.exec(html)?.[0] ?? ''
-    expect(casilla).not.toBe('')
-    expect(casilla).not.toMatch(/checked/)
-    const boton = /<button[^>]*>Continuar<\/button>/.exec(html)?.[0] ?? ''
-    expect(boton).toMatch(/disabled/)
-  })
-
-  it('muestra el aviso completo que se registra y el enlace a la Política', () => {
-    expect(texto(html)).toContain('Al continuar, autoriza a METRIK IA S.A.S.')
-    expect(html).toContain('href="https://valida.metrik.com.co/recursos/privacidad"')
   })
 })
 
@@ -191,64 +168,116 @@ describe('pestañas por rol', () => {
   })
 })
 
-describe('los términos del contrato antes de las llaves', () => {
+describe('la entrada: términos vivos, Política y una sola aprobación', () => {
   const DOCUMENTO = {
     documentoId: '00000000-0000-4000-8000-0000000000e2',
-    titulo: 'Términos de Uso, Confidencialidad y Encargo de Tratamiento de Datos — VALIDA',
+    slug: 'terminos-uso-valida',
+    titulo: 'Términos de Uso de VALIDA',
     version: 'v1.1',
-    textoMd: '# Términos de Uso\n\n3.1. Las credenciales se entregan únicamente después de la aceptación.',
+    textoMd: '# TÉRMINOS DE USO\n\n**EL PROVEEDOR:** METRIK IA S.A.S.\n\n3.1. Las credenciales se entregan únicamente después de la aceptación.',
+  }
+  const POR_FIRMAR = {
+    documentoId: DOCUMENTO.documentoId,
+    titulo: DOCUMENTO.titulo,
+    version: 'v1.1',
     pdfSha256: 'f'.repeat(64),
     empresaNombre: '4D SOFT S.A.S.',
     empresaNit: '901220269-6',
   }
-  const pendientes = (aceptante: { puede: true } | { puede: false; razon: 'no_owner' | 'soporte' | 'otro_espacio' }) =>
+  type Contrato = Parameters<typeof EntradaValidaApi>[0]['entrada']['contrato']
+  const entrada = (contrato: Contrato, conflicto = false) =>
     renderToStaticMarkup(
-      React.createElement(TerminosPendientes, {
-        estado: { estado: 'pendientes', totalPendientes: 1, documento: DOCUMENTO, aceptante },
+      React.createElement(EntradaValidaApi, {
+        entrada: { estado: 'pendiente', documentos: [DOCUMENTO], contrato, conflicto },
+        aviso: 'Al continuar, autoriza a METRIK IA S.A.S. a tratar su correo ... v1.5.',
+        politicaUrl: 'https://valida.metrik.com.co/recursos/privacidad',
+        politicaTitulo: 'Política de Tratamiento de Datos Personales v1.5',
       }),
     )
+  const casilla = (html: string) => /<input[^>]*type="checkbox"[^>]*>/.exec(html)?.[0] ?? ''
+  const botonAcepto = (html: string) => /<button[^>]*>Acepto<\/button>/.exec(html)?.[0] ?? ''
 
-  it('el dueño ve el formulario: nombre, cédula, calidad, casilla SIN marcar y botón deshabilitado', () => {
-    const html = pendientes({ puede: true })
+  it('los términos se leen ahí mismo, como texto, en un contenedor con scroll y su centinela al final', () => {
+    const html = entrada({ estado: 'aceptado' })
+    const t = texto(html)
+    expect(t).toContain('TÉRMINOS DE USO')
+    expect(t).toContain('3.1. Las credenciales se entregan únicamente después de la aceptación.')
+    expect(html).toContain('<strong class="font-semibold">EL PROVEEDOR:</strong>')
+    expect(html).toMatch(/data-terminos="true" class="[^"]*overflow-y-auto/)
+    // El centinela va DENTRO del contenedor, después del texto.
+    const contenedor = html.slice(html.indexOf('data-terminos'))
+    expect(contenedor.indexOf('data-fin-terminos')).toBeGreaterThan(contenedor.indexOf('3.1. Las credenciales'))
+    // Nada de «leer en otra pestaña» para los términos: no hay enlace al PDF.
+    expect(html).not.toContain('/api/valida-api/archivo/documento/')
+  })
+
+  it('el aviso de la Política va en la misma vista, con el enlace a la versión completa', () => {
+    const html = entrada({ estado: 'aceptado' })
+    expect(texto(html)).toContain('Al continuar, autoriza a METRIK IA S.A.S.')
+    expect(html).toContain('href="https://valida.metrik.com.co/recursos/privacidad"')
+  })
+
+  it('una sola casilla SIN marcar y deshabilitada hasta leer, un solo botón «Acepto» apagado', () => {
+    const html = entrada({ estado: 'aceptado' })
+    expect(html.match(/type="checkbox"/g)).toHaveLength(1)
+    expect(casilla(html)).not.toMatch(/checked=""/)
+    expect(casilla(html)).toMatch(/disabled/)
+    expect(botonAcepto(html)).toMatch(/disabled/)
+    expect(texto(html)).toContain('Lee hasta el final para poder aceptar.')
+    expect(texto(html)).toContain('Leí hasta el final «Términos de Uso de VALIDA» (v1.1)')
+    // Sin firma pendiente, no se piden datos personales.
+    expect(html).not.toContain('name="cedula"')
+  })
+
+  it('el dueño con el contrato pendiente firma en la misma pantalla: nombre, cédula, calidad', () => {
+    const html = entrada({ estado: 'pendiente', puede: true, empresas: ['4D SOFT S.A.S.'], porFirmar: [POR_FIRMAR] })
     expect(html).toContain('name="nombre"')
     expect(html).toContain('name="cedula"')
     expect(texto(html)).toContain('Representante legal')
     expect(texto(html)).toContain('Apoderado')
-    const casilla = /<input[^>]*type="checkbox"[^>]*>/.exec(html)?.[0] ?? ''
-    expect(casilla).not.toBe('')
-    expect(casilla).not.toMatch(/checked=""/)
-    expect(casilla).toMatch(/disabled/)
-    const boton = /<button[^>]*>Aceptar los términos<\/button>/.exec(html)?.[0] ?? ''
-    expect(boton).toMatch(/disabled/)
+    expect(html.match(/type="checkbox"/g)).toHaveLength(1)
+    expect(casilla(html)).toMatch(/disabled/)
+    expect(botonAcepto(html)).toMatch(/disabled/)
+    expect(texto(html)).toContain('tengo facultades para obligar a 4D SOFT S.A.S.')
   })
 
-  it('deja leer el texto completo y descargar el PDF antes de aceptar', () => {
-    const html = pendientes({ puede: true })
-    expect(texto(html)).toContain('Leer el texto completo')
-    expect(html).toContain(`href="/api/valida-api/archivo/documento/${DOCUMENTO.documentoId}"`)
-    expect(texto(html)).toContain(DOCUMENTO.pdfSha256)
-  })
-
-  it('quien no es dueño ve por qué no hay llaves, sin formulario', () => {
-    const html = pendientes({ puede: false, razon: 'no_owner' })
-    expect(texto(html)).toContain('Los términos los acepta el dueño del espacio')
+  it('quien no es dueño ve los términos y el aviso, pero no puede aprobar', () => {
+    const html = entrada({ estado: 'pendiente', puede: false, razon: 'no_owner' })
+    expect(texto(html)).toContain('3.1. Las credenciales se entregan')
+    expect(texto(html)).toContain('Al continuar, autoriza a METRIK IA S.A.S.')
+    expect(texto(html)).toContain('El dueño del espacio, que es quien puede obligar a la empresa, todavía no ha aceptado')
+    expect(html).not.toContain('type="checkbox"')
+    expect(botonAcepto(html)).toBe('')
     expect(html).not.toContain('name="cedula"')
-    expect(html).not.toMatch(/<button[^>]*>Aceptar los términos/)
-    // Igual puede leerlos.
-    expect(texto(html)).toContain('Leer el texto completo')
+    // Tampoco se le promete que leyendo hasta el final podrá aceptar.
+    expect(texto(html)).not.toContain('para poder aceptar')
   })
 
-  it('el soporte de MeTRIK ve que no le toca aceptar', () => {
-    const html = pendientes({ puede: false, razon: 'soporte' })
+  it('el soporte de MeTRIK ve que el contrato no le toca', () => {
+    const html = entrada({ estado: 'pendiente', puede: false, razon: 'soporte' })
     expect(texto(html)).toContain('como soporte de MeTRIK')
-    expect(html).not.toContain('name="cedula"')
+    expect(html).not.toContain('type="checkbox"')
   })
 
-  it('sin términos registrados, se dice; no se ofrece aceptar nada', () => {
-    const html = renderToStaticMarkup(React.createElement(TerminosPendientes, { estado: { estado: 'sin_documentos' } }))
-    expect(texto(html)).toContain('todavía no están registrados')
-    expect(html).not.toContain('name="cedula"')
+  it('con un conflicto de constancias no se ofrece aprobar', () => {
+    const html = entrada({ estado: 'aceptado' }, true)
+    expect(texto(html)).toContain('mismo nombre y versión')
+    expect(html).not.toContain('type="checkbox"')
   })
+
+  it('los textos propios no llevan guion largo', () => {
+    const html = entrada({ estado: 'pendiente', puede: true, empresas: ['4D SOFT S.A.S.'], porFirmar: [POR_FIRMAR] })
+    expect(texto(html)).not.toMatch(/[—–]/)
+  })
+})
+
+describe('Documentos, como archivo', () => {
+  const DOCUMENTO = {
+    documentoId: '00000000-0000-4000-8000-0000000000e2',
+    titulo: 'Términos de Uso de VALIDA',
+    textoMd: '# Términos de Uso',
+    pdfSha256: 'f'.repeat(64),
+  }
 
   it('la pestaña Documentos nombra la calidad en español y el canal del módulo', () => {
     const html = renderToStaticMarkup(

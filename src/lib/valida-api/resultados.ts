@@ -35,14 +35,6 @@ export type ResultadoEmitir =
 
 export type ResultadoRevocar = { ok: true; yaEstabaRevocada: boolean } | { ok: false; error: string }
 
-export type ResultadoAceptar = { ok: true } | { ok: false; error: string }
-
-export type EstadoPolitica =
-  | { estado: 'aceptada' }
-  | { estado: 'pendiente' }
-  | { estado: 'no_disponible' }
-  | { estado: 'sin_acceso'; razon: string }
-
 export interface DocumentoContractual {
   documentoId: string
   slug: string
@@ -92,21 +84,36 @@ export interface ServicioConPagos {
 
 export type ResultadoDocumentos = Carga<DocumentosValidaApi>
 
+/** Un documento de términos vigente, tal como se lee en la entrada del módulo. */
+export interface DocumentoEntradaPagina {
+  documentoId: string
+  slug: string
+  titulo: string
+  version: string
+  textoMd: string
+}
+
 /**
- * Lo que la entrada del módulo necesita saber de los términos del contrato. `pendientes` trae
- * el PRIMER documento por aceptar (se aceptan de a uno) y si la persona de la sesión puede
- * aceptarlo.
+ * La aceptación contractual en la entrada. `pendiente` con `puede: true` trae lo que el dueño firma
+ * (una declaración por documento pendiente); con `puede: false`, por qué quien entra no puede.
  */
-export type EstadoTerminosPagina =
-  | { estado: 'aceptados' }
+export type ContratoEntradaPagina =
+  | { estado: 'aceptado' }
+  | { estado: 'pendiente'; puede: true; empresas: string[]; porFirmar: DocumentoPorAceptar[] }
+  | { estado: 'pendiente'; puede: false; razon: RazonNoAcepta }
+
+/** Lo que la página necesita para decidir si abre el módulo o pinta la entrada. */
+export type EstadoEntradaPagina =
+  | { estado: 'aprobada' }
   | { estado: 'sin_documentos' }
   | { estado: 'no_disponible' }
   | {
-      estado: 'pendientes'
-      totalPendientes: number
-      documento: DocumentoPorAceptar
-      aceptante: { puede: true } | { puede: false; razon: RazonNoAcepta }
+      estado: 'pendiente'
+      documentos: DocumentoEntradaPagina[]
+      contrato: ContratoEntradaPagina
+      /** El usuario ya aceptó otro documento con el mismo nombre y versión: no puede completar aquí. */
+      conflicto: boolean
     }
 
-export type ResultadoAceptarTerminos = { ok: true; yaEstaba: boolean } | { ok: false; error: string }
+export type ResultadoAprobarEntrada = { ok: true; yaEstaba: boolean } | { ok: false; error: string }
 export type ResultadoPagos = Carga<ServicioConPagos[]>

@@ -1,8 +1,7 @@
 import { KeyRound } from 'lucide-react'
 import EmptyState from '@/components/empty-state'
 import {
-  estadoPoliticaValidaApi,
-  estadoTerminosValidaApi,
+  estadoEntradaValidaApi,
   leerDocumentosValidaApi,
   leerLlavesValidaApi,
   leerPagosValidaApi,
@@ -11,8 +10,7 @@ import {
 import { contextoValidaApi } from '@/lib/valida-api/contexto'
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica'
 import { puedeOperarLlaves, puedeVerPagos } from '@/lib/valida-api/reglas'
-import { llavesHabilitadas } from '@/lib/valida-api/terminos'
-import { AceptarPolitica, TerminosPendientes, ValidaApiCliente } from './valida-api-cliente'
+import { EntradaValidaApi, ValidaApiCliente } from './valida-api-cliente'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,12 +28,13 @@ export const dynamic = 'force-dynamic'
  * - El portal v1 de Valida **sigue vivo en paralelo** mientras 4D SOFT aprueba (decisión de
  *   Mauricio, 2026-09-16): nada aquí lo apaga ni lo redirige. Eso es C3.
  *
- * ## La entrada: primero la Política, después los términos
+ * ## La entrada: una sola pantalla y una sola aprobación
  *
- * La Política de Datos la acepta cada usuario. Los términos del contrato los acepta el dueño del
- * espacio una vez por versión (cláusula 3.1: sin términos aceptados no se entregan credenciales).
- * Mientras falten, la pestaña Llaves no aparece y sus acciones del servidor se niegan; el resto del
- * módulo carga igual, y Documentos deja leer el texto completo.
+ * Antes de cualquier pestaña, cada usuario lee ahí mismo los términos vigentes del contrato hasta
+ * el final, ve el aviso de la Política de Datos y acepta todo con un solo clic (`entrada.ts`). Si
+ * el contrato del espacio no tiene su aceptación contractual, la firma el dueño en esa misma
+ * pantalla; los demás ven los términos y el aviso, pero no pueden aprobar. Mientras falte algo, no
+ * hay pestañas, y las acciones del servidor y las descargas también se niegan.
  *
  * ## Cada pestaña carga sola
  *
@@ -63,7 +62,7 @@ export default async function ValidaApiPage() {
     )
   }
 
-  const politica = await estadoPoliticaValidaApi()
+  const entrada = await estadoEntradaValidaApi()
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
@@ -77,17 +76,23 @@ export default async function ValidaApiPage() {
         </div>
       </div>
 
-      {politica.estado === 'pendiente' ? (
-        <AceptarPolitica
+      {entrada.estado === 'aprobada' ? (
+        <PestanasCargadas role={ctx.role} />
+      ) : entrada.estado === 'pendiente' ? (
+        <EntradaValidaApi
+          entrada={entrada}
           aviso={textoAvisoPolitica()}
           politicaUrl={POLITICA_DATOS_VALIDA.url}
           politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
         />
-      ) : politica.estado === 'aceptada' ? (
-        <ConTerminos role={ctx.role} />
+      ) : entrada.estado === 'sin_documentos' ? (
+        <EmptyState
+          title="Los términos de tu contrato todavía no están registrados"
+          description="El módulo se abre cuando MeTRIK registre los términos de tu contrato y los aceptes aquí. Escríbenos si esperabas verlos."
+        />
       ) : (
         <EmptyState
-          title="No se pudo verificar tu aceptación de la Política de Datos"
+          title="No se pudo verificar tu aceptación de los términos"
           description="Sin esa verificación el módulo no se abre. Intenta de nuevo en un momento."
         />
       )}
@@ -95,17 +100,8 @@ export default async function ValidaApiPage() {
   )
 }
 
-async function ConTerminos({ role }: { role: string }) {
-  const terminos = await estadoTerminosValidaApi()
-  return (
-    <>
-      {terminos.estado !== 'aceptados' && <TerminosPendientes estado={terminos} />}
-      <PestanasCargadas role={role} operaLlaves={llavesHabilitadas(puedeOperarLlaves(role), terminos)} />
-    </>
-  )
-}
-
-async function PestanasCargadas({ role, operaLlaves }: { role: string; operaLlaves: boolean }) {
+async function PestanasCargadas({ role }: { role: string }) {
+  const operaLlaves = puedeOperarLlaves(role)
   const vePagos = puedeVerPagos(role)
 
   const [resumen, llaves, documentos, pagos] = await Promise.all([

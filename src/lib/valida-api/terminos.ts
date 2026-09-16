@@ -4,15 +4,15 @@
  * muestra la declaración mientras se llena), y los dos tienen que armar EL MISMO texto, o la
  * constancia no probaría lo que la persona leyó.
  *
- * ## Por qué sin términos aceptados no hay llaves
+ * ## Dónde se exigen
  *
  * La cláusula 3.1 de los términos de Valida dice que las credenciales se entregan únicamente
- * después de la aceptación. Hasta el 2026-09-16 el módulo mostraba los términos en Documentos y
- * dejaba crear llaves igual. Ahora la pestaña Llaves (leer, generar y regenerar) exige que TODA
- * versión vigente de los documentos del contrato tenga aceptación registrada. Revocar una llave
- * no se bloquea: solo quita acceso.
+ * después de la aceptación. Desde el 2026-09-16 (tarde) la exigencia no es de la pestaña Llaves
+ * sino de TODO el módulo: la entrada única de `entrada.ts` pide, por usuario, leer los términos
+ * vigentes hasta el final y aceptar la Política, y además que el contrato del espacio tenga su
+ * aceptación contractual. Sin las tres cosas no hay pestañas ni acciones del servidor.
  *
- * Sin documentos vigentes registrados tampoco hay llaves: «no hay nada que aceptar» no es lo
+ * Sin documentos vigentes registrados el módulo no se abre: «no hay nada que aceptar» no es lo
  * mismo que «ya se aceptó», y la cláusula habla de lo segundo.
  *
  * ## Quién acepta
@@ -60,11 +60,16 @@ export function documentoVigente(
 }
 
 /**
- * Qué falta aceptar. `mis_documentos_de_servicio()` devuelve una fila por documento Y por
- * constancia, así que un documento cuenta como aceptado si CUALQUIERA de sus filas trae fecha de
- * aceptación.
+ * Las versiones que rigen hoy, una por documento, con si tienen constancia contractual.
+ * `mis_documentos_de_servicio()` devuelve una fila por documento Y por constancia, así que un
+ * documento cuenta como aceptado si CUALQUIERA de sus filas trae fecha de aceptación. Ordenadas
+ * por slug y fecha de vigencia: la pantalla las muestra en ese orden y el servidor arma el texto
+ * de la casilla en el mismo.
  */
-export function estadoTerminos(documentos: readonly DocumentoContractual[], hoy: string): EstadoTerminos {
+export function vigentesConAceptacion(
+  documentos: readonly DocumentoContractual[],
+  hoy: string,
+): { doc: DocumentoContractual; aceptado: boolean }[] {
   const vigentes = new Map<string, { doc: DocumentoContractual; aceptado: boolean }>()
   for (const d of documentos) {
     if (!documentoVigente(d, hoy)) continue
@@ -74,17 +79,17 @@ export function estadoTerminos(documentos: readonly DocumentoContractual[], hoy:
       aceptado: (previo?.aceptado ?? false) || d.aceptadoAt !== null,
     })
   }
-  if (vigentes.size === 0) return { estado: 'sin_documentos' }
-  const pendientes = [...vigentes.values()]
-    .filter((v) => !v.aceptado)
-    .map((v) => v.doc)
-    .sort((a, b) => a.slug.localeCompare(b.slug) || a.vigenteDesde.localeCompare(b.vigenteDesde))
-  return pendientes.length === 0 ? { estado: 'aceptados' } : { estado: 'pendientes', pendientes }
+  return [...vigentes.values()].sort(
+    (a, b) => a.doc.slug.localeCompare(b.doc.slug) || a.doc.vigenteDesde.localeCompare(b.doc.vigenteDesde),
+  )
 }
 
-/** La pestaña Llaves se ve con permiso de llaves Y términos aceptados. */
-export function llavesHabilitadas(puedeOperarLlaves: boolean, estado: { estado: string }): boolean {
-  return puedeOperarLlaves && estado.estado === 'aceptados'
+/** Qué falta aceptar del contrato. */
+export function estadoTerminos(documentos: readonly DocumentoContractual[], hoy: string): EstadoTerminos {
+  const vigentes = vigentesConAceptacion(documentos, hoy)
+  if (vigentes.length === 0) return { estado: 'sin_documentos' }
+  const pendientes = vigentes.filter((v) => !v.aceptado).map((v) => v.doc)
+  return pendientes.length === 0 ? { estado: 'aceptados' } : { estado: 'pendientes', pendientes }
 }
 
 export type RazonNoAcepta = 'no_owner' | 'soporte' | 'otro_espacio'
@@ -144,11 +149,11 @@ export function validarDatosAceptante(input: {
   return { ok: true, datos: { nombre, cedula, calidad: input.calidad as CalidadAceptante } }
 }
 
+/** Una versión del contrato por firmar, con la empresa que la firma. El texto se lee aparte. */
 export interface DocumentoPorAceptar {
   documentoId: string
   titulo: string
   version: string
-  textoMd: string
   pdfSha256: string
   empresaNombre: string
   empresaNit: string
