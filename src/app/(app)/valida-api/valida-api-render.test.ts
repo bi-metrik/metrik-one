@@ -249,6 +249,8 @@ describe('la entrada: términos vivos, Política y una sola aprobación', () => 
     expect(html).not.toContain('type="checkbox"')
     expect(botonAcepto(html)).toBe('')
     expect(html).not.toContain('name="cedula"')
+    // Tampoco se le promete que leyendo hasta el final podrá aceptar.
+    expect(texto(html)).not.toContain('para poder aceptar')
   })
 
   it('el soporte de MeTRIK ve que el contrato no le toca', () => {

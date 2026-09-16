@@ -158,7 +158,7 @@ export function EntradaValidaApi({
               aria-label="Términos de tu contrato"
               tabIndex={0}
               data-terminos
-              className="max-h-[60vh] overflow-y-auto rounded-md border border-border bg-papel p-4 text-sm leading-relaxed text-tinta sm:max-h-[28rem]"
+              className="max-h-[60vh] overflow-y-auto rounded-md border border-border bg-papel p-4 text-sm leading-relaxed text-tinta [overflow-wrap:anywhere] sm:max-h-[28rem]"
             >
               {documentos.map((d, i) => (
                 <article key={d.documentoId} className={i > 0 ? 'mt-8 border-t border-border pt-6' : undefined}>
@@ -170,9 +170,11 @@ export function EntradaValidaApi({
               ))}
               <div ref={finRef} data-fin-terminos aria-hidden className="h-px w-full" />
             </div>
-            <p aria-live="polite" className={`text-xs ${leido ? 'text-acento' : 'text-tinta-suave'}`}>
-              {leido ? 'Leíste los términos hasta el final.' : 'Lee hasta el final para poder aceptar.'}
-            </p>
+            {puedeAprobar && (
+              <p aria-live="polite" className={`text-xs ${leido ? 'text-acento' : 'text-tinta-suave'}`}>
+                {leido ? 'Leíste los términos hasta el final.' : 'Lee hasta el final para poder aceptar.'}
+              </p>
+            )}
           </div>
 
           <div className="rounded-md border border-border p-4 text-sm">
