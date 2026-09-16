@@ -49,11 +49,32 @@ silenciosos en cualquier workspace que lo bautizara distinto. **How to apply:** 
 migración futura sobre `negocio_bloques.data` se escribe sobre el texto o enumera las
 claves **midiéndolas contra producción primero**, nunca leyéndolas del código.
 
-**Paso C sigue abierto:** poner `public = false` en los dos buckets. Ojo, la migración del
-Paso B **no tocó `cobros.soporte`**: el barrido fue sobre `negocio_bloques.data` y
-`gastos.soporte_url`. Antes del Paso C hay que volver a medir si queda alguna URL pública
-por ahí. Mientras tanto el código acepta las DOS formas: una fila sin migrar sigue
-abriendo — y ese colchón se acaba justo el día del Paso C.
+## ✅ Paso C APLICADO el mismo día (2026-09-16) — los dos buckets ya están cerrados
+
+`public = false` en `ve-documentos` y `gastos-soportes`. Corrió contra producción y se
+versionó en el **PR #757** (`20260916030000_cerrar_buckets_ve_documentos_y_gastos_soportes`,
+squash `e785cd71`), otra vez **archivando algo ya aplicado**: el archivo no aplica nada, el
+`raise exception` aborta contra una base con los buckets ya cerrados (`n` da 0).
+
+**El colchón se acabó.** Hasta el Paso C el código aceptaba las DOS formas y una fila sin
+convertir seguía abriendo. Ya no: cualquier URL pública que quedara viva murió aquí.
+
+⚠️⚠️ **Hallazgo abierto, y es el flanco de este frente: `cobros.soporte` NUNCA se barrió.**
+El Paso B midió y convirtió `negocio_bloques.data` (439) y `gastos.soporte_url` (11) — esa
+tercera columna estaba en el enunciado original del frente y quedó fuera del `do $$`. El
+Paso C cerró los buckets **sin que nadie midiera** si ahí había URLs públicas de
+`ve-documentos` o `gastos-soportes`. Si las había, hoy son enlaces muertos y **el síntoma no
+se parece a la causa**: un soporte de pago que no abre, en Tesorería, semanas después.
+**How to apply:** medirlo es una consulta de solo lectura
+(`select count(*) from cobros where soporte like '%/object/public/ve-documentos/%' or soporte
+like '%/object/public/gastos-soportes/%'`). Si sale > 0, la reparación es el mismo
+`regexp_replace` del Paso B sobre esa columna — las referencias abren con el bucket cerrado,
+así que no hay que reabrir nada.
+
+⚠️ **Y la lección de orden, que casi muerde:** en un frente por pasos, **el paso que retira
+el colchón (C) no puede correr antes de que se verifique que el paso que convierte (B)
+cubrió TODAS las superficies**. Aquí B y C corrieron el mismo día; la superficie que faltaba
+se detectó al escribir la memoria, no al aplicar.
 
 ## La decisión de autorización, que es lo que importa del PR
 
