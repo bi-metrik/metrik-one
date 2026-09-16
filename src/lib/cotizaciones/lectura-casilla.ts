@@ -29,6 +29,13 @@ function entero(valor: string | null | undefined): number | null {
   return n
 }
 
+/** ¿El texto habla de personas y no solo de habitaciones? */
+export function mencionaPersonas(texto: string | null): boolean {
+  if (!texto) return false
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return /adult|nin[oa]|menor|child|infant|beb[e]|huesped|persona|pasajer|\bpax\b|guest/.test(t)
+}
+
 /**
  * Suma las filas del mismo tipo. Una tabla de vuelo con dos aerolíneas trae dos filas ADT:
  * para el precio por pasajero son el mismo tipo, y dejarlas separadas haría que la
@@ -83,6 +90,17 @@ export function construirLecturaCasilla(
     ninos: entero(valor('ocupacion_ninos')),
     infantes: entero(valor('ocupacion_infantes')),
     total: entero(valor('ocupacion_total')) ?? (ranura.slug === 'vuelo_detalle' ? entero(valor('pax')) : null),
+  }
+  // En un hotel, un conteo de personas sin un texto de PERSONAS detrás no es evidencia.
+  // Medido el 2026-09-16 contra el modelo vivo: la tarjeta «1 x Standard Room AD» volvió
+  // una vez sin ocupación y otra con `ocupacion_adultos: 1` — leyó el número de
+  // habitaciones como adultos, y TP3 rechazó una tarjeta buena. Sin la palabra, los conteos
+  // se descartan y la ocupación se toma del ítem con alerta (7.4).
+  if (ranura.slug === 'hotel_detalle' && porTipo.length === 0 && !mencionaPersonas(valor('ocupacion'))) {
+    ocupacion.adultos = null
+    ocupacion.ninos = null
+    ocupacion.infantes = null
+    ocupacion.total = null
   }
   // Si la pantalla solo dice adultos y deja niños/infantes en null, esos null son «no se
   // ve», no «cero». Pero si dice adultos y al menos uno de los menores, lo que falta es 0.

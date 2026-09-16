@@ -104,20 +104,20 @@ RANURA DE ESTA CAPTURA: ${ranura.label} (${ranura.slug})
 QUE SE ESPERA: ${ranura.queSePide}
 QUE NO SIRVE: ${ranura.queNoSirve}
 
-PASO 1 — CUENTA LAS OPCIONES ANTES DE EXTRAER NADA. Mira la captura y cuenta cuantos
-productos distintos con SU PROPIO precio se ven: tarjetas de hotel, filas de vuelos,
-habitaciones o tarifas entre las que habria que elegir. Devuelve ese numero en
-"opciones_visibles".
-- Un precio TACHADO (el de antes de un descuento) no es otra opcion: es el mismo producto.
-- Un filtro, un buscador, un resumen o un contador como "2 Hoteles (de 267)" no son
-  opciones: cuenta solo las tarjetas o filas con precio que SI se ven en la imagen.
+PASO 1 — LISTA LAS OPCIONES QUE SE VEN, ANTES DE EXTRAER NADA. En "opciones_vistas"
+devuelve una entrada por cada producto con SU PROPIO precio que aparece DIBUJADO en la
+imagen: { "nombre": el nombre tal como se ve, "precio": el precio tal como se ve }.
+Tarjetas de hotel, filas de vuelos, habitaciones o tarifas entre las que habria que elegir.
+- Solo lo que SE VE. Un contador o un filtro como "2 Hoteles (de 267)" no es un producto
+  visible: no inventes una entrada por el. Si solo se ve una tarjeta, hay una entrada.
+- Un precio TACHADO (el de antes de un descuento) no es otra opcion: va en la misma entrada.
 - Una tabla que separa el precio de UNA reserva por tipo de pasajero (adultos, ninos,
   infantes) es UNA opcion, no varias.
 
 PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
 
 - "varias_opciones": se ven DOS O MAS opciones con precio propio entre las que habria que
-  ELEGIR (opciones_visibles >= 2): un listado con varios hoteles, un comparador, una
+  ELEGIR (dos o mas entradas en opciones_vistas): un listado con varios hoteles, un comparador, una
   grilla de aerolineas, varias habitaciones con precio, un calendario de precios.
   ⚠️ REGLA ABSOLUTA: ante varias opciones NO ELIJAS NINGUNA. No tomes la primera, ni
   la mas barata, ni la resaltada. Devuelve este veredicto y deja "campos" vacio. Elegir
@@ -127,11 +127,11 @@ PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
   pedia un vuelo, un traslado donde se pedia una actividad).
 - "no_es_pantalla_de_precio": no es una pantalla de reserva ni de cotizacion (un correo,
   un chat, una foto, un documento, una pantalla sin precio).
-- "detalle_unico": se ve UNA sola opcion con su precio (opciones_visibles = 1). Incluye
+- "detalle_unico": se ve UNA sola opcion con su precio (una entrada en opciones_vistas). Incluye
   la tarjeta de UN hotel dentro de un listado filtrado a ese hotel, y la liquidacion o
   el resumen de una sola reserva. Solo en este caso extraes campos.
 
-Si no puedes contar las opciones con certeza, responde "varias_opciones".
+Si no puedes decir con certeza cuantas opciones se ven, responde "varias_opciones".
 
 En "observacion" escribe UNA linea diciendo que viste. Si rechazas, es lo que la
 persona va a leer para saber que capturar.
@@ -185,7 +185,13 @@ function construirEsquema(ranura: DefinicionRanura) {
   return {
     type: 'OBJECT',
     properties: {
-      opciones_visibles: { type: 'NUMBER' },
+      opciones_vistas: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: { nombre: { type: 'STRING' }, precio: { type: 'STRING' } },
+        },
+      },
       veredicto: { type: 'STRING', enum: VEREDICTOS },
       observacion: { type: 'STRING' },
       campos: {
@@ -230,7 +236,7 @@ function construirEsquema(ranura: DefinicionRanura) {
       },
       total_general: { type: 'NUMBER', nullable: true },
     },
-    required: ['opciones_visibles', 'veredicto', 'campos', 'desglose', 'por_tipo_pax'],
+    required: ['opciones_vistas', 'veredicto', 'campos', 'desglose', 'por_tipo_pax'],
   }
 }
 
@@ -301,7 +307,21 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
     })
   }
   const totalGeneral = numeroONulo(obj.total_general)
-  const opcionesVisibles = numeroONulo(obj.opciones_visibles)
+  // RX1 con EVIDENCIA: no un número que el modelo declara, sino las opciones que dice ver.
+  // Medido el 2026-09-16: con un conteo, el mismo listado filtrado de Bedsonline salió 1 en
+  // una corrida y 2 en otra (el contador «2 Hoteles (de 267)» se contaba como opción). Se
+  // cuentan las entradas DISTINTAS: la misma tarjeta repetida no son dos opciones.
+  const vistas = Array.isArray(obj.opciones_vistas) ? obj.opciones_vistas : null
+  const opcionesVisibles = vistas === null
+    ? null
+    : new Set(
+        vistas
+          .map(v => {
+            const o = (v ?? {}) as Record<string, unknown>
+            return `${textoOVacio(o.nombre) ?? ''}|${textoOVacio(o.precio) ?? ''}`.toLowerCase()
+          })
+          .filter(k => k !== '|'),
+      ).size
 
   return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles }
 }

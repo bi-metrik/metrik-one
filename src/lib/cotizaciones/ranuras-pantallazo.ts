@@ -120,6 +120,17 @@ const PRECIO_TOTAL: CampoRanura = {
  * dice cuántos son adultos, y adivinarlo es inventar el dato contra el que se valida la
  * captura. Por eso va aparte `ocupacion_total`.
  */
+/**
+ * Lo que NO es ocupación y el modelo tomó por ella, medido contra el banco real del 2026-09-16:
+ * «1 x Standard Room» (habitaciones) leído como 1 adulto, y «Standard Room W... AD» (régimen
+ * alojamiento y desayuno) devuelto como «1 Adulto». Va en cada campo de conteo porque el
+ * modelo los llena por separado.
+ */
+const NO_ES_OCUPACION =
+  'El número de habitaciones («1 x Standard Room», «1 Habitación») NO es la ocupación, y el código de régimen ' +
+  'que sigue al nombre de la habitación (SA, AD, MP, PC, TI) tampoco: «Standard Room AD» es alojamiento y ' +
+  'desayuno, no un adulto. No los uses como número de personas.'
+
 const OCUPACION: CampoRanura[] = [
   {
     slug: 'ocupacion_adultos',
@@ -128,7 +139,8 @@ const OCUPACION: CampoRanura[] = [
     min: false,
     descripcion_ai:
       'Cuántos ADULTOS muestra la pantalla para esta búsqueda o reserva (buscador, resumen de la reserva, ' +
-      'o la fila ADT de una tabla por tipo de pasajero). null si la pantalla no separa adultos de menores o no se ve.',
+      'o la fila ADT de una tabla por tipo de pasajero). null si la pantalla no separa adultos de menores o no se ve. ' +
+      NO_ES_OCUPACION,
   },
   {
     slug: 'ocupacion_ninos',
@@ -137,7 +149,7 @@ const OCUPACION: CampoRanura[] = [
     min: false,
     descripcion_ai:
       'Cuántos NIÑOS muestra la pantalla (niño, child, CHD). 0 si la pantalla muestra la ocupación y no hay niños. ' +
-      'null si no se ve la ocupación. El número de habitaciones («1 x Standard Room», «1 Habitación») NO es la ocupación: no lo uses como número de personas. El número de habitaciones («1 x Standard Room», «1 Habitación») NO es la ocupación: no lo uses como número de personas.',
+      'null si no se ve la ocupación. ' + NO_ES_OCUPACION,
   },
   {
     slug: 'ocupacion_infantes',
@@ -146,7 +158,7 @@ const OCUPACION: CampoRanura[] = [
     min: false,
     descripcion_ai:
       'Cuántos INFANTES muestra la pantalla (infante, bebé, INF). 0 si la pantalla muestra la ocupación y no hay ' +
-      'infantes. null si no se ve la ocupación. El número de habitaciones («1 x Standard Room», «1 Habitación») NO es la ocupación: no lo uses como número de personas.',
+      'infantes. null si no se ve la ocupación. ' + NO_ES_OCUPACION,
   },
   {
     slug: 'ocupacion_total',
@@ -155,7 +167,7 @@ const OCUPACION: CampoRanura[] = [
     min: false,
     descripcion_ai:
       'Total de personas cuando la pantalla solo da el total sin separar adultos y menores (ej. «3 huéspedes»). ' +
-      'null si no se ve. El número de habitaciones («1 x Standard Room», «1 Habitación») NO es la ocupación: no lo uses como número de personas.',
+      'null si no se ve. ' + NO_ES_OCUPACION,
   },
 ]
 
@@ -239,7 +251,7 @@ const HOTEL: DefinicionRanura = {
     { slug: 'check_in', label: 'Check-in', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de entrada en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'check_out', label: 'Check-out', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'noches', label: 'Noches', tipo: 'numero', min: false, descripcion_ai: 'Número de noches si la pantalla lo dice. Si no, devuelve null: se deriva de las fechas.' },
-    { slug: 'ocupacion', label: 'Ocupación', tipo: 'texto', min: false, descripcion_ai: 'Ocupación de la habitación tal como aparece (ej. 2 adultos + 1 menor).' },
+    { slug: 'ocupacion', label: 'Ocupación', tipo: 'texto', min: false, descripcion_ai: 'El texto literal donde la pantalla dice cuántas PERSONAS se alojan (ej. «2 Adultos - 1 Niño», «3 Huéspedes»), copiado tal cual. Si no hay texto de personas, devuelve null. ' + NO_ES_OCUPACION },
     { slug: 'politica_cancelacion', label: 'Cancelación', tipo: 'texto', min: false, alerta_revision: true, descripcion_ai: 'Política de cancelación en una línea: no reembolsable, gratis hasta tal fecha...' },
     {
       // ⚠️ NO es mínimo desde la tarifa por pasajero (2026-09-16). La tarjeta de hotel del

@@ -31,14 +31,14 @@ describe('el prompt lleva el rechazo por N opciones (RX1)', () => {
   })
 
   it('el empate se resuelve hacia el rechazo, no hacia la extracción', () => {
-    expect(construirPrompt(VUELO)).toContain('Si no puedes contar las opciones con certeza, responde "varias_opciones"')
+    expect(construirPrompt(VUELO)).toContain('Si no puedes decir con certeza cuantas opciones se ven, responde "varias_opciones"')
   })
 
   it('cuenta las opciones antes de clasificar, y el listado filtrado a UN hotel es detalle (regla 7.5)', () => {
     const p = construirPrompt(HOTEL)
-    expect(p.indexOf('opciones_visibles')).toBeLessThan(p.indexOf('"varias_opciones": se ven DOS O MAS'))
+    expect(p.indexOf('"opciones_vistas"')).toBeLessThan(p.indexOf('"varias_opciones": se ven DOS O MAS'))
     expect(p).toContain('Un precio TACHADO')
-    expect(p).toContain('"2 Hoteles (de 267)" no son')
+    expect(p).toContain('"2 Hoteles (de 267)" no es un producto')
     expect(p).toContain('la tarjeta de UN hotel dentro de un listado filtrado a ese hotel')
   })
 
@@ -73,6 +73,19 @@ describe('el prompt lleva el rechazo por N opciones (RX1)', () => {
   it('una fecha sin año se devuelve sin año: el modelo inventaba 2023', () => {
     expect(construirPrompt(VUELO)).toContain('devuelve --MM-DD')
     expect(construirPrompt(VUELO)).toContain('NUNCA inventes el ano')
+  })
+
+  it('ningún campo de ocupación se lee de las habitaciones ni del régimen: «AD» volvió como «1 Adulto»', () => {
+    // Medido el 2026-09-16 contra la tarjeta de París («1 x Standard Room W... AD»): una de dos
+    // corridas devolvió `ocupacion: '1 Adulto'` y TP3 rechazó una captura buena.
+    const lineas = construirPrompt(HOTEL).split('\n').filter(l => /^- ocupacion/.test(l))
+    expect(lineas.map(l => l.slice(2).split(' ')[0])).toEqual([
+      'ocupacion', 'ocupacion_adultos', 'ocupacion_ninos', 'ocupacion_infantes', 'ocupacion_total',
+    ])
+    for (const l of lineas) {
+      expect(l).toContain('«1 x Standard Room»')
+      expect(l).toContain('alojamiento y desayuno, no un adulto')
+    }
   })
 
   it('prohíbe inventar un desglose y repetir el total como fila', () => {
@@ -219,7 +232,16 @@ describe('normalizar las filas por tipo de pasajero', () => {
     expect(r.porTipoPax?.[0].moneda).toBeNull()
   })
 
-  it('trae el conteo de opciones visibles', () => {
-    expect(normalizarRespuesta({ veredicto: 'detalle_unico', opciones_visibles: 1 }).opcionesVisibles).toBe(1)
+  it('cuenta las opciones DISTINTAS que el modelo dice ver, no un número declarado', () => {
+    expect(normalizarRespuesta({ veredicto: 'detalle_unico', opciones_vistas: [{ nombre: 'Crown Paradise', precio: '3.780.884' }] }).opcionesVisibles).toBe(1)
+    expect(normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      opciones_vistas: [{ nombre: 'Crown Paradise', precio: '3.780.884' }, { nombre: 'crown paradise', precio: '3.780.884' }],
+    }).opcionesVisibles).toBe(1)
+    expect(normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      opciones_vistas: [{ nombre: 'Crown Paradise', precio: '3.780.884' }, { nombre: 'Crown Paradise Golden', precio: '4.100.000' }],
+    }).opcionesVisibles).toBe(2)
+    expect(normalizarRespuesta({ veredicto: 'detalle_unico' }).opcionesVisibles).toBeNull()
   })
 })
