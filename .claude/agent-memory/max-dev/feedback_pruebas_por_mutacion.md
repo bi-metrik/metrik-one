@@ -185,3 +185,8 @@ restaurado aunque se lo pidiera.
 **How to apply:** respaldar con `cp` al scratchpad ANTES de mutar y restaurar con `cp` + `cmp`
 contra ese respaldo; o commitear primero y mutar sobre lo commiteado. Después de restaurar,
 `git status --short` y volver a correr la suite **y** `deno check` antes del commit.
+
+**2026-09-16, #774 — un `toContain` de una palabra no fija el elemento que la pinta.** La prueba
+del sello «Aprobado» siguió verde con el sello BORRADO, porque la línea «Aprobado por ti el…»
+también contiene la palabra. **How to apply:** para un rótulo corto, afirmar sobre el nodo
+(atributo `data-*` + su texto exacto con `toBe`), no sobre el texto de toda la pantalla.
