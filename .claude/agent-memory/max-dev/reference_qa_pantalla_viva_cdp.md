@@ -38,6 +38,14 @@ ahorran tiempo:**
   propio vite (`css: { postcss: { plugins: [tailwind()] } }`) e `import
   '../src/app/globals.css'` desde el `main.tsx` del arnés. Sale una hoja completa (~150 kB)
   y las fotos quedan legibles.
+- ⚠️⚠️ **El puerto de CDP puede estar tomado por el Chromium de OTRA sesión, y no se nota.**
+  Medido el 2026-09-16 (#771): el Chromium propio murió con `bind() failed: Address already in
+  use` en el log del background, y el guion de CDP habló igual contra el navegador ajeno (tenía
+  abierta la QA del #763): creó 15 pestañas allí y dio resultados correctos, así que nada lo
+  delató. Antes de lanzar: `curl -s http://127.0.0.1:<p>/json/version` debe FALLAR; si responde,
+  elegir otro puerto. Para limpiar, cerrar solo las pestañas propias por URL
+  (`/json/close/<id>`), nunca matar ese proceso. Y `pkill -f "<patrón>"` mata también la shell
+  que lo ejecuta, porque su propia línea de comando contiene el patrón (sale con 144).
 - **El binario está en `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`**
   (`chrome-linux64`, no `chrome-linux`), y hay que darle `--headless=new --no-sandbox`.
 - **`node_modules` NO está en el worktree y no hace falta**: node resuelve hacia arriba

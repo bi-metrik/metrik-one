@@ -1,13 +1,15 @@
 ---
 name: terminos-modulo-valida-api
-description: PR #769 (2026-09-16) aceptación de términos dentro de /valida-api y sin ellos no hay llaves; migración 20260917014500 SIN aplicar y PR SIN mergear; por qué va en aceptaciones_terminos y no en otra tabla
+description: PR #769 (2026-09-16) aceptación contractual de términos dentro de /valida-api, mergeado y con la migración 20260917014500 aplicada; su entrada de dos pasos la reemplazó el #771; por qué va en aceptaciones_terminos
 metadata:
   type: project
 ---
 
-**PR #769** (`feat/valida-api-aceptar-terminos`), checks verdes, **SIN mergear** porque trae
-`supabase/migrations/20260917014500_aceptacion_terminos_en_modulo.sql` **SIN aplicar**. Orden: la
-sesión principal aplica, verifica con la cabecera y después mergea.
+**PR #769** (`feat/valida-api-aceptar-terminos`). ⚠️ CADUCÓ el «sin mergear / sin aplicar»:
+medido el 2026-09-16 por PostgREST, está en `main` (`383f5d07`) y `aceptaciones_terminos` ya
+tiene `usuario_id`, `workspace_cliente_id` y `documento_version_id`. Su pantalla de dos pasos
+(Política, luego términos solo para el dueño) la reemplazó el **#771** con una entrada única
+([[entrada-unica-valida-api]]); la fila contractual y el trigger de la base siguen iguales.
 
 **Estado que no se ve en el código:**
 - 4D SOFT no ve el paso: su v1.0 está aceptada por WhatsApp (`def579c7`) y la RPC la devuelve con
