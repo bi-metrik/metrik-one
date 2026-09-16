@@ -86,6 +86,7 @@
 - ⚠️ [Guards de items, cierre por tipo y aprobación](project_guard_bloque_items.md) — #676-#687 mergeados: la regla de quién aprueba es `puedeSerAprobador`
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696 mergeado: `omitir_gate.staff_ids` inerte hasta que SOENA lo cargue
 - ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 la captura en ficha y modal SIN QA en pantalla
+- ⚠️ [Cerrar el bucket publico cert-documentos](project_cerrar_bucket_cert_documentos.md) — #742 mergeado, migración SIN aplicar; y 20260630000001 nunca se aplicó
 - ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler
 - ⚠️⚠️ [WhatsApp sin teléfono (nombre de usuario, BSUID)](project_wa_bsuid_sin_telefono.md) — #724 mergeado SIN redesplegar; envío por `recipient` no verificado en vivo
 - ⚠️⚠️ [Aceptación de términos por WhatsApp](project_aceptacion_terminos_wa.md) — #720 en prod, #722 mergeado SIN redesplegar; dominios de Valida en conflicto; HMAC de wa-webhook NO se valida
