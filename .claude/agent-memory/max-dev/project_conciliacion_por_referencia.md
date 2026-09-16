@@ -1,11 +1,11 @@
 ---
 name: conciliacion-por-referencia
-description: "#738 sin mergear: la confirmación de la financiera baja a la porción (split_json.confirmado_at); backfill de 9 filas propuesto y NO aplicado; el limbo HOY es 0 pero los 9 vuelven con el próximo pago"
+description: "#738 MERGEADO (squash 0af16a3e): la confirmación de la financiera baja a la porción (split_json.confirmado_at); backfill de 9 filas propuesto y NO aplicado; el limbo HOY es 0 pero los 9 vuelven con el próximo pago"
 metadata:
   type: project
 ---
 
-PR **#738** (`fix/conciliacion-por-referencia`), abierto el 2026-09-16. Dos defectos del
+PR **#738**, squash `0af16a3e`, mergeado 2026-09-16 02:52Z con los cuatro checks verdes. Dos defectos del
 panel de conciliación de SOENA, con una sola causa: **un check confirma una REFERENCIA de
 pago y el sistema lo guardaba como estado del NEGOCIO.**
 
