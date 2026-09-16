@@ -34,7 +34,7 @@ function ws(slug: string, name: string, grupo: WorkspaceSummary['grupo']): Works
 // Los 13 visibles de producción al 2026-09-16, en el orden en que llegan (`order('name')`).
 const PRODUCCION: WorkspaceSummary[] = [
   ws('afi', 'AFI International Group S.A.S.', 'clarity'),
-  ws('alma-afi', 'ALMA — Concesion Alto Magdalena', 'clarity'),
+  ws('alma-afi', 'ALMA — Concesion Alto Magdalena', 'sustenta'),
   ws('cda-caqueta', 'CDA del Caquetá', 'valida'),
   ws('cda-elcarmen', 'CDA El Carmen', 'valida'),
   ws('cda-puertotest', 'CDA Puerto Test', 'valida'),
@@ -74,7 +74,7 @@ describe('selector del platform admin agrupado', () => {
     expect(pintar(PRODUCCION)).toContain('Buscar workspace...')
   })
 
-  it('producción: encabezados MéTRIK, Valida, Clarity y Demo, alfabético dentro de cada uno', () => {
+  it('producción: encabezados MéTRIK, Valida, Clarity, Sustenta y Demo, alfabético dentro de cada uno', () => {
     expect(grupos(pintar(PRODUCCION))).toEqual([
       ['MéTRIK', ['MeTRIK']],
       ['Valida', ['CDA del Caquetá', 'CDA El Carmen', 'CDA Puerto Test', 'Maxitec — CDA S.A.S.']],
@@ -82,7 +82,6 @@ describe('selector del platform admin agrupado', () => {
         'Clarity',
         [
           'AFI International Group S.A.S.',
-          'ALMA — Concesion Alto Magdalena',
           'Dimpro',
           'SOENA',
           'Termotech SAS',
@@ -90,13 +89,14 @@ describe('selector del platform admin agrupado', () => {
           'WMC SM SAS',
         ],
       ],
+      ['Sustenta', ['ALMA — Concesion Alto Magdalena']],
       ['Demo', ['Estudio Creativo Lúmina']],
     ])
   })
 
   it('el encabezado se ve como texto, no solo como atributo', () => {
     const html = pintar(PRODUCCION)
-    for (const etiqueta of ['MéTRIK', 'Valida', 'Clarity', 'Demo']) {
+    for (const etiqueta of ['MéTRIK', 'Valida', 'Clarity', 'Sustenta', 'Demo']) {
       expect(html).toContain(`>${etiqueta}</div>`)
     }
   })
@@ -109,6 +109,6 @@ describe('selector del platform admin agrupado', () => {
     const conHuerfano = [...PRODUCCION, ws('nuevo', 'Aaa Nuevo', 'sin_clasificar')]
     const g = grupos(pintar(conHuerfano))
     expect(g.at(-1)).toEqual(['Sin clasificar', ['Aaa Nuevo']])
-    expect(g).toHaveLength(5)
+    expect(g).toHaveLength(6)
   })
 })

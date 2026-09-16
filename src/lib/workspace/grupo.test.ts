@@ -3,9 +3,10 @@ import { grupoDeWorkspace, agruparWorkspaces } from './grupo'
 
 // Los 13 workspaces NO archivados de producción, leídos el 2026-09-16 (slug, name y
 // `config_extra->grupo`), en el orden en que llegan de la consulta (`order('name')`).
+// ALMA pasó de clarity a sustenta el mismo día (releído en producción).
 const PRODUCCION_2026_09_16 = [
   { slug: 'afi', name: 'AFI International Group S.A.S.', grupo: 'clarity' },
-  { slug: 'alma-afi', name: 'ALMA — Concesion Alto Magdalena', grupo: 'clarity' },
+  { slug: 'alma-afi', name: 'ALMA — Concesion Alto Magdalena', grupo: 'sustenta' },
   { slug: 'cda-caqueta', name: 'CDA del Caquetá', grupo: 'valida' },
   { slug: 'cda-elcarmen', name: 'CDA El Carmen', grupo: 'valida' },
   { slug: 'cda-puertotest', name: 'CDA Puerto Test', grupo: 'valida' },
@@ -24,15 +25,16 @@ function resumen(grupos: ReturnType<typeof agruparWorkspaces<{ slug: string; nam
 }
 
 describe('grupoDeWorkspace', () => {
-  it('reconoce las cuatro claves', () => {
+  it('reconoce las cinco claves', () => {
     expect(grupoDeWorkspace('metrik')).toBe('metrik')
     expect(grupoDeWorkspace('valida')).toBe('valida')
     expect(grupoDeWorkspace('clarity')).toBe('clarity')
+    expect(grupoDeWorkspace('sustenta')).toBe('sustenta')
     expect(grupoDeWorkspace('demo')).toBe('demo')
   })
 
   it('ausente, vacío, mal escrito o de otro tipo cae en sin clasificar', () => {
-    for (const v of [undefined, null, '', 'Valida', ' valida', 'nativo', 'otro', true, 1, {}]) {
+    for (const v of [undefined, null, '', 'Valida', ' valida', 'Sustenta', 'nativo', 'otro', true, 1, {}]) {
       expect(grupoDeWorkspace(v)).toBe('sin_clasificar')
     }
   })
@@ -44,18 +46,19 @@ describe('grupoDeWorkspace', () => {
 })
 
 describe('agruparWorkspaces', () => {
-  it('producción: MéTRIK primero, luego Valida, Clarity y Demo; alfabético adentro', () => {
+  it('producción: MéTRIK primero, luego Valida, Clarity, Sustenta y Demo; alfabético adentro', () => {
     expect(resumen(agruparWorkspaces(PRODUCCION_2026_09_16))).toEqual([
       ['MéTRIK', ['metrik']],
       ['Valida', ['cda-caqueta', 'cda-elcarmen', 'cda-puertotest', 'maxitec']],
-      ['Clarity', ['afi', 'alma-afi', 'dimpro', 'soena', 'termotech', 'trappvel', 'wmc-sm']],
+      ['Clarity', ['afi', 'dimpro', 'soena', 'termotech', 'trappvel', 'wmc-sm']],
+      ['Sustenta', ['alma-afi']],
       ['Demo', ['ana-demo']],
     ])
   })
 
   it('el orden de grupos no depende del orden de llegada', () => {
     const alReves = [...PRODUCCION_2026_09_16].reverse()
-    expect(agruparWorkspaces(alReves).map(g => g.clave)).toEqual(['metrik', 'valida', 'clarity', 'demo'])
+    expect(agruparWorkspaces(alReves).map(g => g.clave)).toEqual(['metrik', 'valida', 'clarity', 'sustenta', 'demo'])
   })
 
   it('MéTRIK va primero aunque su nombre ordene después de los demás', () => {

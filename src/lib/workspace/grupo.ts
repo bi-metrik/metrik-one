@@ -19,6 +19,7 @@ export const GRUPOS_DE_WORKSPACE = [
   { clave: 'metrik', etiqueta: 'MéTRIK' },
   { clave: 'valida', etiqueta: 'Valida' },
   { clave: 'clarity', etiqueta: 'Clarity' },
+  { clave: 'sustenta', etiqueta: 'Sustenta' },
   { clave: 'demo', etiqueta: 'Demo' },
   { clave: 'sin_clasificar', etiqueta: 'Sin clasificar' },
 ] as const
