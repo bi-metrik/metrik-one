@@ -89,6 +89,7 @@ import {
   type MarcaFacturaMinima,
 } from '@/lib/facturacion/factura-del-negocio'
 import { gatesDeFacturaPorLinea, slugFacturaDeLinea, type GateFactura } from '@/lib/facturacion/leer-factura-del-negocio'
+import { aplicarSumas, type CampoConSuma } from '@/lib/negocios/campo-suma'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
@@ -4676,6 +4677,9 @@ export async function marcarBloqueCompleto(
     workspaceId,
     modo: 'mezcla',
   })
+  // Campos `suma_de` (ej. número de pasajeros = adultos + niños + infantes): el servidor
+  // los vuelve a calcular sobre lo ya saneado. Lo que manda el navegador es UX. Ver `campo-suma.ts`.
+  mergedData = aplicarSumas(configExtraBloque.fields as CampoConSuma[] | undefined, mergedData)
 
   // ── Tarifa UPME confirmada ────────────────────────────────────────────────
   // Barrera real del número que se guarda: la pantalla ya avisa mientras se escribe,
@@ -5402,14 +5406,19 @@ export async function actualizarBloqueData(
   // Lista blanca: el navegador escribe los campos que el bloque declara y las pocas claves
   // propias de su componente. Referencias a archivos (`docs`, `drive_url`, `drive_file_id`)
   // y la traza del servidor (`_ediciones`, …) conservan lo guardado.
-  const dataSaneada = sanearDataDelNavegador({
-    entrante: data,
-    guardada: dataDestino ?? {},
-    tipo: tipoAbierto,
-    configExtra: ce,
-    workspaceId,
-    modo: 'reemplazo',
-  })
+  // Campos `suma_de`: el servidor los recalcula sobre lo saneado, antes de que la corrección
+  // compare, para que la traza también registre el derivado (ver `campo-suma.ts`).
+  const dataSaneada = aplicarSumas(
+    (ce as { fields?: CampoConSuma[] } | null)?.fields,
+    sanearDataDelNavegador({
+      entrante: data,
+      guardada: dataDestino ?? {},
+      tipo: tipoAbierto,
+      configExtra: ce,
+      workspaceId,
+      modo: 'reemplazo',
+    }),
+  )
 
   // ── Corrección post-avance ────────────────────────────────────────────────
   // Escribir en un bloque de una etapa YA SUPERADA no es trabajo de la etapa, es
