@@ -11,7 +11,8 @@
 - ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: por cobros; anular la única viva = el cron la re-emite
 - ⚠️ [Módulos y gate por ruta (A1)](project_modulos_gate_ruta_a1.md) — #733 mergeado y aplicado; gate en middleware (el layout no corre al navegar)
 - ⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 mergeado y aplicado, 4 fichas en v1; un NULL en un CHECK deja pasar
-- ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 SIN mergear, migración SIN aplicar, 4d-soft no existe; 3 huecos del riesgo 11 sin corregir
+- ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 mergeado, migración SIN aplicar, 4d-soft no existe
+- ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #752 cierra 4; consultarValida reabre el de SARLAFT y applyPlantilla va sin sesión
 - ⚠️ [Ensayar una migración con PGlite, versión exacta](reference_pglite_version_de_ci.md) — pglite NO está en el node_modules de la torre; instalarlo aparte con la versión de `package.json`
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — PR #577 sin mergear: nadie se suspende solo, la tabla nace vacía, AFI son 3 planes
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
@@ -98,6 +99,7 @@
 ## Referencias
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio
+- ⚠️ [Qué export 'use server' es endpoint](reference_manifiesto_server_actions.md) — lo dice el manifiesto del build; importada solo por un route.ts NO se registra
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST
 - [Ensayar una función SQL con PGlite](reference_ensayo_sql_pglite.md) — cuerpo viejo y nuevo sobre una foto de producción, sin escribir; el viejo debe reproducir la pantalla
 - ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD con conteo sobre tabla inexistente da 204 sin error; Storage rechaza tildes

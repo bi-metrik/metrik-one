@@ -1,13 +1,13 @@
 ---
 name: modulo-valida-api-c2
-description: PR #747 (C2, módulo /valida-api) SIN mergear y migración SIN aplicar; 4d-soft no existe; por qué el módulo exige la llave valida_api además del cliente, por qué la Política es 1.4 y 3 huecos del riesgo 11 sin corregir
+description: PR #747 (C2, módulo /valida-api) mergeado con la migración SIN aplicar; 4d-soft no existe; por qué el módulo exige la llave valida_api además del cliente, por qué la Política es 1.4; los huecos del riesgo 11 los cierra el #752
 metadata:
   type: project
 ---
 
 Entrega **C2** de `proyectos/metrik/one/2026-09-15_spec-modulos-servicios-cobro.md` (§5.2-§5.4),
-abierta el 2026-09-16 como **PR #747**, rama `feat/modulo-valida-api-c2`. **Sin mergear** por
-orden del encargo. Sin suscripción (C4) y sin tocar el portal v1 (C3).
+abierta el 2026-09-16 como **PR #747**, rama `feat/modulo-valida-api-c2`. ⚠️ CADUCÓ el «sin
+mergear»: el 2026-09-16 ya estaba en `main` (`2181fb91`), con la migración todavía sin aplicar. Sin suscripción (C4) y sin tocar el portal v1 (C3).
 
 **Estado que no se ve en el código:**
 - `20260916180000_modulo_valida_api.sql` **SIN aplicar** (DDL puro). Sin ella el módulo no pasa
@@ -39,7 +39,9 @@ orden del encargo. Sin suscripción (C4) y sin tocar el portal v1 (C3).
   default privileges de producción encendidos.
 - Las RPC `mis_*` se llaman con el cliente de SESIÓN (`getWorkspace().supabase`): con el de
   servicio `current_user_workspace_id()` no tiene de dónde leer y devuelven nada.
-- **Riesgo 11, hallazgos reportados y SIN corregir:** las rutas `/api/afi/generar` y
+- **Riesgo 11:** ⚠️ CADUCÓ el «sin corregir»: los cuatro los cierra el **PR #752**
+  ([[huecos-tenant-riesgo11]]), que además deja reportados otros abiertos. Lo que se había visto:
+  las rutas `/api/afi/generar` y
   `/api/afi/contrato` validan que el negocio sea de AFI pero no que la sesión lo sea;
   `crearV1Automatica` (`'use server'`, sin sesión) reescribe `negocio_bloques.data` de cualquier
   bloque (951 propuestas aprobadas); `guardarDatosSarlaft`/`recalcularScoreNegocio` hacen UPSERT
