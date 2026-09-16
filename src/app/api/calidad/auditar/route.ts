@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
+import { puertaModuloLlamadas } from '@/lib/calidad/puerta-modulo'
 import { auditarTranscripcion } from '@/lib/calidad/motor-auditoria'
 import { getPromptsAuditoria } from '@/lib/calidad/prompts'
 
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
   if (!getRolePermissions(role).canViewCalidadTodos) {
     return NextResponse.json({ error: 'Sin permiso para auditar llamadas' }, { status: 403 })
   }
+  const sinModulo = await puertaModuloLlamadas()
+  if (sinModulo) return sinModulo
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {

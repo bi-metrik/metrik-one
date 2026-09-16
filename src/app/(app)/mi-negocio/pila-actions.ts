@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createDriveFolder, uploadFileToDrive } from '@/lib/google-drive'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { revalidatePath } from 'next/cache'
 
 const SUBFOLDER_PILA = 'PILA'
@@ -50,6 +51,13 @@ export async function uploadPlanillaPila(formData: FormData): Promise<ActionResu
 
   if (role !== 'owner' && role !== 'admin') {
     return { success: false, error: 'Solo owner o admin pueden cargar PILA' }
+  }
+
+  // La sección solo se muestra con `cobros_recurrentes`, pero la acción es un endpoint: sin
+  // esta puerta, el owner de cualquier workspace con carpeta de Drive subía archivos con las
+  // credenciales de Drive de MeTRIK.
+  if (!(await exigirModulo(REQUISITO.cobrosRecurrentes)).ok) {
+    return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
   }
 
   const anio = parseInt(String(formData.get('anio') ?? ''), 10)

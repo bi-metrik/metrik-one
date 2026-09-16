@@ -2972,6 +2972,7 @@ export async function cambiarEtapaNegocio(
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { error: MENSAJE_MODULO_NO_ACTIVO }
 
   const { data: etapaRaw } = await db(supabase)
     .from('etapas_negocio')
@@ -8382,6 +8383,7 @@ export async function perderNegocio(
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { error: MENSAJE_MODULO_NO_ACTIVO }
 
   // El motivo es obligatorio (queda registrado en razon_cierre para medir
   // pérdida de venta y calidad de pauta en el descarte de leads).
@@ -8462,6 +8464,7 @@ export async function pausarNegocio(
 ): Promise<{ error: string | null; autoPerdido?: boolean }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { error: MENSAJE_MODULO_NO_ACTIVO }
 
   // Validar feature flag
   const { data: wsRaw } = await db(supabase)
@@ -8601,6 +8604,7 @@ export async function reactivarNegocio(
 ): Promise<{ error: string | null; safetyNet?: boolean }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { error: MENSAJE_MODULO_NO_ACTIVO }
 
   const { data: negocio } = await db(supabase)
     .from('negocios')
@@ -8663,6 +8667,7 @@ export async function cancelarNegocio(
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { error: MENSAJE_MODULO_NO_ACTIVO }
 
   if (!descripcion || descripcion.trim().length < 20) {
     return { error: 'La descripcion debe tener al menos 20 caracteres' }
@@ -8979,6 +8984,7 @@ export async function completarNegocio(
 ): Promise<{ error: string | null }> {
   const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { error: MENSAJE_MODULO_NO_ACTIVO }
 
   // Validar que existe y esta en stage cobro
   const { data: negocio } = await db(supabase)

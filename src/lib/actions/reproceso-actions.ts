@@ -27,6 +27,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
 import {
@@ -141,6 +142,7 @@ export async function reprocesarNegocio(
 ): Promise<ResultadoReproceso> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   const detalle = (input.detalle ?? '').trim()
   if (!detalle) return { ok: false, error: 'Describe por qué se reprocesa el caso' }
@@ -469,6 +471,7 @@ export async function registrarErrorSinDevolver(
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   const detalle = (input.detalle ?? '').trim()
   if (!detalle) return { ok: false, error: 'Describe qué pasó' }
@@ -551,6 +554,7 @@ export async function cerrarReproceso(
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
   if (role !== 'owner' && role !== 'admin' && role !== 'supervisor') {
     return { ok: false, error: 'Solo supervisores, admin u owner pueden cerrar un reproceso' }
   }

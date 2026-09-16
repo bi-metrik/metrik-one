@@ -11,6 +11,7 @@ import {
   type Area,
 } from './can-edit'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 
 /**
  * Guards server-side de negocios. TODA server action que muta bloques/etapas o
@@ -19,14 +20,27 @@ import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-c
  *
  * UserContext.id = staff.id (negocio_responsables guarda staff.id). El cliente
  * supabase es el del usuario real/impersonado (getWorkspace ya aplica "Ver como").
+ *
+ * Los negocios, sus bloques y sus etapas son de Clarity: los tres guards piden el módulo
+ * además del rol. El gate por ruta cierra `/negocios`, pero cada acción es un endpoint, y
+ * detrás de este guard hay lectura con Gemini (documentos), Drive con las credenciales de
+ * MeTRIK (formularios, propuesta, guía) y el almacenamiento externo. Medido el 2026-09-16:
+ * los únicos negocios fuera de un workspace con Clarity son 2 de advise, sin tocar desde el
+ * 2026-07-30 y ya fuera de su alcance por el gate de `/negocios`.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(c: unknown): any { return c }
 
-async function resolverCtx() {
+type Ctx = { supabase: unknown; user: UserContext }
+
+async function resolverCtx(): Promise<Ctx | { error: string } | null> {
   const { supabase, role, staffId, areas, error } = await getWorkspace()
   if (error) return null
+  const modulo = await exigirModulo(REQUISITO.clarity)
+  if (!modulo.ok) {
+    return { error: modulo.error === 'no_autenticado' ? 'No autenticado' : MENSAJE_MODULO_NO_ACTIVO }
+  }
   const user: UserContext = {
     id: staffId ?? '',
     role: (role ?? 'read_only') as Role,
@@ -49,6 +63,7 @@ export async function guardEditarBloque(
 ): Promise<{ ok: boolean; error?: string }> {
   const c = await resolverCtx()
   if (!c) return { ok: false, error: 'No autenticado' }
+  if ('error' in c) return { ok: false, error: c.error }
   const { data: nb } = await db(c.supabase)
     .from('negocio_bloques')
     .select('negocio_id, negocios!inner(estado), bloque_configs!inner(config_extra, etapas_negocio!inner(stage))')
@@ -84,6 +99,7 @@ export async function guardVerNegocio(
 ): Promise<{ ok: boolean; error?: string }> {
   const c = await resolverCtx()
   if (!c) return { ok: false, error: 'No autenticado' }
+  if ('error' in c) return { ok: false, error: c.error }
   const resp = await responsablesDe(c.supabase, negocioId)
   if (!canViewNegocio(c.user, resp)) return { ok: false, error: 'Sin acceso a este negocio' }
   return { ok: true }
@@ -101,6 +117,7 @@ export async function guardAvanzarStage(
 ): Promise<{ ok: boolean; error?: string }> {
   const c = await resolverCtx()
   if (!c) return { ok: false, error: 'No autenticado' }
+  if ('error' in c) return { ok: false, error: c.error }
   const resp = await responsablesDe(c.supabase, negocioId)
   if (!canAdvanceStage(c.user, stageTo, resp, areasQueAvanzan)) {
     return { ok: false, error: 'Tu rol o área no permite avanzar a esta fase' }
@@ -117,6 +134,6 @@ export async function guardAvanzarStage(
  */
 export async function esGerencial(): Promise<boolean> {
   const c = await resolverCtx()
-  if (!c) return false
+  if (!c || 'error' in c) return false
   return c.user.role === 'owner' || c.user.role === 'admin'
 }

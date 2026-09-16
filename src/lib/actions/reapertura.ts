@@ -19,6 +19,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from './get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
@@ -44,6 +45,7 @@ export async function reabrirNegocio(
   if (error || !workspaceId || !userId) {
     return { ok: false, error: 'No autenticado' }
   }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   // Cargar negocio
   const { data: negocio } = await supabase
@@ -225,6 +227,7 @@ export async function crearNegocioDesdeCerrado(
   if (error || !workspaceId) {
     return { ok: false, error: 'No autenticado' }
   }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   // Cargar origen. Cast del cliente: `negocios.origen`/`aliado_id` son columnas
   // nuevas que aún no están en database.ts generado (mismo patrón `db()` que

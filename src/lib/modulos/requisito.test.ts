@@ -53,6 +53,17 @@ describe('cumpleRequisitoModulo', () => {
     expect(cumpleRequisitoModulo(R.pagoEpayco, TERMOTECH)).toBe(false)
   })
 
+  it('llamadas y cobros recurrentes: advise audita, metrik sube PILA, SOENA no', () => {
+    const ADVISE = ctx({ wa_customer_bot: true, calidad_llamadas: true, fab_registrar_cobro: true })
+    const METRIK_COBROS = ctx({ business: true, cobros_recurrentes: true })
+    expect(cumpleRequisitoModulo(R.llamadas, ADVISE)).toBe(true)
+    expect(cumpleRequisitoModulo(R.llamadas, SOENA)).toBe(false)
+    expect(cumpleRequisitoModulo(R.clarity, ADVISE)).toBe(false)
+    expect(cumpleRequisitoModulo(R.cobrosRecurrentes, METRIK_COBROS)).toBe(true)
+    expect(cumpleRequisitoModulo(R.cobrosRecurrentes, SOENA)).toBe(false)
+    expect(cumpleRequisitoModulo(R.cobrosRecurrentes, ctx({ cobros_recurrentes: true }))).toBe(false)
+  })
+
   it('una función sin su módulo no basta', () => {
     expect(cumpleRequisitoModulo(R.sustentaDual, ctx({ compliance_dual_informa: true }))).toBe(false)
   })

@@ -29,6 +29,7 @@ import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleActividad } from '../_shared/handlers/actividad.ts';
 import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
+import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -404,6 +405,15 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
 
+  // 1b. Modulo. Todo lo que sigue (gastos, contactos, actividad de negocios, numeros, cartera, y
+  //     la transcripcion y el parseo con Gemini) es de Clarity. Va despues de la aceptacion de
+  //     terminos, que no depende del modulo (es como un cliente de Valida API recibe su llave),
+  //     y antes de gastar un solo token. Ver `_shared/wa-modulos.ts`.
+  if (!botEquipoPermitido(user.modulos)) {
+    await sendTextMessage(message.phone, MENSAJE_BOT_SIN_CLARITY);
+    return;
+  }
+
   // 2. Check subscription (WhatsApp only for Pro+)
   if (!['active_pro_plus', 'trial'].includes(user.subscription_status)) {
     await sendTextMessage(message.phone,
@@ -717,7 +727,7 @@ async function identifyUser(
     // Get workspace subscription info
     const { data: workspace } = await supabase
       .from('workspaces')
-      .select('subscription_status')
+      .select('subscription_status, modules')
       .eq('id', staffMatch.workspace_id)
       .single();
 
@@ -739,6 +749,7 @@ async function identifyUser(
       role,
       user_id: staffMatch.user_id || undefined,
       subscription_status: workspace?.subscription_status || 'trial',
+      modulos: workspace ?? null,
     };
   }
 
@@ -754,7 +765,7 @@ async function identifyUser(
   if (collabMatch) {
     const { data: workspace } = await supabase
       .from('workspaces')
-      .select('subscription_status')
+      .select('subscription_status, modules')
       .eq('id', collabMatch.workspace_id)
       .single();
 
@@ -770,6 +781,7 @@ async function identifyUser(
       role: collabRole,
       collaborator_id: collabMatch.id,
       subscription_status: workspace?.subscription_status || 'trial',
+      modulos: workspace ?? null,
     };
   }
 

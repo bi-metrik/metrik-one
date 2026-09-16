@@ -138,6 +138,8 @@ export interface WaUser {
   role: UserRole;
   collaborator_id?: string;
   subscription_status: string;
+  /** Fila de `workspaces` con sus `modules`, o `null` si no se pudo leer. Ver `wa-modulos.ts`. */
+  modulos: { modules?: Record<string, unknown> | null } | null;
 }
 
 // --- WhatsApp Message ---
