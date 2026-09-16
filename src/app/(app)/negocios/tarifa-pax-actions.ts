@@ -24,6 +24,8 @@ import {
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
+import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 
 /**
@@ -43,13 +45,27 @@ import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
  * Confirmar no recibe números del navegador: vuelve a resolver la tarifa con las lecturas
  * guardadas. Una server action exportada es un endpoint alcanzable aunque ningún botón la
  * invoque, y lo que entra por aquí es el costo con el que se mide el margen.
+ *
+ * ## Toda escritura devuelve la tarifa que quedó
+ *
+ * La casilla pinta con ella sin esperar el refresco de la página (`tarifaMasReciente`).
  */
 
 const CLAVES: ClaveCasilla[] = ['grupo_completo', 'sin_infantes', 'solo_adultos']
 
+/**
+ * El tipo de rubro del costo por pasajero. Es lo que cobra el proveedor por cada pasajero
+ * (aerolínea, hotel, operador), con sus tasas y su fee adentro: TP1 solo lee la cantidad y
+ * el subtotal de cada fila, así que partirlo en `impuestos` y `fee_proveedor` exigiría leer
+ * lo que la regla prohíbe. `servicios_prof` lo contaba como honorario de un profesional.
+ */
+const TIPO_RUBRO_POR_PASAJERO: TipoRubroViaje = 'tarifa'
+
 export type ResultadoCasilla =
-  | { ok: true; mensaje: string; alertas: string[] }
+  | { ok: true; mensaje: string; alertas: string[]; tarifa: TarifaPax }
   | { ok: false; codigo: string; mensaje: string; detalle?: string; pideMoneda?: boolean }
+
+export type ResultadoTarifa = { success: boolean; error?: string; tarifa?: TarifaPax }
 
 interface ItemLeido {
   grupo: string | null
@@ -89,25 +105,29 @@ async function leerItem(supabase: unknown, itemId: string): Promise<ItemLeido | 
  * La lectura del modelo tarda de 8 a 25 segundos. Si en ese tiempo alguien pegó el
  * pantallazo de otra casilla de la misma línea, escribir sobre la foto tomada al empezar
  * borraría esa lectura sin que nada falle. `muta` recibe la tarifa FRESCA.
+ *
+ * Devuelve la tarifa que quedó, con la marca de cuándo la escribió el servidor.
  */
 async function guardarTarifa(
   supabase: unknown,
   itemId: string,
   muta: (actual: TarifaPax) => TarifaPax,
-): Promise<string | null> {
+): Promise<{ error: string } | { tarifa: TarifaPax }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
   const { data, error } = await sb.from('items').select('*').eq('id', itemId).maybeSingle()
-  if (error) return error.message
-  if (!data) return 'Ítem no encontrado'
-  const siguiente = muta(leerTarifaPax(data.tarifa_pax))
+  if (error) return { error: error.message }
+  if (!data) return { error: 'Ítem no encontrado' }
+  const siguiente: TarifaPax = { ...muta(leerTarifaPax(data.tarifa_pax)), actualizadaEn: new Date().toISOString() }
   const { error: errUpd } = await sb.from('items').update({ tarifa_pax: siguiente }).eq('id', itemId)
   if (errUpd) {
-    return errUpd.code === '42703'
-      ? 'Falta aplicar la migración de la tarifa por pasajero. Avísale a MeTRIK.'
-      : errUpd.message
+    return {
+      error: errUpd.code === '42703'
+        ? 'Falta aplicar la migración de la tarifa por pasajero. Avísale a MeTRIK.'
+        : errUpd.message,
+    }
   }
-  return null
+  return { tarifa: siguiente }
 }
 
 async function contexto(itemId: string) {
@@ -194,7 +214,7 @@ export async function leerCasillaDeItem(
   }
   leida.alertas = [...leida.alertas, ...validacion.alertas]
 
-  const err = await guardarTarifa(supabase, itemId, actual => {
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
     const casillas = { ...(actual.casillas ?? {}) }
     // Una casilla nueva invalida cualquier confirmación de «el menor no paga»: la resta que
     // se confirmó ya no es la misma.
@@ -205,11 +225,13 @@ export async function leerCasillaDeItem(
     casillas[clave] = leida
     return { ...actual, casillas }
   })
-  if (err) return { ok: false, codigo: 'GUARDAR', mensaje: err }
+  if ('error' in guardado) return { ok: false, codigo: 'GUARDAR', mensaje: guardado.error }
 
-  const estado = resolverTarifa(composicion, { ...(tarifa.casillas ?? {}), [clave]: leida }, ranura.slug)
+  // El mensaje sale de lo que QUEDÓ guardado (que puede traer una casilla que otra persona
+  // pegó mientras el modelo leía), no de la foto tomada al empezar.
+  const estado = resolverTarifa(composicion, guardado.tarifa.casillas ?? {}, ranura.slug)
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
-  return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas }
+  return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas, tarifa: guardado.tarifa }
 }
 
 // ── Quitar la lectura de una casilla ─────────────────────────────────────────
@@ -217,18 +239,18 @@ export async function leerCasillaDeItem(
 export async function quitarCasillaDeItem(
   itemId: string,
   clave: ClaveCasilla,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<ResultadoTarifa> {
   if (!CLAVES.includes(clave)) return { success: false, error: 'Casilla desconocida' }
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
-  const err = await guardarTarifa(ctx.supabase, itemId, actual => {
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
     const casillas = { ...(actual.casillas ?? {}) }
     delete casillas[clave]
     return { ...actual, casillas }
   })
-  if (err) return { success: false, error: err }
+  if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
-  return { success: true }
+  return { success: true, tarifa: guardado.tarifa }
 }
 
 // ── CC2: el menor no paga ────────────────────────────────────────────────────
@@ -236,7 +258,7 @@ export async function quitarCasillaDeItem(
 export async function confirmarMenorNoPaga(
   itemId: string,
   clave: ClaveCasilla,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   if (!ctx.composicion) return { success: false, error: 'La línea no tiene composición' }
@@ -245,15 +267,15 @@ export async function confirmarMenorNoPaga(
   if (estado.estado !== 'confirmar_menor_no_paga' || estado.casilla.clave !== clave) {
     return { success: false, error: 'No hay nada que confirmar en esa casilla. Recarga la cotización.' }
   }
-  const err = await guardarTarifa(ctx.supabase, itemId, actual => {
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
     const casillas = { ...(actual.casillas ?? {}) }
     const l = casillas[clave]
     if (l) casillas[clave] = { ...l, menorNoPagaConfirmado: true }
     return { ...actual, casillas }
   })
-  if (err) return { success: false, error: err }
+  if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
-  return { success: true }
+  return { success: true, tarifa: guardado.tarifa }
 }
 
 // ── Composición de la línea (CC4b, P7) ───────────────────────────────────────
@@ -269,7 +291,7 @@ export async function confirmarMenorNoPaga(
 export async function actualizarComposicionDeItem(
   itemId: string,
   composicion: { adultos: number | string; ninos: number | string; infantes: number | string } | null,
-): Promise<{ success: boolean; error?: string; borroLecturas?: boolean }> {
+): Promise<ResultadoTarifa & { borroLecturas?: boolean }> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
 
@@ -282,14 +304,14 @@ export async function actualizarComposicionDeItem(
   const cambia = !nueva || !anterior || !mismaComposicion(nueva, anterior)
   const habiaLecturas = Object.keys(ctx.tarifa.casillas ?? {}).length > 0
 
-  const err = await guardarTarifa(ctx.supabase, itemId, actual => ({
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => ({
     ...actual,
     composicion: propia,
     ...(cambia ? { casillas: {}, confirmada: null } : {}),
   }))
-  if (err) return { success: false, error: err }
+  if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
-  return { success: true, borroLecturas: cambia && habiaLecturas }
+  return { success: true, borroLecturas: cambia && habiaLecturas, tarifa: guardado.tarifa }
 }
 
 // ── Confirmar el costo por pasajero ──────────────────────────────────────────
@@ -297,7 +319,7 @@ export async function actualizarComposicionDeItem(
 export async function confirmarTarifaPorPasajero(
   itemId: string,
   tasaCambio: number | null,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   const { supabase, item, ranura, tarifa, composicion } = ctx
@@ -337,8 +359,8 @@ export async function confirmarTarifaPorPasajero(
   const { error: errInsertar } = await sb.from('rubros').insert(
     costos.map((c, i) => ({
       item_id: itemId,
-      // `rubros.tipo` tiene un CHECK de seis valores: el concepto va en la descripción.
-      tipo: 'servicios_prof',
+      // El tipo es el concepto (tarifa del proveedor); el tipo de pasajero va en la descripción.
+      tipo: TIPO_RUBRO_POR_PASAJERO,
       descripcion: NOMBRE_TIPO[c.tipo],
       cantidad: c.cantidad,
       unidad: 'pax',
@@ -349,10 +371,14 @@ export async function confirmarTarifaPorPasajero(
   )
   if (errInsertar) return { success: false, error: errInsertar.message }
 
-  // Nombre y descripción: los de la casilla 1, solo si la captura los trae. Una liquidación
-  // sin nombre de hotel no le borra a la línea el nombre que le puso quien cotiza.
+  // El NOMBRE de la casilla 1 solo entra si la línea no tiene uno propio: el que escribió
+  // quien cotiza no se toca (`nombre-linea.ts`). La descripción sí sale de la captura.
   const primera = casillas.grupo_completo
-  const nombreLeido = primera && primera.nombre !== ranura.label ? primera.nombre : null
+  const nombreLeido = nombreAlConfirmarLectura({
+    nombreActual: item.nombre,
+    nombreLeido: primera?.nombre,
+    etiquetaRanura: ranura.label,
+  })
   const notas = [...new Set(Object.values(casillas).flatMap(l => l?.notasCliente ?? []))]
   const baseDescripcion = primera?.descripcion?.trim() || (item.descripcion ?? '').trim()
   const descripcion = [baseDescripcion, ...notas.filter(n => !baseDescripcion.includes(n))]
@@ -381,10 +407,10 @@ export async function confirmarTarifaPorPasajero(
     tasa: moneda === 'COP' ? null : tasaCambio,
     confirmadaEn: new Date().toISOString(),
   }
-  const err = await guardarTarifa(supabase, itemId, actual => ({ ...actual, confirmada }))
-  if (err) return { success: false, error: err }
+  const guardado = await guardarTarifa(supabase, itemId, actual => ({ ...actual, confirmada }))
+  if ('error' in guardado) return { success: false, error: guardado.error }
 
   await recalcularTotales(item.cotizacionId)
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
-  return { success: true }
+  return { success: true, tarifa: guardado.tarifa }
 }

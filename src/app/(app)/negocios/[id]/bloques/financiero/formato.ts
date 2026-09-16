@@ -6,7 +6,7 @@
 // categoría rotulada distinto según en qué bloque la mires.
 // ============================================================
 
-import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
+import { TIPOS_RUBRO, TIPOS_RUBRO_VIAJE } from '@/lib/catalogos/constants'
 import { TIPO_RUBRO_SIN_DETALLE } from '@/lib/negocios/presupuesto-ejecucion'
 
 export const CATEGORIA_LABELS: Record<string, string> = {
@@ -33,9 +33,7 @@ export const RUBRO_LABELS: Record<string, string> = {
   // Los tres tipos de viaje los admite el CHECK de `rubros.tipo` pero no están en el
   // catálogo seleccionable (`TIPOS_RUBRO`): meterlos ahí los ofrecería en el editor
   // de rubros de cualquier cotización. Sin rótulo, la barra mostraría el slug.
-  tarifa: 'Tarifa del proveedor',
-  impuestos: 'Impuestos del proveedor',
-  fee_proveedor: 'Fee del proveedor',
+  ...Object.fromEntries(TIPOS_RUBRO_VIAJE.map(t => [t.value, t.label])),
 }
 
 export const fmt = (v: number) =>

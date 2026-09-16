@@ -462,11 +462,11 @@ export interface RubroPropuesto {
   /**
    * Concepto tal como se muestra y como se guarda en `rubros.descripcion`.
    *
-   * ⚠️ NO es `rubros.tipo`. Esa columna tiene un CHECK de seis valores
-   * (`mo_propia`, `mo_terceros`, `materiales`, `viaticos`, `software`,
-   * `servicios_prof`) y escribir `'tarifa'` ahí la rechaza la base con 23514. El
-   * concepto del diseño (tarifa / impuestos / fee del proveedor) vive en la
-   * descripción hasta que exista la migración que amplíe el CHECK.
+   * ⚠️ NO es `rubros.tipo`. Este comentario decía que el CHECK de esa columna tenía seis
+   * valores y rechazaba `'tarifa'`: desde el 2026-09-14 admite también `tarifa`,
+   * `impuestos` y `fee_proveedor` (`TIPOS_RUBRO_VIAJE`, `lib/catalogos/constants.ts`).
+   * La tarifa por pasajero ya escribe `tarifa`; este cargue de un solo total sigue en
+   * `servicios_prof` y el concepto en la descripción.
    */
   concepto: string
   cantidad: number

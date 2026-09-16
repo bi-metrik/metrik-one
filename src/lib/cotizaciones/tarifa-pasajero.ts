@@ -841,6 +841,12 @@ export interface TarifaPax {
   composicion?: Composicion | null
   casillas?: CasillasLeidas
   confirmada?: TarifaConfirmada | null
+  /**
+   * Cuándo la escribió el servidor por última vez (reloj del servidor, ISO). Es lo que
+   * decide, en pantalla, entre lo que llegó con la página y lo que el servidor acaba de
+   * devolver al guardar (ver `tarifaMasReciente`). Ausente en las escritas antes de él.
+   */
+  actualizadaEn?: string | null
 }
 
 /** Lee `items.tarifa_pax` sin confiar en su forma: un jsonb viejo o roto no rompe la pantalla. */
@@ -873,7 +879,27 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     composicion: normalizarComposicion(r.composicion),
     casillas,
     confirmada,
+    actualizadaEn: typeof r.actualizadaEn === 'string' ? r.actualizadaEn : null,
   }
+}
+
+/**
+ * La tarifa que se pinta: la de la página o la que el servidor acaba de devolver al
+ * guardar, la que escribió el servidor DESPUÉS.
+ *
+ * ⚠️ Por qué existe (Trappvel, 2026-09-16): pegar un pantallazo sin moneda, elegir COP, y
+ * la lectura quedaba guardada mientras la casilla seguía pintando la página vieja hasta
+ * recargar. En los registros de Vercel el refresco SÍ salió después de guardar, y el mismo
+ * camino no se pudo reproducir fuera de producción. La casilla no puede depender de ese
+ * refresco para mostrar lo que el propio servidor le confirmó que guardó.
+ *
+ * Gana la página cuando es igual de nueva o más: en cuanto el refresco llega, manda ella.
+ * Una guardada sin marca nunca gana (no se puede saber si es más nueva).
+ */
+export function tarifaMasReciente(deLaPagina: TarifaPax, guardada: TarifaPax | null): TarifaPax {
+  if (!guardada?.actualizadaEn) return deLaPagina
+  const pagina = deLaPagina.actualizadaEn ?? ''
+  return guardada.actualizadaEn > pagina ? guardada : deLaPagina
 }
 
 /**

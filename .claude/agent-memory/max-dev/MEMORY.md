@@ -46,7 +46,7 @@
 - ⚠️ [El día: itinerario y sugeridos](project_dia_relativo_sugeridos.md) — #718: una línea SIN grupo nunca cae a «no incluidas»
 - ⚠️⚠️ [Entra al precio: el segundo interruptor](project_entra_al_precio.md) — #728 SIN mergear (migración sin aplicar); regla por línea
 - ⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700: el desglose del modelo no es estable; RX1 ya medido con banco real (#763)
-- ⚠️⚠️ [Tarifa por pasajero (Trappvel)](project_tarifa_por_pasajero.md) — #763 SIN mergear: `items.tarifa_pax` antes del merge, Etapa 1 después; «AD» no es adulto
+- ⚠️⚠️ [Tarifa por pasajero (Trappvel)](project_tarifa_por_pasajero.md) — QA en prod: la casilla pinta lo que devuelve el servidor; rubros `tarifa`; «AD» no es adulto
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado; las tres INERTES sin config
@@ -110,7 +110,8 @@
 - [Ensayar una función SQL con PGlite](reference_ensayo_sql_pglite.md) — cuerpo viejo y nuevo sobre una foto de producción
 - ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD sobre tabla inexistente da 204
 - [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo
-- [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP
+- [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; con server actions, `next dev` + ruta `qa-*`
+- [Línea de tiempo de peticiones en producción](reference_vercel_logs_por_cli.md) — `vercel logs --json -q <id>`: si el refresco salió y a qué deployment
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS, chromium fotografía
 - ⚠️ [Cambio SOLO de tildes, y la eñe aparte](reference_cambio_solo_de_tildes.md) — la eñe NO es tilde; hay `anos` que rompen código
 - [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` rasteriza SVG

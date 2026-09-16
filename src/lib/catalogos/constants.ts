@@ -177,6 +177,33 @@ export const TIPOS_RUBRO = [
 
 export type TipoRubro = typeof TIPOS_RUBRO[number]['value']
 
+/**
+ * Los tres tipos de rubro de VIAJE. El CHECK `rubros_tipo_check` los admite desde el
+ * 2026-09-14 (migración `rubros_tipo_conceptos_viaje`, versión `20260914172108`, aplicada
+ * por MCP y sin archivo en el repo; leído del catálogo de producción el 2026-09-16).
+ *
+ * NO van en `TIPOS_RUBRO` a propósito: ese es el selector del editor de rubros de
+ * CUALQUIER cotización, y ofrecerlos ahí los pondría en la de una obra. Los escribe el
+ * sistema (la tarifa por pasajero escribe `tarifa`) y aquí solo viven sus rótulos.
+ */
+export const TIPOS_RUBRO_VIAJE = [
+  { value: 'tarifa', label: 'Tarifa del proveedor' },
+  { value: 'impuestos', label: 'Impuestos del proveedor' },
+  { value: 'fee_proveedor', label: 'Fee del proveedor' },
+] as const
+
+export type TipoRubroViaje = typeof TIPOS_RUBRO_VIAJE[number]['value']
+
+/** El rótulo de un tipo de rubro, del selector o de viaje. Sin rótulo conocido, el slug. */
+export function etiquetaTipoRubro(tipo: string | null | undefined): string {
+  if (!tipo) return ''
+  return (
+    TIPOS_RUBRO.find(t => t.value === tipo)?.label ??
+    TIPOS_RUBRO_VIAJE.find(t => t.value === tipo)?.label ??
+    tipo
+  )
+}
+
 // ── Categorias de gasto (9, spec §4.10) ─────────────────────
 
 export const CATEGORIAS_GASTO = [

@@ -313,10 +313,10 @@ export async function confirmarLecturaDePantallazo(args: {
   const { error: errInsertar } = await sb.from('rubros').insert(
     convertidos.map((r, i) => ({
       item_id: args.itemId,
-      // ⚠️ `rubros.tipo` tiene un CHECK de seis valores y `'tarifa'` no está entre
-      // ellos: la base lo rechazaría con 23514. El concepto del diseño (tarifa /
-      // impuestos / fee del proveedor) vive en la descripción; `servicios_prof` es el
-      // tipo del catálogo que corresponde al costo de un proveedor de servicios.
+      // ⚠️ Escrito cuando el CHECK de `rubros.tipo` tenía seis valores. Desde el
+      // 2026-09-14 admite `tarifa`, `impuestos` y `fee_proveedor` (`TIPOS_RUBRO_VIAJE`),
+      // y la tarifa por pasajero ya escribe `tarifa`. Este cargue de un solo total no
+      // lo usa ninguna pantalla desde el #763 y se deja como estaba.
       tipo: 'servicios_prof',
       descripcion: r.concepto,
       cantidad: r.cantidad,

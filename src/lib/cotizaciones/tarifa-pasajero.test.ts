@@ -18,6 +18,7 @@ import {
   precioPorPasajero,
   repartirProporcional,
   resolverTarifa,
+  tarifaMasReciente,
   validarLecturaEnCasilla,
   type Composicion,
   type LecturaCasilla,
@@ -396,5 +397,36 @@ describe('leerTarifaPax', () => {
     const t = leerTarifaPax({ composicion: { adultos: 2 }, casillas: { grupo_completo: CANCUN } })
     expect(t.composicion).toEqual({ adultos: 2, ninos: 0, infantes: 0 })
     expect(t.casillas?.grupo_completo?.total).toBe(3780884.17)
+  })
+
+  it('lee la marca de escritura del servidor; sin ella, null', () => {
+    expect(leerTarifaPax({ actualizadaEn: '2026-09-16T14:21:45.600Z' }).actualizadaEn).toBe('2026-09-16T14:21:45.600Z')
+    expect(leerTarifaPax({ casillas: {} }).actualizadaEn).toBeNull()
+    expect(leerTarifaPax({ actualizadaEn: 42 }).actualizadaEn).toBeNull()
+  })
+})
+
+describe('tarifaMasReciente · qué pinta la casilla después de guardar', () => {
+  const pagina = leerTarifaPax({ actualizadaEn: '2026-09-16T14:20:26.000Z', casillas: {} })
+  const guardada = leerTarifaPax({ actualizadaEn: '2026-09-16T14:21:45.600Z', casillas: { grupo_completo: CANCUN } })
+
+  it('caso real (elegir COP): la página no trajo la lectura y la casilla pinta lo guardado', () => {
+    expect(tarifaMasReciente(pagina, guardada).casillas?.grupo_completo?.total).toBe(3780884.17)
+  })
+
+  it('una página escrita antes de la marca (sin actualizadaEn) también pierde', () => {
+    expect(tarifaMasReciente(leerTarifaPax({ casillas: {} }), guardada)).toBe(guardada)
+  })
+
+  it('cuando la página llega igual de nueva o más, manda la página', () => {
+    const refrescada = leerTarifaPax({ actualizadaEn: '2026-09-16T14:21:45.600Z', casillas: { grupo_completo: CANCUN } })
+    expect(tarifaMasReciente(refrescada, guardada)).toBe(refrescada)
+    const despues = leerTarifaPax({ actualizadaEn: '2026-09-16T14:30:00.000Z', casillas: {} })
+    expect(tarifaMasReciente(despues, guardada)).toBe(despues)
+  })
+
+  it('sin nada guardado, o guardado sin marca, manda la página', () => {
+    expect(tarifaMasReciente(pagina, null)).toBe(pagina)
+    expect(tarifaMasReciente(pagina, leerTarifaPax({ casillas: { grupo_completo: CANCUN } }))).toBe(pagina)
   })
 })
