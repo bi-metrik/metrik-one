@@ -24,6 +24,7 @@
 // el comercial puede estar sin la plataforma abierta.
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
+import { parsearReferenciaOne } from '../_shared/referencia-archivo.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -570,6 +571,45 @@ type DatosCopy = { fecha_cita: string | null; link: string | null };
 const SLUG_CITA = 'fecha_cita_dian';
 
 /**
+ * Cuanto dura el enlace que se le manda al CLIENTE.
+ *
+ * Siete dias, y es una decision de producto: quien abre este enlace NO tiene sesion en
+ * ONE —no tiene cuenta— asi que no puede pasar por `/api/archivos/abrir`. Un enlace
+ * firmado es lo unico que le sirve, y el plazo es el que se acordo para que alcance a
+ * abrir el documento de su tramite.
+ */
+const SEGUNDOS_ENLACE_CLIENTE = 7 * 24 * 60 * 60;
+
+/**
+ * El `{link}` del copy, listo para mandarselo a alguien sin sesion.
+ *
+ * Tres formas conviven en `drive_url` y las tres tienen que salir bien de aqui:
+ *   · un enlace de Drive              → se manda tal cual (ya es publico por link)
+ *   · una URL publica heredada        → tal cual, hasta que se migre la fila (paso B)
+ *   · una referencia `one://`         → se FIRMA aqui, por siete dias
+ *
+ * Si la firma falla devuelve null, y `aplicarDatosDelCopy` omite el aviso entero con
+ * `sin_link`. Es lo que ya hacia cuando el documento no existia, y es lo correcto: un
+ * correo que promete un certificado con un enlace muerto deja al cliente peor que no
+ * recibirlo, y en el log se ve como exito.
+ */
+async function enlaceParaElCliente(supabase: Supabase, url: string): Promise<string | null> {
+  const ref = parsearReferenciaOne(url);
+  if (!ref) return url;
+
+  const nombre = ref.path.split('/').pop() || 'documento';
+  const { data, error } = await supabase.storage
+    .from(ref.bucket)
+    .createSignedUrl(ref.path, SEGUNDOS_ENLACE_CLIENTE, { download: nombre });
+
+  if (error || !data?.signedUrl) {
+    console.error('[notificar-etapa] no se pudo firmar el documento del cliente:', error?.message ?? 'sin datos');
+    return null;
+  }
+  return data.signedUrl;
+}
+
+/**
  * @param linkSlug slug del bloque ORIGEN cuyo `drive_url` es el `{link}` del copy, tal
  *   como lo declara la etapa. `null` si no lo declaro: entonces no hay enlace y el aviso
  *   se omite antes que mandar el documento de otro tramite.
@@ -602,7 +642,7 @@ async function datosDelCopy(
 
     const url = data.drive_url;
     if (linkSlug && slug === linkSlug && typeof url === 'string' && url) {
-      out.link = url;
+      out.link = await enlaceParaElCliente(supabase, url);
     }
   }
   return out;

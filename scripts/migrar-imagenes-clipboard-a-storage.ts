@@ -24,7 +24,9 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 
-const BUCKET = 've-documentos'
+import { BUCKET_DOCUMENTOS_ONE, construirReferenciaOne } from '../src/lib/almacenamiento/referencia'
+
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 const COMMIT = process.argv.includes('--commit')
 
 const env: Record<string, string> = {}
@@ -110,7 +112,9 @@ async function main() {
             continue
           }
         }
-        url = supabase.storage.from(BUCKET).getPublicUrl(storagePath).data.publicUrl
+        // Referencia, no URL publica: el bucket deja de ser publico. Lo que el bloque
+        // guarda lo abre la pantalla por `/api/archivos/abrir`.
+        url = construirReferenciaOne(BUCKET, storagePath)
         subidas.set(cacheKey, url)
       }
 

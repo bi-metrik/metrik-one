@@ -12,9 +12,14 @@ import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
+import {
+  BUCKET_DOCUMENTOS_ONE,
+  construirReferenciaOne,
+  esRutaDeWorkspace,
+} from '@/lib/almacenamiento/referencia'
 
 /** Bucket que ya usa el producto para documentos de negocio. No se inventa otro. */
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 /** Lo que el navegador acepta subir como comprobante. */
 export const TIPOS_SOPORTE_PAGO = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
@@ -50,8 +55,10 @@ export async function archivarSoporte(
   const storagePath = entrada.storage_path
   // El path llega del navegador y abajo se lee con el cliente de servicio, que NO pasa
   // por RLS. Sin esta comprobacion, un path apuntado a otro workspace terminaria
-  // archivado como soporte propio. La policy del bucket exige el mismo prefijo.
-  if (!storagePath.startsWith(`${workspaceId}/`) || storagePath.includes('..')) {
+  // archivado como soporte propio. La policy del bucket exige el mismo prefijo, y desde
+  // que el soporte se guarda por referencia ese prefijo es TAMBIEN lo que compara la
+  // puerta de `abrir.ts`: un archivo escrito fuera de el queda inabrible.
+  if (!esRutaDeWorkspace(storagePath, workspaceId)) {
     console.warn('[pagos-externos] soporte con path fuera del workspace, descartado')
     return null
   }
@@ -60,9 +67,10 @@ export async function archivarSoporte(
   const fileName = entrada.file_name || storagePath.split('/').pop() || 'soporte'
   const mimeType = entrada.mime_type || mimeDesdeNombre(fileName)
 
-  const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
   const base: Record<string, unknown> = {
-    url: publicData?.publicUrl ?? '',
+    // Referencia, no URL publica: el bucket deja de ser publico y `object/public` se
+    // volveria un enlace muerto. La pantalla la abre por `/api/archivos/abrir`.
+    url: construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, storagePath),
     file_name: fileName,
     mime_type: mimeType,
     storage_path: storagePath,
@@ -70,7 +78,6 @@ export async function archivarSoporte(
     subido_por: userId,
     subido_en: new Date().toISOString(),
   }
-  if (!base.url) return null
 
   const { data: negRaw } = await db(supabase)
     .from('negocios')

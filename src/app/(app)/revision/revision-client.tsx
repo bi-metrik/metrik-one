@@ -17,6 +17,7 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { getRolePermissions } from '@/lib/roles'
 import { marcarRevisado, desmarcarRevisado } from './actions'
 import type { ItemRevision } from './actions'
+import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
@@ -308,7 +309,7 @@ function ItemCard({ item, canMark, isPending, onToggle }: {
             )}
             {item.soporte_url && (
               <a
-                href={item.soporte_url}
+                href={hrefArchivo(item.soporte_url) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-0.5 rounded bg-papel px-1.5 py-0.5 text-[10px] font-medium text-tinta-suave hover:bg-[#E5E7EB]"

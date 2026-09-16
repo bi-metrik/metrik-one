@@ -9,6 +9,8 @@ import {
   type FilaGasto,
   type FilaResumen,
 } from '@/lib/revision/export-excel-libro'
+import { hrefArchivoAbsoluto } from '@/lib/almacenamiento/referencia'
+import { baseUrlDelWorkspace } from '@/lib/negocios/construir-export-negocios'
 
 export const runtime = 'nodejs'
 
@@ -33,7 +35,23 @@ export async function GET(req: NextRequest) {
   const startDate = `${mes}-01`
   const endDate = new Date(y, m, 0).toISOString().split('T')[0]
 
-  const [gastosRes, cobrosRes] = await Promise.all([
+  // ── La columna de soporte del Excel ────────────────────────────────────────
+  //
+  // Es la SEGUNDA salida de un archivo fuera de la pantalla, y la que sí sigue exigiendo
+  // sesion: este libro lo abre el contador del cliente, que tiene cuenta en ONE. Por eso
+  // la celda lleva `/api/archivos/abrir` y no un enlace firmado — un firmado de larga
+  // duracion viajaria dentro de un .xlsx que se reenvia por correo y sobreviviria al
+  // dia que a esa persona se le quite el acceso.
+  //
+  // ABSOLUTO: una ruta relativa dentro de una celda de Excel no resuelve contra nada.
+  // El dominio sale del subdominio del workspace, igual que el "Link ONE" del Excel de
+  // negocios (`baseUrlDelWorkspace`).
+  //
+  // ⚠️ Una fila todavia sin migrar trae una URL publica y `hrefArchivoAbsoluto` la deja
+  // intacta: hasta que el bucket se cierre sigue abriendo, y despues dejara de hacerlo.
+  // Eso es el paso B, no este.
+  const [wsRes, gastosRes, cobrosRes] = await Promise.all([
+    supabase.from('workspaces').select('slug').eq('id', workspaceId).single(),
     supabase
       .from('gastos')
       .select('fecha, monto, descripcion, mensaje_original, categoria, clasificacion_costo, deducible, retencion, tercero_nit, estado_pago, soporte_url, revisado, revisado_at, negocio_id, negocios(nombre, codigo, empresa_id, empresas(nombre))')
@@ -49,6 +67,13 @@ export async function GET(req: NextRequest) {
       .lte('fecha', endDate)
       .order('fecha', { ascending: true }),
   ])
+
+  // Sin slug no hay dominio con el que construir el enlace, y `baseUrlDelWorkspace('')`
+  // produciria `https://.metrikone.co/...`: un enlace roto en cada fila, que es peor que
+  // no bajar el archivo. Mismo criterio que el export de negocios, que aborta.
+  const slug = wsRes.data?.slug as string | undefined
+  if (wsRes.error || !slug) return new NextResponse('Workspace sin slug', { status: 500 })
+  const baseUrl = baseUrlDelWorkspace(slug)
 
   const gastos: FilaGasto[] = (gastosRes.data ?? []).map(g => {
     const neg = g.negocios as { nombre: string | null; codigo: string | null; empresas: { nombre: string | null } | null } | null
@@ -66,7 +91,7 @@ export async function GET(req: NextRequest) {
       estado_pago: g.estado_pago ?? null,
       revisado: g.revisado ? 'Si' : 'No',
       revisado_at: g.revisado_at ?? null,
-      soporte_url: g.soporte_url ?? null,
+      soporte_url: hrefArchivoAbsoluto(baseUrl, g.soporte_url),
     }
   })
 

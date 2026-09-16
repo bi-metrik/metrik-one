@@ -17,6 +17,7 @@ import {
   motivoRechazoComprobante,
   nombreDeComprobantePegado,
 } from '@/lib/cobros/comprobante-pegado'
+import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 
 /** El soporte de un gasto admite más peso que el comprobante de un pago: aquí entran
  *  facturas escaneadas de varias páginas. */
@@ -860,7 +861,7 @@ export default function MovimientosClient({
               <p className="truncate px-2 pt-2 text-sm font-medium">{soporteModal.descripcion}</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={soporteModal.url}
+                src={hrefArchivo(soporteModal.url) ?? undefined}
                 alt="Soporte fotográfico"
                 className="max-h-[75vh] w-full rounded-lg object-contain"
               />

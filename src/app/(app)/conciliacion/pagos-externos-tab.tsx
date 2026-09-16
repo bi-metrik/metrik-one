@@ -39,9 +39,10 @@ import {
   type PanelPagosExternos,
 } from '@/lib/actions/pagos-externos'
 import { formatFecha } from '@/lib/dates/bogota'
+import { BUCKET_DOCUMENTOS_ONE, hrefArchivo } from '@/lib/almacenamiento/referencia'
 
 const VERDE = 'var(--acento)'
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 const TIPOS_SOPORTE = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 const fmtCOP = (n: number) =>
@@ -623,7 +624,7 @@ function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: Pan
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {pago.soporte ? (
             <a
-              href={pago.soporte.url}
+              href={hrefArchivo(pago.soporte.url) ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[12px] font-semibold hover:underline"

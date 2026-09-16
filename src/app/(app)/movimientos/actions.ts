@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { todayBogotaISO, bogotaYearMonth } from '@/lib/dates/bogota'
+import { subirAOne } from '@/lib/almacenamiento/one'
+import { BUCKET_SOPORTES_GASTO, extensionSegura, rutaEnWorkspace } from '@/lib/almacenamiento/referencia'
 
 export type Movimiento = {
   id: string
@@ -299,24 +301,25 @@ export async function attachSoporte(gastoId: string, formData: FormData) {
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
   if (!allowed.includes(file.type)) return { success: false, error: 'Solo JPEG, PNG, WebP o PDF' }
 
-  const ext = file.name.split('.').pop() || 'jpg'
-  const filePath = `${workspaceId}/${crypto.randomUUID()}.${ext}`
-
+  const ext = extensionSegura(file.name.split('.').pop() ?? '') || 'jpg'
   const admin = createServiceClient()
 
-  const { error: uploadError } = await admin.storage
-    .from('gastos-soportes')
-    .upload(filePath, file, { contentType: file.type, upsert: true })
-
-  if (uploadError) return { success: false, error: uploadError.message }
-
-  const { data: { publicUrl } } = admin.storage
-    .from('gastos-soportes')
-    .getPublicUrl(filePath)
+  // Referencia, no URL pública: ver `uploadSoporteGasto` en `nuevo/gasto/gasto-action.ts`.
+  let referencia: string
+  try {
+    referencia = (await subirAOne({
+      bucket: BUCKET_SOPORTES_GASTO,
+      path: rutaEnWorkspace(workspaceId, `${crypto.randomUUID()}.${ext}`),
+      cuerpo: file,
+      mime: file.type,
+    })).referencia
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) }
+  }
 
   const { error: updateError } = await admin
     .from('gastos')
-    .update({ soporte_url: publicUrl, soporte_pendiente: false })
+    .update({ soporte_url: referencia, soporte_pendiente: false })
     .eq('id', gastoId)
     .eq('workspace_id', workspaceId)
 

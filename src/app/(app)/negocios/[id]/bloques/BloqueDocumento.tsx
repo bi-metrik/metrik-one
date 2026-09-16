@@ -24,7 +24,7 @@ import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from
 import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
-import { esReferenciaExterna, hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { BUCKET_DOCUMENTOS_ONE, esReferenciaExterna, hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { puedeCorregirDocumentos } from '@/lib/roles'
@@ -77,7 +77,7 @@ interface BloqueDocumentoProps {
 
 type UploadState = 'empty' | 'uploading' | 'pending_confirm' | 'processing' | 'uploaded' | 'error'
 
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 // ── Confidence badge ─────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
 import { createClient } from '@/lib/supabase/client'
+import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
 import {
   comprobanteDelPortapapeles,
   motivoRechazoComprobante,
@@ -173,7 +174,7 @@ export default function RegistrarPagoModal({
       const ext = fileName.split('.').pop()?.toLowerCase() || 'jpg'
       const path = `${workspaceId}/pagos-fab/${crypto.randomUUID()}.${ext}`
       const { error } = await supabase.storage
-        .from('ve-documentos')
+        .from(BUCKET_DOCUMENTOS_ONE)
         .upload(path, file, { contentType: file.type || undefined, upsert: false })
       if (error) { toast.error(`No se pudo subir el comprobante: ${error.message}`); return }
       setSoporte({ storage_path: path, file_name: fileName, mime_type: file.type || '' })
