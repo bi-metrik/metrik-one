@@ -257,7 +257,16 @@ describe('consultaDualPersistente — el segmento se valida antes de consultar',
  * sigue frenando la guarda de `consultaDual`) y la de `prepararLoteDual`, 1.
  */
 describe('consulta dual persistente — sin el modulo no hay nada', () => {
-  beforeEach(() => reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft }));
+  beforeEach(() => {
+    reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft });
+    // Una respuesta valida por si la guarda falta: la prueba cae por el fetch, no por el doble.
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ dual_id: 'd-1', total_matches: 0, matches: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  });
 
   it('con un segmento valido, 4D SOFT no consulta ni persiste', async () => {
     filaSegmento = { id: 'seg-contraparte', nombre: 'Contraparte', activo: true };

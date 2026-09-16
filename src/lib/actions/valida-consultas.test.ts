@@ -133,6 +133,9 @@ function constructor(tabla: string) {
     gte: () => q,
     lte: () => q,
     not: () => q,
+    // `buscarNegociosParaValida` filtra por codigo o nombre: sin esto la prueba de
+    // `origin/main` caeria por un TypeError del doble y no por la busqueda que se quiere ver.
+    or: () => q,
     eq: (columna: string, valor: unknown) => {
       eqs[columna] = valor
       return q

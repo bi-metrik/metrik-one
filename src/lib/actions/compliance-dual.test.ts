@@ -72,6 +72,12 @@ beforeEach(() => {
  * `consultaDual` caen 2 y la de `consultaDualBatch`, 1.
  */
 describe('consultaDual — el modulo, no la sesion, abre la llave global', () => {
+  // Una respuesta valida por si la guarda falta: asi la prueba cae por el fetch que se hizo
+  // y no por un TypeError del doble.
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(respuesta(200, { dual_id: 'd-1', total_matches: 0, matches: [] }));
+  });
+
   it('4D SOFT (solo valida_api) no consulta', async () => {
     reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft });
     const r = await consultaDual({ tipo: 'natural', identificacion: '1077089147' });
