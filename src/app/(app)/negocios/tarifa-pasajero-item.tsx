@@ -23,11 +23,13 @@ import {
   lineaPorPasajero,
   ocupacionObservada,
   resolverTarifa,
+  tarifaMasReciente,
   traeDesgloseCompleto,
   type CasillaDef,
   type ClaveCasilla,
   type Composicion,
   type LecturaCasilla,
+  type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 
 /**
@@ -46,6 +48,14 @@ import {
  * salen de `tarifa-pasajero.ts`, el MISMO módulo que usa la server action. Aquí solo se
  * pinta: si la pantalla tuviera su propia regla, las casillas que ve la persona y las que
  * acepta el servidor se desincronizarían en silencio.
+ *
+ * ## Lo que se pinta después de guardar
+ *
+ * Toda acción que escribe la tarifa devuelve la que quedó, y la casilla pinta con ella sin
+ * esperar el refresco de la página: manda la más nueva de las dos (`tarifaMasReciente`).
+ * Pegar directo y elegir la moneda después de un rechazo pasan por el MISMO `leer`, así
+ * que quedan igual. Antes, el camino de la moneda dejaba la casilla 1 vacía y la 2 sin
+ * activar hasta recargar, con la lectura ya guardada.
  */
 export default function TarifaPasajeroItem({
   itemId,
@@ -68,7 +78,10 @@ export default function TarifaPasajeroItem({
   sugeridosGuardados?: { id: string }[]
   onCambio: () => void
 }) {
-  const tarifa = leerTarifaPax(tarifaPax)
+  // Lo último que el servidor confirmó haber guardado desde esta casilla. No reemplaza a la
+  // página: solo gana mientras sea más nuevo que ella.
+  const [guardada, setGuardada] = useState<TarifaPax | null>(null)
+  const tarifa = tarifaMasReciente(leerTarifaPax(tarifaPax), guardada)
   const composicion = composicionDeLinea(tarifa, composicionViaje)
   const casillas = tarifa.casillas ?? {}
 
@@ -99,6 +112,7 @@ export default function TarifaPasajeroItem({
       try {
         const r = await leerCasillaDeItem(itemId, clave, dataUrl, monedaIndicada ?? null)
         if (r.ok) {
+          setGuardada(r.tarifa)
           setUltimoMensaje(r.mensaje)
           setPreviews(p => ({ ...p, [clave]: undefined }))
           onCambio()
@@ -122,10 +136,11 @@ export default function TarifaPasajeroItem({
     lector.readAsDataURL(archivo)
   }
 
-  function accion(fn: () => Promise<{ success: boolean; error?: string }>, exito: string) {
+  function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax }>, exito: string) {
     startTransition(async () => {
       const r = await fn()
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
+      if (r.tarifa) setGuardada(r.tarifa)
       toast.success(exito)
       onCambio()
     })
@@ -177,6 +192,7 @@ export default function TarifaPasajeroItem({
         editando={editandoComposicion || !composicion}
         onEditar={setEditandoComposicion}
         hayLecturas={Object.keys(casillas).length > 0}
+        onGuardada={setGuardada}
         onCambio={onCambio}
       />
 
@@ -449,6 +465,7 @@ function ComposicionDeLinea({
   editando,
   onEditar,
   hayLecturas,
+  onGuardada,
   onCambio,
 }: {
   itemId: string
@@ -458,6 +475,7 @@ function ComposicionDeLinea({
   editando: boolean
   onEditar: (v: boolean) => void
   hayLecturas: boolean
+  onGuardada: (tarifa: TarifaPax) => void
   onCambio: () => void
 }) {
   const [adultos, setAdultos] = useState(String(composicion?.adultos ?? ''))
@@ -469,6 +487,7 @@ function ComposicionDeLinea({
     startTransition(async () => {
       const r = await actualizarComposicionDeItem(itemId, propia)
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
+      if (r.tarifa) onGuardada(r.tarifa)
       toast.success(r.borroLecturas
         ? 'Pasajeros de la línea actualizados. Los pantallazos leídos se borraron: eran para otra ocupación.'
         : 'Pasajeros de la línea actualizados.')

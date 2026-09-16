@@ -15,7 +15,7 @@ import {
 } from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
-import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO } from '@/lib/catalogos/constants'
+import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO, etiquetaTipoRubro } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
@@ -1420,7 +1420,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           {rubrosConfirmados.map((r: RubroRow) => (
                             <tr key={r.id} className="border-b border-dashed">
                               <td className="py-1.5 pr-2">
-                                {TIPOS_RUBRO.find(t => t.value === r.tipo)?.label ?? r.tipo}
+                                {etiquetaTipoRubro(r.tipo)}
                               </td>
                               <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">
                                 {r.descripcion || '—'}
@@ -1469,6 +1469,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           {TIPOS_RUBRO.map(t => (
                             <option key={t.value} value={t.value}>{t.label}</option>
                           ))}
+                          {/* Un rubro que escribió el sistema con un tipo fuera del selector
+                              (la tarifa por pasajero escribe `tarifa`): sin esta opción el
+                              select pintaría el primer tipo mientras guarda otro. */}
+                          {!TIPOS_RUBRO.some(t => t.value === newRubro.tipo) && (
+                            <option value={newRubro.tipo}>{etiquetaTipoRubro(newRubro.tipo)}</option>
+                          )}
                         </select>
                         <input
                           placeholder="Descripción"

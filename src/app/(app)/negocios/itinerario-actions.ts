@@ -22,6 +22,7 @@ import {
   type Desmarcado,
   type ItinerarioCalculado,
 } from '@/lib/cotizaciones/itinerarios-datos'
+import { nombreDeAlternativa } from '@/lib/cotizaciones/nombre-linea'
 
 /**
  * Itinerarios de una cotización: leer, combinar y decidir cuáles van al cliente.
@@ -440,7 +441,9 @@ export async function agregarOpcionAItem(itemId: string, nombre: string) {
     .from('items')
     .insert({
       cotizacion_id: titular.cotizacion_id,
-      nombre: nombre.trim() || `${titular.nombre ?? 'Opción'} (alternativa)`,
+      // El relleno sale de `nombre-linea.ts`, donde también se reconoce: la lectura de un
+      // pantallazo solo le pone nombre a una línea que no tiene uno propio.
+      nombre: nombre.trim() || nombreDeAlternativa(titular.nombre),
       grupo,
       opcion_de: titularReal,
       unidad: titular.unidad ?? null,
