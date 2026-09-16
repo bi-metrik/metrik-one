@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getServerKey } from '@/lib/server-keys'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { extraerRanuraDesdeImagen } from '@/lib/ai/extraer-ranura'
 import { evaluarLectura } from '@/lib/cotizaciones/lectura-pantallazo'
 import { construirLecturaCasilla } from '@/lib/cotizaciones/lectura-casilla'
@@ -133,6 +134,11 @@ export async function leerCasillaDeItem(
   monedaIndicada?: string | null,
 ): Promise<ResultadoCasilla> {
   if (!CLAVES.includes(clave)) return { ok: false, codigo: 'CASILLA', mensaje: 'Casilla desconocida.' }
+  // Lee con la llave de Gemini de MeTRIK: la puerta de Clarity va antes de tocar el ítem,
+  // igual que en `leerPantallazoDeItem` (riesgo 11, cuarta ronda).
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) {
+    return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
+  }
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
   const { supabase, item, ranura, viaje, tarifa, composicion } = ctx
