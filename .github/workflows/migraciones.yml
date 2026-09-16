@@ -9,6 +9,7 @@ on:
     paths:
       - 'supabase/migrations/**'
       - 'scripts/check-migracion-grants.mjs'
+      - 'scripts/check-migracion-version-duplicada.mjs'
       - '.github/workflows/migraciones.yml'
 
 jobs:
@@ -29,3 +30,31 @@ jobs:
         env:
           BASE_REF: origin/${{ github.base_ref }}
         run: node scripts/check-migracion-grants.mjs
+
+  version-duplicada:
+    # Dos archivos con el mismo numero de version no fallan al aplicarse: `db push` da ese
+    # numero por aplicado al correr el primero y salta los demas EN SILENCIO. Ya costo una
+    # migracion de seguridad perdida desde junio (`20260630000001`, tres archivos).
+    #
+    # Job aparte del de grants a proposito: son dos preguntas distintas (que dice el SQL / como
+    # se llama el archivo) y conviene saber cual de las dos fallo sin leer el log.
+    name: Ninguna migracion repite version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Compara contra la base del PR: necesita mas de un commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Guarda de versiones
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          # Sin --depth: el checkout ya trajo la historia completa y un fetch superficial la
+          # RECORTA, dejando la base sin ancestro comun con la rama en cuanto main avanza.
+          git fetch origin "${{ github.base_ref }}" --quiet
+          node scripts/check-migracion-version-duplicada.mjs
