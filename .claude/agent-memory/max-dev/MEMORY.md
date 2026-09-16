@@ -42,7 +42,8 @@
 - ⚠️⚠️ [Aporte al total y rubros sugeridos](project_aporte_al_total_y_sugeridos.md) — #709 mergeado y migración aplicada
 - ⚠️ [El día: itinerario y sugeridos](project_dia_relativo_sugeridos.md) — #718: una línea SIN grupo nunca cae a «no incluidas»
 - ⚠️⚠️ [Entra al precio: el segundo interruptor](project_entra_al_precio.md) — #728 SIN mergear (migración sin aplicar); regla por línea
-- ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700: RX1 solo probado con capturas SINTÉTICAS
+- ⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700: el desglose del modelo no es estable; RX1 ya medido con banco real (#763)
+- ⚠️⚠️ [Tarifa por pasajero (Trappvel)](project_tarifa_por_pasajero.md) — #763 SIN mergear: `items.tarifa_pax` antes del merge, Etapa 1 después; «AD» no es adulto
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado; las tres INERTES sin config
