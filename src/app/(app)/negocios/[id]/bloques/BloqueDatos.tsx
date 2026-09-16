@@ -27,6 +27,7 @@ import {
   faltaHoraDeCita,
 } from '@/lib/negocios/fecha-hora-campo'
 import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negocios/numero-colombiano'
+import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
 
 export interface DatosField {
@@ -719,7 +720,7 @@ export default function BloqueDatos({
                       <span className="text-xs text-tinta truncate">{resolved.file_name ?? f.label}</span>
                     </div>
                     <a
-                      href={resolved.drive_url}
+                      href={hrefArchivo(resolved.drive_url) ?? undefined}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-[10px] text-acento hover:underline shrink-0"
@@ -762,7 +763,7 @@ export default function BloqueDatos({
                 </span>
               ) : f.tipo === 'imagen_clipboard' && v ? (
                 // eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image
-                <img src={v as string} alt={f.label} className="max-h-40 rounded-lg border border-[#E5E7EB] object-contain" />
+                <img src={hrefArchivo(v as string) ?? undefined} alt={f.label} className="max-h-40 rounded-lg border border-[#E5E7EB] object-contain" />
               ) : (
                 <div className="flex items-center gap-1.5">
                   <span className={`flex-1 min-w-0 text-xs text-tinta break-words ${f.tipo === 'numero' ? 'tabular-nums' : ''}`}>{
@@ -1114,7 +1115,7 @@ export default function BloqueDatos({
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <a
-                    href={resolved.drive_url}
+                    href={hrefArchivo(resolved.drive_url) ?? undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-tinta hover:border-acento/40 hover:text-acento-hover"
@@ -1123,8 +1124,7 @@ export default function BloqueDatos({
                     Ver
                   </a>
                   <a
-                    href={resolved.drive_url}
-                    download
+                    href={hrefArchivo(resolved.drive_url, { descargar: true }) ?? undefined}
                     className="inline-flex items-center gap-1 rounded-md border border-[#E5E7EB] bg-white px-2 py-1 text-[10px] font-medium text-tinta hover:border-acento/40 hover:text-acento-hover"
                   >
                     <Download className="h-3 w-3" />
@@ -1168,7 +1168,7 @@ export default function BloqueDatos({
                 <div className="flex flex-col items-center gap-1">
                   {/* eslint-disable-next-line @next/next/no-img-element -- data URL desde clipboard paste, no optimizable por next/image */}
                   <img
-                    src={(pasteImgs[f.slug] || values[f.slug]) as string}
+                    src={pasteImgs[f.slug] || (hrefArchivo(values[f.slug] as string) ?? undefined)}
                     alt={f.label}
                     className="max-h-32 rounded object-contain"
                   />

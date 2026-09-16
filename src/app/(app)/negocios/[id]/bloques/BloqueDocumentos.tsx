@@ -19,6 +19,7 @@ import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import DocUploadSlot from './DocUploadSlot'
 import type { SlotState } from './DocUploadSlot'
+import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
 
 export interface DocumentoConfig {
   slug: string
@@ -232,7 +233,7 @@ export default function BloqueDocumentos({
       } else {
         const supabase = createClient()
         const { error: uploadError } = await supabase.storage
-          .from('ve-documentos')
+          .from(BUCKET_DOCUMENTOS_ONE)
           .uploadToSignedUrl(uploadInfo.path, uploadInfo.token as string, file, {
             contentType: file.type || 'application/octet-stream',
           })

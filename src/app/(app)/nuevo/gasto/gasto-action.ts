@@ -1,7 +1,6 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Database } from '@/types/database'
@@ -14,6 +13,8 @@ import {
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 import { clasificarGastoConIA } from '@/lib/gastos/clasificar-gasto-ia'
 import type { PropuestaGasto } from '@/lib/gastos/clasificar-gasto'
+import { subirAOne } from '@/lib/almacenamiento/one'
+import { BUCKET_SOPORTES_GASTO, extensionSegura, rutaEnWorkspace } from '@/lib/almacenamiento/referencia'
 
 // ── Upload soporte to Storage ────────────────────────────────
 
@@ -30,22 +31,23 @@ export async function uploadSoporteGasto(formData: FormData) {
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
   if (!allowed.includes(file.type)) return { success: false, error: 'Solo JPEG, PNG, WebP o PDF', url: null }
 
-  const ext = file.name.split('.').pop() || 'jpg'
+  const ext = extensionSegura(file.name.split('.').pop() ?? '') || 'jpg'
   const fileId = crypto.randomUUID()
-  const filePath = `${workspaceId}/${fileId}.${ext}`
 
-  const admin = createServiceClient()
-  const { error: uploadError } = await admin.storage
-    .from('gastos-soportes')
-    .upload(filePath, file, { contentType: file.type, upsert: true })
-
-  if (uploadError) return { success: false, error: uploadError.message, url: null }
-
-  const { data: { publicUrl } } = admin.storage
-    .from('gastos-soportes')
-    .getPublicUrl(filePath)
-
-  return { success: true, error: null, url: publicUrl }
+  // Lo que se guarda en `gastos.soporte_url` es la REFERENCIA, no una URL pública: el
+  // bucket deja de ser público y una URL de `object/public` se vuelve un enlace muerto.
+  // Quien la abra pasa por `/api/archivos/abrir`, que valida sesión y workspace.
+  try {
+    const { referencia } = await subirAOne({
+      bucket: BUCKET_SOPORTES_GASTO,
+      path: rutaEnWorkspace(workspaceId, `${fileId}.${ext}`),
+      cuerpo: file,
+      mime: file.type,
+    })
+    return { success: true, error: null, url: referencia }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e), url: null }
+  }
 }
 
 // ── Create gasto (FAB) ──────────────────────────────────────

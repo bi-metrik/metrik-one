@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { pushDocumentoBloqueToDrive } from '@/lib/negocios/push-documento-drive'
+import { pushDocumentoBloqueToDrive, storagePathFromUrl } from '@/lib/negocios/push-documento-drive'
 import { esValorProveedorExterno } from '@/lib/almacenamiento/config'
 
 // Reconciliador continuo de documentos atascados en Supabase Storage.
@@ -107,8 +107,12 @@ export async function GET(req: NextRequest) {
       if (b.bloque_configs?.bloque_definitions?.tipo !== 'documento') return false
       const cfg = b.bloque_configs?.config_extra ?? {}
       if (cfg.source_etapa_orden != null) return false
+      // Lo que decide si el documento sigue atascado en Storage es el MISMO parser que
+      // usa quien lo empuja. Escrito aquí aparte (`url.includes('/storage/')`) se
+      // desincronizó en cuanto los escritores pasaron a guardar `one://…`: el cron
+      // habría dejado de ver justo los documentos nuevos, sin fallar en nada.
       const url = b.data?.drive_url
-      return typeof url === 'string' && url.includes('/storage/')
+      return typeof url === 'string' && storagePathFromUrl(url) !== null
     })
     .slice(0, BATCH_LIMIT)
 

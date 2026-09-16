@@ -31,6 +31,7 @@ vi.mock('@/lib/google-drive', () => ({
 }))
 
 import { archivarSoporte } from './soporte-pago'
+import { duenoDeReferencia } from '@/lib/almacenamiento/referencia'
 
 const WS = 'ws-propio'
 
@@ -73,5 +74,19 @@ describe('guard del path del comprobante', () => {
       null, 'user-1',
     )
     expect(r?.mime_type).toBe('application/pdf')
+  })
+
+  // Lo que se guarda cuando Drive no responde ES lo que después hay que poder abrir.
+  // Con la URL pública que había antes, el día que el bucket se cierre la fila quedaría
+  // con un enlace muerto y nadie se enteraría hasta que un usuario lo abriera.
+  it('sin Drive queda una REFERENCIA, y la puerta le reconoce dueño', async () => {
+    const WS_UUID = '7dea141d-d4da-483d-a78d-b14ef35500c5'
+    const r = await archivarSoporte(
+      supabaseFalso, WS_UUID, 'negocio-1',
+      { storage_path: `${WS_UUID}/pagos-fab/mio.jpg`, file_name: 'mio.jpg' },
+      null, 'user-1',
+    )
+    expect(r?.url).toBe(`one://ve-documentos/${WS_UUID}/pagos-fab/mio.jpg`)
+    expect(duenoDeReferencia(r?.url)).toEqual({ workspaceId: WS_UUID, negocioId: null })
   })
 })

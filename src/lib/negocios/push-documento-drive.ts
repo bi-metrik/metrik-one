@@ -31,8 +31,9 @@ import {
   uploadFileToDrive,
   setFilePublicByLink,
 } from '@/lib/google-drive'
+import { BUCKET_DOCUMENTOS_ONE, parsearReferenciaOne } from '@/lib/almacenamiento/referencia'
 
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 export interface PushDocumentoResult {
   pushed: boolean
@@ -53,13 +54,19 @@ function mimeTypeFromName(fileName: string): string {
 }
 
 /**
- * Deriva el storage path (relativo al bucket) desde una URL pública de
- * Supabase Storage. Ambas formas de URL pública contienen el bucket:
- *   .../storage/v1/object/public/ve-documentos/<path>
- *   .../storage/v1/object/ve-documentos/<path>
- * Devuelve null si la URL no pertenece al bucket.
+ * Deriva el storage path (relativo al bucket) desde lo que el bloque tenga guardado.
+ *
+ * DOS formas, porque conviven mientras no se migren las filas viejas:
+ *   · `one://ve-documentos/<path>`                        — lo que se escribe hoy
+ *   · `.../storage/v1/object/public/ve-documentos/<path>` — URL pública heredada
+ *   · `.../storage/v1/object/ve-documentos/<path>`        — la misma, sin `public`
+ *
+ * Devuelve null si el valor no apunta a este bucket (un enlace de Drive, por ejemplo).
  */
-function storagePathFromUrl(url: string): string | null {
+export function storagePathFromUrl(url: string): string | null {
+  const ref = parsearReferenciaOne(url)
+  if (ref) return ref.bucket === BUCKET ? ref.path : null
+
   const marker = `/${BUCKET}/`
   const idx = url.indexOf(marker)
   if (idx === -1) return null

@@ -92,6 +92,104 @@ describe('resolverApertura', () => {
   })
 })
 
+// ── Buckets del propio proyecto de ONE (`one://`) ────────────────────────────
+//
+// La ruta trae el workspace, así que la puerta lo compara en vez de resolverlo. Lo que
+// estas pruebas fijan es que ese atajo NO afloje nada: un archivo de otro workspace
+// sigue siendo 404 y un documento de negocio sigue pasando por `puedeVerNegocio`.
+
+const NEG_SOENA = '8c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f'
+const DOC_ONE = `one://ve-documentos/${WS_SOENA}/negocios/${NEG_SOENA}/11111111-2222-4333-8444-555555555555/factura.pdf`
+const GASTO_ONE = `one://gastos-soportes/${WS_SOENA}/55555555-6666-4777-8888-999999999999.jpg`
+const PAGO_ONE = `one://ve-documentos/${WS_SOENA}/pagos-externos/22222222-3333-4444-8555-666666666666.pdf`
+
+/** Doble para el workspace de SOENA, que es el dueño de las rutas `one://` de arriba. */
+function depsOne(over: Partial<DependenciasApertura> & { sesion?: string | null } = {}) {
+  const firmadas: string[] = []
+  const d: DependenciasApertura = {
+    workspaceDeSesion: async () => (over.sesion === undefined ? WS_SOENA : over.sesion),
+    negocioEsDelWorkspace: async (neg, ws) => neg === NEG_SOENA && ws === WS_SOENA,
+    puedeVerNegocio: async () => true,
+    firmar: async (_ws, ref) => {
+      firmadas.push(ref)
+      return 'https://yfjqscvvxetobiidnepa.supabase.co/storage/v1/object/sign/x?token=t'
+    },
+    ...over,
+  }
+  return { d, firmadas }
+}
+
+describe('resolverApertura sobre los buckets de ONE', () => {
+  it('soporte de gasto del propio workspace: firma sin preguntar por ningún negocio', async () => {
+    let preguntado = false
+    const { d, firmadas } = depsOne({
+      puedeVerNegocio: async () => { preguntado = true; return true },
+      negocioEsDelWorkspace: async () => { preguntado = true; return true },
+    })
+    expect(await resolverApertura(GASTO_ONE, false, d)).toMatchObject({ tipo: 'redirigir' })
+    expect(firmadas).toEqual([GASTO_ONE])
+    // Un gasto puede no tener negocio (gasto de empresa, gasto fijo): si la puerta del
+    // negocio corriera aquí, esos comprobantes quedarían inabribles para siempre.
+    expect(preguntado).toBe(false)
+  })
+
+  it('soporte de pago: mismo trato que el del gasto', async () => {
+    const { d, firmadas } = depsOne()
+    expect(await resolverApertura(PAGO_ONE, false, d)).toMatchObject({ tipo: 'redirigir' })
+    expect(firmadas).toEqual([PAGO_ONE])
+  })
+
+  it('soporte de gasto de OTRO workspace: 404 y no se firma nada', async () => {
+    const { d, firmadas } = depsOne({ sesion: WS_TRAPPVEL })
+    expect(await resolverApertura(GASTO_ONE, false, d)).toMatchObject({ tipo: 'error', status: 404 })
+    expect(firmadas).toHaveLength(0)
+  })
+
+  it('sin sesión: 401, aunque la ruta diga de quién es el archivo', async () => {
+    const { d, firmadas } = depsOne({ sesion: null })
+    expect(await resolverApertura(GASTO_ONE, false, d)).toMatchObject({ tipo: 'error', status: 401 })
+    expect(firmadas).toHaveLength(0)
+  })
+
+  it('documento de negocio: la puerta del negocio SÍ corre, igual que en Drive o en el proyecto del cliente', async () => {
+    const { d, firmadas } = depsOne({ puedeVerNegocio: async () => false })
+    expect(await resolverApertura(DOC_ONE, false, d)).toMatchObject({ tipo: 'error', status: 403 })
+    expect(firmadas).toHaveLength(0)
+  })
+
+  it('documento de negocio con permiso: firma', async () => {
+    const { d, firmadas } = depsOne()
+    expect(await resolverApertura(DOC_ONE, false, d)).toMatchObject({ tipo: 'redirigir' })
+    expect(firmadas).toEqual([DOC_ONE])
+  })
+
+  it('un negocio que no es del workspace de la ruta tampoco pasa', async () => {
+    const { d, firmadas } = depsOne({ negocioEsDelWorkspace: async () => false })
+    expect(await resolverApertura(DOC_ONE, false, d)).toMatchObject({ tipo: 'error', status: 404 })
+    expect(firmadas).toHaveLength(0)
+  })
+
+  it('bucket de ONE fuera de la lista, o ruta sin workspace: 400', async () => {
+    const { d, firmadas } = depsOne()
+    for (const mala of [
+      `one://cert-databooks/${WS_SOENA}/a.pdf`,
+      `one://workspace-logos/${WS_SOENA}/a.png`,
+      'one://ve-documentos/publico/a.pdf',
+      `one://ve-documentos/${WS_SOENA}`,
+      `one://ve-documentos/${WS_SOENA}/../${WS_TRAPPVEL}/a.pdf`,
+    ]) {
+      expect(await resolverApertura(mala, false, d)).toMatchObject({ tipo: 'error', status: 400 })
+    }
+    expect(firmadas).toHaveLength(0)
+  })
+
+  it('una URL pública sin migrar NO entra por aquí: 400 (la pantalla la abre directo)', async () => {
+    const { d } = depsOne()
+    const publica = `https://x.supabase.co/storage/v1/object/public/gastos-soportes/${WS_SOENA}/a.jpg`
+    expect(await resolverApertura(publica, false, d)).toMatchObject({ tipo: 'error', status: 400 })
+  })
+})
+
 describe('resolverAccesoNegocio (la vista del repositorio usa las mismas puertas)', () => {
   it('del workspace y con permiso: ok con el workspace de la sesión', async () => {
     const { d } = deps()

@@ -22,9 +22,17 @@ import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
-import { esReferenciaExterna, esRutaPendienteDe, parsearReferencia } from '@/lib/almacenamiento/referencia'
+import {
+  BUCKET_DOCUMENTOS_ONE,
+  construirReferenciaOne,
+  esReferenciaExterna,
+  esReferenciaOne,
+  esRutaPendienteDe,
+  parsearReferencia,
+} from '@/lib/almacenamiento/referencia'
+import { descargarDeOne } from '@/lib/almacenamiento/one'
 
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any { return client }
@@ -695,9 +703,10 @@ export async function procesarDocumento(
         await admin.storage.from(BUCKET).remove([storagePath])
         console.log('[documento] Step 7 OK: temp file removed')
       } else {
-        // Sin Drive (no configurado o negocio sin carpeta_url): guardar URL de Storage
-        const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
-        driveUrl = publicData.publicUrl
+        // Sin Drive (no configurado o negocio sin carpeta_url): el archivo se queda en
+        // `ve-documentos` y lo que se guarda es la REFERENCIA, no una URL pública. El
+        // bucket deja de ser público, así que `object/public` sería un enlace muerto.
+        driveUrl = construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, storagePath)
       }
     }
 
@@ -892,14 +901,17 @@ export async function reprocesarDocumento(
     // teniendo el archivo delante. La url trae el id, y `extraerDriveFileId` ya
     // existe y está probada — no hace falta un backfill para desatascarlos.
     const driveUrl = currentData.drive_url as string | undefined
-    // Un archivo en almacenamiento externo no tiene id de Drive: se lee por su referencia.
+    // Un archivo guardado por referencia no tiene id de Drive: se lee por su referencia.
+    // Dos esquemas y dos lectores distintos — el proyecto del cliente y el de ONE.
     const referenciaExterna = esReferenciaExterna(driveUrl) ? driveUrl : null
-    const driveFileId = referenciaExterna
+    const referenciaOne = esReferenciaOne(driveUrl) ? driveUrl : null
+    const porReferencia = referenciaExterna ?? referenciaOne
+    const driveFileId = porReferencia
       ? undefined
       : (currentData.drive_file_id as string | undefined) ??
         (driveUrl ? extraerDriveFileId(driveUrl) ?? undefined : undefined)
 
-    if (!driveFileId && !referenciaExterna) {
+    if (!driveFileId && !porReferencia) {
       return { success: false, error: 'No hay archivo en Drive para reprocesar' }
     }
 
@@ -916,7 +928,9 @@ export async function reprocesarDocumento(
 
     // 3. Descargar archivo de Drive (o del almacenamiento externo del workspace)
     let buffer: Buffer
-    if (referenciaExterna) {
+    if (referenciaOne) {
+      buffer = (await descargarDeOne(referenciaOne)).buffer
+    } else if (referenciaExterna) {
       const almacenamiento = await almacenamientoExternoDe(workspaceId)
       if (!almacenamiento) {
         return { success: false, error: 'El archivo está en almacenamiento externo y este espacio usa Drive' }
@@ -1204,10 +1218,15 @@ export async function subirImagenClipboard(
     .upload(storagePath, buffer, { contentType: mimeType, upsert: true })
   if (upErr) return { success: false, error: upErr.message }
 
-  const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(storagePath)
-  // `upsert` reescribe el mismo path: sin este sufijo, al reemplazar el pantallazo
-  // el navegador seguiría mostrando el anterior desde su caché.
-  return { success: true, url: `${publicData.publicUrl}?v=${Date.now()}` }
+  // Referencia, no URL pública. El `<img>` del bloque la pasa por `hrefArchivo`, que la
+  // manda a `/api/archivos/abrir`: una imagen sigue el 302 igual que un enlace.
+  //
+  // Se va el `?v=<epoch>` que llevaba la URL pública, y no hace falta: ese sufijo estaba
+  // para que el navegador no reusara el pantallazo anterior tras un `upsert` sobre el
+  // mismo path, y `/api/archivos/abrir` responde con `cache-control: no-store` y firma
+  // una URL distinta en cada apertura. Ponerlo ahora además rompería la referencia: el
+  // parser rechaza cualquier ruta con `?`.
+  return { success: true, url: construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, storagePath) }
 }
 
 // ── Extracción AI desde un pantallazo pegado (campo imagen_clipboard de BloqueDatos) ──

@@ -124,12 +124,14 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
 
     if (decision.accion === 'guardar_foto') {
       if (context.gasto_id && message.image_id) {
-        const publicUrl = await downloadAndStoreImage(
+        // Lo que vuelve es una REFERENCIA (`one://gastos-soportes/…`), no una URL
+        // publica: el bucket deja de serlo. La pantalla la abre por `/api/archivos/abrir`.
+        const referencia = await downloadAndStoreImage(
           supabase, message.image_id, user.workspace_id, context.gasto_id,
         );
-        if (publicUrl) {
+        if (referencia) {
           await supabase.from('gastos')
-            .update({ soporte_url: publicUrl, soporte_pendiente: false })
+            .update({ soporte_url: referencia, soporte_pendiente: false })
             .eq('id', context.gasto_id);
           await ctx.sendMessage('📷 Guardé el soporte fotográfico.');
         } else {

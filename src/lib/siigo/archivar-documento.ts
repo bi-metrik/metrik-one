@@ -15,8 +15,9 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { createSubfolderPath, setFilePublicByLink, uploadFileToDrive } from '@/lib/google-drive'
+import { BUCKET_DOCUMENTOS_ONE, construirReferenciaOne } from '@/lib/almacenamiento/referencia'
 
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 export interface ResultadoArchivado {
   ok: boolean
@@ -120,7 +121,10 @@ export async function archivarPdfEnBloque(
       // El de Storage era temporal: el archivo vive en Drive, como los demás.
       await svc.storage.from(BUCKET).remove([storagePath])
     } else {
-      url = svc.storage.from(BUCKET).getPublicUrl(storagePath).data.publicUrl
+      // Sin carpeta de Drive el documento se queda en `ve-documentos`, y lo que se
+      // guarda es la REFERENCIA: el bucket deja de ser público y `object/public` sería
+      // un enlace muerto sobre un documento fiscal ya emitido.
+      url = construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, storagePath)
     }
 
     // ── La instancia del bloque, creada si hace falta ─────────────────────────

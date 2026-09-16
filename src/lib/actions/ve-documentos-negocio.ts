@@ -9,15 +9,19 @@ import { parseVeDocuments } from '@/lib/ve/parse-ve-docs'
 import { parseRut } from '@/lib/rut/parse-rut'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
+import { descargarDeOne } from '@/lib/almacenamiento/one'
 import {
+  BUCKET_DOCUMENTOS_ONE,
+  construirReferenciaOne,
   esReferenciaExterna,
+  esReferenciaOne,
   esRutaPendienteDe,
   extensionSegura,
   parsearReferencia,
   rutaPendiente,
 } from '@/lib/almacenamiento/referencia'
 
-const BUCKET = 've-documentos'
+const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 // Cast a untyped para tablas nuevas no en database.ts
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -237,9 +241,10 @@ export async function confirmarUploadDocumentoNegocio(
       console.warn(`[ve-documentos] no se pudo borrar archivo temporal Storage:`, err)
     })
   } else {
-    // Legacy: URL publica de Supabase Storage
-    const { data: publicData } = admin.storage.from(BUCKET).getPublicUrl(filePath)
-    url = publicData.publicUrl
+    // Sin subcarpeta de Drive: el archivo se queda en `ve-documentos` y lo que se guarda
+    // es la REFERENCIA. El bucket deja de ser público, así que una URL `object/public`
+    // sería un enlace muerto.
+    url = construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, filePath)
   }
 
   const { error: updateError } = await db(supabase)
@@ -295,7 +300,19 @@ export async function procesarDocumentoNegocio(
 
   let buffer: ArrayBuffer
   let mimeType: string
-  if (esReferenciaExterna(url)) {
+  if (esReferenciaOne(url)) {
+    // Bucket de ONE: se lee con el cliente de servicio. Un `fetch` a la URL pública
+    // dejaría de funcionar en cuanto el bucket se cierre.
+    try {
+      const leido = await descargarDeOne(url)
+      const copia = new Uint8Array(leido.buffer.length)
+      copia.set(leido.buffer)
+      buffer = copia.buffer
+      mimeType = leido.mime || mimeTypeFromUrl(url)
+    } catch (err) {
+      return { success: false, error: `Error descargando: ${String(err).slice(0, 80)}` }
+    }
+  } else if (esReferenciaExterna(url)) {
     // Una referencia externa no se puede pedir por `fetch`: se lee con la llave del workspace.
     try {
       const { workspaceId } = await getWorkspace()

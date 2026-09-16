@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { BUCKET_SOPORTES_GASTO, construirReferenciaOne } from './referencia-archivo.ts';
 
 const META_API_VERSION = 'v21.0';
 
@@ -66,8 +67,12 @@ function mimeToExt(mime: string): string {
 
 /**
  * Download image from WhatsApp and store in Supabase Storage.
- * Returns the public URL or null if any step fails.
+ * Returns the stable REFERENCE (`one://gastos-soportes/…`) or null if any step fails.
  * Path: gastos-soportes/{workspace_id}/{gasto_id}.{ext}
+ *
+ * ⚠️ Devuelve referencia y no URL publica: el bucket deja de ser publico y una URL
+ * `object/public` quedaria como enlace muerto en `gastos.soporte_url`. Quien la abra
+ * pasa por `/api/archivos/abrir`, que valida sesion y workspace.
  */
 export async function downloadAndStoreImage(
   supabase: SupabaseClient,
@@ -97,7 +102,7 @@ export async function downloadAndStoreImage(
     const filePath = `${workspaceId}/${gastoId}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
-      .from('gastos-soportes')
+      .from(BUCKET_SOPORTES_GASTO)
       .upload(filePath, media.buffer, {
         contentType: media.mimeType,
         upsert: true,
@@ -108,13 +113,8 @@ export async function downloadAndStoreImage(
       return null;
     }
 
-    // 5. Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('gastos-soportes')
-      .getPublicUrl(filePath);
-
     console.log(`[wa-media] Stored: ${filePath} (${media.sizeKB}KB)`);
-    return publicUrl;
+    return construirReferenciaOne(BUCKET_SOPORTES_GASTO, filePath);
   } catch (err) {
     console.error('[wa-media] Unhandled error:', err);
     return null;
