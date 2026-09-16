@@ -9,7 +9,7 @@
  *   - un fallo de lectura CIERRA (al revés que el middleware).
  *
  * VISTO FALLAR (2026-09-16), mutando `exigir-modulo.ts` una guarda a la vez:
- *   - leyendo `modules` sin filtrar por el workspace de la sesión: cae 1;
+ *   - leyendo `modules` sin filtrar por el workspace de la sesión: caen 2;
  *   - dejando pasar cuando la lectura falla: caen 2;
  *   - sin la guarda de sesión: cae 1.
  */

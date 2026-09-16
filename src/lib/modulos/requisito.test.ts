@@ -9,7 +9,7 @@
  * VISTO FALLAR (2026-09-16), mutando `requisito.ts` una guarda a la vez:
  *   - sin el corte del requisito vacío: cae 1;
  *   - sin la comprobación de módulos: caen 4;
- *   - sin la comprobación de la función: caen 3;
+ *   - sin la comprobación de la función: cae 1;
  *   - sin el paso del platform admin: cae 1.
  */
 

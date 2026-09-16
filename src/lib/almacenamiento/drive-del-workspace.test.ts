@@ -6,8 +6,10 @@
  * padres y el cierre ante lo que no se puede comprobar.
  *
  * VISTO FALLAR (2026-09-16), mutando `drive-del-workspace.ts`:
- *   - contando el propio id como raíz: caen 2;
- *   - sin el registro de vistos: el ciclo no termina (cae por tiempo);
+ *   - dejando pasar el id que ES una raíz (`archivoDriveOperable`): cae 1;
+ *   - contando el propio id como descendiente en la subida pura: cae 1;
+ *   - sin el registro de vistos: cae 1 (el ciclo termina igual por el tope de niveles, pero
+ *     preguntando a Drive una vez por nivel);
  *   - dejando pasar cuando la comprobación lanza: cae 1.
  */
 
@@ -58,9 +60,15 @@ describe('desciendeDeAlgunaRaiz', () => {
     expect(await desciendeDeAlgunaRaiz('carpeta-neg', new Set(['carpeta-neg']), padresDe({ 'carpeta-neg': ['raiz'] }))).toBe(false)
   })
 
-  it('un ciclo en los padres termina', async () => {
-    const mapa = { a: ['b'], b: ['a'] }
-    expect(await desciendeDeAlgunaRaiz('a', new Set(['carpeta-neg']), padresDe(mapa))).toBe(false)
+  it('un ciclo en los padres termina sin volver a preguntar por lo ya visto', async () => {
+    const mapa: Record<string, string[]> = { a: ['b'], b: ['a'] }
+    const preguntas: string[] = []
+    const r = await desciendeDeAlgunaRaiz('a', new Set(['carpeta-neg']), async (id) => {
+      preguntas.push(id)
+      return mapa[id] ?? null
+    })
+    expect(r).toBe(false)
+    expect(preguntas).toEqual(['a', 'b'])
   })
 
   it('sin raíces, nada desciende', async () => {

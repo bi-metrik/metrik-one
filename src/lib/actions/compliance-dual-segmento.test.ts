@@ -253,7 +253,8 @@ describe('consultaDualPersistente — el segmento se valida antes de consultar',
 /**
  * TERCERA RONDA (2026-09-16): sin Sustenta dual no se prepara el lote, no se consulta y no
  * se escribe ni la fila de error. VISTO FALLAR contra `origin/main`: caen los 3; quitando la
- * guarda de `consultaDualPersistente` caen 2 y la de `prepararLoteDual`, 1.
+ * guarda de `consultaDualPersistente` cae 1 (la fila de error: con un segmento valido la
+ * sigue frenando la guarda de `consultaDual`) y la de `prepararLoteDual`, 1.
  */
 describe('consulta dual persistente — sin el modulo no hay nada', () => {
   beforeEach(() => reiniciarModulo('ws-test', { ...MODULES.cuatroDSoft }));

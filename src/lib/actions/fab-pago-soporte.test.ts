@@ -54,6 +54,7 @@ vi.mock('@/lib/cobros/soporte-pago', () => ({
 }))
 
 import { agregarPagoFab, getNegociosParaPagoFab } from './fab-pago-actions'
+import { repartirPagoComercial } from './conciliacion-actions'
 import { PREFIJO_REF_AUTOGENERADA } from '@/lib/cobros/referencia-externa'
 import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
@@ -155,8 +156,9 @@ describe('referencia del pago del FAB', () => {
 
 /**
  * TERCERA RONDA (2026-09-16): el FAB de pago es de Clarity, y la cuenta de ePayco es la de
- * SOENA. VISTO FALLAR contra `origin/main`: caen los 3; quitando la guarda de modulo de
- * `ctxFabPago` caen 2, y la de ePayco en `registrarPagoEnNegocio`, 1.
+ * SOENA. VISTO FALLAR contra `origin/main`: caen los 4; quitando la guarda de modulo de
+ * `ctxFabPago` caen 2, la de ePayco en `repartirPagoComercial` 1 y la de
+ * `registrarPagoEnNegocio` 1.
  */
 describe('el FAB de pago y la cuenta de ePayco, por modulo', () => {
   it('4D SOFT (sin Clarity) no registra un pago aunque llame la accion', async () => {
@@ -171,6 +173,19 @@ describe('el FAB de pago y la cuenta de ePayco, por modulo', () => {
     const r = await getNegociosParaPagoFab()
     expect(r.negocios).toEqual([])
     expect(r.error).toBeTruthy()
+  })
+
+  it('Termotech tampoco reparte como ePayco: el techo de plata leeria cuanto pago un cliente de SOENA', async () => {
+    reiniciarModulo(WS, { ...MODULES.termotech })
+    const r = await repartirPagoComercial({
+      referencia: '378962162',
+      monto_total: 1_020_000,
+      porciones: [{ negocio_id: 'n-abierto', monto: 1_020_000 }],
+      fuente: 'epayco',
+    } as unknown as Parameters<typeof repartirPagoComercial>[0])
+    expect(r.success).toBe(false)
+    expect(consultarTransaccionEpayco).not.toHaveBeenCalled()
+    expect(estado.fixtures.cobros ?? []).toHaveLength(0)
   })
 
   it('Termotech (Clarity sin pasarela) no registra como ePayco un pago de la cuenta de SOENA', async () => {

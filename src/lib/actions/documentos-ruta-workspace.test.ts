@@ -340,11 +340,11 @@ describe('procesarDocumentoNegocio — la referencia guardada', () => {
  * 3. `actualizarCamposNegocioBloque` solo escribe los campos extraídos.
  *
  * VISTO FALLAR contra `origin/main`: caen 7 (los dos borrados ajenos, la descarga ajena del
- * reproceso, la URL arbitraria, los dos enlaces de Drive y la clave `docs`); los 3 CONTROL
+ * reproceso, la URL arbitraria, los dos enlaces de Drive y la clave `docs`); los 2 CONTROL
  * siguen verdes. Mutaciones sobre los archivos nuevos: sin la comprobación de ancestros en
- * `procesarDocumento` caen 2; en `reprocesarDocumento`, 1; volviendo a `fetch(url)`, 2; sin
- * la lista blanca de `actualizarCamposNegocioBloque`, 1; contando la propia carpeta como
- * ancestro, 1.
+ * `procesarDocumento` caen 2; en `reprocesarDocumento`, 1; en `procesarDocumentoNegocio`, 1;
+ * volviendo a `fetch(url)`, 3; sin la lista blanca de `actualizarCamposNegocioBloque`, 1;
+ * contando la propia carpeta como ancestro, 1.
  */
 describe('ids de Drive guardados en data — sin Drive propio', () => {
   it('el archivo anterior de otro cliente no se borra', async () => {

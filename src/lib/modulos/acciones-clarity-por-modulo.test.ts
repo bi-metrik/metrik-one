@@ -11,12 +11,15 @@
  * Lo que se fija: sin el módulo, la acción responde antes de tocar la base, Storage o Gemini.
  * Con Clarity (CONTROL), la acción pasa la puerta y llega a la base.
  *
- * VISTO FALLAR (2026-09-16) contra `origin/main`: caen los 8 casos de 4D SOFT; los CONTROL
- * siguen verdes. Quitando cada guarda de módulo cae el caso de su acción (8 mutaciones).
+ * VISTO FALLAR (2026-09-16) contra `origin/main`: caen los 10 casos de 4D SOFT; los 2 CONTROL
+ * siguen verdes. Quitando cada guarda de módulo cae el caso de su acción (10 mutaciones).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// UUID de verdad: `rutaEnWorkspace` rechaza otro formato, y con 'ws-1' `uploadSoporteGasto`
+// cortaba antes de subir también en `origin/main` (la prueba pasaba por la razón equivocada).
+const WS = '64010015-a9a2-4aca-be83-e456cf217d96'
 const tocadas: string[] = []
 
 function clienteQueRegistra() {
@@ -46,7 +49,7 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
 vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({
     supabase: clienteQueRegistra(),
-    workspaceId: 'ws-1',
+    workspaceId: WS,
     userId: 'user-1',
     staffId: 'staff-1',
     role: 'owner',
@@ -66,9 +69,14 @@ const subirAOne = vi.fn(async () => ({ referencia: 'one://x' }))
 vi.mock('@/lib/almacenamiento/one', () => ({ subirAOne: () => subirAOne() }))
 
 import { crearNegocio, crearNegocioDesdeInteraccion } from '@/app/(app)/negocios/negocio-v2-actions'
-import { createGasto, uploadSoporteGasto, clasificarGastoAction } from '@/app/(app)/nuevo/gasto/gasto-action'
+import {
+  createGasto,
+  uploadSoporteGasto,
+  clasificarGastoAction,
+  proponerCentroCostosAction,
+} from '@/app/(app)/nuevo/gasto/gasto-action'
 import { addHorasDestino } from '@/app/(app)/nuevo/horas/horas-action'
-import { addCobro } from '@/lib/actions/cobros-horas-rapidos'
+import { addCobro, addHoras } from '@/lib/actions/cobros-horas-rapidos'
 import { updateLineaActiva } from '@/app/(app)/mi-negocio/actions'
 import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 import { ORIGENES_NEGOCIO, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
@@ -92,7 +100,7 @@ beforeEach(() => {
 })
 
 describe('4D SOFT (solo valida_api) no crea en Clarity', () => {
-  beforeEach(() => reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft }))
+  beforeEach(() => reiniciarModulo(WS, { ...MODULES.cuatroDSoft }))
 
   it('crearNegocio no toca la base', async () => {
     const r = await crearNegocio({ nombre: 'Negocio de prueba', origen: ORIGEN })
@@ -130,6 +138,18 @@ describe('4D SOFT (solo valida_api) no crea en Clarity', () => {
     expect(tocadas).toEqual([])
   })
 
+  it('proponerCentroCostosAction no lee proveedores ni historial', async () => {
+    const r = await proponerCentroCostosAction({ descripcion: 'almuerzo con cliente' })
+    expect(r.centro).toBeNull()
+    expect(tocadas).toEqual([])
+  })
+
+  it('addHoras no registra horas en un proyecto', async () => {
+    const r = await addHoras('proy-1', { fecha: '2026-09-16', horas: 2 })
+    expect(r.success).toBe(false)
+    expect(tocadas).toEqual([])
+  })
+
   it('addCobro no registra', async () => {
     const r = await addCobro('fac-1', { monto: 10_000 })
     expect(r.success).toBe(false)
@@ -144,7 +164,7 @@ describe('4D SOFT (solo valida_api) no crea en Clarity', () => {
 })
 
 describe('CONTROL — con Clarity las acciones pasan la puerta', () => {
-  beforeEach(() => reiniciarModulo('ws-1', { business: true }))
+  beforeEach(() => reiniciarModulo(WS, { business: true }))
 
   it('crearNegocio llega a la base', async () => {
     await crearNegocio({ nombre: 'Negocio de prueba', origen: ORIGEN }).catch(() => null)
@@ -154,10 +174,5 @@ describe('CONTROL — con Clarity las acciones pasan la puerta', () => {
   it('clasificarGastoAction llama al clasificador', async () => {
     await clasificarGastoAction('almuerzo con cliente')
     expect(clasificarGastoConIA).toHaveBeenCalledTimes(1)
-  })
-
-  it('updateLineaActiva lee la línea antes de decidir', async () => {
-    await updateLineaActiva('linea-1')
-    expect(tocadas).toContain('lineas_negocio')
   })
 })

@@ -28,6 +28,12 @@
  * que el helper deje de mirar el workspace tumba 3 (los dos ajenos de `consultarValida`
  * y el del lote; el del id inexistente sigue verde, porque ese id no existe en ningun
  * workspace y la mutacion no lo toca).
+ *
+ * TERCERA RONDA (2026-09-16): la sesion no basta, lo abre el modulo Valida; y sin llave
+ * propia no se usa la global de MeTRIK. VISTO FALLAR contra `origin/main`: caen los 6 de
+ * 4D SOFT que llegan a la red o a la base y los 2 sin llave; el CONTROL del CDA y el de la
+ * llave del workspace siguen verdes. Quitando cada `accesoValida` cae su caso (6
+ * mutaciones); volviendo a poner el respaldo a `VALIDA_API_KEY` caen 2.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -51,6 +57,12 @@ const TABLAS: Record<string, Fila[]> = {
       id: 'c-vieja', workspace_id: 'ws-1', negocio_id: 'neg-ajeno', tipo: 'puntual',
       tipo_persona: 'natural', nombre_consultado: 'X', severidad: 'sin_hallazgo',
       total_matches: 0, created_at: '2026-09-01T00:00:00Z', created_by: null, lote_id: null,
+    },
+    // Un item de lote con reporte en Valida: `generarPDFLoteValida` llega a la red con el.
+    {
+      id: 'c-lote', workspace_id: 'ws-1', negocio_id: null, tipo: 'masiva_item',
+      tipo_persona: 'natural', nombre_consultado: 'Y', severidad: 'sin_hallazgo', valida_consulta_id: 'val-9',
+      total_matches: 0, created_at: '2026-09-02T00:00:00Z', created_by: null, lote_id: 'lote-1',
     },
   ],
 }
@@ -120,6 +132,7 @@ function constructor(tabla: string) {
     limit: () => q,
     gte: () => q,
     lte: () => q,
+    not: () => q,
     eq: (columna: string, valor: unknown) => {
       eqs[columna] = valor
       return q
@@ -189,17 +202,28 @@ describe('el módulo Valida, no la sesión, abre estas acciones (tercera ronda)'
     expect(inserts).toHaveLength(0)
   })
 
-  it('no descarga reportes ni arma el PDF de un lote', async () => {
+  it('no descarga reportes', async () => {
     expect((await descargarPDFConsultaValida('val-1')).ok).toBe(false)
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('no arma el PDF de un lote', async () => {
     expect((await generarPDFLoteValida('lote-1')).ok).toBe(false)
     expect(fetchValida).not.toHaveBeenCalled()
   })
 
-  it('no lista, no prepara lotes ni busca negocios', async () => {
+  it('no lista las consultas', async () => {
     expect((await listarConsultasValida()).ok).toBe(false)
+  })
+
+  it('no prepara lotes', async () => {
     expect((await prepararLoteValida(loteSinCodigo())).ok).toBe(false)
+  })
+
+  it('no busca negocios', async () => {
     expect((await buscarNegociosParaValida('P')).ok).toBe(false)
   })
+
 
   it('CONTROL — un CDA de solo Valida sí consulta', async () => {
     reiniciarModulo('ws-1', { ...MODULES.cda })

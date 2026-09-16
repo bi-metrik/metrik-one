@@ -7,11 +7,12 @@
  * `documentos_preview` con slug `_preview_docs`; ninguno declara `docs`, `drive_url` ni
  * `drive_file_id`.
  *
- * VISTO FALLAR (2026-09-16), mutando `data-escribible.ts` una guarda a la vez:
- *   - dejando pasar toda clave (el comportamiento de `origin/main`): caen 6;
+ * VISTO FALLAR (2026-09-16), mutando `data-escribible.ts` una guarda a la vez (conteos de este
+ * archivo; las mismas mutaciones tumban además las de `data-del-navegador.test.ts`):
+ *   - dejando pasar toda clave (el comportamiento de `origin/main`): caen 4;
  *   - sin `CLAVES_NUNCA_DEL_NAVEGADOR`: cae 1;
- *   - sin el corte de los slugs con `_`: cae 1;
- *   - sin la validación del valor de imagen: caen 2;
+ *   - sin el corte de los slugs con `_`: caen 2;
+ *   - sin la validación del valor de imagen: cae 1;
  *   - en `reemplazo`, borrando lo no escribible que no viene: cae 1.
  */
 

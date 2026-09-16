@@ -20,9 +20,10 @@
  * (`fab_pago_epayco`; Sustenta, que es de quien es `/compliance/validacion`). Los casos
  * "con sesion" pasan a declarar el workspace con el que corren, y se agregan los de un
  * workspace con sesion y sin el modulo (4D SOFT, Termotech, un CDA).
- * VISTO FALLAR contra `origin/main`: caen los 4 casos sin modulo; los de control siguen
- * verdes. Quitando la guarda de modulo de `consultarEpayco` caen 2; de `validarPersona`, 1;
- * de `listarConsultas`, 1.
+ * VISTO FALLAR contra `origin/main`: caen los 5 casos con sesion y sin modulo; los de control
+ * siguen verdes. Quitando la guarda de modulo (que ahora tambien pide la sesion) de
+ * `consultarEpayco` caen 3; de `registrarPagoEpayco`, 1; de `validarPersona`, 1; de
+ * `listarConsultas`, 2.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
