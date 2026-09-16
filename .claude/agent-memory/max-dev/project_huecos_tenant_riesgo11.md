@@ -1,43 +1,58 @@
 ---
 name: huecos-tenant-riesgo11
-description: #752 y #754 cierran los huecos de tenant del riesgo 11 (antes de abrir ONE a 4D SOFT); siguen ABIERTOS data de bloques con claves libres (SSRF, Drive con credenciales globales) y Valida/ePayco con llave global sin gate de módulo
+description: #752, #754 y #759 cierran los huecos de tenant del riesgo 11 (antes de abrir ONE a 4D SOFT); #759 pone exigirModulo en las acciones; siguen abiertos /api/calidad, el bot de WhatsApp y las guardas de bloque sin Clarity
 metadata:
   type: project
 ---
 
-Dos PR, 2026-09-16, sin migración, motivados por dar acceso a ONE a un cliente externo (4D SOFT):
-cualquier acción que acepte un id ajeno o no pida sesión es explotable por ese usuario.
+Tres PR, 2026-09-16, sin migración, motivados por dar acceso a ONE a un cliente externo (4D SOFT,
+workspace `4d-soft` con solo `valida_api`): cualquier acción que acepte un id ajeno, no pida
+sesión o no pida el módulo es explotable por ese usuario.
 
-**#752** (rama `fix/huecos-seguridad-riesgo11`, mergeado `4dc6b19e`): rutas AFI por workspace,
-`crearV1Automatica` a `server-only` con guarda, `guardarDatosSarlaft`/`recalcularScoreNegocio` con
-`negocioEsDelWorkspace`, muro público con los gates adentro de la función que lee.
+**#752** (`4dc6b19e`): rutas AFI por workspace, `crearV1Automatica` a `server-only`,
+`guardarDatosSarlaft`/`recalcularScoreNegocio` con `negocioEsDelWorkspace`, muro público con gates.
 
-**#754** (rama `fix/huecos-seguridad-riesgo11-ronda2`): `valida-consultas` valida el negocio antes
-de llamar a Valida; `applyPlantilla(lineaId)` toma el workspace de la sesión (owner, plantilla
-nativa, sin línea activa); `procesarDocumento`/`confirmarUploadDocumentoNegocio` exigen
-`esRutaDeWorkspace` y el id viejo de Drive sale de la fila; `reprocesarDocumento` y
-`procesarDocumentoNegocio` miran el workspace de la referencia `one://`; `centro-costos-asignar` y
-los generadores AFI a `server-only`; sujetos/documentos de compliance validan sus referencias;
-`consultarEpayco` y `listarConsultas` (valida.ts) exigen sesión.
+**#754** (`36593225`): `valida-consultas` valida el negocio; `applyPlantilla` con workspace de la
+sesión; `procesarDocumento`/`confirmarUploadDocumentoNegocio` con `esRutaDeWorkspace`; referencias
+`one://` por workspace; `consultarEpayco` y `listarConsultas` exigen sesión.
+
+**#759** (`b039db8f`, tercera ronda):
+- `exigirModulo(REQUISITO.x)` (`src/lib/modulos/exigir-modulo.ts`, criterio puro en `requisito.ts`):
+  mismo criterio que `rutaPermitida` más una llave de función (`fab_pago_epayco`,
+  `compliance_dual_informa`, `compliance_vinculacion`). **Cierra si no puede leer** (el middleware
+  abre). Doble de pruebas: `test/exigir-modulo-doble.ts`.
+- Aplicado a: Valida con llave global (Sustenta), `/valida` (Valida), dual, vinculación, expediente
+  documental y monitoreo, ePayco (y el reparto/registro con fuente ePayco), crear negocio, gastos,
+  horas, cobros rápidos y FAB de pago (Clarity), `updateLineaActiva` (rol + Clarity + línea propia).
+- **Se quitó el respaldo a `VALIDA_API_KEY`** en `/valida` y vinculación: los 7 workspaces con esos
+  módulos tienen llave propia en Vault (cabecera de `20260915020000`). Un workspace sin llave falla
+  a la vista.
+- `data` del navegador pasa por lista blanca (`src/lib/negocios/data-escribible.ts`): lo no
+  escribible conserva lo guardado. `procesarDocumentoNegocio` ya no hace `fetch`. Con credenciales
+  globales de Drive, un id solo se opera si cuelga de la carpeta del negocio o del workspace
+  (`src/lib/almacenamiento/drive-del-workspace.ts`).
+- `cargarConfigPeriodicidad` salió de `'use server'` (manifiesto 508 → 507).
 
 **⚠️⚠️ Hallazgo del #754 que no se ve leyendo el código:** `storage-js` pega la ruta a la URL sin
-codificar y el parser WHATWG de `fetch` normaliza `%2e%2e`, `.%2E`, `.<TAB>.` (tabs y saltos se
-borran) y `\` como salto de carpeta. `one://ve-documentos/<mi_ws>/%2e%2e/<otro_ws>/…` pasaba la
-puerta de `/api/archivos/abrir` (primer segmento = mi workspace) y se firmaba el archivo ajeno.
-`remove` no es vulnerable (la ruta va en el cuerpo), `download`/`createSignedUrl` sí.
+codificar y `fetch` normaliza `%2e%2e`, `.%2E`, `.<TAB>.` y `\`. `download`/`createSignedUrl` son
+vulnerables; `remove` no.
 
-**Why:** toda lectura con service role a partir de un dato del navegador (o de `data`, que tiene
-escritores con claves libres) es cross-tenant si no se compara contra la sesión en ese punto.
+**⚠️ Hallazgo del #759:** el gate por ruta deja pasar TODO `/api` (`gate.ts` lo dice). Una route
+handler no está en el manifiesto de server actions y no hereda la puerta de la pantalla.
+
+**Why:** toda lectura con service role a partir de un dato del navegador es cross-tenant si no se
+compara contra la sesión en ese punto; y todo lo que gasta llaves de MeTRIK (Gemini, Valida, Drive
+global) necesita la puerta de módulo en la acción, no solo en la pantalla.
 
 **How to apply:**
-- Toda ruta de Storage que venga de afuera pasa por `esRutaDeWorkspace` o `parsearReferenciaOne`
-  (`referencia.ts`), nunca por un `startsWith` propio. La copia de Deno tiene prueba de contrato.
-- Antes de afirmar que un export es un hueco o que se cerró, mirar el manifiesto del build
-  ([[manifiesto-server-actions]]). Pruebas: doble que aplica `.eq()` y registra efectos, vista
-  fallar contra `origin/main` y guarda por guarda ([[pruebas-por-mutacion]]).
-- ⚠️ ABIERTOS (archivo:línea en el cuerpo del #754): (1) `actualizarBloqueData` y
-  `actualizarCamposNegocioBloque` aceptan claves libres en `data` → SSRF por `fetch(url)` en
-  `procesarDocumentoNegocio`, y lectura/borrado de Drive ajeno con las credenciales globales;
-  (2) `validarPersona`/`listarConsultas` y el respaldo `VALIDA_API_KEY` sin gate de módulo;
-  (3) `consultarEpayco` sin gate `fab_pago_epayco`; (4) `cargarConfigPeriodicidad` sin sesión;
-  (5) `updateLineaActiva` sin rol; (6) `notificar-etapa` sin redesplegar (guarda inerte).
+- Acción nueva que gaste un recurso de MeTRIK o sea de un módulo: `exigirModulo` al inicio, y la
+  prueba mockea con `dobleExigirModulo()`.
+- Rutas de Storage de afuera por `esRutaDeWorkspace` o `parsearReferenciaOne` (`referencia.ts`).
+- Antes de afirmar que un export es un hueco, mirar el manifiesto ([[manifiesto-server-actions]]);
+  pruebas vistas caer contra `origin/main` por su aserción y guarda por guarda
+  ([[pruebas-por-mutacion]]).
+- ⚠️ ABIERTOS tras #759: (1) `/api/calidad/transcribir|auditar|audio-url|guardar` sin módulo:
+  owner/admin/supervisor/read_only de cualquier workspace gasta Gemini de MeTRIK; (2) `wa-webhook`
+  no mira `modules` (edge function, redeploy manual); (3) `uploadPlanillaPila` sin
+  `cobros_recurrentes`; (4) guardas de `guard-negocio.ts` sin Clarity (inertes mientras 4d-soft no
+  tenga negocios); (5) confirmar por MCP los 7 nombres `ws:%:valida_api_key` en Vault.
