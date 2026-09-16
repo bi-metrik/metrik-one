@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { estaArchivado, armarSelectorDeWorkspaces, type WorkspaceConMarca } from './archivado'
 
-const METRIK: WorkspaceConMarca = { id: 'w-metrik', slug: 'metrik', name: 'MéTRIK', archivado: null }
-const SOENA: WorkspaceConMarca = { id: 'w-soena', slug: 'soena', name: 'SOENA', archivado: null }
+const METRIK: WorkspaceConMarca = { id: 'w-metrik', slug: 'metrik', name: 'MéTRIK', archivado: null, grupo: 'metrik' }
+const SOENA: WorkspaceConMarca = { id: 'w-soena', slug: 'soena', name: 'SOENA', archivado: null, grupo: 'clarity' }
 const ADVISE: WorkspaceConMarca = { id: 'w-advise', slug: 'advise', name: 'Advise', archivado: true }
-const HJBC: WorkspaceConMarca = { id: 'w-hjbc', slug: 'hjbc', name: 'HJBC', archivado: true }
+const HJBC: WorkspaceConMarca = { id: 'w-hjbc', slug: 'hjbc', name: 'HJBC', archivado: true, grupo: 'Clarity' }
 
 const TODOS = [ADVISE, HJBC, METRIK, SOENA]
 
@@ -36,8 +36,8 @@ describe('armarSelectorDeWorkspaces', () => {
 
   it('parado DENTRO de un archivado, la barra sigue sabiendo dónde está y a dónde volver', () => {
     const r = armarSelectorDeWorkspaces(TODOS, ADVISE.id, METRIK.id)
-    expect(r.currentWorkspace).toEqual({ id: 'w-advise', slug: 'advise', name: 'Advise' })
-    expect(r.homeWorkspace).toEqual({ id: 'w-metrik', slug: 'metrik', name: 'MéTRIK' })
+    expect(r.currentWorkspace).toEqual({ id: 'w-advise', slug: 'advise', name: 'Advise', grupo: 'sin_clasificar' })
+    expect(r.homeWorkspace).toEqual({ id: 'w-metrik', slug: 'metrik', name: 'MéTRIK', grupo: 'metrik' })
     expect(r.workspaces.some(w => w.id === ADVISE.id)).toBe(false)
   })
 
@@ -46,11 +46,17 @@ describe('armarSelectorDeWorkspaces', () => {
     expect(r.homeWorkspace?.slug).toBe('hjbc')
   })
 
-  it('no filtra la marca hacia el cliente: el resumen solo trae id, slug y name', () => {
+  it('no filtra la marca hacia el cliente: el resumen solo trae id, slug, name y el grupo ya normalizado', () => {
     const r = armarSelectorDeWorkspaces(TODOS, ADVISE.id, METRIK.id)
     for (const w of [...r.workspaces, r.currentWorkspace, r.homeWorkspace]) {
-      expect(Object.keys(w ?? {}).sort()).toEqual(['id', 'name', 'slug'])
+      expect(Object.keys(w ?? {}).sort()).toEqual(['grupo', 'id', 'name', 'slug'])
     }
+  })
+
+  it('el grupo viaja normalizado: una clave desconocida o ausente llega como sin_clasificar', () => {
+    const r = armarSelectorDeWorkspaces(TODOS, HJBC.id, METRIK.id)
+    expect(r.workspaces.map(w => [w.slug, w.grupo])).toEqual([['metrik', 'metrik'], ['soena', 'clarity']])
+    expect(r.currentWorkspace?.grupo).toBe('sin_clasificar')
   })
 
   it('sin home ni actual resolubles devuelve null, no revienta', () => {

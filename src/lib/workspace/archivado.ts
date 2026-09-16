@@ -15,6 +15,8 @@
  * esconderlo (no se nota).
  */
 
+import { grupoDeWorkspace, type GrupoDeWorkspace } from './grupo'
+
 /**
  * `valor` es lo que devuelve PostgREST para `archivado:config_extra->archivado`
  * (flecha simple: conserva el tipo JSON), o el `config_extra.archivado` ya leído.
@@ -28,12 +30,16 @@ export type WorkspaceConMarca = {
   slug: string
   name: string
   archivado?: unknown
+  /** `config_extra->grupo` crudo; se normaliza al armar el resumen. */
+  grupo?: unknown
 }
 
 export type WorkspaceDelSelector = {
   id: string
   slug: string
   name: string
+  /** Encabezado bajo el que se lista. Ya normalizado: nunca un valor desconocido. */
+  grupo: GrupoDeWorkspace
 }
 
 export type SelectorDeWorkspaces = {
@@ -46,7 +52,7 @@ export type SelectorDeWorkspaces = {
 }
 
 function resumen(w: WorkspaceConMarca): WorkspaceDelSelector {
-  return { id: w.id, slug: w.slug, name: w.name }
+  return { id: w.id, slug: w.slug, name: w.name, grupo: grupoDeWorkspace(w.grupo) }
 }
 
 /**

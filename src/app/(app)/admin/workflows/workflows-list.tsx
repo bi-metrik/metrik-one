@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import type { AdminLineaItem } from './actions'
+import { agruparWorkspaces } from '@/lib/workspace/grupo'
 
 interface Props {
   items: AdminLineaItem[]
@@ -15,16 +16,16 @@ export default function WorkflowsList({ items }: Props) {
   const [filterEstado, setFilterEstado] = useState<string>('todos')
 
   const tipos = useMemo(() => Array.from(new Set(items.map(i => i.linea_tipo))).sort(), [items])
-  const workspaceOptions = useMemo(() => {
-    const map = new Map<string, string>()
+  // Mismo orden y encabezados que el selector del platform admin (MéTRIK, Valida,
+  // Clarity, Demo, Sin clasificar); alfabético dentro de cada grupo.
+  const workspaceGroups = useMemo(() => {
+    const map = new Map<string, { slug: string; name: string; grupo: AdminLineaItem['workspace_grupo'] }>()
     for (const it of items) {
       const key = it.workspace_slug || it.workspace_id
       const label = it.workspace_name || it.workspace_slug || it.workspace_id
-      if (!map.has(key)) map.set(key, label)
+      if (!map.has(key)) map.set(key, { slug: key, name: label, grupo: it.workspace_grupo })
     }
-    return Array.from(map.entries())
-      .map(([slug, name]) => ({ slug, name }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+    return agruparWorkspaces(Array.from(map.values()))
   }, [items])
 
   const filtered = useMemo(() => {
@@ -73,7 +74,11 @@ export default function WorkflowsList({ items }: Props) {
           className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm focus:border-acento focus:outline-none"
         >
           <option value="todos">Todos los workspaces</option>
-          {workspaceOptions.map(w => <option key={w.slug} value={w.slug}>{w.name}</option>)}
+          {workspaceGroups.map(g => (
+            <optgroup key={g.clave} label={g.etiqueta}>
+              {g.workspaces.map(w => <option key={w.slug} value={w.slug}>{w.name}</option>)}
+            </optgroup>
+          ))}
         </select>
         <select
           value={filterTipo}
