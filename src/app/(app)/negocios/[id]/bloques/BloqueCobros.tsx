@@ -11,6 +11,7 @@ import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import { hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
 
 interface Cobro {
   id: string
@@ -89,11 +90,14 @@ const TIPO_LABELS: Record<string, string> = {
  * ruido permanente sobre pagos que ya se decidió no acusar. Quién falta se ve entero en
  * el control de recibos de Conciliación, que es donde se actúa.
  */
-function ReciboDelPago({ cobro }: { cobro: Cobro }) {
+export function ReciboDelPago({ cobro }: { cobro: Cobro }) {
   const numero = cobro.siigo_recibo?.numero
   if (!numero) return null
 
-  const url = cobro.siigo_recibo?.archivo_url
+  // El PDF ya no se abre en Drive: nace cerrado y los bytes los baja
+  // `/api/archivos/cobro` con la cuenta de servicio. Un recibo manual (`archivo_url`
+  // null) no tiene enlace, y eso se dice abajo en vez de ofrecer uno roto.
+  const url = hrefArchivoDeCobro(cobro.id, 'recibo', cobro.siigo_recibo?.archivo_url)
   if (!url) {
     // Emitido en Siigo pero sin PDF archivado: existe igual, y decirlo es mejor que
     // ofrecer un enlace que no lleva a ninguna parte.

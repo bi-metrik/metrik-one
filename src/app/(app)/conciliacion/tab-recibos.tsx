@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import BusquedaInput from '@/components/busqueda-input'
 import { emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
 import type { ControlRecibos, PagoConRecibo, EstadoRecibo } from '@/lib/actions/recibos-control-actions'
+import { hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -116,7 +117,11 @@ export default function TabRecibos(
   )
 }
 
-function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => void }) {
+/**
+ * Exportada para poder pintarla sola en una prueba de render: la vista de la pestaña es
+ * estado interno y sin DOM no se puede cambiar. Mismo criterio que `FilaPorFacturar`.
+ */
+export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => void }) {
   const [pendiente, startTransition] = useTransition()
   const [abierto, setAbierto] = useState(false)
   const [valor, setValor] = useState('')
@@ -128,6 +133,11 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
   // exacto. Se escribe solo para corregirlo contra el soporte, porque los casos del
   // cargue masivo no tienen comprobante.
   const montoValido = escrito === '' || Number(escrito) > 0
+
+  // El PDF del recibo ya no se abre en Drive: nace cerrado y los bytes los baja
+  // `/api/archivos/cobro` con la cuenta de servicio. Un recibo cargado a mano no trae
+  // enlace y aquí queda en null, que es lo que ya pintaba "sin PDF".
+  const hrefRecibo = hrefArchivoDeCobro(pago.cobro_id, 'recibo', pago.recibo_url)
 
   function emitir() {
     startTransition(async () => {
@@ -180,9 +190,9 @@ function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => voi
 
       <div className="shrink-0">
         {pago.estado === 'con_recibo' && (
-          pago.recibo_url ? (
+          hrefRecibo ? (
             <a
-              href={pago.recibo_url}
+              href={hrefRecibo}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline"

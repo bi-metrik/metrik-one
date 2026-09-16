@@ -14,20 +14,30 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
+/** Cuántas veces se abrió el archivo a "cualquiera con el enlace". Tiene que ser 0. */
+const aperturas: string[] = []
+/** Bytes que Storage devuelve. `null` = Drive nunca se alcanza. */
+let bytesDeStorage: Blob | null = null
+
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     storage: {
       from: () => ({
         getPublicUrl: () => ({ data: { publicUrl: 'https://storage/x' } }),
-        download: async () => ({ data: null, error: new Error('sin red') }),
+        download: async () =>
+          bytesDeStorage
+            ? { data: bytesDeStorage, error: null }
+            : { data: null, error: new Error('sin red') },
       }),
     },
   }),
 }))
 vi.mock('@/lib/google-drive', () => ({
   createSubfolderPath: async () => 'folder',
-  uploadFileToDrive: async () => ({ fileId: 'f', webViewLink: 'https://drive/f' }),
-  setFilePublicByLink: async () => {},
+  uploadFileToDrive: async () => ({ fileId: 'f', webViewLink: 'https://drive/file/d/f/view' }),
+  // Sigue declarado a propósito aunque el módulo ya no lo importe: si alguien lo
+  // reintroduce, la prueba de abajo lo cuenta en vez de dejarlo pasar en silencio.
+  setFilePublicByLink: async (fileId: string) => { aperturas.push(fileId) },
 }))
 
 import { archivarSoporte } from './soporte-pago'
@@ -88,5 +98,48 @@ describe('guard del path del comprobante', () => {
     )
     expect(r?.url).toBe(`one://ve-documentos/${WS_UUID}/pagos-fab/mio.jpg`)
     expect(duenoDeReferencia(r?.url)).toEqual({ workspaceId: WS_UUID, negocioId: null })
+  })
+})
+
+// ── El soporte NACE CERRADO en Drive ─────────────────────────────────────────
+//
+// Un soporte de pago es la captura de una transferencia bancaria. Hasta el 2026-09-16
+// se abría a "cualquiera con el enlace", un permiso que no vence y sobrevive al cierre
+// del negocio. Nadie sin cuenta en ONE tiene que abrirlo: lo lee el equipo, con sesión,
+// por `/api/archivos/cobro`, que necesita `drive_file_id`.
+
+const WS_UUID = '7dea141d-d4da-483d-a78d-b14ef35500c5'
+
+/** Un negocio CON carpeta de Drive: es el único camino que llega a subir el archivo. */
+const supabaseConCarpeta = {
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: { carpeta_url: 'https://drive.google.com/drive/folders/CARPETA1' },
+          }),
+        }),
+      }),
+    }),
+  }),
+}
+
+describe('el soporte empujado a Drive', () => {
+  it('NO se abre a cualquiera con el enlace, y guarda el id que la ruta necesita', async () => {
+    aperturas.length = 0
+    bytesDeStorage = new Blob(['bytes'])
+    try {
+      const r = await archivarSoporte(
+        supabaseConCarpeta, WS_UUID, 'negocio-1',
+        { storage_path: `${WS_UUID}/pagos-externos/mio.jpg`, file_name: 'mio.jpg' },
+        null, 'user-1',
+      )
+      // CONTROL: sin esto, un fallo de la subida daría el mismo cero de aperturas.
+      expect(r?.drive_file_id).toBe('f')
+      expect(aperturas).toEqual([])
+    } finally {
+      bytesDeStorage = null
+    }
   })
 })

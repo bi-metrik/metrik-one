@@ -77,6 +77,15 @@ export interface MarcaRecibo {
   siigo_id: string
   valor: number
   archivo_url: string | null
+  /**
+   * Id del PDF en Drive.
+   *
+   * Desde el 2026-09-16 el archivo NACE CERRADO (ya no se abre a cualquiera con el
+   * enlace), así que `archivo_url` sirve de referencia pero no para abrirlo: lo abre
+   * `/api/archivos/cobro`, que baja los bytes con la cuenta de servicio y necesita el id.
+   * Las 7 marcas anteriores no lo traen y su id se saca del enlace (`idDeArchivoDrive`).
+   */
+  drive_file_id?: string | null
   at: string
   por: string | null
   /** Fecha del DOCUMENTO en Siigo. Puede no ser la del pago: ver `fecha_motivo`. */
@@ -323,6 +332,7 @@ export async function emitirReciboDeCobro(
     // De aquí en adelante NADA convierte la emisión en un fallo: el recibo ya está
     // asentado y consumió numeración.
     let archivoUrl: string | null = null
+    let driveFileId: string | null = null
     let bloqueConfigId: string | null = null
     if (opciones.bloqueReciboSlug) {
       try {
@@ -345,10 +355,19 @@ export async function emitirReciboDeCobro(
           // Y se acumula en la lista, porque el siguiente pago traerá otro recibo y
           // `drive_url` solo puede apuntar al último.
           { clave: 'recibos', entrada: { numero, valor: valorPagado, cobro_id: cobroId, at: new Date().toISOString() } },
+          'emitido_en_siigo',
+          // ⚠️ El PDF NACE CERRADO en Drive. Un recibo de caja lo lee el equipo con
+          // sesión (la ficha del negocio y el control de recibos de /conciliación), no
+          // un cliente sin cuenta de Google: abrirlo a cualquiera con el enlace no
+          // compraba nada y el permiso no vencía nunca. Se abre por
+          // `/api/archivos/cobro`, que baja los bytes con la cuenta de servicio.
+          false,
         )
         bloqueConfigId = arch.bloqueConfigId ?? null
-        if (arch.ok) archivoUrl = arch.url ?? null
-        else console.error('[siigo] recibo emitido pero SIN archivar en el negocio:', arch.error)
+        if (arch.ok) {
+          archivoUrl = arch.url ?? null
+          driveFileId = arch.driveFileId ?? null
+        } else console.error('[siigo] recibo emitido pero SIN archivar en el negocio:', arch.error)
       } catch (e) {
         console.error('[siigo] recibo emitido pero SIN PDF:', (e as Error).message)
       }
@@ -360,6 +379,7 @@ export async function emitirReciboDeCobro(
       siigo_id: creado.id ?? '',
       valor: valorPagado,
       archivo_url: archivoUrl,
+      drive_file_id: driveFileId,
       at: new Date().toISOString(),
       por: staffNombre,
       fecha: creado.date ?? fechaRecibo,
