@@ -38,6 +38,22 @@ describe('la copia de Deno no se separa de la fuente', () => {
     expect(copia).toContain(`export const BUCKET_SOPORTES_GASTO: BucketOne = 'gastos-soportes'`)
   })
 
+  it('la copia rechaza los mismos saltos de carpeta que arma el parser de URL', () => {
+    // `notificar-etapa` firma por siete días lo que esta copia deja pasar. Si la fuente
+    // aprende a rechazar `%2e%2e`, un tab o la barra invertida y la copia no, el enlace al
+    // cliente vuelve a poder apuntar a otro workspace.
+    const fuente = readFileSync(join(process.cwd(), 'src/lib/almacenamiento/referencia.ts'), 'utf8')
+    for (const guarda of [
+      "s.replace(/%2e/gi, '.')",
+      'if (c < 32 || c === 127) return true',
+      '/[\\\\?#]/.test(path)',
+    ]) {
+      expect(fuente, `la fuente perdió: ${guarda}`).toContain(guarda)
+      expect(copia, `la copia de Deno no tiene: ${guarda}`).toContain(guarda)
+    }
+    expect(copia).toContain('if (rutaConEscape(path)) return null')
+  })
+
   it('la copia NO trae la derivación de dueño ni ninguna puerta', () => {
     // Si alguien copia `duenoDeReferencia` aquí, la autorización pasa a vivir en dos
     // sitios y esta prueba es el único aviso. La decisión de acceso se queda en

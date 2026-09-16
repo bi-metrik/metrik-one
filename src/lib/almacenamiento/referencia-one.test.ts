@@ -158,3 +158,62 @@ describe('rutas dentro de los buckets de ONE', () => {
     expect(esRutaDeWorkspace(`${WS}x/a.pdf`, WS)).toBe(false)
   })
 })
+
+// ── Saltos de carpeta que el parser de URL arma solo ──────────────────────────
+//
+// `storage-js` pega la ruta a la URL sin codificarla y el parser WHATWG normaliza los
+// segmentos de punto antes de mandar la petición. Antes de esta guarda, la referencia
+// `one://ve-documentos/<mi_ws>/%2e%2e/<otro_ws>/...` pasaba la puerta de `abrir.ts` (el
+// primer segmento es el workspace de la sesión) y se firmaba el archivo del OTRO
+// workspace. El primer caso de cada prueba es el control: comprueba con el parser real
+// que la forma de verdad se escapa, para que la prueba no pase por una suposición.
+//
+// VISTO FALLAR (2026-09-16): con `referencia.ts` de `origin/main` caen 2 (las dos guardas);
+// el control y el caso legítimo siguen verdes. Mutando `rutaConEscape`: sin decodificar
+// `%2e` caen 2, sin rechazar caracteres de control caen 2, sin rechazar la barra invertida
+// caen 2, y `esRutaDeWorkspace` con su guarda vieja tumba 1.
+describe('rutas que el parser de URL convierte en salto de carpeta', () => {
+  const TAB = String.fromCharCode(9)
+  const SALTO = String.fromCharCode(10)
+  const ESCAPES = [
+    `${WS}/%2e%2e/${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+    `${WS}/%2E%2E/${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+    `${WS}/.%2e/${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+    `${WS}/%2e./${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+    `${WS}/.${TAB}./${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+    `${WS}/.${SALTO}./${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+    `${WS}/x\\..\\..\\${OTRO_WS}/negocios/${NEG}/factura.pdf`,
+  ]
+
+  function rutaQuePide(path: string): string {
+    return new URL(`https://x.supabase.co/storage/v1/object/ve-documentos/${path}`).pathname
+  }
+
+  it('control: el parser real saca cada una de estas rutas del workspace', () => {
+    for (const p of ESCAPES) {
+      expect(rutaQuePide(p), JSON.stringify(p)).toContain(`/ve-documentos/${OTRO_WS}/`)
+    }
+    // Y una ruta legítima llega intacta, con su workspace.
+    expect(rutaQuePide(`${WS}/negocios/${NEG}/factura.pdf`)).toContain(`/ve-documentos/${WS}/`)
+  })
+
+  it('esRutaDeWorkspace las rechaza todas', () => {
+    for (const p of ESCAPES) expect(esRutaDeWorkspace(p, WS), JSON.stringify(p)).toBe(false)
+  })
+
+  it('el parser de referencias las rechaza, así que abrir no les atribuye dueño', () => {
+    for (const p of ESCAPES) {
+      const ref = `one://ve-documentos/${p}`
+      expect(parsearReferenciaOne(ref), JSON.stringify(p)).toBeNull()
+      expect(duenoDeReferencia(ref), JSON.stringify(p)).toBeNull()
+    }
+  })
+
+  it('un nombre de archivo con puntos o un porcentaje normal sigue siendo válido', () => {
+    const conPuntos = `${WS}/negocios/${NEG}/${BLOQUE}/acta..final.pdf`
+    const conEspacio = `${WS}/negocios/${NEG}/${BLOQUE}/Mi%20archivo.pdf`
+    expect(esRutaDeWorkspace(conPuntos, WS)).toBe(true)
+    expect(esRutaDeWorkspace(conEspacio, WS)).toBe(true)
+    expect(parsearReferenciaOne(`one://ve-documentos/${conEspacio}`)).not.toBeNull()
+  })
+})

@@ -82,6 +82,31 @@ export function construirReferencia(bucket: string, path: string): string {
 }
 
 /**
+ * ¿Esta ruta puede terminar pidiéndole a Storage OTRA carpeta que la que dice?
+ *
+ * `storage-js` pega la ruta a la URL sin codificarla, y el parser de URL (WHATWG, el de
+ * `fetch` en Node) normaliza los segmentos de punto ANTES de mandar la petición. No solo
+ * `..`: también `%2e%2e`, `.%2E` y `%2E.` cuentan como `..`; los tabs y saltos de línea se
+ * BORRAN (`.<TAB>.` queda en `..`), y la barra invertida vale como `/`. Medido con
+ * `new URL(...)`: `<ws>/%2e%2e/<otro_ws>/x.pdf` sale como `<otro_ws>/x.pdf`.
+ *
+ * Comparar el primer segmento contra el workspace no sirve de nada si la ruta se puede
+ * escapar de él después, así que las dos guardas de este módulo pasan por aquí: la del
+ * parser de referencias y la de rutas por workspace.
+ */
+function rutaConEscape(path: string): boolean {
+  for (let i = 0; i < path.length; i++) {
+    const c = path.charCodeAt(i)
+    if (c < 32 || c === 127) return true
+  }
+  if (/[\\?#]/.test(path)) return true
+  return path.split('/').some(s => {
+    const conPuntos = s.replace(/%2e/gi, '.')
+    return s === '' || conPuntos === '.' || conPuntos === '..'
+  })
+}
+
+/**
  * Descompone `<prefijo><bucket>/<path>`. Devuelve null ante cualquier forma sospechosa:
  * un `..`, un segmento vacío o un bucket con caracteres raros no se "corrigen", se
  * rechazan (la referencia llega del navegador en más de un flujo).
@@ -99,8 +124,7 @@ function descomponer(ref: unknown, prefijo: string): { bucket: string; path: str
   const path = resto.slice(corte + 1)
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(bucket)) return null
   if (!path) return null
-  if (path.split('/').some(s => s === '' || s === '.' || s === '..')) return null
-  if (/[\\?#]/.test(path)) return null
+  if (rutaConEscape(path)) return null
   return { bucket, path }
 }
 
@@ -355,10 +379,10 @@ export function prefijoWorkspace(workspaceId: string): string {
  * La forma la exige `duenoDeReferencia`, que es quien decide si el archivo se abre.
  */
 export function esRutaDeWorkspace(path: string, workspaceId: string): boolean {
-  if (!workspaceId) return false
+  if (!workspaceId || typeof path !== 'string') return false
   const segmentos = path.split('/')
   if (segmentos.length < 2) return false
-  if (segmentos.some(s => s === '' || s === '.' || s === '..')) return false
+  if (rutaConEscape(path)) return false
   return segmentos[0].toLowerCase() === workspaceId.toLowerCase()
 }
 

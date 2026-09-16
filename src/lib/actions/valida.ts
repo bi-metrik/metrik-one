@@ -84,6 +84,11 @@ export async function validarPersona(input: ValidaConsultaInput): Promise<
 export async function listarConsultas(opts: { limite?: number; severidad?: Severidad } = {}): Promise<
   { ok: true; consultas: ConsultaResumen[] } | { ok: false; error: string }
 > {
+  // Sin sesion no se lista nada: con la llave global devolvia nombres y documentos
+  // consultados a cualquiera que invocara la accion, con o sin cuenta.
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+
   try {
     const url = new URL(`${VALIDA_API_BASE}/api/v1/consultas`);
     url.searchParams.set('limite', String(opts.limite ?? 50));

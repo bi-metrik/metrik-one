@@ -185,6 +185,31 @@ async function persistirConsulta(opts: {
   return { ok: true, id: ins.id };
 }
 
+/**
+ * El negocio existe y pertenece al workspace de la sesion. No se exporta: en un archivo
+ * `'use server'` todo export es un endpoint.
+ *
+ * Todo lo de este archivo lee y escribe con el cliente de servicio, asi que un
+ * `negocio_id` que llega del navegador no lo filtra nadie mas: sin esta comprobacion, con
+ * el id de un negocio ajeno la consulta quedaba atada a el, se le recalculaba y persistia
+ * el score SARLAFT (el mismo hueco que el #752 cerro en `valida-score.ts`, por otra
+ * puerta) y el historial devolvia su codigo y su nombre.
+ */
+async function negocioEsDelWorkspace(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  negocioId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  const { data } = await svc
+    .from('negocios')
+    .select('id')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
 // ─── Consulta puntual + items de lote ─────────────────────────────────────
 
 export async function consultarValida(
@@ -198,6 +223,12 @@ export async function consultarValida(
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
 
   const { user } = await getCachedUser();
+
+  // Antes de gastar la consulta: un negocio ajeno se trata igual que uno inexistente, y
+  // no se llama a Valida (cada consulta se cobra) ni se persiste nada.
+  if (opts.negocio_id && !(await negocioEsDelWorkspace(createServiceClient(), opts.negocio_id, workspaceId))) {
+    return { ok: false, error: 'negocio_no_encontrado' };
+  }
 
   const apiKey = await getWorkspaceValidaApiKey(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
@@ -334,9 +365,16 @@ export async function prepararLoteValida(
   if (rows.length === 0) return { ok: false, error: 'archivo_vacio' };
   if (rows.length > 500) return { ok: false, error: 'maximo_500_filas_por_lote' };
 
-  // Resolver mapping codigo → negocio_id (para columna negocio_codigo)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+
+  // El negocio del lote entero llega del navegador: ajeno o inexistente, el lote no se
+  // prepara (cada fila sin codigo propio heredaria ese id).
+  if (opts.negocio_id_lote && !(await negocioEsDelWorkspace(svc, opts.negocio_id_lote, workspaceId))) {
+    return { ok: false, error: 'negocio_no_encontrado' };
+  }
+
+  // Resolver mapping codigo → negocio_id (para columna negocio_codigo)
   const codigos = Array.from(
     new Set(
       rows
@@ -535,8 +573,11 @@ export async function listarConsultasValida(
   ) as string[];
   const negocioMap = new Map<string, { codigo: string; nombre: string }>();
   if (negocioIds.length > 0) {
+    // Con el workspace: una fila vieja atada a un negocio ajeno (antes de la guarda de
+    // `consultarValida`) sale sin codigo ni nombre en vez de mostrar los del otro.
     const { data: negs } = await svc.from('negocios')
       .select('id, codigo, nombre')
+      .eq('workspace_id', workspaceId)
       .in('id', negocioIds);
     for (const n of (negs ?? []) as Array<{ id: string; codigo: string; nombre: string }>) {
       negocioMap.set(n.id, { codigo: n.codigo, nombre: n.nombre });

@@ -1,4 +1,9 @@
-'use server'
+import 'server-only'
+
+// ⚠️ NO es 'use server', a proposito: `generarContratoAFI(negocio_id)` no pide sesion ni
+// mira el workspace, y en un archivo 'use server' bastaria con que una pagina lo importara
+// para que quedara registrada como endpoint. Su unica puerta es la ruta
+// `/api/afi/contrato/[negocio_id]`, que resuelve sesion, rol y workspace antes de llamarla.
 
 // Orquestador para generacion del contrato AFI ↔ Cliente.
 // Flujo:

@@ -126,7 +126,7 @@ export default function OnboardingPage() {
     setLoading(true)
     setError('')
 
-    const result = await applyPlantilla(workspaceId, selectedPlantilla)
+    const result = await applyPlantilla(selectedPlantilla)
     if (!result.success) {
       setError(result.error || 'Error aplicando la configuración.')
       setLoading(false)

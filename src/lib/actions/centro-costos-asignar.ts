@@ -1,8 +1,18 @@
-'use server'
+import 'server-only'
 
 // ============================================================
 // Motor de asignación de centro de costos
 // ============================================================
+//
+// ⚠️ NO es un archivo 'use server', a propósito. Lo fue, y sus dos funciones eran
+// endpoints registrados que no pedían sesión: `registrarMapeoAutomatico(gastoId)`
+// escribía reglas en `gastos_recurrentes_map` del workspace de cualquier gasto, y
+// `proponerCentroCostos({ workspaceId, ... })` leía los proveedores y el historial de
+// gastos del workspace que le pasaran, con el cliente de servicio. Sus únicos llamadores
+// son server actions que ya resolvieron la sesión (`gasto-action.ts`): la sesión y el
+// workspace los pone quien llama, y este módulo no se puede invocar desde el navegador.
+// Los componentes de cliente solo importan sus TIPOS (`import type`, que se borra al
+// compilar).
 //
 // Implementa la cascada de 3 heurísticas decidida por Mauricio + directores:
 //   1. Whitelist proveedor (gastos_recurrentes_map) → 'auto', confianza 1.0

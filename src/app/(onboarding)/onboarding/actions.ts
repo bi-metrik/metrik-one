@@ -133,13 +133,62 @@ export async function getPlantillas(): Promise<PlantillaOption[]> {
 
 // ── Aplicar plantilla al workspace ──────────────────────────────────────────
 
-export async function applyPlantilla(workspaceId: string, lineaId: string): Promise<{ success: boolean; error?: string }> {
+/**
+ * Aplica una plantilla nativa al workspace RECIEN creado por quien llama.
+ *
+ * El workspace NO llega del navegador: sale del perfil del usuario de la sesion. Antes
+ * era `applyPlantilla(workspaceId, lineaId)`, una server action registrada que no pedia
+ * sesion y corria `apply_plantilla_to_workspace` y el cambio de `linea_activa_id` con el
+ * cliente de servicio sobre el workspace que le pasaran: cualquiera, con o sin cuenta,
+ * podia sembrar bloques y cambiar la linea activa de un cliente ajeno.
+ *
+ * Solo corre en el onboarding, que es su unico llamador: exige ser owner del workspace,
+ * que la linea sea una plantilla nativa (global) y que el workspace todavia no tenga
+ * linea activa. La funcion SQL es idempotente (`on conflict do nothing`), asi que un
+ * reintento tras un fallo del paso 2 sigue funcionando: la linea activa aun esta vacia.
+ */
+export async function applyPlantilla(lineaId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const { user, error: authError } = await getCachedUser()
+    if (authError || !user) {
+      return { success: false, error: 'Sesión expirada. Inicia sesión de nuevo.' }
+    }
+
     const serviceClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
+
+    const { data: profile } = await db(serviceClient)
+      .from('profiles')
+      .select('workspace_id, role')
+      .eq('id', user.id)
+      .maybeSingle()
+    const workspaceId = (profile as { workspace_id: string | null } | null)?.workspace_id ?? null
+    if (!workspaceId || (profile as { role: string | null }).role !== 'owner') {
+      return { success: false, error: 'No tienes permiso para configurar este espacio.' }
+    }
+
+    const { data: plantilla } = await db(serviceClient)
+      .from('lineas_negocio')
+      .select('id')
+      .eq('id', lineaId)
+      .eq('tipo', 'plantilla')
+      .is('workspace_id', null)
+      .maybeSingle()
+    if (!plantilla) {
+      return { success: false, error: 'Esa plantilla no existe.' }
+    }
+
+    const { data: workspace } = await db(serviceClient)
+      .from('workspaces')
+      .select('linea_activa_id')
+      .eq('id', workspaceId)
+      .maybeSingle()
+    if (!workspace || (workspace as { linea_activa_id: string | null }).linea_activa_id) {
+      return { success: false, error: 'Este espacio ya está configurado.' }
+    }
 
     // 1. Call the SQL function to create bloque_configs
     const { error: rpcError } = await db(serviceClient).rpc('apply_plantilla_to_workspace', {

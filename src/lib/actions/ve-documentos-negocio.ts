@@ -13,8 +13,10 @@ import { descargarDeOne } from '@/lib/almacenamiento/one'
 import {
   BUCKET_DOCUMENTOS_ONE,
   construirReferenciaOne,
+  duenoDeReferencia,
   esReferenciaExterna,
   esReferenciaOne,
+  esRutaDeWorkspace,
   esRutaPendienteDe,
   extensionSegura,
   parsearReferencia,
@@ -138,6 +140,13 @@ export async function confirmarUploadDocumentoNegocio(
 ): Promise<{ success: boolean; url?: string; error?: string }> {
   const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // `filePath` llega del navegador y abajo se descarga, se borra o se guarda como referencia
+  // con el cliente de servicio. Una ruta de ONE que no cuelga del workspace de la sesión se
+  // trata como inexistente; la referencia externa tiene su propia guarda por negocio.
+  if (!esReferenciaExterna(filePath) && !esRutaDeWorkspace(filePath, workspaceId)) {
+    return { success: false, error: 'Archivo no encontrado' }
+  }
 
   const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
   if (!permiso.ok) return { success: false, error: permiso.error }
@@ -278,8 +287,8 @@ export async function procesarDocumentoNegocio(
     return { success: false, error: `'${slug}' no requiere procesamiento AI` }
   }
 
-  const { supabase, role, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId: workspaceSesion, role, error } = await getWorkspace()
+  if (error || !workspaceSesion) return { success: false, error: 'No autenticado' }
 
   const permiso = await guardDocumentoNegocio(negocioBloqueId, role)
   if (!permiso.ok) return { success: false, error: permiso.error }
@@ -294,6 +303,12 @@ export async function procesarDocumentoNegocio(
   const docs = (currentData.docs as Record<string, string>) ?? {}
   const url = docs[slug]
   if (!url) return { success: false, error: `Documento '${slug}' no cargado` }
+
+  // La referencia vive en `data`, que tiene más de un escritor, y abajo se descarga con el
+  // cliente de servicio: tiene que ser de ESTE workspace antes de bajar nada.
+  if (esReferenciaOne(url) && duenoDeReferencia(url)?.workspaceId !== workspaceSesion.toLowerCase()) {
+    return { success: false, error: `Documento '${slug}' no cargado` }
+  }
 
   const apiKey = getServerKey('gemini')
   if (!apiKey) return { success: false, error: 'GEMINI_API_KEY no configurada' }

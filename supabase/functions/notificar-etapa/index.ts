@@ -593,9 +593,23 @@ const SEGUNDOS_ENLACE_CLIENTE = 7 * 24 * 60 * 60;
  * correo que promete un certificado con un enlace muerto deja al cliente peor que no
  * recibirlo, y en el log se ve como exito.
  */
-async function enlaceParaElCliente(supabase: Supabase, url: string): Promise<string | null> {
+async function enlaceParaElCliente(
+  supabase: Supabase,
+  url: string,
+  workspaceId: string,
+): Promise<string | null> {
   const ref = parsearReferenciaOne(url);
   if (!ref) return url;
+
+  // Se firma con el cliente de servicio y el enlace sale a alguien sin sesion, por siete
+  // dias. El `drive_url` vive en `data`, que tiene mas de un escritor: una referencia cuya
+  // ruta no cuelga del workspace del negocio no se firma. Sin enlace el aviso se omite con
+  // `sin_link`, que es lo que ya pasa cuando el documento no existe.
+  const [workspaceDeLaRuta] = ref.path.split('/');
+  if (workspaceDeLaRuta.toLowerCase() !== workspaceId.toLowerCase()) {
+    console.error('[notificar-etapa] referencia de otro workspace; no se firma');
+    return null;
+  }
 
   const nombre = ref.path.split('/').pop() || 'documento';
   const { data, error } = await supabase.storage
@@ -617,6 +631,7 @@ async function enlaceParaElCliente(supabase: Supabase, url: string): Promise<str
 async function datosDelCopy(
   supabase: Supabase,
   negocioId: string,
+  workspaceId: string,
   linkSlug: string | null,
 ): Promise<DatosCopy> {
   // Se piden los slugs concretos en vez de traer todos los bloques del negocio: Postgres
@@ -642,7 +657,7 @@ async function datosDelCopy(
 
     const url = data.drive_url;
     if (linkSlug && slug === linkSlug && typeof url === 'string' && url) {
-      out.link = await enlaceParaElCliente(supabase, url);
+      out.link = await enlaceParaElCliente(supabase, url, workspaceId);
     }
   }
   return out;
@@ -942,7 +957,10 @@ async function enviarAlCliente(
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
-  const resuelto = aplicarDatosDelCopy(base, await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null));
+  const resuelto = aplicarDatosDelCopy(
+    base,
+    await datosDelCopy(supabase, negocio.id, negocio.workspace_id, cfg.link_bloque_slug ?? null),
+  );
   if (resuelto.falta) {
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
     return { ...CORREO_VACIO, estado: 'omitido', omitidoPor: `sin_${resuelto.falta}`, destinatarioReal, respondeA: replyTo };
@@ -1123,7 +1141,7 @@ async function enviarWhatsAppAlCliente(
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
-  const datos = await datosDelCopy(supabase, negocio.id, cfg.link_bloque_slug ?? null);
+  const datos = await datosDelCopy(supabase, negocio.id, negocio.workspace_id, cfg.link_bloque_slug ?? null);
   const resuelto = aplicarDatosDelCopy(base, datos);
   if (resuelto.falta) {
     // El dato que el copy prometia no existe. Se omite y se dice cual: mandarlo a

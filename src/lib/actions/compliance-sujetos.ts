@@ -364,6 +364,39 @@ export async function listarSegmentosParaSujetos(): Promise<
 
 // ─── Escritura ─────────────────────────────────────────────────────────────
 
+/**
+ * Las referencias que llegan del navegador tienen que ser de ESTE workspace.
+ *
+ * Todo este archivo escribe con el cliente de servicio, que no pasa por RLS, y las llaves
+ * foráneas solo exigen que el id exista en alguna parte: sin esto, una ficha se podía
+ * amarrar al personal, al segmento o al usuario de otro cliente. Un id ajeno se contesta
+ * igual que uno inexistente. No se exporta: en un archivo `'use server'` todo export es
+ * un endpoint.
+ */
+async function referenciaAjena(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  refs: { staff_id?: string | null; segmento_id?: string | null; responsable_profile_id?: string | null },
+): Promise<string | null> {
+  const comprobaciones: Array<[string | null | undefined, string, string]> = [
+    [refs.staff_id, 'staff', 'Esa persona no está en el personal de este espacio.'],
+    [refs.segmento_id, 'compliance_segmentos', 'Ese segmento no existe.'],
+    [refs.responsable_profile_id, 'profiles', 'Ese responsable no es de este espacio.'],
+  ];
+  for (const [id, tabla, mensaje] of comprobaciones) {
+    if (!id) continue;
+    const { data } = await svc
+      .from(tabla)
+      .select('id')
+      .eq('id', id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    if (!data) return mensaje;
+  }
+  return null;
+}
+
 export type CrearSujetoInput = {
   tipo: string;
   documento_tipo: string;
@@ -384,6 +417,10 @@ export async function crearSujeto(input: CrearSujetoInput): Promise<Result<{ id:
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+
+  const ajena = await referenciaAjena(svc, guard.data.workspaceId, input);
+  if (ajena) return { ok: false, error: ajena };
+
   const { data, error } = await svc
     .from('compliance_sujetos')
     .insert({
@@ -455,6 +492,12 @@ export async function actualizarSujeto(input: ActualizarSujetoInput): Promise<Re
     patch.notas = input.notas || null;
   }
   if (Object.keys(patch).length === 0) return { ok: true, data: null };
+
+  const ajena = await referenciaAjena(svc, guard.data.workspaceId, {
+    segmento_id: patch.segmento_id as string | null | undefined,
+    responsable_profile_id: patch.responsable_profile_id as string | null | undefined,
+  });
+  if (ajena) return { ok: false, error: ajena };
 
   const { error } = await svc
     .from('compliance_sujetos')
