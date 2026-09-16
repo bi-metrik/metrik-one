@@ -34,4 +34,20 @@ cerrado la URL tecleada.
 - `proyectar_modulos` es `stable` a propósito: encenderla es otra migración, con escritura y cron.
 - El CHECK de `servicio_contratado_id` va en una sola dirección hasta A3.
 
-Relacionado: [[suscripciones-cobro-automatico]], [[ensayo-sql-pglite]].
+## #767 (2026-09-16, mergeado, sin migración): el soporte solo pasa el gate EN SU CASA
+
+Mauricio vio Directorio y Tableros en `4d-soft` (solo `valida_api`). Medido: Juan Guillermo (owner,
+no admin) NO los veía; los veía Mauricio porque `platformAdmin` pasaba el gate siempre y
+`SHARED_NAV_ITEMS` se arma sin mirar módulos. Ahora `soportePasaGate` (gate.ts) = platform_admin Y
+`home_workspace_id` nulo o igual al `workspace_id` (mismo criterio que `isAway`). Aplica en menú,
+middleware (`SELECT_PERFIL_CON_MODULOS` trae las dos columnas, verificado en PostgREST) y
+`exigirModulo`.
+
+**Why:** el menú de un cliente tiene que ser el que el cliente ve, también para quien lo revisa;
+en metrik (casa) se conservó el paso porque ahí Mauricio usa Validación de Sustenta sin el módulo.
+
+**How to apply:** «X aparece donde no debería» en un workspace de un solo módulo: preguntar primero
+QUIÉN lo ve. Si solo lo ve el platform admin, no es el catálogo, es el paso del soporte.
+Lo que le queda a 4d-soft en el menú: `/valida-api` y `/mi-negocio`.
+
+Relacionado: [[suscripciones-cobro-automatico]], [[ensayo-sql-pglite]], [[terminos-modulo-valida-api]].

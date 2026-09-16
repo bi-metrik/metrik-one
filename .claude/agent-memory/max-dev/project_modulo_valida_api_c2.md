@@ -1,6 +1,6 @@
 ---
 name: modulo-valida-api-c2
-description: PR #747 (C2, módulo /valida-api) mergeado con la migración SIN aplicar; 4d-soft no existe; por qué el módulo exige la llave valida_api además del cliente, por qué la Política es 1.4; los huecos del riesgo 11 los cierra el #752
+description: PR #747 (C2, módulo /valida-api) mergeado; 4d-soft ya existe (medido 2026-09-16); por qué el módulo exige la llave valida_api además del cliente, por qué la Política es 1.4; los huecos del riesgo 11 los cierra el #752
 metadata:
   type: project
 ---
@@ -13,7 +13,9 @@ mergear»: el 2026-09-16 ya estaba en `main` (`2181fb91`), con la migración tod
 - `20260916180000_modulo_valida_api.sql` **SIN aplicar** (DDL puro). Sin ella el módulo no pasa
   de la pantalla de la Política (la tabla de aceptaciones no existe) y Documentos/Pagos dicen
   «no disponible». Mergear antes es inocuo: nadie tiene el módulo todavía.
-- **El workspace `4d-soft` no existe.** Faltan, como datos de producción: el workspace, su fila
+- ⚠️ CADUCÓ (medido 2026-09-16 por PostgREST): `4d-soft` existe con `modules.valida_api`, fila en
+  `workspace_modulos`, `servicios_contratados` y la versión v1.0 de términos. Lo que decía:
+  **El workspace `4d-soft` no existe.** Faltan, como datos de producción: el workspace, su fila
   `workspace_modulos` (`valida_api`, origen `servicio`), `modules.valida_api=true`,
   `config_extra.valida_cliente_id='8c211c68-6c25-4beb-b364-c91c284d6379'`, sus usuarios, su
   `servicios_contratados` (+ beneficiario) y una fila de `documentos_contractuales_versiones`
