@@ -414,8 +414,13 @@ export default function AppShell({
   // función). Sin este filtro un item visible rebota al aterrizaje. Medido el 2026-09-15
   // sobre los 17 workspaces: pasaba con Workflows en advise (sin Clarity, con una línea
   // activa) y con Validación en metrik (sin Sustenta). El platform admin pasa, como en el
-  // middleware.
-  const ctxGate = { modules: mod, modoVitrina, platformAdmin: platformAdminState != null }
+  // middleware, pero solo en su propio espacio: visitando el de un cliente ve el menú de ese
+  // cliente (`soportePasaGate`; en 4d-soft le salían Directorio y Tableros, que no tiene).
+  const ctxGate = {
+    modules: mod,
+    modoVitrina,
+    platformAdmin: platformAdminState != null && !platformAdminState.isAway,
+  }
   const moduloGate = <T extends { href: string }>(items: T[]): T[] =>
     items.filter((i) => rutaPermitida(i.href, ctxGate))
 

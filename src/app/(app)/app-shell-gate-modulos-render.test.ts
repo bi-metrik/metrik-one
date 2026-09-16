@@ -34,8 +34,12 @@ const PLATFORM_ADMIN: PlatformAdminState = {
   isAway: false,
 }
 
+// Medido el 2026-09-16 por PostgREST: `4d-soft` nació después de la foto del 2026-09-15. Solo
+// `valida_api`, sin modo vitrina y sin líneas activas.
+const CUATRO_D_SOFT = { slug: '4d-soft', modules: { valida_api: true }, modoVitrina: false, hasLineas: false }
+
 function hrefsDelMenu(slug: string, role: string, platformAdminState: PlatformAdminState | null = null): string[] {
-  const w = workspaceMedido(slug)
+  const w = slug === CUATRO_D_SOFT.slug ? CUATRO_D_SOFT : workspaceMedido(slug)
   const props = {
     fullName: 'Persona de prueba',
     workspaceName: 'Workspace de prueba',
@@ -71,12 +75,23 @@ describe('menú contra gate por módulo', () => {
     expect(hrefs).not.toContain('/flujo')
   })
 
-  it('guardia: metrik conserva la comparativa de Informa y Valida; Validación queda para el platform admin', () => {
+  it('guardia: metrik conserva la comparativa de Informa y Valida; Validación queda para el platform admin en su propio espacio', () => {
     const owner = hrefsDelMenu('metrik', 'owner')
     expect(owner).toContain('/compliance/comparativa-informa')
     expect(owner).toContain('/negocios')
     expect(owner).not.toContain('/compliance/validacion')
     expect(hrefsDelMenu('metrik', 'owner', PLATFORM_ADMIN)).toContain('/compliance/validacion')
+  })
+
+  it('4d-soft (solo Valida API): ni el cliente ni el soporte que lo visita ven Directorio ni Tableros', () => {
+    const cliente = hrefsDelMenu('4d-soft', 'owner')
+    const soporteVisitando = hrefsDelMenu('4d-soft', 'owner', { ...PLATFORM_ADMIN, isAway: true })
+    for (const hrefs of [cliente, soporteVisitando]) {
+      expect(hrefs).not.toContain('/directorio')
+      expect(hrefs).not.toContain('/tableros')
+      // Lo que le queda: su módulo y la configuración de la cuenta.
+      expect(hrefs.filter((h) => h !== '/')).toEqual(['/valida-api', '/mi-negocio'])
+    }
   })
 
   it('guardia: un CDA en vitrina sigue viendo Valida, Números y Tableros', () => {

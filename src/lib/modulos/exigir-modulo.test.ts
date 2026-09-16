@@ -104,6 +104,16 @@ describe('exigirModulo', () => {
     expect(await exigirModulo(REQUISITO.sustentaDual)).toEqual({ ok: true, workspaceId: WS })
   })
 
+  it('el platform admin visitando el espacio de un cliente no pasa: rige lo que el cliente tiene', async () => {
+    escenario.tablas.profiles = [
+      { id: 'user-1', platform_admin: true, workspace_id: WS, home_workspace_id: OTRO_WS },
+    ]
+    expect(await exigirModulo(REQUISITO.clarity)).toEqual({ ok: false, error: 'modulo_no_activo' })
+    // En su propio espacio sigue pasando.
+    escenario.tablas.profiles = [{ id: 'user-1', platform_admin: true, workspace_id: WS, home_workspace_id: WS }]
+    expect(await exigirModulo(REQUISITO.clarity)).toEqual({ ok: true, workspaceId: WS })
+  })
+
   it('si no puede leer, cierra', async () => {
     escenario.fallaLectura = true
     escenario.tablas.profiles = [{ id: 'user-1', platform_admin: true }]

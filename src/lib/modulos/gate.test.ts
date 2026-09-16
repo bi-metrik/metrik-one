@@ -14,6 +14,7 @@ import {
   modulosDeRuta,
   rutaGateada,
   rutaPermitida,
+  soportePasaGate,
   type ContextoGate,
 } from './gate'
 import { WORKSPACES_2026_09_15, workspaceMedido } from './__fixtures__/workspaces-2026-09-15'
@@ -143,6 +144,30 @@ describe('lo que no se puede cerrar', () => {
 
   it('el platform admin pasa en todo', () => {
     for (const r of TODAS_LAS_RUTAS) expect(rutaPermitida(r, ctx('cda-caqueta', { platformAdmin: true })), r).toBe(true)
+  })
+
+  it('el soporte de MeTRIK solo pasa en su propio espacio: visitando a un cliente ve lo del cliente', () => {
+    const HOME = 'ws-metrik'
+    expect(soportePasaGate({ platformAdmin: true, workspaceId: HOME, homeWorkspaceId: HOME })).toBe(true)
+    // Sin espacio propio registrado cuenta como en casa, igual que `isAway`.
+    expect(soportePasaGate({ platformAdmin: true, workspaceId: '4d-soft', homeWorkspaceId: null })).toBe(true)
+    expect(soportePasaGate({ platformAdmin: true, workspaceId: '4d-soft', homeWorkspaceId: HOME })).toBe(false)
+    expect(soportePasaGate({ platformAdmin: false, workspaceId: HOME, homeWorkspaceId: HOME })).toBe(false)
+    expect(soportePasaGate({ platformAdmin: null, workspaceId: HOME, homeWorkspaceId: HOME })).toBe(false)
+
+    // 4d-soft (solo valida_api, medido el 2026-09-16): el soporte que lo visita no abre por URL
+    // Directorio ni Tableros, y entra a Valida API como el cliente.
+    const visita: ContextoGate = {
+      modules: { valida_api: true },
+      modoVitrina: false,
+      platformAdmin: soportePasaGate({ platformAdmin: true, workspaceId: '4d-soft', homeWorkspaceId: HOME }),
+      role: 'owner',
+    }
+    expect(rutaPermitida('/directorio', visita)).toBe(false)
+    expect(rutaPermitida('/tableros', visita)).toBe(false)
+    expect(destinoSiBloqueada('/directorio', visita)).toBe('/valida-api')
+    expect(rutaPermitida('/valida-api', visita)).toBe(true)
+    expect(rutaPermitida('/mi-negocio', visita)).toBe(true)
   })
 
   it('sin `modules` el workspace es Clarity, igual que en el layout y el menú', () => {

@@ -7,17 +7,19 @@
  * Edge-safe: sin `server-only` ni imports de Next.
  */
 
-import type { ContextoGate } from './gate'
+import { soportePasaGate, type ContextoGate } from './gate'
 
 /**
  * El `!profiles_workspace_id_fkey` no es decorativo: `profiles` tiene DOS llaves hacia
  * `workspaces` (`workspace_id` y `home_workspace_id`, la del platform admin), y sin el hint
  * PostgREST responde 300 por ambigüedad. Verificado el 2026-09-15 contra el PostgREST de
  * producción con esta cadena literal: devuelve `workspace.modules` y
- * `workspace.modo_vitrina`, que es `true` o `null`.
+ * `workspace.modo_vitrina`, que es `true` o `null`. `workspace_id` y `home_workspace_id` se
+ * agregaron el 2026-09-16 (el soporte de MeTRIK solo pasa el gate en su propio espacio) y la
+ * cadena se volvió a verificar igual.
  */
 export const SELECT_PERFIL_CON_MODULOS =
-  'role, platform_admin, workspace:workspaces!profiles_workspace_id_fkey(modules, modo_vitrina:config_extra->modo_vitrina)'
+  'role, platform_admin, workspace_id, home_workspace_id, workspace:workspaces!profiles_workspace_id_fkey(modules, modo_vitrina:config_extra->modo_vitrina)'
 
 interface RespuestaPerfil {
   data: unknown
@@ -42,6 +44,8 @@ export interface PerfilDeAcceso {
 interface FilaPerfil {
   role?: string | null
   platform_admin?: boolean | null
+  workspace_id?: string | null
+  home_workspace_id?: string | null
   workspace?: { modules?: Record<string, boolean> | null; modo_vitrina?: unknown } | null
 }
 
@@ -76,7 +80,11 @@ export async function leerPerfilDeAcceso(
     role,
     gate: {
       role,
-      platformAdmin: fila.platform_admin === true,
+      platformAdmin: soportePasaGate({
+        platformAdmin: fila.platform_admin,
+        workspaceId: fila.workspace_id,
+        homeWorkspaceId: fila.home_workspace_id,
+      }),
       modules: fila.workspace?.modules ?? null,
       modoVitrina: fila.workspace?.modo_vitrina === true,
     },

@@ -10,7 +10,7 @@
  *
  * Mismo criterio que la ruta, para que la pantalla y su acción no puedan decir cosas
  * distintas: un módulo está activo con `moduloActivo` (un workspace sin `modules` es Clarity)
- * y el soporte de MeTRIK (`platformAdmin`) pasa, como pasa el middleware.
+ * y el soporte de MeTRIK (`platformAdmin`, solo en su propio espacio) pasa, como pasa el middleware.
  *
  * Puro y sin imports de servidor: lo prueba `requisito.test.ts` sin dobles.
  */
