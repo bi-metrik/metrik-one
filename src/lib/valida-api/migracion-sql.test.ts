@@ -6,9 +6,10 @@ import { PGlite } from '@electric-sql/pglite'
 /**
  * La migración del módulo Valida API (C2), EJECUTADA.
  *
- * Leer el SQL no dice si corre ni qué deja: aquí se levanta Postgres en memoria, se aplica
- * `20260916180000_modulo_valida_api.sql` **tal cual está en el repo** y se prueban las tres
- * decisiones que la base tiene que hacer cumplir sola:
+ * Leer el SQL no dice si corre ni qué deja: aquí se levanta Postgres en memoria, se aplican
+ * `20260916180000_modulo_valida_api.sql` y las migraciones que después reemplazan sus
+ * funciones, **tal cual están en el repo y en el orden en que llegan a producción**, y se
+ * prueban las tres decisiones que la base tiene que hacer cumplir sola:
  *
  *   1. Una RPC devuelve SOLO lo del workspace de la sesión. Es el único candado entre el
  *      workspace de un cliente externo y los datos que viven en el workspace metrik.
@@ -28,7 +29,12 @@ import { PGlite } from '@electric-sql/pglite'
  * son `security definer` justamente para saltársela.
  */
 
-const MIGRACION = join(process.cwd(), 'supabase/migrations/20260916180000_modulo_valida_api.sql')
+const MIGRACIONES = [
+  '20260916180000_modulo_valida_api.sql',
+  // Reemplaza mis_documentos_de_servicio(): la constancia tiene que ser de un negocio del
+  // cliente, no solo del mismo PDF. Probar C2 sin ella probaría una función que ya no corre.
+  '20260916213000_mis_documentos_de_servicio_por_negocio.sql',
+].map((archivo) => join(process.cwd(), 'supabase/migrations', archivo))
 
 const WS_METRIK = '00000000-0000-4000-8000-000000000001'
 const WS_CLIENTE = '00000000-0000-4000-8000-000000000002'
@@ -37,9 +43,13 @@ const EMP_CLIENTE = '00000000-0000-4000-8000-0000000000a1'
 const EMP_AJENA = '00000000-0000-4000-8000-0000000000a2'
 const NEG_CLIENTE = '00000000-0000-4000-8000-0000000000b1'
 const NEG_AJENO = '00000000-0000-4000-8000-0000000000b2'
+// Un negocio del workspace metrik que no es de ningún contrato: donde cae una prueba interna.
+const NEG_PRUEBA = '00000000-0000-4000-8000-0000000000b3'
+const NEG_CLIENTE_AJENA = '00000000-0000-4000-8000-0000000000b4'
 const SC_CLIENTE = '00000000-0000-4000-8000-0000000000c1'
 const SC_AJENO = '00000000-0000-4000-8000-0000000000c2'
 const SC_BENEF = '00000000-0000-4000-8000-0000000000c3'
+const SC_CLIENTE_AJENA = '00000000-0000-4000-8000-0000000000c4'
 const PERFIL = '00000000-0000-4000-8000-0000000000d1'
 
 const SHA = (c: string) => c.repeat(64)
@@ -86,6 +96,8 @@ const ESQUEMA_BASE = `
   create table public.aceptaciones_terminos (
     id uuid primary key,
     workspace_id uuid not null references public.workspaces(id),
+    -- Opcional, como en produccion: la prueba interna del 2026-09-15 no tiene negocio.
+    negocio_id uuid references public.negocios(id),
     nombre_aceptante text not null,
     calidad text not null,
     documento_sha256 text not null,
@@ -132,7 +144,8 @@ const DATOS = `
     ('${EMP_CLIENTE}', 'Cliente SAS'), ('${EMP_AJENA}', 'Ajena SAS');
   insert into public.negocios (id, workspace_id, nombre) values
     ('${NEG_CLIENTE}', '${WS_METRIK}', 'X1 26 1 Paquete Valida API'),
-    ('${NEG_AJENO}', '${WS_METRIK}', 'Z9 26 9 Contrato de otro');
+    ('${NEG_AJENO}', '${WS_METRIK}', 'Z9 26 9 Contrato de otro'),
+    ('${NEG_PRUEBA}', '${WS_METRIK}', 'P0 26 0 Prueba interna');
   insert into public.catalogo_servicios (slug, nombre, modulo, disparador_cobro) values
     ('valida-api-bolsa', 'Paquete de consultas Valida API', 'valida_api', 'consumo'),
     ('licencia-clarity', 'Licencia Clarity', 'business', 'ciclo');
@@ -187,7 +200,7 @@ beforeAll(async () => {
   db = new PGlite()
   await db.exec(ESQUEMA_BASE)
   await db.exec(DATOS)
-  await db.exec(readFileSync(MIGRACION, 'utf8'))
+  for (const migracion of MIGRACIONES) await db.exec(readFileSync(migracion, 'utf8'))
 }, 60_000)
 
 afterAll(async () => {
@@ -275,12 +288,60 @@ describe('mis_documentos_de_servicio(): el documento va con su constancia', () =
          'v1.0', '# Términos', '${SHA('b')}', 'cliente/terminos-v1.pdf', '${SHA('c')}', date '2026-09-15'),
         ('${WS_METRIK}', 'terminos-uso-valida', 'cliente', '${EMP_AJENA}', 'Términos de Uso — VALIDA',
          'v1.0', '# Términos de otro', '${SHA('d')}', 'ajena/terminos-v1.pdf', '${SHA('e')}', date '2026-09-15');
+      -- La del cliente, sobre el negocio de su contrato.
       insert into public.aceptaciones_terminos
-        (id, workspace_id, nombre_aceptante, calidad, documento_sha256, prompt_wamid, estado)
+        (id, workspace_id, negocio_id, nombre_aceptante, calidad, documento_sha256, prompt_wamid, estado)
       values
-        ('00000000-0000-4000-8000-0000000000f1', '${WS_METRIK}', 'Juan Guillermo', 'apoderado',
+        ('00000000-0000-4000-8000-0000000000f1', '${WS_METRIK}', '${NEG_CLIENTE}', 'Juan Guillermo', 'apoderado',
          '${SHA('c')}', 'wamid.xxx', 'aceptado');
+
+      -- El MISMO PDF aceptado fuera de los contratos del cliente. Es lo que hay en producción:
+      -- la prueba interna del 2026-09-15 (41233b25), sin negocio. La de un negocio que no es
+      -- de ningún contrato suyo cubre la otra forma del mismo error.
+      insert into public.aceptaciones_terminos
+        (id, workspace_id, negocio_id, nombre_aceptante, calidad, documento_sha256, prompt_wamid, estado)
+      values
+        ('00000000-0000-4000-8000-0000000000f2', '${WS_METRIK}', null, 'Mauricio Moreno (PRUEBA)',
+         'representante_legal', '${SHA('c')}', 'wamid.prueba', 'aceptado'),
+        ('00000000-0000-4000-8000-0000000000f3', '${WS_METRIK}', '${NEG_PRUEBA}', 'Otra Persona',
+         'autorizado', '${SHA('c')}', null, 'aceptado');
+
+      -- El PDF de la empresa ajena, aceptado solo sobre un negocio que no es de sus contratos.
+      insert into public.aceptaciones_terminos
+        (id, workspace_id, negocio_id, nombre_aceptante, calidad, documento_sha256, prompt_wamid, estado)
+      values
+        ('00000000-0000-4000-8000-0000000000f4', '${WS_METRIK}', '${NEG_PRUEBA}', 'Nadie de Ajena',
+         'autorizado', '${SHA('e')}', null, 'aceptado');
     `)
+  })
+
+  it('el mismo PDF aceptado fuera de sus contratos no repite el documento: queda la constancia del cliente', async () => {
+    const filas = await comoWorkspace<{ pdf_sha256: string; aceptado_por: string; aceptado_calidad: string }>(
+      WS_CLIENTE,
+      'select pdf_sha256, aceptado_por, aceptado_calidad from public.mis_documentos_de_servicio()',
+    )
+    // Uniendo solo por huella salían tres filas: la de Juan Guillermo, la de la prueba interna
+    // y la del negocio ajeno.
+    expect(filas).toHaveLength(1)
+    expect(filas[0]).toEqual({ pdf_sha256: SHA('c'), aceptado_por: 'Juan Guillermo', aceptado_calidad: 'apoderado' })
+  })
+
+  it('un documento sin aceptación de sus negocios se muestra igual, sin constancia', async () => {
+    const filas = await comoWorkspace<{ pdf_sha256: string; aceptado_por: string | null; aceptado_at: Date | null }>(
+      WS_AJENO,
+      'select pdf_sha256, aceptado_por, aceptado_at from public.mis_documentos_de_servicio()',
+    )
+    // El join sigue siendo `left`: filtrar la constancia no puede esconder el documento.
+    expect(filas).toEqual([{ pdf_sha256: SHA('e'), aceptado_por: null, aceptado_at: null }])
+  })
+
+  it('sigue siendo security definer con el search_path fijo después del reemplazo', async () => {
+    const r = await db.query<{ prosecdef: boolean; proconfig: string[] | null }>(
+      `select p.prosecdef, p.proconfig from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'mis_documentos_de_servicio'`,
+    )
+    expect(r.rows).toEqual([{ prosecdef: true, proconfig: ['search_path=public, pg_temp'] }])
   })
 
   it('devuelve el documento de su empresa, con canal whatsapp, y no el de la otra', async () => {
@@ -307,6 +368,50 @@ describe('mis_documentos_de_servicio(): el documento va con su constancia', () =
     expect(nombres).not.toContain('telefono')
     expect(nombres).not.toContain('prompt_wamid')
     expect(nombres).not.toContain('payload_respuesta')
+  })
+
+  // Va de último en el bloque porque siembra un contrato que le suma al cliente el documento
+  // de la otra empresa.
+  it('un negocio que está en contratos de otra empresa u otro workspace no presta su constancia', async () => {
+    // NEG_AJENO está en dos contratos: el de la empresa ajena (lo paga WS_AJENO) y el de
+    // SC_BENEF (empresa del cliente, que lo tiene como beneficiario). Ahora el cliente paga
+    // además un contrato de la empresa ajena, con otro negocio, y alguien de la empresa
+    // ajena acepta su PDF sobre NEG_AJENO.
+    await db.exec(`
+      insert into public.negocios (id, workspace_id, nombre)
+      values ('${NEG_CLIENTE_AJENA}', '${WS_METRIK}', 'X2 26 1 Contrato del cliente con la empresa ajena');
+      insert into public.servicios_contratados
+        (id, workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version,
+         workspace_pagador_id, estado, vigente_desde)
+      values
+        ('${SC_CLIENTE_AJENA}', '${WS_METRIK}', '${EMP_AJENA}', '${NEG_CLIENTE_AJENA}', 'valida-api-bolsa', 1,
+         '${WS_CLIENTE}', 'activo', date '2026-09-16');
+      insert into public.aceptaciones_terminos
+        (id, workspace_id, negocio_id, nombre_aceptante, calidad, documento_sha256, prompt_wamid, estado)
+      values
+        ('00000000-0000-4000-8000-0000000000f5', '${WS_METRIK}', '${NEG_AJENO}', 'Persona de Ajena',
+         'representante_legal', '${SHA('e')}', 'wamid.ajena', 'aceptado');
+    `)
+
+    const delAjeno = await comoWorkspace<{ pdf_sha256: string; aceptado_por: string | null }>(
+      WS_AJENO,
+      'select pdf_sha256, aceptado_por from public.mis_documentos_de_servicio()',
+    )
+    // Para la empresa ajena NEG_AJENO sí es negocio de su contrato: la constancia es suya.
+    expect(delAjeno).toEqual([{ pdf_sha256: SHA('e'), aceptado_por: 'Persona de Ajena' }])
+
+    const delCliente = await comoWorkspace<{ pdf_sha256: string; aceptado_por: string | null }>(
+      WS_CLIENTE,
+      'select pdf_sha256, aceptado_por from public.mis_documentos_de_servicio() order by pdf_sha256',
+    )
+    // El cliente ve el PDF de la empresa ajena por su propio contrato, pero sin constancia:
+    // NEG_AJENO le llega por un contrato de OTRA empresa (SC_BENEF) y, para la empresa
+    // ajena, por un contrato de OTRO workspace (SC_AJENO). Quitar cualquiera de los dos
+    // filtros de la subconsulta le presta la aceptación de otra persona.
+    expect(delCliente).toEqual([
+      { pdf_sha256: SHA('c'), aceptado_por: 'Juan Guillermo' },
+      { pdf_sha256: SHA('e'), aceptado_por: null },
+    ])
   })
 })
 
