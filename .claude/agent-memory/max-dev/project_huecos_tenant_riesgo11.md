@@ -1,11 +1,11 @@
 ---
 name: huecos-tenant-riesgo11
-description: #752, #754 y #759 cierran los huecos de tenant del riesgo 11 (antes de abrir ONE a 4D SOFT); #759 pone exigirModulo en las acciones; siguen abiertos /api/calidad, el bot de WhatsApp y las guardas de bloque sin Clarity
+description: #752, #754, #759 y #761 cierran los huecos de tenant del riesgo 11 (antes de abrir ONE a 4D SOFT); #761 cierra /api/calidad, el bot, PILA y bloques/etapas; wa-webhook SIN redesplegar y HMAC sin validar
 metadata:
   type: project
 ---
 
-Tres PR, 2026-09-16, sin migración, motivados por dar acceso a ONE a un cliente externo (4D SOFT,
+Cuatro PR, 2026-09-16, sin migración, motivados por dar acceso a ONE a un cliente externo (4D SOFT,
 workspace `4d-soft` con solo `valida_api`): cualquier acción que acepte un id ajeno, no pida
 sesión o no pida el módulo es explotable por ese usuario.
 
@@ -51,8 +51,31 @@ global) necesita la puerta de módulo en la acción, no solo en la pantalla.
 - Antes de afirmar que un export es un hueco, mirar el manifiesto ([[manifiesto-server-actions]]);
   pruebas vistas caer contra `origin/main` por su aserción y guarda por guarda
   ([[pruebas-por-mutacion]]).
-- ⚠️ ABIERTOS tras #759: (1) `/api/calidad/transcribir|auditar|audio-url|guardar` sin módulo:
-  owner/admin/supervisor/read_only de cualquier workspace gasta Gemini de MeTRIK; (2) `wa-webhook`
-  no mira `modules` (edge function, redeploy manual); (3) `uploadPlanillaPila` sin
-  `cobros_recurrentes`; (4) guardas de `guard-negocio.ts` sin Clarity (inertes mientras 4d-soft no
-  tenga negocios); (5) confirmar por MCP los 7 nombres `ws:%:valida_api_key` en Vault.
+
+**#761** (`adf063da`, cuarta ronda, cierra los 4 abiertos del #759):
+- `/api/calidad/*` con `puertaModuloLlamadas()` (`src/lib/calidad/puerta-modulo.ts`,
+  `REQUISITO.llamadas`); `transcribir` ahora valida con `esRutaDeWorkspace` (el `%2e%2e` pasaba).
+- `wa-webhook`: `botEquipoPermitido(user.modulos)` (`_shared/wa-modulos.ts`) tras la aceptación de
+  términos y antes de Gemini; sin fila de workspace cierra. Su prueba compara contra
+  `REQUISITO.clarity` y lee el fuente de `index.ts` para fijar el ORDEN (el handler no se colecta).
+- `uploadPlanillaPila` con `REQUISITO.cobrosRecurrentes`.
+- `guard-negocio.ts` exige Clarity en `resolverCtx` (los 3 guards y `esGerencial`). ⚠️
+  `guardDocumentoNegocio` de `ve-documentos` hace `guard.ok || puedeCorregirDocumentos(role)`: la
+  puerta del guard NO basta ahí, el módulo va antes y aparte. Además estado/etapa sin guard
+  (`cambiarEtapaNegocio`, perder/pausar/reactivar/cancelar/completar, reproceso x3, `devolverBloque`,
+  reabrir, `crearNegocioDesdeCerrado`) y `leerPantallazoDeItem`.
+- Medido por PostgREST antes de cerrar: fuera de Clarity solo 2 negocios (advise, dormidos);
+  cero mensajes del bot de equipo desde workspaces sin Clarity; 4d-soft en `active` (el bot ya lo
+  frenaba por plan), alma-afi y advise en `trial` (esos sí pasaban).
+
+**⚠️ Al meter `exigirModulo` en un helper compartido, las pruebas viejas que no lo mockean revientan**
+en `getCachedUser` → `createClient` ("No createClient export on the mock"). En #761 cayeron
+`reproceso-sin-retorno` y `documentos-ruta-workspace`; se arreglan con `dobleExigirModulo()` (su
+estado por defecto ya es Clarity).
+
+- ⚠️⚠️ ABIERTOS tras #761: (1) **`wa-webhook` sin redesplegar** (lo hace la sesión principal, con
+  `--no-verify-jwt`); (2) HMAC de `wa-webhook` sin validar ([[aceptacion-terminos-wa]]); (3) las
+  puertas son de aplicación: con su JWT, un usuario escribe `negocios`/`etapa_actual_id` por PostgREST
+  y el trigger de aviso dispara igual; (4) sin puerta (no gastan llaves): `/api/negocios/export`,
+  `/api/revision/export`, `bloque-locks`, nombre/carpeta/responsables/precio/`confirmarPagoCobro`;
+  (5) confirmar por MCP los 7 nombres `ws:%:valida_api_key` en Vault.
