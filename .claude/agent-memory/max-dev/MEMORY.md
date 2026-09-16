@@ -94,6 +94,7 @@
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696: inerte hasta que SOENA lo cargue
 - ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 sin QA en pantalla
 - ⚠️⚠️ [Referencia `one://` para ve-documentos y gastos-soportes](project_referencia_archivos_one.md) — #748 mergeado; `notificar-etapa` sin redesplegar
+- ⚠️⚠️ [Drive: soporte y recibo nacen cerrados (etapa 1)](project_drive_archivos_cobro.md) — #768; los 22 VIEJOS siguen abiertos y la factura también
 - ⚠️ [Cerrar el bucket publico cert-documentos](project_cerrar_bucket_cert_documentos.md) — #742 mergeado, migración SIN aplicar
 - ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y sin desplegar; un PDF no llega al handler
 - ⚠️⚠️ [WhatsApp sin teléfono (nombre de usuario, BSUID)](project_wa_bsuid_sin_telefono.md) — #724 mergeado sin redesplegar; `recipient` no verificado en vivo
