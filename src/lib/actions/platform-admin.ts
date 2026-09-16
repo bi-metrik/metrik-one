@@ -4,6 +4,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { armarSelectorDeWorkspaces, type WorkspaceConMarca } from '@/lib/workspace/archivado'
 
 // ============================================================
 // Tipos compartidos (cliente + servidor)
@@ -108,23 +109,23 @@ export async function getPlatformAdminState(): Promise<PlatformAdminState | null
 
   const svc = createServiceClient()
 
-  const { data: allWorkspaces } = await svc
+  // Solo la marca de archivado, no el `config_extra` entero (ahí viven credenciales
+  // por workspace). Flecha simple: conserva el booleano JSON.
+  const { data: allWorkspaces, error: wsError } = await svc
     .from('workspaces')
-    .select('id, slug, name')
+    .select('id, slug, name, archivado:config_extra->archivado')
     .order('name')
+  if (wsError) {
+    console.error('[platform-admin] no se pudo leer la lista de workspaces:', wsError.message)
+  }
 
-  const list: WorkspaceSummary[] =
-    (allWorkspaces as WorkspaceSummary[] | null)?.map(w => ({
-      id: w.id,
-      slug: w.slug,
-      name: w.name,
-    })) ?? []
-
-  const currentWorkspace =
-    list.find(w => w.id === profile.workspace_id) ?? null
-  const homeWorkspace = profile.home_workspace_id
-    ? (list.find(w => w.id === profile.home_workspace_id) ?? null)
-    : null
+  // La lista para escoger va sin archivados; el actual y el home se resuelven contra
+  // la COMPLETA, para que la barra no se rompa si el admin está dentro de uno archivado.
+  const { workspaces, currentWorkspace, homeWorkspace } = armarSelectorDeWorkspaces(
+    (allWorkspaces as WorkspaceConMarca[] | null) ?? [],
+    profile.workspace_id,
+    profile.home_workspace_id,
+  )
 
   const isAway =
     profile.home_workspace_id != null &&
@@ -134,7 +135,7 @@ export async function getPlatformAdminState(): Promise<PlatformAdminState | null
     platformAdmin: true,
     currentWorkspace,
     homeWorkspace,
-    workspaces: list,
+    workspaces,
     isAway,
   }
 }

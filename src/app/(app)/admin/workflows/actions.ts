@@ -3,6 +3,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bloqueTipoCode } from '@/components/workflow/types'
+import { estaArchivado } from '@/lib/workspace/archivado'
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ export async function listAdminWorkflows(): Promise<AdminLineaItem[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: lineasRaw } = await (svc as any)
     .from('lineas_negocio')
-    .select('id, nombre, tipo, is_active, workspace_id, workspaces(id, slug, name)')
+    .select('id, nombre, tipo, is_active, workspace_id, workspaces(id, slug, name, archivado:config_extra->archivado)')
     .not('workspace_id', 'is', null)
     .order('nombre')
 
@@ -93,9 +94,11 @@ export async function listAdminWorkflows(): Promise<AdminLineaItem[]> {
     tipo: string
     is_active: boolean
     workspace_id: string
-    workspaces: { id: string; slug: string | null; name: string | null } | null
+    workspaces: { id: string; slug: string | null; name: string | null; archivado?: unknown } | null
   }
-  const lineas = (lineasRaw ?? []) as LineaJoin[]
+  // La biblioteca no lista los flujos de workspaces archivados (muestras comerciales
+  // muertas). El detalle de cada flujo NO se filtra: sigue abriendo por su URL.
+  const lineas = ((lineasRaw ?? []) as LineaJoin[]).filter(l => !estaArchivado(l.workspaces?.archivado))
 
   if (lineas.length === 0) return []
 
