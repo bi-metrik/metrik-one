@@ -8,7 +8,9 @@
  *   - la entrada muestra los términos COMO TEXTO, el aviso de la Política y una sola casilla que
  *     nace sin marcar y deshabilitada (hasta leer hasta el final), con el botón «Acepto» apagado;
  *   - si Valida no responde, la pestaña dice «no disponible» y NO pinta una lista vacía;
- *   - quien no opera llaves no ve la pestaña de llaves.
+ *   - quien no opera llaves no ve la pestaña de llaves;
+ *   - ya no hay pestaña Documentos: la pestaña Términos relee, solo lectura y con el sello
+ *     «Aprobado», el texto que el usuario aprobó, y si no está verificado no pinta ninguno.
  *
  * Se queda en `.ts`: `vitest.config.ts` solo recoge `*.test.ts`, y renombrarlo a `.tsx` lo sacaría
  * de la suite en silencio.
@@ -27,7 +29,7 @@ vi.mock('@/lib/valida-api/acciones', () => ({
   revocarLlaveValidaApi: async () => ({ ok: false, error: 'x' }),
 }))
 
-const { EntradaValidaApi, LlaveUnaVez, PestanaDocumentos, ValidaApiCliente } = await import('./valida-api-cliente')
+const { EntradaValidaApi, LlaveUnaVez, PestanaTerminos, ValidaApiCliente } = await import('./valida-api-cliente')
 
 const LLAVE = 'vld_live_1a2b3c4d5e6f_ESTA_ES_LA_LLAVE_EN_CLARO'
 
@@ -36,7 +38,7 @@ function texto(html: string): string {
 }
 
 const NO_DISPONIBLE = { estado: 'no_disponible' as const, motivo: 'red' as const }
-const DOCS_VACIOS = { estado: 'ok' as const, datos: { contractuales: [], politica: [] } }
+const TERMINOS_VACIOS = { estado: 'ok' as const, datos: [] }
 
 describe('la llave en claro, una sola vez', () => {
   const html = renderToStaticMarkup(
@@ -75,7 +77,7 @@ describe('si Valida no responde, la pestaña lo dice', () => {
         React.createElement(ValidaApiCliente, {
           resumen: NO_DISPONIBLE,
           llaves: NO_DISPONIBLE,
-          documentos: DOCS_VACIOS,
+          terminos: TERMINOS_VACIOS,
           pagos: null,
           operaLlaves: true,
           vePagos: false,
@@ -85,7 +87,7 @@ describe('si Valida no responde, la pestaña lo dice', () => {
     expect(t).toContain('No disponible en este momento')
     expect(t).not.toContain('Todavía no hay llaves')
     // El resto del módulo sigue ahí.
-    expect(t).toContain('Documentos')
+    expect(t).toContain('Términos')
     expect(t).toContain('Ayuda')
   })
 
@@ -95,7 +97,7 @@ describe('si Valida no responde, la pestaña lo dice', () => {
         React.createElement(ValidaApiCliente, {
           resumen: NO_DISPONIBLE,
           llaves: null,
-          documentos: DOCS_VACIOS,
+          terminos: TERMINOS_VACIOS,
           pagos: null,
           operaLlaves: false,
           vePagos: false,
@@ -113,7 +115,7 @@ describe('pestañas por rol', () => {
       React.createElement(ValidaApiCliente, {
         resumen: NO_DISPONIBLE,
         llaves: null,
-        documentos: DOCS_VACIOS,
+        terminos: TERMINOS_VACIOS,
         pagos: null,
         operaLlaves: false,
         vePagos: false,
@@ -122,7 +124,22 @@ describe('pestañas por rol', () => {
     const pestanas = [...html.matchAll(/role="tab"[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)</g)].map((m) => m[1].trim())
     expect(pestanas).not.toContain('Llaves')
     expect(pestanas).not.toContain('Pagos')
-    expect(pestanas).toEqual(['Consumo', 'Suscripción', 'Documentos', 'Ayuda'])
+    expect(pestanas).toEqual(['Consumo', 'Suscripción', 'Términos', 'Ayuda'])
+  })
+
+  it('con todos los permisos: Términos está y Documentos ya no', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ValidaApiCliente, {
+        resumen: NO_DISPONIBLE,
+        llaves: NO_DISPONIBLE,
+        terminos: TERMINOS_VACIOS,
+        pagos: { estado: 'ok', datos: [] },
+        operaLlaves: true,
+        vePagos: true,
+      }),
+    )
+    const pestanas = [...html.matchAll(/role="tab"[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)</g)].map((m) => m[1].trim())
+    expect(pestanas).toEqual(['Llaves', 'Consumo', 'Suscripción', 'Términos', 'Pagos', 'Ayuda'])
   })
 
   it('la bolsa vigente se pinta con su saldo cuando Valida responde', () => {
@@ -156,7 +173,7 @@ describe('pestañas por rol', () => {
             },
           },
           llaves: null,
-          documentos: DOCS_VACIOS,
+          terminos: TERMINOS_VACIOS,
           pagos: null,
           operaLlaves: false,
           vePagos: false,
@@ -271,44 +288,73 @@ describe('la entrada: términos vivos, Política y una sola aprobación', () => 
   })
 })
 
-describe('Documentos, como archivo', () => {
-  const DOCUMENTO = {
+describe('Términos: releer lo aprobado, solo lectura', () => {
+  const TEXTO = '# TÉRMINOS DE USO\n\n**EL PROVEEDOR:** METRIK IA S.A.S.\n\n3.1. Las credenciales se entregan únicamente después de la aceptación.'
+  const verificado = {
+    estado: 'verificado' as const,
     documentoId: '00000000-0000-4000-8000-0000000000e2',
     titulo: 'Términos de Uso de VALIDA',
-    textoMd: '# Términos de Uso',
-    pdfSha256: 'f'.repeat(64),
+    version: 'v1.0',
+    textoMd: TEXTO,
+    aprobadoAt: '2026-09-16T19:27:28.420248+00:00',
+    contrato: { aceptadoAt: '2026-09-15T13:25:06Z', aceptadoPor: 'Juan Guillermo', canal: 'whatsapp' as const },
   }
+  const pintar = (datos: Parameters<typeof PestanaTerminos>[0]['carga']) => renderToStaticMarkup(React.createElement(PestanaTerminos, { carga: datos }))
 
-  it('la pestaña Documentos nombra la calidad en español y el canal del módulo', () => {
-    const html = renderToStaticMarkup(
-      React.createElement(PestanaDocumentos, {
-        carga: {
-          estado: 'ok',
-          datos: {
-            contractuales: [
-              {
-                documentoId: DOCUMENTO.documentoId,
-                slug: 'terminos-uso-valida',
-                titulo: DOCUMENTO.titulo,
-                version: 'v1.1',
-                textoMd: DOCUMENTO.textoMd,
-                pdfSha256: DOCUMENTO.pdfSha256,
-                vigenteDesde: '2026-09-17',
-                vigenteHasta: null,
-                aceptadoAt: '2026-09-17T15:00:00Z',
-                aceptadoPor: 'Johann Manuel Valbuena Alfonso',
-                aceptadoCalidad: 'representante_legal',
-                aceptadoCanal: 'modulo',
-              },
-            ],
-            politica: [],
-          },
-        },
-      }),
-    )
+  it('muestra el texto aprobado con el mismo render de la entrada y el sello «Aprobado» con su fecha', () => {
+    const html = pintar({ estado: 'ok', datos: [verificado] })
     const t = texto(html)
-    expect(t).toContain('en calidad de representante legal')
-    expect(t).toContain('en este módulo')
-    expect(t).not.toContain('representante_legal')
+    // El sello dice «Aprobado» por sí mismo, no solo la línea de la fecha.
+    const sello = /<span data-sello-aprobado[^>]*>([\s\S]*?)<\/span>/.exec(html)?.[1] ?? ''
+    expect(texto(sello)).toBe('Aprobado')
+    expect(t).toContain('Términos de Uso de VALIDA · v1.0')
+    // 19:27 UTC = 2:27 p. m. en Bogotá: la fecha es la de la aprobación del usuario, en hora Colombia.
+    expect(t).toMatch(/Aprobado por ti el 16 de sept\.? de 2026, 0?2:27\s?p\.\s?m\. \(hora Colombia\)/)
+    expect(t).toContain('3.1. Las credenciales se entregan únicamente después de la aceptación.')
+    expect(html).toContain('<strong class="font-semibold">EL PROVEEDOR:</strong>')
+  })
+
+  it('dice quién aceptó el contrato y por qué canal', () => {
+    const t = texto(pintar({ estado: 'ok', datos: [verificado] }))
+    expect(t).toContain('Contrato aceptado el')
+    expect(t).toContain('por Juan Guillermo, por WhatsApp.')
+    const sinContrato = texto(pintar({ estado: 'ok', datos: [{ ...verificado, contrato: null }] }))
+    expect(sinContrato).not.toContain('Contrato aceptado')
+  })
+
+  it('es solo lectura: sin casilla, sin botón, sin PDF y con el scroll normal de la página', () => {
+    const html = pintar({ estado: 'ok', datos: [verificado] })
+    expect(html).not.toContain('type="checkbox"')
+    expect(html).not.toContain('<button')
+    expect(html).not.toContain('/api/valida-api/archivo/')
+    expect(html).not.toContain('overflow-y-auto')
+    expect(html).not.toContain('data-fin-terminos')
+  })
+
+  it('si el texto no se pudo verificar, lo dice y no pinta ningún texto de términos', () => {
+    const html = pintar({
+      estado: 'ok',
+      datos: [{ estado: 'no_verificado', titulo: 'Términos de Uso de VALIDA', version: 'v1.0', aprobadoAt: verificado.aprobadoAt, motivo: 'huella_distinta' }],
+    })
+    const t = texto(html)
+    expect(t).toContain('No podemos mostrar el texto que aprobaste de «Términos de Uso de VALIDA» (v1.0)')
+    expect(html).not.toContain('data-sello-aprobado')
+    expect(t).not.toContain('3.1. Las credenciales')
+  })
+
+  it('si no se pudo leer, «no disponible»; sin aprobaciones, lo dice en vez de una lista vacía', () => {
+    expect(texto(pintar({ estado: 'no_disponible', motivo: 'base' }))).toContain('No disponible en este momento')
+    expect(texto(pintar({ estado: 'ok', datos: [] }))).toContain('No encontramos términos aprobados por ti')
+  })
+
+  it('los textos propios no llevan guion largo', () => {
+    const html = pintar({
+      estado: 'ok',
+      datos: [
+        { ...verificado, textoMd: '3.1. Texto.' },
+        { estado: 'no_verificado', titulo: null, version: 'v2.0', aprobadoAt: verificado.aprobadoAt, motivo: 'version_no_encontrada' },
+      ],
+    })
+    expect(texto(html)).not.toMatch(/[—–]/)
   })
 })
