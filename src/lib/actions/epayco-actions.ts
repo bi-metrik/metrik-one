@@ -66,6 +66,12 @@ export async function consultarEpayco(
   | { success: false; error: string; code?: 'epayco_no_aprobada' | 'referencia_duplicada'; detalle?: string; negocio_existente?: NegocioExistente }
 > {
   try {
+    // Sin sesion no se consulta nada. La cuenta de ePayco es la de las variables de entorno,
+    // no la del workspace, y el desglose trae el nombre del pagador y los montos: sin esta
+    // guarda cualquiera, sin cuenta, podia recorrer referencias y leer los pagos.
+    const { workspaceId, error: errorSesion } = await getWorkspace()
+    if (errorSesion || !workspaceId) return { success: false, error: 'No autenticado' }
+
     const ref = typeof refPayco === 'string' ? parseInt(refPayco, 10) : refPayco
     if (isNaN(ref) || ref <= 0) {
       return { success: false, error: 'Referencia de pago invalida' }

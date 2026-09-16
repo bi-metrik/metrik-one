@@ -25,8 +25,10 @@ import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import {
   BUCKET_DOCUMENTOS_ONE,
   construirReferenciaOne,
+  duenoDeReferencia,
   esReferenciaExterna,
   esReferenciaOne,
+  esRutaDeWorkspace,
   esRutaPendienteDe,
   parsearReferencia,
 } from '@/lib/almacenamiento/referencia'
@@ -542,13 +544,21 @@ async function consolidarDocumentoExterno(a: {
 /**
  * Server action: procesa un documento que ya fue subido a Supabase Storage
  * desde el cliente. Lee el archivo, sube a Drive, extrae AI, actualiza bloque.
+ *
+ * Dos datos que antes llegaban del navegador y se usaban con el cliente de servicio:
+ *   · `storagePath`: se descargaba y se BORRABA sin mirar de quién era. Ahora tiene que
+ *     colgar del prefijo del workspace de la sesión (`esRutaDeWorkspace`, que además
+ *     rechaza los saltos de carpeta que arma el parser de URL). Una referencia externa
+ *     (`sbext://`) tiene su propia guarda en `consolidarDocumentoExterno`.
+ *   · el id del archivo anterior de Drive, que se borraba con las credenciales del
+ *     workspace (o con las globales de MeTRIK, que guardan archivos de varios clientes).
+ *     Ya no es un parámetro: se lee de la fila que se va a reemplazar.
  */
 export async function procesarDocumento(
   negocioBloqueId: string,
   negocioId: string,
   storagePath: string,
   fileName: string,
-  oldDriveFileId?: string,
 ): Promise<{
   success: boolean
   drive_url?: string
@@ -559,6 +569,13 @@ export async function procesarDocumento(
 }> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // Antes de leer nada: una ruta de ONE que no cuelga del workspace de la sesión se trata
+  // como inexistente. Sin esto, con el cliente de servicio se descargaba el archivo de
+  // otro cliente, se le extraían los campos, se subía a este Drive y se borraba el original.
+  if (!esReferenciaExterna(storagePath) && !esRutaDeWorkspace(storagePath, workspaceId)) {
+    return { success: false, error: 'Archivo no encontrado' }
+  }
 
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
@@ -677,6 +694,12 @@ export async function procesarDocumento(
         if (subfolderPath) console.log(`[documento] Step 4a OK: subfolder "${subfolderPath}" -> ${targetFolderId}`)
 
         // ── 4b. Eliminar archivo anterior de Drive si existe ────────────────
+        // El id sale de la fila que se va a reemplazar, nunca del navegador.
+        const anteriorData = (bloqueData?.data as Record<string, unknown> | null) ?? {}
+        const oldDriveFileId =
+          typeof anteriorData.drive_file_id === 'string' && anteriorData.drive_file_id
+            ? anteriorData.drive_file_id
+            : undefined
         if (oldDriveFileId) {
           try {
             await deleteDriveFile(oldDriveFileId, workspaceId)
@@ -929,6 +952,11 @@ export async function reprocesarDocumento(
     // 3. Descargar archivo de Drive (o del almacenamiento externo del workspace)
     let buffer: Buffer
     if (referenciaOne) {
+      // La referencia vive en `data`, que tiene más de un escritor. Se lee con el cliente
+      // de servicio, así que la ruta tiene que ser de ESTE workspace antes de bajar nada.
+      if (duenoDeReferencia(referenciaOne)?.workspaceId !== workspaceId.toLowerCase()) {
+        return { success: false, error: 'Archivo no encontrado' }
+      }
       buffer = (await descargarDeOne(referenciaOne)).buffer
     } else if (referenciaExterna) {
       const almacenamiento = await almacenamientoExternoDe(workspaceId)

@@ -716,14 +716,12 @@ export default function BloqueDocumento({
     setUploadState('processing')
 
     try {
-      // Pass old drive_file_id for deletion if replacing
-      const oldDriveFileId = (saved.drive_file_id as string) ?? undefined
+      // El archivo anterior de Drive lo resuelve el servidor desde la fila que reemplaza.
       const result = await procesarDocumento(
         negocioBloqueId,
         negocioId,
         pendingStoragePath,
         fileName,
-        oldDriveFileId || undefined,
       )
 
       if (!result.success) {

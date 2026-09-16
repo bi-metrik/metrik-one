@@ -31,6 +31,23 @@ export function construirReferenciaOne(bucket: BucketOne, path: string): string 
   return `${PREFIJO_REFERENCIA_ONE}${bucket}/${path}`;
 }
 
+/**
+ * ¿La ruta puede terminar pidiéndole a Storage otra carpeta? Copia de `rutaConEscape` de la
+ * fuente: el parser de URL convierte `%2e%2e`, `.%2E`, `.<TAB>.` y la barra invertida en
+ * un salto de carpeta antes de mandar la petición.
+ */
+function rutaConEscape(path: string): boolean {
+  for (let i = 0; i < path.length; i++) {
+    const c = path.charCodeAt(i);
+    if (c < 32 || c === 127) return true;
+  }
+  if (/[\\?#]/.test(path)) return true;
+  return path.split('/').some((s) => {
+    const conPuntos = s.replace(/%2e/gi, '.');
+    return s === '' || conPuntos === '.' || conPuntos === '..';
+  });
+}
+
 /** Descompone `one://<bucket>/<path>`, con las mismas guardas de forma que la fuente. */
 export function parsearReferenciaOne(ref: unknown): { bucket: BucketOne; path: string } | null {
   if (!esReferenciaOne(ref)) return null;
@@ -41,7 +58,6 @@ export function parsearReferenciaOne(ref: unknown): { bucket: BucketOne; path: s
   const path = resto.slice(corte + 1);
   if (!(BUCKETS_ONE as readonly string[]).includes(bucket)) return null;
   if (!path) return null;
-  if (path.split('/').some((s) => s === '' || s === '.' || s === '..')) return null;
-  if (/[\\?#]/.test(path)) return null;
+  if (rutaConEscape(path)) return null;
   return { bucket: bucket as BucketOne, path };
 }

@@ -189,6 +189,27 @@ export async function listarCargosParaDocumentos(): Promise<
 
 // ─── Escritura del catálogo ────────────────────────────────────────────────
 
+/**
+ * El cargo responsable llega del navegador y se escribe con el cliente de servicio: tiene
+ * que ser un cargo de ESTE workspace. La llave foránea solo exige que exista en alguna
+ * parte. Un cargo ajeno se contesta igual que uno inexistente. No se exporta: en un
+ * archivo `'use server'` todo export es un endpoint.
+ */
+async function cargoEsDelWorkspace(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  cargoId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  const { data } = await svc
+    .from('compliance_cargos')
+    .select('id')
+    .eq('id', cargoId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
 export async function crearDocumento(input: {
   codigo: string;
   tipo: string;
@@ -209,6 +230,10 @@ export async function crearDocumento(input: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+  if (input.responsable_cargo_id && !(await cargoEsDelWorkspace(svc, input.responsable_cargo_id, guard.workspaceId))) {
+    return { ok: false, error: 'cargo_no_encontrado' };
+  }
+
   const { data, error } = await svc
     .from('compliance_documentos')
     .insert({
@@ -264,6 +289,10 @@ export async function actualizarDocumento(input: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+  if (patch.responsable_cargo_id && !(await cargoEsDelWorkspace(svc, patch.responsable_cargo_id as string, guard.workspaceId))) {
+    return { ok: false, error: 'cargo_no_encontrado' };
+  }
+
   const { error } = await svc
     .from('compliance_documentos')
     .update(patch)
