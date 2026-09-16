@@ -24,6 +24,14 @@ export interface ResultadoArchivado {
   /** URL final del archivo (Drive, o Storage si Drive no estaba disponible). */
   url?: string
   /**
+   * Id del archivo en Drive, cuando quedó ahí.
+   *
+   * Lo pide quien guarda una marca en otra tabla (`cobros.siigo_recibo`): con el archivo
+   * cerrado, el id es lo único con lo que `/api/archivos/cobro` puede bajar los bytes.
+   * Sacarlo del enlace después es un parser que se puede evitar guardándolo.
+   */
+  driveFileId?: string | null
+  /**
    * El bloque donde quedó. Lo necesita quien emite para pedir el aviso al cliente
    * (`avisar_documento_al_cliente`), que se identifica por `bloque_config_id`.
    */
@@ -79,6 +87,19 @@ export async function archivarPdfEnBloque(
    * `auth.uid()`) NO le avisa al cliente, venga el archivo de donde venga.
    */
   origen: 'emitido_en_siigo' | 'adoptada_de_siigo' | 'cargada_manual' = 'emitido_en_siigo',
+  /**
+   * Si el archivo queda ABIERTO en Drive a cualquiera con el enlace.
+   *
+   * ⚠️ El default es `true` a propósito: es el comportamiento que esta función tuvo
+   * siempre, y apagarlo para todos cerraría también la FACTURA, que sí llega al cliente
+   * final (que no tiene cuenta de Google) y es otro frente. Quien no lo necesita lo
+   * declara: hoy solo el recibo de caja, que lo lee el equipo con sesión.
+   *
+   * Un archivo abierto así no vence, sobrevive al cierre del negocio y a que el correo se
+   * reenvíe. Medido el 2026-09-16: 22 de 22 archivos vivos de estos caminos estaban
+   * abiertos, ninguno cerrado.
+   */
+  publicoConEnlace = true,
 ): Promise<ResultadoArchivado> {
   try {
     const svc = createServiceClient()
@@ -117,7 +138,7 @@ export async function archivarPdfEnBloque(
       const subido = await uploadFileToDrive(pdf, nombreArchivo, 'application/pdf', destino, workspaceId)
       driveFileId = subido.fileId
       url = subido.webViewLink
-      await setFilePublicByLink(driveFileId, workspaceId)
+      if (publicoConEnlace) await setFilePublicByLink(driveFileId, workspaceId)
       // El de Storage era temporal: el archivo vive en Drive, como los demás.
       await svc.storage.from(BUCKET).remove([storagePath])
     } else {
@@ -185,7 +206,7 @@ export async function archivarPdfEnBloque(
       if (error) return { ok: false, error: error.message, bloqueConfigId: cfg.id }
     }
 
-    return { ok: true, url, bloqueConfigId: cfg.id }
+    return { ok: true, url, driveFileId, bloqueConfigId: cfg.id }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

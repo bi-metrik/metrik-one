@@ -154,10 +154,19 @@ vi.mock('@/lib/pdf/pdf-render-client', () => ({
   },
 }))
 
+/** Los argumentos con los que se archivó el PDF. El 9º dice si el archivo queda ABIERTO. */
+let archivadoCon: unknown[] = []
+
 vi.mock('./archivar-documento', () => ({
-  archivarPdfEnBloque: async () => ({
-    ok: true as const, url: 'https://drive.google.com/file/d/rc/view', bloqueConfigId: 'bloque-recibo',
-  }),
+  archivarPdfEnBloque: async (...args: unknown[]) => {
+    archivadoCon = args
+    return {
+      ok: true as const,
+      url: 'https://drive.google.com/file/d/rc-drive-id-largo/view',
+      driveFileId: 'rc-drive-id-largo',
+      bloqueConfigId: 'bloque-recibo',
+    }
+  },
 }))
 
 import { emitirReciboDeCobro } from './recibos'
@@ -184,6 +193,31 @@ beforeEach(() => {
   nombreTercero = 'JORGE ANDRES SUESCUN CHACON'
   avisos = []
   consecutivo = 0
+  archivadoCon = []
+})
+
+// ── El PDF del recibo NACE CERRADO en Drive ──────────────────────────────────
+//
+// Hasta el 2026-09-16 se abría a "cualquiera con el enlace", un permiso que no vence.
+// Un recibo de caja lo lee el equipo con sesión (la ficha del negocio y el control de
+// recibos de Tesorería), no un cliente sin cuenta de Google. Cerrarlo obliga a guardar
+// el id de Drive: con el archivo cerrado, es lo único con lo que `/api/archivos/cobro`
+// puede bajar los bytes.
+describe('el PDF del recibo no se abre a cualquiera con el enlace', () => {
+  it('se archiva pidiendo explícitamente que NO quede público', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+    // CONTROL: si no se archivó, el `false` de abajo sería un `undefined` silencioso.
+    expect(archivadoCon).not.toHaveLength(0)
+    expect(archivadoCon[8]).toBe(false)
+  })
+
+  it('la marca del cobro guarda el id de Drive, no solo el enlace', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+    expect(cobros[COBRO_1].siigo_recibo).toMatchObject({
+      archivo_url: 'https://drive.google.com/file/d/rc-drive-id-largo/view',
+      drive_file_id: 'rc-drive-id-largo',
+    })
+  })
 })
 
 describe('emitirReciboDeCobro — un recibo por cobro, no por negocio', () => {

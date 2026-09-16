@@ -39,7 +39,8 @@ import {
   type PanelPagosExternos,
 } from '@/lib/actions/pagos-externos'
 import { formatFecha } from '@/lib/dates/bogota'
-import { BUCKET_DOCUMENTOS_ONE, hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
+import { hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
 
 const VERDE = 'var(--acento)'
 const BUCKET = BUCKET_DOCUMENTOS_ONE
@@ -561,7 +562,11 @@ function ListadoPagos({ panel, onCambio }: { panel: PanelPagosExternos; onCambio
   )
 }
 
-function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: PanelPagosExternos; onCambio: () => void }) {
+/**
+ * Exportada para poder pintarla sola en una prueba de render: el listado se arma de una
+ * lectura al servidor. Mismo criterio que `FilaPorFacturar`.
+ */
+export function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: PanelPagosExternos; onCambio: () => void }) {
   const [modo, setModo] = useState<'ver' | 'editar' | 'anular'>('ver')
 
   return (
@@ -624,7 +629,10 @@ function FilaPago({ pago, panel, onCambio }: { pago: PagoExternoFila; panel: Pan
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {pago.soporte ? (
             <a
-              href={hrefArchivo(pago.soporte.url) ?? undefined}
+              // El soporte ya no se abre en Drive: el archivo nace cerrado y los bytes
+              // los baja `/api/archivos/cobro` con la cuenta de servicio. Lo que sigue
+              // en Storage (Drive no respondió) sigue por `/api/archivos/abrir`.
+              href={hrefArchivoDeCobro(pago.cobro_id, 'soporte', pago.soporte.url) ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[12px] font-semibold hover:underline"

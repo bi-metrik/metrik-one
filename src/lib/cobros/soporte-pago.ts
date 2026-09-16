@@ -11,7 +11,7 @@ import 'server-only'
  */
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink } from '@/lib/google-drive'
+import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import {
   BUCKET_DOCUMENTOS_ONE,
   construirReferenciaOne,
@@ -95,7 +95,11 @@ export async function archivarSoporte(
     const buffer = Buffer.from(await fileData.arrayBuffer())
     const targetFolderId = await createSubfolderPath(subcarpeta, folderId, workspaceId)
     const subido = await uploadFileToDrive(buffer, fileName, mimeType, targetFolderId, workspaceId)
-    await setFilePublicByLink(subido.fileId, workspaceId)
+    // El archivo NACE CERRADO. Antes se llamaba a `setFilePublicByLink`, que lo abria a
+    // cualquiera con el enlace, sin vencimiento: un soporte de pago es la captura de una
+    // transferencia bancaria y no hay ningun cliente final que lo abra. Lo lee el equipo,
+    // con sesion, por `/api/archivos/cobro`, que baja los bytes con la cuenta de
+    // servicio. `drive_file_id` es lo que esa ruta necesita, y ya se guardaba.
     return { ...base, url: subido.webViewLink, drive_file_id: subido.fileId }
   } catch (err) {
     console.warn(
