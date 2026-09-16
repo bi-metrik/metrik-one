@@ -56,7 +56,7 @@
 - ⚠️⚠️ [PQR rechazado: el desenlace que devuelve el caso](project_pqr_rechazado_desenlace.md) — #603 mergeado, config SOENA SIN aplicar
 - ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — #731; SQL PENDIENTE va DESPUÉS del deploy; un lock_when con fuente en etapa anterior nunca persiste
 - ⚠️⚠️ [Aviso de sobrepago a financiera](project_aviso_sobrepago_financiera.md) — #734 mergeado, config SOENA SIN aplicar: va ANTES de apagar conciliar_sobrepago; V0498 falso
-- ⚠️⚠️ [Conciliación por referencia, no por negocio](project_conciliacion_por_referencia.md) — #738 sin mergear: backfill de 9 filas propuesto y NO aplicado; el limbo hoy es 0 pero los 9 vuelven con el próximo pago
+- ⚠️⚠️ [Conciliación por referencia, no por negocio](project_conciliacion_por_referencia.md) — #738 mergeado: backfill de 9 filas propuesto y NO aplicado; el limbo hoy es 0 pero los 9 vuelven con el próximo pago
 - ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — #736 mergeado, config SOENA SIN aplicar (va DESPUÉS del deploy); el caso vivo es V0497, no V0498
 - ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — #598 mergeado, config SOENA SIN aplicar; el `solo_si` que evitó el único falso positivo
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto
