@@ -9,8 +9,9 @@
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — Solo corre en producción (credenciales sensibles en Vercel)
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — un PR que cambie qué emite el cron dispara cuentas reales horas después
 - ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: por cobros; anular la única viva = el cron la re-emite
-- ⚠️⚠️ [Módulos y gate por ruta (A1)](project_modulos_gate_ruta_a1.md) — #733 sin mergear, migración sin aplicar; gate en middleware (el layout no corre al navegar)
-- ⚠️⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 sin mergear; un NULL en un CHECK deja pasar; falta la decisión que cita valida-cda-licencia
+- ⚠️ [Módulos y gate por ruta (A1)](project_modulos_gate_ruta_a1.md) — #733 mergeado y aplicado; gate en middleware (el layout no corre al navegar)
+- ⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 mergeado y aplicado, 4 fichas en v1; un NULL en un CHECK deja pasar
+- ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 SIN mergear, migración SIN aplicar, 4d-soft no existe; 3 huecos del riesgo 11 sin corregir
 - ⚠️ [Ensayar una migración con PGlite, versión exacta](reference_pglite_version_de_ci.md) — pglite NO está en el node_modules de la torre; instalarlo aparte con la versión de `package.json`
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — PR #577 sin mergear: nadie se suspende solo, la tabla nace vacía, AFI son 3 planes
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
@@ -20,6 +21,7 @@
 - ⚠️⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 y #626 en main; #721 SIN MERGEAR: migración (venta canónica + pendiente a hoy) va antes del merge
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
 - ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer (el switch cambia los archivos bajo tus pies)
+- ⚠️ [Valida API directa desde ONE (C1)](project_one_api_directa_c1.md) — #44 mergeado y 0034 aplicada; por qué deshabilitar una bolsa NO la cierra
 - ⚠️ [Hook de presupuesto al editar CLAUDE.md](project_hook_presupuesto_claude_md.md) — salta siempre y las cifras son de `.claude/rules/`, no de tu cambio; esa carpeta es de Mik
 - ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote
 - [Verificar el deploy sin el CLI de Vercel](project_verificar_deploy_sin_vercel_cli.md) — el CLI se cuelga en un worktree aislado; las fechas absolutas salen del commit status de GitHub

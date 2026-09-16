@@ -128,6 +128,19 @@ describe('lo que no se puede cerrar', () => {
     }
   })
 
+  it('un cliente de API directa (solo valida_api) aterriza en /valida-api, que su gate permite', () => {
+    const soloApi: ContextoGate = { modules: { valida_api: true }, modoVitrina: false, platformAdmin: false }
+    for (const role of ROLES) {
+      const destino = landingForWorkspace(role, soloApi.modules as Record<string, boolean>, false)
+      expect(destino, role).toBe('/valida-api')
+      expect(rutaPermitida(destino, soloApi), role).toBe(true)
+    }
+    // Y no abre pantallas de otros módulos por URL.
+    expect(rutaPermitida('/negocios', soloApi)).toBe(false)
+    expect(rutaPermitida('/valida', soloApi)).toBe(false)
+    expect(destinoSiBloqueada('/negocios', { ...soloApi, role: 'owner' })).toBe('/valida-api')
+  })
+
   it('el platform admin pasa en todo', () => {
     for (const r of TODAS_LAS_RUTAS) expect(rutaPermitida(r, ctx('cda-caqueta', { platformAdmin: true })), r).toBe(true)
   })

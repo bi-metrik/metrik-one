@@ -41,6 +41,9 @@ export function landingForWorkspace(
     // dispersion y las tres cosas concretas que puede hacer para subir. La
     // lista sigue a un clic, para cuando lo que quiere es buscar una llamada.
     if (mods.calidad_llamadas) return role === 'operator' ? '/calidad/mi-perfil' : '/calidad';
+    // Cliente de API directa (4D SOFT): su unica pantalla es el modulo. Sin esta rama caeria a
+    // /mi-negocio, que no le dice nada de sus llaves ni de su consumo (spec 2026-09-15 §2.4).
+    if (mods.valida_api) return '/valida-api';
     return '/mi-negocio';
   }
 

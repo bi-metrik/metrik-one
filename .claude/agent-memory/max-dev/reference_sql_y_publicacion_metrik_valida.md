@@ -108,6 +108,20 @@ repo SI resuelve el alias `@/`.** Es la forma de tener un arnes de render que nu
 el checkout. Dos gotchas: `tsx` transpila a **cjs**, asi que **nada de top-level await**
 (usar `.then`), y el arnes tiene que estar en un sitio donde `Write` alcance.
 
-⚠️ **`metrik-valida` no tiene `.github/workflows/`**: el unico check del PR es el build
-de Vercel. "Checks verdes" ahi **no** quiere decir que corrieron tipos, pruebas ni lint;
-eso hay que correrlo a mano.
+⚠️⚠️ **CADUCO (medido el 2026-09-16): `metrik-valida` SI tiene CI desde el 2026-09-11.**
+`.github/workflows/pruebas.yml` corre `npm ci`, `npx tsc --noEmit` y `npm test` en **cada
+PR** y en cada push a `main`, con el check **«Tipos y pruebas»**. Los checks de un PR ahi
+ya son tres: ese, Vercel y Vercel Preview Comments. **El lint sigue sin correr en CI** y hay
+que lanzarlo a mano por rutas (`npx eslint <rutas>`), nunca `npm run lint`.
+
+⚠️ **El `npm ci` de CI instala `@electric-sql/pglite`; el `node_modules` del checkout
+compartido de la torre NO lo tiene** (entro como devDependency con 0033). Sin el, `tsc` y
+todas las pruebas de `lib/portal/` y `lib/consumo/bolsa-sql` fallan en local con `TS2307`, y
+`next build` se cae en el paso de tipos **aunque ya haya compilado**. Se resuelve
+instalandolo aparte con la version exacta de `package.json` y colgandolo del `node_modules`
+de la copia (ver [[pglite-version-de-ci]]).
+
+⚠️ **`baseConMigraciones()` de `lib/portal/base-de-prueba.ts` aplica TODAS las migraciones
+en orden sobre PGlite.** Una migracion nueva que no corra sobre una base limpia tumba de
+paso todas las pruebas del portal. Es la comprobacion mas barata de que el SQL esta bien:
+`npx tsx --test lib/portal/superficie-authenticated.test.ts`.

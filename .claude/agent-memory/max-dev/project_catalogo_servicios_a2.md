@@ -1,6 +1,6 @@
 ---
 name: catalogo-servicios-a2
-description: PR #741 (A2, catálogo de servicios) SIN mergear y migración SIN aplicar; la Action del cerebro está preparada y sin instalar, y le falta una decisión que Kaori no ha capturado
+description: PR #741 (A2) mergeado y migración APLICADA: el catálogo tiene las 4 fichas en v1 y servicios_contratados sigue en 0 filas (2026-09-16); un NULL en un CHECK deja pasar
 metadata:
   type: project
 ---
@@ -8,6 +8,8 @@ metadata:
 Entrega A2 de `proyectos/metrik/one/2026-09-15_spec-modulos-servicios-cobro.md`, abierta el
 2026-09-16 como **PR #741**, con los **7 checks en verde**. **Sin mergear**, porque trae
 migración: lo decide Mauricio.
+
+⚠️ **CADUCÓ lo de «sin mergear / sin aplicar»** (2026-09-16): #741 está en `main`, las 6 tablas existen en producción, `catalogo_servicios` tiene `licencia-clarity`, `licencia-sustenta`, `valida-api-bolsa` y `valida-cda-licencia` en v1, y `servicios_contratados` está en **0 filas** (los contratos son A3).
 
 **Estado que no se ve en el código:**
 - `20260916120000_catalogo_y_servicios_contratados.sql` **sin aplicar**. Es DDL puro, cero

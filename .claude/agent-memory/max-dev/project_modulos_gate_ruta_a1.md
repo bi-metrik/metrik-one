@@ -1,6 +1,6 @@
 ---
 name: modulos-gate-ruta-a1
-description: PR #733 (A1, spec módulos y cobro) SIN mergear y migración workspace_modulos SIN aplicar; el gate vive en el middleware porque el layout no corre en navegación suave; advise pierde Workflows al mergear
+description: PR #733 (A1) mergeado y workspace_modulos APLICADA en producción (verificado 2026-09-16); el gate vive en el middleware porque el layout no corre en navegación suave
 metadata:
   type: project
 ---
@@ -8,6 +8,8 @@ metadata:
 Entrega A1 de `proyectos/metrik/one/2026-09-15_spec-modulos-servicios-cobro.md`, abierta el
 2026-09-15 como **PR #733**, con los 7 checks en verde. **Sin mergear**, porque trae migración:
 lo decide Mauricio.
+
+⚠️ **CADUCÓ lo de «sin mergear / sin aplicar»** (2026-09-16): #733 está en `main` y `workspace_modulos` existe en producción. Lo que sigue vigente es el porqué del middleware.
 
 **Estado que no se ve en el código:**
 - `20260915210000_workspace_modulos.sql` **sin aplicar**. Nada del PR lee esa tabla: el gate lee
