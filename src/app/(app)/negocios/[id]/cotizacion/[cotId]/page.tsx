@@ -6,6 +6,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   politicaMargenDeLinea,
@@ -193,6 +194,25 @@ export default async function CotizacionNegocioPage({
     // Sin composición del viaje la pantalla la pide por línea.
   }
 
+  // ¿Líneas por tipo («+ Vuelo», «+ Hotel»…) en vez de nombre libre? Solo si la línea del
+  // negocio declara quiénes viajan (`lineas-por-tipo.ts`). Si no se puede leer, la pantalla
+  // queda como siempre: preferible a ofrecer tipos de viaje a quien no cotiza viajes.
+  let lineasPorTipo = false
+  if (negocioLineaId) {
+    try {
+      const { supabase: sbTipos } = await getWorkspace()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: bloquesLinea, error: errTipos } = await (sbTipos as any)
+        .from('bloque_configs')
+        .select('fields:config_extra->fields, etapas_negocio!inner(linea_id)')
+        .eq('etapas_negocio.linea_id', negocioLineaId)
+      if (errTipos) console.warn('[cotizacion] no se pudo leer si la línea cotiza por tipo:', errTipos.message)
+      else lineasPorTipo = lineaCotizaPorTipo(((bloquesLinea ?? []) as { fields: unknown }[]).map(b => b.fields))
+    } catch {
+      // Sin respuesta, lo de siempre: nombre libre.
+    }
+  }
+
   const cotRow = cotizacion as unknown as { piso_margen_pct?: number | null; aviso_margen_pct?: number | null }
   const umbrales = umbralesDeCotizacion(
     { pisoPct: cotRow.piso_margen_pct, avisoPct: cotRow.aviso_margen_pct },
@@ -215,6 +235,7 @@ export default async function CotizacionNegocioPage({
       politicaRecargo={politicaRecargo}
       itinerarios={itinerarios}
       composicionViaje={composicionViaje}
+      lineasPorTipo={lineasPorTipo}
     />
   )
 }

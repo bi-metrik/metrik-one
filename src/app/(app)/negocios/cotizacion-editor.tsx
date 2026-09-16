@@ -42,7 +42,8 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
-import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { gruposCanonicos, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { nombreProvisionalDeGrupo } from '@/lib/cotizaciones/nombre-linea'
 import {
   confirmadaVigente,
   leerTarifaPax,
@@ -209,9 +210,15 @@ interface Props {
    * punto de partida (tarifa por pasajero §4). `null` o ausente: la línea pide escribirla.
    */
   composicionViaje?: Composicion | null
+  /**
+   * La línea del negocio cotiza por TIPO (`lineas-por-tipo.ts`): en vez de «nombre + Item»
+   * se ofrecen «+ Vuelo», «+ Hotel», «+ Actividad», «+ Traslado» y «+ Otro». Ausente vale
+   * `false`, que es la pantalla de siempre.
+   */
+  lineasPorTipo?: boolean
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -229,6 +236,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
   // New item
   const [newItemName, setNewItemName] = useState('')
+  // Con líneas por tipo, el campo de nombre libre solo aparece al pedir «+ Otro».
+  const [mostrarOtro, setMostrarOtro] = useState(false)
 
   // Catalog
   const [showCatalog, setShowCatalog] = useState(false)
@@ -351,6 +360,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         router.refresh()
       } else {
         toast.error(res.error)
+      }
+    })
+  }
+
+  // «+ Vuelo», «+ Hotel»…: la línea nace con su grupo y un nombre provisional (la etiqueta),
+  // y ABIERTA, para que se vea la casilla del pantallazo. Al confirmar el costo, el nombre
+  // leído reemplaza al provisional (`nombre-linea.ts`).
+  const handleAddItemDeGrupo = (g: { grupo: string; label: string }) => {
+    startTransition(async () => {
+      const res = await addItem(cotizacion.id, nombreProvisionalDeGrupo(g.label), undefined, undefined, g.grupo)
+      if (res.success && 'id' in res && res.id) {
+        const nuevoId = res.id
+        setExpandedItems(prev => new Set(prev).add(nuevoId))
+        router.refresh()
+      } else {
+        toast.error('error' in res ? res.error : 'No se pudo agregar la línea')
       }
     })
   }
@@ -1568,23 +1593,51 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           {/* Add item actions */}
           {editable && (
             <div className="space-y-2">
-              {/* Single row: input + add button + catalog button */}
-              <div className="relative flex gap-2">
-                <input
-                  value={newItemName}
-                  onChange={e => setNewItemName(e.target.value)}
-                  placeholder="Nombre del item..."
-                  className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
-                  onKeyDown={e => e.key === 'Enter' && handleAddItem()}
-                />
-                <button
-                  onClick={handleAddItem}
-                  disabled={isPending || !newItemName.trim()}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Item
-                </button>
+              {/* Single row: input + add button + catalog button. Con líneas por tipo, los
+                  botones de tipo reemplazan al input; «+ Otro» lo abre debajo. */}
+              <div className={lineasPorTipo ? 'relative flex flex-wrap gap-2' : 'relative flex gap-2'}>
+                {lineasPorTipo ? (
+                  <>
+                    {gruposCanonicos().map(g => (
+                      <button
+                        key={g.grupo}
+                        onClick={() => handleAddItemDeGrupo(g)}
+                        disabled={isPending}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        {g.label}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setMostrarOtro(v => !v)}
+                      disabled={isPending}
+                      aria-expanded={mostrarOtro}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Otro
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={newItemName}
+                      onChange={e => setNewItemName(e.target.value)}
+                      placeholder="Nombre del item..."
+                      className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
+                      onKeyDown={e => e.key === 'Enter' && handleAddItem()}
+                    />
+                    <button
+                      onClick={handleAddItem}
+                      disabled={isPending || !newItemName.trim()}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Item
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={loadCatalog}
                   disabled={catalogLoading}
@@ -1631,6 +1684,30 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   </div>
                 )}
               </div>
+              {lineasPorTipo && mostrarOtro && (
+                <div className="flex gap-2">
+                  <input
+                    value={newItemName}
+                    onChange={e => setNewItemName(e.target.value)}
+                    placeholder="Nombre de la línea..."
+                    aria-label="Nombre de la línea"
+                    autoFocus
+                    className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleAddItem()
+                      if (e.key === 'Escape') setMostrarOtro(false)
+                    }}
+                  />
+                  <button
+                    onClick={handleAddItem}
+                    disabled={isPending || !newItemName.trim()}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Agregar
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
