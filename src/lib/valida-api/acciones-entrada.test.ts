@@ -64,13 +64,17 @@ const LEYO: AceptacionUsuarioRegistrada = {
   aceptada_at: '2026-09-17T10:00:00Z',
 }
 
+/** La fila registrada de la versión: sus dos huellas (`documentos_contractuales_versiones`). */
+const VERSION_REGISTRADA = { id: DOC_ID, texto_sha256: createHash('sha256').update(DOC.textoMd, 'utf8').digest('hex'), pdf_sha256: PDF }
+
 const escenario: {
   documentos: DocumentoContractual[] | null
   aceptaciones: AceptacionUsuarioRegistrada[] | null
+  versiones: (typeof VERSION_REGISTRADA)[] | null
   perfil: { role: string | null; workspaceId: string | null; platformAdmin: boolean } | null
   errorContrato: { code: string; message: string } | null
   errorUsuario: { code: string; message: string } | null
-} = { documentos: [DOC_ACEPTADO], aceptaciones: [], perfil: null, errorContrato: null, errorUsuario: null }
+} = { documentos: [DOC_ACEPTADO], aceptaciones: [], versiones: [VERSION_REGISTRADA], perfil: null, errorContrato: null, errorUsuario: null }
 
 const llamarValida = vi.fn()
 const rpc = vi.fn()
@@ -101,16 +105,14 @@ vi.mock('./terminos-servidor', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     from: (tabla: string) => {
+      const filas = tabla === 'documentos_contractuales_versiones' ? escenario.versiones : escenario.aceptaciones
       const lectura = {
         select: () => lectura,
         eq: () => lectura,
+        in: () => lectura,
         order: () => lectura,
         then: (resolver: (r: unknown) => unknown) =>
-          resolver(
-            escenario.aceptaciones === null
-              ? { data: null, error: { message: 'caída' } }
-              : { data: escenario.aceptaciones, error: null },
-          ),
+          resolver(filas === null ? { data: null, error: { message: 'caída' } } : { data: filas, error: null }),
       }
       return {
         ...lectura,
@@ -131,10 +133,10 @@ const {
   aprobarEntradaValidaApi,
   estadoEntradaValidaApi,
   generarLlaveValidaApi,
-  leerDocumentosValidaApi,
   leerLlavesValidaApi,
   leerPagosValidaApi,
   leerResumenValidaApi,
+  leerTerminosAprobadosValidaApi,
   revocarLlaveValidaApi,
 } = await import('./acciones')
 
@@ -146,6 +148,7 @@ const DUENO = { role: 'owner', workspaceId: WS, platformAdmin: false }
 beforeEach(() => {
   escenario.documentos = [DOC_ACEPTADO]
   escenario.aceptaciones = []
+  escenario.versiones = [VERSION_REGISTRADA]
   escenario.perfil = DUENO
   escenario.errorContrato = null
   escenario.errorUsuario = null
@@ -160,8 +163,8 @@ describe('sin la entrada aprobada no hay NINGUNA acción, tampoco por el servido
   const todas = async () => [
     await leerResumenValidaApi(),
     await leerLlavesValidaApi(),
-    await leerDocumentosValidaApi(),
     await leerPagosValidaApi(),
+    await leerTerminosAprobadosValidaApi(),
     await generarLlaveValidaApi({ nombre: 'ERP' }),
     await generarLlaveValidaApi({ reemplazaA: '00000000-0000-4000-8000-00000000abcd' }),
     await revocarLlaveValidaApi('00000000-0000-4000-8000-00000000abcd'),
@@ -209,6 +212,43 @@ describe('sin la entrada aprobada no hay NINGUNA acción, tampoco por el servido
     expect((await leerResumenValidaApi()).estado).toBe('ok')
     expect((await leerLlavesValidaApi()).estado).toBe('ok')
     expect(llamarValida).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('releer los términos aprobados', () => {
+  it('con la entrada aprobada, entrega el texto de la versión que el usuario aprobó, verificado', async () => {
+    escenario.aceptaciones = [POLITICA, LEYO]
+    const r = await leerTerminosAprobadosValidaApi()
+    expect(r).toEqual({
+      estado: 'ok',
+      datos: [
+        {
+          estado: 'verificado',
+          documentoId: DOC_ID,
+          titulo: DOC.titulo,
+          version: 'v1.0',
+          textoMd: DOC.textoMd,
+          aprobadoAt: LEYO.aceptada_at,
+          contrato: { aceptadoAt: '2026-09-15T13:25:06Z', aceptadoPor: 'Juan Guillermo', canal: 'whatsapp' },
+        },
+      ],
+    })
+  })
+
+  it('si la huella registrada del texto no coincide, no entrega texto', async () => {
+    escenario.aceptaciones = [POLITICA, LEYO]
+    escenario.versiones = [{ ...VERSION_REGISTRADA, texto_sha256: 'e'.repeat(64) }]
+    const r = await leerTerminosAprobadosValidaApi()
+    expect(r.estado === 'ok' && r.datos).toEqual([expect.objectContaining({ estado: 'no_verificado', motivo: 'huella_distinta' })])
+    expect(JSON.stringify(r)).not.toContain('3.1. Las credenciales')
+  })
+
+  it('si no se pueden leer las huellas de las versiones, «no disponible», no una lista vacía', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    escenario.aceptaciones = [POLITICA, LEYO]
+    escenario.versiones = null
+    expect(await leerTerminosAprobadosValidaApi()).toEqual({ estado: 'no_disponible', motivo: 'base' })
+    log.mockRestore()
   })
 })
 

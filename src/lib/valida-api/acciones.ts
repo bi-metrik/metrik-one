@@ -6,8 +6,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { llamarValida } from './cliente'
 import { contextoValidaApi, origenPeticion, type ContextoValidaApi } from './contexto'
 import { filasAceptacionUsuario, textoCasillaEntrada } from './entrada'
-import { entradaAprobada, entradaDelUsuario } from './entrada-servidor'
-import { POLITICA_DATOS_VALIDA } from './politica'
+import { entradaAprobada, entradaDelUsuario, leerAceptacionesUsuario } from './entrada-servidor'
 import { huellaAvisoPolitica, huellaTexto } from './politica-huella'
 import {
   armarServicioConPagos,
@@ -17,18 +16,19 @@ import {
 } from './mapeo'
 import { esUuid, nombreLlaveValido, puedeOperarLlaves, puedeVerPagos } from './reglas'
 import { prepararAceptacion, type FilaAceptacionModulo, type RazonNoAcepta, type VersionContratada } from './terminos'
+import { terminosAprobados, type HuellasVersion } from './terminos-aprobados'
 import { documentosDelCliente, versionContratada } from './terminos-servidor'
 import type { ListadoLlaves, ResumenValidaApi } from './tipos'
 import type {
   Carga,
   EstadoEntradaPagina,
   ResultadoAprobarEntrada,
-  ResultadoDocumentos,
   ResultadoEmitir,
   ResultadoLlaves,
   ResultadoPagos,
   ResultadoResumen,
   ResultadoRevocar,
+  ResultadoTerminosAprobados,
 } from './resultados'
 
 /**
@@ -384,41 +384,54 @@ export async function revocarLlaveValidaApi(keyId: string): Promise<ResultadoRev
   return { ok: true, yaEstabaRevocada: r.datos.ya_estaba_revocada === true }
 }
 
-// ── Documentos y Pagos: datos del workspace metrik, solo por RPC cerrada ─────
+// ── Términos: releer lo que el usuario aprobó ───────────────────────────────
 
-export async function leerDocumentosValidaApi(): Promise<ResultadoDocumentos> {
+/**
+ * Los términos que la persona de la sesión aprobó en la entrada, con el texto exacto que aprobó.
+ * La regla (qué versión y cómo se comprueba que es el mismo texto) vive en `terminos-aprobados.ts`;
+ * aquí solo se juntan las tres lecturas, y cualquiera que falle es «no disponible», nunca una lista
+ * vacía que se leería como «no aprobaste nada».
+ */
+export async function leerTerminosAprobadosValidaApi(): Promise<ResultadoTerminosAprobados> {
   const ctx = await contextoValidaApi()
   if (ctx.tipo !== 'ok') return sinAcceso(ctx)
   if (!(await entradaAprobada())) return { estado: 'sin_acceso', razon: MENSAJE_ENTRADA_PENDIENTE }
 
-  // La RPC va con el cliente de SESIÓN (ver `terminos-servidor.ts`) y se comparte en el request
-  // con la puerta de la entrada.
-  const [docs, politica] = await Promise.all([
+  // El usuario REAL de la sesión, igual que en la entrada: lo aprobado es suyo, no del impersonado.
+  const [docs, aceptaciones] = await Promise.all([
     documentosDelCliente(),
-    createServiceClient()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .from('documentos_aceptaciones_usuario' as any)
-      .select('documento_version, aceptada_at')
-      .eq('usuario_id', ctx.actor.usuario_id)
-      .eq('documento_slug', POLITICA_DATOS_VALIDA.slug)
-      .order('aceptada_at', { ascending: false }),
+    leerAceptacionesUsuario(ctx.actor.usuario_id),
   ])
-
   if (!docs.ok) return { estado: 'no_disponible', motivo: docs.motivo }
-  if (politica.error) {
-    console.error('[valida-api] aceptaciones de la Política:', politica.error.message)
-    return { estado: 'no_disponible', motivo: 'base' }
+  if (aceptaciones === null) return { estado: 'no_disponible', motivo: 'base' }
+
+  const ids = [...new Set(docs.documentos.map((d) => d.documentoId))]
+  const huellas = new Map<string, HuellasVersion>()
+  if (ids.length > 0) {
+    // Las huellas registradas de cada versión. Los ids salen de la RPC de SESIÓN, así que el
+    // cliente de servicio solo lee versiones que el espacio ya puede ver.
+    const versiones = await createServiceClient()
+      // La tabla nace en la migración de C2; no está en `database.ts`.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from('documentos_contractuales_versiones' as any)
+      .select('id, texto_sha256, pdf_sha256')
+      .in('id', ids)
+    if (versiones.error) {
+      console.error('[valida-api] huellas de las versiones:', versiones.error.message)
+      return { estado: 'no_disponible', motivo: 'base' }
+    }
+    for (const v of (versiones.data ?? []) as unknown as { id: string; texto_sha256: string; pdf_sha256: string }[]) {
+      huellas.set(v.id, { textoSha256: v.texto_sha256, pdfSha256: v.pdf_sha256 })
+    }
   }
 
-  const filasPolitica = (politica.data ?? []) as unknown as { documento_version: string; aceptada_at: string }[]
   return {
     estado: 'ok',
-    datos: {
-      contractuales: docs.documentos,
-      politica: filasPolitica.map((p) => ({ version: p.documento_version, aceptadaAt: p.aceptada_at })),
-    },
+    datos: terminosAprobados({ aceptaciones, documentos: docs.documentos, huellas, huella: huellaTexto }),
   }
 }
+
+// ── Pagos: datos del workspace metrik, solo por RPC cerrada ─────────────────
 
 export async function leerPagosValidaApi(): Promise<ResultadoPagos> {
   const ctx = await contextoValidaApi()

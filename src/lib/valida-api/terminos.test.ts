@@ -4,7 +4,6 @@ import {
   LARGO_MAXIMO_DECLARACION,
   documentoVigente,
   estadoTerminos,
-  etiquetaCalidad,
   prepararAceptacion,
   puedeAceptarTerminos,
   textoDeclaracionTerminos,
@@ -144,12 +143,6 @@ describe('los datos de quien acepta', () => {
     expect(validarDatosAceptante({ ...base, calidad: 'autorizado' }).ok).toBe(false)
     expect(validarDatosAceptante({ ...base, declaraFacultades: false }).ok).toBe(false)
     expect(validarDatosAceptante({ ...base, declaraFacultades: 'true' }).ok).toBe(false)
-  })
-
-  it('la etiqueta de la calidad se lee en español', () => {
-    expect(etiquetaCalidad('representante_legal')).toBe('representante legal')
-    expect(etiquetaCalidad('apoderado')).toBe('apoderado')
-    expect(etiquetaCalidad(null)).toBeNull()
   })
 })
 

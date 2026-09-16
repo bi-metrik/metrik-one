@@ -31,17 +31,6 @@ export const CALIDADES_ACEPTANTE = {
 
 export type CalidadAceptante = keyof typeof CALIDADES_ACEPTANTE
 
-/** Etiqueta legible de una calidad guardada, también las del canal WhatsApp. */
-export function etiquetaCalidad(calidad: string | null | undefined): string | null {
-  if (!calidad) return null
-  const conocidas: Record<string, string> = {
-    ...CALIDADES_ACEPTANTE,
-    persona_natural: 'Persona natural',
-    autorizado: 'Autorizado',
-  }
-  return (conocidas[calidad] ?? calidad).toLowerCase()
-}
-
 /** Tope de `aceptaciones_terminos.texto_aceptacion` (CHECK de la tabla). */
 export const LARGO_MAXIMO_DECLARACION = 1024
 

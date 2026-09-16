@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   AlertTriangle,
   BarChart3,
+  BadgeCheck,
   Check,
   Copy,
   CreditCard,
@@ -16,25 +17,22 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { aprobarEntradaValidaApi, generarLlaveValidaApi, revocarLlaveValidaApi } from '@/lib/valida-api/acciones'
-import { extraerClausula } from '@/lib/valida-api/clausula'
 import { vistaConsumo } from '@/lib/valida-api/consumo-vista'
 import { textoCasillaEntrada } from '@/lib/valida-api/entrada'
 import {
   CALIDADES_ACEPTANTE,
-  etiquetaCalidad,
   textoDeclaracionTerminos,
   validarDatosAceptante,
 } from '@/lib/valida-api/terminos'
 import { bloquesDeTexto, type Tramo } from '@/lib/valida-api/texto-documento'
 import type {
   Carga,
-  DocumentosValidaApi,
   EstadoEntradaPagina,
   LlaveRecienEmitida,
-  ResultadoDocumentos,
   ResultadoLlaves,
   ResultadoPagos,
   ResultadoResumen,
+  ResultadoTerminosAprobados,
 } from '@/lib/valida-api/resultados'
 import type { LlaveValida } from '@/lib/valida-api/tipos'
 import { formatBogotaFechaCortaAno, formatBogotaFechaHora } from '@/lib/dates/bogota'
@@ -393,19 +391,19 @@ function FormularioFirma({
 
 // ── Pestañas ───────────────────────────────────────────────────────────────
 
-type Pestana = 'llaves' | 'consumo' | 'suscripcion' | 'documentos' | 'pagos' | 'ayuda'
+type Pestana = 'llaves' | 'consumo' | 'suscripcion' | 'terminos' | 'pagos' | 'ayuda'
 
 export function ValidaApiCliente({
   resumen,
   llaves,
-  documentos,
+  terminos,
   pagos,
   operaLlaves,
   vePagos,
 }: {
   resumen: ResultadoResumen
   llaves: ResultadoLlaves | null
-  documentos: ResultadoDocumentos
+  terminos: ResultadoTerminosAprobados
   pagos: ResultadoPagos | null
   operaLlaves: boolean
   vePagos: boolean
@@ -416,7 +414,7 @@ export function ValidaApiCliente({
     { id: 'llaves', etiqueta: 'Llaves', icono: <KeyRound className="h-4 w-4" />, visible: operaLlaves },
     { id: 'consumo', etiqueta: 'Consumo', icono: <BarChart3 className="h-4 w-4" />, visible: true },
     { id: 'suscripcion', etiqueta: 'Suscripción', icono: <CreditCard className="h-4 w-4" />, visible: true },
-    { id: 'documentos', etiqueta: 'Documentos', icono: <FileText className="h-4 w-4" />, visible: true },
+    { id: 'terminos', etiqueta: 'Términos', icono: <FileText className="h-4 w-4" />, visible: true },
     { id: 'pagos', etiqueta: 'Pagos', icono: <Receipt className="h-4 w-4" />, visible: vePagos },
     { id: 'ayuda', etiqueta: 'Ayuda', icono: <HelpCircle className="h-4 w-4" />, visible: true },
   ]
@@ -446,7 +444,7 @@ export function ValidaApiCliente({
       {pestana === 'llaves' && llaves && <PestanaLlaves carga={llaves} />}
       {pestana === 'consumo' && <PestanaConsumo carga={resumen} />}
       {pestana === 'suscripcion' && <PestanaSuscripcion />}
-      {pestana === 'documentos' && <PestanaDocumentos carga={documentos} />}
+      {pestana === 'terminos' && <PestanaTerminos carga={terminos} />}
       {pestana === 'pagos' && pagos && <PestanaPagos carga={pagos} />}
       {pestana === 'ayuda' && <PestanaAyuda />}
     </div>
@@ -721,77 +719,74 @@ function PestanaSuscripcion() {
   )
 }
 
-// ── Documentos ──────────────────────────────────────────────────────────────
+// ── Términos: lo que el usuario aprobó, para releerlo ──────────────────────
 
-export function PestanaDocumentos({ carga }: { carga: ResultadoDocumentos }) {
-  const [abierto, setAbierto] = useState<string | null>(null)
+/**
+ * Los términos que la persona aprobó en la entrada, con el mismo texto y el mismo render, y un sello
+ * «Aprobado». Solo lectura: sin casilla, sin botón y con el scroll normal de la página. El texto
+ * llega únicamente si el servidor comprobó que es el de la versión aprobada (`terminos-aprobados.ts`);
+ * si no, se dice, y no se pinta ningún otro.
+ */
+export function PestanaTerminos({ carga }: { carga: ResultadoTerminosAprobados }) {
   if (carga.estado !== 'ok') return <AvisoCarga carga={carga} />
-  const { contractuales, politica }: DocumentosValidaApi = carga.datos
-
-  const terminos = contractuales.find((d) => d.slug.startsWith('terminos'))
-  const confidencialidad = terminos ? extraerClausula(terminos.textoMd, 8) : null
+  if (carga.datos.length === 0) {
+    return (
+      <p className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">
+        No encontramos términos aprobados por ti en este espacio. Escríbenos si esperabas verlos.
+      </p>
+    )
+  }
 
   return (
-    <div className="space-y-5">
-      {contractuales.length === 0 ? (
-        <p className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">
-          Los términos de tu contrato aparecen aquí cuando MeTRIK registre el contrato de este espacio.
-        </p>
-      ) : (
-        <ul className="space-y-3">
-          {contractuales.map((d) => (
-            <li key={d.documentoId} className="rounded-lg border border-border bg-white p-4 text-sm">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-semibold text-tinta">{d.titulo}</span>
-                <span className="text-xs text-tinta-suave">{d.version}</span>
-              </div>
-              {d.aceptadoAt ? (
-                <p className="mt-2 text-xs text-tinta-suave">
-                  Aceptado el {formatBogotaFechaHora(d.aceptadoAt)} (hora Colombia) · {d.aceptadoPor}
-                  {d.aceptadoCalidad && `, en calidad de ${etiquetaCalidad(d.aceptadoCalidad)}`}
-                  {d.aceptadoCanal === 'whatsapp' ? ' · por WhatsApp' : ' · en este módulo'}
-                  {' · '}huella del PDF aceptado: {d.pdfSha256.slice(0, 8)}…{d.pdfSha256.slice(-4)}
+    <div className="space-y-6">
+      {carga.datos.map((t) =>
+        t.estado === 'verificado' ? (
+          <article key={t.documentoId} data-termino-aprobado className="rounded-lg border border-border bg-white p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-tinta-suave">
+                {t.titulo} · {t.version}
+              </p>
+              <span
+                data-sello-aprobado
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800"
+              >
+                <BadgeCheck className="h-4 w-4" />
+                Aprobado
+              </span>
+            </div>
+            <div className="mt-2 space-y-0.5 text-xs text-tinta-suave">
+              <p>Aprobado por ti el {formatBogotaFechaHora(t.aprobadoAt)} (hora Colombia).</p>
+              {t.contrato && (
+                <p>
+                  Contrato aceptado el {formatBogotaFechaHora(t.contrato.aceptadoAt)}
+                  {t.contrato.aceptadoPor && ` por ${t.contrato.aceptadoPor}`}
+                  {t.contrato.canal === 'whatsapp' ? ', por WhatsApp.' : ', en este módulo.'}
                 </p>
-              ) : (
-                <p className="mt-2 text-xs text-tinta-suave">Sin aceptación registrada para esta versión.</p>
               )}
-              <div className="mt-2 flex gap-4">
-                <a href={`/api/valida-api/archivo/documento/${d.documentoId}`} className="text-xs font-semibold text-acento">
-                  Descargar PDF
-                </a>
-                <button type="button" onClick={() => setAbierto(abierto === d.documentoId ? null : d.documentoId)} className="text-xs font-semibold text-acento">
-                  {abierto === d.documentoId ? 'Ocultar texto' : 'Leer aquí'}
-                </button>
-              </div>
-              {abierto === d.documentoId && (
-                <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-papel p-3 font-sans text-xs text-tinta">{d.textoMd}</pre>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {confidencialidad && (
-        <details className="rounded-lg border border-border bg-white p-4 text-sm">
-          <summary className="cursor-pointer font-semibold text-tinta">Confidencialidad</summary>
-          <pre className="mt-3 whitespace-pre-wrap font-sans text-xs text-tinta">{confidencialidad}</pre>
-        </details>
-      )}
-
-      <div className="rounded-lg border border-border bg-white p-4 text-sm">
-        <p className="font-semibold text-tinta">Política de Datos</p>
-        {politica.length === 0 ? (
-          <p className="mt-1 text-xs text-tinta-suave">Sin aceptación registrada.</p>
+            </div>
+            <div className="mt-4 rounded-md border border-border bg-papel p-4 text-sm leading-relaxed text-tinta [overflow-wrap:anywhere]">
+              <TextoDocumento md={t.textoMd} />
+            </div>
+          </article>
         ) : (
-          <ul className="mt-1 space-y-1 text-xs text-tinta-suave">
-            {politica.map((p) => (
-              <li key={`${p.version}-${p.aceptadaAt}`}>
-                Aceptaste la versión {p.version} el {formatBogotaFechaHora(p.aceptadaAt)}.
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+          <div
+            key={`${t.titulo ?? 'documento'}-${t.version}`}
+            data-termino-no-verificado
+            className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">
+                No podemos mostrar el texto que aprobaste{t.titulo ? ` de «${t.titulo}»` : ''} ({t.version})
+              </p>
+              <p className="mt-1">
+                Tu aprobación es del {formatBogotaFechaHora(t.aprobadoAt)} (hora Colombia), pero no pudimos comprobar que el
+                texto guardado sea el mismo que aprobaste, así que no mostramos ninguno. Escríbenos para revisarlo.
+              </p>
+            </div>
+          </div>
+        ),
+      )}
     </div>
   )
 }

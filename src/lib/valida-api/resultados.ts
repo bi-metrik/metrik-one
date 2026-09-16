@@ -50,16 +50,6 @@ export interface DocumentoContractual {
   aceptadoCanal: 'whatsapp' | 'modulo' | null
 }
 
-export interface AceptacionPoliticaPropia {
-  version: string
-  aceptadaAt: string
-}
-
-export interface DocumentosValidaApi {
-  contractuales: DocumentoContractual[]
-  politica: AceptacionPoliticaPropia[]
-}
-
 export interface CobroDeServicio {
   cobroId: string
   fecha: string | null
@@ -81,8 +71,6 @@ export interface ServicioConPagos {
   vigenteHasta: string | null
   cobros: CobroDeServicio[]
 }
-
-export type ResultadoDocumentos = Carga<DocumentosValidaApi>
 
 /** Un documento de términos vigente, tal como se lee en la entrada del módulo. */
 export interface DocumentoEntradaPagina {
@@ -116,4 +104,32 @@ export type EstadoEntradaPagina =
     }
 
 export type ResultadoAprobarEntrada = { ok: true; yaEstaba: boolean } | { ok: false; error: string }
+
+/**
+ * Un documento de términos tal como el usuario lo aprobó en la entrada, para releerlo en la pestaña
+ * Términos. `verificado` trae el texto SOLO si su huella coincide con la de la versión aprobada;
+ * `no_verificado` no trae texto a propósito: mostrar otro texto sería peor que no mostrar ninguno.
+ */
+export type TerminoAprobado =
+  | {
+      estado: 'verificado'
+      documentoId: string
+      titulo: string
+      version: string
+      textoMd: string
+      /** Cuándo aprobó ESTE usuario, en la entrada. */
+      aprobadoAt: string
+      /** La aceptación contractual del espacio, si existe. */
+      contrato: { aceptadoAt: string; aceptadoPor: string | null; canal: 'whatsapp' | 'modulo' } | null
+    }
+  | {
+      estado: 'no_verificado'
+      /** Null cuando la versión aprobada no está entre los documentos del espacio. */
+      titulo: string | null
+      version: string
+      aprobadoAt: string
+      motivo: 'version_no_encontrada' | 'huella_distinta'
+    }
+
+export type ResultadoTerminosAprobados = Carga<TerminoAprobado[]>
 export type ResultadoPagos = Carga<ServicioConPagos[]>

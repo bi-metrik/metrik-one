@@ -2,10 +2,10 @@ import { KeyRound } from 'lucide-react'
 import EmptyState from '@/components/empty-state'
 import {
   estadoEntradaValidaApi,
-  leerDocumentosValidaApi,
   leerLlavesValidaApi,
   leerPagosValidaApi,
   leerResumenValidaApi,
+  leerTerminosAprobadosValidaApi,
 } from '@/lib/valida-api/acciones'
 import { contextoValidaApi } from '@/lib/valida-api/contexto'
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica'
@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic'
  *
  * - Las llaves y el consumo **viven en Valida**: ONE los opera por las rutas firmadas
  *   `/api/one/v1/*` y no guarda copia (§5.6).
- * - Documentos y pagos **viven en el workspace metrik** y se leen solo por RPC cerradas (§3.6).
+ * - Los pagos **viven en el workspace metrik** y se leen solo por RPC cerradas (§3.6).
  * - La suscripción es la entrega C4: su pestaña lo dice y no inventa datos.
  * - El portal v1 de Valida **sigue vivo en paralelo** mientras 4D SOFT aprueba (decisión de
  *   Mauricio, 2026-09-16): nada aquí lo apaga ni lo redirige. Eso es C3.
@@ -36,12 +36,19 @@ export const dynamic = 'force-dynamic'
  * pantalla; los demás ven los términos y el aviso, pero no pueden aprobar. Mientras falte algo, no
  * hay pestañas, y las acciones del servidor y las descargas también se niegan.
  *
+ * ## Términos en vez de Documentos
+ *
+ * La pestaña Documentos (PDF, versiones, aceptaciones de la Política) se quitó por pedido de
+ * Mauricio (2026-09-16). En su lugar, Términos deja releer, solo lectura, el MISMO texto que la
+ * persona aprobó en la entrada, con el sello «Aprobado»; el servidor comprueba la huella antes de
+ * entregarlo (`terminos-aprobados.ts`). Sin PDF y sin listado de versiones.
+ *
  * ## Cada pestaña carga sola
  *
  * Las cuatro lecturas salen en paralelo y cada una devuelve su propio estado. Si Valida no
- * responde, Llaves y Consumo dicen «no disponible» y Documentos, Pagos y Ayuda cargan igual
- * (§5.4). Un `Promise.all` que tumbara la página entera por una llamada caída sería justo lo que
- * la spec pide evitar.
+ * responde, Llaves y Consumo dicen «no disponible» y Términos, Pagos y Ayuda cargan igual (§5.4).
+ * Un `Promise.all` que tumbara la página entera por una llamada caída sería justo lo que la spec
+ * pide evitar.
  */
 export default async function ValidaApiPage() {
   const ctx = await contextoValidaApi()
@@ -71,7 +78,7 @@ export default async function ValidaApiPage() {
         <div>
           <h1 className="text-xl font-bold text-tinta">Valida API</h1>
           <p className="text-sm text-tinta-suave">
-            Las llaves de tu integración, el consumo de tu paquete y los documentos de tu contrato.
+            Las llaves de tu integración y el consumo de tu paquete.
           </p>
         </div>
       </div>
@@ -104,10 +111,10 @@ async function PestanasCargadas({ role }: { role: string }) {
   const operaLlaves = puedeOperarLlaves(role)
   const vePagos = puedeVerPagos(role)
 
-  const [resumen, llaves, documentos, pagos] = await Promise.all([
+  const [resumen, llaves, terminos, pagos] = await Promise.all([
     leerResumenValidaApi(),
     operaLlaves ? leerLlavesValidaApi() : Promise.resolve(null),
-    leerDocumentosValidaApi(),
+    leerTerminosAprobadosValidaApi(),
     vePagos ? leerPagosValidaApi() : Promise.resolve(null),
   ])
 
@@ -115,7 +122,7 @@ async function PestanasCargadas({ role }: { role: string }) {
     <ValidaApiCliente
       resumen={resumen}
       llaves={llaves}
-      documentos={documentos}
+      terminos={terminos}
       pagos={pagos}
       operaLlaves={operaLlaves}
       vePagos={vePagos}

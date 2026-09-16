@@ -1,14 +1,18 @@
 /**
- * La descarga de archivos del módulo Valida API también exige la entrada aprobada.
+ * La descarga de recibos del módulo Valida API también exige la entrada aprobada.
  *
- * La pestaña Documentos y la de Pagos no se pintan sin la aprobación única, pero la URL de
- * descarga se puede escribir a mano: sin la aprobación responde 403 y NO pregunta nada a las RPC
- * del contrato ni firma una URL del bucket.
+ * La pestaña Pagos no se pinta sin la aprobación única, pero la URL de descarga se puede escribir
+ * a mano: sin la aprobación responde 403 y NO pregunta nada a las RPC del contrato ni firma una
+ * URL del bucket.
+ *
+ * La clase `documento` (el PDF de los términos) se retiró con la pestaña Documentos: responde 404
+ * aunque la entrada esté aprobada, y tampoco consulta ni firma nada.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const DOC_ID = 'b91b4a14-cce1-4cfa-88d5-f235aa9e1060'
+const COBRO_ID = 'b91b4a14-cce1-4cfa-88d5-f235aa9e1060'
+const SERVICIO_ID = '5d6f0a2e-7a55-4a4e-9a0b-6f1d2f3c4b5a'
 
 const escenario = { aprobada: false }
 const rpc = vi.fn()
@@ -33,35 +37,42 @@ vi.mock('@/lib/supabase/server', () => ({
 const { GET } = await import('./route')
 
 const pedir = (clase: string) =>
-  GET(new Request(`https://4d-soft.metrikone.co/api/valida-api/archivo/${clase}/${DOC_ID}`), {
-    params: Promise.resolve({ clase, id: DOC_ID }),
+  GET(new Request(`https://4d-soft.metrikone.co/api/valida-api/archivo/${clase}/${COBRO_ID}`), {
+    params: Promise.resolve({ clase, id: COBRO_ID }),
   })
 
 beforeEach(() => {
   escenario.aprobada = false
   rpc.mockReset()
-  rpc.mockResolvedValue({
-    data: [{ documento_id: DOC_ID, pdf_bucket: 'aceptaciones-documentos', pdf_path: 'x.pdf', slug: 'terminos-uso-valida', version: 'v1.0' }],
-    error: null,
-  })
+  rpc.mockImplementation(async (nombre: string) =>
+    nombre === 'mis_servicios'
+      ? { data: [{ servicio_contratado_id: SERVICIO_ID, es_pagador: true }], error: null }
+      : { data: [{ cobro_id: COBRO_ID, recibo_path: 'recibos/rc-1.pdf', recibo_numero: 'RC-1' }], error: null },
+  )
   firmar.mockReset()
-  firmar.mockResolvedValue({ data: { signedUrl: 'https://firmada.example/x.pdf' }, error: null })
+  firmar.mockResolvedValue({ data: { signedUrl: 'https://firmada.example/rc-1.pdf' }, error: null })
 })
 
 describe('descarga de archivos del módulo', () => {
   it('sin la entrada aprobada, 403 y nada se consulta ni se firma', async () => {
-    for (const clase of ['documento', 'recibo']) {
-      const r = await pedir(clase)
-      expect(r.status, clase).toBe(403)
-    }
+    const r = await pedir('recibo')
+    expect(r.status).toBe(403)
     expect(rpc).not.toHaveBeenCalled()
     expect(firmar).not.toHaveBeenCalled()
   })
 
-  it('con la entrada aprobada, el documento se entrega por URL firmada', async () => {
+  it('con la entrada aprobada, el recibo se entrega por URL firmada', async () => {
+    escenario.aprobada = true
+    const r = await pedir('recibo')
+    expect(r.status).toBe(302)
+    expect(r.headers.get('location')).toBe('https://firmada.example/rc-1.pdf')
+  })
+
+  it('el PDF de los términos ya no se sirve: 404, sin consultar ni firmar', async () => {
     escenario.aprobada = true
     const r = await pedir('documento')
-    expect(r.status).toBe(302)
-    expect(r.headers.get('location')).toBe('https://firmada.example/x.pdf')
+    expect(r.status).toBe(404)
+    expect(rpc).not.toHaveBeenCalled()
+    expect(firmar).not.toHaveBeenCalled()
   })
 })
