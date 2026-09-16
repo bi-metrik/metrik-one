@@ -13,7 +13,7 @@
 - ⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 aplicado; un NULL en un CHECK deja pasar
 - ⚠️⚠️ [Módulo Valida API (C2)](project_modulo_valida_api_c2.md) — #747 mergeado; 4d-soft ya existe (medido 2026-09-16)
 - [Términos dentro de /valida-api](project_terminos_modulo_valida_api.md) — #769 mergeado, migración aplicada; la fila contractual y su trigger
-- ⚠️⚠️ [Entrada única de /valida-api](project_entrada_unica_valida_api.md) — #771: sin aprobar no hay nada, ni revocar; el UNIQUE sin huella pide migración
+- ⚠️⚠️ [Entrada única de /valida-api](project_entrada_unica_valida_api.md) — #771 entrada; #774 Términos exige texto_sha256 = sha256(texto_md) tal cual
 - ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad; Política ya es 1.5, la de Wompi será otra
 - ⚠️⚠️ [Alta de 4D SOFT en ONE](project_alta_4dsoft_one.md) — ejecutada (medido 2026-09-16); comisión = AFI
 - ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761 cierra calidad, bot, PILA y negocios; wa-webhook SIN redesplegar

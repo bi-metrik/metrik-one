@@ -1,6 +1,6 @@
 ---
 name: entrada-unica-valida-api
-description: PR #771 (2026-09-16) mergeado sin migración — /valida-api tiene UNA entrada con los términos vivos y una sola aprobación por usuario; sin ella nada abre, ni revocar llaves; el UNIQUE sin huella pide migración con el segundo cliente
+description: PR #771 (2026-09-16) una entrada con términos vivos y una sola aprobación; #774 quitó la pestaña Documentos y la cambió por Términos, que relee el texto aprobado solo si su huella cuadra; el UNIQUE sin huella pide migración con el segundo cliente
 metadata:
   type: project
 ---
@@ -33,6 +33,20 @@ haber leído hasta el final para poder aprobar». Con dos pasos, 4D SOFT nunca v
   llama después de `contextoValidaApi()`. Las reglas puras están en `entrada.ts`.
 - El texto de los términos lo pinta `texto-documento.ts` (lector propio, sin HTML crudo). Con el
   texto real a 390 px, correos y URL largos abrían scroll horizontal: `[overflow-wrap:anywhere]`.
+
+## #774 (squash `b32ca4d8`, 2026-09-16): fuera Documentos, entra Términos
+
+- Se borraron `PestanaDocumentos`, `leerDocumentosValidaApi`, `clausula.ts`, `etiquetaCalidad` y la
+  clase `documento` de `/api/valida-api/archivo` (ahora 404; `recibo` sigue). Ya no hay PDF de los
+  términos en ONE ni listado de aceptaciones de la Política.
+- La pestaña **Términos** (`terminos-aprobados.ts` + `leerTerminosAprobadosValidaApi`) muestra, solo
+  lectura, el texto que ESE usuario aprobó, con sello «Aprobado». La versión sale de su constancia
+  (slug + versión + huella del PDF) y el texto se entrega solo si la fila de
+  `documentos_contractuales_versiones` tiene ese PDF y `sha256(texto_md) = texto_sha256`.
+- ⚠️ **Medido en producción el 2026-09-16:** `texto_sha256` es sha256 del `texto_md` TAL CUAL (sin
+  trim, sin salto final). Al cargar una versión nueva, calcularlo igual, o Términos mostrará error
+  a todos los que la aprueben. La RPC `mis_documentos_de_servicio` NO trae `texto_sha256`: se lee
+  aparte con el cliente de servicio por los ids que devolvió la RPC de sesión.
 
 Relacionado: [[terminos-modulo-valida-api]], [[modulo-valida-api-c2]], [[razon-social-metrik-ia]],
 [[pruebas-por-mutacion]].
