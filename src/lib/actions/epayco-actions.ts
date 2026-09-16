@@ -2,6 +2,7 @@
 
 import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { revalidatePath } from 'next/cache'
 import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
@@ -42,6 +43,19 @@ export interface NegocioExistente {
 // aprobado, no como aprobado por defecto.
 const ESTADO_APROBADO = 'Aceptada'
 
+/**
+ * La cuenta de ePayco de este archivo es GLOBAL (variables de entorno) y es la de SOENA. La
+ * usa solo un workspace que cobra por la pasarela: el mismo `fab_pago_epayco` que ya decide
+ * si el modal de pago verifica referencias (`workspaceCobraPorEpayco`).
+ */
+async function accesoEpayco(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const r = await exigirModulo(REQUISITO.pagoEpayco)
+  if (r.ok) return { ok: true }
+  if (r.error === 'no_autenticado') return { ok: false, error: 'No autenticado' }
+  if (r.error === 'lectura_fallida') return { ok: false, error: 'No se pudo comprobar el acceso a ePayco. Intenta de nuevo.' }
+  return { ok: false, error: 'Este espacio no cobra por ePayco.' }
+}
+
 // ── consultarEpayco ──────────────────────────────────────────────────────────
 
 /**
@@ -69,8 +83,11 @@ export async function consultarEpayco(
     // Sin sesion no se consulta nada. La cuenta de ePayco es la de las variables de entorno,
     // no la del workspace, y el desglose trae el nombre del pagador y los montos: sin esta
     // guarda cualquiera, sin cuenta, podia recorrer referencias y leer los pagos.
-    const { workspaceId, error: errorSesion } = await getWorkspace()
-    if (errorSesion || !workspaceId) return { success: false, error: 'No autenticado' }
+    //
+    // Y la sesion no basta: esa cuenta es la de SOENA. Solo un workspace que cobra por
+    // ePayco (`fab_pago_epayco`) la consulta; cualquier otro recorria los pagos de SOENA.
+    const acceso = await accesoEpayco()
+    if (!acceso.ok) return { success: false, error: acceso.error }
 
     const ref = typeof refPayco === 'string' ? parseInt(refPayco, 10) : refPayco
     if (isNaN(ref) || ref <= 0) {
@@ -214,6 +231,10 @@ export async function registrarPagoEpayco(
     if (error || !workspaceId) {
       return { success: false, error: error ?? 'Sin workspace' }
     }
+    // Registrar un pago ePayco es de un workspace que cobra por ePayco: la re-validación
+    // de abajo consulta la cuenta global (la de SOENA).
+    const acceso = await accesoEpayco()
+    if (!acceso.ok) return { success: false, error: acceso.error }
 
     // ── 0. Re-validar en servidor cuando la validación está activada ────────
     // El cliente ya pasó por consultarEpayco, pero el desglose llega del cliente

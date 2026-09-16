@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getRolePermissions } from '@/lib/roles'
 import { revalidatePath } from 'next/cache'
 import { addHoras } from '@/lib/actions/cobros-horas-rapidos'
@@ -73,6 +74,7 @@ export async function addHorasDestino(
   // Negocio path
   const { supabase, workspaceId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   // Validate negocio exists and is active
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

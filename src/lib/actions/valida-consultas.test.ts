@@ -76,10 +76,15 @@ vi.mock('@/lib/supabase/auth-user', () => ({
   getCachedUser: async () => ({ user: { id: 'user-1' } }),
 }))
 
+const llave: { delWorkspace: string | undefined } = { delWorkspace: 'llave-de-prueba' }
+
 vi.mock('@/lib/secretos/workspace', () => ({
   leerSecretosWorkspace: async () => ({}),
-  secretoConRespaldo: () => 'llave-de-prueba',
+  secretoConRespaldo: () => llave.delWorkspace,
 }))
+
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
 vi.mock('@/lib/actions/_usuarios', () => ({
   resolverNombresUsuarios: async () => new Map(),
@@ -136,7 +141,15 @@ function constructor(tabla: string) {
   return q
 }
 
-import { consultarValida, prepararLoteValida, listarConsultasValida } from './valida-consultas'
+import {
+  consultarValida,
+  prepararLoteValida,
+  listarConsultasValida,
+  descargarPDFConsultaValida,
+  generarPDFLoteValida,
+  buscarNegociosParaValida,
+} from './valida-consultas'
+import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const PERSONA = { tipo: 'natural' as const, nombre: 'Juan Perez' }
 
@@ -159,6 +172,66 @@ beforeEach(() => {
   persistirScore.mockClear()
   fetchValida.mockClear()
   vi.stubGlobal('fetch', fetchValida)
+  // AFI: Clarity con el módulo Valida y su propia llave.
+  reiniciarModulo('ws-1', { ...MODULES.afi })
+  llave.delWorkspace = 'llave-de-prueba'
+  process.env.VALIDA_API_KEY = 'llave-global-de-metrik'
+})
+
+describe('el módulo Valida, no la sesión, abre estas acciones (tercera ronda)', () => {
+  // 4D SOFT: sesión válida, workspace con solo `valida_api`. Nada de este archivo le sirve.
+  beforeEach(() => reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft }))
+
+  it('no consulta Valida ni persiste', async () => {
+    const r = await consultarValida(PERSONA)
+    expect(r).toEqual({ ok: false, error: 'modulo_no_activo' })
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('no descarga reportes ni arma el PDF de un lote', async () => {
+    expect((await descargarPDFConsultaValida('val-1')).ok).toBe(false)
+    expect((await generarPDFLoteValida('lote-1')).ok).toBe(false)
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('no lista, no prepara lotes ni busca negocios', async () => {
+    expect((await listarConsultasValida()).ok).toBe(false)
+    expect((await prepararLoteValida(loteSinCodigo())).ok).toBe(false)
+    expect((await buscarNegociosParaValida('P')).ok).toBe(false)
+  })
+
+  it('CONTROL — un CDA de solo Valida sí consulta', async () => {
+    reiniciarModulo('ws-1', { ...MODULES.cda })
+    expect((await consultarValida(PERSONA)).ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('sin llave propia no se usa la de MeTRIK (tercera ronda)', () => {
+  beforeEach(() => {
+    llave.delWorkspace = undefined
+  })
+
+  it('la consulta falla a la vista en vez de cobrarse a MeTRIK', async () => {
+    const r = await consultarValida(PERSONA)
+    expect(r).toEqual({ ok: false, error: 'valida_api_key_no_configurada' })
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('el reporte no se baja con la llave global', async () => {
+    const r = await descargarPDFConsultaValida('val-de-otro-cliente')
+    expect(r).toEqual({ ok: false, error: 'valida_api_key_no_configurada' })
+    expect(fetchValida).not.toHaveBeenCalled()
+  })
+
+  it('CONTROL — con llave propia, la que viaja es la del workspace', async () => {
+    llave.delWorkspace = 'llave-de-prueba'
+    await consultarValida(PERSONA)
+    const init = fetchValida.mock.calls[0][1] as { headers: Record<string, string> }
+    expect(init.headers.Authorization).toBe('Bearer llave-de-prueba')
+  })
 })
 
 describe('consultarValida — de quien es el negocio', () => {

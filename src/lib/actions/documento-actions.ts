@@ -33,6 +33,7 @@ import {
   parsearReferencia,
 } from '@/lib/almacenamiento/referencia'
 import { descargarDeOne } from '@/lib/almacenamiento/one'
+import { archivoDriveOperable } from '@/lib/almacenamiento/drive-del-workspace'
 
 const BUCKET = BUCKET_DOCUMENTOS_ONE
 
@@ -700,7 +701,12 @@ export async function procesarDocumento(
           typeof anteriorData.drive_file_id === 'string' && anteriorData.drive_file_id
             ? anteriorData.drive_file_id
             : undefined
-        if (oldDriveFileId) {
+        // Y aun saliendo de la fila, `data` tiene más de un escritor: sin Drive propio el
+        // borrado va con las credenciales globales de MeTRIK, así que el archivo tiene que
+        // colgar de una carpeta de ESTE workspace (ver `drive-del-workspace.ts`).
+        if (oldDriveFileId && !(await archivoDriveOperable({ fileId: oldDriveFileId, workspaceId, negocioId }))) {
+          console.warn(`[documento] Step 4b SKIP: ${oldDriveFileId} no cuelga de una carpeta de este workspace`)
+        } else if (oldDriveFileId) {
           try {
             await deleteDriveFile(oldDriveFileId, workspaceId)
             console.log(`[documento] Step 4b OK: old file ${oldDriveFileId} deleted`)
@@ -906,7 +912,7 @@ export async function reprocesarDocumento(
     // 1. Leer bloque + config
     const { data: bloqueData } = await db(supabase)
       .from('negocio_bloques')
-      .select('data, bloque_configs(config_extra)')
+      .select('data, negocio_id, bloque_configs(config_extra)')
       .eq('id', bloqueId)
       .single()
 
@@ -965,6 +971,14 @@ export async function reprocesarDocumento(
       }
       buffer = (await almacenamiento.descargar(referenciaExterna)).buffer
     } else {
+      // El id sale de `data`, que tiene más de un escritor. Sin Drive propio se descarga con
+      // las credenciales globales de MeTRIK: tiene que colgar de una carpeta de este workspace.
+      const operable = await archivoDriveOperable({
+        fileId: driveFileId as string,
+        workspaceId,
+        negocioId: (bloqueData.negocio_id as string | undefined) ?? null,
+      })
+      if (!operable) return { success: false, error: 'Archivo no encontrado' }
       console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
       buffer = await downloadDriveFile(driveFileId as string, workspaceId)
     }

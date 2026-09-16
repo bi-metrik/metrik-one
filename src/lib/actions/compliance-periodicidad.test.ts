@@ -31,11 +31,8 @@ vi.mock('@/lib/supabase/auth-user', () => ({
   getCachedUser: async () => ({ user: { id: 'user-oficial' } }),
 }));
 
-import {
-  cargarConfigPeriodicidad,
-  guardarPeriodicidad,
-  listarPeriodicidad,
-} from './compliance-periodicidad';
+import { guardarPeriodicidad, listarPeriodicidad } from './compliance-periodicidad';
+import { cargarConfigPeriodicidad } from '@/lib/compliance/periodicidad-config';
 import { DEFAULT_SUGERIDO, NIVELES } from '@/lib/compliance/periodicidad';
 
 function servicioFalso() {

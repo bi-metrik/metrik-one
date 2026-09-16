@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { parseRut } from '@/lib/rut/parse-rut'
@@ -264,9 +265,40 @@ export async function getLineasDisponibles() {
 }
 
 export async function updateLineaActiva(lineaId: string) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
+  // La línea activa decide el flujo por el que entra todo negocio nuevo. Antes cualquier
+  // sesión del workspace la cambiaba, y a cualquier línea. Ahora, las mismas condiciones
+  // con las que `/mi-negocio` muestra "Mi flujo":
+  //   - owner o admin;
+  if (role !== 'owner' && role !== 'admin') {
+    return { success: false, error: 'Solo el dueño o un administrador cambian el flujo del negocio' }
+  }
+  //   - con Clarity (es el flujo de los negocios);
+  const modulo = await exigirModulo(REQUISITO.clarity)
+  if (!modulo.ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
+  //   - un workspace nativo: el de un cliente Clarity lo configura MeTRIK;
+  const { data: ws, error: errWs } = await supabase
+    .from('workspaces')
+    .select('tipo')
+    .eq('id', workspaceId)
+    .maybeSingle()
+  if (errWs) return { success: false, error: errWs.message }
+  if ((ws as { tipo?: string | null } | null)?.tipo === 'clarity') {
+    return { success: false, error: 'El flujo de este espacio lo configura MeTRIK' }
+  }
+  //   - una línea que ese workspace puede ver: una plantilla o una suya.
+  const { data: linea, error: errLinea } = await supabase
+    .from('lineas_negocio')
+    .select('id, workspace_id')
+    .eq('id', lineaId)
+    .maybeSingle()
+  if (errLinea) return { success: false, error: errLinea.message }
+  const duena = (linea as { workspace_id?: string | null } | null)?.workspace_id
+  if (!linea || (duena !== null && duena !== undefined && duena !== workspaceId)) {
+    return { success: false, error: 'Línea no encontrada' }
+  }
 
   const { error: dbError } = await supabase
     .from('workspaces')

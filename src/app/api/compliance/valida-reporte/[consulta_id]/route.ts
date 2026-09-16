@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getWorkspace } from '@/lib/actions/get-workspace';
 import { createServiceClient } from '@/lib/supabase/server';
+import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
@@ -27,6 +28,15 @@ export async function GET(
   const { workspaceId, error: wsError } = await getWorkspace();
   if (wsError || !workspaceId) {
     return Response.json({ error: 'no_autenticado' }, { status: 401 });
+  }
+
+  // 1b) Modulo. La llave es la GLOBAL de MeTRIK y esta ruta sirve a `/compliance/validacion`,
+  //     que es de Sustenta. Con solo la sesion, un workspace de otro modulo (4D SOFT, con
+  //     `valida_api`) bajaba por aqui cualquier reporte sin fila local: el limite de abajo.
+  const modulo = await exigirModulo(REQUISITO.sustenta);
+  if (!modulo.ok) {
+    const status = modulo.error === 'no_autenticado' ? 401 : modulo.error === 'lectura_fallida' ? 503 : 403;
+    return Response.json({ error: modulo.error }, { status });
   }
 
   // 2) Pertenencia. `valida_consultas.valida_consulta_id` guarda el id que Valida

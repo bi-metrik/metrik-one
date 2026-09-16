@@ -17,6 +17,9 @@
  * Lo que se fija es DONDE viven, leyendo el fuente: una prueba de comportamiento daria
  * igual con la funcion en un archivo `'use server'` o fuera de el.
  *
+ * Tercera ronda: VISTO FALLAR contra `origin/main` el caso de `cargarConfigPeriodicidad`
+ * (su archivo nuevo no existe y `compliance-periodicidad.ts`, que es `'use server'`, la exporta).
+ *
  * VISTO FALLAR (2026-09-16):
  *   - contra `origin/main` caen 7 de 8 (los tres archivos empiezan con `'use server'` y
  *     ninguno importa `server-only`). La octava pasa en los dos lados: vigila una
@@ -56,6 +59,12 @@ const CASOS = [
   { modulo: 'src/lib/actions/centro-costos-asignar.ts', funciones: ['proponerCentroCostos', 'registrarMapeoAutomatico'] },
   { modulo: 'src/lib/afi/generar-contrato.ts', funciones: ['generarContratoAFI'] },
   { modulo: 'src/lib/afi/generar-paquete.ts', funciones: ['disparararGeneracionAFI'] },
+  // Tercera ronda (2026-09-16): `cargarConfigPeriodicidad(workspaceId)` estaba registrada en
+  // el manifiesto y devolvia la politica de cualquier workspace sin pedir sesion. Y las dos
+  // puertas nuevas reciben el workspace o el id por parametro: tampoco pueden ser endpoints.
+  { modulo: 'src/lib/compliance/periodicidad-config.ts', funciones: ['cargarConfigPeriodicidad'] },
+  { modulo: 'src/lib/modulos/exigir-modulo.ts', funciones: ['exigirModulo'] },
+  { modulo: 'src/lib/almacenamiento/drive-del-workspace.ts', funciones: ['archivoDriveOperable'] },
 ]
 
 const TODOS_LOS_TS = archivosTs('src')

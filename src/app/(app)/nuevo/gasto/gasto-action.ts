@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Database } from '@/types/database'
@@ -21,6 +22,8 @@ import { BUCKET_SOPORTES_GASTO, extensionSegura, rutaEnWorkspace } from '@/lib/a
 export async function uploadSoporteGasto(formData: FormData) {
   const { workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado', url: null }
+  // Gastos son de Clarity: un workspace sin ese módulo no sube soportes ni crea gastos.
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO, url: null }
 
   const file = formData.get('file') as File | null
   if (!file || file.size === 0) return { success: false, error: 'Sin archivo', url: null }
@@ -72,6 +75,7 @@ export async function createGasto(input: {
 }) {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
 
   if (!input.monto || input.monto <= 0) return { success: false, error: 'Monto invalido' }
 
@@ -198,7 +202,7 @@ export async function proponerCentroCostosAction(args: {
   descripcion?: string | null
 }) {
   const { workspaceId, userId, error } = await getWorkspace()
-  if (error || !workspaceId) {
+  if (error || !workspaceId || !(await exigirModulo(REQUISITO.clarity)).ok) {
     return {
       centro: null,
       origen: null,
@@ -286,5 +290,7 @@ export async function clasificarGastoAction(
 ): Promise<PropuestaGasto | null> {
   const { workspaceId } = await getWorkspace()
   if (!workspaceId) return null
+  // La clasificación la paga MeTRIK (Gemini con su llave): solo para quien registra gastos.
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return null
   return clasificarGastoConIA(descripcion)
 }

@@ -38,8 +38,13 @@ vi.mock('@/app/(app)/negocios/negocio-v2-actions', () => ({
 vi.mock('@/lib/activity/registrar-actividad', () => ({
   registrarActividad: async () => ({ error: null }),
 }))
-vi.mock('@/lib/epayco', () => ({ consultarTransaccionEpayco: async () => null }))
+const consultarTransaccionEpayco = vi.fn(async (_ref: number) => ({ estado: 'Rechazada' }))
+vi.mock('@/lib/epayco', () => ({
+  consultarTransaccionEpayco: (ref: number) => consultarTransaccionEpayco(ref),
+}))
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
+vi.mock('@/lib/modulos/exigir-modulo', async () =>
+  (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
 /** El archivado real toca Storage y Drive; lo que se prueba aquí es qué hace el FAB
  *  con su respuesta, no el archivado en sí. */
@@ -48,8 +53,9 @@ vi.mock('@/lib/cobros/soporte-pago', () => ({
   archivarSoporte: (...args: unknown[]) => archivarSoporte(...args),
 }))
 
-import { agregarPagoFab } from './fab-pago-actions'
+import { agregarPagoFab, getNegociosParaPagoFab } from './fab-pago-actions'
 import { PREFIJO_REF_AUTOGENERADA } from '@/lib/cobros/referencia-externa'
+import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const COMPROBANTE = { storage_path: `${WS}/pagos-fab/abc.jpg`, file_name: 'transferencia.jpg' }
 
@@ -70,6 +76,8 @@ function cobroGuardado(): Record<string, unknown> | undefined {
 
 beforeEach(() => {
   archivarSoporte.mockReset()
+  consultarTransaccionEpayco.mockClear()
+  reiniciarModulo(WS, { business: true })
   reiniciarDoble()
   estado.fixtures.workspaces = [{ id: WS, modules: {} }]
   estado.fixtures.negocios = [
@@ -142,5 +150,34 @@ describe('referencia del pago del FAB', () => {
     const r = await agregarPagoFab(pago({ referencia: 'TRF-0001' }))
     expect(r.success).toBe(true)
     expect(cobroGuardado()?.external_ref).toBe('TRF-0001')
+  })
+})
+
+/**
+ * TERCERA RONDA (2026-09-16): el FAB de pago es de Clarity, y la cuenta de ePayco es la de
+ * SOENA. VISTO FALLAR contra `origin/main`: caen los 3; quitando la guarda de modulo de
+ * `ctxFabPago` caen 2, y la de ePayco en `registrarPagoEnNegocio`, 1.
+ */
+describe('el FAB de pago y la cuenta de ePayco, por modulo', () => {
+  it('4D SOFT (sin Clarity) no registra un pago aunque llame la accion', async () => {
+    reiniciarModulo(WS, { ...MODULES.cuatroDSoft })
+    const r = await agregarPagoFab(pago())
+    expect(r.success).toBe(false)
+    expect(estado.fixtures.cobros ?? []).toHaveLength(0)
+  })
+
+  it('4D SOFT tampoco lista los negocios del selector', async () => {
+    reiniciarModulo(WS, { ...MODULES.cuatroDSoft })
+    const r = await getNegociosParaPagoFab()
+    expect(r.negocios).toEqual([])
+    expect(r.error).toBeTruthy()
+  })
+
+  it('Termotech (Clarity sin pasarela) no registra como ePayco un pago de la cuenta de SOENA', async () => {
+    reiniciarModulo(WS, { ...MODULES.termotech })
+    const r = await agregarPagoFab(pago({ fuente: 'epayco', referencia: '378962162' }))
+    expect(r.success).toBe(false)
+    expect(consultarTransaccionEpayco).not.toHaveBeenCalled()
+    expect(estado.fixtures.cobros ?? []).toHaveLength(0)
   })
 })
