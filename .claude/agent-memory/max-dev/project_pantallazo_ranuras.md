@@ -17,6 +17,11 @@ el número equivocado — y eso no falla en ninguna parte.
 
 ## ⚠️⚠️ RX1 está probado contra capturas que YO construí, no contra proveedores reales
 
+> ⚠️ **CADUCÓ en parte el 2026-09-16:** ya hay banco real (10 capturas en
+> `proyectos/trappvel/clarity/capturas-proveedor/2026-09-16/`) y RX1 se midió contra él en
+> [[tarifa-por-pasajero]] (#763). En el listado filtrado a un hotel pedir un NÚMERO de opciones
+> era inestable; se estabilizó pidiendo la lista `opciones_vistas`.
+
 **No existe banco de pantallazos reales.** Lo único en `proyectos/trappvel/` es el
 comprobante de un anticipo bancario. Las 4 capturas de la evaluación son HTML que
 rendericé con chromium para el PR. El propio diseño lo declara abierto en §10 (*«A7 ·
