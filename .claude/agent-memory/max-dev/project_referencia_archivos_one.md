@@ -1,6 +1,6 @@
 ---
 name: referencia-archivos-one
-description: PR #748 mergeado (Paso A de cerrar ve-documentos y gastos-soportes) — el esquema one://, por qué el dueño tiene DOS patas y no gasto/cobro, y el redespliegue de notificar-etapa que el merge NO hace
+description: Pasos A (#748) y B (#755, migración YA aplicada) de cerrar ve-documentos y gastos-soportes — el esquema one://, por qué el dueño tiene DOS patas y no gasto/cobro, el corte en `?` que salvó 344 documentos, y el redespliegue de notificar-etapa que el merge NO hace
 metadata:
   type: project
 ---
@@ -20,9 +20,40 @@ regresión real, acotada al camino degradado (negocio sin `carpeta_url`).
 ⚠️ **El enlace firmado de 7 días NUNCA se ejercitó contra Storage real** (no se puede sin
 escribir en producción). Necesita QA en vivo antes del Paso C.
 
-**Pasos B y C siguen abiertos y NO son de este PR:** migrar las filas con URL pública
-(`negocio_bloques.data`, `gastos.soporte_url`, `cobros.soporte`) y poner `public = false`.
-Mientras tanto el código acepta las DOS formas: una fila sin migrar sigue abriendo.
+## ✅ Paso B APLICADO (2026-09-16) — la migración corrió ANTES de que existiera el archivo
+
+⚠️ **Caducó** lo que decía este archivo sobre que el Paso B seguía abierto. La migración de
+datos **ya corrió contra producción** con el sí explícito de Mauricio y está registrada en
+el ledger como `20260916020000_urls_publicas_a_referencia_one`. El **PR #755** (squash
+`c3b220f5`, mergeado con los 6 checks verdes) solo **versionó el archivo**: el repo decía
+que esa migración no existía. **No aplicó nada** — el `raise exception` con los conteos
+medidos la vuelve inservible contra cualquier base que no sea la que se midió, incluida
+esa misma una segunda vez.
+
+**Resultado, verificado contra producción:** 439 filas de `negocio_bloques` y 11 de
+`gastos` convertidas, 0 URLs públicas restantes, 0 referencias malformadas. De las 149
+referencias distintas, **146 apuntan a un objeto que existe en `storage.objects`; 3 no**,
+y esas 3 tienen la forma correcta → eran enlaces **ya muertos antes** de la migración.
+
+⚠️⚠️ **El corte en `?` es la línea que decidió el frente, y lo atrapó el ensayo.**
+`parsearReferenciaOne` rechaza cualquier path con `?` (guarda `rutaConEscape`), y **344 de
+las 443** URLs traían `?v=<epoch>`, el cachebuster del pantallazo: sin el corte en el
+patrón, 344 documentos habrían quedado **inabribles con el archivo intacto en Storage**.
+
+⚠️ **El reemplazo va sobre el TEXTO del jsonb, no clave por clave, y no es pereza:** el
+nombre del campo lo pone `bloque_configs`, o sea la configuración del workspace. **408 de
+las 439** filas usaban `pantallazo_certificacion`, una clave que **no aparece en ninguna
+parte del código**; las otras dos fueron `drive_url` (22 — nombre heredado que miente:
+guarda Storage, no Drive) y `_backfill` (9). Clave por clave habría dejado huecos
+silenciosos en cualquier workspace que lo bautizara distinto. **How to apply:** cualquier
+migración futura sobre `negocio_bloques.data` se escribe sobre el texto o enumera las
+claves **midiéndolas contra producción primero**, nunca leyéndolas del código.
+
+**Paso C sigue abierto:** poner `public = false` en los dos buckets. Ojo, la migración del
+Paso B **no tocó `cobros.soporte`**: el barrido fue sobre `negocio_bloques.data` y
+`gastos.soporte_url`. Antes del Paso C hay que volver a medir si queda alguna URL pública
+por ahí. Mientras tanto el código acepta las DOS formas: una fila sin migrar sigue
+abriendo — y ese colchón se acaba justo el día del Paso C.
 
 ## La decisión de autorización, que es lo que importa del PR
 
