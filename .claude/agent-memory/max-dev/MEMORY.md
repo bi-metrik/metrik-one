@@ -10,6 +10,8 @@
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — un PR que cambie qué emite el cron dispara cuentas reales horas después
 - ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: por cobros; anular la única viva = el cron la re-emite
 - ⚠️⚠️ [Módulos y gate por ruta (A1)](project_modulos_gate_ruta_a1.md) — #733 sin mergear, migración sin aplicar; gate en middleware (el layout no corre al navegar)
+- ⚠️⚠️ [Catálogo de servicios (A2)](project_catalogo_servicios_a2.md) — #741 sin mergear; un NULL en un CHECK deja pasar; falta la decisión que cita valida-cda-licencia
+- ⚠️ [Ensayar una migración con PGlite, versión exacta](reference_pglite_version_de_ci.md) — pglite NO está en el node_modules de la torre; instalarlo aparte con la versión de `package.json`
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — PR #577 sin mergear: nadie se suspende solo, la tabla nace vacía, AFI son 3 planes
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el módulo YA está encendido (caducó lo contrario), el sync sigue sin correr
