@@ -28,6 +28,8 @@ Se puede probar el primer render igual:
   ```
   Solo sirve si ese es el **único** estado del componente que nace en `false`, así que hay que revisarlo antes de usarlo. Siempre va con un caso de control que compruebe que el contenido abierto sí se pinta (el placeholder del buscador). Sin ese control, las demás pruebas pasan aunque la lista no aparezca.
 
+- ⚠️ **Afirmar `toContain('disabled')` sobre el HTML NO prueba que el botón esté deshabilitado: lo pasa cualquier botón con clases `disabled:*` de Tailwind.** Medido el 2026-09-17 (#782): el botón de cada workspace lleva `disabled:cursor-default disabled:opacity-50`, así que `expect(habilitado).not.toContain('disabled')` **falla** sobre un botón que sí está habilitado, y su gemelo `toContain('disabled')` habría pasado sobre uno mal pintado. Lo que React renderiza de verdad es el atributo `disabled=""`, y **eso** es lo que hay que afirmar. Mismo cuidado con `checked`, `required` y `readonly`: los tres tienen variante de Tailwind con el mismo nombre. Familia de [[pruebas-por-mutacion]] — aquí el falso resultado apareció en la dirección buena (rojo), pero la afirmación positiva era la que no medía nada.
+
 **Cuándo vale la pena:** cuando el defecto que se arregla ES la ausencia de algo en pantalla. Ahí una prueba de servidor no distingue "arreglado" de "sigue invisible". Precedente: `src/app/(app)/negocios/[id]/recaudo-cambiado-banner.test.ts` (PR #569, ver [[aviso-recaudo-sin-salida]]) — es el primer test de render del repo.
 
 Para ver un PDF renderizado de verdad, que es otra cosa, ver [[mirar-pdf-renderizado]].
