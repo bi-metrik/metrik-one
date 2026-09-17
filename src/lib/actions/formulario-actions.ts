@@ -869,7 +869,10 @@ export async function guardarSeccional(
   // tablero sin saber si necesita cita. En ese caso la elección vive solo en el bloque,
   // que es lo que el operador realmente eligió: qué preset aplicarle a ESTE formulario.
   if (nid) {
-    await fijarSeccionalNegocio(supabase, { negocioId: nid, entrada: seccional, pisar: true })
+    // `origen: 'manual'` es lo que hace que una lectura posterior del RUT NO la deshaga.
+    // Antes esa protección era un `pisar: true` desde aquí, y desde el otro lado un
+    // `pisar: false` que no podía distinguir esta elección de una siembra automática.
+    await fijarSeccionalNegocio(supabase, { negocioId: nid, entrada: seccional, origen: 'manual' })
     revalidatePath(`/negocios/${nid}`)
   }
   return { error: null }

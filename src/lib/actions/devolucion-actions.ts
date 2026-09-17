@@ -29,6 +29,7 @@ import {
   type MotivoDevolucion,
 } from '@/lib/negocios/devolucion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { soltarSeccionalDelRut } from '@/lib/negocios/seccional-desde-documento'
 
 /**
  * Mismo escape de tipos que usa `reproceso-actions`: `negocio_bloques.data` y las tablas
@@ -273,6 +274,22 @@ export async function devolverBloque(
       .eq('id', (evento as { id: string }).id)
     return { ok: false, error: 'No se pudo devolver el documento. Intenta de nuevo.' }
   }
+
+  // ── Soltar el dato que este archivo sembró en el NEGOCIO ──────────────
+  // Un documento devuelto deja de valer, y con él lo que dejó escrito fuera de su propia
+  // casilla. Hoy eso es una sola cosa: la seccional DIAN, que nace al procesar el RUT
+  // (`sembrarSeccionalDesdeRut`) y de la que cuelgan la casilla 12 del Formato 010, el
+  // buzón de la Guía de Devolución y el corte con/sin cita del tablero.
+  //
+  // Sin esto, entre la devolución y la carga del documento nuevo el caso sigue mostrando
+  // la seccional del archivo que el equipo acaba de rechazar — que es exactamente lo que
+  // pasó con V0264, pero en ese caso además para siempre.
+  //
+  // ⚠️ NO se generalizó a "todo dato sembrado": la seccional es el ÚNICO dato que un
+  // documento escribe hoy en el negocio. Un barrido genérico sobre `metadata` tendría que
+  // saber qué llave sembró qué bloque, y esa relación no existe en ninguna parte. El día
+  // que aparezca un segundo dato sembrado, su función de suelta se llama aquí al lado.
+  await soltarSeccionalDelRut(supabase, { negocioId: b.negocio_id, bloqueId: b.id })
 
   // ── Devolver el CASO a la etapa del bloque ────────────────────────────
   // Reabrir la casilla sola no resolvía el dolor: el caso seguía en la bandeja de
