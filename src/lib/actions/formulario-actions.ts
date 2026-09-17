@@ -18,6 +18,7 @@ import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
+import { telefonoCasilla25 } from '@/lib/dian/telefono-casilla-25'
 import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { createElement } from 'react'
@@ -217,6 +218,14 @@ function aplicarDeterministas(
     if (!('codigo_pais' in overrides)) datosFinal.codigo_pais = codes.codigo_pais
     if (!('codigo_departamento' in overrides)) datosFinal.codigo_departamento = codes.codigo_departamento
     if (!('codigo_municipio' in overrides)) datosFinal.codigo_municipio = codes.codigo_municipio
+    // Casilla 25 (Telefono) - numero LOCAL de 7 digitos, sin indicativo. Va AQUI y no
+    // solo en el renderer porque esta misma funcion alimenta la pantalla de edicion:
+    // mientras el teléfono se normalizaba al estampar, la casilla mostraba "6086871"
+    // y el PDF salía con "602 6086871". Solo un override con VALOR gana; uno vacío
+    // se normaliza, igual que el DV.
+    const telOverride = overrides.telefono
+    const telManual = 'telefono' in overrides && telOverride != null && telOverride.trim() !== ''
+    if (!telManual) datosFinal.telefono = telefonoCasilla25(datosFinal.telefono)
   }
 }
 
@@ -775,6 +784,9 @@ export async function resolverFormularioParaEdicion(
   valorBase.codigo_pais = datosEd.codigo_pais ?? valorBase.codigo_pais
   valorBase.codigo_departamento = datosEd.codigo_departamento ?? valorBase.codigo_departamento
   valorBase.codigo_municipio = datosEd.codigo_municipio ?? valorBase.codigo_municipio
+  // Casilla 25: la pantalla muestra el número YA normalizado (local de 7 dígitos),
+  // que es exactamente lo que va a estampar el PDF.
+  valorBase.telefono = datosEd.telefono ?? valorBase.telefono
 
   // Mostrar TODAS las casillas del template (no solo las autollenadas): las
   // casillas vacías del 010/1668 deben verse para poder llenarlas a mano cuando
