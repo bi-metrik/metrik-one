@@ -73,10 +73,14 @@ describe('agregar líneas por tipo', () => {
     for (const t of ['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro']) expect(botones(html)).not.toContain(t)
   })
 
-  it('con la marca: un botón por tipo, «Otro» y el catálogo; el nombre libre no está a la vista', () => {
+  it('con la marca: un botón por tipo y «Otro»; el nombre libre no está a la vista', () => {
     const html = pintar(true)
-    expect(botones(html)).toEqual(expect.arrayContaining(['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro', 'Desde catálogo']))
+    expect(botones(html)).toEqual(expect.arrayContaining(['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro']))
     expect(botones(html)).not.toContain('Item')
+    // ⚠️ «Desde catálogo» se fue el 2026-09-17 (ver `cotizacion-limpieza-render.test.ts`):
+    // el catálogo es una lista de servicios con precio fijo y aquí el costo entra por
+    // pantallazo. Ocupaba el renglón de los botones que sí se usan.
+    expect(botones(html)).not.toContain('Desde catálogo')
     expect(html).not.toContain('placeholder="Nombre del item..."')
     expect(html).not.toContain('placeholder="Nombre de la línea..."')
   })

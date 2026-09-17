@@ -234,16 +234,19 @@ describe('hallazgo 2 · confirmar no pisa el nombre que escribió la persona', (
     expect(itemEnBase('item-vuelo').nombre).toBe('PRUEBA Vuelo LATAM')
   })
 
-  it('una línea sin nombre sí toma el leído', async () => {
+  // ⚠️ Desde el 2026-09-17 el nombre leído se guarda en MAYÚSCULA (`mayusculas.ts`): sale
+  // impreso al lado de lo que alguien escribió a mano y la lista tiene que leerse pareja.
+  // Las tildes se conservan — «Bogotá» → «BOGOTÁ», no «BOGOTA».
+  it('una línea sin nombre sí toma el leído, en mayúscula y con tildes', async () => {
     tablas.items.push(itemVueloConLectura(''))
     await confirmarTarifaPorPasajero('item-vuelo', null)
-    expect(itemEnBase('item-vuelo').nombre).toBe('LATAM Bogotá BOG–Orlando MCO')
+    expect(itemEnBase('item-vuelo').nombre).toBe('LATAM BOGOTÁ BOG–ORLANDO MCO')
   })
 
   it('una alternativa con el relleno del sistema también', async () => {
     tablas.items.push(itemVueloConLectura('PRUEBA Vuelo LATAM (alternativa)'))
     await confirmarTarifaPorPasajero('item-vuelo', null)
-    expect(itemEnBase('item-vuelo').nombre).toBe('LATAM Bogotá BOG–Orlando MCO')
+    expect(itemEnBase('item-vuelo').nombre).toBe('LATAM BOGOTÁ BOG–ORLANDO MCO')
   })
 })
 

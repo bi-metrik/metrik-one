@@ -44,10 +44,25 @@ export default function TablaCombinaciones({
   cotizacionId,
   estado,
   editable,
+  explicarVacio = false,
 }: {
   cotizacionId: string
   estado: EstadoItinerarios
   editable: boolean
+  /**
+   * ¿Se dice POR QUÉ no hay tabla, en vez de no pintar nada?
+   *
+   * Sin alternativas cargadas no hay nada que combinar y la sección desaparecía entera:
+   * quien espera ver combinaciones no tiene forma de saber si faltan datos, si el módulo
+   * no está, o si la pantalla está rota. Medido el 2026-09-17 en la cotización de prueba
+   * de Trappvel: COT-2026-0002 tiene un vuelo y un hotel, **uno de cada**, así que no hay
+   * ranura que cruzar — y la pantalla no lo decía en ninguna parte.
+   *
+   * Opt-in, y por eso ausente vale `false`: en una cotización que no es de viaje
+   * (Termotech, WMC, Arca) la frase no significa nada y R6 sigue mandando — esa
+   * cotización no gana una sección al abrirla.
+   */
+  explicarVacio?: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -57,7 +72,35 @@ export default function TablaCombinaciones({
 
   // R6 · sin opciones y sin itinerarios no hay nada que decidir: la sección no se
   // pinta. Una cotización que ya existía no gana una sección al abrirla.
-  if (ranuras.length === 0 && itinerarios.length === 0) return null
+  const vacia = ranuras.length === 0 && itinerarios.length === 0
+  if (vacia && !explicarVacio) return null
+
+  // Lo que falta, dicho donde iría la tabla. No es un error ni un aviso: es la
+  // instrucción de una línea que convierte «aquí no hay nada» en «esto es lo que hay
+  // que hacer». La acción vive en cada línea («Agregar alternativa a esta línea»), así
+  // que aquí no se repite un botón que no podría saber sobre cuál línea actuar.
+  if (vacia) {
+    return (
+      <div className="rounded-lg border border-dashed px-4 py-5 text-center">
+        <h3 className="text-sm font-semibold">Combinaciones</h3>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Todavía no hay nada que combinar: cada componente tiene una sola opción.
+        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Agrega una alternativa a una línea de <strong>vuelo</strong> o de <strong>hotel</strong>
+          {' '}(botón «Agregar alternativa a esta línea», dentro de la línea) y aquí aparece la
+          {' '}tabla con el costo y el margen de cada combinación.
+        </p>
+        {/* La otra vía, y es la que destrabó el caso real: dos líneas sueltas que compiten
+            por lo mismo no se cruzan hasta que comparten grupo. En la cotización de prueba
+            había dos hoteles y uno estaba sin grupo, así que no eran alternativas de nada. */}
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Si ya tienes dos líneas que compiten, basta con darles el <strong>mismo grupo</strong>
+          {' '}en «Grupo de la línea».
+        </p>
+      </div>
+    )
+  }
 
   function correr(accion: () => Promise<{ success: boolean; error?: string }>, exito?: string) {
     startTransition(async () => {

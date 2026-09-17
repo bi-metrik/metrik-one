@@ -25,6 +25,7 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
+import { aMayusculas } from '@/lib/negocios/mayusculas'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 
@@ -385,11 +386,16 @@ export async function confirmarTarifaPorPasajero(
     .filter(Boolean)
     .join(' · ')
 
+  // El nombre y la descripción se guardan en MAYÚSCULA (`mayusculas.ts`): lo que sale del
+  // pantallazo termina impreso al lado de lo que alguien escribió a mano, y una lista que
+  // alterna «LATAM BOGOTÁ–PUNTA CANA» con «Hard Rock Punta Cana» se lee como dos
+  // cotizaciones distintas. Aquí es seguro por construcción: esta acción solo corre sobre
+  // una línea con RANURA, o sea una línea de viaje.
   const { error: errItem } = await sb
     .from('items')
     .update({
-      ...(nombreLeido ? { nombre: nombreLeido } : {}),
-      descripcion: descripcion || null,
+      ...(nombreLeido ? { nombre: aMayusculas(nombreLeido) } : {}),
+      descripcion: aMayusculas(descripcion) || null,
       // La línea es el grupo: el reparto por pasajero lo dicen los rubros y el PDF.
       cantidad: 1,
       unidad: null,
