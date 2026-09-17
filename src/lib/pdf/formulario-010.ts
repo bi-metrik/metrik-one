@@ -2,7 +2,6 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import fs from 'fs'
 import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
-import { formatearTelefonoFijo } from '@/lib/dian/indicativos'
 import { drawFixed, drawCells, type Cell, type CellGroup } from './acroform'
 import { TIPO_DOCUMENTO_DIAN } from '@/lib/dian/tipo-documento'
 
@@ -317,8 +316,10 @@ export async function generarFormulario010(
   edit1('codigo_seccional', datos.codigo_seccional, P1.codigo_seccional)
   edit1('correo_electronico', datos.correo_electronico, P1.correo_electronico)
   edit1('direccion', datos.direccion, P1.direccion)
-  // Casilla 25 (Teléfono) — línea fija con indicativo de ciudad delante ("601 …").
-  edit1('telefono', formatearTelefonoFijo(datos.telefono, datos.codigo_departamento), P1.telefono)
+  // Casilla 25 (Teléfono) — número local de 7 dígitos, SIN indicativo de ciudad: la
+  // DIAN devuelve el formato si lo lleva. Lo normaliza `aplicarDeterministas` (una
+  // sola vía, para que la pantalla de edición muestre lo mismo que se estampa aquí).
+  edit1('telefono', datos.telefono, P1.telefono)
   edit1('pais', datos.pais, P1.pais)
   edit1('departamento', datos.departamento, P1.departamento)
   edit1('municipio', datos.municipio, P1.municipio)
