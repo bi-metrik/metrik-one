@@ -72,6 +72,14 @@ interface BloqueDocumentoProps {
      *  (owner/admin/supervisor) puede corregir TODOS los campos extraídos
      *  (no solo los de alerta_revision). Cada corrección queda marcada. */
     corregir_campos_gerencial?: boolean
+    /**
+     * Lo pone el SERVIDOR: el área del usuario no cubre el stage de la etapa donde
+     * vive este bloque, y tampoco entra por la excepción de corrección hacia atrás.
+     * Sin leerlo, la pantalla ofrecía corregir campos que `guardEditarBloque`
+     * rechaza con «Tu rol o área no permite editar en esta fase del negocio» —
+     * `BloqueDatos` ya lo respetaba y este bloque no.
+     */
+    _areaReadonly?: boolean
   }
 }
 
@@ -539,8 +547,13 @@ export default function BloqueDocumento({
   // debe cubrir el stage y, si es operator, debe ser responsable). Antes la
   // pantalla solo dejaba pasar a los gerenciales, así que el comercial cargaba la
   // factura, veía el dato mal extraído y no tenía cómo corregirlo.
+  //  - `_areaReadonly` manda sobre los dos: si el servidor dice que el área del
+  //    usuario no cubre el stage de ESTE bloque, no hay corrección que valga y
+  //    ofrecerla solo enseña a chocarse (mismo criterio que `BloqueDatos`).
   const corregirGerencial = configExtra.corregir_campos_gerencial === true
-  const puedeCorregirVisible = puedeCorregirDocumentos(userRole) || esResponsable === true
+  const areaReadonly = configExtra._areaReadonly === true
+  const puedeCorregirVisible =
+    !areaReadonly && (puedeCorregirDocumentos(userRole) || esResponsable === true)
   // Causa de la corrección, elegida en un clic y compartida por todos los campos del
   // bloque: corregir tres campos del mismo documento por el mismo motivo es UNA
   // corrección, no tres. `sesionDoc` es lo que las agrupa en el registro.
@@ -717,11 +730,19 @@ export default function BloqueDocumento({
 
     try {
       // El archivo anterior de Drive lo resuelve el servidor desde la fila que reemplaza.
+      // `correccion` solo viaja cuando se está reemplazando desde el modo visible con
+      // una causa ya elegida: es el MISMO `sesionDoc` que usan los campos, así que
+      // reemplazar el archivo y corregir campos en el mismo acto queda como UNA sola
+      // corrección en el registro. En el modo editable `causaDoc` es null y el servidor
+      // recibe lo de siempre.
       const result = await procesarDocumento(
         negocioBloqueId,
         negocioId,
         pendingStoragePath,
         fileName,
+        causaDoc && sesionDoc.current
+          ? { causa: causaDoc, sesion_id: sesionDoc.current }
+          : undefined,
       )
 
       if (!result.success) {
@@ -892,6 +913,89 @@ export default function BloqueDocumento({
               Listo
             </button>
           </div>
+        )}
+        {/* ── Reemplazar el archivo, no solo sus campos ────────────────────────────
+            Hasta hoy el modo visible ofrecía Ver, Descargar y Devolver: si el documento
+            estaba mal y quien lo veía sabía cuál era el bueno, su única salida era
+            devolvérselo a quien lo cargó. La vía que existía para subir era
+            `editable_siempre`, que está hecha para otra cosa (el documento que aparece
+            DESPUÉS de que su etapa pasó, como la factura bajada de Siigo) y deja el
+            bloque abierto siempre y desde todas partes.
+            Mismas tres llaves que la corrección de campos —opt-in del bloque, rol o
+            responsable, y causa ya elegida— y el mismo `sesionDoc`, así que reemplazar
+            el archivo y corregir campos en el mismo acto es UNA corrección. El aviso de
+            `handleFileSelected` antes de perder los campos corregidos a mano se conserva
+            tal cual. El servidor vuelve a exigir las tres (ver `procesarDocumento`). */}
+        {corregirGerencial && puedeCorregirVisible && causaDoc && driveUrl
+          && uploadState !== 'pending_confirm' && uploadState !== 'uploading'
+          && uploadState !== 'processing' && (
+          <div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (f) { handleFileSelected(f); e.target.value = '' }
+              }}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-white px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted/50"
+            >
+              <Upload className="h-3 w-3" />
+              Reemplazar archivo
+            </button>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              PDF, JPG, PNG o WebP — max {maxSizeMb}MB. Queda registrado con la misma causa.
+            </p>
+          </div>
+        )}
+        {uploadState === 'uploading' && (
+          <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/30 px-3 py-2">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0" />
+            <span className="text-[11px] text-blue-700">Subiendo archivo…</span>
+          </div>
+        )}
+        {uploadState === 'pending_confirm' && (
+          <div className="flex items-center gap-2 rounded-lg border border-blue-300 bg-blue-50/30 px-3 py-2">
+            <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="block truncate text-[11px] font-medium text-blue-800">{fileName}</span>
+              <p className="text-[10px] text-blue-500">
+                Reemplaza el archivo actual. Confirma para {camposConfig.length > 0 ? 'procesar con IA y guardar' : 'guardar'}.
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-1.5">
+              <button
+                type="button"
+                onClick={handleCancelConfirm}
+                className="rounded-md border border-blue-300 bg-white px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="rounded-md bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
+              >
+                Reemplazar
+              </button>
+            </div>
+          </div>
+        )}
+        {uploadState === 'processing' && (
+          <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+            <Sparkles className="h-4 w-4 animate-pulse text-primary shrink-0" />
+            <span className="text-[11px] text-primary/80">
+              {camposConfig.length > 0 ? 'Procesando con IA…' : 'Guardando…'}
+            </span>
+          </div>
+        )}
+        {uploadState === 'error' && errorMsg && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{errorMsg}</p>
         )}
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

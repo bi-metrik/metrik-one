@@ -121,7 +121,7 @@ import {
   type PropuestaPendiente,
 } from '@/lib/correcciones/reversa'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
-import { STAGE_TO_AREA, getAreasEfectivas, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage, type UserContext } from '@/lib/permissions/can-edit'
+import { STAGE_TO_AREA, getAreasEfectivas, corrigeHaciaAtrasSinArea, puedeAutorizarCierreNoFacturable, puedeDevolverCasoPorRuta, type Area, type Role, type Stage, type UserContext } from '@/lib/permissions/can-edit'
 import { guardEditarBloque, guardAvanzarStage, guardVerNegocio } from '@/lib/permissions/guard-negocio'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import {
@@ -7404,6 +7404,34 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     block_id: string | null
     slug?: string | null
   }
+  // ── Solo lectura por área, POR BLOQUE ─────────────────────────────────────
+  // Se resuelve contra el stage de la etapa DONDE VIVE EL BLOQUE, no contra el stage
+  // actual del negocio. Para los bloques de la etapa actual da exactamente lo mismo
+  // (es la misma etapa), así que no hay regresión; lo que cambia es el HISTORIAL, que
+  // hasta hoy no recibía la marca en absoluto: la pantalla ofrecía corregir un bloque
+  // de otra área y el servidor devolvía «Tu rol o área no permite editar en esta fase».
+  //
+  // `esPostAvance` entra en el criterio con la MISMA función que aplica el guard
+  // (`corrigeHaciaAtrasSinArea`): corregir hacia atrás no lo corta el área, así que
+  // marcar de solo lectura a quien sí puede sería volver a mentir, ahora al revés.
+  // Sin áreas asignadas no hay segmentación (el modelo solo se activa donde
+  // `staff_areas` está poblado), y owner/admin con área también se restringen
+  // (decisión 2026-06-04).
+  const usuarioAreas: UserContext = {
+    id: staffId ?? '',
+    role: (role ?? 'read_only') as Role,
+    areas: (areas ?? []) as Area[],
+  }
+  const areasEfectivasUsuario = getAreasEfectivas(usuarioAreas)
+  const tieneAreasAsignadas = !!areas && areas.length > 0
+  const areaReadonlyDe = (stageBloque: Stage | null, esPostAvance: boolean): boolean => {
+    if (!tieneAreasAsignadas) return false
+    const areaDuena = stageBloque ? STAGE_TO_AREA[stageBloque] : null
+    if (areaDuena === null) return false
+    if (areasEfectivasUsuario.has(areaDuena)) return false
+    return !corrigeHaciaAtrasSinArea(usuarioAreas, { esPostAvance })
+  }
+
   const bloquesEtapasPrevias: BloqueHistorialPlano[] = []
   {
     const etapaActualOrden = base.etapasLinea.find(
@@ -7498,7 +7526,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // los tipos de visualizacion agregada (resumen_financiero, ejecucion,
       // historial). El componente HistorialEtapasPrevias los muestra en
       // orden de aparicion (etapa_orden ASC, bloque.orden ASC).
-      const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre }]))
+      const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre, stage: e.stage }]))
       const HIDDEN_TYPES = new Set(['resumen_financiero', 'resultado', 'ejecucion', 'historial', 'historial_valida'])
 
       // ── Bloques que se ACTIVARON tarde ────────────────────────────────────────
@@ -7665,13 +7693,26 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         // lo que hace falta cuando el caso ya avanzo — pero el flag solo se ponia en la
         // rama de la etapa actual, asi que se perdia en silencio. Medido en V0318, que al
         // avanzar a Cargue se quedo sin el boton. La action revalida el permiso.
-        const ceEnriched = def?.tipo === 'propuesta_economica'
+        const ceEnrichedPropuesta = def?.tipo === 'propuesta_economica'
           ? {
               ...ceEnrichedBase,
               ...(puedeCorregirPrecioWs ? { _puedeCorregirPrecio: true } : {}),
               _servicioVigente: servicioVigenteNeg,
             }
           : ceEnrichedBase
+
+        // Solo lectura por área en el HISTORIAL: se mide contra el stage de la etapa de
+        // ESTE bloque (no contra el stage actual del negocio) y con `esPostAvance` en
+        // true, porque por construcción estas etapas ya quedaron atrás. Un bloque que
+        // invita a otra área (`areas_editoras`) conserva esa excepción, igual que en la
+        // etapa actual. Hasta hoy el historial NO recibía la marca: por eso la pantalla
+        // ofrecía corregir lo que el servidor rechazaba.
+        const invitadoHistorial = ((ce as { areas_editoras?: Area[] }).areas_editoras ?? [])
+          .some(a => areasEfectivasUsuario.has(a))
+        const ceEnriched =
+          !invitadoHistorial && areaReadonlyDe((etapaInfo.stage ?? null) as Stage | null, true)
+            ? { ...ceEnrichedPropuesta, _areaReadonly: true }
+            : ceEnrichedPropuesta
 
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,
@@ -7699,21 +7740,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 
   // ── Build enriched bloques with auto_fill values ──────────────────────────
-  // Segmentación por área: si el usuario tiene área(s) asignada(s) y NO cubren el
-  // stage de la etapa actual, sus bloques quedan readonly — SALVO los que inviten
-  // a su área con `areas_editoras` (se resuelve bloque por bloque más abajo).
-  // Sin área → sin restricción (solo se activa donde staff_areas está poblado).
-  // owner/admin con área también se restringen (decisión 2026-06-04).
-  const stageActualNeg = (base.negocio.stage_actual ?? null) as Stage | null
-  const areaDuenaActual = stageActualNeg ? STAGE_TO_AREA[stageActualNeg] : null
-  const areasEfectivasUsuario = getAreasEfectivas({
-    id: '',
-    role: (role ?? 'read_only') as Role,
-    areas: (areas ?? []) as Area[],
-  })
-  const areaReadonly =
-    !!areas && areas.length > 0 && areaDuenaActual !== null
-    && !areasEfectivasUsuario.has(areaDuenaActual)
+  // Segmentación por área para los bloques de la ETAPA ACTUAL: el stage sale de la
+  // propia etapa (`base.bloques` son todos de `etapa_actual_id`), no de
+  // `negocios.stage_actual` — es el mismo valor, porque un trigger lo sincroniza, pero
+  // leerlo de la etapa es lo que hace que este cálculo y el del guard midan contra la
+  // MISMA fuente. `esPostAvance` es false por construcción: la etapa actual no está
+  // superada, así que aquí la corrección hacia atrás no aplica y el criterio es
+  // idéntico al de antes.
+  const stageEtapaActual = (base.etapasLinea.find(e => e.id === base.negocio.etapa_actual_id)?.stage
+    ?? base.negocio.stage_actual ?? null) as Stage | null
+  const areaReadonly = areaReadonlyDe(stageEtapaActual, false)
 
   // Orden de la etapa en la que está el negocio AHORA. Define la ventana de reversión
   // de la propuesta, que no coincide con la etapa donde el bloque vive.

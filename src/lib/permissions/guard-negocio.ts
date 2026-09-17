@@ -5,6 +5,8 @@ import {
   canEditBloque,
   canViewNegocio,
   canAdvanceStage,
+  corrigeHaciaAtrasSinArea,
+  esEtapaSuperada,
   type UserContext,
   type Stage,
   type Role,
@@ -57,6 +59,33 @@ async function responsablesDe(supabase: unknown, negocioId: string): Promise<str
   return ((data ?? []) as { staff_id: string }[]).map((r) => r.staff_id)
 }
 
+const MENSAJE_SIN_AREA = 'Tu rol o área no permite editar en esta fase del negocio'
+
+/**
+ * ¿El bloque vive en una etapa que el negocio YA superó?
+ *
+ * Una sola consulta: el orden del bloque y el `etapa_actual_id` ya vienen de la
+ * lectura principal del guard, así que aquí solo falta el orden de la etapa actual.
+ * Se llama SOLO cuando el chequeo de área falló y el rol puede corregir — el camino
+ * normal (trabajar la etapa propia) no paga nada.
+ *
+ * La comparación es la de `esEtapaSuperada`, la misma que usa `contextoCorreccion`
+ * para decidir que hay que exigir causa y dejar registro.
+ */
+async function bloqueDeEtapaSuperada(
+  supabase: unknown,
+  ordenBloque: number | null | undefined,
+  etapaActualId: string | null | undefined,
+): Promise<boolean> {
+  if (typeof ordenBloque !== 'number' || !etapaActualId) return false
+  const { data } = await db(supabase)
+    .from('etapas_negocio')
+    .select('orden')
+    .eq('id', etapaActualId)
+    .maybeSingle()
+  return esEtapaSuperada(ordenBloque, (data as { orden?: number } | null)?.orden)
+}
+
 /** Guard de edición de un bloque por su id (resuelve negocio + stage + responsables). */
 export async function guardEditarBloque(
   negocioBloqueId: string,
@@ -66,7 +95,7 @@ export async function guardEditarBloque(
   if ('error' in c) return { ok: false, error: c.error }
   const { data: nb } = await db(c.supabase)
     .from('negocio_bloques')
-    .select('negocio_id, negocios!inner(estado), bloque_configs!inner(config_extra, etapas_negocio!inner(stage))')
+    .select('negocio_id, negocios!inner(estado, etapa_actual_id), bloque_configs!inner(config_extra, etapas_negocio!inner(stage, orden))')
     .eq('id', negocioBloqueId)
     .single()
   if (!nb) return { ok: false, error: 'Bloque no encontrado' }
@@ -87,10 +116,26 @@ export async function guardEditarBloque(
   const areasExtra = ((nb.bloque_configs as { config_extra?: { areas_editoras?: unknown } | null } | null)
     ?.config_extra?.areas_editoras ?? []) as Area[]
   const resp = await responsablesDe(c.supabase, nb.negocio_id as string)
-  if (!canEditBloque(c.user, { stage, areasExtra }, resp)) {
-    return { ok: false, error: 'Tu rol o área no permite editar en esta fase del negocio' }
+  if (canEditBloque(c.user, { stage, areasExtra }, resp)) return { ok: true }
+
+  // Segundo intento: corrección HACIA ATRÁS. El área deja de cortar cuando el bloque
+  // es de una etapa ya superada y el rol corrige documentos (ver
+  // `corrigeHaciaAtrasSinArea`). Se pregunta aquí y no antes para que el camino
+  // normal —trabajar un bloque de la etapa propia— no pague una consulta de más;
+  // y `corrigeHaciaAtrasSinArea` se evalúa PRIMERO porque es puro y descarta sin IO
+  // a operator, contador y read_only, que son la mayoría de los rechazos.
+  if (!corrigeHaciaAtrasSinArea(c.user, { esPostAvance: true })) {
+    return { ok: false, error: MENSAJE_SIN_AREA }
   }
-  return { ok: true }
+  const esPostAvance = await bloqueDeEtapaSuperada(
+    c.supabase,
+    (nb.bloque_configs?.etapas_negocio?.orden ?? null) as number | null,
+    ((nb.negocios as { etapa_actual_id?: string | null } | null)?.etapa_actual_id ?? null),
+  )
+  if (esPostAvance && canEditBloque(c.user, { stage, areasExtra, esPostAvance: true }, resp)) {
+    return { ok: true }
+  }
+  return { ok: false, error: MENSAJE_SIN_AREA }
 }
 
 /** Guard de visibilidad de un negocio (operator solo si es responsable). */

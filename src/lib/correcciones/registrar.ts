@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { STAGE_TO_AREA, type Stage } from '@/lib/permissions/can-edit'
+import { STAGE_TO_AREA, esEtapaSuperada, type Stage } from '@/lib/permissions/can-edit'
 
 /**
  * Registro de correcciones sobre bloques de etapas ya superadas.
@@ -130,7 +130,10 @@ export async function contextoCorreccion(
   const ordenActual = (etapaActual as { orden?: number } | null)?.orden
   const cfg = (nb.bloque_configs?.config_extra ?? {}) as { corregir_campos_gerencial?: boolean }
   return {
-    esPostAvance: ordenBloque !== undefined && ordenActual !== undefined && ordenBloque < ordenActual,
+    // La comparación vive en `can-edit.ts` porque el guard de permisos la necesita con
+    // el MISMO criterio: si las dos se separan, la pantalla deja corregir algo que el
+    // registro no considera corrección (o al revés).
+    esPostAvance: esEtapaSuperada(ordenBloque, ordenActual),
     permiteCorregir: cfg.corregir_campos_gerencial === true,
     dataPrevia: (nb.data ?? {}) as Record<string, unknown>,
   }
