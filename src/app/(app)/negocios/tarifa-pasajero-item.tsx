@@ -12,6 +12,8 @@ import {
   quitarCasillaDeItem,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { descartarPropuestaDePantallazo } from '@/app/(app)/negocios/pantallazo-actions'
+import { margenDelProveedor, type MargenProveedor } from '@/lib/cotizaciones/margen-proveedor'
+import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import {
   casillasDe,
@@ -156,6 +158,10 @@ export default function TarifaPasajeroItem({
   const confirmada = tarifa.confirmada ?? null
   const hayPorConfirmar = estado?.estado === 'resuelta' && (!confirmada || ultimaLectura > confirmada.confirmadaEn)
   const confirmadaAlDia = !!confirmada && confirmadaVigente(confirmada, costoUnitarioLinea)
+  // El margen que la captura ya fija. Se calcula con el MISMO helper que usa el servidor al
+  // confirmar: escrito dos veces, la pantalla anunciaría un porcentaje y la línea guardaría
+  // otro (es la lección de `seleccionSupuesta`).
+  const margenProveedor = margenDelProveedor(casillas.grupo_completo)
 
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
@@ -323,6 +329,8 @@ export default function TarifaPasajeroItem({
                 Costo por pasajero, de {describirOcupacion(composicion)}. Es una propuesta: no entra al costo hasta que confirmes.
               </p>
 
+              <MargenDelPantallazo margen={margenProveedor} />
+
               <button
                 type="button"
                 onClick={() => setDetalleAbierto(x => ({ ...x, resultado: !x.resultado }))}
@@ -387,6 +395,12 @@ export default function TarifaPasajeroItem({
               <p className="text-[11px] font-medium text-emerald-900">
                 Costo cargado por pasajero: {lineaPorPasajero(confirmada.costos.map(c => ({ tipo: c.tipo, unitario: c.unitarioCOP })), 'COP')}
               </p>
+              {confirmada.margenProveedor && (
+                <p className="mt-0.5 text-[10px] text-emerald-900">
+                  Margen {formatMargenPct(confirmada.margenProveedor.margenPct)}, puesto por el pantallazo. La línea se vende
+                  en {formatoMonto(confirmada.margenProveedor.precioCliente, confirmada.margenProveedor.moneda)}.
+                </p>
+              )}
               {!confirmadaAlDia && (
                 <p className="mt-0.5 text-[10px] text-amber-800">
                   El costo de la línea cambió después de confirmar. El precio por pasajero no se imprime hasta volver a confirmar.
@@ -397,6 +411,25 @@ export default function TarifaPasajeroItem({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * El margen que el pantallazo ya trae, dicho con los tres números que lo sostienen.
+ *
+ * ⚠️ Los DOS precios se nombran. «Margen 10,4%» a secas obliga a creerle a la pantalla; con
+ * «cliente $2.029.118 · agencia $1.818.919» quien confirma puede cotejarlo contra la imagen
+ * que acaba de pegar, que es justo lo que se le está pidiendo que haga.
+ */
+function MargenDelPantallazo({ margen }: { margen: MargenProveedor | null }) {
+  if (!margen) return null
+  return (
+    <p className="rounded bg-emerald-50 p-1.5 text-[10px] text-emerald-900">
+      <span className="font-medium">Este pantallazo ya trae el margen: {formatMargenPct(margen.margenPct)}.</span>{' '}
+      Paga el cliente {formatoMonto(margen.precioCliente, margen.moneda)} y paga la agencia{' '}
+      {formatoMonto(margen.costoAgencia, margen.moneda)}. Al confirmar, la línea queda con ese margen: no hace falta
+      escribirlo.
+    </p>
   )
 }
 

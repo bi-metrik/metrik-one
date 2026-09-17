@@ -624,8 +624,8 @@ export function resumenDeLinea(
       etiqueta('Regreso', v('fecha_regreso')),
       etiqueta('Vuelo', v('numero_vuelo')),
       etiqueta('Tarifa', v('familia_tarifa')),
-      escalasTexto(v('escalas')),
-      equipajeTexto(v('equipaje_bodega'), v('equipaje_mano')),
+      escalasTexto(v('escalas'), v('escala_ida'), v('escala_regreso')),
+      equipajeTexto(v('equipaje_bodega'), v('equipaje_mano'), v('equipaje_personal')),
     )
     return { nombre, descripcion: unir(partes) }
   }
@@ -667,11 +667,48 @@ function etiqueta(nombre: string, valor: string | null): string | null {
   return valor ? `${nombre}: ${valor}` : null
 }
 
-function escalasTexto(valor: string | null): string | null {
-  if (valor === null) return null
-  const n = numero(valor)
-  if (n === null) return null
-  return n === 0 ? 'Directo' : n === 1 ? '1 escala' : `${n} escalas`
+/**
+ * La escala, dicha con la ciudad cuando la captura la muestra.
+ *
+ * *«El cliente quiere saber si hace escala en Bogotá o en Panamá»* (Alejandra,
+ * 2026-09-16). El conteo sin el dónde no le sirve a nadie, pero sigue siendo lo único
+ * que muestran algunas pantallas: sin ciudades leídas, esto imprime exactamente lo que
+ * imprimía antes.
+ *
+ * ⚠️ El REGRESO no se afirma nunca por omisión. Un itinerario cuyo recorrido de vuelta
+ * no se ve en la captura sale sin línea de regreso, no como «regreso directo»: eso
+ * último es una afirmación sobre algo que nadie leyó (R-P2).
+ */
+export function escalasTexto(
+  valor: string | null,
+  escalaIda: string | null = null,
+  escalaRegreso: string | null = null,
+): string | null {
+  const ida = (escalaIda ?? '').trim() || null
+  const regreso = (escalaRegreso ?? '').trim() || null
+
+  if (ida === null && regreso === null) {
+    if (valor === null) return null
+    const n = numero(valor)
+    if (n === null) return null
+    return n === 0 ? 'Directo' : n === 1 ? '1 escala' : `${n} escalas`
+  }
+
+  // Ida y regreso por la misma ciudad es el caso normal de un viaje con conexión, y
+  // decirlo dos veces alarga la línea sin agregar nada.
+  if (ida !== null && regreso !== null && sinTildes(ida) === sinTildes(regreso)) {
+    return `Escala en ${ida} (ida y regreso)`
+  }
+
+  const partes: string[] = []
+  if (ida !== null) partes.push(`Escala ida: ${ida}`)
+  else if (numero(valor) === 0) partes.push('Ida directa')
+  if (regreso !== null) partes.push(`Escala regreso: ${regreso}`)
+  return partes.length > 0 ? partes.join(' · ') : null
+}
+
+function sinTildes(t: string): string {
+  return t.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
 /**
@@ -681,12 +718,32 @@ function escalasTexto(valor: string | null): string | null {
  * *«Incluye sin equipaje de bodega y equipaje de mano»* en la línea que ve el cliente
  * — salió del primer render contra el modelo vivo, no de una prueba.
  */
-function equipajeTexto(bodega: string | null, mano: string | null): string | null {
+/**
+ * El equipaje, dicho sin contradecirse y con el artículo personal aparte.
+ *
+ * ⚠️ Los campos se redactan por SEPARADO. Concatenarlos bajo un «Incluye» imprimía
+ * *«Incluye sin equipaje de bodega y equipaje de mano»* en la línea que ve el cliente
+ * — salió del primer render contra el modelo vivo, no de una prueba.
+ *
+ * ⚠️ El artículo personal existe como tercer campo desde el 2026-09-17: en una tarifa
+ * Basic de Avianca es lo ÚNICO que va resaltado, y decir «sin equipaje de mano» a secas
+ * se lee como que el pasajero viaja con las manos vacías. `solo artículo personal` solo
+ * se afirma cuando la captura dijo que los otros dos NO van: con uno de ellos en `null`
+ * la frase sería una afirmación sobre lo que nadie leyó.
+ */
+function equipajeTexto(
+  bodega: string | null,
+  mano: string | null,
+  personal: string | null,
+): string | null {
+  if (personal === 'true' && mano === 'false' && bodega === 'false') return 'Solo artículo personal'
+
   const trozos: string[] = []
   if (bodega === 'true') trozos.push('Con equipaje de bodega')
   if (bodega === 'false') trozos.push('Sin equipaje de bodega')
   if (mano === 'true') trozos.push('con equipaje de mano')
-  if (mano === 'false') trozos.push('solo artículo personal')
+  if (mano === 'false') trozos.push('sin equipaje de mano')
+  if (personal === 'true' && mano !== 'true') trozos.push('con artículo personal')
   return trozos.length > 0 ? trozos.join(', ') : null
 }
 

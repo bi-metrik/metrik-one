@@ -48,6 +48,7 @@
 - ⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700: el desglose del modelo no es estable; RX1 ya medido con banco real (#763)
 - ⚠️⚠️ [Tarifa por pasajero (Trappvel)](project_tarifa_por_pasajero.md) — QA en prod: la casilla pinta lo que devuelve el servidor; rubros `tarifa`; «AD» no es adulto
 - ⚠️ [Pantalla de cotización de viaje](project_trappvel_pantalla_cotizacion.md) — #777 mergeado; el gate lo cumple UN solo bloque en toda la base
+- ⚠️⚠️ [Lectura fina: escala, equipaje y margen del pantallazo](project_lectura_fina_trappvel.md) — #784; el juicio del modelo sobre una IMAGEN no es estable, su descripción sí
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado; las tres INERTES sin config

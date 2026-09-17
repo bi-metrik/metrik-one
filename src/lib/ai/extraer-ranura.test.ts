@@ -245,3 +245,59 @@ describe('normalizar las filas por tipo de pasajero', () => {
     expect(normalizarRespuesta({ veredicto: 'detalle_unico' }).opcionesVisibles).toBeNull()
   })
 })
+
+/**
+ * El equipaje sale de dos respuestas del modelo en la MISMA llamada, y lo que no coincide
+ * no se afirma. El caso de referencia es la tarifa BASIC de Avianca del banco real
+ * (`3.57.39_PM-3`), donde de los tres iconos solo el primero está a color y el modelo
+ * respondía «con equipaje de bodega» una corrida sí y otra no.
+ */
+describe('equipaje · el icono observado se cruza con el dictamen del modelo', () => {
+  const conIconos = (colores: string[], dictamen: Record<string, unknown> = {}) =>
+    normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      campos: dictamen,
+      iconos_equipaje: colores.map((color, i) => ({ dibujo: ['bolso', 'maleta de cabina', 'maleta grande'][i], color })),
+    }).campos
+
+  it('los tres a color: los tres incluidos', () => {
+    const c = conIconos(['a_color', 'a_color', 'a_color'])
+    expect([c.equipaje_personal.value, c.equipaje_mano.value, c.equipaje_bodega.value]).toEqual(['true', 'true', 'true'])
+  })
+
+  it('solo el primero a color: artículo personal sí, los otros dos no', () => {
+    const c = conIconos(['azul', 'gris', 'gris'])
+    expect([c.equipaje_personal.value, c.equipaje_mano.value, c.equipaje_bodega.value]).toEqual(['true', 'false', 'false'])
+  })
+
+  // El defecto que se busca cerrar: un icono dibujado en gris NO es equipaje incluido.
+  it('el dictamen que CONTRADICE al icono deja el campo vacío, no elige uno de los dos', () => {
+    const c = conIconos(['azul', 'gris', 'gris'], {
+      equipaje_bodega: { value: 'true', confidence: 0.9 },
+      equipaje_mano: { value: 'false', confidence: 0.9 },
+    })
+    expect(c.equipaje_bodega.value).toBeNull()
+    expect(c.equipaje_bodega.confidence).toBe(0)
+    // El que sí coincide se conserva.
+    expect(c.equipaje_mano.value).toBe('false')
+  })
+
+  it('con dos iconos la posición no dice cuál es cuál: manda lo que respondió el modelo', () => {
+    const c = conIconos(['azul', 'gris'], { equipaje_bodega: { value: 'true', confidence: 0.9 } })
+    expect(c.equipaje_bodega.value).toBe('true')
+  })
+
+  it('un color que no se entiende no toca el campo', () => {
+    const c = conIconos(['morado con lunares', 'gris', 'gris'], { equipaje_personal: { value: 'true', confidence: 0.9 } })
+    expect(c.equipaje_personal.value).toBe('true')
+    expect(c.equipaje_mano.value).toBe('false')
+  })
+
+  it('sin iconos en la respuesta, el campo queda como lo dejó el modelo', () => {
+    const r = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      campos: { equipaje_bodega: { value: 'true', confidence: 0.9 } },
+    })
+    expect(r.campos.equipaje_bodega.value).toBe('true')
+  })
+})

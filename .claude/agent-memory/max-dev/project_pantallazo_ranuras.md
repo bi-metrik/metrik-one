@@ -21,6 +21,11 @@ el número equivocado — y eso no falla en ninguna parte.
 > `proyectos/trappvel/clarity/capturas-proveedor/2026-09-16/`) y RX1 se midió contra él en
 > [[tarifa-por-pasajero]] (#763). En el listado filtrado a un hotel pedir un NÚMERO de opciones
 > era inestable; se estabilizó pidiendo la lista `opciones_vistas`.
+>
+> ⚠️ **Pero no quedó cerrado:** el 2026-09-17, sobre la MISMA captura (`4.06.11_PM`,
+> Bedsonline Cancún), RX1 la aceptó en una corrida y la rechazó en otra. Ver
+> [[lectura-fina-trappvel]] (#784), donde la misma inestabilidad en el equipaje se atacó
+> cruzando dos respuestas del modelo en la misma llamada.
 
 **No existe banco de pantallazos reales.** Lo único en `proyectos/trappvel/` es el
 comprobante de un anticipo bancario. Las 4 capturas de la evaluación son HTML que

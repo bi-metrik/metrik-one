@@ -23,6 +23,8 @@ import {
   type TarifaConfirmada,
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
+import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
+import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
@@ -76,6 +78,10 @@ interface ItemLeido {
   estado: EstadoCotizacion
   negocioId: string | null
   tarifaRaw: unknown
+  /** El precio lo escribió una persona: el margen derivado NO lo toca. */
+  precioManual: boolean
+  /** La de la cotización, no la de la línea de negocio: es la que aplica `recalcularTotales`. */
+  convencionMargen: ConvencionMargen | null
 }
 
 async function leerItem(supabase: unknown, itemId: string): Promise<ItemLeido | null> {
@@ -84,11 +90,15 @@ async function leerItem(supabase: unknown, itemId: string): Promise<ItemLeido | 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('items')
-    .select('*, cotizaciones(estado, negocio_id)')
+    .select('*, cotizaciones(estado, negocio_id, convencion_margen)')
     .eq('id', itemId)
     .maybeSingle()
   if (error || !data) return null
-  const cot = (data.cotizaciones ?? {}) as { estado?: string; negocio_id?: string | null }
+  const cot = (data.cotizaciones ?? {}) as {
+    estado?: string
+    negocio_id?: string | null
+    convencion_margen?: string | null
+  }
   return {
     grupo: (data.grupo ?? null) as string | null,
     nombre: (data.nombre ?? null) as string | null,
@@ -97,6 +107,8 @@ async function leerItem(supabase: unknown, itemId: string): Promise<ItemLeido | 
     estado: (cot.estado ?? 'borrador') as EstadoCotizacion,
     negocioId: cot.negocio_id ?? null,
     tarifaRaw: data.tarifa_pax,
+    precioManual: data.precio_manual === true,
+    convencionMargen: (cot.convencion_margen ?? null) as ConvencionMargen | null,
   }
 }
 
@@ -386,6 +398,29 @@ export async function confirmarTarifaPorPasajero(
     .filter(Boolean)
     .join(' · ')
 
+  // ── El margen que ya trae la captura (Decameron, §4.4 de la propuesta visual) ──
+  //
+  // Cuando el pantallazo muestra lo que paga el cliente Y lo que paga la agencia, el
+  // margen no es una decisión pendiente: la línea se vende a lo que el proveedor le cobra
+  // al pasajero. Escribirlo aquí es lo que evita las dos correcciones a mano de hoy —
+  // poner el precio a dedo, o dejar el margen en 0 y hacer saltar el gate de piso.
+  //
+  // ⚠️ El margen NO se reconvierte a pesos: es una razón entre dos números de la MISMA
+  // captura, así que no depende de la tasa. Lo que sí queda en pesos es el costo.
+  const margenProveedor = margenDelProveedor(casillas.grupo_completo)
+  const loPusoUnaCaptura = tarifa.confirmada?.margenProveedor != null
+  const convencion = item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO
+  const patchMargen: Record<string, unknown> =
+    // Un precio escrito a mano manda sobre el margen (`margen-vista.ts`): tocar el campo
+    // no movería el precio y dejaría en pantalla un porcentaje que no gobierna nada.
+    item.precioManual ? {}
+      : margenProveedor ? { margen_porcentaje: margenDeLineaSegunConvencion(margenProveedor, convencion) }
+      // La captura nueva ya NO trae los dos precios y el margen escrito lo había puesto
+      // una captura anterior: se retira para que la línea vuelva a heredar el de la
+      // cotización. Si lo puso una persona, no se toca.
+      : loPusoUnaCaptura ? { margen_porcentaje: null }
+      : {}
+
   // El nombre y la descripción se guardan en MAYÚSCULA (`mayusculas.ts`): lo que sale del
   // pantallazo termina impreso al lado de lo que alguien escribió a mano, y una lista que
   // alterna «LATAM BOGOTÁ–PUNTA CANA» con «Hard Rock Punta Cana» se lee como dos
@@ -401,6 +436,7 @@ export async function confirmarTarifaPorPasajero(
       unidad: null,
       // El costo lo mandan los rubros (mismo guard que `updateItem`).
       subtotal: 0,
+      ...patchMargen,
     })
     .eq('id', itemId)
   if (errItem) return { success: false, error: errItem.message }
@@ -412,6 +448,7 @@ export async function confirmarTarifaPorPasajero(
     moneda,
     tasa: moneda === 'COP' ? null : tasaCambio,
     confirmadaEn: new Date().toISOString(),
+    margenProveedor: item.precioManual ? null : margenProveedor,
   }
   const guardado = await guardarTarifa(supabase, itemId, actual => ({ ...actual, confirmada }))
   if ('error' in guardado) return { success: false, error: guardado.error }

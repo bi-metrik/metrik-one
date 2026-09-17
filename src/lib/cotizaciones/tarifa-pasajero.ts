@@ -26,6 +26,8 @@
  * clasifica al menor según el proveedor (CC4b); el sistema compara cantidades (TP3).
  */
 
+import type { MargenProveedor } from './margen-proveedor'
+
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
 export type TipoPasajero = 'adulto' | 'nino' | 'infante'
@@ -834,6 +836,15 @@ export interface TarifaConfirmada {
   moneda: string
   tasa: number | null
   confirmadaEn: string
+  /**
+   * El margen que fijó la propia captura, cuando traía los dos precios
+   * (`margen-proveedor.ts`). Queda guardado por dos razones: la pantalla tiene que poder
+   * decir de dónde salió el porcentaje de la línea, y al volver a confirmar con una
+   * captura que YA NO trae los dos precios hay que saber que el margen escrito lo puso
+   * una captura y no una persona — si no, quedaría un margen viejo gobernando un costo
+   * nuevo.
+   */
+  margenProveedor?: MargenProveedor | null
 }
 
 export interface TarifaPax {
