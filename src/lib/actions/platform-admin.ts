@@ -165,6 +165,27 @@ export async function switchWorkspace(targetWorkspaceId: string) {
     .single()
   if (!target) return { error: 'Workspace destino no existe' }
 
+  // Audit log en el workspace que ABANDONA, cuando ese no es su home — o sea cuando
+  // salta de un workspace de cliente a otro. `returnHome` ya registraba su salida; con
+  // el salto A → B habilitado desde la barra, sin esto el rastro quedaba cojo: el owner
+  // de A veía la entrada del platform admin y nunca su salida.
+  //
+  // Saltar de casa a un cliente NO registra salida (es el comportamiento de siempre y es
+  // el correcto: el home de MeTRIK no es un workspace ajeno del que haya que rendir
+  // cuentas). `autor_id` NULL por el mismo motivo que abajo: la FK apunta a staff(id).
+  const abandonaWorkspaceAjeno =
+    profile.home_workspace_id != null && profile.workspace_id !== profile.home_workspace_id
+  if (abandonaWorkspaceAjeno) {
+    await registrarActividad(svc, {
+      workspace_id: profile.workspace_id,
+      entidad_tipo: 'workspace',
+      entidad_id: profile.workspace_id,
+      tipo: 'platform_admin_exit',
+      autor_id: null,
+      contenido: `Platform admin de MeTRIK (${ctx.email}) salió de este workspace hacia otro workspace`,
+    }, 'switchWorkspace')
+  }
+
   const updates: { workspace_id: string; home_workspace_id?: string } = {
     workspace_id: targetWorkspaceId,
   }
