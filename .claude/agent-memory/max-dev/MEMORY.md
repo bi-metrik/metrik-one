@@ -5,7 +5,7 @@
 - [sprint-10 supervisor y contador](project_sprint10_roles.md) — agregar roles, supervisor/contador, área y display_role
 - [SOENA pipeline VE 2026-04-05](project_soena_ve_pipeline.md) — etapas, gates, custom fields y estado_ve del flujo VE
 - ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
-- [Formato 010 DIAN](project_formulario_010_dian.md) — overlay AcroForm, flatten, casilla 12 y presets
+- ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza); overlay, flatten, casilla 12
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — solo corre en producción (credenciales en Vercel)
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — cambiar qué emite el cron dispara cuentas reales
 - ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: anular la única viva = el cron la re-emite
@@ -118,7 +118,7 @@
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS, chromium fotografía
 - ⚠️ [Cambio SOLO de tildes, y la eñe aparte](reference_cambio_solo_de_tildes.md) — la eñe NO es tilde; hay `anos` que rompen código
 - [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` rasteriza SVG
-- ⚠️ [Leer el texto de un PDF de @react-pdf](reference_leer_texto_de_un_pdf_de_react_pdf.md) — el texto va en HEX
+- ⚠️ [Leer el texto de un PDF (@react-pdf y pdf-lib)](reference_leer_texto_de_un_pdf_de_react_pdf.md) — va en HEX; el extractor se valida con un control
 - [Texto de un PDF de Chromium con pypdfium2](reference_texto_pdf_pypdfium2.md) — en la caché de uv; el pie se pega a la línea siguiente
 - [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — vitest + `pdf-to-img` en prefijo aparte
 - [Renderizar client components en aislamiento](reference_render_appshell_aislado.md) — solo pide `usePathname` + `useRouter`

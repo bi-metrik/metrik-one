@@ -1,6 +1,6 @@
 ---
 name: formulario-010-dian
-description: Cómo se arma el Formato 010 DIAN (AcroForm overlay) — aplanado, seccionales con código, capa editable
+description: Cómo se arma el Formato 010 DIAN (AcroForm overlay) — aplanado, seccionales con código, capa editable, y la casilla 25 sin indicativo (la DIAN rechaza si lo lleva)
 metadata:
   type: project
 ---
@@ -70,6 +70,31 @@ Fuente de verdad: `proyectos/soena/ve/docs/entrada/ejemplo-010-diligenciado-deis
   ruta compartida y se commitean aparte (fuera del PR de metrik-one).
 - 2026-07-08: `20260708_010_valores_A1_cali_A2.sql` + `20260708_010_A5_nombres_documentos.sql`.
 - Patrón: `jsonb_set(config_extra,'{campos_constantes}', ... || jsonb_build_object(...))`.
+
+## ⚠️⚠️ Casilla 25 (Teléfono): número LOCAL de 7 dígitos, SIN indicativo
+Cerrado el 2026-09-17 (PR #785). **La DIAN RECHAZA el formato si la casilla 25 lleva
+el indicativo de ciudad** (`602 2324412`) — reportado por Deisy con la captura. El
+supuesto contrario estaba escrito en el encabezado de `src/lib/dian/indicativos.ts`,
+que se **borró completo** (su `formatearTelefonoFijo` tenía un solo consumidor).
+
+**Son DOS casos y hay que cubrir los dos** (medido en SOENA, bloque `rut`, 340 con
+teléfono): **116** llegan con 7 dígitos y el sistema les pegaba el indicativo, y
+**42** llegan con 10 dígitos que **ya traen el `60X` desde el propio RUT**. Quitar
+solo el formateo arregla los 116 y deja los 42 rechazándose igual.
+
+Regla en `src/lib/dian/telefono-casilla-25.ts` (puro): 7 dígitos tal cual · 10 que
+empiezan en `3` son **celular y NO se tocan** (recortarlo lo destruye) · 10 que
+empiezan en `60` pierden los 3 primeros · **cualquier otra forma se devuelve sin
+cambios** (no adivinar: un número raro que se imprime raro es visible y corregible;
+uno recortado mal es un dato falso que va a la DIAN).
+
+**Vive en `aplicarDeterministas`, no en el renderer.** Esa función alimenta también
+la pantalla de edición: mientras el teléfono se normalizaba al estampar, la casilla
+mostraba `6086871` y el PDF salía `602 6086871`. El renderer solo imprime
+`datos.telefono`. Override con valor manda (mismo criterio que el DV).
+
+⚠️ `codigo_departamento` **sigue haciendo falta** para las casillas 26-28; lo que
+dejó de hacer es decidir el teléfono.
 
 ## Determinismo (ver aplicarDeterministas)
 - DV recalculado módulo 11 (no confiar en extracción). Códigos DANE por nombre (divipola.ts).
