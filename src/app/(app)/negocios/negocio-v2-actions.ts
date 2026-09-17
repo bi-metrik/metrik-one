@@ -106,6 +106,7 @@ import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compart
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { resolverDestinoCompartido } from '@/lib/negocios/casilla-compartida'
 import { sanearDataDelNavegador } from '@/lib/negocios/data-escribible'
+import { mayusculasDeBloqueDeViaje } from '@/lib/negocios/mayusculas'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
@@ -4680,6 +4681,11 @@ export async function marcarBloqueCompleto(
   // Campos `suma_de` (ej. número de pasajeros = adultos + niños + infantes): el servidor
   // los vuelve a calcular sobre lo ya saneado. Lo que manda el navegador es UX. Ver `campo-suma.ts`.
   mergedData = aplicarSumas(configExtraBloque.fields as CampoConSuma[] | undefined, mergedData)
+  // El texto libre del bloque que captura el viaje se GUARDA en mayúscula. La pantalla
+  // ya lo convierte mientras se escribe; esta es la que manda, porque una server action
+  // exportada es un endpoint alcanzable aunque ningún botón la invoque. No hace nada en
+  // un bloque que no declare la composición del viaje (ver `mayusculas.ts`).
+  mergedData = mayusculasDeBloqueDeViaje(configExtraBloque.fields, mergedData)
 
   // ── Tarifa UPME confirmada ────────────────────────────────────────────────
   // Barrera real del número que se guarda: la pantalla ya avisa mientras se escribe,
@@ -5408,16 +5414,22 @@ export async function actualizarBloqueData(
   // y la traza del servidor (`_ediciones`, …) conservan lo guardado.
   // Campos `suma_de`: el servidor los recalcula sobre lo saneado, antes de que la corrección
   // compare, para que la traza también registre el derivado (ver `campo-suma.ts`).
-  const dataSaneada = aplicarSumas(
-    (ce as { fields?: CampoConSuma[] } | null)?.fields,
-    sanearDataDelNavegador({
-      entrante: data,
-      guardada: dataDestino ?? {},
-      tipo: tipoAbierto,
-      configExtra: ce,
-      workspaceId,
-      modo: 'reemplazo',
-    }),
+  // El texto libre del bloque que captura el viaje se GUARDA en mayúscula, ANTES de que
+  // la corrección compare: así la traza registra lo que de verdad quedó escrito y no una
+  // versión intermedia. No hace nada en los demás bloques (ver `mayusculas.ts`).
+  const dataSaneada = mayusculasDeBloqueDeViaje(
+    (ce as { fields?: unknown } | null)?.fields,
+    aplicarSumas(
+      (ce as { fields?: CampoConSuma[] } | null)?.fields,
+      sanearDataDelNavegador({
+        entrante: data,
+        guardada: dataDestino ?? {},
+        tipo: tipoAbierto,
+        configExtra: ce,
+        workspaceId,
+        modo: 'reemplazo',
+      }),
+    ),
   )
 
   // ── Corrección post-avance ────────────────────────────────────────────────

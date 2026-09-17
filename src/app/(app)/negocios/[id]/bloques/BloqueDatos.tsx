@@ -16,6 +16,8 @@ import { SECCIONALES_DIAN, mapCiudadASeccional, getSeccionalBySlug, seccionalDes
 import { campoVisible, camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { aplicarSumas } from '@/lib/negocios/campo-suma'
+import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { bloqueDeclaraComposicionViaje } from '@/lib/cotizaciones/lineas-por-tipo'
 import { resolverOpciones, type OpcionSoloSi } from '@/lib/negocios/opcion-condicional'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { formatFecha } from '@/lib/dates/bogota'
@@ -481,9 +483,22 @@ export default function BloqueDatos({
     })
   }
 
+  /**
+   * ¿Este bloque es el que captura quiénes viajan?
+   *
+   * En ese bloque el texto libre (destino, requisitos especiales) se escribe en
+   * MAYÚSCULA, igual que los nombres de las líneas de la cotización, para que el caso se
+   * lea parejo de punta a punta. Se aplica también aquí y no solo en el servidor porque
+   * el campo es controlado: si solo convirtiera el servidor, la casilla mostraría lo
+   * tecleado y la base guardaría otra cosa. La regla de verdad sigue siendo la del
+   * servidor (`actualizarBloqueData`); esto es la misma función pura, no una segunda.
+   */
+  const textoEnMayusculas = bloqueDeclaraComposicionViaje(fields)
+
   // Escritura libre (texto/número): solo estado + borrador diferido. Sin revalidate
   // ni input deshabilitado → el foco nunca se pierde mientras se escribe.
   function handleTextChange(slug: string, value: unknown) {
+    if (textoEnMayusculas && typeof value === 'string') value = aMayusculas(value)
     const next = { ...valuesRef.current, [slug]: value }
     setValues(next)
     // El operador corrige el dato → ya fue verificado, quitar el badge "Revisar".

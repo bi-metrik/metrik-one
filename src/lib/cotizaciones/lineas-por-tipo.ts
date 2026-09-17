@@ -21,15 +21,30 @@
 export const CAMPOS_COMPOSICION_VIAJE: readonly string[] = ['adultos', 'ninos', 'infantes']
 
 /**
- * Recibe el `config_extra.fields` de cada bloque de la línea (tal como llega de la base,
- * sin confiar en su forma) y dice si alguno declara la composición del viaje.
+ * ¿ESTE bloque es el que captura quiénes viajan?
+ *
+ * El mismo criterio que `lineaCotizaPorTipo`, mirando un solo bloque. Se expone aparte
+ * porque hay superficies que solo tienen delante el bloque que se está editando y no la
+ * línea entera — el bloque «Condiciones del viaje» que escribe destino y requisitos es
+ * justo ese caso. Reescribir ahí la lista de campos sería una segunda regla que se
+ * desincroniza el día que la composición gane un campo.
+ *
+ * Recibe el `config_extra.fields` tal como llega de la base, sin confiar en su forma.
  */
-export function lineaCotizaPorTipo(fieldsPorBloque: readonly unknown[]): boolean {
-  return fieldsPorBloque.some(fields =>
+export function bloqueDeclaraComposicionViaje(fields: unknown): boolean {
+  return (
     Array.isArray(fields) &&
     fields.some(f => {
       const slug = (f as { slug?: unknown } | null)?.slug
       return typeof slug === 'string' && CAMPOS_COMPOSICION_VIAJE.includes(slug)
-    }),
+    })
   )
+}
+
+/**
+ * Recibe el `config_extra.fields` de cada bloque de la línea (tal como llega de la base,
+ * sin confiar en su forma) y dice si alguno declara la composición del viaje.
+ */
+export function lineaCotizaPorTipo(fieldsPorBloque: readonly unknown[]): boolean {
+  return fieldsPorBloque.some(bloqueDeclaraComposicionViaje)
 }

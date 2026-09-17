@@ -68,6 +68,7 @@ import {
   soloSugeridos,
 } from '@/lib/cotizaciones/rubros-sugeridos'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
+import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
@@ -351,12 +352,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  /**
+   * En el flujo de viaje los nombres se GUARDAN en mayúscula (ver `mayusculas.ts`): el
+   * nombre de una línea sale impreso al cliente y distingue una alternativa de otra, así
+   * que se escribe una sola vez ya convertido y no se maquilla en cada superficie.
+   */
+  const comoSeGuarda = (texto: string) => (lineasPorTipo ? aMayusculas(texto) : texto)
+
   const handleAddItem = () => {
     if (!newItemName.trim()) return
     startTransition(async () => {
-      const res = await addItem(cotizacion.id, newItemName)
+      const res = await addItem(cotizacion.id, comoSeGuarda(newItemName))
       if (res.success) {
         setNewItemName('')
+        // El campo de «Otro» se cierra al agregar: dejarlo abierto con el texto ya
+        // consumido invita a volver a darle al botón sobre un campo vacío.
+        setMostrarOtro(false)
         router.refresh()
       } else {
         toast.error(res.error)
@@ -369,7 +380,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // leído reemplaza al provisional (`nombre-linea.ts`).
   const handleAddItemDeGrupo = (g: { grupo: string; label: string }) => {
     startTransition(async () => {
-      const res = await addItem(cotizacion.id, nombreProvisionalDeGrupo(g.label), undefined, undefined, g.grupo)
+      // El provisional también se guarda en mayúscula, para que la lista no alterne
+      // «Vuelo» con «LATAM BOGOTÁ–PUNTA CANA». `esNombreDeRelleno` normaliza a
+      // minúscula antes de comparar, así que sigue reconociéndolo como relleno.
+      const res = await addItem(cotizacion.id, comoSeGuarda(nombreProvisionalDeGrupo(g.label)), undefined, undefined, g.grupo)
       if (res.success && 'id' in res && res.id) {
         const nuevoId = res.id
         setExpandedItems(prev => new Set(prev).add(nuevoId))
@@ -631,7 +645,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onBlur={e => {
                 // Se guarda null y no cadena vacía: el vacío tiene que llegar a la
                 // base de UNA sola forma, o la lista pinta un nombre en blanco.
-                const nombre = e.target.value.trim() || null
+                const nombre = comoSeGuarda(e.target.value.trim()) || null
+                // La casilla pinta lo que se guardó. Sin esto el campo queda con lo
+                // tecleado y la base con otra cosa: una pantalla sana que miente.
+                e.target.value = nombre ?? ''
                 if (nombre === (cotizacion.descripcion ?? null)) return
                 startTransition(async () => {
                   const res = await updateCotizacion(cotizacion.id, { descripcion: nombre })
@@ -909,7 +926,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           aria-label="Nombre de la línea"
                           className="w-full rounded border bg-background px-2 py-1.5 text-sm"
                           onBlur={e => {
-                            const val = e.target.value.trim()
+                            const val = comoSeGuarda(e.target.value.trim())
+                            // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
+                            e.target.value = val
                             if (val === (item.nombre ?? '')) return
                             startTransition(async () => {
                               const res = await updateItem(item.id, { nombre: val })
@@ -935,34 +954,43 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           })
                         }}
                       />
-                      <div>
-                        <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                          Unidad
-                        </label>
-                        <input
-                          type="text"
-                          defaultValue={item.unidad ?? ''}
-                          placeholder="pax, noches, trayectos…"
-                          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-                          onBlur={e => {
-                            const val = e.target.value.trim()
-                            if (val === (item.unidad ?? '')) return
-                            startTransition(async () => {
-                              const res = await actualizarRanuraDeItem(item.id, { unidad: val })
-                              if (!res.success) { toast.error(res.error); return }
-                              router.refresh()
-                            })
-                          }}
-                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                        />
-                        {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
-                            pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
-                            morfología del español sobre texto libre acierta a veces. Por eso
-                            el marcador sugiere la forma en plural, que es la del caso común. */}
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          Se imprime tal cual al cliente
-                        </p>
-                      </div>
+                      {/* LA UNIDAD no se teclea en el flujo de viaje.
+                          La escribe la propia ranura al leer el pantallazo
+                          (`ranura.unidadPorDefecto`), y al confirmar la tarifa por
+                          pasajero el servidor la deja en `null` a propósito: la línea es
+                          el grupo y el reparto lo dicen los rubros. Teclear «pax» aquí
+                          era pedir a mano un dato que el flujo escribe solo y que
+                          además borra un minuto después. */}
+                      {!lineasPorTipo && (
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                            Unidad
+                          </label>
+                          <input
+                            type="text"
+                            defaultValue={item.unidad ?? ''}
+                            placeholder="pax, noches, trayectos…"
+                            className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                            onBlur={e => {
+                              const val = e.target.value.trim()
+                              if (val === (item.unidad ?? '')) return
+                              startTransition(async () => {
+                                const res = await actualizarRanuraDeItem(item.id, { unidad: val })
+                                if (!res.success) { toast.error(res.error); return }
+                                router.refresh()
+                              })
+                            }}
+                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          />
+                          {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
+                              pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
+                              morfología del español sobre texto libre acierta a veces. Por eso
+                              el marcador sugiere la forma en plural, que es la del caso común. */}
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            Se imprime tal cual al cliente
+                          </p>
+                        </div>
+                      )}
                       {/* EL DÍA. Un solo interruptor: con día la línea imprime en el
                           itinerario día por día; sin día, y si declara un grupo que no
                           se combina, cae al paquete de «actividades adicionales no
@@ -1413,8 +1441,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           placeholder="Describe qué incluye este item..."
                           className="w-full rounded border bg-background px-2 py-1.5 text-xs"
                           onBlur={e => {
+                            const val = comoSeGuarda(e.target.value)
+                            // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
+                            e.target.value = val
+                            if (val === (item.descripcion ?? '')) return
                             startTransition(async () => {
-                              await updateItem(item.id, { descripcion: e.target.value })
+                              await updateItem(item.id, { descripcion: val })
                             })
                           }}
                         />
@@ -1638,17 +1670,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     </button>
                   </>
                 )}
-                <button
-                  onClick={loadCatalog}
-                  disabled={catalogLoading}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
-                >
-                  {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
-                  Desde catálogo
-                </button>
+                {/* EL CATÁLOGO no aplica al flujo de viaje.
+                    Es una lista de servicios con precio fijo, y aquí el costo entra por
+                    pantallazo del proveedor: no hay dos viajes con el mismo precio.
+                    Medido el 2026-09-17 contra producción: el workspace de Trappvel tiene
+                    CERO servicios, así que el botón solo abría un panel que decía que no
+                    hay nada. Ocupaba el renglón de «+ Vuelo / + Hotel», que es el que se
+                    usa. */}
+                {!lineasPorTipo && (
+                  <button
+                    onClick={loadCatalog}
+                    disabled={catalogLoading}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
+                  >
+                    {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+                    Desde catálogo
+                  </button>
+                )}
 
                 {/* Catalog dropdown */}
-                {showCatalog && (
+                {!lineasPorTipo && showCatalog && (
                   <div className="absolute right-0 top-full z-10 mt-1 w-80 rounded-lg border border-blue-200 bg-background shadow-lg p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-blue-800">Agregar desde catálogo</span>
@@ -1720,6 +1761,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               cotizacionId={cotizacion.id}
               estado={itinerarios}
               editable={editable}
+              explicarVacio={lineasPorTipo}
             />
           )}
 
@@ -1845,6 +1887,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
             umbrales={umbrales}
             pisoBloqueaAvance={pisoBloqueaAvance}
+            ofrecerAdministrativos={!lineasPorTipo}
             onMargenChange={pct => {
               startTransition(async () => {
                 await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
@@ -2076,7 +2119,7 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
  * diera: el cliente veía una línea "Administración e imprevistos" que nadie había
  * cotizado, y el margen no se podía leer en ninguna parte.
  */
-function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, onMargenChange, onAIUChange, onDescuentoChange }: {
+function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, ofrecerAdministrativos = true, onMargenChange, onAIUChange, onDescuentoChange }: {
   cascada: Cascada
   margenPct: number
   convencionMargen: ConvencionMargen
@@ -2087,6 +2130,19 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   umbrales: UmbralesMargen
   /** Ver el prop del mismo nombre en `Props`: decide el TEXTO del rojo, no el color. */
   pisoBloqueaAvance?: boolean
+  /**
+   * ¿Se OFRECE el AIU (administración e imprevistos)?
+   *
+   * Es una convención de obra pública colombiana: un segundo recargo sobre el mismo
+   * costo, al lado del margen general. En una cotización de viaje son dos palancas para
+   * lo mismo y la pregunta «¿cuál muevo?» no tiene respuesta. Medido el 2026-09-17: de
+   * las 6 cotizaciones de Trappvel, NINGUNA lo usa.
+   *
+   * ⚠️ Solo se retira la INVITACIÓN. Una cotización que ya tenga valores sigue
+   * mostrándolos y editándolos: esconder un porcentaje que ya está sumando sería
+   * exactamente la pantalla que miente.
+   */
+  ofrecerAdministrativos?: boolean
   onMargenChange: (pct: number) => void
   onAIUChange: (adminPct: number | null, imprevPct: number | null) => void
   onDescuentoChange: (pct: number) => void
@@ -2164,7 +2220,7 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
           </div>
         </div>
       )}
-      {editable && !showAIU && (
+      {editable && !showAIU && ofrecerAdministrativos && (
         <button
           onClick={() => setShowAIU(true)}
           className="text-[11px] text-muted-foreground hover:text-amber-600 hover:underline"
