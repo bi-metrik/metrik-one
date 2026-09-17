@@ -1773,6 +1773,10 @@ async function getNegocioDetalle(id: string): Promise<{
             const esc = await fijarSeccionalNegocio(supabase, {
               negocioId: id,
               entrada: labelCanonicoSeccional(seccional),
+              // `documento`: el valor sale del RUT del caso (`seccionalRut`, leído arriba),
+              // no de una elección del operador. Con ese origen, un RUT corregido después
+              // sí puede reemplazarlo; la elección manual del 010 sigue intocable.
+              origen: 'documento',
             })
             if (esc.guardado) negocioMetadata.seccional = esc.guardado
           }

@@ -1,5 +1,6 @@
 /**
- * Siembra `negocios.metadata.seccional` cuando se procesa el RUT.
+ * Siembra `negocios.metadata.seccional` cuando se procesa el RUT — y la SUELTA cuando ese
+ * mismo bloque se devuelve.
  *
  * ── Por qué existe ───────────────────────────────────────────────────────────
  *
@@ -20,7 +21,12 @@
  * que una línea renombre su bloque, en silencio.
  */
 
-import { fijarSeccionalNegocio, type EscrituraSeccional } from './seccional-negocio'
+import {
+  fijarSeccionalNegocio,
+  soltarSeccionalSembrada,
+  type EscrituraSeccional,
+  type SueltaSeccional,
+} from './seccional-negocio'
 
 /** Los mismos defaults que aplica el auto-init cuando la config no los declara. */
 const RUT_SLUG_DEFAULT = 'rut'
@@ -64,11 +70,63 @@ export function textoSeccionalDeCampos(campos: Campos | null | undefined, campo:
 type Db = { from: (t: string) => any }
 
 /**
+ * ¿El bloque que se acaba de tocar ES el RUT de la línea del negocio? Devuelve el campo
+ * del que sale la seccional, o null.
+ *
+ * Vive aquí (y no duplicada en cada consumidor) porque la pregunta "¿esta casilla es la
+ * que siembra la seccional?" la hacen dos caminos opuestos: la siembra al procesar el
+ * documento y la SUELTA al devolverlo. Si cada uno resolviera el bloque por su cuenta,
+ * uno podría hardcodear `'rut'` y el otro no, y bastaría con que una línea renombre su
+ * bloque para que sembrara sin poder soltar.
+ */
+async function campoSeccionalEnDb(
+  db: Db,
+  negocioId: string,
+  bloqueId: string,
+): Promise<string | null> {
+  // Slug del bloque procesado + línea del negocio.
+  const { data: bloque } = await db
+    .from('negocio_bloques')
+    .select('bloque_configs(slug)')
+    .eq('id', bloqueId)
+    .maybeSingle()
+  const bloqueSlug = (bloque as { bloque_configs?: { slug?: string | null } | null } | null)
+    ?.bloque_configs?.slug
+  if (!bloqueSlug) return null
+
+  const { data: neg } = await db
+    .from('negocios')
+    .select('linea_id')
+    .eq('id', negocioId)
+    .maybeSingle()
+  const lineaId = (neg as { linea_id?: string | null } | null)?.linea_id
+  if (!lineaId) return null
+
+  const { data: etapas } = await db
+    .from('etapas_negocio')
+    .select('id')
+    .eq('linea_id', lineaId)
+  const etapaIds = ((etapas ?? []) as Array<{ id: string }>).map(e => e.id)
+  if (etapaIds.length === 0) return null
+
+  const { data: configs } = await db
+    .from('bloque_configs')
+    .select('config_extra')
+    .in('etapa_id', etapaIds)
+  const citas = ((configs ?? []) as Array<{ config_extra: Record<string, unknown> | null }>)
+    .map(c => c.config_extra?.cita_dian_confirmacion as CitaDianConfig)
+    .filter(Boolean)
+
+  return campoSeccionalDelBloque(bloqueSlug, citas)
+}
+
+/**
  * Escribe la seccional del negocio a partir de los campos recién extraídos del RUT.
  *
- * `pisar: false` a propósito: una seccional ya establecida puede ser una corrección
- * manual hecha en el 010 (que escribe con `pisar: true`), y el dato crudo del
- * documento no puede deshacerla. Sembrar lo que falta sí; reabrir una decisión no.
+ * Escribe con `origen: 'documento'`, y eso es lo que decide contra qué puede competir:
+ * pisa otra seccional sembrada por un documento (el caso de V0264: el RUT bueno llegó
+ * después y tenía que corregir) y NO pisa la elegida a mano en el 010. Ver las reglas en
+ * `fijarSeccionalNegocio`.
  *
  * Nunca lanza: es un efecto lateral del guardado de un documento, y un fallo aquí no
  * puede convertir en error una extracción que sí funcionó.
@@ -81,50 +139,46 @@ export async function sembrarSeccionalDesdeRut(
   if (!campos || Object.keys(campos).length === 0) return null
 
   try {
-    const db = supabase as Db
-
-    // Slug del bloque procesado + línea del negocio.
-    const { data: bloque } = await db
-      .from('negocio_bloques')
-      .select('bloque_configs(slug)')
-      .eq('id', bloqueId)
-      .maybeSingle()
-    const bloqueSlug = (bloque as { bloque_configs?: { slug?: string | null } | null } | null)
-      ?.bloque_configs?.slug
-    if (!bloqueSlug) return null
-
-    const { data: neg } = await db
-      .from('negocios')
-      .select('linea_id')
-      .eq('id', negocioId)
-      .maybeSingle()
-    const lineaId = (neg as { linea_id?: string | null } | null)?.linea_id
-    if (!lineaId) return null
-
-    const { data: etapas } = await db
-      .from('etapas_negocio')
-      .select('id')
-      .eq('linea_id', lineaId)
-    const etapaIds = ((etapas ?? []) as Array<{ id: string }>).map(e => e.id)
-    if (etapaIds.length === 0) return null
-
-    const { data: configs } = await db
-      .from('bloque_configs')
-      .select('config_extra')
-      .in('etapa_id', etapaIds)
-    const citas = ((configs ?? []) as Array<{ config_extra: Record<string, unknown> | null }>)
-      .map(c => c.config_extra?.cita_dian_confirmacion as CitaDianConfig)
-      .filter(Boolean)
-
-    const campo = campoSeccionalDelBloque(bloqueSlug, citas)
+    const campo = await campoSeccionalEnDb(supabase as Db, negocioId, bloqueId)
     if (!campo) return null
 
     const texto = textoSeccionalDeCampos(campos, campo)
     if (!texto) return null
 
-    return await fijarSeccionalNegocio(supabase, { negocioId, entrada: texto })
+    return await fijarSeccionalNegocio(supabase, { negocioId, entrada: texto, origen: 'documento' })
   } catch (e) {
     console.error('[seccional-desde-documento] no se pudo sembrar la seccional:', e)
+    return null
+  }
+}
+
+/**
+ * Suelta la seccional que sembró ESTE bloque, cuando el bloque se devuelve.
+ *
+ * Solo hace algo si el bloque devuelto es el RUT que la línea declara como fuente de la
+ * seccional; devolver cualquier otro documento no toca el dato. Y dentro del RUT, solo
+ * suelta lo de origen documento: la elección manual del 010 se conserva.
+ *
+ * ⚠️ Se suelta con CUALQUIER motivo de devolución, no solo `archivo_equivocado`. Devolver
+ * un bloque es decir que su contenido no sirve —da igual si es el archivo de otro, uno
+ * ilegible o uno vencido— y los motivos son la taxonomía del indicador, no una escala de
+ * confianza del dato. Enumerar "qué motivos invalidan el dato" sería una segunda lista que
+ * se desincroniza con la primera. El costo de soltar de más es nulo: la próxima carga lo
+ * vuelve a sembrar, idéntico si el documento nuevo dice lo mismo.
+ *
+ * Nunca lanza: la devolución ya ocurrió y un fallo aquí no puede deshacerla.
+ */
+export async function soltarSeccionalDelRut(
+  supabase: unknown,
+  params: { negocioId: string; bloqueId: string },
+): Promise<SueltaSeccional | null> {
+  const { negocioId, bloqueId } = params
+  try {
+    const campo = await campoSeccionalEnDb(supabase as Db, negocioId, bloqueId)
+    if (!campo) return null
+    return await soltarSeccionalSembrada(supabase, { negocioId })
+  } catch (e) {
+    console.error('[seccional-desde-documento] no se pudo soltar la seccional:', e)
     return null
   }
 }

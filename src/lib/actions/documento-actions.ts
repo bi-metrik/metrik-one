@@ -1186,8 +1186,8 @@ export async function actualizarCampoDocumento(
   }
 
 
-  // Corregir a mano la seccional del RUT también la siembra en el negocio, si aún no
-  // la tiene. No pisa una ya establecida: esa pudo elegirse en el 010.
+  // Corregir a mano la seccional del RUT también la siembra en el negocio. Reemplaza la
+  // que hubiera sembrado otro documento; no toca la elegida a mano en el 010.
   await sembrarSeccionalDesdeRut(supabase, { negocioId, bloqueId, campos })
 
   // La factura puede aparecer DESPUES de que el caso llego a su etapa de cierre: ese es
