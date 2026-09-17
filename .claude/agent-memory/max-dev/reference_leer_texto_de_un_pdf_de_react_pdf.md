@@ -1,6 +1,6 @@
 ---
 name: leer-texto-de-un-pdf-de-react-pdf
-description: Cómo medir lo que un PDF de @react-pdf IMPRIME sin recalcularlo — el texto va en HEX, no en cadenas literales, y una etiqueta buscada por subcadena da falsos negativos
+description: Cómo medir lo que un PDF IMPRIME sin recalcularlo (@react-pdf y el overlay pdf-lib del 010) — el texto va en HEX, una etiqueta por subcadena da falsos negativos, y el extractor se valida con un control que TIENE que dar positivo
 metadata:
   type: reference
 ---
@@ -78,5 +78,35 @@ titula el bloque (`bloques.length > 1`). Para ejercitar el título hacen falta D
 
 Ejemplo vivo: `src/app/(app)/negocios/cotizacion-alternativas-e2e.test.ts`.
 
+## Lo mismo vale para el overlay de **pdf-lib** (formularios DIAN)
+
+Medido el 2026-09-17 sobre el 010 (PR #785). `generarFormulario010` estampa con
+`drawText` y el content stream queda igual de ilegible:
+
+```
+BT /Helvetica-2000805986 8 Tf 1 0 0 1 28 601 Tm <3331> Tj T* ET
+```
+
+Se llega al stream por `page.node.get(...obj('Contents'))` — puede ser un `PDFStream`
+**o un `PDFArray` de streams**, hay que cubrir los dos—, `getContents()` y
+`inflateSync` dentro de un `try` (a veces ya viene plano). Después, el mismo decodeo
+de `<hex> Tj`. Sin decodificar, buscar `'602'` en el stream crudo devuelve **cero** y
+se lee como «el arreglo funciona».
+
+## ⚠️⚠️ Un extractor se valida con un CONTROL que TIENE que dar positivo
+
+Es el paso que salva. Al comprobar que la casilla 25 ya no imprime el indicativo, las
+tres corridas decían «rastro de 602: no» **con el extractor roto** (no encontraba
+nada, ni siquiera `RAMIREZ`). Un cuarto render con el valor del comportamiento VIEJO
+(`'602 2324412'`) es lo único que prueba que el instrumento ve lo que busca:
+
+```
+CONTROL (comportamiento viejo, "602 2324412") | rastro de "602": SI
+```
+
+Sin esa línea, los «no» son indistinguibles de un falso negativo del instrumento.
+Familia de [[pruebas-por-mutacion]]: el arnés también falla, y falla parecido a la
+verdad.
+
 Relacionado: [[mirar-pdf-renderizado]], [[aporte-al-total-y-sugeridos]],
-[[pruebas-por-mutacion]].
+[[pruebas-por-mutacion]], [[formulario-010-dian]].
