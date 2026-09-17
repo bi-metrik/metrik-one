@@ -190,6 +190,100 @@ const A_PAGAR_AGENCIA: CampoRanura = {
     'restando comisiones. null si la pantalla no lo muestra.',
 }
 
+// ── Escala: DÓNDE, no solo cuántas ───────────────────────────────────────────
+
+/**
+ * Qué es una escala cuando la pantalla muestra el itinerario por tramos.
+ *
+ * Pedido de Alejandra el 2026-09-16: *«el cliente quiere saber si hace escala en Bogotá
+ * o en Panamá»*. Hasta hoy la ranura solo leía CUÁNTAS (`escalas`), que es el dato que
+ * menos le sirve a quien viaja.
+ *
+ * ⚠️ La escala casi nunca está escrita como tal: en el banco real (Amadeus, 2026-09-16)
+ * la ida son dos filas —`Cúcuta CUC → Bogotá BOG` y `Bogotá BOG → Armenia AXM`— y la
+ * palabra «escala» no aparece en ninguna parte. Por eso la instrucción describe el
+ * PATRÓN (la ciudad donde termina un tramo y empieza el siguiente) y no una etiqueta.
+ */
+const COMO_SE_LEE_LA_ESCALA =
+  'La escala es la ciudad INTERMEDIA del recorrido: cuando el itinerario se muestra en varios tramos, ' +
+  'es la ciudad donde termina un tramo y empieza el siguiente (Cúcuta→Bogotá y Bogotá→Armenia hacen escala ' +
+  'en Bogotá). Devuelve el NOMBRE de la ciudad como aparece, y el país si la pantalla lo muestra; si solo ' +
+  'se ve el código de aeropuerto, devuélvelo tal cual. Con varias escalas, sepáralas con « · ». ' +
+  'Si ese trayecto es de un solo tramo (directo), devuelve null: el campo escalas ya dice 0. ' +
+  'Si la pantalla no muestra el recorrido, null. NUNCA la deduzcas de la aerolínea ni del destino.'
+
+const ESCALA_IDA: CampoRanura = {
+  slug: 'escala_ida',
+  label: 'Escala (ida)',
+  tipo: 'texto',
+  min: false,
+  descripcion_ai: `Ciudad o ciudades donde hace escala la IDA (los tramos que van del origen al destino). ${COMO_SE_LEE_LA_ESCALA}`,
+}
+
+const ESCALA_REGRESO: CampoRanura = {
+  slug: 'escala_regreso',
+  label: 'Escala (regreso)',
+  tipo: 'texto',
+  min: false,
+  descripcion_ai:
+    'Ciudad o ciudades donde hace escala el REGRESO (los tramos que vuelven del destino al origen). ' +
+    `${COMO_SE_LEE_LA_ESCALA} Si el viaje es solo ida, null.`,
+}
+
+// ── Equipaje: cuenta el icono RESALTADO, no que el icono exista ──────────────
+
+/**
+ * Los tres iconos de maleta salen SIEMPRE; el que cuenta es el resaltado.
+ *
+ * Defecto reportado por Alejandra el 2026-09-16: *«el lector marcó equipaje de bodega en
+ * una tarifa Basic que solo lleva mochila»*. Medido sobre el banco real contando píxeles
+ * (`3.57.39_PM-3`, tarifa BASIC): los tres iconos están dibujados y **solo el primero es
+ * azul**; los otros dos son gris (RGB sin componente azul dominante). En la tarifa LIGHT
+ * (`4.00.50_PM`) son azules el primero y el segundo, y gris el tercero. O sea que la
+ * PRESENCIA del icono no dice nada y el color lo dice todo.
+ *
+ * Por eso cada campo describe **su** icono y el estado que lo hace verdadero, en vez de
+ * preguntar «¿incluye equipaje de bodega?», que es la pregunta que el modelo respondía
+ * mirando si el dibujo estaba.
+ *
+ * ⚠️ Esta descripción NO es lo único que decide: lo que el modelo responda aquí se CRUZA
+ * contra los iconos que dice ver (`iconos_equipaje`), y lo que no coincide se descarta
+ * (`derivarEquipajeDeLosIconos`, `src/lib/ai/extraer-ranura.ts`). Con la descripción sola,
+ * la misma imagen daba respuestas distintas entre corridas.
+ */
+const COMO_SE_LEE_EL_EQUIPAJE =
+  'En las pantallas de aerolínea el equipaje se muestra como una fila de iconos y SIEMPRE aparecen todos, ' +
+  'incluidos los que la tarifa NO incluye: los incluidos van RESALTADOS (a color, normalmente azul) y los ' +
+  'excluidos van en GRIS, apagados o tachados. De izquierda a derecha son: (1) el más pequeño, un bolso, ' +
+  'morral o mochila, es el ARTÍCULO PERSONAL; (2) una maleta de cabina con ruedas y manija, es el EQUIPAJE ' +
+  'DE MANO; (3) la maleta más grande, es el EQUIPAJE DE BODEGA. Que el icono esté dibujado NO quiere decir ' +
+  'que la tarifa lo incluya. PROCEDIMIENTO: cuenta de izquierda a derecha cuántos de los tres iconos están ' +
+  'A COLOR. Si solo el primero está a color, la tarifa incluye ÚNICAMENTE el artículo personal y los otros ' +
+  'dos son false. Si están a color los dos primeros, incluye artículo personal y equipaje de mano, y bodega ' +
+  'es false. Si están los tres, los tres son true. NO decidas por el nombre de la tarifa (BASIC, LIGHT, ' +
+  'STANDARD, FLEX) ni por lo que suelas saber de esa aerolínea: la misma familia tarifaria lleva cosas ' +
+  'distintas según la ruta, y lo que vale es lo que la imagen muestra.'
+
+function equipaje(slug: string, label: string, cual: string): CampoRanura {
+  return {
+    slug,
+    label,
+    tipo: 'boolean',
+    min: false,
+    alerta_revision: true,
+    descripcion_ai:
+      `true SOLO si ${cual} está RESALTADO a color (o la pantalla lo dice con texto); ` +
+      `false si está en gris, apagado o tachado (o la pantalla dice que no va incluido); ` +
+      `null si la pantalla no muestra nada sobre equipaje. ${COMO_SE_LEE_EL_EQUIPAJE}`,
+  }
+}
+
+const EQUIPAJE: CampoRanura[] = [
+  equipaje('equipaje_personal', 'Artículo personal', 'el icono del artículo personal (el bolso o mochila, el primero)'),
+  equipaje('equipaje_mano', 'Equipaje de mano', 'el icono de la maleta de cabina (el segundo)'),
+  equipaje('equipaje_bodega', 'Equipaje de bodega', 'el icono de la maleta grande de bodega (el tercero)'),
+]
+
 /** El enum que decide si el número leído se multiplica o no (R-P6). */
 function basePrecio(opciones: string[], nota: string): CampoRanura {
   return {
@@ -222,10 +316,11 @@ const VUELO: DefinicionRanura = {
     { slug: 'fecha_salida', label: 'Salida', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida del vuelo de ida, en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'fecha_regreso', label: 'Regreso', tipo: 'fecha', min: false, descripcion_ai: 'Fecha del vuelo de regreso en formato AAAA-MM-DD. null si es solo ida. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     { slug: 'numero_vuelo', label: 'Nº de vuelo', tipo: 'texto', min: false, descripcion_ai: 'Número o números de vuelo tal como aparecen (ej. AV8520).' },
-    { slug: 'escalas', label: 'Escalas', tipo: 'numero', min: false, descripcion_ai: 'Cuántas escalas tiene la ida. 0 si es directo. null si la pantalla no lo dice.' },
+    { slug: 'escalas', label: 'Escalas', tipo: 'numero', min: false, descripcion_ai: 'Cuántas escalas tiene la IDA. 0 si es directo. null si la pantalla no lo dice.' },
+    ESCALA_IDA,
+    ESCALA_REGRESO,
     { slug: 'familia_tarifa', label: 'Tarifa', tipo: 'texto', min: false, descripcion_ai: 'Nombre de la familia tarifaria: basic, light, full, flex, economy...' },
-    { slug: 'equipaje_bodega', label: 'Equipaje de bodega', tipo: 'boolean', min: false, alerta_revision: true, descripcion_ai: 'true si la tarifa INCLUYE equipaje de bodega, false si lo excluye explícitamente, null si no se ve.' },
-    { slug: 'equipaje_mano', label: 'Equipaje de mano', tipo: 'boolean', min: false, alerta_revision: true, descripcion_ai: 'true si INCLUYE equipaje de mano, false si solo artículo personal, null si no se ve.' },
+    ...EQUIPAJE,
     { slug: 'pax', label: 'Pasajeros', tipo: 'numero', min: true, descripcion_ai: 'Número de pasajeros de la reserva. Si la pantalla no lo dice, devuelve null: no supongas 1.' },
     ...OCUPACION,
     MONEDA,

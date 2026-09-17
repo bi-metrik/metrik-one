@@ -154,6 +154,18 @@ REGLAS DE EXTRACCION:
   (ej. "Vie, 23 Oct"), devuelve --MM-DD (ej. --10-23). NUNCA inventes el ano.
 - Booleanos: la cadena "true" o "false". null si la pantalla no lo dice.
 
+PASO 3b — LOS ICONOS DE EQUIPAJE, ANTES DE DECIDIR SI VAN INCLUIDOS. Si la pantalla
+muestra una fila de iconos de equipaje (bolsos, mochilas, maletas), devuelve en
+"iconos_equipaje" una entrada por cada icono, EN EL ORDEN EN QUE APARECEN de izquierda a
+derecha: { "dibujo": que se ve (bolso, mochila, maleta de cabina con ruedas, maleta
+grande), "color": "a_color" si esta pintado de un color (azul, verde, naranja), "gris" si
+esta en gris, apagado, difuminado o tachado }.
+- Describe lo que VES. Que un icono este incluido en la tarifa se decide despues, con esta
+  lista: aqui solo importa el dibujo y el color.
+- Si la misma fila de iconos se repite en la pantalla (una vez por cada tramo del vuelo y
+  otra en la tabla de tarifa), devuelve UNA sola fila de iconos, no todas.
+- Si la pantalla no muestra iconos de equipaje, devuelve la lista vacia.
+
 PASO 4 — DESGLOSE. En "desglose" devuelve las filas de precio que la pantalla muestre
 DESGLOSADAS (tarifa, impuestos y tasas, resort fee, cargo por servicio, equipaje).
 - Copia lo que la pantalla lista. NO inventes un desglose que no esta: si solo hay un
@@ -204,6 +216,14 @@ function construirEsquema(ranura: DefinicionRanura) {
           }]),
         ),
         required: ranura.campos.map(c => c.slug),
+      },
+      iconos_equipaje: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: { dibujo: { type: 'STRING' }, color: { type: 'STRING' } },
+          required: ['dibujo', 'color'],
+        },
       },
       desglose: {
         type: 'ARRAY',
@@ -306,6 +326,8 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
       confidence: Number(fila.confidence ?? 0) || 0,
     })
   }
+  derivarEquipajeDeLosIconos(obj.iconos_equipaje, campos)
+
   const totalGeneral = numeroONulo(obj.total_general)
   // RX1 con EVIDENCIA: no un número que el modelo declara, sino las opciones que dice ver.
   // Medido el 2026-09-16: con un conteo, el mismo listado filtrado de Bedsonline salió 1 en
@@ -324,6 +346,64 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
       ).size
 
   return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles }
+}
+
+/**
+ * El equipaje se cruza contra los iconos observados, y lo que no coincide NO se afirma.
+ *
+ * ## Por qué no basta preguntar «¿incluye equipaje de bodega?»
+ *
+ * ⚠️ Medido contra el modelo vivo sobre la MISMA imagen (`3.57.39_PM-3`, tarifa BASIC de
+ * Avianca por Amadeus, 2026-09-17). Contado por píxeles, de los tres iconos **solo el
+ * primero está a color**. Preguntando directo, el modelo respondió «sin equipaje de
+ * bodega, con equipaje de mano» en una corrida y «con equipaje de bodega, con equipaje de
+ * mano» en la siguiente, las dos con confianza 0,9. Es el mismo modo de fallo del conteo
+ * de opciones de RX1 antes de que se pidiera `opciones_vistas`, y el mismo del desglose
+ * que no reconcilia: **el juicio del modelo sobre una imagen no es estable entre
+ * corridas; su descripción de lo que ve lo es un poco más.**
+ *
+ * ## La regla: dos respuestas de la MISMA llamada tienen que coincidir
+ *
+ * El modelo responde dos veces sobre lo mismo sin saberlo: en `iconos_equipaje` describe
+ * qué dibujo hay y de qué color, y en los campos `equipaje_*` dictamina si va incluido.
+ * Cuando las dos coinciden, el dato se guarda. **Cuando se contradicen, el campo queda
+ * VACÍO**: no se afirma ni que lleva ni que no lleva.
+ *
+ * Es el mismo criterio que `desgloseReconcilia` (`lectura-pantallazo.ts`) y por la misma
+ * razón: este dato no mueve plata, se imprime en el documento que lee el cliente. Un
+ * hueco lo llena una persona mirando las reglas de la tarifa; un «incluye maleta de
+ * bodega» falso lo descubre el pasajero en el aeropuerto.
+ *
+ * ⚠️ Solo se cruza con EXACTAMENTE tres iconos. Con uno o dos la posición no dice cuál es
+ * cuál —una pantalla que muestre solo la maleta de bodega es una fila de uno— y ahí manda
+ * lo que el modelo respondió en los campos, que es el comportamiento anterior.
+ */
+function derivarEquipajeDeLosIconos(raw: unknown, campos: LecturaCruda['campos']): void {
+  const iconos = Array.isArray(raw) ? raw : []
+  if (iconos.length !== 3) return
+  const slugs = ['equipaje_personal', 'equipaje_mano', 'equipaje_bodega']
+  iconos.forEach((ic, i) => {
+    const color = String(((ic ?? {}) as Record<string, unknown>).color ?? '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+    const incluido = /a_color|color|azul|verde|naranja|resalt|activ|destac/.test(color)
+    const excluido = /gris|apag|tach|difumin|desactiv|opac|inactiv/.test(color)
+    if (incluido === excluido) return // ni lo uno ni lo otro, o las dos: no aporta
+    const delIcono = incluido ? 'true' : 'false'
+
+    const dictamen = campos[slugs[i]]
+    const delCampo = dictamen && dictamen.confidence >= 0.5 ? (dictamen.value ?? '').trim().toLowerCase() : ''
+    if (delCampo === 'true' || delCampo === 'false') {
+      // La confianza no es 1 aunque coincidan: el dato es DERIVADO de una observación
+      // sobre píxeles, no leído de un texto. Los tres van marcados para revisión.
+      campos[slugs[i]] = delCampo === delIcono
+        ? { value: delIcono, confidence: 0.9 }
+        : { value: null, confidence: 0 }
+      return
+    }
+    campos[slugs[i]] = { value: delIcono, confidence: 0.9 }
+  })
 }
 
 /**

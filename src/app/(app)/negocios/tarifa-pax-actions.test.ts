@@ -16,6 +16,8 @@ type Fila = Record<string, unknown>
 
 let tablas: Record<string, Fila[]> = {}
 let lecturaDelModelo: LecturaCruda
+/** La de la cotización que embebe el doble. Decide qué número va a `margen_porcentaje`. */
+let convencionDeLaCotizacion: 'markup' | 'sobre_venta' = 'sobre_venta'
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
 vi.mock('@/lib/actions/get-workspace', () => ({
@@ -67,7 +69,13 @@ function consulta(tabla: string) {
     return {
       data: filas.map(f => {
         const salida = structuredClone(f)
-        if (embebeCotizacion) salida.cotizaciones = { estado: 'borrador', negocio_id: 'neg-1' }
+        if (embebeCotizacion) {
+          salida.cotizaciones = {
+            estado: 'borrador',
+            negocio_id: 'neg-1',
+            convencion_margen: convencionDeLaCotizacion,
+          }
+        }
         return salida
       }),
       error: null,
@@ -96,6 +104,8 @@ function consulta(tabla: string) {
 
 const { leerCasillaDeItem, confirmarTarifaPorPasajero, quitarCasillaDeItem } = await import('./tarifa-pax-actions')
 const { leerTarifaPax, tarifaMasReciente } = await import('@/lib/cotizaciones/tarifa-pasajero')
+const { precioConMargen } = await import('@/lib/cotizaciones/precio-item')
+const { nivelDeMargen, POLITICA_MARGEN_POR_DEFECTO } = await import('@/lib/cotizaciones/convencion-margen')
 
 const v = (valor: string | null, confianza = 0.95) => ({ value: valor, confidence: confianza })
 
@@ -173,9 +183,49 @@ function itemVueloConLectura(nombre: string): Fila {
 
 const itemEnBase = (id: string) => (tablas.items ?? []).find(f => f.id === id) as Fila
 
+/**
+ * La LIQUIDACIÓN de Decameron ya guardada en la casilla 1, con los números de la captura
+ * real (`capturas-proveedor/2026-09-16/3.57.39_PM.jpeg`): desglose por tipo que suma el
+ * valor al pasajero (2.029.118) y «total a pagar agencia» aparte (1.818.919).
+ */
+function itemHotelLiquidacion(over: Fila = {}): Fila {
+  return {
+    id: 'item-liquidacion',
+    cotizacion_id: 'cot-1',
+    grupo: 'hotel',
+    nombre: 'DECAMERON',
+    descripcion: null,
+    tarifa_pax: {
+      composicion: { adultos: 2, ninos: 0, infantes: 1 },
+      casillas: {
+        grupo_completo: {
+          moneda: 'COP',
+          total: 2029118,
+          aPagarAgencia: 1818919,
+          porTipo: [
+            { tipo: 'adulto', cantidad: 2, subtotal: 2019412 },
+            { tipo: 'infante', cantidad: 1, subtotal: 9706 },
+          ],
+          ocupacion: { adultos: 2, ninos: 0, infantes: 1, total: 3 },
+          ocupacionDelItem: false,
+          identidad: {},
+          notasCliente: [],
+          alertas: [],
+          campos: [],
+          nombre: 'Decameron',
+          descripcion: 'Todo incluido',
+          leidaEn: '2026-09-17T14:19:59.007Z',
+        },
+      },
+    },
+    ...over,
+  }
+}
+
 beforeEach(() => {
   tablas = { items: [], rubros: [] }
   lecturaDelModelo = decameronResultado()
+  convencionDeLaCotizacion = 'sobre_venta'
 })
 
 describe('hallazgo 1 · elegir la moneda deja la casilla igual que pegar directo', () => {
@@ -260,5 +310,85 @@ describe('hallazgo 3 · los rubros por pasajero son tarifa del proveedor', () =>
       ['tarifa', 'Niño', 1, 1771063],
     ])
     expect(leerTarifaPax(r.tarifa).confirmada?.costoTotalCOP).toBe(11306378)
+  })
+})
+
+/**
+ * El pantallazo con los DOS precios (§4.4 de `propuesta-visual.md`, reunión del 16-sep).
+ *
+ * Lo que se afirma es lo que quedó ESCRITO en `items`: el reparto del costo, el margen de
+ * la línea, y que el precio que sale de ese margen es exactamente el que la captura dice
+ * que paga el cliente. El precio lo calcula `recalcularTotales` con `precioConMargen`, así
+ * que aquí se reproduce con la misma función pura y no con una fórmula copiada.
+ */
+describe('Decameron · el margen lo pone el pantallazo, no una persona', () => {
+  it('el costo es «a pagar agencia» y el margen deja el precio en lo que paga el cliente', async () => {
+    tablas.items.push(itemHotelLiquidacion())
+    const r = await confirmarTarifaPorPasajero('item-liquidacion', null)
+    expect(r).toMatchObject({ success: true })
+
+    // El costo repartido suma exactamente el «total a pagar agencia» leído (hallazgo 7.1).
+    const costo = tablas.rubros.reduce((a, x) => a + Number(x.cantidad) * Number(x.valor_unitario), 0)
+    expect(costo).toBe(1818919)
+
+    const item = itemEnBase('item-liquidacion')
+    expect(Number(item.margen_porcentaje)).toBeCloseTo(10.359, 3)
+    expect(Math.round(precioConMargen(costo, Number(item.margen_porcentaje), 'sobre_venta'))).toBe(2029118)
+
+    // 10,36% está por encima del piso de 5%: el gate de margen no tiene nada que frenar.
+    expect(nivelDeMargen(Number(item.margen_porcentaje), POLITICA_MARGEN_POR_DEFECTO)).toBe('ok')
+
+    // Queda registrado de dónde salió, para que la pantalla lo pueda decir.
+    expect(leerTarifaPax(r.tarifa).confirmada?.margenProveedor).toMatchObject({
+      precioCliente: 2029118,
+      costoAgencia: 1818919,
+    })
+  })
+
+  it('en una cotización «markup» se escribe el OTRO número, y el precio sigue siendo el mismo', async () => {
+    convencionDeLaCotizacion = 'markup'
+    tablas.items.push(itemHotelLiquidacion())
+    await confirmarTarifaPorPasajero('item-liquidacion', null)
+
+    const item = itemEnBase('item-liquidacion')
+    expect(Number(item.margen_porcentaje)).toBeCloseTo(11.556, 3)
+    expect(Math.round(precioConMargen(1818919, Number(item.margen_porcentaje), 'markup'))).toBe(2029118)
+  })
+
+  it('un pantallazo con UN solo precio no escribe margen: la línea hereda el de la cotización', async () => {
+    tablas.items.push(itemVueloConLectura('PRUEBA Vuelo LATAM'))
+    await confirmarTarifaPorPasajero('item-vuelo', null)
+    expect(itemEnBase('item-vuelo').margen_porcentaje).toBeUndefined()
+  })
+
+  // El precio escrito a mano manda sobre el margen (`margen-vista.ts`): tocar el campo no
+  // movería el precio y dejaría en pantalla un porcentaje que no gobierna nada.
+  it('con el precio escrito a mano no se toca el margen', async () => {
+    tablas.items.push(itemHotelLiquidacion({ precio_manual: true, margen_porcentaje: 25 }))
+    await confirmarTarifaPorPasajero('item-liquidacion', null)
+    expect(Number(itemEnBase('item-liquidacion').margen_porcentaje)).toBe(25)
+  })
+
+  /**
+   * El caso que obliga a guardar `margenProveedor`: volver a leer la MISMA línea con una
+   * captura que ya no trae los dos precios. Sin esto quedaría un margen viejo gobernando
+   * un costo nuevo, y nadie podría saber que no lo puso una persona.
+   */
+  it('re-leer con una captura de un solo precio RETIRA el margen que había puesto la anterior', async () => {
+    tablas.items.push(itemHotelLiquidacion())
+    await confirmarTarifaPorPasajero('item-liquidacion', null)
+    expect(Number(itemEnBase('item-liquidacion').margen_porcentaje)).toBeCloseTo(10.359, 3)
+
+    // Misma línea, otra captura: mismo total, sin «total a pagar agencia».
+    const item = itemEnBase('item-liquidacion')
+    const tarifa = structuredClone(item.tarifa_pax) as {
+      casillas: { grupo_completo: { aPagarAgencia: number | null; leidaEn: string } }
+    }
+    tarifa.casillas.grupo_completo.aPagarAgencia = null
+    tarifa.casillas.grupo_completo.leidaEn = '2026-09-17T15:00:00.000Z'
+    item.tarifa_pax = tarifa
+
+    await confirmarTarifaPorPasajero('item-liquidacion', null)
+    expect(itemEnBase('item-liquidacion').margen_porcentaje).toBeNull()
   })
 })

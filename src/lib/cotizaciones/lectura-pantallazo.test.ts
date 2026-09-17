@@ -367,6 +367,98 @@ describe('el nombre y la descripción de la línea', () => {
   })
 })
 
+/**
+ * Los dos defectos que Alejandra y Daniela chocaron en vivo el 2026-09-16.
+ *
+ * Los números y los estados de los iconos salen del banco real
+ * (`capturas-proveedor/2026-09-16/`), medidos: en `3.57.39_PM-3` (tarifa BASIC de Avianca
+ * por Amadeus) los tres iconos están dibujados y **solo el primero es azul**; en
+ * `4.00.50_PM` (LIGHT) son azules el primero y el segundo. La misma captura BASIC es la
+ * del itinerario Cúcuta→Bogotá→Armenia, que es de donde sale la escala.
+ */
+describe('escala · el cliente quiere saber DÓNDE, no cuántas', () => {
+  it('Cúcuta–Bogotá–Armenia dice Bogotá, en la ida y en el regreso, sin repetirlo dos veces', () => {
+    const r = evaluarLectura(VUELO, vueloOk({
+      origen: v('CUC'), destino: v('AXM'),
+      escalas: v('1'), escala_ida: v('Bogotá'), escala_regreso: v('Bogotá'),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(resumenDeLinea(VUELO, r.campos).descripcion).toContain('Escala en Bogotá (ida y regreso)')
+  })
+
+  it('escalas distintas se nombran las dos', () => {
+    const r = evaluarLectura(VUELO, vueloOk({
+      escalas: v('1'), escala_ida: v('Panamá'), escala_regreso: v('Bogotá'),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { descripcion } = resumenDeLinea(VUELO, r.campos)
+    expect(descripcion).toContain('Escala ida: Panamá')
+    expect(descripcion).toContain('Escala regreso: Bogotá')
+  })
+
+  // R-P2 otra vez: el regreso que no se ve NO sale como «regreso directo».
+  it('sin escala de regreso leída, la descripción no afirma nada del regreso', () => {
+    const r = evaluarLectura(VUELO, vueloOk({
+      escalas: v('1'), escala_ida: v('Bogotá'), escala_regreso: v(null, 0),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { descripcion } = resumenDeLinea(VUELO, r.campos)
+    expect(descripcion).toContain('Escala ida: Bogotá')
+    expect(descripcion).not.toContain('regreso')
+  })
+
+  it('sin ciudades leídas, la línea sale exactamente como antes', () => {
+    const r = evaluarLectura(VUELO, vueloOk({ escalas: v('2') }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(resumenDeLinea(VUELO, r.campos).descripcion).toContain('2 escalas')
+  })
+})
+
+describe('equipaje · cuenta el icono RESALTADO, no que el icono exista', () => {
+  it('BASIC de Avianca (solo el primer icono a color) sale como «Solo artículo personal»', () => {
+    const r = evaluarLectura(VUELO, vueloOk({
+      familia_tarifa: v('BASIC Standard economy'),
+      equipaje_personal: v('true'), equipaje_mano: v('false'), equipaje_bodega: v('false'),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { descripcion } = resumenDeLinea(VUELO, r.campos)
+    expect(descripcion).toContain('Solo artículo personal')
+    // El defecto reportado: bodega marcada en una tarifa que solo lleva mochila.
+    expect(descripcion).not.toContain('Con equipaje de bodega')
+  })
+
+  it('LIGHT (primero y segundo a color) sí dice equipaje de mano, y sigue sin bodega', () => {
+    const r = evaluarLectura(VUELO, vueloOk({
+      familia_tarifa: v('LIGHT Standard economy'),
+      equipaje_personal: v('true'), equipaje_mano: v('true'), equipaje_bodega: v('false'),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { descripcion } = resumenDeLinea(VUELO, r.campos)
+    expect(descripcion).toContain('con equipaje de mano')
+    expect(descripcion).toContain('Sin equipaje de bodega')
+    expect(descripcion).not.toContain('Solo artículo personal')
+  })
+
+  // «Solo artículo personal» es una afirmación sobre los TRES iconos. Con uno sin leer, no.
+  it('con el equipaje de bodega sin leer no se afirma «solo artículo personal»', () => {
+    const r = evaluarLectura(VUELO, vueloOk({
+      equipaje_personal: v('true'), equipaje_mano: v('false'), equipaje_bodega: v(null, 0),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { descripcion } = resumenDeLinea(VUELO, r.campos)
+    expect(descripcion).not.toContain('Solo artículo personal')
+    expect(descripcion).toContain('sin equipaje de mano')
+    expect(descripcion).toContain('con artículo personal')
+  })
+})
+
 describe('la ranura se deriva del grupo', () => {
   it('los grupos canónicos resuelven', () => {
     expect(ranuraDeGrupo('vuelo')?.slug).toBe('vuelo_detalle')
