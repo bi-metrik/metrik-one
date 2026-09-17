@@ -94,6 +94,7 @@
 - ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`)
 - [Soporte de listas para el operador](project_soporte_listas_operator.md) — #631: `/compliance/listas` sin gate por rol
 - ⚠️ [Guards de items, cierre por tipo y aprobación](project_guard_bloque_items.md) — quién aprueba lo decide `puedeSerAprobador`
+- ⚠️⚠️ [Corregir hacia atrás sin área](project_correccion_hacia_atras_sin_area.md) — #780 mergeado; el opt-in es la única válvula y SOLO SOENA lo declara
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696: inerte hasta que SOENA lo cargue
 - ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 sin QA en pantalla
 - ⚠️⚠️ [Referencia `one://` para ve-documentos y gastos-soportes](project_referencia_archivos_one.md) — #748 mergeado; `notificar-etapa` sin redesplegar
@@ -131,6 +132,7 @@
 - ⚠️ [`\b` de JS es ASCII](reference_regex_js_b_ascii.md) — usar lookarounds `\p{L}` con `u`
 - [Probar un route handler con vitest](reference_probar_route_handler_vitest.md) — el doble debe APLICAR los `.eq()`
 - ⚠️ [Probar un handler del bot de WhatsApp](reference_probar_handler_wa_bot.md) — NO se colecta (`wa-parse.ts` lee `Deno.env`)
+- ⚠️ [`can-edit.test.mjs` NO lo corre nadie](reference_can_edit_test_mjs_no_corre.md) — el `include` de vitest no lo recoge; las pruebas de permisos van en `.test.ts`
 - ⚠️ [Verificar contra el CSS compilado](reference_verificar_css_compilado.md) — un `@theme` mal declarado deja las clases sin efecto
 - [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete «de»
 - ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con secreto en base64
