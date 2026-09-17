@@ -17,6 +17,8 @@
  * y negocioResponsables antes de invocar estas funciones.
  */
 
+import { puedeCorregirDocumentos } from '@/lib/roles'
+
 // ── Tipos ────────────────────────────────────────────────────────────
 
 export type Role =
@@ -57,6 +59,16 @@ export type BloqueContext = {
    * poder mover el negocio de etapa.
    */
   areasExtra?: Area[]
+  /**
+   * El bloque vive en una etapa que el negocio YA SUPERÓ (misma señal que
+   * `esPostAvance` de `lib/correcciones/registrar.ts`). Escribir ahí no es trabajar
+   * la etapa: es corregir hacia atrás, y entonces el área deja de cortar para los
+   * roles de corrección (ver `corrigeHaciaAtrasSinArea`).
+   *
+   * Sin la marca el criterio es idéntico al anterior: `canAdvanceStage` no la pasa
+   * nunca, porque avanzar un negocio no es corregir un dato.
+   */
+  esPostAvance?: boolean
 }
 
 /** Stage -> area duena del stage. cerrado no tiene area (read-only). */
@@ -84,6 +96,68 @@ export function getAreasEfectivas(user: UserContext): Set<Area> {
   return areas
 }
 
+// ── corrigeHaciaAtrasSinArea ─────────────────────────────────────────
+
+/**
+ * ¿Esta escritura es una CORRECCIÓN HACIA ATRÁS que el área no puede cortar?
+ *
+ * El área dueña de un bloque se deriva del stage de su etapa, y eso es correcto
+ * mientras la etapa se está trabajando: cada área hace lo suyo. Pero corregir un dato
+ * de una etapa YA SUPERADA no es trabajar esa etapa — es reparar el expediente, y el
+ * expediente es uno solo. Quien detecta el documento mal cargado suele ser de otra
+ * área que la que lo cargó, y hasta hoy su única salida era devolverlo.
+ *
+ * Caso que lo motivó (SOENA, 2026-09-17): la supervisora de `operaciones` necesita
+ * corregir campos y reemplazar documentos de etapas ya superadas — 68 de los 113
+ * bloques `datos`/`documento` de la línea viven en stages `venta` o `cobro`, así que
+ * estaban cerrados para ella aunque el bloque declarara el opt-in.
+ *
+ * Lo que este helper omite es EXACTAMENTE el chequeo de área, nada más. Siguen
+ * cortando, y ninguno pasa por aquí:
+ *   - el negocio cerrado y el gate de módulo (`guardEditarBloque`);
+ *   - `read_only` y `contador`, fuera del modelo;
+ *   - `operator`, que no está en `ROLES_CORRECCION_DOCUMENTOS`: esto NO le abre nada
+ *     a un ejecutor, que sigue con el criterio de siempre (área + responsable);
+ *   - el opt-in `corregir_campos_gerencial` del bloque, que es la válvula real y lo
+ *     exige `actualizarBloqueData`: sin él no hay corrección hacia atrás;
+ *   - la causa obligatoria y el registro de autoría.
+ *
+ * Y NO toca `canAdvanceStage`: corregir un dato de una etapa pasada no es mover el
+ * negocio (esa función nunca pasa `esPostAvance`).
+ *
+ * Fuente ÚNICA del criterio: lo consumen el guard del servidor (`guardEditarBloque`)
+ * y la pantalla (`_areaReadonly`, resuelto por bloque en `getNegocioDetalleCompleto`).
+ * Escrito dos veces, la pantalla ofrecería algo que el servidor rechaza — que es
+ * exactamente la contradicción que este frente vino a cerrar.
+ */
+export function corrigeHaciaAtrasSinArea(
+  user: UserContext,
+  contexto: { esPostAvance?: boolean },
+): boolean {
+  if (contexto.esPostAvance !== true) return false
+  return puedeCorregirDocumentos(user.role)
+}
+
+/**
+ * Señal compartida: ¿el bloque vive en una etapa de orden MENOR que la actual del
+ * negocio? Es lo que separa "trabajar la etapa" de "corregir hacia atrás".
+ *
+ * Vive aquí, y no en cada consumidor, porque la usan el guard de permisos y el
+ * contexto de corrección (`lib/correcciones/registrar.ts`). Dos copias de esta
+ * comparación se separan en cuanto alguien toque una, y el síntoma sería el peor
+ * posible: la pantalla dejando corregir algo que el registro no considera corrección.
+ */
+export function esEtapaSuperada(
+  ordenBloque: number | null | undefined,
+  ordenEtapaActual: number | null | undefined,
+): boolean {
+  return (
+    typeof ordenBloque === 'number'
+    && typeof ordenEtapaActual === 'number'
+    && ordenBloque < ordenEtapaActual
+  )
+}
+
 // ── canEditBloque ────────────────────────────────────────────────────
 
 /**
@@ -100,6 +174,10 @@ export function getAreasEfectivas(user: UserContext): Set<Area> {
  *     passthrough — se restringen como el resto.
  *   - cerrado (sin area_duena): solo owner/admin.
  *   - operator: ademas debe ser responsable del negocio.
+ *   - `bloque.esPostAvance`: si el bloque es de una etapa YA SUPERADA y el rol
+ *     corrige documentos (owner/admin/supervisor), el area deja de cortar. Ver
+ *     `corrigeHaciaAtrasSinArea` — lo demas (opt-in del bloque, causa, registro,
+ *     negocio cerrado, modulo) sigue igual y lo aplican otras capas.
  */
 export function canEditBloque(
   user: UserContext,
@@ -114,15 +192,27 @@ export function canEditBloque(
   const areasEfectivas = getAreasEfectivas(user)
   // El bloque puede declarar áreas adicionales autorizadas a editarlo.
   const invitada = (bloque.areasExtra ?? []).some(a => areasEfectivas.has(a))
-  // Cubre el stage si no tiene areas (sin segmentacion), su area lo incluye, o
-  // el bloque invita explicitamente a su area.
-  const cubreStage = (areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena))) || invitada
+  // Corrección hacia atrás: el área deja de cortar. Lo que se omite es el chequeo de
+  // ÁREA, no el de un stage que no tiene dueña (`cerrado`, reservado a owner/admin).
+  //
+  // ⚠️ El `areaDuena !== null` es HOY redundante —las dos ramas de abajo deciden el
+  // caso null antes de mirar esto (`areaDuena === null ? true : …` y el `return false`
+  // del supervisor)— y por eso mutarlo no tumba ninguna prueba. Se conserva a
+  // propósito: es la única línea que dice que la excepción no puede convertir a un
+  // supervisor en owner, y quedaría viva de inmediato si alguien reordena esas ramas.
+  const correccionHaciaAtras = areaDuena !== null && corrigeHaciaAtrasSinArea(user, bloque)
+  // Cubre el stage si no tiene areas (sin segmentacion), su area lo incluye, el
+  // bloque invita explicitamente a su area, o esta corrigiendo hacia atras.
+  const cubreStage =
+    (areaDuena !== null && (!tieneAreas || areasEfectivas.has(areaDuena)))
+    || invitada
+    || correccionHaciaAtras
 
   // owner/admin: passthrough si no tienen area; con area, se restringen al stage.
   if (user.role === 'owner' || user.role === 'admin') {
     if (!tieneAreas) return true
     // Stage sin área dueña (cerrado): owner/admin conservan el paso, como antes.
-    return areaDuena === null ? true : areasEfectivas.has(areaDuena) || invitada
+    return areaDuena === null ? true : areasEfectivas.has(areaDuena) || invitada || correccionHaciaAtras
   }
 
   // Stage cerrado: solo owner/admin (ya retornaron arriba)
@@ -147,6 +237,10 @@ export function canEditBloque(
  * ¿Puede el usuario avanzar/cambiar un negocio al stage destino? Mismo criterio
  * que editar un bloque de ese stage: su área debe cubrirlo (o sin área →
  * passthrough por rol); operator además debe ser responsable del negocio.
+ *
+ * ⚠️ NO pasa `esPostAvance`, y es deliberado: corregir un dato de una etapa pasada
+ * no es mover el negocio. La excepción de `corrigeHaciaAtrasSinArea` abre la
+ * ESCRITURA de un bloque superado, nunca el avance.
  */
 export function canAdvanceStage(
   user: UserContext,

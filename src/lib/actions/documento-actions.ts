@@ -16,6 +16,7 @@ import { montosCoinciden } from '@/lib/negocios/monto-cop'
 import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { resolverDestino } from '@/lib/negocios/casilla-compartida'
+import { esReemplazoHaciaAtras } from '@/lib/documentos/reemplazo-hacia-atras'
 import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
@@ -560,6 +561,14 @@ export async function procesarDocumento(
   negocioId: string,
   storagePath: string,
   fileName: string,
+  /**
+   * Solo viaja cuando se REEMPLAZA el archivo desde el modo visible de una etapa ya
+   * superada: eso es una corrección, y entonces la causa es obligatoria (mismo
+   * criterio que `actualizarBloqueData` y que `actualizarCampoDocumento`). El
+   * `sesion_id` es el del bloque, así que reemplazar el archivo y corregir sus campos
+   * en el mismo acto queda como UNA corrección y no como dos.
+   */
+  correccion?: { causa?: string; sesion_id?: string },
 ): Promise<{
   success: boolean
   drive_url?: string
@@ -568,7 +577,7 @@ export async function procesarDocumento(
   extraction_error?: string
   error?: string
 }> {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Antes de leer nada: una ruta de ONE que no cuelga del workspace de la sesión se trata
@@ -590,6 +599,20 @@ export async function procesarDocumento(
   // del origen y el bloque espejo se comporta igual sin copiarle nada.
   const destino = await resolverDestino(supabase, negocioBloqueId)
   const bloqueId = destino.id
+
+  // ── ¿Este archivo REEMPLAZA a otro en una etapa ya superada? ───────────────
+  // Entonces no es cargar un documento, es corregir el expediente: mismo opt-in, misma
+  // causa y mismo registro que corregir un campo. El criterio (y por qué la primera
+  // carga y `editable_siempre` quedan fuera) vive en el módulo, no aquí.
+  const reemplazoHaciaAtras = await esReemplazoHaciaAtras(supabase, negocioBloqueId)
+  if (reemplazoHaciaAtras.aplica) {
+    if (!reemplazoHaciaAtras.permiteCorregir) {
+      return { success: false, error: 'Este bloque no admite correcciones después de avanzar de etapa' }
+    }
+    if (!esCausaValida(correccion?.causa) || !correccion?.sesion_id) {
+      return { success: false, error: 'Indica por qué se corrige antes de guardar' }
+    }
+  }
 
   const admin = createServiceClient()
   const mimeType = mimeTypeFromName(fileName)
@@ -842,6 +865,23 @@ export async function procesarDocumento(
         .eq('id', bloqueId)
     }
 
+
+    // Traza del reemplazo, en la MISMA tabla y con la misma sesión que la corrección de
+    // campos: el slug `archivo` deja en el timeline «Corrigió «archivo» en <etapa>:
+    // <antes> → <después>». Nunca bloquea — el documento ya quedó guardado y el registro
+    // es la traza, no el trabajo.
+    if (reemplazoHaciaAtras.aplica) {
+      await registrarCorrecciones({
+        supabase,
+        workspaceId,
+        userId,
+        staffId,
+        negocioBloqueId,
+        campos: [{ slug: 'archivo', antes: reemplazoHaciaAtras.nombreAnterior, despues: fileName }],
+        causa: correccion!.causa as CausaCorreccion,
+        sesionId: correccion!.sesion_id as string,
+      })
+    }
 
     // La seccional del caso nace aquí, con el RUT, no cuando una rama concreta del flujo
     // se activa. Nunca lanza: el documento ya se guardó bien.

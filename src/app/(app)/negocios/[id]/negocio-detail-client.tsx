@@ -1711,6 +1711,10 @@ function BloqueRenderer({
             campos_visibles?: string[]
             editar_extraidos?: boolean
             corregir_campos_gerencial?: boolean
+            // Lo resuelve el servidor contra el stage de la etapa DE ESTE BLOQUE.
+            // `BloqueDatos` ya lo respetaba; el documento no, y por eso ofrecía
+            // corregir campos que el guard rechazaba.
+            _areaReadonly?: boolean
           }}
           // El ejecutor responsable del negocio corrige los campos de sus propios
           // documentos, no solo los roles gerenciales. El servidor ya lo permitía
