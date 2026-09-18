@@ -1,9 +1,13 @@
 import 'server-only'
 import { cache } from 'react'
 
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import {
+  ERROR_DESINCRONIZADO,
+  hayDesincronizacionDeTenant,
+} from '@/lib/tenant/desincronizacion'
 
 const VALID_AREAS = ['comercial', 'operaciones', 'financiera', 'direccion'] as const
 
@@ -104,12 +108,53 @@ async function getWorkspaceImpl() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('workspace_id, role, full_name, platform_admin')
+    // El slug del workspace viaja en el MISMO viaje que el perfil. El guard de
+    // desincronizacion no puede costar una consulta nueva: este helper corre en cada
+    // request y lo llaman 111 archivos (cada ida y vuelta cuesta entre 60 y 180 ms).
+    // El embed se desambigua con el nombre de la FK a proposito: `profiles` tiene DOS
+    // hacia `workspaces` (`workspace_id` y `home_workspace_id`), y sin nombrarla
+    // PostgREST responde PGRST201 "Could not embed because more than one relationship
+    // was found" (medido contra produccion el 2026-09-18).
+    .select(
+      'workspace_id, role, full_name, platform_admin, workspaces!profiles_workspace_id_fkey(slug)',
+    )
     .eq('id', user.id)
     .single()
 
   if (!profile?.workspace_id) {
     return { supabase, workspaceId: null, userId: user.id, role: null, staffId: null, areas: [] as string[], impersonating: false, realRole: null, error: 'Sin perfil' as const }
+  }
+
+  // ── Guard: la pestaña quedó en OTRO inquilino ─────────────────────────
+  // El workspace activo es uno solo por usuario (`profiles.workspace_id`), asi que una
+  // pestaña abierta en el subdominio de X sigue leyendo y ESCRIBIENDO en Y despues de
+  // que alguien cambie de workspace en otra pestaña, y el RLS lo aprueba porque las dos
+  // miran la misma fila. Devolver `workspaceId: null` corta ahi: los 111 consumidores
+  // que hacen `if (!workspaceId) return ...` dejan de escribir, que es el punto.
+  //
+  // Esto NO resuelve el fondo (sigue sin poder haber dos workspaces en paralelo): lo
+  // que evita es que la pestaña desincronizada guarde en el inquilino equivocado en
+  // silencio. Quien lo explica con nombres propios es `(app)/layout.tsx`.
+  //
+  // Inerte sin cabecera: dominio de marketing, previews de Vercel y `localhost` no
+  // tienen subdominio de inquilino y se comportan exactamente igual que antes.
+  const slugPestana = (await headers()).get('x-tenant-slug')
+  const slugSesion =
+    (profile as { workspaces?: { slug?: string | null } | null }).workspaces?.slug ?? null
+  if (hayDesincronizacionDeTenant(slugPestana, slugSesion)) {
+    return {
+      supabase,
+      workspaceId: null,
+      userId: user.id,
+      role: null,
+      staffId: null,
+      areas: [] as string[],
+      impersonating: false,
+      realRole: null,
+      error: ERROR_DESINCRONIZADO,
+      slugPestana: slugPestana as string,
+      slugSesion: slugSesion as string,
+    }
   }
 
   const realRole = (profile.role ?? 'read_only') as string

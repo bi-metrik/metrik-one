@@ -25,6 +25,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('next/headers', () => ({
   cookies: async () => ({ get: () => undefined }),
+  headers: async () => ({
+    get: (nombre: string) => (nombre === 'x-tenant-slug' ? cabeceraTenant : null),
+  }),
 }))
 
 vi.mock('@/lib/supabase/auth-user', () => ({
@@ -37,13 +40,23 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 
 import { __getWorkspaceImplParaPruebas as getWorkspaceImpl } from './get-workspace-impl'
+import { ERROR_DESINCRONIZADO } from '@/lib/tenant/desincronizacion'
 
 // ─── Estado de la "base" ───────────────────────────────────────────────────
 
 type StaffRow = { id: string; profile_id: string; workspace_id: string; is_active: boolean }
 
 let usuario: { id: string }
-let perfil: { workspace_id: string; role: string; full_name: string; platform_admin: boolean }
+let perfil: {
+  workspace_id: string
+  role: string
+  full_name: string
+  platform_admin: boolean
+  /** El slug del workspace viaja EMBEBIDO en la misma lectura del perfil. */
+  workspaces: { slug: string } | null
+}
+/** Lo que el middleware inyecta como `x-tenant-slug` en las cabeceras de request. */
+let cabeceraTenant: string | null
 let staffRows: StaffRow[]
 /** Escrituras sobre `staff` hechas con el cliente AUTENTICADO (insert o upsert). */
 let escriturasStaff: number
@@ -138,7 +151,14 @@ let errorSpy: ReturnType<typeof vi.spyOn>
 let warnSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
-  perfil = { workspace_id: 'ws-actual', role: 'owner', full_name: 'Prueba', platform_admin: false }
+  perfil = {
+    workspace_id: 'ws-actual',
+    role: 'owner',
+    full_name: 'Prueba',
+    platform_admin: false,
+    workspaces: { slug: 'soena' },
+  }
+  cabeceraTenant = null
   staffRows = []
   escriturasStaff = 0
   simularCarreraTrasLectura = false
@@ -218,5 +238,98 @@ describe('getWorkspace — resolucion del staff', () => {
     expect(errorSpy).not.toHaveBeenCalled()
     // No se duplico el registro.
     expect(staffRows).toHaveLength(1)
+  })
+})
+
+/**
+ * El guard de pestaña desincronizada, cableado.
+ *
+ * La regla pura vive en `lib/tenant/desincronizacion.ts` y tiene sus propias pruebas.
+ * Lo que se fija aca es que `getWorkspace` la APLIQUE: que un subdominio que no
+ * corresponde deje de devolver `workspaceId`, que es de lo que cuelgan los 111
+ * consumidores que hacen `if (!workspaceId) return ...`.
+ *
+ * VISTAS FALLAR (2026-09-18) contra el codigo sin el guard: las dos que afirman la
+ * desincronizacion (devolvia `workspaceId` y `error: null`). Las tres inertes pasan en
+ * los dos sentidos por construccion, y estan para que el guard no se pueda "arreglar"
+ * bloqueando de mas: sin ellas, un guard que retuviera SIEMPRE tambien saldria verde.
+ */
+describe('getWorkspace — la pestaña quedo en otro inquilino', () => {
+  it('el subdominio coincide con el workspace de la sesion: pasa, nada cambia', async () => {
+    usuario = { id: 'user-ok' }
+    staffRows.push({ id: 's1', profile_id: 'user-ok', workspace_id: 'ws-actual', is_active: true })
+    cabeceraTenant = 'soena'
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.workspaceId).toBe('ws-actual')
+    expect(r.error).toBeNull()
+    expect(r.staffId).toBe('s1')
+  })
+
+  it('el subdominio NO coincide: sin workspaceId, con los dos slugs y sin tocar staff', async () => {
+    usuario = { id: 'user-desync' }
+    cabeceraTenant = 'metrik'
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.workspaceId).toBeNull()
+    expect(r.error).toBe(ERROR_DESINCRONIZADO)
+    if (r.error === ERROR_DESINCRONIZADO) {
+      expect(r.slugPestana).toBe('metrik')
+      expect(r.slugSesion).toBe('soena')
+    }
+    // Corta antes del auto-alta de staff: una pestaña que no va a escribir nada tampoco
+    // tiene por que crear filas.
+    expect(escriturasStaff).toBe(0)
+    expect(staffRows).toHaveLength(0)
+  })
+
+  it('sin cabecera de inquilino es INERTE (marketing, preview de Vercel, localhost)', async () => {
+    usuario = { id: 'user-sin-cabecera' }
+    staffRows.push({
+      id: 's2',
+      profile_id: 'user-sin-cabecera',
+      workspace_id: 'ws-actual',
+      is_active: true,
+    })
+    cabeceraTenant = null
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.workspaceId).toBe('ws-actual')
+    expect(r.error).toBeNull()
+  })
+
+  it('si el slug de la sesion no se pudo resolver, no se afirma nada y se deja pasar', async () => {
+    usuario = { id: 'user-sin-slug' }
+    staffRows.push({
+      id: 's3',
+      profile_id: 'user-sin-slug',
+      workspace_id: 'ws-actual',
+      is_active: true,
+    })
+    // El embed no trajo el workspace (RLS, o una fila sin slug). Retener por no poder
+    // leer un dato convertiria un fallo de lectura en un bloqueo total.
+    perfil.workspaces = null
+    cabeceraTenant = 'metrik'
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.workspaceId).toBe('ws-actual')
+    expect(r.error).toBeNull()
+  })
+
+  it('mayusculas y basura invisible en el slug NO cuentan como desincronizacion', async () => {
+    usuario = { id: 'user-ruido' }
+    staffRows.push({ id: 's4', profile_id: 'user-ruido', workspace_id: 'ws-actual', is_active: true })
+    // `NEXT_PUBLIC_BASE_DOMAIN` ya llego una vez a produccion con un salto de linea
+    // pegado; aca ese ruido dejaria al usuario encerrado.
+    cabeceraTenant = ' SOENA\n'
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.workspaceId).toBe('ws-actual')
+    expect(r.error).toBeNull()
   })
 })
