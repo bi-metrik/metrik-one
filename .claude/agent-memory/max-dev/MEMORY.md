@@ -5,6 +5,7 @@
 - [sprint-10 supervisor y contador](project_sprint10_roles.md) — agregar roles, supervisor/contador, área y display_role
 - [SOENA pipeline VE 2026-04-05](project_soena_ve_pipeline.md) — etapas, gates, custom fields y estado_ve del flujo VE
 - ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
+- ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — #787 mergeado; backfill de 21 SIN aplicar, V0244 sin traza; se mide por FLUJO, no por `orden`
 - ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza); overlay, flatten, casilla 12
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — solo corre en producción (credenciales en Vercel)
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — cambiar qué emite el cron dispara cuentas reales
