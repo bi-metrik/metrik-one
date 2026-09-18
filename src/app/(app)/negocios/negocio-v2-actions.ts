@@ -71,6 +71,7 @@ import {
   type CampoDecision,
 } from '@/lib/negocios/dato-de-decision'
 import { camposDeRoutingDelNegocio } from '@/lib/negocios/campos-de-routing-del-negocio'
+import { avisoNoAplica, reglasNoAplica, type AvisoNoAplica } from '@/lib/negocios/no-aplica'
 import { aplicarDesenlacesDeRetorno } from '@/lib/negocios/aplicar-desenlace'
 import { leerDesenlacesDeMetadata, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
@@ -6769,6 +6770,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   pausaEnabled: boolean
   /** ¿El usuario actual (por staff.id) es uno de los responsables del negocio? */
   currentUserEsResponsable: boolean
+  /**
+   * El caso no le aplica a este proceso, y por qué. Lo declara la LÍNEA
+   * (`config_extra.no_aplica`) y lo evalúa `condicion_cumplida`, la misma función que
+   * los gates. `null` cuando aplica o cuando la línea no declara nada.
+   * Ver `src/lib/negocios/no-aplica.ts`: avisa, no cierra.
+   */
+  noAplica: AvisoNoAplica | null
 } | null> {
   const { supabase, workspaceId, role, areas, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -6919,6 +6927,25 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       configLinea: (lineaCobroRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
       configWorkspace: (wsRes.data as { config_extra?: { cobro?: ConfigCobro } } | null)?.config_extra?.cobro ?? null,
       ceroDeliberado,
+    })
+  }
+
+  // ── ¿Este caso le aplica al proceso? ──────────────────────────────────────
+  // Si la línea declara `no_aplica` y alguna de sus condiciones se cumple, la ficha lo
+  // DICE en vez de quedarse muda. La condición la resuelve la misma RPC que los gates:
+  // si la pantalla dijera «no aplica» con su propio criterio, podría contradecir al
+  // motor, que es quien decide si el bloque se pide (ver `src/lib/negocios/no-aplica.ts`).
+  let noAplica: AvisoNoAplica | null = null
+  const reglasAplicabilidad = reglasNoAplica(lineaConfigExtra)
+  if (reglasAplicabilidad.length > 0 && base.negocio.linea_id && base.negocio.etapa_actual_id) {
+    noAplica = await avisoNoAplica(reglasAplicabilidad, async condicion => {
+      const { data: cumple } = await db(supabase).rpc('condicion_cumplida', {
+        p_negocio_id: id,
+        p_linea_id: base.negocio.linea_id,
+        p_etapa_actual_id: base.negocio.etapa_actual_id,
+        p_cond: condicion,
+      })
+      return cumple === true
     })
   }
 
@@ -8150,6 +8177,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   return {
     negocio: base.negocio,
+    noAplica,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
     etapasNoAplican: base.etapasNoAplican,

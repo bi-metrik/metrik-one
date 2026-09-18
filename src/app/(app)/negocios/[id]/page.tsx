@@ -181,6 +181,7 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
         bloques={data.bloques}
         etapasLinea={data.etapasLinea}
         etapasNoAplican={data.etapasNoAplican}
+        noAplica={data.noAplica}
         profiles={data.profiles}
         currentUserId={data.currentUserId}
         currentUserEsResponsable={data.currentUserEsResponsable}
