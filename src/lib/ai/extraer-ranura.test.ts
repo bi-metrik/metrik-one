@@ -247,57 +247,132 @@ describe('normalizar las filas por tipo de pasajero', () => {
 })
 
 /**
- * El equipaje sale de dos respuestas del modelo en la MISMA llamada, y lo que no coincide
- * no se afirma. El caso de referencia es la tarifa BASIC de Avianca del banco real
+ * El equipaje sale del ESTADO de los iconos que el modelo dice ver, no de su dictamen
+ * sobre la tarifa. El caso de referencia es la tarifa BASIC de Avianca del banco real
  * (`3.57.39_PM-3`), donde de los tres iconos solo el primero está a color y el modelo
  * respondía «con equipaje de bodega» una corrida sí y otra no.
  */
-describe('equipaje · el icono observado se cruza con el dictamen del modelo', () => {
-  const conIconos = (colores: string[], dictamen: Record<string, unknown> = {}) =>
+describe('equipaje · manda el estado del icono; sin fila limpia, hueco', () => {
+  const TRES = ['bolso', 'maleta de cabina', 'maleta grande']
+  const DICTAMEN_TODO_SI = {
+    equipaje_personal: { value: 'true', confidence: 0.9 },
+    equipaje_mano: { value: 'true', confidence: 0.9 },
+    equipaje_bodega: { value: 'true', confidence: 0.9 },
+  }
+  const conIconos = (estados: string[], dictamen: Record<string, unknown> = DICTAMEN_TODO_SI) =>
     normalizarRespuesta({
       veredicto: 'detalle_unico',
       campos: dictamen,
-      iconos_equipaje: colores.map((color, i) => ({ dibujo: ['bolso', 'maleta de cabina', 'maleta grande'][i], color })),
+      iconos_equipaje: estados.map((estado, i) => ({ dibujo: TRES[i % 3], color: estado, estado })),
     }).campos
 
-  it('los tres a color: los tres incluidos', () => {
-    const c = conIconos(['a_color', 'a_color', 'a_color'])
-    expect([c.equipaje_personal.value, c.equipaje_mano.value, c.equipaje_bodega.value]).toEqual(['true', 'true', 'true'])
+  const tresValores = (c: Record<string, { value: string | null }>) =>
+    [c.equipaje_personal.value, c.equipaje_mano.value, c.equipaje_bodega.value]
+
+  it('los tres encendidos: los tres incluidos', () => {
+    expect(tresValores(conIconos(['encendido', 'encendido', 'encendido']))).toEqual(['true', 'true', 'true'])
   })
 
-  it('solo el primero a color: artículo personal sí, los otros dos no', () => {
-    const c = conIconos(['azul', 'gris', 'gris'])
-    expect([c.equipaje_personal.value, c.equipaje_mano.value, c.equipaje_bodega.value]).toEqual(['true', 'false', 'false'])
+  // El caso que define el encargo: el dictamen del modelo dice «los tres sí» y la fila de
+  // iconos dice otra cosa. Manda la fila — el dictamen es el que se voltea entre corridas.
+  it('solo el primero encendido: artículo personal sí, los otros dos no, aunque el modelo diga que sí', () => {
+    expect(tresValores(conIconos(['encendido', 'apagado', 'apagado']))).toEqual(['true', 'false', 'false'])
   })
 
-  // El defecto que se busca cerrar: un icono dibujado en gris NO es equipaje incluido.
-  it('el dictamen que CONTRADICE al icono deja el campo vacío, no elige uno de los dos', () => {
-    const c = conIconos(['azul', 'gris', 'gris'], {
-      equipaje_bodega: { value: 'true', confidence: 0.9 },
-      equipaje_mano: { value: 'false', confidence: 0.9 },
-    })
-    expect(c.equipaje_bodega.value).toBeNull()
+  it('negro, gris oscuro y blanco son APAGADO', () => {
+    expect(tresValores(conIconos(['azul', 'negro', 'gris oscuro']))).toEqual(['true', 'false', 'false'])
+    expect(tresValores(conIconos(['a_color', 'sin color', 'plano']))).toEqual(['true', 'false', 'false'])
+    expect(tresValores(conIconos(['naranja', 'blanco', 'gris']))).toEqual(['true', 'false', 'false'])
+  })
+
+  // Medido en el banco real: el modelo devolvió «azul oscuro» sobre un icono encendido.
+  // «oscuro» describe el tono del azul, no que el icono esté apagado.
+  it('«azul oscuro» es un color; «gris oscuro» no', () => {
+    expect(tresValores(conIconos(['celeste', 'azul oscuro', 'gris oscuro']))).toEqual(['true', 'true', 'false'])
+  })
+
+  // La sospecha 2: la fila aparece cuatro veces en la pantalla (dos tramos de vuelo y dos
+  // filas de la tabla de tarifa). Doce iconos no son doce piezas de equipaje.
+  it('la misma terna repetida se colapsa a una: 6 y 12 iconos se leen igual que 3', () => {
+    const terna = ['encendido', 'apagado', 'apagado']
+    expect(tresValores(conIconos([...terna, ...terna]))).toEqual(['true', 'false', 'false'])
+    expect(tresValores(conIconos([...terna, ...terna, ...terna, ...terna]))).toEqual(['true', 'false', 'false'])
+  })
+
+  it('una repetición que NO es exacta no se colapsa: la fila no se lee y queda hueco', () => {
+    const c = conIconos(['encendido', 'apagado', 'apagado', 'encendido', 'encendido', 'apagado'])
+    expect(tresValores(c)).toEqual([null, null, null])
+  })
+
+  // Hueco antes que mentira: con dos iconos la posición no dice cuál es cuál. Antes aquí
+  // mandaba el dictamen del modelo, y ese dictamen es el que puso los tres en `true`.
+  it('con dos iconos la fila no se puede leer: los tres campos quedan vacíos', () => {
+    const c = conIconos(['encendido', 'apagado'])
+    expect(tresValores(c)).toEqual([null, null, null])
     expect(c.equipaje_bodega.confidence).toBe(0)
-    // El que sí coincide se conserva.
-    expect(c.equipaje_mano.value).toBe('false')
   })
 
-  it('con dos iconos la posición no dice cuál es cuál: manda lo que respondió el modelo', () => {
-    const c = conIconos(['azul', 'gris'], { equipaje_bodega: { value: 'true', confidence: 0.9 } })
-    expect(c.equipaje_bodega.value).toBe('true')
+  it('un estado que no se entiende vacía la fila entera, no solo ese campo', () => {
+    expect(tresValores(conIconos(['no se distingue', 'apagado', 'apagado']))).toEqual([null, null, null])
+    expect(tresValores(conIconos(['encendido', '', 'apagado']))).toEqual([null, null, null])
   })
 
-  it('un color que no se entiende no toca el campo', () => {
-    const c = conIconos(['morado con lunares', 'gris', 'gris'], { equipaje_personal: { value: 'true', confidence: 0.9 } })
-    expect(c.equipaje_personal.value).toBe('true')
-    expect(c.equipaje_mano.value).toBe('false')
-  })
-
-  it('sin iconos en la respuesta, el campo queda como lo dejó el modelo', () => {
+  it('sin fila de iconos, el campo queda como lo dejó el modelo', () => {
     const r = normalizarRespuesta({
       veredicto: 'detalle_unico',
       campos: { equipaje_bodega: { value: 'true', confidence: 0.9 } },
     })
     expect(r.campos.equipaje_bodega.value).toBe('true')
+  })
+
+  // La ranura de hotel no declara estos campos. Inventarlos metería claves que nadie pidió.
+  it('una ranura sin campos de equipaje no gana claves aunque lleguen iconos', () => {
+    const r = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      campos: { hotel: { value: 'Crown Paradise', confidence: 1 } },
+      iconos_equipaje: [{ dibujo: 'bolso', estado: 'encendido' }],
+    })
+    expect(Object.keys(r.campos)).toEqual(['hotel'])
+  })
+
+  // Punto 1 del encargo: sin la evidencia guardada, el próximo fallo tampoco se diagnostica.
+  it('la lectura conserva los iconos crudos, con las DOS respuestas del modelo', () => {
+    const r = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      campos: {},
+      iconos_equipaje: [
+        { dibujo: 'morral', color: 'AZUL', estado: 'encendido' },
+        { dibujo: 'maleta', color: 'gris oscuro', estado: 'apagado' },
+      ],
+    })
+    expect(r.iconosEquipaje).toEqual([
+      { dibujo: 'morral', color: 'AZUL', clasificado: 'encendido', estado: 'encendido' },
+      { dibujo: 'maleta', color: 'gris oscuro', clasificado: 'apagado', estado: 'apagado' },
+    ])
+  })
+
+  // El error medido: el modelo llamó «a_color» a un icono gris oscuro. Con el color
+  // concreto al lado, la contradicción es visible y el icono queda sin leer.
+  it('un color que contradice a su propia clasificación deja la fila sin leer', () => {
+    const c = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      campos: DICTAMEN_TODO_SI,
+      iconos_equipaje: [
+        { dibujo: 'bolso', color: 'azul', estado: 'encendido' },
+        { dibujo: 'maleta de cabina', color: 'gris oscuro', estado: 'encendido' },
+        { dibujo: 'maleta grande', color: 'gris oscuro', estado: 'apagado' },
+      ],
+    }).campos
+    expect(tresValores(c)).toEqual([null, null, null])
+  })
+
+  // El esquema anterior pedía solo `color`. Una respuesta vieja se sigue entendiendo.
+  it('acepta el esquema viejo (solo `color`) sin cambiar el resultado', () => {
+    const c = normalizarRespuesta({
+      veredicto: 'detalle_unico',
+      campos: DICTAMEN_TODO_SI,
+      iconos_equipaje: TRES.map((dibujo, i) => ({ dibujo, color: i === 0 ? 'a_color' : 'gris' })),
+    }).campos
+    expect(tresValores(c)).toEqual(['true', 'false', 'false'])
   })
 })

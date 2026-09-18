@@ -246,10 +246,12 @@ const ESCALA_REGRESO: CampoRanura = {
  * preguntar «¿incluye equipaje de bodega?», que es la pregunta que el modelo respondía
  * mirando si el dibujo estaba.
  *
- * ⚠️ Esta descripción NO es lo único que decide: lo que el modelo responda aquí se CRUZA
- * contra los iconos que dice ver (`iconos_equipaje`), y lo que no coincide se descarta
- * (`derivarEquipajeDeLosIconos`, `src/lib/ai/extraer-ranura.ts`). Con la descripción sola,
- * la misma imagen daba respuestas distintas entre corridas.
+ * ⚠️ Desde el 2026-09-18 esta descripción **solo manda cuando la pantalla NO muestra
+ * iconos** (una tarifa que dice por escrito «incluye 1 maleta de 23 kg»). Con fila de
+ * iconos visible decide el ESTADO de cada icono (`iconos_equipaje` →
+ * `derivarEquipajeDeLosIconos`, `src/lib/ai/extraer-ranura.ts`), y si esa fila no se lee
+ * limpia los tres campos quedan vacíos. Motivo medido: con la descripción sola, la misma
+ * imagen daba `true` en una corrida y `false` en la siguiente, las dos con confianza 0,9.
  */
 const COMO_SE_LEE_EL_EQUIPAJE =
   'En las pantallas de aerolínea el equipaje se muestra como una fila de iconos y SIEMPRE aparecen todos, ' +
