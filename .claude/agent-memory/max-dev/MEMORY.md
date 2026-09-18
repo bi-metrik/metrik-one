@@ -34,6 +34,7 @@
 - ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate toda escritura en metrik-one se bloquea
 - ⚠️ [Vistas server-only](project_vistas_server_only.md) — revocada a `authenticated` devuelve vacío sin error
 - ⚠️ [staff es 1 fila por persona en TODA la base](project_staff_unique_global.md) — UNIQUE global de `profile_id`: platform_admin ajeno opera con `staffId` null
+- ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — #789 mergeado; el fondo sigue abierto y el embed de `workspaces` necesita el nombre de la FK
 - [La empresa espejo se sigue creando](project_empresa_espejo_se_sigue_creando.md) — decisión cerrada; solo el directorio dejó de listarla
 - [Canal WhatsApp propio](project_canal_wa_propio.md) — #448 sin desplegar; Gate 0 prohíbe persistir contenido
 - ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — deploy ANTES del SQL; idioma PRIMERO (#574)
@@ -109,6 +110,7 @@
 ## Referencias
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`
+- ⚠️ [Un layout sin `{children}` corta la página](reference_layout_sin_children_corta_la_pagina.md) — su `redirect()` ni se dispara; medido con `next dev` y su control
 - ⚠️ [Qué export 'use server' es endpoint](reference_manifiesto_server_actions.md) — lo dice el manifiesto del build
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — probar primero `.env.local` + PostgREST
 - [Ensayar una función SQL con PGlite](reference_ensayo_sql_pglite.md) — cuerpo viejo y nuevo sobre una foto de producción
