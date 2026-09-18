@@ -75,12 +75,36 @@ export interface FilaTipoPaxCruda {
   confidence: number
 }
 
+/**
+ * Un icono de la fila de equipaje, tal como el modelo dice verlo.
+ *
+ * ⚠️ `estado` describe el PÍXEL, no la tarifa: `encendido` es «está pintado de un color»
+ * y `apagado` es «está en gris, negro, plano o tachado». Que el icono vaya incluido en la
+ * tarifa se deriva después (`derivarEquipajeDeLosIconos`, `src/lib/ai/extraer-ranura.ts`).
+ *
+ * Se conserva crudo en la lectura porque es la EVIDENCIA del equipaje: sin ella, un
+ * equipaje mal leído no se puede diagnosticar — hay que adivinar si el modelo describió
+ * mal los iconos o si el cruce no llegó a correr. Costó una corrida entera del banco real
+ * el 2026-09-17 no tenerlo.
+ */
+export interface IconoEquipajeCrudo {
+  dibujo: string | null
+  /** El color concreto que el modelo dice ver: «azul», «gris oscuro», «negro». */
+  color: string | null
+  /** Cómo lo clasificó el modelo: «encendido» / «apagado», tal como respondió. */
+  clasificado: string | null
+  /** El veredicto del servidor tras cruzar las dos respuestas. `null` = no se puede leer. */
+  estado: 'encendido' | 'apagado' | null
+}
+
 export interface LecturaCruda {
   veredicto: VeredictoImagen
   /** Una línea del modelo explicando qué vio. Se usa para el mensaje de rechazo. */
   observacion: string | null
   campos: Record<string, ValorLeido>
   desglose: FilaDesglose[]
+  /** La fila de iconos de equipaje que el modelo dice ver, en orden y sin interpretar. */
+  iconosEquipaje?: IconoEquipajeCrudo[]
   /** Filas por tipo de pasajero. Vacío cuando la pantalla trae un solo total. */
   porTipoPax?: FilaTipoPaxCruda[]
   /** El total de la tabla por tipo de pasajero («Total General», «Sub-Total»). */
@@ -730,13 +754,19 @@ function sinTildes(t: string): string {
  * se lee como que el pasajero viaja con las manos vacías. `solo artículo personal` solo
  * se afirma cuando la captura dijo que los otros dos NO van: con uno de ellos en `null`
  * la frase sería una afirmación sobre lo que nadie leyó.
+ *
+ * ⚠️ Y la exclusión se dice con todas las letras. «Solo artículo personal» a secas deja
+ * que el cliente complete el resto: lo que compró es el morral, y lo que NO compró es la
+ * maleta de cabina y la de bodega. Esa es la línea que evita la discusión en el mostrador.
  */
 function equipajeTexto(
   bodega: string | null,
   mano: string | null,
   personal: string | null,
 ): string | null {
-  if (personal === 'true' && mano === 'false' && bodega === 'false') return 'Solo artículo personal'
+  if (personal === 'true' && mano === 'false' && bodega === 'false') {
+    return 'Solo artículo personal (sin equipaje de mano ni de bodega)'
+  }
 
   const trozos: string[] = []
   if (bodega === 'true') trozos.push('Con equipaje de bodega')

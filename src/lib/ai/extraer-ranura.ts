@@ -33,7 +33,12 @@
  */
 
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
-import type { FilaTipoPaxCruda, LecturaCruda, VeredictoImagen } from '@/lib/cotizaciones/lectura-pantallazo'
+import type {
+  FilaTipoPaxCruda,
+  IconoEquipajeCrudo,
+  LecturaCruda,
+  VeredictoImagen,
+} from '@/lib/cotizaciones/lectura-pantallazo'
 import { extraerConReintento, type ResultadoExtraccion } from './reintentar-extraccion'
 
 /**
@@ -75,6 +80,24 @@ const THINKING_BUDGET = 2048
  * en el peor caso, por debajo de los 60 s del plan, y el mensaje dice qué hacer.
  */
 const TIMEOUT_MS = 25_000
+
+/**
+ * A la captura se le dan más píxeles ANTES de mandarla. No es cosmético.
+ *
+ * ⚠️ Medido contra el modelo vivo sobre `3.57.39_PM-3` (Avianca BASIC), cinco corridas por
+ * configuración: **con la imagen tal como llega, el modelo describe el icono de cabina como
+ * «azul» en 2 de 5** —es gris oscuro— y el equipaje de mano sale afirmado en falso. **Con la
+ * imagen ampliada, 5 de 5 correctas.** El icono mide ~20 px en un pantallazo de 1600; Gemini
+ * trocea la imagen en teselas de 768 px, así que ampliar es literalmente darle más píxeles
+ * por icono, no un ajuste de redacción. Ninguna forma de escribir el prompt arregla un
+ * límite de percepción, y probar redacciones hasta que el número cuadre es cómo se cuela
+ * una lectura que parece correcta.
+ *
+ * El tope de 3.072 px es el lado a partir del cual Gemini reduce la imagen por su cuenta:
+ * pasarse no agrega nada y cuesta teselas. El factor 2 es hasta donde se midió.
+ */
+const LADO_OBJETIVO = 3072
+const FACTOR_MAXIMO = 2
 
 const MIMES_SOPORTADOS: Record<string, string> = {
   'image/jpeg': 'image/jpeg',
@@ -158,10 +181,17 @@ PASO 3b — LOS ICONOS DE EQUIPAJE, ANTES DE DECIDIR SI VAN INCLUIDOS. Si la pan
 muestra una fila de iconos de equipaje (bolsos, mochilas, maletas), devuelve en
 "iconos_equipaje" una entrada por cada icono, EN EL ORDEN EN QUE APARECEN de izquierda a
 derecha: { "dibujo": que se ve (bolso, mochila, maleta de cabina con ruedas, maleta
-grande), "color": "a_color" si esta pintado de un color (azul, verde, naranja), "gris" si
-esta en gris, apagado, difuminado o tachado }.
+grande), "color": el color con el que esta RELLENO ese icono, en una o dos palabras y tal
+como lo ves (azul, celeste, verde, naranja, morado, rojo, gris, gris oscuro, negro),
+"estado": "encendido" o "apagado" }.
+- "encendido" = el relleno del icono es UN COLOR: azul, celeste, verde, naranja, morado, rojo.
+- "apagado" = el relleno NO es un color: gris, GRIS OSCURO, NEGRO, blanco, plano, sin
+  color, difuminado o tachado. Un icono gris oscuro o negro esta APAGADO, nunca encendido:
+  en una pantalla de aerolinea el color es lo unico que marca lo incluido.
+- COMPARA los iconos de una misma fila ENTRE SI antes de responder. Un icono oscuro al lado
+  de uno azul se distingue comparandolos; mirando uno solo, no.
 - Describe lo que VES. Que un icono este incluido en la tarifa se decide despues, con esta
-  lista: aqui solo importa el dibujo y el color.
+  lista: aqui solo importa el dibujo, el color y el estado.
 - Si la misma fila de iconos se repite en la pantalla (una vez por cada tramo del vuelo y
   otra en la tabla de tarifa), devuelve UNA sola fila de iconos, no todas.
 - Si la pantalla no muestra iconos de equipaje, devuelve la lista vacia.
@@ -221,8 +251,15 @@ function construirEsquema(ranura: DefinicionRanura) {
         type: 'ARRAY',
         items: {
           type: 'OBJECT',
-          properties: { dibujo: { type: 'STRING' }, color: { type: 'STRING' } },
-          required: ['dibujo', 'color'],
+          properties: {
+            dibujo: { type: 'STRING' },
+            // El color concreto y su clasificación, en la misma entrada: la percepción
+            // («gris oscuro») y el juicio («apagado») se cruzan, y lo que no coincide no
+            // se afirma. El modelo ya contestó «a_color» sobre un icono gris oscuro.
+            color: { type: 'STRING' },
+            estado: { type: 'STRING', enum: ['encendido', 'apagado'] },
+          },
+          required: ['dibujo', 'color', 'estado'],
         },
       },
       desglose: {
@@ -326,7 +363,8 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
       confidence: Number(fila.confidence ?? 0) || 0,
     })
   }
-  derivarEquipajeDeLosIconos(obj.iconos_equipaje, campos)
+  const iconosEquipaje = colapsarRepeticion(normalizarIconos(obj.iconos_equipaje))
+  derivarEquipajeDeLosIconos(iconosEquipaje, campos)
 
   const totalGeneral = numeroONulo(obj.total_general)
   // RX1 con EVIDENCIA: no un número que el modelo declara, sino las opciones que dice ver.
@@ -345,65 +383,151 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
           .filter(k => k !== '|'),
       ).size
 
-  return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles }
+  return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles, iconosEquipaje }
+}
+
+const SLUGS_EQUIPAJE = ['equipaje_personal', 'equipaje_mano', 'equipaje_bodega']
+
+/**
+ * Cada icono trae DOS respuestas del modelo, y se cruzan entre sí.
+ *
+ * `color` es lo que percibe («azul», «gris oscuro») y `estado` cómo lo clasifica
+ * («encendido», «apagado»). Se piden las dos porque el error medido está justamente en el
+ * salto de una a otra: con el esquema anterior, que pedía un `color` libre, el modelo
+ * respondió **`a_color` sobre el icono de cabina, que es gris oscuro** — no falló el
+ * vocabulario del servidor (`a_color` y `gris` caen los dos en su lista), falló la
+ * descripción. Nombrar el color concreto obliga a mirar el píxel; clasificarlo aparte
+ * obliga a decidir; y si las dos no coinciden, el icono queda sin leer.
+ */
+function normalizarIconos(raw: unknown): IconoEquipajeCrudo[] {
+  const lista = Array.isArray(raw) ? raw : []
+  return lista.map(ic => {
+    const o = (ic ?? {}) as Record<string, unknown>
+    const color = textoOVacio(o.color)
+    const clasificado = textoOVacio(o.estado)
+    // Las dos respuestas del modelo sobre el MISMO icono: qué color ve y cómo lo clasifica.
+    // Coinciden → el estado se guarda. Se contradicen («gris oscuro» + «encendido») → el
+    // icono queda sin leer, y un icono sin leer vacía la fila entera.
+    const porColor = estadoDelIcono(color)
+    const porClase = estadoDelIcono(clasificado)
+    const estado = porColor !== null && porClase !== null && porColor !== porClase
+      ? null
+      : porColor ?? porClase
+    return { dibujo: textoOVacio(o.dibujo), color, clasificado, estado }
+  })
 }
 
 /**
- * El equipaje se cruza contra los iconos observados, y lo que no coincide NO se afirma.
+ * Encendido = pintado de un color. Apagado = gris, NEGRO, blanco, plano o tachado.
  *
- * ## Por qué no basta preguntar «¿incluye equipaje de bodega?»
+ * ⚠️ El TONO se mira antes que el adjetivo, porque «oscuro» no significa lo mismo en
+ * «gris oscuro» que en «azul oscuro» — y el modelo devolvió las dos cosas en el banco
+ * real. Un adjetivo suelto no es evidencia de nada: lo que decide es si se nombró un color
+ * o un neutro.
+ *
+ * ⚠️ Lo que no se entiende devuelve `null`, y un `null` vacía la fila entera (ver
+ * `derivarEquipajeDeLosIconos`). Antes devolvía «no toques el campo», que es lo mismo que
+ * dejar mandando al dictamen del modelo — justo el que no es estable.
+ */
+function estadoDelIcono(raw: string | null): 'encendido' | 'apagado' | null {
+  const t = (raw ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+  if (t === '') return null
+  // «sin color» contiene «color»: se resuelve antes que nada, o el vocabulario de encendido
+  // lo toma por su contrario.
+  if (/\bsin (color|colorear|pintar|resaltar|resalte)\b|\bno (esta|est) (a color|resaltado|pintado)\b/.test(t)) {
+    return 'apagado'
+  }
+  const tono = /azul|celeste|verde|naranja|morad|violeta|rojo|amarill|turques|cian|fucsia|rosa|dorad/.test(t)
+  const neutro = /gris|grey|gray|negr|black|blanc|white|plomo|platead/.test(t)
+  // «azul grisáceo» nombra las dos cosas: no se afirma ninguna.
+  if (tono !== neutro) return tono ? 'encendido' : 'apagado'
+  if (tono && neutro) return null
+  // Sin color nombrado, vale la clasificación o el adjetivo.
+  const encendido = /encendid|a_color|a color|color|resalt|activ|destac|ilumin|brillante/.test(t)
+  const apagado = /apagad|oscur|dark|plano|difumin|atenuad|tenue|tach|desactiv|opac|inactiv/.test(t)
+  if (encendido === apagado) return null
+  return encendido ? 'encendido' : 'apagado'
+}
+
+/**
+ * Una terna repetida es UNA terna — y que se repita IGUAL es la prueba de que se leyó bien.
+ *
+ * La misma fila de iconos aparece varias veces en la pantalla (una por tramo del vuelo y
+ * otra por cada fila de la tabla de tarifa: cuatro veces en la captura de Avianca del banco
+ * real). El prompt pide TODAS, no una: son observaciones independientes de lo mismo dentro
+ * de la misma llamada, y compararlas entre sí es la única forma barata de detectar que el
+ * modelo dudó. Si las cuatro coinciden, se colapsan a una; si no, la lista no tiene período
+ * exacto, no se puede leer como terna y los tres campos quedan vacíos.
+ *
+ * ⚠️ Esto **no** es una defensa contra que el modelo desobedezca una instrucción de estilo:
+ * es el cruce. Antes el prompt pedía una sola fila y un `length !== 3` mataba la derivación
+ * en silencio.
+ *
+ * Devuelve el período mínimo que, repetido, reproduce la lista completa.
+ */
+function colapsarRepeticion(iconos: IconoEquipajeCrudo[]): IconoEquipajeCrudo[] {
+  const n = iconos.length
+  if (n < 2) return iconos
+  const claves = iconos.map(ic =>
+    `${(ic.dibujo ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()}|${ic.estado ?? '?'}`,
+  )
+  for (let p = 1; p < n; p++) {
+    if (n % p !== 0) continue
+    let repite = true
+    for (let i = p; i < n && repite; i++) repite = claves[i] === claves[i % p]
+    if (repite) return iconos.slice(0, p)
+  }
+  return iconos
+}
+
+/**
+ * El equipaje sale del ESTADO de los iconos. Si la fila no se lee limpia, queda vacío.
+ *
+ * ## La regla, de Mauricio (2026-09-18)
+ *
+ * *«Debemos traer esa información del mismo pantallazo. En el caso de Avianca se reconoce
+ * porque solo está alumbrado el morral pequeño.»* El dato no se resuelve preguntando si la
+ * tarifa incluye maleta: está dibujado en la pantalla, y lo dice el estado del icono, no
+ * que el icono exista.
+ *
+ * ## Por qué el dictamen del modelo ya no decide
  *
  * ⚠️ Medido contra el modelo vivo sobre la MISMA imagen (`3.57.39_PM-3`, tarifa BASIC de
- * Avianca por Amadeus, 2026-09-17). Contado por píxeles, de los tres iconos **solo el
- * primero está a color**. Preguntando directo, el modelo respondió «sin equipaje de
- * bodega, con equipaje de mano» en una corrida y «con equipaje de bodega, con equipaje de
- * mano» en la siguiente, las dos con confianza 0,9. Es el mismo modo de fallo del conteo
- * de opciones de RX1 antes de que se pidiera `opciones_vistas`, y el mismo del desglose
- * que no reconcilia: **el juicio del modelo sobre una imagen no es estable entre
- * corridas; su descripción de lo que ve lo es un poco más.**
+ * Avianca por Amadeus): preguntando directo «¿incluye equipaje de bodega?», respondió
+ * `false` en una corrida y `true` en la siguiente, las dos con confianza 0,9. Contado por
+ * píxeles, de los tres iconos solo el primero está a color. **El juicio del modelo sobre
+ * una imagen no es estable entre corridas; su descripción de lo que ve sí.** Hasta el
+ * 2026-09-18 las dos respuestas se cruzaban y solo se guardaba lo que coincidía; con un
+ * dictamen que se voltea entre corridas, ese cruce producía un campo que también se
+ * voltea. Ahora manda la descripción y el dictamen no entra: no se puede estabilizar un
+ * dato cruzándolo contra una fuente inestable.
  *
- * ## La regla: dos respuestas de la MISMA llamada tienen que coincidir
+ * ## Hueco antes que mentira
  *
- * El modelo responde dos veces sobre lo mismo sin saberlo: en `iconos_equipaje` describe
- * qué dibujo hay y de qué color, y en los campos `equipaje_*` dictamina si va incluido.
- * Cuando las dos coinciden, el dato se guarda. **Cuando se contradicen, el campo queda
- * VACÍO**: no se afirma ni que lleva ni que no lleva.
+ * Con fila de iconos visible que NO se puede leer como terna limpia —no son tres, o el
+ * estado de alguno es ambiguo— los tres campos quedan **vacíos**. Dejar mandando al
+ * dictamen en ese caso es exactamente lo que puso los tres en `true` sobre una tarifa que
+ * solo lleva morral. Un hueco lo llena una persona mirando las reglas de la tarifa; un
+ * «incluye maleta de bodega» falso lo descubre el pasajero en el aeropuerto.
  *
- * Es el mismo criterio que `desgloseReconcilia` (`lectura-pantallazo.ts`) y por la misma
- * razón: este dato no mueve plata, se imprime en el documento que lee el cliente. Un
- * hueco lo llena una persona mirando las reglas de la tarifa; un «incluye maleta de
- * bodega» falso lo descubre el pasajero en el aeropuerto.
- *
- * ⚠️ Solo se cruza con EXACTAMENTE tres iconos. Con uno o dos la posición no dice cuál es
- * cuál —una pantalla que muestre solo la maleta de bodega es una fila de uno— y ahí manda
- * lo que el modelo respondió en los campos, que es el comportamiento anterior.
+ * ⚠️ **Sin fila de iconos no se toca nada**: una tarifa que dice por escrito «incluye 1
+ * maleta de 23 kg» es un dato válido leído del texto, y ahí el único que leyó es el
+ * modelo.
  */
-function derivarEquipajeDeLosIconos(raw: unknown, campos: LecturaCruda['campos']): void {
-  const iconos = Array.isArray(raw) ? raw : []
-  if (iconos.length !== 3) return
-  const slugs = ['equipaje_personal', 'equipaje_mano', 'equipaje_bodega']
-  iconos.forEach((ic, i) => {
-    const color = String(((ic ?? {}) as Record<string, unknown>).color ?? '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-    const incluido = /a_color|color|azul|verde|naranja|resalt|activ|destac/.test(color)
-    const excluido = /gris|apag|tach|difumin|desactiv|opac|inactiv/.test(color)
-    if (incluido === excluido) return // ni lo uno ni lo otro, o las dos: no aporta
-    const delIcono = incluido ? 'true' : 'false'
+function derivarEquipajeDeLosIconos(iconos: IconoEquipajeCrudo[], campos: LecturaCruda['campos']): void {
+  if (iconos.length === 0) return
+  // La ranura de hotel no declara estos campos: sin ellos no hay nada que derivar, y
+  // crearlos inventaría claves que la ranura nunca pidió.
+  if (!SLUGS_EQUIPAJE.every(s => s in campos)) return
 
-    const dictamen = campos[slugs[i]]
-    const delCampo = dictamen && dictamen.confidence >= 0.5 ? (dictamen.value ?? '').trim().toLowerCase() : ''
-    if (delCampo === 'true' || delCampo === 'false') {
-      // La confianza no es 1 aunque coincidan: el dato es DERIVADO de una observación
-      // sobre píxeles, no leído de un texto. Los tres van marcados para revisión.
-      campos[slugs[i]] = delCampo === delIcono
-        ? { value: delIcono, confidence: 0.9 }
-        : { value: null, confidence: 0 }
-      return
-    }
-    campos[slugs[i]] = { value: delIcono, confidence: 0.9 }
-  })
+  const terna = iconos.length === 3 && iconos.every(ic => ic.estado !== null)
+  for (const [i, slug] of SLUGS_EQUIPAJE.entries()) {
+    // La confianza no es 1 aunque la fila se lea limpia: el dato es DERIVADO de una
+    // observación sobre píxeles, no leído de un texto. Los tres van marcados para revisión.
+    campos[slug] = terna
+      ? { value: iconos[i].estado === 'encendido' ? 'true' : 'false', confidence: 0.9 }
+      : { value: null, confidence: 0 }
+  }
 }
 
 /**
@@ -480,6 +604,34 @@ export async function extraerRanuraDesdeImagen(
   )
 }
 
+/**
+ * Amplía la captura hasta el tamaño en que el modelo distingue un icono de 20 px.
+ *
+ * ⚠️ El formato NO se cambia: `sharp` devuelve el mismo que entró si no se le pide otro, y
+ * así el `mime_type` que viaja sigue siendo el que declaró quien subió el archivo. Un PNG
+ * de pantalla recomprimido a JPEG mete artefactos justo en los bordes de letra pequeña.
+ *
+ * ⚠️ Si `sharp` falla —o no está— se manda la imagen ORIGINAL. Ampliar es una mejora de
+ * lectura, no un requisito: quedarse sin leer la captura porque no se pudo redimensionar
+ * sería cambiar un dato peor por ningún dato.
+ */
+async function conMasPixeles(buffer: Buffer, mime: string): Promise<Buffer> {
+  if (mime === 'application/pdf') return buffer
+  try {
+    const sharp = (await import('sharp')).default
+    const meta = await sharp(buffer).metadata()
+    const ancho = meta.width ?? 0
+    const lado = Math.max(ancho, meta.height ?? 0)
+    if (lado === 0) return buffer
+    const factor = Math.min(FACTOR_MAXIMO, LADO_OBJETIVO / lado)
+    if (factor <= 1.05) return buffer
+    return await sharp(buffer).resize({ width: Math.round(ancho * factor), kernel: 'lanczos3' }).toBuffer()
+  } catch (err) {
+    console.warn('[extraer-ranura] No se pudo ampliar la captura, se manda como llegó:', err)
+    return buffer
+  }
+}
+
 async function unaLlamada(
   buffer: Buffer,
   mimeType: string,
@@ -490,6 +642,8 @@ async function unaLlamada(
 
   const mime = MIMES_SOPORTADOS[mimeType.toLowerCase()]
   if (!mime) return { data: null, error: `Tipo de imagen no soportado: ${mimeType}` }
+
+  const imagen = await conMasPixeles(buffer, mime)
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
@@ -503,7 +657,7 @@ async function unaLlamada(
         contents: [{
           parts: [
             { text: 'Clasifica y lee la siguiente captura.' },
-            { inline_data: { mime_type: mime, data: buffer.toString('base64') } },
+            { inline_data: { mime_type: mime, data: imagen.toString('base64') } },
           ],
         }],
         generationConfig: {

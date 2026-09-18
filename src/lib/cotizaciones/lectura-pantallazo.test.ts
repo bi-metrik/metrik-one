@@ -428,6 +428,9 @@ describe('equipaje · cuenta el icono RESALTADO, no que el icono exista', () => 
     if (!r.ok) return
     const { descripcion } = resumenDeLinea(VUELO, r.campos)
     expect(descripcion).toContain('Solo artículo personal')
+    // Y lo que NO lleva se dice con todas las letras: «solo artículo personal» a secas
+    // deja que el cliente complete el resto, y eso se completa en el mostrador.
+    expect(descripcion).toContain('sin equipaje de mano ni de bodega')
     // El defecto reportado: bodega marcada en una tarifa que solo lleva mochila.
     expect(descripcion).not.toContain('Con equipaje de bodega')
   })
