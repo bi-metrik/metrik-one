@@ -37,6 +37,11 @@ import {
   LABEL_MOTIVO,
   type MotivoDevolucion,
 } from '@/lib/negocios/devolucion'
+import {
+  etiquetaEsperado,
+  expectativaDeDocumento,
+  type DocumentoRechazado,
+} from '@/lib/documentos/tipo-documento'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import type { NegocioBloque } from '../../negocio-v2-actions'
@@ -80,6 +85,13 @@ interface BloqueDocumentoProps {
      * `BloqueDatos` ya lo respetaba y este bloque no.
      */
     _areaReadonly?: boolean
+    /**
+     * Opt-in: qué documento espera este bloque (uno o varios slugs de
+     * `TIPOS_DOCUMENTO`). Si el lector identifica otro documento conocido, el bloque
+     * NO se guarda. Sin esta llave el bloque acepta lo de siempre.
+     */
+    documento_esperado?: string | string[]
+    documento_esperado_confianza_min?: number
   }
 }
 
@@ -111,6 +123,59 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
       <AlertTriangle className="h-3 w-3" />
       Manual
     </span>
+  )
+}
+
+// ── El archivo no es el documento que este bloque espera ─────────────────────
+//
+// Lo que hace resoluble el rechazo no es el mensaje de error: es decir QUÉ llegó. Un
+// «no se pudo procesar» hace que el operador vuelva a subir el mismo archivo. Aquí se
+// nombran las dos cosas —lo que se espera y lo que se identificó— y se cita la evidencia
+// que usó el lector, para que un falso positivo también se pueda discutir.
+function DocumentoRechazadoPanel({
+  rechazo,
+  onCerrar,
+}: {
+  rechazo: DocumentoRechazado
+  onCerrar: () => void
+}) {
+  return (
+    <div
+      data-test="documento-rechazado"
+      className="rounded-lg border border-red-300 bg-red-50 px-3 py-2.5"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] font-semibold text-red-800">
+            No se guardó: este no es el documento que va aquí
+          </p>
+          <dl className="mt-1.5 space-y-0.5 text-[11px] text-red-700">
+            <div className="flex gap-1.5">
+              <dt className="shrink-0 font-medium">Se espera:</dt>
+              <dd data-test="doc-esperado">{rechazo.esperado}</dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt className="shrink-0 font-medium">Lo que subiste:</dt>
+              <dd data-test="doc-visto">{rechazo.visto}</dd>
+            </div>
+          </dl>
+          {rechazo.evidencia && (
+            <p className="mt-1.5 text-[10px] italic text-red-600/80">«{rechazo.evidencia}»</p>
+          )}
+          <p className="mt-1.5 text-[11px] text-red-700">
+            El bloque quedó como estaba. Sube el documento correcto.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCerrar}
+          className="shrink-0 rounded-md border border-red-300 bg-white px-2 py-0.5 text-[10px] font-medium text-red-700 hover:bg-red-100"
+        >
+          Entendido
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -539,6 +604,9 @@ export default function BloqueDocumento({
   const camposVisibles = configExtra.campos_visibles ?? null
   const maxSizeMb = configExtra.max_size_mb ?? 20
   const editarExtraidos = configExtra.editar_extraidos === true
+  // Qué documento espera el bloque, en palabras. Se dice ANTES de subir: es la mitad
+  // barata del control — el operador que lee «aquí va el RUT» rara vez sube la Cámara.
+  const expectativaDoc = expectativaDeDocumento(configExtra as unknown as Record<string, unknown>)
   // Corrección en modo visible (opt-in por config `corregir_campos_gerencial`).
   // Dos perfiles la tienen:
   //  - roles gerenciales (owner/admin/supervisor), que corrigen cualquier caso;
@@ -607,6 +675,9 @@ export default function BloqueDocumento({
     return (saved.campos as Record<string, CampoResultado>) ?? {}
   })
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  // Qué documento llegó cuando el bloque se rechazó. Va aparte del `errorMsg` porque lo
+  // que hace accionable el rechazo no es el mensaje: es ver QUÉ se subió.
+  const [docRechazado, setDocRechazado] = useState<DocumentoRechazado | null>(null)
   const [pendingStoragePath, setPendingStoragePath] = useState<string | null>(null)
   const [reprocessing, setReprocessing] = useState(false)
   const [extractionStatus, setExtractionStatus] = useState<'ok' | 'failed' | 'no_key' | null>(
@@ -618,9 +689,14 @@ export default function BloqueDocumento({
     try {
       const res = await reprocesarDocumento(negocioBloqueId, negocioId)
       if (!res.success) {
+        // Reprocesar reescribe todos los campos: si el archivo guardado no es el
+        // documento que el bloque espera, se dice qué es. NO se toca `uploadState`:
+        // el archivo sigue ahí y la fila que lo muestra no puede desaparecer.
+        if (res.documento_rechazado) setDocRechazado(res.documento_rechazado)
         toast.error(res.error ?? 'Error reprocesando')
         return
       }
+      setDocRechazado(null)
       if (res.campos) setCampos(res.campos)
       setExtractionStatus('ok')
       toast.success('Documento reprocesado con IA')
@@ -669,6 +745,7 @@ export default function BloqueDocumento({
     setUploadState('uploading')
     setFileName(file.name)
     setErrorMsg(null)
+    setDocRechazado(null)
 
     try {
       const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf'
@@ -748,9 +825,13 @@ export default function BloqueDocumento({
       if (!result.success) {
         setUploadState('error')
         setErrorMsg(result.error ?? 'Error procesando documento')
+        // El archivo sigue en el área de subida (`pendingStoragePath` intacto): quien lo
+        // cargó puede elegir otro sin volver a empezar. Nada se guardó en el bloque.
+        setDocRechazado(result.documento_rechazado ?? null)
         toast.error(result.error ?? 'Error procesando documento')
         return
       }
+      setDocRechazado(null)
 
       setDriveUrl(result.drive_url ?? null)
       if (result.campos) {
@@ -994,7 +1075,10 @@ export default function BloqueDocumento({
             </span>
           </div>
         )}
-        {uploadState === 'error' && errorMsg && (
+        {docRechazado && (
+          <DocumentoRechazadoPanel rechazo={docRechazado} onCerrar={() => setDocRechazado(null)} />
+        )}
+        {uploadState === 'error' && errorMsg && !docRechazado && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{errorMsg}</p>
         )}
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
@@ -1139,6 +1223,11 @@ export default function BloqueDocumento({
           <Upload className="h-5 w-5 shrink-0" />
           <div className="text-left">
             <span className="text-sm font-medium">{label}</span>
+            {expectativaDoc && (
+              <p className="text-[11px] font-medium text-foreground/70">
+                Aquí va: {etiquetaEsperado(expectativaDoc)}
+              </p>
+            )}
             <p className="text-[11px] text-muted-foreground/60">
               {fileDrop.isDragging
                 ? 'Suelta el archivo aquí'

@@ -33,6 +33,8 @@ import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproces
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { RecaudoCambiadoBanner, type AvisoRecaudoVista } from './recaudo-cambiado-banner'
 import { EtapasNoAplican } from './etapas-no-aplican'
+import { AvisoNoAplicaPanel } from './aviso-no-aplica'
+import type { AvisoNoAplica } from '@/lib/negocios/no-aplica'
 import PanelContacto from './panel-contacto'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
@@ -2143,6 +2145,8 @@ interface Props {
   etapasLinea: EtapaNegocio[]
   /** Etapas que este caso no va a recorrer, con la respuesta que las dejo fuera. */
   etapasNoAplican?: EtapaNoAplica[]
+  /** El caso entero no le aplica a este proceso, y por que. Ver `lib/negocios/no-aplica`. */
+  noAplica?: AvisoNoAplica | null
   profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   currentUserId: string | null
   currentUserEsResponsable: boolean
@@ -2226,6 +2230,7 @@ export default function NegocioDetailClient({
   bloques,
   etapasLinea,
   etapasNoAplican,
+  noAplica = null,
   profiles,
   currentUserId,
   currentUserEsResponsable,
@@ -2532,6 +2537,11 @@ export default function NegocioDetailClient({
         {/* Etapas que el proceso se salto con razon. Va pegado a la barra de progreso
             porque responde la misma pregunta: por donde va el caso. */}
         <EtapasNoAplican etapas={etapasNoAplican ?? []} />
+
+        {/* El caso ENTERO no le aplica al proceso. Va justo debajo del progreso, antes
+            que cualquier bloque: si la etapa se ve vacia, esto es lo que lo explica —
+            y sin la explicacion la salida barata es mentirle al formulario. */}
+        <AvisoNoAplicaPanel aviso={noAplica} />
 
         {/* Panel del contacto, versión móvil: por debajo de `lg` no hay rail.
             El nombre y el teléfono se ven sin abrir nada —el nombre es

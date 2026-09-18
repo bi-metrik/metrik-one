@@ -8,6 +8,17 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
 import { extractFieldsFromDocument, type CampoExtraccion, type CampoResultado } from '@/lib/ai/extract-fields'
 import { extraerConReintento } from '@/lib/ai/reintentar-extraccion'
+import { reconocerDocumento } from '@/lib/ai/reconocer-documento'
+import {
+  etiquetaEsperado,
+  etiquetaTipo,
+  expectativaDeDocumento,
+  mensajeDocumentoRechazado,
+  veredictoDocumento,
+  type DocumentoRechazado,
+  type ExpectativaDocumento,
+  type Reconocimiento,
+} from '@/lib/documentos/tipo-documento'
 import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
@@ -73,6 +84,31 @@ async function extractWithRetry(
     () => extractFieldsFromDocument(buffer, mimeType, campos, apiKey),
     tag,
   )
+}
+
+// ── ¿El archivo ES el documento que el bloque espera? ────────────────────────
+//
+// El control vive ANTES de cualquier paso destructivo. No es un detalle de orden: al
+// reemplazar un documento, `procesarDocumento` BORRA el archivo anterior de Drive (paso
+// 4b) antes de subir el nuevo, y la consolidación externa pisa el pendiente. Comprobar
+// después de eso dejaría al negocio sin el documento bueno y sin el malo.
+//
+// Devuelve `null` cuando el bloque no declara expectativa: ahí no se llama al lector ni
+// se cambia una sola línea del comportamiento de siempre.
+async function reconocerParaBloque(
+  buffer: Buffer,
+  mimeType: string,
+  expectativa: ExpectativaDocumento | null,
+  apiKey: string | undefined,
+): Promise<Reconocimiento | null> {
+  if (!expectativa || !apiKey) return null
+  const { data, error } = await reconocerDocumento(buffer, mimeEfectivo(buffer, mimeType), apiKey)
+  if (!data) {
+    // Un lector que no responde NO frena al operador: se anota y se sigue.
+    console.warn('[documento] no se pudo identificar el documento:', error)
+    return null
+  }
+  return data
 }
 
 // ── Cross-check: validacion cruzada contra datos extraidos de otros bloques ──
@@ -575,6 +611,11 @@ export async function procesarDocumento(
   campos?: Record<string, CampoResultado>
   extraction_status?: 'ok' | 'failed' | 'no_key'
   extraction_error?: string
+  /**
+   * Presente SOLO cuando el bloque se rechazó porque el archivo no es el documento que
+   * espera. La pantalla lo pinta para que el operador vea QUÉ llegó, no solo que falló.
+   */
+  documento_rechazado?: DocumentoRechazado
   error?: string
 }> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
@@ -634,6 +675,61 @@ export async function procesarDocumento(
     const label = (configExtra.label as string) ?? 'Documento'
     const camposExtraccion = (configExtra.campos_extraccion ?? []) as CampoExtraccion[]
 
+    // ── 2b. ¿Este archivo es el documento que el bloque espera? ──────────
+    //
+    // Va ANTES de tocar Drive y antes de consolidar la subida externa: los dos son
+    // destructivos (borran o pisan el archivo que ya estaba). Solo corre si el bloque
+    // declara `documento_esperado`; sin esa llave no se baja el archivo dos veces, no
+    // se llama al modelo y el comportamiento es exactamente el de siempre.
+    const expectativa = expectativaDeDocumento(configExtra)
+    const apiKeyGemini = getServerKey('gemini')
+    let reconocimiento: Reconocimiento | null = null
+    // El archivo bajado para identificar se reusa más abajo en el camino de ONE, para
+    // no pagar dos descargas del mismo objeto.
+    let bufferPrecargado: Buffer | null = null
+
+    if (expectativa && apiKeyGemini) {
+      if (esReferenciaExterna(storagePath)) {
+        // El pendiente todavía no se consolidó: se lee por su referencia.
+        const almacenamiento = await almacenamientoExternoDe(workspaceId)
+        if (almacenamiento) {
+          try {
+            bufferPrecargado = (await almacenamiento.descargar(storagePath)).buffer
+          } catch (e) {
+            console.warn('[documento] no se pudo leer el pendiente externo para identificarlo:', e)
+          }
+        }
+      } else {
+        const { data: fileData } = await admin.storage.from(BUCKET).download(storagePath)
+        if (fileData) bufferPrecargado = Buffer.from(await fileData.arrayBuffer())
+      }
+
+      if (bufferPrecargado) {
+        reconocimiento = await reconocerParaBloque(bufferPrecargado, mimeType, expectativa, apiKeyGemini)
+      }
+    }
+
+    const veredicto = veredictoDocumento(expectativa, reconocimiento)
+    if (!veredicto.acepta && expectativa && reconocimiento) {
+      // Nada se guardó: ni el archivo, ni los campos, ni la seccional. El archivo que el
+      // bloque ya tenía sigue intacto, que es justo lo que este orden protege.
+      console.warn(
+        `[documento] rechazado en ${bloqueId}: espera ${expectativa.tipos.join('|')}, ` +
+        `llegó ${reconocimiento.tipo} (${reconocimiento.confianza})`,
+      )
+      return {
+        success: false,
+        error: mensajeDocumentoRechazado(expectativa, reconocimiento),
+        documento_rechazado: {
+          esperado: etiquetaEsperado(expectativa),
+          visto: etiquetaTipo(reconocimiento.tipo),
+          visto_tipo: reconocimiento.tipo,
+          confianza: reconocimiento.confianza,
+          evidencia: reconocimiento.evidencia,
+        },
+      }
+    }
+
     let buffer: Buffer
     let driveUrl: string | null = null
     let driveFileId: string | null = null
@@ -659,17 +755,22 @@ export async function procesarDocumento(
     } else {
       // ── 1. Descargar archivo de Storage ──────────────────────────────────
       console.log(`[documento] Step 1: downloading ${fileName} from Storage...`)
-      const { data: fileData, error: dlError } = await admin.storage
-        .from(BUCKET)
-        .download(storagePath)
+      if (bufferPrecargado) {
+        // Ya se bajó para identificar el documento (paso 2b): no se pide dos veces.
+        buffer = bufferPrecargado
+      } else {
+        const { data: fileData, error: dlError } = await admin.storage
+          .from(BUCKET)
+          .download(storagePath)
 
-      if (dlError || !fileData) {
-        console.error('[documento] Step 1 FAILED:', dlError?.message)
-        return { success: false, error: `Error leyendo archivo: ${dlError?.message ?? 'no data'}` }
+        if (dlError || !fileData) {
+          console.error('[documento] Step 1 FAILED:', dlError?.message)
+          return { success: false, error: `Error leyendo archivo: ${dlError?.message ?? 'no data'}` }
+        }
+
+        const arrayBuf = await fileData.arrayBuffer()
+        buffer = Buffer.from(arrayBuf)
       }
-
-      const arrayBuf = await fileData.arrayBuffer()
-      buffer = Buffer.from(arrayBuf)
       console.log(`[documento] Step 1 OK: ${(buffer.length / 1024).toFixed(0)}KB`)
 
       // ── 3. Obtener drive_folder_id del workspace ────────────────────────
@@ -766,6 +867,12 @@ export async function procesarDocumento(
     const currentData = (bloqueData?.data as Record<string, unknown>) ?? {}
     const newData: Record<string, unknown> = {
       ...currentData,
+      // Qué documento dijo el lector que es este archivo. Se guarda también cuando el
+      // veredicto NO fue concluyente: es la traza de que el control corrió, y sin ella
+      // «no se comprobó» y «se comprobó y pasó» se ven igual.
+      ...(reconocimiento
+        ? { _documento: { ...reconocimiento, motivo: veredicto.motivo, visto_at: new Date().toISOString() } }
+        : {}),
       drive_url: driveUrl,
       drive_file_id: driveFileId,
       file_name: fileName,
@@ -780,7 +887,7 @@ export async function procesarDocumento(
 
     if (camposExtraccion.length > 0) {
       console.log(`[documento] Step 9: AI extraction (${camposExtraccion.length} campos)...`)
-      const apiKey = getServerKey('gemini')
+      const apiKey = apiKeyGemini
       if (apiKey) {
         const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'documento')
         if (extraction.data) {
@@ -927,6 +1034,8 @@ export async function reprocesarDocumento(
 ): Promise<{
   success: boolean
   campos?: Record<string, CampoResultado>
+  /** Ver `procesarDocumento`: presente solo cuando el archivo no es el documento esperado. */
+  documento_rechazado?: DocumentoRechazado
   error?: string
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -1030,6 +1139,33 @@ export async function reprocesarDocumento(
     const mimeType = mimeEfectivo(buffer, mimeTypeFromName(fileName))
 
     // 4. Extraer con AI (con reintento ante fallo transitorio)
+    // 3b. ¿El archivo guardado ES el documento que el bloque espera?
+    //
+    // Reprocesar reescribe TODOS los campos extraídos y vuelve a sembrar la seccional
+    // (ver `sembrarSeccionalDesdeRut` al final). O sea que es otra puerta por la que un
+    // documento equivocado siembra datos, y tiene que pasar por el mismo control.
+    // Aquí no hay paso destructivo previo: el archivo ya está guardado y no se toca.
+    const expectativa = expectativaDeDocumento(configExtra)
+    const reconocimiento = await reconocerParaBloque(buffer, mimeType, expectativa, apiKey)
+    const veredicto = veredictoDocumento(expectativa, reconocimiento)
+    if (!veredicto.acepta && expectativa && reconocimiento) {
+      console.warn(
+        `[reprocesar] rechazado en ${bloqueId}: espera ${expectativa.tipos.join('|')}, ` +
+        `el archivo es ${reconocimiento.tipo} (${reconocimiento.confianza})`,
+      )
+      return {
+        success: false,
+        error: mensajeDocumentoRechazado(expectativa, reconocimiento),
+        documento_rechazado: {
+          esperado: etiquetaEsperado(expectativa),
+          visto: etiquetaTipo(reconocimiento.tipo),
+          visto_tipo: reconocimiento.tipo,
+          confianza: reconocimiento.confianza,
+          evidencia: reconocimiento.evidencia,
+        },
+      }
+    }
+
     console.log(`[reprocesar] AI extraction (${camposExtraccion.length} campos)...`)
     const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'reprocesar')
     if (!extraction.data) {
@@ -1068,6 +1204,9 @@ export async function reprocesarDocumento(
     const now = new Date().toISOString()
     const newData: Record<string, unknown> = { ...currentData, campos: mergedCampos, _extraction_status: 'ok' }
     delete newData._extraction_error
+    if (reconocimiento) {
+      newData._documento = { ...reconocimiento, motivo: veredicto.motivo, visto_at: now }
+    }
     if (ccResult) newData._cross_check = { ...ccResult, solo_alerta: crossCheckSoloAlerta }
 
     await db(supabase)
