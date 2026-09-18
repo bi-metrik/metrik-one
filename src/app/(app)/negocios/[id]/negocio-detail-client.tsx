@@ -968,7 +968,7 @@ function SelectorEtapa({
             )}
             <ReprocesoBoton
               negocioId={negocioId}
-              reprocesoActivo={Boolean(reprocesoMarca?.activo)}
+              reprocesoAbierto={reprocesoMarca}
               userRole={userRole}
             />
             <button
@@ -2284,7 +2284,9 @@ export default function NegocioDetailClient({
     if (d) Object.assign(datosEtapa, d)
   }
 
-  // Reproceso abierto: gobierna el banner de arriba y oculta el boton de abrir otro.
+  // Reproceso abierto: gobierna el banner de arriba y el aviso del modal de reproceso.
+  // Ya NO oculta el boton de abrir otro: esconderlo dejaba sin salida a un caso que
+  // necesita un segundo ciclo.
   const reprocesoMarca = (((negocio as unknown as { metadata?: Record<string, unknown> | null }).metadata
     ?.reproceso ?? null) as ReprocesoVista | null)
 

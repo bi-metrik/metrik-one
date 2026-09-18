@@ -137,6 +137,7 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { evaluarGateMargen } from '@/lib/cotizaciones/gate-margen-datos'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
+import { cerrarReprocesoSiSeRehizoElTramo } from '@/lib/negocios/cierre-reproceso-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
@@ -4439,11 +4440,11 @@ export async function cambiarEtapaNegocioConGate(
   // con el que se declara la configuración; `orden` es interno y no coincide).
   const { data: nuevaEtapaInfoRaw } = await db(supabase)
     .from('etapas_negocio')
-    .select('nombre, numero, linea_id, config_extra')
+    .select('nombre, numero, orden, linea_id, config_extra')
     .eq('id', resolvedEtapaId)
     .single()
   const nuevaEtapaInfo = nuevaEtapaInfoRaw as
-    { nombre: string; numero: number | null; linea_id: string | null
+    { nombre: string; numero: number | null; orden: number | null; linea_id: string | null
       config_extra: Record<string, unknown> | null } | null
   const nuevaEtapaNombre = nuevaEtapaInfo?.nombre ?? resolvedEtapaId
 
@@ -4616,6 +4617,34 @@ export async function cambiarEtapaNegocioConGate(
   // atraviesa una etapa de cobro sin detenerse pasa por esta línea en la misma llamada.
   // No frena nada y no deja rastro en el negocio; si ya se avisó ese monto, no repite.
   await avisarSobrepagoSiCorresponde(workspaceId, negocioId)
+
+  // ── Cierre automático del reproceso ───────────────────────────────────────────
+  // Este es el ÚNICO punto de escritura del cierre: no hay trigger de base ni estado
+  // derivado al leer. Va aquí, después de mover, porque la pregunta ("¿el caso ya volvió a
+  // la etapa de la que salió?") solo tiene respuesta nueva cuando el caso se movió.
+  //
+  // La metadata se relee AHORA y no se reusa la de arriba: entre el inicio de esta llamada
+  // y este punto, `cambiarEtapaNegocio` y los gates escribieron ahí (marcas de saldo, de
+  // Siigo). Construir el update sobre una lectura vieja pierde esas escrituras en silencio
+  // — es el read-modify-write que ya costó 12 facturas con el tercero equivocado.
+  if (nuevaEtapaInfo?.linea_id && typeof nuevaEtapaInfo.orden === 'number') {
+    const [{ data: negMeta }, { data: etapasLinea }] = await Promise.all([
+      db(supabase).from('negocios').select('metadata').eq('id', negocioId)
+        .eq('workspace_id', workspaceId).maybeSingle(),
+      db(supabase).from('etapas_negocio').select('id, nombre, orden, config_extra')
+        .eq('linea_id', nuevaEtapaInfo.linea_id).order('orden', { ascending: true }),
+    ])
+    await cerrarReprocesoSiSeRehizoElTramo({
+      workspaceId,
+      negocioId,
+      metadata: (negMeta as { metadata?: Record<string, unknown> | null } | null)?.metadata ?? null,
+      etapas: (etapasLinea ?? []) as Array<{
+        id: string; nombre: string; orden: number; config_extra: Record<string, unknown> | null
+      }>,
+      ordenDestino: nuevaEtapaInfo.orden,
+      staffId: staffId ?? null,
+    })
+  }
 
   return { ...resultCambio, etapaDestinoNombre: nuevaEtapaNombre }
 }

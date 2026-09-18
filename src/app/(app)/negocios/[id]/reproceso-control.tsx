@@ -9,6 +9,15 @@
  *    UPME o la DIAN devuelven el trabajo.
  *  - Con reproceso abierto → banner rojo arriba de todo, imposible de pasar por alto,
  *    con el ciclo, la causa y a qué etapa volvió el caso.
+ *
+ * ⚠️ El botón sigue estando con un reproceso abierto (2026-09-18). Antes desaparecía, y con
+ * 22 reprocesos vivos que nadie cerraba eso dejaba a casi todo caso reincidente sin la
+ * opción de reprocesar otra vez. Ahora el modal avisa qué ciclo está abierto y que
+ * confirmar lo cierra para abrir el siguiente.
+ *
+ * El "Cerrar" del banner también cambió de sentido: es la CORRECCIÓN de un reproceso
+ * abierto por error, no el paso normal. El cierre normal lo hace solo el sistema cuando el
+ * caso vuelve a la etapa de la que salió (`cierre-reproceso.ts`).
  */
 
 import { useState, useTransition } from 'react'
@@ -33,6 +42,18 @@ export type ReprocesoVista = {
 const LABEL_TIPO: Record<string, string> = {
   certificacion_upme: 'Certificación UPME',
   devolucion_dian: 'Devolución DIAN',
+}
+
+/**
+ * Fecha corta en Bogotá. `hourCycle` no hace falta (no se imprime hora), pero la zona sí:
+ * un `abierto_at` de las 7 p.m. cae al día siguiente si se lee en UTC.
+ */
+function fechaCorta(iso: string): string | null {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', day: '2-digit', month: 'short', year: 'numeric',
+  }).format(d)
 }
 
 export function ReprocesoBanner({
@@ -76,10 +97,10 @@ export function ReprocesoBanner({
               })
             }
             disabled={isPending}
-            title="Marcar el reproceso como resuelto"
+            title="El reproceso se abrió por error o ya no aplica. El caso no se mueve. Cuando el tramo se rehace de verdad, se cierra solo al volver a la etapa de la que salió."
             className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent disabled:opacity-60"
           >
-            {isPending ? 'Cerrando…' : 'Cerrar'}
+            {isPending ? 'Cerrando…' : 'Cerrar a mano'}
           </button>
         )}
       </div>
@@ -166,13 +187,45 @@ export function PanelErrorSinRetorno({
   )
 }
 
+/**
+ * Aviso de que ya hay un ciclo abierto, arriba del formulario de reproceso.
+ *
+ * Reemplaza al botón escondido: antes, con un reproceso activo, "Reprocesar" desaparecía y
+ * un caso que necesitaba un segundo reproceso parecía no tener la opción. Lo que hay que
+ * decir antes de confirmar es que esto NO abre un reproceso paralelo — cierra el que está
+ * abierto y empieza el siguiente.
+ *
+ * Exportado para la prueba de render.
+ */
+export function AvisoCicloAbierto({ reproceso }: { reproceso: ReprocesoVista }) {
+  const ciclo = reproceso.ciclo ?? 1
+  const desde = reproceso.abierto_at ? fechaCorta(reproceso.abierto_at) : null
+  return (
+    <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+      <p className="text-xs font-semibold text-amber-900">
+        Ya hay un reproceso abierto: ciclo {ciclo} — {LABEL_TIPO[reproceso.tipo ?? ''] ?? reproceso.tipo}.
+      </p>
+      <p className="mt-1 text-xs text-amber-800">
+        {desde ? `Abierto el ${desde}` : 'Abierto'}
+        {reproceso.abierto_por_nombre ? ` por ${reproceso.abierto_por_nombre}` : ''}.
+      </p>
+      <p className="mt-1 text-xs text-amber-800">
+        Si confirmas, el ciclo {ciclo} se cierra y empieza el {ciclo + 1}. No quedan dos reprocesos
+        abiertos a la vez: el ciclo {ciclo} sigue contando en el indicador de calidad del mes en que
+        se abrió.
+      </p>
+    </div>
+  )
+}
+
 export function ReprocesoBoton({
   negocioId,
-  reprocesoActivo,
+  reprocesoAbierto,
   userRole,
 }: {
   negocioId: string
-  reprocesoActivo: boolean
+  /** El ciclo vigente, si hay uno abierto. Ya NO esconde el botón: lo explica. */
+  reprocesoAbierto: ReprocesoVista | null
   userRole: string
 }) {
   const [abierto, setAbierto] = useState(false)
@@ -190,7 +243,13 @@ export function ReprocesoBoton({
   // Solo dirección y supervisión. El servidor lo vuelve a validar, y además exige
   // área de operaciones al supervisor; esto es únicamente para no mostrar un botón
   // que va a fallar.
-  if (!GERENCIAL.includes(userRole) || reprocesoActivo) return null
+  //
+  // ⚠️ El botón YA NO se esconde cuando hay un reproceso abierto. Escondiéndolo, un caso que
+  // necesita un segundo reproceso parecía no tener la opción — y con 22 reprocesos vivos que
+  // nadie cerraba (medido 2026-09-18), eso alcanzaba a casi todos los que ya habían tenido
+  // uno. Fue el síntoma que abrió este frente (V0388). En vez de esconderlo, el modal
+  // explica qué ciclo está abierto y que confirmar lo cierra.
+  if (!GERENCIAL.includes(userRole)) return null
 
   return (
     <>
@@ -209,7 +268,11 @@ export function ReprocesoBoton({
           <div className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-lg">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold">
-                {sinRetorno ? 'Registrar el error sin devolver el caso' : 'Abrir reproceso'}
+                {sinRetorno
+                  ? 'Registrar el error sin devolver el caso'
+                  : reprocesoAbierto?.activo
+                    ? `Abrir reproceso ${(reprocesoAbierto.ciclo ?? 1) + 1}`
+                    : 'Abrir reproceso'}
               </h2>
               <button onClick={cerrar} className="text-muted-foreground hover:text-foreground">
                 <X className="h-4 w-4" />
@@ -240,6 +303,8 @@ export function ReprocesoBoton({
               />
             ) : (
             <>
+            {reprocesoAbierto?.activo && <AvisoCicloAbierto reproceso={reprocesoAbierto} />}
+
             <p className="mb-3 text-xs text-muted-foreground">
               El caso vuelve a la etapa donde empieza el tramo que hay que rehacer. Lo que ya se
               había llenado queda archivado como historial, no se pierde. Se notifica a
@@ -308,7 +373,11 @@ export function ReprocesoBoton({
                 }
                 className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
               >
-                {isPending ? 'Abriendo…' : 'Abrir reproceso'}
+                {isPending
+                  ? 'Abriendo…'
+                  : reprocesoAbierto?.activo
+                    ? `Cerrar el ${reprocesoAbierto.ciclo ?? 1} y abrir el ${(reprocesoAbierto.ciclo ?? 1) + 1}`
+                    : 'Abrir reproceso'}
               </button>
             </div>
             </>

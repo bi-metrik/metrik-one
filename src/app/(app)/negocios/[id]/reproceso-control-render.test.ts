@@ -19,7 +19,7 @@ vi.mock('@/lib/actions/reproceso-actions', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 
-const { PanelErrorSinRetorno } = await import('./reproceso-control')
+const { PanelErrorSinRetorno, AvisoCicloAbierto, ReprocesoBoton } = await import('./reproceso-control')
 
 const html = (extra: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
@@ -64,5 +64,69 @@ describe('PanelErrorSinRetorno', () => {
     const h = html({ pending: true })
     expect(h).toContain('Registrando…')
     expect((h.match(/disabled=""/g) ?? []).length).toBe(2)
+  })
+})
+
+/**
+ * El botón "Reprocesar" YA NO desaparece con un reproceso abierto (2026-09-18).
+ *
+ * Esconderlo era el síntoma que abrió este frente: con 22 reprocesos vivos que nadie
+ * cerraba, casi todo caso que ya había tenido uno parecía no tener la opción de volver a
+ * reprocesarse (V0388). Una prueba del server action no fija esto; solo el render.
+ */
+describe('ReprocesoBoton con un ciclo abierto', () => {
+  const boton = (reprocesoAbierto: Record<string, unknown> | null, userRole = 'supervisor') =>
+    renderToStaticMarkup(
+      React.createElement(ReprocesoBoton, { negocioId: 'n1', reprocesoAbierto, userRole }),
+    )
+
+  it('se sigue dibujando aunque haya un reproceso activo', () => {
+    expect(boton({ activo: true, ciclo: 1, tipo: 'devolucion_dian' })).toContain('Reprocesar')
+  })
+
+  it('sin reproceso abierto se dibuja igual que siempre', () => {
+    expect(boton(null)).toContain('Reprocesar')
+  })
+
+  it('un rol no gerencial sigue sin verlo', () => {
+    expect(boton(null, 'operator')).toBe('')
+    expect(boton({ activo: true, ciclo: 1 }, 'operator')).toBe('')
+  })
+})
+
+describe('AvisoCicloAbierto', () => {
+  const aviso = (extra: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(
+      React.createElement(AvisoCicloAbierto, {
+        reproceso: {
+          activo: true,
+          ciclo: 1,
+          tipo: 'devolucion_dian',
+          abierto_at: '2026-09-15T13:40:53.568Z',
+          abierto_por_nombre: 'Deisy',
+          ...extra,
+        },
+      }),
+    )
+
+  it('nombra el ciclo abierto y de qué es', () => {
+    const h = aviso()
+    expect(h).toContain('Ya hay un reproceso abierto: ciclo 1')
+    expect(h).toContain('Devolución DIAN')
+  })
+
+  it('dice desde cuándo y quién lo abrió', () => {
+    const h = aviso()
+    expect(h).toContain('Deisy')
+    expect(h).toContain('2026')
+  })
+
+  it('advierte que confirmar CIERRA el abierto y abre el siguiente', () => {
+    expect(aviso()).toContain('el ciclo 1 se cierra y empieza el 2')
+    expect(aviso({ ciclo: 2 })).toContain('el ciclo 2 se cierra y empieza el 3')
+  })
+
+  it('aclara que el ciclo cerrado sigue contando en su mes', () => {
+    expect(aviso()).toContain('sigue contando en el indicador de calidad del mes en que')
   })
 })

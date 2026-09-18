@@ -68,6 +68,22 @@ export type ReprocesoMarca = {
   abierto_por: string | null
   abierto_por_nombre: string | null
   etapa_retorno: string | null
+  /**
+   * De dónde SALIÓ el caso al abrirse el reproceso. Es lo que permite saber después si el
+   * tramo ya se rehizo: el reproceso se cierra solo cuando el caso vuelve a alcanzar esta
+   * etapa (ver `cierre-reproceso.ts`). `etapa_retorno` dice a dónde volvió, que es otra
+   * pregunta — superarla no significa haber rehecho nada.
+   *
+   * Opcional porque los 22 reprocesos vivos al 2026-09-18 nacieron sin ella. Esos se
+   * cierran solo a mano hasta que el backfill se los escriba.
+   */
+  etapa_origen?: string | null
+  /**
+   * Marca de cierre. `cerrado_por: 'sistema'` es el cierre automático (el caso volvió a
+   * `etapa_origen`); un `staff.id` es una corrección a mano desde el banner.
+   */
+  cerrado_at?: string
+  cerrado_por?: string | null
 }
 
 const LABEL_TIPO: Record<TipoReproceso, string> = {
@@ -308,6 +324,11 @@ export async function reprocesarNegocio(
     abierto_por: staffId ?? null,
     abierto_por_nombre: nombreAutor,
     etapa_retorno: destino.nombre,
+    // De dónde SALE el caso. Sin este dato no hay forma de saber después si el tramo se
+    // rehizo, y el reproceso se queda abierto hasta que alguien pulse "Cerrar" — que es
+    // por lo que al 2026-09-18 había 22 vivos contra 5 cerrados. No se deriva de
+    // `etapa_retorno`: superar la etapa de retorno no significa haber rehecho el tramo.
+    etapa_origen: etapaActual.nombre,
   }
 
   const { error: updErr } = await db(supabase)
@@ -349,6 +370,30 @@ export async function reprocesarNegocio(
   // entre el 13 y el 27 de agosto. La politica estaba bien; el que se quedo
   // atras fue el escritor.
   const admin = createServiceClient()
+
+  // ── Cerrar el ciclo anterior antes de abrir el siguiente ──────────────────────
+  // Desde que el botón "Reprocesar" ya no se esconde con un reproceso abierto, esta
+  // llamada puede llegar con el ciclo N todavía vivo. El UPDATE de `negocios` de arriba
+  // ya pisó la marca previa con la nueva, así que el caso NUNCA queda sin marca; lo que
+  // se perdería es el `cerrado_at` del evento del ciclo N en `reproceso_eventos`, que es
+  // el insumo del 40% del bono y quedaría abierto para siempre.
+  //
+  // Se cierra con la fecha de apertura del ciclo nuevo: el ciclo N terminó exactamente
+  // cuando empezó el N+1. `abierto_at` y `atribuido_a` del evento viejo NO se tocan — el
+  // indicador cuenta por `abierto_at` y ese mes ya pasó.
+  if (marcaPrevia?.activo === true && typeof marcaPrevia.ciclo === 'number' && marcaPrevia.ciclo > 0) {
+    const { error: errCierrePrevio } = await db(admin)
+      .from('reproceso_eventos')
+      .update({ cerrado_at: archivadoAt })
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', negocioId)
+      .eq('ciclo', marcaPrevia.ciclo)
+      .is('cerrado_at', null)
+    if (errCierrePrevio) {
+      console.error('[reproceso] no se pudo cerrar el ciclo previo de', negocioId, errCierrePrevio)
+    }
+  }
+
   const atribuidoA = await resolverAtribucionReproceso(supabase, negocioId, input.tipo, {
     workspaceId,
     antesDe: archivadoAt,
@@ -545,9 +590,16 @@ export async function registrarErrorSinDevolver(
 }
 
 /**
- * Cierra la marca de reproceso: el tramo se rehizo y el caso vuelve a la normalidad.
- * El historial de ciclos y la traza en activity_log se conservan; lo único que
- * cambia es que el negocio deja de estar señalado como urgente.
+ * Cierra la marca a mano. Es una CORRECCIÓN, no un paso del proceso.
+ *
+ * El cierre normal lo hace solo el sistema cuando el caso vuelve a alcanzar su
+ * `etapa_origen` (`cierre-reproceso-servidor.ts`). Esta acción queda para lo que el
+ * automático no puede resolver: un reproceso abierto por error, uno que ya no aplica, o
+ * uno de los 22 vivos que nacieron sin `etapa_origen` y que el automático nunca va a tocar.
+ *
+ * El historial de ciclos y la traza en activity_log se conservan; el evento de calidad solo
+ * recibe su `cerrado_at`. El indicador cuenta por `abierto_at`, así que cerrar a mano NO
+ * borra el reproceso del mes en que ocurrió.
  */
 export async function cerrarReproceso(
   negocioId: string,
@@ -575,7 +627,15 @@ export async function cerrarReproceso(
 
   await db(supabase)
     .from('negocios')
-    .update({ metadata: { ...metadata, reproceso: { ...marca, activo: false, cerrado_at: cerradoAt } } })
+    .update({
+      metadata: {
+        ...metadata,
+        // `cerrado_por` con el staff que lo pulsó: este cierre es una CORRECCIÓN de un
+        // reproceso abierto por error, no un paso del proceso. El cierre del proceso lo
+        // hace solo el sistema al volver el caso a `etapa_origen` (`'sistema'`).
+        reproceso: { ...marca, activo: false, cerrado_at: cerradoAt, cerrado_por: staffId ?? null },
+      },
+    })
     .eq('id', negocioId)
 
   // El hecho ya quedo asentado al abrirlo; aqui solo se le pone fecha de cierre.
@@ -601,7 +661,9 @@ export async function cerrarReproceso(
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId,
-      contenido: `Reproceso ${marca.ciclo} cerrado — ${LABEL_TIPO[marca.tipo]}.`,
+      contenido:
+        `Reproceso ${marca.ciclo} cerrado a mano — ${LABEL_TIPO[marca.tipo]}. ` +
+        `Se abrió por error o ya no aplica; el caso no se movió.`,
     }, 'cerrarReproceso')
   }
 
