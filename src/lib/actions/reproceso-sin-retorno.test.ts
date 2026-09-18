@@ -149,15 +149,22 @@ const bloque = (id: string, orden: number) => ({
   id, negocio_id: 'neg-v0388', data: { dato: id }, estado: 'completo', bloque_configs: { etapa_id: `etapa-${orden}`, config_extra: {} },
 })
 
-function sembrar(etapaActualOrden: number, { conRouting = false }: { conRouting?: boolean } = {}) {
+function sembrar(
+  etapaActualOrden: number,
+  { conRouting = false, marcaPrevia = null }: { conRouting?: boolean; marcaPrevia?: Fila | null } = {},
+) {
   const r = (orden: number, extra: Fila = {}) =>
     conRouting && ROUTING_SOENA[orden] ? { ...extra, routing: ROUTING_SOENA[orden] } : extra
   tablas = {
     negocios: [{
       id: 'neg-v0388', workspace_id: 'ws-soena', estado: 'abierto', stage_actual: 'ejecucion',
-      etapa_actual_id: `etapa-${etapaActualOrden}`, linea_id: LINEA, metadata: { seccional: 'Bogotá' },
+      etapa_actual_id: `etapa-${etapaActualOrden}`, linea_id: LINEA,
+      metadata: { seccional: 'Bogotá', ...(marcaPrevia ? { reproceso: marcaPrevia } : {}) },
       codigo: 'V0388', nombre: 'Caso',
     }],
+    reproceso_eventos: [
+      { id: 'ev-c1', workspace_id: 'ws-soena', negocio_id: 'neg-v0388', ciclo: 1, cerrado_at: null },
+    ],
     etapas_negocio: [
       etapa(12, 'Entrega', r(12)),
       etapa(13, 'Generación', r(13)),
@@ -247,6 +254,86 @@ describe('reprocesarNegocio — el tramo se mide por el flujo', () => {
     const r = await reprocesarNegocio('neg-v0388', input)
     expect(r).toMatchObject({ ok: true, etapaNombre: 'Anexos' })
     expect(archivados()).toEqual(['b-anexos', 'b-envio', 'b-gen', 'b-seg'])
+  })
+})
+
+/**
+ * La marca guarda de dónde SALIÓ el caso (2026-09-18).
+ *
+ * Sin `etapa_origen` no hay forma de saber después si el tramo se rehizo, y el reproceso se
+ * queda abierto hasta que alguien pulse "Cerrar": es por lo que había 22 vivos contra 5
+ * cerrados. `etapa_retorno` no sirve para eso — dice a dónde volvió, no de dónde salió.
+ */
+describe('reprocesarNegocio — etapa_origen en la marca', () => {
+  const marcaEscrita = () =>
+    (escrituras.find((e) => e.tabla === 'negocios' && e.op === 'update')?.payload.metadata as Fila)
+      ?.reproceso as Fila | undefined
+
+  it('guarda la etapa de la que salió el caso, distinta de la de retorno', async () => {
+    sembrar(19, { conRouting: true })
+    await reprocesarNegocio('neg-v0388', input)
+    expect(marcaEscrita()).toMatchObject({ etapa_origen: 'Seguimiento', etapa_retorno: 'Cita' })
+  })
+
+  it('el origen es la etapa REAL, no la declarada ni la de retorno resuelta', async () => {
+    sembrar(14, { conRouting: true })
+    retornoResuelto = { orden: 18, motivo: 'no_aplica', rama: null }
+    await reprocesarNegocio('neg-v0388', input)
+    expect(marcaEscrita()).toMatchObject({ etapa_origen: 'Envío', etapa_retorno: 'Anexos' })
+  })
+})
+
+/**
+ * Abrir el ciclo N+1 sobre uno activo cierra el N en la MISMA operación.
+ *
+ * Desde que el botón "Reprocesar" ya no se esconde con un reproceso abierto, esta llamada
+ * puede llegar con el ciclo N vivo. El UPDATE de `negocios` ya pisa la marca previa, así que
+ * el caso nunca queda sin marca; lo que se perdería es el `cerrado_at` del evento del ciclo
+ * N en `reproceso_eventos`, que es el insumo del 40% del bono.
+ */
+describe('reprocesarNegocio — ciclo N+1 sobre uno activo', () => {
+  const MARCA_C1: Fila = {
+    activo: true, ciclo: 1, tipo: 'devolucion_dian', causa: 'error_propio',
+    detalle: 'primera', abierto_at: '2026-09-01T10:00:00.000Z',
+    abierto_por: 'staff-deisy', abierto_por_nombre: 'Deisy',
+    etapa_retorno: 'Cita', etapa_origen: 'Seguimiento',
+  }
+  const eventos = () => escrituras.filter((e) => e.tabla === 'reproceso_eventos')
+
+  it('cierra el evento del ciclo 1 y abre el 2, los dos con el cliente de servicio', async () => {
+    sembrar(19, { conRouting: true, marcaPrevia: MARCA_C1 })
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r).toMatchObject({ ok: true, ciclo: 2 })
+
+    const cierre = eventos().find((e) => e.op === 'update')
+    expect(cierre).toBeDefined()
+    expect(cierre!.cliente).toBe('servicio')
+    expect(cierre!.payload.cerrado_at).toEqual(expect.any(String))
+    expect(cierre!.ids).toEqual(['ev-c1'])
+
+    const alta = eventos().find((e) => e.op === 'insert')
+    expect(alta!.cliente).toBe('servicio')
+    expect(alta!.payload.ciclo).toBe(2)
+  })
+
+  it('la marca nueva pisa a la anterior: el caso nunca queda sin marca', async () => {
+    sembrar(19, { conRouting: true, marcaPrevia: MARCA_C1 })
+    await reprocesarNegocio('neg-v0388', input)
+    const marca = (escrituras.find((e) => e.tabla === 'negocios' && e.op === 'update')
+      ?.payload.metadata as Fila).reproceso as Fila
+    expect(marca).toMatchObject({ activo: true, ciclo: 2, etapa_origen: 'Seguimiento' })
+  })
+
+  it('sin ciclo previo activo no se cierra ningún evento', async () => {
+    sembrar(19, { conRouting: true })
+    await reprocesarNegocio('neg-v0388', input)
+    expect(eventos().filter((e) => e.op === 'update')).toHaveLength(0)
+  })
+
+  it('una marca previa YA cerrada tampoco se vuelve a cerrar', async () => {
+    sembrar(19, { conRouting: true, marcaPrevia: { ...MARCA_C1, activo: false } })
+    await reprocesarNegocio('neg-v0388', input)
+    expect(eventos().filter((e) => e.op === 'update')).toHaveLength(0)
   })
 })
 
