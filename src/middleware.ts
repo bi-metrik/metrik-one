@@ -59,18 +59,35 @@ export async function middleware(request: NextRequest) {
 
   // --- TENANT SUBDOMAIN ROUTES ---
   if (slug) {
-    supabaseResponse.headers.set('x-tenant-slug', slug)
+    // El slug del inquilino tiene que llegar al SERVER COMPONENT, y la unica via es una
+    // cabecera de REQUEST: en la funcion serverless que renderiza, el `host` y el
+    // `x-forwarded-host` NO traen el subdominio (por eso `/login` ya hacia este mismo
+    // rewrite). Puesto solo en la respuesta, como estaba, el servidor nunca lo veia: la
+    // pestaña no tenia forma de saber en que inquilino la abrieron, y el workspace se
+    // resolvia siempre desde `profiles.workspace_id`, que es global por usuario.
+    // Cero lecturas nuevas: el slug ya esta calculado arriba.
+    const requestHeaders = new Headers(request.headers)
+    requestHeaders.set('x-tenant-slug', slug)
+    const respuestaTenant = () => {
+      const res = withAuthCookies(
+        NextResponse.next({ request: { headers: requestHeaders } }),
+        supabaseResponse,
+      )
+      // Se conserva tambien en la respuesta: es lo que habia y sirve para diagnosticar
+      // desde el navegador de que inquilino vino un render.
+      res.headers.set('x-tenant-slug', slug)
+      return res
+    }
 
     // Rutas publicas permitidas en el subdomain sin sesion
-    if (pathname.startsWith('/auth/callback')) return supabaseResponse
+    if (pathname.startsWith('/auth/callback')) return respuestaTenant()
     if (pathname === '/login') {
       // Reenviar el slug del tenant al server component. En el edge (aqui) el host
       // es correcto; en la funcion serverless que renderiza /login,
       // headers().get('host')/x-forwarded-host NO traen el subdominio. Se pasa por
       // DOS vias: (1) rewrite con ?__ws=slug (URL que la funcion SIEMPRE recibe) y
-      // (2) header de request x-tenant-slug (belt-and-suspenders).
-      const requestHeaders = new Headers(request.headers)
-      requestHeaders.set('x-tenant-slug', slug)
+      // (2) header de request x-tenant-slug (belt-and-suspenders), el mismo
+      // `requestHeaders` que ahora usan todas las rutas del inquilino.
       const rwUrl = request.nextUrl.clone()
       rwUrl.searchParams.set('__ws', slug)
       return withAuthCookies(
@@ -78,25 +95,25 @@ export async function middleware(request: NextRequest) {
         supabaseResponse
       )
     }
-    if (pathname === '/sin-espacio') return supabaseResponse
+    if (pathname === '/sin-espacio') return respuestaTenant()
     // Signup cerrado: registro / onboarding / invitaciones ya no existen -> al login
     if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
       return withAuthCookies(NextResponse.redirect(new URL('/login', request.url)), supabaseResponse)
     }
     // Certificacion publica via QR (read-only, sin login). La pagina valida el
     // flag del workspace y solo expone lotes estado='publicado' via service-role.
-    if (pathname.startsWith('/cert/')) return supabaseResponse
-    if (pathname.startsWith('/c/')) return supabaseResponse
+    if (pathname.startsWith('/cert/')) return respuestaTenant()
+    if (pathname.startsWith('/c/')) return respuestaTenant()
     // Muro proyectable (televisor del piso, sin login). La pagina valida el
     // modulo, el opt-in config_extra.muro_publico y el token de la URL, y solo
     // expone agregados sin dinero ni identificador de cliente.
-    if (pathname.startsWith('/muro/')) return supabaseResponse
+    if (pathname.startsWith('/muro/')) return respuestaTenant()
 
     // Formulario publico de vinculacion de contrapartes (CCBF). La contraparte
     // NO tiene usuario en ONE: la credencial es el token del enlace, que la
     // pagina valida contra Valida. La marca que se pinta sale del workspace del
     // propio expediente, no de este subdominio.
-    if (pathname.startsWith('/vinculacion/')) return supabaseResponse
+    if (pathname.startsWith('/vinculacion/')) return respuestaTenant()
 
     // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
     // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por
@@ -141,7 +158,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    return supabaseResponse
+    return respuestaTenant()
   }
 
   // --- MARKETING DOMAIN (no subdomain) ---

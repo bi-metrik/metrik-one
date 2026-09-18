@@ -8,27 +8,10 @@ import {
   type PlatformAdminState,
 } from '@/lib/actions/platform-admin'
 import { agruparWorkspaces } from '@/lib/workspace/grupo'
-
 // Redirige al subdomain target via magic link cuando se proporciona (caso normal
-// — siembra sesion en subdomain destino) o directo (fallback local/dev).
-function redirectAfterSwitch(targetSlug: string, actionLink: string | null | undefined) {
-  if (typeof window === 'undefined') return
-  if (actionLink) {
-    window.location.href = actionLink
-    return
-  }
-  // Fallback (dev local sin subdomain routing real, o si generateLink falla)
-  const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co'
-  if (
-    window.location.hostname === 'localhost' ||
-    window.location.hostname.endsWith('.localhost')
-  ) {
-    window.location.reload()
-    return
-  }
-  const protocol = window.location.protocol
-  window.location.href = `${protocol}//${targetSlug}.${baseDomain}/`
-}
+// - siembra sesion en subdomain destino) o directo (fallback local/dev). Se mudo a
+// `lib/workspace` para que la pantalla de pestaña desincronizada use el mismo camino.
+import { redirectAfterSwitch } from '@/lib/workspace/redirigir-tras-switch'
 
 /**
  * El desplegable de workspaces, usado por las DOS ramas de la barra.
