@@ -30,10 +30,11 @@ Vive en `derivarEquipajeDeLosIconos` (`src/lib/ai/extraer-ranura.ts`).
 ⚠️ **Solo se cruza con EXACTAMENTE tres iconos.** Con uno o dos la posición no dice cuál
 es cuál y manda lo que respondió el modelo.
 
-⚠️ **Lo que sigue sin cuadrar:** en la BASIC, `equipaje_mano` sale `true` y el segundo
-icono es gris. Las dos respuestas del modelo coinciden ahí, así que el cruce no lo
-atrapa. Cumple el criterio literal del brief y contradice a Alejandra («solo lleva
-mochila»). `equipaje_bodega`, que era el defecto reportado, sí quedó en `false` y estable.
+✅ **CERRADO el 2026-09-18 por [[equipaje-por-iconos]] (#792).** Lo que quedaba sin cuadrar
+era esto: en la BASIC, `equipaje_mano` salía `true` con el segundo icono gris, y las dos
+respuestas del modelo coincidían ahí, así que el cruce no lo atrapaba. **La causa no era el
+cruce: el modelo describía «a_color» un icono gris oscuro de 20 px.** Se arregló dándole más
+píxeles (la captura se amplía antes de mandarla), no con otra redacción.
 
 **How to apply:** para leer un ESTADO VISUAL de una imagen (color, resaltado, tachado),
 no preguntar por la conclusión: pedir la descripción y cruzarla. Y contar los píxeles
