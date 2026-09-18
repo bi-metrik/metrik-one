@@ -6,6 +6,10 @@
 - [SOENA pipeline VE 2026-04-05](project_soena_ve_pipeline.md) — etapas, gates, custom fields y estado_ve del flujo VE
 - ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
 - ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — #787 mergeado; backfill de 21 SIN aplicar, V0244 sin traza; se mide por FLUJO, no por `orden`
+- ⚠️⚠️ [El bloque declara qué documento espera](project_documento_esperado_bloque.md) — config de SOENA SIN aplicar; el veredicto es ASIMÉTRICO a propósito
+- ⚠️ [«No aplica» por línea](project_no_aplica_por_linea.md) — SIN aplicar; la pantalla muda es la causa del dato inventado; avisa, no cierra
+- [Origen de la seccional](project_seccional_origen.md) — #779 mergeado; sin llave = `documento`, así que el RUT corrige solo lo viejo
+- [Seccional que contradice al RUT](project_seccional_contradice_el_rut.md) — barrido 2026-09-17: V0109 y V0400; V0382 y V0253 son extracción, no contradicción
 - ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza); overlay, flatten, casilla 12
 - [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — solo corre en producción (credenciales en Vercel)
 - ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — cambiar qué emite el cron dispara cuentas reales
