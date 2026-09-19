@@ -5,8 +5,27 @@ import { extractSlug } from '@/lib/tenant/extract-slug'
 import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 import { destinoSiBloqueada, rutaGateada } from '@/lib/modulos/gate'
 import { leerPerfilDeAcceso, type ClientePerfil } from '@/lib/modulos/perfil-de-acceso'
+import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
 
 const IS_DEV = process.env.NODE_ENV === 'development'
+
+/**
+ * ¿Esta petición es una NAVEGACIÓN? Solo a esas se las manda al aviso de pestaña
+ * desincronizada.
+ *
+ * Un server action es un POST a la misma URL de la pantalla: redirigirlo perdería la
+ * escritura sin decir nada. A esos los corta `getWorkspace`, que devuelve `workspaceId: null`
+ * (ver `lib/tenant/desincronizacion.ts`) y es el guard que impide que el dato caiga en el
+ * inquilino equivocado. `/api` queda fuera por lo mismo: un cliente que espera JSON no sabe
+ * qué hacer con un 307 a una pantalla.
+ */
+function esNavegacion(request: NextRequest): boolean {
+  const metodo = request.method.toUpperCase()
+  if (metodo !== 'GET' && metodo !== 'HEAD') return false
+  if (request.headers.get('next-action')) return false
+  if (request.nextUrl.pathname.startsWith('/api/')) return false
+  return true
+}
 
 /**
  * Propaga las cookies de sesion refrescadas (las que `updateSession` escribio en
@@ -140,15 +159,34 @@ export async function middleware(request: NextRequest) {
     // `/suscripcion-suspendida` queda fuera del guard: es a donde manda el layout de
     // la app cuando el workspace está suspendido, y sin esta excepción un contador
     // rebotaría entre /revision (layout → suspendida) y aquí (guard → /revision).
+    // `/pestana-desincronizada` queda fuera por la misma razón: el guard de abajo manda ahí,
+    // y sin esta excepción un contador rebotaría entre esa pantalla y /revision para siempre.
     const aplicaGuardContador =
       pathname !== '/revision' && !pathname.startsWith('/revision/') && !pathname.startsWith('/auth/') &&
-      pathname !== '/suscripcion-suspendida'
+      pathname !== '/suscripcion-suspendida' && pathname !== RUTA_DESINCRONIZADA
     // Gate por módulo: una pantalla de un módulo apagado no abre (ver `lib/modulos/gate.ts`,
     // que explica por qué vive aquí y no en el layout). Comparte la lectura del perfil con
     // el guard del contador: una sola ida a la base, como antes.
     const aplicaGateModulo = rutaGateada(pathname)
     if (aplicaGuardContador || aplicaGateModulo) {
       const perfil = await leerPerfilDeAcceso(supabase as unknown as ClientePerfil, user.id, aplicaGateModulo)
+      // ── La pestaña quedó en otro espacio de trabajo ──────────────────────
+      // Va PRIMERO y va AQUÍ, no en `(app)/layout.tsx`: en una navegación del lado del
+      // cliente Next solo renderiza los segmentos que cambian, así que el layout NO vuelve a
+      // correr y su guard no se entera (medido el 2026-09-19: de /negocios a /movimientos por
+      // `<Link>` la pantalla siguió pintando el inquilino viejo, sin un solo aviso). El
+      // middleware, en cambio, corre en toda navegación.
+      //
+      // Cero consultas nuevas: el slug de la sesión viaja en el MISMO perfil que ya leían el
+      // guard del contador y el gate por módulo, y el de la pestaña lo calculó `extractSlug`.
+      // Inerte sin cabecera (dominio base, previews) y si el slug de la sesión no se pudo
+      // leer, por las razones de `lib/tenant/desincronizacion.ts`.
+      if (esNavegacion(request) && hayDesincronizacionDeTenant(slug, perfil.slugWorkspace)) {
+        return withAuthCookies(
+          NextResponse.redirect(new URL(RUTA_DESINCRONIZADA, request.url)),
+          supabaseResponse,
+        )
+      }
       if (aplicaGuardContador && perfil.role === 'contador') {
         return withAuthCookies(NextResponse.redirect(new URL('/revision', request.url)), supabaseResponse)
       }

@@ -52,8 +52,8 @@ let perfil: {
   role: string
   full_name: string
   platform_admin: boolean
-  /** El slug del workspace viaja EMBEBIDO en la misma lectura del perfil. */
-  workspaces: { slug: string } | null
+  /** El slug y el nombre del workspace viajan EMBEBIDOS en la misma lectura del perfil. */
+  workspaces: { slug: string; name: string } | null
 }
 /** Lo que el middleware inyecta como `x-tenant-slug` en las cabeceras de request. */
 let cabeceraTenant: string | null
@@ -156,7 +156,7 @@ beforeEach(() => {
     role: 'owner',
     full_name: 'Prueba',
     platform_admin: false,
-    workspaces: { slug: 'soena' },
+    workspaces: { slug: 'soena', name: 'SOENA' },
   }
   cabeceraTenant = null
   staffRows = []
@@ -278,6 +278,11 @@ describe('getWorkspace — la pestaña quedo en otro inquilino', () => {
     if (r.error === ERROR_DESINCRONIZADO) {
       expect(r.slugPestana).toBe('metrik')
       expect(r.slugSesion).toBe('soena')
+      // Lo que la pantalla del aviso necesita y no puede volver a consultar: el workspace
+      // del inquilino de la pestaña no es el de la sesion, asi que su RLS no lo alcanza.
+      // Si esto se cae, el aviso muestra el slug en minuscula y pierde el boton de volver.
+      expect(r.nombreSesion).toBe('SOENA')
+      expect(r.platformAdmin).toBe(false)
     }
     // Corta antes del auto-alta de staff: una pestaña que no va a escribir nada tampoco
     // tiene por que crear filas.

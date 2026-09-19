@@ -13,6 +13,18 @@
  * tener dos en paralelo. Lo único que logra es que la pestaña desincronizada no pinte ni
  * escriba EN SILENCIO.
  *
+ * Dónde se hace cumplir, y por qué son dos sitios distintos:
+ *
+ *  - **La NAVEGACIÓN la corta el middleware** (`src/middleware.ts`), que la manda a
+ *    `RUTA_DESINCRONIZADA`. Tiene que ser ahí y no en `(app)/layout.tsx`: en una navegación
+ *    del lado del cliente Next solo renderiza los segmentos que cambian, así que el layout no
+ *    vuelve a correr. Medido el 2026-09-19 con un clic real en el menú: la pantalla siguió
+ *    pintando el inquilino viejo sin un solo aviso, y el guard del layout solo existía cuando
+ *    alguien recargaba.
+ *  - **La ESCRITURA la corta `getWorkspace`** devolviendo `workspaceId: null` (los ~111
+ *    consumidores hacen `if (!workspaceId) return …`). Un server action es un POST: a esos no
+ *    se los redirige, porque un redirect perdería la escritura sin decir nada.
+ *
  * Tres reglas, y las tres importan:
  *
  *  - **Sin cabecera de inquilino el guard es INERTE.** El dominio de marketing, los
@@ -30,6 +42,13 @@
 
 /** Valor de `error` con el que `getWorkspace` declara la desincronización. */
 export const ERROR_DESINCRONIZADO = 'workspace-desincronizado'
+
+/**
+ * La pantalla del aviso. Vive FUERA de `(app)` a propósito: el middleware manda aquí la
+ * navegación, así que esta ruta tiene que poder pintarse sin pasar por el layout del
+ * inquilino (que es el que está desincronizado) y sin volver a caer en el guard.
+ */
+export const RUTA_DESINCRONIZADA = '/pestana-desincronizada'
 
 function normalizar(slug: string): string {
   return slug.trim().toLowerCase()

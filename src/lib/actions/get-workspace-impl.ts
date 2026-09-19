@@ -116,7 +116,7 @@ async function getWorkspaceImpl() {
     // PostgREST responde PGRST201 "Could not embed because more than one relationship
     // was found" (medido contra produccion el 2026-09-18).
     .select(
-      'workspace_id, role, full_name, platform_admin, workspaces!profiles_workspace_id_fkey(slug)',
+      'workspace_id, role, full_name, platform_admin, workspaces!profiles_workspace_id_fkey(slug, name)',
     )
     .eq('id', user.id)
     .single()
@@ -139,9 +139,14 @@ async function getWorkspaceImpl() {
   // Inerte sin cabecera: dominio de marketing, previews de Vercel y `localhost` no
   // tienen subdominio de inquilino y se comportan exactamente igual que antes.
   const slugPestana = (await headers()).get('x-tenant-slug')
-  const slugSesion =
-    (profile as { workspaces?: { slug?: string | null } | null }).workspaces?.slug ?? null
+  const workspaceDeLaSesion = (profile as {
+    workspaces?: { slug?: string | null; name?: string | null } | null
+  }).workspaces
+  const slugSesion = workspaceDeLaSesion?.slug ?? null
   if (hayDesincronizacionDeTenant(slugPestana, slugSesion)) {
+    // El nombre y el `platform_admin` salen del MISMO viaje: los necesita la pantalla del
+    // aviso (`/pestana-desincronizada`), que no puede leer el workspace del inquilino de la
+    // pestaña porque su RLS ya apunta al de la sesión.
     return {
       supabase,
       workspaceId: null,
@@ -154,6 +159,8 @@ async function getWorkspaceImpl() {
       error: ERROR_DESINCRONIZADO,
       slugPestana: slugPestana as string,
       slugSesion: slugSesion as string,
+      nombreSesion: workspaceDeLaSesion?.name ?? slugSesion ?? '',
+      platformAdmin: (profile as { platform_admin?: boolean }).platform_admin === true,
     }
   }
 
