@@ -21,6 +21,10 @@ let cobros: Fila[]
 let negocios: Fila[]
 let contactos: Fila[]
 let bloquesRut: Fila[]
+/** Líneas del workspace. Solo las que declaran `recibo_por_concepto` cambian algo. */
+let lineas: Fila[]
+/** `v_cobro_valor`: el reparto canónico. Vacío = el panel ni lo consulta. */
+let reparto: Fila[]
 
 vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({ workspaceId: WS, staffId: 's1', role: 'admin', areas: ['financiera'] }),
@@ -46,6 +50,8 @@ vi.mock('@/lib/supabase/server', () => ({
       const fuente = tabla === 'cobros' ? () => cobros
         : tabla === 'negocios' ? () => negocios
         : tabla === 'negocio_bloques' ? () => bloquesRut
+        : tabla === 'lineas_negocio' ? () => lineas
+        : tabla === 'v_cobro_valor' ? () => reparto
         : () => contactos
       const chain = {
         select: (cols: string) => { selects[tabla] = cols; return chain },
@@ -71,10 +77,13 @@ beforeEach(() => {
   selects = {}
   negocios = [{
     id: 'neg-1', codigo: 'V0451', nombre: 'Cliente Uno', contacto_id: 'ct-1',
-    carpeta_url: 'https://drive/x',
+    carpeta_url: 'https://drive/x', linea_id: 'lin-1',
     metadata: { siigo_cliente: { siigo_id: 'cli-1', identificacion: '1110584384' } },
   }]
   bloquesRut = []
+  // La línea NO declara `recibo_por_concepto`: es el estado de toda la base hoy.
+  lineas = [{ id: 'lin-1', config_extra: { siigo: { recibo_concepto: 'Dinero recibido del cliente' } } }]
+  reparto = []
   contactos = [{ id: 'ct-1', nombre: 'José Noel', email: 'jose@ejemplo.com' }]
   cobros = [
     {
@@ -178,6 +187,123 @@ describe('getControlRecibos — el control es por pago, no por negocio', () => {
     expect(data!.totales.pendientes).toBe(1)
     expect(data!.totales.emitibles).toBe(1)
     expect(data!.totales.valor_pendiente).toBe(637500)
+  })
+})
+
+/**
+ * El estado de un pago deja de ser binario.
+ *
+ * EL CASO QUE IMPORTA: un cobro MIXTO al que se le emitió el recibo del honorario y no
+ * el de la plata de terceros. Tiene marca, así que con el criterio anterior
+ * (`siigo_recibo.numero` a secas) salía `con_recibo` y desaparecía de la lista sobre la
+ * que hay que actuar — el panel volvería a esconder trabajo, que es justo lo que el
+ * PR #581 corrigió. Medido en producción el 2026-09-19: 63 de los 425 cobros vivos de
+ * SOENA son mixtos.
+ *
+ * SE VIERON FALLAR contra el criterio anterior:
+ *   - "un mixto a medias se ve PENDIENTE"          → salía `con_recibo`
+ *   - "la fila dice qué componente falta"          → no existía el dato
+ *   - "los DOS recibos se listan"                  → solo el primero
+ */
+describe('getControlRecibos — un pago mixto a medias sigue pendiente', () => {
+  /** Como queda una línea que sí declara recibo por concepto. Los ids son ejemplos. */
+  const LINEA_POR_CONCEPTO = {
+    id: 'lin-1',
+    config_extra: {
+      siigo: {
+        recibo_concepto: 'Dinero recibido del cliente',
+        recibo_por_concepto: {
+          honorario: { document_id: 101, concepto: 'Honorarios de asesoría' },
+          pasante: { document_id: 202, concepto: 'Recaudo para pago de tarifa UPME' },
+        },
+      },
+    },
+  }
+
+  /** c1 es mixto: $701.812 = $400.000 de honorario + $301.812 de terceros. */
+  const REPARTO_MIXTO = {
+    cobro_id: 'c1', a_tramo1: 400_000, a_tramo2: 0, a_tarifa: 301_812, excedente: 0,
+  }
+
+  beforeEach(() => {
+    lineas = [LINEA_POR_CONCEPTO]
+    reparto = [REPARTO_MIXTO]
+    // Solo salió el del honorario: el de terceros falló y hay que reintentarlo.
+    cobros[0].siigo_recibo = [
+      { numero: 'RC-1-70', archivo_url: 'https://drive/rc70', componente: 'honorario' },
+    ]
+  })
+
+  it('un mixto con UN recibo de DOS se ve PENDIENTE, no resuelto', async () => {
+    const { data } = await getControlRecibos()
+
+    const mixto = data!.pagos.find(p => p.cobro_id === 'c1')!
+    expect(mixto.estado).toBe('pendiente')
+    expect(data!.totales.con_recibo).toBe(0)
+  })
+
+  it('la fila dice QUÉ componente falta, para que el pendiente se pueda resolver', async () => {
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c1')!.componentes_pendientes).toEqual(['pasante'])
+  })
+
+  it('con los DOS emitidos queda resuelto, y los dos se listan', async () => {
+    cobros[0].siigo_recibo = [
+      { numero: 'RC-1-70', archivo_url: 'https://drive/rc70', componente: 'honorario' },
+      { numero: 'RC-9-3', archivo_url: 'https://drive/rc93', componente: 'pasante' },
+    ]
+    const { data } = await getControlRecibos()
+
+    const mixto = data!.pagos.find(p => p.cobro_id === 'c1')!
+    expect(mixto.estado).toBe('con_recibo')
+    expect(mixto.recibos.map(r => r.numero)).toEqual(['RC-1-70', 'RC-9-3'])
+    expect(mixto.componentes_pendientes).toEqual([])
+  })
+
+  it('un cobro PURO no queda esperando un componente que no tiene', async () => {
+    // c2 no tiene fila de reparto en este escenario: sin plata en la otra bolsa, un
+    // solo recibo lo resuelve. Exigirle dos lo dejaría pendiente para siempre.
+    reparto = [REPARTO_MIXTO, { cobro_id: 'c2', a_tramo1: 637_500, a_tramo2: 0, a_tarifa: 0, excedente: 0 }]
+    cobros[1].siigo_recibo = [{ numero: 'RC-1-71', archivo_url: null, componente: 'honorario' }]
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c2')!.estado).toBe('con_recibo')
+  })
+
+  // ── Lo que protege a las 17 marcas ya escritas ──
+  it('una marca VIEJA (objeto, sin componente) sigue contando como resuelta', async () => {
+    // 16 en `soena` y 1 en `metrik`, medidas el 2026-09-19. Acusan el TOTAL: no se sabe
+    // qué componente respaldan, y re-emitir consume numeración que no se deshace. Los 3
+    // mixtos que ya tienen recibo se quedan como están (decisión de Mauricio).
+    cobros[0].siigo_recibo = { numero: 'RC-1-65', archivo_url: 'https://drive/rc65' }
+    const { data } = await getControlRecibos()
+
+    const mixto = data!.pagos.find(p => p.cobro_id === 'c1')!
+    expect(mixto.estado).toBe('con_recibo')
+    expect(mixto.componentes_pendientes).toEqual([])
+    expect(mixto.recibo_numero).toBe('RC-1-65')
+  })
+})
+
+/**
+ * Control de compatibilidad: una línea sin `recibo_por_concepto` no paga nada.
+ *
+ * Es lo que protege a `metrik`, a `valida` y a SOENA mientras el comprobante de la
+ * plata de terceros no exista.
+ */
+describe('getControlRecibos — sin recibo por concepto nada cambia', () => {
+  it('no consulta el reparto: ninguna línea lo necesita', async () => {
+    await getControlRecibos()
+
+    expect(selects['v_cobro_valor']).toBeUndefined()
+  })
+
+  it('un solo recibo resuelve el pago, aunque el cobro sea mixto', async () => {
+    reparto = [{ cobro_id: 'c1', a_tramo1: 400_000, a_tramo2: 0, a_tarifa: 301_812, excedente: 0 }]
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c1')!.estado).toBe('con_recibo')
   })
 })
 

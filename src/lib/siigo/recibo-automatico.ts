@@ -25,6 +25,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { emitirReciboDeCobro } from './recibos'
+import { leerReciboPorConcepto, tieneRecibo } from './recibo-componentes'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any {
@@ -49,7 +50,10 @@ export async function emitirReciboAutomatico(workspaceId: string, cobroId: strin
       .maybeSingle()
 
     if (!cobro?.negocio_id) return
-    if (cobro.siigo_recibo || cobro.anulado_at) return
+    // ⚠️ `tieneRecibo`, no la verdad del valor: desde el recibo por concepto la marca
+    // puede ser una LISTA, y una lista vacía es `truthy`. Con el `if (cobro.siigo_recibo)`
+    // de antes, un cobro cuya lista quedó vacía nunca volvería a emitir.
+    if (tieneRecibo(cobro.siigo_recibo) || cobro.anulado_at) return
 
     const { data: neg } = await db(svc)
       .from('negocios').select('linea_id').eq('id', cobro.negocio_id).maybeSingle()
@@ -69,6 +73,7 @@ export async function emitirReciboAutomatico(workspaceId: string, cobroId: strin
     const r = await emitirReciboDeCobro(workspaceId, cobroId, null, {
       bloqueReciboSlug: cfgSiigo.bloque_recibo_slug,
       concepto: cfgSiigo.recibo_concepto,
+      porConcepto: leerReciboPorConcepto(cfgSiigo),
       avisarAlCliente: true,
     })
 

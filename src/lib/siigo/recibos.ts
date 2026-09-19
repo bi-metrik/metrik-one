@@ -46,6 +46,19 @@ import { borradorRecibo, SUCURSAL_POR_DEFECTO, type BorradorRecibo } from './map
 import { asegurarClienteSiigo } from './clientes'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { renderReciboCaja } from '@/lib/pdf/pdf-render-client'
+import {
+  componentesEmitidos,
+  hayReciboPorElTotal,
+  planDeEmision,
+  primerRecibo,
+  recibosDelCobro,
+  repartoDeCobro,
+  tieneRecibo,
+  type ComponenteAEmitir,
+  type ConfigReciboPorConcepto,
+  type FilaReparto,
+  type MarcaRecibo,
+} from './recibo-componentes'
 
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
 const ESPERA_429_EMISION_MS = 30_000
@@ -71,38 +84,26 @@ function esPeriodoCerrado(e: unknown): boolean {
   return hablaDeFecha && hablaDePeriodo
 }
 
-/** Lo que queda escrito en el negocio cuando el recibo se emite. */
-export interface MarcaRecibo {
-  numero: string
-  siigo_id: string
-  valor: number
-  archivo_url: string | null
-  /**
-   * Id del PDF en Drive.
-   *
-   * Desde el 2026-09-16 el archivo NACE CERRADO (ya no se abre a cualquiera con el
-   * enlace), así que `archivo_url` sirve de referencia pero no para abrirlo: lo abre
-   * `/api/archivos/cobro`, que baja los bytes con la cuenta de servicio y necesita el id.
-   * Las 7 marcas anteriores no lo traen y su id se saca del enlace (`idDeArchivoDrive`).
-   */
-  drive_file_id?: string | null
-  at: string
-  por: string | null
-  /** Fecha del DOCUMENTO en Siigo. Puede no ser la del pago: ver `fecha_motivo`. */
-  fecha?: string
-  /** Cuándo entró la plata. Es la que el cliente reconoce. */
-  fecha_pago?: string
-  /**
-   * Por qué el documento no lleva la fecha del pago.
-   *
-   * Se guarda en vez de confiar en que alguien recuerde: cuando alguien pregunte por
-   * qué un recibo tiene dos fechas, la respuesta está en el dato (Mauricio, 2026-09-07).
-   */
-  fecha_motivo?: string | null
-}
+/**
+ * Lo que queda escrito en el cobro cuando el recibo se emite.
+ *
+ * La definición vive en `./recibo-componentes` (módulo puro, que también lo importa el
+ * navegador) y se re-exporta aquí porque este archivo era su casa histórica.
+ */
+export type { MarcaRecibo }
 
 export type ResultadoRecibo =
-  | { ok: true; numero: string; siigo_id: string; valor: number; archivada: boolean }
+  | {
+      ok: true
+      /** El primero emitido. Se conserva para los llamadores de una sola cifra. */
+      numero: string
+      siigo_id: string
+      /** Suma de lo emitido: con un solo componente es el valor de siempre. */
+      valor: number
+      archivada: boolean
+      /** Todos los recibos que esta llamada emitió, en orden de imputación. */
+      recibos: Array<{ numero: string; siigo_id: string; valor: number }>
+    }
   | { ok: false; motivo: 'ya_emitido'; numero: string }
   | { ok: false; motivo: 'sin_valor' }
   | { ok: false; motivo: 'anulado' }
@@ -141,6 +142,13 @@ export async function recibosDelClienteEnSiigo(
   cfg: SiigoConfig,
   maxEspera429Ms = 0,
   valor?: number,
+  /**
+   * Tipo de comprobante contra el que se pregunta. Sin él, el de la configuración.
+   *
+   * Con recibo por concepto cada componente sale con SU comprobante, así que preguntar
+   * siempre por el de la configuración buscaría el duplicado en el cajón equivocado.
+   */
+  documentId?: number,
 ): Promise<Array<{ numero: string; fecha: string; valor: number }>> {
   try {
     const r = await siigoRequest<{
@@ -148,7 +156,7 @@ export async function recibosDelClienteEnSiigo(
         customer?: { identification?: string } }>
     }>(
       workspaceId,
-      `/v1/vouchers?document_id=${cfg.reciboDocumentId}&page_size=100`,
+      `/v1/vouchers?document_id=${documentId ?? cfg.reciboDocumentId}&page_size=100`,
       { maxEspera429Ms },
     )
     return (r.results ?? [])
@@ -174,6 +182,14 @@ export async function recibosDelClienteEnSiigo(
  * lo corrige a mano, que sigue siendo un camino válido: **los casos del cargue masivo no
  * tienen comprobante** (nacieron antes de que existiera ese punto de control), así que la
  * captura manual no es una excepción rara.
+ *
+ * ── Uno por el total, o uno por concepto ───────────────────────────────────
+ *
+ * Si la línea declara `recibo_por_concepto` (opción `porConcepto`), se emite **un recibo
+ * por cada componente con valor mayor a cero**: el honorario con su comprobante y la
+ * plata de terceros con el suyo. Sin esa declaración, el camino es exactamente el de
+ * siempre — un recibo por el total, con `reciboDocumentId`, y la marca como objeto.
+ * Ver `./recibo-componentes` para por qué la compatibilidad importa.
  */
 export async function emitirReciboDeCobro(
   workspaceId: string,
@@ -190,14 +206,17 @@ export async function emitirReciboDeCobro(
     valorPagado?: number
     /** Pedir el aviso al cliente después de archivar. */
     avisarAlCliente?: boolean
+    /** `lineas_negocio.config_extra.siigo.recibo_por_concepto`. Ausente = como hoy. */
+    porConcepto?: ConfigReciboPorConcepto | null
   } = {},
 ): Promise<ResultadoRecibo> {
   const svc = createServiceClient()
+  const porConcepto = opciones.porConcepto ?? null
 
   // ── 0. El cobro, que es de donde cuelga todo ──
   const { data: cobroRaw, error: errCobro } = await db(svc)
     .from('cobros')
-    .select('id, negocio_id, monto, fecha, siigo_recibo, anulado_at')
+    .select('id, negocio_id, monto, fecha, tipo_cobro, siigo_recibo, anulado_at')
     .eq('id', cobroId)
     .eq('workspace_id', workspaceId)
     .single()
@@ -207,7 +226,8 @@ export async function emitirReciboDeCobro(
     negocio_id: string | null
     monto: number | null
     fecha: string | null
-    siigo_recibo: MarcaRecibo | null
+    tipo_cobro: string | null
+    siigo_recibo: unknown
     anulado_at: string | null
   }
 
@@ -217,7 +237,16 @@ export async function emitirReciboDeCobro(
   // ── 1. ¿Este COBRO ya tiene recibo? ──
   // La marca por cobro es lo que reemplazó a `negocios.metadata.siigo_recibo`: con la
   // marca por negocio, el segundo pago de un mismo caso nunca habría emitido.
-  if (cobro.siigo_recibo?.numero) return { ok: false, motivo: 'ya_emitido', numero: cobro.siigo_recibo.numero }
+  //
+  // Sin componentes declarados basta con que exista uno, que es el criterio de siempre.
+  // Con componentes, una marca por el TOTAL también cubre el cobro entero: no se sabe
+  // qué concepto acusa, y re-emitir consume numeración que no se deshace.
+  const yaCubierto = porConcepto
+    ? hayReciboPorElTotal(cobro.siigo_recibo)
+    : tieneRecibo(cobro.siigo_recibo)
+  if (yaCubierto) {
+    return { ok: false, motivo: 'ya_emitido', numero: primerRecibo(cobro.siigo_recibo)?.numero ?? '' }
+  }
 
   // Un cobro anulado no documenta plata recibida: emitir por él consumiría numeración
   // para acusar algo que se deshizo.
@@ -228,10 +257,14 @@ export async function emitirReciboDeCobro(
   const valorPagado = opciones.valorPagado ?? Number(cobro.monto ?? 0)
   if (!Number.isFinite(valorPagado) || valorPagado <= 0) return { ok: false, motivo: 'sin_valor' }
 
-  // El concepto lo declara la línea. Sin él no se emite: un documento contable que no
-  // se puede corregir no sale con un texto por defecto inventado aquí.
-  const concepto = opciones.concepto?.trim()
-  if (!concepto) return { ok: false, motivo: 'faltan_datos', faltantes: ['concepto del recibo (config de la línea)'] }
+  // ── 2b. Qué recibos hay que emitir ──
+  const plan = await planParaEsteCobro(svc, workspaceId, cobroId, cobro, valorPagado, opciones, porConcepto)
+  if (!plan.ok) return plan.error
+  const componentes = plan.componentes
+  if (componentes.length === 0) {
+    // Todos los componentes ya tienen su recibo: es la idempotencia, no un fallo.
+    return { ok: false, motivo: 'ya_emitido', numero: primerRecibo(cobro.siigo_recibo)?.numero ?? '' }
+  }
 
   const { data: negRaw, error: errNeg } = await db(svc)
     .from('negocios')
@@ -256,162 +289,351 @@ export async function emitirReciboDeCobro(
   // Si no se pudo releer el RUT se cae al del negocio, que es peor pero no vacío.
   const nombreParaDocumento = cliente.nombre ?? negocio.nombre
 
+  // ── La fecha es la del COBRO, no la de hoy ──
+  // Decisión de Mauricio (2026-09-07). El recibo acusa plata que YA entró: fecharlo
+  // hoy diría que entró hoy. Medido el 2026-09-04 sobre los 48 pagos sin recibo y sin
+  // facturar, el más viejo era del 17 de febrero: con la fecha de emisión, ese cliente
+  // habría recibido un "recibimos tu pago" siete meses tarde y Siigo habría registrado
+  // en septiembre plata de febrero.
+  const fechaPago = cobro.fecha ?? hoyISO()
+
+  // Siigo resuelve el tercero por identificación MÁS sucursal: un cliente que vive
+  // en la sucursal 1 no existe si se le pregunta por la 0, y responde
+  // `The customer doesn't exist`, que suena a otra cosa. Sin dato conocido va la
+  // principal, igual que siempre. Se resuelve UNA vez porque el reintento por
+  // periodo cerrado vuelve a armar el borrador: dos copias se desincronizarían y
+  // el reintento perdería la sucursal justo en los casos más viejos.
+  const sucursalDelCliente = cliente.branch_office ?? SUCURSAL_POR_DEFECTO
+
+  const emitidos: Array<{ numero: string; siigo_id: string; valor: number }> = []
+  /** Bloque donde quedó el PRIMER PDF: es el que enlaza el aviso al cliente. */
+  let bloqueDelAviso: string | null = null
+  let algunPdfArchivado = false
+  let todosLosPdfArchivados = true
+
   try {
     const cfg = await getSiigoConfig(workspaceId)
 
     // ── 4. ¿Siigo ya recaudó ESTE MISMO VALOR de este cliente? ──
-    const existentes = await recibosDelClienteEnSiigo(
-      workspaceId, identificacion, cfg, ESPERA_429_EMISION_MS, valorPagado,
-    )
+    // Se pregunta por TODOS los componentes antes de emitir el primero: descubrir el
+    // duplicado a mitad del bucle dejaría un recibo emitido y el otro no, por una
+    // comprobación que se podía hacer antes.
+    const existentes: Array<{ numero: string; fecha: string; valor: number }> = []
+    for (const comp of componentes) {
+      existentes.push(...await recibosDelClienteEnSiigo(
+        workspaceId, identificacion, cfg, ESPERA_429_EMISION_MS, comp.valor, comp.documentId,
+      ))
+    }
     const justificacion = opciones.justificacionDuplicado?.trim()
     if (existentes.length > 0 && !justificacion) {
       return { ok: false, motivo: 'duplicado_en_siigo', existentes }
     }
 
-    // ── 5. Emitir ──
-    // ── La fecha es la del COBRO, no la de hoy ──
-    // Decisión de Mauricio (2026-09-07). El recibo acusa plata que YA entró: fecharlo
-    // hoy diría que entró hoy. Medido el 2026-09-04 sobre los 48 pagos sin recibo y sin
-    // facturar, el más viejo era del 17 de febrero: con la fecha de emisión, ese cliente
-    // habría recibido un "recibimos tu pago" siete meses tarde y Siigo habría registrado
-    // en septiembre plata de febrero.
-    const fechaPago = cobro.fecha ?? hoyISO()
-    let fechaRecibo = fechaPago
-    let motivoFechaDistinta: string | null = null
+    // ── 5. Emitir, un recibo por componente ──
+    for (const comp of componentes) {
+      let fechaRecibo = fechaPago
+      let motivoFechaDistinta: string | null = null
 
-    // Siigo resuelve el tercero por identificación MÁS sucursal: un cliente que vive
-    // en la sucursal 1 no existe si se le pregunta por la 0, y responde
-    // `The customer doesn't exist`, que suena a otra cosa. Sin dato conocido va la
-    // principal, igual que siempre. Se resuelve UNA vez porque el reintento por
-    // periodo cerrado vuelve a armar el borrador: dos copias se desincronizarían y
-    // el reintento perdería la sucursal justo en los casos más viejos.
-    const sucursalDelCliente = cliente.branch_office ?? SUCURSAL_POR_DEFECTO
-
-    const { payload, faltantes } = borradorRecibo(
-      cfg, identificacion, valorPagado, fechaRecibo, concepto, sucursalDelCliente,
-    )
-    if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
-
-    // Determinista desde el COBRO: un reintento no produce un segundo recibo, y dos
-    // cobros del mismo negocio no chocan entre sí (con la clave por negocio, el segundo
-    // recibo habría recibido de vuelta el primero).
-    const clave = claveIdempotencia(cobroId, 'rc')
-    const emitir = (cuerpo: BorradorRecibo) =>
-      siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
-        workspaceId, '/v1/vouchers',
-        { method: 'POST', body: cuerpo, idempotencyKey: clave, maxEspera429Ms: ESPERA_429_EMISION_MS },
+      const armar = (fecha: string) => borradorRecibo(
+        cfg, identificacion, comp.valor, fecha, comp.concepto, sucursalDelCliente, comp.documentId,
       )
 
-    let creado: { id?: string; name?: string; number?: number; date?: string }
-    try {
-      creado = await emitir(payload)
-    } catch (e) {
-      // ⚠️ El ÚNICO rechazo que se reintenta es el del periodo contable cerrado.
-      //
-      // Un pago de febrero no se puede asentar en un mes que ya se cerró, y eso no es
-      // un defecto de Siigo: es contabilidad. La alternativa era dejar 20 pagos viejos
-      // ($8.1M, medido el 2026-09-07) sin recibo para siempre.
-      //
-      // Se reintenta con la fecha de HOY y el PDF sigue mostrando la del pago, así que
-      // el cliente ve su fecha real y el documento queda en un periodo que la admite.
-      // Cualquier otro error se propaga: tratarlos todos como periodo cerrado
-      // convertiría un dato malo en un recibo con fecha cambiada y sin nadie mirando.
-      if (!esPeriodoCerrado(e)) throw e
+      const { payload, faltantes } = armar(fechaRecibo)
+      // Solo puede frenar ANTES del primer POST: un faltante estructural es el mismo
+      // para todos los componentes, así que si el primero pasó, el segundo también.
+      if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 
-      motivoFechaDistinta = `Siigo rechazó la fecha del pago (${fechaPago}) por periodo contable cerrado`
-      fechaRecibo = hoyISO()
-      const reintento = borradorRecibo(
-        cfg, identificacion, valorPagado, fechaRecibo, concepto, sucursalDelCliente,
-      )
-      creado = await emitir(reintento.payload)
-    }
-
-    const numero = creado.name ?? '(sin número)'
-
-    // ── 6. El PDF, que Siigo no da ──
-    // De aquí en adelante NADA convierte la emisión en un fallo: el recibo ya está
-    // asentado y consumió numeración.
-    let archivoUrl: string | null = null
-    let driveFileId: string | null = null
-    let bloqueConfigId: string | null = null
-    if (opciones.bloqueReciboSlug) {
-      try {
-        const pdf = await renderReciboCaja('soena', {
-          numero,
-          fecha: creado.date ?? fechaRecibo,
-          fecha_pago: fechaPago,
-          cliente_nombre: nombreParaDocumento,
-          cliente_identificacion: identificacion,
-          negocio_codigo: negocio.codigo ?? '',
-          valor: valorPagado,
-          concepto,
-        })
-        const arch = await archivarPdfEnBloque(
-          workspaceId, negocioId, opciones.bloqueReciboSlug, pdf,
-          `${numero.replace(/[^\w.-]+/g, '-')}.pdf`,
-          // El consecutivo se guarda como campo: se ve en el bloque sin que nadie
-          // tenga que abrir el PDF a copiarlo.
-          { numero_recibo: numero },
-          // Y se acumula en la lista, porque el siguiente pago traerá otro recibo y
-          // `drive_url` solo puede apuntar al último.
-          { clave: 'recibos', entrada: { numero, valor: valorPagado, cobro_id: cobroId, at: new Date().toISOString() } },
-          'emitido_en_siigo',
-          // ⚠️ El PDF NACE CERRADO en Drive. Un recibo de caja lo lee el equipo con
-          // sesión (la ficha del negocio y el control de recibos de /conciliación), no
-          // un cliente sin cuenta de Google: abrirlo a cualquiera con el enlace no
-          // compraba nada y el permiso no vencía nunca. Se abre por
-          // `/api/archivos/cobro`, que baja los bytes con la cuenta de servicio.
-          false,
+      // Determinista desde el COBRO **y el componente**: un reintento no produce un
+      // segundo recibo, dos cobros del mismo negocio no chocan entre sí, y los dos
+      // componentes de un mismo cobro tampoco (con una clave sola, el segundo POST
+      // habría recibido de vuelta el recibo del primero).
+      const clave = claveIdempotencia(cobroId, comp.sufijoIdempotencia)
+      const emitir = (cuerpo: BorradorRecibo) =>
+        siigoRequest<{ id?: string; name?: string; number?: number; date?: string }>(
+          workspaceId, '/v1/vouchers',
+          { method: 'POST', body: cuerpo, idempotencyKey: clave, maxEspera429Ms: ESPERA_429_EMISION_MS },
         )
-        bloqueConfigId = arch.bloqueConfigId ?? null
-        if (arch.ok) {
-          archivoUrl = arch.url ?? null
-          driveFileId = arch.driveFileId ?? null
-        } else console.error('[siigo] recibo emitido pero SIN archivar en el negocio:', arch.error)
+
+      let creado: { id?: string; name?: string; number?: number; date?: string }
+      try {
+        creado = await emitir(payload)
       } catch (e) {
-        console.error('[siigo] recibo emitido pero SIN PDF:', (e as Error).message)
+        // ⚠️ El ÚNICO rechazo que se reintenta es el del periodo contable cerrado.
+        //
+        // Un pago de febrero no se puede asentar en un mes que ya se cerró, y eso no es
+        // un defecto de Siigo: es contabilidad. La alternativa era dejar 20 pagos viejos
+        // ($8.1M, medido el 2026-09-07) sin recibo para siempre.
+        //
+        // Se reintenta con la fecha de HOY y el PDF sigue mostrando la del pago, así que
+        // el cliente ve su fecha real y el documento queda en un periodo que la admite.
+        // Cualquier otro error se propaga: tratarlos todos como periodo cerrado
+        // convertiría un dato malo en un recibo con fecha cambiada y sin nadie mirando.
+        if (!esPeriodoCerrado(e)) throw e
+
+        motivoFechaDistinta = `Siigo rechazó la fecha del pago (${fechaPago}) por periodo contable cerrado`
+        fechaRecibo = hoyISO()
+        creado = await emitir(armar(fechaRecibo).payload)
       }
+
+      const numero = creado.name ?? '(sin número)'
+
+      // ── 6. El PDF, que Siigo no da ──
+      // De aquí en adelante NADA convierte la emisión en un fallo: el recibo ya está
+      // asentado y consumió numeración.
+      let archivoUrl: string | null = null
+      let driveFileId: string | null = null
+      let bloqueConfigId: string | null = null
+      if (comp.bloqueSlug) {
+        try {
+          const pdf = await renderReciboCaja('soena', {
+            numero,
+            fecha: creado.date ?? fechaRecibo,
+            fecha_pago: fechaPago,
+            cliente_nombre: nombreParaDocumento,
+            cliente_identificacion: identificacion,
+            negocio_codigo: negocio.codigo ?? '',
+            valor: comp.valor,
+            concepto: comp.concepto,
+          })
+          const arch = await archivarPdfEnBloque(
+            workspaceId, negocioId, comp.bloqueSlug, pdf,
+            `${numero.replace(/[^\w.-]+/g, '-')}.pdf`,
+            // El consecutivo se guarda como campo: se ve en el bloque sin que nadie
+            // tenga que abrir el PDF a copiarlo.
+            { numero_recibo: numero },
+            // Y se acumula en la lista, porque el siguiente pago traerá otro recibo y
+            // `drive_url` solo puede apuntar al último. Con recibo por concepto, además,
+            // la entrada dice de cuál de los dos es.
+            {
+              clave: 'recibos',
+              entrada: {
+                numero,
+                valor: comp.valor,
+                cobro_id: cobroId,
+                at: new Date().toISOString(),
+                ...(comp.componente ? { componente: comp.componente } : {}),
+              },
+            },
+            'emitido_en_siigo',
+            // ⚠️ El PDF NACE CERRADO en Drive. Un recibo de caja lo lee el equipo con
+            // sesión (la ficha del negocio y el control de recibos de /conciliación), no
+            // un cliente sin cuenta de Google: abrirlo a cualquiera con el enlace no
+            // compraba nada y el permiso no vencía nunca. Se abre por
+            // `/api/archivos/cobro`, que baja los bytes con la cuenta de servicio.
+            false,
+          )
+          bloqueConfigId = arch.bloqueConfigId ?? null
+          if (arch.ok) {
+            archivoUrl = arch.url ?? null
+            driveFileId = arch.driveFileId ?? null
+          } else console.error('[siigo] recibo emitido pero SIN archivar en el negocio:', arch.error)
+        } catch (e) {
+          console.error('[siigo] recibo emitido pero SIN PDF:', (e as Error).message)
+        }
+        if (archivoUrl) {
+          algunPdfArchivado = true
+          if (!bloqueDelAviso && bloqueConfigId) bloqueDelAviso = bloqueConfigId
+        } else {
+          todosLosPdfArchivados = false
+        }
+      }
+
+      // ── 7. La marca, en el COBRO ──
+      const marca: MarcaRecibo = {
+        numero,
+        siigo_id: creado.id ?? '',
+        valor: comp.valor,
+        archivo_url: archivoUrl,
+        drive_file_id: driveFileId,
+        at: new Date().toISOString(),
+        por: staffNombre,
+        fecha: creado.date ?? fechaRecibo,
+        fecha_pago: fechaPago,
+        fecha_motivo: motivoFechaDistinta,
+        ...(comp.componente ? { componente: comp.componente } : {}),
+      }
+
+      // Se guarda DESPUÉS DE CADA componente, no al final: el recibo ya consumió
+      // numeración, y si el siguiente falla su marca tiene que quedar o el reintento
+      // lo emitiría otra vez.
+      await guardarMarca(svc, workspaceId, cobroId, marca, porConcepto != null)
+
+      emitidos.push({ numero, siigo_id: marca.siigo_id, valor: comp.valor })
     }
 
-    // ── 7. La marca, en el COBRO ──
-    const marca: MarcaRecibo = {
-      numero,
-      siigo_id: creado.id ?? '',
-      valor: valorPagado,
-      archivo_url: archivoUrl,
-      drive_file_id: driveFileId,
-      at: new Date().toISOString(),
-      por: staffNombre,
-      fecha: creado.date ?? fechaRecibo,
-      fecha_pago: fechaPago,
-      fecha_motivo: motivoFechaDistinta,
-    }
-
-    const { error: errUp } = await db(svc)
-      .from('cobros').update({ siigo_recibo: marca }).eq('id', cobroId).eq('workspace_id', workspaceId)
-
-    // El recibo YA existe en Siigo. Si la marca no se guarda, el cobro se vería como no
-    // recaudado y alguien podría re-emitir: por eso el error se dice, no se traga.
-    if (errUp) console.error('[siigo] recibo emitido pero NO marcado en el cobro:', errUp.message)
-
-    // ── 8. El aviso al cliente ──
+    // ── 8. El aviso al cliente: UNO solo, después de TODOS los componentes ──
+    //
+    // Decisión de Mauricio (2026-09-19). El cliente hizo UN pago y espera UNA
+    // confirmación: dos correos por el mismo pago se leen como un cobro doble. Por eso
+    // el aviso vive fuera del bucle — si un componente falla, la excepción sale antes
+    // de llegar aquí y el correo no se manda a medias; el cobro queda pendiente en el
+    // panel y el aviso espera al reintento.
+    //
+    // ⚠️ El aviso nombra el documento de UN bloque (`avisar_documento_al_cliente` se
+    // identifica por `bloque_config_id`). Que el correo liste los dos números con su
+    // valor depende de la plantilla de `notificar-etapa`, que este frente no toca.
+    //
     // Se pide EXPLÍCITAMENTE y no por el trigger: `trg_avisar_documento_cargado` exige
     // `auth.uid()`, y esto corre con el service role. Aflojar esa guarda para ganar el
     // aviso habría reabierto el envío masivo que impidió el accidente de V0412.
-    if (opciones.avisarAlCliente && archivoUrl && bloqueConfigId) {
+    if (opciones.avisarAlCliente && algunPdfArchivado && bloqueDelAviso) {
       const { error: errAviso } = await db(svc).rpc('avisar_documento_al_cliente', {
         p_negocio_id: negocioId,
-        p_bloque_config_id: bloqueConfigId,
+        p_bloque_config_id: bloqueDelAviso,
       })
       if (errAviso) console.error('[siigo] recibo archivado pero SIN avisar al cliente:', errAviso.message)
     }
 
+    const sinBloque = componentes.every(c => !c.bloqueSlug)
     return {
-      ok: true, numero, siigo_id: marca.siigo_id, valor: valorPagado,
-      archivada: !opciones.bloqueReciboSlug || archivoUrl != null,
+      ok: true,
+      numero: emitidos[0].numero,
+      siigo_id: emitidos[0].siigo_id,
+      valor: emitidos.reduce((s, r) => s + r.valor, 0),
+      archivada: sinBloque || todosLosPdfArchivados,
+      recibos: emitidos,
     }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
     return { ok: false, motivo: 'error', mensaje }
   }
+}
+
+/**
+ * Guarda la marca de un recibo en el cobro.
+ *
+ * **Con componentes se ACUMULA en lista; sin ellos se escribe el objeto de siempre.**
+ * La asimetría es deliberada: `mis_cobros_de_servicio` (el módulo Valida API, en otro
+ * workspace) lee la marca con `siigo_recibo ->> 'numero'`, que sobre una lista devuelve
+ * NULL **sin dar error**. Una línea que no declara `recibo_por_concepto` no cambia de
+ * forma, ni siquiera de almacenamiento.
+ *
+ * En el camino de lista se RELEE justo antes de escribir, que es lo mismo que hace
+ * `guardarMarcaEnMetadata`: entre el inicio de la emisión y este punto pudo entrar otra
+ * marca (un recibo cargado a mano, el otro componente de un reintento en paralelo), y
+ * construir la lista sobre la lectura vieja la borraría.
+ */
+async function guardarMarca(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  cobroId: string,
+  marca: MarcaRecibo,
+  comoLista: boolean,
+): Promise<void> {
+  let valor: unknown = marca
+
+  if (comoLista) {
+    const { data, error: errLeer } = await db(svc)
+      .from('cobros').select('siigo_recibo').eq('id', cobroId).eq('workspace_id', workspaceId).single()
+    if (errLeer) {
+      console.error(
+        '[siigo] no se pudo releer el cobro antes de guardar la marca; ' +
+        `se escribe sobre lo que se leyó al empezar: ${errLeer.message}`,
+      )
+    }
+    const previas = recibosDelCobro((data as { siigo_recibo?: unknown } | null)?.siigo_recibo)
+      // Un reintento del MISMO componente reemplaza su marca en vez de duplicarla.
+      .filter(m => !(marca.componente && m.componente === marca.componente))
+    valor = [...previas, marca]
+  }
+
+  const { error: errUp } = await db(svc)
+    .from('cobros').update({ siigo_recibo: valor }).eq('id', cobroId).eq('workspace_id', workspaceId)
+
+  // El recibo YA existe en Siigo. Si la marca no se guarda, el cobro se vería como no
+  // recaudado y alguien podría re-emitir: por eso el error se dice, no se traga.
+  if (errUp) console.error('[siigo] recibo emitido pero NO marcado en el cobro:', errUp.message)
+}
+
+/**
+ * Qué recibos hay que emitir para este cobro.
+ *
+ * Sin `recibo_por_concepto` es uno solo por el total, con el comprobante y el concepto
+ * de siempre, y **no se consulta el reparto**: una línea que no declara componentes no
+ * puede quedarse sin emitir porque `v_cobro_valor` no tenga fila para ese cobro.
+ */
+async function planParaEsteCobro(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  cobroId: string,
+  cobro: { monto: number | null; tipo_cobro: string | null; siigo_recibo: unknown },
+  valorPagado: number,
+  opciones: { concepto?: string; bloqueReciboSlug?: string; valorPagado?: number },
+  porConcepto: ConfigReciboPorConcepto | null,
+): Promise<{ ok: true; componentes: ComponenteAEmitir[] } | { ok: false; error: ResultadoRecibo }> {
+  if (!porConcepto) {
+    // El concepto lo declara la línea. Sin él no se emite: un documento contable que no
+    // se puede corregir no sale con un texto por defecto inventado aquí.
+    const concepto = opciones.concepto?.trim()
+    if (!concepto) {
+      return {
+        ok: false,
+        error: { ok: false, motivo: 'faltan_datos', faltantes: ['concepto del recibo (config de la línea)'] },
+      }
+    }
+    return {
+      ok: true,
+      componentes: [{
+        // Sin `componente`: la marca no dice a qué concepto corresponde porque acusa el
+        // total, que es exactamente lo que significa su ausencia.
+        componente: undefined,
+        valor: valorPagado,
+        // Sin `documentId`: `borradorRecibo` cae al `reciboDocumentId` del workspace.
+        documentId: undefined,
+        concepto,
+        bloqueSlug: opciones.bloqueReciboSlug,
+        // El sufijo de siempre. Cambiarlo haría que un reintento emitiera de nuevo.
+        sufijoIdempotencia: 'rc',
+      }],
+    }
+  }
+
+  // ⚠️ El valor corregido a mano NO se reparte a ojo.
+  //
+  // El reparto sale de `v_cobro_valor`, que parte el MONTO DEL COBRO. Si quien emite
+  // escribe otra cifra, no hay forma de saber cuánto de esa diferencia es honorario y
+  // cuánto es de terceros — y repartirla en proporción sería inventar la respuesta,
+  // justo el error que este frente cierra. Se corrige el monto del pago y se reintenta.
+  const montoDelCobro = Number(cobro.monto ?? 0)
+  if (opciones.valorPagado != null && Math.abs(opciones.valorPagado - montoDelCobro) > 0.01) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        motivo: 'faltan_datos',
+        faltantes: ['el valor corregido no se puede repartir por concepto: corrige el monto del pago'],
+      },
+    }
+  }
+
+  const { data: filaRaw } = await db(svc)
+    .from('v_cobro_valor')
+    .select('a_tramo1, a_tramo2, a_tarifa, excedente')
+    .eq('cobro_id', cobroId)
+    .maybeSingle()
+
+  const reparto = repartoDeCobro(filaRaw as FilaReparto | null, {
+    monto: valorPagado,
+    tipo_cobro: cobro.tipo_cobro,
+  })
+  if (!reparto) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        motivo: 'faltan_datos',
+        faltantes: ['el reparto del cobro (v_cobro_valor no tiene fila para este pago)'],
+      },
+    }
+  }
+
+  const plan = planDeEmision(reparto, porConcepto, opciones.bloqueReciboSlug)
+  if (!plan.ok) return { ok: false, error: { ok: false, motivo: 'faltan_datos', faltantes: plan.faltantes } }
+
+  // Lo que ya tiene recibo no se vuelve a emitir: es lo que hace que un reintento tras
+  // un fallo parcial complete el cobro en vez de duplicar el componente que sí salió.
+  const emitidos = componentesEmitidos(cobro.siigo_recibo)
+  return { ok: true, componentes: plan.componentes.filter(c => !emitidos.has(c.componente!)) }
 }

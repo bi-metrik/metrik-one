@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   archivoDeCobro,
+  docDeRecibo,
   esDocumentoCobro,
   hrefArchivoDeCobro,
   idDeArchivoDrive,
@@ -108,6 +109,46 @@ describe('archivoDeCobro', () => {
     expect(archivoDeCobro({ soporte: null }, 'soporte')).toBeNull()
     expect(archivoDeCobro(null, 'recibo')).toBeNull()
   })
+
+  // ── Un pago mixto trae DOS recibos ───────────────────────────────────────
+  //
+  // Desde el 2026-09-19 la marca puede ser una lista. `recibo` abre el del honorario y
+  // `recibo_pasante` el de la plata de terceros: si los dos cayeran en el mismo nombre,
+  // la ruta bajaria siempre el mismo PDF y el otro documento seria inalcanzable.
+  it('recibo y recibo_pasante abren archivos DISTINTOS de la misma fila', () => {
+    const OTRO_ID = '1AAAbbbCCCdddEEEfffGGG'
+    const mixto: FilaCobroArchivo = {
+      siigo_recibo: [
+        { numero: 'RC-1-70', archivo_url: URL_RECIBO, drive_file_id: ID_RECIBO, componente: 'honorario' },
+        { numero: 'RC-9-3', archivo_url: URL_RECIBO, drive_file_id: OTRO_ID, componente: 'pasante' },
+      ],
+    }
+    expect(archivoDeCobro(mixto, 'recibo')).toEqual({
+      fileId: ID_RECIBO, fileName: 'RC-1-70.pdf', mimeType: 'application/pdf',
+    })
+    expect(archivoDeCobro(mixto, 'recibo_pasante')).toEqual({
+      fileId: OTRO_ID, fileName: 'RC-9-3.pdf', mimeType: 'application/pdf',
+    })
+  })
+
+  it('la marca VIEJA responde a `recibo`: ningun enlace ya repartido cambia de destino', () => {
+    // Acusa el total, asi que no declara componente. Son las 17 marcas de produccion.
+    const vieja: FilaCobroArchivo = {
+      siigo_recibo: { numero: 'RC-1-43', archivo_url: URL_RECIBO },
+    }
+    expect(archivoDeCobro(vieja, 'recibo')?.fileId).toBe(ID_RECIBO)
+    // Y no se presta como si fuera el de terceros: pedir el que no existe da null.
+    expect(archivoDeCobro(vieja, 'recibo_pasante')).toBeNull()
+  })
+
+  it('un cobro PURO de terceros abre por `recibo_pasante`', () => {
+    const soloTerceros: FilaCobroArchivo = {
+      siigo_recibo: [{ numero: 'RC-9-4', archivo_url: URL_RECIBO, drive_file_id: ID_RECIBO, componente: 'pasante' }],
+    }
+    expect(archivoDeCobro(soloTerceros, 'recibo_pasante')?.fileId).toBe(ID_RECIBO)
+    // `recibo` no cae al de terceros: abriria el documento equivocado.
+    expect(archivoDeCobro(soloTerceros, 'recibo')).toBeNull()
+  })
 })
 
 describe('hrefArchivoDeCobro', () => {
@@ -140,8 +181,17 @@ describe('esDocumentoCobro', () => {
   it('la lista es cerrada', () => {
     expect(esDocumentoCobro('soporte')).toBe(true)
     expect(esDocumentoCobro('recibo')).toBe(true)
+    expect(esDocumentoCobro('recibo_pasante')).toBe(true)
     expect(esDocumentoCobro('factura')).toBe(false)
     expect(esDocumentoCobro(null)).toBe(false)
+  })
+
+  it('docDeRecibo: solo `pasante` cambia de puerta', () => {
+    expect(docDeRecibo('pasante')).toBe('recibo_pasante')
+    expect(docDeRecibo('honorario')).toBe('recibo')
+    // Una marca vieja no declara componente y abre por la puerta de siempre.
+    expect(docDeRecibo(null)).toBe('recibo')
+    expect(docDeRecibo(undefined)).toBe('recibo')
   })
 })
 

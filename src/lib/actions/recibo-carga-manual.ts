@@ -6,6 +6,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { createServiceClient } from '@/lib/supabase/server'
+import { primerRecibo } from '@/lib/siigo/recibo-componentes'
 import {
   BUCKET_DOCUMENTOS_SERVICIO,
   marcaReciboManual,
@@ -76,7 +77,8 @@ export async function cargarReciboManual(formData: FormData): Promise<ResultadoR
     negocio_id: string | null
     monto: number | null
     anulado_at: string | null
-    siigo_recibo: { numero?: string } | null
+    /** Objeto (forma vieja) o lista. Se lee con `primerRecibo`, nunca de frente. */
+    siigo_recibo: unknown
   }
   const { data: cobroCrudo, error: errorCobro } = await db
     .from('cobros')
@@ -89,8 +91,10 @@ export async function cargarReciboManual(formData: FormData): Promise<ResultadoR
   // Mismo mensaje si no existe o es de otro workspace: no se confirma la existencia de un id ajeno.
   if (!cobro) return { ok: false, error: 'Cobro no encontrado' }
   if (cobro.anulado_at) return { ok: false, error: 'El cobro está anulado: no se le carga recibo' }
-  const previo = cobro.siigo_recibo
-  if (previo?.numero) return { ok: false, error: `Ese cobro ya tiene el recibo ${previo.numero}` }
+  // Vale para las dos formas de la marca: el objeto de siempre y la lista del recibo
+  // por concepto. Un recibo a mano sobre un cobro que ya tiene alguno lo pisaría.
+  const previo = primerRecibo(cobro.siigo_recibo)
+  if (previo) return { ok: false, error: `Ese cobro ya tiene el recibo ${previo.numero}` }
 
   const buffer = Buffer.from(await (archivo as File).arrayBuffer())
   const sha256 = createHash('sha256').update(buffer).digest('hex')

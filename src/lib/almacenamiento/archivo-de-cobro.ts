@@ -32,6 +32,7 @@
 // ============================================================
 
 import { esReferenciaArchivo, hrefArchivo } from './referencia'
+import { recibosDelCobro } from '@/lib/siigo/recibo-componentes'
 
 /** Ruta que baja los bytes de un archivo de cobro con la cuenta de servicio. */
 export const RUTA_ARCHIVO_COBRO = '/api/archivos/cobro'
@@ -39,12 +40,24 @@ export const RUTA_ARCHIVO_COBRO = '/api/archivos/cobro'
 /**
  * Los documentos que cuelgan de un cobro. Lista CERRADA: el nombre llega del navegador y
  * es lo que decide que columna se lee.
+ *
+ * ⚠️ `recibo` y `recibo_pasante` son DOS entradas y no un parametro suelto a proposito,
+ * por lo mismo que la lista es cerrada. Desde el recibo por concepto (2026-09-19) un
+ * cobro puede tener dos recibos: el del honorario y el de la plata de terceros. `recibo`
+ * resuelve el del honorario **y tambien la marca vieja**, que acusa el total y es la
+ * unica forma de las 17 filas anteriores — asi que ningun enlace ya repartido cambia de
+ * significado.
  */
-export const DOCUMENTOS_COBRO = ['soporte', 'recibo'] as const
+export const DOCUMENTOS_COBRO = ['soporte', 'recibo', 'recibo_pasante'] as const
 export type DocumentoCobro = (typeof DOCUMENTOS_COBRO)[number]
 
 export function esDocumentoCobro(valor: unknown): valor is DocumentoCobro {
   return typeof valor === 'string' && (DOCUMENTOS_COBRO as readonly string[]).includes(valor)
+}
+
+/** Que nombre de documento abre el recibo de un componente. */
+export function docDeRecibo(componente: string | null | undefined): DocumentoCobro {
+  return componente === 'pasante' ? 'recibo_pasante' : 'recibo'
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -96,11 +109,13 @@ export interface FilaCobroArchivo {
     mime_type?: string | null
     drive_file_id?: string | null
   } | null
-  siigo_recibo?: {
-    numero?: string | null
-    archivo_url?: string | null
-    drive_file_id?: string | null
-  } | null
+  /**
+   * Objeto (forma vieja, acusa el total) o LISTA (un recibo por concepto).
+   *
+   * Se lee con `recibosDelCobro`, que tolera las dos: es el mismo criterio que usan el
+   * panel y la tarjeta del cobro, y por eso no se repite aqui.
+   */
+  siigo_recibo?: unknown
 }
 
 export interface ArchivoDeCobro {
@@ -148,7 +163,12 @@ export function archivoDeCobro(
     }
   }
 
-  const r = fila.siigo_recibo
+  // `recibo` toma el del honorario, y si no lo hay, el primero: eso cubre la marca
+  // vieja (sin componente, acusa el total) sin un caso especial.
+  const marcas = recibosDelCobro(fila.siigo_recibo)
+  const r = doc === 'recibo_pasante'
+    ? marcas.find(m => m.componente === 'pasante')
+    : marcas.find(m => m.componente === 'honorario') ?? marcas.find(m => m.componente !== 'pasante')
   if (!r) return null
   const fileId = (r.drive_file_id || '').trim() || idDeArchivoDrive(r.archivo_url)
   if (!fileId || !ID_DRIVE.test(fileId)) return null

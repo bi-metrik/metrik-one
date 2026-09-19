@@ -11,7 +11,8 @@ import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
-import { hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
+import { docDeRecibo, hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
+import { recibosDelCobro } from '@/lib/siigo/recibo-componentes'
 
 interface Cobro {
   id: string
@@ -26,14 +27,17 @@ interface Cobro {
   notas: string | null
   external_ref: string | null
   /**
-   * Recibo de caja de ESTE pago, si ya se emitió.
+   * Recibo(s) de caja de ESTE pago, si ya se emitieron.
    *
    * Va en el cobro y no en un bloque del negocio porque un bloque sostiene UN archivo:
    * con varios pagos, el PDF del último pisaba a los anteriores y los recibos viejos
    * quedaban sin puerta de entrada desde la ficha (Mauricio, 2026-09-07). El dato ya
    * vivía aquí; lo que faltaba era mostrarlo al lado de la plata que lo originó.
+   *
+   * ⚠️ Objeto (acusa el total) o LISTA (un recibo por concepto). Se lee con
+   * `recibosDelCobro`, que conoce las dos formas, nunca de frente.
    */
-  siigo_recibo?: { numero?: string; archivo_url?: string | null } | null
+  siigo_recibo?: unknown
   /** true si es una porción de un reparto propuesto por el comercial (split_json.origen==='comercial'). */
   es_reparto_comercial?: boolean
 }
@@ -84,41 +88,50 @@ const TIPO_LABELS: Record<string, string> = {
 }
 
 /**
- * El recibo de caja de un pago, al lado del pago.
+ * El o los recibos de caja de un pago, al lado del pago.
  *
  * Sin número no se dice nada: "sin recibo" en cada fila de un histórico de meses sería
  * ruido permanente sobre pagos que ya se decidió no acusar. Quién falta se ve entero en
  * el control de recibos de Conciliación, que es donde se actúa.
+ *
+ * ⚠️ Un pago mixto sale con DOS documentos (honorario y plata de terceros) y **los dos
+ * se listan**: mostrar solo el primero escondería un documento contable que existe.
  */
 export function ReciboDelPago({ cobro }: { cobro: Cobro }) {
-  const numero = cobro.siigo_recibo?.numero
-  if (!numero) return null
-
-  // El PDF ya no se abre en Drive: nace cerrado y los bytes los baja
-  // `/api/archivos/cobro` con la cuenta de servicio. Un recibo manual (`archivo_url`
-  // null) no tiene enlace, y eso se dice abajo en vez de ofrecer uno roto.
-  const url = hrefArchivoDeCobro(cobro.id, 'recibo', cobro.siigo_recibo?.archivo_url)
-  if (!url) {
-    // Emitido en Siigo pero sin PDF archivado: existe igual, y decirlo es mejor que
-    // ofrecer un enlace que no lleva a ninguna parte.
-    return (
-      <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[var(--acento)]">
-        <Receipt className="h-3 w-3" /> Recibo {numero} · sin PDF
-      </p>
-    )
-  }
+  const marcas = recibosDelCobro(cobro.siigo_recibo)
+  if (marcas.length === 0) return null
 
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={e => e.stopPropagation()}
-      className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[var(--acento)] hover:underline"
-    >
-      <Receipt className="h-3 w-3" /> Recibo {numero}
-      <ExternalLink className="h-2.5 w-2.5" />
-    </a>
+    <>
+      {marcas.map(m => {
+        // El PDF ya no se abre en Drive: nace cerrado y los bytes los baja
+        // `/api/archivos/cobro` con la cuenta de servicio. Un recibo manual
+        // (`archivo_url` null) no tiene enlace, y eso se dice en vez de ofrecer uno roto.
+        const url = hrefArchivoDeCobro(cobro.id, docDeRecibo(m.componente), m.archivo_url)
+        if (!url) {
+          // Emitido en Siigo pero sin PDF archivado: existe igual, y decirlo es mejor
+          // que ofrecer un enlace que no lleva a ninguna parte.
+          return (
+            <p key={m.numero} className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--acento)]">
+              <Receipt className="h-3 w-3" /> Recibo {m.numero} · sin PDF
+            </p>
+          )
+        }
+        return (
+          <a
+            key={m.numero}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--acento)] hover:underline"
+          >
+            <Receipt className="h-3 w-3" /> Recibo {m.numero}
+            <ExternalLink className="h-2.5 w-2.5" />
+          </a>
+        )
+      })}
+    </>
   )
 }
 

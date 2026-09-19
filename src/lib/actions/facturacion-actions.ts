@@ -22,6 +22,11 @@ import { bloqueoPorNegocioCerrado } from '@/lib/negocios/negocio-abierto'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 import { borradorCliente, borradorFactura, type RutExtraido } from '@/lib/siigo/mapeo'
 import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
+import {
+  leerReciboPorConcepto,
+  primerRecibo,
+  type ConfigReciboPorConcepto,
+} from '@/lib/siigo/recibo-componentes'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
   conceptoFactura,
@@ -471,7 +476,8 @@ async function armarColaFacturacion(
     // 357 cobros hoy para 305 casos: crece con el recaudo, no solo con los casos.
     traerTodo<CobroParaRecaudo & {
       negocio_id: string
-      siigo_recibo: { numero?: string } | null
+      /** Objeto o lista: se lee con `primerRecibo`, nunca de frente. */
+      siigo_recibo: unknown
       anulado_at: string | null
     }>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -514,7 +520,8 @@ async function armarColaFacturacion(
     if (!cobrosPorNegocio.has(c.negocio_id)) cobrosPorNegocio.set(c.negocio_id, [])
     cobrosPorNegocio.get(c.negocio_id)!.push(c)
     if (c.anulado_at) continue
-    if (c.siigo_recibo?.numero) ultimoReciboPorNegocio.set(c.negocio_id, c.siigo_recibo.numero)
+    const recibo = primerRecibo(c.siigo_recibo)
+    if (recibo) ultimoReciboPorNegocio.set(c.negocio_id, recibo.numero)
   }
   const conciliados = new Set(
     conciliadoRes.filter(x => x.conciliado === true).map(x => x.negocio_id),
@@ -1437,7 +1444,19 @@ function valorLeido(leido: Record<string, CampoResultado> | null, slug: string):
 // ── Recibo de caja del recaudo de la tarifa UPME ─────────────────────────────
 
 export type ResultadoRecibo =
-  | { ok: true; numero: string; valor: number; archivada: boolean }
+  | {
+      ok: true
+      numero: string
+      valor: number
+      archivada: boolean
+      /**
+       * Todos los recibos que la emisión produjo.
+       *
+       * Un pago mixto sale con DOS (honorario y plata de terceros), así que el mensaje
+       * al usuario tiene que nombrarlos: decir solo el primero le esconde el segundo.
+       */
+      recibos: Array<{ numero: string; valor: number }>
+    }
   | { ok: false; error: string; duplicados?: Array<{ numero: string; fecha: string; valor: number }> }
 
 /**
@@ -1475,6 +1494,12 @@ export async function emitirReciboDeNegocio(
   // negocio, así que cuando no llega `cobroId` se resuelve el cobro pendiente más
   // reciente: es el que acaba de entrar y el que la persona está mirando. Si el negocio
   // no tiene ningún cobro sin recibo, no hay plata nueva que acusar.
+  //
+  // ⚠️ Este camino solo ve los cobros **sin ninguna marca**. Un cobro mixto al que le
+  // falta UN componente ya tiene marca, así que no lo encuentra: ese se reintenta desde
+  // el panel de recibos, que siempre pasa `cobroId` (y que lo muestra pendiente, ver
+  // `recibos-control-actions.ts`). Resolverlo aquí obligaría a leer el reparto y la
+  // config de la línea de todos los cobros del negocio para elegir uno.
   let cobroId = opciones?.cobroId
   if (!cobroId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1503,6 +1528,7 @@ export async function emitirReciboDeNegocio(
     .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
   let bloqueReciboSlug: string | undefined
   let concepto: string | undefined
+  let porConcepto: ConfigReciboPorConcepto | null = null
   if (negLinea?.linea_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: linea } = await (svc as any)
@@ -1511,11 +1537,14 @@ export async function emitirReciboDeNegocio(
       { bloque_recibo_slug?: string; recibo_concepto?: string } | undefined
     bloqueReciboSlug = cfgSiigo?.bloque_recibo_slug
     concepto = cfgSiigo?.recibo_concepto
+    // Ausente = un recibo por el total, como siempre.
+    porConcepto = leerReciboPorConcepto(cfgSiigo)
   }
 
   const r = await emitirReciboDeCobro(workspaceId, cobroId, nombre, {
     bloqueReciboSlug,
     concepto,
+    porConcepto,
     justificacionDuplicado: opciones?.justificacionDuplicado,
     // El valor capturado gana sobre el del cobro: quien emite desde Tesorería está
     // mirando el soporte y el sistema no.
@@ -1544,5 +1573,11 @@ export async function emitirReciboDeNegocio(
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/conciliacion')
-  return { ok: true, numero: r.numero, valor: r.valor, archivada: r.archivada }
+  return {
+    ok: true,
+    numero: r.numero,
+    valor: r.valor,
+    archivada: r.archivada,
+    recibos: r.recibos.map(x => ({ numero: x.numero, valor: x.valor })),
+  }
 }

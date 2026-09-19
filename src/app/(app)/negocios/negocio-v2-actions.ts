@@ -8210,10 +8210,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       vencido: (c.vencido as boolean | null) ?? false,
       notas: c.notas as string | null,
       external_ref: c.external_ref as string | null,
-      // El recibo de caja de ESTE pago. Va por cobro y no por bloque del negocio: un
-      // bloque sostiene un archivo, y con varios pagos el PDF del último pisaba a los
-      // anteriores (Mauricio, 2026-09-07).
-      siigo_recibo: (c.siigo_recibo as { numero?: string; archivo_url?: string | null } | null) ?? null,
+      // El o los recibos de caja de ESTE pago. Van por cobro y no por bloque del
+      // negocio: un bloque sostiene un archivo, y con varios pagos el PDF del último
+      // pisaba a los anteriores (Mauricio, 2026-09-07). Desde el recibo por concepto
+      // puede ser una LISTA; la tarjeta lo lee con `recibosDelCobro`.
+      siigo_recibo: c.siigo_recibo ?? null,
       es_reparto_comercial:
         ((c.split_json as { origen?: string } | null)?.origen ?? null) === 'comercial',
     })),
