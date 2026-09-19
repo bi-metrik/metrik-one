@@ -38,7 +38,7 @@
 - ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate toda escritura en metrik-one se bloquea
 - ⚠️ [Vistas server-only](project_vistas_server_only.md) — revocada a `authenticated` devuelve vacío sin error
 - ⚠️ [staff es 1 fila por persona en TODA la base](project_staff_unique_global.md) — UNIQUE global de `profile_id`: platform_admin ajeno opera con `staffId` null
-- ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — #789 mergeado; el fondo sigue abierto y el embed de `workspaces` necesita el nombre de la FK
+- ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — #789 y #796: el guard va en el MIDDLEWARE, un layout no corre en navegación suave
 - [La empresa espejo se sigue creando](project_empresa_espejo_se_sigue_creando.md) — decisión cerrada; solo el directorio dejó de listarla
 - [Canal WhatsApp propio](project_canal_wa_propio.md) — #448 sin desplegar; Gate 0 prohíbe persistir contenido
 - ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — deploy ANTES del SQL; idioma PRIMERO (#574)
@@ -115,13 +115,14 @@
 ## Referencias
 
 - [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`
-- ⚠️ [Un layout sin `{children}` corta la página](reference_layout_sin_children_corta_la_pagina.md) — su `redirect()` ni se dispara; medido con `next dev` y su control
+- ⚠️⚠️ [Un layout sin `{children}` corta la página](reference_layout_sin_children_corta_la_pagina.md) — cierto, y SOLO en carga completa: un gate de layout no existe en navegación suave
 - ⚠️ [Qué export 'use server' es endpoint](reference_manifiesto_server_actions.md) — lo dice el manifiesto del build
 - [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — probar primero `.env.local` + PostgREST
 - [Ensayar una función SQL con PGlite](reference_ensayo_sql_pglite.md) — cuerpo viejo y nuevo sobre una foto de producción
 - ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD sobre tabla inexistente da 204
 - [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo
 - [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; con server actions, `next dev` + ruta `qa-*`
+- ⚠️ [Medir la cadena real sin producción](reference_arnes_supabase_enlatado.md) — doblar los 3 clientes de Supabase con un proxy enlatado; el arnés rompe `tsc`
 - [Línea de tiempo de peticiones en producción](reference_vercel_logs_por_cli.md) — `vercel logs --json -q <id>`: si el refresco salió y a qué deployment
 - [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS, chromium fotografía
 - ⚠️ [Cambio SOLO de tildes, y la eñe aparte](reference_cambio_solo_de_tildes.md) — la eñe NO es tilde; hay `anos` que rompen código
