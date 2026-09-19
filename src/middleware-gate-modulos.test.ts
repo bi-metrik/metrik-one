@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest, NextResponse } from 'next/server'
 import { workspaceMedido } from '@/lib/modulos/__fixtures__/workspaces-2026-09-15'
+import { SELECT_PERFIL_BASE } from '@/lib/modulos/perfil-de-acceso'
 
 interface Perfil {
   role: string
@@ -39,7 +40,14 @@ function dobleSupabase() {
                     data: {
                       role: perfil.role,
                       platform_admin: perfil.platform_admin ?? false,
-                      workspace: { modules: w.modules, modo_vitrina: w.modoVitrina ? true : null },
+                      // El slug va en el embed porque desde el 2026-09-19 el middleware
+                      // también compara la pestaña contra la sesión; acá los dos coinciden
+                      // siempre, así que ese guard queda inerte y lo que se mide es el gate.
+                      workspace: {
+                        slug: perfil.slug,
+                        modules: w.modules,
+                        modo_vitrina: w.modoVitrina ? true : null,
+                      },
                     },
                     error: null,
                   }
@@ -111,7 +119,7 @@ describe('middleware: gate por módulo', () => {
   it('una ruta sin módulo no pide los módulos: el guard del contador lee solo el rol, como antes', async () => {
     perfil = { role: 'owner', slug: 'cda-caqueta' }
     await pedir(TENANT, '/servicios')
-    expect(selects).toEqual(['role'])
+    expect(selects).toEqual([SELECT_PERFIL_BASE])
     selects.length = 0
     await pedir(TENANT, '/negocios')
     expect(selects).toHaveLength(1)

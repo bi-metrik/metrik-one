@@ -2,8 +2,7 @@ import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
-import { PestanaDesincronizada } from './pestana-desincronizada'
-import { hayDesincronizacionDeTenant, urlDeWorkspace } from '@/lib/tenant/desincronizacion'
+import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import VersionWatcher from '@/components/version-watcher'
@@ -139,39 +138,18 @@ export default async function AppLayout({
   }
 
   // ── La pestaña quedó en otro espacio de trabajo ──────────────────────────
-  // El subdominio no decide el inquilino: lo decide `profiles.workspace_id`, que es uno
-  // solo por usuario. Una pestaña abierta en X después de que alguien cambió a Y seguía
-  // pintando Y con la URL diciendo X. `getWorkspace` ya corta las escrituras; esto es lo
-  // que lo explica con nombres propios, en vez de dejar la pestaña muda.
+  // El subdominio no decide el inquilino: lo decide `profiles.workspace_id`, que es uno solo
+  // por usuario. Una pestaña abierta en X después de que alguien cambió a Y seguía pintando Y
+  // con la URL diciendo X.
   //
-  // No cuesta una consulta: el slug de la pestaña llega por cabecera (la pone el
-  // middleware) y el del workspace activo sale de la lectura de `workspaces` de arriba.
-  // Se renderiza EN LUGAR de `AppShell` + children a propósito: un layout que no
-  // renderiza `{children}` hace que la página ni se ejecute, así que su
-  // `redirect('/login')` no se dispara (medido contra `next dev` el 2026-09-18).
+  // Quien de verdad atrapa esto es el middleware, porque corre en TODA navegación y este
+  // layout no (en una navegación del lado del cliente Next solo renderiza los segmentos que
+  // cambian). Esto queda como red por si la lectura del perfil del middleware falló: no cuesta
+  // una consulta (el slug llega por cabecera y el del workspace activo sale de la lectura de
+  // arriba) y manda a la MISMA pantalla, para que no haya dos caminos que se desincronicen.
   const slugPestana = (await headers()).get('x-tenant-slug')
   if (!overrideDev && hayDesincronizacionDeTenant(slugPestana, workspace.slug)) {
-    // El workspace de la pestaña solo se puede nombrar si quien mira es platform admin:
-    // su lista ya viene resuelta arriba, y para nadie más hay forma (ni razón) de
-    // resolver un workspace ajeno. Sin él no se pinta el botón de volver, que es lo
-    // correcto: `switchWorkspace` lo rechazaría de todos modos.
-    const dePestana =
-      platformAdminState?.workspaces.find((w) => w.slug === slugPestana) ?? null
-    return (
-      <PestanaDesincronizada
-        slugPestana={slugPestana as string}
-        slugSesion={workspace.slug}
-        nombreSesion={workspace.name}
-        urlSesion={urlDeWorkspace(
-          workspace.slug,
-          process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co',
-          process.env.NODE_ENV === 'development',
-        )}
-        workspaceDePestana={
-          dePestana ? { id: dePestana.id, slug: dePestana.slug, name: dePestana.name } : null
-        }
-      />
-    )
+    redirect(RUTA_DESINCRONIZADA)
   }
 
   // Gate de suscripción: el acceso es el producto. Solo `suspendida` cierra la puerta;

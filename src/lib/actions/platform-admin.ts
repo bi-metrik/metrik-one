@@ -1,7 +1,6 @@
 'use server'
 
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { armarSelectorDeWorkspaces, type WorkspaceConMarca } from '@/lib/workspace/archivado'
@@ -225,7 +224,18 @@ export async function switchWorkspace(targetWorkspaceId: string) {
   // Landing por defecto = /numeros (Mis Numeros) — el dashboard principal del ws.
   const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/numeros')
 
-  revalidatePath('/', 'layout')
+  // Sin `revalidatePath('/', 'layout')` a propósito. Lo tenía, y lo único que producía era un
+  // PARPADEO del aviso de pestaña desincronizada en la pestaña que acaba de cambiar: el layout
+  // se volvía a pintar con el perfil ya movido mientras la pestaña seguía en el host viejo, o
+  // sea que le avisaba de un desajuste que ella misma acababa de provocar y que se iba a
+  // resolver un instante después. Medido el 2026-09-19 contra `next dev` con un clic real en la
+  // barra: la pantalla del aviso se pintaba (`slug de la pestaña: soena`, `de la sesión:
+  // metrik`) y desaparecía al saltar al host destino.
+  //
+  // No hay nada que revalidar: el destino es SIEMPRE otro host, que se pinta de cero tras el
+  // enlace mágico, y en local sin subdominios `redirectAfterSwitch` recarga la página entera
+  // (ver `lib/workspace/redirigir-tras-switch.ts`). Los dos únicos consumidores de esta acción
+  // (la barra de platform admin y la pantalla del aviso) navegan por ahí.
   return {
     success: true,
     targetSlug,
@@ -278,7 +288,8 @@ export async function returnHome() {
   const targetSlug = (home as { slug: string }).slug
   const actionLink = await generateCrossSubdomainSessionLink(ctx.email, targetSlug, '/numeros')
 
-  revalidatePath('/', 'layout')
+  // Sin `revalidatePath('/', 'layout')`, por la misma razón que en `switchWorkspace`: el
+  // destino es otro host y lo único que producía era el parpadeo del aviso.
   return {
     success: true,
     targetSlug,

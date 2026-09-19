@@ -14,11 +14,11 @@ import { redirectAfterSwitch } from '@/lib/workspace/redirigir-tras-switch'
  * entendible: sin ella, la pestaña se quedaría en blanco o pidiendo login, y el usuario
  * no tendría forma de saber que el cambio lo hizo él mismo en otra pestaña.
  *
- * Se renderiza desde `(app)/layout.tsx` EN LUGAR de `AppShell` + children. Eso no es un
- * detalle de estilo: medido el 2026-09-18 contra `next dev`, un layout que no renderiza
- * `{children}` hace que la página nunca se ejecute, así que su `redirect('/login')` (el
- * que casi todas hacen cuando no hay `workspaceId`) no se dispara y esta pantalla gana.
- * Con `{children}` puesto, la misma prueba devuelve 307 al login.
+ * Tiene UNA sola puerta: la ruta `/pestana-desincronizada` (fuera de `(app)`), a donde
+ * manda el middleware. Vivía dentro de `(app)/layout.tsx`, renderizada en lugar de
+ * `AppShell` + children, y ahí era invisible en toda navegación del lado del cliente: el
+ * layout no vuelve a correr (medido el 2026-09-19 con un clic real en el nav, ver
+ * `middleware.ts`). El layout ya solo detecta y redirige a esta ruta.
  */
 
 export type WorkspaceDePestana = { id: string; slug: string; name: string }

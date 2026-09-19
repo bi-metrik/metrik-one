@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { leerPerfilDeAcceso, SELECT_PERFIL_CON_MODULOS, type ClientePerfil } from './perfil-de-acceso'
+import {
+  leerPerfilDeAcceso,
+  SELECT_PERFIL_BASE,
+  SELECT_PERFIL_CON_MODULOS,
+  type ClientePerfil,
+} from './perfil-de-acceso'
 
 /** Doble del cliente que anota qué se pidió y responde lo que se le diga. */
 function cliente(respuesta: { data: unknown; error: { message: string } | null }) {
@@ -26,7 +31,11 @@ function cliente(respuesta: { data: unknown; error: { message: string } | null }
 describe('leerPerfilDeAcceso', () => {
   it('con módulos pide el perfil con el workspace embebido por la llave correcta y arma el contexto', async () => {
     const { c, pedido } = cliente({
-      data: { role: 'owner', platform_admin: false, workspace: { modules: { valida_consulta: true }, modo_vitrina: true } },
+      data: {
+        role: 'owner',
+        platform_admin: false,
+        workspace: { slug: 'soena', modules: { valida_consulta: true }, modo_vitrina: true },
+      },
       error: null,
     })
     const perfil = await leerPerfilDeAcceso(c, 'u1', true)
@@ -34,6 +43,7 @@ describe('leerPerfilDeAcceso', () => {
     expect(SELECT_PERFIL_CON_MODULOS).toContain('workspaces!profiles_workspace_id_fkey')
     expect(perfil).toEqual({
       role: 'owner',
+      slugWorkspace: 'soena',
       gate: { role: 'owner', platformAdmin: false, modules: { valida_consulta: true }, modoVitrina: true },
     })
   })
@@ -79,16 +89,32 @@ describe('leerPerfilDeAcceso', () => {
     })
   })
 
-  it('sin módulos pide solo el rol, como el guard del contador de antes', async () => {
-    const { c, pedido } = cliente({ data: { role: 'contador' }, error: null })
-    expect(await leerPerfilDeAcceso(c, 'u1', false)).toEqual({ role: 'contador', gate: null })
-    expect(pedido.select).toBe('role')
+  it('sin módulos pide el rol y el slug del workspace, los dos guards que no miran módulos', async () => {
+    const { c, pedido } = cliente({
+      data: { role: 'contador', workspace: { slug: 'soena' } },
+      error: null,
+    })
+    expect(await leerPerfilDeAcceso(c, 'u1', false)).toEqual({
+      role: 'contador',
+      slugWorkspace: 'soena',
+      gate: null,
+    })
+    expect(pedido.select).toBe(SELECT_PERFIL_BASE)
+  })
+
+  it('si el embed no trae el workspace, el slug queda en null (el guard no afirma nada)', async () => {
+    const { c } = cliente({ data: { role: 'owner', platform_admin: false, workspace: null }, error: null })
+    expect((await leerPerfilDeAcceso(c, 'u1', true)).slugWorkspace).toBeNull()
   })
 
   it('si la lectura falla no hay gate, y se dice en el log', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { c } = cliente({ data: null, error: { message: 'Could not embed' } })
-    expect(await leerPerfilDeAcceso(c, 'u1', true)).toEqual({ role: null, gate: null })
+    expect(await leerPerfilDeAcceso(c, 'u1', true)).toEqual({
+      role: null,
+      slugWorkspace: null,
+      gate: null,
+    })
     expect(log).toHaveBeenCalledWith(expect.stringContaining('[gate-modulos]'), 'Could not embed')
     log.mockRestore()
   })
