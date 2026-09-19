@@ -24,6 +24,7 @@ import {
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
+import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
@@ -80,6 +81,14 @@ interface ItemLeido {
   tarifaRaw: unknown
   /** El precio lo escribió una persona: el margen derivado NO lo toca. */
   precioManual: boolean
+  /**
+   * El margen que la línea tiene escrito hoy. `null` = hereda el de la cotización.
+   *
+   * Hace falta para saber si el margen que hay puesto sigue siendo el que puso una
+   * captura o si alguien lo movió después: solo en el primer caso una captura nueva
+   * puede retirarlo.
+   */
+  margenPorcentaje: number | null
   /** La de la cotización, no la de la línea de negocio: es la que aplica `recalcularTotales`. */
   convencionMargen: ConvencionMargen | null
 }
@@ -108,6 +117,9 @@ async function leerItem(supabase: unknown, itemId: string): Promise<ItemLeido | 
     negocioId: cot.negocio_id ?? null,
     tarifaRaw: data.tarifa_pax,
     precioManual: data.precio_manual === true,
+    margenPorcentaje: data.margen_porcentaje === null || data.margen_porcentaje === undefined
+      ? null
+      : Number(data.margen_porcentaje),
     convencionMargen: (cot.convencion_margen ?? null) as ConvencionMargen | null,
   }
 }
@@ -408,8 +420,22 @@ export async function confirmarTarifaPorPasajero(
   // ⚠️ El margen NO se reconvierte a pesos: es una razón entre dos números de la MISMA
   // captura, así que no depende de la tasa. Lo que sí queda en pesos es el costo.
   const margenProveedor = margenDelProveedor(casillas.grupo_completo)
-  const loPusoUnaCaptura = tarifa.confirmada?.margenProveedor != null
   const convencion = item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO
+  // ¿El margen que hay escrito hoy es el que puso una captura anterior, o alguien lo movió?
+  //
+  // No alcanza con «la confirmación anterior guardó un margen de proveedor»: desde que ese
+  // número se guarda SIEMPRE (aunque no se aplique), esa marca también está en líneas cuyo
+  // margen lo escribió una persona. Retirarlo ahí le borraría a alguien su decisión. Se
+  // compara el número, con el mismo criterio que usa la pantalla para decir de dónde sale.
+  const margenAnterior = tarifa.confirmada?.margenProveedor
+  const loPusoUnaCaptura =
+    margenAnterior != null
+    && origenDelMargen({
+      margenPropio: item.margenPorcentaje !== null,
+      precioManual: false,
+      margenDelPantallazo: margenDeLineaSegunConvencion(margenAnterior, convencion),
+      margenActual: item.margenPorcentaje,
+    }) === 'proveedor'
   const patchMargen: Record<string, unknown> =
     // Un precio escrito a mano manda sobre el margen (`margen-vista.ts`): tocar el campo
     // no movería el precio y dejaría en pantalla un porcentaje que no gobierna nada.
@@ -448,7 +474,13 @@ export async function confirmarTarifaPorPasajero(
     moneda,
     tasa: moneda === 'COP' ? null : tasaCambio,
     confirmadaEn: new Date().toISOString(),
-    margenProveedor: item.precioManual ? null : margenProveedor,
+    // Lo que dijo la captura se guarda SIEMPRE, aunque no se haya aplicado.
+    //
+    // Antes se descartaba cuando la línea tenía precio escrito a mano, y con eso se perdía
+    // el único número que permite responder «cuánto me moví de lo que el proveedor me
+    // daba»: quien revisa veía un precio a mano y ningún punto de comparación. Que se
+    // APLIQUE sigue decidiéndolo `patchMargen` de arriba; esto solo lo deja anotado.
+    margenProveedor,
   }
   const guardado = await guardarTarifa(supabase, itemId, actual => ({ ...actual, confirmada }))
   if ('error' in guardado) return { success: false, error: guardado.error }

@@ -232,9 +232,17 @@ export interface LecturaCasilla {
   total: number
   /**
    * Lo que paga la agencia cuando la captura lo muestra aparte (liquidación con
-   * comisión descontada). Es el COSTO, leído y nunca recalculado (hallazgo 7.1).
+   * comisión descontada). Es el COSTO.
+   *
+   * Lo resuelve `costo-agencia.ts`: el neto escrito manda (leído y nunca recalculado,
+   * hallazgo 7.1) y la comisión solo rellena el hueco cuando el neto no está.
    */
   aPagarAgencia: number | null
+  /**
+   * Si ese número estaba escrito o se derivó de la comisión. Ausente en las lecturas
+   * anteriores al 2026-09-19, que solo sabían leerlo escrito.
+   */
+  costoAgenciaOrigen?: 'neto_leido' | 'derivado_comision' | null
   /** Desglose por tipo tal como se leyó. Vacío = la pantalla trae un solo total. */
   porTipo: FilaTipo[]
   ocupacion: OcupacionLeida
@@ -878,6 +886,9 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
         identidad: l.identidad && typeof l.identidad === 'object' ? l.identidad : {},
         ocupacion: l.ocupacion ?? { adultos: null, ninos: null, infantes: null, total: null },
         aPagarAgencia: typeof l.aPagarAgencia === 'number' ? l.aPagarAgencia : null,
+        costoAgenciaOrigen: l.costoAgenciaOrigen === 'neto_leido' || l.costoAgenciaOrigen === 'derivado_comision'
+          ? l.costoAgenciaOrigen
+          : null,
       }
     }
   }

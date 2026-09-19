@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { precioSeDerivaDelCosto, precioVentaDelItem, costoUnitarioDelItem, margenRealDelItem } from './precio-item'
+import { precioSeDerivaDelCosto, precioVentaDelItem, costoUnitarioDelItem, margenRealDelItem, margenParaPrecio, precioConMargen } from './precio-item'
 
 /**
  * Los cuatro escenarios de la prueba de escritorio del encargo, más los bordes
@@ -244,5 +244,52 @@ describe('precioSeDerivaDelCosto: el costo directo tambien deriva precio', () =>
   it('el costo directo respeta la convencion de margen sobre venta', () => {
     const item = { numeroDeRubros: 0, subtotal: 1_000_000, margen_porcentaje: 15, convencion_margen: 'sobre_venta' as const }
     expect(precioVentaDelItem(item)).toBe(1_176_471)
+  })
+})
+
+/**
+ * La SEGUNDA puerta: escribir el precio al cliente y que el margen se acomode.
+ *
+ * La prueba que importa no es el número suelto sino el VIAJE DE IDA Y VUELTA: el margen
+ * que sale de aquí, metido en `precioConMargen`, tiene que devolver el precio pedido. Si
+ * las dos funciones se separan, mover el margen y escribir el precio dejarían de llevar
+ * al mismo sitio y la pantalla ofrecería dos puertas que dan a cuartos distintos.
+ *
+ * ⚠️ Mutaciones MEDIDAS (aplicadas y revertidas):
+ *   · `margenParaPrecio` devuelve siempre el de `markup` ............ 2 rojas
+ *   · un precio igual o menor que el costo devuelve 0 en vez de null . 1 roja
+ */
+describe('margenParaPrecio · la inversa de precioConMargen', () => {
+  it('ida y vuelta exacta en sobre_venta', () => {
+    const m = margenParaPrecio(1_818_919, 2_029_118, 'sobre_venta')!
+    expect(m).toBeCloseTo(10.359, 3)
+    expect(precioConMargen(1_818_919, m, 'sobre_venta')).toBeCloseTo(2_029_118, 6)
+  })
+
+  it('ida y vuelta exacta en markup', () => {
+    const m = margenParaPrecio(1_818_919, 2_029_118, 'markup')!
+    expect(m).toBeCloseTo(11.556, 3)
+    expect(precioConMargen(1_818_919, m, 'markup')).toBeCloseTo(2_029_118, 6)
+  })
+
+  it('las dos convenciones NO dan el mismo número, y esa es la razón de pasarla', () => {
+    // Cruzarlas vende la línea por debajo de lo que el proveedor le cobra al pasajero,
+    // y nada en pantalla lo delata.
+    const sobreVenta = margenParaPrecio(1_818_919, 2_029_118, 'sobre_venta')!
+    const markup = margenParaPrecio(1_818_919, 2_029_118, 'markup')!
+    expect(sobreVenta).not.toBeCloseTo(markup, 2)
+  })
+
+  it('un precio que no supera el costo no tiene margen: null, no 0', () => {
+    // Un 0 escribiría «esta línea va a costo», que es una decisión de alguien; y un
+    // negativo dejaría la línea a pérdida sin que nadie lo pidiera.
+    expect(margenParaPrecio(1_000_000, 1_000_000, 'sobre_venta')).toBeNull()
+    expect(margenParaPrecio(1_000_000, 900_000, 'sobre_venta')).toBeNull()
+  })
+
+  it('sin costo no hay margen que despejar', () => {
+    expect(margenParaPrecio(0, 1_000_000, 'sobre_venta')).toBeNull()
+    expect(margenParaPrecio(Number.NaN, 1_000_000, 'sobre_venta')).toBeNull()
+    expect(margenParaPrecio(1_000_000, 0, 'sobre_venta')).toBeNull()
   })
 })

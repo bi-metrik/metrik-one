@@ -132,6 +132,36 @@ export function precioConMargen(
 }
 
 /**
+ * El margen que hay que escribir para que un costo dé EXACTAMENTE ese precio.
+ *
+ * Es la inversa de `precioConMargen` y existe para que las dos puertas de la misma
+ * decisión lleven al mismo sitio: mover el margen, o escribir el precio al cliente y que
+ * el margen se acomode. La agencia usa la que tenga a mano —del proveedor le llega un
+ * precio, del cliente le llega un tope— y las dos terminan escribiendo el MISMO campo
+ * (`items.margen_porcentaje`). Guardar el precio aparte con `precio_manual` era la otra
+ * opción, y deja la línea sin reaccionar a un cambio de costo: el margen mostrado seguiría
+ * al día y el precio no.
+ *
+ * `null` cuando la pregunta no tiene respuesta: sin costo no hay margen que despejar
+ * (`sobre_venta` daría 100% y `markup` una división por cero), y un precio que no supera
+ * el costo pediría un margen negativo, que es una venta a pérdida escrita por accidente.
+ */
+export function margenParaPrecio(
+  costo: number,
+  precioObjetivo: number,
+  convencion: ConvencionMargen = CONVENCION_MARGEN_POR_DEFECTO,
+): number | null {
+  const base = Number(costo)
+  const precio = Number(precioObjetivo)
+  if (!Number.isFinite(base) || base <= 0) return null
+  if (!Number.isFinite(precio) || precio <= 0) return null
+  if (precio <= base) return null
+  return convencion === 'sobre_venta'
+    ? ((precio - base) / precio) * 100
+    : (precio / base - 1) * 100
+}
+
+/**
  * Margen REAL de una línea, el que queda dentro del precio de venta.
  *
  * Es lo que hay que enseñar al lado del campo cuando la convención es `markup`, porque
