@@ -57,6 +57,13 @@ devuelve 2.029.118 **al peso**. Por encima del piso de 5%: el gate no frena.
 - ⚠️ **Re-leer con una captura de un solo precio RETIRA el margen** que puso la anterior.
   Por eso `TarifaConfirmada.margenProveedor` se guarda: es lo único que distingue «lo
   puso una captura» de «lo puso una persona». Con `precio_manual` no se toca nada.
+  > ⚠️ **CADUCÓ en parte el 2026-09-19 con [[margen-por-item-proveedor]] (#794):**
+  > `margenProveedor` se guarda **siempre**, también con `precio_manual` — el número de la
+  > captura no se pierde nunca. Como esa marca ya no distingue quién puso lo que hay
+  > escrito, retirar el margen se decide **comparando el número**, no por su existencia.
+- ⚠️ **El costo de agencia ya no sale solo de `total_a_pagar_agencia`.** Desde el #794 lo
+  resuelve `costo-agencia.ts`, que reconoce «precio neto» y compañía y puede derivarlo de la
+  comisión. La captura de Ushuaia, que aquí quedaba sin margen, ahora fija **14,000%**.
 
 ## El equipaje comprado aparte («+ Otro») YA llegaba al documento
 

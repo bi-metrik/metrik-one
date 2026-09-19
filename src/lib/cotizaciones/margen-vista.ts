@@ -19,7 +19,19 @@
  * que nadie se entere. Esta pieza es la única que traduce ese estado a texto.
  */
 
-export type OrigenMargen = 'propio' | 'manual' | 'heredado'
+export type OrigenMargen = 'proveedor' | 'propio' | 'manual' | 'heredado'
+
+/**
+ * Cuánto se puede mover el margen escrito respecto del que fijó la captura y seguir
+ * siendo "el mismo número".
+ *
+ * La casilla del editor tiene `step="0.01"`, así que cualquier edición deliberada mueve
+ * al menos una centésima. Por debajo de media centésima solo hay ruido de coma flotante
+ * al ir y volver de `numeric`: tratarlo como una edición pintaría «margen propio de la
+ * línea» sobre una línea que nadie tocó, que es exactamente la confusión que este módulo
+ * existe para evitar.
+ */
+const MISMO_MARGEN = 0.005
 
 /**
  * El precio escrito a mano MANDA sobre el margen propio.
@@ -28,19 +40,41 @@ export type OrigenMargen = 'propio' | 'manual' | 'heredado'
  * propio y después escribió el precio). En ese caso el margen que la pantalla
  * enseña sale del precio, así que decir "propio de la línea" apuntaría al campo
  * equivocado — la cifra no cambia tocando ese campo.
+ *
+ * ⚠️ `proveedor` va ANTES que `propio` y no es un matiz de redacción. Un margen que vino
+ * del pantallazo aterriza en el mismo campo que uno tecleado (`items.margen_porcentaje`),
+ * así que sin esta distinción la pantalla decía «margen propio de la línea» en los dos
+ * casos y quien revisa no tenía cómo saber cuál de las nueve líneas revisar. Se separan
+ * comparando el número escrito contra el que la captura dejó guardado: si coinciden, el
+ * margen sigue siendo el del proveedor; si no, alguien lo movió y eso hay que decirlo.
  */
 export function origenDelMargen(linea: {
   margenPropio: boolean
   precioManual: boolean
+  /** El margen que fijó la captura, en la convención de la cotización. */
+  margenDelPantallazo?: number | null
+  /** El margen que hoy tiene escrito la línea. */
+  margenActual?: number | null
 }): OrigenMargen {
   if (linea.precioManual) return 'manual'
-  if (linea.margenPropio) return 'propio'
-  return 'heredado'
+  if (!linea.margenPropio) return 'heredado'
+  const delPantallazo = linea.margenDelPantallazo
+  const actual = linea.margenActual
+  if (
+    delPantallazo !== null && delPantallazo !== undefined && Number.isFinite(delPantallazo)
+    && actual !== null && actual !== undefined && Number.isFinite(actual)
+    && Math.abs(actual - delPantallazo) < MISMO_MARGEN
+  ) {
+    return 'proveedor'
+  }
+  return 'propio'
 }
 
 /** Cómo se dice cada origen al lado del porcentaje. */
 export function etiquetaOrigenMargen(origen: OrigenMargen): string {
   switch (origen) {
+    case 'proveedor':
+      return 'lo trae el pantallazo'
     case 'manual':
       return 'precio escrito a mano'
     case 'propio':

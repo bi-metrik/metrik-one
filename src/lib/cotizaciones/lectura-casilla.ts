@@ -22,6 +22,7 @@ import {
   type OcupacionLeida,
   type TipoPasajero,
 } from './tarifa-pasajero'
+import { resolverCostoAgencia } from './costo-agencia'
 
 function entero(valor: string | null | undefined): number | null {
   const n = numeroLeido(valor ?? null)
@@ -131,16 +132,31 @@ export function construirLecturaCasilla(
 
   const { nombre, descripcion } = resumenDeLinea(ranura, aceptacion.campos)
 
+  // Lo que paga la agencia: el neto escrito si está, y si no el que deja la comisión
+  // (`costo-agencia.ts`). Cuando la captura se contradice, el costo queda sin resolver y
+  // el motivo se cuelga de las alertas — abstenerse deja la línea con el margen de la
+  // cotización, que es el comportamiento de siempre; callarlo dejaría a quien revisa
+  // preguntándose por qué esta captura no fijó margen y la de al lado sí.
+  const costoAgencia = resolverCostoAgencia({
+    precioCliente: total,
+    netoLeido: numeroLeido(valor('total_a_pagar_agencia')),
+    comisionValor: numeroLeido(valor('comision_agencia_valor')),
+    comisionPct: numeroLeido(valor('comision_agencia_pct')),
+  })
+  const alertas = [...aceptacion.avisos]
+  if (costoAgencia && costoAgencia.costoAgencia === null) alertas.push(costoAgencia.motivo)
+
   return {
     moneda,
     total,
-    aPagarAgencia: numeroLeido(valor('total_a_pagar_agencia')),
+    aPagarAgencia: costoAgencia?.costoAgencia ?? null,
+    costoAgenciaOrigen: costoAgencia && costoAgencia.costoAgencia !== null ? costoAgencia.origen : null,
     porTipo,
     ocupacion,
     ocupacionDelItem: sinOcupacion,
     identidad,
     notasCliente,
-    alertas: aceptacion.avisos,
+    alertas,
     campos: aceptacion.campos
       .filter(c => c.valor !== null)
       .map(c => ({ label: c.label, valor: c.delItem ? `${c.valor} (del viaje)` : (c.valor as string) })),

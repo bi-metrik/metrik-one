@@ -391,4 +391,46 @@ describe('Decameron · el margen lo pone el pantallazo, no una persona', () => {
     await confirmarTarifaPorPasajero('item-liquidacion', null)
     expect(itemEnBase('item-liquidacion').margen_porcentaje).toBeNull()
   })
+
+  /**
+   * La condición dura del brief del 2026-09-19: lo que dijo la captura NO se pierde
+   * nunca, ni siquiera cuando no se aplica.
+   *
+   * Antes se descartaba en cuanto la línea tenía precio escrito a mano, y con eso
+   * desaparecía el único número que permite responder «cuánto me moví de lo que el
+   * proveedor me daba» — no está guardado en ninguna otra parte.
+   */
+  it('con precio a mano el margen NO se aplica, pero el número de la captura queda anotado', async () => {
+    tablas.items.push(itemHotelLiquidacion({ precio_manual: true, margen_porcentaje: 25 }))
+    const r = await confirmarTarifaPorPasajero('item-liquidacion', null)
+    expect(Number(itemEnBase('item-liquidacion').margen_porcentaje)).toBe(25)
+    expect(leerTarifaPax(r.tarifa).confirmada?.margenProveedor).toMatchObject({
+      precioCliente: 2029118,
+      costoAgencia: 1818919,
+    })
+  })
+
+  /**
+   * El reverso de «re-leer retira el margen»: si entre las dos capturas una PERSONA movió
+   * el margen, esa decisión no se borra. Retirarlo lo decide el número, no la existencia
+   * de una captura anterior — desde que `margenProveedor` se guarda siempre, esa marca ya
+   * no distingue quién puso lo que hay escrito.
+   */
+  it('un margen que MOVIÓ una persona NO lo retira la captura siguiente', async () => {
+    tablas.items.push(itemHotelLiquidacion())
+    await confirmarTarifaPorPasajero('item-liquidacion', null)
+
+    // Alguien lo sube al 18% y después se vuelve a leer con una captura de un solo precio.
+    const item = itemEnBase('item-liquidacion')
+    item.margen_porcentaje = 18
+    const tarifa = structuredClone(item.tarifa_pax) as {
+      casillas: { grupo_completo: { aPagarAgencia: number | null; leidaEn: string } }
+    }
+    tarifa.casillas.grupo_completo.aPagarAgencia = null
+    tarifa.casillas.grupo_completo.leidaEn = '2026-09-19T15:00:00.000Z'
+    item.tarifa_pax = tarifa
+
+    await confirmarTarifaPorPasajero('item-liquidacion', null)
+    expect(Number(itemEnBase('item-liquidacion').margen_porcentaje)).toBe(18)
+  })
 })

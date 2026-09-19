@@ -73,3 +73,49 @@ describe('lectura con tabla por tipo de pasajero', () => {
     expect(l.campos.find(c => c.label === 'Check-in')?.valor).toBe('2026-10-01 (del viaje)')
   })
 })
+
+describe('lo que paga la agencia, leído de la captura', () => {
+  it('Altos Ushuaia: «Precio neto» entra como costo de agencia', () => {
+    // Medido: hasta hoy este campo volvía vacío en las 4 corridas del banco y la línea
+    // se vendía con el margen general de la cotización, teniendo el margen servido.
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      hotel: 'Altos Ushuaia Hotel & Resto', ciudad: 'Ushuaia',
+      moneda: 'COP', precio_total: '799016.38', base_precio: 'total',
+      total_a_pagar_agencia: '687154.09',
+    }), '2026-09-16T00:00:00Z')
+    expect(l.total).toBe(799016.38)
+    expect(l.aPagarAgencia).toBe(687154.09)
+    expect(l.costoAgenciaOrigen).toBe('neto_leido')
+    expect(l.alertas).toEqual([])
+  })
+
+  it('sin neto escrito, la comisión lo deriva', () => {
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      hotel: 'Altos Ushuaia Hotel & Resto', moneda: 'COP',
+      precio_total: '799016.38', base_precio: 'total',
+      comision_agencia_valor: '111862.29', comision_agencia_pct: '14',
+    }), '2026-09-16T00:00:00Z')
+    expect(l.aPagarAgencia).toBeCloseTo(687154.09, 2)
+    expect(l.costoAgenciaOrigen).toBe('derivado_comision')
+  })
+
+  it('una captura que se contradice deja el costo sin resolver Y lo dice', () => {
+    // El motivo viaja en las alertas: sin él, quien revisa no tiene forma de saber por
+    // qué esta captura no fijó margen y la de al lado sí.
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      hotel: 'X', moneda: 'COP', precio_total: '799016.38', base_precio: 'total',
+      comision_agencia_valor: '50000', comision_agencia_pct: '14',
+    }), '2026-09-16T00:00:00Z')
+    expect(l.aPagarAgencia).toBeNull()
+    expect(l.costoAgenciaOrigen).toBeNull()
+    expect(l.alertas.join(' ')).toContain('No coinciden')
+  })
+
+  it('un buscador con UN solo precio sigue sin costo de agencia, y sin alertas nuevas', () => {
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      hotel: 'X', moneda: 'COP', precio_total: '1000000', base_precio: 'total',
+    }), '2026-09-16T00:00:00Z')
+    expect(l.aPagarAgencia).toBeNull()
+    expect(l.alertas).toEqual([])
+  })
+})

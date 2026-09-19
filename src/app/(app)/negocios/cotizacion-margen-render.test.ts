@@ -272,3 +272,143 @@ describe('el piso se distingue del aviso en pantalla', () => {
     expect(html).not.toContain('se puede enviar igual')
   })
 })
+
+// ── El margen que trae el pantallazo, y sus dos puertas de edición ───────────
+//
+// Brief del 2026-09-19 (`brief-max-2026-09-19-margen-por-item.md`). Tres cosas que una
+// prueba pura NO fija: que la pantalla DIGA que el margen lo trae la captura, que el
+// número original siga a la vista después de editarlo, y que exista por dónde volver.
+// `origenDelMargen` puede devolver 'proveedor' perfecto y el JSX seguir escribiendo
+// «margen propio de la línea» — que es exactamente el defecto que se viene a cerrar.
+
+/** Decameron, medido contra el banco real: costo 1.818.919 y precio al pasajero 2.029.118. */
+const COSTO_DECAMERON = 1_818_919
+const PRECIO_DECAMERON = 2_029_118
+
+/** Un ítem ya confirmado desde un pantallazo que traía los dos precios. */
+const itemConPantallazo = (
+  costo: number,
+  precio: number,
+  over: Record<string, unknown> = {},
+) => {
+  const margenPct = ((precio - costo) / precio) * 100
+  return item({
+    subtotal: costo,
+    margen_porcentaje: margenPct,
+    tarifa_pax: {
+      confirmada: {
+        composicion: { adultos: 2, ninos: 0, infantes: 0 },
+        costos: [{ tipo: 'adulto', cantidad: 2, unitarioCOP: costo / 2, totalCOP: costo }],
+        costoTotalCOP: costo,
+        moneda: 'COP',
+        tasa: null,
+        confirmadaEn: '2026-09-19T12:00:00.000Z',
+        margenProveedor: { precioCliente: precio, costoAgencia: costo, moneda: 'COP', margenPct },
+      },
+    },
+    ...over,
+  })
+}
+
+describe('el margen que trae el pantallazo se distingue del escrito a mano', () => {
+  it('lo dice con sus palabras, no como «margen propio de la línea»', () => {
+    const html = pintar([itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON)])
+    expect(html).toContain('lo trae el pantallazo')
+    expect(html).not.toContain('margen propio de la línea')
+  })
+
+  it('la línea se vende al precio del proveedor, no al del margen general', () => {
+    // Con el 15% de la cotización saldría en 2.139.905. Es la diferencia entre cobrar
+    // lo que el proveedor le cobra al pasajero y cobrar otra cosa.
+    const html = pintar([itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON)])
+    expect(html).toContain('2.029.118')
+    expect(html).toContain('Margen real 10,4%')
+  })
+
+  it('no repite el número del pantallazo cuando es el mismo que está puesto', () => {
+    const html = pintar([itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON)])
+    expect(html).not.toContain('El pantallazo decía')
+  })
+})
+
+describe('editar el margen NO borra lo que dijo la captura', () => {
+  const editado = () =>
+    pintar([itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON, { margen_porcentaje: 18 })])
+
+  it('al moverlo pasa a ser propio de la línea', () => {
+    const html = editado()
+    expect(html).toContain('margen propio de la línea')
+    expect(html).not.toContain('lo trae el pantallazo')
+    expect(html).toContain('Margen real 18,0%')
+  })
+
+  it('el número del proveedor queda a la vista al lado del editado', () => {
+    // La condición dura del brief: sin esto la agencia no sabe cuánto se movió de lo
+    // que el proveedor le daba, y ese número no está en ninguna otra pantalla.
+    expect(editado()).toContain('El pantallazo decía 10,4%')
+  })
+
+  it('hay por dónde volver a él', () => {
+    expect(editado()).toContain('Volver al del pantallazo')
+  })
+
+  it('con precio escrito a mano también se conserva y también se puede volver', () => {
+    const html = pintar([
+      itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON, {
+        precio_manual: true,
+        precio_venta: 2_500_000,
+      }),
+    ])
+    expect(html).toContain('precio escrito a mano')
+    expect(html).toContain('El pantallazo decía 10,4%')
+    expect(html).toContain('Volver al del pantallazo')
+  })
+})
+
+describe('la segunda puerta: escribir el precio al cliente', () => {
+  it('la línea con margen propio ofrece la casilla de precio al cliente', () => {
+    const html = pintar([itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON)])
+    expect(html).toContain('Precio al cliente')
+    // Arranca con el precio que hoy tiene la línea, no vacía.
+    expect(html).toContain('value="2.029.118"')
+  })
+
+  it('una línea que HEREDA el margen no la ofrece: ahí la puerta es «Marginar distinto»', () => {
+    // El control que hace valer la prueba de arriba. Si la casilla se pintara siempre,
+    // esta caería y el cambio habría tocado cotizaciones que no usan pantallazos.
+    const html = pintar([item()])
+    expect(html).not.toContain('Precio al cliente')
+    expect(html).toContain('Marginar distinto')
+  })
+})
+
+describe('dos hoteles con márgenes distintos en la misma cotización', () => {
+  // Altos Ushuaia, medido: precio 799.016,38 y «precio neto» 687.154,09 → 14,0%.
+  const COSTO_USHUAIA = 687_154
+  const PRECIO_USHUAIA = 799_016
+
+  const dosHoteles = () =>
+    pintar([
+      itemConPantallazo(COSTO_DECAMERON, PRECIO_DECAMERON, { nombre: 'Decameron' }),
+      itemConPantallazo(COSTO_USHUAIA, PRECIO_USHUAIA, { nombre: 'Altos Ushuaia', orden: 2 }),
+    ])
+
+  it('cada uno conserva el suyo y el general de la cotización no los pisa', () => {
+    const html = dosHoteles()
+    expect(html).toContain('Margen real 10,4%')
+    expect(html).toContain('Margen real 14,0%')
+    // Ninguno cayó al 15% general de la cotización.
+    expect(html).not.toContain('Margen real 15,0%')
+    // Los dos se anuncian como servidos por su captura. Se cuenta la frase del
+    // TOOLTIP, que sale una vez por línea: el texto suelto «lo trae el pantallazo»
+    // aparece dos veces por línea (el renglón del margen y el tooltip) y contarlo
+    // pasaría igual si solo una de las dos superficies lo dijera.
+    expect(html.match(/El margen de esta línea lo trae el pantallazo\./g)?.length).toBe(2)
+  })
+
+  it('los dos precios son los del proveedor, al peso', () => {
+    const html = dosHoteles()
+    expect(html).toContain('2.029.118')
+    expect(html).toContain('799.016')
+  })
+})

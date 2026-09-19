@@ -177,18 +177,74 @@ const OCUPACION: CampoRanura[] = [
  * Hallazgo 7.1 del diseño: en la liquidación de Decameron la resta de comisión y
  * prestación NO da el «total a pagar agencia» (faltan 7.287 sin concepto). El costo es el
  * número leído, nunca uno recalculado.
+ *
+ * ⚠️ La etiqueta NO es la de Decameron. Medido contra el banco real el 2026-09-16, la
+ * captura de Altos Ushuaia (`4.03.08_PM`) dice exactamente lo mismo con otras palabras
+ * —«Precio neto» en un globo, sobre el precio grande— y este campo volvía vacío en las
+ * 4 corridas: la pantalla traía un margen servido que nadie tomaba. Por eso la
+ * descripción enumera las formas de decirlo y no una sola.
+ *
+ * ⚠️ El otro efecto de nombrarlo es que le da DÓNDE CAER a ese número: en 1 de 6 corridas
+ * el modelo había leído el neto de Ushuaia como si fuera el precio al pasajero. Con dos
+ * casillas descritas cada cifra tiene su sitio, y por eso las dos descripciones se
+ * apuntan mutuamente.
  */
 const A_PAGAR_AGENCIA: CampoRanura = {
   slug: 'total_a_pagar_agencia',
-  label: 'Total a pagar agencia',
+  label: 'Precio neto (lo que paga la agencia)',
   tipo: 'currency',
   min: false,
   alerta_revision: true,
   descripcion_ai:
-    'El valor NETO que paga la agencia cuando la pantalla lo muestra aparte del valor al pasajero ' +
-    '(ej. «TOTAL A PAGAR AGENCIA» en una liquidación con comisión). Cópialo tal cual: NO lo calcules ' +
-    'restando comisiones. null si la pantalla no lo muestra.',
+    'El valor NETO que paga la AGENCIA, cuando la pantalla lo muestra aparte del valor al pasajero. ' +
+    'Da igual cómo lo llame: «TOTAL A PAGAR AGENCIA», «Precio neto», «Neto», «Tarifa neta», «Net rate», ' +
+    '«Precio agencia», «Valor agencia», «Costo agencia». Suele ser MENOR que el precio destacado y aparecer ' +
+    'en un globo, un recuadro o una fila aparte. Cópialo tal cual: NO lo calcules restando comisiones. ' +
+    'null si la pantalla no lo muestra. NUNCA pongas aquí el precio que paga el pasajero: ese va en precio_total.',
 }
+
+/**
+ * La comisión de la agencia, para DERIVAR el neto cuando la pantalla no lo escribe.
+ *
+ * Solo rellena el hueco: si el neto viene escrito, manda el neto (`costo-agencia.ts`).
+ * Son dos campos porque la misma comisión suele venir escrita dos veces —Ushuaia dice
+ * «Descuento (14%) 111.862,29»— y tenerlas separadas es lo que permite cruzarlas: si el
+ * porcentaje aplicado al precio no da la plata, la captura se contradice y no se fija
+ * ningún margen.
+ *
+ * ⚠️ La descripción distingue a propósito la comisión de la agencia de un descuento
+ * PROMOCIONAL al cliente. Los dos se dibujan igual (un porcentaje al lado de un valor) y
+ * confundirlos convertiría una oferta de temporada en margen inventado.
+ */
+const COMO_SE_RECONOCE_LA_COMISION =
+  'Es lo que la AGENCIA gana: la diferencia entre lo que paga el pasajero y lo que paga la agencia. ' +
+  'Cuenta cuando la pantalla la llama «comisión», «comisión agencia», «commission», o cuando es el ' +
+  'descuento que aplicado al precio da un «precio neto» que también se ve. ' +
+  'NO cuentan las rebajas promocionales al cliente (precio tachado, «-20% oferta», «ahorra X»): esas no ' +
+  'las gana la agencia. Si no puedes distinguirlo, devuelve null.'
+
+const COMISION_VALOR: CampoRanura = {
+  slug: 'comision_agencia_valor',
+  label: 'Comisión de la agencia',
+  tipo: 'currency',
+  min: false,
+  alerta_revision: true,
+  descripcion_ai:
+    `La comisión de la agencia EN PLATA, en la misma moneda del precio. ${COMO_SE_RECONOCE_LA_COMISION}`,
+}
+
+const COMISION_PCT: CampoRanura = {
+  slug: 'comision_agencia_pct',
+  label: 'Comisión de la agencia (%)',
+  tipo: 'numero',
+  min: false,
+  descripcion_ai:
+    'La misma comisión escrita como PORCENTAJE, solo el número (14 para «(14%)»). ' +
+    `${COMO_SE_RECONOCE_LA_COMISION} null si la pantalla solo la muestra en plata.`,
+}
+
+/** Lo que paga la agencia, dicho de las tres formas en que las pantallas lo dicen. */
+const COSTO_AGENCIA: CampoRanura[] = [A_PAGAR_AGENCIA, COMISION_VALOR, COMISION_PCT]
 
 // ── Escala: DÓNDE, no solo cuántas ───────────────────────────────────────────
 
@@ -327,9 +383,9 @@ const VUELO: DefinicionRanura = {
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
-    A_PAGAR_AGENCIA,
-    { slug: 'precio_por_pax', label: 'Precio por pax', tipo: 'currency', min: false, descripcion_ai: 'Precio unitario por pasajero, solo si la pantalla lo muestra aparte del total.' },
     basePrecio(['total', 'por_pax'], 'total = es el precio de toda la reserva; por_pax = es el precio de un solo pasajero.'),
+    ...COSTO_AGENCIA,
+    { slug: 'precio_por_pax', label: 'Precio por pax', tipo: 'currency', min: false, descripcion_ai: 'Precio unitario por pasajero, solo si la pantalla lo muestra aparte del total.' },
   ],
 }
 
@@ -384,8 +440,8 @@ const HOTEL: DefinicionRanura = {
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
-    A_PAGAR_AGENCIA,
     basePrecio(['total', 'por_noche'], 'total = es el precio de toda la estadía; por_noche = es el precio de una sola noche.'),
+    ...COSTO_AGENCIA,
   ],
 }
 
@@ -407,8 +463,8 @@ const ACTIVIDAD: DefinicionRanura = {
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
-    A_PAGAR_AGENCIA,
     basePrecio(['total', 'por_pax'], 'total = es el precio de todas las personas; por_pax = es el precio de una sola.'),
+    ...COSTO_AGENCIA,
   ],
 }
 
@@ -428,8 +484,8 @@ const TRASLADO: DefinicionRanura = {
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
-    A_PAGAR_AGENCIA,
     basePrecio(['total', 'por_pax'], 'total = es el precio del trayecto completo; por_pax = es el precio por persona.'),
+    ...COSTO_AGENCIA,
   ],
 }
 

@@ -17,7 +17,8 @@ import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO, etiquetaTipoRubro } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
-import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { CONVENCION_MARGEN_POR_DEFECTO, margenParaPrecio, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
 import {
   nombreDelMargen,
@@ -762,6 +763,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // La línea ya calculada por la cascada. Es la misma que guarda el servidor.
             const linea = lineaPorItem.get(item.id)
             const costoLinea = linea?.costoLinea ?? 0
+            // El costo con su parte de los administrativos: es contra ESTE número contra
+            // el que la cascada aplica el margen, así que es contra el que hay que
+            // despejarlo cuando alguien escribe el precio al cliente. Usar `costoLinea`
+            // pelado daría un margen que no reproduce el precio pedido.
+            const costoDeVentaLinea = linea?.costoDeVentaLinea ?? 0
             const precioLinea = linea?.precioLinea ?? Math.round(itemPrecio * itemCantidad)
             // El margen propio es una EXCEPCIÓN declarada, no un campo vacío: `null`
             // quiere decir "usa el de la cotización", y 0 quiere decir "esta línea va
@@ -781,7 +787,28 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // es ámbar. Ninguno de los dos frena el envío — el rechazo en servidor
             // llega con los itinerarios.
             const nivelMargen = nivelDeMargen(margenRealPct, umbrales)
-            const origenMargen = origenDelMargen({ margenPropio, precioManual: precioFijadoAMano })
+            // Lo que se leyó del pantallazo de esta línea. Se resuelve ANTES del origen del
+            // margen porque el origen depende de lo que la captura haya fijado.
+            const tarifaDelItem = leerTarifaPax(item.tarifa_pax)
+            // El margen que puso el pantallazo, si esta línea se costeó con uno que traía
+            // los dos precios. Vive en `items.tarifa_pax` desde que se confirmó, así que
+            // sobrevive a cualquier edición posterior del margen: es el único número que
+            // permite decir «me moví tanto de lo que el proveedor me daba».
+            const margenDelPantallazo = tarifaDelItem.confirmada?.margenProveedor
+              ? margenDeLineaSegunConvencion(tarifaDelItem.confirmada.margenProveedor, convencionMargen)
+              : null
+            const margenEscrito = margenPropio ? Number(item.margen_porcentaje) : null
+            const origenMargen = origenDelMargen({
+              margenPropio,
+              precioManual: precioFijadoAMano,
+              margenDelPantallazo,
+              margenActual: margenEscrito,
+            })
+            // El número del pantallazo se enseña al lado del editado, nunca en su lugar.
+            // Solo cuando difieren: repetirlo idéntico haría dudar de si son dos cifras.
+            const pantallazoDecia = margenDelPantallazo !== null && origenMargen !== 'proveedor'
+              ? formatMargenPct(margenDelPantallazo)
+              : null
             // La ranura de captura se DERIVA del grupo. `null` es respuesta legítima
             // y frecuente: el método día a día y los componentes propios no tienen
             // contrato de pantallazo y se costean a mano, como hoy.
@@ -790,7 +817,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // cascada, repartido en proporción al costo confirmado de cada tipo. Solo si
             // ese costo sigue siendo el de la línea: si alguien editó los rubros después,
             // el reparto describiría otra versión.
-            const tarifaDelItem = leerTarifaPax(item.tarifa_pax)
             const precioPorPax = tarifaDelItem.confirmada && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
               ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
               : null
@@ -1303,6 +1329,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             )}
                           </p>
                         )}
+                        {/* Lo que dijo la captura NO se pierde cuando alguien lo mueve.
+                            Sin este renglón, una línea editada deja a la agencia sin saber
+                            cuánto se separó de lo que el proveedor le daba, y el número
+                            original no está en ninguna otra pantalla. */}
+                        {pantallazoDecia && (
+                          <p className="text-[10px] text-muted-foreground">
+                            El pantallazo decía {pantallazoDecia}.
+                          </p>
+                        )}
                         {/* El descuento comercial vive al final de la cascada y NO se
                             reparte por línea, así que el margen de arriba está por
                             encima del que queda de verdad. Decirlo cuesta una línea;
@@ -1363,6 +1398,72 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 />
                                 %
                               </label>
+                              {/* La SEGUNDA puerta a la misma decisión: escribir el precio
+                                  que va a pagar el cliente y dejar que el margen se
+                                  acomode. Escribe el MISMO campo que la casilla de la
+                                  izquierda (`margen_porcentaje`), no un precio aparte: con
+                                  `precio_manual` la línea dejaría de reaccionar a un cambio
+                                  de costo y el margen mostrado quedaría al día con un
+                                  precio que ya no le corresponde.
+                                  El margen se despeja contra el costo de la línea CON su
+                                  parte de los administrativos, que es contra lo que la
+                                  cascada calcula el precio. */}
+                              {costoDeVentaLinea > 0 && (
+                                <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                  Precio al cliente
+                                  <div className="relative">
+                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">$</span>
+                                    <input
+                                      key={`precio-obj-${item.id}-${precioLinea}`}
+                                      type="text"
+                                      inputMode="numeric"
+                                      defaultValue={precioLinea ? precioLinea.toLocaleString('es-CO') : ''}
+                                      className="w-28 rounded border bg-background py-0.5 pr-1.5 pl-4 text-[11px] tabular-nums"
+                                      onBlur={e => {
+                                        const objetivo = Number(e.target.value.replace(/[^0-9]/g, '')) || 0
+                                        if (objetivo === precioLinea) return
+                                        const nuevo = margenParaPrecio(costoDeVentaLinea, objetivo, convencionMargen)
+                                        if (nuevo === null) {
+                                          // Un precio que no supera el costo pediría margen
+                                          // negativo. Se dice y se devuelve la casilla a lo
+                                          // que hay: escribirlo dejaría la línea a pérdida
+                                          // sin que nadie lo haya pedido.
+                                          e.target.value = precioLinea.toLocaleString('es-CO')
+                                          toast.error(
+                                            `El precio tiene que superar el costo de la línea (${formatCOP(costoDeVentaLinea)}).`,
+                                          )
+                                          return
+                                        }
+                                        startTransition(async () => {
+                                          await updateItem(item.id, { margen_porcentaje: nuevo })
+                                          await recalcularTotales(cotizacion.id)
+                                          router.refresh()
+                                        })
+                                      }}
+                                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                    />
+                                  </div>
+                                </label>
+                              )}
+                              {/* Volver al número del proveedor. Es la mitad que hace
+                                  reversible la edición: sin esto, «no se pierde» sería
+                                  solo poder leerlo. */}
+                              {pantallazoDecia && margenDelPantallazo !== null && (
+                                <button
+                                  type="button"
+                                  disabled={isPending}
+                                  onClick={() => {
+                                    startTransition(async () => {
+                                      await updateItem(item.id, { margen_porcentaje: margenDelPantallazo })
+                                      await recalcularTotales(cotizacion.id)
+                                      router.refresh()
+                                    })
+                                  }}
+                                  className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                                >
+                                  Volver al del pantallazo
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 disabled={isPending}
@@ -1427,6 +1528,31 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                   className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
                                 >
                                   Volver a calcularlo desde el costo
+                                </button>
+                              )}
+                              {/* Con precio a mano el margen no gobierna nada, pero el
+                                  número del pantallazo sigue siendo el punto de referencia
+                                  y volver a él tiene que ser un clic: se suelta el precio
+                                  fijado Y se repone el margen del proveedor, porque hacer
+                                  solo lo primero devolvería la línea al margen de la
+                                  cotización, que no es de donde salió. */}
+                              {pantallazoDecia && margenDelPantallazo !== null && costoLinea > 0 && (
+                                <button
+                                  type="button"
+                                  disabled={isPending}
+                                  onClick={() => {
+                                    startTransition(async () => {
+                                      await updateItem(item.id, {
+                                        precio_manual: false,
+                                        margen_porcentaje: margenDelPantallazo,
+                                      })
+                                      await recalcularTotales(cotizacion.id)
+                                      router.refresh()
+                                    })
+                                  }}
+                                  className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                                >
+                                  Volver al del pantallazo
                                 </button>
                               )}
                             </>
