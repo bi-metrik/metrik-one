@@ -272,6 +272,15 @@ export function borradorRecibo(
   concepto: string,
   /** Sucursal del tercero en Siigo. Ver `SUCURSAL_POR_DEFECTO`. */
   branchOffice: number = SUCURSAL_POR_DEFECTO,
+  /**
+   * Tipo de comprobante. Sin él, el único que declara el workspace.
+   *
+   * ⚠️ **Es lo que decide a qué cuenta contable entra la plata**, y la API de Siigo no
+   * acepta la cuenta en el payload: el recibo `Detailed`, el único que traía
+   * `items[].account.code`, fue retirado. Por eso un recibo de honorarios y uno de
+   * plata de terceros salen idénticos salvo por este número y la observación.
+   */
+  documentId?: number,
 ): Borrador<BorradorRecibo> {
   const faltantes: string[] = []
   if (!identificacion) faltantes.push('identificación')
@@ -279,7 +288,7 @@ export function borradorRecibo(
 
   return {
     payload: {
-      document: { id: cfg.reciboDocumentId },
+      document: { id: documentId ?? cfg.reciboDocumentId },
       date: fecha,
       type: 'AdvancePayment',
       customer: { identification: identificacion, branch_office: branchOffice },

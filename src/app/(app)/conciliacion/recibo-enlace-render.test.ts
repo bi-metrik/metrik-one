@@ -33,6 +33,8 @@ function pagoFalso(p: Partial<PagoConRecibo> = {}): PagoConRecibo {
     estado: 'con_recibo',
     recibo_numero: 'RC-1-65',
     recibo_url: URL_DRIVE,
+    recibos: [{ numero: 'RC-1-65', url: URL_DRIVE, componente: null }],
+    componentes_pendientes: [],
     no_aplica_motivo: null,
     facturado: false,
     faltantes: [],
@@ -53,8 +55,43 @@ describe('el enlace al PDF del recibo', () => {
   })
 
   it('un recibo sin PDF archivado lo dice, y no enlaza nada', () => {
-    const html = pintar(pagoFalso({ recibo_url: null }))
+    const html = pintar(pagoFalso({
+      recibo_url: null,
+      recibos: [{ numero: 'RC-1-65', url: null, componente: null }],
+    }))
     expect(html).toContain('sin PDF')
     expect(html).not.toContain('/api/archivos/cobro')
+  })
+
+  // ── El pago mixto: DOS documentos en la misma fila ──
+  //
+  // Mostrar solo el primero escondería un recibo que ya consumió numeración en la
+  // contabilidad del cliente, que es exactamente el trabajo que este panel existe para
+  // no esconder (PR #581).
+  it('un pago con dos recibos enlaza los DOS, cada uno a su documento', () => {
+    const html = pintar(pagoFalso({
+      recibo_numero: 'RC-1-70',
+      recibos: [
+        { numero: 'RC-1-70', url: URL_DRIVE, componente: 'honorario' },
+        { numero: 'RC-9-3', url: URL_DRIVE, componente: 'pasante' },
+      ],
+    }))
+    expect(html).toContain('RC-1-70')
+    expect(html).toContain('RC-9-3')
+    expect(html).toContain(`doc=recibo"`)
+    expect(html).toContain(`doc=recibo_pasante"`)
+    expect(html).not.toContain('drive.google.com')
+  })
+
+  it('cuando falta un componente, la fila dice CUÁL y ofrece completarlo', () => {
+    const html = pintar(pagoFalso({
+      estado: 'pendiente',
+      recibos: [{ numero: 'RC-1-70', url: URL_DRIVE, componente: 'honorario' }],
+      componentes_pendientes: ['pasante'],
+    }))
+    expect(html).toContain('Completar recibos')
+    expect(html).toContain('Falta el recibo de la plata de terceros')
+    // Y no se lee como "emitir el primero", que es lo que invitaría a duplicar.
+    expect(html).not.toContain('Emitir recibo')
   })
 })

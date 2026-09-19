@@ -17,12 +17,24 @@
  *
  * ── Los tres estados de un pago ─────────────────────────────────────────────
  *
- *  - `con_recibo`  — tiene `siigo_recibo`. Trae número y enlace al PDF.
+ *  - `con_recibo`  — toda su plata está acusada. Trae número y enlace al PDF.
  *  - `no_aplica`   — marcado con `recibo_no_aplica`. Es el corte histórico del
  *                    2026-09-07: los pagos de negocios ya facturados no llevan recibo
  *                    retroactivo. Se muestran, no se esconden: un pendiente que
  *                    desaparece sin dejar rastro es un pendiente que nadie audita.
  *  - `pendiente`   — el resto. Es la única lista sobre la que hay que actuar.
+ *
+ * ── Tener UN recibo ya no basta para estar acusado ──────────────────────────
+ *
+ * Desde el recibo por concepto (2026-09-19), una línea puede declarar que un pago
+ * mixto sale en DOS documentos: el honorario y la plata de terceros. **Un cobro con el
+ * honorario emitido y la tarifa no está PENDIENTE, no resuelto.** Si se viera resuelto,
+ * el panel volvería a esconder trabajo, que es justo lo que el PR #581 corrigió.
+ *
+ * Para saberlo hacen falta dos cosas que antes no se leían: el reparto del cobro
+ * (`v_cobro_valor`, que dice cuánta plata hay en cada bolsa) y la configuración de la
+ * línea del negocio (que dice si esa línea parte sus recibos). **Una línea que no lo
+ * declara se comporta exactamente como antes**, y ninguna lo declara hoy.
  *
  * Un cobro anulado no aparece: no documenta plata recibida.
  */
@@ -31,6 +43,16 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { traerTodo } from '@/lib/supabase/paginar'
+import {
+  componentesConValor,
+  leerReciboPorConcepto,
+  primerRecibo,
+  reciboCompleto,
+  recibosDelCobro,
+  repartoDeCobro,
+  type ComponenteRecibo,
+  type FilaReparto,
+} from '@/lib/siigo/recibo-componentes'
 
 export type EstadoRecibo = 'con_recibo' | 'no_aplica' | 'pendiente'
 
@@ -44,10 +66,25 @@ export interface PagoConRecibo {
   fecha: string | null
   concepto: string | null
   estado: EstadoRecibo
-  /** Número del recibo en Siigo. Solo en `con_recibo`. */
+  /** Número del PRIMER recibo del cobro. Null si todavía no tiene ninguno. */
   recibo_numero: string | null
-  /** Enlace al PDF archivado en Drive. Solo en `con_recibo`, y puede faltar. */
+  /** Enlace al PDF del PRIMER recibo. Puede faltar aunque el recibo exista. */
   recibo_url: string | null
+  /**
+   * Todos los recibos del cobro, en orden de emisión.
+   *
+   * Es lo que permite mostrar los dos documentos de un pago mixto. Con un solo recibo
+   * trae una entrada, y con la marca vieja (objeto suelto) también: el helper tolera
+   * las dos formas.
+   */
+  recibos: Array<{ numero: string; url: string | null; componente: ComponenteRecibo | null }>
+  /**
+   * Qué le falta por acusar a un cobro que YA tiene algún recibo.
+   *
+   * Vacío en el caso normal. Con contenido significa que la emisión quedó a medias y
+   * hay que reintentarla: el panel lo dice en vez de dejar el pendiente sin explicación.
+   */
+  componentes_pendientes: ComponenteRecibo[]
   /** Por qué no lleva recibo. Solo en `no_aplica`. */
   no_aplica_motivo: string | null
   /** El negocio ya tiene factura. Se muestra como contexto, NO decide el estado. */
@@ -134,7 +171,9 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     monto: number | null
     fecha: string | null
     notas: string | null
-    siigo_recibo: { numero?: string; archivo_url?: string | null } | null
+    tipo_cobro: string | null
+    /** Objeto (forma vieja) o lista: se lee con los helpers, nunca de frente. */
+    siigo_recibo: unknown
     recibo_no_aplica: { motivo?: string } | null
   }
 
@@ -142,7 +181,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('cobros')
-      .select('id, negocio_id, monto, fecha, notas, siigo_recibo, recibo_no_aplica')
+      .select('id, negocio_id, monto, fecha, notas, tipo_cobro, siigo_recibo, recibo_no_aplica')
       .eq('workspace_id', workspaceId)
       .is('anulado_at', null)
       .not('fecha', 'is', null)
@@ -162,6 +201,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     nombre: string | null
     contacto_id: string | null
     carpeta_url: string | null
+    linea_id: string | null
     metadata: Record<string, unknown> | null
   }
 
@@ -169,13 +209,66 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('negocios')
-      .select('id, codigo, nombre, contacto_id, carpeta_url, metadata')
+      .select('id, codigo, nombre, contacto_id, carpeta_url, linea_id, metadata')
       .in('id', negocioIds)
       .order('id')
       .range(d, h),
     { etiqueta: 'recibos/negocios' },
   )
   const porId = new Map(negocios.map(n => [n.id, n]))
+
+  // ── Qué componentes espera cada cobro ──
+  //
+  // Solo hace falta para las líneas que declaran `recibo_por_concepto`. Hoy no lo
+  // declara ninguna, así que las dos lecturas de abajo se saltan enteras y el panel
+  // cuesta exactamente lo mismo que antes.
+  const lineaIds = [...new Set(negocios.map(n => n.linea_id).filter((v): v is string => !!v))]
+  const lineas = lineaIds.length === 0 ? [] : await traerTodo<{ id: string; config_extra: Record<string, unknown> | null }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d, h) => (svc as any)
+      .from('lineas_negocio').select('id, config_extra').in('id', lineaIds).order('id').range(d, h),
+    { etiqueta: 'recibos/lineas' },
+  )
+  const porConceptoPorLinea = new Map(
+    lineas.map(l => [l.id, leerReciboPorConcepto((l.config_extra ?? {}).siigo)]),
+  )
+  const algunaLineaParteRecibos = [...porConceptoPorLinea.values()].some(v => v != null)
+
+  // El reparto solo se lee si alguna línea lo necesita: es la vista del P&L, y pedirla
+  // por gusto en cada carga del panel es trabajo que nadie usa.
+  const repartoPorCobro = new Map<string, FilaReparto>()
+  if (algunaLineaParteRecibos) {
+    const filas = await traerTodo<FilaReparto & { cobro_id: string }>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (d, h) => (svc as any)
+        .from('v_cobro_valor')
+        .select('cobro_id, a_tramo1, a_tramo2, a_tarifa, excedente')
+        .eq('workspace_id', workspaceId)
+        .order('cobro_id')
+        .range(d, h),
+      { etiqueta: 'recibos/reparto' },
+    )
+    for (const f of filas) repartoPorCobro.set(f.cobro_id, f)
+  }
+
+  /**
+   * Los componentes que ESTE cobro tiene que acusar.
+   *
+   * Vacío significa "basta un recibo cualquiera", que es el criterio de siempre y el
+   * que aplica a toda línea sin `recibo_por_concepto`.
+   */
+  const esperadosDe = (c: FilaCobro): ComponenteRecibo[] => {
+    const lineaId = c.negocio_id ? porId.get(c.negocio_id)?.linea_id : null
+    const cfg = lineaId ? porConceptoPorLinea.get(lineaId) : null
+    if (!cfg) return []
+    const reparto = repartoDeCobro(repartoPorCobro.get(c.id) ?? null, {
+      monto: Number(c.monto ?? 0),
+      tipo_cobro: c.tipo_cobro,
+    })
+    // Sin reparto no se sabe qué falta. Se cae al criterio de siempre en vez de
+    // declarar pendiente un cobro que quizá ya está completo.
+    return componentesConValor(reparto).filter(comp => cfg[comp] != null)
+  }
 
   const contactoIds = [...new Set(negocios.map(n => n.contacto_id).filter((v): v is string => !!v))]
   const contactos = contactoIds.length === 0 ? [] : await traerTodo<{ id: string; nombre: string | null; email: string | null }>(
@@ -195,7 +288,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
   // SOENA eso baja la lectura de ~300 negocios a ~17.
   const negociosPendientes = new Set(
     cobros
-      .filter(c => !c.siigo_recibo?.numero && !c.recibo_no_aplica && c.negocio_id)
+      .filter(c => !reciboCompleto(c.siigo_recibo, esperadosDe(c)) && !c.recibo_no_aplica && c.negocio_id)
       .map(c => c.negocio_id as string),
   )
   const sinMarca = [...negociosPendientes].filter(id => {
@@ -235,11 +328,23 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     const meta = (neg?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
     const contacto = neg?.contacto_id ? contactoPorId.get(neg.contacto_id) : undefined
 
-    const estado: EstadoRecibo = c.siigo_recibo?.numero
+    const esperados = esperadosDe(c)
+    const marcas = recibosDelCobro(c.siigo_recibo)
+
+    // ⚠️ Un cobro con UN recibo de DOS no es `con_recibo`. Ver el encabezado.
+    const estado: EstadoRecibo = reciboCompleto(c.siigo_recibo, esperados)
       ? 'con_recibo'
       : c.recibo_no_aplica
         ? 'no_aplica'
         : 'pendiente'
+
+    // Lo que falta solo se nombra cuando el cobro ya tiene algún recibo: ahí la emisión
+    // quedó a medias y el panel puede decir cuál. Sin ninguno, el pendiente se explica
+    // solo y repetir los dos componentes sería ruido.
+    const emitidos = new Set(marcas.map(m => m.componente).filter(Boolean))
+    const componentesPendientes = estado === 'pendiente' && marcas.length > 0
+      ? esperados.filter(comp => !emitidos.has(comp))
+      : []
 
     // Lo que impediría emitir y lo que solo va a salir peor. Se calculan siempre para
     // que la lista diga por qué un pendiente no se puede resolver hoy, en vez de
@@ -267,8 +372,14 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       fecha: c.fecha,
       concepto: c.notas,
       estado,
-      recibo_numero: c.siigo_recibo?.numero ?? null,
-      recibo_url: c.siigo_recibo?.archivo_url ?? null,
+      recibo_numero: primerRecibo(c.siigo_recibo)?.numero ?? null,
+      recibo_url: primerRecibo(c.siigo_recibo)?.archivo_url ?? null,
+      recibos: marcas.map(m => ({
+        numero: m.numero,
+        url: m.archivo_url ?? null,
+        componente: m.componente ?? null,
+      })),
+      componentes_pendientes: componentesPendientes,
       no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? null,
       facturado: !!meta.siigo_factura?.numero,
       faltantes,

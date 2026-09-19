@@ -59,4 +59,26 @@ describe('el recibo dentro del bloque de Cobros', () => {
   it('sin numero no se dice nada', () => {
     expect(pintar(null)).toBe('')
   })
+
+  // ── Un pago mixto sale con DOS documentos ────────────────────────────────
+  //
+  // Los dos se listan y cada uno abre el SUYO. Mostrar solo el primero escondería un
+  // recibo que ya consumió numeración en la contabilidad del cliente.
+  it('dos recibos se pintan los dos, cada uno a su documento', () => {
+    const html = pintar([
+      { numero: 'RC-1-70', archivo_url: URL_DRIVE, componente: 'honorario' },
+      { numero: 'RC-9-3', archivo_url: URL_DRIVE, componente: 'pasante' },
+    ])
+    expect(html).toContain('RC-1-70')
+    expect(html).toContain('RC-9-3')
+    expect(html).toContain(`doc=recibo"`)
+    expect(html).toContain(`doc=recibo_pasante"`)
+    expect(html).not.toContain('drive.google.com')
+  })
+
+  it('una lista VACIA no es un recibo: no se pinta nada', () => {
+    // ⚠️ `[]` es `truthy`. Con el `if (cobro.siigo_recibo)` de antes habría pintado
+    // una fila sin número.
+    expect(pintar([])).toBe('')
+  })
 })

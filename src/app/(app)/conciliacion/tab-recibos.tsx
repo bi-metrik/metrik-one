@@ -20,7 +20,19 @@ import { toast } from 'sonner'
 import BusquedaInput from '@/components/busqueda-input'
 import { emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
 import type { ControlRecibos, PagoConRecibo, EstadoRecibo } from '@/lib/actions/recibos-control-actions'
-import { hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
+import { docDeRecibo, hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
+import type { ComponenteRecibo } from '@/lib/siigo/recibo-componentes'
+
+/**
+ * Cómo se le nombra cada componente a una persona.
+ *
+ * `pasante` es la palabra del modelo de dinero (plata que entra y se gira a un tercero);
+ * en pantalla no dice nada, así que se traduce.
+ */
+const ETIQUETA_COMPONENTE: Record<ComponenteRecibo, string> = {
+  honorario: 'el honorario',
+  pasante: 'la plata de terceros',
+}
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -134,11 +146,6 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
   // cargue masivo no tienen comprobante.
   const montoValido = escrito === '' || Number(escrito) > 0
 
-  // El PDF del recibo ya no se abre en Drive: nace cerrado y los bytes los baja
-  // `/api/archivos/cobro` con la cuenta de servicio. Un recibo cargado a mano no trae
-  // enlace y aquí queda en null, que es lo que ya pintaba "sin PDF".
-  const hrefRecibo = hrefArchivoDeCobro(pago.cobro_id, 'recibo', pago.recibo_url)
-
   function emitir() {
     startTransition(async () => {
       const r = await emitirReciboDeNegocio(pago.negocio_id, {
@@ -147,10 +154,15 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
         justificacionDuplicado: justificacion.trim() || undefined,
       })
       if (r.ok) {
+        // Un pago mixto produce DOS documentos: el mensaje los nombra a los dos, o el
+        // segundo quedaría emitido sin que nadie lo sepa.
+        const nombrados = r.recibos.length > 1
+          ? `Recibos ${r.recibos.map(x => x.numero).join(' y ')} emitidos`
+          : `Recibo ${r.numero} emitido`
         toast.success(
           r.archivada
-            ? `Recibo ${r.numero} emitido y archivado.`
-            : `Recibo ${r.numero} emitido. El PDF no se pudo archivar: revísalo.`,
+            ? `${nombrados} y archivado${r.recibos.length > 1 ? 's' : ''}.`
+            : `${nombrados}. El PDF no se pudo archivar: revísalo.`,
         )
         setAbierto(false)
         onCambio()
@@ -189,27 +201,38 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
       </span>
 
       <div className="shrink-0">
+        {/* Un pago mixto sale con DOS documentos y se listan los dos: mostrar uno solo
+            escondería un recibo que ya consumió numeración. */}
         {pago.estado === 'con_recibo' && (
-          hrefRecibo ? (
-            <a
-              href={hrefRecibo}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline"
-              style={{ color: 'var(--acento)' }}
-            >
-              <Check className="h-3.5 w-3.5" />
-              {pago.recibo_numero}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          ) : (
-            // Emitido pero sin PDF archivado: el recibo existe en Siigo igual, y decirlo
-            // es más útil que mostrar un enlace roto.
-            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--acento)' }}>
-              <Check className="h-3.5 w-3.5" />
-              {pago.recibo_numero} · sin PDF
-            </span>
-          )
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {pago.recibos.map(r => {
+              // El PDF del recibo ya no se abre en Drive: nace cerrado y los bytes los
+              // baja `/api/archivos/cobro` con la cuenta de servicio. Un recibo cargado
+              // a mano no trae enlace, que es lo que ya pintaba "sin PDF".
+              const href = hrefArchivoDeCobro(pago.cobro_id, docDeRecibo(r.componente), r.url)
+              return href ? (
+                <a
+                  key={r.numero}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline"
+                  style={{ color: 'var(--acento)' }}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {r.numero}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                // Emitido pero sin PDF archivado: el recibo existe en Siigo igual, y
+                // decirlo es más útil que mostrar un enlace roto.
+                <span key={r.numero} className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--acento)' }}>
+                  <Check className="h-3.5 w-3.5" />
+                  {r.numero} · sin PDF
+                </span>
+              )
+            })}
+          </div>
         )}
 
         {pago.estado === 'no_aplica' && (
@@ -232,8 +255,17 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
                 className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-papel"
                 style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
               >
-                <Receipt className="h-3.5 w-3.5" /> Emitir recibo
+                <Receipt className="h-3.5 w-3.5" />
+                {pago.componentes_pendientes.length > 0 ? 'Completar recibos' : 'Emitir recibo'}
               </button>
+              {/* La emisión quedó a medias: se dice QUÉ falta, para que el pendiente no
+                  parezca un pago sin acusar cuando ya tiene un documento emitido. */}
+              {pago.componentes_pendientes.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Falta el recibo de {pago.componentes_pendientes.map(c => ETIQUETA_COMPONENTE[c]).join(' y ')}
+                </span>
+              )}
               {/* El recibo sale igual: esto se dice ANTES de emitir, no se calla. */}
               {pago.avisos.map(a => (
                 <span key={a} className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
