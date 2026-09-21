@@ -18,17 +18,20 @@ import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import {
+  CLAVE_CONFIRMACION_NIT,
   MENSAJE_NIT_AMBIGUO,
   MENSAJE_NO_COINCIDE,
-  confirmacionVigente,
+  confirmacionDe,
   digitosDeNit,
   faltaConfirmacionNit,
-  leerConfirmacion,
+  leerConfirmaciones,
+  motivoFaltaConfirmacionNit,
+  type MotivoFaltaNit,
   mismoNit,
   nitAConfirmar,
-  type ConfirmacionNit,
 } from '@/lib/dian/confirmacion-nit'
 import { casillasConNit } from '@/lib/dian/guarda-nit-formulario'
+import { guardarMarcaAnidadaEnMetadata } from '@/lib/negocios/marca-metadata'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { telefonoCasilla25 } from '@/lib/dian/telefono-casilla-25'
@@ -567,32 +570,49 @@ export async function generarFormularioCore(
     const nitPegado = nitConDvPegadoEnFormulario(template, camposFuente, datosFinal, sondas)
     if (nitPegado) return { success: false, error: nitPegado }
 
+    // El negocio se lee ACÁ y no en el paso 3 porque la guarda de abajo necesita su
+    // `metadata`: las confirmaciones del NIT viven en el negocio, no en el bloque.
+    const { data: negocio } = await db(supabase)
+      .from('negocios')
+      .select('codigo, carpeta_url, metadata')
+      .eq('id', negocioId)
+      .single()
+
     // Transcripción a ciegas del NIT: alguien tuvo que leer la casilla 5 del RUT y
     // teclearla, y el número tecleado tuvo que coincidir. El DV, el cruce entre campos
     // y la confianza del modelo NO ven un dígito de más (medido sobre 342 RUT reales,
     // ver `@/lib/dian/confirmacion-nit`). Va aquí, sobre `datosFinal`, por el mismo
     // motivo que la guarda de arriba: lo que se confirma es lo que se va a imprimir.
     //
+    // El mapa es del NEGOCIO y está indexado por NIT, así que una confirmación cubre los
+    // cuatro bloques de 010/1668 mientras los cuatro impriman ese número — y el bloque
+    // que imprima otro (override, o el RUT corregido después) pide el suyo sin
+    // desconfirmar a los demás.
+    //
     // Los cargues masivos entran por este mismo núcleo, así que quedan cubiertos. Un
     // script legítimo pasa su propia confirmación explícita — que se compara igual.
-    let confirmacion = leerConfirmacion(
-      ((bloqueData.data as Record<string, unknown>) ?? {}).confirmacion_nit,
-    )
+    const metadataNegocio = ((negocio?.metadata as Record<string, unknown> | null) ?? {})
+    let confirmaciones = leerConfirmaciones(metadataNegocio[CLAVE_CONFIRMACION_NIT])
+    const { nit: nitEsperado } = nitAConfirmar(template, camposFuente, datosFinal)
     if (confirmacionNit) {
-      const { nit: esperado } = nitAConfirmar(template, camposFuente, datosFinal)
-      if (esperado && !mismoNit(confirmacionNit.nit, esperado)) {
+      if (nitEsperado && !mismoNit(confirmacionNit.nit, nitEsperado)) {
         return { success: false, error: MENSAJE_NO_COINCIDE }
       }
-      if (esperado) {
-        confirmacion = {
-          nit: esperado,
-          por: confirmacionNit.por ?? null,
-          por_nombre: confirmacionNit.por_nombre,
-          at: new Date().toISOString(),
+      if (nitEsperado) {
+        // Se suma al mapa en memoria para que la generación pase; queda PERSISTIDA
+        // después, junto con el resto del guardado (paso 7).
+        confirmaciones = {
+          ...confirmaciones,
+          [nitEsperado]: {
+            nit: nitEsperado,
+            por: confirmacionNit.por ?? null,
+            por_nombre: confirmacionNit.por_nombre,
+            at: new Date().toISOString(),
+          },
         }
       }
     }
-    const faltaConfirmar = faltaConfirmacionNit(template, camposFuente, datosFinal, confirmacion)
+    const faltaConfirmar = faltaConfirmacionNit(template, camposFuente, datosFinal, confirmaciones)
     if (faltaConfirmar) return { success: false, error: faltaConfirmar }
 
     // ── Seccional DIAN (010): preset config-driven vía helper compartido con la
@@ -616,13 +636,6 @@ export async function generarFormularioCore(
         error: `Faltan ${faltantesReales.length} campos: ${faltantesReales.join(', ')}`,
       }
     }
-
-    // 3. Get negocio info
-    const { data: negocio } = await db(supabase)
-      .from('negocios')
-      .select('codigo, carpeta_url')
-      .eq('id', negocioId)
-      .single()
 
     const codigoNegocio = (negocio?.codigo as string) ?? negocioId.slice(0, 8)
     const fechaGeneracion = new Date().toISOString()
@@ -710,13 +723,24 @@ export async function generarFormularioCore(
         generated_at: fechaGeneracion,
       })
 
+    // 6b. La confirmación explícita de un script se PERSISTE en el negocio, igual que la
+    // que teclea el operador: si no, la única traza de ese acto viviría en la consola de
+    // quien corrió el script, y el siguiente formulario del mismo caso la volvería a pedir.
+    if (confirmacionNit && nitEsperado) {
+      await guardarMarcaAnidadaEnMetadata(
+        admin, workspaceId, negocioId, CLAVE_CONFIRMACION_NIT, nitEsperado,
+        {
+          por: confirmacionNit.por ?? null,
+          por_nombre: confirmacionNit.por_nombre,
+          at: fechaGeneracion,
+        },
+        metadataNegocio,
+      )
+    }
+
     // 7. Save data and mark complete (conserva campos_override; usa los valores finales)
-    // `confirmacion_nit` se reescribe para que la confirmación explícita de un script
-    // quede con su autor en el bloque, igual que la que teclea el operador: si no, la
-    // única traza de ese acto viviría en la consola de quien corrió el script.
     const newData = {
       ...((bloqueData.data as Record<string, unknown>) ?? {}),
-      ...(confirmacion ? { confirmacion_nit: confirmacion } : {}),
       drive_url: driveUrl,
       campos_usados: datosFinal,
       template,
@@ -784,6 +808,13 @@ export interface EstadoConfirmacionNit {
   documento_url?: string | null
   /** Nombre del bloque de donde sale el NIT: es donde se corrige si no coincide. */
   documento_label?: string | null
+  /**
+   * Por qué falta (null si no falta). `otro_nit` es el caso del mapa compartido: el
+   * negocio ya tiene confirmaciones, pero ninguna es del número que ESTE bloque imprime.
+   * Sin distinguirlo, al operador que acaba de confirmar en el formulario de al lado la
+   * segunda petición se le parece a un defecto.
+   */
+  motivo?: MotivoFaltaNit | null
 }
 
 export interface FormularioVersionItem {
@@ -890,12 +921,16 @@ export async function resolverFormularioParaEdicion(
 
   // ── Transcripción a ciegas del NIT ───────────────────────────────────────
   // El estado se calcula sobre `datosEd`, que ya trae los overrides: es exactamente el
-  // valor que se va a imprimir, el mismo que juzga la guarda de la generación.
+  // valor que se va a imprimir, el mismo que juzga la guarda de la generación. El mapa
+  // de confirmados vive en el NEGOCIO, así que lo que otro bloque ya confirmó cuenta acá.
   const { nit: nitEsperado, ambiguo: nitAmbiguo } = nitAConfirmar(template, camposFuente, datosEd)
-  const confirmacionGuardada = leerConfirmacion(
-    ((bloqueData.data as Record<string, unknown>) ?? {}).confirmacion_nit,
+  const { data: negocioConf } = await db(supabase)
+    .from('negocios').select('metadata').eq('id', negocioId).maybeSingle()
+  const confirmaciones = leerConfirmaciones(
+    ((negocioConf?.metadata as Record<string, unknown> | null) ?? {})[CLAVE_CONFIRMACION_NIT],
   )
-  const nitConfirmado = confirmacionVigente(confirmacionGuardada, nitEsperado)
+  const confirmacionGuardada = confirmacionDe(confirmaciones, nitEsperado)
+  const nitConfirmado = confirmacionGuardada !== null
   // Mientras no esté confirmado, el valor de estas casillas NO sale del servidor.
   const slugsOcultos = new Set(
     nitConfirmado ? [] : casillasConNit(template, camposFuente).map((c) => c.slug),
@@ -975,6 +1010,7 @@ export async function resolverFormularioParaEdicion(
       at: nitConfirmado ? confirmacionGuardada?.at ?? null : null,
       documento_url: doc?.drive_url ?? null,
       documento_label: doc?.label ?? null,
+      motivo: motivoFaltaConfirmacionNit(template, camposFuente, datosEd, confirmaciones),
     },
   }
 }
@@ -1077,6 +1113,13 @@ export async function guardarFormularioOverrides(
  * Si no coincide, **no escribe nada** y devuelve los dos números para que la pantalla los
  * ponga lado a lado. La salida no es reintentar el campo: si el operador leyó bien, lo que
  * está mal es el NIT guardado, y eso se corrige en el bloque `rut` (con su causa).
+ *
+ * Lo confirmado queda en `negocios.metadata.confirmacion_nit[<nit en dígitos>]`, o sea a
+ * nivel de NEGOCIO: con eso los cuatro bloques de 010/1668 quedan cubiertos de una vez
+ * mientras impriman ese mismo número. Se escribe con `guardarMarcaAnidadaEnMetadata`, que
+ * **relee la metadata justo antes del update**: `metadata` es una columna compartida
+ * (`seccional`, `siigo_cliente`, `reproceso`…) y un leer-modificar-escribir sobre la copia
+ * vieja pisaría lo que otro proceso escribió en el medio, sin error y sin aviso.
  */
 export async function confirmarNitFormulario(
   negocioBloqueId: string,
@@ -1132,24 +1175,20 @@ export async function confirmarNitFormulario(
     nombre = (prof?.full_name as string | null) ?? null
   }
 
-  const confirmacion: ConfirmacionNit = {
-    nit: esperado.nit,
-    // staff.id, NO profile.id: es lo mismo que acepta `activity_log.autor_id`, y tenerlo
-    // guardado aquí evita que quien lea la fila tenga que adivinar de qué tabla es el id.
-    por: staffId ?? null,
-    por_nombre: nombre,
-    at: new Date().toISOString(),
-  }
-
-  const current = (row.data as Record<string, unknown>) ?? {}
-  const { error: upErr } = await db(supabase)
-    .from('negocio_bloques')
-    .update({
-      data: { ...current, confirmacion_nit: confirmacion },
-      updated_at: confirmacion.at,
-    })
-    .eq('id', negocioBloqueId)
-  if (upErr) return { ok: false, error: (upErr as { message: string }).message }
+  const at = new Date().toISOString()
+  // La entrada se indexa por el NIT en dígitos; `nit` NO se repite adentro, porque el dato
+  // en dos sitios son dos sitios que se pueden contradecir.
+  const guardada = await guardarMarcaAnidadaEnMetadata(
+    supabase, workspaceId, negocioId, CLAVE_CONFIRMACION_NIT, esperado.nit,
+    {
+      // staff.id, NO profile.id: es el mismo id que acepta `activity_log.autor_id`, y
+      // tenerlo aquí evita que quien lea la fila tenga que adivinar de qué tabla es.
+      por: staffId ?? null,
+      por_nombre: nombre,
+      at,
+    },
+  )
+  if (!guardada.ok) return { ok: false, error: guardada.mensaje }
 
   const label = (configExtra.label as string) ?? 'Formulario'
   await registrarActividad(supabase, {
@@ -1159,9 +1198,11 @@ export async function confirmarNitFormulario(
     tipo: 'cambio',
     // ⚠️ FK a staff(id). Pasarle el profile.id la viola y el evento se pierde sin ruido.
     autor_id: staffId ?? null,
-    campo_modificado: 'confirmacion_nit',
-    valor_nuevo: confirmacion.nit,
-    contenido: `Confirmó el NIT ${confirmacion.nit} del RUT para ${label}`.slice(0, 280),
+    campo_modificado: CLAVE_CONFIRMACION_NIT,
+    valor_nuevo: esperado.nit,
+    // El evento dice desde qué formulario se confirmó, aunque la confirmación cubra a los
+    // cuatro: es el dato que permite reconstruir quién estaba mirando qué.
+    contenido: `Confirmó el NIT ${esperado.nit} del RUT desde ${label}`.slice(0, 280),
   }, 'confirmarNitFormulario')
 
   revalidatePath(`/negocios/${negocioId}`)

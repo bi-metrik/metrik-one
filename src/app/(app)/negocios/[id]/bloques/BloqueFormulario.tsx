@@ -280,6 +280,28 @@ export default function BloqueFormulario({
             </div>
           ) : (
             <div className="mt-2 space-y-2">
+              {/*
+                La confirmación se comparte a nivel de NEGOCIO, así que quien ya la hizo en
+                el formulario de al lado necesita saber por qué se la vuelven a pedir: este
+                bloque va a imprimir OTRO número. Sin esta línea la segunda petición se lee
+                como un defecto, y de ahí a teclear sin mirar hay un paso.
+              */}
+              {confirmNit?.motivo === 'otro_nit' && (
+                <p data-testid="motivo-otro-nit" className="text-[11px] font-medium text-amber-900">
+                  Ya confirmaste un NIT en este negocio, pero este formulario va a imprimir uno
+                  distinto. Confirma el de este formulario.
+                </p>
+              )}
+              {confirmNit?.motivo === 'ambiguo' && (
+                <p data-testid="motivo-ambiguo" className="text-[11px] font-medium text-red-700">
+                  Este formulario imprime más de un NIT distinto: no se puede confirmar con un solo
+                  número. Revisa la configuración del bloque.
+                </p>
+              )}
+              {/* Con dos NIT distintos no hay un número que teclear: pedirlo sería ofrecer
+                  una salida que no resuelve nada. Se explica y se corta. */}
+              {confirmNit?.motivo !== 'ambiguo' && (
+                <>
               <p className="text-[11px] text-amber-800">
                 Abre el documento y escribe la casilla 5 tal como aparece. No se muestra en pantalla:
                 el número tiene que salir del documento, no de aquí.
@@ -315,6 +337,8 @@ export default function BloqueFormulario({
                   Confirmar
                 </button>
               </div>
+                </>
+              )}
             </div>
           )}
         </div>
