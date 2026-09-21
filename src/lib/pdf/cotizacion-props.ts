@@ -134,6 +134,25 @@ export interface CotizacionPDFProps {
     unidad?: string | null
     /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
     precioPorPasajero?: PrecioPorPasajeroPDF
+    /**
+     * Los adicionales de ESTA variante, en palabras: «Equipaje de bodega adicional ×2».
+     *
+     * Van DENTRO de la línea, no como ítem aparte: *«que me lo muestre todo junto»*. Son
+     * texto, sin cifra propia — el dinero del documento se imprime una sola vez y va en el
+     * total de la línea (ver `valorAdicionales`).
+     */
+    adicionales?: string[]
+    /**
+     * Lo que los adicionales le suman al total de la línea, en pesos.
+     *
+     * ⚠️ TIENE que entrar en el total impreso. `precio_venta` es el precio BASE de la
+     * variante (`items.precio_venta`), y sin este sumando la columna que el cliente suma
+     * quedaría por debajo del TOTAL, que sale de `valor_total` y sí los incluye. Dos
+     * cifras del mismo dinero que no cuadran, en el documento que el cliente sí suma.
+     *
+     * Ausente vale 0: es todo lo que no es un viaje con adicionales.
+     */
+    valorAdicionales?: number
   }[]
 
   /**
@@ -163,6 +182,10 @@ export interface CotizacionPDFProps {
       unidad?: string | null
       /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
       precioPorPasajero?: PrecioPorPasajeroPDF
+      /** Ver `items[].adicionales`: van dentro de la línea, en palabras. */
+      adicionales?: string[]
+      /** Ver `items[].valorAdicionales`: TIENE que entrar en el total impreso. */
+      valorAdicionales?: number
     }[]
   }[] | null
   /**

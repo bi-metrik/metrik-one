@@ -16,6 +16,12 @@ import {
   contextoDelViaje,
   registrarSalidaAlCliente,
 } from '@/lib/cotizaciones/registro-decisiones'
+import { leerAdicionalesDeItems } from '@/lib/cotizaciones/itinerarios-datos'
+import {
+  adicionalesPorItem,
+  etiquetaDeAdicional,
+  totalesDeAdicionales,
+} from '@/lib/cotizaciones/adicionales'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
@@ -636,6 +642,29 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // de una plantilla, y una regla repetida es una regla que se desincroniza.
   const bloques = await bloquesParaPDF(supabase, cotizacionId)
   const itemPorId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
+
+  /**
+   * Los adicionales de cada variante, para el documento del cliente (§1.2 del diseño).
+   *
+   * ⚠️ Van DENTRO de la línea, no como ítem aparte, y su plata TIENE que entrar en el
+   * total impreso: `items.precio_venta` guarda el precio BASE, así que sin este sumando
+   * la columna que el cliente suma quedaría por debajo del TOTAL, que sale de
+   * `valor_total` y sí los incluye.
+   *
+   * Lectura tolerante: sin la tabla devuelve vacío y el PDF sale exactamente como hoy.
+   */
+  const filasAdicionales = await leerAdicionalesDeItems(supabase, [...itemPorId.keys()])
+  const adicionalesPorId = adicionalesPorItem(filasAdicionales)
+  const adicionalesDe = (i: ItemRow) => {
+    const lista = i.id ? adicionalesPorId.get(i.id) ?? [] : []
+    if (lista.length === 0) return { adicionales: undefined, valorAdicionales: undefined }
+    return {
+      adicionales: lista.map(ad =>
+        ad.cantidad > 1 ? `${etiquetaDeAdicional(ad)} ×${ad.cantidad}` : etiquetaDeAdicional(ad),
+      ),
+      valorAdicionales: totalesDeAdicionales(lista).precio,
+    }
+  }
   const itinerariosPDF = bloques
     ? bloques.map(b => ({
         nombre: b.nombre,
@@ -652,6 +681,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
             cantidad: Number(i.cantidad) || 1,
             unidad: i.unidad ?? null,
             precioPorPasajero: precioPorPasajeroDeItem(i),
+            ...adicionalesDe(i),
           })),
       }))
     : null
@@ -681,6 +711,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     cantidad: Number(i.cantidad) || 1,
     unidad: i.unidad ?? null,
     precioPorPasajero: precioPorPasajeroDeItem(i),
+    ...adicionalesDe(i),
   })
 
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
@@ -804,6 +835,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
       tarifa_pax: i.tarifa_pax,
+      // §1.2 · el adicional se ve DENTRO del vuelo. Es la misma lista que va en
+      // «Inversión»: escrita dos veces, la ficha y el precio dirían cosas distintas.
+      adicionales: adicionalesDe(i).adicionales ?? [],
     }))
     const vuelos = vuelosDeItems(paraLectura)
     const hoteles = hotelesDeItems(paraLectura)

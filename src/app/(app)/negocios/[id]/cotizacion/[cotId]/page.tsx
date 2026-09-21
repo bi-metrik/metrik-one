@@ -1,5 +1,6 @@
 import { getCotizacion, getCotizacionItems } from '@/app/(app)/negocios/cotizacion-actions'
 import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
+import { getAdicionalesDeCotizacion } from '@/app/(app)/negocios/adicional-actions'
 import { getPoliticaRecargo } from '@/app/(app)/negocios/recargo-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -23,7 +24,7 @@ export default async function CotizacionNegocioPage({
   const { id, cotId } = await params
 
   // getFiscalProfile tiene getWorkspace() interno que THROWS — catch para no crashear
-  const [cotizacion, items, fiscalResult, itinerarios] = await Promise.all([
+  const [cotizacion, items, fiscalResult, itinerarios, adicionales] = await Promise.all([
     getCotizacion(cotId),
     getCotizacionItems(cotId),
     getFiscalProfile().catch(() => ({ success: false as const, data: null })),
@@ -31,6 +32,10 @@ export default async function CotizacionNegocioPage({
     // opciones —que es toda cotizacion anterior a este frente— y tambien cuando la
     // migracion no esta aplicada: en los dos casos la pantalla se ve como hoy.
     getEstadoItinerarios(cotId),
+    // Los adicionales de cada variante. Mismo corte: sin la tabla devuelve
+    // `disponible: false` y el editor no ofrece el control, en vez de ofrecer uno que
+    // va a devolver un 42P01 al primer clic.
+    getAdicionalesDeCotizacion(cotId),
   ])
 
   // Regla 2 · el recargo fijo que declara la línea del negocio. Sin línea, o sin la
@@ -236,6 +241,7 @@ export default async function CotizacionNegocioPage({
       itinerarios={itinerarios}
       composicionViaje={composicionViaje}
       lineasPorTipo={lineasPorTipo}
+      adicionales={adicionales as Parameters<typeof CotizacionEditor>[0]['adicionales']}
     />
   )
 }

@@ -31,6 +31,7 @@ const VUELO = {
   escalas: 1,
   tarifa: 'BASIC Standard economy',
   equipaje: 'articulo personal',
+  adicionales: [],
 }
 
 const HOTEL = {
@@ -46,6 +47,7 @@ const HOTEL = {
   cancelacion: 'Cancelacion gratuita hasta 30/11/2026',
   estrellas: null,
   localizador: null,
+  adicionales: [],
 }
 
 const CARGO = {
@@ -304,4 +306,64 @@ describe('compatibilidad', () => {
     expect(t).toContain('TIQUETES AEREOS')
     expect(t).toContain('TOTAL')
   })
+})
+
+
+/**
+ * El adicional DENTRO del vuelo, y su plata dentro del total de la linea (S1.2).
+ *
+ * > *«Un equipaje adicional de bodega no lo pondria como otro item, sino que lo agregaria
+ * > dentro del vuelo como adicional para que el sistema me lo muestre todo junto.»*
+ *
+ * Todo lo que se afirma aqui sale del BINARIO del PDF, no de las props: la plantilla
+ * puede recibir el dato correcto y no pintarlo, que es lo que el JSX decide.
+ */
+describe('adicionales dentro de la variante', () => {
+  const conMaleta = () =>
+    props({
+      viaje: viaje({ vuelos: [{ ...VUELO, adicionales: ['Equipaje de bodega adicional x2'] }] }),
+      items: [
+        {
+          nombre: 'TIQUETES AEREOS',
+          descripcion: null,
+          precio_venta: 1_294_351,
+          descuento_porcentaje: 0,
+          cantidad: 1,
+          unidad: null,
+          adicionales: ['Equipaje de bodega adicional x2'],
+          valorAdicionales: 240_000,
+        },
+        { nombre: 'HOTEL CROWN PARADISE', descripcion: null, precio_venta: 3_780_884, descuento_porcentaje: 0, cantidad: 1, unidad: null },
+      ],
+    })
+
+  it('se imprime dentro de la ficha del vuelo', async () => {
+    const t = await texto(conMaleta())
+    expect(t).toContain('Adicionales')
+    expect(t).toContain('Equipaje de bodega adicional x2')
+  })
+
+  it('su plata entra en el total de SU linea: la columna sigue cuadrando', async () => {
+    const t = await texto(conMaleta())
+    // 1.294.351 + 240.000 = 1.534.351. Sin el sumando saldria 1.294.351 y la columna
+    // quedaria por debajo del TOTAL, que si los incluye.
+    expect(t).toContain('1.534.351')
+    expect(t).not.toContain('1.294.351')
+  })
+
+  it('sale en los TRES niveles de detalle: es plata que el cliente paga', async () => {
+    for (const nivel of ['muy_detallada', 'normal', 'general'] as const) {
+      const p = conMaleta()
+      const t = await texto({ ...p, viaje: { ...p.viaje!, nivelDetalle: nivel } })
+      expect(t, nivel).toContain('Equipaje de bodega adicional x2')
+    }
+  }, 30_000)
+
+  it('R6 . sin adicionales el documento no cambia un caracter', async () => {
+    const sinCampo = props()
+    const conCampoVacio = props({
+      items: props().items.map(i => ({ ...i, adicionales: [], valorAdicionales: 0 })),
+    })
+    expect(await texto(conCampoVacio)).toBe(await texto(sinCampo))
+  }, 30_000)
 })

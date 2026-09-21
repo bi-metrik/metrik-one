@@ -140,10 +140,14 @@ export default function CotizacionTrappvelPDF({
   const opcionales = sugeridos ?? []
 
   // Lo que el cliente paga: la MISMA lista que alimenta el Subtotal. Ver decisión 2.
+  // ⚠️ El adicional entra en el total de SU línea. `precio_venta` es el precio BASE de la
+  // variante: sin este sumando, la columna que el cliente suma quedaría por debajo del
+  // TOTAL, que sí los incluye. Ausente vale 0 — toda cotización sin adicionales imprime
+  // exactamente lo mismo que antes.
   const lineas = items.map(i => {
     const cantidad = i.cantidad ?? 1
-    const total = Math.round(i.precio_venta * cantidad * (1 - (i.descuento_porcentaje || 0) / 100))
-    return { ...i, cantidad, total }
+    const base = Math.round(i.precio_venta * cantidad * (1 - (i.descuento_porcentaje || 0) / 100))
+    return { ...i, cantidad, total: base + (i.valorAdicionales ?? 0) }
   })
   const subtotal = lineas.reduce((a, l) => a + l.total, 0)
   const iva = fiscal?.iva ?? 0
@@ -289,6 +293,15 @@ export default function CotizacionTrappvelPDF({
                     {vu.escalaRegreso && <Dato etiqueta="Regreso" valor={`Escala en ${vu.escalaRegreso}`} />}
                     {!general && vu.tarifa && <Dato etiqueta="Tarifa" valor={vu.tarifa} />}
                     {!general && vu.equipaje && <Dato etiqueta="Equipaje" valor={vu.equipaje} />}
+                    {/* §1.2 · el adicional va DENTRO del vuelo, no como item aparte:
+                        *«mantener dentro de cada bloque todo el hilo de variables»*.
+                        Sale en los TRES niveles —incluido el general— porque es plata que
+                        el cliente paga, y el nivel recorta descripcion, nunca
+                        obligaciones (decision 3 de la cabecera). Sin cifra: el dinero
+                        vive en «Inversion» y se imprime una sola vez. */}
+                    {vu.adicionales.length > 0 && (
+                      <Dato etiqueta="Adicionales" valor={vu.adicionales.join(' · ')} />
+                    )}
                   </View>
                 )
               })}
@@ -329,6 +342,10 @@ export default function CotizacionTrappvelPDF({
                   {!general && h.ocupacion && <Dato etiqueta="Acomodación" valor={h.ocupacion} />}
                   {detallada && h.cancelacion && <Dato etiqueta="Cancelación" valor={h.cancelacion} />}
                   {h.localizador && <Dato etiqueta="Localizador" valor={h.localizador} />}
+                  {/* Ver la nota del vuelo: el adicional vive dentro de su bloque. */}
+                  {h.adicionales.length > 0 && (
+                    <Dato etiqueta="Adicionales" valor={h.adicionales.join(' · ')} />
+                  )}
                 </View>
               ))}
             </View>
@@ -427,6 +444,21 @@ export default function CotizacionTrappvelPDF({
                         {l.nombre}
                         {l.cantidad > 1 ? `  ×${l.cantidad}${l.unidad ? ` ${l.unidad}` : ''}` : ''}
                       </Text>
+                      {/* Los adicionales, DENTRO de la línea (§1.2): *«que me lo muestre
+                          todo junto»*. Sin cifra propia —el dinero del documento se
+                          imprime una vez y ya está en el total de la derecha—, pero con
+                          nombre: un cargo que sube el precio y no aparece en ninguna
+                          parte es lo que este renglón existe para que no pase.
+                          Sale en los TRES niveles de detalle: es plata que el cliente
+                          paga, y el nivel recorta descripción, nunca obligaciones. */}
+                      {(l.adicionales?.length ?? 0) > 0 && (
+                        <Text
+                          hyphenationCallback={SIN_GUION}
+                          style={{ fontSize: 7, color: GRIS_ETIQUETA, marginTop: 1 }}
+                        >
+                          {`Incluye: ${l.adicionales!.join(' · ')}`}
+                        </Text>
+                      )}
                       {detallada && <PorPasajero precios={l.precioPorPasajero ?? null} color={GRIS_ETIQUETA} />}
                     </View>
                     <Text style={{ fontSize: 8.5, color: NEGRO }}>{pesos(l.total)}</Text>

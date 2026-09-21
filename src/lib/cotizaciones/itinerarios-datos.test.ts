@@ -36,7 +36,14 @@ function constructor(tabla: string) {
   let payload: Fila = {}
   let embebe: string[] = []
 
-  const aplica = (f: Fila) => filtros.every(([col, val]) => f[col] === val)
+  // `in` filtra por PERTENENCIA, no por el primer valor: quedarse con el primer id
+  // dejaría fuera los adicionales de las demás líneas sin que nada fallara.
+  const aplica = (f: Fila) =>
+    filtros.every(([col, val]) =>
+      val !== null && typeof val === 'object' && '__in' in (val as object)
+        ? (val as { __in: unknown[] }).__in.includes(f[col])
+        : f[col] === val,
+    )
 
   const proyectar = (f: Fila): Fila => {
     const salida: Fila = { ...f }
@@ -89,6 +96,7 @@ function constructor(tabla: string) {
     update(p: Fila) { operacion = 'update'; payload = p; return api },
     delete() { operacion = 'delete'; return api },
     eq(col: string, val: unknown) { filtros.push([col, val]); return api },
+    in(col: string, vals: unknown[]) { filtros.push([col, { __in: vals }]); return api },
     neq(col: string, val: unknown) {
       filtros.push([col, { __neq: val }] as unknown as [string, unknown])
       return api

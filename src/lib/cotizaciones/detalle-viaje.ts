@@ -40,6 +40,14 @@ export interface ItemConLectura {
   nombre: string | null
   grupo: string | null
   tarifa_pax?: unknown
+  /**
+   * Los adicionales de ESTA variante, ya en palabras («Equipaje de bodega adicional ×2»).
+   *
+   * No salen de la lectura del pantallazo: son datos de `item_adicionales`
+   * (`adicionales.ts`) y llegan armados desde el servidor, igual que el nombre de la
+   * línea. Ausente o vacío = la ficha no los menciona, que es todo lo que existe hoy.
+   */
+  adicionales?: string[]
 }
 
 export interface VueloPDF {
@@ -58,6 +66,14 @@ export interface VueloPDF {
   tarifa: string | null
   /** Qué equipaje lleva, en palabras. `null` = la captura no mostraba equipaje. */
   equipaje: string | null
+  /**
+   * Los adicionales de esta variante: la maleta extra, la silla, el seguro.
+   *
+   * Van DENTRO de la ficha del vuelo, que es literalmente lo que se pidió: *«mantener
+   * dentro de cada bloque todo el hilo de variables»*. Sin cifra — el dinero del documento
+   * vive en «Inversión» y se imprime una sola vez.
+   */
+  adicionales: string[]
 }
 
 export interface HotelPDF {
@@ -75,6 +91,8 @@ export interface HotelPDF {
   estrellas: number | null
   /** Ver la cabecera: una cotización no tiene localizador. */
   localizador: string | null
+  /** Ver `VueloPDF.adicionales`: van dentro de la ficha, sin cifra. */
+  adicionales: string[]
 }
 
 /**
@@ -231,6 +249,7 @@ export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
       escalas: numero(d, 'escalas'),
       tarifa: texto(d, 'familia_tarifa'),
       equipaje: equipajeEnPalabras(d),
+      adicionales: item.adicionales ?? [],
     })
   }
   return out
@@ -268,6 +287,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       cancelacion: texto(d, 'politica_cancelacion'),
       estrellas: null,
       localizador: null,
+      adicionales: item.adicionales ?? [],
     })
   }
   return out
