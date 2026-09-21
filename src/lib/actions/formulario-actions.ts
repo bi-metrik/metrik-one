@@ -17,6 +17,19 @@ import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
+import {
+  MENSAJE_NIT_AMBIGUO,
+  MENSAJE_NO_COINCIDE,
+  confirmacionVigente,
+  digitosDeNit,
+  faltaConfirmacionNit,
+  leerConfirmacion,
+  mismoNit,
+  nitAConfirmar,
+  type ConfirmacionNit,
+} from '@/lib/dian/confirmacion-nit'
+import { casillasConNit } from '@/lib/dian/guarda-nit-formulario'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { telefonoCasilla25 } from '@/lib/dian/telefono-casilla-25'
 import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
@@ -430,11 +443,31 @@ export async function generarFormulario(
 }
 
 /**
+ * Confirmación del NIT que un llamador SIN pantalla (un script de cargue) puede traer
+ * consigo para satisfacer la transcripción a ciegas.
+ *
+ * **No es un flag para saltarse la guarda.** `nit` se compara igual contra lo que el
+ * formulario va a imprimir: si el script escribió otro número, la generación falla lo
+ * mismo que en pantalla. Lo único que cambia es de dónde viene el acto humano — de un
+ * input o de quien corrió el script, que tiene que decir su nombre en `por_nombre`.
+ */
+export interface ConfirmacionNitExplicita {
+  /** El NIT leído del documento. Se compara, no se cree. */
+  nit: string
+  /** `staff.id` de quien confirma, si se conoce. */
+  por?: string | null
+  /** Quién confirmó, legible. Obligatorio: una confirmación anónima no es un control. */
+  por_nombre: string
+}
+
+/**
  * Núcleo de generación SIN auth. Lo invocan el server action `generarFormulario`
  * (tras getWorkspace + guardEditarBloque) y los scripts de cargue masivo (con
  * service client). Misma lógica de producción: resuelve casillas, arma el PDF con
  * el template oficial, lo sube a la carpeta canónica del negocio en Drive y deja
  * una versión en `formulario_versiones`. → una sola vía de generación, sin drift.
+ *
+ * `confirmacionNit` es para los llamadores sin pantalla; ver `ConfirmacionNitExplicita`.
  */
 export async function generarFormularioCore(
   supabase: SupabaseClient,
@@ -442,6 +475,7 @@ export async function generarFormularioCore(
   userId: string | null,
   negocioBloqueId: string,
   negocioId: string,
+  confirmacionNit?: ConfirmacionNitExplicita,
 ): Promise<GenerarFormularioResult> {
   const admin = createServiceClient()
 
@@ -532,6 +566,34 @@ export async function generarFormularioCore(
     // Se mira DESPUÉS de los overrides, porque lo que cuenta es lo que se va a imprimir.
     const nitPegado = nitConDvPegadoEnFormulario(template, camposFuente, datosFinal, sondas)
     if (nitPegado) return { success: false, error: nitPegado }
+
+    // Transcripción a ciegas del NIT: alguien tuvo que leer la casilla 5 del RUT y
+    // teclearla, y el número tecleado tuvo que coincidir. El DV, el cruce entre campos
+    // y la confianza del modelo NO ven un dígito de más (medido sobre 342 RUT reales,
+    // ver `@/lib/dian/confirmacion-nit`). Va aquí, sobre `datosFinal`, por el mismo
+    // motivo que la guarda de arriba: lo que se confirma es lo que se va a imprimir.
+    //
+    // Los cargues masivos entran por este mismo núcleo, así que quedan cubiertos. Un
+    // script legítimo pasa su propia confirmación explícita — que se compara igual.
+    let confirmacion = leerConfirmacion(
+      ((bloqueData.data as Record<string, unknown>) ?? {}).confirmacion_nit,
+    )
+    if (confirmacionNit) {
+      const { nit: esperado } = nitAConfirmar(template, camposFuente, datosFinal)
+      if (esperado && !mismoNit(confirmacionNit.nit, esperado)) {
+        return { success: false, error: MENSAJE_NO_COINCIDE }
+      }
+      if (esperado) {
+        confirmacion = {
+          nit: esperado,
+          por: confirmacionNit.por ?? null,
+          por_nombre: confirmacionNit.por_nombre,
+          at: new Date().toISOString(),
+        }
+      }
+    }
+    const faltaConfirmar = faltaConfirmacionNit(template, camposFuente, datosFinal, confirmacion)
+    if (faltaConfirmar) return { success: false, error: faltaConfirmar }
 
     // ── Seccional DIAN (010): preset config-driven vía helper compartido con la
     //    capa editable (display ⟺ generación). Override manual > preset > fuente.
@@ -649,8 +711,12 @@ export async function generarFormularioCore(
       })
 
     // 7. Save data and mark complete (conserva campos_override; usa los valores finales)
+    // `confirmacion_nit` se reescribe para que la confirmación explícita de un script
+    // quede con su autor en el bloque, igual que la que teclea el operador: si no, la
+    // única traza de ese acto viviría en la consola de quien corrió el script.
     const newData = {
       ...((bloqueData.data as Record<string, unknown>) ?? {}),
+      ...(confirmacion ? { confirmacion_nit: confirmacion } : {}),
       drive_url: driveUrl,
       campos_usados: datosFinal,
       template,
@@ -696,6 +762,28 @@ export interface CasillaEditable {
   editado: boolean
   /** Determinista: la calcula el sistema y NO se edita (casilla 20 = NIT 31). */
   fijo?: boolean
+  /**
+   * La casilla lleva el NIT y todavía no se ha confirmado a ciegas, así que su valor
+   * **no viaja al navegador**: `value` llega vacío. Enmascararla en el cliente no
+   * serviría — el número quedaría en el payload de la página, y el punto del control es
+   * que el ojo no lo vea antes de teclearlo (ver `@/lib/dian/confirmacion-nit`).
+   */
+  oculto?: boolean
+}
+
+/** Estado de la transcripción a ciegas del NIT, para que la pantalla sepa qué pedir. */
+export interface EstadoConfirmacionNit {
+  /** El formulario imprime un NIT, así que la transcripción aplica. */
+  requiere: boolean
+  /** Hay una confirmación vigente para el NIT que se va a imprimir. */
+  confirmado: boolean
+  /** Quién la hizo, para mostrarlo sin tener que resolver ids. */
+  por_nombre?: string | null
+  at?: string | null
+  /** Enlace al documento del que hay que leer la casilla 5 (el RUT). */
+  documento_url?: string | null
+  /** Nombre del bloque de donde sale el NIT: es donde se corrige si no coincide. */
+  documento_label?: string | null
 }
 
 export interface FormularioVersionItem {
@@ -722,6 +810,8 @@ export async function resolverFormularioParaEdicion(
   seccional?: string | null
   /** true si es sugerida (no confirmada por el operador). */
   seccional_sugerida?: boolean
+  /** Transcripción a ciegas del NIT. Ausente = el template no lleva NIT. */
+  confirmacion_nit?: EstadoConfirmacionNit
   error?: string
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -798,6 +888,19 @@ export async function resolverFormularioParaEdicion(
     new Set([...meta.map((m) => m.slug), ...Object.keys(valorBase)]),
   ).sort((a, b) => (ordenMeta.get(a) ?? 999) - (ordenMeta.get(b) ?? 999))
 
+  // ── Transcripción a ciegas del NIT ───────────────────────────────────────
+  // El estado se calcula sobre `datosEd`, que ya trae los overrides: es exactamente el
+  // valor que se va a imprimir, el mismo que juzga la guarda de la generación.
+  const { nit: nitEsperado, ambiguo: nitAmbiguo } = nitAConfirmar(template, camposFuente, datosEd)
+  const confirmacionGuardada = leerConfirmacion(
+    ((bloqueData.data as Record<string, unknown>) ?? {}).confirmacion_nit,
+  )
+  const nitConfirmado = confirmacionVigente(confirmacionGuardada, nitEsperado)
+  // Mientras no esté confirmado, el valor de estas casillas NO sale del servidor.
+  const slugsOcultos = new Set(
+    nitConfirmado ? [] : casillasConNit(template, camposFuente).map((c) => c.slug),
+  )
+
   const casillas: CasillaEditable[] = slugs.map((slug) => {
     const m = metaDeCasilla(template, slug)
     const rawOverride = overrides[slug]
@@ -811,16 +914,22 @@ export async function resolverFormularioParaEdicion(
       && Object.prototype.hasOwnProperty.call(overrides, slug)
       && !(slug === 'dv' && (rawOverride ?? '').trim() === '')
     const value = editado ? (rawOverride ?? '') : (valorBase[slug] ?? '')
+    const oculto = slugsOcultos.has(slug)
     return {
       slug,
       label: m.label,
       grupo: m.grupo,
       casilla: m.casilla,
-      value,
+      // Una casilla oculta viaja VACÍA. Mandarla y taparla con CSS dejaría el número
+      // en el payload, que es justo lo que el control existe para evitar.
+      value: oculto ? '' : value,
       es_constante: esConstante[slug],
-      faltante: !esConstante[slug] && !value && faltantes.includes(slug),
-      editado,
+      // Oculta no es faltante: el dato está, solo no se muestra todavía. Marcarla en
+      // ámbar diría que hay que teclearla a mano, que es lo contrario de lo que toca.
+      faltante: !oculto && !esConstante[slug] && !value && faltantes.includes(slug),
+      editado: oculto ? false : editado,
       fijo,
+      oculto,
     }
   })
 
@@ -847,11 +956,48 @@ export async function resolverFormularioParaEdicion(
     autor: v.generated_by ? (nombrePorId[v.generated_by] ?? null) : null,
   }))
 
+  // El documento del que hay que leer la casilla 5 es el bloque FUENTE del NIT, no uno
+  // fijo: si mañana el NIT sale de otro documento, el enlace lo sigue.
+  const slugFuenteNit = casillasConNit(template, camposFuente)[0]?.source.bloque_slug ?? null
+  const doc = slugFuenteNit
+    ? await leerDocumentoFuente(supabase, negocioId, slugFuenteNit)
+    : null
+
   return {
     casillas, versiones,
     seccionales: secc.seccionales.length ? secc.seccionales : undefined,
     seccional: secc.seleccion,
     seccional_sugerida: secc.sugerida,
+    confirmacion_nit: {
+      requiere: nitEsperado !== null || nitAmbiguo,
+      confirmado: nitConfirmado,
+      por_nombre: nitConfirmado ? confirmacionGuardada?.por_nombre ?? null : null,
+      at: nitConfirmado ? confirmacionGuardada?.at ?? null : null,
+      documento_url: doc?.drive_url ?? null,
+      documento_label: doc?.label ?? null,
+    },
+  }
+}
+
+/** Enlace y nombre del bloque documento del que sale un campo (para mandar a leerlo). */
+async function leerDocumentoFuente(
+  supabase: unknown,
+  negocioId: string,
+  bloqueSlug: string,
+): Promise<{ drive_url: string | null; label: string | null } | null> {
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug, nombre, config_extra)')
+    .eq('negocio_id', negocioId)
+    .eq('bloque_configs.slug', bloqueSlug)
+    .limit(1)
+    .maybeSingle()
+  if (!data) return null
+  const cfg = (data as { bloque_configs?: { nombre?: string | null; config_extra?: Record<string, unknown> } }).bloque_configs
+  const d = ((data as { data?: Record<string, unknown> }).data ?? {}) as Record<string, unknown>
+  return {
+    drive_url: (d.drive_url as string | null) ?? null,
+    label: (cfg?.config_extra?.label as string | undefined) ?? cfg?.nombre ?? null,
   }
 }
 
@@ -918,4 +1064,137 @@ export async function guardarFormularioOverrides(
   const nid = row?.negocio_id as string | undefined
   if (nid) revalidatePath(`/negocios/${nid}`)
   return { error: null }
+}
+
+/**
+ * Confirma el NIT de un formulario DIAN transcribiéndolo a ciegas.
+ *
+ * El cliente manda **solo lo que el operador tecleó**. El valor esperado lo vuelve a
+ * resolver el servidor contra los bloques fuente: si el esperado viajara desde el
+ * navegador, el control se podría satisfacer devolviendo el mismo número que se recibió,
+ * y dejaría de ser una segunda lectura del documento.
+ *
+ * Si no coincide, **no escribe nada** y devuelve los dos números para que la pantalla los
+ * ponga lado a lado. La salida no es reintentar el campo: si el operador leyó bien, lo que
+ * está mal es el NIT guardado, y eso se corrige en el bloque `rut` (con su causa).
+ */
+export async function confirmarNitFormulario(
+  negocioBloqueId: string,
+  nitTecleado: string,
+): Promise<{
+  ok: boolean
+  error?: string
+  /** Solo cuando NO coincide. Los dos en dígitos, que es como se compararon. */
+  tecleado?: string
+  guardado?: string
+}> {
+  const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
+
+  const tecleado = digitosDeNit(nitTecleado)
+  if (tecleado === '') return { ok: false, error: 'Escribe el número de la casilla 5 del RUT' }
+
+  const { data: row } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, negocio_id, bloque_configs(config_extra, etapas_negocio(linea_id))')
+    .eq('id', negocioBloqueId)
+    .single()
+  if (!row) return { ok: false, error: 'Bloque no encontrado' }
+
+  const bc = row.bloque_configs as {
+    config_extra: Record<string, unknown>
+    etapas_negocio: { linea_id: string }
+  }
+  const configExtra = bc.config_extra
+  const negocioId = row.negocio_id as string
+
+  const esperado = await nitEsperadoDelBloque(
+    supabase, negocioId, bc.etapas_negocio.linea_id, configExtra,
+    (row.data as Record<string, unknown>) ?? {},
+  )
+  if (esperado.ambiguo) return { ok: false, error: MENSAJE_NIT_AMBIGUO }
+  if (!esperado.nit) {
+    return { ok: false, error: 'Este formulario todavía no tiene NIT: carga el RUT primero' }
+  }
+
+  if (!mismoNit(tecleado, esperado.nit)) {
+    // Nada escrito: un intento fallido no deja rastro en el bloque a propósito. Lo que
+    // interesa registrar es la confirmación, no cuántas veces se tecleó mal.
+    return { ok: false, error: MENSAJE_NO_COINCIDE, tecleado, guardado: esperado.nit }
+  }
+
+  let nombre: string | null = null
+  if (userId) {
+    const { data: prof } = await db(supabase).from('profiles').select('full_name').eq('id', userId).maybeSingle()
+    nombre = (prof?.full_name as string | null) ?? null
+  }
+
+  const confirmacion: ConfirmacionNit = {
+    nit: esperado.nit,
+    // staff.id, NO profile.id: es lo mismo que acepta `activity_log.autor_id`, y tenerlo
+    // guardado aquí evita que quien lea la fila tenga que adivinar de qué tabla es el id.
+    por: staffId ?? null,
+    por_nombre: nombre,
+    at: new Date().toISOString(),
+  }
+
+  const current = (row.data as Record<string, unknown>) ?? {}
+  const { error: upErr } = await db(supabase)
+    .from('negocio_bloques')
+    .update({
+      data: { ...current, confirmacion_nit: confirmacion },
+      updated_at: confirmacion.at,
+    })
+    .eq('id', negocioBloqueId)
+  if (upErr) return { ok: false, error: (upErr as { message: string }).message }
+
+  const label = (configExtra.label as string) ?? 'Formulario'
+  await registrarActividad(supabase, {
+    workspace_id: workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: negocioId,
+    tipo: 'cambio',
+    // ⚠️ FK a staff(id). Pasarle el profile.id la viola y el evento se pierde sin ruido.
+    autor_id: staffId ?? null,
+    campo_modificado: 'confirmacion_nit',
+    valor_nuevo: confirmacion.nit,
+    contenido: `Confirmó el NIT ${confirmacion.nit} del RUT para ${label}`.slice(0, 280),
+  }, 'confirmarNitFormulario')
+
+  revalidatePath(`/negocios/${negocioId}`)
+  return { ok: true }
+}
+
+/**
+ * Resuelve el NIT que el formulario va a imprimir, leyendo los bloques fuente y aplicando
+ * los overrides ya guardados. Es el mismo par de pasos que hace la generación; por eso un
+ * override en la casilla del NIT invalida la confirmación anterior y obliga a rehacerla.
+ *
+ * No aplica `aplicarSeccionalPreset` ni `aplicarDeterministas` a propósito: ninguno de los
+ * dos toca el NIT (escriben tipo de documento, DV, códigos DANE y teléfono), y traerlos
+ * aquí agregaría una consulta y un camino que podría separarse del de generación.
+ */
+async function nitEsperadoDelBloque(
+  supabase: unknown,
+  negocioId: string,
+  lineaId: string,
+  configExtra: Record<string, unknown>,
+  data: Record<string, unknown>,
+): Promise<{ nit: string | null; ambiguo: boolean }> {
+  const template = (configExtra.template as string) ?? ''
+  const camposFuente = (configExtra.campos_fuente ?? []) as CampoFuente[]
+  const constantes = (configExtra.campos_constantes ?? {}) as Record<string, string>
+  const { datos } = await resolverCamposFuente(supabase, negocioId, lineaId, camposFuente)
+  const overrides = (data.campos_override ?? {}) as Record<string, string | null>
+  // Mismo reparto que la generacion: un override cuya clave es una constante va a las
+  // constantes; el resto pisa el autollenado. La casilla del NIT nunca es constante, pero
+  // el reparto se copia entero para que las dos vias no puedan separarse.
+  const datosFinal: Record<string, string | null> = { ...datos }
+  for (const [k, v] of Object.entries(overrides)) {
+    if (!(k in constantes)) datosFinal[k] = v
+  }
+  return nitAConfirmar(template, camposFuente, datosFinal)
 }
