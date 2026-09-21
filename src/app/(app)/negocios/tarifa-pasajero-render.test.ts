@@ -68,34 +68,37 @@ function pintar(props: Record<string, unknown>) {
 /** El texto visible, sin etiquetas: una casilla parte su número y su título en dos nodos. */
 const sinEtiquetas = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
-describe('las casillas dicen qué pantallazo va en cada una (P1, P2, P3)', () => {
-  it('2 adultos, 1 niño y 1 infante: tres casillas numeradas con la búsqueda literal', () => {
-    const texto = sinEtiquetas(pintar({ composicionViaje: { adultos: 2, ninos: 1, infantes: 1 } }))
-    expect(texto).toContain('1 Grupo completo')
-    expect(texto).toContain('Busca en la plataforma: 2 adultos, 1 niño, 1 infante')
-    expect(texto).toContain('2 Sin el infante')
-    expect(texto).toContain('Busca otra vez el mismo hotel, habitación y fechas con: 2 adultos, 1 niño')
-    expect(texto).toContain('3 Solo adultos')
-    expect(texto).toContain('Busca otra vez el mismo hotel, habitación y fechas con: 2 adultos')
+/**
+ * La lectura de una casilla 1 que trae el precio por tipo y su ocupación. Es la captura de
+ * Amadeus del banco real (`capturas-proveedor/2026-09-16/3.57.39_PM-3.jpeg`).
+ */
+const AMADEUS = lectura({
+  total: 1294351,
+  porTipo: [
+    { tipo: 'adulto', cantidad: 2, subtotal: 1283014 },
+    { tipo: 'infante', cantidad: 1, subtotal: 11337 },
+  ],
+  ocupacion: { adultos: 2, ninos: 0, infantes: 1, total: 3 },
+  nombre: 'Avianca Cúcuta–Armenia',
+})
+
+describe('§2.1 · la zona de pegado es lo primero y no depende de nada', () => {
+  it('sin composición del viaje YA se puede pegar, y no se pregunta nada antes', () => {
+    const html = pintar({ composicionViaje: null })
+    const texto = sinEtiquetas(html)
+    expect(html).toContain('aria-label="Pegar el pantallazo del proveedor"')
+    expect(texto).toContain('Pega aquí el pantallazo del proveedor')
+    // El bloqueo que abrió el frente: la pregunta salía ANTES y tapaba la zona de pegado.
+    expect(texto).not.toContain('Escribe cuántos adultos, niños e infantes cubre esta línea')
+    expect(texto).not.toContain('Grupo completo')
   })
 
-  it('P1: la 1 se puede pegar; la 2 y la 3 se ven en gris con la razón, sin zona de pegado', () => {
+  it('con composición del viaje tampoco se numeran casillas antes de la primera lectura', () => {
     const html = pintar({ composicionViaje: { adultos: 2, ninos: 1, infantes: 1 } })
-    expect(html).toContain('aria-label="Pegar el pantallazo 1: Grupo completo"')
+    expect(html).toContain('aria-label="Pegar el pantallazo del proveedor"')
     expect(html).not.toContain('aria-label="Pegar el pantallazo 2')
     expect(html).not.toContain('aria-label="Pegar el pantallazo 3')
-    expect(sinEtiquetas(html)).toContain('(Solo si el pantallazo 1 no separa adultos, niños e infantes)')
-  })
-
-  it('P2: sin infantes no aparece «sin el infante»; solo adultos, una casilla', () => {
-    const conNino = sinEtiquetas(pintar({ composicionViaje: { adultos: 2, ninos: 1, infantes: 0 } }))
-    expect(conNino).not.toContain('Sin el infante')
-    expect(conNino).toContain('2 Solo adultos')
-
-    const soloAdultos = sinEtiquetas(pintar({ composicionViaje: { adultos: 2, ninos: 0, infantes: 0 } }))
-    expect(soloAdultos).not.toContain('Solo adultos')
-    expect(soloAdultos).not.toContain('Grupo completo')
-    expect(soloAdultos).toContain('Busca en la plataforma: 2 adultos')
+    expect(sinEtiquetas(html)).not.toContain('Sin el infante')
   })
 
   it('P3: nunca siglas', () => {
@@ -103,10 +106,51 @@ describe('las casillas dicen qué pantallazo va en cada una (P1, P2, P3)', () =>
     expect(html).not.toMatch(/\b(ADT|CHD|INF)\b/)
   })
 
-  it('sin composición del viaje, la línea la pide antes de mostrar casillas', () => {
+  it('el contrato de la ranura sigue antes de pegar', () => {
     const texto = sinEtiquetas(pintar({ composicionViaje: null }))
-    expect(texto).toContain('Escribe cuántos adultos, niños e infantes cubre esta línea')
-    expect(texto).not.toContain('Grupo completo')
+    expect(texto).toContain('Pantallazo de hotel · precio por pasajero')
+    expect(texto).toContain('la habitación y el régimen ya seleccionados')
+    expect(texto).toContain('La imagen no se guarda')
+  })
+})
+
+describe('§2.4 · la composición es un resultado, no una pregunta', () => {
+  it('leída del pantallazo: la línea dice a quién cubre sin que nadie lo escriba', () => {
+    const texto = sinEtiquetas(pintar({
+      ranura: VUELO,
+      composicionViaje: null,
+      tarifaPax: { composicion: { adultos: 2, ninos: 0, infantes: 1 }, casillas: { grupo_completo: AMADEUS } },
+    }))
+    expect(texto).toContain('Esta línea cubre: 2 adultos y 1 infante')
+    expect(texto).toContain('leído del pantallazo')
+  })
+
+  it('solo habla si FALTA gente del viaje, con los números correctos', () => {
+    const conFaltantes = sinEtiquetas(pintar({
+      ranura: VUELO,
+      composicionViaje: { adultos: 6, ninos: 1, infantes: 1 },
+      tarifaPax: { composicion: { adultos: 2, ninos: 0, infantes: 1 }, casillas: { grupo_completo: AMADEUS } },
+    }))
+    expect(conFaltantes).toContain('Faltan 4 adultos y 1 niño por acomodar.')
+
+    const cubreATodos = sinEtiquetas(pintar({
+      ranura: VUELO,
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 1 },
+      tarifaPax: { composicion: { adultos: 2, ninos: 0, infantes: 1 }, casillas: { grupo_completo: AMADEUS } },
+    }))
+    expect(cubreATodos).not.toContain('por acomodar')
+  })
+
+  it('la captura sin ocupación legible: la pregunta sale DESPUÉS de pegar y dice por qué', () => {
+    const texto = sinEtiquetas(pintar({
+      composicionViaje: null,
+      tarifaPax: { casillas: { grupo_completo: lectura({ total: 900000, ocupacionDelItem: true }) } },
+    }))
+    expect(texto).toContain('Este pantallazo no dice a cuántos pasajeros cubre.')
+    expect(texto).toContain('Escribe cuántos adultos, niños e infantes cubre esta línea.')
+    // ⚠️ Responder NO borra el pantallazo que se acaba de pegar (no hay ocupación anterior
+    // que invalidar). Advertirlo aquí sería falso, y quien lo lee no contesta.
+    expect(texto).not.toContain('borra los pantallazos leídos')
   })
 
   it('la composición propia de la línea manda sobre la del viaje (P7)', () => {
@@ -114,9 +158,54 @@ describe('las casillas dicen qué pantallazo va en cada una (P1, P2, P3)', () =>
       composicionViaje: { adultos: 4, ninos: 0, infantes: 0 },
       tarifaPax: { composicion: { adultos: 2, ninos: 1, infantes: 0 } },
     }))
-    expect(texto).toContain('Esta línea cubre: 2 adultos, 1 niño')
+    expect(texto).toContain('Esta línea cubre: 2 adultos y 1 niño')
     expect(texto).toContain('ajustado en esta línea')
     expect(texto).toContain('Cambiar pasajeros de esta línea')
+  })
+})
+
+describe('las casillas complementarias arrancan DESPUÉS de la primera lectura (P1, P2, P3)', () => {
+  /** Una casilla 1 con un solo total para el grupo: no resuelve, así que pide las demás. */
+  const UN_SOLO_TOTAL = (c: { adultos: number; ninos: number; infantes: number }) => lectura({
+    total: 3780884.17,
+    ocupacion: { ...c, total: null },
+    identidad: { hotel: 'Crown Paradise Club Cancun All Inclusive' },
+  })
+
+  it('2 adultos, 1 niño y 1 infante: tres casillas numeradas con la búsqueda literal', () => {
+    const composicion = { adultos: 2, ninos: 1, infantes: 1 }
+    const html = pintar({
+      composicionViaje: composicion,
+      tarifaPax: { casillas: { grupo_completo: UN_SOLO_TOTAL(composicion) } },
+    })
+    const texto = sinEtiquetas(html)
+    expect(texto).toContain('1 Grupo completo')
+    expect(texto).toContain('Busca en la plataforma: 2 adultos, 1 niño, 1 infante')
+    expect(texto).toContain('2 Sin el infante')
+    expect(texto).toContain('Busca otra vez el mismo hotel, habitación y fechas con: 2 adultos, 1 niño')
+    expect(texto).toContain('3 Solo adultos')
+    expect(texto).toContain('Busca otra vez el mismo hotel, habitación y fechas con: 2 adultos')
+    expect(html).toContain('aria-label="Pegar el pantallazo 2: Sin el infante"')
+    expect(html).toContain('aria-label="Pegar el pantallazo 3: Solo adultos"')
+  })
+
+  it('P2: sin infantes no aparece «sin el infante»; solo adultos, ninguna casilla más', () => {
+    const conNino = { adultos: 2, ninos: 1, infantes: 0 }
+    const texto = sinEtiquetas(pintar({
+      composicionViaje: conNino,
+      tarifaPax: { casillas: { grupo_completo: UN_SOLO_TOTAL(conNino) } },
+    }))
+    expect(texto).not.toContain('Sin el infante')
+    expect(texto).toContain('2 Solo adultos')
+
+    // Con solo adultos la casilla 1 resuelve sola: nunca hay secuencia que numerar.
+    const soloAdultos = { adultos: 2, ninos: 0, infantes: 0 }
+    const html = pintar({
+      composicionViaje: soloAdultos,
+      tarifaPax: { casillas: { grupo_completo: UN_SOLO_TOTAL(soloAdultos) } },
+    })
+    expect(sinEtiquetas(html)).not.toContain('Solo adultos')
+    expect(html).not.toContain('aria-label="Pegar el pantallazo 2')
   })
 })
 
@@ -192,11 +281,3 @@ describe('lo que encontró el pantallazo 1 (P4, P6)', () => {
   })
 })
 
-describe('el contrato de la ranura sigue antes de pegar', () => {
-  it('qué se pide, qué no sirve y que la imagen no se guarda', () => {
-    const texto = sinEtiquetas(pintar({ composicionViaje: { adultos: 2, ninos: 0, infantes: 0 } }))
-    expect(texto).toContain('Pantallazo de hotel · precio por pasajero')
-    expect(texto).toContain('la habitación y el régimen ya seleccionados')
-    expect(texto).toContain('La imagen no se guarda')
-  })
-})

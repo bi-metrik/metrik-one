@@ -8,9 +8,11 @@ import { describe, expect, it } from 'vitest'
 import {
   aPesos,
   casillasDe,
+  composicionDeLectura,
   composicionDeLinea,
   confirmadaVigente,
   describirOcupacion,
+  faltanPorAcomodar,
   leerTarifaPax,
   lineaPorPasajero,
   mismoTexto,
@@ -248,7 +250,62 @@ describe('resolución con el banco real', () => {
   })
 })
 
+/**
+ * §2.4 del diseño del 2026-09-21: la composición es un RESULTADO de la lectura, no una
+ * pregunta previa. Lo que se afirma aquí es que la captura la acredita cuando la trae, y
+ * que un desconocimiento NO se rellena con ceros.
+ */
+describe('la ocupación sale de la captura', () => {
+  it('la captura de Amadeus acredita 2 adultos y 1 infante sin que nadie lo escriba', () => {
+    expect(composicionDeLectura(AMADEUS)).toEqual({ adultos: 2, ninos: 0, infantes: 1 })
+    expect(composicionDeLectura(LATAM)).toEqual({ adultos: 5, ninos: 1, infantes: 0 })
+  })
+
+  it('sin ocupación en la imagen NO se inventa: hay que preguntar', () => {
+    // 7.4 · la tarjeta no la muestra y la lectura la tomó del ítem.
+    expect(composicionDeLectura(lectura({ total: 900000, ocupacionDelItem: true }))).toBeNull()
+    // Solo un total de personas («3 huéspedes»): no se puede partir por tipo.
+    expect(composicionDeLectura(lectura({ total: 900000, ocupacion: { adultos: null, ninos: null, infantes: null, total: 3 } }))).toBeNull()
+    // Sin un adulto no hay composición con la que cotizar (ni casilla «solo adultos»).
+    expect(composicionDeLectura(lectura({ total: 900000, ocupacion: { adultos: 0, ninos: 1, infantes: 0, total: 1 } }))).toBeNull()
+  })
+
+  it('solo se avisa lo que FALTA del viaje; cubrir de más no se reporta', () => {
+    const linea: Composicion = { adultos: 2, ninos: 0, infantes: 1 }
+    expect(faltanPorAcomodar(linea, { adultos: 6, ninos: 1, infantes: 1 })).toEqual({ adultos: 4, ninos: 1, infantes: 0 })
+    expect(describirOcupacion(faltanPorAcomodar(linea, { adultos: 6, ninos: 1, infantes: 1 }) as Composicion, 'y'))
+      .toBe('4 adultos y 1 niño')
+    expect(faltanPorAcomodar(linea, { adultos: 2, ninos: 0, infantes: 1 })).toBeNull()
+    expect(faltanPorAcomodar(linea, { adultos: 1, ninos: 0, infantes: 0 })).toBeNull()
+    // Sin viaje declarado no hay contra qué comparar.
+    expect(faltanPorAcomodar(linea, null)).toBeNull()
+  })
+})
+
 describe('validación de un pantallazo contra su casilla (P5)', () => {
+  /**
+   * §2.1 · el primer pantallazo entra sin composición: no hay casilla contra la cual
+   * comparar, así que solo se juzga si la captura cuadra consigo misma.
+   */
+  it('sin composición: la casilla 1 se acepta con TP2 y nada más', () => {
+    const ok = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: AMADEUS, composicion: null, casillas: {}, ranuraSlug: 'vuelo_detalle' })
+    expect(ok).toEqual({ ok: true, alertas: [] })
+
+    const malo = { ...LATAM, porTipo: [{ tipo: 'adulto' as const, cantidad: 5, subtotal: 6093500 }, LATAM.porTipo[1]] }
+    const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: malo, composicion: null, casillas: {}, ranuraSlug: 'vuelo_detalle' })
+    expect(v.ok).toBe(false)
+    if (v.ok) return
+    expect(v.codigo).toBe('TP2')
+  })
+
+  it('sin composición, una casilla complementaria no tiene qué buscar', () => {
+    const v = validarLecturaEnCasilla({ clave: 'solo_adultos', lectura: AMADEUS, composicion: null, casillas: {}, ranuraSlug: 'vuelo_detalle' })
+    expect(v.ok).toBe(false)
+    if (v.ok) return
+    expect(v.codigo).toBe('CASILLA')
+    expect(v.mensaje).toContain('Pega primero el pantallazo del proveedor')
+  })
+
   it('TP2: filas que no suman el total general se rechazan', () => {
     const malo = { ...LATAM, porTipo: [{ tipo: 'adulto' as const, cantidad: 5, subtotal: 6093500 }, LATAM.porTipo[1]] }
     const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: malo, composicion: { adultos: 5, ninos: 1, infantes: 0 }, casillas: {}, ranuraSlug: 'vuelo_detalle' })

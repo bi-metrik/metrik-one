@@ -273,6 +273,51 @@ export function montoDeCosto(l: LecturaCasilla): number {
   return l.aPagarAgencia !== null && l.aPagarAgencia > 0 ? l.aPagarAgencia : l.total
 }
 
+/**
+ * La composición que la propia captura ACREDITA, o `null` si la imagen no la dice.
+ *
+ * Es lo que convierte la composición de una PREGUNTA en un RESULTADO (§2.4 del diseño del
+ * 2026-09-21): la lectura ya devuelve `ocupacion_adultos`, `ocupacion_ninos` y
+ * `ocupacion_infantes` — medido, la captura de Amadeus devuelve 2 adultos y 1 infante sin
+ * que nadie los escriba. Quien cotiza pega primero y corrige después, en vez de declarar a
+ * quién cubre la línea antes de tener nada delante.
+ *
+ * Devuelve `null`, y entonces hay que preguntar:
+ *  · la imagen no muestra ocupación (`ocupacionDelItem`);
+ *  · solo dice un total de personas («3 huéspedes»), que no se puede partir por tipo;
+ *  · lo que muestra no tiene un adulto (una tarjeta que solo lista un menor).
+ *
+ * Un `null` NO se rellena con ceros: eso convertiría un desconocimiento en una afirmación
+ * sobre cuántos viajan, que es el dato con el que se costea.
+ */
+export function composicionDeLectura(l: LecturaCasilla): Composicion | null {
+  if (l.ocupacionDelItem) return null
+  const o = ocupacionObservada(l)
+  if (o.adultos === null && o.ninos === null && o.infantes === null) return null
+  return normalizarComposicion({
+    adultos: o.adultos ?? 0,
+    ninos: o.ninos ?? 0,
+    infantes: o.infantes ?? 0,
+  })
+}
+
+/**
+ * Quiénes del viaje se quedan sin acomodar con lo que esta línea cubre, o `null` si no
+ * falta nadie (§2.4).
+ *
+ * ⚠️ Solo cuenta lo que FALTA. Una línea que cubre de más no se reporta: el sistema compara
+ * para avisar de un hueco, no para discutir una decisión de quien cotiza.
+ */
+export function faltanPorAcomodar(linea: Composicion, viaje: Composicion | null): Composicion | null {
+  if (!viaje) return null
+  const falta: Composicion = {
+    adultos: Math.max(0, viaje.adultos - linea.adultos),
+    ninos: Math.max(0, viaje.ninos - linea.ninos),
+    infantes: Math.max(0, viaje.infantes - linea.infantes),
+  }
+  return totalPasajeros(falta) > 0 ? falta : null
+}
+
 /** La ocupación que ACREDITA la captura: la de las filas si hay desglose, la leída si no. */
 export function ocupacionObservada(l: LecturaCasilla): OcupacionLeida {
   if (l.porTipo.length > 0) {
@@ -424,6 +469,23 @@ function tituloEnFrase(def: CasillaDef): string {
 }
 
 /**
+ * TP2 · la captura tiene que cuadrar consigo misma. Es lo único que se puede juzgar sin
+ * saber a cuántos cubre la línea, por eso vive aparte: la primera lectura lo usa solo.
+ */
+function errorTP2(lectura: LecturaCasilla): ValidacionCasilla | null {
+  if (desgloseCuadra(lectura)) return null
+  const suma = lectura.porTipo.reduce((a, f) => a + f.subtotal, 0)
+  return {
+    ok: false,
+    codigo: 'TP2',
+    mensaje:
+      `Los valores por tipo de pasajero suman ${formatoMonto(suma, lectura.moneda)} y el total del pantallazo ` +
+      `dice ${formatoMonto(lectura.total, lectura.moneda)}. No cuadran: sube la pantalla del detalle de la tarifa ` +
+      'donde se vean las filas y el total general.',
+  }
+}
+
+/**
  * Juzga un pantallazo YA aceptado por su ranura contra la casilla donde se pegó (6.1, P5).
  *
  * El orden importa: primero si la captura es coherente consigo misma (TP2), después si es
@@ -434,11 +496,27 @@ function tituloEnFrase(def: CasillaDef): string {
 export function validarLecturaEnCasilla(args: {
   clave: ClaveCasilla
   lectura: LecturaCasilla
-  composicion: Composicion
+  /**
+   * `null` = la línea todavía no sabe a cuántos cubre, porque nadie lo declaró y el viaje
+   * tampoco. Es el primer pantallazo (§2.1): se juzga solo si la captura es coherente
+   * consigo misma (TP2), porque no hay casilla contra la cual comparar. La ocupación sale
+   * de esta misma lectura (`composicionDeLectura`).
+   */
+  composicion: Composicion | null
   casillas: CasillasLeidas
   ranuraSlug: string
 }): ValidacionCasilla {
   const { clave, lectura, composicion, casillas, ranuraSlug } = args
+  if (!composicion) {
+    if (clave !== 'grupo_completo') {
+      return {
+        ok: false,
+        codigo: 'CASILLA',
+        mensaje: 'Pega primero el pantallazo del proveedor: de ahí sale a cuántos pasajeros cubre la línea.',
+      }
+    }
+    return errorTP2(lectura) ?? { ok: true, alertas: [] }
+  }
   const defs = casillasDe(composicion, ranuraSlug)
   const def = defs.find(d => d.clave === clave)
   if (!def) {
@@ -462,17 +540,8 @@ export function validarLecturaEnCasilla(args: {
   const alertas: string[] = []
 
   // TP2
-  if (!desgloseCuadra(lectura)) {
-    const suma = lectura.porTipo.reduce((a, f) => a + f.subtotal, 0)
-    return {
-      ok: false,
-      codigo: 'TP2',
-      mensaje:
-        `Los valores por tipo de pasajero suman ${formatoMonto(suma, lectura.moneda)} y el total del pantallazo ` +
-        `dice ${formatoMonto(lectura.total, lectura.moneda)}. No cuadran: sube la pantalla del detalle de la tarifa ` +
-        'donde se vean las filas y el total general.',
-    }
-  }
+  const tp2 = errorTP2(lectura)
+  if (tp2) return tp2
 
   // TP3
   const observada = ocupacionObservada(lectura)
