@@ -44,7 +44,15 @@ function constructor(tabla: string) {
   let payload: Fila = {}
   let embebeRubros = false
 
-  const aplica = (f: Fila) => filtros.every(([col, val]) => f[col] === val)
+  // `in` filtra por PERTENENCIA de verdad, no por el primer valor: la lectura de
+  // `item_adicionales` pide todas las líneas de la cotización de una vez, y quedarse con
+  // el primer id dejaría adicionales fuera del total sin que la prueba lo notara.
+  const aplica = (f: Fila) =>
+    filtros.every(([col, val]) =>
+      val !== null && typeof val === 'object' && '__in' in (val as object)
+        ? (val as { __in: unknown[] }).__in.includes(f[col])
+        : f[col] === val,
+    )
 
   const proyectar = (f: Fila) => {
     if (!embebeRubros) return { ...f }
@@ -82,6 +90,10 @@ function constructor(tabla: string) {
     },
     eq(col: string, val: unknown) {
       filtros.push([col, val])
+      return api
+    },
+    in(col: string, vals: unknown[]) {
+      filtros.push([col, { __in: vals }])
       return api
     },
     // El doble NO ordena: ordenar aqui esconderia que el codigo depende del orden

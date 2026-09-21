@@ -211,7 +211,13 @@ export function armarFilasDeRegistro(args: {
   if (filas.length === 0) return []
 
   const cascada = calcularCascada(ctx.items, ctx.params)
-  const precioDe = new Map(cascada.lineas.map(l => [l.id ?? '', l.precioLinea]))
+  // ⚠️ `precioConAdicionales`, no `precioLinea`: lo que se guarda es **el precio que se le
+  // mostró al cliente**, y una variante con maleta extra se le mostró con la maleta
+  // adentro. Con el base, el precio congelado de Avianca-con-maleta sería idéntico al de
+  // Avianca-sin-maleta y la comparación que este registro existe para permitir se
+  // volvería ciega justo en el caso que la motivó. `precio_elegida` no necesita cambio:
+  // sale de la cascada del itinerario, que ya suma los adicionales de lo que incluye.
+  const precioDe = new Map(cascada.lineas.map(l => [l.id ?? '', l.precioConAdicionales]))
   const nombreDe = new Map(ctx.items.map(i => [i.id, i.nombre]))
   const ranuras = ranurasConAlternativas(ctx.items as ItemConGrupo[])
 

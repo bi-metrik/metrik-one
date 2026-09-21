@@ -263,3 +263,34 @@ describe('cómo se comparan dos coberturas', () => {
     expect(textoDeTramo({ desde: 'Bogotá', hasta: 'San Andrés' })).toBe('Bogotá–San Andrés')
   })
 })
+
+
+/**
+ * S5 del diseno de adicionales. El aviso NO mira adicionales, y es una decision.
+ *
+ * > *«Dos variantes del mismo tramo, una con maleta y otra sin ella, no son una diferencia
+ * > de cobertura: son la comparacion que el cliente tiene que poder hacer. Si avisa ahi, el
+ * > aviso pasa a salir siempre y deja de leerse.»*
+ *
+ * La cobertura se LEE de `items.tarifa_pax.casillas[*].identidad` —el origen y el destino
+ * que mostro la captura— y el adicional no vive ahi: vive en `item_adicionales`. La ceguera
+ * esta en la FORMA, no en un filtro que alguien pueda quitar. Estas pruebas fijan la
+ * consecuencia para que se vea el dia que alguien intente cruzar las dos cosas.
+ */
+describe('el aviso de cobertura es ciego a los adicionales', () => {
+  it('dos variantes del MISMO tramo, una con maleta y otra sin ella: NO hay aviso', () => {
+    expect(
+      avisosDeCobertura([
+        vuelo('avianca', 'Avianca Basic', AVIANCA),
+        vuelo('latam', 'LATAM', AVIANCA),
+      ]),
+    ).toEqual([])
+  })
+
+  it('el tipo de entrada del aviso ni siquiera acepta adicionales', () => {
+    // Si un dia alguien los agrega a `LineaParaCobertura`, esta linea deja de compilar.
+    // Es la unica forma de fijar una ausencia: por el tipo, no por el valor.
+    const l: LineaParaCobertura = vuelo('x', 'x', AVIANCA)
+    expect(Object.hasOwn(l, 'adicionales')).toBe(false)
+  })
+})

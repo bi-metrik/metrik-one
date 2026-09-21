@@ -43,6 +43,15 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
+import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
+import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
+
+/**
+ * Sin adicionales y sin poder guardarlos: lo que recibe toda cotización que no es de
+ * viaje, y toda base sin la migración aplicada. La constante vive fuera del componente
+ * para que su identidad no cambie en cada render.
+ */
+const ADICIONALES_VACIOS = { disponible: false, porItem: {} as Record<string, FilaAdicional[]> }
 import {
   etiquetaDeRanura,
   gruposCanonicos,
@@ -225,9 +234,17 @@ interface Props {
    * `false`, que es la pantalla de siempre.
    */
   lineasPorTipo?: boolean
+  /**
+   * Los adicionales de cada variante, leídos por el servidor (`adicional-actions.ts`).
+   *
+   * Opcional a propósito, y `disponible: false` por defecto: el editor se monta desde dos
+   * rutas, y una cotización sin adicionales —o una base sin la migración— no pinta nada.
+   * Es el mismo corte que `itinerarios`.
+   */
+  adicionales?: { disponible: boolean; porItem: Record<string, FilaAdicional[]> }
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -1282,6 +1299,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       costoUnitarioLinea={costoUnitario}
                       sugeridosGuardados={rubrosSugeridos}
                       onCambio={() => router.refresh()}
+                    />
+                  )}
+                  {/* Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Se ofrecen donde
+                      se ofrece el cargue de pantallazo —líneas con ranura del catálogo—
+                      porque es donde la pregunta significa algo: una línea de Termotech no
+                      gana una sección al abrir su cotización, que es R6 en la pantalla.
+                      ⚠️ NO se condiciona a `editable`: una cotización ya enviada tiene que
+                      poder MOSTRAR sus adicionales; lo que se apaga es escribirlos. */}
+                  {ranuraDeItem && (
+                    <AdicionalesItem
+                      itemId={item.id}
+                      filas={adicionales.porItem[item.id] ?? []}
+                      disponible={adicionales.disponible}
+                      editable={editable}
                     />
                   )}
                   {/* Item sale fields */}

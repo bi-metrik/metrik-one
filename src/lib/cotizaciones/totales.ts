@@ -19,6 +19,18 @@
  *    aplicarlos línea por línea da el mismo total que aplicarlos al gran total. Eso es
  *    lo que permite que una línea pueda marginar distinto sin romper la suma.
  *
+ * ## Los ADICIONALES entran como un sumando, no como un escalón
+ *
+ * Una variante puede llevar adicionales (`adicionales.ts`): la maleta extra, la silla, el
+ * seguro. Cada uno trae **su costo y su precio ya tomados**, así que no pasa por el margen
+ * de la línea ni por el de la cotización y no lleva administrativos: se suma al costo
+ * directo y a la venta bruta, y punto.
+ *
+ * ⚠️ La línea conserva sus dos cifras BASE (`costoDeVentaLinea`, `precioLinea`) y expone
+ * las del adicional aparte. No es prolijidad: `recalcularTotales` escribe
+ * `items.precio_venta` a partir de `precioLinea`, y una maleta metida ahí se volvería
+ * precio base de la línea y se cobraría otra vez en el recálculo siguiente.
+ *
  * LEGADO: una línea sin costo (las cotizaciones anteriores a esto guardaban solo el
  * precio) conserva su `precio_venta` como precio de línea. Sin eso, recalcular una
  * cotización ya enviada la dejaría en cero.
@@ -30,6 +42,7 @@ import {
   precioConMargen,
   type ConvencionMargen,
 } from './precio-item'
+import { totalesDeAdicionales, type AdicionalParaSuma } from './adicionales'
 
 export interface ItemParaCascada {
   id?: string
@@ -48,6 +61,14 @@ export interface ItemParaCascada {
   /** Precio guardado. Solo manda si la línea no tiene costo o se fijó a mano. */
   precio_venta?: number | null
   precio_manual?: boolean | null
+  /**
+   * Los adicionales DE ESTA VARIANTE: la maleta extra, la silla, el seguro.
+   *
+   * Ausente o vacío vale cero por todos lados y la cascada da exactamente lo que daba
+   * antes de que este campo existiera — que es R6 sostenido desde el dato y no desde un
+   * `if`. Ver `adicionales.ts`: cuelgan del ítem, nunca de la ranura.
+   */
+  adicionales?: readonly AdicionalParaSuma[] | null
 }
 
 export interface ParametrosCascada {
@@ -67,21 +88,48 @@ export interface LineaCalculada {
   /** Costo de la línea ya con cantidad y descuento de compra. */
   costoLinea: number
   /**
-   * Costo de la línea CON su parte de los administrativos.
+   * Costo de la línea CON su parte de los administrativos. **SIN adicionales.**
    *
    * Los administrativos se reparten proporcionalmente al costo, así que la suma de
-   * este campo sobre todas las líneas es exactamente `costoDeVenta`. Es el costo
-   * contra el que hay que medir el margen de la línea: medirlo contra `costoLinea`
-   * pelado lo deja por encima del margen real de la cotización, y dos cifras del
-   * mismo dinero que no cuadran entre sí es lo que obliga a adivinar cuál manda.
+   * este campo sobre todas las líneas **más** la de `costoAdicionales` es exactamente
+   * `costoDeVenta`. Es el costo contra el que hay que medir el margen de la línea:
+   * medirlo contra `costoLinea` pelado lo deja por encima del margen real de la
+   * cotización, y dos cifras del mismo dinero que no cuadran entre sí es lo que obliga a
+   * adivinar cuál manda.
+   *
+   * ⚠️ El costo del adicional NO entra al reparto de administrativos, y es deliberado: su
+   * precio está DADO, no derivado. Meterlo en la base del AIU le movería el margen sin
+   * moverle el precio, que son otra vez dos cifras del mismo dinero. Con AIU en 0 —el caso
+   * de Trappvel y de casi todos— la diferencia no existe.
    */
   costoDeVentaLinea: number
   /** Margen que se le aplicó, sea el propio o el de la cotización. */
   margenAplicado: number
   /** `true` si la línea trae margen propio distinto al de la cotización. */
   margenPropio: boolean
-  /** Precio de la línea, ya con administrativos y margen. */
+  /**
+   * Precio de la línea, ya con administrativos y margen. **SIN adicionales.**
+   *
+   * ⚠️ Es a propósito, y es lo que evita un error que se compone solo: `recalcularTotales`
+   * escribe `items.precio_venta = precioLinea / cantidad`. Si aquí entrara la maleta, la
+   * maleta quedaría metida DENTRO del precio base de la línea, y el siguiente recálculo la
+   * sumaría otra vez encima. El precio que incluye adicionales es `precioConAdicionales`,
+   * y quien lo necesite lo pide con ese nombre.
+   */
   precioLinea: number
+  /** Costo de los adicionales de la línea, en pesos. 0 si no tiene. */
+  costoAdicionales: number
+  /** Precio de los adicionales de la línea, en pesos. 0 si no tiene. */
+  precioAdicionales: number
+  /**
+   * Lo que de verdad paga el cliente por esta línea: base más adicionales.
+   *
+   * *«El precio de la variante pasa a ser base más adicionales»* (§1.2). Es la cifra que
+   * va al documento del cliente, al cuadre del ítem de ajuste y al registro de decisiones
+   * —donde lo que se guarda es **el precio que se le mostró al cliente**—, y la que suma
+   * `ventaBruta`.
+   */
+  precioConAdicionales: number
   /**
    * Margen REAL de la línea: lo que queda dentro de su precio después de pagar su
    * costo y su parte de los administrativos.
@@ -152,6 +200,15 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
   const lineas: LineaCalculada[] = []
   let costoDirecto = 0
   let ventaBruta = 0
+  /**
+   * La base sobre la que se calculan los administrativos: el costo SIN adicionales.
+   *
+   * Existe aparte de `costoDirecto` para que la invariante siga cerrando: la suma de
+   * `costoDeVentaLinea` más la de `costoAdicionales` tiene que dar `costoDeVenta`
+   * exactamente, y el adicional no lleva AIU (ver `costoDeVentaLinea`). Sin adicionales
+   * las dos variables valen lo mismo y todo esto es un no-op.
+   */
+  let costoBaseDeAdministrativos = 0
 
   for (const item of items) {
     const costoUnitario = item.es_ajuste === true
@@ -162,7 +219,14 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
         subtotal: item.subtotal,
       })
     const costoLinea = costoDeLinea(item)
-    costoDirecto += costoLinea
+    // Los adicionales de ESTA variante. Traen su costo y su precio ya tomados, así que
+    // no pasan por el margen de la línea ni por el de la cotización: se SUMAN.
+    // ⚠️ El ítem de cuadre no admite adicionales — es precio, no un componente del viaje.
+    const adic = item.es_ajuste === true
+      ? { costo: 0, precio: 0, sinConvertir: [] as string[] }
+      : totalesDeAdicionales(item.adicionales)
+    costoBaseDeAdministrativos += costoLinea
+    costoDirecto += costoLinea + adic.costo
 
     const margenPropio = item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
     const margenAplicado = margenPropio ? Number(item.margen_porcentaje) || 0 : margenCotizacion
@@ -187,7 +251,12 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     const cantidadLinea = Number(item.cantidad) || 1
     precioLinea = Math.round(precioLinea / cantidadLinea) * cantidadLinea
 
-    ventaBruta += precioLinea
+    // El adicional se suma DESPUÉS del cuadre por unidad, no antes: su cantidad es la
+    // suya (seis maletas para seis adultos) y no tiene por qué ser múltiplo de la del
+    // ítem. Sumarlo antes dejaría el precio unitario de la línea contaminado con una
+    // fracción de maleta, que es justo el número que la columna del PDF imprime.
+    const precioConAdicionales = precioLinea + adic.precio
+    ventaBruta += precioConAdicionales
 
     // La parte de los administrativos que le toca a esta línea. Proporcional al
     // costo, que es la propiedad que permite que una línea margine distinto sin
@@ -202,6 +271,9 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       margenAplicado,
       margenPropio,
       precioLinea: Math.round(precioLinea),
+      costoAdicionales: adic.costo,
+      precioAdicionales: adic.precio,
+      precioConAdicionales: Math.round(precioConAdicionales),
       // Se mide sobre los valores REDONDEADOS, que son los que la pantalla enseña:
       // calcularlo con los exactos deja un porcentaje que no cuadra con las dos
       // cifras impresas al lado, y el usuario no tiene cómo saber cuál falla.
@@ -209,7 +281,10 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     })
   }
 
-  const administrativos = costoDirecto * (adminPct / 100)
+  // El AIU se calcula sobre el costo BASE, no sobre el que ya trae adicionales: ver la
+  // nota de `costoDeVentaLinea`. Sin adicionales, `costoBaseDeAdministrativos` es
+  // idéntico a `costoDirecto` y esto es exactamente la línea de siempre.
+  const administrativos = costoBaseDeAdministrativos * (adminPct / 100)
   const costoDeVenta = costoDirecto + administrativos
   const descuentoComercial = ventaBruta * (descComercial / 100)
   const precioVenta = ventaBruta - descuentoComercial

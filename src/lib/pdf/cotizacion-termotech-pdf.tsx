@@ -172,7 +172,10 @@ export default function CotizacionTermotechPDF({
 }: CotizacionPDFProps) {
   const conCantidad = items.map((item) => {
     const cantidad = item.cantidad ?? 1
-    const bruto = Math.round(item.precio_venta * cantidad)
+    // ⚠️ El adicional de la variante entra en el total de SU línea (`adicionales.ts`).
+    // Ausente vale 0, así que esta plantilla imprime exactamente lo mismo que antes; el
+    // sumando está para que ningún documento pueda quedar por debajo de su propio TOTAL.
+    const bruto = Math.round(item.precio_venta * cantidad) + (item.valorAdicionales ?? 0)
     const descuento = Math.round(bruto * ((item.descuento_porcentaje ?? 0) / 100))
     return { ...item, cantidad, neto: bruto - descuento }
   })

@@ -56,7 +56,8 @@ function TablaDeItems({ items, pc, pcLight }: { items: ItemPDF[]; pc: string; pc
     <View>
       {items.map((item, i) => {
         const cant = item.cantidad ?? 1
-        const neto = Math.round(item.precio_venta * cant)
+        // Ver la nota de `valorAdicionales`: ausente vale 0 y nada cambia.
+        const neto = Math.round(item.precio_venta * cant) + (item.valorAdicionales ?? 0)
         // La unidad se imprime solo cuando la linea la declara: «3 noches» dice mas
         // que «3», y un «3 und» inventado dice menos que nada.
         const unidad = (item.unidad ?? '').trim()
@@ -126,7 +127,8 @@ export default function CotizacionPDF({ cotizacion, empresa, vendedor, items, fi
   const hasQuantity = items.some(i => (i.cantidad ?? 1) > 1)
   const itemsWithTotals = items.map(item => {
     const cant = item.cantidad ?? 1
-    const lineTotal = Math.round(item.precio_venta * cant)
+    // Ver la nota de `valorAdicionales`: ausente vale 0 y nada cambia.
+    const lineTotal = Math.round(item.precio_venta * cant) + (item.valorAdicionales ?? 0)
     const descVal = Math.round(lineTotal * (item.descuento_porcentaje / 100))
     return { ...item, lineTotal, descuento_valor: descVal, neto: lineTotal - descVal }
   })

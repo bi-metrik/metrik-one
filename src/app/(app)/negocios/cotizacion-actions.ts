@@ -11,9 +11,11 @@ import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 import {
   contextoDeCotizacion,
   desmarcarLosQueYaNoPueden,
+  leerAdicionalesDeItems,
   leerItinerarios,
   totalDelPrincipal,
 } from '@/lib/cotizaciones/itinerarios-datos'
+import { adjuntarAdicionales } from '@/lib/cotizaciones/adicionales'
 import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
@@ -1122,7 +1124,13 @@ export async function recalcularTotales(cotizacionId: string) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filas = (items ?? []) as any[]
-  const paraCascada = filas.map(item => {
+  // Los adicionales de cada variante (`adicionales.ts`). Consulta aparte y tolerante: sin
+  // la tabla devuelve vacío y esta función recalcula exactamente lo que recalculaba antes.
+  const filasAdicionales = await leerAdicionalesDeItems(
+    supabase,
+    filas.map(f => f.id as string),
+  )
+  const paraCascadaSinAdic = filas.map(item => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
     const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(item.rubros)
     return {
@@ -1138,6 +1146,9 @@ export async function recalcularTotales(cotizacionId: string) {
       precio_manual: item.precio_manual,
     }
   })
+  // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito
+  // dos veces, la pantalla y el recálculo podrían cobrarle la maleta a líneas distintas.
+  const paraCascada = adjuntarAdicionales(paraCascadaSinAdic, filasAdicionales)
   const params = {
     administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
     // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
@@ -1209,9 +1220,12 @@ export async function recalcularTotales(cotizacionId: string) {
     // Las que APORTAN, no todas: con dos alternativas en la misma ranura, sumarlas
     // las dos dejaba la diferencia corta y el ítem de cuadre absorbía un vuelo entero.
     // Sin ranuras con alternativas es la misma suma de siempre.
+    // ⚠️ `precioConAdicionales`, no `precioLinea`: la maleta extra es precio real de la
+    // línea. Con el base, el ítem de cuadre absorbería el adicional entero como si fuera
+    // un descuento comercial.
     const sumaRegulares = cascadaTotal.lineas
       .filter(l => l.id !== ajuste.id)
-      .reduce((s, l) => s + l.precioLinea, 0)
+      .reduce((s, l) => s + l.precioConAdicionales, 0)
     const diferencia = Math.round(valorFijado - sumaRegulares)
 
     if (diferencia === 0) {

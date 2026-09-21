@@ -131,3 +131,60 @@ describe('§2.2 · «Agregar otra opción» va al pie', () => {
       .toBeLessThan(texto.indexOf('Costo de la línea'))
   })
 })
+
+
+/**
+ * El editor MONTA la seccion de adicionales en la linea de viaje (y solo ahi).
+ *
+ * ⚠️ Su prueba de componente (`adicionales-render.test.ts`) mide que el componente pinta
+ * bien; no mide que el editor lo cuelgue. Son dos cosas distintas y la segunda es la que
+ * se rompe al mover un bloque de sitio: el componente seguiria perfecto y la seccion no
+ * existiria en pantalla.
+ *
+ * La mitad negativa es la que sostiene R6: una linea SIN ranura del catalogo —o sea toda
+ * cotizacion de Termotech, Arca y WMC— no gana una seccion al abrirse.
+ */
+describe('adicionales: el editor los monta donde corresponde', () => {
+  function pintarCon(item: Record<string, unknown>, adicionales?: Record<string, unknown>) {
+    return renderToStaticMarkup(
+      React.createElement(CotizacionEditor, {
+        oportunidadId: 'neg-1',
+        cotizacion: {
+          id: 'cot-1', codigo: 'COT-2026-0002', consecutivo: 'COT-2026-0002', modo: 'detallada',
+          estado: 'borrador', descripcion: null, valor_total: 0, margen_porcentaje: 15,
+          costo_total: 0, fecha_envio: null, fecha_validez: null, descuento_porcentaje: 0,
+          convencion_margen: 'sobre_venta',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        initialItems: [item] as any,
+        umbrales: { pisoPct: 5, avisoPct: 10 },
+        lineasPorTipo: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        adicionales: adicionales as any,
+      }),
+    )
+  }
+
+  const ROTULO = 'Adicionales de esta opcion'.replace('opcion', 'opción')
+
+  it('en una linea de VUELO la seccion existe', () => {
+    const t = sinEtiquetas(pintarCon(ITEM, { disponible: true, porItem: {} }))
+    expect(t).toContain(ROTULO)
+  })
+
+  it('R6 . en una linea SIN ranura del catalogo no existe', () => {
+    const t = sinEtiquetas(pintarCon({ ...ITEM, grupo: null }, { disponible: true, porItem: {} }))
+    expect(t).not.toContain(ROTULO)
+  })
+
+  it('sin la migracion aplicada tampoco existe: el deploy va antes que el SQL', () => {
+    const t = sinEtiquetas(pintarCon(ITEM, { disponible: false, porItem: {} }))
+    expect(t).not.toContain(ROTULO)
+  })
+
+  it('sin la prop (la otra ruta que monta el editor) no existe', () => {
+    const t = sinEtiquetas(pintarCon(ITEM))
+    expect(t).not.toContain(ROTULO)
+  })
+})

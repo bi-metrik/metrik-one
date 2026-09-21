@@ -35,6 +35,12 @@ import {
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
 import { costoDeRubrosConfirmados } from './rubros-sugeridos'
+import {
+  adjuntarAdicionales,
+  faltaLaTablaDeAdicionales,
+  type Adicional,
+  type FilaAdicional,
+} from './adicionales'
 
 // El cliente tipado de Supabase obliga a arrastrar medio `database.ts` por cada
 // `select`, y ninguna de estas tablas está en los tipos generados todavía.
@@ -85,6 +91,16 @@ export interface ItemDeCotizacion extends ItemConGrupo {
   margen_porcentaje: number | null
   precio_venta: number | null
   precio_manual: boolean | null
+  /**
+   * Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Vacío en toda línea que no los
+   * tenga, que es todo lo que existe hoy y todo lo que no sea de viaje.
+   *
+   * ⚠️ Cuelgan del ítem. La consecuencia de que cuelguen del ítem y no del grupo es
+   * exactamente esto: `cascadaDeItinerario` filtra por los ítems que el itinerario
+   * incluye, así que el adicional de la variante descartada **desaparece del total solo**,
+   * sin una sola línea de código que lo saque.
+   */
+  adicionales: Adicional[]
 }
 
 export interface ContextoCotizacion {
@@ -157,7 +173,11 @@ export async function contextoDeCotizacion(
     .order('orden')
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const items: ItemDeCotizacion[] = ((filas ?? []) as any[]).map(fila => {
+  const idsDeItems = ((filas ?? []) as any[]).map(f => f.id as string)
+  const filasAdicionales = await leerAdicionalesDeItems(supabase, idsDeItems)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sinAdicionales = ((filas ?? []) as any[]).map(fila => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
     const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(fila.rubros)
     return {
@@ -181,6 +201,11 @@ export async function contextoDeCotizacion(
       precio_manual: fila.precio_manual ?? false,
     }
   })
+
+  // ⚠️⚠️ Cada línea recibe SUS adicionales, emparejados por id. Es la decisión del frente
+  // y vive en un helper puro justo para que se la pueda ver fallar: emparejar por `grupo`
+  // le cobraría a la tarifa que eligió LATAM la maleta que alguien cargó en Avianca.
+  const items: ItemDeCotizacion[] = adjuntarAdicionales(sinAdicionales, filasAdicionales)
 
   // La política de la línea solo hace falta si la cotización no congeló los umbrales.
   let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
@@ -212,6 +237,38 @@ export async function contextoDeCotizacion(
     negocioId,
     oportunidadId: (cot.oportunidad_id ?? null) as string | null,
   }
+}
+
+/**
+ * Los adicionales de un juego de líneas, agrupados por variante.
+ *
+ * ⚠️ **Consulta APARTE, no un embed en el `select` de los ítems.** Un
+ * `select('*, item_adicionales(*)')` contra una base sin la tabla devuelve un **400 sobre
+ * toda la consulta**: el editor de cotización dejaría de abrir mientras el SQL esté
+ * pendiente, y el deploy va antes que el SQL. Aparte, lo peor que pasa es que no haya
+ * adicionales, que es exactamente el estado de todo lo que existe hoy (R6).
+ *
+ * ⚠️ Un error que NO sea «la tabla no existe» se reporta por consola y **también** cae a
+ * vacío. Silenciar un `42501` dejaría una línea con adicionales cobrando de menos y
+ * indistinguible de una que no tiene ninguno — es el mismo criterio que
+ * `leerItinerarios`.
+ */
+export async function leerAdicionalesDeItems(
+  supabase: Supabase,
+  itemIds: string[],
+): Promise<FilaAdicional[]> {
+  if (itemIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('item_adicionales')
+    .select('*')
+    .in('item_id', itemIds)
+  if (error) {
+    if (!faltaLaTablaDeAdicionales(error)) {
+      console.error('[adicionales] no se pudieron leer:', error.message)
+    }
+    return []
+  }
+  return (data ?? []) as FilaAdicional[]
 }
 
 /**

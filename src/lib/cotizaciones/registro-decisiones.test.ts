@@ -50,6 +50,7 @@ function item(
     margen_porcentaje: null,
     precio_venta: precio,
     precio_manual: true,
+    adicionales: [],
   }
 }
 

@@ -166,6 +166,7 @@ describe('la cascada vigente (gate del piso) no mide con la sugerencia adentro',
     margen_porcentaje: null,
     precio_venta: 0,
     precio_manual: false,
+    adicionales: [],
     ...extra,
   })
   const ctx = (catalinaFuera: boolean): ContextoCotizacion => ({
