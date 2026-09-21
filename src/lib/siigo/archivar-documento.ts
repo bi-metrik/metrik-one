@@ -36,6 +36,13 @@ export interface ResultadoArchivado {
    * (`avisar_documento_al_cliente`), que se identifica por `bloque_config_id`.
    */
   bloqueConfigId?: string
+  /**
+   * Referencia `one://` a la copia del PDF en Storage, cuando se pidió conservarla.
+   *
+   * Es la única forma de entregarle el documento a alguien SIN sesión: se firma por
+   * siete días desde la edge function. Ver `copiaParaElCliente`.
+   */
+  referenciaCliente?: string | null
   /** Por qué no se pudo archivar. El documento en Siigo ya existe igual. */
   error?: string
 }
@@ -100,6 +107,28 @@ export async function archivarPdfEnBloque(
    * abiertos, ninguno cerrado.
    */
   publicoConEnlace = true,
+  /**
+   * Si se conserva una copia del PDF en Storage para poder dársela a alguien SIN sesión.
+   *
+   * ⚠️ **Es la contrapartida de haber cerrado el archivo de Drive.** Desde el 2026-09-16
+   * el recibo de caja nace cerrado y solo se abre por `/api/archivos/cobro`, que exige
+   * sesión. El correo al cliente seguía prometiendo "puedes ver y descargar el recibo
+   * aquí" con la URL de Drive: medido el 2026-09-21, 401 en los tres que se probaron, y
+   * 14 avisos `enviado` a 8 clientes reales el 16 y el 17 de septiembre.
+   *
+   * Con esto el PDF queda en dos sitios: **Drive** es el expediente que lee el equipo, y
+   * **Storage** es de donde sale el enlace firmado del cliente. El bucket `ve-documentos`
+   * es privado desde el 2026-09-16, así que la copia no se abre sola: solo existe el
+   * enlace firmado, y vence a los siete días. Eso es justo lo que "cualquiera con el
+   * enlace" de Drive no hacía.
+   *
+   * Tres efectos, y son UNA sola decisión:
+   *   1. la copia de Storage no se borra cuando el archivo se sube a Drive,
+   *   2. se devuelve su referencia `one://` en `referenciaCliente`,
+   *   3. y si hay `historial`, la entrada nueva la lleva en `ref` — que es lo que el
+   *      aviso firma documento por documento cuando el cobro produjo dos recibos.
+   */
+  copiaParaElCliente = false,
 ): Promise<ResultadoArchivado> {
   try {
     const svc = createServiceClient()
@@ -130,6 +159,8 @@ export async function archivarPdfEnBloque(
 
     let url: string
     let driveFileId: string | null = null
+    /** La copia de Storage, cuando sobrevive: es de donde sale el enlace del cliente. */
+    let referenciaCliente: string | null = null
     const carpetaId = (neg.carpeta_url as string | null)?.match(/folders\/([-\w]+)/)?.[1] ?? null
 
     if (carpetaId) {
@@ -139,13 +170,21 @@ export async function archivarPdfEnBloque(
       driveFileId = subido.fileId
       url = subido.webViewLink
       if (publicoConEnlace) await setFilePublicByLink(driveFileId, workspaceId)
-      // El de Storage era temporal: el archivo vive en Drive, como los demás.
-      await svc.storage.from(BUCKET).remove([storagePath])
+      if (copiaParaElCliente) {
+        // Se queda: el de Drive está cerrado y no hay otra forma de que el cliente,
+        // que no tiene cuenta, abra su propio documento.
+        referenciaCliente = construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, storagePath)
+      } else {
+        // El de Storage era temporal: el archivo vive en Drive, como los demás.
+        await svc.storage.from(BUCKET).remove([storagePath])
+      }
     } else {
       // Sin carpeta de Drive el documento se queda en `ve-documentos`, y lo que se
       // guarda es la REFERENCIA: el bucket deja de ser público y `object/public` sería
       // un enlace muerto sobre un documento fiscal ya emitido.
       url = construirReferenciaOne(BUCKET_DOCUMENTOS_ONE, storagePath)
+      // Por este camino ya es la misma referencia: no hay copia que conservar.
+      if (copiaParaElCliente) referenciaCliente = url
     }
 
     // ── La instancia del bloque, creada si hace falta ─────────────────────────
@@ -174,7 +213,10 @@ export async function archivarPdfEnBloque(
         ? {
             [historial.clave]: [
               ...(((existente?.data as Record<string, unknown> | undefined)?.[historial.clave] ?? []) as unknown[]),
-              historial.entrada,
+              // `ref` lo pone ESTA función y no quien llama: la ruta de Storage se arma
+              // aquí adentro (necesita el `bloque_config_id`, que se resuelve aquí), y
+              // duplicar esa convención afuera la dejaría desincronizarse en silencio.
+              referenciaCliente ? { ...historial.entrada, ref: referenciaCliente } : historial.entrada,
             ],
           }
         : {}),
@@ -206,7 +248,7 @@ export async function archivarPdfEnBloque(
       if (error) return { ok: false, error: error.message, bloqueConfigId: cfg.id }
     }
 
-    return { ok: true, url, driveFileId, bloqueConfigId: cfg.id }
+    return { ok: true, url, driveFileId, bloqueConfigId: cfg.id, referenciaCliente }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

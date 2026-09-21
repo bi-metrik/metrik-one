@@ -70,6 +70,10 @@ let avisos: Array<{ negocio: string; bloque: string }>
 let consecutivo: number
 /** Slugs de bloque a los que se archivó cada PDF, en orden. */
 let bloquesArchivados: string[]
+/** Lo que cada archivado recibió para acumular en `negocio_bloques.data.recibos`. */
+let entradasDelHistorial: Record<string, unknown>[]
+/** Si cada archivado pidió conservar la copia de Storage para el cliente. */
+let copiasParaElCliente: unknown[]
 
 function servicioFalso() {
   const from = (tabla: string) => {
@@ -186,6 +190,9 @@ vi.mock('./archivar-documento', () => ({
   archivarPdfEnBloque: async (...args: unknown[]) => {
     const slug = args[2] as string
     bloquesArchivados.push(slug)
+    const historial = args[6] as { entrada?: Record<string, unknown> } | undefined
+    if (historial?.entrada) entradasDelHistorial.push(historial.entrada)
+    copiasParaElCliente.push(args[9])
     return {
       ok: true as const,
       url: `https://drive.google.com/file/d/drive-${bloquesArchivados.length}/view`,
@@ -239,6 +246,54 @@ beforeEach(() => {
   avisos = []
   consecutivo = 0
   bloquesArchivados = []
+  entradasDelHistorial = []
+  copiasParaElCliente = []
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LO QUE EL CORREO NECESITA: el bloque acumula con qué nombrar cada documento
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('el bloque acumula lo que el aviso al cliente va a nombrar', () => {
+  it('un cobro mixto deja DOS entradas, cada una con su concepto y su valor', async () => {
+    await emitirReciboDeCobro(WS, MIXTO, null, POR_COMPONENTE)
+
+    // El concepto viaja con la entrada y no se deduce después: es lo que la línea
+    // tenía configurado CUANDO se emitió. Leerlo de la config al mandar el correo
+    // dejaría que un cambio de config reescribiera un documento ya emitido.
+    expect(entradasDelHistorial).toMatchObject([
+      { numero: 'RC-101-1', valor: 400_000, concepto: 'Honorarios de asesoría', componente: 'honorario' },
+      { numero: 'RC-202-2', valor: 600_000, concepto: 'Recaudo para pago de tarifa UPME', componente: 'pasante' },
+    ])
+    // Las dos del MISMO cobro: así el correo nombra los dos documentos de este pago
+    // y ninguno de un pago anterior.
+    expect(new Set(entradasDelHistorial.map(e => e.cobro_id)).size).toBe(1)
+  })
+
+  it('un cobro puro deja UNA entrada', async () => {
+    await emitirReciboDeCobro(WS, PURO_HONORARIO, null, POR_COMPONENTE)
+
+    expect(entradasDelHistorial).toHaveLength(1)
+    expect(entradasDelHistorial[0]).toMatchObject({ valor: 400_000, concepto: 'Honorarios de asesoría' })
+  })
+
+  it('una línea SIN recibo_por_concepto también deja su entrada, con el concepto de siempre', async () => {
+    await emitirReciboDeCobro(WS, MIXTO, null, LEGADO)
+
+    expect(entradasDelHistorial).toHaveLength(1)
+    expect(entradasDelHistorial[0]).toMatchObject({ valor: 1_000_000, concepto: 'Dinero recibido del cliente' })
+    // Sin `componente`: acusa el total. Es la misma asimetría que la marca del cobro.
+    expect(entradasDelHistorial[0]).not.toHaveProperty('componente')
+  })
+
+  it('SIEMPRE pide conservar la copia en Storage: el de Drive nace cerrado', async () => {
+    // Sin esa copia el correo promete una descarga y entrega un 401, que es el
+    // defecto medido el 2026-09-21 sobre 14 avisos ya enviados a 8 clientes reales.
+    await emitirReciboDeCobro(WS, MIXTO, null, POR_COMPONENTE)
+    await emitirReciboDeCobro(WS, PURO_TARIFA, null, LEGADO)
+
+    expect(copiasParaElCliente).toEqual([true, true, true])
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -29,6 +29,14 @@ la factura SÍ llega a un cliente sin cuenta de Google. La etapa 2 es exactament
 ese default. Si algún día se apaga para todos sin resolver antes el lector de la factura,
 el cliente recibe un enlace que no puede abrir.
 
+⚠️⚠️ **Cerrar el recibo dejó al CLIENTE sin su documento, y nadie lo ajustó en el correo.**
+Medido el 2026-09-21: **401 sin sesión** en los PDF de recibo, **200** en los de factura
+(control). El copy seguía prometiendo la descarga: **14 avisos `enviado` a 8 clientes reales**
+el 16 y el 17 de septiembre. Se cierra en el [[correo-recibo-dos-documentos]] (#804)
+conservando una copia en Storage y firmándola 7 días, **sin reabrir el archivo de Drive**.
+**How to apply:** al cerrar un archivo, barrer quién PROMETE ese archivo aguas abajo — el
+correo al cliente no aparece en ninguna búsqueda del código de permisos.
+
 ⚠️ **Los 22 archivos viejos siguen abiertos y se abren igual por la ruta nueva.** La ruta
 no depende del permiso: usa la credencial. Cerrarlos es la etapa 3 y es escritura masiva
 contra la API de Drive; pide el sí de Mauricio aparte.

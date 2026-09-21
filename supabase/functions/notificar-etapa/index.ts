@@ -25,6 +25,13 @@
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { parsearReferenciaOne } from '../_shared/referencia-archivo.ts';
+import {
+  DIAS_ENLACE_CLIENTE,
+  MARCA_RECIBOS,
+  type ReciboConEnlace,
+  recibosDelUltimoPago,
+  textoDeRecibos,
+} from '../_shared/recibos-del-aviso.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -77,7 +84,9 @@ type Supabase = SupabaseClient<EsquemaSinGenerar>;
  *
  * `link_bloque_slug` dice de QUE bloque sale el `{link}` del copy. Es opt-in y no tiene
  * default a proposito: sin el, un copy que promete un documento se omite en vez de
- * mandar el que la base devuelva primero.
+ * mandar el que la base devuelva primero. Es TAMBIEN el bloque del que sale `{recibos}`,
+ * y no hay una segunda declaracion porque no hay un segundo bloque: el del recibo de
+ * caja es uno solo, y lo que cambio es que puede tener dentro mas de un documento.
  *
  * `plantilla` es el NOMBRE de la plantilla aprobada de WhatsApp que FunnelChat debe
  * mandar para esta etapa. Sin ella FunnelChat solo puede mandar texto libre, y Meta
@@ -566,7 +575,12 @@ function formatearCita(valor: string): string | null {
   return `${fecha} a las ${h12}:${mm} ${h < 12 ? 'a. m.' : 'p. m.'}`;
 }
 
-type DatosCopy = { fecha_cita: string | null; link: string | null };
+/**
+ * `recibos` es el bloque de texto que nombra los documentos del ULTIMO pago: uno por
+ * componente cuando el cobro fue mixto, uno solo cuando fue puro. Ver
+ * `_shared/recibos-del-aviso.ts`.
+ */
+type DatosCopy = { fecha_cita: string | null; link: string | null; recibos: string | null };
 
 const SLUG_CITA = 'fecha_cita_dian';
 
@@ -578,7 +592,7 @@ const SLUG_CITA = 'fecha_cita_dian';
  * firmado es lo unico que le sirve, y el plazo es el que se acordo para que alcance a
  * abrir el documento de su tramite.
  */
-const SEGUNDOS_ENLACE_CLIENTE = 7 * 24 * 60 * 60;
+const SEGUNDOS_ENLACE_CLIENTE = DIAS_ENLACE_CLIENTE * 24 * 60 * 60;
 
 /**
  * El `{link}` del copy, listo para mandarselo a alguien sin sesion.
@@ -627,12 +641,16 @@ async function enlaceParaElCliente(
  * @param linkSlug slug del bloque ORIGEN cuyo `drive_url` es el `{link}` del copy, tal
  *   como lo declara la etapa. `null` si no lo declaro: entonces no hay enlace y el aviso
  *   se omite antes que mandar el documento de otro tramite.
+ * @param texto el copy tal como lo declara la etapa. Solo sirve para saber si hace falta
+ *   resolver `{recibos}`: un copy que no lo nombra no paga ni una consulta ni una firma
+ *   de mas, igual que `datosOpcionales`. Es lo que deja intactos a `metrik` y a `valida`.
  */
 async function datosDelCopy(
   supabase: Supabase,
   negocioId: string,
   workspaceId: string,
   linkSlug: string | null,
+  texto: string,
 ): Promise<DatosCopy> {
   // Se piden los slugs concretos en vez de traer todos los bloques del negocio: Postgres
   // descomprime el jsonb `data` completo en cada fila, y por eso este mismo campo ya
@@ -645,7 +663,9 @@ async function datosDelCopy(
     .eq('negocio_id', negocioId)
     .in('bloque_configs.slug', slugs);
 
-  const out: DatosCopy = { fecha_cita: null, link: null };
+  const quiereRecibos = texto.includes(MARCA_RECIBOS);
+
+  const out: DatosCopy = { fecha_cita: null, link: null, recibos: null };
   for (const fila of filas ?? []) {
     const slug = (fila?.bloque_configs as { slug?: string } | null)?.slug;
     const data = (fila?.data ?? {}) as Record<string, unknown>;
@@ -659,16 +679,40 @@ async function datosDelCopy(
     if (linkSlug && slug === linkSlug && typeof url === 'string' && url) {
       out.link = await enlaceParaElCliente(supabase, url, workspaceId);
     }
+
+    // ── Los DOS documentos de un pago mixto ────────────────────────────────
+    // Sale del MISMO bloque que el `{link}`: el que declara `link_bloque_slug`. No hay
+    // una segunda declaracion porque no hay un segundo bloque — el bloque del recibo es
+    // uno, y lo que cambia es que ahora puede tener dentro mas de un documento.
+    //
+    // Cada uno se firma por separado: `data.recibos[].ref` es una referencia `one://`
+    // a la copia del PDF en Storage, que es la unica forma de darselo a alguien sin
+    // sesion. El de Drive nace CERRADO desde el 2026-09-16 y devuelve 401.
+    if (quiereRecibos && linkSlug && slug === linkSlug) {
+      const encontrados = recibosDelUltimoPago(data.recibos);
+      const conEnlace: ReciboConEnlace[] = [];
+      for (const r of encontrados) {
+        conEnlace.push({
+          ...r,
+          enlace: r.ref ? await enlaceParaElCliente(supabase, r.ref, workspaceId) : null,
+        });
+      }
+      out.recibos = conEnlace.length > 0 ? textoDeRecibos(conEnlace) : null;
+    }
   }
   return out;
 }
 
 /**
- * Mete `{fecha_cita}` y `{link}` en el copy, y dice cual falto.
+ * Mete `{fecha_cita}`, `{link}` y `{recibos}` en el copy, y dice cual falto.
  *
  * Si el copy pide un dato que no existe, NO se manda el aviso: un WhatsApp que dice
  * "tu cita es el " o que trae un enlace vacio es peor que no mandar nada, y ademas
  * se ve como exito en el log. El que falta sale como motivo de omision.
+ *
+ * `{recibos}` es obligatorio por la misma razon y no por simetria: un correo que dice
+ * "estos son los documentos de tu pago" seguido de nada es exactamente el fallo que se
+ * quiere evitar. Se omite con `sin_recibos`.
  *
  * Los reemplazos viejos ({etapa}, {codigo}, {negocio}) siguen siendo sustitucion
  * simple: llevan meses saliendo con codigo vacio y no es esta la sesion para
@@ -676,7 +720,7 @@ async function datosDelCopy(
  */
 function aplicarDatosDelCopy(texto: string, datos: DatosCopy): { texto: string; falta: string | null } {
   let out = texto;
-  for (const clave of ['fecha_cita', 'link'] as const) {
+  for (const clave of ['fecha_cita', 'link', 'recibos'] as const) {
     const marca = `{${clave}}`;
     if (!out.includes(marca)) continue;
     const valor = datos[clave];
@@ -959,7 +1003,7 @@ async function enviarAlCliente(
     .replaceAll('{negocio}', negocio.nombre ?? '');
   const resuelto = aplicarDatosDelCopy(
     base,
-    await datosDelCopy(supabase, negocio.id, negocio.workspace_id, cfg.link_bloque_slug ?? null),
+    await datosDelCopy(supabase, negocio.id, negocio.workspace_id, cfg.link_bloque_slug ?? null, base),
   );
   if (resuelto.falta) {
     console.warn('[notificar-etapa] copy sin dato:', resuelto.falta, negocio.codigo);
@@ -1141,7 +1185,12 @@ async function enviarWhatsAppAlCliente(
     .replaceAll('{etapa}', etapaNombre)
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{negocio}', negocio.nombre ?? '');
-  const datos = await datosDelCopy(supabase, negocio.id, negocio.workspace_id, cfg.link_bloque_slug ?? null);
+  // ⚠️ `{recibos}` se resuelve aqui tambien, pero NO viaja como variable de plantilla:
+  // una plantilla aprobada de Meta tiene casillas fijas y de una sola linea, y este
+  // bloque son dos lineas por documento con una URL larga adentro. El copy de WhatsApp
+  // que lo use solo llega como texto libre (dentro de las 24 h). El de SOENA remite al
+  // correo, que es donde el detalle cabe.
+  const datos = await datosDelCopy(supabase, negocio.id, negocio.workspace_id, cfg.link_bloque_slug ?? null, base);
   const resuelto = aplicarDatosDelCopy(base, datos);
   if (resuelto.falta) {
     // El dato que el copy prometia no existe. Se omite y se dice cual: mandarlo a
