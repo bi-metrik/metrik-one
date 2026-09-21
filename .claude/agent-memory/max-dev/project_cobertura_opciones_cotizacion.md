@@ -1,6 +1,6 @@
 ---
 name: cobertura-opciones-cotizacion
-description: PR #798 mergeado y desplegado — el aviso de cobertura SOLO existe para vuelo y SOLO si la línea tiene captura; un segundo «+ Vuelo» crea una opción que compite; 4.1 sigue sin construir a propósito
+description: PR #798 mergeado y desplegado — el aviso de cobertura SOLO existe para vuelo y SOLO si la línea tiene captura, y compara DENTRO de una ranura; lo de que un segundo «+ Vuelo» compite CADUCÓ con las ranuras múltiples
 metadata:
   type: project
 ---
@@ -25,12 +25,24 @@ del modelo se movió. El apaño de la §6 —*«un tramo adicional va como compo
 opción»*— está escrito en la pantalla **dos veces** (bajo el botón de opción y bajo el
 renglón de «+ Vuelo / + Hotel») porque hoy es la única salida correcta.
 
-## ⚠️⚠️ Un segundo «+ Vuelo» crea una OPCIÓN, no un segundo vuelo cobrado
+## ~~Un segundo «+ Vuelo» crea una OPCIÓN, no un segundo vuelo cobrado~~ CADUCÓ
 
-La ranura es el `grupo`, así que dos líneas creadas con «+ Vuelo» compiten y **solo una
-suma**, aunque nadie haya tocado «Agregar otra opción». Es el mismo error silencioso de
-Alejandra entrando por la otra puerta y no estaba dicho en ninguna parte. Ahora lo dice
-la ayuda del renglón de botones (solo con `lineasPorTipo`).
+> ⚠️ **Dejó de ser cierto el 2026-09-21** con [[ranuras-multiples-tres-tarifas]] (#805):
+> «+ Vuelo» sobre una cotización que ya tiene un vuelo crea **Vuelo 2**, otra ranura que
+> **SUMA**. La ayuda del renglón de botones decía lo contrario y se reescribió; tres
+> pruebas de render cayeron por eso.
+
+Lo que sí sigue vigente es el por qué: la ranura es el `grupo`, así que dos líneas con el
+**mismo** grupo compiten y solo una suma. Lo que cambió es que ahora hay una forma de
+crear un grupo distinto del mismo tipo desde el botón, en vez de tener que teclearlo.
+
+## ⚠️ El aviso compara DENTRO de una ranura, nunca entre ranuras
+
+Desde [[ranuras-multiples-tres-tarifas]] una cotización puede tener «Vuelo» y «Vuelo 2».
+Cubren tramos distintos **a propósito**, así que avisar ahí saldría en cada viaje con
+escala. Lo garantiza `ranurasConAlternativas`, que agrupa por el TEXTO del grupo — y el
+aviso nombra ahora la instancia («Vuelo 2 · San Andrés a Providencia»), no el tipo: con
+dos ranuras de vuelo, «las opciones de vuelo» no dice en cuál de las dos está el problema.
 
 ## ⚠️⚠️ El aviso de cobertura tiene DOS límites declarados
 
@@ -78,5 +90,5 @@ línea dice `vuelo · opción`. ⚠️ El estado vacío de `tabla-combinaciones.
 nombre del botón**: renombrarlo otra vez sin tocar esa frase manda a buscar algo que no
 existe. Dos pruebas de render existentes cayeron con el cambio y por eso existen.
 
-Relacionado: [[itinerarios-cotizacion]], [[pantallazo-ranuras]], [[tarifa-por-pasajero]],
+Relacionado: [[ranuras-multiples-tres-tarifas]], [[itinerarios-cotizacion]], [[pantallazo-ranuras]], [[tarifa-por-pasajero]],
 [[trappvel-pantalla-cotizacion]], [[pruebas-por-mutacion]].

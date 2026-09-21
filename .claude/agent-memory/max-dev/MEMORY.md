@@ -49,7 +49,8 @@
 - ⚠️⚠️ [Lectura fina: escala, equipaje y margen del pantallazo](project_lectura_fina_trappvel.md) — #784; el juicio del modelo sobre una IMAGEN no es estable, su descripción sí
 - ⚠️⚠️ [Margen por ítem leído de la captura](project_margen_por_item_proveedor.md) — #794: el neto LEÍDO manda; cruzarlo contra la comisión deja a Decameron sin margen
 - ⚠️⚠️ [Equipaje por iconos](project_equipaje_por_iconos.md) — #792 mergeado: a un icono de 20 px se le dan MÁS PÍXELES; un cruce no atrapa el error que comparten las dos respuestas
-- ⚠️⚠️ [Cobertura de las opciones (4.2 y 4.3)](project_cobertura_opciones_cotizacion.md) — #798 en producción; el aviso SOLO existe para vuelo y SOLO con captura; un segundo «+ Vuelo» compite
+- ⚠️⚠️ [Ranuras múltiples y tres tarifas](project_ranuras_multiples_tres_tarifas.md) — #805 en producción; lo que cambió NO es que sumen; renombrar UNA línea duplica el total
+- ⚠️⚠️ [Cobertura de las opciones (4.2 y 4.3)](project_cobertura_opciones_cotizacion.md) — #798 en producción; el aviso SOLO existe para vuelo y SOLO con captura; lo de «+ Vuelo compite» CADUCÓ
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
 - ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — #800: el SQL va DESPUÉS del deploy; el nivel de detalle nace inerte; `→` no existe en el PDF
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; vigente: el rastro de margen VACÍO
