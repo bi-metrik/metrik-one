@@ -41,9 +41,16 @@ import { costoDeRubrosConfirmados } from './rubros-sugeridos'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Supabase = any
 
-/** Las columnas de la cabecera + su selección. Una sola forma para las dos lecturas. */
-const SELECT_ITINERARIO =
-  'id, cotizacion_id, nombre, orden, va_en_propuesta, es_principal, itinerario_opciones(item_id)'
+/**
+ * Las columnas de la cabecera + su selección. Una sola forma para las dos lecturas.
+ *
+ * ⚠️ `*` y no la lista de columnas, a propósito y por el mismo motivo que los ítems:
+ * `motivo_codigo` y `motivo_texto` los agrega una migración que todavía está
+ * pendiente, y nombrarlas antes devolvería un **400 sobre toda la tabla** —o sea el
+ * editor sin abrir— en vez de llegar `undefined`, que es exactamente el estado de una
+ * tarifa sin motivo escrito.
+ */
+const SELECT_ITINERARIO = '*, itinerario_opciones(item_id)'
 
 export interface FilaItinerario {
   id: string
@@ -53,6 +60,18 @@ export interface FilaItinerario {
   vaEnPropuesta: boolean
   esPrincipal: boolean
   seleccion: string[]
+  /** Por qué se eligió esta combinación (§3.3). Opcional, nunca bloquea. */
+  motivoCodigo: string | null
+  motivoTexto: string | null
+  /**
+   * `false` cuando la fila llegó SIN las columnas del motivo, o sea con la migración
+   * pendiente.
+   *
+   * No es lo mismo que «nadie escribió un motivo»: con la columna ausente la pantalla
+   * no puede ofrecer el control, porque guardar devolvería un `42703`. Es la misma
+   * distinción que `tablasAusentes` hace un nivel más arriba.
+   */
+  traeColumnasDeMotivo: boolean
 }
 
 export interface ItemDeCotizacion extends ItemConGrupo {
@@ -96,6 +115,9 @@ export interface ItinerarioCalculado {
   margenRealPct: number | null
   /** Por qué NO puede ir en la propuesta. `null` = puede. */
   bloqueo: string | null
+  /** Por qué se eligió esta combinación (§3.3). Se captura aquí, en la tabla. */
+  motivoCodigo: string | null
+  motivoTexto: string | null
 }
 
 export interface Desmarcado {
@@ -266,6 +288,8 @@ export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario
     precio: cascada.precioVenta,
     margenRealPct: cascada.margenRealPct,
     bloqueo: motivo ? textoDeRechazo(motivo) : null,
+    motivoCodigo: fila.motivoCodigo,
+    motivoTexto: fila.motivoTexto,
   }
 }
 
@@ -386,6 +410,11 @@ function aFila(data: any): FilaItinerario {
     vaEnPropuesta: data.va_en_propuesta === true,
     esPrincipal: data.es_principal === true,
     seleccion: ((data.itinerario_opciones ?? []) as { item_id: string }[]).map(o => o.item_id),
+    motivoCodigo: (data.motivo_codigo ?? null) as string | null,
+    motivoTexto: (data.motivo_texto ?? null) as string | null,
+    // La PRESENCIA de la clave, no su valor: una tarifa sin motivo escrito llega con
+    // `motivo_codigo: null`, y una base sin la migración llega sin la clave.
+    traeColumnasDeMotivo: Object.hasOwn(data ?? {}, 'motivo_codigo'),
   }
 }
 

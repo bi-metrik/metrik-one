@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,6 +9,7 @@ import {
   armarTarifas,
   cambiarOpcionDeItinerario,
   eliminarItinerario,
+  guardarMotivoDeTarifa,
   marcarEnPropuesta,
   marcarPrincipal,
   renombrarItinerario,
@@ -16,6 +17,7 @@ import {
   type EstadoItinerarios,
 } from '@/app/(app)/negocios/itinerario-actions'
 import { nombreDeItinerario } from '@/lib/cotizaciones/itinerarios'
+import { etiquetaDeMotivo, MOTIVOS_COMBINACION } from '@/lib/cotizaciones/motivo-combinacion'
 import { esTarifaConNombre, NOMBRES_TARIFA, tarifasQueFaltan } from '@/lib/cotizaciones/tarifas'
 import { nivelDeMargen } from '@/lib/cotizaciones/convencion-margen'
 import { claseNivelMargen, formatMargenPct } from '@/lib/cotizaciones/margen-vista'
@@ -84,8 +86,16 @@ export default function TablaCombinaciones({
   const [isPending, startTransition] = useTransition()
   const [nombres, setNombres] = useState<Record<string, string>>({})
   const [nombresRanura, setNombresRanura] = useState<Record<string, string>>({})
+  const [motivos, setMotivos] = useState<Record<string, string>>({})
 
-  const { ranuras, fijosConAlternativas, itinerarios, umbrales, tablasAusentes } = estado
+  const {
+    ranuras,
+    fijosConAlternativas,
+    itinerarios,
+    umbrales,
+    tablasAusentes,
+    motivoDisponible,
+  } = estado
   // Cuáles de las tres faltan, con el MISMO helper que usa la acción: escrito dos veces,
   // el botón diría que no hay nada que crear y el servidor crearía, o al revés.
   const faltanTarifas = tarifasQueFaltan(itinerarios.map(i => i.nombre))
@@ -142,6 +152,33 @@ export default function TablaCombinaciones({
         return
       }
       if (exito) toast.success(exito)
+      router.refresh()
+    })
+  }
+
+  /**
+   * El motivo de §3.3, guardado donde se elige.
+   *
+   * No usa `correr` porque tiene que LIMPIAR el borrador local al terminar: la casilla
+   * vuelve a pintar lo que quedó guardado. Si se dejara lo tecleado, un texto que el
+   * servidor recorta a nulo (solo espacios) seguiría en pantalla y la base diría otra
+   * cosa — la pantalla sana que miente que este repo ya pagó con el nombre de la línea.
+   *
+   * Sin toast de éxito a propósito: el motivo se escribe mientras se compara, y un
+   * aviso por cada tecleo de campo es ruido sobre una acción que no decide nada.
+   */
+  function guardarMotivo(id: string, codigo: string | null, texto: string | null) {
+    startTransition(async () => {
+      const r = await guardarMotivoDeTarifa(id, codigo, texto)
+      if (!r.success) {
+        toast.error(r.error ?? 'No se pudo guardar el motivo')
+        return
+      }
+      setMotivos(m => {
+        const siguiente = { ...m }
+        delete siguiente[id]
+        return siguiente
+      })
       router.refresh()
     })
   }
@@ -285,11 +322,14 @@ export default function TablaCombinaciones({
               {itinerarios.map((it, i) => {
                 const nivel = nivelDeMargen(it.margenRealPct, umbrales)
                 const margenTexto = formatMargenPct(it.margenRealPct)
+                const fondoBajoPiso = nivel === 'bajo_piso' ? 'bg-red-50/60 dark:bg-red-950/10' : ''
                 return (
+                  <Fragment key={it.id}>
                   <tr
-                    key={it.id}
                     // T4 · la fila bajo el piso se marca, igual que la línea del paso 1.
-                    className={`border-b last:border-0 ${nivel === 'bajo_piso' ? 'bg-red-50/60 dark:bg-red-950/10' : ''}`}
+                    // El borde baja a la sub-fila del motivo cuando existe: una línea
+                    // entre la tarifa y su propio motivo los leería como dos cosas.
+                    className={`${motivoDisponible ? '' : 'border-b last:border-0'} ${fondoBajoPiso}`}
                   >
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-1.5">
@@ -441,6 +481,73 @@ export default function TablaCombinaciones({
                       </div>
                     </td>
                   </tr>
+
+                  {/* §3.3 · POR QUÉ esta combinación y no otra.
+                      Va aquí, pegado a la tarifa, porque R5 lo pide donde se elige y
+                      no en un modal al emitir: «un campo obligatorio en el instante de
+                      más afán produce veinte motivos basura, que es peor que veinte
+                      vacíos». No bloquea nada, no valida nada y se puede dejar en
+                      blanco — ninguna acción de esta tabla depende de él.
+                      Solo aparece cuando la base ya tiene las columnas: ofrecerlo antes
+                      de aplicar el SQL sería un control que siempre falla. */}
+                  {motivoDisponible && (
+                    <tr className={`border-b last:border-0 ${fondoBajoPiso}`}>
+                      <td colSpan={ranuras.length + 6} className="px-3 pb-2 pt-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* El rótulo dice de qué es el motivo. «Por qué esta» a secas
+                              se lee truncado: se vio en la captura, no en una prueba. */}
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                            Por qué esta combinación
+                          </span>
+                          {editable ? (
+                            <>
+                              <select
+                                value={it.motivoCodigo ?? ''}
+                                disabled={isPending}
+                                aria-label={`Motivo de ${nombreDeItinerario(it.nombre, i + 1)}`}
+                                onChange={e =>
+                                  guardarMotivo(
+                                    it.id,
+                                    e.target.value === '' ? null : e.target.value,
+                                    // El texto que haya, tecleado o guardado: elegir de la
+                                    // lista no puede borrar lo que alguien escribió.
+                                    motivos[it.id] ?? it.motivoTexto ?? null,
+                                  )
+                                }
+                                className="rounded border bg-background px-1.5 py-0.5 text-[11px] disabled:opacity-60"
+                              >
+                                {/* «Sin motivo» y no «no especificado»: es la ausencia de
+                                    respuesta, y se guarda como NULL. */}
+                                <option value="">Sin motivo</option>
+                                {MOTIVOS_COMBINACION.map(m => (
+                                  <option key={m.codigo} value={m.codigo}>{m.etiqueta}</option>
+                                ))}
+                              </select>
+                              <input
+                                value={motivos[it.id] ?? it.motivoTexto ?? ''}
+                                placeholder="…y en tus palabras (opcional)"
+                                disabled={isPending}
+                                aria-label={`Motivo en palabras de ${nombreDeItinerario(it.nombre, i + 1)}`}
+                                onChange={e => setMotivos(m => ({ ...m, [it.id]: e.target.value }))}
+                                onBlur={e => {
+                                  if ((e.target.value.trim() || null) === (it.motivoTexto ?? null)) return
+                                  guardarMotivo(it.id, it.motivoCodigo, e.target.value)
+                                }}
+                                className="min-w-[14rem] flex-1 rounded border bg-background px-1.5 py-0.5 text-[11px] disabled:opacity-60"
+                              />
+                            </>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">
+                              {[etiquetaDeMotivo(it.motivoCodigo), it.motivoTexto]
+                                .filter(Boolean)
+                                .join(' · ') || 'Sin motivo'}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

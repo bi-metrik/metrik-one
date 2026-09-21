@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { textoDeRechazo } from '@/lib/cotizaciones/itinerarios'
+import { etiquetaDeMotivo, MOTIVOS_COMBINACION } from '@/lib/cotizaciones/motivo-combinacion'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {}, refresh: () => {}, back: () => {} }),
@@ -34,6 +35,7 @@ vi.mock('@/app/(app)/negocios/itinerario-actions', () => ({
   renombrarRanura: async () => ({ success: true, grupo: 'vuelo', lineas: 2 }),
   cambiarOpcionDeItinerario: async () => ({ success: true, desmarcados: [] }),
   marcarEnPropuesta: async () => ({ success: true }),
+  guardarMotivoDeTarifa: async () => ({ success: true, motivo: { codigo: null, texto: null } }),
   marcarPrincipal: async () => ({ success: true }),
   renombrarItinerario: async () => ({ success: true }),
   eliminarItinerario: async () => ({ success: true }),
@@ -78,6 +80,7 @@ function itinerarios() {
       vaEnPropuesta: true, esPrincipal: true,
       seleccion: ['avianca', 'h1'], ranurasFaltantes: [],
       costo: 3_350_000, precio: 3_850_000, margenRealPct: (500_000 / 3_850_000) * 100, bloqueo: null,
+      motivoCodigo: null, motivoTexto: null,
     },
     {
       id: 'it-barata', nombre: 'Económica', orden: 2,
@@ -90,6 +93,7 @@ function itinerarios() {
       // captura, no en la prueba.
       costo: 3_175_000, precio: 3_275_000, margenRealPct: (100_000 / 3_275_000) * 100,
       bloqueo: 'Margen 3,1%, por debajo del piso de 5,0%',
+      motivoCodigo: null, motivoTexto: null,
     },
   ]
 }
@@ -100,7 +104,14 @@ function pintar(estado: Parameters<typeof TablaCombinaciones>[0]['estado'], edit
   )
 }
 
-const BASE = { umbrales: { pisoPct: 5, avisoPct: 10 }, tablasAusentes: false, fijosConAlternativas: [] }
+const BASE = {
+  umbrales: { pisoPct: 5, avisoPct: 10 },
+  tablasAusentes: false,
+  fijosConAlternativas: [],
+  // El SQL del registro de decisiones está pendiente: por defecto la base todavía NO
+  // tiene las columnas del motivo, que es el estado con el que sale este deploy.
+  motivoDisponible: false,
+}
 
 describe('R6 · una cotización sin opciones no gana una sección', () => {
   it('no pinta absolutamente nada', () => {
@@ -314,6 +325,8 @@ function tarifa(nombre: string, seleccion: string[], faltantes: string[] = []) {
     bloqueo: faltantes.length > 0
       ? textoDeRechazo({ tipo: 'incompleto', grupos: faltantes })
       : null,
+    motivoCodigo: null,
+    motivoTexto: null,
   }
 }
 
@@ -407,5 +420,68 @@ describe('el viaje a Providencia, en la tabla', () => {
     )
     expect(html).not.toContain('aria-label="Nombre de la ranura')
     expect(html.replace(/<[^>]*>/g, ' ')).toContain('San Andrés a Providencia')
+  })
+})
+
+describe('§3.3 · el motivo se pide DONDE SE ELIGE, y nunca bloquea', () => {
+  const CON_MOTIVO = { ...BASE, motivoDisponible: true }
+
+  it('con la migración pendiente NO se ofrece el control', () => {
+    // Es el estado con el que sale este deploy: el SQL va después. Ofrecer un selector
+    // que devuelve `42703` en cada uso enseña a ignorar los errores de la pantalla,
+    // que es justo lo que cuesta caro cuando el error sí importa.
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
+    expect(html).not.toContain('Por qué esta combinación')
+    expect(html).not.toContain('Sin motivo')
+  })
+
+  it('con la migración aplicada ofrece la lista corta de §3.3 y el texto libre', () => {
+    const html = pintar({ ...CON_MOTIVO, ranuras: RANURAS, itinerarios: itinerarios() })
+    // Las seis razones del diseño, tal como se declaran. Si alguien las reescribe aquí
+    // y no en la lista, esto cae: el catálogo tiene un solo dueño.
+    for (const m of MOTIVOS_COMBINACION) expect(html).toContain(m.etiqueta)
+    // Y «además se puede escribir» (§3.3), no en vez de.
+    expect(html).toContain('aria-label="Motivo en palabras de Recomendada"')
+  })
+
+  it('la ausencia de motivo se ofrece como «Sin motivo», no como «no especificado»', () => {
+    const html = pintar({ ...CON_MOTIVO, ranuras: RANURAS, itinerarios: itinerarios() })
+    expect(html).toContain('>Sin motivo<')
+    expect(html).not.toContain('No especificado')
+  })
+
+  it('NO bloquea: la tarifa sin motivo conserva su interruptor de propuesta', () => {
+    // R5 · «opcional y nunca bloquea». Una prueba del helper seguiría verde con el
+    // interruptor deshabilitado por falta de motivo; esto lo fija en el JSX.
+    const html = pintar({ ...CON_MOTIVO, ranuras: RANURAS, itinerarios: itinerarios() })
+    // Se corta ANTES de la sub-fila del motivo de la Recomendada, así que lo que queda
+    // es su fila principal. (No se puede cortar por el nombre: «Económica» aparece
+    // también en el encabezado, que enumera las tres.)
+    const recomendada = html.slice(0, html.indexOf('aria-label="Motivo de Recomendada"'))
+    expect(recomendada).toContain('type="checkbox"')
+    expect(recomendada).toContain('checked=""')
+    // Y el interruptor NO está deshabilitado por no haber escrito un motivo.
+    expect(recomendada).not.toMatch(/type="checkbox"[^>]*disabled/)
+  })
+
+  it('un motivo ya escrito se pinta en su casilla, no se pierde al recargar', () => {
+    const conMotivo = itinerarios().map(it =>
+      it.id === 'it-cara'
+        ? { ...it, motivoCodigo: 'horario', motivoTexto: 'salía 5:20 a.m. con un infante' }
+        : it,
+    )
+    const html = pintar({ ...CON_MOTIVO, ranuras: RANURAS, itinerarios: conMotivo })
+    expect(html).toContain('value="salía 5:20 a.m. con un infante"')
+  })
+
+  it('en solo lectura el motivo se LEE y no se puede tocar', () => {
+    const conMotivo = itinerarios().map(it =>
+      it.id === 'it-cara' ? { ...it, motivoCodigo: 'cliente', motivoTexto: 'lo pidió él' } : it,
+    )
+    const html = pintar({ ...CON_MOTIVO, ranuras: RANURAS, itinerarios: conMotivo }, false)
+    expect(html).not.toContain('aria-label="Motivo de Recomendada"')
+    const t = html.replace(/<[^>]*>/g, ' ')
+    expect(t).toContain('lo pidió él')
+    expect(t).toContain(etiquetaDeMotivo('cliente'))
   })
 })
