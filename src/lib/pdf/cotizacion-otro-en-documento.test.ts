@@ -24,52 +24,13 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
-import { inflateSync } from 'node:zlib'
 
 import CotizacionPDF from './cotizacion-pdf'
 import type { CotizacionPDFProps } from './cotizacion-props'
+import { textoDelPDF } from './texto-del-pdf'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 import { diasDelItinerario, itemsSugeridos } from '@/lib/cotizaciones/dia-relativo'
 import { calcularCascada } from '@/lib/cotizaciones/totales'
-
-function textoDelPDF(buf: Buffer): string {
-  const trozos: string[] = []
-  let desde = 0
-  for (;;) {
-    const ini = buf.indexOf('stream', desde)
-    if (ini === -1) break
-    let inicio = ini + 'stream'.length
-    if (buf[inicio] === 0x0d) inicio++
-    if (buf[inicio] === 0x0a) inicio++
-    const fin = buf.indexOf('endstream', inicio)
-    if (fin === -1) break
-    try {
-      trozos.push(inflateSync(buf.subarray(inicio, fin)).toString('latin1'))
-    } catch {
-      // fuente o imagen
-    }
-    desde = fin + 1
-  }
-  const contenido = trozos.join('\n')
-  const piezas: string[] = []
-  const reOperador = /(\[[^\]]*\]\s*TJ|(?:<[0-9A-Fa-f\s]*>|\((?:\\.|[^\\)])*\))\s*Tj)/g
-  let op: RegExpExecArray | null
-  while ((op = reOperador.exec(contenido)) !== null) {
-    let linea = ''
-    const reTrozo = /<([0-9A-Fa-f\s]*)>|\(((?:\\.|[^\\)])*)\)/g
-    let t: RegExpExecArray | null
-    while ((t = reTrozo.exec(op[0])) !== null) {
-      if (t[1] !== undefined) {
-        const hex = t[1].replace(/\s+/g, '')
-        for (let i = 0; i + 1 < hex.length; i += 2) linea += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16))
-      } else {
-        linea += (t[2] ?? '').replace(/\\([()\\])/g, '$1')
-      }
-    }
-    piezas.push(linea)
-  }
-  return piezas.join(' ')
-}
 
 const props = (over: Partial<CotizacionPDFProps>): CotizacionPDFProps => ({
   cotizacion: {

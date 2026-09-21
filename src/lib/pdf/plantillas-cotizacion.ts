@@ -27,12 +27,14 @@ import type { ComponentType } from 'react'
 
 import type { CotizacionPDFProps } from './cotizacion-props'
 import CotizacionTermotechPDF from './cotizacion-termotech-pdf'
+import CotizacionTrappvelPDF from './cotizacion-trappvel-pdf'
 
 /** Slug de la plantilla genérica de MeTRIK. Es el default de la columna. */
 export const PLANTILLA_POR_DEFECTO = 'metrik'
 
 const PLANTILLAS: Record<string, ComponentType<CotizacionPDFProps>> = {
   termotech: CotizacionTermotechPDF,
+  trappvel: CotizacionTrappvelPDF,
 }
 
 /**

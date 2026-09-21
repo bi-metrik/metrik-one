@@ -17,14 +17,33 @@
  * existe.
  */
 
+import { nivelDetalleDesde, type NivelDetalle } from './detalle-viaje'
 import { normalizarComposicion, type Composicion } from './tarifa-pasajero'
 
 export interface ViajeDelNegocio {
   composicion: Composicion | null
   fechas: { inicio: string | null; fin: string | null }
+  /**
+   * A dónde va el viaje, según lo declaró la etapa 1 (`condiciones_del_viaje.destino`).
+   * Es lo que la portada del documento del cliente pone en la ficha DESTINO.
+   */
+  destino: string | null
+  /**
+   * El párrafo con el que se presenta el destino en el documento del cliente (§2.2 de
+   * `propuesta-visual.md`). Lo escribe quien cotiza; **no lo redacta el sistema**.
+   */
+  presentacion: string | null
+  /** Qué tan detallado sale el documento. Sin declararlo, `normal`. */
+  nivelDetalle: NivelDetalle
 }
 
-export const VIAJE_VACIO: ViajeDelNegocio = { composicion: null, fechas: { inicio: null, fin: null } }
+export const VIAJE_VACIO: ViajeDelNegocio = {
+  composicion: null,
+  fechas: { inicio: null, fin: null },
+  destino: null,
+  presentacion: null,
+  nivelDetalle: nivelDetalleDesde(null),
+}
 
 function fecha(v: unknown): string | null {
   if (typeof v !== 'string') return null
@@ -32,17 +51,35 @@ function fecha(v: unknown): string | null {
   return m ? m[1] : null
 }
 
+function textoLibre(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t === '' ? null : t
+}
+
 /** Lo puro: de las filas de `data` de los bloques al viaje. La primera composición válida gana. */
 export function viajeDesdeFilas(filas: Record<string, unknown>[]): ViajeDelNegocio {
   let composicion: Composicion | null = null
   let inicio: string | null = null
   let fin: string | null = null
+  let destino: string | null = null
+  let presentacion: string | null = null
+  let nivel: unknown = null
   for (const f of filas) {
     if (!composicion) composicion = normalizarComposicion(f)
     if (!inicio) inicio = fecha(f.fecha_salida)
     if (!fin) fin = fecha(f.fecha_regreso)
+    if (!destino) destino = textoLibre(f.destino)
+    if (!presentacion) presentacion = textoLibre(f.presentacion_destino)
+    if (!nivel) nivel = f.nivel_detalle
   }
-  return { composicion, fechas: { inicio, fin } }
+  return {
+    composicion,
+    fechas: { inicio, fin },
+    destino,
+    presentacion,
+    nivelDetalle: nivelDetalleDesde(nivel),
+  }
 }
 
 export async function leerViajeDelNegocio(
@@ -53,7 +90,13 @@ export async function leerViajeDelNegocio(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')
-    .select('adultos:data->adultos, ninos:data->ninos, infantes:data->infantes, fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso')
+    .select(
+      'adultos:data->adultos, ninos:data->ninos, infantes:data->infantes, '
+      + 'fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso, '
+      // Los tres que alimentan la portada del documento del cliente. Un bloque que no los
+      // declara devuelve null en esas columnas: no hay 400 que tolerar ni nada que romper.
+      + 'destino:data->destino, presentacion_destino:data->presentacion_destino, nivel_detalle:data->nivel_detalle',
+    )
     .eq('negocio_id', negocioId)
   if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message }
   return { viaje: viajeDesdeFilas((data ?? []) as Record<string, unknown>[]), error: null }

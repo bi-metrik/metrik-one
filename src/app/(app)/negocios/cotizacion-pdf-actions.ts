@@ -3,10 +3,22 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
+import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
 import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
+import {
+  cargosEnDestinoDeItems,
+  destinoDeItinerario,
+  duracionDelViaje,
+  hotelesDeItems,
+  leerConfigDocumentoViaje,
+  rangoDeFechas,
+  vuelosDeItems,
+} from '@/lib/cotizaciones/detalle-viaje'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -166,11 +178,13 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     logo_url: string | null
     color_primario: string | null
     cotizacion_template_slug: string | null
+    /** De aquí salen el pie y la firma del documento de viaje (`leerConfigDocumentoViaje`). */
+    config_extra: unknown
   }
   const { data: wsRaw } = await supabase
     .from('workspaces')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .select('name, logo_url, color_primario, cotizacion_template_slug' as any)
+    .select('name, logo_url, color_primario, cotizacion_template_slug, config_extra' as any)
     .eq('id', workspaceId)
     .single()
   const ws = (wsRaw as unknown as WorkspaceRow | null) ?? null
@@ -642,6 +656,67 @@ export async function generateCotizacionPDF(cotizacionId: string) {
           unidad: i.unidad ?? null,
         }))
 
+  /**
+   * El VIAJE que describe el documento del cliente (Entrega B del brief del 17-sep).
+   *
+   * Se arma con lo que YA está guardado: la lectura del pantallazo de cada línea
+   * (aerolínea, ruta en IATA, número de vuelo, escala, hotel, habitación, régimen,
+   * impuestos en destino) y el bloque «Condiciones del viaje» del negocio (quiénes
+   * viajan, a dónde, entre qué fechas). No hay tabla nueva.
+   *
+   * ⚠️ Solo se arma para un workspace con plantilla propia y negocio: es el único que
+   * puede imprimirlo, y así ningún otro paga la consulta de los bloques. Si al final no
+   * hay NADA que describir, viaja `null` y la plantilla imprime la lista plana — el mismo
+   * contrato de `dias` e `itinerarios`.
+   *
+   * ⚠️ Se describe lo que se IMPRIME: con itinerario principal, sus líneas; sin él, las
+   * que aportan al total. Describir una alternativa descartada pondría en el documento un
+   * vuelo que el cliente no está comprando.
+   */
+  const idsDelPrincipal = bloques?.find(b => b.esPrincipal)?.itemIds ?? null
+  const itemsImpresos = idsDelPrincipal
+    ? idsDelPrincipal.map(id => itemPorId.get(id)).filter((i): i is ItemRow => i !== undefined)
+    : items.filter(aporta)
+
+  let viajePDF: CotizacionPDFProps['viaje'] = null
+  if (plantillaPropia && negocioInfo) {
+    const { viaje: delNegocio } = await leerViajeDelNegocio(supabase, negocioInfo.id)
+    const paraLectura = itemsImpresos.map(i => ({
+      nombre: i.nombre ?? '',
+      grupo: i.grupo ?? null,
+      tarifa_pax: i.tarifa_pax,
+    }))
+    const vuelos = vuelosDeItems(paraLectura)
+    const hoteles = hotelesDeItems(paraLectura)
+    const cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
+    const config = leerConfigDocumentoViaje(ws?.config_extra)
+    const viaje = {
+      viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
+      destino: delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles),
+      fechas: rangoDeFechas(delNegocio.fechas.inicio, delNegocio.fechas.fin),
+      duracion: duracionDelViaje(delNegocio.fechas.inicio, delNegocio.fechas.fin),
+      presentacion: delNegocio.presentacion,
+      // ⚠️ El banco de fotos por ciudad no existe todavía: aquí va `null` SIEMPRE, y la
+      // plantilla está hecha para verse bien así. El día que exista, es esta línea.
+      foto: null,
+      vuelos,
+      hoteles,
+      cargosEnDestino,
+      nivelDetalle: delNegocio.nivelDetalle,
+      pie: config.pie,
+      firma: config.firma,
+    }
+    const hayAlgoQueDescribir =
+      viaje.viajeros !== null
+      || viaje.destino !== null
+      || viaje.fechas !== null
+      || viaje.presentacion !== null
+      || vuelos.length > 0
+      || hoteles.length > 0
+      || cargosEnDestino.length > 0
+    viajePDF = hayAlgoQueDescribir ? viaje : null
+  }
+
   const element = createElement(plantillaPropia ?? CotizacionPDF, {
     cotizacion: {
       consecutivo: cot.consecutivo,
@@ -687,6 +762,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
+    viaje: viajePDF,
   })
 
   // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
