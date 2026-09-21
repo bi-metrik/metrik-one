@@ -32,9 +32,14 @@ describe('plantillaCotizacionPropia', () => {
     expect(plantillaCotizacionPropia('termotech')).not.toBeNull()
   })
 
+  it('trappvel sí tiene plantilla propia', () => {
+    expect(plantillaCotizacionPropia('trappvel')).not.toBeNull()
+  })
+
   it('el registro declara exactamente los slugs que se sabe que existen', () => {
     // Si mañana se agrega otro, esta prueba obliga a decirlo aquí — y a revisar que
-    // el slug nuevo no esté ya en uso por el servicio externo.
-    expect(slugsConPlantillaPropia()).toEqual(['termotech'])
+    // el slug nuevo no esté ya en uso por el servicio externo. `trappvel` se agregó el
+    // 2026-09-21 y se comprobó contra producción que ningún workspace lo tenía puesto.
+    expect(slugsConPlantillaPropia()).toEqual(['termotech', 'trappvel'])
   })
 })

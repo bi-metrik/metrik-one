@@ -75,7 +75,24 @@ describe('quiénes viajan, desde los bloques del negocio', () => {
       { adultos: null, ninos: null, infantes: null, fecha_salida: null, fecha_regreso: null },
       { adultos: 2, ninos: 1, infantes: 0, fecha_salida: '2026-12-19', fecha_regreso: '2026-12-23' },
     ])
-    expect(v).toEqual({ composicion: { adultos: 2, ninos: 1, infantes: 0 }, fechas: { inicio: '2026-12-19', fin: '2026-12-23' } })
+    expect(v.composicion).toEqual({ adultos: 2, ninos: 1, infantes: 0 })
+    expect(v.fechas).toEqual({ inicio: '2026-12-19', fin: '2026-12-23' })
+  })
+
+  it('lo que alimenta la portada del documento del cliente sale de los mismos bloques', () => {
+    const v = viajeDesdeFilas([
+      { destino: 'Cancún', presentacion_destino: 'Playa turquesa y zona maya.', nivel_detalle: 'muy_detallada' },
+    ])
+    expect(v.destino).toBe('Cancún')
+    expect(v.presentacion).toBe('Playa turquesa y zona maya.')
+    expect(v.nivelDetalle).toBe('muy_detallada')
+  })
+
+  it('un negocio que no declara nada de eso no inventa: destino y párrafo vacíos, detalle normal', () => {
+    const v = viajeDesdeFilas([{ adultos: 2 }])
+    expect(v.destino).toBeNull()
+    expect(v.presentacion).toBeNull()
+    expect(v.nivelDetalle).toBe('normal')
   })
 
   it('sin adultos no hay composición: la línea la pide', () => {

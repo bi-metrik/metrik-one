@@ -50,6 +50,7 @@
 - ⚠️⚠️ [Equipaje por iconos](project_equipaje_por_iconos.md) — #792 mergeado: a un icono de 20 px se le dan MÁS PÍXELES; un cruce no atrapa el error que comparten las dos respuestas
 - ⚠️⚠️ [Cobertura de las opciones (4.2 y 4.3)](project_cobertura_opciones_cotizacion.md) — #798 en producción; el aviso SOLO existe para vuelo y SOLO con captura; un segundo «+ Vuelo» compite
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
+- ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — #800: el SQL va DESPUÉS del deploy; el nivel de detalle nace inerte; `→` no existe en el PDF
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado; las tres INERTES sin config
 - ⚠️⚠️ [Archivos de trappvel en su propio Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: config aplicada, corte de Drive DESPUÉS del merge

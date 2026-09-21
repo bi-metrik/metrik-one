@@ -10,6 +10,13 @@
  * defecto los ignora y su salida no cambia un píxel.
  */
 
+import type {
+  CargoEnDestinoPDF,
+  HotelPDF,
+  NivelDetalle,
+  VueloPDF,
+} from '@/lib/cotizaciones/detalle-viaje'
+
 /**
  * El precio de UN pasajero de cada tipo en una línea (tarifa por pasajero, diseño §4).
  *
@@ -21,6 +28,59 @@ export type PrecioPorPasajeroPDF = {
   cantidad: number
   precioUnitario: number
 }[] | null
+
+/**
+ * La foto de una sección del documento (portada, hotel).
+ *
+ * ⚠️ HUECO DECLARADO: el banco de fotos por ciudad **no existe todavía** (es la mitad de
+ * la Entrega B que quedó fuera, y antes hay que decidir quién aprueba una foto antes de
+ * que salga a un cliente). Hoy este campo llega SIEMPRE `null` y la plantilla está hecha
+ * para verse bien así: donde iría la foto va una banda de marca, nunca un hueco ni una
+ * imagen rota.
+ */
+export interface FotoPDF {
+  url: string
+  /** Rótulo en mayúscula sostenida, como en los itinerarios de Trappvel: `MADRID · EDIFICIO METRÓPOLIS`. */
+  rotulo: string | null
+}
+
+/**
+ * El viaje que describe el documento del cliente: portada, vuelos, hoteles y cargos en
+ * destino (§2 de `proyectos/trappvel/clarity/docs/diseno/propuesta-visual.md`).
+ *
+ * `null` o ausente —que es TODA cotización que no sea de viaje, o sea Termotech, Arca y
+ * WMC— hace que la plantilla que lo consuma imprima la lista plana de siempre. Igual que
+ * `dias` e `itinerarios`: no hay un flag que encender, hay un objeto que no llega.
+ *
+ * Lo arma `detalle-viaje.ts` con lo que la lectura del pantallazo ya guardó en cada línea;
+ * no hay una tabla nueva de «datos del vuelo».
+ */
+export interface ViajePDF {
+  /** «2 adultos y 1 niño». `null` si nadie declaró la composición del grupo. */
+  viajeros: string | null
+  destino: string | null
+  /** «23 oct 2026 – 30 oct 2026». `null` si no hay fechas. */
+  fechas: string | null
+  /** «7 días / 6 noches». `null` si no se puede derivar de fechas completas. */
+  duracion: string | null
+  /** El párrafo de presentación del destino, escrito por quien cotiza. */
+  presentacion: string | null
+  foto: FotoPDF | null
+  vuelos: VueloPDF[]
+  hoteles: HotelPDF[]
+  cargosEnDestino: CargoEnDestinoPDF[]
+  nivelDetalle: NivelDetalle
+  /**
+   * El pie de marca que va en todas las páginas y la firma del documento.
+   *
+   * Salen de la configuración del workspace, no del código: quién firma un documento que
+   * va al cliente es una decisión del cliente, y clavarla aquí obligaría a un despliegue
+   * para cambiar un cargo. Sin configuración, el pie se arma con los datos del vendedor y
+   * la firma cae en `emisor` (quien generó el documento).
+   */
+  pie: string | null
+  firma: { nombre: string; cargo: string | null; contacto: string | null } | null
+}
 
 export interface CotizacionPDFProps {
   cotizacion: {
@@ -223,4 +283,12 @@ export interface CotizacionPDFProps {
    * inventado, no firmar.
    */
   emisor?: { nombre: string; cargo: string | null } | null
+
+  /**
+   * El viaje: portada, vuelos, hoteles y cargos en destino. Ver `ViajePDF`.
+   *
+   * Solo lo consume la plantilla `trappvel`. `null` en toda cotización que no sea de
+   * viaje, y la plantilla por defecto ni lo mira.
+   */
+  viaje?: ViajePDF | null
 }
