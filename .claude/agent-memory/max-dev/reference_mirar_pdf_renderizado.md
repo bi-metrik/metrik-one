@@ -73,3 +73,27 @@ comprobar que las ignora.
   totalPages}) => …} fixed>` da el «N de M» del pie.
 
 Relacionado: [[medicion-sin-mcp-supabase]], [[pruebas-por-mutacion]], [[worktree-git-bloqueado]].
+
+## ⚠️⚠️ El extractor de texto saltaba uno de cada dos `stream` (2026-09-21, #800)
+
+El helper que leía el binario avanzaba `desde = fin + 1` tras cada `endstream`: la vuelta
+siguiente encontraba el «stream» **de esa misma palabra**, leía basura entre dos objetos,
+el `inflateSync` fallaba y el `catch` se lo tragaba. Con UNA página no se nota; **con dos
+se pierde la mitad del documento, en silencio**, y las pruebas afirman sobre un texto
+incompleto. Se arregla con `desde = fin + 'endstream'.length`.
+
+Vive en `src/lib/pdf/texto-del-pdf.ts` y lo comparten las pruebas de plantilla. Señal de
+que está mordiendo: el texto extraído empieza a mitad del documento y termina con el pie
+de la última página.
+
+## Glifos que NO existen en las fuentes estándar del PDF (2026-09-21)
+
+`→`, `✓`, `✕` y `★` **no están en WinAnsi**: el renderizador imprime otro carácter (la
+flecha salió como apóstrofo: «Cúcuta CUC ’Armenia AXM») y no falla nada. Sí existen `•`,
+`×`, `·`, `–` y `—`. Las estrellas de un hotel van en palabras. Solo lo ve quien mira la
+página: en el texto extraído el carácter equivocado se lee como cualquier otro.
+
+## Un bloque de total sin `wrap={false}` se parte contra el pie
+
+La franja del TOTAL quedó cortada a media altura entre dos páginas. `wrap={false}` en el
+contenedor. Mismo criterio que las filas de tabla.
