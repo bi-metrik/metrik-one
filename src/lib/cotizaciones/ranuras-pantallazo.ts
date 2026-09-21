@@ -22,6 +22,36 @@
  * Consecuencia directa: **un ítem sin grupo no ofrece cargue de pantallazo.** No es
  * una limitación, es el contrato.
  *
+ * ## VARIAS ranuras del mismo tipo, y el grupo sigue siendo la única fuente
+ *
+ * Caso real (Mauricio, 2026-09-21): un viaje a Providencia lleva **dos vuelos** —
+ * Bogotá–San Andrés y San Andrés–Providencia— y los dos van en lo que recibe el
+ * cliente. **Suman**, no compiten. Dentro de cada uno, las aerolíneas y los horarios sí
+ * compiten.
+ *
+ * Como el modelo ya hace que dos grupos DISTINTOS sumen y dos líneas del MISMO grupo
+ * compitan, lo único que faltaba era poder escribir dos grupos distintos que el registro
+ * reconociera los dos como vuelo. Se hace con una **convención declarada de etiqueta**
+ * dentro del mismo campo, no con una columna nueva:
+ *
+ * ```
+ *   vuelo                          → ranura de vuelo, sin etiqueta
+ *   vuelo 2                        → ranura de vuelo, etiqueta «2»
+ *   vuelo: Bogotá a San Andrés     → ranura de vuelo, etiqueta «Bogotá a San Andrés»
+ * ```
+ *
+ * ⚠️ La etiqueta separada por ESPACIO tiene que ser un número, y no es un detalle: sin
+ * esa restricción «Hotel Occidental» pasaría a resolver como hotel, y el propio registro
+ * declara desde el primer día que **no** debe hacerlo — es el nombre de un proveedor, no
+ * una ranura. Con dos puntos la etiqueta es libre porque el separador ya es la
+ * declaración explícita de que lo de la izquierda es el tipo.
+ *
+ * ⚠️ Dos grupos del mismo tipo con etiquetas distintas son **dos ranuras**, y por eso
+ * suman. Renombrar la etiqueta de UNA línea de una ranura con varias variantes la parte
+ * en dos ranuras de una variante cada una, y el total **se duplica en silencio**: por eso
+ * el renombre es una operación sobre la ranura entera (`renombrarRanura`) y no la edición
+ * del grupo de una línea suelta.
+ *
  * ## Por qué este registro vive en CÓDIGO y no en una tabla (R-P3)
  *
  * Misma regla que `src/lib/pdf/plantillas-cotizacion.ts`. Lo que le decimos al modelo
@@ -525,6 +555,9 @@ export const RANURAS_COMBINABLES: readonly string[] = [VUELO.slug, HOTEL.slug]
  * Solo si resuelve a una ranura combinable. Un grupo que no resuelve a ninguna ranura
  * (`seguro`, `dia-1`, «propina») devuelve `false`, que es lo correcto: nunca se cruzó
  * con nada y ahora tampoco.
+ *
+ * ⚠️ Cada INSTANCIA abre su propia columna: «vuelo» y «vuelo 2» son dos columnas, y por
+ * eso los dos vuelos de Providencia suman en cada tarifa en vez de competir.
  */
 export function grupoCombinable(grupo: string | null | undefined): boolean {
   const ranura = ranuraDeGrupo(grupo)
@@ -552,16 +585,161 @@ const POR_GRUPO: Map<string, DefinicionRanura> = new Map(
   Object.values(RANURAS).flatMap(r => r.grupos.map(g => [clave(g), r] as const)),
 )
 
+/** El separador explícito del nombre libre. Ver la cabecera. */
+const SEPARADOR = ':'
+
 /**
- * La ranura que le corresponde a un `items.grupo`, o `null` si ese grupo no es una.
+ * Una ranura CONCRETA de una cotización: su tipo y qué la distingue de sus hermanas.
+ *
+ * La gramática completa del `items.grupo`, y no tiene más casos:
+ *
+ * ```
+ *   grupo  = tipo [ " " numero ] [ ":" nombre ]
+ *   tipo   = uno de los sinónimos declarados en `DefinicionRanura.grupos`
+ * ```
+ *
+ * `vuelo` · `vuelo 2` · `vuelo: Bogotá a San Andrés` · `vuelo 2: San Andrés a Providencia`
+ */
+export interface InstanciaRanura {
+  /** El contrato de captura. Lo comparten todas las instancias del mismo tipo. */
+  definicion: DefinicionRanura
+  /**
+   * El ordinal, cuando la instancia lo lleva. `null` = la primera.
+   *
+   * Lo pone `siguienteGrupoDeTipo` al crear la segunda ranura del tipo, y **sobrevive al
+   * renombre**: «vuelo 2» renombrada queda «vuelo 2: San Andrés a Providencia». Perder el
+   * número al renombrar haría que la siguiente ranura volviera a llamarse 2.
+   */
+  numero: number | null
+  /** El nombre que le puso una persona. `null` = todavía no tiene. */
+  nombre: string | null
+}
+
+/**
+ * La ranura concreta que le corresponde a un `items.grupo`.
  *
  * `null` es una respuesta legítima y frecuente: los grupos del método día a día
  * (`dia-1`, `dia-2`, §2.5) y los componentes propios («seguro», «propina») no tienen
  * contrato de captura. Esos ítems se costean a mano, como hoy.
  */
-export function ranuraDeGrupo(grupo: string | null | undefined): DefinicionRanura | null {
+export function resolverRanura(grupo: string | null | undefined): InstanciaRanura | null {
   if (!grupo) return null
-  return POR_GRUPO.get(clave(grupo)) ?? null
+  const bruto = grupo.trim()
+  if (bruto === '') return null
+
+  // El grupo entero como tipo va PRIMERO, sin pasar por la gramática: así ningún grupo
+  // que hoy resuelve puede dejar de hacerlo por un separador que aparezca en un
+  // sinónimo futuro.
+  const directa = POR_GRUPO.get(clave(bruto))
+  if (directa) return { definicion: directa, numero: null, nombre: null }
+
+  const corte = bruto.indexOf(SEPARADOR)
+  const cabeza = corte >= 0 ? bruto.slice(0, corte).trim() : bruto
+  const libre = corte >= 0 ? bruto.slice(corte + 1).trim() : ''
+  if (cabeza === '') return null
+
+  // El ordinal va pegado al tipo y SOLO admite dígitos. No es un detalle: con cualquier
+  // palabra, «Hotel Occidental» pasaría a ser una ranura de hotel, y el registro declara
+  // desde el primer día que no debe — es el nombre de un proveedor.
+  const numerada = /^(.+?)\s+(\d+)$/.exec(cabeza)
+  const tipo = numerada ? numerada[1] : cabeza
+  const numero = numerada ? Number(numerada[2]) : null
+
+  const def = POR_GRUPO.get(clave(tipo))
+  if (!def) return null
+  return { definicion: def, numero, nombre: libre === '' ? null : libre }
+}
+
+/**
+ * El TIPO de ranura de un grupo, o `null` si ese grupo no es una.
+ *
+ * Es lo que consumen el pantallazo, la cobertura y el documento: todos preguntan «¿esto
+ * es un vuelo?», no «¿cuál de los vuelos?». Dos instancias del mismo tipo devuelven la
+ * misma definición, que es justo lo que hace que «Vuelo 2» tenga caja de pantallazo.
+ */
+export function ranuraDeGrupo(grupo: string | null | undefined): DefinicionRanura | null {
+  return resolverRanura(grupo)?.definicion ?? null
+}
+
+/**
+ * ¿Estos dos grupos son la MISMA ranura? Compara el texto, no el tipo.
+ *
+ * ⚠️ `vuelo` y `vuelo 2` son del mismo tipo y **no** son la misma ranura: suman. Quien
+ * necesite «del mismo tipo» compara `ranuraDeGrupo(a)?.slug === ranuraDeGrupo(b)?.slug`,
+ * y quien necesite «la misma columna» usa esto.
+ */
+export function mismaRanura(a: string | null | undefined, b: string | null | undefined): boolean {
+  const ka = (a ?? '').trim()
+  const kb = (b ?? '').trim()
+  if (ka === '' || kb === '') return false
+  return clave(ka) === clave(kb)
+}
+
+/**
+ * Cómo se llama una ranura de cara a quien cotiza, y en el documento.
+ *
+ * El tipo SIEMPRE se dice, aunque haya etiqueta: una columna que dijera solo «Bogotá a
+ * San Andrés» deja de decir que es un vuelo, y es lo primero que hay que saber para
+ * elegir en ella. Un grupo que no es ranura se devuelve tal como se escribió — «dia-1»
+ * y «seguro» son su propio nombre.
+ */
+export function etiquetaDeRanura(grupo: string | null | undefined): string {
+  const instancia = resolverRanura(grupo)
+  if (instancia === null) return (grupo ?? '').trim()
+  const { definicion, numero, nombre } = instancia
+  const cabeza = numero === null ? definicion.label : `${definicion.label} ${numero}`
+  return nombre === null ? cabeza : `${cabeza} · ${nombre}`
+}
+
+/**
+ * El `items.grupo` que corresponde a una instancia: el canónico, su ordinal y su nombre.
+ *
+ * Se escribe siempre desde el canónico (`vuelo`), no desde el sinónimo que alguien haya
+ * tecleado: así dos ranuras que se llaman igual no quedan escritas distinto («hoteles 2»
+ * y «hotel 2») y dejan de ser la misma columna sin que nada falle.
+ *
+ * ⚠️ El nombre se limpia de dos puntos: uno dentro convertiría «vuelo: 9:15 a. m.» en un
+ * grupo cuyo nombre es «9» y cuyo resto se pierde al releerlo. Se reemplaza por un guion
+ * en vez de rechazarse, porque el nombre es de la persona y no de la gramática.
+ */
+export function grupoDeInstancia(
+  definicion: DefinicionRanura,
+  instancia: { numero?: number | null; nombre?: string | null },
+): string {
+  const canonico = definicion.grupos[0]
+  const n = instancia.numero ?? null
+  const cabeza = n === null || !Number.isInteger(n) || n < 2 ? canonico : `${canonico} ${n}`
+  const nombre = (instancia.nombre ?? '').trim().replace(/:/g, ' -').trim()
+  return nombre === '' ? cabeza : `${cabeza}${SEPARADOR} ${nombre}`
+}
+
+/**
+ * El grupo de la SIGUIENTE ranura de un tipo, dados los que ya existen.
+ *
+ * La primera va sin etiqueta (`vuelo`) y las demás numeradas (`vuelo 2`, `vuelo 3`), de
+ * modo que una cotización de un solo vuelo se escribe exactamente como hoy (R6) y la
+ * segunda no tiene que inventarse un nombre para existir — se le pone después.
+ *
+ * ⚠️ Basta que exista UNA ranura del tipo, con la etiqueta que sea, para que la siguiente
+ * arranque en 2: si alguien renombró la primera a «vuelo: Bogotá a San Andrés», devolver
+ * «vuelo» crearía una ranura nueva en vez de continuar la serie, y a simple vista se
+ * leerían como dos cosas distintas del mismo viaje.
+ */
+export function siguienteGrupoDeTipo(
+  definicion: DefinicionRanura,
+  gruposEnUso: readonly (string | null | undefined)[],
+): string {
+  const delTipo = gruposEnUso
+    .map(resolverRanura)
+    .filter(r => r !== null && r.definicion.slug === definicion.slug)
+  if (delTipo.length === 0) return definicion.grupos[0]
+  // El siguiente ordinal libre. Se mira el NÚMERO de cada instancia, no el texto del
+  // grupo: una ranura renombrada («vuelo 2: San Andrés a Providencia») ocupa el 2 aunque
+  // su grupo ya no se escriba así, y reutilizarlo fundiría dos ranuras en una.
+  const ocupados = new Set(delTipo.map(r => r!.numero ?? 1))
+  let n = 2
+  while (ocupados.has(n)) n += 1
+  return grupoDeInstancia(definicion, { numero: n })
 }
 
 /** La ranura por su slug. `null` si el slug no está en el registro. */

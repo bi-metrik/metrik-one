@@ -7,12 +7,16 @@ import { diaDeItem, puedeLlevarDia, puedeSerSugerido } from '@/lib/cotizaciones/
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
 import {
-  combinacionesCartesianas,
   normalizarGrupo,
   ranurasCombinables,
   ranurasNoCombinables,
-  TOPE_COMBINACIONES,
 } from '@/lib/cotizaciones/itinerarios'
+import { renombreDeRanura, tarifasQueFaltan } from '@/lib/cotizaciones/tarifas'
+import {
+  etiquetaDeRanura,
+  grupoDeInstancia,
+  resolverRanura,
+} from '@/lib/cotizaciones/ranuras-pantallazo'
 import {
   calcularItinerario,
   contextoDeCotizacion,
@@ -50,7 +54,21 @@ export interface EstadoItinerarios {
    * `fijosConAlternativas` para que la pantalla pueda decir cuál de sus opciones está
    * sumando, que es lo que un supuesto callado no permite corregir.
    */
-  ranuras: { grupo: string; candidatos: { id: string; nombre: string | null }[] }[]
+  ranuras: {
+    grupo: string
+    /** Cómo se llama entera, de cara a quien cotiza: «Vuelo 2 · San Andrés a Providencia». */
+    etiqueta: string
+    /**
+     * La parte FIJA del nombre: «Vuelo», «Vuelo 2». No se edita — la decide el catálogo
+     * y el ordinal, y cambiarla a mano fundiría dos ranuras.
+     */
+    prefijo: string
+    /** La parte que una persona escribió: «San Andrés a Providencia». `''` = sin nombre. */
+    nombre: string
+    /** `true` si el grupo resuelve a una ranura del catálogo y se le puede poner nombre. */
+    renombrable: boolean
+    candidatos: { id: string; nombre: string | null }[]
+  }[]
   /**
    * Los grupos con alternativas que NO se cruzan (tour, traslado, plan, lo propio).
    *
@@ -96,10 +114,20 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
 
   const nombreDe = (id: string) => ctx.items.find(i => i.id === id)?.nombre ?? null
 
-  const ranuras = ranurasCombinables(ctx.items).map(r => ({
-    grupo: r.grupo,
-    candidatos: r.candidatos.map(id => ({ id, nombre: nombreDe(id) })),
-  }))
+  const ranuras = ranurasCombinables(ctx.items).map(r => {
+    const inst = resolverRanura(r.grupo)
+    return {
+      grupo: r.grupo,
+      etiqueta: etiquetaDeRanura(r.grupo),
+      // El prefijo se arma con el MISMO criterio que `etiquetaDeRanura`: la instancia sin
+      // nombre. Escribirlo a mano lo desincronizaría el día que el catálogo cambie una
+      // etiqueta, y el síntoma sería un encabezado que dice otra cosa que el aviso.
+      prefijo: inst ? etiquetaDeRanura(grupoDeInstancia(inst.definicion, { numero: inst.numero })) : r.grupo,
+      nombre: inst?.nombre ?? '',
+      renombrable: inst !== null,
+      candidatos: r.candidatos.map(id => ({ id, nombre: nombreDe(id) })),
+    }
+  })
 
   // El supuesto permanente: en estos grupos aporta el primero por orden y nadie va a
   // elegir por ellos. Se nombra la opción que suma y las que no, porque «hay una
@@ -127,76 +155,119 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
 // ── Escritura ────────────────────────────────────────────────────────────────
 
 /**
- * T1 · propone el producto cartesiano de las opciones existentes, ya calculado.
+ * Crea las TRES tarifas con nombre: Económica, Recomendada, Premium.
  *
- * T2 · **nacen con `va_en_propuesta = false`.** Ninguna combinación llega al cliente
- * por omisión, ni siquiera la que más margen deja.
+ * Reemplaza al generador del producto cartesiano (ver la nota en `itinerarios.ts`). Con
+ * el viaje a Providencia —dos vuelos y un hotel, dos opciones cada uno— el producto eran
+ * ocho filas y lo que se le manda al cliente son tres.
  *
- * No borra lo que ya está: solo agrega lo que falta. Regenerar después de sumar un
- * hotel tiene que conservar el nombre y la marca de los itinerarios que alguien ya
- * revisó — borrarlos y rehacerlos perdería ese trabajo en silencio.
+ * ⚠️ **Nacen VACÍAS de selección, y es el hueco del motor (§3 del diseño).** Las tres se
+ * arman a mano eligiendo una variante por ranura; cuando exista la propuesta automática,
+ * es aquí donde escribirá la elección inicial. Nacer con una elección por defecto sería
+ * peor que nacer vacías: una combinación que aparece elegida sin que nadie la eligiera es
+ * indistinguible de una revisada.
+ *
+ * T2 · **nacen con `va_en_propuesta = false`.** Ninguna llega al cliente por omisión.
+ *
+ * No borra ni renombra lo que ya está. Una cotización que venía del enumerado cartesiano
+ * conserva sus filas: quitarlas para dejar la tabla prolija perdería en silencio el
+ * nombre y la marca de algo que alguien ya revisó.
  */
-export async function generarCombinaciones(cotizacionId: string) {
+export async function armarTarifas(cotizacionId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   const ctx = await contextoDeCotizacion(supabase, cotizacionId)
   if (!ctx) return { success: false, error: 'Cotización no encontrada' }
 
-  const { combinaciones, truncado, total } = combinacionesCartesianas(ctx.items)
-  if (combinaciones.length === 0) {
+  // Sin ranuras que cruzar las tres tarifas serían idénticas entre sí: la misma línea
+  // tres veces con el mismo precio. No es un error del usuario, es que todavía no hay
+  // nada que elegir, y se dice cómo se llega a tenerlo.
+  const ranuras = ranurasCombinables(ctx.items)
+  if (ranuras.length === 0) {
     return {
       success: false,
-      error: 'No hay opciones que combinar: agrega al menos dos alternativas de vuelo o de hotel. Tours y traslados no se combinan, entran igual en todos los itinerarios.',
+      error:
+        'Todavía no hay nada entre qué elegir: las tres tarifas saldrían iguales. ' +
+        'Agrega otra opción a una línea de vuelo o de hotel («Agregar otra opción de vuelo»).',
     }
   }
 
   const existentes = await leerItinerarios(supabase, cotizacionId)
   if (existentes === null) return { success: false, error: ERROR_TABLAS_AUSENTES }
 
-  // La huella de una combinación es su selección ordenada: regenerar no duplica lo
-  // que ya existe, aunque alguien lo haya renombrado o reordenado.
-  const yaEstan = new Set(existentes.map(i => huella(i.seleccion)))
-  const nuevas = combinaciones.filter(sel => !yaEstan.has(huella(sel)))
+  const faltan = tarifasQueFaltan(existentes.map(i => i.nombre))
 
   let orden = existentes.reduce((m, i) => Math.max(m, i.orden), 0)
   let creadas = 0
-  for (const seleccion of nuevas) {
+  for (const nombre of faltan) {
     orden += 1
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: fila, error: errIns } = await (supabase as any)
+    const { error: errIns } = await (supabase as any)
       .from('cotizacion_itinerarios')
       .insert({
         workspace_id: workspaceId,
         cotizacion_id: cotizacionId,
-        nombre: null,
+        nombre,
         orden,
         va_en_propuesta: false,
         es_principal: false,
       })
-      .select('id')
-      .single()
-    if (errIns || !fila) {
-      return { success: false, error: errIns?.message ?? 'No se pudo crear el itinerario' }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: errVin } = await (supabase as any)
-      .from('itinerario_opciones')
-      .insert(seleccion.map(itemId => ({ itinerario_id: fila.id, item_id: itemId })))
-    if (errVin) return { success: false, error: errVin.message }
+    if (errIns) return { success: false, error: errIns.message }
     creadas += 1
   }
 
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
-  return {
-    success: true,
-    creadas,
-    yaExistian: combinaciones.length - nuevas.length,
-    aviso: truncado
-      ? `Son ${total} combinaciones posibles y se generaron las primeras ${TOPE_COMBINACIONES}. Reduce las alternativas de algún grupo para verlas todas.`
-      : null,
-  }
+  return { success: true, creadas, yaExistian: 3 - faltan.length }
+}
+
+/**
+ * Le pone NOMBRE a una ranura entera: «Vuelo 2» pasa a «San Andrés a Providencia».
+ *
+ * ⚠️⚠️ **Mueve TODAS las líneas de esa ranura, y por eso no es la edición del grupo de una
+ * línea suelta.** Renombrar el grupo de una sola variante de una ranura con dos la parte
+ * en dos ranuras de una variante cada una: las dos pasan a sumar, y el total **se duplica
+ * sin que nada falle**. Es el peor error que este modelo puede cometer, así que el
+ * renombre es una operación sobre la ranura o no es.
+ *
+ * El ORDINAL se conserva (`vuelo 2` → `vuelo 2: San Andrés a Providencia`): perderlo
+ * haría que la siguiente ranura del tipo volviera a llamarse 2 y se fundiera con ésta.
+ *
+ * ⚠️ NO necesita el guard de `entra_al_precio` que sí tiene `actualizarRanuraDeItem`, y
+ * conviene dejar dicho por qué: el renombre conserva el TIPO, así que `grupoCombinable`
+ * devuelve lo mismo antes y después y `fueraDelPrecio` no puede cambiar de opinión sobre
+ * ninguna de las líneas. Lo que ese guard protege es el cambio de grupo a otro tipo, que
+ * aquí no puede ocurrir por construcción.
+ */
+export async function renombrarRanura(cotizacionId: string, grupo: string, nombre: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const actual = normalizarGrupo(grupo)
+  if (actual === null) return { success: false, error: 'Falta la ranura que se va a renombrar' }
+
+  // Las líneas de la cotización. Hacen falta para las dos cosas: decidir el grupo nuevo
+  // (necesita saber qué ranuras ya existen) y saber a cuáles aplicar el cambio.
+  const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+  if (!ctx) return { success: false, error: 'Cotización no encontrada' }
+
+  const afectadas = ctx.items.filter(i => normalizarGrupo(i.grupo) === actual).map(i => i.id)
+  if (afectadas.length === 0) return { success: false, error: 'Esa ranura no tiene líneas' }
+
+  // La decisión vive en el helper puro. Aquí solo se ejecuta.
+  const decision = renombreDeRanura(actual, nombre, ctx.items.map(i => i.grupo ?? null))
+  if (!decision.ok) return { success: false, error: decision.detalle }
+  if (decision.grupo === actual) return { success: true, grupo: actual, sinCambio: true }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any)
+    .from('items')
+    .update({ grupo: decision.grupo })
+    .in('id', afectadas)
+  if (errUpd) return { success: false, error: errUpd.message }
+
+  revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
+  return { success: true, grupo: decision.grupo, lineas: afectadas.length }
 }
 
 /**
@@ -638,11 +709,6 @@ export async function actualizarDiaDeItem(
 
 const ERROR_TABLAS_AUSENTES =
   'Los itinerarios todavía no están disponibles en esta base: falta aplicar la migración 20260914200000_cotizacion_itinerarios.sql'
-
-/** Huella estable de una selección, para no duplicar combinaciones al regenerar. */
-function huella(seleccion: string[]): string {
-  return [...seleccion].sort().join('|')
-}
 
 /**
  * Un grupo de arranque para un ítem que todavía no tiene ranura.

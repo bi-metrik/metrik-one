@@ -151,10 +151,16 @@ describe('editor de cotización · la ranura se elige de una lista', () => {
     expect(opcionesDeGrupo(html)).toContain('dia-1')
   })
 
-  it('el selector dice qué habilita el grupo elegido', () => {
+  it('el selector dice qué habilita el grupo elegido, y NOMBRA la ranura', () => {
     // Sin esta línea, que «vuelo» abra el cargue de pantallazo y «día-1» no es una
-    // regla invisible que nadie puede deducir.
-    expect(pintar([item({ grupo: 'hotel' })])).toContain('Permite pegar el pantallazo de hotel')
+    // regla invisible que nadie puede deducir. Desde las ranuras múltiples además
+    // tiene que decir CUÁL: mover una línea de «Vuelo» a «Vuelo 2» la saca de una
+    // competencia y la mete en otra, y el total se mueve.
+    const hotel = pintar([item({ grupo: 'hotel' })])
+    expect(hotel).toContain('Hotel · compite con las demás líneas de esta ranura')
+    expect(hotel).toContain('permite pegar su pantallazo')
+    const segundoVuelo = pintar([item({ grupo: 'vuelo 2: San Andrés a Providencia' })])
+    expect(segundoVuelo).toContain('Vuelo 2 · San Andrés a Providencia · compite con las demás')
     expect(pintar([item({ grupo: 'dia-1' })])).toContain('el costo se carga a mano')
   })
 })

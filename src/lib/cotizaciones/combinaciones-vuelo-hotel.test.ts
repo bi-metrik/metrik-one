@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
 import {
-  combinacionesCartesianas,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
   itinerarioCompleto,
@@ -66,24 +65,12 @@ const VIAJE = [
   item('traslado-comp', { grupo: 'traslado', orden: 8, subtotal: 150_000, opcion_de: 'traslado-priv' }),
 ]
 
-describe('el producto cartesiano solo cruza vuelo y hotel', () => {
-  it('CONTROL · con la regla anterior el traslado multiplicaba: 18 filas', () => {
+describe('solo vuelo y hotel abren columna', () => {
+  it('CONTROL · si el traslado abriera columna, las combinaciones se duplicarían', () => {
+    // El argumento de la reunión del 2026-09-14, contado en números: un traslado al
+    // aeropuerto no cambia según la aerolínea, así que multiplicar por él da 18 filas
+    // idénticas de a pares en vez de 9.
     expect(productoDeTodas(VIAJE)).toBe(18)
-  })
-
-  it('hoy son 9: el traslado no abre columna', () => {
-    const { combinaciones, truncado, total } = combinacionesCartesianas(VIAJE)
-    expect(combinaciones).toHaveLength(9)
-    expect(total).toBe(9)
-    expect(truncado).toBe(false)
-  })
-
-  it('ninguna combinación nombra un traslado: no es una decisión de la tabla', () => {
-    const { combinaciones } = combinacionesCartesianas(VIAJE)
-    for (const sel of combinaciones) {
-      expect(sel.filter(id => id.startsWith('traslado-'))).toEqual([])
-      expect(sel).toHaveLength(2)
-    }
   })
 
   it('las columnas son vuelo y hotel; el traslado queda en la otra lista', () => {

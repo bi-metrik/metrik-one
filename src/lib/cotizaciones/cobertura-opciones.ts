@@ -10,9 +10,16 @@
  * el precio incompleto y el documento impecable. Eso es lo peor que puede pasar aquí,
  * un error que no se ve.
  *
- * Mientras una opción no pueda tener varias líneas que sumen (§4.1, que NO se
- * construye), lo único que se puede hacer es **decirlo antes de imprimir**, nombrando
- * lo que cubre cada una.
+ * Desde las ranuras múltiples (2026-09-21) ese segundo tramo **sí tiene dónde ir**: es
+ * otra ranura de vuelo («Vuelo 2»), que SUMA en vez de competir. El aviso sigue haciendo
+ * falta porque la vía equivocada sigue existiendo —cargarlo como opción es un clic— y lo
+ * único que lo delata es comparar lo que cubre cada una. Lo que cambió es la salida que
+ * el texto ofrece: antes «va como componente aparte», ahora «va como ranura aparte».
+ *
+ * ⚠️ El aviso compara DENTRO de una ranura, nunca entre ranuras. Vuelo 1 y Vuelo 2 cubren
+ * tramos distintos **a propósito**: avisar ahí saldría en cada viaje con escala y
+ * enseñaría a ignorarlo. Lo garantiza `ranurasConAlternativas`, que agrupa por el texto
+ * del `grupo` — «vuelo» y «vuelo 2» son dos entradas distintas.
  *
  * ## Avisa, NO bloquea
  *
@@ -48,7 +55,7 @@
  */
 
 import { ranurasConAlternativas, type ItemConGrupo } from './itinerarios'
-import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { etiquetaDeRanura, ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax, type TarifaPax } from './tarifa-pasajero'
 
 /** Lo mínimo que hace falta de una línea para saber qué cubre. */
@@ -167,7 +174,14 @@ export interface OpcionCubierta {
 
 export interface AvisoCobertura {
   grupo: string
-  /** Cómo se llama la ranura de cara a quien cotiza: «vuelo». */
+  /**
+   * Cómo se llama la ranura de cara a quien cotiza: «Vuelo», «Vuelo 2 · San Andrés a
+   * Providencia».
+   *
+   * ⚠️ Es la etiqueta de la INSTANCIA, no el tipo. Con dos ranuras de vuelo en la misma
+   * cotización, decir «las opciones de vuelo» deja sin saber en cuál de las dos está el
+   * problema, que es justo lo que este aviso viene a que se pueda revisar.
+   */
   ranura: string
   /**
    * `difieren`: las opciones no cubren lo mismo, y se nombra qué cubre cada una.
@@ -211,7 +225,8 @@ export function avisosDeCobertura(lineas: LineaParaCobertura[]): AvisoCobertura[
   for (const ranura of ranurasConAlternativas(lineas)) {
     const def = ranuraDeGrupo(ranura.grupo)
     if (def === null || !RANURAS_CON_COBERTURA.includes(def.slug)) continue
-    const etiqueta = def.label.toLowerCase()
+    // La INSTANCIA, no el tipo: «Vuelo 2 · San Andrés a Providencia».
+    const etiqueta = etiquetaDeRanura(ranura.grupo)
 
     const participan = ranura.candidatos
       .map(id => porId.get(id))
@@ -238,7 +253,7 @@ export function avisosDeCobertura(lineas: LineaParaCobertura[]): AvisoCobertura[
         motivo: 'no_comparable',
         opciones,
         texto:
-          `No se pudo comparar qué cubre cada opción de ${etiqueta}: de ${cuales} no se leyó el ` +
+          `No se pudo comparar qué cubre cada opción de «${etiqueta}»: de ${cuales} no se leyó el ` +
           `trayecto (origen y destino). Compruébalo antes de imprimir, porque solo una opción ` +
           `entra al precio final.`,
       })
@@ -259,9 +274,9 @@ export function avisosDeCobertura(lineas: LineaParaCobertura[]): AvisoCobertura[
       motivo: 'difieren',
       opciones,
       texto:
-        `Las opciones de ${etiqueta} no cubren lo mismo: ${detalle}. Solo una entra al precio ` +
+        `Las opciones de «${etiqueta}» no cubren lo mismo: ${detalle}. Solo una entra al precio ` +
         `final y las demás quedan para comparar. Si es otro tramo del mismo viaje, va como ` +
-        `componente aparte, no como opción.`,
+        `ranura aparte (botón «+ Vuelo»), no como opción.`,
     })
   }
 

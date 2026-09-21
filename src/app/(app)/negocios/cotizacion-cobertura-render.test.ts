@@ -181,21 +181,27 @@ describe('el botón de opción nombra su ranura', () => {
 })
 
 describe('el botón del componente suelto', () => {
-  it('se llama «Otro componente del viaje» y dice que suma siempre', () => {
+  it('se llama «Otro componente del viaje» y dice que no compite con nadie', () => {
     const html = pintar([AVIANCA])
     expect(botones(html)).toContain('Otro componente del viaje')
-    expect(texto(html)).toContain('Otro componente del viaje suma siempre al precio')
+    expect(texto(html)).toContain('es una línea sin ranura: suma siempre y no compite con nadie')
   })
 
-  it('avisa que un segundo «+ Vuelo» es otra opción, no otro vuelo cobrado', () => {
+  it('⚠️ dice que un segundo «+ Vuelo» SUMA, que es lo contrario de lo que decía', () => {
+    // Hasta el 2026-09-21 «+ Vuelo» creaba una OPCIÓN que competía y esta ayuda lo
+    // advertía. Ahora crea «Vuelo 2», que suma aparte, y la ayuda tiene que decir lo
+    // nuevo: si se quedara la frase vieja mandaría a no usar el botón correcto.
     const t = texto(pintar([AVIANCA]))
-    expect(t).toContain('si ya hay una, la nueva es otra opción y solo una entra al precio final')
-    expect(t).toContain('Un tramo adicional del mismo viaje va como componente, no como opción')
+    expect(t).toContain('si ya hay un vuelo, el nuevo es «Vuelo 2» y los dos van en el viaje')
+    expect(t).toContain('un segundo tramo va así')
+    // Y sigue distinguiendo la alternativa, que es la otra mitad del modelo.
+    expect(t).toContain('esas compiten y solo una entra al precio')
+    expect(t).not.toContain('la nueva es otra opción')
   })
 
   it('en una cotización que no es de viaje, esa ayuda no se pinta (R6)', () => {
     const t = texto(pintar([item()], false))
-    expect(t).not.toContain('Otro componente del viaje suma siempre al precio')
+    expect(t).not.toContain('no compite con nadie')
   })
 })
 
@@ -235,7 +241,9 @@ describe('el aviso de cobertura en el editor', () => {
       tarifa_pax: { casillas: { grupo_completo: lectura({ origen: null, destino: null }) } },
     })
     const t = texto(pintar([AVIANCA, sinRuta]))
-    expect(t).toContain('No se pudo comparar qué cubre cada opción de vuelo')
+    // Nombra la RANURA, no el tipo: con dos vuelos en la cotización, «de vuelo» no
+    // dice en cuál de los dos está el problema.
+    expect(t).toContain('No se pudo comparar qué cubre cada opción de «Vuelo»')
     expect(t).toContain('«SATENA»')
     expect(t).not.toContain('cubren lo mismo')
   })

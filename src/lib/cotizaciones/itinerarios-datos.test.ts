@@ -268,7 +268,8 @@ describe('§2.6.5 · desmarcar lo que ya no puede ir a la propuesta', () => {
     const desmarcados = await desmarcarLosQueYaNoPueden(clienteFalso(), COT)
 
     expect(desmarcados.map(d => d.id)).toEqual(['it-cara'])
-    expect(desmarcados[0].motivo).toContain('hotel')
+    // La ranura se nombra con la etiqueta de su columna, no con el grupo crudo.
+    expect(desmarcados[0].motivo).toContain('Hotel')
     expect(itinerario('it-cara').va_en_propuesta).toBe(false)
     // La Económica sí tiene su hotel elegido: se queda.
     expect(itinerario('it-barata').va_en_propuesta).toBe(true)
