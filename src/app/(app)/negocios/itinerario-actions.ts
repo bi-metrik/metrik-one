@@ -12,6 +12,7 @@ import {
   ranurasNoCombinables,
 } from '@/lib/cotizaciones/itinerarios'
 import { renombreDeRanura, tarifasQueFaltan } from '@/lib/cotizaciones/tarifas'
+import { normalizarMotivo } from '@/lib/cotizaciones/motivo-combinacion'
 import {
   etiquetaDeRanura,
   grupoDeInstancia,
@@ -85,6 +86,14 @@ export interface EstadoItinerarios {
    * vez de ofrecer un botón que va a fallar.
    */
   tablasAusentes: boolean
+  /**
+   * `true` cuando la base ya tiene las columnas del motivo (§3.3).
+   *
+   * Mismo criterio que `tablasAusentes` y por el mismo motivo: el deploy va antes que
+   * el SQL, y ofrecer un control que va a devolver un `42703` enseña a ignorar los
+   * errores de la pantalla. Sin tarifas la pregunta no aplica y vale `false`.
+   */
+  motivoDisponible: boolean
 }
 
 // ── Lectura ──────────────────────────────────────────────────────────────────
@@ -104,6 +113,7 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
     itinerarios: [],
     umbrales: UMBRALES_MARGEN_POR_DEFECTO,
     tablasAusentes: false,
+    motivoDisponible: false,
   }
 
   const { supabase, error } = await getWorkspace()
@@ -148,6 +158,9 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
     fijosConAlternativas,
     umbrales: ctx.umbrales,
     tablasAusentes: false,
+    // `every` y no `some`: si una sola fila llegó sin las columnas, la base no las
+    // tiene y el control no se puede ofrecer.
+    motivoDisponible: filas.length > 0 && filas.every(f => f.traeColumnasDeMotivo),
     itinerarios: filas.map(fila => calcularItinerario(ctx, fila)),
   }
 }
@@ -417,6 +430,58 @@ export async function renombrarItinerario(itinerarioId: string, nombre: string) 
     .eq('id', itinerarioId)
   if (errUpd) return { success: false, error: errUpd.message }
   return { success: true }
+}
+
+/**
+ * Por qué se eligió esta combinación (§3.3 del diseño de ranuras).
+ *
+ * ## Dónde se pide, y por qué aquí
+ *
+ * §3.2.1 R5: *«Se pide donde se elige, en la tabla, no en un modal al emitir. Un campo
+ * obligatorio en el instante de más afán produce veinte motivos basura, que es peor que
+ * veinte vacíos.»* Por eso esto es una acción suelta de la tabla y no un paso del PDF.
+ *
+ * ## Nunca bloquea, y se puede borrar
+ *
+ * Guardar el motivo no valida nada más: no mira el margen, no mira si la tarifa está
+ * completa, no exige que vaya en la propuesta. Mandar los dos campos vacíos lo BORRA
+ * —quien se equivocó de fila tiene cómo deshacerlo— y deja los dos en `null`, que es lo
+ * mismo que nunca haberlo escrito.
+ *
+ * ⚠️ El código se valida contra la lista (`normalizarMotivo`): llega de un `select` del
+ * navegador, o sea de un endpoint alcanzable, y una categoría inventada ensuciaría la
+ * serie que §3.4 agrupa para escribir criterios.
+ *
+ * ⚠️ El `42703` de la columna ausente se traduce. El SQL de este frente está pendiente
+ * y el deploy va antes: sin esto, quien le dé al selector vería el error crudo de
+ * Postgres y no sabría que no es culpa suya.
+ */
+export async function guardarMotivoDeTarifa(
+  itinerarioId: string,
+  codigo: string | null,
+  texto: string | null,
+) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+
+  const motivo = normalizarMotivo(codigo, texto)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errUpd } = await (supabase as any)
+    .from('cotizacion_itinerarios')
+    .update({ motivo_codigo: motivo.codigo, motivo_texto: motivo.texto })
+    .eq('id', itinerarioId)
+  if (errUpd) {
+    if (errUpd.code === '42703' || errUpd.code === 'PGRST204') {
+      return {
+        success: false,
+        error:
+          'El motivo todavía no se puede guardar en esta base: falta aplicar la migración '
+          + 'del registro de decisiones. La tarifa y su precio funcionan igual.',
+      }
+    }
+    return { success: false, error: errUpd.message }
+  }
+  return { success: true, motivo }
 }
 
 /** Borrar una fila de la tabla. Sus vínculos se van por `on delete cascade`. */

@@ -1,10 +1,21 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { createServiceClient } from '@/lib/supabase/server'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
-import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
+import {
+  bloquesParaPDF,
+  contextoDeCotizacion,
+  leerItinerarios,
+} from '@/lib/cotizaciones/itinerarios-datos'
+import {
+  armarFilasDeRegistro,
+  contextoDelViaje,
+  registrarSalidaAlCliente,
+} from '@/lib/cotizaciones/registro-decisiones'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
@@ -97,6 +108,105 @@ async function guardarPdfEnAlmacenamientoExterno(
     const msg = e instanceof Error ? e.message : String(e)
     console.error('[cotizacion-pdf] el PDF no quedó guardado en el almacenamiento externo:', msg)
     return { externo: true, referencia: null, aviso: `El PDF se generó pero no quedó guardado: ${msg}` }
+  }
+}
+
+/**
+ * El registro de decisiones de combinación (§3.2 del diseño de ranuras).
+ *
+ * ## Por qué ESTE es el momento de «la cotización sale al cliente»
+ *
+ * §3.2.1 R2 pide registrar *«cuando la cotización sale al cliente, no en cada edición
+ * de la tabla»*, y ese evento no existe limpio en el código. Los dos candidatos reales
+ * eran éste y `enviarCotizacionNegocio` (el paso `borrador → enviada`). Se eligió
+ * generar el documento, por tres razones:
+ *
+ *  · **Es lo único que produce el documento que el cliente recibe.** `enviada` es un
+ *    estado: no manda un correo, no adjunta nada, no genera un PDF. Lo que ve el
+ *    cliente sale de aquí, y desde el #800 con la plantilla propia de Trappvel.
+ *  · **`enviada` ocurre UNA sola vez y R3 necesita que se repita.** Esa acción exige
+ *    `estado === 'borrador'` y además rechaza una segunda si ya hay otra enviada: una
+ *    reemisión con otra combinación —*«ese cambio de opinión es exactamente la señal
+ *    que interesa»*— nunca llegaría a registrarse. Generar el PDF sí se repite.
+ *  · **Los errores no son simétricos.** Registrar una descarga que nadie mandó deja
+ *    una fila de más, ruido débil que se puede filtrar por cotización. No registrar
+ *    las reemisiones deja fuera justo la señal que el registro existe para capturar.
+ *
+ * Queda dicho para que se discuta: si mañana aparece un envío de verdad (correo al
+ * cliente), el disparo se mueve ahí y esta llamada se va.
+ *
+ * ## Nunca bloquea
+ *
+ * Cuando esto corre el PDF ya existe. *«Una cotización que no se puede emitir porque
+ * no pudo guardar una fila de aprendizaje es el peor intercambio posible.»* Todo fallo
+ * —incluida la tabla sin crear, que es el estado esperado hasta que se aplique el
+ * SQL— se reporta por consola y la cotización sale igual.
+ *
+ * ## Coste
+ *
+ * Una consulta para una cotización sin tarifas (lee los itinerarios y sale). Solo
+ * cuando hay tarifas marcadas para la propuesta lee además ítems, viaje y staff. Esas
+ * lecturas se repiten con las de `bloquesParaPDF` en el camino de @react-pdf; se
+ * prefirió repetirlas a atar el registro a la forma de esa función, que sirve a la
+ * plantilla y tiene otro dueño.
+ */
+async function registrarDecisionesDeLaSalida(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  args: {
+    workspaceId: string
+    cotizacionId: string
+    negocioId: string | null
+    staffId: string | null
+  },
+): Promise<void> {
+  try {
+    const filas = await leerItinerarios(supabase, args.cotizacionId)
+    // `null` = las tablas de itinerarios no están; `[]` = R6, esta cotización no las usa.
+    if (filas === null || filas.length === 0) return
+    const salen = filas.filter(f => f.vaEnPropuesta)
+    // Ninguna tarifa marcada: el PDF imprimió la lista plana y no salió ninguna
+    // combinación al cliente. No hay decisión que registrar.
+    if (salen.length === 0) return
+
+    const ctx = await contextoDeCotizacion(supabase, args.cotizacionId)
+    if (!ctx) return
+
+    const { viaje } = await leerViajeDelNegocio(supabase, args.negocioId)
+
+    // R6 del registro · quién eligió, con su nombre congelado. Sin ficha de staff
+    // queda en null: mejor sin autor que con el equivocado.
+    let nombreQuien: string | null = null
+    if (args.staffId) {
+      const { data: staff } = await supabase
+        .from('staff')
+        .select('full_name')
+        .eq('id', args.staffId)
+        .maybeSingle()
+      nombreQuien = (staff as { full_name: string | null } | null)?.full_name ?? null
+    }
+
+    const aInsertar = armarFilasDeRegistro({
+      workspaceId: args.workspaceId,
+      cotizacionId: args.cotizacionId,
+      negocioId: args.negocioId,
+      ctx,
+      filas: salen,
+      // Una marca por salida, igual para las tres tarifas.
+      contexto: contextoDelViaje(viaje, todayBogotaISO()),
+      quien: { staffId: args.staffId, nombre: nombreQuien },
+      salidaAt: new Date().toISOString(),
+    })
+
+    // Cliente de SERVICIO: la tabla es server-only (guarda precios de proveedor) y no
+    // concede nada a `authenticated`. El `workspace_id` sale de la sesión, no del
+    // navegador.
+    await registrarSalidaAlCliente(createServiceClient(), aInsertar)
+  } catch (e) {
+    console.error(
+      '[cotizacion-pdf] el registro de decisiones falló; la cotización salió igual:',
+      e instanceof Error ? e.message : String(e),
+    )
   }
 }
 
@@ -471,6 +581,15 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         }
       }
 
+      // El documento ya existe: desde aquí, lo que salió al cliente salió. Ver el
+      // encabezado del helper para por qué éste es el momento de «sale al cliente».
+      await registrarDecisionesDeLaSalida(supabase, {
+        workspaceId,
+        cotizacionId,
+        negocioId: negocioInfo?.id ?? null,
+        staffId: staffId ?? null,
+      })
+
       return {
         success: true,
         pdf: buffer.toString('base64'),
@@ -780,6 +899,15 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     filename,
     Buffer.from(buffer),
   )
+
+  // El documento ya existe: desde aquí, lo que salió al cliente salió. Ver el
+  // encabezado del helper para por qué éste es el momento de «sale al cliente».
+  await registrarDecisionesDeLaSalida(supabase, {
+    workspaceId,
+    cotizacionId,
+    negocioId: negocioInfo?.id ?? null,
+    staffId: staffId ?? null,
+  })
 
   return {
     success: true,
