@@ -589,3 +589,63 @@ describe('dónde queda el PDF de la cotización', () => {
     expect(llamadasDrive).toHaveLength(0)
   }, 30_000)
 })
+
+// ── §4.3 · el aviso de cobertura viaja con el PDF ────────────────────────────
+
+/**
+ * Lo leído de la captura de una opción, en la forma en que vive en `items.tarifa_pax`.
+ *
+ * Solo la identidad: es lo único que la cobertura mira, y poner aquí un desglose
+ * completo haría pasar la prueba por un camino que no es el que se está midiendo.
+ */
+const capturaDe = (identidad: Record<string, string | null>) => ({
+  casillas: {
+    grupo_completo: {
+      moneda: 'COP', total: 1_000_000, aPagarAgencia: null, porTipo: [],
+      ocupacion: { adultos: 2, ninos: 0, infantes: 0, total: 2 }, ocupacionDelItem: false,
+      identidad, notasCliente: [], alertas: [], campos: [],
+      nombre: 'Línea', descripcion: '', leidaEn: '2026-09-21T12:00:00Z',
+    },
+  },
+})
+
+/** El caso de Alejandra sobre la siembra de arriba: AVIANCA ida y vuelta, WINGO solo ida. */
+function conCapturas(wingo: Record<string, string | null>) {
+  sembrar({ conAlternativa: true })
+  const porId = (id: string) => tablas.items.find(i => i.id === id) as Fila
+  porId('avianca').tarifa_pax = capturaDe({
+    origen: 'Bogotá', destino: 'San Andrés', fecha_salida: '2026-11-10', fecha_regreso: '2026-11-15',
+  })
+  porId('wingo').tarifa_pax = capturaDe(wingo)
+}
+
+describe('el aviso de cobertura también sale al generar el PDF', () => {
+  it('dos opciones que no cubren lo mismo: el aviso vuelve con el PDF, nombrando los dos tramos', async () => {
+    // Quien imprime no siempre es quien cargó: el banner del editor no lo ve alguien
+    // que entra, abre la cotización y le da a descargar. Por eso se mide AQUÍ, sobre
+    // la función real, y no solo en el render de la pantalla.
+    conCapturas({ origen: 'San Andrés', destino: 'Providencia', fecha_salida: '2026-11-11', fecha_regreso: null })
+    const res = (await generateCotizacionPDF(COT)) as { success: boolean; pdf: string; avisosCobertura?: string[] }
+
+    expect(res.avisosCobertura).toHaveLength(1)
+    expect(res.avisosCobertura?.[0]).toContain('Bogotá–San Andrés')
+    expect(res.avisosCobertura?.[0]).toContain('San Andrés–Providencia')
+
+    // ⚠️ AVISA, NO BLOQUEA: el PDF sale igual. Un gate aquí dejaría a quien imprime sin
+    // documento por una diferencia que puede ser perfectamente legítima.
+    expect(res.success).toBe(true)
+    expect(res.pdf.length).toBeGreaterThan(0)
+  }, 30_000)
+
+  it('dos opciones que cubren lo mismo: ningún aviso', async () => {
+    conCapturas({ origen: 'Bogotá', destino: 'San Andrés', fecha_salida: '2026-11-10', fecha_regreso: '2026-11-15' })
+    const res = (await generateCotizacionPDF(COT)) as { success: boolean; avisosCobertura?: string[] }
+    expect(res.avisosCobertura).toEqual([])
+  }, 30_000)
+
+  it('sin capturas cargadas tampoco: no es que cubran lo mismo, es que no hay nada leído', async () => {
+    sembrar({ conAlternativa: true })
+    const res = (await generateCotizacionPDF(COT)) as { success: boolean; avisosCobertura?: string[] }
+    expect(res.avisosCobertura).toEqual([])
+  }, 30_000)
+})

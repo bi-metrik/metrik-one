@@ -70,12 +70,18 @@ describe('agregar líneas por tipo', () => {
     expect(html).toContain('placeholder="Nombre del item..."')
     expect(botones(html)).toContain('Item')
     expect(botones(html)).toContain('Desde catálogo')
-    for (const t of ['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro']) expect(botones(html)).not.toContain(t)
+    for (const t of ['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro componente del viaje']) {
+      expect(botones(html)).not.toContain(t)
+    }
   })
 
-  it('con la marca: un botón por tipo y «Otro»; el nombre libre no está a la vista', () => {
+  it('con la marca: un botón por tipo y «Otro componente del viaje»; el nombre libre no está a la vista', () => {
+    // ⚠️ El botón se llamaba «Otro» hasta el 2026-09-21 (§4.2). El nombre nuevo dice lo
+    // único que hay que saber para elegirlo: una línea sin ranura SUMA SIEMPRE.
     const html = pintar(true)
-    expect(botones(html)).toEqual(expect.arrayContaining(['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro']))
+    expect(botones(html)).toEqual(
+      expect.arrayContaining(['Vuelo', 'Hotel', 'Actividad', 'Traslado', 'Otro componente del viaje']),
+    )
     expect(botones(html)).not.toContain('Item')
     // ⚠️ «Desde catálogo» se fue el 2026-09-17 (ver `cotizacion-limpieza-render.test.ts`):
     // el catálogo es una lista de servicios con precio fijo y aquí el costo entra por
