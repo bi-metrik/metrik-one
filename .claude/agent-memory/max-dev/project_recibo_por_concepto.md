@@ -1,13 +1,15 @@
 ---
 name: recibo-por-concepto
-description: "PR #795 SIN mergear (Mauricio decide): un pago sale con un recibo por componente. La marca de `cobros.siigo_recibo` tiene DOS formas y `mis_cobros_de_servicio` solo lee una; el comprobante del pasante NO EXISTE todavía"
+description: "PR #795 MERGEADO el 2026-09-19 (squash `0d5a8b5f`) y apagado: un pago sale con un recibo por componente. La marca de `cobros.siigo_recibo` tiene DOS formas y `mis_cobros_de_servicio` solo lee una; el comprobante del pasante NO EXISTE todavía"
 metadata:
   type: project
 ---
 
-PR **[#795](https://github.com/bi-metrik/metrik-one/pull/795)**, rama `feat/recibo-por-concepto`, commit
-`089acd00`. **Los 8 checks en verde con preview de Vercel, y SIN mergear**: el brief cierra con
-«Mauricio decide el merge», que gana sobre el merge automático de `branch-workflow-one.md`.
+PR **[#795](https://github.com/bi-metrik/metrik-one/pull/795)**, rama `feat/recibo-por-concepto`.
+**MERGEADO el 2026-09-19** con los 8 checks verdes (squash `0d5a8b5f`, verificado con
+`gh pr view 795` el 2026-09-21). Nació sin mergear —el brief cerraba con «Mauricio decide el
+merge»— y él lo mergeó el mismo día. **El código está en `main` y sigue INERTE**: ninguna línea
+declara `recibo_por_concepto` y `recibo_automatico` sigue en `false`.
 
 Un pago mixto salía con UN recibo por el total y ese total entraba entero a la cuenta del único
 comprobante configurado. Ahora, si la línea declara `config_extra.siigo.recibo_por_concepto`, sale
@@ -51,12 +53,11 @@ SOENA: **63 mixtos**, 317 solo honorario, 45 solo tarifa.
 
 ### Dos puntos donde el brief va por delante del código, reportados en el PR
 
-1. **El correo NO puede nombrar los dos documentos con su número y su valor.** La decisión
-   estructural sí está: **un** aviso, fuera del bucle, y si el segundo componente falla el correo no
-   sale. Pero `avisar_documento_al_cliente(negocio_id, bloque_config_id)` se identifica por un
-   **bloque**, no por recibos, y el cuerpo lo arma la plantilla de la edge function
-   `notificar-etapa`, que nombra UN documento y UN enlace. Listar los dos exige tocar esa plantilla
-   y redesplegar la función — y **mergear no despliega edge functions**.
+1. ✅ **CERRADO por el [[correo-recibo-dos-documentos]] (#804, sin mergear).** Decía que el correo
+   no podía nombrar los dos documentos: la plantilla de `notificar-etapa` nombraba UN documento y UN
+   enlace. Ya existe la marca `{recibos}`, que sale del mismo bloque y lista los documentos del
+   ÚLTIMO pago con número, concepto, valor y enlace propio. Sigue en pie lo de siempre: **mergear no
+   despliega edge functions**, y el copy de SOENA es un SQL aparte, sin aplicar.
 2. **La suma exacta se garantiza en los datos que existen, no en general.**
    `honorario + pasante = monto` sale del propio reparto y está fijado por prueba. Pero
    `/v1/document-types` da **`decimals: false`** en el 32623 y `true` en el 4594: un comprobante

@@ -17,8 +17,11 @@ final**. Antes ese camino mandaba una URL pública que funcionaba: la ventana es
 regresión real, acotada al camino degradado (negocio sin `carpeta_url`).
 `supabase functions deploy notificar-etapa`.
 
-⚠️ **El enlace firmado de 7 días NUNCA se ejercitó contra Storage real** (no se puede sin
-escribir en producción). Necesita QA en vivo antes del Paso C.
+✅ **CADUCÓ: el enlace firmado de 7 días YA se ejercitó contra Storage real** (2026-09-21,
+[[correo-recibo-dos-documentos]]). **Firmar no escribe nada**, así que se midió sin tocar
+producción: un objeto real de `ve-documentos` firmado a 604800 s devolvió **200 y 134.355
+bytes sin credenciales**, con token de **7,0 días exactos**, y el mismo objeto por su URL
+pública devolvió **400**. La receta está en esa memoria.
 
 ## ✅ Paso B APLICADO (2026-09-16) — la migración corrió ANTES de que existiera el archivo
 
