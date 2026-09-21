@@ -40,7 +40,7 @@
 
 import { calcularCascada, type Cascada, type ItemParaCascada, type ParametrosCascada } from './totales'
 import { nivelDeMargen } from './convencion-margen'
-import { grupoCombinable } from './ranuras-pantallazo'
+import { etiquetaDeRanura, grupoCombinable } from './ranuras-pantallazo'
 import { fueraDelPrecio } from './dia-relativo'
 
 /** Lo mínimo que hace falta de un ítem para saber en qué ranura vive. */
@@ -326,50 +326,19 @@ export function itemsQueAportanAlTotal(items: ItemConGrupo[]): string[] {
 }
 
 /**
- * El producto cartesiano de las ranuras: todas las combinaciones posibles (T1).
+ * ⚠️ Aquí vivía `combinacionesCartesianas`, que enumeraba TODAS las combinaciones.
  *
- * Cada elemento es la selección de UN itinerario. Nadie teclea una combinación a mano.
+ * Se retiró el 2026-09-21 con las tres tarifas con nombre (`tarifas.ts`). El motivo no
+ * fue el tope —eran 60 filas— sino que enumerar responde la pregunta equivocada: con dos
+ * vuelos y un hotel de dos opciones cada uno el producto son ocho filas y **lo que se le
+ * manda al cliente son tres**, con nombre. Las otras cinco eran trabajo de revisión que
+ * nadie iba a usar, y el tope que las acotaba dejó de tener objeto: la tabla tiene
+ * exactamente tres filas sin importar cuántas ranuras haya.
  *
- * ⚠️ Tope duro de combinaciones. 3×3 son nueve y es el caso real; 6 ranuras de 4
- * opciones son 4.096 filas, y eso no es una tabla que alguien vaya a revisar: es una
- * pantalla colgada y 4.096 inserts. Al pasarse, se devuelve lo que cabe y el llamador
- * avisa — cortar en silencio dejaría combinaciones ausentes que nadie sabría buscar.
+ * Lo que NO se movió, y es la parte del modelo que sostiene todo lo demás:
+ * `ranurasCombinables` sigue diciendo qué columnas hay y `ranurasSinResolver` sigue
+ * diciendo cuáles le faltan a una tarifa.
  */
-export const TOPE_COMBINACIONES = 60
-
-export interface Cartesiano {
-  combinaciones: string[][]
-  /** `true` si el producto completo no cabía en el tope. */
-  truncado: boolean
-  /** Cuántas combinaciones habría sin el tope. */
-  total: number
-}
-
-export function combinacionesCartesianas(items: ItemConGrupo[]): Cartesiano {
-  // Solo vuelo y hotel (decisión del 2026-09-14). Con tres vuelos, tres hoteles y dos
-  // traslados con alternativas esto devuelve 9 y no 18: el traslado entra en las nueve
-  // sin ocupar una columna. El tope sigue vigente porque el producto lo sigue siendo —
-  // seis destinos con vuelo y hotel propios lo alcanzan.
-  const ranuras = ranurasCombinables(items)
-  if (ranuras.length === 0) return { combinaciones: [], truncado: false, total: 0 }
-
-  const total = ranuras.reduce((n, r) => n * r.candidatos.length, 1)
-
-  let combinaciones: string[][] = [[]]
-  for (const ranura of ranuras) {
-    const siguiente: string[][] = []
-    for (const parcial of combinaciones) {
-      for (const candidato of ranura.candidatos) {
-        if (siguiente.length >= TOPE_COMBINACIONES) break
-        siguiente.push([...parcial, candidato])
-      }
-      if (siguiente.length >= TOPE_COMBINACIONES) break
-    }
-    combinaciones = siguiente
-  }
-
-  return { combinaciones, truncado: total > TOPE_COMBINACIONES, total }
-}
 
 /**
  * La cascada de UN itinerario: la misma aritmética, sobre el subconjunto de ítems.
@@ -427,13 +396,20 @@ export function motivoDeRechazo(args: {
   return null
 }
 
-/** El motivo, dicho como se le dice a una persona. */
+/**
+ * El motivo, dicho como se le dice a una persona.
+ *
+ * ⚠️ Las ranuras se nombran con su ETIQUETA, no con el `grupo` crudo. Desde que hay
+ * varias del mismo tipo, el grupo se escribe «vuelo 2: san andrés a providencia» y la
+ * tabla la llama «Vuelo 2 · San Andrés a Providencia»: mandar a elegir algo con un
+ * nombre que no aparece en pantalla es un bloqueo que el usuario no puede levantar.
+ */
 export function textoDeRechazo(motivo: MotivoRechazo): string {
   if (motivo.tipo === 'incompleto') {
-    const lista = motivo.grupos.join(', ')
+    const lista = motivo.grupos.map(etiquetaDeRanura).join(', ')
     return motivo.grupos.length === 1
-      ? `Falta elegir ${lista}: un itinerario incompleto no puede ir en la propuesta`
-      : `Faltan por elegir: ${lista}. Un itinerario incompleto no puede ir en la propuesta`
+      ? `Falta elegir ${lista}: una tarifa incompleta no puede ir en la propuesta`
+      : `Faltan por elegir: ${lista}. Una tarifa incompleta no puede ir en la propuesta`
   }
   const piso = formatoPct(motivo.pisoPct)
   if (motivo.margenRealPct === null) {

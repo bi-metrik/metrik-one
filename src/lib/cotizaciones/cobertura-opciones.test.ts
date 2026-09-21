@@ -81,8 +81,11 @@ describe('el caso que perdió el tramo', () => {
     expect(avisos[0].texto).toContain('San Andrés–Bogotá')
     expect(avisos[0].texto).toContain('SATENA')
     expect(avisos[0].texto).toContain('San Andrés–Providencia')
-    // El apaño de §6 mientras 4.1 no exista: dónde va el tramo que falta.
-    expect(avisos[0].texto).toContain('componente')
+    // Dónde va el tramo que falta. Desde las ranuras múltiples (2026-09-21) la salida
+    // ya no es «componente aparte» sino OTRA RANURA de vuelo, que suma en vez de
+    // competir. El aviso tiene que mandar a la salida que existe hoy.
+    expect(avisos[0].texto).toContain('ranura aparte')
+    expect(avisos[0].texto).toContain('+ Vuelo')
   })
 
   it('ninguna de las dos contiene a la otra: las dos coberturas viajan en el aviso', () => {

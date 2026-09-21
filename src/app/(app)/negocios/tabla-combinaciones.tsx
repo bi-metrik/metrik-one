@@ -6,25 +6,41 @@ import { Loader2, Sparkles, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
+  armarTarifas,
   cambiarOpcionDeItinerario,
   eliminarItinerario,
-  generarCombinaciones,
   marcarEnPropuesta,
   marcarPrincipal,
   renombrarItinerario,
+  renombrarRanura,
   type EstadoItinerarios,
 } from '@/app/(app)/negocios/itinerario-actions'
 import { nombreDeItinerario } from '@/lib/cotizaciones/itinerarios'
+import { esTarifaConNombre, NOMBRES_TARIFA, tarifasQueFaltan } from '@/lib/cotizaciones/tarifas'
 import { nivelDeMargen } from '@/lib/cotizaciones/convencion-margen'
 import { claseNivelMargen, formatMargenPct } from '@/lib/cotizaciones/margen-vista'
 import { formatCOP } from '@/lib/contacts/constants'
 
 /**
- * La tabla de combinaciones: dónde se decide qué ve el cliente.
+ * La tabla de combinaciones: dónde se ARMAN las tres tarifas que ve el cliente.
  *
- * Filas = itinerarios. Columnas = grupos. Celdas = desplegable con las opciones de
- * ese grupo. Al final de cada fila: costo, precio, margen y el interruptor «va en
- * propuesta».
+ * Filas = tarifas (Económica, Recomendada, Premium). Columnas = ranuras. Celdas =
+ * desplegable con las variantes de esa ranura. Al final de cada fila: costo, precio,
+ * margen y el interruptor «va en propuesta».
+ *
+ * ## Deja de enumerar el producto completo (2026-09-21)
+ *
+ * Antes el botón generaba **todas** las combinaciones posibles. Con el viaje a
+ * Providencia —dos vuelos y un hotel, dos opciones cada uno— eran ocho filas, y lo que se
+ * le manda al cliente son tres. Ahora el botón crea exactamente las tres, vacías, y se
+ * arman eligiendo una variante por ranura. El motor que propondrá esa elección inicial no
+ * entra todavía: el hueco está en `armarTarifas`.
+ *
+ * ## Varias ranuras del mismo tipo SUMAN
+ *
+ * «Vuelo» y «Vuelo 2» son dos columnas y una tarifa lleva una variante de cada una: los
+ * dos tramos van en lo que recibe el cliente. Las variantes DENTRO de una columna siguen
+ * compitiendo. El encabezado de cada columna es editable y renombra la ranura entera.
  *
  * ## R6 en la pantalla
  *
@@ -67,8 +83,12 @@ export default function TablaCombinaciones({
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [nombres, setNombres] = useState<Record<string, string>>({})
+  const [nombresRanura, setNombresRanura] = useState<Record<string, string>>({})
 
   const { ranuras, fijosConAlternativas, itinerarios, umbrales, tablasAusentes } = estado
+  // Cuáles de las tres faltan, con el MISMO helper que usa la acción: escrito dos veces,
+  // el botón diría que no hay nada que crear y el servidor crearía, o al revés.
+  const faltanTarifas = tarifasQueFaltan(itinerarios.map(i => i.nombre))
 
   // R6 · sin opciones y sin itinerarios no hay nada que decidir: la sección no se
   // pinta. Una cotización que ya existía no gana una sección al abrirla.
@@ -84,14 +104,21 @@ export default function TablaCombinaciones({
   if (vacia) {
     return (
       <div className="rounded-lg border border-dashed px-4 py-5 text-center">
-        <h3 className="text-sm font-semibold">Combinaciones</h3>
+        <h3 className="text-sm font-semibold">Las tres tarifas</h3>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Todavía no hay nada que combinar: cada componente tiene una sola opción.
+          Todavía no hay entre qué elegir: cada componente tiene una sola opción, así que
+          {' '}Económica, Recomendada y Premium saldrían idénticas.
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground">
           Agrega otra opción a una línea de <strong>vuelo</strong> o de <strong>hotel</strong>
           {' '}(botón «Agregar otra opción de vuelo», dentro de la línea) y aquí aparece la
-          {' '}tabla con el costo y el margen de cada combinación.
+          {' '}tabla para armar las tres, con el costo y el margen de cada una.
+        </p>
+        {/* La confusión que costó el tramo perdido de Providencia, dicha antes de que
+            alguien use el botón equivocado: un SEGUNDO TRAMO no es una opción. */}
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Si lo que falta es <strong>otro tramo</strong> del viaje (el segundo vuelo), no es una
+          {' '}opción: es otra ranura. Se agrega con «+ Vuelo» y suma aparte.
         </p>
         {/* La otra vía, y es la que destrabó el caso real: dos líneas sueltas que compiten
             por lo mismo no se cruzan hasta que comparten grupo. En la cotización de prueba
@@ -123,43 +150,45 @@ export default function TablaCombinaciones({
     <div className="rounded-lg border">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <div>
-          <h3 className="text-sm font-semibold">Combinaciones</h3>
+          <h3 className="text-sm font-semibold">Las tres tarifas</h3>
           <p className="text-[11px] text-muted-foreground">
-            Cada fila es un itinerario completo con su propio costo y su propio margen.
-            {' '}Solo las marcadas «va en propuesta» salen en el PDF.
+            {NOMBRES_TARIFA.join(', ')}. Cada una es <strong>una opción por ranura</strong> y su
+            {' '}precio es la suma de todas. Solo las marcadas «va en propuesta» salen en el PDF.
           </p>
-          {/* La regla de la reunión del 15, dicha donde se aplica. Sin esto, «¿por qué
-              el traslado no tiene columna?» no tiene respuesta en pantalla. */}
+          {/* Lo que más cuesta entender del modelo, dicho donde se usa: las COLUMNAS
+              suman entre sí y las OPCIONES de una columna compiten. Sin esta línea,
+              «¿por qué el segundo vuelo no aparece en el total?» no tiene respuesta en
+              pantalla — y era el defecto que abrió este frente. */}
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Se cruzan <strong>vuelos y hoteles</strong>. Tours, traslados y planes no abren
-            columna: suman igual en todos los itinerarios.
+            Cada columna es una ranura y <strong>todas suman</strong>: dos vuelos van los dos en
+            {' '}el viaje. Dentro de una columna las opciones <strong>compiten</strong> y solo una
+            {' '}entra. Tours, traslados y planes no abren columna: suman igual en las tres.
           </p>
         </div>
-        {editable && ranuras.length > 0 && !tablasAusentes && (
+        {editable && ranuras.length > 0 && !tablasAusentes && faltanTarifas.length > 0 && (
           <button
             type="button"
             disabled={isPending}
             onClick={() =>
               startTransition(async () => {
-                const r = await generarCombinaciones(cotizacionId)
+                const r = await armarTarifas(cotizacionId)
                 if (!r.success) {
-                  toast.error(r.error ?? 'No se pudieron generar')
+                  toast.error(r.error ?? 'No se pudieron armar')
                   return
                 }
-                // Se dice cuántas se crearon Y cuántas ya estaban: regenerar tras
-                // agregar un hotel conserva lo revisado, y sin el conteo eso se lee
-                // como que el botón no hizo nada.
-                const partes = [`${r.creadas} combinación${r.creadas === 1 ? '' : 'es'} nueva${r.creadas === 1 ? '' : 's'}`]
+                // Se dice cuántas se crearon Y cuántas ya estaban: volver a pulsarlo tras
+                // agregar un hotel conserva lo revisado, y sin el conteo eso se lee como
+                // que el botón no hizo nada.
+                const partes = [`${r.creadas} tarifa${r.creadas === 1 ? '' : 's'} nueva${r.creadas === 1 ? '' : 's'}`]
                 if (r.yaExistian) partes.push(`${r.yaExistian} ya estaban`)
-                toast.success(partes.join(', '))
-                if (r.aviso) toast.warning(r.aviso)
+                toast.success(`${partes.join(', ')}. Elige una opción por ranura en cada una.`)
                 router.refresh()
               })
             }
             className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
             {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            Generar combinaciones
+            {faltanTarifas.length === 3 ? 'Armar las tres tarifas' : `Crear ${faltanTarifas.join(' y ')}`}
           </button>
         )}
       </div>
@@ -180,13 +209,14 @@ export default function TablaCombinaciones({
       {!tablasAusentes && itinerarios.length === 0 && ranuras.length > 0 && (
         <div className="px-4 py-5 text-center text-xs">
           <p className="text-muted-foreground">
-            Hay {ranuras.length === 1 ? 'un grupo' : `${ranuras.length} grupos`} con alternativas que se cruzan
-            {' '}({ranuras.map(r => r.grupo).join(', ')}).
+            Hay {ranuras.length === 1 ? 'una ranura' : `${ranuras.length} ranuras`} con opciones
+            {' '}({ranuras.map(r => r.etiqueta).join(', ')}).
+            {ranuras.length > 1 && ' Todas suman: una tarifa lleva una opción de cada una.'}
           </p>
           <p className="mt-1 font-medium text-amber-700 dark:text-amber-400">
-            Todavía nadie eligió: el total toma una opción por supuesto en cada grupo.
+            Todavía nadie eligió: el total toma una opción por supuesto en cada ranura.
           </p>
-          <p className="mt-1 text-muted-foreground">Genera las combinaciones para ver el margen de cada una.</p>
+          <p className="mt-1 text-muted-foreground">Arma las tres tarifas para ver el margen de cada una.</p>
         </div>
       )}
 
@@ -198,7 +228,7 @@ export default function TablaCombinaciones({
             <p key={f.grupo}>
               <span className="font-medium capitalize">{f.grupo}</span> no se cruza: suma
               {' '}<span className="font-medium">«{f.aporta ?? 'Sin nombre'}»</span> en todos los
-              {' '}itinerarios{f.fuera.length > 0 && <> y deja fuera del total a {f.fuera.map(n => `«${n}»`).join(', ')}</>}.
+              {' '}tarifas{f.fuera.length > 0 && <> y deja fuera del total a {f.fuera.map(n => `«${n}»`).join(', ')}</>}.
             </p>
           ))}
         </div>
@@ -209,9 +239,40 @@ export default function TablaCombinaciones({
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b bg-muted/40 text-left">
-                <th className="px-3 py-2 font-medium">Itinerario</th>
+                <th className="px-3 py-2 font-medium">Tarifa</th>
                 {ranuras.map(r => (
-                  <th key={r.grupo} className="px-3 py-2 font-medium capitalize">{r.grupo}</th>
+                  <th key={r.grupo} className="px-3 py-2 font-medium align-bottom">
+                    {/* EL NOMBRE DE LA RANURA, editable donde se ve. Con dos vuelos,
+                        «Vuelo» y «Vuelo 2» no dicen cuál es cuál: el nombre («Bogotá a
+                        San Andrés») es lo único que los distingue en pantalla y en el
+                        documento.
+                        ⚠️ Solo se edita la parte LIBRE. El tipo y el ordinal («Vuelo 2»)
+                        los decide el catálogo: dejarlos escribir fundiría dos ranuras.
+                        ⚠️ Renombra la ranura ENTERA, no la línea: cambiar el grupo de una
+                        sola variante la partiría en dos y el total se duplicaría. */}
+                    <div className="whitespace-nowrap">{r.prefijo}</div>
+                    {editable && r.renombrable ? (
+                      <input
+                        value={nombresRanura[r.grupo] ?? r.nombre}
+                        placeholder="ponle nombre…"
+                        aria-label={`Nombre de la ranura ${r.prefijo}`}
+                        title={`Renombra «${r.prefijo}» completa: sus ${r.candidatos.length} opciones`}
+                        onChange={e => setNombresRanura(n => ({ ...n, [r.grupo]: e.target.value }))}
+                        onBlur={e => {
+                          if (e.target.value.trim() === r.nombre) return
+                          correr(
+                            () => renombrarRanura(cotizacionId, r.grupo, e.target.value),
+                            'Ranura renombrada',
+                          )
+                        }}
+                        className="mt-0.5 w-32 rounded border-0 bg-transparent px-1 py-0.5 text-[11px] font-normal text-muted-foreground focus:bg-background focus:ring-1"
+                      />
+                    ) : (
+                      r.nombre !== '' && (
+                        <div className="text-[11px] font-normal text-muted-foreground">{r.nombre}</div>
+                      )
+                    )}
+                  </th>
                 ))}
                 <th className="px-3 py-2 text-right font-medium">Costo</th>
                 <th className="px-3 py-2 text-right font-medium">Precio</th>
@@ -255,10 +316,27 @@ export default function TablaCombinaciones({
                           <span className="font-medium">{nombreDeItinerario(it.nombre, i + 1)}</span>
                         )}
                       </div>
+                      {/* Una fila que NO es una de las tres. Pasa en las cotizaciones que
+                          venían del enumerado cartesiano —no se borran, que sería perder
+                          en silencio lo que alguien revisó— y en las que alguien crea a
+                          mano. Se marca para que no se confunda con lo que va al cliente. */}
+                      {!esTarifaConNombre(it.nombre) && (
+                        <div className="text-[10px] leading-tight text-muted-foreground">
+                          No es una de las tres tarifas
+                        </div>
+                      )}
+                      {/* UNA TARIFA INCOMPLETA SE VE INCOMPLETA Y DICE QUÉ LE FALTA.
+                          Se nombra la ranura como se llama en su columna, no el grupo
+                          crudo: «vuelo 2: san andrés a providencia» manda a buscar algo
+                          que en la tabla no se llama así. El candado de que no se imprima
+                          a medias vive en el servidor (`motivoDeRechazo`), no aquí. */}
                       {it.ranurasFaltantes.length > 0 && (
-                        <span className="text-[10px] text-red-600">
-                          Falta elegir: {it.ranurasFaltantes.join(', ')}
-                        </span>
+                        <div className="mt-0.5 text-[10px] font-medium leading-tight text-red-600">
+                          Incompleta: falta elegir{' '}
+                          {it.ranurasFaltantes
+                            .map(g => ranuras.find(r => r.grupo === g)?.etiqueta ?? g)
+                            .join(', ')}
+                        </div>
                       )}
                     </td>
 
@@ -353,8 +431,8 @@ export default function TablaCombinaciones({
                           <button
                             type="button"
                             disabled={isPending}
-                            title="Eliminar itinerario"
-                            onClick={() => correr(() => eliminarItinerario(it.id), 'Itinerario eliminado')}
+                            title="Eliminar esta tarifa"
+                            onClick={() => correr(() => eliminarItinerario(it.id), 'Tarifa eliminada')}
                             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-red-600 disabled:opacity-40"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -375,17 +453,17 @@ export default function TablaCombinaciones({
           clic de distancia. */}
       {itinerarios.length > 0 && !itinerarios.some(i => i.esPrincipal) && (
         <div className="border-t bg-amber-50 px-4 py-2 text-[11px] font-medium text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-          Ningún itinerario está marcado como principal: el valor de la cotización sale de
-          una opción tomada por supuesto, no de esta tabla. Marca uno con la estrella.
+          Ninguna tarifa está marcada como principal: el valor de la cotización sale de
+          una opción tomada por supuesto, no de esta tabla. Marca una con la estrella.
         </div>
       )}
 
       {itinerarios.length > 0 && (
         <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-          El itinerario con <Star className="inline h-3 w-3 fill-amber-400 text-amber-500" /> es el
+          La tarifa con <Star className="inline h-3 w-3 fill-amber-400 text-amber-500" /> es la
           {' '}<strong>principal</strong>: su total es el valor de la cotización y el costeo con el
           {' '}que sigue el negocio. Bajo el piso de {formatMargenPct(umbrales.pisoPct)} no se puede
-          {' '}marcar para propuesta.
+          {' '}marcar para propuesta, y una tarifa incompleta tampoco.
         </div>
       )}
     </div>

@@ -19,6 +19,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { textoDeRechazo } from '@/lib/cotizaciones/itinerarios'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {}, refresh: () => {}, back: () => {} }),
@@ -29,7 +30,8 @@ vi.mock('sonner', () => ({
 // Las server actions se doblan: un import de VALOR desde un archivo `'use server'`
 // arrastra `getWorkspace` y con él el runtime de Next.
 vi.mock('@/app/(app)/negocios/itinerario-actions', () => ({
-  generarCombinaciones: async () => ({ success: true, creadas: 0, yaExistian: 0, aviso: null }),
+  armarTarifas: async () => ({ success: true, creadas: 3, yaExistian: 0 }),
+  renombrarRanura: async () => ({ success: true, grupo: 'vuelo', lineas: 2 }),
   cambiarOpcionDeItinerario: async () => ({ success: true, desmarcados: [] }),
   marcarEnPropuesta: async () => ({ success: true }),
   marcarPrincipal: async () => ({ success: true }),
@@ -39,9 +41,33 @@ vi.mock('@/app/(app)/negocios/itinerario-actions', () => ({
 
 const { default: TablaCombinaciones } = await import('./tabla-combinaciones')
 
+/** La forma con la que el servidor sirve una ranura. Ver `EstadoItinerarios`. */
+function ranura(
+  grupo: string,
+  prefijo: string,
+  nombre: string,
+  candidatos: { id: string; nombre: string }[],
+) {
+  const etiqueta = nombre === '' ? prefijo : `${prefijo} · ${nombre}`
+  return { grupo, etiqueta, prefijo, nombre, renombrable: true, candidatos }
+}
+
 const RANURAS = [
-  { grupo: 'vuelo', candidatos: [{ id: 'avianca', nombre: 'AVIANCA' }, { id: 'wingo', nombre: 'WINGO' }] },
-  { grupo: 'hotel', candidatos: [{ id: 'h1', nombre: 'OCCIDENTAL' }, { id: 'h2', nombre: 'HARD ROCK' }] },
+  ranura('vuelo', 'Vuelo', '', [{ id: 'avianca', nombre: 'AVIANCA' }, { id: 'wingo', nombre: 'WINGO' }]),
+  ranura('hotel', 'Hotel', '', [{ id: 'h1', nombre: 'OCCIDENTAL' }, { id: 'h2', nombre: 'HARD ROCK' }]),
+]
+
+/** El viaje a Providencia: DOS ranuras de vuelo que suman, más el hotel. */
+const PROVIDENCIA = [
+  ranura('vuelo: Bogotá a San Andrés', 'Vuelo', 'Bogotá a San Andrés', [
+    { id: 'avianca', nombre: 'AVIANCA' },
+    { id: 'wingo', nombre: 'WINGO' },
+  ]),
+  ranura('vuelo 2: San Andrés a Providencia', 'Vuelo 2', 'San Andrés a Providencia', [
+    { id: 'sat-am', nombre: 'SATENA 7:00' },
+    { id: 'sat-pm', nombre: 'SATENA 15:00' },
+  ]),
+  ranura('hotel', 'Hotel', '', [{ id: 'h1', nombre: 'OCCIDENTAL' }, { id: 'h2', nombre: 'HARD ROCK' }]),
 ]
 
 /** El caso medido: la Recomendada al 13,0% y la Económica al 3,1%. */
@@ -87,8 +113,8 @@ describe('R6 · una cotización sin opciones no gana una sección', () => {
 
   it('sí pinta si hay ranuras aunque todavía no haya combinaciones', () => {
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: [] })
-    expect(html).toContain('Generar combinaciones')
-    expect(html).toContain('vuelo')
+    expect(html).toContain('Armar las tres tarifas')
+    expect(html).toContain('Vuelo')
   })
 })
 
@@ -216,7 +242,7 @@ describe('estados de la pantalla', () => {
   it('con combinaciones pero SIN principal, avisa lo mismo', () => {
     const sinPrincipal = itinerarios().map(i => ({ ...i, esPrincipal: false }))
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: sinPrincipal })
-    expect(html).toContain('Ningún itinerario está marcado como principal')
+    expect(html).toContain('Ninguna tarifa está marcada como principal')
     expect(html).not.toContain('suma todas las alternativas')
   })
 
@@ -224,7 +250,7 @@ describe('estados de la pantalla', () => {
     // El control que hace válidas las dos pruebas de arriba: sin él, un aviso pintado
     // siempre las pasaría igual.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
-    expect(html).not.toContain('Ningún itinerario está marcado como principal')
+    expect(html).not.toContain('Ninguna tarifa está marcada como principal')
   })
 })
 
@@ -237,9 +263,14 @@ describe('estados de la pantalla', () => {
 // traslado.
 
 describe('Regla 1 · la tabla explica qué se cruza y qué no', () => {
-  it('el encabezado dice que se cruzan vuelos y hoteles', () => {
+  it('el encabezado explica que las columnas SUMAN y las opciones compiten', () => {
+    // Es la distinción que abrió este frente: dos vuelos suman, dos aerolíneas del
+    // mismo vuelo compiten. Sin decirlo, «¿por qué el segundo vuelo no está en el
+    // total?» no tiene respuesta en pantalla.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
-    expect(html).toContain('vuelos y hoteles')
+    const t = html.replace(/<[^>]*>/g, ' ')
+    expect(t).toContain('todas suman')
+    expect(t).toContain('compiten')
     expect(html).toContain('Tours, traslados y planes no abren')
   })
 
@@ -262,5 +293,119 @@ describe('Regla 1 · la tabla explica qué se cruza y qué no', () => {
     // El control: sin el, un bloque pintado siempre pasaria la prueba de arriba.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
     expect(html).not.toContain('no se cruza')
+  })
+})
+
+// ── Las tres tarifas con nombre (2026-09-21) ───────────────────────
+//
+// La tabla dejó de enumerar el producto completo. Lo que estas pruebas fijan es lo que
+// se ve: los tres nombres tal cual, las columnas de las ranuras con su nombre propio, y
+// que una tarifa incompleta se VEA incompleta y diga qué le falta.
+
+/** Una fila mínima, con el nombre y la selección que se quieran. */
+function tarifa(nombre: string, seleccion: string[], faltantes: string[] = []) {
+  return {
+    id: `it-${nombre}`, nombre, orden: 1,
+    vaEnPropuesta: false, esPrincipal: false,
+    seleccion, ranurasFaltantes: faltantes,
+    costo: 1_000_000, precio: 1_200_000, margenRealPct: 16.7,
+    // El bloqueo se arma con el MISMO helper que usa el servidor: escrito a mano, el
+    // fixture podría nombrar la ranura de una forma que el producto no usa.
+    bloqueo: faltantes.length > 0
+      ? textoDeRechazo({ tipo: 'incompleto', grupos: faltantes })
+      : null,
+  }
+}
+
+describe('la tabla arma TRES tarifas con nombre', () => {
+  it('el botón ofrece armar las tres y las nombra en el encabezado', () => {
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: [] })
+    expect(html).toContain('Armar las tres tarifas')
+    for (const n of ['Económica', 'Recomendada', 'Premium']) expect(html).toContain(n)
+    // Y ya NO ofrece enumerar el producto completo.
+    expect(html).not.toContain('Generar combinaciones')
+  })
+
+  it('con las tres puestas, el botón desaparece: no hay nada que crear', () => {
+    // El control de la prueba de arriba. Un botón que se pinta siempre la pasaría igual.
+    const html = pintar({
+      ...BASE,
+      ranuras: RANURAS,
+      itinerarios: ['Económica', 'Recomendada', 'Premium'].map(n => tarifa(n, ['avianca', 'h1'])),
+    })
+    expect(html).not.toContain('Armar las tres tarifas')
+  })
+
+  it('con dos puestas, el botón dice cuál falta', () => {
+    const html = pintar({
+      ...BASE,
+      ranuras: RANURAS,
+      itinerarios: ['Económica', 'Recomendada'].map(n => tarifa(n, ['avianca', 'h1'])),
+    })
+    expect(html).toContain('Crear Premium')
+  })
+
+  it('una fila que NO es una de las tres se marca como tal', () => {
+    // Pasa en las cotizaciones que venían del enumerado cartesiano: sus filas no se
+    // borran, y sin marca se confundirían con lo que va al cliente.
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: [tarifa('Opción 4', ['avianca', 'h1'])] })
+    expect(html.replace(/<[^>]*>/g, ' ')).toContain('No es una de las tres tarifas')
+  })
+})
+
+describe('el viaje a Providencia, en la tabla', () => {
+  it('los DOS vuelos son columnas, cada una con su nombre propio', () => {
+    // El bloqueo que abrió el frente: hasta hoy «Vuelo 2» no abría columna, así que el
+    // segundo tramo no se podía elegir por tarifa.
+    const html = pintar({
+      ...BASE,
+      ranuras: PROVIDENCIA,
+      itinerarios: [tarifa('Recomendada', ['avianca', 'sat-am', 'h1'])],
+    })
+    const t = html.replace(/<[^>]*>/g, ' ')
+    // El prefijo del tipo va como texto y el nombre libre como valor del input que lo
+    // renombra: las dos mitades del encabezado, cada una donde se puede tocar.
+    expect(t).toContain('Vuelo 2')
+    expect(html).toMatch(/aria-label="Nombre de la ranura Vuelo"[^>]*value="Bogotá a San Andrés"/)
+    expect(html).toMatch(/aria-label="Nombre de la ranura Vuelo 2"[^>]*value="San Andrés a Providencia"/)
+    // Las dos variantes de horario del segundo tramo están para elegir.
+    expect(html).toContain('SATENA 7:00')
+    expect(html).toContain('SATENA 15:00')
+  })
+
+  it('⚠️ una tarifa INCOMPLETA se ve incompleta y dice qué le falta, por su nombre', () => {
+    const html = pintar({
+      ...BASE,
+      ranuras: PROVIDENCIA,
+      itinerarios: [tarifa('Premium', ['avianca', 'h2'], ['vuelo 2: San Andrés a Providencia'])],
+    })
+    const t = html.replace(/<[^>]*>/g, ' ')
+    expect(t).toContain('Incompleta: falta elegir')
+    // ⚠️ El nombre de la COLUMNA, no el grupo crudo: «vuelo 2: san andrés a
+    // providencia» manda a buscar algo que la tabla no llama así.
+    expect(t).toContain('Vuelo 2 · San Andrés a Providencia')
+    expect(t).not.toContain('vuelo 2: San Andrés')
+  })
+
+  it('el encabezado de la ranura es EDITABLE y renombra la ranura completa', () => {
+    // Sin esto, «Vuelo» y «Vuelo 2» no dicen cuál es cuál. ⚠️ Solo se edita la parte
+    // libre: dejar escribir el ordinal fundiría dos ranuras.
+    const html = pintar({
+      ...BASE,
+      ranuras: PROVIDENCIA,
+      itinerarios: [tarifa('Recomendada', ['avianca', 'sat-am', 'h1'])],
+    })
+    expect(html).toContain('aria-label="Nombre de la ranura Vuelo 2"')
+    expect(html).toMatch(/aria-label="Nombre de la ranura Vuelo 2"[^>]*value="San Andrés a Providencia"/)
+    expect(html).toContain('sus 2 opciones')
+  })
+
+  it('en solo lectura el encabezado NO es editable', () => {
+    const html = pintar(
+      { ...BASE, ranuras: PROVIDENCIA, itinerarios: [tarifa('Recomendada', ['avianca', 'sat-am', 'h1'])] },
+      false,
+    )
+    expect(html).not.toContain('aria-label="Nombre de la ranura')
+    expect(html.replace(/<[^>]*>/g, ' ')).toContain('San Andrés a Providencia')
   })
 })

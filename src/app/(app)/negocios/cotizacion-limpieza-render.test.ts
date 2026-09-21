@@ -164,7 +164,7 @@ describe('administración e imprevistos: se deja de OFRECER, no de mostrar', () 
 describe('las combinaciones dicen POR QUÉ no hay tabla', () => {
   it('sin alternativas, la pantalla explica qué falta', () => {
     const html = pintar({ lineasPorTipo: true, itinerarios: SIN_ALTERNATIVAS })
-    expect(html).toContain('Combinaciones')
+    expect(html).toContain('Las tres tarifas')
     expect(html).toContain('Agrega otra opción a una línea')
     // Dice dónde está la acción, no solo que falta algo, y la NOMBRA como se llama
     // el botón: citar un nombre viejo manda a buscar algo que ya no existe.

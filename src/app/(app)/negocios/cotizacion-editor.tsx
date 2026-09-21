@@ -43,7 +43,13 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
-import { gruposCanonicos, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import {
+  etiquetaDeRanura,
+  gruposCanonicos,
+  ranuraDeGrupo,
+  ranuraPorSlug,
+  siguienteGrupoDeTipo,
+} from '@/lib/cotizaciones/ranuras-pantallazo'
 import { nombreProvisionalDeGrupo } from '@/lib/cotizaciones/nombre-linea'
 import {
   confirmadaVigente,
@@ -388,12 +394,29 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // «+ Vuelo», «+ Hotel»…: la línea nace con su grupo y un nombre provisional (la etiqueta),
   // y ABIERTA, para que se vea la casilla del pantallazo. Al confirmar el costo, el nombre
   // leído reemplaza al provisional (`nombre-linea.ts`).
-  const handleAddItemDeGrupo = (g: { grupo: string; label: string }) => {
+  /**
+   * «+ Vuelo» sobre una cotización que YA tiene un vuelo crea **Vuelo 2**, otra ranura
+   * que SUMA. Antes creaba una línea en la misma ranura, o sea una opción que compite, y
+   * era el error silencioso que costó el tramo a Providencia: el PDF salía sin él.
+   *
+   * La ranura que compite sigue existiendo y tiene su propio botón dentro de la línea
+   * («Agregar otra opción de vuelo»). Son dos cosas distintas y ahora hay un botón para
+   * cada una.
+   */
+  const handleAddItemDeGrupo = (g: { grupo: string; label: string; ranura: string }) => {
     startTransition(async () => {
+      const def = ranuraPorSlug(g.ranura)
+      // El grupo se calcula con lo que hay EN PANTALLA porque es lo mismo que el servidor
+      // vería: `addItem` no puede resolverlo por su cuenta sin releer la cotización, y el
+      // peor caso de una carrera (dos «+ Vuelo» a la vez) es que las dos caigan en la
+      // misma ranura — visible y corregible desde el grupo de la línea.
+      const grupo = def
+        ? siguienteGrupoDeTipo(def, initialItems.map(i => i.grupo ?? null))
+        : g.grupo
       // El provisional también se guarda en mayúscula, para que la lista no alterne
       // «Vuelo» con «LATAM BOGOTÁ–PUNTA CANA». `esNombreDeRelleno` normaliza a
       // minúscula antes de comparar, así que sigue reconociéndolo como relleno.
-      const res = await addItem(cotizacion.id, comoSeGuarda(nombreProvisionalDeGrupo(g.label)), undefined, undefined, g.grupo)
+      const res = await addItem(cotizacion.id, comoSeGuarda(nombreProvisionalDeGrupo(g.label)), undefined, undefined, grupo)
       if (res.success && 'id' in res && res.id) {
         const nuevoId = res.id
         setExpandedItems(prev => new Set(prev).add(nuevoId))
@@ -909,10 +932,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       {/* La ranura, visible sin abrir la linea: con nueve lineas en
                           pantalla, saber cuales compiten entre si es la unica forma de
                           leer la lista. «opción» se dice aparte porque una opcion
-                          no se suma al total salvo que un itinerario la elija. */}
+                          no se suma al total salvo que un itinerario la elija.
+                          ⚠️ Se pinta la ETIQUETA de la ranura, no el grupo crudo: con dos
+                          vuelos, «vuelo» y «vuelo 2: san andrés a providencia» se leen
+                          como dos cosas sin relación, y el chip existe justo para que se
+                          vea de un vistazo cuáles son del mismo tipo y cuáles compiten. */}
                       {!isAjuste && item.grupo && (
                         <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          {item.grupo}{item.opcion_de ? ' · opción' : ''}
+                          {etiquetaDeRanura(item.grupo)}{item.opcion_de ? ' · opción' : ''}
                         </span>
                       )}
                       {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
@@ -1959,16 +1986,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 )}
               </div>
               {/* QUÉ HACE CADA BOTÓN, en la pantalla donde se elige (§4.2).
-                  «+ Vuelo» sobre una cotización que ya tiene un vuelo NO agrega un
-                  segundo vuelo al precio: agrega otra OPCIÓN en la misma ranura, y solo
-                  una suma. Es el mismo error silencioso del botón de opción, entrando
-                  por la otra puerta, así que se dice aquí también. */}
+                  ⚠️ Esta frase decía lo CONTRARIO hasta el 2026-09-21: «+ Vuelo» sobre una
+                  cotización que ya tenía un vuelo creaba otra OPCIÓN en la misma ranura, y
+                  solo una sumaba — el error silencioso que dejó el viaje a Providencia sin
+                  el tramo a la isla. Ahora crea «Vuelo 2», que suma aparte, y la opción que
+                  compite tiene su propio botón DENTRO de la línea. Son dos cosas distintas
+                  y cada una tiene su botón, así que la frase ya puede explicar las dos. */}
               {lineasPorTipo && (
                 <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  <span className="font-medium text-foreground">Otro componente del viaje</span> suma siempre al precio.
-                  {' '}Vuelo, Hotel, Actividad y Traslado agregan una línea a esa ranura: si ya hay una,
-                  la nueva es <span className="font-medium">otra opción</span> y solo una entra al precio final.
-                  {' '}Un tramo adicional del mismo viaje va como componente, no como opción.
+                  <span className="font-medium text-foreground">Vuelo, Hotel, Actividad y Traslado</span>{' '}
+                  agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
+                  vuelo, el nuevo es «Vuelo 2» y los dos van en el viaje (un segundo tramo va así).
+                  {' '}Para una <span className="font-medium">alternativa</span> del mismo componente —otra
+                  aerolínea, otro horario— se usa «Agregar otra opción de…» dentro de la línea: esas
+                  compiten y solo una entra al precio.
+                  {' '}<span className="font-medium text-foreground">Otro componente del viaje</span> es
+                  una línea sin ranura: suma siempre y no compite con nadie.
                 </p>
               )}
               {lineasPorTipo && mostrarOtro && (

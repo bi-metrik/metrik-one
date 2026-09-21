@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest'
 
 import {
   ranurasConAlternativas,
+  ranurasCombinables,
   itemsFijos,
   ranurasSinResolver,
   itinerarioCompleto,
   itemsDelItinerario,
-  combinacionesCartesianas,
   cascadaDeItinerario,
   motivoDeRechazo,
   textoDeRechazo,
@@ -14,7 +14,6 @@ import {
   nombreDeItinerario,
   tituloDeBloquePDF,
   itinerarioPrincipal,
-  TOPE_COMBINACIONES,
 } from './itinerarios'
 import { calcularCascada } from './totales'
 
@@ -75,12 +74,8 @@ describe('R6 · una cotización sin grupos se comporta como hoy', () => {
     expect(porItinerario.lineas.map(l => l.id)).toEqual(['a', 'b', 'c'])
   })
 
-  it('no propone ninguna combinación: no hay tabla que llenar', () => {
-    expect(combinacionesCartesianas(cotizacionDeSiempre)).toEqual({
-      combinaciones: [],
-      truncado: false,
-      total: 0,
-    })
+  it('no tiene ranuras que cruzar: no hay tabla que llenar', () => {
+    expect(ranurasCombinables(cotizacionDeSiempre)).toEqual([])
   })
 
   it('un `grupo` en cadena vacía se comporta igual que sin grupo', () => {
@@ -168,46 +163,15 @@ describe('R2 · un itinerario resuelve exactamente una opción por ranura', () =
   })
 })
 
-// ── T1 · el cartesiano ───────────────────────────────────────────────────────
+// ── T1 · el cartesiano, RETIRADO ─────────────────────────────────────────────
 
-describe('T1 · generar combinaciones', () => {
-  it('3 vuelos × 3 hoteles son las NUEVE del caso real', () => {
-    const items = [
-      ...['a', 'b', 'c'].map((s, i) => item(`v-${s}`, { grupo: 'vuelo', orden: i })),
-      ...['x', 'y', 'z'].map((s, i) => item(`h-${s}`, { grupo: 'hotel', orden: 10 + i })),
-      item('traslado', { grupo: 'traslado', orden: 20 }),
-    ]
-    const { combinaciones, truncado, total } = combinacionesCartesianas(items)
-    expect(total).toBe(9)
-    expect(truncado).toBe(false)
-    expect(combinaciones).toHaveLength(9)
-    // Cada una es completa por construcción: ese es el punto de generarlas.
-    for (const sel of combinaciones) expect(itinerarioCompleto(items, sel)).toBe(true)
-    // Y son nueve DISTINTAS, no la misma nueve veces.
-    expect(new Set(combinaciones.map(c => c.join('|'))).size).toBe(9)
-  })
-
-  it('no genera nada cuando no hay ranuras', () => {
-    expect(combinacionesCartesianas([item('a'), item('b')]).combinaciones).toEqual([])
-  })
-
-  it('se corta en el tope y lo DICE, en vez de colgar la pantalla', () => {
-    // Desde que solo se cruzan vuelo y hotel el tope cuesta mas alcanzarlo, y esa es
-    // justo la intencion de la regla del 2026-09-14. Pero sigue siendo alcanzable:
-    // ocho vuelos por ocho hoteles son 64 filas, y eso no es una tabla que alguien
-    // revise. El tope NO se quito.
-    const items = []
-    for (let o = 0; o < 8; o++) {
-      items.push(item(`vuelo-${o}`, { grupo: 'vuelo', orden: o }))
-      items.push(item(`hotel-${o}`, { grupo: 'hotel', orden: 100 + o }))
-    }
-    const { combinaciones, truncado, total } = combinacionesCartesianas(items)
-    expect(total).toBe(64)
-    expect(truncado).toBe(true)
-    expect(combinaciones.length).toBeLessThanOrEqual(TOPE_COMBINACIONES)
-    expect(combinaciones.length).toBeGreaterThan(0)
-  })
-})
+/**
+ * Aquí vivían las pruebas de `combinacionesCartesianas`. Se retiró el 2026-09-21 con las
+ * tres tarifas con nombre (`tarifas.ts`): enumerar el producto completo responde la
+ * pregunta equivocada. Lo que sigue vivo y sí se prueba es el modelo de ranuras
+ * —`ranurasCombinables`, `ranurasSinResolver`, `itemsDelItinerario`— que es sobre lo que
+ * se arman las tres.
+ */
 
 // ── R5 · totales por itinerario ──────────────────────────────────────────────
 
@@ -282,14 +246,25 @@ describe('§2.6.4 · el piso de margen bloquea marcar va_en_propuesta', () => {
     // Decir "bajo el piso" ahí manda a subir un precio cuando falta elegir el hotel.
     const motivo = motivoDeRechazo({ ranurasFaltantes: ['hotel'], margenRealPct: 0, pisoPct: 5 })
     expect(motivo).toEqual({ tipo: 'incompleto', grupos: ['hotel'] })
-    expect(textoDeRechazo(motivo!)).toContain('hotel')
+    // ⚠️ El texto nombra la ranura como la llama la TABLA, no como está escrito el
+    // grupo. Con varias ranuras del mismo tipo el grupo es «vuelo 2: san andrés a
+    // providencia» y la columna dice «Vuelo 2 · San Andrés a Providencia»: mandar a
+    // elegir algo con un nombre que no aparece en pantalla no se puede resolver.
+    expect(textoDeRechazo(motivo!)).toContain('Hotel')
   })
 
-  it('nombra TODAS las ranuras que faltan', () => {
+  it('nombra TODAS las ranuras que faltan, con la etiqueta de su columna', () => {
     const motivo = motivoDeRechazo({ ranurasFaltantes: ['vuelo', 'hotel'], margenRealPct: null, pisoPct: 5 })
     const texto = textoDeRechazo(motivo!)
-    expect(texto).toContain('vuelo')
-    expect(texto).toContain('hotel')
+    expect(texto).toContain('Vuelo')
+    expect(texto).toContain('Hotel')
+    // Y la segunda ranura de un tipo se nombra con su etiqueta completa.
+    const dosVuelos = motivoDeRechazo({
+      ranurasFaltantes: ['vuelo 2: San Andrés a Providencia'],
+      margenRealPct: null,
+      pisoPct: 5,
+    })
+    expect(textoDeRechazo(dosVuelos!)).toContain('Vuelo 2 · San Andrés a Providencia')
   })
 })
 
