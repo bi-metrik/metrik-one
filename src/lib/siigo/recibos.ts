@@ -411,6 +411,12 @@ export async function emitirReciboDeCobro(
                 valor: comp.valor,
                 cobro_id: cobroId,
                 at: new Date().toISOString(),
+                // El concepto viaja con la entrada y no se deduce después: es lo que la
+                // línea tenía configurado CUANDO se emitió, y es lo que el correo le
+                // nombra al cliente ("Honorarios de asesoría" / "Recaudo para pago de
+                // tarifa UPME"). Si se leyera de la config al mandar el correo, cambiar
+                // la config reescribiría lo que dice un documento ya emitido.
+                concepto: comp.concepto,
                 ...(comp.componente ? { componente: comp.componente } : {}),
               },
             },
@@ -421,6 +427,12 @@ export async function emitirReciboDeCobro(
             // compraba nada y el permiso no vencía nunca. Se abre por
             // `/api/archivos/cobro`, que baja los bytes con la cuenta de servicio.
             false,
+            // ...pero el CLIENTE sí recibe un aviso que nombra su recibo, y no tiene
+            // sesión. Por eso se conserva la copia en Storage (bucket privado) y su
+            // referencia `one://` queda en la entrada: la edge function la firma por
+            // siete días. Sin esto el correo promete una descarga y entrega un 401 —
+            // medido el 2026-09-21 sobre 14 avisos ya enviados a 8 clientes reales.
+            true,
           )
           bloqueConfigId = arch.bloqueConfigId ?? null
           if (arch.ok) {
@@ -469,9 +481,11 @@ export async function emitirReciboDeCobro(
     // de llegar aquí y el correo no se manda a medias; el cobro queda pendiente en el
     // panel y el aviso espera al reintento.
     //
-    // ⚠️ El aviso nombra el documento de UN bloque (`avisar_documento_al_cliente` se
-    // identifica por `bloque_config_id`). Que el correo liste los dos números con su
-    // valor depende de la plantilla de `notificar-etapa`, que este frente no toca.
+    // ⚠️ El aviso se pide por BLOQUE (`avisar_documento_al_cliente` se identifica por
+    // `bloque_config_id`), no por recibo. Que el correo nombre los DOS documentos con su
+    // número, su concepto y su valor lo resuelve `notificar-etapa` leyendo
+    // `data.recibos` del bloque y quedándose con los del ÚLTIMO cobro — y solo si el
+    // copy de la etapa escribe `{recibos}`. Ver `_shared/recibos-del-aviso.ts`.
     //
     // Se pide EXPLÍCITAMENTE y no por el trigger: `trg_avisar_documento_cargado` exige
     // `auth.uid()`, y esto corre con el service role. Aflojar esa guarda para ganar el
