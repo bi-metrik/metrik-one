@@ -12,6 +12,7 @@ import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import {
   aPesos,
+  composicionDeLectura,
   composicionDeLinea,
   leerTarifaPax,
   mismaComposicion,
@@ -187,11 +188,14 @@ export async function leerCasillaDeItem(
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
   const { supabase, item, ranura, viaje, tarifa, composicion } = ctx
-  if (!composicion) {
+  // La casilla 1 se puede pegar SIEMPRE (§2.1): es lo primero del bloque y de ella sale la
+  // ocupación. Las complementarias no existen antes de la primera lectura — sin saber a
+  // cuántos cubre la línea no hay «sin el infante» que buscar.
+  if (!composicion && clave !== 'grupo_completo') {
     return {
       ok: false,
       codigo: 'SIN_COMPOSICION',
-      mensaje: 'Escribe cuántos adultos, niños e infantes cubre esta línea para saber qué pantallazos pegar.',
+      mensaje: 'Pega primero el pantallazo del proveedor: de ahí sale a cuántos pasajeros cubre la línea.',
     }
   }
 
@@ -227,10 +231,25 @@ export async function leerCasillaDeItem(
   }
 
   const leida = construirLecturaCasilla(ranura, veredicto, new Date().toISOString())
+
+  // ── Quién decide a cuántos cubre la línea (§2.4) ──────────────────────────
+  //
+  // La composición es un RESULTADO, no una pregunta: la captura ya trae `ocupacion_adultos`,
+  // `ocupacion_ninos` y `ocupacion_infantes`, y mientras nadie la haya declarado a mano en
+  // ESTA línea, la que manda es la leída. Si alguien escribió la suya (`tarifa.composicion`),
+  // esa manda y la captura tiene que coincidir con ella (TP3): al revés, la lectura
+  // siguiente le borraría su corrección sin decir nada.
+  const derivada = clave === 'grupo_completo' ? composicionDeLectura(leida) : null
+  const laDeLaCaptura = tarifa.composicion ? null : derivada
+  // Solo se fija en la línea cuando difiere de la que venía usando (la del viaje). Si
+  // coincide, la línea sigue heredándola y la pantalla lo sigue diciendo así.
+  const fijaOcupacion = !!laDeLaCaptura && (!composicion || !mismaComposicion(laDeLaCaptura, composicion))
+  const composicionEfectiva = laDeLaCaptura ?? composicion
+
   const validacion = validarLecturaEnCasilla({
     clave,
     lectura: leida,
-    composicion,
+    composicion: composicionEfectiva,
     casillas: tarifa.casillas ?? {},
     ranuraSlug: ranura.slug,
   })
@@ -240,7 +259,10 @@ export async function leerCasillaDeItem(
   leida.alertas = [...leida.alertas, ...validacion.alertas]
 
   const guardado = await guardarTarifa(supabase, itemId, actual => {
-    const casillas = { ...(actual.casillas ?? {}) }
+    // Si la ocupación de la línea cambia, las otras casillas se van: eran búsquedas para
+    // otra ocupación y restar sobre ellas daría el precio de un grupo que nadie cotizó.
+    const cambiaOcupacion = fijaOcupacion && !!composicion
+    const casillas = cambiaOcupacion ? {} : { ...(actual.casillas ?? {}) }
     // Una casilla nueva invalida cualquier confirmación de «el menor no paga»: la resta que
     // se confirmó ya no es la misma.
     for (const k of CLAVES) {
@@ -248,14 +270,53 @@ export async function leerCasillaDeItem(
       if (l?.menorNoPagaConfirmado) casillas[k] = { ...l, menorNoPagaConfirmado: false }
     }
     casillas[clave] = leida
-    return { ...actual, casillas }
+    return {
+      ...actual,
+      ...(fijaOcupacion ? { composicion: laDeLaCaptura } : {}),
+      casillas,
+      ...(cambiaOcupacion ? { confirmada: null } : {}),
+    }
   })
   if ('error' in guardado) return { ok: false, codigo: 'GUARDAR', mensaje: guardado.error }
 
+  // El NOMBRE nace lleno desde la lectura (§2.3), no al confirmar. Una línea creada con
+  // «+ Vuelo» se llama «Vuelo» hasta que alguien la renombra, y con tres opciones en
+  // pantalla ese relleno no distingue una de otra. Solo se escribe si la línea no tiene
+  // nombre propio (`nombre-linea.ts`): lo que escribió una persona no se toca.
+  if (clave === 'grupo_completo') {
+    const nombreLeido = nombreAlConfirmarLectura({
+      nombreActual: item.nombre,
+      nombreLeido: leida.nombre,
+      etiquetaRanura: ranura.label,
+    })
+    if (nombreLeido) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: errNombre } = await (supabase as any)
+        .from('items')
+        .update({ nombre: aMayusculas(nombreLeido) })
+        .eq('id', itemId)
+      // El nombre no puede tumbar una lectura que ya quedó guardada: se reporta y se sigue.
+      if (errNombre) console.warn('[tarifa-pax] no se pudo escribir el nombre leído:', errNombre.message)
+    }
+  }
+
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+
+  // La captura no dijo a cuántos cubre y nadie lo había declarado: la pregunta sale AHORA,
+  // con la lectura ya guardada, y diciendo por qué (§2.4). Preguntarlo antes de pegar era
+  // pedir un dato que el pantallazo trae en el 80% de los casos.
+  if (!composicionEfectiva) {
+    return {
+      ok: true,
+      mensaje: 'Este pantallazo no dice a cuántos pasajeros cubre. Escribe cuántos adultos, niños e infantes cubre esta línea.',
+      alertas: leida.alertas,
+      tarifa: guardado.tarifa,
+    }
+  }
+
   // El mensaje sale de lo que QUEDÓ guardado (que puede traer una casilla que otra persona
   // pegó mientras el modelo leía), no de la foto tomada al empezar.
-  const estado = resolverTarifa(composicion, guardado.tarifa.casillas ?? {}, ranura.slug)
-  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  const estado = resolverTarifa(composicionEfectiva, guardado.tarifa.casillas ?? {}, ranura.slug)
   return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas, tarifa: guardado.tarifa }
 }
 
@@ -326,7 +387,10 @@ export async function actualizarComposicionDeItem(
   }
   const nueva = propia ?? ctx.viaje.composicion
   const anterior = ctx.composicion
-  const cambia = !nueva || !anterior || !mismaComposicion(nueva, anterior)
+  // ⚠️ Sin composición ANTERIOR no hay nada que invalidar: es la respuesta a la pregunta
+  // que sale DESPUÉS de pegar cuando la captura no dice a cuántos cubre (§2.4), y borrarle
+  // ahí la lectura obligaría a pegar el mismo pantallazo dos veces.
+  const cambia = !!anterior && (!nueva || !mismaComposicion(nueva, anterior))
   const habiaLecturas = Object.keys(ctx.tarifa.casillas ?? {}).length > 0
 
   const guardado = await guardarTarifa(ctx.supabase, itemId, actual => ({

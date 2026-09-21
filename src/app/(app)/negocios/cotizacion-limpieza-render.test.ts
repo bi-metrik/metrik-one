@@ -119,9 +119,12 @@ describe('la unidad no se teclea en el flujo de viaje', () => {
     // una limpieza de más pasaría igual de verde.
     // ⚠️ El botón se llamaba «Agregar alternativa a esta línea» hasta el 2026-09-21
     // (§4.2): «alternativa» no decía ni que compite ni que solo una entra al precio.
+    // ⚠️ El GRUPO no desapareció el 2026-09-21: salió de la primera fila y vive detrás
+    // de «Mover a otra opción» (§2.3, `cotizacion-orden-bloque-render.test.ts`). Lo ponía
+    // el botón que se apretó y el chip del encabezado ya lo dice.
     const html = pintar({ lineasPorTipo: true })
     expect(html).toContain('aria-label="Nombre de la línea"')
-    expect(html).toContain('aria-label="Grupo de la línea"')
+    expect(html).toContain('Mover a otra opción')
     expect(html).toContain('Describe qué incluye este item')
     expect(html).toContain('Agregar otra opción a esta línea')
   })

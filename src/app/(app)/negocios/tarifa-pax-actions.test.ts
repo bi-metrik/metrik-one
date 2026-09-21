@@ -18,6 +18,8 @@ let tablas: Record<string, Fila[]> = {}
 let lecturaDelModelo: LecturaCruda
 /** La de la cotización que embebe el doble. Decide qué número va a `margen_porcentaje`. */
 let convencionDeLaCotizacion: 'markup' | 'sobre_venta' = 'sobre_venta'
+/** Quiénes viajan (etapa 1). `null` = el negocio no lo declaró. */
+let composicionDelViaje: { adultos: number; ninos: number; infantes: number } | null = null
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
 vi.mock('@/lib/actions/get-workspace', () => ({
@@ -34,7 +36,7 @@ vi.mock('@/lib/ai/extraer-ranura', () => ({
 }))
 vi.mock('@/lib/cotizaciones/viaje-negocio', () => ({
   leerViajeDelNegocio: async () => ({
-    viaje: { composicion: null, fechas: { inicio: '2026-12-12', fin: '2026-12-16' } },
+    viaje: { composicion: composicionDelViaje, fechas: { inicio: '2026-12-12', fin: '2026-12-16' } },
     error: null,
   }),
 }))
@@ -102,7 +104,12 @@ function consulta(tabla: string) {
   return api
 }
 
-const { leerCasillaDeItem, confirmarTarifaPorPasajero, quitarCasillaDeItem } = await import('./tarifa-pax-actions')
+const {
+  actualizarComposicionDeItem,
+  confirmarTarifaPorPasajero,
+  leerCasillaDeItem,
+  quitarCasillaDeItem,
+} = await import('./tarifa-pax-actions')
 const { leerTarifaPax, tarifaMasReciente } = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { precioConMargen } = await import('@/lib/cotizaciones/precio-item')
 const { nivelDeMargen, POLITICA_MARGEN_POR_DEFECTO } = await import('@/lib/cotizaciones/convencion-margen')
@@ -226,6 +233,115 @@ beforeEach(() => {
   tablas = { items: [], rubros: [] }
   lecturaDelModelo = decameronResultado()
   convencionDeLaCotizacion = 'sobre_venta'
+  composicionDelViaje = null
+})
+
+/**
+ * El bloqueo que abrió el frente del 2026-09-21: la línea no tiene composición y el negocio
+ * tampoco, así que hasta ese día no había dónde pegar y la acción rechazaba con
+ * `SIN_COMPOSICION`. Ahora la casilla 1 se puede pegar siempre y la ocupación sale de ella.
+ */
+describe('§2.1 y §2.4 · se pega primero y la ocupación sale de la captura', () => {
+  const sinComposicion = (): Fila => ({
+    id: 'item-hotel',
+    cotizacion_id: 'cot-1',
+    grupo: 'hotel',
+    nombre: 'Hotel',
+    descripcion: null,
+  })
+
+  it('sin composición en la línea NI en el viaje, la lectura entra y fija a quién cubre', async () => {
+    tablas.items.push(sinComposicion())
+    const r = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+
+    const enBase = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(enBase.casillas?.grupo_completo?.total).toBe(2029118)
+    // Nadie escribió esto: sale de `ocupacion_adultos`, `ocupacion_ninos` y `ocupacion_infantes`.
+    expect(enBase.composicion).toEqual({ adultos: 2, ninos: 0, infantes: 1 })
+  })
+
+  it('el NOMBRE nace lleno desde la lectura, sin esperar a confirmar', async () => {
+    tablas.items.push(sinComposicion())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
+    expect(itemEnBase('item-hotel').nombre).toBe('DECAMERON CARTAGENA · CARTAGENA')
+  })
+
+  it('un nombre que escribió una persona NO lo pisa la lectura', async () => {
+    tablas.items.push({ ...sinComposicion(), nombre: 'PRUEBA Decameron' })
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
+    expect(itemEnBase('item-hotel').nombre).toBe('PRUEBA Decameron')
+  })
+
+  /**
+   * El viaje lleva 6 adultos, 1 niño y 1 infante y la captura cubre a 3. Hasta hoy TP3
+   * rechazaba la captura; ahora la ocupación de la línea es la de la captura y lo que falta
+   * se reporta en pantalla (`faltanPorAcomodar`), que es lo que el diseño pide: la
+   * partición manda.
+   */
+  it('la captura manda sobre la composición del VIAJE mientras nadie la haya ajustado', async () => {
+    composicionDelViaje = { adultos: 6, ninos: 1, infantes: 1 }
+    tablas.items.push(sinComposicion())
+    const r = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
+    expect(r.ok).toBe(true)
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).composicion).toEqual({ adultos: 2, ninos: 0, infantes: 1 })
+  })
+
+  /**
+   * El reverso: si alguien AJUSTÓ la ocupación en la línea, esa decisión no se borra sola.
+   * La captura tiene que coincidir con ella (TP3) o se rechaza.
+   */
+  it('una composición ajustada a mano NO la pisa la captura siguiente', async () => {
+    tablas.items.push({
+      ...sinComposicion(),
+      tarifa_pax: { composicion: { adultos: 2, ninos: 1, infantes: 0 } },
+    })
+    const r = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.codigo).toBe('TP3')
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).composicion).toEqual({ adultos: 2, ninos: 1, infantes: 0 })
+  })
+
+  /**
+   * La captura no dice a cuántos cubre: la lectura QUEDA GUARDADA, la pregunta sale después
+   * y responderla no borra el pantallazo. Sin esto habría que pegar la misma imagen dos
+   * veces, que es justo lo que el frente vino a quitar.
+   */
+  it('sin ocupación legible se guarda igual, se pregunta después, y responder no borra la lectura', async () => {
+    lecturaDelModelo = {
+      ...decameronResultado(),
+      campos: {
+        ...decameronResultado().campos,
+        ocupacion: v(null, 0),
+        ocupacion_adultos: v(null, 0),
+        ocupacion_ninos: v(null, 0),
+        ocupacion_infantes: v(null, 0),
+      },
+    }
+    tablas.items.push(sinComposicion())
+
+    const r = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.mensaje).toContain('no dice a cuántos pasajeros cubre')
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas?.grupo_completo?.total).toBe(2029118)
+
+    const guardada = await actualizarComposicionDeItem('item-hotel', { adultos: 2, ninos: 0, infantes: 1 })
+    expect(guardada.success).toBe(true)
+    const enBase = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(enBase.composicion).toEqual({ adultos: 2, ninos: 0, infantes: 1 })
+    expect(enBase.casillas?.grupo_completo?.total).toBe(2029118)
+  })
+
+  it('las casillas complementarias siguen necesitando saber a quién cubre la línea', async () => {
+    tablas.items.push(sinComposicion())
+    const r = await leerCasillaDeItem('item-hotel', 'solo_adultos', 'data:image/png;base64,AAAA', 'COP')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.codigo).toBe('SIN_COMPOSICION')
+  })
 })
 
 describe('hallazgo 1 · elegir la moneda deja la casilla igual que pegar directo', () => {

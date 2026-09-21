@@ -241,6 +241,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const [newItemName, setNewItemName] = useState('')
   // Con líneas por tipo, el campo de nombre libre solo aparece al pedir «+ Otro».
   const [mostrarOtro, setMostrarOtro] = useState(false)
+  // La línea cuyo grupo se está cambiando desde «Mover a otra opción» (flujo de viaje).
+  const [moverGrupoDe, setMoverGrupoDe] = useState<string | null>(null)
 
   // Catalog
   const [showCatalog, setShowCatalog] = useState(false)
@@ -850,6 +852,46 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
               : null
 
+            // EL BOTÓN DICE LO QUE HACE (§4.2). Se llamaba «Agregar alternativa a esta
+            // línea», y «alternativa» no dice ninguna de las dos cosas que importan: que
+            // COMPITE y que solo una entra al precio. Con la ranura resuelta el botón la
+            // nombra («otra opción de vuelo»), que es el vocabulario con el que la persona
+            // está pensando. Dónde se pinta lo decide el flujo (§2.2), no este bloque.
+            const botonOtraOpcion = (
+              <>
+                {/* La opción nace VACÍA de costo: es otro proveedor, no una variante del
+                    mismo precio. Copiarle los rubros dejaría a WINGO costando lo que
+                    AVIANCA sin que se note. */}
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => {
+                    startTransition(async () => {
+                      const res = await agregarOpcionAItem(item.id, '')
+                      if (!res.success) { toast.error(res.error); return }
+                      toast.success(`Otra opción en «${res.grupo}». Solo una entra al precio: cárgale su costo.`)
+                      router.refresh()
+                    })
+                  }}
+                  className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  <Plus className="h-3 w-3" />
+                  {ranuraDeItem
+                    ? `Agregar otra opción de ${ranuraDeItem.label.toLowerCase()}`
+                    : 'Agregar otra opción a esta línea'}
+                </button>
+                {/* El apaño de la §6 del diseño, y es requisito mientras una opción no
+                    pueda tener varias líneas que sumen (§4.1, sin construir): el segundo
+                    tramo de un mismo viaje NO va aquí. Cargado como opción, el motor se
+                    queda con uno solo y el PDF sale sin el otro — con el precio incompleto
+                    y buen aspecto. */}
+                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                  Solo una opción entra al precio final. Las demás quedan para comparar.
+                  {' '}Un tramo adicional del mismo viaje no es una opción: va como componente aparte.
+                </p>
+              </>
+            )
+
             return (
             <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
               <div
@@ -997,18 +1039,25 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           Es lo que distingue una alternativa de otra y lo que imprime el PDF
                         </p>
                       </div>
-                      <SelectorRanura
-                        valor={item.grupo ?? null}
-                        gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
-                        disabled={isPending}
-                        onCambio={val => {
-                          startTransition(async () => {
-                            const res = await actualizarRanuraDeItem(item.id, { grupo: val })
-                            if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
-                          })
-                        }}
-                      />
+                      {/* EL GRUPO ya lo fijó el botón que se apretó («+ Vuelo») y el chip
+                          del encabezado lo repite. En el flujo de viaje deja la primera
+                          fila y pasa a una acción secundaria: volver a preguntarlo en cada
+                          línea es preguntar lo que el sistema ya sabe. Fuera de ese flujo
+                          (Termotech, Arca, WMC) el campo se queda donde estaba. */}
+                      {!lineasPorTipo && (
+                        <SelectorRanura
+                          valor={item.grupo ?? null}
+                          gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                          disabled={isPending}
+                          onCambio={val => {
+                            startTransition(async () => {
+                              const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                              if (!res.success) { toast.error(res.error); return }
+                              router.refresh()
+                            })
+                          }}
+                        />
+                      )}
                       {/* LA UNIDAD no se teclea en el flujo de viaje.
                           La escribe la propia ranura al leer el pantallazo
                           (`ranura.unidadPorDefecto`), y al confirmar la tarifa por
@@ -1157,44 +1206,39 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           </span>
                         </label>
                       )}
-                      {/* EL BOTÓN DICE LO QUE HACE (§4.2).
-                          Se llamaba «Agregar alternativa a esta línea», y «alternativa»
-                          no dice ninguna de las dos cosas que importan: que COMPITE y
-                          que solo una entra al precio. Con la ranura resuelta el botón
-                          la nombra («otra opción de vuelo»), que es el vocabulario con
-                          el que la persona está pensando. */}
-                      <div className="col-span-2 sm:col-span-4">
-                        {/* La opción nace VACÍA de costo: es otro proveedor, no
-                            una variante del mismo precio. Copiarle los rubros dejaría
-                            a WINGO costando lo que AVIANCA sin que se note. */}
-                        <button
-                          type="button"
-                          disabled={isPending}
-                          onClick={() => {
-                            startTransition(async () => {
-                              const res = await agregarOpcionAItem(item.id, '')
-                              if (!res.success) { toast.error(res.error); return }
-                              toast.success(`Otra opción en «${res.grupo}». Solo una entra al precio: cárgale su costo.`)
-                              router.refresh()
-                            })
-                          }}
-                          className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
-                        >
-                          <Plus className="h-3 w-3" />
-                          {ranuraDeItem
-                            ? `Agregar otra opción de ${ranuraDeItem.label.toLowerCase()}`
-                            : 'Agregar otra opción a esta línea'}
-                        </button>
-                        {/* El apaño de la §6 del diseño, y es requisito mientras una
-                            opción no pueda tener varias líneas que sumen (§4.1, sin
-                            construir): el segundo tramo de un mismo viaje NO va aquí.
-                            Cargado como opción, el motor se queda con uno solo y el PDF
-                            sale sin el otro — con el precio incompleto y buen aspecto. */}
-                        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                          Solo una opción entra al precio final. Las demás quedan para comparar.
-                          {' '}Un tramo adicional del mismo viaje no es una opción: va como componente aparte.
-                        </p>
-                      </div>
+                      {/* Fuera del flujo de viaje el botón se queda donde estaba: el
+                          bloque de Termotech, Arca y WMC no cambia. */}
+                      {!lineasPorTipo && <div className="col-span-2 sm:col-span-4">{botonOtraOpcion}</div>}
+                      {/* MOVER LA LÍNEA A OTRA OPCIÓN. El grupo decide con quién compite:
+                          es el caso raro de querer que dos líneas se comparen entre sí, y
+                          por eso vive detrás de un clic en vez de en la primera fila. */}
+                      {lineasPorTipo && (
+                        <div className="col-span-2 sm:col-span-4">
+                          {moverGrupoDe === item.id ? (
+                            <SelectorRanura
+                              valor={item.grupo ?? null}
+                              gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                              disabled={isPending}
+                              onCambio={val => {
+                                startTransition(async () => {
+                                  const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                                  if (!res.success) { toast.error(res.error); return }
+                                  setMoverGrupoDe(null)
+                                  router.refresh()
+                                })
+                              }}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setMoverGrupoDe(item.id)}
+                              className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
+                            >
+                              Mover a otra opción
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1623,6 +1667,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           }}
                         />
                       </div>
+
+                      {/* AL PIE, DESPUÉS DEL COSTO Y LA DESCRIPCIÓN (§2.2). Un botón que
+                          agrega algo va después de lo que agrega: arriba, entre el nombre
+                          y el contenido, se leía como si aplicara a lo que venía abajo.
+                          Solo en el flujo de viaje: fuera de él el bloque queda como hoy. */}
+                      {lineasPorTipo && <div className="border-t pt-2">{botonOtraOpcion}</div>}
                     </div>
                   )}
                   {/* Rubros table (internal costs).
@@ -1770,7 +1820,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         )}
                       </div>
                     </div>
-                  ) : editable ? (
+                  ) : editable && !lineasPorTipo ? (
+                    /* EN UN VIAJE NO SE AGREGAN RUBROS (§2.5). Un rubro es la forma
+                       genérica de costear un ítem por partes (mano de obra por horas,
+                       materiales) y nació para Termotech. En un viaje el desglose
+                       equivalente —tarifa, tasas, fee— ya lo trae el pantallazo, y agregar
+                       un rubro ANULA el costo escrito: es una trampa, no una opción. Quien
+                       costea a mano escribe el costo y detalla en la descripción.
+                       Los rubros que YA existen (los que escribe la tarifa por pasajero)
+                       se siguen viendo y corrigiendo arriba. */
                     <button
                       onClick={() => {
                         // Desglosar anula el costo escrito a mano: con rubros, el costo lo

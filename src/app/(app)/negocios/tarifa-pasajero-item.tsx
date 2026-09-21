@@ -17,12 +17,15 @@ import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import {
   casillasDe,
+  composicionDeLectura,
   composicionDeLinea,
   confirmadaVigente,
   describirOcupacion,
+  faltanPorAcomodar,
   formatoMonto,
   leerTarifaPax,
   lineaPorPasajero,
+  mismaComposicion,
   ocupacionObservada,
   resolverTarifa,
   tarifaMasReciente,
@@ -58,6 +61,19 @@ import {
  * Pegar directo y elegir la moneda después de un rechazo pasan por el MISMO `leer`, así
  * que quedan igual. Antes, el camino de la moneda dejaba la casilla 1 vacía y la 2 sin
  * activar hasta recargar, con la lectura ya guardada.
+ *
+ * ## El orden del bloque (diseño del 2026-09-21, §3)
+ *
+ * 1. **La zona de pegado, SIEMPRE visible**, sin nada que llenar antes. Hasta el
+ *    2026-09-21 solo se dibujaba con la composición ya declarada, así que un negocio sin
+ *    pasajeros en la etapa 1 dejaba la línea **sin ningún sitio donde pegar** — el bloqueo
+ *    que abrió este frente.
+ * 2. Lo que encontró la lectura, incluida **a quién cubre**, que sale de la propia captura.
+ * 3. Lo que falta: la siguiente captura, o la pregunta que la lectura no resolvió.
+ *
+ * La secuencia de capturas complementarias (2 y 3) arranca DESPUÉS de la primera lectura:
+ * la razón por la que existen —saber qué casillas pedir— aplica a la SEGUNDA captura, no a
+ * la primera.
  */
 export default function TarifaPasajeroItem({
   itemId,
@@ -101,9 +117,22 @@ export default function TarifaPasajeroItem({
   const primera = casillas.grupo_completo
   const primeraResuelve = !!(composicion && primera && traeDesgloseCompleto(primera, composicion))
 
-  /** P1: la 1 siempre activa; las demás cuando la 1 no separa los tipos (o ya tienen lectura). */
-  const activa = (d: CasillaDef) =>
-    !d.condicional || !!casillas[d.clave] || (!!primera && !primeraResuelve)
+  // §2.1 · la secuencia de tres casillas solo existe cuando la primera lectura NO resolvió.
+  // Mientras tanto hay UNA zona de pegado y ningún número: numerar una casilla 1 obliga a
+  // preguntarse dónde están la 2 y la 3.
+  const enSecuencia = !!composicion && !!primera && !primeraResuelve && defs.length > 1
+  const complementarias = defs.slice(1).filter(d => enSecuencia || !!casillas[d.clave])
+  const defPrimera: CasillaDef = enSecuencia
+    ? defs[0]
+    : { ...(defs[0] ?? DEF_SIN_COMPOSICION), titulo: 'Pantallazo del proveedor', busqueda: '' }
+
+  // De dónde salió la ocupación de la línea, y a quién del viaje le falta sitio (§2.4).
+  const ocupacionLeida = primera ? composicionDeLectura(primera) : null
+  const laPusoElPantallazo = !!(tarifa.composicion && ocupacionLeida && mismaComposicion(ocupacionLeida, tarifa.composicion))
+  const faltan = composicion ? faltanPorAcomodar(composicion, composicionViaje) : null
+  // La pregunta que la lectura no resolvió: sale DESPUÉS de pegar y diciendo por qué.
+  const pedirComposicion = !composicion && !!primera
+  const mostrarComposicion = !!composicion && (!!primera || !!tarifa.composicion)
 
   function leer(clave: ClaveCasilla, dataUrl: string, monedaIndicada?: string) {
     setPreviews(p => ({ ...p, [clave]: dataUrl }))
@@ -189,112 +218,64 @@ export default function TarifaPasajeroItem({
         </div>
       )}
 
-      {/* ── Quiénes cubre esta línea (P7, CC4b) ── */}
-      <ComposicionDeLinea
-        itemId={itemId}
-        composicion={composicion}
-        esPropia={!!tarifa.composicion}
-        hayViaje={!!composicionViaje}
-        editando={editandoComposicion || !composicion}
-        onEditar={setEditandoComposicion}
-        hayLecturas={Object.keys(casillas).length > 0}
-        onGuardada={setGuardada}
-        onCambio={onCambio}
+      {/* ── 1 · LA ZONA DE PEGADO, siempre visible ────────────────────────────
+          Es lo primero del bloque y no depende de que nadie haya declarado nada. */}
+      <Casilla
+        def={defPrimera}
+        numerada={enSecuencia}
+        lectura={primera}
+        rechazo={rechazos.grupo_completo}
+        preview={previews.grupo_completo}
+        leyendo={leyendo === 'grupo_completo'}
+        detalleAbierto={!!detalleAbierto.grupo_completo}
+        deshabilitado={isPending || leyendo !== null}
+        onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, grupo_completo: !x.grupo_completo }))}
+        onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), 'Pantallazo quitado.')}
+        onPegar={e => pegar('grupo_completo', e)}
+        onMoneda={mon => leer('grupo_completo', previews.grupo_completo as string, mon)}
       />
+
+      {/* ── 2 · A quién cubre esta línea: RESULTADO de la lectura (§2.4, P7) ──
+          Solo se habla cuando hay algo que decir: después de una lectura, o cuando
+          alguien ajustó la ocupación a mano. Antes de pegar no se pregunta nada. */}
+      {(mostrarComposicion || pedirComposicion || editandoComposicion) && (
+        <ComposicionDeLinea
+          itemId={itemId}
+          composicion={composicion}
+          esPropia={!!tarifa.composicion}
+          laPusoElPantallazo={laPusoElPantallazo}
+          faltan={faltan}
+          hayViaje={!!composicionViaje}
+          editando={editandoComposicion || pedirComposicion}
+          motivo={pedirComposicion ? 'Este pantallazo no dice a cuántos pasajeros cubre.' : null}
+          onEditar={setEditandoComposicion}
+          hayLecturas={Object.keys(casillas).length > 0}
+          onGuardada={setGuardada}
+          onCambio={onCambio}
+        />
+      )}
 
       {composicion && (
         <div className="mt-2 space-y-2">
-          {defs.map(d => {
-            const lectura = casillas[d.clave]
-            const esActiva = activa(d)
-            const rechazo = rechazos[d.clave]
-            return (
-              <div
-                key={d.clave}
-                className={`rounded-md border p-2.5 ${esActiva ? 'bg-background' : 'bg-muted/40 opacity-70'}`}
-              >
-                <div className="flex items-start gap-2">
-                  <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${esActiva ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-                    {d.numero}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2">
-                      <p className="text-xs font-semibold">{d.titulo}</p>
-                      {d.condicional && !esActiva && d.razonCondicional && (
-                        <p className="text-[10px] text-muted-foreground">({d.razonCondicional})</p>
-                      )}
-                    </div>
-                    {/* La búsqueda literal. Es EL requisito de la pantalla (P3). */}
-                    <p className="text-[11px] text-foreground">{d.busqueda}</p>
-
-                    {lectura && (
-                      <LecturaResumen
-                        lectura={lectura}
-                        abierta={!!detalleAbierto[d.clave]}
-                        onToggle={() => setDetalleAbierto(x => ({ ...x, [d.clave]: !x[d.clave] }))}
-                        onQuitar={() => accion(() => quitarCasillaDeItem(itemId, d.clave), `Pantallazo ${d.numero} quitado.`)}
-                        deshabilitado={isPending || leyendo !== null}
-                      />
-                    )}
-
-                    {esActiva && (
-                      <div
-                        onPaste={e => pegar(d.clave, e)}
-                        tabIndex={0}
-                        aria-label={`Pegar el pantallazo ${d.numero}: ${d.titulo}`}
-                        className="mt-1.5 flex min-h-[52px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed bg-muted/30 p-2 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      >
-                        {leyendo === d.clave ? (
-                          <span className="flex items-center gap-1 text-[11px] font-medium text-primary">
-                            <Loader2 className="h-3 w-3 animate-spin" /> Leyendo el pantallazo {d.numero}…
-                          </span>
-                        ) : previews[d.clave] ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- data URL del portapapeles, no optimizable por next/image
-                          <img src={previews[d.clave]} alt={`Pantallazo ${d.numero} pegado`} className="max-h-20 rounded object-contain" />
-                        ) : (
-                          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                            <ImageIcon className="h-4 w-4" />
-                            {lectura
-                              ? 'Pega otro pantallazo aquí para reemplazar este (Ctrl+V / Cmd+V)'
-                              : 'Pega aquí el pantallazo con Ctrl+V / Cmd+V'}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {rechazo && (
-                      <div className="mt-1.5 rounded-md border border-red-300 bg-red-50 p-2">
-                        <p className="flex items-start gap-1.5 text-[11px] font-medium text-red-900">
-                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          {rechazo.mensaje}
-                        </p>
-                        {rechazo.detalle && <p className="mt-0.5 pl-5 text-[10px] text-red-800">{rechazo.detalle}</p>}
-                        {/* RX3: la captura solo muestra «$». La persona dice en qué moneda está
-                            y se vuelve a leer: el sistema no la supone (R-P5). */}
-                        {rechazo.pideMoneda && previews[d.clave] && (
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-5">
-                            <span className="text-[10px] text-red-900">¿En qué moneda está el precio?</span>
-                            {['COP', 'USD', 'EUR', 'MXN'].map(mon => (
-                              <button
-                                key={mon}
-                                type="button"
-                                disabled={leyendo !== null}
-                                onClick={() => leer(d.clave, previews[d.clave] as string, mon)}
-                                className="rounded border bg-background px-2 py-0.5 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
-                              >
-                                {mon}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        <p className="mt-0.5 pl-5 text-[10px] text-red-700">Este pantallazo no se guardó.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+          {/* ── 3 · Lo que falta: las capturas complementarias (CC4a) ──────────
+              Nacen DESPUÉS de la primera lectura, cuando ya se sabe qué falta. */}
+          {complementarias.map(d => (
+            <Casilla
+              key={d.clave}
+              def={d}
+              numerada
+              lectura={casillas[d.clave]}
+              rechazo={rechazos[d.clave]}
+              preview={previews[d.clave]}
+              leyendo={leyendo === d.clave}
+              detalleAbierto={!!detalleAbierto[d.clave]}
+              deshabilitado={isPending || leyendo !== null}
+              onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, [d.clave]: !x[d.clave] }))}
+              onQuitar={() => accion(() => quitarCasillaDeItem(itemId, d.clave), `Pantallazo ${d.numero} quitado.`)}
+              onPegar={e => pegar(d.clave, e)}
+              onMoneda={mon => leer(d.clave, previews[d.clave] as string, mon)}
+            />
+          ))}
 
           {/* ── Qué encontró (P4) y qué falta ── */}
           {ultimoMensaje && estado?.estado !== 'falta' && estado?.estado !== 'resuelta' && (
@@ -415,6 +396,137 @@ export default function TarifaPasajeroItem({
 }
 
 /**
+ * La casilla 1 cuando la línea todavía no sabe a cuántos cubre: una zona de pegado y nada
+ * más. No hay búsqueda literal que dictar porque la ocupación sale de la propia captura.
+ */
+const DEF_SIN_COMPOSICION: CasillaDef = {
+  clave: 'grupo_completo',
+  numero: 1,
+  titulo: 'Pantallazo del proveedor',
+  ocupacion: { adultos: 1, ninos: 0, infantes: 0 },
+  busqueda: '',
+  condicional: false,
+  razonCondicional: null,
+}
+
+/**
+ * Una casilla: su instrucción, lo que se leyó en ella y dónde pegar.
+ *
+ * `numerada` es la diferencia entre la zona de pegado única del comienzo y una de las tres
+ * casillas de la secuencia complementaria. El número solo aparece cuando hay más de una: un
+ * «1» solitario obliga a preguntarse dónde están la 2 y la 3.
+ */
+function Casilla({
+  def,
+  numerada,
+  lectura,
+  rechazo,
+  preview,
+  leyendo,
+  detalleAbierto,
+  deshabilitado,
+  onToggleDetalle,
+  onQuitar,
+  onPegar,
+  onMoneda,
+}: {
+  def: CasillaDef
+  numerada: boolean
+  lectura: LecturaCasilla | undefined
+  rechazo?: { mensaje: string; detalle?: string; pideMoneda?: boolean }
+  preview?: string
+  leyendo: boolean
+  detalleAbierto: boolean
+  deshabilitado: boolean
+  onToggleDetalle: () => void
+  onQuitar: () => void
+  onPegar: (e: React.ClipboardEvent) => void
+  onMoneda: (moneda: string) => void
+}) {
+  const comoSeLlama = numerada ? `el pantallazo ${def.numero}: ${def.titulo}` : 'el pantallazo del proveedor'
+  return (
+    <div className="rounded-md border bg-background p-2.5">
+      <div className="flex items-start gap-2">
+        {numerada && (
+          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+            {def.numero}
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold">{def.titulo}</p>
+          {/* La búsqueda literal. Es EL requisito de la pantalla (P3). */}
+          {def.busqueda && <p className="text-[11px] text-foreground">{def.busqueda}</p>}
+
+          {lectura && (
+            <LecturaResumen
+              lectura={lectura}
+              abierta={detalleAbierto}
+              onToggle={onToggleDetalle}
+              onQuitar={onQuitar}
+              deshabilitado={deshabilitado}
+            />
+          )}
+
+          <div
+            onPaste={onPegar}
+            tabIndex={0}
+            aria-label={`Pegar ${comoSeLlama}`}
+            className="mt-1.5 flex min-h-[52px] cursor-pointer items-center justify-center rounded-lg border-2 border-dashed bg-muted/30 p-2 focus:outline-none focus:ring-2 focus:ring-primary/20"
+          >
+            {leyendo ? (
+              <span className="flex items-center gap-1 text-[11px] font-medium text-primary">
+                <Loader2 className="h-3 w-3 animate-spin" /> Leyendo {comoSeLlama}…
+              </span>
+            ) : preview ? (
+              // eslint-disable-next-line @next/next/no-img-element -- data URL del portapapeles, no optimizable por next/image
+              <img src={preview} alt={`Pantallazo ${def.numero} pegado`} className="max-h-20 rounded object-contain" />
+            ) : (
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <ImageIcon className="h-4 w-4" />
+                {lectura
+                  ? 'Pega otro pantallazo aquí para reemplazar este (Ctrl+V / Cmd+V)'
+                  : numerada
+                    ? 'Pega aquí el pantallazo con Ctrl+V / Cmd+V'
+                    : 'Pega aquí el pantallazo del proveedor (Ctrl+V / Cmd+V)'}
+              </span>
+            )}
+          </div>
+
+          {rechazo && (
+            <div className="mt-1.5 rounded-md border border-red-300 bg-red-50 p-2">
+              <p className="flex items-start gap-1.5 text-[11px] font-medium text-red-900">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                {rechazo.mensaje}
+              </p>
+              {rechazo.detalle && <p className="mt-0.5 pl-5 text-[10px] text-red-800">{rechazo.detalle}</p>}
+              {/* RX3: la captura solo muestra «$». La persona dice en qué moneda está
+                  y se vuelve a leer: el sistema no la supone (R-P5). */}
+              {rechazo.pideMoneda && preview && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-5">
+                  <span className="text-[10px] text-red-900">¿En qué moneda está el precio?</span>
+                  {['COP', 'USD', 'EUR', 'MXN'].map(mon => (
+                    <button
+                      key={mon}
+                      type="button"
+                      disabled={deshabilitado}
+                      onClick={() => onMoneda(mon)}
+                      className="rounded border bg-background px-2 py-0.5 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
+                    >
+                      {mon}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="mt-0.5 pl-5 text-[10px] text-red-700">Este pantallazo no se guardó.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
  * El margen que el pantallazo ya trae, dicho con los tres números que lo sostienen.
  *
  * ⚠️ Los DOS precios se nombran. «Margen 10,4%» a secas obliga a creerle a la pantalla; con
@@ -490,12 +602,23 @@ function LecturaResumen({
   )
 }
 
+/**
+ * A quién cubre la línea: un RESULTADO de la lectura, corregible con un clic (§2.4).
+ *
+ * ⚠️ Solo habla cuando hay algo que decir. Antes de la primera lectura no aparece: la
+ * ocupación sale del pantallazo, y preguntarla antes era pedir el dato que la captura trae
+ * en la mayoría de los casos. Y contra los pasajeros del viaje **solo se avisa lo que
+ * falta**: una línea que cubre a todos no dice nada.
+ */
 function ComposicionDeLinea({
   itemId,
   composicion,
   esPropia,
+  laPusoElPantallazo,
+  faltan,
   hayViaje,
   editando,
+  motivo,
   onEditar,
   hayLecturas,
   onGuardada,
@@ -504,8 +627,14 @@ function ComposicionDeLinea({
   itemId: string
   composicion: Composicion | null
   esPropia: boolean
+  /** La ocupación de la línea es la que leyó la captura, no una que alguien escribió. */
+  laPusoElPantallazo: boolean
+  /** Pasajeros del viaje que esta línea deja sin acomodar, o `null` si no falta nadie. */
+  faltan: Composicion | null
   hayViaje: boolean
   editando: boolean
+  /** Por qué se está preguntando, cuando la lectura no lo resolvió. */
+  motivo: string | null
   onEditar: (v: boolean) => void
   hayLecturas: boolean
   onGuardada: (tarifa: TarifaPax) => void
@@ -531,18 +660,29 @@ function ComposicionDeLinea({
 
   if (!editando && composicion) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5">
-        <p className="text-[11px]">
-          <span className="font-medium">Esta línea cubre:</span> {describirOcupacion(composicion)}
-          <span className="ml-1 text-muted-foreground">· {esPropia ? 'ajustado en esta línea' : 'la del viaje'}</span>
-        </p>
-        <button
-          type="button"
-          onClick={() => onEditar(true)}
-          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
-        >
-          <Pencil className="h-3 w-3" /> Cambiar pasajeros de esta línea
-        </button>
+      <div className="mt-2 rounded-md bg-muted/30 px-2 py-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px]">
+            <span className="font-medium">Esta línea cubre:</span> {describirOcupacion(composicion, 'y')}
+            <span className="ml-1 text-muted-foreground">
+              · {laPusoElPantallazo ? 'leído del pantallazo' : esPropia ? 'ajustado en esta línea' : 'la del viaje'}
+            </span>
+          </p>
+          <button
+            type="button"
+            onClick={() => onEditar(true)}
+            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+          >
+            <Pencil className="h-3 w-3" /> Cambiar pasajeros de esta línea
+          </button>
+        </div>
+        {/* Lo único que el sistema tiene que decir sobre los pasajeros del viaje: quién se
+            queda sin sitio. Que la línea cubra de más es una decisión de quien cotiza. */}
+        {faltan && (
+          <p className="mt-0.5 text-[11px] font-medium text-amber-800">
+            Faltan {describirOcupacion(faltan, 'y')} por acomodar.
+          </p>
+        )}
       </div>
     )
   }
@@ -563,9 +703,13 @@ function ComposicionDeLinea({
   )
 
   return (
-    <div className="rounded-md border bg-muted/20 p-2">
+    <div className="mt-2 rounded-md border bg-muted/20 p-2">
+      {/* La pregunta SIEMPRE dice por qué está preguntando: sale después de pegar, cuando
+          la captura no trae la ocupación (§2.4). Un campo en blanco sin motivo se lee como
+          un requisito del sistema y no como un límite de esa imagen. */}
+      {motivo && <p className="text-[11px] font-medium text-amber-900">{motivo}</p>}
       <p className="text-[11px] font-medium">
-        {composicion ? '¿Cuántos pasajeros cubre esta línea?' : 'Escribe cuántos adultos, niños e infantes cubre esta línea para saber qué pantallazos pegar.'}
+        {composicion ? '¿Cuántos pasajeros cubre esta línea?' : 'Escribe cuántos adultos, niños e infantes cubre esta línea.'}
       </p>
       <p className="text-[10px] text-muted-foreground">
         Clasifica a cada menor como lo hace este proveedor: la aerolínea y el hotel pueden llamarlo distinto.
@@ -603,7 +747,10 @@ function ComposicionDeLinea({
           </button>
         )}
       </div>
-      {hayLecturas && (
+      {/* ⚠️ Solo si la línea YA sabía a cuántos cubre. Respondiendo la pregunta que sale
+          después de pegar no se borra nada (no hay ocupación anterior que invalidar), y
+          advertirlo ahí sería falso: quien lee esa frase no contesta y vuelve a pegar. */}
+      {hayLecturas && composicion && (
         <p className="mt-1 text-[10px] text-amber-800">
           Cambiar los pasajeros borra los pantallazos leídos de esta línea: eran búsquedas para otra ocupación.
         </p>
