@@ -11,13 +11,17 @@ import {
   AlertTriangle,
   RefreshCw,
   History,
+  ShieldCheck,
+  XCircle,
 } from 'lucide-react'
 import {
   generarFormulario,
   resolverFormularioParaEdicion,
   guardarFormularioOverrides,
   guardarSeccional,
+  confirmarNitFormulario,
   type CasillaEditable,
+  type EstadoConfirmacionNit,
   type FormularioVersionItem,
 } from '@/lib/actions/formulario-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
@@ -64,6 +68,16 @@ export default function BloqueFormulario({
   const [state, setState] = useState<GenerateState>('idle')
   const [isPending, startTransition] = useTransition()
   const [verHistorial, setVerHistorial] = useState(false)
+  // ── Transcripción a ciegas del NIT ──────────────────────────────────────
+  const [confirmNit, setConfirmNit] = useState<EstadoConfirmacionNit | undefined>(undefined)
+  const [nitTecleado, setNitTecleado] = useState('')
+  // Cuando NO coincide, el campo para teclear NO vuelve en esta vista. Al mostrar los
+  // dos números lado a lado el guardado queda a la vista, así que reofrecerlo dejaría
+  // que se copie el que está en pantalla — y eso es exactamente el rubber-stamp que
+  // este control existe para evitar (en V0446 alguien ya había mirado ese número).
+  // La salida es corregir el bloque de origen; al cambiar el NIT, la pantalla vuelve a
+  // pedir la transcripción con otro valor.
+  const [desajusteNit, setDesajusteNit] = useState<{ tecleado: string; guardado: string } | null>(null)
   const dirtyRef = useRef<Record<string, string>>({})
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -78,10 +92,29 @@ export default function BloqueFormulario({
     setSeccionales(res.seccionales)
     setSeccional(res.seccional ?? null)
     setSeccionalSugerida(res.seccional_sugerida ?? false)
+    setConfirmNit(res.confirmacion_nit)
     const init: Record<string, string> = {}
     res.casillas.forEach((c) => { init[c.slug] = c.value })
     setValores(init)
     setLoading(false)
+  }
+
+  function handleConfirmarNit() {
+    startTransition(async () => {
+      const r = await confirmarNitFormulario(negocioBloqueId, nitTecleado)
+      if (r.ok) {
+        setNitTecleado('')
+        setDesajusteNit(null)
+        await cargar() // recarga: ahora sí llega el valor de la casilla del NIT
+        toast.success('NIT confirmado')
+        return
+      }
+      if (r.tecleado && r.guardado) {
+        setDesajusteNit({ tecleado: r.tecleado, guardado: r.guardado })
+        return
+      }
+      toast.error(r.error ?? 'No se pudo confirmar')
+    })
   }
 
   function handleSeccionalChange(value: string) {
@@ -167,6 +200,7 @@ export default function BloqueFormulario({
     porGrupo[c.grupo].push(c)
   }
   const hayFaltantes = casillas.some((c) => c.faltante && !valores[c.slug])
+  const pideConfirmarNit = Boolean(confirmNit?.requiere) && !confirmNit?.confirmado
 
   return (
     <div className="space-y-3">
@@ -214,6 +248,109 @@ export default function BloqueFormulario({
         </div>
       )}
 
+      {/* ── Transcripción a ciegas del NIT ──────────────────────────────── */}
+      {pideConfirmarNit && (
+        <div data-testid="panel-confirmacion-nit" className="rounded-lg border border-amber-300 bg-amber-50/50 p-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            Confirma el NIT antes de generar
+          </p>
+
+          {desajusteNit ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-red-700">
+                <XCircle className="h-3.5 w-3.5 shrink-0" />
+                Los dos números no coinciden
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-md border border-border bg-white px-2 py-1.5">
+                  <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Escribiste</p>
+                  <p data-testid="nit-tecleado" className="font-mono text-sm">{desajusteNit.tecleado}</p>
+                </div>
+                <div className="rounded-md border border-red-300 bg-white px-2 py-1.5">
+                  <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Guardado (va a la DIAN)</p>
+                  <p data-testid="nit-guardado" className="font-mono text-sm text-red-700">{desajusteNit.guardado}</p>
+                </div>
+              </div>
+              <p className="text-[11px] text-amber-800">
+                Si lo que escribiste es lo que dice el documento, el que está mal es el guardado.
+                Corrígelo en el bloque{confirmNit?.documento_label ? ` «${confirmNit.documento_label}»` : ' del documento'} —
+                te va a pedir la causa— y vuelve aquí. Este formulario no se genera hasta entonces.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {/*
+                La confirmación se comparte a nivel de NEGOCIO, así que quien ya la hizo en
+                el formulario de al lado necesita saber por qué se la vuelven a pedir: este
+                bloque va a imprimir OTRO número. Sin esta línea la segunda petición se lee
+                como un defecto, y de ahí a teclear sin mirar hay un paso.
+              */}
+              {confirmNit?.motivo === 'otro_nit' && (
+                <p data-testid="motivo-otro-nit" className="text-[11px] font-medium text-amber-900">
+                  Ya confirmaste un NIT en este negocio, pero este formulario va a imprimir uno
+                  distinto. Confirma el de este formulario.
+                </p>
+              )}
+              {confirmNit?.motivo === 'ambiguo' && (
+                <p data-testid="motivo-ambiguo" className="text-[11px] font-medium text-red-700">
+                  Este formulario imprime más de un NIT distinto: no se puede confirmar con un solo
+                  número. Revisa la configuración del bloque.
+                </p>
+              )}
+              {/* Con dos NIT distintos no hay un número que teclear: pedirlo sería ofrecer
+                  una salida que no resuelve nada. Se explica y se corta. */}
+              {confirmNit?.motivo !== 'ambiguo' && (
+                <>
+              <p className="text-[11px] text-amber-800">
+                Abre el documento y escribe la casilla 5 tal como aparece. No se muestra en pantalla:
+                el número tiene que salir del documento, no de aquí.
+              </p>
+              {confirmNit?.documento_url && (
+                <a
+                  href={hrefArchivo(confirmNit.documento_url) ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" /> Abrir {confirmNit.documento_label ?? 'el documento'}
+                </a>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={nitTecleado}
+                  onChange={(e) => setNitTecleado(e.target.value)}
+                  placeholder="Casilla 5 del RUT"
+                  aria-label="Casilla 5 del RUT"
+                  className="w-44 rounded-md border border-amber-400 bg-white px-2 py-1 font-mono text-xs focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                />
+                <button
+                  type="button"
+                  onClick={handleConfirmarNit}
+                  disabled={isPending || nitTecleado.trim() === ''}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-white px-3 py-1 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
+                >
+                  {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                  Confirmar
+                </button>
+              </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {confirmNit?.requiere && confirmNit.confirmado && (
+        <p data-testid="nit-confirmado" className="flex items-center gap-1.5 text-[11px] text-green-700">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          NIT confirmado{confirmNit.por_nombre ? ` por ${confirmNit.por_nombre}` : ''}
+        </p>
+      )}
+
       {/* Casillas editables agrupadas */}
       <div className="space-y-3">
         {grupos.map((g) => (
@@ -227,7 +364,20 @@ export default function BloqueFormulario({
                     {c.label}
                     {c.editado && <span className="text-[9px] font-normal text-primary">editado</span>}
                     {c.fijo && <span className="text-[9px] font-normal text-muted-foreground">fijo</span>}
+                    {c.oculto && <span className="text-[9px] font-normal text-amber-700">oculto</span>}
                   </span>
+                  {/* La casilla del NIT sin confirmar se pinta tapada y sin input: no hay
+                      valor que mostrar (el servidor no lo manda) y tampoco debe poder
+                      escribirse aquí, porque un texto tecleado quedaría como override. */}
+                  {c.oculto ? (
+                    <div
+                      data-testid={`casilla-oculta-${c.slug}`}
+                      title="Se muestra al confirmar el NIT"
+                      className="w-full cursor-not-allowed select-none rounded-md border border-amber-400 bg-amber-50/60 px-2 py-1 font-mono text-xs text-amber-700"
+                    >
+                      •••••••• <span className="font-sans text-[10px]">se muestra al confirmar</span>
+                    </div>
+                  ) : (
                   <input
                     type="text"
                     value={valores[c.slug] ?? ''}
@@ -241,6 +391,7 @@ export default function BloqueFormulario({
                         : c.faltante && !valores[c.slug] ? 'border-amber-400 bg-amber-50/40' : 'border-border focus:border-primary'
                     }`}
                   />
+                  )}
                 </label>
               ))}
             </div>
@@ -259,9 +410,13 @@ export default function BloqueFormulario({
       <div className="flex items-center gap-2">
         <button
           type="button"
+          data-testid="generar-formulario"
           onClick={handleGenerar}
-          disabled={isPending}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
+          // Sin confirmación del NIT no se genera. El servidor lo frena igual
+          // (`generarFormularioCore`); esto solo evita el viaje y explica por qué.
+          disabled={isPending || pideConfirmarNit}
+          title={pideConfirmarNit ? 'Confirma el NIT del documento antes de generar' : undefined}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state === 'generating' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           {versionActual ? 'Modificar y regenerar' : 'Generar PDF'}

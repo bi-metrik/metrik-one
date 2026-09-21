@@ -48,8 +48,12 @@ const PREFIJO_SONDA = '__identificacion_de__'
  * En SOENA son dos formas distintas y las dos cuentan: el 010 lo llama `nit`, el 1668
  * lo llama `numero_identificacion`. Por eso se decide por la FUENTE (`campo_slug`), no
  * por el nombre de la casilla.
+ *
+ * Exportada porque la transcripción a ciegas (`./confirmacion-nit`) tiene que mirar
+ * EXACTAMENTE las mismas casillas: dos listas se desincronizan al agregar un template, y
+ * el síntoma sería un formulario que un control protege y el otro no.
  */
-function casillasConNit(template: string, campos: CampoFuenteMinimo[]): CampoFuenteMinimo[] {
+export function casillasConNit(template: string, campos: CampoFuenteMinimo[]): CampoFuenteMinimo[] {
   if (!TEMPLATES_CON_NIT.has(template)) return []
   return campos.filter((c) => c.source?.tipo === 'ai' && c.source.campo_slug === 'nit' && !c.source.campos_slug?.length)
 }
