@@ -114,14 +114,16 @@ describe('la unidad no se teclea en el flujo de viaje', () => {
     expect(html).toContain('Se imprime tal cual al cliente')
   })
 
-  it('lo que NO se quita: nombre, grupo, descripción y alternativa siguen ahí', () => {
+  it('lo que NO se quita: nombre, grupo, descripción y la otra opción siguen ahí', () => {
     // El campo de al lado se fue; los que sostienen el trabajo se quedan. Sin esto,
     // una limpieza de más pasaría igual de verde.
+    // ⚠️ El botón se llamaba «Agregar alternativa a esta línea» hasta el 2026-09-21
+    // (§4.2): «alternativa» no decía ni que compite ni que solo una entra al precio.
     const html = pintar({ lineasPorTipo: true })
     expect(html).toContain('aria-label="Nombre de la línea"')
     expect(html).toContain('aria-label="Grupo de la línea"')
     expect(html).toContain('Describe qué incluye este item')
-    expect(html).toContain('Agregar alternativa a esta línea')
+    expect(html).toContain('Agregar otra opción a esta línea')
   })
 })
 
@@ -160,9 +162,10 @@ describe('las combinaciones dicen POR QUÉ no hay tabla', () => {
   it('sin alternativas, la pantalla explica qué falta', () => {
     const html = pintar({ lineasPorTipo: true, itinerarios: SIN_ALTERNATIVAS })
     expect(html).toContain('Combinaciones')
-    expect(html).toContain('Agrega una alternativa a una línea')
-    // Dice dónde está la acción, no solo que falta algo.
-    expect(html).toContain('Agregar alternativa a esta línea')
+    expect(html).toContain('Agrega otra opción a una línea')
+    // Dice dónde está la acción, no solo que falta algo, y la NOMBRA como se llama
+    // el botón: citar un nombre viejo manda a buscar algo que ya no existe.
+    expect(html).toContain('Agregar otra opción de vuelo')
     // Y la otra vía, que es la que destrabó el caso real: dos líneas sueltas compiten
     // solo si comparten grupo.
     expect(html).toContain('mismo grupo')
@@ -170,7 +173,7 @@ describe('las combinaciones dicen POR QUÉ no hay tabla', () => {
 
   it('en una cotización que no es de viaje no se pinta nada (R6)', () => {
     const html = pintar({ itinerarios: SIN_ALTERNATIVAS })
-    expect(html).not.toContain('Agrega una alternativa a una línea')
+    expect(html).not.toContain('Agrega otra opción a una línea')
     expect(html).not.toContain('Todavía no hay nada que combinar')
   })
 })

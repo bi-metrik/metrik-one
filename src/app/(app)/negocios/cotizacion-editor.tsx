@@ -63,6 +63,7 @@ import {
   itemsQueAportanAlTotal,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
+import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import {
   costoDeRubrosConfirmados,
   soloConfirmados,
@@ -347,6 +348,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         // proyecto del cliente. El servidor dice por qué; aquí solo se muestra.
         const aviso = (res as { aviso?: string | null }).aviso
         if (aviso) toast.error(aviso)
+        // §4.3 · qué cubre cada opción. Sale AQUÍ y no solo en el banner porque quien
+        // imprime no siempre es quien cargó: el PDF ya salió (avisa, no bloquea) y el
+        // aviso se queda en pantalla hasta que alguien lo cierre.
+        for (const a of (res as { avisosCobertura?: string[] }).avisosCobertura ?? []) {
+          toast.warning(a, { duration: Infinity, closeButton: true })
+        }
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
@@ -575,6 +582,28 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s => s.combinable ? !hayPrincipal : true)
   const hayCombinable = supuestos.some(s => s.combinable)
   const nombrePorItem = new Map(initialItems.map(i => [i.id, i.nombre ?? 'Sin nombre']))
+
+  /**
+   * §4.3 · ¿Las opciones de una ranura cubren lo mismo?
+   *
+   * El aviso NO depende de que haya o no itinerario principal: el daño que para es
+   * cargar como opción un tramo que en realidad se suma, y eso ya está mal desde antes
+   * de que alguien arme una combinación. Avisa, no bloquea: dos opciones distintas
+   * pueden ser legítimas y quien decide es la persona.
+   */
+  const avisosCobertura = avisosDeCobertura(
+    initialItems.map(i => ({
+      id: i.id,
+      nombre: i.nombre ?? null,
+      grupo: i.grupo ?? null,
+      opcion_de: i.opcion_de ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
+      dia_relativo: i.dia_relativo ?? null,
+      entra_al_precio: i.entra_al_precio ?? null,
+      tarifa_pax: i.tarifa_pax,
+    })),
+  )
 
   /**
    * El DÍA: un solo interruptor para dos superficies del documento.
@@ -837,11 +866,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       )}
                       {/* La ranura, visible sin abrir la linea: con nueve lineas en
                           pantalla, saber cuales compiten entre si es la unica forma de
-                          leer la lista. «alternativa» se dice aparte porque una opcion
+                          leer la lista. «opción» se dice aparte porque una opcion
                           no se suma al total salvo que un itinerario la elija. */}
                       {!isAjuste && item.grupo && (
                         <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          {item.grupo}{item.opcion_de ? ' · alternativa' : ''}
+                          {item.grupo}{item.opcion_de ? ' · opción' : ''}
                         </span>
                       )}
                       {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
@@ -1128,8 +1157,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           </span>
                         </label>
                       )}
-                      <div className="col-span-2 flex items-end sm:col-span-4">
-                        {/* La alternativa nace VACÍA de costo: es otro proveedor, no
+                      {/* EL BOTÓN DICE LO QUE HACE (§4.2).
+                          Se llamaba «Agregar alternativa a esta línea», y «alternativa»
+                          no dice ninguna de las dos cosas que importan: que COMPITE y
+                          que solo una entra al precio. Con la ranura resuelta el botón
+                          la nombra («otra opción de vuelo»), que es el vocabulario con
+                          el que la persona está pensando. */}
+                      <div className="col-span-2 sm:col-span-4">
+                        {/* La opción nace VACÍA de costo: es otro proveedor, no
                             una variante del mismo precio. Copiarle los rubros dejaría
                             a WINGO costando lo que AVIANCA sin que se note. */}
                         <button
@@ -1139,15 +1174,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             startTransition(async () => {
                               const res = await agregarOpcionAItem(item.id, '')
                               if (!res.success) { toast.error(res.error); return }
-                              toast.success(`Alternativa agregada en «${res.grupo}». Cárgale su costo.`)
+                              toast.success(`Otra opción en «${res.grupo}». Solo una entra al precio: cárgale su costo.`)
                               router.refresh()
                             })
                           }}
                           className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
                         >
                           <Plus className="h-3 w-3" />
-                          Agregar alternativa a esta línea
+                          {ranuraDeItem
+                            ? `Agregar otra opción de ${ranuraDeItem.label.toLowerCase()}`
+                            : 'Agregar otra opción a esta línea'}
                         </button>
+                        {/* El apaño de la §6 del diseño, y es requisito mientras una
+                            opción no pueda tener varias líneas que sumen (§4.1, sin
+                            construir): el segundo tramo de un mismo viaje NO va aquí.
+                            Cargado como opción, el motor se queda con uno solo y el PDF
+                            sale sin el otro — con el precio incompleto y buen aspecto. */}
+                        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                          Solo una opción entra al precio final. Las demás quedan para comparar.
+                          {' '}Un tramo adicional del mismo viaje no es una opción: va como componente aparte.
+                        </p>
                       </div>
                     </div>
                   )}
@@ -1767,6 +1813,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         {g.label}
                       </button>
                     ))}
+                    {/* EL BOTÓN DEL COMPONENTE SUELTO (§4.2). Se llamaba «Otro», que no
+                        dice lo único que hay que saber para elegirlo: una línea sin
+                        ranura SUMA SIEMPRE, no compite con nadie. */}
                     <button
                       onClick={() => setMostrarOtro(v => !v)}
                       disabled={isPending}
@@ -1774,7 +1823,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50"
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      Otro
+                      Otro componente del viaje
                     </button>
                   </>
                 ) : (
@@ -1851,6 +1900,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   </div>
                 )}
               </div>
+              {/* QUÉ HACE CADA BOTÓN, en la pantalla donde se elige (§4.2).
+                  «+ Vuelo» sobre una cotización que ya tiene un vuelo NO agrega un
+                  segundo vuelo al precio: agrega otra OPCIÓN en la misma ranura, y solo
+                  una suma. Es el mismo error silencioso del botón de opción, entrando
+                  por la otra puerta, así que se dice aquí también. */}
+              {lineasPorTipo && (
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  <span className="font-medium text-foreground">Otro componente del viaje</span> suma siempre al precio.
+                  {' '}Vuelo, Hotel, Actividad y Traslado agregan una línea a esa ranura: si ya hay una,
+                  la nueva es <span className="font-medium">otra opción</span> y solo una entra al precio final.
+                  {' '}Un tramo adicional del mismo viaje va como componente, no como opción.
+                </p>
+              )}
               {lineasPorTipo && mostrarOtro && (
                 <div className="flex gap-2">
                   <input
@@ -1968,6 +2030,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 {' '}<span className="font-medium">desmarca «Entra al precio»</span> si es una sugerencia
                 (el cliente sigue viendo su valor), o <span className="font-medium">déjala en cero</span>.
               </p>
+            </div>
+          )}
+
+          {/* §4.3 · el aviso que le habría salvado el PDF a Alejandra.
+              Va ANTES del de supuestos a propósito: aquel dice cuál opción cuenta, y
+              este dice que las opciones no eran comparables en primer lugar — o sea que
+              elegir una de las dos es la pregunta equivocada. El texto lo arma
+              `cobertura-opciones.ts`, el mismo que se imprime al generar el PDF. */}
+          {avisosCobertura.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="font-medium">
+                {avisosCobertura.length === 1
+                  ? 'Revisa qué cubre cada opción antes de imprimir.'
+                  : `Revisa qué cubre cada opción en ${avisosCobertura.length} ranuras antes de imprimir.`}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {avisosCobertura.map(a => (
+                  <li key={a.grupo}>{a.texto}</li>
+                ))}
+              </ul>
             </div>
           )}
 

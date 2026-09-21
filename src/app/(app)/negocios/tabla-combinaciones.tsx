@@ -77,8 +77,10 @@ export default function TablaCombinaciones({
 
   // Lo que falta, dicho donde iría la tabla. No es un error ni un aviso: es la
   // instrucción de una línea que convierte «aquí no hay nada» en «esto es lo que hay
-  // que hacer». La acción vive en cada línea («Agregar alternativa a esta línea»), así
+  // que hacer». La acción vive en cada línea («Agregar otra opción de vuelo»), así
   // que aquí no se repite un botón que no podría saber sobre cuál línea actuar.
+  // ⚠️ El nombre del botón se cita TAL CUAL: si el botón se renombra y esta frase no,
+  // la pantalla manda a buscar algo que ya no existe.
   if (vacia) {
     return (
       <div className="rounded-lg border border-dashed px-4 py-5 text-center">
@@ -87,8 +89,8 @@ export default function TablaCombinaciones({
           Todavía no hay nada que combinar: cada componente tiene una sola opción.
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Agrega una alternativa a una línea de <strong>vuelo</strong> o de <strong>hotel</strong>
-          {' '}(botón «Agregar alternativa a esta línea», dentro de la línea) y aquí aparece la
+          Agrega otra opción a una línea de <strong>vuelo</strong> o de <strong>hotel</strong>
+          {' '}(botón «Agregar otra opción de vuelo», dentro de la línea) y aquí aparece la
           {' '}tabla con el costo y el margen de cada combinación.
         </p>
         {/* La otra vía, y es la que destrabó el caso real: dos líneas sueltas que compiten

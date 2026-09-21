@@ -5,6 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import { bloquesParaPDF } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   PLANTILLA_POR_DEFECTO,
@@ -276,6 +277,32 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   /** El ítem de cuadre entra siempre: su rama vive fuera de las ranuras. */
   const aporta = (i: ItemRow) => !i.id || aportanAlTotal.has(i.id) || i.es_ajuste === true
 
+  /**
+   * §4.3 · el aviso de cobertura también sale AQUÍ, no solo en el editor.
+   *
+   * Quien imprime no siempre es quien cargó, y este documento es el que se le manda al
+   * cliente: el banner del editor no lo ve alguien que entra, abre la cotización y le
+   * da a descargar. Es el mismo helper y la misma frase que la pantalla, así que las dos
+   * superficies no pueden decir cosas distintas del mismo problema.
+   *
+   * ⚠️ AVISA, NO BLOQUEA. El PDF se genera igual: dos opciones con coberturas distintas
+   * pueden ser legítimas y esto no tiene con qué juzgarlo. Lo que no puede pasar es que
+   * salga en silencio.
+   */
+  const avisosCobertura = avisosDeCobertura(
+    items.filter(i => i.id).map(i => ({
+      id: i.id as string,
+      nombre: i.nombre,
+      grupo: i.grupo ?? null,
+      opcion_de: i.opcion_de ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
+      dia_relativo: i.dia_relativo ?? null,
+      entra_al_precio: i.entra_al_precio ?? null,
+      tarifa_pax: i.tarifa_pax,
+    })),
+  ).map(a => a.texto)
+
   // Calculate fiscal
   type Regimen = FiscalProfile['regimen_tributario']
   const vendorProfile: FiscalProfile = {
@@ -439,6 +466,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         driveWebViewLink,
         archivoReferencia: externo.referencia,
         aviso: externo.aviso,
+        avisosCobertura,
         renderedVia: 'weasyprint' as const,
       }
     } catch (e) {
@@ -684,6 +712,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     fiscal,
     archivoReferencia: externo.referencia,
     aviso: externo.aviso,
+    avisosCobertura,
     renderedVia: 'react-pdf' as const,
   }
 }
