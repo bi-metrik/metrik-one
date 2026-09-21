@@ -44,6 +44,7 @@
 - ⚠️⚠️ [Entra al precio: el segundo interruptor](project_entra_al_precio.md) — #728 SIN mergear (migración sin aplicar); regla por línea
 - ⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700: el desglose del modelo no es estable; RX1 ya medido con banco real (#763)
 - ⚠️⚠️ [Tarifa por pasajero (Trappvel)](project_tarifa_por_pasajero.md) — QA en prod: la casilla pinta lo que devuelve el servidor; rubros `tarifa`; «AD» no es adulto
+- ⚠️⚠️ [Orden del bloque de ítem (Trappvel)](project_orden_bloque_item_trappvel.md) — #802 en producción; la captura fija la ocupación salvo que una persona la haya ajustado
 - ⚠️ [Pantalla de cotización de viaje](project_trappvel_pantalla_cotizacion.md) — #777 mergeado; el gate lo cumple UN solo bloque en toda la base
 - ⚠️⚠️ [Lectura fina: escala, equipaje y margen del pantallazo](project_lectura_fina_trappvel.md) — #784; el juicio del modelo sobre una IMAGEN no es estable, su descripción sí
 - ⚠️⚠️ [Margen por ítem leído de la captura](project_margen_por_item_proveedor.md) — #794: el neto LEÍDO manda; cruzarlo contra la comisión deja a Decameron sin margen
