@@ -52,6 +52,7 @@
 - ⚠️⚠️ [Equipaje por iconos](project_equipaje_por_iconos.md) — #792 mergeado: a un icono de 20 px se le dan MÁS PÍXELES; un cruce no atrapa el error que comparten las dos respuestas
 - ⚠️⚠️ [Ranuras múltiples y tres tarifas](project_ranuras_multiples_tres_tarifas.md) — #805 en producción; lo que cambió NO es que sumen; renombrar UNA línea duplica el total
 - ⚠️⚠️ [Registro de decisiones de combinación](project_registro_decisiones_combinacion.md) — #808 en producción; el SQL va DESPUÉS del deploy; «sale al cliente» = generar el PDF, no `enviada`
+- ⚠️⚠️ [Adicionales dentro de la variante](project_adicionales_por_variante.md) — #810 en producción; cuelgan del ITEM, no del grupo; `precioLinea` sigue BASE o la maleta se compone; SQL SIN aplicar
 - ⚠️⚠️ [Cobertura de las opciones (4.2 y 4.3)](project_cobertura_opciones_cotizacion.md) — #798 en producción; el aviso SOLO existe para vuelo y SOLO con captura; lo de «+ Vuelo compite» CADUCÓ
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
 - ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — #800: el SQL va DESPUÉS del deploy; el nivel de detalle nace inerte; `→` no existe en el PDF
