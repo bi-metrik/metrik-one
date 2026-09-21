@@ -14,6 +14,11 @@ Sigue a [[pantallazo-ranuras]] (#700).
 **Why:** un solo total de grupo no dice cuánto cuesta un niño; la agencia cotiza por pasajero y el
 modelo NO puede repartir un total entre tipos sin inventar el dato.
 
+> ⚠️⚠️ **CADUCÓ en parte el 2026-09-21 con [[orden-bloque-item-trappvel]] (#802):** la composición
+> ya NO se declara antes de pegar. La casilla 1 se puede pegar siempre y la ocupación sale de la
+> propia captura; **TP3 solo rechaza la casilla 1 cuando una persona ajustó la composición a
+> mano**. Todo lo de abajo sobre casillas, restas y confirmación sigue igual.
+
 ## ⚠️⚠️ Orden de despliegue
 
 1. Aplicar `supabase/migrations/20260916231500_items_tarifa_pax.sql` (DDL puro).
