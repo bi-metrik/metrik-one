@@ -83,6 +83,20 @@ Subdomain routing: `ana.metrikone.co` → workspace slug `"ana"`.
 - Todas las tablas tienen `workspace_id`
 - RLS policies usando `current_user_workspace_id()` (funcion PostgreSQL)
 
+### ⚠️ El subdominio NO decide el inquilino: lo decide una sola fila
+
+`current_user_workspace_id()` es literalmente `select workspace_id from profiles where id = auth.uid()`. O sea que **el workspace activo es uno solo por usuario**, no por pestana, no por subdominio, y de esa fila cuelga TODO el RLS. El subdominio enruta y pinta la marca; no manda.
+
+Consecuencia que no es obvia y ya mordio: cambiar de workspace en una pestana se lleva **todas** las demas. Hasta el 2026-09-18 una pestana que se quedo abierta en `soena.metrikone.co` seguia pintando y **escribiendo** en el workspace nuevo, y el RLS lo aprobaba, porque las dos leen la misma fila. Un formulario abierto antes del cambio y enviado despues guardaba el dato en el inquilino equivocado con la URL diciendo lo contrario.
+
+Lo que hay hoy es un guard, no el arreglo: el middleware compara el slug del host contra el del perfil y manda la navegacion a `/pestana-desincronizada`; `getWorkspace` devuelve `workspaceId: null` para cortar la escritura (ver `src/lib/tenant/desincronizacion.ts`). **Sigue sin poderse tener dos workspaces abiertos en paralelo.** Para eso habria que derivar el workspace activo del subdominio, lo que obliga a cambiar esa funcion, que es el corazon del aislamiento multi-tenant.
+
+**El slug del inquilino llega al server component SOLO por cabecera de request.** En la funcion serverless el `host` y el `x-forwarded-host` NO traen el subdominio: el middleware inyecta `x-tenant-slug` con `NextResponse.next({ request: { headers } })`. Ponerlo en la respuesta, como estaba antes, no sirve de nada porque el servidor nunca lo ve.
+
+**Un guard no puede vivir en un layout.** Un layout del App Router no se vuelve a ejecutar en navegacion suave, solo en carga completa de documento: el guard de pestana desincronizada nacio en `(app)/layout.tsx` y en produccion no existia al hacer clic en el menu. Lo que corre siempre es el middleware.
+
+**`profiles` tiene DOS llaves foraneas hacia `workspaces`** (`workspace_id` y `home_workspace_id`, la del platform admin), asi que todo embed de PostgREST tiene que nombrar la relacion (`workspaces!profiles_workspace_id_fkey(...)`) o responde PGRST201 por ambiguedad.
+
 **Dev local**: `localhost:3000` (marketing), no hay subdomain routing en dev — todo opera en el mismo host.
 
 ## Convenciones de base de datos (toda migration nueva)
@@ -369,6 +383,16 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 | — | 2026-03-04 | UI: splash, isotipo ONE (M₁), lockup tipografico, normalizacion ONE→one |
 
 ## Ultimo avance
+
+### Saltar entre workspaces sin pasar por MeTRIK, y la pestana que quedaba escribiendo en el inquilino equivocado - PRs #782 `918a921d`, #789 `c8d0670d`, #796 `d28c3d42` (2026-09-17 al 21)
+
+- **#782, la puerta que faltaba.** `switchWorkspace` ya soportaba ir del workspace A al B; la barra de platform admin, en modo away, hacia un early return que solo pintaba "Regresar a {home}". El desplegable salio a un componente propio (`SelectorDeWorkspaces`) que usan las dos ramas. De paso, `switchWorkspace` ahora registra `platform_admin_exit` en el workspace que abandona cuando ese no es su home: antes solo `returnHome` lo hacia, asi que el owner de un cliente veia la entrada del soporte y nunca su salida.
+- **⚠️⚠️ Lo que se encontro al preguntar por pestanas en paralelo:** el workspace activo vive en `profiles.workspace_id`, una fila por usuario, y el middleware nunca comparaba el slug del host contra ella. Una pestana que quedo abierta en otro subdominio seguia pintando y **escribiendo** en el workspace nuevo, y el RLS lo aprobaba, porque `current_user_workspace_id()` lee esa misma fila. Detalle y consecuencias en la seccion **Multi-Tenancy**.
+- **#789, el guard (opcion A, decidida por Mauricio).** El middleware pasa `x-tenant-slug` como cabecera de **request** (antes solo la ponia en la respuesta, que el server component no ve), `getWorkspace` devuelve `workspaceId: null` cuando no coincide, y una pantalla lo explica con nombres propios. Regla del repo respetada: **cero consultas nuevas por peticion**, el slug entro en el mismo embed del perfil que ya se leia.
+- **⚠️ #789 no funcionaba en produccion, y el motivo es general: un layout del App Router NO se vuelve a ejecutar en navegacion suave.** El guard vivia en `(app)/layout.tsx`, asi que al hacer clic en el menu simplemente no existia; solo aparecia al recargar. **#796** lo mudo al middleware, que corre en toda peticion, y redirige a `/pestana-desincronizada`. Solo navegaciones (GET/HEAD, sin `Next-Action`, fuera de `/api`): a un server action no se le redirige, y para eso sigue estando el corte de `getWorkspace`.
+- **El `revalidatePath('/', 'layout')` de `switchWorkspace` y `returnHome` se quito.** Era lo que re-pintaba el layout con el perfil ya cambiado mientras la pestana todavia estaba en el host viejo: el aviso parpadeaba en la pestana que se esta yendo. No era carga util, el destino es siempre otro host y se pinta de cero tras el magic link.
+- **⚠️ `/suscripcion-suspendida` es la unica ruta de la app donde el middleware no lee el perfil**, asi que ahi el guard no aplica. Y el middleware **no conoce el override `__dev_ws`**: en local con subdominios reales, ese override se lee como desincronizacion.
+- **Sigue abierto lo de fondo:** no se pueden tener dos workspaces abiertos en paralelo. Eso exige derivar el workspace activo del subdominio y cambiar `current_user_workspace_id()`, que es el corazon del aislamiento.
 
 ### Bot WA: un "Si" al soporte fotografico ya no expulsa, pide la foto - PR #658, `wa-webhook` v151 (2026-09-14)
 
