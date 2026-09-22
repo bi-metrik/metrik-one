@@ -21,12 +21,13 @@ export const LINEA = 'linea-ve'
  * Un caso de la cola YA ARMADO, para las pruebas que ejercitan la pantalla sin
  * pasar por el servidor.
  *
- * Vive aquí y no en cada archivo de pruebas porque `CasoPorFacturar` crece: el
- * 2026-09-08 ganó `estado_recaudo`, `banda_materialidad` y `retenido_por_recaudo`
- * en dos cambios seguidos, y cada copia del literal hay que arreglarla aparte.
+ * Vive aquí y no en cada archivo de pruebas porque `CasoPorFacturar` cambia: el
+ * 2026-09-08 ganó `estado_recaudo`, `banda_materialidad` y `retenido_por_recaudo`, y
+ * el 2026-09-22 los perdió con `falta_saldo` (la factura ya no espera el recaudo). Cada
+ * copia del literal habría que arreglarla aparte.
  *
- * Por defecto: cuadrado, con datos completos y listo para facturar. Lo que la
- * prueba quiera romper, lo pasa por `p`.
+ * Por defecto: con datos completos y listo para facturar. Lo que la prueba quiera
+ * romper, lo pasa por `p`.
  */
 export function casoFalso(p: Partial<CasoPorFacturar> = {}): CasoPorFacturar {
   return {
@@ -40,9 +41,7 @@ export function casoFalso(p: Partial<CasoPorFacturar> = {}): CasoPorFacturar {
     cerrado: false,
     recibo_numero: null,
     concepto: { code: '22', nombre: null, servicio: null, porDefecto: true },
-    base_gravable: null, falta_saldo: 0,
-    estado_recaudo: 'cubierto', banda_materialidad: 1_000,
-    retenido_por_recaudo: false,
+    base_gravable: null,
     descartado: null,
     ...p,
   }
@@ -203,8 +202,8 @@ export function sembrar(opciones: {
   /**
    * Cuánto del honorario tiene recaudado el caso `i`. Por defecto, todo.
    *
-   * Existe para el gate del recaudo: es la única palanca con la que un caso puede
-   * quedar `descuadre_menor` o `retenido`, que es lo que decide si entra a la cola.
+   * Hasta el 2026-09-22 era la palanca del gate del recaudo. Hoy existe para probar lo
+   * contrario: que un caso SIN un peso recaudado sale listo igual.
    */
   recaudo?: (i: number) => number
   /** Marca en `metadata` del caso `i`. Sirve para sembrar un ya facturado o un descartado. */
@@ -246,8 +245,8 @@ export function sembrar(opciones: {
       etapas_negocio: { nombre: 'Cargue', numero: 6 },
     })
     estado.fixtures.contactos.push({ id: `con-${pad(i)}`, ...contactoDe(i) })
-    // Honorario recaudado completo: así `falta_saldo` es 0 y lo único que puede
-    // dejar un caso fuera de "listo" es que le falte un dato del borrador.
+    // Un pago por caso, por defecto del honorario completo. Desde el 2026-09-22 no
+    // decide nada en la cola: solo alimenta el número del último recibo.
     estado.fixtures.cobros.push({ id: `cob-${pad(i)}`, negocio_id: id, monto: recaudoDe(i), tipo_cobro: 'pago', split_json: null })
   }
 

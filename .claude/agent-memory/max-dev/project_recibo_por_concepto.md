@@ -30,6 +30,9 @@ SOENA: **63 mixtos**, 317 solo honorario, 45 solo tarifa.
   `primerRecibo` / `tieneRecibo` de `src/lib/siigo/recibo-componentes.ts` son el criterio único.
 - ⚠️ **Una lista vacía es `truthy`.** `if (cobro.siigo_recibo)` la lee como «ya tiene recibo» y el
   cobro no volvería a emitir nunca. Ya mordió en `recibo-automatico.ts`; hay prueba que lo fija.
+- ✅ **CADUCÓ (medido 2026-09-22):** el comprobante del pasante YA EXISTE: RC-3 `33546`, y la
+  línea GIT EV/HEV ya lo declara en `recibo_por_concepto.pasante`. Y el honorario pasa a ser
+  ABONO a la factura en [[factura-libre-abono]] (#818). Lo que sigue es la historia:
 - ⚠️⚠️ **El comprobante del componente pasante NO EXISTE.** Mauricio decidió el 2026-09-19 no reusar
   el RC-2 (`32623`): es **de uso mixto** — 13 vouchers, solo 2 son recaudo UPME (del 2026-07-21) y
   los otros 11 son de marzo, de $535.670 a $25.902.492, sin observación. Se le pide a SOENA un tipo

@@ -78,8 +78,11 @@ export async function emitirReciboAutomatico(workspaceId: string, cobroId: strin
     })
 
     // `ya_emitido` y `duplicado_en_siigo` no son fallos aquí: son la idempotencia
-    // haciendo su trabajo cuando el mismo cobro se toca dos veces.
-    if (!r.ok && r.motivo !== 'ya_emitido' && r.motivo !== 'duplicado_en_siigo') {
+    // haciendo su trabajo cuando el mismo cobro se toca dos veces. Tampoco lo son
+    // `espera_factura` (el honorario se abona cuando se facture) ni `abono_a_mano` (el
+    // abono quedó escrito en el cobro para Tesorería, con su razón).
+    const noEsFallo = ['ya_emitido', 'duplicado_en_siigo', 'espera_factura', 'abono_a_mano']
+    if (!r.ok && !noEsFallo.includes(r.motivo)) {
       console.error('[recibo-automatico] no se emitió para el cobro', cobroId, r.motivo)
     }
   } catch (e) {

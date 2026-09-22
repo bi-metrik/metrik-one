@@ -68,6 +68,27 @@ export const SUFIJO_IDEMPOTENCIA: Readonly<Record<ComponenteRecibo, string>> = O
   pasante: 'rcpas',
 })
 
+/**
+ * Sufijo del ABONO del honorario a la factura (`DebtPayment`).
+ *
+ * ⚠️ Mismo aviso que `SUFIJO_IDEMPOTENCIA`: **no se cambia nunca.** Es distinto de `rchon`
+ * a propósito: el abono es OTRO documento que el anticipo del honorario, y un cobro nunca
+ * lleva los dos (ver `planDeEmision`). Si compartieran sufijo, un anticipo que ONE hubiera
+ * emitido y no alcanzado a marcar volvería de Siigo disfrazado de abono.
+ */
+export const SUFIJO_IDEMPOTENCIA_ABONO = 'abhon'
+
+/**
+ * Cómo sale un componente en Siigo.
+ *
+ *  - `anticipo` — `AdvancePayment`, suelto, sin factura. Es el de siempre y el que se
+ *    asume cuando la línea no dice nada.
+ *  - `abono`    — `DebtPayment` contra la factura del negocio. Solo el HONORARIO puede
+ *    ser abono: es lo único que se factura. La tarifa UPME es plata de terceros y nunca
+ *    entra en la factura, así que no tiene a qué abonarse.
+ */
+export type TipoReciboComponente = 'anticipo' | 'abono'
+
 /** Lo que la línea declara para un componente. Todo opcional: se valida al emitir. */
 export interface ConfigComponenteRecibo {
   /** Tipo de comprobante de Siigo. Es lo que decide a qué cuenta entra la plata. */
@@ -76,6 +97,8 @@ export interface ConfigComponenteRecibo {
   concepto?: string
   /** Bloque donde se archiva el PDF. Sin él, el del recibo de la línea. */
   bloque_slug?: string
+  /** Ausente = `anticipo`, el de siempre. Ver `TipoReciboComponente`. */
+  tipo?: TipoReciboComponente
 }
 
 /** `lineas_negocio.config_extra.siigo.recibo_por_concepto`. */
@@ -102,6 +125,10 @@ export function leerReciboPorConcepto(cfgSiigo: unknown): ConfigReciboPorConcept
       document_id: Number.isFinite(documentId) && documentId > 0 ? documentId : undefined,
       concepto: typeof obj.concepto === 'string' ? obj.concepto.trim() || undefined : undefined,
       bloque_slug: typeof obj.bloque_slug === 'string' ? obj.bloque_slug.trim() || undefined : undefined,
+      // Solo el honorario se abona a la factura. En el componente pasante la clave se
+      // IGNORA en vez de romper: la tarifa UPME no está en la factura, así que un
+      // "abono" suyo cruzaría plata de terceros contra un ingreso propio.
+      ...(comp === 'honorario' && obj.tipo === 'abono' ? { tipo: 'abono' as const } : {}),
     }
   }
   // Declarado pero vacío no es "declarado": se comporta como si no estuviera.
@@ -169,6 +196,8 @@ export interface ComponenteAEmitir {
   concepto: string
   bloqueSlug?: string
   sufijoIdempotencia: string
+  /** Ausente = anticipo, el de siempre. */
+  tipo?: TipoReciboComponente
 }
 
 export type PlanDeEmision =
@@ -200,13 +229,15 @@ export function planDeEmision(
     if (!cfg?.concepto) faltantes.push(`concepto de "${comp}" (config de la línea)`)
     if (!cfg?.document_id || !cfg.concepto) continue
 
+    const esAbono = cfg.tipo === 'abono'
     componentes.push({
       componente: comp,
       valor,
       documentId: cfg.document_id,
       concepto: cfg.concepto,
       bloqueSlug: cfg.bloque_slug ?? bloqueSlugPorDefecto,
-      sufijoIdempotencia: SUFIJO_IDEMPOTENCIA[comp],
+      sufijoIdempotencia: esAbono ? SUFIJO_IDEMPOTENCIA_ABONO : SUFIJO_IDEMPOTENCIA[comp],
+      ...(esAbono ? { tipo: 'abono' as const } : {}),
     })
   }
 
@@ -266,11 +297,46 @@ export interface MarcaRecibo {
    * significa "acusa el total", no "es honorario".
    */
   componente?: ComponenteRecibo
+  /**
+   * `abono` si el documento es un `DebtPayment` contra la factura del negocio.
+   *
+   * ⚠️ Ausente en todas las marcas anteriores al 2026-09-22 y en las de cualquier
+   * componente que no se declare abono: ausente significa ANTICIPO (`AdvancePayment`).
+   */
+  tipo?: 'abono'
+  /** La factura a la que se abonó. Solo en los abonos. */
+  factura?: { numero: string; siigo_id: string }
+  /**
+   * Honorario de este pago que NO cupo en el saldo de la factura, y por eso no se abonó.
+   * Solo en los abonos, y solo cuando es mayor que cero. Es plata de sobrepago: la ve el
+   * flujo de sobrepago del negocio, no este documento.
+   */
+  sin_abonar?: number
   /** Recibo cargado a mano (`cargarReciboManual`). No lo escribe la emisión. */
   origen?: string
   sha256?: string
   storage_bucket?: string
   storage_path?: string
+}
+
+/**
+ * Un componente que ONE NO emitió y le dejó a Tesorería: el abono con retención, la
+ * factura sin saldo, la factura anulada…
+ *
+ * Vive en la MISMA lista que las marcas de recibo (`cobros.siigo_recibo`) pero **sin
+ * `numero`**, así que `recibosDelCobro` —el criterio único de «tiene recibo»— la ignora
+ * por construcción: no cuenta como recibo emitido en la emisión, ni en el panel, ni en la
+ * ruta que abre los PDF. Se guarda para que el pendiente diga POR QUÉ ONE no lo hizo, en
+ * vez de verse como un pago que nadie miró. Solo existe en las líneas que parten sus
+ * recibos por concepto, que son las que ya guardan lista.
+ */
+export interface MarcaAbonoAMano {
+  componente: ComponenteRecibo
+  abono_a_mano: { motivo: string; detalle: string }
+  /** Honorario de este pago que quedó sin abonar. */
+  valor: number
+  at: string
+  por: string | null
 }
 
 /**
@@ -287,6 +353,47 @@ export function recibosDelCobro(guardada: unknown): MarcaRecibo[] {
     (m): m is MarcaRecibo =>
       !!m && typeof m === 'object' && typeof (m as MarcaRecibo).numero === 'string' && (m as MarcaRecibo).numero !== '',
   )
+}
+
+/**
+ * Los abonos que ONE le dejó a Tesorería en este cobro. Vacío en el caso normal.
+ *
+ * Solo tiene sentido sobre la LISTA: la marca vieja (objeto suelto) nunca lleva uno.
+ */
+export function abonosAManoDelCobro(guardada: unknown): MarcaAbonoAMano[] {
+  if (!Array.isArray(guardada)) return []
+  return guardada.filter(
+    (m): m is MarcaAbonoAMano =>
+      !!m && typeof m === 'object'
+      && esComponenteRecibo((m as MarcaAbonoAMano).componente)
+      && !!(m as MarcaAbonoAMano).abono_a_mano
+      && typeof (m as MarcaAbonoAMano).abono_a_mano === 'object',
+  )
+}
+
+/**
+ * La lista que queda después de escribir `nueva`, reemplazando lo que hubiera del MISMO
+ * componente —sea un recibo o un «a mano»— y conservando TODO lo demás.
+ *
+ * ⚠️ Conserva las entradas de otros componentes aunque no sean recibos. Reconstruir la
+ * lista con `recibosDelCobro` (que filtra lo que no tiene número) borraría el «a mano» del
+ * honorario en cuanto se emitiera el recibo de la tarifa, y el pendiente quedaría sin su
+ * explicación.
+ *
+ * La marca vieja (objeto suelto, sin componente) entra como primer elemento: acusa el
+ * total y no se toca.
+ */
+export function conEntradaDeComponente(
+  guardada: unknown,
+  nueva: { componente?: ComponenteRecibo } & Record<string, unknown>,
+): unknown[] {
+  const previas = guardada == null ? [] : Array.isArray(guardada) ? guardada : [guardada]
+  const otras = previas.filter(m => {
+    if (!m || typeof m !== 'object') return false
+    const comp = (m as { componente?: unknown }).componente
+    return !(nueva.componente && comp === nueva.componente)
+  })
+  return [...otras, nueva]
 }
 
 /** ¿Este cobro tiene al menos un recibo emitido? */

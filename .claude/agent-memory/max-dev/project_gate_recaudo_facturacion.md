@@ -1,9 +1,15 @@
 ---
 name: gate-recaudo-facturacion
-description: PR #578 + su enmienda — el recaudo como condición para FACTURAR (no para verse); la banda del 1%, dónde vive cada pieza, y por qué la adopción nunca se gatea por saldo
+description: "REVERTIDO por #818 (2026-09-22): el recaudo fue condición para FACTURAR del 8 al 22 de septiembre; la banda del 1% y los retenidos ya no existen. Queda la lección de la adopción y de las dos capas de prueba"
 metadata:
   type: project
 ---
+
+> ⚠️ **CADUCÓ el 2026-09-22.** La factura ya no espera el recaudo: sale a crédito y la cierran
+> los abonos ([[factura-libre-abono]], #818). `estadoDeRecaudo`, `bandaMaterialidadFacturacion`,
+> `razonDeRetencion` y la sección de retenidos se borraron. Siguen valiendo las lecciones: quitar
+> una fila de una lista le quita TODAS sus acciones, y una decisión de pantalla se prueba en dos
+> capas (pura + render).
 
 Desde el **2026-09-08** el honorario recaudado decide **si se puede facturar** un caso de la
 cola de `/conciliacion`, no si el caso existe. La decisión se movió **dos veces el mismo

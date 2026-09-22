@@ -299,6 +299,61 @@ export function borradorRecibo(
   }
 }
 
+export interface BorradorAbono {
+  document: { id: number }
+  date: string
+  type: 'DebtPayment'
+  customer: { identification: string; branch_office: number }
+  items: Array<{
+    due: { prefix: string; consecutive: number; quote: number; date?: string }
+    value: number
+  }>
+  payment: { id: number; value: number }
+  observations: string
+}
+
+/**
+ * Abono del honorario a la factura del negocio: un recibo de caja `DebtPayment`.
+ *
+ * Es el mismo comprobante que el anticipo del honorario (el `document.id` lo declara la
+ * línea) y la misma forma de pago del recibo (`reciboPaymentId`); lo que cambia es que
+ * cruza un vencimiento. La forma es la de los 8 abonos que Tesorería hizo a mano en el
+ * Siigo de SOENA (RC-1-22: `items[0].due` = FV-1 / 17 / cuota 1, un solo ítem por el
+ * valor, `payment.value` igual al ítem), y la de la documentación de `POST /v1/vouchers`.
+ *
+ * Un solo ítem, sin `taxes` ni `discounts`: el abono con retención los necesita y por eso
+ * NO se arma aquí (se lo deja a Tesorería, ver `abono.ts`).
+ */
+export function borradorAbono(
+  cfg: SiigoConfig,
+  identificacion: string,
+  valor: number | null,
+  fecha: string,
+  concepto: string,
+  vencimiento: { prefix: string; consecutive: number; quote: number; date?: string },
+  branchOffice: number = SUCURSAL_POR_DEFECTO,
+  documentId?: number,
+): Borrador<BorradorAbono> {
+  const faltantes: string[] = []
+  if (!identificacion) faltantes.push('identificación')
+  if (valor == null || !(valor > 0)) faltantes.push('valor del abono')
+  if (!vencimiento.prefix || !(vencimiento.consecutive > 0)) faltantes.push('factura a la que se abona')
+
+  const v = valor ?? 0
+  return {
+    payload: {
+      document: { id: documentId ?? cfg.reciboDocumentId },
+      date: fecha,
+      type: 'DebtPayment',
+      customer: { identification: identificacion, branch_office: branchOffice },
+      items: [{ due: vencimiento, value: v }],
+      payment: { id: cfg.reciboPaymentId, value: v },
+      observations: concepto,
+    },
+    faltantes,
+  }
+}
+
 export interface BorradorFactura {
   document: { id: number }
   date: string

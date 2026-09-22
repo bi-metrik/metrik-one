@@ -44,7 +44,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { traerTodo } from '@/lib/supabase/paginar'
 import {
+  abonosAManoDelCobro,
   componentesConValor,
+  hayReciboPorElTotal,
   leerReciboPorConcepto,
   primerRecibo,
   reciboCompleto,
@@ -53,6 +55,7 @@ import {
   type ComponenteRecibo,
   type FilaReparto,
 } from '@/lib/siigo/recibo-componentes'
+import { ETIQUETA_ABONO_A_MANO, esMotivoAbonoAMano, retencionDelCobro } from '@/lib/siigo/abono'
 
 export type EstadoRecibo = 'con_recibo' | 'no_aplica' | 'pendiente'
 
@@ -85,7 +88,13 @@ export interface PagoConRecibo {
    * trae una entrada, y con la marca vieja (objeto suelto) también: el helper tolera
    * las dos formas.
    */
-  recibos: Array<{ numero: string; url: string | null; componente: ComponenteRecibo | null }>
+  recibos: Array<{
+    numero: string
+    url: string | null
+    componente: ComponenteRecibo | null
+    /** Número de la factura a la que se abonó. Solo en los abonos (`DebtPayment`). */
+    abono_de?: string | null
+  }>
   /**
    * Qué le falta por acusar a un cobro que YA tiene algún recibo.
    *
@@ -183,13 +192,15 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     /** Objeto (forma vieja) o lista: se lee con los helpers, nunca de frente. */
     siigo_recibo: unknown
     recibo_no_aplica: { motivo?: string } | null
+    /** Con retención, el abono del honorario no lo hace ONE: lo cruza Tesorería. */
+    retencion: number | string | null
   }
 
   const cobros = await traerTodo<FilaCobro>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('cobros')
-      .select('id, negocio_id, monto, fecha, notas, tipo_cobro, siigo_recibo, recibo_no_aplica')
+      .select('id, negocio_id, monto, fecha, notas, tipo_cobro, siigo_recibo, recibo_no_aplica, retencion')
       .eq('workspace_id', workspaceId)
       .is('anulado_at', null)
       .not('fecha', 'is', null)
@@ -276,6 +287,45 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     // Sin reparto no se sabe qué falta. Se cae al criterio de siempre en vez de
     // declarar pendiente un cobro que quizá ya está completo.
     return componentesConValor(reparto).filter(comp => cfg[comp] != null)
+  }
+
+  /**
+   * Qué dice el panel del honorario en una línea que lo ABONA a la factura.
+   *
+   * Tres casos en que el botón NO resolvería el honorario, y el panel lo dice antes de
+   * que alguien lo oprima: el negocio todavía no tiene factura (se abona al facturar),
+   * el pago trae retención (lo cruza Tesorería), o una emisión anterior ya lo dejó «a
+   * mano» con su razón. Si el honorario es lo ÚNICO que falta es un faltante (el botón
+   * no haría nada); si falta también la tarifa es solo un aviso, porque el botón sí
+   * emite la tarifa y el cobro no puede quedarse sin su RC-3 por culpa del honorario.
+   */
+  const delAbono = (
+    c: FilaCobro,
+    esperados: ComponenteRecibo[],
+    facturado: boolean,
+  ): { faltantes: string[]; avisos: string[] } => {
+    const out = { faltantes: [] as string[], avisos: [] as string[] }
+    const lineaId = c.negocio_id ? porId.get(c.negocio_id)?.linea_id : null
+    const cfg = lineaId ? porConceptoPorLinea.get(lineaId) : null
+    if (cfg?.honorario?.tipo !== 'abono' || hayReciboPorElTotal(c.siigo_recibo)) return out
+
+    const emitidos = new Set(recibosDelCobro(c.siigo_recibo).map(m => m.componente))
+    const faltan = esperados.filter(comp => !emitidos.has(comp))
+    if (!faltan.includes('honorario')) return out
+    const destino = faltan.length === 1 ? out.faltantes : out.avisos
+
+    const aMano = abonosAManoDelCobro(c.siigo_recibo).find(m => m.componente === 'honorario')
+    if (aMano) {
+      const motivo = aMano.abono_a_mano.motivo
+      destino.push(`el abono a mano en Siigo: ${esMotivoAbonoAMano(motivo) ? ETIQUETA_ABONO_A_MANO[motivo] : aMano.abono_a_mano.detalle}`)
+    } else if (!facturado) {
+      destino.push(faltan.length === 1
+        ? 'la factura del negocio: el honorario se abona a ella'
+        : 'el honorario se abona a la factura cuando se emita: ahora sale solo la tarifa')
+    } else if (retencionDelCobro(c.retencion) > 0) {
+      destino.push(`el abono a mano en Siigo: ${ETIQUETA_ABONO_A_MANO.retencion}`)
+    }
+    return out
   }
 
   const contactoIds = [...new Set(negocios.map(n => n.contacto_id).filter((v): v is string => !!v))]
@@ -382,6 +432,13 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       const identificado = !!meta.siigo_cliente?.identificacion
         || (!!c.negocio_id && conIdentificacion.has(c.negocio_id))
       if (!identificado) faltantes.push('RUT del cliente')
+
+      // ── El honorario que se ABONA a la factura ──
+      // Lo que ONE no puede resolver con un clic se dice como faltante, para que el
+      // botón no prometa un recibo que va a volver sin emitir nada.
+      const del = delAbono(c, esperados, !!meta.siigo_factura?.numero)
+      faltantes.push(...del.faltantes)
+      avisos.push(...del.avisos)
       // El PDF se archiva DESPUÉS de emitir y su fallo no deshace el recibo, que ya
       // consumió numeración en Siigo. Frenar por esto dejaría plata sin acusar por un
       // problema de archivo.
@@ -405,6 +462,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
         numero: m.numero,
         url: m.archivo_url ?? null,
         componente: m.componente ?? null,
+        abono_de: m.tipo === 'abono' ? m.factura?.numero ?? null : null,
       })),
       componentes_pendientes: componentesPendientes,
       no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? null,
