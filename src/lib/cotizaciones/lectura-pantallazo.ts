@@ -644,8 +644,12 @@ export function resumenDeLinea(
     const ruta = [v('origen'), v('destino')].filter(Boolean).join('–')
     const nombre = [v('aerolinea'), ruta].filter(Boolean).join(' ') || ranura.label
     partes.push(
-      etiqueta('Salida', v('fecha_salida')),
-      etiqueta('Regreso', v('fecha_regreso')),
+      // La hora va PEGADA a su fecha, no como entrada aparte: «Salida: 2026-10-23 05:50»
+      // se lee de un golpe, y quien cotiza tiene que poder confirmar la lectura ANTES de
+      // que el documento salga al cliente. Sin hora leída, esto imprime exactamente lo
+      // que imprimía antes.
+      etiqueta('Salida', conHora(v('fecha_salida'), v('hora_salida'))),
+      etiqueta('Regreso', conHora(v('fecha_regreso'), v('hora_salida_regreso'))),
       etiqueta('Vuelo', v('numero_vuelo')),
       etiqueta('Tarifa', v('familia_tarifa')),
       escalasTexto(v('escalas'), v('escala_ida'), v('escala_regreso')),
@@ -685,6 +689,15 @@ export function resumenDeLinea(
     etiqueta('Proveedor', v('proveedor')),
   )
   return { nombre, descripcion: unir(partes) }
+}
+
+/**
+ * La fecha con su hora, si la hay. Sin fecha no hay nada que decir: una hora suelta
+ * («Salida: 05:50») no dice de qué día, y el campo se omite entero.
+ */
+function conHora(fecha: string | null, hora: string | null): string | null {
+  if (!fecha) return null
+  return hora ? `${fecha} ${hora}` : fecha
 }
 
 function etiqueta(nombre: string, valor: string | null): string | null {
