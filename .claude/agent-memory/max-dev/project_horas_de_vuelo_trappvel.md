@@ -1,6 +1,6 @@
 ---
 name: horas-de-vuelo-trappvel
-description: "#812 — las horas del vuelo en el documento del cliente de Trappvel: la duración NO se calcula (restar mentiría en 2 de 3 capturas reales), la columna vacía desaparece, y la política de cancelación no se imprimía nunca"
+description: "#812 — las horas del vuelo en el documento del cliente de Trappvel: restar mentiría en 2 de 3 capturas reales (vigente); la columna DURACIÓN caducó con el #815; la política de cancelación no se imprimía nunca"
 metadata:
   type: project
 ---
@@ -9,6 +9,15 @@ metadata:
 verdes (`c300cdd9`), **sin migración y sin una sola escritura a producción**. La plantilla
 ya estaba encendida (`cotizacion_template_slug = 'trappvel'`, verificado contra la base ese
 día), así que esto **ya lo ve el cliente**. Sigue a [[documento-cliente-trappvel]] (#800).
+
+> ⚠️⚠️ **CADUCÓ EN PARTE el 2026-09-22 con [[tres-tarifas-y-tabla-de-vuelos]] (#815):**
+> la columna DURACIÓN **ya no existe** y los campos `duracion_ida` / `duracion_regreso`
+> salieron de la ranura. No por un defecto de lectura —se leían 18 de 18— sino porque **el
+> itinerario de referencia no la trae**: su tabla de vuelos tiene cinco columnas. Tampoco
+> se imprime ya el número de vuelo. Lo que sigue vigente es TODO lo de abajo sobre **por
+> qué no se calcula**, que vale para cualquier dato horario de un viaje internacional.
+> `hora_salida` y `hora_llegada` siguen vivas y su prompt no cambió un carácter, así que
+> el 18/18 se conserva.
 
 ## ⚠️⚠️ La duración de un vuelo NO se calcula restando las horas
 

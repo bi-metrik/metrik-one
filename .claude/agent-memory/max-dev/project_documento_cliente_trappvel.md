@@ -62,6 +62,10 @@ nada falle**. Vive en `src/lib/cotizaciones/detalle-viaje.ts` (puro).
 **Estrellas del hotel y localizador** no están en el contrato de ninguna ranura. Los campos
 existen en el tipo y llegan vacíos.
 
+⚠️ **Las ESTRELLAS del hotel SÍ están en el itinerario de referencia** (`★★★★★` y
+«Categoría 5 estrellas»), confirmado leyéndolo el 2026-09-22: el hueco es de lectura, no
+de diseño. Ver [[tres-tarifas-y-tabla-de-vuelos]].
+
 ⚠️ **Las horas de vuelo SALIERON de esta lista el 2026-09-22**: el #812 las agregó a la
 ranura y las midió (18 de 18). Lo que sigue vigente es que el brief y la §3 de
 `propuesta-visual.md` afirmaban que «la lectura ya los guarda» **y era falso**. Ver
