@@ -413,9 +413,9 @@ export function textoDeRechazo(motivo: MotivoRechazo): string {
   }
   const piso = formatoPct(motivo.pisoPct)
   if (motivo.margenRealPct === null) {
-    return `Este itinerario todavía no tiene margen medible (sin costo o sin precio) y el piso es ${piso}`
+    return `Este itinerario todavía no tiene margen medible (sin costo o sin precio) y el margen mínimo es ${piso}`
   }
-  return `Margen ${formatoPct(motivo.margenRealPct)}, por debajo del piso de ${piso}`
+  return `Margen ${formatoPct(motivo.margenRealPct)}, por debajo del margen mínimo de ${piso}`
 }
 
 /**

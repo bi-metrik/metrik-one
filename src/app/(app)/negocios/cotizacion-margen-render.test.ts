@@ -163,7 +163,7 @@ describe('editor de cotización · margen por línea', () => {
     const html = pintar([item({ precio_venta: 1_032_000, precio_manual: true })])
     expect(html).toContain('Margen 3,1%')
     expect(colorDeLinea(html, '3,1%')).toBe('text-red-600')
-    expect(html).toContain('bajo el piso de 5,0%')
+    expect(html).toContain('bajo el margen mínimo de 5,0%')
   })
 
   it('entre el piso y el aviso sale en ÁMBAR', () => {
@@ -177,7 +177,7 @@ describe('editor de cotización · margen por línea', () => {
     // usara los del producto (5/10) en vez del prop, este caso seguiría en ámbar.
     const html = pintar([item({ margen_porcentaje: 8 })], {}, { pisoPct: 12, avisoPct: 20 })
     expect(colorDeLinea(html, '8,0%')).toBe('text-red-600')
-    expect(html).toContain('bajo el piso de 12,0%')
+    expect(html).toContain('bajo el margen mínimo de 12,0%')
   })
 
   it('una línea sin costo no muestra margen: no hay con qué medirla', () => {
@@ -208,7 +208,7 @@ describe('editor de cotización · margen consolidado del viaje', () => {
 
   it('un viaje entero bajo el piso lo marca el consolidado, no solo las líneas', () => {
     const html = pintar([item({ margen_porcentaje: 3 })])
-    expect(html).toContain('bajo el piso')
+    expect(html).toContain('bajo el margen mínimo')
   })
 
   it('el precio consolidado es el de la convención: 1.176.471, no 1.150.000', () => {

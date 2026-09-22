@@ -242,7 +242,7 @@ describe('§2.6.5 · desmarcar lo que ya no puede ir a la propuesta', () => {
     const desmarcados = await desmarcarLosQueYaNoPueden(clienteFalso(), COT)
 
     expect(desmarcados.map(d => d.nombre)).toEqual(['Económica'])
-    expect(desmarcados[0].motivo).toContain('piso')
+    expect(desmarcados[0].motivo).toContain('margen mínimo')
     // La afirmación va sobre la FILA, no sobre lo que devolvió la función.
     expect(itinerario('it-barata').va_en_propuesta).toBe(false)
     expect(itinerario('it-cara').va_en_propuesta).toBe(true)

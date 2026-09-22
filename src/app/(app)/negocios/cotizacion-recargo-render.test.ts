@@ -147,3 +147,45 @@ describe('se ve que la línea lleva OTRO valor', () => {
     expect(html).not.toContain('Agregar recargo')
   })
 })
+
+describe('solo para vuelos internacionales', () => {
+  const INTERNACIONALES = { ...POLITICA, vuelos: 'internacionales' }
+  const vuelo = (origen: string, destino: string) =>
+    item({
+      nombre: `Vuelo ${origen} - ${destino}`,
+      tarifa_pax: {
+        casillas: {
+          grupo_completo: {
+            moneda: 'COP',
+            total: 1,
+            campos: [{ label: 'Origen', valor: origen }, { label: 'Destino', valor: destino }],
+          },
+        },
+      },
+    })
+
+  it('Bogotá – San Andrés: no se ofrece', () => {
+    const html = pintar([vuelo('Bogotá BOG', 'San Andrés Isla ADZ')], INTERNACIONALES)
+    expect(html).not.toContain('Agregar recargo')
+  })
+
+  it('Bogotá – Cancún: se ofrece y dice que es por el vuelo internacional', () => {
+    const html = pintar([vuelo('Bogotá BOG', 'Cancún CUN')], INTERNACIONALES)
+    expect(html).toContain('Agregar recargo')
+    expect(html).toContain('lleva un vuelo internacional')
+    expect(html).not.toContain('sin poder confirmarlo')
+  })
+
+  it('un destino que no se reconoce: se ofrece, y avisa cuál mirar', () => {
+    const html = pintar([vuelo('Bogotá BOG', 'BOQ')], INTERNACIONALES)
+    expect(html).toContain('Agregar recargo')
+    expect(html).toContain('sin poder confirmarlo')
+    expect(html).toContain('BOQ')
+  })
+
+  it('CONTROL · con «todos», el Bogotá – San Andrés sí lo ofrece y sin aviso', () => {
+    const html = pintar([vuelo('Bogotá BOG', 'San Andrés Isla ADZ')])
+    expect(html).toContain('Agregar recargo')
+    expect(html).not.toContain('sin poder confirmarlo')
+  })
+})

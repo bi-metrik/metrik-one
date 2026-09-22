@@ -92,7 +92,7 @@ function itinerarios() {
       // lado decía 3,1% — dos cifras del mismo dinero en la misma fila. Se vio en la
       // captura, no en la prueba.
       costo: 3_175_000, precio: 3_275_000, margenRealPct: (100_000 / 3_275_000) * 100,
-      bloqueo: 'Margen 3,1%, por debajo del piso de 5,0%',
+      bloqueo: 'Margen 3,1%, por debajo del margen mínimo de 5,0%',
       motivoCodigo: null, motivoTexto: null,
     },
   ]
@@ -137,7 +137,7 @@ describe('§2.6.4 · el bloqueo se VE, no solo se rechaza', () => {
     // NO cayó. Se afirma sobre el nodo de texto, quitando primero los atributos.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
     const soloTexto = html.replace(/<[^>]*>/g, ' ')
-    expect(soloTexto).toContain('por debajo del piso')
+    expect(soloTexto).toContain('por debajo del margen mínimo')
     expect(soloTexto).toContain('3,1%')
     expect(soloTexto).toContain('5,0%')
   })

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import {
+  aQuienLeCorresponde,
   estadoDelRecargo,
   lineaDeRecargo,
   politicaRecargoDeLinea,
@@ -41,6 +42,7 @@ describe('dónde vive el valor por defecto', () => {
       etiqueta: 'Recargo de emisión',
       valor: 100_000,
       aplicaA: ['vuelo_detalle'],
+      vuelos: 'todos',
     })
   })
 
@@ -100,7 +102,7 @@ describe('el estado que la pantalla muestra', () => {
 
   it('falta: hay vuelo y no está puesto', () => {
     expect(estadoDelRecargo([item()], politica)).toEqual({
-      estado: 'falta', valor: 100_000, etiqueta: 'Recargo de emisión',
+      estado: 'falta', valor: 100_000, etiqueta: 'Recargo de emisión', dudosos: [],
     })
   })
 
@@ -208,5 +210,85 @@ describe('el recargo llega al PDF, y una sola vez', () => {
       { id: 'r2', grupo: null, orden: 2 },
     ]
     expect(ids(sinGrupo)).toEqual(['r1', 'r2'])
+  })
+})
+
+describe('solo para vuelos internacionales', () => {
+  /** Un vuelo con su lectura de pantallazo, como la deja `tarifa_pax`. */
+  const vuelo = (id: string, nombre: string, origen: string | null, destino: string | null) =>
+    item({
+      id,
+      nombre,
+      tarifa_pax: {
+        casillas: {
+          grupo_completo: {
+            moneda: 'COP',
+            total: 1,
+            campos: [
+              ...(origen ? [{ label: 'Origen', valor: origen }] : []),
+              ...(destino ? [{ label: 'Destino', valor: destino }] : []),
+            ],
+          },
+        },
+      },
+    })
+
+  const soloInternacionales = politicaRecargoDeLinea({
+    recargo: { ...CONFIG.recargo, vuelos: 'internacionales' },
+  })
+
+  it('lee la opción de la línea; sin ella rige «todos», lo de antes', () => {
+    expect(soloInternacionales.vuelos).toBe('internacionales')
+    expect(politicaRecargoDeLinea(CONFIG).vuelos).toBe('todos')
+    expect(politicaRecargoDeLinea({ recargo: { ...CONFIG.recargo, vuelos: 'algunos' } }).vuelos).toBe('todos')
+  })
+
+  it('Bogotá – San Andrés NO lo lleva', () => {
+    const items = [vuelo('v1', 'Vuelo BOG-ADZ', 'Bogotá BOG', 'San Andrés Isla ADZ')]
+    expect(estadoDelRecargo(items, soloInternacionales)).toEqual({ estado: 'no_aplica' })
+  })
+
+  it('Bogotá – Cancún SÍ lo lleva', () => {
+    const items = [vuelo('v1', 'Vuelo BOG-CUN', 'Bogotá BOG', 'Cancún CUN')]
+    expect(estadoDelRecargo(items, soloInternacionales)).toEqual({
+      estado: 'falta', valor: 100_000, etiqueta: 'Recargo de emisión', dudosos: [],
+    })
+  })
+
+  it('con «todos», el mismo Bogotá – San Andrés sí lo lleva', () => {
+    const items = [vuelo('v1', 'Vuelo BOG-ADZ', 'Bogotá BOG', 'San Andrés Isla ADZ')]
+    expect(estadoDelRecargo(items, politicaRecargoDeLinea(CONFIG)).estado).toBe('falta')
+  })
+
+  it('un nacional y un internacional en la misma cotización: lo lleva', () => {
+    const items = [
+      vuelo('v1', 'Vuelo 1', 'Bogotá BOG', 'San Andrés Isla ADZ'),
+      vuelo('v2', 'Vuelo 2', 'San Andrés Isla ADZ', 'Panamá PTY'),
+    ]
+    expect(recargoCorresponde(items, soloInternacionales)).toBe(true)
+  })
+
+  it('un lugar que no se reconoce: lo ofrece y dice cuál vuelo mirar', () => {
+    const items = [vuelo('v1', 'Vuelo BOG-BOQ', 'Bogotá BOG', 'BOQ')]
+    expect(aQuienLeCorresponde(items, soloInternacionales)).toEqual({
+      corresponde: true,
+      dudosos: ['Vuelo BOG-BOQ (BOQ)'],
+    })
+  })
+
+  it('un vuelo escrito a mano, sin lectura: lo ofrece y avisa que no sabe de dónde a dónde', () => {
+    const items = [item({ id: 'v1', nombre: 'Tiquete Avianca' })]
+    expect(aQuienLeCorresponde(items, soloInternacionales)).toEqual({
+      corresponde: true,
+      dudosos: ['Tiquete Avianca (sin origen, sin destino)'],
+    })
+  })
+
+  it('un recargo ya puesto en una cotización solo nacional no dispara ningún aviso', () => {
+    const items = [
+      vuelo('v1', 'Vuelo BOG-ADZ', 'Bogotá BOG', 'San Andrés Isla ADZ'),
+      item({ id: 'r', nombre: 'Recargo de emisión', grupo: null, precio_venta: 100_000 }),
+    ]
+    expect(estadoDelRecargo(items, soloInternacionales)).toEqual({ estado: 'no_aplica' })
   })
 })
