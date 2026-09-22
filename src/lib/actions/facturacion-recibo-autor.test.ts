@@ -65,7 +65,17 @@ vi.mock('@/lib/supabase/server', () => ({
         maybeSingle: async () => {
           if (tabla === 'staff') return { data: staff[id ?? ''] ?? null, error: null }
           if (tabla === 'profiles') return { data: profiles[id ?? ''] ?? null, error: null }
-          if (tabla === 'lineas_negocio') return { data: { config_extra: {} }, error: null }
+          if (tabla === 'lineas_negocio') {
+            return {
+              data: { config_extra: { siigo: { recibo_por_concepto: {
+                honorario: { document_id: 4594, concepto: 'Honorarios de asesoría', tipo: 'abono' },
+                pasante: { document_id: 33546, concepto: 'Recaudo pago certificación UPME' },
+              } } } },
+              error: null,
+            }
+          }
+          // El pago trae tarifa UPME: es lo único que Tesorería emite (brief 2026-09-22).
+          if (tabla === 'v_cobro_valor') return { data: { a_tarifa: 550035 }, error: null }
           return { data: null, error: null }
         },
         single: async () => ({ data: { linea_id: 'lin-1' }, error: null }),

@@ -24,6 +24,10 @@
  * honorario: se abona el día que se facture (`abonos-factura.ts`). La regla y sus casos
  * viven en `./abono`.
  *
+ * Desde el brief del 2026-09-22 («Tesorería solo emite recibos de la tarifa UPME») el
+ * abono es AUTOMÁTICO e invisible: sale solo por `abonos-factura.ts`, no genera PDF ni
+ * aviso al cliente, y Tesorería ya no puede pedirlo (su botón emite `['pasante']`).
+ *
  * ── Cuelga del COBRO, no del negocio ────────────────────────────────────────
  *
  * La marca vive en `cobros.siigo_recibo` y la idempotencia contra Siigo va por
@@ -260,6 +264,7 @@ export async function recibosDelClienteEnSiigo(
 
 /**
  * Emite el recibo de caja de UN COBRO, renderiza su PDF, lo archiva y avisa al cliente.
+ * El abono a la factura es la excepción: se emite, pero sin PDF ni aviso (paso 6).
  *
  * El valor sale del cobro. `valorPagado` lo pisa solo cuando quien emite desde Tesorería
  * lo corrige a mano, que sigue siendo un camino válido: **los casos del cargue masivo no
@@ -292,9 +297,10 @@ export async function emitirReciboDeCobro(
     /** `lineas_negocio.config_extra.siigo.recibo_por_concepto`. Ausente = como hoy. */
     porConcepto?: ConfigReciboPorConcepto | null
     /**
-     * Emitir SOLO estos componentes. Lo usa el abono al facturar (`abonos-factura.ts`):
-     * al emitir la factura se abonan los honorarios de los pagos anteriores, y la tarifa
-     * de esos pagos no es asunto de ese momento.
+     * Emitir SOLO estos componentes. Desde el brief del 2026-09-22 cada documento tiene
+     * un solo camino: el abono del honorario sale solo por `abonos-factura.ts`
+     * (`['honorario']`, automático) y el recibo de la tarifa UPME por Tesorería o por el
+     * recibo automático (`['pasante']`). Lo que no se pide ni se planea.
      */
     soloComponentes?: readonly ComponenteRecibo[]
   } = {},
@@ -501,8 +507,9 @@ export async function emitirReciboDeCobro(
       let motivoFechaDistinta: string | null = null
       const abono = comp.abono ?? null
 
-      // El abono lo dice en su propia observación: el cliente lee el PDF, y "Honorarios
-      // de asesoría" a secas no le dice que ese pago ya quedó cruzado con su factura.
+      // El abono lo dice en su propia observación: quien lo lea en Siigo tiene que saber
+      // que ese pago ya quedó cruzado con su factura, y "Honorarios de asesoría" a secas
+      // no lo dice.
       const concepto = abono ? `${comp.concepto} · abono a la factura ${abono.factura.numero}` : comp.concepto
 
       const armar = (fecha: string): { payload: BorradorRecibo | BorradorAbono; faltantes: string[] } => abono
@@ -578,10 +585,17 @@ export async function emitirReciboDeCobro(
       // ── 6. El PDF, que Siigo no da ──
       // De aquí en adelante NADA convierte la emisión en un fallo: el recibo ya está
       // asentado y consumió numeración.
+      //
+      // ⚠️ El ABONO no lleva PDF (regla 5 del brief del 2026-09-22, «Tesorería solo emite
+      // recibos de la tarifa UPME»). Es un asiento interno que cierra la cuenta por cobrar:
+      // no se archiva en el bloque del recibo, no entra en `data.recibos` y por eso el
+      // correo «recibimos tu pago» —que se arma de esa lista— nombra solo el RC-3. Un
+      // cliente que recibiera el PDF de un abono estaría leyendo un documento que ONE
+      // produce solo, sin que nadie lo haya mirado.
       let archivoUrl: string | null = null
       let driveFileId: string | null = null
       let bloqueConfigId: string | null = null
-      if (comp.bloqueSlug) {
+      if (comp.bloqueSlug && !abono) {
         try {
           const pdf = await renderReciboCaja('soena', {
             numero,
@@ -616,7 +630,6 @@ export async function emitirReciboDeCobro(
                 // la config reescribiría lo que dice un documento ya emitido.
                 concepto,
                 ...(comp.componente ? { componente: comp.componente } : {}),
-                ...(abono ? { tipo: 'abono', factura: abono.factura.numero } : {}),
               },
             },
             'emitido_en_siigo',
@@ -709,7 +722,8 @@ export async function emitirReciboDeCobro(
       if (errAviso) console.error('[siigo] recibo archivado pero SIN avisar al cliente:', errAviso.message)
     }
 
-    const sinBloque = preparados.every(c => !c.bloqueSlug)
+    // El abono no se archiva (ver el paso 6): no cuenta como PDF que faltó.
+    const sinBloque = preparados.every(c => !c.bloqueSlug || c.abono)
     return {
       ok: true,
       numero: emitidos[0].numero,
@@ -966,7 +980,12 @@ async function planParaEsteCobro(
   cobroId: string,
   cobro: { monto: number | null; tipo_cobro: string | null; siigo_recibo: unknown },
   valorPagado: number,
-  opciones: { concepto?: string; bloqueReciboSlug?: string; valorPagado?: number },
+  opciones: {
+    concepto?: string
+    bloqueReciboSlug?: string
+    valorPagado?: number
+    soloComponentes?: readonly ComponenteRecibo[]
+  },
   porConcepto: ConfigReciboPorConcepto | null,
 ): Promise<{ ok: true; componentes: ComponenteAEmitir[] } | { ok: false; error: ResultadoRecibo }> {
   if (!porConcepto) {
@@ -1020,10 +1039,21 @@ async function planParaEsteCobro(
     .eq('cobro_id', cobroId)
     .maybeSingle()
 
-  const reparto = repartoDeCobro(filaRaw as FilaReparto | null, {
+  const repartoCompleto = repartoDeCobro(filaRaw as FilaReparto | null, {
     monto: valorPagado,
     tipo_cobro: cobro.tipo_cobro,
   })
+  // Lo que no se pidió no entra al plan, ni siquiera para exigirle su configuración: el
+  // recibo de la tarifa (Tesorería) no puede quedar frenado porque el honorario de la
+  // línea no esté bien declarado, ni el abono (automático) por la tarifa. Se deja en cero
+  // y `planDeEmision` lo salta como a cualquier bolsa vacía.
+  const solo = opciones.soloComponentes ? new Set<ComponenteRecibo>(opciones.soloComponentes) : null
+  const reparto = repartoCompleto && solo
+    ? {
+        honorario: solo.has('honorario') ? repartoCompleto.honorario : 0,
+        pasante: solo.has('pasante') ? repartoCompleto.pasante : 0,
+      }
+    : repartoCompleto
   if (!reparto) {
     return {
       ok: false,

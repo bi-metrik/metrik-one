@@ -1307,36 +1307,46 @@ export type ResultadoRecibo =
       numero: string
       valor: number
       archivada: boolean
-      /**
-       * Todos los recibos que la emisión produjo.
-       *
-       * Un pago mixto sale con DOS (honorario y plata de terceros), así que el mensaje
-       * al usuario tiene que nombrarlos: decir solo el primero le esconde el segundo.
-       */
+      /** Los recibos que la emisión produjo. Desde el 2026-09-22 es uno: el de la tarifa. */
       recibos: Array<{ numero: string; valor: number }>
-      /**
-       * Lo que NO salió con este pago y por qué, en una frase: el honorario que espera la
-       * factura, o el abono que quedó para Tesorería. Vacío en el caso normal.
-       */
-      notas: string[]
     }
   | { ok: false; error: string; duplicados?: Array<{ numero: string; fecha: string; valor: number }> }
 
 /**
- * Emite el recibo de caja del recaudo de la tarifa UPME.
+ * Por qué Tesorería no emite nada por un pago sin tarifa UPME.
  *
- * ⚠️ **El valor lo decide quien emite, no el sistema.** Puede venir del comprobante
- * extraído, pero los casos que entraron por el cargue masivo NO tienen ese comprobante
- * — nacieron antes de que existiera el punto de control — y son la mayoría: medido el
- * 2026-08-12, de 171 casos con el bloque solo **18** traen el valor. Por eso la captura
- * a mano es el camino frecuente y no una excepción.
+ * ⚠️ No se exporta: este archivo es `'use server'`, y exportar una constante anula TODOS
+ * sus exports en el build (gotcha del 2026-08-06).
+ */
+const MENSAJE_SIN_TARIFA_UPME =
+  'Este pago no trae tarifa UPME: no lleva recibo de caja. Su honorario se abona solo a la factura del negocio.'
+
+/**
+ * Emite el recibo de caja del recaudo de la tarifa UPME (RC-3). Es lo ÚNICO que emite.
  *
- * Cuando `valorPagado` no llega, se usa el del comprobante; si tampoco está, se rechaza
- * en vez de emitir un recibo en cero (que consumiría numeración sin documentar nada).
+ * Brief del 2026-09-22 (Mauricio): «no nos debería permitir generar recibos de caja
+ * diferentes a la tarifa UPME». Por eso esta acción —el botón de Tesorería › control de
+ * recibos— pide a la emisión SOLO el componente `pasante`, y rechaza antes de tocar Siigo:
+ *
+ *   - una línea que no declara `recibo_por_concepto.pasante`: sin él la emisión caería al
+ *     recibo por el TOTAL con el comprobante del workspace, que en SOENA es el RC-1 (4594)
+ *     del honorario. Sería un RC-1 a mano por la puerta de atrás;
+ *   - un pago sin porción UPME (`a_tarifa = 0` en `v_cobro_valor`): no tiene nada que
+ *     emitir, y su honorario se abona solo a la factura (`abonos-factura.ts`);
+ *   - un pago cuyo reparto no se conoce: no se sabe cuánto es tarifa, y adivinarlo es
+ *     emitir un documento contable con un valor inventado.
+ *
+ * No acepta un valor escrito a mano: el recibo acusa la porción UPME que sale del reparto
+ * del pago. Si el soporte dice otra cosa, lo que está mal es el monto del pago y se
+ * corrige ahí (la emisión por concepto ya rechazaba cualquier otra cifra).
+ *
+ * ⚠️ No hay otra vía de servidor que emita un RC-1 de honorario a pedido de una persona:
+ * el abono sale solo, sin botón (`abonarAlRegistrarPago`, al facturar y en el lote del
+ * rezago, que es un script y no una server action).
  */
 export async function emitirReciboDeNegocio(
   negocioId: string,
-  opciones?: { valorPagado?: number; justificacionDuplicado?: string; cobroId?: string },
+  opciones?: { justificacionDuplicado?: string; cobroId?: string },
 ): Promise<ResultadoRecibo> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { ok: false, error: ctx.error }
@@ -1358,11 +1368,8 @@ export async function emitirReciboDeNegocio(
   // reciente: es el que acaba de entrar y el que la persona está mirando. Si el negocio
   // no tiene ningún cobro sin recibo, no hay plata nueva que acusar.
   //
-  // ⚠️ Este camino solo ve los cobros **sin ninguna marca**. Un cobro mixto al que le
-  // falta UN componente ya tiene marca, así que no lo encuentra: ese se reintenta desde
-  // el panel de recibos, que siempre pasa `cobroId` (y que lo muestra pendiente, ver
-  // `recibos-control-actions.ts`). Resolverlo aquí obligaría a leer el reparto y la
-  // config de la línea de todos los cobros del negocio para elegir uno.
+  // ⚠️ Este camino solo ve los cobros **sin ninguna marca**. El panel de recibos siempre
+  // pasa `cobroId`.
   let cobroId = opciones?.cobroId
   if (!cobroId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1390,29 +1397,48 @@ export async function emitirReciboDeNegocio(
   const { data: negLinea } = await (svc as any)
     .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).single()
   let bloqueReciboSlug: string | undefined
-  let concepto: string | undefined
   let porConcepto: ConfigReciboPorConcepto | null = null
   if (negLinea?.linea_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: linea } = await (svc as any)
       .from('lineas_negocio').select('config_extra').eq('id', negLinea.linea_id).maybeSingle()
     const cfgSiigo = ((linea?.config_extra ?? {}) as Record<string, unknown>).siigo as
-      { bloque_recibo_slug?: string; recibo_concepto?: string } | undefined
+      { bloque_recibo_slug?: string } | undefined
     bloqueReciboSlug = cfgSiigo?.bloque_recibo_slug
-    concepto = cfgSiigo?.recibo_concepto
-    // Ausente = un recibo por el total, como siempre.
     porConcepto = leerReciboPorConcepto(cfgSiigo)
+  }
+
+  if (!porConcepto?.pasante) {
+    return {
+      ok: false,
+      error: 'La línea de este negocio no declara el recibo de la tarifa UPME '
+        + '(recibo_por_concepto.pasante). Desde Tesorería solo se emite ese recibo.',
+    }
+  }
+
+  // ── ¿Este pago trae tarifa UPME? ──
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: fila } = await (svc as any)
+    .from('v_cobro_valor').select('a_tarifa').eq('cobro_id', cobroId).maybeSingle()
+  if (!fila) {
+    return {
+      ok: false,
+      error: 'No se sabe cuánto de este pago es tarifa UPME: el pago no tiene reparto. Revisa su monto y su negocio.',
+    }
+  }
+  if (!(Number((fila as { a_tarifa?: unknown }).a_tarifa ?? 0) > 0)) {
+    return { ok: false, error: MENSAJE_SIN_TARIFA_UPME }
   }
 
   const r = await emitirReciboDeCobro(workspaceId, cobroId, nombre, {
     bloqueReciboSlug,
-    concepto,
     porConcepto,
+    // ⚠️ Regla 1 del brief: el botón de Tesorería emite SOLO el RC-3. El honorario no
+    // sale por aquí ni como anticipo ni como abono.
+    soloComponentes: ['pasante'],
     justificacionDuplicado: opciones?.justificacionDuplicado,
-    // El valor capturado gana sobre el del cobro: quien emite desde Tesorería está
-    // mirando el soporte y el sistema no.
-    valorPagado: opciones?.valorPagado,
-    // Emitido a mano por una persona que decidió hacerlo: el cliente se entera igual.
+    // Emitido por una persona que decidió hacerlo: el cliente recibe el «recibimos tu
+    // pago» con este RC-3.
     avisarAlCliente: true,
   })
 
@@ -1424,19 +1450,13 @@ export async function emitirReciboDeNegocio(
         duplicados: r.existentes,
       }
     }
-    // Un «a mano» se escribió en el cobro: la lista tiene que refrescarse para mostrarlo.
-    if (r.motivo === 'abono_a_mano') {
-      revalidatePath(`/negocios/${negocioId}`)
-      revalidatePath('/conciliacion')
-    }
     const mensajes: Record<string, string> = {
-      ya_emitido: r.motivo === 'ya_emitido' ? `Este pago ya tiene el recibo ${r.numero}.` : '',
+      ya_emitido: r.motivo === 'ya_emitido'
+        ? (r.numero ? `Este pago ya tiene el recibo ${r.numero}.` : 'La tarifa UPME de este pago ya tiene su recibo.')
+        : '',
       sin_valor: 'El valor tiene que ser mayor que cero.',
       anulado: 'Ese pago está anulado: no se le puede emitir recibo.',
       faltan_datos: r.motivo === 'faltan_datos' ? `Faltan datos: ${r.faltantes.join(', ')}.` : '',
-      espera_factura: 'El honorario de este pago se abona a la factura, y el negocio todavía no tiene. '
-        + 'Sale solo el día que se facture.',
-      abono_a_mano: r.motivo === 'abono_a_mano' ? r.a_mano.map(m => m.detalle).join(' ') : '',
       error: r.motivo === 'error' ? r.mensaje : '',
     }
     return { ok: false, error: mensajes[r.motivo] || 'No se pudo emitir el recibo.' }
@@ -1450,11 +1470,5 @@ export async function emitirReciboDeNegocio(
     valor: r.valor,
     archivada: r.archivada,
     recibos: r.recibos.map(x => ({ numero: x.numero, valor: x.valor })),
-    notas: [
-      ...(r.honorario_espera_factura
-        ? ['El honorario se abona a la factura cuando se emita: el negocio todavía no tiene.']
-        : []),
-      ...(r.a_mano ?? []).map(m => m.detalle),
-    ],
   }
 }

@@ -103,7 +103,7 @@ vi.mock('./archivar-documento', () => ({
 }))
 
 vi.mock('./abonos-factura', () => ({
-  abonarPagosPreviosALaFactura: async (_ws: string, negocio: string) => {
+  abonarPagosDelNegocio: async (_ws: string, negocio: string) => {
     abonosPedidos.push({ negocio, marcaAlLlamar: fila.metadata.siigo_factura ?? null })
     return { emitidos: [{ cobro_id: 'cob-1', numero: 'RC-1-90', valor: 425_000 }], a_mano: [], fallidos: [] }
   },

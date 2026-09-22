@@ -37,6 +37,20 @@
  * declara se comporta exactamente como antes**, y ninguna lo declara hoy.
  *
  * Un cobro anulado no aparece: no documenta plata recibida.
+ *
+ * ── Desde el 2026-09-22 el recibo es SOLO el de la tarifa UPME ──────────────
+ *
+ * Brief de Mauricio («no nos debería permitir generar recibos de caja diferentes a la
+ * tarifa UPME»). En una línea que parte sus recibos por concepto:
+ *
+ *  - lo que se espera de un pago es SOLO su RC-3 (`pasante`). El honorario se abona solo a
+ *    la factura (`abonos-factura.ts`) y ese abono no es un «recibo» del panel: no se lista,
+ *    no cuenta para el estado y no tiene botón;
+ *  - un pago SIN porción UPME (`a_tarifa = 0`) no aparece: no tiene nada que emitir. Solo
+ *    se lista si ya tiene un recibo de caja de antes (un anticipo viejo, una marca por el
+ *    total), para que ese documento siga a la vista;
+ *  - lo que el abono automático le dejó a Tesorería (retención, factura saldada o con
+ *    cuotas, excedente…) se muestra aparte, en `abonos_a_mano`, como aviso y sin botón.
  */
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -46,16 +60,16 @@ import { traerTodo } from '@/lib/supabase/paginar'
 import {
   abonosAManoDelCobro,
   componentesConValor,
-  hayReciboPorElTotal,
   leerReciboPorConcepto,
-  primerRecibo,
   reciboCompleto,
   recibosDelCobro,
   repartoDeCobro,
   type ComponenteRecibo,
+  type ConfigReciboPorConcepto,
   type FilaReparto,
+  type MarcaRecibo,
 } from '@/lib/siigo/recibo-componentes'
-import { ETIQUETA_ABONO_A_MANO, esMotivoAbonoAMano, retencionDelCobro } from '@/lib/siigo/abono'
+import { ETIQUETA_ABONO_A_MANO, esMotivoAbonoAMano } from '@/lib/siigo/abono'
 
 export type EstadoRecibo = 'con_recibo' | 'no_aplica' | 'pendiente'
 
@@ -92,9 +106,13 @@ export interface PagoConRecibo {
     numero: string
     url: string | null
     componente: ComponenteRecibo | null
-    /** Número de la factura a la que se abonó. Solo en los abonos (`DebtPayment`). */
-    abono_de?: string | null
   }>
+  /**
+   * La porción de tarifa UPME del pago (`a_tarifa`): es lo que acusa el recibo que se
+   * emite desde aquí, y el valor que muestra el formulario. `null` cuando la línea no
+   * parte sus recibos por concepto o el pago no tiene reparto.
+   */
+  valor_upme: number | null
   /**
    * Qué le falta por acusar a un cobro que YA tiene algún recibo.
    *
@@ -139,14 +157,42 @@ export interface PagoConRecibo {
  */
 export interface ControlRecibos {
   pagos: PagoConRecibo[]
+  /** Lo que el abono automático le dejó a Tesorería. Aviso, sin botón. */
+  abonos_a_mano: AbonoParaTesoreria[]
   totales: {
     pendientes: number
     con_recibo: number
     no_aplica: number
+    /** Lo que falta por acusar: la porción UPME de cada pendiente, no el pago entero. */
     valor_pendiente: number
     /** Pendientes que se pueden emitir hoy: los que no tienen nada que los frene. */
     emitibles: number
+    abonos_a_mano: number
   }
+}
+
+/**
+ * Un honorario que ONE no pudo abonar a la factura y que cruza Tesorería en Siigo.
+ *
+ * Regla 7 del brief del 2026-09-22: se muestra como aviso para quien lleva la tesorería,
+ * SIN botón de emitir. No hay un botón posible: cada motivo es algo que ONE no decide (a
+ * qué cuota abonar, cómo descontar una retención, qué hacer con plata que ya no cabe en la
+ * factura).
+ */
+export interface AbonoParaTesoreria {
+  cobro_id: string
+  negocio_id: string
+  negocio_codigo: string | null
+  cliente: string | null
+  fecha: string | null
+  /** El pago completo, para reconocerlo. */
+  monto: number
+  /** El honorario que quedó sin abonar. */
+  valor: number
+  /** La razón corta, lista para leer. */
+  motivo: string
+  /** La explicación larga que dejó la emisión, si la hay. */
+  detalle: string | null
 }
 
 /** Mismo criterio de área que facturación: el recaudo es del área financiera. */
@@ -192,15 +238,13 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     /** Objeto (forma vieja) o lista: se lee con los helpers, nunca de frente. */
     siigo_recibo: unknown
     recibo_no_aplica: { motivo?: string } | null
-    /** Con retención, el abono del honorario no lo hace ONE: lo cruza Tesorería. */
-    retencion: number | string | null
   }
 
   const cobros = await traerTodo<FilaCobro>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('cobros')
-      .select('id, negocio_id, monto, fecha, notas, tipo_cobro, siigo_recibo, recibo_no_aplica, retencion')
+      .select('id, negocio_id, monto, fecha, notas, tipo_cobro, siigo_recibo, recibo_no_aplica')
       .eq('workspace_id', workspaceId)
       .is('anulado_at', null)
       .not('fecha', 'is', null)
@@ -211,7 +255,11 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
 
   const negocioIds = [...new Set(cobros.map(c => c.negocio_id).filter((v): v is string => !!v))]
   if (negocioIds.length === 0) {
-    return { pagos: [], totales: { pendientes: 0, con_recibo: 0, no_aplica: 0, valor_pendiente: 0, emitibles: 0 } }
+    return {
+      pagos: [],
+      abonos_a_mano: [],
+      totales: { pendientes: 0, con_recibo: 0, no_aplica: 0, valor_pendiente: 0, emitibles: 0, abonos_a_mano: 0 },
+    }
   }
 
   type FilaNegocio = {
@@ -238,9 +286,8 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
 
   // ── Qué componentes espera cada cobro ──
   //
-  // Solo hace falta para las líneas que declaran `recibo_por_concepto`. Hoy no lo
-  // declara ninguna, así que las dos lecturas de abajo se saltan enteras y el panel
-  // cuesta exactamente lo mismo que antes.
+  // Solo hace falta para las líneas que declaran `recibo_por_concepto` (la de SOENA lo
+  // declara desde el 2026-09-19). Sin ninguna, las dos lecturas de abajo se saltan.
   const lineaIds = [...new Set(negocios.map(n => n.linea_id).filter((v): v is string => !!v))]
   const lineas = lineaIds.length === 0 ? [] : await traerTodo<{ id: string; config_extra: Record<string, unknown> | null }>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -270,62 +317,72 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     for (const f of filas) repartoPorCobro.set(f.cobro_id, f)
   }
 
-  /**
-   * Los componentes que ESTE cobro tiene que acusar.
-   *
-   * Vacío significa "basta un recibo cualquiera", que es el criterio de siempre y el
-   * que aplica a toda línea sin `recibo_por_concepto`.
-   */
-  const esperadosDe = (c: FilaCobro): ComponenteRecibo[] => {
+  const cfgDe = (c: { negocio_id: string | null }): ConfigReciboPorConcepto | null => {
     const lineaId = c.negocio_id ? porId.get(c.negocio_id)?.linea_id : null
-    const cfg = lineaId ? porConceptoPorLinea.get(lineaId) : null
-    if (!cfg) return []
-    const reparto = repartoDeCobro(repartoPorCobro.get(c.id) ?? null, {
-      monto: Number(c.monto ?? 0),
-      tipo_cobro: c.tipo_cobro,
-    })
-    // Sin reparto no se sabe qué falta. Se cae al criterio de siempre en vez de
-    // declarar pendiente un cobro que quizá ya está completo.
-    return componentesConValor(reparto).filter(comp => cfg[comp] != null)
+    return (lineaId ? porConceptoPorLinea.get(lineaId) : null) ?? null
   }
 
   /**
-   * Qué dice el panel del honorario en una línea que lo ABONA a la factura.
+   * Cómo se ve cada cobro en el panel, o `null` si no se ve.
    *
-   * Tres casos en que el botón NO resolvería el honorario, y el panel lo dice antes de
-   * que alguien lo oprima: el negocio todavía no tiene factura (se abona al facturar),
-   * el pago trae retención (lo cruza Tesorería), o una emisión anterior ya lo dejó «a
-   * mano» con su razón. Si el honorario es lo ÚNICO que falta es un faltante (el botón
-   * no haría nada); si falta también la tarifa es solo un aviso, porque el botón sí
-   * emite la tarifa y el cobro no puede quedarse sin su RC-3 por culpa del honorario.
+   * En una línea por concepto lo único que se espera de un pago es su RC-3: el honorario
+   * se abona solo y ese abono no es un recibo del panel (`marcasCaja` lo excluye). Un pago
+   * sin porción UPME no tiene nada que emitir y no aparece, salvo que ya tenga un recibo
+   * de caja de antes. Una línea sin `recibo_por_concepto` conserva el criterio de siempre:
+   * basta un recibo cualquiera.
    */
-  const delAbono = (
-    c: FilaCobro,
-    esperados: ComponenteRecibo[],
-    facturado: boolean,
-  ): { faltantes: string[]; avisos: string[] } => {
-    const out = { faltantes: [] as string[], avisos: [] as string[] }
-    const lineaId = c.negocio_id ? porId.get(c.negocio_id)?.linea_id : null
-    const cfg = lineaId ? porConceptoPorLinea.get(lineaId) : null
-    if (cfg?.honorario?.tipo !== 'abono' || hayReciboPorElTotal(c.siigo_recibo)) return out
-
-    const emitidos = new Set(recibosDelCobro(c.siigo_recibo).map(m => m.componente))
-    const faltan = esperados.filter(comp => !emitidos.has(comp))
-    if (!faltan.includes('honorario')) return out
-    const destino = faltan.length === 1 ? out.faltantes : out.avisos
-
-    const aMano = abonosAManoDelCobro(c.siigo_recibo).find(m => m.componente === 'honorario')
-    if (aMano) {
-      const motivo = aMano.abono_a_mano.motivo
-      destino.push(`el abono a mano en Siigo: ${esMotivoAbonoAMano(motivo) ? ETIQUETA_ABONO_A_MANO[motivo] : aMano.abono_a_mano.detalle}`)
-    } else if (!facturado) {
-      destino.push(faltan.length === 1
-        ? 'la factura del negocio: el honorario se abona a ella'
-        : 'el honorario se abona a la factura cuando se emita: ahora sale solo la tarifa')
-    } else if (retencionDelCobro(c.retencion) > 0) {
-      destino.push(`el abono a mano en Siigo: ${ETIQUETA_ABONO_A_MANO.retencion}`)
+  type Clasificado = {
+    c: FilaCobro
+    cfg: ConfigReciboPorConcepto | null
+    esperados: ComponenteRecibo[]
+    /** Los recibos de CAJA del cobro: todo menos los abonos a la factura. */
+    marcasCaja: MarcaRecibo[]
+    /** `null` = no se sabe (línea sin concepto, o sin reparto). */
+    valorUpme: number | null
+    estado: EstadoRecibo
+  }
+  const clasificar = (c: FilaCobro): Clasificado | null => {
+    const cfg = cfgDe(c)
+    const marcasCaja = recibosDelCobro(c.siigo_recibo).filter(m => m.tipo !== 'abono')
+    let esperados: ComponenteRecibo[] = []
+    let valorUpme: number | null = null
+    if (cfg) {
+      const reparto = repartoDeCobro(repartoPorCobro.get(c.id) ?? null, {
+        monto: Number(c.monto ?? 0),
+        tipo_cobro: c.tipo_cobro,
+      })
+      // Sin reparto no se sabe qué falta: se cae al criterio de siempre en vez de
+      // declarar pendiente un cobro que quizá ya está completo.
+      if (reparto) {
+        valorUpme = reparto.pasante
+        esperados = componentesConValor(reparto).filter(comp => comp === 'pasante' && cfg.pasante != null)
+        // Regla 2: un pago de puro honorario no tiene recibo que emitir.
+        if (!(valorUpme > 0) && marcasCaja.length === 0) return null
+      }
     }
-    return out
+    // ⚠️ Un cobro con UN recibo de DOS no es `con_recibo`. Ver el encabezado.
+    const estado: EstadoRecibo = reciboCompleto(marcasCaja, esperados)
+      ? 'con_recibo'
+      : c.recibo_no_aplica
+        ? 'no_aplica'
+        : 'pendiente'
+    return { c, cfg, esperados, marcasCaja, valorUpme, estado }
+  }
+  const clasificados = cobros.map(clasificar).filter((x): x is Clasificado => x != null)
+
+  /**
+   * El aviso del honorario de un pago, si su abono quedó para Tesorería.
+   *
+   * Va en la fila del RC-3 como aviso, no como faltante: el botón emite la tarifa igual, y
+   * el cobro no puede quedarse sin su RC-3 por culpa del honorario.
+   */
+  const avisoDelAbono = (c: FilaCobro): string | null => {
+    const aMano = abonosAManoDelCobro(c.siigo_recibo).find(m => m.componente === 'honorario')
+    if (!aMano) return null
+    const motivo = aMano.abono_a_mano.motivo
+    return `el abono del honorario va a mano en Siigo: ${
+      esMotivoAbonoAMano(motivo) ? ETIQUETA_ABONO_A_MANO[motivo] : aMano.abono_a_mano.detalle
+    }`
   }
 
   const contactoIds = [...new Set(negocios.map(n => n.contacto_id).filter((v): v is string => !!v))]
@@ -361,9 +418,9 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
   // los negocios que hacen falta —los pendientes sin marca—, y no el de todos: en
   // SOENA eso baja la lectura de ~300 negocios a ~17.
   const negociosPendientes = new Set(
-    cobros
-      .filter(c => !reciboCompleto(c.siigo_recibo, esperadosDe(c)) && !c.recibo_no_aplica && c.negocio_id)
-      .map(c => c.negocio_id as string),
+    clasificados
+      .filter(x => x.estado === 'pendiente' && x.c.negocio_id)
+      .map(x => x.c.negocio_id as string),
   )
   const sinMarca = [...negociosPendientes].filter(id => {
     const meta = (porId.get(id)?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
@@ -397,7 +454,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       .map(b => b.negocio_id),
   )
 
-  const pagos: PagoConRecibo[] = cobros.map(c => {
+  const pagos: PagoConRecibo[] = clasificados.map(({ c, cfg, esperados, marcasCaja, valorUpme, estado }) => {
     const neg = c.negocio_id ? porId.get(c.negocio_id) : undefined
     const meta = (neg?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
     const contacto = neg?.contacto_id ? contactoPorId.get(neg.contacto_id) : undefined
@@ -405,21 +462,11 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     // A quién le llega el aviso: lo dice la RPC, no el contacto. Ver `correosDelCliente`.
     const correo = (c.negocio_id ? emailPorNegocio.get(c.negocio_id) : null) ?? null
 
-    const esperados = esperadosDe(c)
-    const marcas = recibosDelCobro(c.siigo_recibo)
-
-    // ⚠️ Un cobro con UN recibo de DOS no es `con_recibo`. Ver el encabezado.
-    const estado: EstadoRecibo = reciboCompleto(c.siigo_recibo, esperados)
-      ? 'con_recibo'
-      : c.recibo_no_aplica
-        ? 'no_aplica'
-        : 'pendiente'
-
     // Lo que falta solo se nombra cuando el cobro ya tiene algún recibo: ahí la emisión
     // quedó a medias y el panel puede decir cuál. Sin ninguno, el pendiente se explica
-    // solo y repetir los dos componentes sería ruido.
-    const emitidos = new Set(marcas.map(m => m.componente).filter(Boolean))
-    const componentesPendientes = estado === 'pendiente' && marcas.length > 0
+    // solo y repetir los componentes sería ruido.
+    const emitidos = new Set(marcasCaja.map(m => m.componente).filter(Boolean))
+    const componentesPendientes = estado === 'pendiente' && marcasCaja.length > 0
       ? esperados.filter(comp => !emitidos.has(comp))
       : []
 
@@ -433,12 +480,13 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
         || (!!c.negocio_id && conIdentificacion.has(c.negocio_id))
       if (!identificado) faltantes.push('RUT del cliente')
 
-      // ── El honorario que se ABONA a la factura ──
-      // Lo que ONE no puede resolver con un clic se dice como faltante, para que el
-      // botón no prometa un recibo que va a volver sin emitir nada.
-      const del = delAbono(c, esperados, !!meta.siigo_factura?.numero)
-      faltantes.push(...del.faltantes)
-      avisos.push(...del.avisos)
+      // El botón emite SOLO el recibo de la tarifa UPME (`emitirReciboDeNegocio`). Lo que
+      // lo haría volver sin emitir se dice aquí, antes de oprimirlo.
+      if (!cfg?.pasante) faltantes.push('el recibo de la tarifa UPME en la configuración de la línea')
+      else if (valorUpme == null) faltantes.push('el reparto del pago (cuánto es tarifa UPME)')
+
+      const delAbono = avisoDelAbono(c)
+      if (delAbono) avisos.push(delAbono)
       // El PDF se archiva DESPUÉS de emitir y su fallo no deshace el recibo, que ya
       // consumió numeración en Siigo. Frenar por esto dejaría plata sin acusar por un
       // problema de archivo.
@@ -456,14 +504,15 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       fecha: c.fecha,
       concepto: c.notas,
       estado,
-      recibo_numero: primerRecibo(c.siigo_recibo)?.numero ?? null,
-      recibo_url: primerRecibo(c.siigo_recibo)?.archivo_url ?? null,
-      recibos: marcas.map(m => ({
+      recibo_numero: marcasCaja[0]?.numero ?? null,
+      recibo_url: marcasCaja[0]?.archivo_url ?? null,
+      // Regla 4: el abono a la factura no aparece como recibo.
+      recibos: marcasCaja.map(m => ({
         numero: m.numero,
         url: m.archivo_url ?? null,
         componente: m.componente ?? null,
-        abono_de: m.tipo === 'abono' ? m.factura?.numero ?? null : null,
       })),
+      valor_upme: valorUpme,
       componentes_pendientes: componentesPendientes,
       no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? null,
       facturado: !!meta.siigo_factura?.numero,
@@ -475,17 +524,82 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
   // Lo más reciente primero: es donde está el trabajo que todavía se puede resolver.
   pagos.sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''))
 
+  const abonosAMano = abonosParaTesoreria(cobros, porId, contactoPorId, cfgDe)
+
   const pendientes = pagos.filter(p => p.estado === 'pendiente')
   return {
     pagos,
+    abonos_a_mano: abonosAMano,
     totales: {
       pendientes: pendientes.length,
       con_recibo: pagos.filter(p => p.estado === 'con_recibo').length,
       no_aplica: pagos.filter(p => p.estado === 'no_aplica').length,
-      valor_pendiente: pendientes.reduce((s, p) => s + p.monto, 0),
+      valor_pendiente: pendientes.reduce((s, p) => s + (p.valor_upme ?? p.monto), 0),
       emitibles: pendientes.filter(p => p.faltantes.length === 0).length,
+      abonos_a_mano: abonosAMano.length,
     },
   }
+}
+
+const fmtCOP = (v: number): string =>
+  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+
+/**
+ * Los honorarios que el abono automático le dejó a Tesorería (regla 7 del brief del
+ * 2026-09-22): cada «a mano» guardado en el cobro, y cada abono que salió pero no cupo
+ * entero en la factura (el excedente).
+ *
+ * Sale de lo que la emisión DEJÓ ESCRITO, no de una reconstrucción: un pago que todavía no
+ * pasó por el abono automático (el rezago) no está aquí, porque no se sabe qué le va a
+ * pasar hasta intentarlo.
+ */
+function abonosParaTesoreria(
+  cobros: Array<{
+    id: string; negocio_id: string | null; monto: number | null; fecha: string | null; siigo_recibo: unknown
+  }>,
+  porId: Map<string, { codigo: string | null; nombre: string | null; contacto_id: string | null }>,
+  contactoPorId: Map<string, { nombre: string | null }>,
+  cfgDe: (c: { negocio_id: string | null }) => ConfigReciboPorConcepto | null,
+): AbonoParaTesoreria[] {
+  const out: AbonoParaTesoreria[] = []
+  for (const c of cobros) {
+    if (cfgDe(c)?.honorario?.tipo !== 'abono') continue
+    const neg = c.negocio_id ? porId.get(c.negocio_id) : undefined
+    const base = {
+      cobro_id: c.id,
+      negocio_id: c.negocio_id ?? '',
+      negocio_codigo: neg?.codigo ?? null,
+      cliente: (neg?.contacto_id ? contactoPorId.get(neg.contacto_id)?.nombre : null) ?? neg?.nombre ?? null,
+      fecha: c.fecha,
+      monto: Number(c.monto ?? 0),
+    }
+
+    const aMano = abonosAManoDelCobro(c.siigo_recibo).find(m => m.componente === 'honorario')
+    if (aMano) {
+      const motivo = aMano.abono_a_mano.motivo
+      out.push({
+        ...base,
+        valor: Number(aMano.valor ?? 0),
+        motivo: esMotivoAbonoAMano(motivo) ? ETIQUETA_ABONO_A_MANO[motivo] : 'el abono no se pudo hacer solo',
+        detalle: aMano.abono_a_mano.detalle || null,
+      })
+      continue
+    }
+
+    const abono = recibosDelCobro(c.siigo_recibo).find(m => m.tipo === 'abono' && Number(m.sin_abonar ?? 0) > 0)
+    if (abono) {
+      const sobra = Number(abono.sin_abonar)
+      out.push({
+        ...base,
+        valor: sobra,
+        motivo: 'el honorario pasó el saldo de la factura (excedente)',
+        detalle: `Se abonaron ${fmtCOP(Number(abono.valor ?? 0))} a la factura ${abono.factura?.numero ?? ''} `
+          + `y ${fmtCOP(sobra)} no cupieron: es plata de sobrepago.`,
+      })
+    }
+  }
+  out.sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''))
+  return out
 }
 
 /**

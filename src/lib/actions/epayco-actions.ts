@@ -4,7 +4,7 @@ import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { revalidatePath } from 'next/cache'
-import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
+import { alRegistrarCobro } from '@/lib/siigo/recibo-automatico'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
@@ -430,9 +430,10 @@ export async function registrarPagoEpayco(
       .eq('id', negocioBloqueId)
 
     // ── 6. Revalidar y retornar ────────────────────────────────────────────
-    // El recibo de caja de esta plata. Solo si la línea lo declara, y nunca devuelve
+    // Lo que va a Siigo por esta plata: el abono del honorario a la factura (siempre, si
+    // hay factura) y el RC-3 de la tarifa (solo con `recibo_automatico`). Nunca devuelve
     // error: el pago ya quedó registrado y eso es lo que la persona pidió.
-    if (cobroId) await emitirReciboAutomatico(workspaceId, cobroId)
+    if (cobroId) await alRegistrarCobro(workspaceId, cobroId)
 
     // Si este pago dejó el negocio con plata de más, se le avisa a la financiera
     // (opt-in `aviso_sobrepago`). Nunca devuelve error.

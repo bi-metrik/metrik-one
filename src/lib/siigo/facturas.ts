@@ -27,7 +27,7 @@ import { borradorFactura, SUCURSAL_POR_DEFECTO, type BorradorFactura } from './m
 import { resolverConceptoDeNegocio } from './concepto-negocio'
 import { asegurarClienteSiigo, corregirContactoParaFactura, identificacionDelNegocio } from './clientes'
 import { archivarPdfEnBloque } from './archivar-documento'
-import { abonarPagosPreviosALaFactura, type ResultadoAbonosFactura } from './abonos-factura'
+import { abonarPagosDelNegocio, type ResultadoAbonosFactura } from './abonos-factura'
 import { leerFacturaDeUnNegocio } from '@/lib/facturacion/leer-factura-del-negocio'
 import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 // PostgREST corta en 1.000 filas sin avisar, y aquí una fila que falte se lee
@@ -568,7 +568,7 @@ export async function emitirFacturaNegocio(
     // sabría a qué cruzar. Nunca lanza (ver `abonos-factura.ts`): lo que no salga queda
     // pendiente en el control de recibos, y la factura sigue siendo un éxito.
     const abonos: ResultadoAbonosFactura = guardada.ok
-      ? await abonarPagosPreviosALaFactura(workspaceId, negocioId, staffNombre)
+      ? await abonarPagosDelNegocio(workspaceId, negocioId, staffNombre)
       : { emitidos: [], a_mano: [], fallidos: [] }
 
     // Si el caso ya estaba ESPERANDO en su etapa de cierre, la factura que acaba de

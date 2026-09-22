@@ -93,6 +93,19 @@ vi.mock('@/lib/supabase/server', () => ({
 
 import { getControlRecibos } from './recibos-control-actions'
 
+const LINEA_SOENA = {
+  id: 'lin-1',
+  config_extra: {
+    siigo: {
+      recibo_concepto: 'Dinero recibido del cliente',
+      recibo_por_concepto: {
+        honorario: { document_id: 4594, concepto: 'Honorarios de asesoría', tipo: 'abono' },
+        pasante: { document_id: 33546, concepto: 'Recaudo pago certificación UPME' },
+      },
+    },
+  },
+}
+
 beforeEach(() => {
   fallaTabla = null
   selects = {}
@@ -107,9 +120,14 @@ beforeEach(() => {
     metadata: { siigo_cliente: { siigo_id: 'cli-1', identificacion: '1110584384' } },
   }]
   bloquesRut = []
-  // La línea NO declara `recibo_por_concepto`: es el estado de toda la base hoy.
-  lineas = [{ id: 'lin-1', config_extra: { siigo: { recibo_concepto: 'Dinero recibido del cliente' } } }]
-  reparto = []
+  // La línea de SOENA tal como está en producción (leída el 2026-09-22): el honorario se
+  // abona a la factura y la tarifa UPME sale con su RC-3.
+  lineas = [LINEA_SOENA]
+  // Los dos pagos del caso base son de pura tarifa: es el recibo que se emite desde aquí.
+  reparto = [
+    { cobro_id: 'c1', a_tramo1: 0, a_tramo2: 0, a_tarifa: 701_812, excedente: 0 },
+    { cobro_id: 'c2', a_tramo1: 0, a_tramo2: 0, a_tarifa: 637_500, excedente: 0 },
+  ]
   contactos = [{ id: 'ct-1', nombre: 'José Noel', email: 'jose@ejemplo.com' }]
   cobros = [
     {
@@ -319,88 +337,151 @@ describe('getControlRecibos — un pago mixto a medias sigue pendiente', () => {
 })
 
 /**
- * El honorario que se ABONA a la factura (2026-09-22).
+ * Tesorería solo emite recibos de la tarifa UPME (brief del 2026-09-22).
  *
- * El panel no puede ofrecer un botón que vuelva sin emitir nada. Tres casos en que el
- * honorario no lo resuelve un clic: el negocio no tiene factura (se abona al facturar),
- * el pago trae retención (lo cruza Tesorería) o una emisión anterior ya lo dejó «a mano».
+ * El honorario se ABONA solo a la factura (RC-1 `DebtPayment`), sin botón y sin PDF: no es
+ * un «recibo» del panel. Lo único que el panel dice de él es lo que quedó para Tesorería.
+ *
+ * EL CASO QUE IMPORTA: V0513 aparecía en «Sin recibo» con $450.000, y todo era honorario.
+ * No había nada que emitir, y el botón solo podía producir un RC-1 a mano.
  */
-describe('getControlRecibos — el honorario que se abona a la factura', () => {
-  const LINEA_ABONO = {
-    id: 'lin-1',
-    config_extra: {
-      siigo: {
-        recibo_por_concepto: {
-          honorario: { document_id: 4594, concepto: 'Honorarios de asesoría', tipo: 'abono' },
-          pasante: { document_id: 33546, concepto: 'Recaudo pago certificación UPME' },
-        },
-      },
-    },
+describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se abona solo', () => {
+  const fila = (id: string) => getControlRecibos().then(r => r.data!.pagos.find(p => p.cobro_id === id))
+  const conFactura = () => {
+    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
   }
-  const fila = (id: string) => (getControlRecibos().then(r => r.data!.pagos.find(p => p.cobro_id === id)!))
 
   beforeEach(() => {
-    lineas = [LINEA_ABONO]
     reparto = [
       { cobro_id: 'c1', a_tramo1: 0, a_tramo2: 0, a_tarifa: 701_812, excedente: 0 },
-      { cobro_id: 'c2', a_tramo1: 637_500, a_tramo2: 0, a_tarifa: 0, excedente: 0 },
+      // c2 es V0513: todo honorario.
+      { cobro_id: 'c2', a_tramo1: 450_000, a_tramo2: 0, a_tarifa: 0, excedente: 0 },
     ]
     cobros[0].siigo_recibo = null
   })
 
-  it('sin factura, un pago de puro honorario NO es emitible: falta la factura', async () => {
-    const c2 = await fila('c2')
-    expect(c2.estado).toBe('pendiente')
-    expect(c2.faltantes).toEqual(['la factura del negocio: el honorario se abona a ella'])
+  it('un pago de puro honorario NO aparece en «Sin recibo»: no tiene nada que emitir', async () => {
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.map(p => p.cobro_id)).toEqual(['c1'])
+    expect(data!.totales.pendientes).toBe(1)
+    expect(data!.totales.valor_pendiente).toBe(701_812)
   })
 
-  it('sin factura, un pago mixto SÍ es emitible (sale la tarifa), con el aviso del honorario', async () => {
+  it('tampoco con la factura emitida: su honorario se abona solo, sin botón', async () => {
+    conFactura()
+    expect(await fila('c2')).toBeUndefined()
+  })
+
+  it('un pago mixto se emite por su porción UPME, sin aviso sobre el honorario', async () => {
     reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
-    const c1 = await fila('c1')
+    const { data } = await getControlRecibos()
+
+    const c1 = data!.pagos.find(p => p.cobro_id === 'c1')!
+    expect(c1.estado).toBe('pendiente')
+    expect(c1.valor_upme).toBe(383_062)
     expect(c1.faltantes).toEqual([])
-    expect(c1.avisos).toContain('el honorario se abona a la factura cuando se emita: ahora sale solo la tarifa')
+    expect(c1.avisos.some(a => a.includes('honorario'))).toBe(false)
+    // Lo que falta acusar es la tarifa, no el pago entero.
+    expect(data!.totales.valor_pendiente).toBe(383_062)
   })
 
-  it('con factura, el pago de puro honorario se puede emitir', async () => {
-    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
-    const c2 = await fila('c2')
-    expect(c2.faltantes).toEqual([])
+  it('el ABONO no aparece como recibo: un mixto con abono y RC-3 lista solo el RC-3', async () => {
+    reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    cobros[0].siigo_recibo = [
+      { numero: 'RC-1-90', archivo_url: null, componente: 'honorario', tipo: 'abono', factura: { numero: 'FV-2-540', siigo_id: 'x' } },
+      { numero: 'RC-3-12', archivo_url: 'https://drive/rc3', componente: 'pasante' },
+    ]
+    const c1 = (await fila('c1'))!
+
+    expect(c1.estado).toBe('con_recibo')
+    expect(c1.recibos).toEqual([{ numero: 'RC-3-12', url: 'https://drive/rc3', componente: 'pasante' }])
+    expect(c1.recibo_numero).toBe('RC-3-12')
   })
 
-  it('con factura y retención, lo cruza Tesorería: no es emitible', async () => {
-    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
-    cobros[1].retencion = 50_000
-    const c2 = await fila('c2')
-    expect(c2.faltantes).toEqual(['el abono a mano en Siigo: el pago trae retención'])
+  it('con el abono hecho y la tarifa sin recibo, sigue pendiente y ofrece EMITIR (no «completar»)', async () => {
+    reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    cobros[0].siigo_recibo = [
+      { numero: 'RC-1-90', archivo_url: null, componente: 'honorario', tipo: 'abono', factura: { numero: 'FV-2-540', siigo_id: 'x' } },
+    ]
+    const c1 = (await fila('c1'))!
+
+    expect(c1.estado).toBe('pendiente')
+    expect(c1.recibos).toEqual([])
+    expect(c1.componentes_pendientes).toEqual([])
   })
 
-  it('un «a mano» guardado se nombra por su razón, y no cuenta como recibo', async () => {
-    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
+  it('un pago de puro honorario con su abono emitido no aparece en ninguna lista', async () => {
     cobros[1].siigo_recibo = [{
-      componente: 'honorario', abono_a_mano: { motivo: 'factura_saldada', detalle: '…' }, valor: 637_500, at: '', por: null,
-    }]
-    const c2 = await fila('c2')
-    expect(c2.estado).toBe('pendiente')
-    expect(c2.recibos).toEqual([])
-    expect(c2.faltantes).toEqual(['el abono a mano en Siigo: la factura ya no tenía saldo (sobrepago)'])
-  })
-
-  it('un abono emitido dice a qué factura se abonó', async () => {
-    cobros[1].siigo_recibo = [{
-      numero: 'RC-1-90', archivo_url: null, componente: 'honorario', tipo: 'abono',
+      numero: 'RC-1-91', archivo_url: null, componente: 'honorario', tipo: 'abono',
       factura: { numero: 'FV-2-540', siigo_id: 'x' },
     }]
-    const c2 = await fila('c2')
-    expect(c2.estado).toBe('con_recibo')
-    expect(c2.recibos).toEqual([{ numero: 'RC-1-90', url: null, componente: 'honorario', abono_de: 'FV-2-540' }])
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c2')).toBeUndefined()
+    expect(data!.abonos_a_mano).toEqual([])
   })
 
-  it('CONTROL: en una línea sin abono el mismo pago sin factura sí es emitible', async () => {
-    lineas = [{ id: 'lin-1', config_extra: { siigo: { recibo_por_concepto: {
-      honorario: { document_id: 4594, concepto: 'Honorarios de asesoría' },
-    } } } }]
-    const c2 = await fila('c2')
-    expect(c2.faltantes).toEqual([])
+  it('un pago de puro honorario con un recibo VIEJO sigue a la vista, con su documento', async () => {
+    // V0502: el honorario salió como RC-1 de anticipo antes del abono. Ese documento
+    // existe y consumió numeración: no puede desaparecer del panel.
+    cobros[1].siigo_recibo = [{ numero: 'RC-1-80', archivo_url: null, componente: 'honorario' }]
+    const c2 = (await fila('c2'))!
+
+    expect(c2.estado).toBe('con_recibo')
+    expect(c2.recibos.map(r => r.numero)).toEqual(['RC-1-80'])
+  })
+
+  // ── Regla 7: lo que queda «a mano» se avisa, sin botón ──
+
+  it('un «a mano» del honorario va como AVISO en la fila del RC-3, que se sigue pudiendo emitir', async () => {
+    reparto[0] = { cobro_id: 'c1', a_tramo1: 268_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    cobros[0].siigo_recibo = [{
+      componente: 'honorario', abono_a_mano: { motivo: 'retencion', detalle: '…' }, valor: 268_750, at: '', por: null,
+    }]
+    const { data } = await getControlRecibos()
+
+    const c1 = data!.pagos.find(p => p.cobro_id === 'c1')!
+    expect(c1.faltantes).toEqual([])
+    expect(c1.avisos).toContain('el abono del honorario va a mano en Siigo: el pago trae retención')
+    expect(data!.abonos_a_mano).toMatchObject([{ cobro_id: 'c1', valor: 268_750, motivo: 'el pago trae retención' }])
+  })
+
+  it('un pago de puro honorario con «a mano» aparece SOLO en abonos a mano', async () => {
+    conFactura()
+    cobros[1].siigo_recibo = [{
+      componente: 'honorario', abono_a_mano: { motivo: 'factura_saldada', detalle: 'La factura ya no tiene saldo.' },
+      valor: 450_000, at: '', por: null,
+    }]
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c2')).toBeUndefined()
+    expect(data!.abonos_a_mano).toMatchObject([{
+      cobro_id: 'c2', negocio_codigo: 'V0451', valor: 450_000,
+      motivo: 'la factura ya no tenía saldo (sobrepago)', detalle: 'La factura ya no tiene saldo.',
+    }])
+    expect(data!.totales.abonos_a_mano).toBe(1)
+  })
+
+  it('el EXCEDENTE de un abono se avisa: lo que no cupo en la factura', async () => {
+    cobros[1].siigo_recibo = [{
+      numero: 'RC-1-92', archivo_url: null, componente: 'honorario', tipo: 'abono',
+      factura: { numero: 'FV-2-540', siigo_id: 'x' }, valor: 350_000, sin_abonar: 100_000,
+    }]
+    const { data } = await getControlRecibos()
+
+    expect(data!.abonos_a_mano).toMatchObject([{
+      cobro_id: 'c2', valor: 100_000, motivo: 'el honorario pasó el saldo de la factura (excedente)',
+    }])
+  })
+
+  it('sin reparto no se sabe cuánto es tarifa: el botón no se ofrece', async () => {
+    reparto = [{ cobro_id: 'c2', a_tramo1: 450_000, a_tramo2: 0, a_tarifa: 0, excedente: 0 }]
+    const c1 = (await fila('c1'))!
+
+    expect(c1.estado).toBe('pendiente')
+    expect(c1.valor_upme).toBeNull()
+    expect(c1.faltantes).toEqual(['el reparto del pago (cuánto es tarifa UPME)'])
   })
 })
 
@@ -411,6 +492,10 @@ describe('getControlRecibos — el honorario que se abona a la factura', () => {
  * plata de terceros no exista.
  */
 describe('getControlRecibos — sin recibo por concepto nada cambia', () => {
+  beforeEach(() => {
+    lineas = [{ id: 'lin-1', config_extra: { siigo: { recibo_concepto: 'Dinero recibido del cliente' } } }]
+  })
+
   it('no consulta el reparto: ninguna línea lo necesita', async () => {
     await getControlRecibos()
 
@@ -422,6 +507,16 @@ describe('getControlRecibos — sin recibo por concepto nada cambia', () => {
     const { data } = await getControlRecibos()
 
     expect(data!.pagos.find(p => p.cobro_id === 'c1')!.estado).toBe('con_recibo')
+  })
+
+  it('pero desde aquí ya no se emite: el botón solo sabe emitir el recibo de la tarifa UPME', async () => {
+    // Sin `recibo_por_concepto.pasante` la emisión caería al recibo por el TOTAL con el
+    // comprobante del workspace, que en SOENA es el RC-1 del honorario.
+    const { data } = await getControlRecibos()
+
+    const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
+    expect(pendiente.faltantes).toContain('el recibo de la tarifa UPME en la configuración de la línea')
+    expect(data!.totales.emitibles).toBe(0)
   })
 })
 
