@@ -14,6 +14,7 @@
  */
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { nombreDeQuienActua } from '@/lib/activity/nombre-de-quien-actua'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
@@ -1479,15 +1480,15 @@ export async function emitirReciboDeNegocio(
   if (!ctx.ok) return { ok: false, error: ctx.error }
   const { workspaceId } = ctx
 
-  const { staffId } = await getWorkspace()
+  const { staffId, userId } = await getWorkspace()
   const svc = createServiceClient()
 
-  let nombre: string | null = null
-  if (staffId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: st } = await (svc as any).from('staff').select('full_name').eq('id', staffId).maybeSingle()
-    nombre = (st?.full_name as string | null) ?? null
-  }
+  // Quién emite, para la marca del recibo. Cuando el workspace no tiene staff propio de
+  // esta persona —el caso del platform_admin trabajando dentro del workspace de un
+  // cliente— el nombre sale de su perfil: `por` es texto en un jsonb, no una FK, así que
+  // decir quién oprimió el botón no arrastra autoría de otro inquilino. Sin este respaldo
+  // quedaron 7 marcas de 18 sin autor en SOENA (medido el 2026-09-22).
+  const nombre = await nombreDeQuienActua(svc, { staffId, userId })
 
   // ── De qué COBRO es este recibo ──
   // Desde el 2026-09-03 el recibo cuelga del cobro. Tesorería sigue entrando por el

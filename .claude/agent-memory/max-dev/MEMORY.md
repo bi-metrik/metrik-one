@@ -75,6 +75,7 @@
 - ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — #731; SQL pendiente va DESPUÉS del deploy
 - ⚠️⚠️ [Aviso de sobrepago a financiera](project_aviso_sobrepago_financiera.md) — #734 mergeado, config SOENA sin aplicar (antes de apagar conciliar_sobrepago)
 - ⚠️⚠️ [Conciliación por referencia, no por negocio](project_conciliacion_por_referencia.md) — #738 mergeado; backfill de 9 filas NO aplicado (vuelven con el próximo pago)
+- ⚠️⚠️ [Panel de recibos: destinatario real y autor de la marca](project_panel_destinatario_y_autor.md) — #814 sin mergear: la migración va ANTES del merge; el `staffId` null deja sin autor 7 sitios más
 - ⚠️⚠️ [Un recibo por concepto](project_recibo_por_concepto.md) — #795 mergeado y apagado; la marca tiene DOS formas y un consumidor SQL solo lee una; el comprobante del pasante no existe
 - ⚠️⚠️ [El correo del recibo: enlace vivo y los dos documentos](project_correo_recibo_dos_documentos.md) — #804 sin mergear; el SQL de copy va DESPUÉS del deploy de `notificar-etapa`
 - ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — #736 mergeado, config SOENA sin aplicar; caso vivo V0497

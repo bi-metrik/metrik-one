@@ -413,3 +413,28 @@ describe('emitirReciboDeCobro — el PDF dice el nombre del tercero', () => {
     expect(pdfPedido?.cliente_nombre).toBe('Cliente Prueba')
   })
 })
+
+/**
+ * La marca del cobro guarda QUIÉN emitió, y lo guarda tal cual se lo pasan.
+ *
+ * Es el otro extremo del hilo que empieza en `emitirReciboDeNegocio`: ahí se resuelve el
+ * nombre (staff del workspace y, si no hay, el perfil del usuario — ver
+ * `facturacion-recibo-autor.test.ts`), y aquí se comprueba que ese texto es exactamente el
+ * que queda en `por`. Sin este tramo, las dos mitades podrían dejar de encajar sin que
+ * ninguna prueba lo note.
+ *
+ * `por` es TEXTO dentro de un jsonb, no una FK: no ata la marca a ningún `staff.id`.
+ */
+describe('emitirReciboDeCobro — la marca dice quién emitió', () => {
+  it('el nombre que recibe queda en `por`', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, 'Mauricio Moreno', OPC)
+
+    expect(cobros[COBRO_1].siigo_recibo).toMatchObject({ por: 'Mauricio Moreno' })
+  })
+
+  it('sin nombre queda en null: la marca no inventa un autor', async () => {
+    await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
+
+    expect(cobros[COBRO_1].siigo_recibo).toMatchObject({ por: null })
+  })
+})
