@@ -47,6 +47,7 @@
 - ⚠️⚠️ [Horas de vuelo en el documento](project_horas_de_vuelo_trappvel.md) — restar miente en 2 de 3 capturas
 - ⚠️⚠️ [Tres tarifas y tabla de vuelos](project_tres_tarifas_y_tabla_de_vuelos.md) — la plantilla propia PIERDE lo que la genérica resolvía
 - ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — el nivel de detalle nace inerte; `→` no existe en el PDF
+- ⚠️⚠️ [Arreglos 1-5 del PDF Trappvel (#822)](project_arreglos_documento_trappvel_0006.md) — un grupo libre borraba un vuelo; texto de ONE sin construir
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge
 - ⚠️⚠️ [Archivos de trappvel en su Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: corte de Drive DESPUÉS
