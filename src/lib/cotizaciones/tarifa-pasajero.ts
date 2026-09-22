@@ -27,6 +27,7 @@
  */
 
 import type { MargenProveedor } from './margen-proveedor'
+import { leerCorrecciones, type Correcciones } from './correcciones'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -930,6 +931,24 @@ export interface TarifaPax {
   casillas?: CasillasLeidas
   confirmada?: TarifaConfirmada | null
   /**
+   * Lo que una persona corrigió de lo leído, campo por campo (`correcciones.ts`). Vive FUERA
+   * de las casillas a propósito: releer un pantallazo reemplaza su casilla y no puede
+   * llevarse lo que alguien corrigió.
+   */
+  correcciones?: Correcciones
+  /**
+   * La descripción que el SISTEMA escribió por última vez en `items.descripcion`, ya en
+   * mayúscula (`descripcionReescribible`, `ficha-linea.ts`).
+   *
+   * Es lo que permite no pisar lo que escribió una persona (regla 4 del brief del
+   * 2026-09-22): al volver a confirmar, o al corregir un campo de la ficha, la descripción
+   * se reescribe solo si sigue siendo esta. Mismo criterio que el margen: se compara el
+   * valor. Vive fuera de `confirmada` porque cambiar los pasajeros borra la confirmación y
+   * no puede borrar con ella la prueba de quién escribió la descripción. Ausente en las
+   * líneas confirmadas antes de esta marca.
+   */
+  descripcionDelSistema?: string | null
+  /**
    * Cuándo la escribió el servidor por última vez (reloj del servidor, ISO). Es lo que
    * decide, en pantalla, entre lo que llegó con la página y lo que el servidor acaba de
    * devolver al guardar (ver `tarifaMasReciente`). Ausente en las escritas antes de él.
@@ -966,10 +985,19 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     && normalizarComposicion(conf.composicion) !== null
     ? conf
     : null
+  // ⚠️ Toda llave que NO se lea aquí se pierde en la siguiente escritura: `guardarTarifa`
+  // escribe lo que devuelve esta función. Por eso las correcciones se leen aunque esta
+  // función no las use. Sin correcciones la llave no aparece: la tarifa de una línea que nadie
+  // corrigió se lee exactamente igual que antes.
+  const correcciones = leerCorrecciones(r.correcciones)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
     confirmada,
+    ...(Object.keys(correcciones).length > 0 ? { correcciones } : {}),
+    ...(typeof r.descripcionDelSistema === 'string' || r.descripcionDelSistema === null
+      ? { descripcionDelSistema: r.descripcionDelSistema as string | null }
+      : {}),
     actualizadaEn: typeof r.actualizadaEn === 'string' ? r.actualizadaEn : null,
   }
 }

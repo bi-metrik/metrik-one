@@ -107,9 +107,11 @@ function consulta(tabla: string) {
 const {
   actualizarComposicionDeItem,
   confirmarTarifaPorPasajero,
+  corregirCampoDeFicha,
   leerCasillaDeItem,
   quitarCasillaDeItem,
 } = await import('./tarifa-pax-actions')
+const { hotelesDeItems, vuelosDeItems } = await import('@/lib/cotizaciones/detalle-viaje')
 const { leerTarifaPax, tarifaMasReciente } = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { precioConMargen } = await import('@/lib/cotizaciones/precio-item')
 const { nivelDeMargen, POLITICA_MARGEN_POR_DEFECTO } = await import('@/lib/cotizaciones/convencion-margen')
@@ -548,5 +550,146 @@ describe('Decameron · el margen lo pone el pantallazo, no una persona', () => {
 
     await confirmarTarifaPorPasajero('item-liquidacion', null)
     expect(Number(itemEnBase('item-liquidacion').margen_porcentaje)).toBe(18)
+  })
+})
+
+/**
+ * Brief del 2026-09-22, punto 3 y verificación 4: editar las estrellas, una hora de vuelo y el
+ * equipaje; el documento muestra lo editado, lo que dijo la IA sigue guardado, y releer la
+ * captura no lo pisa. Se afirma lo que quedó ESCRITO en `items`, leído como lo lee el
+ * documento (`hotelesDeItems`, `vuelosDeItems`).
+ */
+describe('corregir la ficha · lo que dijo la IA no se pierde y releer no lo pisa', () => {
+  const lecturaHotel = (): LecturaCruda => {
+    const l = decameronResultado()
+    l.campos.moneda = v('COP')
+    l.campos.estrellas = v('3', 0.9)
+    return l
+  }
+  const docHotel = () => hotelesDeItems([{ nombre: 'x', grupo: 'hotel', tarifa_pax: itemEnBase('item-hotel').tarifa_pax }])[0]
+
+  it('corregir las estrellas: el documento imprime la corrección y la lectura queda intacta', async () => {
+    tablas.items.push(itemHotel('Hotel'))
+    lecturaDelModelo = lecturaHotel()
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA')
+    expect(docHotel().estrellas).toBe(3)
+
+    const r = await corregirCampoDeFicha('item-hotel', 'estrellas', '4')
+    expect(r.success).toBe(true)
+    const t = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(t.correcciones?.estrellas?.valor).toBe('4')
+    expect(t.casillas?.grupo_completo?.campos.find(c => c.label === 'Estrellas')?.valor).toBe('3')
+    expect(docHotel().estrellas).toBe(4)
+  })
+
+  it('releer el pantallazo reemplaza la lectura pero NO la corrección', async () => {
+    tablas.items.push(itemHotel('Hotel'))
+    lecturaDelModelo = lecturaHotel()
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA')
+    await corregirCampoDeFicha('item-hotel', 'estrellas', '4')
+    await corregirCampoDeFicha('item-hotel', 'regimen', 'Solo alojamiento')
+
+    // La captura nueva dice otra cosa de los dos campos.
+    const nueva = lecturaHotel()
+    nueva.campos.estrellas = v('5', 0.9)
+    nueva.campos.regimen = v('Desayuno')
+    lecturaDelModelo = nueva
+    const r = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,BBBB')
+    expect(r.ok).toBe(true)
+
+    const t = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    // La lectura es la nueva…
+    expect(t.casillas?.grupo_completo?.campos.find(c => c.label === 'Estrellas')?.valor).toBe('5')
+    expect(t.casillas?.grupo_completo?.campos.find(c => c.label === 'Régimen')?.valor).toBe('Desayuno')
+    // …y lo que corrigió la persona sigue mandando.
+    expect(t.correcciones?.estrellas?.valor).toBe('4')
+    expect(docHotel()).toMatchObject({ estrellas: 4, regimen: 'Solo alojamiento' })
+  })
+
+  it('«volver a lo leído» quita la corrección y el documento vuelve a la lectura', async () => {
+    tablas.items.push(itemHotel('Hotel'))
+    lecturaDelModelo = lecturaHotel()
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA')
+    await corregirCampoDeFicha('item-hotel', 'estrellas', '4')
+    await corregirCampoDeFicha('item-hotel', 'estrellas', null)
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).correcciones).toBeUndefined()
+    expect(docHotel().estrellas).toBe(3)
+  })
+
+  it('lo que entra al costo no se corrige en la ficha, y un valor inválido no se guarda', async () => {
+    tablas.items.push(itemHotel('Hotel'))
+    const antes = structuredClone(itemEnBase('item-hotel').tarifa_pax)
+    expect((await corregirCampoDeFicha('item-hotel', 'precio_total', '1')).success).toBe(false)
+    expect((await corregirCampoDeFicha('item-hotel', 'estrellas', '4,5')).success).toBe(false)
+    expect((await corregirCampoDeFicha('item-hotel', 'no_existe', 'x')).success).toBe(false)
+    expect(itemEnBase('item-hotel').tarifa_pax).toEqual(antes)
+  })
+
+  // ── Vuelo: la hora y el equipaje, y la descripción que no se pisa ──────────
+
+  function itemVueloConFicha(descripcion: string | null = null): Fila {
+    const f = itemVueloConLectura('')
+    const tp = f.tarifa_pax as { casillas: { grupo_completo: { campos: unknown; descripcion: string } } }
+    tp.casillas.grupo_completo.campos = [
+      { label: 'Aerolínea', valor: 'LATAM' },
+      { label: 'Salida', valor: '2026-10-01' },
+      { label: 'Hora de salida (ida)', valor: '05:50' },
+      { label: 'Escalas', valor: '0' },
+      { label: 'Artículo personal', valor: 'true' },
+      { label: 'Equipaje de mano', valor: 'false' },
+      { label: 'Equipaje de bodega', valor: 'false' },
+    ]
+    tp.casillas.grupo_completo.descripcion =
+      'Salida: 2026-10-01 05:50 · Directo · Solo artículo personal (sin equipaje de mano ni de bodega)'
+    return { ...f, descripcion }
+  }
+  const docVuelo = () => vuelosDeItems([{ nombre: 'x', grupo: 'vuelo', tarifa_pax: itemEnBase('item-vuelo').tarifa_pax }])[0]
+
+  it('corregir la hora y el equipaje: el documento los muestra y la descripción del sistema se rearma', async () => {
+    tablas.items.push(itemVueloConFicha())
+    await confirmarTarifaPorPasajero('item-vuelo', null)
+    expect(itemEnBase('item-vuelo').descripcion).toContain('05:50')
+
+    await corregirCampoDeFicha('item-vuelo', 'hora_salida', '7:45 am')
+    await corregirCampoDeFicha('item-vuelo', 'equipaje_mano', 'true')
+    expect(docVuelo()).toMatchObject({ horaSalida: '07:45', equipaje: 'artículo personal + equipaje de mano' })
+    // La descripción la había escrito el sistema: se rearma con lo corregido.
+    expect(itemEnBase('item-vuelo').descripcion).toContain('07:45')
+    expect(itemEnBase('item-vuelo').descripcion).not.toContain('05:50')
+    // La lectura sigue diciendo lo que dijo.
+    const t = leerTarifaPax(itemEnBase('item-vuelo').tarifa_pax)
+    expect(t.casillas?.grupo_completo?.campos.find(c => c.label === 'Hora de salida (ida)')?.valor).toBe('05:50')
+  })
+
+  it('una descripción que escribió una persona NO la pisa ni corregir un campo ni volver a confirmar', async () => {
+    tablas.items.push(itemVueloConFicha())
+    await confirmarTarifaPorPasajero('item-vuelo', null)
+    itemEnBase('item-vuelo').descripcion = 'VUELO NOCTURNO, PEDIR SILLA DE VENTANA'
+
+    await corregirCampoDeFicha('item-vuelo', 'hora_salida', '07:45')
+    expect(itemEnBase('item-vuelo').descripcion).toBe('VUELO NOCTURNO, PEDIR SILLA DE VENTANA')
+
+    // Hasta el 2026-09-22 volver a confirmar la reescribía siempre.
+    const f = itemEnBase('item-vuelo')
+    const tp = f.tarifa_pax as { casillas: { grupo_completo: { leidaEn: string } } }
+    tp.casillas.grupo_completo.leidaEn = new Date().toISOString()
+    await confirmarTarifaPorPasajero('item-vuelo', null)
+    expect(itemEnBase('item-vuelo').descripcion).toBe('VUELO NOCTURNO, PEDIR SILLA DE VENTANA')
+  })
+
+  it('cambiar los pasajeros borra la confirmación pero no la marca: la descripción del sistema se sigue actualizando', async () => {
+    tablas.items.push(itemVueloConFicha())
+    await confirmarTarifaPorPasajero('item-vuelo', null)
+    const escrita = itemEnBase('item-vuelo').descripcion
+    await actualizarComposicionDeItem('item-vuelo', { adultos: 4, ninos: 1, infantes: 0 })
+    const t = leerTarifaPax(itemEnBase('item-vuelo').tarifa_pax)
+    expect(t.confirmada).toBeNull()
+    expect(t.descripcionDelSistema).toBe(escrita)
+  })
+
+  it('una línea sin confirmar con una descripción escrita a mano: confirmar no la pisa', async () => {
+    tablas.items.push(itemVueloConFicha('INCLUYE TRASLADO AL HOTEL'))
+    await confirmarTarifaPorPasajero('item-vuelo', null)
+    expect(itemEnBase('item-vuelo').descripcion).toBe('INCLUYE TRASLADO AL HOTEL')
   })
 })

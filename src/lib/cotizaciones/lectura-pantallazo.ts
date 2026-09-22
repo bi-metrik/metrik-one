@@ -32,6 +32,7 @@
 
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
+import { estrellasDesdeTexto } from './estrellas'
 
 // ── Lo que devuelve el modelo, antes de juzgarlo ─────────────────────────────
 
@@ -111,6 +112,13 @@ export interface LecturaCruda {
   totalGeneral?: number | null
   /** Cuántas opciones con precio propio contó el modelo en la captura (RX1, regla 7.5). */
   opcionesVisibles?: number | null
+  /**
+   * Lo que vieron las dos corridas de la detección de estrellas (`detectarEstrellas`,
+   * `src/lib/ai/extraer-ranura.ts`). Es la evidencia del campo `estrellas`: sin ella, un campo
+   * vacío no dice si la captura no mostraba estrellas o si las corridas no coincidieron.
+   * Solo la ranura de hotel.
+   */
+  estrellasDeteccion?: { valor: number | null; corridas: (number | null)[]; error: string | null }
 }
 
 /**
@@ -259,13 +267,18 @@ export function evaluarLectura(
     }
   }
 
-  const campos: CampoLeido[] = ranura.campos.map(def => ({
-    slug: def.slug,
-    label: def.label,
-    valor: limpio(cruda.campos[def.slug]),
-    confidence: cruda.campos[def.slug]?.confidence ?? 0,
-    alertaRevision: def.alerta_revision === true,
-  }))
+  const campos: CampoLeido[] = ranura.campos.map(def => {
+    const valor = limpio(cruda.campos[def.slug])
+    return {
+      slug: def.slug,
+      label: def.label,
+      // La categoría solo existe como entero de 1 a 5 (`estrellas.ts`). El lector ya la
+      // cruza así; esto es la segunda capa, para que ningún camino deje pasar «4,5».
+      valor: def.slug === 'estrellas' ? (estrellasDesdeTexto(valor)?.toString() ?? null) : valor,
+      confidence: cruda.campos[def.slug]?.confidence ?? 0,
+      alertaRevision: def.alerta_revision === true,
+    }
+  })
   const porSlug = new Map(campos.map(c => [c.slug, c]))
   const avisosDelItem: string[] = []
 

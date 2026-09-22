@@ -29,6 +29,8 @@ import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
+import { esCorregible } from '@/lib/cotizaciones/correcciones'
+import { descripcionDeLinea, descripcionReescribible, validarCorreccion } from '@/lib/cotizaciones/ficha-linea'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
@@ -461,18 +463,25 @@ export async function confirmarTarifaPorPasajero(
   if (errInsertar) return { success: false, error: errInsertar.message }
 
   // El NOMBRE de la casilla 1 solo entra si la línea no tiene uno propio: el que escribió
-  // quien cotiza no se toca (`nombre-linea.ts`). La descripción sí sale de la captura.
+  // quien cotiza no se toca (`nombre-linea.ts`).
   const primera = casillas.grupo_completo
   const nombreLeido = nombreAlConfirmarLectura({
     nombreActual: item.nombre,
     nombreLeido: primera?.nombre,
     etiquetaRanura: ranura.label,
   })
-  const notas = [...new Set(Object.values(casillas).flatMap(l => l?.notasCliente ?? []))]
-  const baseDescripcion = primera?.descripcion?.trim() || (item.descripcion ?? '').trim()
-  const descripcion = [baseDescripcion, ...notas.filter(n => !baseDescripcion.includes(n))]
-    .filter(Boolean)
-    .join(' · ')
+  // La DESCRIPCIÓN sale de la captura, con lo corregido en la ficha encima
+  // (`descripcionDeLinea`). Y tampoco se pisa si la escribió una persona: hasta el
+  // 2026-09-22 esta confirmación la reescribía SIEMPRE, así que volver a pegar un pantallazo
+  // se llevaba lo que alguien hubiera corregido a mano (regla 4 del brief).
+  const descripcionNueva = aMayusculas(
+    descripcionDeLinea(ranura, casillas, tarifa.correcciones, item.descripcion),
+  ) || null
+  const reescribeDescripcion = descripcionReescribible(
+    item.descripcion,
+    tarifa.descripcionDelSistema,
+    !!tarifa.confirmada,
+  )
 
   // ── El margen que ya trae la captura (Decameron, §4.4 de la propuesta visual) ──
   //
@@ -520,7 +529,7 @@ export async function confirmarTarifaPorPasajero(
     .from('items')
     .update({
       ...(nombreLeido ? { nombre: aMayusculas(nombreLeido) } : {}),
-      descripcion: aMayusculas(descripcion) || null,
+      ...(reescribeDescripcion ? { descripcion: descripcionNueva } : {}),
       // La línea es el grupo: el reparto por pasajero lo dicen los rubros y el PDF.
       cantidad: 1,
       unidad: null,
@@ -546,10 +555,107 @@ export async function confirmarTarifaPorPasajero(
     // APLIQUE sigue decidiéndolo `patchMargen` de arriba; esto solo lo deja anotado.
     margenProveedor,
   }
-  const guardado = await guardarTarifa(supabase, itemId, actual => ({ ...actual, confirmada }))
+  const guardado = await guardarTarifa(supabase, itemId, actual => ({
+    ...actual,
+    confirmada,
+    // La marca solo se mueve cuando el sistema ESCRIBIÓ: si respetó una descripción humana,
+    // la marca vieja sigue siendo distinta de lo que hay y la protección se mantiene.
+    ...(reescribeDescripcion ? { descripcionDelSistema: descripcionNueva } : {}),
+  }))
   if ('error' in guardado) return { success: false, error: guardado.error }
 
   await recalcularTotales(item.cotizacionId)
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return { success: true, tarifa: guardado.tarifa }
+}
+
+// ── Corregir un campo de la ficha ────────────────────────────────────────────
+
+/**
+ * Guarda lo que una persona corrigió de un campo leído, o lo deshace.
+ *
+ * `valor: string` corrige (un texto vacío deja el campo vacío a propósito); `valor: null`
+ * vuelve a lo que leyó la IA.
+ *
+ * Brief del 2026-09-22, punto 3 (`correcciones.ts` tiene el porqué):
+ *  · lo que dijo la IA no se toca: sigue en la casilla;
+ *  · la corrección vive fuera de las casillas, así que releer el pantallazo no la pisa;
+ *  · el valor se valida y se normaliza AQUÍ, no en el navegador (`validarCorreccion`): una
+ *    server action exportada es un endpoint alcanzable aunque ningún botón la invoque;
+ *  · los campos que entran al costo no se corrigen por esta vía (`esCorregible`).
+ *
+ * Si la descripción de la línea sigue siendo la que escribió el sistema, se rearma con la
+ * corrección, para que «Día a día» no diga una hora que la ficha ya cambió. Si la escribió
+ * una persona, no se toca.
+ */
+export async function corregirCampoDeFicha(
+  itemId: string,
+  slug: string,
+  valor: string | null,
+): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const { supabase, item, ranura, tarifa } = ctx
+  const def = ranura.campos.find(c => c.slug === slug)
+  if (!def || !esCorregible(ranura, slug)) {
+    return { success: false, error: 'Ese campo no se corrige en la ficha: va en el costo de la línea.' }
+  }
+
+  let correccion: { valor: string | null } | null = null
+  if (valor !== null) {
+    const v = validarCorreccion(def, valor)
+    if (!v.ok) return { success: false, error: v.error }
+    correccion = { valor: v.valor }
+  }
+
+  const { userId } = await getWorkspace()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: perfil } = await (supabase as any)
+    .from('profiles').select('full_name').eq('id', userId).maybeSingle()
+  const por = (perfil?.full_name as string | null | undefined)?.trim() || null
+
+  const siguientes = { ...(tarifa.correcciones ?? {}) }
+  if (correccion) {
+    siguientes[slug] = { valor: correccion.valor, por, porId: userId ?? null, en: new Date().toISOString() }
+  } else {
+    delete siguientes[slug]
+  }
+
+  // La descripción se rearma solo si todavía es la que puso el sistema (y ya hubo una).
+  const delSistema = tarifa.descripcionDelSistema
+  const sincroniza = typeof delSistema === 'string'
+    && descripcionReescribible(item.descripcion, delSistema, true)
+  const descripcionNueva = sincroniza
+    ? aMayusculas(descripcionDeLinea(ranura, tarifa.casillas ?? {}, siguientes, item.descripcion)) || null
+    : null
+
+  // La descripción primero: si no se pudo escribir, la marca no se mueve y la línea queda
+  // protegida (lo que hay ya no coincide con la marca), que es el lado seguro.
+  let sincronizada = false
+  if (sincroniza) {
+    if (descripcionNueva === (item.descripcion ?? null)) {
+      sincronizada = true
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: errDesc } = await (supabase as any)
+        .from('items').update({ descripcion: descripcionNueva }).eq('id', itemId)
+      if (errDesc) console.warn('[tarifa-pax] no se pudo rearmar la descripción:', errDesc.message)
+      sincronizada = !errDesc
+    }
+  }
+
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
+    // Sobre la tarifa FRESCA: otra persona pudo corregir otro campo mientras tanto.
+    const correcciones = { ...(actual.correcciones ?? {}) }
+    if (correccion) correcciones[slug] = siguientes[slug]
+    else delete correcciones[slug]
+    const siguiente: TarifaPax = { ...actual, correcciones }
+    if (Object.keys(correcciones).length === 0) delete siguiente.correcciones
+    if (sincronizada) siguiente.descripcionDelSistema = descripcionNueva
+    return siguiente
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
 }

@@ -23,6 +23,7 @@ vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({
   confirmarMenorNoPaga: async () => ({ success: true }),
   actualizarComposicionDeItem: async () => ({ success: true }),
   confirmarTarifaPorPasajero: async () => ({ success: true }),
+  corregirCampoDeFicha: async () => ({ success: true }),
 }))
 vi.mock('@/app/(app)/negocios/pantallazo-actions', () => ({
   descartarPropuestaDePantallazo: async () => ({ success: true }),

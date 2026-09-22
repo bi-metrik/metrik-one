@@ -22,13 +22,19 @@
  * cliente el dato vale igual —es su viaje—, así que se imprime, pero sin el marcador, que
  * es vocabulario interno.
  *
+ * ## Lo que corrigió una persona manda sobre lo leído
+ *
+ * Desde el 2026-09-22 cada campo de la ficha se puede corregir (`correcciones.ts`). El
+ * documento imprime lo corregido encima de lo leído (`aplicarCorrecciones`); lo que dijo la
+ * IA sigue guardado en la casilla, intacto.
+ *
  * ## Lo que NO se lee hoy y por eso NO se imprime
  *
- * Las **estrellas del hotel** y el **localizador** no están en el contrato de ninguna
- * ranura. El itinerario de referencia los trae porque es un viaje YA reservado; una
- * cotización todavía no tiene localizador. Los campos existen en el tipo y llegan vacíos:
- * el día que la lectura los traiga, se imprimen solos. Inventarlos sería peor que no
- * tenerlos.
+ * El **localizador** no está en el contrato de ninguna ranura: el itinerario de referencia
+ * lo trae porque es un viaje YA reservado, y una cotización todavía no tiene. El campo existe
+ * en el tipo y llega vacío. Las **estrellas** sí se leen desde el 2026-09-22
+ * (`detectarEstrellas`) y se imprimen cuando la captura las mostraba o una persona las
+ * escribió.
  *
  * ⚠️ Las **horas de vuelo** salieron de esta lista el 2026-09-22: la ranura las lee
  * (`hora_salida`, `hora_llegada` y sus hermanas del regreso), medidas contra las tres
@@ -50,6 +56,8 @@
 
 import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
+import { estrellasDesdeTexto } from './estrellas'
 
 /** Lo mínimo de una línea para reconstruir su detalle. */
 export interface ItemConLectura {
@@ -119,7 +127,10 @@ export interface HotelPDF {
   noches: number | null
   ocupacion: string | null
   cancelacion: string | null
-  /** Ver la cabecera: no se lee hoy. */
+  /**
+   * La categoría: la que mostraba la captura o la que escribió una persona. Entero de 1 a 5,
+   * o `null`. Es el campo que consume la plantilla (`h.estrellas`).
+   */
   estrellas: number | null
   /** Ver la cabecera: una cotización no tiene localizador. */
   localizador: string | null
@@ -306,11 +317,6 @@ export function duracionDelViaje(inicio: string | null, fin: string | null): str
   return `${noches + 1} días / ${noches} ${noches === 1 ? 'noche' : 'noches'}`
 }
 
-/** Le quita a un valor el marcador interno «(del viaje)». Ver la cabecera. */
-function sinMarcador(valor: string): string {
-  return valor.replace(/\s*\(del viaje\)\s*$/i, '').trim()
-}
-
 /**
  * Los campos de la lectura, de vuelta a sus slugs.
  *
@@ -322,16 +328,8 @@ export function detalleDeLectura(
   campos: { label: string; valor: string }[] | undefined,
 ): Record<string, string> {
   const ranura = ranuraDeGrupo(grupo)
-  if (!ranura || !campos || campos.length === 0) return {}
-  const slugPorLabel = new Map(ranura.campos.map(c => [c.label, c.slug]))
-  const out: Record<string, string> = {}
-  for (const c of campos) {
-    const slug = slugPorLabel.get(c.label)
-    if (!slug) continue
-    const valor = sinMarcador(c.valor ?? '')
-    if (valor !== '') out[slug] = valor
-  }
-  return out
+  if (!ranura) return {}
+  return leidosPorSlug(ranura, campos)
 }
 
 /** La casilla de la que sale el detalle: la del grupo completo, o la primera que haya. */
@@ -340,8 +338,18 @@ function casillaDelItem(item: ItemConLectura): LecturaCasilla | null {
   return casillas?.grupo_completo ?? casillas?.sin_infantes ?? casillas?.solo_adultos ?? null
 }
 
+/**
+ * El detalle de la línea tal como se imprime: lo leído, con lo corregido encima.
+ *
+ * ⚠️ Las correcciones se aplican aunque la línea no tenga lectura: son de la línea, no de la
+ * casilla. Una línea sin ranura no tiene ni lo uno ni lo otro.
+ */
 function detalleDelItem(item: ItemConLectura): Record<string, string> {
-  return detalleDeLectura(item.grupo, casillaDelItem(item)?.campos)
+  if (!ranuraDeGrupo(item.grupo)) return {}
+  return aplicarCorrecciones(
+    detalleDeLectura(item.grupo, casillaDelItem(item)?.campos),
+    leerTarifaPax(item.tarifa_pax).correcciones,
+  )
 }
 
 const texto = (d: Record<string, string>, slug: string): string | null => d[slug] ?? null
@@ -438,7 +446,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       noches: nochesDe(d),
       ocupacion: texto(d, 'ocupacion'),
       cancelacion: texto(d, 'politica_cancelacion'),
-      estrellas: null,
+      estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,
       adicionales: item.adicionales ?? [],
     })
