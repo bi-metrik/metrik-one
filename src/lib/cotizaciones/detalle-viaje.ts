@@ -30,10 +30,22 @@
  * el día que la lectura los traiga, se imprimen solos. Inventarlos sería peor que no
  * tenerlos.
  *
- * ⚠️ Las **horas de vuelo y la duración** estaban en esta lista hasta el 2026-09-22 y ya
- * no: la ranura de vuelo las lee (`hora_salida`, `hora_llegada`, `duracion_ida` y sus
- * hermanas del regreso), medidas contra las tres capturas reales del banco. La duración se
- * LEE y nunca se calcula, y el porqué está medido en `ranuras-pantallazo.ts`.
+ * ⚠️ Las **horas de vuelo** salieron de esta lista el 2026-09-22: la ranura las lee
+ * (`hora_salida`, `hora_llegada` y sus hermanas del regreso), medidas contra las tres
+ * capturas reales del banco.
+ *
+ * ⚠️⚠️ La **duración** y el **número de vuelo** NO se imprimen, y no por un hueco de
+ * lectura: **no están en el itinerario de referencia**. Leído el 2026-09-22 del PDF que
+ * Trappvel manda hoy (`Itinerario_Viaje_Cancun_Ligia_Sanchez.pdf`, el mismo que cita §1 de
+ * `propuesta-visual.md`), su tabla de vuelos tiene CINCO columnas —AEROLÍNEA, RUTA, FECHA,
+ * SALIDA, LLEGADA— y ninguna de las dos. La §2 de ese documento afirmaba lo contrario y se
+ * escribió de memoria: manda la referencia.
+ *
+ * Quitarlas no es cosmético: la tabla de siete columnas dejaba la RUTA en 120,3 pt cuando
+ * «San Andrés ADZ – Providencia PVA» mide 120,2 pt, o sea **pegada** a la fecha sin un
+ * punto de aire. Y de paso desaparece la pregunta de la duración que cruza medianoche.
+ * El número de vuelo **sigue viéndose en la plataforma** (`resumenDeLinea`): lo que se
+ * retiró es el documento del cliente.
  */
 
 import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
@@ -66,12 +78,8 @@ export interface VueloPDF {
   horaSalida: string | null
   /** Hora de llegada del ÚLTIMO tramo de la ida. */
   horaLlegada: string | null
-  /** Duración del trayecto de ida, **leída**, nunca calculada. Ver `ranuras-pantallazo.ts`. */
-  duracionIda: string | null
   horaSalidaRegreso: string | null
   horaLlegadaRegreso: string | null
-  duracionRegreso: string | null
-  numeroVuelo: string | null
   escalaIda: string | null
   escalaRegreso: string | null
   /** Cuántas escalas tiene la ida. `null` = la captura no lo decía. */
@@ -170,32 +178,12 @@ export function horaCorta(valor: string | null | undefined): string | null {
 }
 
 /**
- * La duración tal como la mostró la pantalla, legible: «2h:50m» → «2 h 50 m».
- *
- * Si no se reconoce la forma horas-minutos se devuelve el texto tal cual (recortado): la
- * pantalla lo mostró y copiarlo no inventa nada. Lo que NO se hace en ninguna parte es
- * CALCULARLA restando las horas — ver la tabla medida en `ranuras-pantallazo.ts`.
- */
-export function duracionLegible(valor: string | null | undefined): string | null {
-  const t = (valor ?? '').trim()
-  if (t === '') return null
-  const m = /^(?:(\d{1,2})\s*h(?:oras?|rs?)?)?\s*[:.\s]?\s*(?:(\d{1,2})\s*m(?:in(?:utos?)?)?)?$/i.exec(t)
-  const horas = m?.[1] ? Number(m[1]) : null
-  const minutos = m?.[2] ? Number(m[2]) : null
-  if (horas === null && minutos === null) return t.slice(0, 24)
-  if (minutos !== null && minutos > 59) return t.slice(0, 24)
-  return [horas !== null ? `${horas} h` : null, minutos !== null ? `${minutos} m` : null]
-    .filter(Boolean)
-    .join(' ')
-}
-
-/**
  * Una fila de la tabla de vuelos: un TRAYECTO, ida o regreso.
  *
- * La referencia de Trappvel (§2.3) es una tabla con una fila por trayecto. No se parte por
- * TRAMO —Cúcuta→Bogotá y Bogotá→Armenia serían dos filas— porque la lectura no separa el
- * número de vuelo ni la tarifa por tramo: partirla obligaría a repartir a mano datos que
- * la captura da juntos, que es inventar. La escala ya dice dónde se para.
+ * La referencia de Trappvel es una tabla con una fila por trayecto. No se parte por
+ * TRAMO —Cúcuta→Bogotá y Bogotá→Armenia serían dos filas— porque la lectura no separa la
+ * tarifa por tramo: partirla obligaría a repartir a mano datos que la captura da juntos,
+ * que es inventar. La escala ya dice dónde se para.
  */
 export interface TrayectoPDF {
   sentido: 'Ida' | 'Regreso'
@@ -203,13 +191,23 @@ export interface TrayectoPDF {
   fecha: string | null
   salida: string | null
   llegada: string | null
-  duracion: string | null
   /** «Bogotá», «Directo», o `null` si la captura no dijo nada del recorrido. */
   escala: string | null
 }
 
-/** Las columnas de la tabla, en el orden en que se imprimen. */
-export const COLUMNAS_TRAYECTO = ['sentido', 'ruta', 'fecha', 'salida', 'llegada', 'duracion', 'escala'] as const
+/**
+ * Las columnas de la tabla, en el orden en que se imprimen.
+ *
+ * Las cuatro del medio son las de la referencia (RUTA, FECHA, SALIDA, LLEGADA; la
+ * AEROLÍNEA encabeza la tarjeta en vez de repetirse por fila). `sentido` es nuestro:
+ * la referencia usa una tabla por trayecto y aquí van los dos en la misma tarjeta, así
+ * que sin esa columna las dos filas no se distinguen.
+ *
+ * ⚠️ `escala` NO está en la referencia y se imprime igual: §4.1 del brief lo pide con
+ * nombre propio —*el cliente quiere saber si la escala es en Bogotá o en Panamá*— y es
+ * una condición del viaje, no un adorno.
+ */
+export const COLUMNAS_TRAYECTO = ['sentido', 'ruta', 'fecha', 'salida', 'llegada', 'escala'] as const
 export type ColumnaTrayecto = (typeof COLUMNAS_TRAYECTO)[number]
 
 /**
@@ -228,7 +226,6 @@ export function trayectosDelVuelo(v: VueloPDF): TrayectoPDF[] {
     fecha: v.fechaSalida,
     salida: v.horaSalida,
     llegada: v.horaLlegada,
-    duracion: v.duracionIda,
     // `escalas === 0` es la ÚNICA forma de afirmar «directo»: un `escalaIda` vacío puede
     // ser un vuelo directo o una pantalla que no mostró el recorrido, y son cosas distintas.
     escala: v.escalaIda ?? (v.escalas === 0 ? 'Directo' : null),
@@ -243,7 +240,6 @@ export function trayectosDelVuelo(v: VueloPDF): TrayectoPDF[] {
       fecha: v.fechaRegreso,
       salida: v.horaSalidaRegreso,
       llegada: v.horaLlegadaRegreso,
-      duracion: v.duracionRegreso,
       // `escalas` cuenta solo las de la IDA (así lo declara la ranura): del regreso solo se
       // sabe lo que diga `escala_regreso`. Afirmar «Directo» aquí sería usar el dato del
       // otro trayecto.
@@ -379,11 +375,8 @@ export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
       fechaRegreso: fechaCorta(texto(d, 'fecha_regreso')),
       horaSalida: horaCorta(texto(d, 'hora_salida')),
       horaLlegada: horaCorta(texto(d, 'hora_llegada')),
-      duracionIda: duracionLegible(texto(d, 'duracion_ida')),
       horaSalidaRegreso: horaCorta(texto(d, 'hora_salida_regreso')),
       horaLlegadaRegreso: horaCorta(texto(d, 'hora_llegada_regreso')),
-      duracionRegreso: duracionLegible(texto(d, 'duracion_regreso')),
-      numeroVuelo: texto(d, 'numero_vuelo'),
       escalaIda: texto(d, 'escala_ida'),
       escalaRegreso: texto(d, 'escala_regreso'),
       escalas: numero(d, 'escalas'),

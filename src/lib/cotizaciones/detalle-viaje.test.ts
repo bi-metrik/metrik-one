@@ -16,7 +16,6 @@ import {
   destinoDeItinerario,
   detalleDeLectura,
   duracionDelViaje,
-  duracionLegible,
   equipajeEnPalabras,
   fechaCorta,
   horaCorta,
@@ -144,14 +143,13 @@ describe('equipaje', () => {
 })
 
 describe('vuelosDeItems', () => {
-  it('arma el vuelo real de Amadeus con su ruta, su número y su escala', () => {
+  it('arma el vuelo real de Amadeus con su ruta y su escala', () => {
     const [v] = vuelosDeItems([item('AVIANCA CÚCUTA–ARMENIA', 'vuelo', CAMPOS_VUELO)])
     expect(v.aerolinea).toBe('Avianca')
     expect(v.origen).toBe('Cúcuta CUC')
     expect(v.destino).toBe('Armenia AXM')
     expect(v.fechaSalida).toBe('23 oct')
     expect(v.fechaRegreso).toBe('25 oct')
-    expect(v.numeroVuelo).toBe('9459 · 4867 · 9842 · 9488')
     expect(v.escalaIda).toBe('Bogotá BOG')
     expect(v.escalaRegreso).toBe('Bogotá BOG')
     expect(v.escalas).toBe(1)
@@ -181,13 +179,10 @@ describe('vuelosDeItems', () => {
     expect(v.horaLlegada).toBe('10:15')
     expect(v.horaSalidaRegreso).toBe('18:45')
     expect(v.horaLlegadaRegreso).toBe('22:10')
-    // Esa pantalla muestra la duración de cada TRAMO, no la del recorrido: hueco.
-    expect(v.duracionIda).toBeNull()
-    expect(v.duracionRegreso).toBeNull()
   })
 })
 
-describe('horas y duración', () => {
+describe('horas', () => {
   it('normaliza la hora a 24 horas', () => {
     expect(horaCorta('05:50')).toBe('05:50')
     expect(horaCorta('5:50')).toBe('05:50')
@@ -206,16 +201,13 @@ describe('horas y duración', () => {
     expect(horaCorta('')).toBeNull()
   })
 
-  it('la duración se lee y se deja legible', () => {
-    expect(duracionLegible('2h:50m')).toBe('2 h 50 m')
-    expect(duracionLegible('4h 15m')).toBe('4 h 15 m')
-    expect(duracionLegible('11 horas 20 min')).toBe('11 h 20 m')
-    expect(duracionLegible('45m')).toBe('45 m')
-    expect(duracionLegible(null)).toBeNull()
-  })
-
-  it('una duración con otra forma se copia tal cual: la pantalla la mostró', () => {
-    expect(duracionLegible('día completo')).toBe('día completo')
+  it('⚠️ la DURACIÓN ya no se lee: el itinerario de referencia no la trae', () => {
+    // Se leía bien (18 de 18 en el banco real). Salió porque la tabla de vuelos de la
+    // referencia tiene cinco columnas —AERO, RUTA, FECHA, SALIDA, LLEGADA— y ninguna es
+    // la duración. Nada más la consumía: no la mostraba ni `resumenDeLinea`.
+    const [v] = vuelosDeItems([item('AVIANCA', 'vuelo', CAMPOS_VUELO)])
+    expect(v).not.toHaveProperty('duracionIda')
+    expect(trayectosDelVuelo(v)[0]).not.toHaveProperty('duracion')
   })
 })
 
@@ -230,7 +222,6 @@ describe('trayectosDelVuelo', () => {
       fecha: '23 oct',
       salida: '05:50',
       llegada: '10:15',
-      duracion: null,
       escala: 'Bogotá BOG',
     })
     expect(regreso.ruta).toBe('Armenia AXM – Cúcuta CUC')
@@ -259,15 +250,10 @@ describe('columnasConDato', () => {
   const vuelo = () => vuelosDeItems([item('AVIANCA', 'vuelo', CAMPOS_VUELO)])[0]
 
   it('⚠️ la columna sin un solo dato NO se imprime: nada de tabla con guiones', () => {
-    // El vuelo real no trae duración de recorrido: esa columna desaparece entera.
+    // Las seis que existen. La AEROLÍNEA no es columna: encabeza la tarjeta.
     expect(columnasConDato(trayectosDelVuelo(vuelo()))).toEqual([
       'sentido', 'ruta', 'fecha', 'salida', 'llegada', 'escala',
     ])
-  })
-
-  it('con duración leída, la columna aparece', () => {
-    const t = trayectosDelVuelo({ ...vuelo(), duracionIda: '2 h 50 m' })
-    expect(columnasConDato(t)).toContain('duracion')
   })
 
   it('con un solo trayecto la columna del sentido sobra', () => {

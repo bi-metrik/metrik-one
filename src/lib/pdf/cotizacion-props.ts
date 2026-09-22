@@ -274,7 +274,20 @@ export interface CotizacionPDFProps {
    * y el documento de Termotech, Arca y WMC no cambia un píxel.
    */
   preciosPorPasajero?: {
-    filas: { tipo: 'adulto' | 'nino' | 'infante'; precioUnitario: number }[]
+    filas: {
+      tipo: 'adulto' | 'nino' | 'infante'
+      /** Cuántos viajan de ese tipo. `null` = las líneas no coinciden y no se multiplica. */
+      cantidad: number | null
+      precioUnitario: number
+    }[]
+    /**
+     * Lo que la tabla por pasajero explica (Σ `precioUnitario × cantidad`).
+     *
+     * ⚠️ Es lo que permite que el documento NO muestre dos cifras que no cierran: la
+     * plantilla resta `total − cubierto` y nombra la diferencia. `null` = no se puede
+     * reconciliar, y entonces la plantilla lo dice en vez de sugerir que la columna suma.
+     */
+    cubierto: number | null
     /** Componentes que se cobran por el grupo y NO están en la suma. Se nombran en el pie. */
     sinReparto: string[]
   } | null

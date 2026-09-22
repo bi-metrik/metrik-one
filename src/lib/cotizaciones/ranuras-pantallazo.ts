@@ -321,10 +321,10 @@ const ESCALA_REGRESO: CampoRanura = {
 /**
  * La hora de salida y la de llegada de cada trayecto.
  *
- * Los tres itinerarios que Trappvel manda hoy a sus clientes traen una tabla de vuelos con
- * columnas SALIDA, LLEGADA y DURACIÓN (§2.3 de `propuesta-visual.md`). Sin estos campos
- * esas tres columnas no se pueden llenar: el dato **no existía** en ninguna ranura —medido
- * el 2026-09-22 contra este mismo archivo—, así que no era un problema de impresión.
+ * Los itinerarios que Trappvel manda hoy a sus clientes traen una tabla de vuelos con
+ * columnas SALIDA y LLEGADA —leídas del PDF de referencia el 2026-09-22, donde salen como
+ * `07:45 am` y `11:35 am`—. Sin estos campos esas dos columnas no se pueden llenar: el dato
+ * **no existía** en ninguna ranura, así que no era un problema de impresión.
  *
  * ⚠️ En un itinerario con escala la pantalla muestra una fila POR TRAMO. Lo que el cliente
  * necesita es cuándo sale de su casa y cuándo llega a su destino, o sea la salida del
@@ -376,49 +376,24 @@ const HORA_LLEGADA_REGRESO: CampoRanura = {
 }
 
 /**
- * La duración se LEE de la pantalla. No se calcula restando las horas, y eso está medido.
+ * ⚠️⚠️ La DURACIÓN del vuelo ya NO se lee, y no porque no se pudiera.
  *
- * ⚠️ Restar llegada menos salida da el número equivocado en cuanto el vuelo cruza un huso
- * horario, que es el caso normal de esta agencia. Medido contra las tres capturas reales de
- * vuelo del banco (`capturas-proveedor/2026-09-16`):
+ * Se leía bien —18 de 18 en el banco real (#812)— pero **el itinerario de referencia no la
+ * trae**: su tabla de vuelos tiene cinco columnas (AEROLÍNEA, RUTA, FECHA, SALIDA, LLEGADA).
+ * Leído el 2026-09-22 del PDF que Trappvel manda hoy. La §2 de `propuesta-visual.md` decía
+ * que sí y estaba escrita de memoria.
  *
- * | Captura | Trayecto | La pantalla dice | Restar las horas daría |
- * |---|---|---|---|
- * | `3.57.39_PM-3` | Cúcuta–Armenia (vía Bogotá) | no muestra el total | 4h 25m ✔ (mismo huso) |
- * | `4.00.50_PM` | Bogotá–Punta Cana | 2h 50m | 3h 50m ✘ |
- * | `4.01.10_PM` | Bogotá–Orlando | 4h 15m | 5h 15m ✘ |
+ * Nada más la consumía: `resumenDeLinea` nunca la mostró en la plataforma y el documento
+ * era su único destino. Un campo que el modelo llena en cada lectura y que no se ve en
+ * ninguna pantalla es trabajo que se paga y no se usa.
  *
- * O sea que el cálculo habría mentido en **2 de las 3**, y en las dos el error es de una
- * hora exacta: lo bastante plausible como para que nadie lo revise. El brief autorizaba
- * calcularla *«si no viene escrita»* y dejaba la salida explícita («si no se puede calcular
- * con seguridad, se deja vacía»); la medición dice que nunca se puede.
- *
- * ⚠️ Tampoco se SUMAN los tramos: la suma no incluye el tiempo de conexión. En la captura
- * de Cúcuta–Armenia los dos tramos suman 2h 25m sobre un recorrido de 4h 25m.
+ * Queda escrito lo que costó medirlo, porque la conclusión vale para cualquier dato
+ * horario de un viaje internacional: **restar llegada menos salida miente en 2 de 3
+ * capturas reales**, y en las dos por una hora exacta —lo bastante plausible como para que
+ * nadie lo revise— porque el vuelo cruza un huso. Tampoco se pueden SUMAR los tramos: la
+ * suma omite la conexión (2h 25m de tramos sobre un recorrido de 4h 25m). Si algún día
+ * vuelve a hacer falta, se LEE de la pantalla o se deja vacía; nunca se calcula.
  */
-const COMO_SE_LEE_LA_DURACION =
-  'Cópiala tal como aparece (2h 50m, 4h:15m, 11h 20min). Si el trayecto se muestra en VARIOS tramos y la ' +
-  'pantalla solo da la duración de cada tramo por separado, devuelve null: la suma de los tramos no incluye ' +
-  'el tiempo de conexión. NUNCA la calcules restando la hora de llegada menos la de salida: origen y destino ' +
-  'pueden estar en husos horarios distintos y el resultado sería falso.'
-
-const DURACION_IDA: CampoRanura = {
-  slug: 'duracion_ida',
-  label: 'Duración (ida)',
-  tipo: 'texto',
-  min: false,
-  descripcion_ai: `Duración del trayecto de IDA completo, si la pantalla la muestra. ${COMO_SE_LEE_LA_DURACION}`,
-}
-
-const DURACION_REGRESO: CampoRanura = {
-  slug: 'duracion_regreso',
-  label: 'Duración (regreso)',
-  tipo: 'texto',
-  min: false,
-  descripcion_ai:
-    'Duración del trayecto de REGRESO completo, si la pantalla la muestra. ' +
-    `${COMO_SE_LEE_LA_DURACION} Si el viaje es solo ida, null.`,
-}
 
 // ── Equipaje: cuenta el icono RESALTADO, no que el icono exista ──────────────
 
@@ -509,10 +484,8 @@ const VUELO: DefinicionRanura = {
     { slug: 'fecha_regreso', label: 'Regreso', tipo: 'fecha', min: false, descripcion_ai: 'Fecha del vuelo de regreso en formato AAAA-MM-DD. null si es solo ida. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año.' },
     HORA_SALIDA,
     HORA_LLEGADA,
-    DURACION_IDA,
     HORA_SALIDA_REGRESO,
     HORA_LLEGADA_REGRESO,
-    DURACION_REGRESO,
     { slug: 'numero_vuelo', label: 'Nº de vuelo', tipo: 'texto', min: false, descripcion_ai: 'Número o números de vuelo tal como aparecen (ej. AV8520).' },
     { slug: 'escalas', label: 'Escalas', tipo: 'numero', min: false, descripcion_ai: 'Cuántas escalas tiene la IDA. 0 si es directo. null si la pantalla no lo dice.' },
     ESCALA_IDA,

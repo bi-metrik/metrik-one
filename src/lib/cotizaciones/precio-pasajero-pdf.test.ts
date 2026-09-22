@@ -52,9 +52,44 @@ describe('precio por pasajero del viaje', () => {
       { nombre: 'Seguro', precio_venta: 300, cantidad: 1, precioPorPasajero: null },
     ])
     expect(r).toEqual({
-      filas: [{ tipo: 'adulto', precioUnitario: 2000 }, { tipo: 'nino', precioUnitario: 1500 }],
+      filas: [
+        { tipo: 'adulto', cantidad: 2, precioUnitario: 2000 },
+        { tipo: 'nino', cantidad: 1, precioUnitario: 1500 },
+      ],
+      // 2 adultos a 2000 + 1 nino a 1500. Es lo que la tabla del PDF explica; el resto
+      // (el Seguro) se nombra y su plata sale de restar contra el total impreso.
+      cubierto: 5500,
       sinReparto: ['Seguro'],
     })
+  })
+
+  it('⚠️ los ADICIONALES de una linea repartida tambien quedan fuera de la suma', () => {
+    // `precioPorPasajeroDeItem` reparte `items.precio_venta`, que es el precio BASE de la
+    // variante: la maleta extra vive en `valorAdicionales` y NO esta en el reparto. Es el
+    // hueco exacto que dejo la prueba real de Providencia con 360.000 sin explicar.
+    const r = preciosPorPasajeroDelViaje([
+      {
+        nombre: 'Vuelo',
+        precio_venta: 3000,
+        cantidad: 1,
+        adicionales: ['Equipaje de bodega adicional x2'],
+        precioPorPasajero: [{ tipo: 'adulto', cantidad: 2, precioUnitario: 1000 }],
+      },
+    ])
+    expect(r?.cubierto).toBe(2000)
+    expect(r?.sinReparto).toEqual(['Equipaje de bodega adicional x2'])
+  })
+
+  it('⚠️ si las lineas NO coinciden en cuantos viajan, no se multiplica ni se reconcilia', () => {
+    // Un vuelo para 6 adultos y un hotel para 4: multiplicar por cualquiera de los dos
+    // daria un subtotal que no es el de nadie. `cubierto` en null hace que el documento
+    // lo diga en vez de imprimir dos cifras que no cierran.
+    const r = preciosPorPasajeroDelViaje([
+      { nombre: 'Vuelo', precio_venta: 6000, cantidad: 1, precioPorPasajero: [{ tipo: 'adulto', cantidad: 6, precioUnitario: 1000 }] },
+      { nombre: 'Hotel', precio_venta: 2000, cantidad: 1, precioPorPasajero: [{ tipo: 'adulto', cantidad: 4, precioUnitario: 500 }] },
+    ])
+    expect(r?.filas).toEqual([{ tipo: 'adulto', cantidad: null, precioUnitario: 1500 }])
+    expect(r?.cubierto).toBeNull()
   })
 
   it('un tipo que ninguna línea incluye no aparece (no hay «Infante $0»)', () => {
