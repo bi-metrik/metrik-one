@@ -6,10 +6,13 @@
  */
 
 import {
+  composicionDeLinea,
+  confirmacionDesactualizada,
   confirmadaVigente,
   leerTarifaPax,
   precioPorPasajero,
   TIPOS_PASAJERO,
+  type Composicion,
   type PrecioPorPasajero,
   type TipoPasajero,
 } from './tarifa-pasajero'
@@ -28,15 +31,25 @@ export interface ItemConTarifa {
  * ⚠️ `null` también cuando el costo por pasajero confirmado ya no es el costo de la línea
  * (alguien editó los rubros después). Imprimir ese reparto le diría al cliente cuánto paga
  * cada uno con los números de otra versión de la cotización.
+ *
+ * ⚠️ Y `null` cuando la confirmación es de OTROS pasajeros u otra moneda (brief del
+ * 2026-09-22, `confirmacionDesactualizada`): el reparto describiría a otro grupo. Para
+ * juzgar una línea que HEREDA los pasajeros hace falta la composición del viaje
+ * (`composicionViaje`); sin ella se juzga solo contra la propia de la línea y la moneda.
  */
-export function precioPorPasajeroDeItem(item: ItemConTarifa): PrecioPorPasajero[] | null {
+export function precioPorPasajeroDeItem(
+  item: ItemConTarifa,
+  composicionViaje?: Composicion | null,
+): PrecioPorPasajero[] | null {
   if (item.es_ajuste) return null
-  const { confirmada } = leerTarifaPax(item.tarifa_pax)
+  const tarifa = leerTarifaPax(item.tarifa_pax)
+  const { confirmada } = tarifa
   if (!confirmada) return null
   const costoUnitario = (item.rubros ?? [])
     .filter(r => r.sugerido !== true)
     .reduce((a, r) => a + (Number(r.valor_total) || 0), 0)
   if (!confirmadaVigente(confirmada, costoUnitario)) return null
+  if (confirmacionDesactualizada(tarifa, composicionDeLinea(tarifa, composicionViaje ?? null))) return null
   return precioPorPasajero(confirmada, Number(item.precio_venta) || 0)
 }
 

@@ -24,6 +24,7 @@ vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({
   actualizarComposicionDeItem: async () => ({ success: true }),
   confirmarTarifaPorPasajero: async () => ({ success: true }),
   corregirCampoDeFicha: async () => ({ success: true }),
+  elegirMonedaDeTarifa: async () => ({ success: true }),
 }))
 vi.mock('@/app/(app)/negocios/pantallazo-actions', () => ({
   descartarPropuestaDePantallazo: async () => ({ success: true }),
@@ -279,6 +280,115 @@ describe('lo que encontró el pantallazo 1 (P4, P6)', () => {
     expect(texto).toContain('Costo cargado por pasajero: Adulto $641.507 · Infante $11.337')
     expect(texto).not.toContain('Confirmar y cargar el costo')
     expect(texto).not.toContain('El costo de la línea cambió')
+  })
+})
+
+/**
+ * Brief del 2026-09-22, parte 1 · la línea hereda los pasajeros del VIAJE y el viaje cambió
+ * después de pegar. La alerta tiene que estar EN la casilla, en palabras, y la propuesta de
+ * costo por pasajero NO puede pintarse (sería el precio de 2 dividido entre 3).
+ */
+describe('captura desactualizada · la alerta es persistente y el precio viejo no se propone', () => {
+  const DOS_ADULTOS = lectura({
+    total: 2000000,
+    ocupacion: { adultos: 2, ninos: 0, infantes: 0, total: 2 },
+    paraComposicion: { adultos: 2, ninos: 0, infantes: 0 },
+  })
+
+  it('el viaje pasó de 2 a 3 adultos: la casilla lo dice y no hay «Confirmar»', () => {
+    const texto = sinEtiquetas(pintar({
+      composicionViaje: { adultos: 3, ninos: 0, infantes: 0 },
+      tarifaPax: { casillas: { grupo_completo: DOS_ADULTOS } },
+    }))
+    expect(texto).toContain('Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos: pega uno nuevo.')
+    expect(texto).toContain('el costo por pasajero no se calcula hasta reemplazarlo')
+    expect(texto).not.toContain('Confirmar y cargar el costo')
+    // El precio de 2 dividido entre 3 no aparece en ninguna parte.
+    expect(texto).not.toContain('666.667')
+  })
+
+  it('con los pasajeros con que se buscó, nada que decir', () => {
+    const texto = sinEtiquetas(pintar({
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 0 },
+      tarifaPax: { casillas: { grupo_completo: DOS_ADULTOS } },
+    }))
+    expect(texto).not.toContain('pega uno nuevo')
+    expect(texto).toContain('Confirmar y cargar el costo')
+  })
+
+  it('el costo YA cargado para 2 dice, encima, que la línea ahora es de 3', () => {
+    const texto = sinEtiquetas(pintar({
+      composicionViaje: { adultos: 3, ninos: 0, infantes: 0 },
+      costoUnitarioLinea: 2000000,
+      tarifaPax: {
+        casillas: { grupo_completo: DOS_ADULTOS },
+        confirmada: {
+          composicion: { adultos: 2, ninos: 0, infantes: 0 },
+          costos: [{ tipo: 'adulto', cantidad: 2, unitarioCOP: 1000000, totalCOP: 2000000 }],
+          costoTotalCOP: 2000000,
+          moneda: 'COP',
+          tasa: null,
+          confirmadaEn: '2026-09-22T13:00:00Z',
+        },
+      },
+    }))
+    expect(texto).toContain('El costo cargado es para 2 adultos y la línea ahora cubre 3 adultos')
+    expect(texto).toContain('Costo cargado por pasajero: Adulto $1.000.000')
+  })
+})
+
+/**
+ * Brief del 2026-09-22, parte 2 · la captura no mostraba la moneda: COP va preseleccionada,
+ * con la alerta a la vista y el botón de confirmar apagado hasta un clic.
+ */
+describe('moneda supuesta · se ve y frena', () => {
+  const SIN_MONEDA = lectura({
+    total: 2000000,
+    ocupacion: { adultos: 2, ninos: 0, infantes: 0, total: 2 },
+    monedaAsumida: true,
+  })
+
+  it('alerta persistente, «Sí, es COP» a un clic, y confirmar apagado', () => {
+    const html = pintar({
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 0 },
+      tarifaPax: { casillas: { grupo_completo: SIN_MONEDA } },
+    })
+    const texto = sinEtiquetas(html)
+    expect(texto).toContain('La captura no muestra la moneda: se asumió COP. Acéptala o cámbiala antes de confirmar el costo.')
+    expect(texto).toContain('Sí, es COP')
+    expect(texto).toContain('USD')
+    expect(texto).toContain('(moneda sin confirmar)')
+    expect(texto).toContain('Acepta o cambia la moneda de la tarifa')
+    // El botón existe, pero apagado.
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*?Confirmar y cargar el costo/)
+  })
+
+  it('aceptada por una persona: dice quién, deja confirmar, y ofrece cambiarla', () => {
+    const html = pintar({
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 0 },
+      tarifaPax: {
+        casillas: { grupo_completo: SIN_MONEDA },
+        moneda: { valor: 'USD', por: 'Alejandra', porId: 'p-1', en: '2026-09-22T15:00:00Z' },
+      },
+    })
+    const texto = sinEtiquetas(html)
+    expect(texto).toContain('Moneda de la tarifa: USD')
+    expect(texto).toContain('la eligió Alejandra')
+    expect(texto).toContain('Cambiar moneda')
+    expect(texto).not.toContain('se asumió COP')
+    // En USD pide la tasa, como siempre.
+    expect(texto).toContain('Tasa de cambio USD → COP')
+    expect(texto).toContain('Leído: 2.000.000 USD')
+  })
+
+  it('la moneda que mostró la captura se dice como leída, sin alerta', () => {
+    const texto = sinEtiquetas(pintar({
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 0 },
+      tarifaPax: { casillas: { grupo_completo: lectura({ ...SIN_MONEDA, monedaAsumida: undefined }) } },
+    }))
+    expect(texto).toContain('Moneda de la tarifa: COP')
+    expect(texto).toContain('leída del pantallazo')
+    expect(texto).not.toContain('se asumió COP')
   })
 })
 

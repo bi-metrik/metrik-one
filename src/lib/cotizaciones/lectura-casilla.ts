@@ -74,6 +74,9 @@ export function construirLecturaCasilla(
 ): LecturaCasilla {
   const valor = (slug: string) => aceptacion.campos.find(c => c.slug === slug)?.valor ?? null
   const moneda = (valor('moneda') ?? 'COP').toUpperCase()
+  // La captura no mostraba la moneda y se preseleccionó (`monedaSiFalta`). Queda dicho en
+  // la lectura: es lo que impide confirmar el costo hasta que una persona la acepte.
+  const monedaAsumida = aceptacion.campos.find(c => c.slug === 'moneda')?.supuesto === true
   const porTipo = agruparPorTipo(aceptacion)
 
   let total: number
@@ -159,9 +162,12 @@ export function construirLecturaCasilla(
     alertas,
     campos: aceptacion.campos
       .filter(c => c.valor !== null)
+      // Un valor supuesto no se lista como leído: afirmaría que la imagen decía «COP».
+      .filter(c => !c.supuesto)
       .map(c => ({ label: c.label, valor: c.delItem ? `${c.valor} (del viaje)` : (c.valor as string) })),
     nombre,
     descripcion,
     leidaEn,
+    ...(monedaAsumida ? { monedaAsumida: true } : {}),
   }
 }

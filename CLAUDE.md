@@ -384,6 +384,13 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### Trappvel: capturas de otros pasajeros y moneda editable por bloque (2026-09-22)
+
+- **⚠️⚠️ Cambiar los pasajeros (de la línea o del viaje que la línea hereda) ya NO borra casillas ni confirmación: las MARCA.** Cada casilla guarda `paraComposicion`; `capturasDesactualizadas` compara casilla por casilla y `resolverTarifa` devuelve `desactualizada` (sin costo). Antes, con la línea heredando, un precio buscado para 2 se dividía entre 3 en silencio.
+- **La confirmación vieja se queda (rubros intactos) pero `confirmacionDesactualizada` la marca**: no se reimprime el reparto por pasajero (editor y PDF) y no se reconfirma hasta pegar la captura nueva. Aviso a nivel de cotización (`captura-desactualizada.ts`): avisa, no bloquea; no hay control de envío donde sumarlo.
+- **RX3 ya no rechaza en el cargue por casillas** (`monedaSiFalta`): COP queda SUPUESTA y el costo no se confirma hasta un clic (`elegirMonedaDeTarifa` → `tarifa_pax.moneda`, con quién y cuándo). El cargue legacy sin esa opción sigue rechazando.
+- **Costo a mano en otra moneda en líneas de viaje** (`costo-manual.ts`): `subtotal` sigue en pesos y lo escrito queda en `tarifa_pax.costoManual`. Los rubros siguen siendo solo COP (libro ya convertido). Sin DDL.
+
 ### Sistema visual del documento de Trappvel (2026-09-22)
 
 - **La forma la manda `proyectos/trappvel/clarity/docs/diseno/sistema-visual-documento.md`**; el contenido, `propuesta-visual.md` y el brief del 22-sep. Solo la plantilla de Trappvel: Termotech sale identico byte a byte (sin fecha ni ID).

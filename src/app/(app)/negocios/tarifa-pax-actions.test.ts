@@ -108,11 +108,18 @@ const {
   actualizarComposicionDeItem,
   confirmarTarifaPorPasajero,
   corregirCampoDeFicha,
+  elegirMonedaDeTarifa,
   leerCasillaDeItem,
   quitarCasillaDeItem,
 } = await import('./tarifa-pax-actions')
 const { hotelesDeItems, vuelosDeItems } = await import('@/lib/cotizaciones/detalle-viaje')
-const { leerTarifaPax, tarifaMasReciente } = await import('@/lib/cotizaciones/tarifa-pasajero')
+const {
+  capturasDesactualizadas,
+  confirmacionDesactualizada,
+  leerTarifaPax,
+  monedaDeTarifa,
+  tarifaMasReciente,
+} = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { precioConMargen } = await import('@/lib/cotizaciones/precio-item')
 const { nivelDeMargen, POLITICA_MARGEN_POR_DEFECTO } = await import('@/lib/cotizaciones/convencion-margen')
 
@@ -346,15 +353,297 @@ describe('§2.1 y §2.4 · se pega primero y la ocupación sale de la captura', 
   })
 })
 
+/**
+ * El hueco del brief del 2026-09-22 (parte 1, punto 2): la línea no tiene composición
+ * propia, hereda la del VIAJE, y alguien cambia los pasajeros del viaje DESPUÉS de pegar.
+ *
+ * Hasta hoy la captura vieja se seguía usando sin aviso: `resolverTarifa`, caso «solo
+ * adultos», dividía el precio buscado para 2 adultos entre 3, y la confirmación escribía
+ * ese costo en los rubros. La cotización salía con el precio mal y nada lo decía.
+ */
+describe('el hueco · los pasajeros del VIAJE cambian y la línea que los hereda', () => {
+  const PNG = 'data:image/png;base64,AAAA'
+  const dosAdultos = (): LecturaCruda => ({
+    ...decameronResultado(),
+    campos: {
+      ...decameronResultado().campos,
+      ocupacion: v('2 adultos'),
+      ocupacion_adultos: v('2'),
+      ocupacion_ninos: v('0'),
+      ocupacion_infantes: v('0'),
+      moneda: v('COP'),
+      precio_total: v('2000000'),
+    },
+  })
+  const heredaDelViaje = (): Fila => ({
+    id: 'item-hotel',
+    cotizacion_id: 'cot-1',
+    grupo: 'hotel',
+    nombre: 'Hotel',
+    descripcion: null,
+  })
+
+  it('la captura buscada para 2 adultos NO se reparte entre 3 al confirmar', async () => {
+    composicionDelViaje = { adultos: 2, ninos: 0, infantes: 0 }
+    lecturaDelModelo = dosAdultos()
+    tablas.items.push(heredaDelViaje())
+
+    const leida = await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    expect(leida.ok).toBe(true)
+    // La captura coincidía con el viaje: la línea sigue HEREDANDO, no fija nada propio.
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).composicion).toBeNull()
+
+    composicionDelViaje = { adultos: 3, ninos: 0, infantes: 0 }
+    const r = await confirmarTarifaPorPasajero('item-hotel', null)
+
+    expect(r.success).toBe(false)
+    expect(r.error).toContain('Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos')
+    // Y nada entró al costo: el precio de 2 no se dividió entre 3.
+    expect(tablas.rubros).toEqual([])
+  })
+
+  it('la captura NO se borra, se marca; pegar la nueva quita la alerta y deja confirmar', async () => {
+    composicionDelViaje = { adultos: 2, ninos: 0, infantes: 0 }
+    lecturaDelModelo = dosAdultos()
+    tablas.items.push(heredaDelViaje())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    // Se anota para quiénes se buscó: es lo que permite decir después que quedó vieja.
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas?.grupo_completo?.paraComposicion)
+      .toEqual({ adultos: 2, ninos: 0, infantes: 0 })
+
+    composicionDelViaje = { adultos: 3, ninos: 0, infantes: 0 }
+    const vieja = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(vieja.casillas?.grupo_completo?.total).toBe(2000000)
+    expect(capturasDesactualizadas({ adultos: 3, ninos: 0, infantes: 0 }, vieja.casillas ?? {}, 'hotel_detalle'))
+      .toHaveLength(1)
+
+    // La captura nueva, buscada para 3.
+    const tres = dosAdultos()
+    tres.campos.ocupacion = v('3 adultos')
+    tres.campos.ocupacion_adultos = v('3')
+    tres.campos.precio_total = v('2700000')
+    lecturaDelModelo = tres
+    const r = await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    expect(r.ok).toBe(true)
+    const nueva = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(capturasDesactualizadas({ adultos: 3, ninos: 0, infantes: 0 }, nueva.casillas ?? {}, 'hotel_detalle'))
+      .toEqual([])
+
+    const conf = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(conf.success).toBe(true)
+    expect(tablas.rubros.map(x => [x.descripcion, x.cantidad, x.valor_unitario])).toEqual([['Adulto', 3, 900000]])
+  })
+
+  it('cambiar los pasajeros DE LA LÍNEA tampoco borra: la lectura queda y la confirmación se niega', async () => {
+    composicionDelViaje = { adultos: 2, ninos: 0, infantes: 0 }
+    lecturaDelModelo = dosAdultos()
+    tablas.items.push(heredaDelViaje())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+
+    const cambio = await actualizarComposicionDeItem('item-hotel', { adultos: 3, ninos: 0, infantes: 0 })
+    expect(cambio.success).toBe(true)
+    expect(cambio.desactualizadas).toBe(1)
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas?.grupo_completo?.total).toBe(2000000)
+
+    const r = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(r.success).toBe(false)
+    expect(r.error).toContain('Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos')
+  })
+
+  it('con el costo ya confirmado, cambiar el viaje marca la confirmación y no toca los rubros', async () => {
+    composicionDelViaje = { adultos: 2, ninos: 0, infantes: 0 }
+    lecturaDelModelo = dosAdultos()
+    tablas.items.push(heredaDelViaje())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    expect((await confirmarTarifaPorPasajero('item-hotel', null)).success).toBe(true)
+    const rubrosAntes = structuredClone(tablas.rubros)
+
+    const t = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(confirmacionDesactualizada(t, { adultos: 2, ninos: 0, infantes: 0 })).toBeNull()
+    expect(confirmacionDesactualizada(t, { adultos: 3, ninos: 0, infantes: 0 })?.mensaje)
+      .toContain('El costo cargado es para 2 adultos y la línea ahora cubre 3 adultos')
+    // Lo aprobado sigue siendo el costo de la línea hasta que alguien confirme otro.
+    expect(tablas.rubros).toEqual(rubrosAntes)
+  })
+
+  it('responder a cuántos cubre una captura sin ocupación la ANOTA: un cambio posterior sí se detecta', async () => {
+    lecturaDelModelo = {
+      ...dosAdultos(),
+      campos: {
+        ...dosAdultos().campos,
+        ocupacion: v(null, 0),
+        ocupacion_adultos: v(null, 0),
+        ocupacion_ninos: v(null, 0),
+        ocupacion_infantes: v(null, 0),
+      },
+    }
+    tablas.items.push(heredaDelViaje())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas?.grupo_completo?.paraComposicion).toBeUndefined()
+
+    await actualizarComposicionDeItem('item-hotel', { adultos: 2, ninos: 0, infantes: 0 })
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas?.grupo_completo?.paraComposicion)
+      .toEqual({ adultos: 2, ninos: 0, infantes: 0 })
+
+    await actualizarComposicionDeItem('item-hotel', { adultos: 4, ninos: 0, infantes: 0 })
+    const r = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(r.success).toBe(false)
+    expect(r.error).toContain('Este pantallazo es para 2 adultos y la línea ahora cubre 4 adultos')
+  })
+})
+
+/**
+ * Brief del 2026-09-22, parte 2: la moneda de la tarifa se puede elegir, por defecto COP, y
+ * una captura sin moneda ya no se rechaza (RX3) sino que queda con COP SUPUESTA hasta que una
+ * persona la acepte o la cambie. Tres casos que pide el brief —COP, USD con tasa, moneda
+ * cambiada tras confirmar— y los frenos alrededor.
+ */
+describe('la moneda de la tarifa · editable, COP por defecto, y nunca callada', () => {
+  const PNG = 'data:image/png;base64,AAAA'
+  const dosAdultos = (moneda: string | null, precio = '2000000'): LecturaCruda => ({
+    ...decameronResultado(),
+    campos: {
+      ...decameronResultado().campos,
+      ocupacion: v('2 adultos'),
+      ocupacion_adultos: v('2'),
+      ocupacion_ninos: v('0'),
+      ocupacion_infantes: v('0'),
+      moneda: moneda === null ? v(null, 0) : v(moneda),
+      precio_total: v(precio),
+    },
+  })
+  const linea = (): Fila => ({
+    id: 'item-hotel',
+    cotizacion_id: 'cot-1',
+    grupo: 'hotel',
+    nombre: 'Hotel',
+    descripcion: null,
+    tarifa_pax: { composicion: { adultos: 2, ninos: 0, infantes: 0 } },
+  })
+  const unitarios = () => tablas.rubros.map(x => [x.descripcion, x.cantidad, x.valor_unitario])
+
+  it('COP: la captura la muestra y el costo entra en pesos, sin tasa', async () => {
+    lecturaDelModelo = dosAdultos('COP')
+    tablas.items.push(linea())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    const r = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(r.success).toBe(true)
+    expect(unitarios()).toEqual([['Adulto', 2, 1000000]])
+    expect(leerTarifaPax(r.tarifa).confirmada).toMatchObject({ moneda: 'COP', tasa: null })
+  })
+
+  it('USD con tasa: sin tasa no se confirma; con tasa el costo entra convertido', async () => {
+    lecturaDelModelo = dosAdultos('USD', '1000')
+    tablas.items.push(linea())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+
+    const sinTasa = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(sinTasa.success).toBe(false)
+    expect(sinTasa.error).toContain('falta la tasa de cambio')
+    expect(tablas.rubros).toEqual([])
+
+    const r = await confirmarTarifaPorPasajero('item-hotel', 4000)
+    expect(r.success).toBe(true)
+    expect(unitarios()).toEqual([['Adulto', 2, 2000000]])
+    expect(leerTarifaPax(r.tarifa).confirmada).toMatchObject({ moneda: 'USD', tasa: 4000 })
+  })
+
+  it('sin moneda en la captura: se guarda con COP SUPUESTA y no se confirma hasta aceptarla', async () => {
+    lecturaDelModelo = dosAdultos(null)
+    tablas.items.push(linea())
+    const leida = await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    expect(leida.ok).toBe(true)
+    const t = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(t.casillas?.grupo_completo).toMatchObject({ moneda: 'COP', monedaAsumida: true })
+    expect(monedaDeTarifa(t)).toMatchObject({ moneda: 'COP', asumida: true })
+
+    const bloqueada = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(bloqueada.success).toBe(false)
+    expect(bloqueada.error).toContain('se asumió COP')
+    expect(tablas.rubros).toEqual([])
+
+    // Un clic: «es COP».
+    const aceptada = await elegirMonedaDeTarifa('item-hotel', 'COP')
+    expect(aceptada.success).toBe(true)
+    const tras = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(tras.moneda).toMatchObject({ valor: 'COP' })
+    expect(tras.moneda?.en).toBeTruthy()
+    // Lo que dijo la IA (nada) sigue anotado en la casilla.
+    expect(tras.casillas?.grupo_completo?.monedaAsumida).toBe(true)
+
+    const r = await confirmarTarifaPorPasajero('item-hotel', null)
+    expect(r.success).toBe(true)
+    expect(unitarios()).toEqual([['Adulto', 2, 1000000]])
+  })
+
+  it('«$» que en realidad era USD: la persona la cambia y el costo pide tasa', async () => {
+    lecturaDelModelo = dosAdultos(null, '1000')
+    tablas.items.push(linea())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    await elegirMonedaDeTarifa('item-hotel', 'usd')
+
+    expect((await confirmarTarifaPorPasajero('item-hotel', null)).success).toBe(false)
+    const r = await confirmarTarifaPorPasajero('item-hotel', 4100)
+    expect(r.success).toBe(true)
+    expect(unitarios()).toEqual([['Adulto', 2, 2050000]])
+  })
+
+  it('moneda cambiada DESPUÉS de confirmar: la confirmación queda desactualizada y hay que volver a confirmar con tasa', async () => {
+    lecturaDelModelo = dosAdultos('COP', '1000')
+    tablas.items.push(linea())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    expect((await confirmarTarifaPorPasajero('item-hotel', null)).success).toBe(true)
+    expect(unitarios()).toEqual([['Adulto', 2, 500]])
+
+    const cambio = await elegirMonedaDeTarifa('item-hotel', 'USD')
+    expect(cambio.success).toBe(true)
+    expect(cambio.confirmacionDesactualizada).toBe(true)
+    const t = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(confirmacionDesactualizada(t, { adultos: 2, ninos: 0, infantes: 0 })?.mensaje)
+      .toContain('El costo se cargó en COP y la tarifa ahora está en USD')
+    // Lo que dijo la IA sigue siendo COP en la casilla; los rubros no se tocaron.
+    expect(t.casillas?.grupo_completo?.moneda).toBe('COP')
+    expect(unitarios()).toEqual([['Adulto', 2, 500]])
+
+    expect((await confirmarTarifaPorPasajero('item-hotel', null)).success).toBe(false)
+    const r = await confirmarTarifaPorPasajero('item-hotel', 4000)
+    expect(r.success).toBe(true)
+    expect(unitarios()).toEqual([['Adulto', 2, 2000000]])
+    expect(confirmacionDesactualizada(leerTarifaPax(r.tarifa), { adultos: 2, ninos: 0, infantes: 0 })).toBeNull()
+  })
+
+  it('un pantallazo 1 nuevo retira la moneda elegida: es otra búsqueda', async () => {
+    lecturaDelModelo = dosAdultos(null)
+    tablas.items.push(linea())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    await elegirMonedaDeTarifa('item-hotel', 'USD')
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).moneda?.valor).toBe('USD')
+
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    const t = leerTarifaPax(itemEnBase('item-hotel').tarifa_pax)
+    expect(t.moneda).toBeUndefined()
+    expect(monedaDeTarifa(t)).toMatchObject({ moneda: 'COP', asumida: true })
+  })
+
+  it('un código que no es moneda no se guarda', async () => {
+    lecturaDelModelo = dosAdultos(null)
+    tablas.items.push(linea())
+    await leerCasillaDeItem('item-hotel', 'grupo_completo', PNG)
+    const r = await elegirMonedaDeTarifa('item-hotel', 'pesos')
+    expect(r.success).toBe(false)
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).moneda).toBeUndefined()
+  })
+})
+
 describe('hallazgo 1 · elegir la moneda deja la casilla igual que pegar directo', () => {
-  it('sin moneda pide la moneda y no guarda nada; con COP guarda y DEVUELVE lo guardado', async () => {
+  // ⚠️ Hasta el 2026-09-22 una captura sin moneda se RECHAZABA (RX3) y no guardaba nada. El
+  // brief de ese día la vuelve un «se guarda con COP supuesta»: ver el bloque de la moneda.
+  it('sin moneda ya no se rechaza; con COP indicada guarda y DEVUELVE lo guardado', async () => {
     tablas.items.push(itemHotel('PRUEBA Hotel Decameron'))
 
     const sinMoneda = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA')
-    expect(sinMoneda.ok).toBe(false)
-    if (sinMoneda.ok) return
-    expect(sinMoneda.pideMoneda).toBe(true)
-    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas).toEqual({})
+    expect(sinMoneda.ok).toBe(true)
+    expect(leerTarifaPax(itemEnBase('item-hotel').tarifa_pax).casillas?.grupo_completo?.monedaAsumida).toBe(true)
 
     const conCOP = await leerCasillaDeItem('item-hotel', 'grupo_completo', 'data:image/png;base64,AAAA', 'COP')
     expect(conCOP.ok).toBe(true)
@@ -677,13 +966,17 @@ describe('corregir la ficha · lo que dijo la IA no se pierde y releer no lo pis
     expect(itemEnBase('item-vuelo').descripcion).toBe('VUELO NOCTURNO, PEDIR SILLA DE VENTANA')
   })
 
-  it('cambiar los pasajeros borra la confirmación pero no la marca: la descripción del sistema se sigue actualizando', async () => {
+  // ⚠️ Hasta el 2026-09-22 cambiar los pasajeros BORRABA la confirmación. Ahora se conserva
+  // marcada como desactualizada (brief de ese día, parte 1); la marca de la descripción, igual.
+  it('cambiar los pasajeros NO borra la confirmación ni la marca: la confirmación queda desactualizada', async () => {
     tablas.items.push(itemVueloConFicha())
     await confirmarTarifaPorPasajero('item-vuelo', null)
     const escrita = itemEnBase('item-vuelo').descripcion
-    await actualizarComposicionDeItem('item-vuelo', { adultos: 4, ninos: 1, infantes: 0 })
+    const r = await actualizarComposicionDeItem('item-vuelo', { adultos: 4, ninos: 1, infantes: 0 })
+    expect(r.confirmacionDesactualizada).toBe(true)
     const t = leerTarifaPax(itemEnBase('item-vuelo').tarifa_pax)
-    expect(t.confirmada).toBeNull()
+    expect(t.confirmada?.composicion).toEqual({ adultos: 5, ninos: 1, infantes: 0 })
+    expect(t.casillas?.grupo_completo?.total).toBe(11306378)
     expect(t.descripcionDelSistema).toBe(escrita)
   })
 

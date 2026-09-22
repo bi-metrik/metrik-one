@@ -265,6 +265,42 @@ export interface LecturaCasilla {
   leidaEn: string
   /** CC2: la resta con la casilla de más personas dio cero y alguien confirmó que el menor no paga. */
   menorNoPagaConfirmado?: boolean
+  /**
+   * A cuántos pasajeros cubría la LÍNEA cuando se buscó y se leyó esta captura: la
+   * composición efectiva de ese momento (la propia, la del viaje, o la que fijó la propia
+   * captura). Es lo que permite decir, después, que la captura quedó vieja.
+   *
+   * ⚠️ Es la ocupación de la línea, no la de la casilla: la búsqueda de «solo adultos» se
+   * deriva de ella con `casillasDe`. Ausente en las lecturas anteriores al 2026-09-22, y
+   * en la primera lectura de una línea que todavía no sabía a cuántos cubre (se completa
+   * cuando alguien responde la pregunta).
+   */
+  paraComposicion?: Composicion | null
+  /**
+   * La captura NO mostraba la moneda (o solo «$») y se preseleccionó COP para poder
+   * guardarla. No es un dato de la imagen: mientras nadie la acepte o la cambie, el costo
+   * no se deja confirmar (`monedaDeTarifa`). Ausente = la moneda estaba en la captura.
+   */
+  monedaAsumida?: boolean
+}
+
+/**
+ * La moneda que eligió una PERSONA para la tarifa de la línea (brief del 2026-09-22, parte 2).
+ *
+ * Mismo patrón que las correcciones de la ficha (#821): lo que dijo la IA se queda en cada
+ * casilla (`LecturaCasilla.moneda`), y lo que manda la persona vive aparte, con quién y
+ * cuándo. Es de la LÍNEA y no de una casilla porque las casillas de una misma tarifa tienen
+ * que estar en la misma moneda (CC1): elegirla en una y no en otra no significa nada.
+ */
+export interface DecisionMoneda {
+  /** Código ISO de tres letras, en mayúscula. */
+  valor: string
+  /** Nombre de quien la eligió. */
+  por: string | null
+  /** `profiles.id` de quien la eligió. */
+  porId: string | null
+  /** Cuándo (ISO, reloj del servidor). */
+  en: string
 }
 
 export type CasillasLeidas = Partial<Record<ClaveCasilla, LecturaCasilla>>
@@ -506,6 +542,12 @@ export function validarLecturaEnCasilla(args: {
   composicion: Composicion | null
   casillas: CasillasLeidas
   ranuraSlug: string
+  /**
+   * La moneda que eligió una persona para la línea (`DecisionMoneda`), si la hay. Una
+   * captura complementaria que MUESTRA otra se rechaza: es otra búsqueda, o la elección
+   * estaba mal, y cualquiera de las dos cosas la tiene que resolver una persona.
+   */
+  monedaDecidida?: string | null
 }): ValidacionCasilla {
   const { clave, lectura, composicion, casillas, ranuraSlug } = args
   if (!composicion) {
@@ -589,9 +631,22 @@ export function validarLecturaEnCasilla(args: {
       }
     }
   }
+  // La moneda se compara entre lo que las capturas MUESTRAN. Una supuesta (la captura solo
+  // decía «$») no es evidencia de nada: sigue a la de la línea.
+  const decidida = args.monedaDecidida ? args.monedaDecidida.toUpperCase() : null
+  if (!lectura.monedaAsumida && decidida && clave !== 'grupo_completo' && lectura.moneda.toUpperCase() !== decidida) {
+    return {
+      ok: false,
+      codigo: 'CC1',
+      mensaje:
+        `Este pantallazo está en ${lectura.moneda.toUpperCase()} y para esta línea se eligió ${decidida}. ` +
+        'Si el precio de la línea está en otra moneda, cámbiala primero; si no, busca con la misma moneda.',
+    }
+  }
   for (const otra of otras) {
     const previa = casillas[otra.clave] as LecturaCasilla
-    if (previa.moneda.toUpperCase() !== lectura.moneda.toUpperCase()) {
+    const lasDosMuestranMoneda = !lectura.monedaAsumida && !previa.monedaAsumida
+    if (lasDosMuestranMoneda && previa.moneda.toUpperCase() !== lectura.moneda.toUpperCase()) {
       return {
         ok: false,
         codigo: 'CC1',
@@ -649,6 +704,227 @@ export function validarLecturaEnCasilla(args: {
   return { ok: true, alertas }
 }
 
+// ── Capturas desactualizadas (brief del 2026-09-22, parte 1) ─────────────────
+
+/**
+ * Una captura que se buscó para otros pasajeros que los que la línea cubre hoy.
+ *
+ * ## El hueco que esto cierra
+ *
+ * Una línea sin composición propia HEREDA la del viaje. Si alguien cambia los pasajeros del
+ * viaje después de pegar, la captura vieja se seguía usando: el caso «solo adultos» dividía
+ * un precio buscado para 2 entre 3, y la cotización salía con el precio mal y sin aviso. Lo
+ * mismo pasaba con el desglose por tipo (el subtotal de 2 adultos repartido entre 3).
+ *
+ * ## Qué se compara, y por qué casilla por casilla
+ *
+ * La ocupación que se BUSCÓ en esa casilla contra la que la casilla pide HOY. No la
+ * composición de la línea entera: pasar de 2 adultos, 1 niño y 1 infante a 2 infantes deja
+ * vigente la búsqueda de «solo adultos» (sigue siendo 2 adultos), y pedir que se repita
+ * sería trabajo inventado.
+ *
+ * Lo buscado sale de `paraComposicion`, que se guarda al leer. Para las lecturas anteriores
+ * se usa lo que la propia captura acredita (`composicionDeLectura`); si tampoco lo dice, NO
+ * se marca: inventar una alerta enseña a ignorarlas.
+ */
+export interface CapturaDesactualizada {
+  clave: ClaveCasilla
+  /** El número de la casilla con la composición de HOY (el que ve la persona). */
+  numero: number
+  /** Para quiénes se buscó. */
+  buscadaPara: Composicion
+  /** Para quiénes hace falta hoy. */
+  necesaria: Composicion
+  /** En palabras de quien cotiza, y diciendo qué hacer. */
+  mensaje: string
+}
+
+/** La ocupación que busca una casilla para una composición dada, o `null` si no la pide. */
+function ocupacionDeCasilla(c: Composicion, clave: ClaveCasilla, ranuraSlug: string): Composicion | null {
+  return casillasDe(c, ranuraSlug).find(d => d.clave === clave)?.ocupacion ?? null
+}
+
+/** Para quiénes se buscó la captura de una casilla, o `null` si no hay cómo saberlo. */
+function ocupacionBuscada(l: LecturaCasilla, clave: ClaveCasilla, ranuraSlug: string): Composicion | null {
+  if (l.paraComposicion) return ocupacionDeCasilla(l.paraComposicion, clave, ranuraSlug)
+  return composicionDeLectura(l)
+}
+
+/** Todas las casillas desactualizadas, cuenten o no para el costo de hoy. */
+function desactualizadasTodas(
+  actual: Composicion,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+): CapturaDesactualizada[] {
+  const out: CapturaDesactualizada[] = []
+  for (const def of casillasDe(actual, ranuraSlug)) {
+    const l = casillas[def.clave]
+    if (!l) continue
+    const buscada = ocupacionBuscada(l, def.clave, ranuraSlug)
+    if (!buscada || mismaComposicion(buscada, def.ocupacion)) continue
+    out.push({
+      clave: def.clave,
+      numero: def.numero,
+      buscadaPara: buscada,
+      necesaria: def.ocupacion,
+      mensaje: def.clave === 'grupo_completo'
+        ? `Este pantallazo es para ${describirOcupacion(buscada, 'y')} y la línea ahora cubre ` +
+          `${describirOcupacion(actual, 'y')}: pega uno nuevo.`
+        : `El pantallazo ${def.numero} (${def.titulo.toLowerCase()}) es para ${describirOcupacion(buscada, 'y')} ` +
+          `y ahora hace falta con ${describirOcupacion(def.ocupacion, 'y')}: pega uno nuevo.`,
+    })
+  }
+  return out
+}
+
+/**
+ * Las capturas que ya no sirven para el costo de la línea con la composición de HOY.
+ *
+ * ⚠️ Una complementaria vieja NO cuenta cuando el pantallazo 1, vigente, ya trae el precio
+ * de cada tipo: la línea no la usa para nada, y exigir reemplazarla frenaría una
+ * confirmación por una captura que no entra al costo.
+ */
+export function capturasDesactualizadas(
+  actual: Composicion | null,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+): CapturaDesactualizada[] {
+  if (!actual) return []
+  const todas = desactualizadasTodas(actual, casillas, ranuraSlug)
+  const l1 = casillas.grupo_completo
+  const unoVigente = !!l1 && !todas.some(d => d.clave === 'grupo_completo')
+  if (unoVigente && traeDesgloseCompleto(l1 as LecturaCasilla, actual)) return []
+  return todas
+}
+
+/**
+ * Las casillas que siguen describiendo la composición de hoy. Es con estas —y no con las
+ * viejas— que se compara una captura nueva (mismo producto, CC2): una captura vieja de otra
+ * ocupación haría rechazar una buena por una resta que ya no existe.
+ */
+export function casillasVigentes(
+  actual: Composicion | null,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+): CasillasLeidas {
+  if (!actual) return casillas
+  const viejas = new Set(desactualizadasTodas(actual, casillas, ranuraSlug).map(d => d.clave))
+  const out: CasillasLeidas = {}
+  for (const clave of ['grupo_completo', 'sin_infantes', 'solo_adultos'] as ClaveCasilla[]) {
+    const l = casillas[clave]
+    if (l && !viejas.has(clave)) out[clave] = l
+  }
+  return out
+}
+
+// ── La moneda de la tarifa (brief del 2026-09-22, parte 2) ───────────────────
+
+export interface MonedaDeTarifa {
+  /** La que manda para el costo. */
+  moneda: string
+  /**
+   * `true` = ninguna captura la mostraba y nadie la eligió: se supone COP. El costo NO se
+   * confirma así — «$» sin moneda es el error más caro del motor (un USD tomado por COP) y
+   * el valor por defecto no puede pasar callado.
+   */
+  asumida: boolean
+  origen: 'persona' | 'captura' | 'supuesta' | 'sin_lectura'
+  /** La que leyó la IA, si alguna captura la mostraba. Se enseña al lado de la elegida. */
+  leida: string | null
+  decision: DecisionMoneda | null
+}
+
+/**
+ * La moneda con la que se costea la línea: la que eligió una persona; si no, la que mostró
+ * alguna captura; si ninguna la mostró, COP supuesta (sin confirmar).
+ *
+ * Las casillas de una tarifa comparten moneda (CC1 compara lo LEÍDO entre ellas), así que
+ * la primera leída basta.
+ */
+export function monedaDeTarifa(tarifa: TarifaPax): MonedaDeTarifa {
+  const lecturas = (['grupo_completo', 'sin_infantes', 'solo_adultos'] as ClaveCasilla[])
+    .map(k => tarifa.casillas?.[k])
+    .filter((l): l is LecturaCasilla => !!l)
+  const leida = lecturas.find(l => !l.monedaAsumida)?.moneda.toUpperCase() ?? null
+  const decision = tarifa.moneda ?? null
+  if (decision) return { moneda: decision.valor, asumida: false, origen: 'persona', leida, decision }
+  if (leida) return { moneda: leida, asumida: false, origen: 'captura', leida, decision: null }
+  if (lecturas.length > 0) return { moneda: 'COP', asumida: true, origen: 'supuesta', leida: null, decision: null }
+  return { moneda: 'COP', asumida: false, origen: 'sin_lectura', leida: null, decision: null }
+}
+
+/**
+ * Las monedas que se ofrecen con un clic. Cualquier otro código ISO se escribe a mano: la
+ * lista es comodidad, no el límite (Trappvel cotiza también en otras monedas locales).
+ */
+export const MONEDAS_FRECUENTES: readonly string[] = ['COP', 'USD', 'EUR', 'MXN']
+
+/** Lo que se le dice a quien intenta confirmar con la moneda supuesta. */
+export const MENSAJE_MONEDA_ASUMIDA =
+  'La captura no muestra la moneda: se asumió COP. Acéptala o cámbiala antes de confirmar el costo.'
+
+/** Un código de moneda escrito por una persona, limpio; o `null` si no es un código. */
+export function codigoDeMoneda(texto: string | null | undefined): string | null {
+  const t = (texto ?? '').trim().toUpperCase()
+  return /^[A-Z]{3}$/.test(t) ? t : null
+}
+
+// ── La confirmación desactualizada ───────────────────────────────────────────
+
+export interface ConfirmacionDesactualizada {
+  motivo: 'composicion' | 'moneda'
+  mensaje: string
+}
+
+/**
+ * ¿El costo confirmado sigue describiendo la línea de hoy?
+ *
+ * ## La decisión: el costo SE QUEDA y la confirmación queda MARCADA
+ *
+ * Hasta el 2026-09-22, cambiar los pasajeros de la línea borraba la confirmación y dejaba
+ * los rubros; cambiar los del viaje no hacía nada. Lo mínimo que no deja un precio mal sin
+ * aviso, sin tirar un costo que alguien aprobó:
+ *
+ *  · los rubros siguen (es el último costo aprobado; quitarlos dejaría la línea en cero, que
+ *    también es un precio falso);
+ *  · la confirmación se marca: la línea y la cotización lo dicen en pantalla, el reparto por
+ *    pasajero deja de imprimirse (describiría otro grupo u otra moneda), y el costo no se
+ *    vuelve a confirmar hasta que las capturas estén al día.
+ *
+ * Dos motivos: otra composición, u otra moneda (alguien cambió la moneda después de
+ * confirmar: los rubros están en pesos convertidos desde la moneda vieja).
+ */
+export function confirmacionDesactualizada(
+  tarifa: TarifaPax,
+  actual: Composicion | null,
+): ConfirmacionDesactualizada | null {
+  const c = tarifa.confirmada
+  if (!c) return null
+  // Normalizada: un jsonb escrito a mano sin `ninos` o `infantes` no puede leerse como otra
+  // composición solo por la forma.
+  const cargada = normalizarComposicion(c.composicion)
+  if (actual && cargada && !mismaComposicion(cargada, actual)) {
+    return {
+      motivo: 'composicion',
+      mensaje:
+        `El costo cargado es para ${describirOcupacion(cargada, 'y')} y la línea ahora cubre ` +
+        `${describirOcupacion(actual, 'y')}: vuelve a confirmarlo con un pantallazo para ` +
+        `${describirOcupacion(actual, 'y')}.`,
+    }
+  }
+  const m = monedaDeTarifa(tarifa)
+  const confirmadaEn = (c.moneda || 'COP').toUpperCase()
+  if (m.origen !== 'sin_lectura' && !m.asumida && m.moneda !== confirmadaEn) {
+    return {
+      motivo: 'moneda',
+      mensaje:
+        `El costo se cargó en ${confirmadaEn} y la tarifa ahora está en ${m.moneda}: vuelve a confirmar` +
+        (m.moneda !== 'COP' ? ' con la tasa de cambio.' : '.'),
+    }
+  }
+  return null
+}
+
 // ── Resolución: el costo de cada tipo de pasajero ────────────────────────────
 
 export interface CostoPorTipo {
@@ -667,6 +943,8 @@ export type EstadoTarifa =
   | { estado: 'falta'; siguiente: CasillaDef; faltan: CasillaDef[]; mensaje: string }
   | { estado: 'confirmar_menor_no_paga'; casilla: CasillaDef; tipo: TipoPasajero; mensaje: string }
   | { estado: 'inconsistente'; mensaje: string }
+  /** Hay capturas buscadas para otros pasajeros: no se calcula ningún costo con ellas. */
+  | { estado: 'desactualizada'; capturas: CapturaDesactualizada[]; mensaje: string }
   | {
       estado: 'resuelta'
       costos: CostoPorTipo[]
@@ -721,15 +999,32 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * con menores pide la siguiente, hasta tres.
  *
  * ⚠️ Nunca se agrupa un valor «menores» (D3): cada tipo sale de su propia resta.
+ *
+ * ⚠️ Una captura buscada para OTROS pasajeros no entra a ninguna cuenta (brief del
+ * 2026-09-22): el estado es `desactualizada` y no hay costo. Es aquí, y no en quien llama,
+ * porque este es el único sitio donde un precio se divide entre pasajeros: la pantalla, el
+ * mensaje de la lectura y la confirmación lo heredan sin poder saltárselo.
+ *
+ * `opciones.moneda` es la moneda con la que se costea la línea (`monedaDeTarifa`): la que
+ * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
-export function resolverTarifa(c: Composicion, casillas: CasillasLeidas, ranuraSlug: string): EstadoTarifa {
+export function resolverTarifa(
+  c: Composicion,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+  opciones: { moneda?: string | null } = {},
+): EstadoTarifa {
   const defs = casillasDe(c, ranuraSlug)
   const def1 = defs[0]
   const l1 = casillas.grupo_completo
   if (!l1) {
     return { estado: 'vacia', siguiente: def1, mensaje: `Pega el pantallazo 1: ${def1.busqueda.charAt(0).toLowerCase()}${def1.busqueda.slice(1)}.` }
   }
-  const moneda = l1.moneda.toUpperCase()
+  const viejas = capturasDesactualizadas(c, casillas, ranuraSlug)
+  if (viejas.length > 0) {
+    return { estado: 'desactualizada', capturas: viejas, mensaje: viejas[0].mensaje }
+  }
+  const moneda = (opciones.moneda || l1.moneda).toUpperCase()
   const presentes = tiposPresentes(c)
 
   // 1 · el pantallazo 1 ya trae el precio de cada tipo (aerolíneas, liquidación Decameron).
@@ -943,9 +1238,10 @@ export interface TarifaPax {
    * Es lo que permite no pisar lo que escribió una persona (regla 4 del brief del
    * 2026-09-22): al volver a confirmar, o al corregir un campo de la ficha, la descripción
    * se reescribe solo si sigue siendo esta. Mismo criterio que el margen: se compara el
-   * valor. Vive fuera de `confirmada` porque cambiar los pasajeros borra la confirmación y
-   * no puede borrar con ella la prueba de quién escribió la descripción. Ausente en las
-   * líneas confirmadas antes de esta marca.
+   * valor. Vive fuera de `confirmada` porque la confirmación se reemplaza entera al volver a
+   * confirmar (y hasta el 2026-09-22 cambiar los pasajeros la borraba), y no puede llevarse
+   * con ella la prueba de quién escribió la descripción. Ausente en las líneas confirmadas
+   * antes de esta marca.
    */
   descripcionDelSistema?: string | null
   /**
@@ -954,6 +1250,64 @@ export interface TarifaPax {
    * devolver al guardar (ver `tarifaMasReciente`). Ausente en las escritas antes de él.
    */
   actualizadaEn?: string | null
+  /**
+   * La moneda de la tarifa que eligió una persona (`DecisionMoneda`). Ausente = manda la
+   * que leyó la IA, o COP supuesta si ninguna captura la mostró (`monedaDeTarifa`).
+   *
+   * Se retira al leer un pantallazo 1 nuevo: es otra búsqueda, quizá de otro proveedor, y
+   * la elección que alguien hizo sobre la captura anterior no se hereda a ciegas.
+   */
+  moneda?: DecisionMoneda | null
+  /**
+   * El costo escrito A MANO en otra moneda (`costo-manual.ts`). `items.subtotal` guarda los
+   * pesos, que es lo que suman el costo total y la cascada; esto guarda lo que la persona
+   * escribió y con qué tasa, para poder decírselo después. Ausente = el costo se escribió en
+   * pesos.
+   */
+  costoManual?: CostoManualEnMoneda | null
+}
+
+/** Un costo escrito a mano en otra moneda, con la tasa con que se pasó a pesos. */
+export interface CostoManualEnMoneda {
+  moneda: string
+  /** El valor unitario tal como se escribió, en `moneda`. */
+  valor: number
+  /** Pesos por unidad de `moneda`. */
+  tasa: number
+  por: string | null
+  porId: string | null
+  en: string
+}
+
+function leerDecisionMoneda(raw: unknown): DecisionMoneda | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  const valor = codigoDeMoneda(typeof d.valor === 'string' ? d.valor : null)
+  if (!valor || typeof d.en !== 'string') return null
+  return {
+    valor,
+    por: typeof d.por === 'string' ? d.por : null,
+    porId: typeof d.porId === 'string' ? d.porId : null,
+    en: d.en,
+  }
+}
+
+function leerCostoManual(raw: unknown): CostoManualEnMoneda | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  const moneda = codigoDeMoneda(typeof d.moneda === 'string' ? d.moneda : null)
+  const valor = Number(d.valor)
+  const tasa = Number(d.tasa)
+  if (!moneda || !Number.isFinite(valor) || valor < 0 || !Number.isFinite(tasa) || tasa <= 0) return null
+  if (typeof d.en !== 'string') return null
+  return {
+    moneda,
+    valor,
+    tasa,
+    por: typeof d.por === 'string' ? d.por : null,
+    porId: typeof d.porId === 'string' ? d.porId : null,
+    en: d.en,
+  }
 }
 
 /** Lee `items.tarifa_pax` sin confiar en su forma: un jsonb viejo o roto no rompe la pantalla. */
@@ -977,7 +1331,13 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
         costoAgenciaOrigen: l.costoAgenciaOrigen === 'neto_leido' || l.costoAgenciaOrigen === 'derivado_comision'
           ? l.costoAgenciaOrigen
           : null,
+        paraComposicion: normalizarComposicion(l.paraComposicion),
+        monedaAsumida: l.monedaAsumida === true,
       }
+      // Sin la marca, las llaves no aparecen: una lectura anterior al 2026-09-22 se lee
+      // exactamente como antes.
+      if (!casillas[clave]!.paraComposicion) delete casillas[clave]!.paraComposicion
+      if (!casillas[clave]!.monedaAsumida) delete casillas[clave]!.monedaAsumida
     }
   }
   const conf = r.confirmada as TarifaConfirmada | null | undefined
@@ -990,6 +1350,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   // función no las use. Sin correcciones la llave no aparece: la tarifa de una línea que nadie
   // corrigió se lee exactamente igual que antes.
   const correcciones = leerCorrecciones(r.correcciones)
+  const moneda = leerDecisionMoneda(r.moneda)
+  const costoManual = leerCostoManual(r.costoManual)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -999,6 +1361,9 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
       ? { descripcionDelSistema: r.descripcionDelSistema as string | null }
       : {}),
     actualizadaEn: typeof r.actualizadaEn === 'string' ? r.actualizadaEn : null,
+    // Igual que las correcciones: sin decisión, la llave no aparece.
+    ...(moneda ? { moneda } : {}),
+    ...(costoManual ? { costoManual } : {}),
   }
 }
 

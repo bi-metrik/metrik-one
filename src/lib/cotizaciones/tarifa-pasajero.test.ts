@@ -7,10 +7,14 @@ import { describe, expect, it } from 'vitest'
 
 import {
   aPesos,
+  capturasDesactualizadas,
   casillasDe,
+  casillasVigentes,
   composicionDeLectura,
   composicionDeLinea,
+  confirmacionDesactualizada,
   confirmadaVigente,
+  monedaDeTarifa,
   describirOcupacion,
   faltanPorAcomodar,
   leerTarifaPax,
@@ -485,5 +489,160 @@ describe('tarifaMasReciente · qué pinta la casilla después de guardar', () =>
   it('sin nada guardado, o guardado sin marca, manda la página', () => {
     expect(tarifaMasReciente(pagina, null)).toBe(pagina)
     expect(tarifaMasReciente(pagina, leerTarifaPax({ casillas: { grupo_completo: CANCUN } }))).toBe(pagina)
+  })
+})
+
+/**
+ * Brief del 2026-09-22, parte 1: una captura buscada para otros pasajeros no entra a ninguna
+ * cuenta. El hueco original era el de «solo adultos» (un precio para 2 dividido entre 3), y
+ * su hermano es el del desglose (el subtotal de 2 adultos repartido entre 3).
+ */
+describe('capturas desactualizadas', () => {
+  const DOS: Composicion = { adultos: 2, ninos: 0, infantes: 0 }
+  const TRES: Composicion = { adultos: 3, ninos: 0, infantes: 0 }
+  const dosAdultos = (over: Partial<LecturaCasilla> = {}) => lectura({
+    total: 2000000,
+    ocupacion: { adultos: 2, ninos: 0, infantes: 0, total: 2 },
+    paraComposicion: DOS,
+    ...over,
+  })
+
+  it('el hueco: un precio buscado para 2 adultos NO se divide entre 3', () => {
+    const e = resolverTarifa(TRES, { grupo_completo: dosAdultos() }, 'hotel_detalle')
+    expect(e.estado).toBe('desactualizada')
+    expect(e.mensaje).toBe('Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos: pega uno nuevo.')
+    // Con la composición con que se buscó, se resuelve como siempre.
+    expect(resolverTarifa(DOS, { grupo_completo: dosAdultos() }, 'hotel_detalle').estado).toBe('resuelta')
+  })
+
+  it('el hermano del hueco: un desglose de 2 adultos tampoco se reparte entre 3', () => {
+    const conDesglose = dosAdultos({ porTipo: [{ tipo: 'adulto', cantidad: 2, subtotal: 2000000 }] })
+    expect(resolverTarifa(TRES, { grupo_completo: conDesglose }, 'vuelo_detalle').estado).toBe('desactualizada')
+  })
+
+  it('una lectura anterior a la marca se juzga por lo que la captura acredita', () => {
+    const vieja = dosAdultos({ paraComposicion: undefined })
+    expect(resolverTarifa(TRES, { grupo_completo: vieja }, 'hotel_detalle').estado).toBe('desactualizada')
+  })
+
+  it('sin marca y sin ocupación visible NO se marca nada: no se inventan alertas', () => {
+    const sinEvidencia = dosAdultos({ paraComposicion: undefined, ocupacionDelItem: true })
+    expect(capturasDesactualizadas(TRES, { grupo_completo: sinEvidencia }, 'hotel_detalle')).toEqual([])
+  })
+
+  it('se compara casilla por casilla: «solo adultos» sigue vigente si los adultos no cambian', () => {
+    const antes: Composicion = { adultos: 2, ninos: 1, infantes: 1 }
+    const ahora: Composicion = { adultos: 2, ninos: 1, infantes: 2 }
+    const casillas = {
+      grupo_completo: lectura({ total: 300, paraComposicion: antes }),
+      sin_infantes: lectura({ total: 200, paraComposicion: antes }),
+      solo_adultos: lectura({ total: 100, paraComposicion: antes }),
+    }
+    const viejas = capturasDesactualizadas(ahora, casillas, 'hotel_detalle')
+    expect(viejas.map(v => v.clave)).toEqual(['grupo_completo'])
+    expect(Object.keys(casillasVigentes(ahora, casillas, 'hotel_detalle'))).toEqual(['sin_infantes', 'solo_adultos'])
+  })
+
+  it('una complementaria vieja no cuenta si el pantallazo 1, vigente, ya trae cada tipo', () => {
+    const ahora: Composicion = { adultos: 3, ninos: 1, infantes: 0 }
+    const casillas = {
+      grupo_completo: lectura({
+        total: 400,
+        porTipo: [{ tipo: 'adulto', cantidad: 3, subtotal: 300 }, { tipo: 'nino', cantidad: 1, subtotal: 100 }],
+        paraComposicion: ahora,
+      }),
+      solo_adultos: lectura({ total: 200, paraComposicion: { adultos: 2, ninos: 1, infantes: 0 } }),
+    }
+    expect(capturasDesactualizadas(ahora, casillas, 'vuelo_detalle')).toEqual([])
+    // Pero si el 1 no resuelve solo, la complementaria vieja SÍ frena, y dice cuál es.
+    const sinDesglose = { ...casillas, grupo_completo: lectura({ total: 400, paraComposicion: ahora }) }
+    const viejas = capturasDesactualizadas(ahora, sinDesglose, 'hotel_detalle')
+    expect(viejas).toHaveLength(1)
+    expect(viejas[0].mensaje).toBe('El pantallazo 2 (solo adultos) es para 2 adultos y ahora hace falta con 3 adultos: pega uno nuevo.')
+  })
+
+  it('la confirmación: otra composición la marca, la misma no', () => {
+    const tarifa = leerTarifaPax({
+      casillas: { grupo_completo: dosAdultos() },
+      confirmada: { composicion: DOS, costos: [], costoTotalCOP: 2000000, moneda: 'COP', tasa: null, confirmadaEn: '2026-09-22T10:00:00Z' },
+    })
+    expect(confirmacionDesactualizada(tarifa, DOS)).toBeNull()
+    expect(confirmacionDesactualizada(tarifa, TRES)).toMatchObject({ motivo: 'composicion' })
+  })
+})
+
+describe('la moneda de la tarifa', () => {
+  const conf = (moneda: string) => ({
+    composicion: { adultos: 1 }, costos: [], costoTotalCOP: 1, moneda, tasa: null, confirmadaEn: '2026-09-22T10:00:00Z',
+  })
+
+  it('la elegida por una persona manda sobre la leída; la leída sobre la supuesta', () => {
+    const leidaUSD = lectura({ moneda: 'USD' })
+    const supuesta = lectura({ moneda: 'COP', monedaAsumida: true })
+    expect(monedaDeTarifa(leerTarifaPax({ casillas: { grupo_completo: leidaUSD } })))
+      .toMatchObject({ moneda: 'USD', asumida: false, origen: 'captura' })
+    expect(monedaDeTarifa(leerTarifaPax({ casillas: { grupo_completo: supuesta } })))
+      .toMatchObject({ moneda: 'COP', asumida: true, origen: 'supuesta' })
+    expect(monedaDeTarifa(leerTarifaPax({
+      casillas: { grupo_completo: leidaUSD },
+      moneda: { valor: 'COP', por: 'Ana', porId: 'p-1', en: '2026-09-22T10:00:00Z' },
+    }))).toMatchObject({ moneda: 'COP', asumida: false, origen: 'persona', leida: 'USD' })
+  })
+
+  it('sin lecturas no hay nada que confirmar: COP y no supuesta', () => {
+    expect(monedaDeTarifa({})).toMatchObject({ moneda: 'COP', asumida: false, origen: 'sin_lectura' })
+  })
+
+  it('cambiar la moneda después de confirmar marca la confirmación', () => {
+    const tarifa = leerTarifaPax({
+      casillas: { grupo_completo: lectura({ moneda: 'COP' }) },
+      confirmada: conf('COP'),
+      moneda: { valor: 'USD', por: null, porId: null, en: '2026-09-22T11:00:00Z' },
+    })
+    expect(confirmacionDesactualizada(tarifa, { adultos: 1, ninos: 0, infantes: 0 })).toMatchObject({ motivo: 'moneda' })
+  })
+
+  it('CC1: una supuesta no choca con ninguna; dos leídas distintas sí', () => {
+    const c: Composicion = { adultos: 2, ninos: 1, infantes: 0 }
+    const base = { clave: 'solo_adultos' as const, composicion: c, ranuraSlug: 'hotel_detalle' }
+    const hotel = { hotel: 'Decameron Cartagena', tipo_habitacion: null, regimen: null, check_in: null, check_out: null }
+    const uno = lectura({ moneda: 'USD', total: 1000, identidad: hotel, ocupacion: { adultos: 2, ninos: 1, infantes: 0, total: 3 } })
+    const dos = (over: Partial<LecturaCasilla>) =>
+      lectura({ moneda: 'COP', total: 500, identidad: hotel, ocupacion: { adultos: 2, ninos: 0, infantes: 0, total: 2 }, ...over })
+
+    const leidasDistintas = validarLecturaEnCasilla({ ...base, lectura: dos({}), casillas: { grupo_completo: uno } })
+    expect(leidasDistintas).toMatchObject({ ok: false, codigo: 'CC1' })
+    expect(leidasDistintas.ok ? '' : leidasDistintas.mensaje).toContain('en COP y el de la casilla 1 en USD')
+    // La supuesta no es evidencia: sigue a la de la línea.
+    expect(validarLecturaEnCasilla({ ...base, lectura: dos({ monedaAsumida: true }), casillas: { grupo_completo: uno } }).ok).toBe(true)
+    // Una leída que contradice la moneda que eligió una persona se rechaza, aunque la 1 fuera supuesta.
+    const elegida = validarLecturaEnCasilla({
+      ...base,
+      lectura: dos({ moneda: 'EUR' }),
+      casillas: { grupo_completo: lectura({ ...uno, monedaAsumida: true }) },
+      monedaDecidida: 'USD',
+    })
+    expect(elegida).toMatchObject({ ok: false, codigo: 'CC1' })
+    expect(elegida.ok ? '' : elegida.mensaje).toContain('se eligió USD')
+    // Y la que coincide con la elegida pasa.
+    expect(validarLecturaEnCasilla({
+      ...base,
+      lectura: dos({ moneda: 'USD' }),
+      casillas: { grupo_completo: lectura({ ...uno, monedaAsumida: true }) },
+      monedaDecidida: 'USD',
+    }).ok).toBe(true)
+  })
+
+  it('leerTarifaPax conserva la moneda elegida y el costo en otra moneda; sin ellos, ni aparecen', () => {
+    const t = leerTarifaPax({
+      moneda: { valor: 'usd', por: 'Ana', porId: 'p-1', en: '2026-09-22T10:00:00Z' },
+      costoManual: { moneda: 'EUR', valor: 100, tasa: 4500, por: null, porId: null, en: '2026-09-22T10:00:00Z' },
+    })
+    expect(t.moneda).toMatchObject({ valor: 'USD', por: 'Ana' })
+    expect(t.costoManual).toMatchObject({ moneda: 'EUR', valor: 100, tasa: 4500 })
+    const vacia = leerTarifaPax({ casillas: { grupo_completo: CANCUN } })
+    expect('moneda' in vacia).toBe(false)
+    expect('costoManual' in vacia).toBe(false)
+    expect('paraComposicion' in (vacia.casillas?.grupo_completo ?? {})).toBe(false)
   })
 })

@@ -553,6 +553,27 @@ describe('tarifa por pasajero · las reglas aprobadas el 2026-09-16', () => {
     expect(r.avisos[0]).toContain('indicada a mano')
   })
 
+  // Brief del 2026-09-22, parte 2: donde quien llama sabe frenar la confirmación, RX3 deja
+  // de ser un rechazo. Sin la opción, sigue siéndolo (el cargue de un solo total no frena).
+  it('RX3 con moneda por defecto: se acepta con COP marcada como SUPUESTA; sin la opción, rechaza', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ moneda: v(null, 0) }), { monedaSiFalta: 'COP' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'moneda')).toMatchObject({ valor: 'COP', supuesto: true, alertaRevision: true })
+    expect(r.campos.find(c => c.slug === 'moneda')?.delItem).toBeUndefined()
+
+    const sinOpcion = evaluarLectura(HOTEL, hotelOk({ moneda: v(null, 0) }))
+    expect(sinOpcion).toMatchObject({ ok: false, codigo: 'RX3' })
+  })
+
+  it('la moneda que SÍ muestra la captura no se toca aunque haya moneda por defecto', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ moneda: v('USD') }), { monedaSiFalta: 'COP' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'moneda')).toMatchObject({ valor: 'USD' })
+    expect(r.campos.find(c => c.slug === 'moneda')?.supuesto).toBeUndefined()
+  })
+
   it('por casillas: faltan mínimos descriptivos y se AVISA; faltan los de costo y se rechaza', () => {
     const sinNombre = hotelOk({ hotel: v(null, 0), ciudad: v(null, 0), tipo_habitacion: v(null, 0) })
     const ok = evaluarLectura(HOTEL, sinNombre, { soloMinimosDeCosto: true })

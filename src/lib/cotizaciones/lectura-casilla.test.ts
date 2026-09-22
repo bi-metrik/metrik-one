@@ -47,6 +47,24 @@ describe('ocupación de un hotel: sin texto de personas no hay evidencia', () =>
   })
 })
 
+describe('moneda supuesta (brief del 2026-09-22, parte 2)', () => {
+  it('queda dicha en la lectura, y NO se lista entre lo leído', () => {
+    const a = aceptacion(HOTEL, { hotel: 'Decameron', moneda: 'COP', precio_total: '1000', base_precio: 'total' })
+    const moneda = a.campos.find(c => c.slug === 'moneda') as CampoLeido
+    moneda.supuesto = true
+    const l = construirLecturaCasilla(HOTEL, a, '2026-09-22T00:00:00Z')
+    expect(l.moneda).toBe('COP')
+    expect(l.monedaAsumida).toBe(true)
+    expect(l.campos.some(c => c.label === moneda.label)).toBe(false)
+  })
+
+  it('la que mostró la captura no lleva la marca', () => {
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, { hotel: 'Decameron', moneda: 'USD', precio_total: '1000', base_precio: 'total' }), '2026-09-22T00:00:00Z')
+    expect(l.moneda).toBe('USD')
+    expect('monedaAsumida' in l).toBe(false)
+  })
+})
+
 describe('lectura con tabla por tipo de pasajero', () => {
   it('el total es el de la tabla y las filas del mismo tipo se suman', () => {
     const l = construirLecturaCasilla(VUELO, aceptacion(VUELO, { aerolinea: 'Avianca', moneda: 'COP', precio_total: '1294351', base_precio: 'total' }, {
