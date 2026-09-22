@@ -401,7 +401,93 @@ describe('el documento imprime lo corregido encima de lo leído', () => {
     expect(cargosEnDestinoDeItems([corregido(CAMPOS_HOTEL, 'hotel', { impuestos_destino_valor: null })])).toEqual([])
   })
 
-  it('una línea que no es ranura sigue sin detalle aunque traiga correcciones', () => {
-    expect(hotelesDeItems([corregido(CAMPOS_HOTEL, 'seguro', { estrellas: '5' })])).toEqual([])
+  it('una línea que no es ranura, sin lectura, sigue sin detalle aunque traiga correcciones', () => {
+    // Las correcciones solas no vuelven hotel a una línea: lo que dice qué es, es la lectura.
+    expect(hotelesDeItems([corregido([], 'seguro', { estrellas: '5' })])).toEqual([])
+  })
+})
+
+/**
+ * ⚠️⚠️ COT-2026-0006 (2026-09-22): el vuelo «AVIANCA BOG - ADZ» se cobraba en «Inversión» y
+ * no aparecía ni en la tabla de vuelos ni en el día a día.
+ *
+ * Su lectura estaba completa en la base (aerolínea, fechas, números de vuelo), pero su grupo
+ * era `avianca bog - adz`, un nombre libre que no resuelve a ninguna ranura. El documento
+ * solo preguntaba por el grupo.
+ */
+describe('la ranura sale de la lectura cuando el grupo no es una', () => {
+  // La lectura de producción de COT-2026-0006, tal cual (sin códigos IATA en la ruta).
+  const CAMPOS_AVIANCA_0006 = [
+    { label: 'Aerolínea', valor: 'Avianca' },
+    { label: 'Origen', valor: 'Bogotá' },
+    { label: 'Destino', valor: 'San Andrés Isla' },
+    { label: 'Salida', valor: '2026-11-23' },
+    { label: 'Regreso', valor: '2026-11-28' },
+    { label: 'Nº de vuelo', valor: '9782, 9779' },
+    { label: 'Escalas', valor: '0' },
+    { label: 'Tarifa', valor: 'BASIC Economy' },
+    { label: 'Equipaje de bodega', valor: 'true' },
+    { label: 'Equipaje de mano', valor: 'true' },
+    { label: 'Pasajeros', valor: '8' },
+    { label: 'Moneda', valor: 'COP' },
+    { label: 'Precio', valor: '6208296' },
+  ]
+
+  it('⚠️⚠️ COT-2026-0006: el vuelo con grupo libre y lectura de vuelo SÍ es un vuelo', () => {
+    const [v] = vuelosDeItems([item('AVIANCA BOG - ADZ', 'avianca bog - adz', CAMPOS_AVIANCA_0006)])
+    expect(v).toBeDefined()
+    expect(v.aerolinea).toBe('Avianca')
+    // Lo leído manda: la ruta sale de la lectura, no del nombre, aunque el nombre traiga IATA.
+    expect(v.origen).toBe('Bogotá')
+    expect(v.destino).toBe('San Andrés Isla')
+    expect(v.fechaSalida).toBe('23 nov 2026')
+    expect(v.fechaRegreso).toBe('28 nov 2026')
+    expect(v.numeroVuelo).toBe('9782, 9779')
+  })
+
+  it('con un hotel pasa lo mismo: su lectura lo hace hotel', () => {
+    const [h] = hotelesDeItems([item('CROWN', 'crown paradise', CAMPOS_HOTEL)])
+    expect(h.hotel).toBe('Crown Paradise Club Cancun All Inclusive')
+    expect(vuelosDeItems([item('CROWN', 'crown paradise', CAMPOS_HOTEL)])).toEqual([])
+  })
+
+  it('el grupo manda cuando resuelve: una lectura de vuelo en un grupo de hotel no es un vuelo', () => {
+    expect(vuelosDeItems([item('X', 'hotel', CAMPOS_VUELO)])).toEqual([])
+  })
+
+  it('una lectura con solo etiquetas compartidas (moneda, precio) no dice de qué es', () => {
+    const soloPrecio = [{ label: 'Moneda', valor: 'COP' }, { label: 'Precio', valor: '100' }]
+    expect(vuelosDeItems([item('X', 'libre', soloPrecio)])).toEqual([])
+    expect(hotelesDeItems([item('X', 'libre', soloPrecio)])).toEqual([])
+  })
+})
+
+describe('un vuelo sin lectura: solo lo que dice su nombre', () => {
+  it('con grupo libre, entra si el nombre trae aerolínea y ruta IATA; sin fechas ni horas', () => {
+    const [v] = vuelosDeItems([{ nombre: 'AVIANCA BOG - ADZ', grupo: 'avianca bog - adz', tarifa_pax: null }])
+    expect(v.aerolinea).toBe('AVIANCA')
+    expect(v.origen).toBe('BOG')
+    expect(v.destino).toBe('ADZ')
+    expect(v.fechaSalida).toBeNull()
+    expect(v.horaSalida).toBeNull()
+    expect(v.numeroVuelo).toBeNull()
+  })
+
+  it('con grupo libre y un nombre que no es de vuelo, no entra', () => {
+    expect(vuelosDeItems([{ nombre: 'TRASLADO APT - HTL', grupo: 'traslado privado', tarifa_pax: null }])).toEqual([])
+    expect(vuelosDeItems([{ nombre: 'SEGURO DE VIAJE', grupo: 'seguro', tarifa_pax: null }])).toEqual([])
+  })
+
+  it('con grupo de vuelo, la ruta del nombre llena lo que la captura no trajo', () => {
+    const [v] = vuelosDeItems([{ nombre: 'LATAM MDE - CTG', grupo: 'vuelo', tarifa_pax: null }])
+    expect(v.aerolinea).toBe('LATAM')
+    expect(v.origen).toBe('MDE')
+    expect(v.destino).toBe('CTG')
+  })
+
+  it('⚠️ lo del nombre no se mezcla con lo leído: con origen leído, el destino no sale del nombre', () => {
+    const [v] = vuelosDeItems([item('AVIANCA BOG - ADZ', 'vuelo', [{ label: 'Origen', valor: 'Bogotá' }])])
+    expect(v.origen).toBe('Bogotá')
+    expect(v.destino).toBeNull()
   })
 })

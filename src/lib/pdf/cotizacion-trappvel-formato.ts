@@ -116,24 +116,91 @@ export function colorDeSigla(sigla: string): string {
   return colores[h % colores.length]
 }
 
+/** Un número de vuelo suelto: `8832`, `AV8520`, `9R8832`, con una letra de sufijo a lo sumo. */
+const NUMERO_DE_VUELO = /^(?:[A-Z0-9]{2})?\d{1,4}[A-Z]?$/i
+
+/**
+ * Los números de vuelo de un texto leído, uno por elemento. `null` si algún pedazo no es un
+ * número de vuelo: entonces el texto no se puede repartir entre tramos.
+ *
+ * La lectura los escribe «tal como aparecen», y en las capturas reales aparecen separados
+ * por coma (`9782, 9779`), por punto medio (`8832 · 8833`), por barra o por espacio, y con
+ * o sin el código de la aerolínea pegado (`AV 8520`).
+ */
+function numerosSueltos(texto: string): string[] | null {
+  const partes = texto.split(/\s*(?:[,;/|+·•–—]|\s-\s|\sy\s)\s*/i).map(p => p.trim()).filter(Boolean)
+  const out: string[] = []
+  for (const p of partes) {
+    const junto = p.replace(/^([A-Z0-9]{2})[\s-]+(\d{1,4}[A-Z]?)$/i, '$1$2')
+    if (NUMERO_DE_VUELO.test(junto)) {
+      out.push(junto)
+      continue
+    }
+    const sub = p.split(/\s+/)
+    if (sub.length > 1 && sub.every(s => NUMERO_DE_VUELO.test(s))) {
+      out.push(...sub)
+      continue
+    }
+    return null
+  }
+  return out
+}
+
 /**
  * Los números de vuelo de la ida y del regreso.
  *
- * La lectura guarda el campo «tal como aparece»: `AV8520`, o `AV8520 / AV9380`, o los
- * cuatro tramos de un viaje con escala. Con una cantidad PAR y regreso, la primera mitad
- * es la ida y la segunda el regreso, que es el orden en que la pantalla los muestra. Con
- * cualquier otra forma no se reparte: va entero en la ida, y no se adivina.
+ * La lectura guarda el campo «tal como aparece»: `AV8520`, o `9782, 9779`, o `8832 · 8833`,
+ * o los cuatro tramos de un viaje con escala. Con una cantidad PAR y regreso, la primera
+ * mitad es la ida y la segunda el regreso, que es el orden en que la pantalla los muestra.
+ *
+ * ⚠️⚠️ Cuando no se puede saber cuál es de cuál —un solo número para un viaje de ida y
+ * regreso, tres números, un texto que no se deja partir— NO se imprime todo en la fila de
+ * la ida: eso afirmaba que el regreso no tenía vuelo y que la ida tenía tres. Va en
+ * `sinAsignar`, que la plantilla imprime a nivel del vuelo entero, sin pegarlo a un tramo.
+ * (COT-2026-0006: `8832 · 8833` caía entero en la ida porque el `·` no era separador.)
  */
-export function numerosDeVuelo(numero: string | null | undefined, hayRegreso: boolean): { ida: string | null; regreso: string | null } {
+export function numerosDeVuelo(
+  numero: string | null | undefined,
+  hayRegreso: boolean,
+): { ida: string | null; regreso: string | null; sinAsignar: string | null } {
   const limpio = (numero ?? '').trim()
-  if (!limpio) return { ida: null, regreso: null }
-  const tokens = limpio.split(/[\s,;/|+]+/).filter(Boolean)
-  const todosVuelos = tokens.length > 1 && tokens.every(t => /^[A-Z0-9]{2}\d{1,4}$/i.test(t))
-  if (hayRegreso && todosVuelos && tokens.length % 2 === 0) {
+  if (!limpio) return { ida: null, regreso: null, sinAsignar: null }
+  const tokens = numerosSueltos(limpio)
+  // Sin regreso todo es de la ida: es la única fila que hay.
+  if (!hayRegreso) return { ida: tokens ? tokens.join(' · ') : limpio, regreso: null, sinAsignar: null }
+  if (tokens && tokens.length >= 2 && tokens.length % 2 === 0) {
     const mitad = tokens.length / 2
-    return { ida: tokens.slice(0, mitad).join(' · '), regreso: tokens.slice(mitad).join(' · ') }
+    return { ida: tokens.slice(0, mitad).join(' · '), regreso: tokens.slice(mitad).join(' · '), sinAsignar: null }
   }
-  return { ida: limpio, regreso: null }
+  return { ida: null, regreso: null, sinAsignar: tokens ? tokens.join(' · ') : limpio }
+}
+
+/**
+ * Lo que el NOMBRE de una línea dice de su vuelo: `AVIANCA BOG - ADZ` → aerolínea `AVIANCA`,
+ * ruta `BOG` → `ADZ`.
+ *
+ * Es el último recurso, para una línea de vuelo que no tiene lectura: lo que imprime es lo
+ * que quien cotiza escribió, tal cual, y nada más. Ni fechas ni horas, que el nombre no dice.
+ *
+ * - La ruta: dos códigos IATA en MAYÚSCULA separados por guion, flecha, barra o « a ». En
+ *   minúscula no cuenta: «bog-adz» puede ser cualquier cosa.
+ * - La aerolínea: lo que queda del nombre sin la ruta y sin paréntesis, solo si es una
+ *   aerolínea conocida (`siglaAerolinea`). Sin ruta no se intenta: el resto del nombre sería
+ *   el nombre entero, y «SATENA ADZ - PROVIDENCIA» no es el nombre de una aerolínea.
+ */
+export function vueloDesdeNombre(nombre: string | null | undefined): { aerolinea: string | null; origen: string | null; destino: string | null } {
+  const t = (nombre ?? '').trim()
+  const ruta = /(^|[^A-Za-z])([A-Z]{3})\s*(?:-|–|—|→|>|\/|\sa\s)\s*([A-Z]{3})(?![A-Za-z])/.exec(t)
+  if (!ruta || ruta[2] === ruta[3]) return { aerolinea: null, origen: null, destino: null }
+  const resto = (t.slice(0, ruta.index + ruta[1].length) + ' ' + t.slice(ruta.index + ruta[0].length))
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[\s\-–—·,:]+/g, ' ')
+    .trim()
+  return {
+    aerolinea: resto !== '' && siglaAerolinea(resto) !== null ? resto : null,
+    origen: ruta[2],
+    destino: ruta[3],
+  }
 }
 
 /**
@@ -320,10 +387,80 @@ export function tituloConAcento(titulo: string, destino: string | null): { antes
   return { antes: m[1] ?? '', acento: m[2], despues: '' }
 }
 
+// ── Precio por pasajero contra el TOTAL ───────────────────────────────────────
+
+export interface FilaPorPasajeroDoc {
+  tipo: 'adulto' | 'nino' | 'infante'
+  cantidad: number | null
+  precioUnitario: number
+}
+
+/**
+ * Deja la tabla por pasajero sumando EXACTAMENTE el total, absorbiendo en una fila el
+ * residuo del redondeo.
+ *
+ * ## Por qué (COT-2026-0006, 2026-09-22)
+ *
+ * Cada línea reparte su precio entre tipos al peso, y luego lo divide entre cuántos son:
+ * `9.911.816 / 6` no da entero, se redondea a 1.651.969 y se pierden 2 pesos. El documento
+ * los publicaba como «Se cobra por el grupo $ 2»: un cobro que no existe, con nombre, en la
+ * sección que el cliente usa para saber cuánto paga cada uno.
+ *
+ * Esta función solo recibe un residuo que YA se sabe que es de redondeo (la plantilla lo
+ * decide: nada se cobra por el grupo y el residuo cabe en un peso por pasajero y línea).
+ * Lo pone en la fila donde cabe entero —`residuo % cantidad === 0`, o sea siempre en una
+ * fila de un solo pasajero— y entre esas, en la de mayor subtotal, donde menos se nota.
+ * Así `c/u × cantidad` sigue siendo el subtotal de cada fila y la columna suma el TOTAL.
+ *
+ * Si ninguna fila puede absorberlo entero (seis adultos y dos niños con 1 peso de
+ * residuo), devuelve el residuo intacto: la plantilla lo nombra como ajuste de redondeo,
+ * que es lo que es. Repartirlo en un `c/u` que no multiplique bien sería otra cifra que no
+ * cuadra.
+ */
+export function absorberRedondeo(
+  filas: FilaPorPasajeroDoc[],
+  residuo: number,
+): { filas: FilaPorPasajeroDoc[]; residuo: number } {
+  if (residuo === 0) return { filas, residuo: 0 }
+  let mejor = -1
+  filas.forEach((f, i) => {
+    if (f.cantidad === null || f.cantidad <= 0) return
+    if (residuo % f.cantidad !== 0) return
+    if (f.precioUnitario + residuo / f.cantidad <= 0) return
+    if (mejor === -1) { mejor = i; return }
+    const actual = filas[mejor]
+    if (f.precioUnitario * f.cantidad > actual.precioUnitario * (actual.cantidad as number)) mejor = i
+  })
+  if (mejor === -1) return { filas, residuo }
+  return {
+    filas: filas.map((f, i) => (i === mejor ? { ...f, precioUnitario: f.precioUnitario + residuo / (f.cantidad as number) } : f)),
+    residuo: 0,
+  }
+}
+
 // ── Utilidades ────────────────────────────────────────────────────────────────
 
 export function sinTildes(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+/** Sin tildes, en minúscula, sin puntuación y con un solo espacio. */
+function comparable(s: string): string {
+  return sinTildes(s).replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+/**
+ * ¿Este nombre ya está dicho en el título de la portada?
+ *
+ * Con un solo capítulo, su nombre es casi siempre el destino del negocio, y el título de la
+ * portada casi siempre lo nombra: «San Andrés - Providencia» salía en 34 pt arriba y otra
+ * vez en 22 pt media página más abajo. Se compara por palabras enteras y sin tildes, así
+ * que «Cancún» está en «Viaje a Cancún» y «Roma» no está en «Romería».
+ */
+export function yaEstaEnElTitulo(nombre: string | null | undefined, titulo: string): boolean {
+  const n = comparable(nombre ?? '')
+  if (n === '') return false
+  return ` ${comparable(titulo)} `.includes(` ${n} `)
 }
 
 /** El vuelo tiene regreso si la captura leyó algo suyo: la misma regla de `trayectosDelVuelo`. */

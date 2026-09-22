@@ -17,6 +17,8 @@ import CotizacionTrappvelPDF from './cotizacion-trappvel-pdf'
 import { plantillaCotizacionPropia } from './plantillas-cotizacion'
 import { textoDelPDF } from './texto-del-pdf'
 import type { CotizacionPDFProps, ViajePDF } from './cotizacion-props'
+import { vuelosDeItems } from '@/lib/cotizaciones/detalle-viaje'
+import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -245,14 +247,31 @@ describe('el documento del cliente', () => {
     expect(t).toContain('TOUR CHICHEN ITZA')
   })
 
-  it('separa incluye de no incluye, y lo de destino cae en «no incluye»', async () => {
+  it('lo de destino cae en «A tener en cuenta»', async () => {
     const t = await texto(props())
-    expect(t).toContain('Incluido en el plan')
     expect(t).toContain('A tener en cuenta')
-    expect(t).toContain('TIQUETES AEREOS')
     // Sin «en destino» pegado: el renglón puede partirse justo ahí y el extractor mete un
     // espacio de más en el corte.
     expect(t).toContain('Impuestos y tasas de hospedaje (Cancun), que se pagan')
+  })
+
+  /**
+   * ⚠️ Hasta el 2026-09-22 «Incluido en el plan» repetía, con un chulo delante, la misma
+   * lista de «Inversión» (COT-2026-0006: «✓ AVIANCA BOG - ADZ ✓ SATENA ADZ - PROVIDENCIA»).
+   * Lo que el cliente recibe no es el nombre de una línea.
+   */
+  it('⚠️ «Incluido en el plan» ya no repite los nombres de las líneas de «Inversión»', async () => {
+    const t = await texto(props())
+    expect(t).not.toContain('Incluido en el plan')
+    // La línea sigue en «Inversión», una sola vez.
+    expect(t.split('TIQUETES AEREOS').length - 1).toBe(1)
+  })
+
+  it('con inclusiones de verdad, «Incluido en el plan» vuelve con ellas', async () => {
+    const t = await texto(props({ viaje: viaje({ incluye: ['Traslados aeropuerto - hotel - aeropuerto', 'Desayunos diarios'] }) }))
+    expect(t).toContain('Incluido en el plan')
+    expect(t).toContain('Desayunos diarios')
+    expect(t.split('TIQUETES AEREOS').length - 1).toBe(1)
   })
 
   it('lista los opcionales diciendo que no están en el precio', async () => {
@@ -585,4 +604,165 @@ describe('adicionales dentro de la variante', () => {
     })
     expect(await texto(conCampoVacio)).toBe(await texto(sinCampo))
   }, 30_000)
+})
+
+
+/**
+ * ⚠️⚠️ COT-2026-0006 (San Andrés - Providencia, 6 adultos + 1 niño + 1 infante), renderizada
+ * desde producción el 2026-09-22 después del #819. Cinco defectos en un documento de dos
+ * páginas; el fixture reproduce su forma con la lectura TAL CUAL está en la base y pasa por
+ * el mismo camino que la acción: `vuelosDeItems` → plantilla.
+ */
+describe('COT-2026-0006: San Andrés - Providencia', () => {
+  const campos = (o: Record<string, string>) => Object.entries(o).map(([label, valor]) => ({ label, valor }))
+  const conTarifa = (c: Record<string, string>, costos: [string, number, number][]) => {
+    const total = costos.reduce((a, [, , t]) => a + t, 0)
+    return {
+      casillas: { grupo_completo: { total, moneda: 'COP', campos: campos(c) } },
+      confirmada: {
+        tasa: null,
+        moneda: 'COP',
+        composicion: { adultos: 6, ninos: 1, infantes: 1 },
+        costos: costos.map(([tipo, cantidad, totalCOP]) => ({ tipo, cantidad, totalCOP, unitarioCOP: Math.round(totalCOP / cantidad) })),
+        costoTotalCOP: total,
+        confirmadaEn: '2026-09-17T16:53:02.530Z',
+      },
+    }
+  }
+  const LINEAS = [
+    {
+      nombre: 'AVIANCA BOG - ADZ',
+      // ⚠️ El grupo real: un nombre libre, no una ranura.
+      grupo: 'avianca bog - adz',
+      precio_venta: 7_303_878,
+      rubros: [{ valor_total: 6_208_296 }],
+      tarifa_pax: conTarifa(
+        { 'Aerolínea': 'Avianca', 'Origen': 'Bogotá', 'Destino': 'San Andrés Isla', 'Salida': '2026-11-23', 'Regreso': '2026-11-28', 'Nº de vuelo': '9782, 9779', 'Escalas': '0' },
+        [['adulto', 6, 5_547_822], ['nino', 1, 649_137], ['infante', 1, 11_337]],
+      ),
+    },
+    {
+      nombre: 'SATENA ADZ - PROVIDENCIA',
+      grupo: 'vuelo',
+      precio_venta: 3_873_172,
+      rubros: [{ valor_total: 3_292_196 }],
+      tarifa_pax: conTarifa(
+        { 'Aerolínea': 'SATENA', 'Origen': 'San Andrés Isla ADZ', 'Destino': 'Providencia PVA', 'Salida': '2026-11-23', 'Regreso': '2026-11-25', 'Nº de vuelo': '8832 · 8833', 'Escalas': '0' },
+        [['adulto', 6, 2_877_222], ['nino', 1, 403_637], ['infante', 1, 11_337]],
+      ),
+    },
+  ]
+
+  const cot0006 = (over: Partial<ViajePDF> = {}): CotizacionPDFProps => {
+    const items = LINEAS.map(l => ({
+      nombre: l.nombre, descripcion: null, precio_venta: l.precio_venta, descuento_porcentaje: 0, cantidad: 1, unidad: null,
+      precioPorPasajero: precioPorPasajeroDeItem(l),
+    }))
+    return props({
+      cotizacion: { ...props().cotizacion, valor_total: 11_177_050 },
+      items,
+      dias: null,
+      sugeridos: null,
+      preciosPorPasajero: preciosPorPasajeroDelViaje(items),
+      negocio: { nombre: 'San Andres - Providencia' },
+      viaje: viaje({
+        viajeros: '6 adultos, 1 nino y 1 infante',
+        destino: 'San Andres - Providencia',
+        fechas: '23 nov 2026 - 28 nov 2026',
+        duracion: '6 dias / 5 noches',
+        presentacion: null,
+        fechaInicio: '2026-11-23',
+        vuelos: vuelosDeItems(LINEAS.map(l => ({ nombre: l.nombre, grupo: l.grupo, tarifa_pax: l.tarifa_pax }))),
+        hoteles: [],
+        cargosEnDestino: [],
+        ...over,
+      }),
+    })
+  }
+
+  it('1 · el vuelo de Avianca sale en la tabla de vuelos y en el día a día', async () => {
+    const t = await texto(cot0006())
+    // ⚠️ El renderizador parte la corrida después del dígito del día («28  nov»): se busca
+    // con `\s+`. Día a día: el 23 abre con Avianca y el 28 es su regreso.
+    expect(t).toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
+    expect(t).toMatch(/28 NOV San Andrés Isla Bogotá Avianca/)
+    // Tabla de vuelos: las dos filas de Avianca, cada una con su fecha y su número.
+    expect(t).toMatch(/Avianca Bogotá San Andrés Isla Vuelo directo 23\s+nov 2026 9782/)
+    expect(t).toMatch(/Avianca San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+  })
+
+  it('2 · cada número de vuelo va en SU fila: 8832 a la ida, 8833 al regreso', async () => {
+    const t = await texto(cot0006())
+    expect(t).not.toContain('8832 · 8833')
+    expect(t).toMatch(/Providencia \(PVA\) Vuelo directo 23\s+nov 2026 8832/)
+    expect(t).toMatch(/San Andrés Isla \(ADZ\) Vuelo directo 25\s+nov 2026 8833/)
+  })
+
+  it('2b · un solo número para ida y regreso no se pega a ninguna fila: va bajo el vuelo', async () => {
+    const vuelos = cot0006().viaje!.vuelos.map(v => ({ ...v, numeroVuelo: v.aerolinea === 'SATENA' ? '8832' : null }))
+    const t = await texto(cot0006({ vuelos }))
+    expect(t).toContain('Vuelo 8832')
+    // Sin número asignable a un tramo no hay columna VUELO.
+    expect(t).not.toContain('FECHA VUELO')
+  })
+
+  it('3 · ⚠️⚠️ el redondeo no se cobra por el grupo, y la columna suma el TOTAL', async () => {
+    const t = await texto(cot0006())
+    expect(t).not.toContain('Se cobra por el grupo')
+    expect(t).not.toContain('Ajuste por redondeo')
+    expect(t).toContain('9.911.814')
+    // Los 2 pesos del redondeo van al niño: 1.238.558 + 2.
+    expect(t).toContain('1.238.560')
+    expect(t).toContain('26.676')
+    expect(t).toContain('11.177.050')
+    expect(9_911_814 + 1_238_560 + 26_676).toBe(11_177_050)
+  })
+
+  it('3b · lo que de verdad se cobra por el grupo se sigue nombrando', async () => {
+    const p = cot0006()
+    const t = await texto({
+      ...p,
+      items: [...p.items, { nombre: 'SEGURO DE VIAJE', descripcion: null, precio_venta: 420_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }],
+      preciosPorPasajero: preciosPorPasajeroDelViaje([...p.items, { nombre: 'SEGURO DE VIAJE', precio_venta: 420_000, cantidad: 1 }]),
+    })
+    expect(t).toContain('Se cobra por el grupo: SEGURO DE VIAJE')
+  })
+
+  it('4 · «Incluido en el plan» no repite las dos líneas de «Inversión»', async () => {
+    const t = await texto(cot0006())
+    expect(t).not.toContain('Incluido en el plan')
+    expect(t.split('SATENA ADZ - PROVIDENCIA').length - 1).toBe(1)
+  })
+
+  it('5 · con un solo destino igual al título, el capítulo no repite el título', async () => {
+    // Sin vuelos ni fotos para contar limpio: el título (portada), la ficha DESTINO y,
+    // antes del arreglo, el encabezado del capítulo.
+    const solo = (nombre: string) => props({
+      negocio: { nombre },
+      sugeridos: null,
+      viaje: viaje({ destino: 'Providencia', vuelos: [], hoteles: [], cargosEnDestino: [], presentacion: null, fechaInicio: '2026-11-23' }),
+    })
+    const t = await texto(solo('Providencia'))
+    expect(t.split('Providencia').length - 1).toBe(2)
+    // Si el título NO nombra el destino, el capítulo conserva su nombre.
+    const u = await texto(solo('Luna de miel familia Porras'))
+    expect(u.split('Providencia').length - 1).toBe(2)
+  })
+
+  it('5b · con varios destinos cada capítulo conserva su nombre y su «DESTINO N DE M»', async () => {
+    const t = await texto(props({
+      negocio: { nombre: 'Europa - Madrid y Roma' },
+      viaje: viaje({
+        destino: 'Madrid y Roma',
+        vuelos: [],
+        cargosEnDestino: [],
+        hoteles: [
+          { ...HOTEL, hotel: 'Hotel Metropolis', ciudad: 'Madrid', checkIn: '11 may 2027', checkOut: '14 may 2027' },
+          { ...HOTEL, hotel: 'Hotel Navona', ciudad: 'Roma', checkIn: '14 may 2027', checkOut: '18 may 2027' },
+        ],
+      }),
+    }))
+    expect(t).toContain('DESTINO 1 DE 2 Madrid')
+    expect(t).toContain('DESTINO 2 DE 2 Roma')
+  })
 })

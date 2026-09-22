@@ -14,8 +14,9 @@
  * **1 · Lo que no existe no se pinta, y el documento no se ve roto por eso.** No hay
  * placeholders, ni rayas, ni «—» en una ficha vacía: la ficha no aparece. Sin foto de
  * portada la banda no existe y el bloque sube; sin párrafo de destino, sin cargos, sin
- * opcionales, la sección no se imprime. Lo que todavía no tiene campo (estrellas, foto del
- * hotel, «Antes de viajar») está dibujado y espera el dato: no se inventa contenido.
+ * opcionales, la sección no se imprime. Lo que todavía no tiene campo (foto del hotel,
+ * «Antes de viajar», «Incluido en el plan») está dibujado y espera el dato: no se inventa
+ * contenido, y tampoco se rellena con lo que ya está dicho en otra sección.
  *
  * **2 · El dinero se imprime en «Inversión».** Los vuelos, los hoteles y la línea de tiempo
  * describen el viaje **sin precios**. Con el precio repetido en dos sitios, basta que una
@@ -58,6 +59,7 @@ import type { CotizacionPDFProps, FotoPDF, PrecioPorPasajeroPDF, ViajePDF } from
 import { creditosDeFotos } from './fotos-del-viaje'
 import {
   TOKENS as C,
+  absorberRedondeo,
   capitulosDelViaje,
   circuloDeFecha,
   claveDeFecha,
@@ -77,6 +79,7 @@ import {
   sinTildes,
   tieneRegreso,
   tituloConAcento,
+  yaEstaEnElTitulo,
   type Capitulo,
   type Fecha,
 } from './cotizacion-trappvel-formato'
@@ -527,6 +530,16 @@ interface FilaVuelo {
   numero: string | null
 }
 
+/**
+ * Los números de vuelo que no se sabe a qué tramo pertenecen. Van bajo el vuelo entero, en
+ * la línea gris: pegados a la ida afirmarían que el regreso no tiene vuelo.
+ */
+function numerosSinTramo(v: VueloPDF): string | null {
+  const { sinAsignar } = numerosDeVuelo(v.numeroVuelo, tieneRegreso(v))
+  if (!sinAsignar) return null
+  return `${sinAsignar.includes('·') ? 'Vuelos' : 'Vuelo'} ${sinAsignar}`
+}
+
 function filasDelVuelo(v: VueloPDF): FilaVuelo[] {
   const regreso = tieneRegreso(v)
   const numeros = numerosDeVuelo(v.numeroVuelo, regreso)
@@ -630,6 +643,7 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
   )
   const bloques = grupos.map((g, gi) => {
         const meta = [
+          numerosSinTramo(g.v),
           !general ? g.v.tarifa : null,
           !general ? g.v.equipaje : null,
           // §1.2 · el adicional va DENTRO del vuelo y sale en los TRES niveles: es plata
@@ -731,11 +745,13 @@ const ALTO_CIERRE = 90
  * ⚠️ `minPresenceAhead` reserva el alto de la franja de totales: sin él la última fila se
  * queda al pie de una página y el TOTAL aparece solo arriba de la siguiente.
  */
-function LineaPrecio({ l, detallada, tam = 9, ultima = false, tarjeta }: {
+function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, tarjeta }: {
   l: LineaImpresa
   detallada: boolean
   tam?: number
   ultima?: boolean
+  /** Lo que la última fila pide ADEMÁS del TOTAL: el cierre, si viene detrás. */
+  presenciaExtra?: number
   /** Dentro de la tarjeta de «Inversión» con una tarifa: cada fila dibuja su tramo del borde. */
   tarjeta?: PosicionEnTarjeta
 }) {
@@ -771,7 +787,7 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, tarjeta }: {
   return (
     <View
       wrap={false}
-      minPresenceAhead={ultima ? ALTO_TOTALES : 0}
+      minPresenceAhead={ultima ? ALTO_TOTALES + (presenciaExtra ?? 0) : 0}
       style={tarjeta ? {
         borderLeftWidth: 0.75,
         borderRightWidth: 0.75,
@@ -852,7 +868,33 @@ export default function CotizacionTrappvelPDF({
    * viajeros: una maleta la compra alguien concreto.
    */
   const cubierto = preciosPorPasajero?.cubierto ?? null
-  const porElGrupo = cubierto === null ? null : total - cubierto
+  const diferencia = cubierto === null ? null : total - cubierto
+
+  /**
+   * ⚠️⚠️ Una diferencia de unos pocos pesos NO es un cobro por el grupo: es redondeo.
+   *
+   * Cada línea reparte su precio entre tipos y lo divide entre cuántos son; la división no
+   * da entero y se redondea al peso. COT-2026-0006 imprimía «Se cobra por el grupo $ 2»
+   * sin que nada se cobrara por el grupo. Es redondeo, y solo si las dos cosas son ciertas:
+   * nada se queda fuera del reparto (`sinReparto` vacío) y la diferencia cabe en un peso por
+   * pasajero de cada línea repartida, el mismo margen que ya usa `confirmadaVigente`. Se
+   * absorbe en una fila para que la columna siga sumando el TOTAL; si ninguna fila puede
+   * absorberlo entero, se nombra como lo que es.
+   */
+  const toleranciaRedondeo = lineas.reduce(
+    (a, l) => a + (l.cantidad || 1) * (l.precioPorPasajero ?? []).reduce((b, p) => b + p.cantidad, 0),
+    0,
+  )
+  const esRedondeo = diferencia !== null
+    && diferencia !== 0
+    && (preciosPorPasajero?.sinReparto.length ?? 0) === 0
+    && Math.abs(diferencia) <= toleranciaRedondeo
+  const reconciliado = esRedondeo && preciosPorPasajero
+    ? absorberRedondeo(preciosPorPasajero.filas, diferencia as number)
+    : { filas: preciosPorPasajero?.filas ?? [], residuo: 0 }
+  const filasPorPasajero = reconciliado.filas
+  const ajusteRedondeo = esRedondeo ? reconciliado.residuo : 0
+  const porElGrupo = diferencia === null ? null : esRedondeo ? 0 : diferencia
 
   /**
    * «A tener en cuenta»: lo que el viajero paga aparte. Sale de hechos que el documento ya
@@ -972,12 +1014,31 @@ export default function CotizacionTrappvelPDF({
   const creditos = creditosDeFotos([v.foto, ...fotosCiudades])
   const antesDeViajar = v.antesDeViajar ?? []
 
+  /**
+   * «Incluido en el plan»: lo que el cliente RECIBE (traslados, equipaje, alimentación,
+   * impuestos…), no los nombres de las líneas.
+   *
+   * ⚠️ Hasta el 2026-09-22 la columna repetía, con un chulo delante, exactamente la lista de
+   * «Inversión» que el cliente acababa de leer media página arriba: no decía nada que no
+   * estuviera dicho, y su título prometía una cosa que no era. Ahora solo sale con una lista
+   * de inclusiones de verdad (`viaje.incluye`), que todavía no llena nadie.
+   */
+  const incluye = (v.incluye ?? []).map(t => t.trim()).filter(Boolean)
+
   // ⚠️ La firma sola en una página en blanco: pasaba con la cotización de tres tarifas.
   // El cierre (créditos + firma) no se parte, y la ÚLTIMA sección que se imprime pide
   // tener el cierre en su misma página: si no cabe, la sección baja con él. Las secciones
   // que se parten igual se parten, y el cierre sigue al resto en la página siguiente.
+  //
+  // ⚠️ La lista empieza en «Inversión», que sale siempre. Hasta el 2026-09-22 empezaba en
+  // «Incluido», que también salía siempre (repetía las líneas): al dejar de imprimirse, la
+  // regla se habría quedado sin a quién pegarle el cierre en un documento sin opcionales ni
+  // cargos, que es justo el más corto.
+  const hayPorPasajero = Boolean(preciosPorPasajero && preciosPorPasajero.filas.length > 0)
   const seccionesFinales = [
-    (lineas.length > 0 || noIncluye.length > 0) && 'incluido',
+    'inversion',
+    hayPorPasajero && 'porPasajero',
+    (incluye.length > 0 || noIncluye.length > 0) && 'incluido',
     opcionales.length > 0 && 'opcionales',
     v.cargosEnDestino.length > 0 && 'cargos',
     antesDeViajar.length > 0 && 'antes',
@@ -987,8 +1048,10 @@ export default function CotizacionTrappvelPDF({
   const conCierre = (seccion: string) => (seccion === ultimaSeccion ? ALTO_CIERRE : undefined)
 
   // Totales: subtotal e IVA solo con IVA; el TOTAL en la barra de degradado, siempre.
-  const Totales = (
-    <View wrap={false} style={{ marginTop: 8 }}>
+  // `minPresenceAhead` solo cuando el TOTAL va suelto (más de 8 líneas) y es lo último antes
+  // de la firma: en los demás casos lo lleva la caja que lo envuelve.
+  const totales = (minPresenceAhead?: number) => (
+    <View wrap={false} minPresenceAhead={minPresenceAhead} style={{ marginTop: 8 }}>
       {!general && iva > 0 && (
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 2 }}>
           <Text style={{ fontSize: 8.5, color: C.gris, width: 120 }}>Subtotal</Text>
@@ -1072,15 +1135,20 @@ export default function CotizacionTrappvelPDF({
             const suyas = entradasDe.get(i) ?? []
             const hayAlgo = c.hotel !== null || c.alternativas.length > 0 || fotos.length > 0 || suyas.length > 0
             if (!hayAlgo) return null
-            const fechasCapitulo = c.hotel
+            const nombreCiudad = c.ciudad ? (lugarConCodigo(c.ciudad)?.nombre ?? c.ciudad) : null
+            // Con un solo capítulo, su nombre casi siempre es el destino que la portada ya
+            // dice en 34 pt («San Andrés - Providencia» salía dos veces en la misma página).
+            // Sin el nombre tampoco va la línea de fechas: la repite la tarjeta del hotel.
+            const conNombre = nombreCiudad !== null && (multiples || !yaEstaEnElTitulo(nombreCiudad, titulo))
+            const fechasCapitulo = conNombre && c.hotel
               ? [rangoCompacto(c.hotel.checkIn, c.hotel.checkOut), c.hotel.noches ? `${c.hotel.noches} ${c.hotel.noches === 1 ? 'noche' : 'noches'}` : null].filter(Boolean).join(' · ')
               : null
             const encabezado = (
               <>
                 {multiples && <Antetitulo texto={`DESTINO ${i + 1} DE ${capitulos.length}`} color={C.magenta} />}
-                {c.ciudad && (
+                {conNombre && (
                   <Text style={{ fontSize: 22, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: multiples ? 4 : 0 }}>
-                    {lugarConCodigo(c.ciudad)?.nombre ?? c.ciudad}
+                    {nombreCiudad}
                   </Text>
                 )}
                 {fechasCapitulo && <Text style={{ fontSize: 9, color: C.gris, marginTop: 2 }}>{fechasCapitulo}</Text>}
@@ -1091,7 +1159,7 @@ export default function CotizacionTrappvelPDF({
             const conFotos = fotos.length > 0
             const conHotel = !conFotos && c.hotel !== null
             return (
-              <View key={`capitulo-${i}`} style={{ marginTop: 26 }}>
+              <View key={`capitulo-${i}`} style={{ marginTop: multiples || conNombre ? 26 : 0 }}>
                 <View wrap={false}>
                   {encabezado}
                   {conFotos && <FranjaDeFotos fotos={fotos} alto={150} />}
@@ -1117,7 +1185,7 @@ export default function CotizacionTrappvelPDF({
               con varias tarifas el bloque entero no se parte (`wrap={false}`), así el
               total nunca queda solo en la página siguiente. */}
           {porTarifas ? (
-            <View wrap={false}>
+            <View wrap={false} minPresenceAhead={conCierre('inversion')}>
               <Titulo texto="Inversión" />
               <View style={{ flexDirection: 'row' }}>
                 {bloques.map((b, i) => (
@@ -1160,12 +1228,12 @@ export default function CotizacionTrappvelPDF({
                 El total de abajo corresponde a la opción recomendada. Las demás son alternativas
                 con el precio indicado en su encabezado.
               </Text>
-              {Totales}
+              {totales()}
             </View>
           ) : !general && lineas.length > 0 && lineas.length <= LINEAS_EN_UN_BLOQUE ? (
             // Pocas líneas: la tarjeta entera y el TOTAL no se parten. Partida en dos
             // páginas, la tarjeta queda abierta por abajo en una y por arriba en la otra.
-            <View wrap={false}>
+            <View wrap={false} minPresenceAhead={conCierre('inversion')}>
               <Titulo texto="Inversión" />
               {lineas.map((l, i) => (
                 <LineaPrecio
@@ -1175,7 +1243,7 @@ export default function CotizacionTrappvelPDF({
                   tarjeta={lineas.length === 1 ? 'unica' : i === 0 ? 'primera' : i === lineas.length - 1 ? 'ultima' : 'media'}
                 />
               ))}
-              {Totales}
+              {totales()}
             </View>
           ) : !general && lineas.length > 0 ? (
             // ⚠️ Las filas y el TOTAL van como HERMANOS directos del cuerpo (fragmento, no
@@ -1193,15 +1261,17 @@ export default function CotizacionTrappvelPDF({
                   l={l}
                   detallada={detallada}
                   ultima={i === lineas.length - 2}
+                  // Si la firma va detrás del TOTAL, la última fila pide sitio para los dos.
+                  presenciaExtra={conCierre('inversion')}
                   tarjeta={i === lineas.length - 2 ? 'ultima' : 'media'}
                 />
               ))}
-              {Totales}
+              {totales(conCierre('inversion'))}
             </>
           ) : (
-            <View wrap={false}>
+            <View wrap={false} minPresenceAhead={conCierre('inversion')}>
               <Titulo texto="Inversión" />
-              {Totales}
+              {totales()}
             </View>
           )}
 
@@ -1209,12 +1279,16 @@ export default function CotizacionTrappvelPDF({
               ⚠️⚠️ Esta tabla y el TOTAL son dinero del MISMO viaje: la diferencia se
               imprime con nombre y cierra por construcción (Σ por pasajero + lo del grupo =
               TOTAL). Con varias tarifas, es la de la recomendada. */}
-          {preciosPorPasajero && preciosPorPasajero.filas.length > 0 && (
-            <View wrap={false} style={{ marginTop: 12, backgroundColor: C.tarjeta, borderRadius: 8, padding: 11 }}>
+          {preciosPorPasajero && hayPorPasajero && (
+            <View
+              wrap={false}
+              minPresenceAhead={conCierre('porPasajero')}
+              style={{ marginTop: 12, backgroundColor: C.tarjeta, borderRadius: 8, padding: 11 }}
+            >
               <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.gris, letterSpacing: 1, marginBottom: 4 }}>
                 {porTarifas ? 'PRECIO POR PASAJERO · OPCIÓN RECOMENDADA' : 'PRECIO POR PASAJERO'}
               </Text>
-              {preciosPorPasajero.filas.map(f => (
+              {filasPorPasajero.map(f => (
                 <View key={`pax-${f.tipo}`} style={{ flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 1.5 }}>
                   <Text style={{ fontSize: 9, color: C.tinta, flex: 1 }}>
                     {NOMBRE_PASAJERO[f.tipo]}
@@ -1242,6 +1316,13 @@ export default function CotizacionTrappvelPDF({
                   <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{pesos(porElGrupo)}</Text>
                 </View>
               )}
+              {/* Solo cuando ninguna fila pudo absorber el redondeo entero: se dice qué es. */}
+              {ajusteRedondeo !== 0 && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 3, marginTop: 2 }}>
+                  <Text style={{ fontSize: 7.5, color: C.gris, flex: 1 }}>Ajuste por redondeo</Text>
+                  <Text style={{ fontSize: 7.5, color: C.gris }}>{pesos(ajusteRedondeo)}</Text>
+                </View>
+              )}
               {/* Sin `cubierto` no se puede afirmar que la columna sume el total: se dice. */}
               {porElGrupo === null && preciosPorPasajero.sinReparto.length > 0 && (
                 <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris, marginTop: 3 }}>
@@ -1261,25 +1342,26 @@ export default function CotizacionTrappvelPDF({
           )}
 
           {/* ── Incluido / A tener en cuenta (§4.6) ────────────────────────────
-              Dos columnas sin caja. Una columna sin datos no se imprime. */}
-          {(lineas.length > 0 || noIncluye.length > 0) && (
+              Dos columnas sin caja. Una columna sin datos no se imprime, y la de «Incluido»
+              solo existe con inclusiones de verdad (ver `incluye`). */}
+          {(incluye.length > 0 || noIncluye.length > 0) && (
             <View wrap={false} minPresenceAhead={conCierre('incluido')} style={{ flexDirection: 'row', marginTop: 26 }}>
-              {lineas.length > 0 && (
+              {incluye.length > 0 && (
                 <View style={{ flex: 1, paddingRight: noIncluye.length > 0 ? 14 : 0 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
                     <IconoCheck color={C.verde} tam={12} />
                     <Text style={{ fontSize: 14, fontFamily: 'Helvetica-Bold', color: C.verde, marginLeft: 6 }}>Incluido en el plan</Text>
                   </View>
-                  {lineas.map((l, i) => (
+                  {incluye.map((texto, i) => (
                     <View key={`incluye-${i}`} style={{ flexDirection: 'row', marginBottom: 4 }}>
                       <View style={{ marginTop: 1.5, marginRight: 6 }}><IconoCheck color={C.verde} /></View>
-                      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{l.nombre}</Text>
+                      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{texto}</Text>
                     </View>
                   ))}
                 </View>
               )}
               {noIncluye.length > 0 && (
-                <View style={{ flex: 1, paddingLeft: lineas.length > 0 ? 14 : 0 }}>
+                <View style={{ flex: 1, paddingLeft: incluye.length > 0 ? 14 : 0 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
                     <IconoX color={C.rojo} tam={11} />
                     <Text style={{ fontSize: 14, fontFamily: 'Helvetica-Bold', color: C.rojo, marginLeft: 6 }}>A tener en cuenta</Text>

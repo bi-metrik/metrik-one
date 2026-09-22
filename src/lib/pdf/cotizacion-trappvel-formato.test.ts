@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   TOKENS,
+  absorberRedondeo,
   capitulosDelViaje,
   colorDeTarifa,
   leerFecha,
@@ -14,6 +15,9 @@ import {
   rangoCompacto,
   siglaAerolinea,
   tituloConAcento,
+  vueloDesdeNombre,
+  yaEstaEnElTitulo,
+  type FilaPorPasajeroDoc,
 } from './cotizacion-trappvel-formato'
 import type { HotelPDF } from '@/lib/cotizaciones/detalle-viaje'
 
@@ -73,21 +77,113 @@ describe('la sigla de la aerolínea', () => {
 
 describe('los números de vuelo de la ida y del regreso', () => {
   it('con dos números y regreso, el primero es la ida y el segundo el regreso', () => {
-    expect(numerosDeVuelo('AV8520 / AV9380', true)).toEqual({ ida: 'AV8520', regreso: 'AV9380' })
+    expect(numerosDeVuelo('AV8520 / AV9380', true)).toEqual({ ida: 'AV8520', regreso: 'AV9380', sinAsignar: null })
+  })
+
+  /**
+   * ⚠️ COT-2026-0006 (2026-09-22): la lectura de SATENA guardó `8832 · 8833` y el documento
+   * imprimió los dos en la fila de la ida, con el regreso sin vuelo. El `·` no era
+   * separador, así que el texto no se dejaba partir y caía entero en la ida.
+   */
+  it('⚠️ COT-2026-0006: «8832 · 8833» y «9782, 9779» se reparten ida y regreso', () => {
+    expect(numerosDeVuelo('8832 · 8833', true)).toEqual({ ida: '8832', regreso: '8833', sinAsignar: null })
+    expect(numerosDeVuelo('9782, 9779', true)).toEqual({ ida: '9782', regreso: '9779', sinAsignar: null })
+  })
+
+  it('con el código de la aerolínea separado por espacio, cada número sigue siendo uno', () => {
+    expect(numerosDeVuelo('AV 8520 / AV 9380', true)).toEqual({ ida: 'AV8520', regreso: 'AV9380', sinAsignar: null })
   })
 
   it('con cuatro tramos, mitad y mitad', () => {
-    expect(numerosDeVuelo('AV1 AV2 AV3 AV4', true)).toEqual({ ida: 'AV1 · AV2', regreso: 'AV3 · AV4' })
+    expect(numerosDeVuelo('AV1 AV2 AV3 AV4', true)).toEqual({ ida: 'AV1 · AV2', regreso: 'AV3 · AV4', sinAsignar: null })
+    expect(numerosDeVuelo('9459 · 4867 · 9842 · 9488', true)).toEqual({ ida: '9459 · 4867', regreso: '9842 · 9488', sinAsignar: null })
   })
 
-  it('con una cantidad impar no se reparte: va entero en la ida', () => {
-    expect(numerosDeVuelo('AV1 AV2 AV3', true)).toEqual({ ida: 'AV1 AV2 AV3', regreso: null })
+  it('⚠️ sin forma de saber cuál es de cuál, no se pega a ningún tramo: va sin asignar', () => {
+    // Impar: no se sabe dónde parte.
+    expect(numerosDeVuelo('AV1 AV2 AV3', true)).toEqual({ ida: null, regreso: null, sinAsignar: 'AV1 · AV2 · AV3' })
+    // Uno solo para un viaje de ida y regreso: puede ser de cualquiera de los dos.
+    expect(numerosDeVuelo('8832', true)).toEqual({ ida: null, regreso: null, sinAsignar: '8832' })
+    // Un texto que no es una lista de números no se parte ni se reescribe.
+    expect(numerosDeVuelo('ver reserva', true)).toEqual({ ida: null, regreso: null, sinAsignar: 'ver reserva' })
   })
 
   it('sin regreso todo es de la ida, y sin dato no hay número', () => {
-    expect(numerosDeVuelo('AV8520 AV9380', false)).toEqual({ ida: 'AV8520 AV9380', regreso: null })
-    expect(numerosDeVuelo('', true)).toEqual({ ida: null, regreso: null })
-    expect(numerosDeVuelo(null, true)).toEqual({ ida: null, regreso: null })
+    expect(numerosDeVuelo('AV8520 AV9380', false)).toEqual({ ida: 'AV8520 · AV9380', regreso: null, sinAsignar: null })
+    expect(numerosDeVuelo('', true)).toEqual({ ida: null, regreso: null, sinAsignar: null })
+    expect(numerosDeVuelo(null, true)).toEqual({ ida: null, regreso: null, sinAsignar: null })
+  })
+})
+
+describe('lo que el nombre de la línea dice del vuelo', () => {
+  it('«AVIANCA BOG - ADZ»: la aerolínea como se escribió y la ruta en IATA', () => {
+    expect(vueloDesdeNombre('AVIANCA BOG - ADZ')).toEqual({ aerolinea: 'AVIANCA', origen: 'BOG', destino: 'ADZ' })
+    expect(vueloDesdeNombre('AVIANCA BOG - ADZ (alternativa)')).toEqual({ aerolinea: 'AVIANCA', origen: 'BOG', destino: 'ADZ' })
+    expect(vueloDesdeNombre('Copa PTY → BOG')).toEqual({ aerolinea: 'Copa', origen: 'PTY', destino: 'BOG' })
+  })
+
+  it('sin dos códigos IATA no hay ruta, y sin ruta no se adivina la aerolínea', () => {
+    // «PROVIDENCIA» no es un código: el resto del nombre no es el de una aerolínea.
+    expect(vueloDesdeNombre('SATENA ADZ - PROVIDENCIA')).toEqual({ aerolinea: null, origen: null, destino: null })
+    // En minúscula no cuenta: «bog-adz» puede ser cualquier cosa.
+    expect(vueloDesdeNombre('avianca bog - adz')).toEqual({ aerolinea: null, origen: null, destino: null })
+    expect(vueloDesdeNombre(null)).toEqual({ aerolinea: null, origen: null, destino: null })
+  })
+
+  it('con ruta pero sin una aerolínea conocida, la ruta sale y la aerolínea no', () => {
+    expect(vueloDesdeNombre('TRASLADO APT - HTL')).toEqual({ aerolinea: null, origen: 'APT', destino: 'HTL' })
+  })
+})
+
+describe('el redondeo del precio por pasajero', () => {
+  // COT-2026-0006: 6 adultos a 1.651.969 (el reparto exacto daba 9.911.816), niño e infante.
+  const FILAS: FilaPorPasajeroDoc[] = [
+    { tipo: 'adulto', cantidad: 6, precioUnitario: 1_651_969 },
+    { tipo: 'nino', cantidad: 1, precioUnitario: 1_238_558 },
+    { tipo: 'infante', cantidad: 1, precioUnitario: 26_676 },
+  ]
+  const suma = (f: FilaPorPasajeroDoc[]) => f.reduce((a, x) => a + x.precioUnitario * (x.cantidad ?? 0), 0)
+
+  it('⚠️⚠️ COT-2026-0006: los 2 pesos se absorben y la columna suma el TOTAL', () => {
+    const r = absorberRedondeo(FILAS, 2)
+    expect(r.residuo).toBe(0)
+    expect(suma(r.filas)).toBe(11_177_050)
+    // Van a la fila de un solo pasajero con mayor subtotal: el niño. El adulto no se toca
+    // porque 2 no se reparte entero entre 6.
+    expect(r.filas.map(f => f.precioUnitario)).toEqual([1_651_969, 1_238_560, 26_676])
+  })
+
+  it('un residuo que se reparte entero entre los de una fila va a esa fila', () => {
+    const r = absorberRedondeo([{ tipo: 'adulto', cantidad: 3, precioUnitario: 100 }, { tipo: 'nino', cantidad: 2, precioUnitario: 50 }], 3)
+    expect(r).toEqual({ filas: [{ tipo: 'adulto', cantidad: 3, precioUnitario: 101 }, { tipo: 'nino', cantidad: 2, precioUnitario: 50 }], residuo: 0 })
+  })
+
+  it('un residuo negativo también se absorbe', () => {
+    const r = absorberRedondeo(FILAS, -2)
+    expect(suma(r.filas)).toBe(11_177_050 - 4)
+    expect(r.residuo).toBe(0)
+  })
+
+  it('si ninguna fila lo absorbe entero, lo devuelve intacto para nombrarlo', () => {
+    const filas = [{ tipo: 'adulto' as const, cantidad: 6, precioUnitario: 100 }, { tipo: 'nino' as const, cantidad: 2, precioUnitario: 50 }]
+    expect(absorberRedondeo(filas, 1)).toEqual({ filas, residuo: 1 })
+  })
+
+  it('sin residuo no toca nada', () => {
+    expect(absorberRedondeo(FILAS, 0)).toEqual({ filas: FILAS, residuo: 0 })
+  })
+})
+
+describe('el nombre del capítulo contra el título de la portada', () => {
+  it('ya está dicho si el título lo nombra entero, sin importar tildes ni puntuación', () => {
+    expect(yaEstaEnElTitulo('San Andrés - Providencia', 'San Andrés - Providencia')).toBe(true)
+    expect(yaEstaEnElTitulo('Cancun', 'Viaje a Cancún · familia Sánchez')).toBe(true)
+  })
+
+  it('no lo está si el título no lo nombra, o solo lo contiene dentro de otra palabra', () => {
+    expect(yaEstaEnElTitulo('Cartagena', 'Luna de miel Pérez')).toBe(false)
+    expect(yaEstaEnElTitulo('Roma', 'Romería en Boyacá')).toBe(false)
+    expect(yaEstaEnElTitulo(null, 'San Andrés')).toBe(false)
   })
 })
 
