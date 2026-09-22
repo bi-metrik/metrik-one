@@ -151,7 +151,10 @@ describe('la plantilla trappvel está registrada', () => {
 describe('el documento del cliente', () => {
   it('pone en la portada el título y las cuatro fichas', async () => {
     const t = await texto(props())
-    expect(t).toContain('VIAJE A CANCUN')
+    // El título sale como lo escribió quien cotiza (§4.2): ya no se pasa a mayúsculas.
+    expect(t).toContain('PROPUESTA DE VIAJE')
+    expect(t).toContain('familia Sanchez')
+    expect(t).not.toContain('VIAJE A CANCUN')
     expect(t).toContain('VIAJEROS')
     expect(t).toContain('DESTINO')
     expect(t).toContain('FECHA')
@@ -170,7 +173,10 @@ describe('el documento del cliente', () => {
     expect(t).toContain('Avianca')
     expect(t).toContain('CUC')
     expect(t).toContain('AXM')
-    expect(t).toContain('Bogota BOG')
+    // §4.4: el código va entre paréntesis y la escala se nombra.
+    expect(t).toContain('Escala en Bogota (BOG)')
+    // La pastilla de la aerolínea lleva su sigla IATA.
+    expect(t).toContain('AV Avianca')
   })
 
   /**
@@ -188,20 +194,27 @@ describe('el documento del cliente', () => {
     expect(t).toContain('10:15')
     expect(t).toContain('18:45')
     expect(t).toContain('22:10')
-    // Dos trayectos: la fila se distingue por su sentido, y el regreso va al revés.
-    expect(t).toContain('Ida')
-    expect(t).toContain('Regreso')
+    // Dos trayectos: cada fila dice su ruta, y el regreso va al revés.
+    expect(t.split('Cucuta (CUC)').length - 1).toBe(2)
+    expect(t.split('Armenia (AXM)').length - 1).toBe(2)
   })
 
-  it('⚠️ la tabla NO trae DURACIÓN ni número de vuelo: no están en la referencia', async () => {
-    // El itinerario que Trappvel manda hoy tiene cinco columnas (AERO, RUTA, FECHA,
-    // SALIDA, LLEGADA). Se mira el ENCABEZADO y no la palabra suelta: «DURACIÓN» también
-    // es una de las cuatro fichas de la portada, y ahí sí tiene dato.
+  it('⚠️ sin número de vuelo no hay columna VUELO: una columna vacía no se imprime', async () => {
+    // Se mira el ENCABEZADO y no la palabra suelta: «DURACIÓN» también es una de las
+    // cuatro fichas de la portada, y ahí sí tiene dato.
     const t = await texto(props())
-    expect(t).toContain('SALIDA LLEGADA ESCALA')
+    expect(t).toContain('AEROLÍNEA RUTA FECHA SALIDA LLEGADA')
+    expect(t).not.toContain('LLEGADA VUELO')
     expect(t).not.toContain('LLEGADA DURACIÓN')
-    // El número de vuelo se sigue viendo en la plataforma; en el documento, no.
-    expect(t).not.toContain('9459')
+  })
+
+  it('con número de vuelo la columna VUELO vuelve, con el de la ida y el del regreso', async () => {
+    // Decisión de Mauricio (2026-09-22): el número vuelve a la tabla, solo si hay dato.
+    // Con dos números y regreso, el primero es de la ida y el segundo del regreso.
+    const t = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 AV9460' }] }) }))
+    expect(t).toContain('LLEGADA VUELO')
+    expect(t).toContain('AV9459')
+    expect(t).toContain('AV9460')
   })
 
   it('un viaje de solo ida no imprime una fila de regreso vacía', async () => {
@@ -234,20 +247,24 @@ describe('el documento del cliente', () => {
 
   it('separa incluye de no incluye, y lo de destino cae en «no incluye»', async () => {
     const t = await texto(props())
-    expect(t).toContain('INCLUYE / NO INCLUYE')
+    expect(t).toContain('Incluido en el plan')
+    expect(t).toContain('A tener en cuenta')
     expect(t).toContain('TIQUETES AEREOS')
-    expect(t).toContain('se pagan en destino')
+    // Sin «en destino» pegado: el renglón puede partirse justo ahí y el extractor mete un
+    // espacio de más en el corte.
+    expect(t).toContain('Impuestos y tasas de hospedaje (Cancun), que se pagan')
   })
 
   it('lista los opcionales diciendo que no están en el precio', async () => {
     const t = await texto(props())
-    expect(t).toContain('OPCIONALES')
+    expect(t).toContain('Opcionales')
+    expect(t).toContain('No están incluidas en el precio')
     expect(t).toContain('SNORKEL EN ISLA MUJERES')
   })
 
   it('imprime los cargos en destino en su moneda local', async () => {
     const t = await texto(props())
-    expect(t).toContain('CARGOS A PAGAR EN DESTINO')
+    expect(t).toContain('Cargos a pagar en destino')
     // ⚠️ El monto y la moneda pueden viajar en dos corridas de texto distintas dentro del
     // PDF, así que se buscan por separado: afirmar la cadena entera mediría el salto de
     // línea del renderizador, no que el dato esté impreso.
@@ -382,6 +399,30 @@ describe('las tres tarifas (Economica / Recomendada / Premium)', () => {
     expect(t).toContain('TIQUETES AEREOS')
   })
 
+  it('cada vuelo y cada hotel llevan el nombre de SU tarifa, con el mismo color que en «Inversión»', async () => {
+    const t = await texto(props({
+      itinerarios: ITIN,
+      viaje: viaje({
+        vuelos: [{ ...VUELO, tarifas: [0] }, { ...VUELO, aerolinea: 'LATAM', tarifas: [1] }],
+        hoteles: [{ ...HOTEL, tarifas: [0] }, { ...HOTEL, hotel: 'Hotel Economico Cancun', tarifas: [1] }],
+      }),
+    }))
+    // Cuatro apariciones de ECONÓMICA: la tarjeta de «Inversión», los DOS tramos de su
+    // vuelo (ida y regreso llevan cada uno su marca) y su hotel.
+    expect(t.split('ECONÓMICA').length - 1).toBe(4)
+    expect(t).toContain('Hotel Economico Cancun')
+    expect(t).toContain('La que recomendamos')
+  })
+
+  it('con UNA sola tarifa no aparece ningún nombre de tarifa en vuelos ni hoteles', async () => {
+    const t = await texto(props({
+      itinerarios: [ITIN![0]],
+      viaje: viaje({ vuelos: [{ ...VUELO, tarifas: [0] }], hoteles: [{ ...HOTEL, tarifas: [0] }] }),
+    }))
+    expect(t).not.toContain('RECOMENDADA')
+    expect(t).not.toContain('La que recomendamos')
+  })
+
   it('R6 · sin itinerarios el documento no cambia un caracter', async () => {
     const sin = await texto(props())
     const conNull = await texto(props({ itinerarios: null }))
@@ -402,7 +443,7 @@ describe('las tres tarifas (Economica / Recomendada / Premium)', () => {
 describe('el hueco de la foto', () => {
   it('sin foto el documento sale completo: no hay imagen rota ni sección vacía', async () => {
     const t = await texto(props({ viaje: viaje({ foto: null }) }))
-    expect(t).toContain('VIAJE A CANCUN')
+    expect(t).toContain('familia Sanchez')
     expect(t).toContain('Crown Paradise')
   })
 
@@ -461,7 +502,7 @@ describe('los tres niveles de detalle', () => {
     for (const nivel of ['muy_detallada', 'normal', 'general'] as const) {
       const t = await texto(props({ viaje: viaje({ nivelDetalle: nivel }) }))
       expect(t, nivel).toContain('329,44')
-      expect(t, nivel).toContain('CARGOS A PAGAR EN DESTINO')
+      expect(t, nivel).toContain('Cargos a pagar en destino')
       expect(t, nivel).toContain('TOTAL')
       expect(t, nivel).toContain('PRECIO POR PASAJERO')
     }

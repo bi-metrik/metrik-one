@@ -48,6 +48,11 @@ export interface FotoPDF {
    * licencia. `null` solo para una foto propia del cliente.
    */
   credito: string | null
+  /**
+   * Los nombres con que el viaje llama a esta ciudad («Providencia», «Providencia PVA»).
+   * Con ellos la plantilla pone la foto en el capítulo de su ciudad sin conocer el banco.
+   */
+  lugares?: string[]
 }
 
 /**
@@ -79,6 +84,16 @@ export interface ViajePDF {
    * franja de fotos.
    */
   fotosCiudades?: FotoPDF[]
+  /**
+   * La fecha de salida en ISO (`2027-01-17`). Con ella la línea de tiempo pone la fecha en
+   * cada día («17 ENE»); sin ella, el círculo dice «DÍA 3». Opcional.
+   */
+  fechaInicio?: string | null
+  /**
+   * El recuadro «Antes de viajar» (§4.9 del sistema visual). ⚠️ SIN CAMPO todavía: nadie lo
+   * llena y el recuadro no se imprime. No se inventa contenido por defecto.
+   */
+  antesDeViajar?: string[]
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]
