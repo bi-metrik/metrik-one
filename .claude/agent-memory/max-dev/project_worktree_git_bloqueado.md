@@ -202,6 +202,12 @@ que puede estar basado en un `main` más viejo: comprobar `git log <base vieja>.
 redirección). Todo esto va en un `.sh` **dentro del worktree**, invocado con `bash script.sh`,
 y se borra antes de cerrar.
 
+Medido el 2026-09-22 (#826): la tool `Write` **al scratchpad sí pasó**, y `python3
+<scratchpad>/x.py` o `bash <scratchpad>/x.sh` planos corrieron sin problema (así no hay nada que
+borrar del worktree). Se rechazaron: un `python3 - <<'EOF'` con backticks de JS adentro (template
+literals), y `VAR="$(grep …)" npx …` (valor calculado que alimenta un comando). Para una clave de
+`.env.local`, que la lea el propio script, no el shell.
+
 Medido el 2026-09-07 (PR #556), tres rechazos más que cuestan un comando cada uno:
 - **Un heredoc que escribe FUERA del worktree** (`cat > <scratchpad>/x.py <<'EOF'`) se rechaza
   aunque no lleve git («too complex to verify that it stays inside the worktree»). El camino

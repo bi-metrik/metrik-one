@@ -1,6 +1,6 @@
 ---
 name: arreglos-documento-trappvel-0006
-description: "#822 — cinco arreglos del PDF de Trappvel vistos en COT-2026-0006: un grupo libre borraba un vuelo del itinerario, el «·» no partía números de vuelo, el redondeo salía como cobro por el grupo; y la propuesta (sin construir) del texto que redacta ONE"
+description: "#822 — cinco arreglos del PDF de Trappvel vistos en COT-2026-0006: un grupo libre borraba un vuelo del itinerario, el «·» no partía números de vuelo, el redondeo salía como cobro por el grupo; y la propuesta del texto que redacta ONE (construida en #826)"
 metadata:
   type: project
 ---
@@ -33,7 +33,7 @@ no cuentan). Cualquier consumidor nuevo del detalle usa `ranuraDelItem`, no `ran
   por palabras enteras, sin tildes). Con varios destinos no cambia.
 - QA: `proyectos/trappvel/clarity/qa/2026-09-22_arreglos-1-5/`.
 
-## Propuesta (NO construida): el texto que redacta ONE
+## Propuesta del texto que redacta ONE (construida en #826, ver [[texto-cliente-trappvel]])
 
 Titular, intro, «Incluido» y «Antes de viajar», redactados por Gemini y corregidos por el equipo.
 Recomendación entregada: columna nueva `cotizaciones.documento_cliente jsonb` (**requiere
