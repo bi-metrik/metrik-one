@@ -55,7 +55,8 @@
 - ⚠️⚠️ [Adicionales dentro de la variante](project_adicionales_por_variante.md) — #810 en producción; cuelgan del ITEM, no del grupo; `precioLinea` sigue BASE o la maleta se compone; SQL SIN aplicar
 - ⚠️⚠️ [Cobertura de las opciones (4.2 y 4.3)](project_cobertura_opciones_cotizacion.md) — #798 en producción; el aviso SOLO existe para vuelo y SOLO con captura; lo de «+ Vuelo compite» CADUCÓ
 - ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; migraciones ya aplicadas
-- ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — #800: el SQL va DESPUÉS del deploy; el nivel de detalle nace inerte; `→` no existe en el PDF
+- ⚠️⚠️ [Horas de vuelo en el documento (Trappvel)](project_horas_de_vuelo_trappvel.md) — #812 en producción; la duración NO se calcula (restar miente en 2 de 3 capturas); la cancelación no se imprimía nunca
+- ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — #800 con el SQL YA aplicado (plantilla encendida); el nivel de detalle nace inerte; `→` no existe en el PDF
 - ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; vigente: el rastro de margen VACÍO
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado; las tres INERTES sin config
 - ⚠️⚠️ [Archivos de trappvel en su propio Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: config aplicada, corte de Drive DESPUÉS del merge
