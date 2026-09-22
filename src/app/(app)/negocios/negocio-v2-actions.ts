@@ -53,6 +53,7 @@ import {
   type DocumentoRequerido,
 } from '@/lib/negocios/cierre-bloque'
 import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from '@/lib/negocios/salto-etapa'
+import { anticipoEsperado, estadoAnticipo, notaAnticipoCubierto, type EstadoAnticipo } from '@/lib/negocios/anticipo-cubierto'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
@@ -3190,10 +3191,10 @@ export async function cambiarEtapaNegocio(
 // avanza. Opción A (aprobada): el gate se satisface cuando el negocio YA tiene
 // cubierto su anticipo esperado, sin importar la vía.
 
-// Porcentaje del precio que constituye el anticipo en Plan 1 (50/50).
+// Porcentaje del anticipo en Plan 1 (50/50): `ANTICIPO_PCT_PLAN1`, en
+// `lib/negocios/anticipo-cubierto.ts` junto con la regla de cuándo está cubierto.
 // TODO: validar con Carmen si la base del anticipo es honorario-only vs precio
 // completo. Por ahora la base es el precio_aprobado completo.
-const ANTICIPO_PCT_PLAN1 = 0.5
 
 /**
  * ¿El negocio ya tiene cubierto su anticipo esperado por el saldo real (cualquier
@@ -3208,8 +3209,12 @@ const ANTICIPO_PCT_PLAN1 = 0.5
  *     · Plan 2 (único) → precio_aprobado (100%)
  *     · Sin plan / sin precio → precio_aprobado (conservador: exige pago completo)
  *
- * Devuelve true solo si `anticipoEsperado > 0` Y `cobrado >= anticipoEsperado - 1`
- * (tolerancia de 1 peso). Con cobrado=0 y precio>0 devuelve false (sigue bloqueando).
+ * Devuelve true solo si `anticipoEsperado > 0` Y el faltante es cero, negativo o cabe en
+ * el piso de materialidad (`TOLERANCIA_SALDO_COP`). Hasta 2026-09-22 la tolerancia era de
+ * un peso (`cobrado >= anticipoEsperado - 1`), más estricta que los gates de saldo y que el
+ * salto de etapa. Decisión de Mauricio (2026-08-06): el piso aplica a todo el sistema. La
+ * tolerancia solo deja avanzar el caso: no crea cobro ni reconoce ingreso. La regla vive en
+ * `lib/negocios/anticipo-cubierto.ts`. Con cobrado=0 y precio>0 devuelve false.
  */
 // Exportada porque el panel que aparece tras registrar un pago necesita saber si el
 // motor va a cerrar solo el gate de anticipo, para no anunciar como retenido un caso que
@@ -3220,6 +3225,18 @@ export async function anticipoCubiertoPorSaldo(
   workspaceId: string,
   negocioId: string,
 ): Promise<boolean> {
+  return (await estadoAnticipoPorSaldo(supabase, workspaceId, negocioId)).cubierto
+}
+
+/**
+ * Lo mismo que `anticipoCubiertoPorSaldo`, con el faltante: el cierre automático lo
+ * necesita para que su nota diga cuánto quedó sin pagar cuando cerró dentro del piso.
+ */
+async function estadoAnticipoPorSaldo(
+  supabase: unknown,
+  workspaceId: string,
+  negocioId: string,
+): Promise<EstadoAnticipo> {
   const [negRes, cobrosRes, propRes, conciliadoRes] = await Promise.all([
     db(supabase)
       .from('negocios')
@@ -3255,8 +3272,8 @@ export async function anticipoCubiertoPorSaldo(
     // APROBADA cuyo valor final es 0) de "aún sin cotizar" (precio null/0 porque nunca
     // se aprobó una propuesta). Solo el primero da el gate por satisfecho; el segundo
     // sigue bloqueando — no abrir la puerta a saltar el anticipo de algo no cotizado.
-    if (esCeroDeliberado(propuestas, neg?.precio_aprobado ?? null)) return true
-    return false
+    if (esCeroDeliberado(propuestas, neg?.precio_aprobado ?? null)) return { cubierto: true, faltante: 0 }
+    return { cubierto: false, faltante: 0 }
   }
 
   // Recaudo CONFIRMADO: una porción de reparto que el comercial propuso y la financiera
@@ -3276,12 +3293,8 @@ export async function anticipoCubiertoPorSaldo(
     if (planRaw === 1 || planRaw === 2) { plan = planRaw as 1 | 2; break }
   }
 
-  const anticipoEsperado = plan === 1
-    ? Math.round(precio * ANTICIPO_PCT_PLAN1)
-    : precio // Plan 2 (único) o sin plan → pago completo (conservador)
-
-  if (!(anticipoEsperado > 0)) return false
-  return cobrado >= anticipoEsperado - 1
+  // Plan 2 (único) o sin plan → pago completo (conservador).
+  return estadoAnticipo(anticipoEsperado(precio, plan), cobrado)
 }
 
 /**
@@ -3318,15 +3331,17 @@ async function autocompletarGatesAnticipoPorSaldo(
   if (bloques.length === 0) return
 
   // Solo consultar el saldo si hay algún bloque candidato.
-  const cubierto = await anticipoCubiertoPorSaldo(supabase, workspaceId, negocioId)
+  const { cubierto, faltante } = await estadoAnticipoPorSaldo(supabase, workspaceId, negocioId)
   if (!cubierto) return
 
+  // Si cerró dentro del piso de materialidad, la nota lo dice con su cifra.
+  const nota = notaAnticipoCubierto(faltante)
   const nowIso = new Date().toISOString()
   for (const b of bloques) {
     const nuevaData = {
       ...(b.data ?? {}),
       _completado_via: 'saldo',
-      _nota: 'Anticipo cubierto por el saldo del negocio (reparto/otro pago); gate cerrado automáticamente.',
+      _nota: nota,
     }
     await db(supabase)
       .from('negocio_bloques')
@@ -3341,7 +3356,7 @@ async function autocompletarGatesAnticipoPorSaldo(
           entidad_id: negocioId,
           tipo: 'comentario',
           autor_id: staffId,
-          contenido: 'Anticipo cubierto por el saldo del negocio (reparto/otro pago); gate cerrado automáticamente.',
+          contenido: nota,
         }, 'autocompletarGatesAnticipoPorSaldo')
       } catch { /* no bloquear por el log */ }
     }
@@ -4368,8 +4383,9 @@ export async function cambiarEtapaNegocioConGate(
     // Igual que los gates de saldo: se compara contra el valor a recaudar (honorario
     // + tarifa pasante). Con `precio_aprobado` a secas, un negocio con la tarifa
     // pagada daba saldo NEGATIVO y `debeSaltarPorSaldo` —que con `conciliar_sobrepago`
-    // exige CERO exacto— no saltaba: el caso entraba a las etapas de cobro que ya no
-    // le aplicaban.
+    // no deja pasar un sobrepago real— no saltaba: el caso entraba a las etapas de cobro
+    // que ya no le aplicaban. Hoy las dos ramas del salto miden contra el piso de
+    // materialidad, no contra el cero exacto (ver `lib/negocios/salto-etapa.ts`).
     const honorarioSkip = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
     const precio = valorARecaudar(honorarioSkip, modeloSkip)
     // El salto encadena: con el saldo en cero un negocio puede atravesar VARIAS etapas de
