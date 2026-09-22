@@ -1,13 +1,15 @@
 ---
 name: texto-cliente-trappvel
-description: "#826 — ONE redacta el texto del documento de Trappvel (titular, intro, incluye, antes de viajar) y el equipo lo revisa; columna cotizaciones.documento_cliente SIN aplicar al abrir el PR; el PDF imprime solo lo revisado"
+description: "#826 — ONE redacta el texto del documento de Trappvel (titular, intro, incluye, antes de viajar) y el equipo lo revisa; columna cotizaciones.documento_cliente aplicada por Mauricio antes del merge; el PDF imprime solo lo revisado"
 metadata:
   type: project
 ---
 
-**PR [#826](https://github.com/bi-metrik/metrik-one/pull/826), abierto SIN mergear (2026-09-22).**
-Lleva la migración `20260922230000_cotizaciones_documento_cliente.sql`, **sin aplicar**: la aplica
-la sesión principal ANTES del merge. Aditiva, sin backfill, sin RLS nueva.
+**PR [#826](https://github.com/bi-metrik/metrik-one/pull/826), mergeado con squash el 2026-09-22.**
+La migración `20260922230000_cotizaciones_documento_cliente.sql` la aplicó Mauricio en el SQL
+editor ANTES del merge y quedó en el ledger con esa misma versión (verificado de solo lectura:
+columna, CHECK `cotizaciones_documento_cliente_es_objeto` y fila del ledger). Aditiva, sin
+backfill, sin RLS nueva.
 
 **Why:** Mauricio aprobó la columna y el redactor el 2026-09-22, tras la propuesta que quedó en
 [[arreglos-documento-trappvel-0006]].
@@ -27,7 +29,13 @@ la sesión principal ANTES del merge. Aditiva, sin backfill, sin RLS nueva.
   **no se probó en vivo**. Si alguien reporta el tono, empezar por ahí.
 - La guarda de carrera del UPDATE (`documento_cliente->>revisado_en is null`) usa filtro por
   ruta JSON de PostgREST; verificado en vivo con un control inverso.
-- QA: `proyectos/trappvel/clarity/qa/2026-09-22_redactor/` (COT-0006 revisado, borrador, y el
-  sintético con el texto real de Gemini).
+- **Con titular redactado el título deja de ser el nombre del negocio.** Todo dedupe «la portada
+  ya lo dice» compara contra los tres lados (`yaLoDiceLaPortada`: título, nombre del negocio,
+  ficha DESTINO), no solo contra el título: si no, el destino reaparece bajo las fotos.
+- **La ficha DESTINO es angosta y parte el nombre en dos renglones:** en el texto extraído sale
+  `San Andres -  Providencia`. Contar ocurrencias con `\s+`, nunca con `split` literal.
+- El rótulo «DÍA A DÍA» viaja con las DOS primeras filas en `wrap={false}` (patrón #819).
+- QA: `proyectos/trappvel/clarity/qa/2026-09-22_redactor/` (COT-0006 revisado v1 y `-v2` tras los
+  dos arreglos, borrador, y el sintético con el texto real de Gemini).
 
 Relacionado: [[documento-cliente-trappvel]], [[pruebas-por-mutacion]], [[mirar-pdf-renderizado]].

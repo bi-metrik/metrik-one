@@ -49,7 +49,7 @@
 - ⚠️⚠️ [Tres tarifas y tabla de vuelos](project_tres_tarifas_y_tabla_de_vuelos.md) — la plantilla propia PIERDE lo que la genérica resolvía
 - ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — el nivel de detalle nace inerte; `→` no existe en el PDF
 - ⚠️⚠️ [Arreglos 1-5 del PDF Trappvel (#822)](project_arreglos_documento_trappvel_0006.md) — un grupo libre borraba un vuelo del documento
-- ⚠️⚠️ [Texto del cliente redactado por ONE (#826)](project_texto_cliente_trappvel.md) — migración SIN aplicar; el PDF imprime solo lo revisado
+- ⚠️ [Texto del cliente redactado por ONE (#826)](project_texto_cliente_trappvel.md) — mergeado; el PDF imprime solo lo revisado
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge
 - ⚠️⚠️ [Archivos de trappvel en su Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: corte de Drive DESPUÉS
