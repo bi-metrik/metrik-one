@@ -4,17 +4,22 @@ import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import {
+  lineaDeRecargo,
   politicaRecargoDeLinea,
+  recargoCorresponde,
   RECARGO_POR_DEFECTO,
+  type ItemParaRecargo,
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
+import { isEditable } from '@/lib/cotizaciones/state-machine'
 
 /**
  * El recargo fijo, del lado del servidor.
  *
- * Regla 2 del 2026-09-14. Lo que este archivo hace es **ofrecer** y **poner**; el
- * criterio de a qué vuelo le corresponde no vive aquí (ver el encabezado de
- * `recargo-linea.ts`): lo decide quien cotiza, apretando el botón.
+ * Regla 2 del 2026-09-14. Lo que este archivo hace es **ofrecer** y **poner**. A qué
+ * vuelos aplica lo decide la línea (todos o solo internacionales, desde Mi Negocio) y el
+ * criterio vive en `recargo-linea.ts`; si a ESTA cotización le va, lo decide quien
+ * cotiza, apretando el botón.
  *
  * ⚠️ El recargo entra como una línea SIN COSTO y con `precio_manual = true`. Eso lo
  * vuelve INGRESO en la cascada: suma al precio y no al costo, y el margen sube
@@ -56,10 +61,14 @@ export async function aplicarRecargo(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: cot } = await (supabase as any)
     .from('cotizaciones')
-    .select('id, negocio_id, oportunidad_id')
+    .select('id, negocio_id, oportunidad_id, estado')
     .eq('id', cotizacionId)
     .maybeSingle()
   if (!cot) return { success: false as const, error: 'Cotización no encontrada' }
+  // Una cotización ya enviada no cambia de precio por un botón: se duplica o se corrige.
+  if (!isEditable(cot.estado)) {
+    return { success: false as const, error: 'Esta cotización ya no es un borrador: su precio no se cambia agregándole un recargo.' }
+  }
   if (!cot.negocio_id) {
     return { success: false as const, error: 'El recargo se configura por línea de negocio, y esta cotización no cuelga de un negocio' }
   }
@@ -67,6 +76,27 @@ export async function aplicarRecargo(cotizacionId: string) {
   const politica = await getPoliticaRecargo(cot.negocio_id as string)
   if (!politica.activo) {
     return { success: false as const, error: 'Esta línea no tiene recargo configurado. Se activa en Mi Negocio → Margen y recargo.' }
+  }
+
+  // Lo que decide la pantalla se vuelve a decidir aquí: esta acción es un endpoint
+  // alcanzable aunque ningún botón la invoque, y el botón solo aparece si corresponde.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: filas, error: errItems } = await (supabase as any)
+    .from('items')
+    .select('id, nombre, grupo, precio_venta, cantidad, es_ajuste, tarifa_pax')
+    .eq('cotizacion_id', cotizacionId)
+  if (errItems) return { success: false as const, error: errItems.message as string }
+  const items = (filas ?? []) as ItemParaRecargo[]
+  if (lineaDeRecargo(items, politica)) {
+    return { success: false as const, error: `Esta cotización ya lleva el ${politica.etiqueta.toLowerCase()}.` }
+  }
+  if (!recargoCorresponde(items, politica)) {
+    return {
+      success: false as const,
+      error: politica.vuelos === 'internacionales'
+        ? 'El recargo está configurado solo para vuelos internacionales, y esta cotización no lleva ninguno.'
+        : 'Esta cotización no lleva ningún vuelo al que le corresponda el recargo.',
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

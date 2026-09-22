@@ -106,11 +106,11 @@ export function cotizacionesBajoPiso(medidas: CotizacionMedida[]): BajoPiso[] {
 export function mensajeGateMargen(bajoPiso: BajoPiso[]): string {
   if (bajoPiso.length === 0) return ''
   const detalle = bajoPiso
-    .map(c => `${c.codigo ?? 'la cotización'} está al ${pct(c.margenRealPct)} (piso ${pct(c.pisoPct)})`)
+    .map(c => `${c.codigo ?? 'la cotización'} está al ${pct(c.margenRealPct)} (mínimo ${pct(c.pisoPct)})`)
     .join('; ')
   return bajoPiso.length === 1
-    ? `Margen por debajo del piso: ${detalle}. Sube el margen o el precio antes de avanzar.`
-    : `${bajoPiso.length} cotizaciones por debajo del piso: ${detalle}. Sube el margen o el precio antes de avanzar.`
+    ? `Margen por debajo del mínimo para aprobar: ${detalle}. Sube el margen o el precio antes de avanzar.`
+    : `${bajoPiso.length} cotizaciones por debajo del margen mínimo: ${detalle}. Sube el margen o el precio antes de avanzar.`
 }
 
 function pct(valor: number): string {

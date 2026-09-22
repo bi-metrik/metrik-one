@@ -7,6 +7,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaYear } from '@/lib/dates/bogota'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { esBrandingPorDefecto } from '@/lib/marca/paleta'
+import { lineaUsaPoliticaDePrecio } from '@/lib/cotizaciones/politica-de-linea'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
@@ -51,6 +52,7 @@ export default async function MiNegocioPage() {
     categoriesResult,
     serviciosResult,
     featuresResult,
+    politicasLineaResult,
   ] = await Promise.all([
     // Columnas explicitas, NUNCA `*`: el workspace viaja como prop a un componente
     // cliente y `config_extra` guarda credenciales (Drive, Siigo, Valida). Con `*`
@@ -105,6 +107,13 @@ export default async function MiNegocioPage() {
       .from('workspace_features')
       .select('*')
       .eq('workspace_id', workspaceId),
+
+    // Solo para decidir si existe la sección «Margen y recargo»: el `config_extra` de las
+    // líneas no viaja al cliente, viaja un booleano.
+    supabase
+      .from('lineas_negocio')
+      .select('config_extra')
+      .eq('workspace_id', workspaceId),
   ])
 
   // `modules` y `tipo` ya vienen en el `select` de arriba. Antes se pedian en
@@ -114,6 +123,12 @@ export default async function MiNegocioPage() {
     (workspaceResult.data?.modules as Record<string, boolean> | null) ?? { business: true }
 
   const { lineas: lineasDisponibles, lineaActivaId } = await getLineasDisponibles()
+
+  // R6 · la sección de margen y recargo solo existe si alguna línea usa esos valores.
+  // Los demás workspaces corren con los de fábrica y nadie les pidió configurarlos.
+  // `lineas_negocio.config_extra` todavía no está en los tipos generados.
+  const usaPoliticaDePrecio = ((politicasLineaResult.data ?? []) as unknown as { config_extra: unknown }[])
+    .some(l => lineaUsaPoliticaDePrecio(l.config_extra as Record<string, unknown> | null))
 
   // Equipo: areas por miembro + responsables por defecto (fuente unica staff_areas)
   const [equipoConAreas, equipoDefaults] = await Promise.all([
@@ -199,6 +214,7 @@ export default async function MiNegocioPage() {
       equipoDefaults={equipoDefaults}
       lineasDisponibles={lineasDisponibles}
       lineaActivaId={lineaActivaId}
+      usaPoliticaDePrecio={usaPoliticaDePrecio}
       sectionScores={{
         fiscal: fiscalScore,
         marca: marcaScore,

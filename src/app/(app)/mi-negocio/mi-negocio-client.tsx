@@ -53,6 +53,8 @@ interface MiNegocioClientProps {
   workspaceTipo: 'nativo' | 'clarity'
   lineasDisponibles: { id: string; nombre: string; descripcion: string | null; tipo: string }[]
   lineaActivaId: string | null
+  /** Alguna línea del workspace usa margen mínimo o recargo. Sin eso no hay sección. */
+  usaPoliticaDePrecio?: boolean
   sectionScores: {
     fiscal: number
     marca: number
@@ -74,6 +76,7 @@ interface SectionDef {
   roles: string[]
   modules?: string[] // Si definido, solo visible cuando alguno de estos módulos está activo. Vacío = siempre visible.
   wsTipo?: 'nativo' | 'clarity' // Si definido, solo visible para ese tipo de workspace
+  soloConPoliticaDePrecio?: boolean // Si true, solo visible cuando alguna linea usa margen minimo o recargo
 }
 
 const SECTIONS: SectionDef[] = [
@@ -90,8 +93,8 @@ const SECTIONS: SectionDef[] = [
   { key: 'terminos-propuesta', label: 'Términos de la propuesta', icon: FileText, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'] },
   // Sin `wsTipo`, igual que los términos: el workspace para el que se construyó
   // (Trappvel) es `clarity`, y copiar el filtro de 'mi-flujo' la escondería justo
-  // donde hace falta.
-  { key: 'margen', label: 'Margen mínimo', icon: Percent, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'] },
+  // donde hace falta. Solo aparece donde alguna línea usa estos valores (R6).
+  { key: 'margen', label: 'Margen y recargo', icon: Percent, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPoliticaDePrecio: true },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
@@ -117,6 +120,7 @@ export default function MiNegocioClient({
   equipoDefaults,
   lineasDisponibles = [],
   lineaActivaId = null,
+  usaPoliticaDePrecio = false,
   sectionScores,
   workspaceTipo,
 }: MiNegocioClientProps) {
@@ -182,6 +186,7 @@ export default function MiNegocioClient({
     if (!s.roles.includes(currentUserRole)) return false
     // Filtro por tipo de workspace (nativo vs clarity)
     if (s.wsTipo && s.wsTipo !== workspaceTipo) return false
+    if (s.soloConPoliticaDePrecio && !usaPoliticaDePrecio) return false
     // Si la sección define módulos requeridos, al menos uno debe estar activo
     if (s.modules && s.modules.length > 0) {
       return s.modules.some(m => mod[m])

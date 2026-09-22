@@ -569,7 +569,7 @@ export default function TablaCombinaciones({
         <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
           La tarifa con <Star className="inline h-3 w-3 fill-amber-400 text-amber-500" /> es la
           {' '}<strong>principal</strong>: su total es el valor de la cotización y el costeo con el
-          {' '}que sigue el negocio. Bajo el piso de {formatMargenPct(umbrales.pisoPct)} no se puede
+          {' '}que sigue el negocio. Bajo el margen mínimo de {formatMargenPct(umbrales.pisoPct)} no se puede
           {' '}marcar para propuesta, y una tarifa incompleta tampoco.
         </div>
       )}

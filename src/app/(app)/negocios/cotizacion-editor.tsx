@@ -617,6 +617,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       precio_venta: i.precio_venta,
       cantidad: i.cantidad,
       es_ajuste: i.es_ajuste ?? false,
+      // De dónde a dónde va el vuelo, para cuando el recargo aplica solo a internacionales.
+      tarifa_pax: i.tarifa_pax,
     })),
     politicaRecargo,
   )
@@ -1466,7 +1468,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             <span className="ml-1 text-muted-foreground">· {etiquetaOrigenMargen(origenMargen)}</span>
                             {nivelMargen === 'bajo_piso' && (
                               <span className="ml-1 font-semibold">
-                                · bajo el piso de {formatMargenPct(umbrales.pisoPct)}
+                                · bajo el margen mínimo de {formatMargenPct(umbrales.pisoPct)}
                                 {pisoBloqueaAvance && ' · no deja avanzar'}
                               </span>
                             )}
@@ -2087,11 +2089,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               pida es peor que una que falta, porque sale impresa al cliente. */}
           {recargo.estado === 'falta' && editable && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900">
-              <p>
-                <span className="font-medium">{recargo.etiqueta}</span> de{' '}
-                <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>: esta
-                {' '}cotización tiene un componente al que le corresponde y todavía no lo lleva.
-              </p>
+              <div>
+                <p>
+                  <span className="font-medium">{recargo.etiqueta}</span> de{' '}
+                  <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>: esta
+                  {' '}cotización {politicaRecargo.vuelos === 'internacionales' ? 'lleva un vuelo internacional' : 'tiene un componente al que le corresponde'}
+                  {' '}y todavía no lo lleva.
+                </p>
+                {/* Un origen o destino que no se reconoce cuenta como internacional: se
+                    ofrece el recargo, pero se dice por qué, para que alguien lo mire. */}
+                {recargo.dudosos.length > 0 && (
+                  <p className="mt-1 text-amber-800">
+                    Se contó como internacional sin poder confirmarlo: {recargo.dudosos.join('; ')}.
+                    {' '}Revisa de dónde a dónde va antes de agregarlo.
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 disabled={isPending}
@@ -2397,8 +2410,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
  */
 function textoPiso(pisoPct: number, bloqueaAvance: boolean): string {
   return bloqueaAvance
-    ? `Está por debajo del piso de ${formatMargenPct(pisoPct)}: con este margen el negocio NO avanza de etapa. Sube el margen o el precio.`
-    : `Está por debajo del piso de ${formatMargenPct(pisoPct)}. Aquí es una marca: la cotización se puede enviar igual.`
+    ? `Está por debajo del margen mínimo de ${formatMargenPct(pisoPct)}: con este margen el negocio NO avanza de etapa. Sube el margen o el precio.`
+    : `Está por debajo del margen mínimo de ${formatMargenPct(pisoPct)}. Aquí es una marca: la cotización se puede enviar igual.`
 }
 
 /** Qué explica el tooltip del margen, sin repetir lo que ya dice el texto. */
@@ -2671,7 +2684,7 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
             >
               {margenConsolidado}
               {nivelConsolidado === 'bajo_piso' && (
-                <span className="ml-1">· bajo el piso{pisoBloqueaAvance && ' · no deja avanzar'}</span>
+                <span className="ml-1">· bajo el margen mínimo{pisoBloqueaAvance && ' · no deja avanzar'}</span>
               )}
               {nivelConsolidado === 'aviso' && <span className="ml-1">· bajo</span>}
             </span>

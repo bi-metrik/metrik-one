@@ -31,11 +31,13 @@
  *
  * ## Qué NO decide este archivo
  *
- * **El monto y el criterio de «internacional» son decisión de Trappvel, no del
- * código.** Aquí solo vive el mecanismo: dónde está el valor por defecto, cuándo se
- * OFRECE, y cómo se ve que alguien lo cambió. Quién aprieta el botón decide si a ESTE
- * vuelo le corresponde — que es justo lo que un `if (esInternacional)` escrito por
- * nosotros haría mal, porque «internacional» todavía no está definido por nadie.
+ * **El monto y a qué vuelos aplica son decisión de Trappvel, no del código.** Los dos
+ * se escriben en Mi Negocio → Margen y recargo (brief del 2026-09-22): el monto, y si
+ * aplica a TODOS los vuelos o solo a los INTERNACIONALES. Lo que sí vive aquí es qué
+ * quiere decir «internacional» (`vuelo-internacional.ts`: origen o destino fuera de
+ * Colombia; lo que no se reconoce cuenta como internacional y se avisa) y el mecanismo:
+ * cuándo se OFRECE y cómo se ve que alguien lo cambió. El recargo sigue sin agregarse
+ * solo: quien aprieta el botón decide si a ESTA cotización le corresponde.
  *
  * ## Dónde vive el valor por defecto
  *
@@ -45,7 +47,12 @@
  * recargo, **sin tocar código y sin SQL**.
  */
 
+import { vuelosDeItems } from './detalle-viaje'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { alcanceDelVuelo } from './vuelo-internacional'
+
+/** A qué vuelos aplica el recargo. */
+export type VuelosDelRecargo = 'todos' | 'internacionales'
 
 /** Lo que la línea declara sobre el recargo, ya resuelto. */
 export interface PoliticaRecargo {
@@ -57,6 +64,11 @@ export interface PoliticaRecargo {
   valor: number
   /** Ranuras a las que aplica (slugs de `ranuras-pantallazo`). */
   aplicaA: string[]
+  /**
+   * Dentro de los vuelos, a cuáles. `todos` es lo que regía antes de que existiera la
+   * opción, y por eso es lo que vale cuando la línea no dice nada.
+   */
+  vuelos: VuelosDelRecargo
 }
 
 /**
@@ -71,6 +83,7 @@ export const RECARGO_POR_DEFECTO: PoliticaRecargo = {
   etiqueta: 'Recargo de emisión',
   valor: 0,
   aplicaA: ['vuelo_detalle'],
+  vuelos: 'todos',
 }
 
 type ConfigExtra = {
@@ -79,6 +92,7 @@ type ConfigExtra = {
     etiqueta?: unknown
     valor?: unknown
     aplica_a?: unknown
+    vuelos?: unknown
   } | null
 } | null
 
@@ -115,6 +129,9 @@ export function politicaRecargoDeLinea(configExtra: unknown): PoliticaRecargo {
     etiqueta,
     valor,
     aplicaA,
+    // Solo el valor exacto enciende el filtro. Cualquier otra cosa es lo de antes
+    // (todos): un jsonb mal escrito no puede quitarle el recargo a un vuelo.
+    vuelos: recargo.vuelos === 'internacionales' ? 'internacionales' : 'todos',
   }
 }
 
@@ -128,6 +145,11 @@ export interface ItemParaRecargo {
   precio_venta?: number | null
   cantidad?: number | null
   es_ajuste?: boolean | null
+  /**
+   * La lectura del pantallazo (`items.tarifa_pax`). Hace falta para saber de dónde a
+   * dónde va un vuelo cuando el recargo aplica solo a los internacionales.
+   */
+  tarifa_pax?: unknown
 }
 
 /**
@@ -138,12 +160,57 @@ export interface ItemParaRecargo {
  * es el mismo contrato que el pantallazo.
  */
 export function recargoCorresponde(items: ItemParaRecargo[], politica: PoliticaRecargo): boolean {
-  if (!politica.activo) return false
-  return items.some(i => {
+  return aQuienLeCorresponde(items, politica).corresponde
+}
+
+export interface CorrespondenciaRecargo {
+  corresponde: boolean
+  /**
+   * Los vuelos que se contaron como internacionales SIN estar seguros: su origen o su
+   * destino no se reconoció. Cada uno dice el nombre de la línea y qué no se reconoció.
+   * Vacío cuando no aplica el filtro de internacionales o cuando todo se reconoció.
+   */
+  dudosos: string[]
+}
+
+/**
+ * ¿A qué componentes de esta cotización les corresponde el recargo, y con qué dudas?
+ *
+ * Con `vuelos: 'internacionales'` un vuelo cuenta solo si es internacional según
+ * `alcanceDelVuelo`. Un Bogotá–San Andrés no cuenta; un Bogotá–Cancún sí; un vuelo cuyo
+ * origen o destino no se reconoce **cuenta**, y se nombra en `dudosos` para que quien
+ * cotiza lo mire antes de apretar el botón.
+ *
+ * ⚠️ El filtro de internacionales solo toca la ranura `vuelo_detalle`. Si una línea
+ * declarara el recargo también para otra ranura, esa sigue contando entera: «internacional»
+ * no quiere decir nada para un hotel.
+ */
+export function aQuienLeCorresponde(items: ItemParaRecargo[], politica: PoliticaRecargo): CorrespondenciaRecargo {
+  if (!politica.activo) return { corresponde: false, dudosos: [] }
+
+  const aplicables = items.filter(i => {
     if (i.es_ajuste === true) return false
     const ranura = ranuraDeGrupo(i.grupo)
     return ranura !== null && politica.aplicaA.includes(ranura.slug)
   })
+  // Solo el valor exacto enciende el filtro: una política armada sin el campo (una de
+  // antes de que existiera) se comporta como siempre, con todos los vuelos.
+  if (politica.vuelos !== 'internacionales') return { corresponde: aplicables.length > 0, dudosos: [] }
+
+  let corresponde = false
+  const dudosos: string[] = []
+  for (const item of aplicables) {
+    if (ranuraDeGrupo(item.grupo)?.slug !== 'vuelo_detalle') { corresponde = true; continue }
+    const [vuelo] = vuelosDeItems([{ nombre: item.nombre ?? null, grupo: item.grupo ?? null, tarifa_pax: item.tarifa_pax }])
+    const alcance = alcanceDelVuelo(vuelo?.origen, vuelo?.destino)
+    if (!alcance.internacional) continue
+    corresponde = true
+    if (alcance.sinReconocer.length > 0) {
+      const nombre = (item.nombre ?? '').trim() || 'Un vuelo'
+      dudosos.push(`${nombre} (${alcance.sinReconocer.join(', ')})`)
+    }
+  }
+  return { corresponde, dudosos }
 }
 
 /**
@@ -166,8 +233,11 @@ export function lineaDeRecargo<T extends ItemParaRecargo>(
 export type EstadoRecargo =
   /** La línea no lo declara, o no hay a qué aplicarlo. */
   | { estado: 'no_aplica' }
-  /** Corresponde y NO está puesto: se ofrece. */
-  | { estado: 'falta'; valor: number; etiqueta: string }
+  /**
+   * Corresponde y NO está puesto: se ofrece. `dudosos` nombra los vuelos que se
+   * contaron como internacionales sin reconocer su origen o destino.
+   */
+  | { estado: 'falta'; valor: number; etiqueta: string; dudosos: string[] }
   /** Está puesto por el valor vigente. */
   | { estado: 'puesto'; valor: number; etiqueta: string; itemId: string }
   /** Está puesto por OTRO valor: alguien lo cambió, o el vigente se movió después. */
@@ -186,10 +256,13 @@ export function estadoDelRecargo(
   items: ItemParaRecargo[],
   politica: PoliticaRecargo,
 ): EstadoRecargo {
-  if (!recargoCorresponde(items, politica)) return { estado: 'no_aplica' }
+  const correspondencia = aQuienLeCorresponde(items, politica)
+  if (!correspondencia.corresponde) return { estado: 'no_aplica' }
 
   const linea = lineaDeRecargo(items, politica)
-  if (!linea) return { estado: 'falta', valor: politica.valor, etiqueta: politica.etiqueta }
+  if (!linea) {
+    return { estado: 'falta', valor: politica.valor, etiqueta: politica.etiqueta, dudosos: correspondencia.dudosos }
+  }
 
   const enLaLinea = Math.round((Number(linea.precio_venta) || 0) * (Number(linea.cantidad) || 1))
   if (enLaLinea === politica.valor) {
