@@ -14,9 +14,10 @@
  *
  * **1 · Lo que no existe no se pinta, y el documento no se ve roto por eso.** No hay
  * placeholders, ni rayas, ni «—» en una ficha vacía: la ficha no aparece. El caso que
- * manda es la foto de portada, que **hoy llega siempre `null`** porque el banco de fotos
- * por ciudad no está construido: donde iría la foto va una banda con el color y el logo
- * de la marca, que es una portada legítima y no un hueco.
+ * manda es la foto de portada: sale del banco PROVISIONAL de fotos por ciudad
+ * (`fotos-ciudad.ts`), y cuando la ciudad destino no está en el banco, donde iría la foto
+ * va una banda con el color y el logo de la marca, que es una portada legítima y no un
+ * hueco.
  *
  * **2 · El dinero se imprime UNA vez.** El día a día, la tabla de vuelos y la ficha de
  * hotel describen el viaje **sin precios**, como en los itinerarios de referencia; todo el
@@ -37,7 +38,8 @@
 import { Document, Page, Text, View, Image as PdfImage } from '@react-pdf/renderer'
 
 import type { CotizacionPDFProps, ViajePDF } from './cotizacion-props'
-import type { PrecioPorPasajeroPDF } from './cotizacion-props'
+import type { FotoPDF, PrecioPorPasajeroPDF } from './cotizacion-props'
+import { creditosDeFotos } from './fotos-del-viaje'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 import {
@@ -334,6 +336,37 @@ function LineaPrecio({ l, detallada }: { l: LineaImpresa; detallada: boolean }) 
   )
 }
 
+/**
+ * Una foto por ciudad del viaje, con su rótulo debajo, como en los itinerarios de
+ * referencia (`MADRID · EDIFICIO METRÓPOLIS`).
+ *
+ * El rótulo va DEBAJO y en gris, no encima de la foto: así se lee igual sobre cualquier
+ * imagen. La franja no se parte entre páginas (`wrap={false}`): media foto al pie y la
+ * otra mitad arriba es exactamente el aspecto de un documento roto. Sin fotos, no existe.
+ */
+function FotosCiudades({ fotos }: { fotos: FotoPDF[] }) {
+  if (fotos.length === 0) return null
+  // Una sola foto a lo ancho sería otra portada: se limita al alto de la franja.
+  const alto = fotos.length === 1 ? 150 : fotos.length === 2 ? 130 : 105
+  return (
+    <View wrap={false} style={{ flexDirection: 'row', marginTop: 14 }}>
+      {fotos.map((f, i) => (
+        <View
+          key={`foto-${i}`}
+          style={{ flexGrow: 1, flexBasis: 0, marginLeft: i === 0 ? 0 : 6 }}
+        >
+          <PdfImage src={f.url} style={{ width: '100%', height: alto, objectFit: 'cover' }} />
+          {f.rotulo && (
+            <Text style={{ fontSize: 6.5, color: GRIS_ETIQUETA, letterSpacing: 1, marginTop: 3 }}>
+              {f.rotulo.toUpperCase()}
+            </Text>
+          )}
+        </View>
+      ))}
+    </View>
+  )
+}
+
 /** Lo que mide la franja de totales, para que ninguna fila la deje huérfana. */
 const ALTO_TOTALES = 70
 
@@ -421,6 +454,11 @@ export default function CotizacionTrappvelPDF({
   const pie = v.pie ?? [vendedor.nombre, vendedor.email, vendedor.telefono, vendedor.ciudad].filter(Boolean).join(' · ')
   const firma = v.firma ?? (emisor ? { nombre: emisor.nombre, cargo: emisor.cargo, contacto: null } : null)
 
+  // Las fotos las elige `fotos-del-viaje.ts` (máximo cuatro, portada incluida). Aquí solo
+  // se imprimen, y los créditos salen de las MISMAS que se imprimen.
+  const fotosCiudades = v.fotosCiudades ?? []
+  const creditos = creditosDeFotos([v.foto, ...fotosCiudades])
+
   const fichas: { etiqueta: string; valor: string }[] = []
   if (v.viajeros) fichas.push({ etiqueta: 'VIAJEROS', valor: v.viajeros })
   if (v.destino) fichas.push({ etiqueta: 'DESTINO', valor: v.destino })
@@ -457,12 +495,23 @@ export default function CotizacionTrappvelPDF({
               {(vendedor.razon_social ?? vendedor.nombre).toUpperCase()}
             </Text>
           )}
+          {/* El rótulo lleva un respaldo oscuro: blanco a secas sobre el cielo o la arena
+              de una foto que nadie revisó queda ilegible. */}
           {v.foto?.rotulo && (
-            <Text
-              style={{ position: 'absolute', bottom: 6, right: 12, fontSize: 6.5, color: BLANCO, letterSpacing: 1 }}
+            <View
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                backgroundColor: 'rgba(0,0,0,0.45)',
+                paddingVertical: 3,
+                paddingHorizontal: 8,
+              }}
             >
-              {v.foto.rotulo.toUpperCase()}
-            </Text>
+              <Text style={{ fontSize: 6.5, color: BLANCO, letterSpacing: 1 }}>
+                {v.foto.rotulo.toUpperCase()}
+              </Text>
+            </View>
           )}
         </View>
 
@@ -505,6 +554,9 @@ export default function CotizacionTrappvelPDF({
               {v.presentacion}
             </Text>
           )}
+
+          {/* ── Una foto por ciudad del viaje ─────────────────────────── */}
+          <FotosCiudades fotos={fotosCiudades} />
 
           {/* ── Vuelos ───────────────────────────────────────────────── */}
           {v.vuelos.length > 0 && (
@@ -949,6 +1001,17 @@ export default function CotizacionTrappvelPDF({
                 <Text style={{ fontSize: 7.5, color: GRIS_ETIQUETA, marginTop: 1 }}>{firma.contacto}</Text>
               )}
             </View>
+          )}
+          {/* ── Créditos de las fotos ────────────────────────────────────
+              Sin crédito, la licencia de casi todas (CC BY / BY-SA) no se cumple. Solo
+              las que se imprimieron, y la línea no existe si no hubo ninguna. */}
+          {creditos.length > 0 && (
+            <Text
+              hyphenationCallback={SIN_GUION}
+              style={{ fontSize: 6, color: GRIS_ETIQUETA, marginTop: 18, lineHeight: 1.4 }}
+            >
+              {`Fotografías: ${creditos.join(' · ')}`}
+            </Text>
           )}
         </View>
 

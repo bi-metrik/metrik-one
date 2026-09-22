@@ -39,8 +39,11 @@ import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
+  plantillaUsaFotosDeCiudad,
 } from '@/lib/pdf/plantillas-cotizacion'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
+import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
+import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import { createElement } from 'react'
@@ -843,15 +846,21 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const hoteles = hotelesDeItems(paraLectura)
     const cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
     const config = leerConfigDocumentoViaje(ws?.config_extra)
+    const destino = delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles)
+    const fotos = plantillaUsaFotosDeCiudad(templateSlug)
+      ? fotosDelViaje({ destino, vuelos, hoteles }, fotosDeCiudad)
+      : null
     const viaje = {
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
-      destino: delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles),
+      destino,
       fechas: rangoDeFechas(delNegocio.fechas.inicio, delNegocio.fechas.fin),
       duracion: duracionDelViaje(delNegocio.fechas.inicio, delNegocio.fechas.fin),
       presentacion: delNegocio.presentacion,
-      // ⚠️ El banco de fotos por ciudad no existe todavía: aquí va `null` SIEMPRE, y la
-      // plantilla está hecha para verse bien así. El día que exista, es esta línea.
-      foto: null,
+      // Las fotos salen del banco PROVISIONAL (`fotos-ciudad.ts`) y solo para la plantilla
+      // que las imprime. `fotosDeCiudad` es la única puerta al banco: cuando llegue el real
+      // (async, en la base), se cambia allá y esta línea sigue igual.
+      foto: fotos?.portada ?? null,
+      fotosCiudades: fotos?.ciudades ?? [],
       vuelos,
       hoteles,
       cargosEnDestino,

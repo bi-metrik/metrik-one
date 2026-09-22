@@ -413,11 +413,19 @@ describe('el hueco de la foto', () => {
         foto: {
           url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
           rotulo: 'Cancun · zona hotelera',
+          credito: 'Autora de prueba (Wikimedia Commons, CC BY-SA 4.0)',
         },
       }),
     }))
     expect(t).toContain('CANCUN')
     expect(t).toContain('ZONA HOTELERA')
+    // La licencia obliga a nombrar al autor de lo que se imprime.
+    expect(t).toContain('Fotografías: Autora de prueba (Wikimedia Commons, CC BY-SA 4.0)')
+  })
+
+  it('sin fotos no hay línea de créditos', async () => {
+    const t = await texto(props({ viaje: viaje({ foto: null, fotosCiudades: [] }) }))
+    expect(t).not.toContain('Fotografías')
   })
 })
 
