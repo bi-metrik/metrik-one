@@ -30,18 +30,24 @@ export type PrecioPorPasajeroPDF = {
 }[] | null
 
 /**
- * La foto de una sección del documento (portada, hotel).
+ * La foto de una sección del documento (portada, ciudad).
  *
- * ⚠️ HUECO DECLARADO: el banco de fotos por ciudad **no existe todavía** (es la mitad de
- * la Entrega B que quedó fuera, y antes hay que decidir quién aprueba una foto antes de
- * que salga a un cliente). Hoy este campo llega SIEMPRE `null` y la plantilla está hecha
- * para verse bien así: donde iría la foto va una banda de marca, nunca un hueco ni una
- * imagen rota.
+ * Desde el 2026-09-22 la llena un banco PROVISIONAL (`src/lib/pdf/fotos-ciudad.ts`): el
+ * real, curado por el cliente, espera a que se decida quién aprueba una foto antes de que
+ * salga. Sin foto para la ciudad, este campo llega `null` y la plantilla pone la banda de
+ * marca: nunca un hueco ni una imagen rota.
  */
 export interface FotoPDF {
+  /** URL o ruta absoluta en disco. @react-pdf acepta las dos. */
   url: string
   /** Rótulo en mayúscula sostenida, como en los itinerarios de Trappvel: `MADRID · EDIFICIO METRÓPOLIS`. */
   rotulo: string | null
+  /**
+   * Lo que la licencia obliga a imprimir: `Felviper (Wikimedia Commons, CC BY-SA 4.0)`.
+   * Casi todas las fotos del banco son CC BY o BY-SA: sin el crédito, usarlas incumple la
+   * licencia. `null` solo para una foto propia del cliente.
+   */
+  credito: string | null
 }
 
 /**
@@ -65,7 +71,14 @@ export interface ViajePDF {
   duracion: string | null
   /** El párrafo de presentación del destino, escrito por quien cotiza. */
   presentacion: string | null
+  /** La foto de portada: la de la ciudad destino del negocio. */
   foto: FotoPDF | null
+  /**
+   * Una foto por ciudad del viaje, sin repetir la de portada. Entre las dos no pasan de
+   * cuatro (`fotos-del-viaje.ts`). Opcional: ausente o vacío, el documento no imprime la
+   * franja de fotos.
+   */
+  fotosCiudades?: FotoPDF[]
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]

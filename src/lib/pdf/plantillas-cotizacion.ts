@@ -59,3 +59,16 @@ export function plantillaCotizacionPropia(
 export function slugsConPlantillaPropia(): string[] {
   return Object.keys(PLANTILLAS)
 }
+
+/**
+ * Las plantillas que imprimen fotos de ciudad. Hoy solo la de Trappvel.
+ *
+ * La pregunta vive aquí, junto al registro, y no como un `slug === 'trappvel'` suelto en
+ * la acción: quien agregue una plantilla ve en el mismo archivo que tiene que decidir si
+ * lleva fotos. Las demás no pagan ni la consulta al banco.
+ */
+const PLANTILLAS_CON_FOTOS = new Set(['trappvel'])
+
+export function plantillaUsaFotosDeCiudad(slug: string | null | undefined): boolean {
+  return !!slug && PLANTILLAS_CON_FOTOS.has(slug)
+}

@@ -384,6 +384,14 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### Fotos provisionales por ciudad en el documento de Trappvel (2026-09-22)
+
+- **Banco provisional en el repo, no en la base** (`src/lib/pdf/fotos-ciudad.ts`): 16 fotos de Wikimedia Commons, dos por ciudad, en `src/lib/pdf/templates/fotos-ciudad/`. **`fotosDeCiudad(ciudad)` es la unica puerta**: cuando llegue el banco real (tabla + bucket, pendiente de decidir quien aprueba una foto) se reescribe esa funcion y nada mas.
+- **⚠️ Las imagenes van en `templates/` y no en `public/`** porque esa carpeta ya la arrastra `outputFileTracingIncludes` a cada funcion; en `public/` las sirve el CDN y la funcion que renderiza el PDF no las tiene en disco. Una foto cuyo archivo no esta en disco no se devuelve: el documento cae a la portada de marca en vez de un recuadro vacio.
+- **La regla vive aparte y es pura** (`fotos-del-viaje.ts`): portada de la ciudad destino del negocio (sin foto para esa ciudad, portada de marca; no se rellena con otra ciudad), una foto por ciudad del viaje sin repetir la de portada, **maximo 4**. Origen y escalas no cuentan.
+- **Creditos obligatorios**: casi todas son CC BY / BY-SA. Linea al final con los autores de las fotos IMPRESAS, sin repetir.
+- **⚠️ Un pliego de fotos cosechadas automaticamente no se da por bueno sin leer el titulo de cada una en Commons**: la "Providencia" del pliego era la Isla de los Leprosos, en Venezuela.
+
 ### Saltar entre workspaces sin pasar por MeTRIK, y la pestana que quedaba escribiendo en el inquilino equivocado - PRs #782 `918a921d`, #789 `c8d0670d`, #796 `d28c3d42` (2026-09-17 al 21)
 
 - **#782, la puerta que faltaba.** `switchWorkspace` ya soportaba ir del workspace A al B; la barra de platform admin, en modo away, hacia un early return que solo pintaba "Regresar a {home}". El desplegable salio a un componente propio (`SelectorDeWorkspaces`) que usan las dos ramas. De paso, `switchWorkspace` ahora registra `platform_admin_exit` en el workspace que abandona cuando ese no es su home: antes solo `returnHome` lo hacia, asi que el owner de un cliente veia la entrada del soporte y nunca su salida.
