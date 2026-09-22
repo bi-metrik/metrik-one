@@ -11,9 +11,9 @@
  * (ver el reporte del PR) y no contra un `fetch` doblado, que solo comprobaría que el
  * doble devuelve lo que el doble devuelve.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { construirPrompt, normalizarRespuesta } from './extraer-ranura'
+import { construirPrompt, contarCajasDeEstrellas, extraerRanuraDesdeImagen, normalizarRespuesta } from './extraer-ranura'
 import { ranuraPorSlug } from '@/lib/cotizaciones/ranuras-pantallazo'
 
 const VUELO = ranuraPorSlug('vuelo_detalle')!
@@ -374,5 +374,110 @@ describe('equipaje · manda el estado del icono; sin fila limpia, hueco', () => 
       iconos_equipaje: TRES.map((dibujo, i) => ({ dibujo, color: i === 0 ? 'a_color' : 'gris' })),
     }).campos
     expect(tresValores(c)).toEqual(['true', 'false', 'false'])
+  })
+})
+
+/**
+ * Las estrellas de categoría (brief del 2026-09-22). Lo que se mide aquí es la DECISIÓN del
+ * servidor sobre lo que devuelve la detección: qué cuenta como una fila de categoría y qué
+ * pasa cuando las dos corridas no coinciden. Si el modelo acierta se midió contra el banco
+ * real (7 capturas de hotel, 5 corridas: 32 bien, 2 vacías, 0 mal).
+ */
+describe('estrellas · se cuentan las cajas, y solo si forman UNA fila de categoría', () => {
+  const caja = (x: number, label = 'filled_star', y = 680) => ({ box_2d: [y - 8, x, y + 8, x + 16], label })
+
+  it('cinco estrellas rellenas en una fila son 5; tres rellenas y una vacía son 3', () => {
+    expect(contarCajasDeEstrellas([caja(100), caja(120), caja(140), caja(160), caja(180)])).toBe(5)
+    expect(contarCajasDeEstrellas([caja(100), caja(120), caja(140), caja(160, 'empty_star')])).toBe(3)
+  })
+
+  it('lista vacía = la captura no muestra categoría (`null`, no un error)', () => {
+    expect(contarCajasDeEstrellas([])).toBeNull()
+  })
+
+  it('lo que no se puede leer como UNA fila de categoría no da número', () => {
+    // Más de cinco: algo que no es la categoría se coló (círculos de reseña, iconos).
+    expect(contarCajasDeEstrellas(Array.from({ length: 6 }, (_, i) => caja(100 + i * 20)))).toBeUndefined()
+    // Una estrella lejos de las demás es otra cosa.
+    expect(contarCajasDeEstrellas([caja(100), caja(120), caja(140, 'filled_star', 900)])).toBeUndefined()
+    // Media estrella, o una etiqueta que no es estrella.
+    expect(contarCajasDeEstrellas([caja(100), caja(120, 'half_star')])).toBeUndefined()
+    // Solo vacías: no hay categoría que afirmar.
+    expect(contarCajasDeEstrellas([caja(100, 'empty_star')])).toBeUndefined()
+    // Respuesta rota.
+    expect(contarCajasDeEstrellas({ estrellas: 3 })).toBeUndefined()
+    expect(contarCajasDeEstrellas([{ box_2d: [1, 2], label: 'filled_star' }])).toBeUndefined()
+  })
+})
+
+describe('estrellas · dos corridas que tienen que coincidir, y solo en la ranura de hotel', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** Un Gemini doblado: la lectura responde un detalle; cada detección, lo que diga la lista. */
+  function stub(detecciones: unknown[]) {
+    const llamadas: { modelo: string; cuerpo: string }[] = []
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      const modelo = /models\/([^:]+):/.exec(url)?.[1] ?? ''
+      llamadas.push({ modelo, cuerpo: init.body })
+      const texto = modelo === 'gemini-3.5-flash'
+        ? JSON.stringify(detecciones[n++ % detecciones.length])
+        : JSON.stringify({ opciones_vistas: [{ nombre: 'H', precio: '1' }], veredicto: 'detalle_unico', campos: {}, desglose: [], por_tipo_pax: [] })
+      return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: texto }] } }] }), { status: 200 })
+    }))
+    return llamadas
+  }
+  const fila = (n: number) => Array.from({ length: n }, (_, i) => ({ box_2d: [672, 100 + i * 20, 688, 116 + i * 20], label: 'filled_star' }))
+  const imagen = Buffer.from('no-es-una-imagen')
+
+  it('si las dos ven lo mismo, el campo queda con ese número y marcado para revisión (0,9)', async () => {
+    stub([fila(4), fila(4)])
+    const r = await extraerRanuraDesdeImagen(imagen, 'image/png', HOTEL, 'k')
+    expect(r.data?.campos.estrellas).toEqual({ value: '4', confidence: 0.9 })
+    expect(r.data?.estrellasDeteccion?.corridas).toEqual([4, 4])
+  })
+
+  it('si no coinciden, queda VACÍO: una estrella inventada es peor que un hueco', async () => {
+    stub([fila(4), fila(5)])
+    const r = await extraerRanuraDesdeImagen(imagen, 'image/png', HOTEL, 'k')
+    expect(r.data?.campos.estrellas).toEqual({ value: null, confidence: 0 })
+    expect(r.data?.estrellasDeteccion?.corridas).toEqual([4, 5])
+  })
+
+  it('si una no puede leer la fila, tampoco hay número', async () => {
+    stub([fila(4), [...fila(4), ...fila(2)]])
+    const r = await extraerRanuraDesdeImagen(imagen, 'image/png', HOTEL, 'k')
+    expect(r.data?.campos.estrellas?.value).toBeNull()
+  })
+
+  it('sin estrellas en ninguna de las dos, el campo queda vacío', async () => {
+    stub([[], []])
+    const r = await extraerRanuraDesdeImagen(imagen, 'image/png', HOTEL, 'k')
+    expect(r.data?.campos.estrellas?.value).toBeNull()
+  })
+
+  it('un vuelo no llama a la detección', async () => {
+    const llamadas = stub([fila(3)])
+    const r = await extraerRanuraDesdeImagen(imagen, 'image/png', VUELO, 'k')
+    expect(llamadas.map(l => l.modelo)).toEqual(['gemini-2.5-flash'])
+    expect(r.data?.campos.estrellas).toBeUndefined()
+  })
+
+  it('el hotel: una lectura y DOS detecciones', async () => {
+    const llamadas = stub([fila(3), fila(3)])
+    await extraerRanuraDesdeImagen(imagen, 'image/png', HOTEL, 'k')
+    expect(llamadas.map(l => l.modelo).sort()).toEqual(['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash'])
+  })
+})
+
+describe('estrellas · la lectura principal NO las pide', () => {
+  // Medido: pedirlas dentro de la lectura dio 4 en un hotel de 5, cinco de cinco veces, y
+  // pedir los iconos uno por uno desordenó la lectura del hotel. El prompt de hotel queda
+  // idéntico al que ya se había medido.
+  it('ni el prompt ni el esquema nombran el campo', () => {
+    const p = construirPrompt(HOTEL)
+    expect(p).not.toContain('estrellas')
+    expect(p).not.toContain('Estrellas')
+    expect(p).toContain('- hotel (Hotel, OBLIGATORIO)')
   })
 })

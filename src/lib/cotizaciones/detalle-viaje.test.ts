@@ -285,10 +285,15 @@ describe('hotelesDeItems', () => {
     expect(hotelesDeItems([item('H', 'hotel', sinNoches)])[0].noches).toBe(4)
   })
 
-  it('estrellas y localizador NO se leen hoy: llegan vacíos, no inventados', () => {
+  it('sin estrellas en la lectura y sin corrección, llegan vacías, no inventadas; el localizador no se lee', () => {
     const [h] = hotelesDeItems([item('CROWN PARADISE', 'hotel', CAMPOS_HOTEL)])
     expect(h.estrellas).toBeNull()
     expect(h.localizador).toBeNull()
+  })
+
+  it('las estrellas que mostraba la captura llegan al documento como número', () => {
+    const [h] = hotelesDeItems([item('CROWN PARADISE', 'hotel', [...CAMPOS_HOTEL, { label: 'Estrellas', valor: '5' }])])
+    expect(h.estrellas).toBe(5)
   })
 })
 
@@ -350,5 +355,53 @@ describe('leerConfigDocumentoViaje', () => {
   it('sin configuración devuelve los dos vacíos, y un jsonb roto también', () => {
     expect(leerConfigDocumentoViaje(null)).toEqual({ pie: null, firma: null })
     expect(leerConfigDocumentoViaje({ documento_viaje: 'sí' })).toEqual({ pie: null, firma: null })
+  })
+})
+
+/**
+ * Brief del 2026-09-22, punto 3: lo que corrige una persona es lo que imprime el documento, y
+ * lo que dijo la IA sigue guardado en la casilla.
+ */
+describe('el documento imprime lo corregido encima de lo leído', () => {
+  const corregido = (campos: { label: string; valor: string }[], grupo: string, correcciones: Record<string, string | null>) => {
+    const base = item('L', grupo, campos)
+    return {
+      ...base,
+      tarifa_pax: {
+        ...base.tarifa_pax,
+        correcciones: Object.fromEntries(
+          Object.entries(correcciones).map(([k, v]) => [k, { valor: v, por: 'Daniela', porId: 'p1', en: '2026-09-22T20:00:00Z' }]),
+        ),
+      },
+    }
+  }
+
+  it('una hora de vuelo corregida sale en la tabla; la lectura queda igual en la casilla', () => {
+    const it0 = corregido(CAMPOS_VUELO, 'vuelo', { hora_salida: '07:45' })
+    const [v] = vuelosDeItems([it0])
+    expect(v.horaSalida).toBe('07:45')
+    expect(v.horaLlegada).toBe('10:15')
+    expect(it0.tarifa_pax.casillas.grupo_completo.campos.find(c => c.label === 'Hora de salida (ida)')?.valor).toBe('05:50')
+  })
+
+  it('el equipaje corregido cambia lo que se le dice al cliente', () => {
+    const [v] = vuelosDeItems([corregido(CAMPOS_VUELO, 'vuelo', { equipaje_mano: 'true', equipaje_bodega: 'true' })])
+    expect(v.equipaje).toBe('artículo personal + equipaje de mano + equipaje de bodega')
+  })
+
+  it('las estrellas escritas a mano se imprimen; corregidas a vacío, no se imprimen', () => {
+    const conEstrellas = [...CAMPOS_HOTEL, { label: 'Estrellas', valor: '4' }]
+    expect(hotelesDeItems([corregido(CAMPOS_HOTEL, 'hotel', { estrellas: '3' })])[0].estrellas).toBe(3)
+    expect(hotelesDeItems([corregido(conEstrellas, 'hotel', { estrellas: '5' })])[0].estrellas).toBe(5)
+    expect(hotelesDeItems([corregido(conEstrellas, 'hotel', { estrellas: null })])[0].estrellas).toBeNull()
+  })
+
+  it('los impuestos en destino corregidos cambian el cargo; corregidos a vacío, lo quitan', () => {
+    expect(cargosEnDestinoDeItems([corregido(CAMPOS_HOTEL, 'hotel', { impuestos_destino_valor: '400' })])[0].monto).toBe('400 MXN')
+    expect(cargosEnDestinoDeItems([corregido(CAMPOS_HOTEL, 'hotel', { impuestos_destino_valor: null })])).toEqual([])
+  })
+
+  it('una línea que no es ranura sigue sin detalle aunque traiga correcciones', () => {
+    expect(hotelesDeItems([corregido(CAMPOS_HOTEL, 'seguro', { estrellas: '5' })])).toEqual([])
   })
 })

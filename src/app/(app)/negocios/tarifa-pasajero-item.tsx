@@ -8,9 +8,11 @@ import {
   actualizarComposicionDeItem,
   confirmarMenorNoPaga,
   confirmarTarifaPorPasajero,
+  corregirCampoDeFicha,
   leerCasillaDeItem,
   quitarCasillaDeItem,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
+import FichaDeLinea from '@/app/(app)/negocios/ficha-linea-item'
 import { descartarPropuestaDePantallazo } from '@/app/(app)/negocios/pantallazo-actions'
 import { margenDelProveedor, type MargenProveedor } from '@/lib/cotizaciones/margen-proveedor'
 import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
@@ -36,6 +38,7 @@ import {
   type LecturaCasilla,
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
+import type { Correcciones } from '@/lib/cotizaciones/correcciones'
 
 /**
  * Pantallazos de una línea con precio por tipo de pasajero (diseño §6.1).
@@ -177,6 +180,17 @@ export default function TarifaPasajeroItem({
     })
   }
 
+  // La ficha espera la respuesta para cerrar su editor solo si se guardó: con un error, lo
+  // que escribió la persona sigue en pantalla para corregirlo.
+  async function corregir(slug: string, valor: string | null): Promise<boolean> {
+    const r = await corregirCampoDeFicha(itemId, slug, valor)
+    if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return false }
+    if (r.tarifa) setGuardada(r.tarifa)
+    toast.success(valor === null ? 'Vuelve a lo que leyó el pantallazo.' : 'Corrección guardada. Lo que leyó el pantallazo sigue guardado.')
+    onCambio()
+    return true
+  }
+
   const monedaResuelta = estado?.estado === 'resuelta' ? estado.moneda : 'COP'
   const enCOP = monedaResuelta === 'COP'
   const tasaNum = Number(tasa.replace(/[^\d.,]/g, '').replace(',', '.'))
@@ -224,6 +238,7 @@ export default function TarifaPasajeroItem({
         def={defPrimera}
         numerada={enSecuencia}
         lectura={primera}
+        ficha={{ ranura, correcciones: tarifa.correcciones, onGuardar: corregir }}
         rechazo={rechazos.grupo_completo}
         preview={previews.grupo_completo}
         leyendo={leyendo === 'grupo_completo'}
@@ -429,10 +444,20 @@ function Casilla({
   onQuitar,
   onPegar,
   onMoneda,
+  ficha,
 }: {
   def: CasillaDef
   numerada: boolean
   lectura: LecturaCasilla | undefined
+  /**
+   * Solo la captura principal: su lectura es la que llega al documento, y ahí se corrige.
+   * Las complementarias existen para el costo por pasajero y se muestran como se leyeron.
+   */
+  ficha?: {
+    ranura: DefinicionRanura
+    correcciones: Correcciones | undefined
+    onGuardar: (slug: string, valor: string | null) => Promise<boolean>
+  }
   rechazo?: { mensaje: string; detalle?: string; pideMoneda?: boolean }
   preview?: string
   leyendo: boolean
@@ -464,6 +489,7 @@ function Casilla({
               onToggle={onToggleDetalle}
               onQuitar={onQuitar}
               deshabilitado={deshabilitado}
+              ficha={ficha}
             />
           )}
 
@@ -551,13 +577,20 @@ function LecturaResumen({
   onToggle,
   onQuitar,
   deshabilitado,
+  ficha,
 }: {
   lectura: LecturaCasilla
   abierta: boolean
   onToggle: () => void
   onQuitar: () => void
   deshabilitado: boolean
+  ficha?: {
+    ranura: DefinicionRanura
+    correcciones: Correcciones | undefined
+    onGuardar: (slug: string, valor: string | null) => Promise<boolean>
+  }
 }) {
+  const corregidos = Object.keys(ficha?.correcciones ?? {}).length
   const obs = ocupacionObservada(lectura)
   const ocupacion = lectura.ocupacionDelItem
     ? 'ocupación no visible en la imagen'
@@ -575,14 +608,40 @@ function LecturaResumen({
         <div className="flex items-center gap-2">
           <button type="button" onClick={onToggle} className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground">
             {abierta ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Ver lo leído
+            {ficha ? 'Ver y corregir lo leído' : 'Ver lo leído'}
+            {corregidos > 0 && (
+              <span className="ml-0.5 rounded bg-amber-100 px-1 text-[9px] font-medium text-amber-900">
+                {corregidos} {corregidos === 1 ? 'corregido' : 'corregidos'}
+              </span>
+            )}
           </button>
           <button type="button" disabled={deshabilitado} onClick={onQuitar} className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground hover:text-red-700 disabled:opacity-50">
             <X className="h-3 w-3" /> Quitar
           </button>
         </div>
       </div>
-      {abierta && (
+      {abierta && ficha && (
+        <>
+          {lectura.porTipo.length > 0 && (
+            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
+              {lectura.porTipo.map(f => (
+                <div key={f.tipo} className="min-w-0">
+                  <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">Fila {f.tipo === 'nino' ? 'niños' : f.tipo === 'adulto' ? 'adultos' : 'infantes'}</span>
+                  <span className="block truncate text-[11px] tabular-nums">{f.cantidad} · {formatoMonto(f.subtotal, lectura.moneda)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <FichaDeLinea
+            ranura={ficha.ranura}
+            campos={lectura.campos}
+            correcciones={ficha.correcciones}
+            deshabilitado={deshabilitado}
+            onGuardar={ficha.onGuardar}
+          />
+        </>
+      )}
+      {abierta && !ficha && (
         <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
           {lectura.porTipo.map(f => (
             <div key={f.tipo} className="min-w-0">

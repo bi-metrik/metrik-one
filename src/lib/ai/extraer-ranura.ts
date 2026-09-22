@@ -116,8 +116,19 @@ const VEREDICTOS: VeredictoImagen[] = [
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 
+/**
+ * Los campos que se le piden a la lectura: todos menos los que llena otro paso (`aparte`).
+ *
+ * ⚠️ Por esto el prompt de hotel es idéntico, byte a byte, al de antes de las estrellas: la
+ * categoría la detecta `detectarEstrellas` en paralelo, y todo lo ya medido sobre la lectura
+ * de hotel sigue valiendo.
+ */
+function camposDeLaLectura(ranura: DefinicionRanura) {
+  return ranura.campos.filter(c => !c.aparte)
+}
+
 export function construirPrompt(ranura: DefinicionRanura): string {
-  const campos = ranura.campos
+  const campos = camposDeLaLectura(ranura)
     .map(c => `- ${c.slug} (${c.label}${c.min ? ', OBLIGATORIO' : ''}): ${c.descripcion_ai}`)
     .join('\n')
 
@@ -239,13 +250,13 @@ function construirEsquema(ranura: DefinicionRanura) {
       campos: {
         type: 'OBJECT',
         properties: Object.fromEntries(
-          ranura.campos.map(c => [c.slug, {
+          camposDeLaLectura(ranura).map(c => [c.slug, {
             type: 'OBJECT',
             properties: { value: { type: 'STRING' }, confidence: { type: 'NUMBER' } },
             required: ['value', 'confidence'],
           }]),
         ),
-        required: ranura.campos.map(c => c.slug),
+        required: camposDeLaLectura(ranura).map(c => c.slug),
       },
       iconos_equipaje: {
         type: 'ARRAY',
@@ -598,10 +609,194 @@ export async function extraerRanuraDesdeImagen(
   ranura: DefinicionRanura,
   apiKey: string,
 ): Promise<ResultadoExtraccion<LecturaCruda>> {
-  return extraerConReintento(
+  // Las estrellas se detectan EN PARALELO con la lectura: solo necesitan la imagen, así que
+  // no le suman espera a quien cotiza (la lectura tarda más que ellas).
+  const deteccion = pideEstrellas(ranura) ? detectarEstrellas(buffer, mimeType, apiKey) : null
+  const lectura = await extraerConReintento(
     () => unaLlamada(buffer, mimeType, ranura, apiKey),
     `ranura:${ranura.slug}`,
   )
+  // ⚠️ Si la detección tarda MÁS que la lectura, se le da una gracia corta y no más. Medido en
+  // el banco real: una de 35 detecciones llegó al tope de 20 s y la lectura esperó con ella.
+  // Unas estrellas no valen diez segundos más con quien cotiza mirando el indicador: sin
+  // respuesta a tiempo, el campo queda vacío y lo cubre la búsqueda en la web.
+  const estrellas = deteccion
+    ? await Promise.race([
+        deteccion,
+        new Promise<DeteccionEstrellas>(resolve =>
+          setTimeout(() => resolve({ valor: null, corridas: [], error: 'la detección tardó más que la lectura' }), GRACIA_ESTRELLAS_MS)),
+      ])
+    : null
+  if (lectura.data && estrellas) {
+    lectura.data.estrellasDeteccion = estrellas
+    lectura.data.campos.estrellas = estrellas.valor === null
+      ? { value: null, confidence: 0 }
+      // 0,9 y no 1: es un dato derivado de iconos de ~14 px, marcado para revisión.
+      : { value: String(estrellas.valor), confidence: 0.9 }
+  }
+  return lectura
+}
+
+// ── Estrellas: se DETECTAN, no se cuentan de un vistazo ──────────────────────
+
+/** ¿La ranura lee la categoría del hotel? Hoy solo `hotel_detalle`, y aparte de la lectura. */
+function pideEstrellas(ranura: DefinicionRanura): boolean {
+  return ranura.campos.some(c => c.slug === 'estrellas')
+}
+
+/**
+ * Modelo de la detección de estrellas. NO es el de la lectura, y a propósito.
+ *
+ * ⚠️ Medido contra el modelo vivo el 2026-09-22 sobre las siete capturas de hotel del banco
+ * real (cinco con estrellas, dos sin): preguntando el NÚMERO, todos los modelos probados
+ * (2.5-flash, 3-flash-preview, 3.5-flash) contaron **4 en Crown Paradise, que tiene 5**, y
+ * 2.5-flash además contó 2 en Vitium, que tiene 3. Pidiendo una CAJA por estrella y contando
+ * las cajas, 3.5-flash acertó **21 de 21**; 2.5-flash con la misma pregunta mezcló etiquetas
+ * y devolvió JSON roto en dos de tres corridas de Crown.
+ */
+const MODELO_ESTRELLAS = 'gemini-3.5-flash'
+const TIMEOUT_ESTRELLAS_MS = 20_000
+/** Lo que se espera a la detección DESPUÉS de que termina la lectura. Ver `extraerRanuraDesdeImagen`. */
+const GRACIA_ESTRELLAS_MS = 4_000
+
+/**
+ * La categoría del hotel, detectando cada estrella como un objeto con su caja.
+ *
+ * ## Por qué así, y no como un campo más de la lectura
+ *
+ * ⚠️ La estrella de categoría mide ~14 px en una captura de 1.600, y contarla de un vistazo
+ * es un límite de percepción que no se arregla redactando (el equipaje ya lo enseñó, #792).
+ * Medido contra el modelo vivo, con el campo dentro de la lectura normal: las cuatro tarjetas
+ * de 3 estrellas bien **20 de 20**, y Crown Paradise (5) leída como **4, con confianza 1, en
+ * 5 de 5**. Se probaron y se descartaron, con números:
+ *
+ *  · pedir los iconos uno por uno (el truco del equipaje): siguió viendo 4 y además desordenó
+ *    la lectura del hotel (Vitium rechazada por RX2 en 2 de 5 corridas);
+ *  · cruzar la lectura ampliada con un conteo sobre la imagen original: cada escala falla en
+ *    capturas distintas, pero el resultado cambiaba con la redacción (con una, Crown salía 5
+ *    en la original; con otra, 4 en las dos, y el cruce dejaba pasar el error);
+ *  · `mediaResolution: HIGH`: Crown siguió en 4 ampliada y Vitium en 2 sin ampliar;
+ *  · recortar alrededor del nombre: las cajas del NOMBRE que devolvió el modelo caían lejos
+ *    (en Crown, en la esquina de la foto).
+ *
+ * Lo que funcionó fue cambiar la pregunta: una caja por estrella, y el servidor cuenta. Es
+ * otro mecanismo —localizar cada icono— y no un número estimado. Medido por este mismo camino
+ * (`extraerRanuraDesdeImagen`, 7 capturas de hotel × 5 corridas): **32 bien, 2 vacías, 0
+ * mal**, más 1 rechazo RX2 de la lectura principal, cuyo cuerpo es idéntico byte a byte al de
+ * antes de este cambio. Las 2 vacías fueron una detección que llegó al tope de tiempo y una en
+ * que las dos corridas no coincidieron: justo el caso en que se prefiere el hueco.
+ * Evidencia: `proyectos/trappvel/clarity/qa/2026-09-22_estrellas-y-campos-editables/`.
+ *
+ * ## Por qué dos corridas, y qué se exige a cada una
+ *
+ * La lectura principal NO pregunta por las estrellas: su prompt de hotel queda idéntico al
+ * que ya se midió. Esta detección corre DOS veces en paralelo sobre la imagen original, y el
+ * número vale solo si:
+ *  · las dos corridas coinciden;
+ *  · todas las cajas caen en UNA fila (una estrella lejos de las demás es otra cosa);
+ *  · hay a lo sumo cinco, y todas son `filled_star` o `empty_star`.
+ * Si algo de eso falla, el campo queda vacío. Una estrella de más es una promesa sobre el hotel
+ * que la agencia no verificó; un hueco lo llena una persona o la búsqueda en la web.
+ *
+ * ⚠️ Lo que NO lee: una categoría escrita solo con texto («Hotel 4*») y sin iconos. En el banco
+ * real no hay ninguna; si aparece, queda vacía y la cubre la búsqueda en la web.
+ *
+ * Nunca tumba la lectura: si falla o tarda, el campo queda vacío.
+ */
+export async function detectarEstrellas(
+  buffer: Buffer,
+  mimeType: string,
+  apiKey: string,
+): Promise<DeteccionEstrellas> {
+  const mime = MIMES_SOPORTADOS[mimeType.toLowerCase()]
+  if (!apiKey || !mime || mime === 'application/pdf') {
+    return { valor: null, corridas: [], error: 'la detección solo corre sobre imágenes' }
+  }
+  const corridas = await Promise.all([unaDeteccion(buffer, mime, apiKey), unaDeteccion(buffer, mime, apiKey)])
+  const error = corridas.find(c => c.error)?.error ?? null
+  const [a, b] = corridas.map(c => c.valor)
+  // `null` en las dos = ninguna de las dos vio estrellas: la captura no las muestra.
+  const valor = a !== undefined && a === b ? a : null
+  return { valor, corridas: corridas.map(c => c.valor ?? null), error }
+}
+
+export interface DeteccionEstrellas {
+  /** La categoría que vieron igual las dos corridas, o `null`. */
+  valor: number | null
+  /** Lo que vio cada corrida (`null` = nada o no legible). Evidencia para el diagnóstico. */
+  corridas: (number | null)[]
+  error: string | null
+}
+
+const PROMPT_ESTRELLAS =
+  'Detect every star icon of the hotel CATEGORY rating that sits right next to the hotel name ' +
+  '(not guest-review bubbles, not ratings shown with numbers). Output a json list where each entry ' +
+  'contains the 2D bounding box in "box_2d" and a text label in "label" ("filled_star" or "empty_star"). ' +
+  'If there are none, output an empty list.'
+
+async function unaDeteccion(
+  buffer: Buffer,
+  mime: string,
+  apiKey: string,
+): Promise<{ valor: number | null | undefined; error: string | null }> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_ESTRELLAS}:generateContent?key=${apiKey}`
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(TIMEOUT_ESTRELLAS_MS),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inline_data: { mime_type: mime, data: buffer.toString('base64') } }, { text: PROMPT_ESTRELLAS }] }],
+        // La familia 3.x usa `thinkingLevel`; el `thinkingBudget` numérico de 2.5 se ignora
+        // en silencio (gotcha ya escrito en el repo).
+        generationConfig: { temperature: 0.1, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
+      }),
+    })
+    if (!res.ok) return { valor: undefined, error: `HTTP ${res.status}` }
+    const data = await res.json()
+    const candidato = data.candidates?.[0]
+    if (candidato?.finishReason && candidato.finishReason !== 'STOP') {
+      return { valor: undefined, error: `terminó con ${candidato.finishReason}` }
+    }
+    const texto: string = (candidato?.content?.parts ?? [])
+      .find((p: { thought?: boolean; text?: string }) => !p.thought && p.text)?.text ?? ''
+    return { valor: contarCajasDeEstrellas(JSON.parse(texto)), error: null }
+  } catch (err) {
+    return { valor: undefined, error: String(err).slice(0, 120) }
+  }
+}
+
+/**
+ * Cuenta las estrellas rellenas de una detección, o dice por qué no se puede.
+ *
+ * Devuelve `null` cuando la lista viene vacía (no hay estrellas junto al nombre) y `undefined`
+ * cuando la lista existe pero no se puede leer como UNA fila de categoría: más de cinco
+ * cajas, una etiqueta que no es estrella rellena o vacía, cajas en filas distintas, o ninguna
+ * rellena. La diferencia importa: `null` en las dos corridas es «no hay estrellas»; un
+ * `undefined` nunca coincide con nada y deja el campo vacío.
+ *
+ * Exportada para probarla sin llamar al modelo.
+ */
+export function contarCajasDeEstrellas(raw: unknown): number | null | undefined {
+  if (!Array.isArray(raw)) return undefined
+  if (raw.length === 0) return null
+  if (raw.length > 5) return undefined
+  const cajas: { yc: number; alto: number; llena: boolean }[] = []
+  for (const e of raw) {
+    const o = (e ?? {}) as Record<string, unknown>
+    const b = o.box_2d
+    const label = String(o.label ?? '').trim().toLowerCase()
+    if (!Array.isArray(b) || b.length !== 4 || !b.every(n => typeof n === 'number' && Number.isFinite(n))) return undefined
+    if (label !== 'filled_star' && label !== 'empty_star') return undefined
+    const [ymin, , ymax] = b as number[]
+    cajas.push({ yc: (ymin + ymax) / 2, alto: Math.abs(ymax - ymin), llena: label === 'filled_star' })
+  }
+  // Una sola fila: los centros no se separan más que la estrella más alta (mínimo 10 de 1000).
+  const ys = cajas.map(c => c.yc)
+  const tolerancia = Math.max(10, ...cajas.map(c => c.alto))
+  if (Math.max(...ys) - Math.min(...ys) > tolerancia) return undefined
+  const llenas = cajas.filter(c => c.llena).length
+  return llenas >= 1 ? llenas : undefined
 }
 
 /**

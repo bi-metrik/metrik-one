@@ -88,6 +88,12 @@ export interface CampoRanura {
   alerta_revision?: boolean
   /** Valores admitidos cuando `tipo === 'enum'`. */
   opciones?: string[]
+  /**
+   * El campo NO se le pide a la lectura: lo llena otro paso (`detectarEstrellas`, en
+   * `src/lib/ai/extraer-ranura.ts`). Sigue siendo un campo de la ranura —se muestra, se edita
+   * y se guarda como los demás—, pero el prompt y el esquema de la lectura no lo nombran.
+   */
+  aparte?: boolean
 }
 
 export interface DefinicionRanura {
@@ -502,6 +508,38 @@ const VUELO: DefinicionRanura = {
   ],
 }
 
+// ── Estrellas: la CATEGORÍA del hotel, no la opinión de los huéspedes ────────
+
+/**
+ * La categoría del hotel, leída SOLO si la captura la muestra.
+ *
+ * La tarjeta de hotel del documento del cliente imprime las estrellas junto al nombre
+ * (`sistema-visual-documento.md` §4.3) y ninguna ranura las leía: el campo existía en
+ * `HotelPDF` y llegaba siempre vacío. Es la excepción declarada a «no tocar la ficha»
+ * (brief del 2026-09-22).
+ *
+ * ⚠️ `aparte`: la lectura NO la pide. La detecta `detectarEstrellas`
+ * (`src/lib/ai/extraer-ranura.ts`) en paralelo, con otro modelo y otra pregunta, porque
+ * contarla dentro de la lectura dio 4 en un hotel de 5 estrellas en cinco de cinco corridas.
+ * El porqué, con los números, está en esa función. Aquí sigue siendo un campo de la ranura:
+ * se muestra, se edita y se guarda como los demás.
+ *
+ * ⚠️ La trampa en las tarjetas reales no es solo la estrella vacía: dos líneas más abajo van
+ * los círculos verdes de TripAdvisor (4 círculos en un hotel de 3 estrellas). La reseña no es
+ * la categoría.
+ */
+const ESTRELLAS: CampoRanura = {
+  slug: 'estrellas',
+  label: 'Estrellas',
+  tipo: 'numero',
+  min: false,
+  alerta_revision: true,
+  aparte: true,
+  descripcion_ai:
+    'Categoría del hotel en estrellas, entero de 1 a 5, solo si la captura la muestra junto al nombre. ' +
+    'No se le pide a la lectura: la detecta `detectarEstrellas`.',
+}
+
 const HOTEL: DefinicionRanura = {
   slug: 'hotel_detalle',
   label: 'Hotel',
@@ -511,6 +549,7 @@ const HOTEL: DefinicionRanura = {
   unidadPorDefecto: 'noches',
   campos: [
     { slug: 'hotel', label: 'Hotel', tipo: 'texto', min: true, descripcion_ai: 'Nombre del HOTEL tal como aparece. No el nombre de una promoción, de un plan o de una tarifa: si la pantalla no muestra el nombre del hotel, devuelve null.' },
+    ESTRELLAS,
     { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad o zona del hotel según la pantalla. Si no aparece, devuelve null: NO la deduzcas del destino del viaje.' },
     { slug: 'tipo_habitacion', label: 'Habitación', tipo: 'texto', min: true, descripcion_ai: 'Tipo de habitación seleccionada (doble estándar, suite, vista al mar...).' },
     { slug: 'regimen', label: 'Régimen', tipo: 'texto', min: false, descripcion_ai: 'Régimen de alimentación: solo alojamiento, desayuno, media pensión, todo incluido.' },
