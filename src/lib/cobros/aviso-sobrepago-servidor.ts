@@ -10,7 +10,7 @@
 // El sobrepago lo decide `descuadreConciliacion`, que vive en TypeScript y depende del
 // modelo de dinero (tarifa confirmada, recaudo confirmado). Un trigger en SQL tendría
 // que reescribir esa resta, y una segunda vara para la misma plata es el error que este
-// repo ya pagó siete veces. Hermana de `emitirReciboAutomatico` por la misma razón.
+// repo ya pagó siete veces. Hermana de `alRegistrarCobro` (`siigo/recibo-automatico.ts`) por la misma razón.
 //
 // ── Desde dónde se llama ─────────────────────────────────────────────────────
 //

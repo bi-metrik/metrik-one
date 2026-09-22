@@ -1,43 +1,48 @@
 // ============================================================
-// Al emitir la factura, se abonan los pagos que llegaron ANTES.
+// El honorario de los pagos de un negocio se ABONA a su factura.
 //
-// Regla 2 del brief del 2026-09-22: el abono se dispara con lo que ocurra de último.
+// Brief del 2026-09-22 («Tesorería solo emite recibos de la tarifa UPME»): el abono a la
+// factura (RC-1 `DebtPayment`) es 100 % automático, no tiene botón y no aparece como
+// recibo en el panel. Sale por aquí en los tres momentos en que puede faltar:
 //
-//   - Entra un pago y el negocio YA tiene factura → el abono sale con el pago
-//     (`emitirReciboDeCobro`, desde el recibo automático o desde Tesorería).
-//   - Se emite la factura y el negocio YA tenía pagos → sale AQUÍ: un abono por cada
-//     cobro con porción honorario que todavía no tenga ni abono ni anticipo.
+//   - Se emite la factura y el negocio YA tenía pagos → `facturas.ts` (#818).
+//   - Entra un pago y el negocio YA tiene factura → `abonarAlRegistrarPago`
+//     (`recibo-automatico.ts`), desde cada camino que registra plata. **No depende de
+//     `recibo_automatico`**, que desde este brief gobierna solo al RC-3.
+//   - Pagos que quedaron sin abono (el rezago) → `rezago-abonos.ts`, en lote.
 //
-// Sin esta mitad, la factura que ahora sale sin esperar el recaudo nacería con saldo
-// completo aunque el cliente ya hubiera pagado todo, y quedaría abierta en Siigo hasta
-// que alguien la cruzara a mano, que es justo lo que ONE viene a quitarle a Tesorería.
+// Es la MISMA rutina en los tres, y recorre el NEGOCIO, no un cobro suelto: así un abono
+// que falló la vez pasada (Siigo caído, un 429) se vuelve a intentar con el siguiente pago
+// del mismo caso, sin que nadie tenga que acordarse. Qué cobro se abona lo decide
+// `porQueNoSeAbona` (`abono-pendiente.ts`), que también usa el lote.
 //
 // ── Qué NO hace ─────────────────────────────────────────────────────────────
 //
-//   - No toca la tarifa: sus recibos (el RC-3) salen con el pago, no con la factura.
+//   - No toca la tarifa: sus recibos (el RC-3) no son asunto de la factura.
 //   - No emite abono sobre un cobro que ya tiene el anticipo del honorario (RC-1
 //     `AdvancePayment`), ni sobre una marca vieja por el total. Esos los cruza o los
-//     anula Tesorería a mano (regla 3): dos documentos por la misma plata no se deshacen.
-//   - No le avisa al cliente. El «recibimos tu pago» de esos pagos ya salió (o no salió
-//     porque solo traían honorario y no había factura, regla 8); mandarlo semanas
-//     después, junto con la factura, se leería como un cobro nuevo.
+//     anula Tesorería a mano: dos documentos por la misma plata no se deshacen.
+//   - No abona una porción que el comercial propuso y la financiera no ha aceptado.
+//   - No reintenta lo que ya quedó «a mano» con su razón (salvo la factura sin vínculo,
+//     que sí se resuelve adoptándola).
+//   - No genera PDF ni le avisa al cliente (regla 5 del brief): es un asiento interno
+//     para cerrar la cuenta por cobrar. El «recibimos tu pago» sale solo con el RC-3.
 //   - No revisa los pagos marcados `recibo_no_aplica` (el corte histórico del
 //     2026-09-07): no llevan recibo retroactivo, y un abono lo es.
 //
-// ⚠️ NUNCA lanza. La factura ya existe en Siigo y es irreversible: nada de lo que pase
-// aquí puede convertir su emisión en un fallo. Lo que no salga queda pendiente en el
-// control de recibos de Tesorería, que lo reintenta cobro por cobro.
+// ⚠️ NUNCA lanza. Quien la llama acaba de hacer algo que la persona pidió (emitir la
+// factura, registrar el pago) y ya quedó hecho: nada de lo que pase aquí puede
+// convertirlo en un fallo. Lo que no salga queda sin marca y lo recoge el siguiente pago
+// del negocio o el lote del rezago.
 //
 // Server-only.
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { emitirReciboDeCobro, type AbonoAMano } from './recibos'
-import {
-  componentesEmitidos,
-  hayReciboPorElTotal,
-  leerReciboPorConcepto,
-} from './recibo-componentes'
+import { leerReciboPorConcepto } from './recibo-componentes'
+import { porQueNoSeAbona } from './abono-pendiente'
+import { leerFacturaDeUnNegocio } from '@/lib/facturacion/leer-factura-del-negocio'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any {
@@ -55,14 +60,19 @@ export interface ResultadoAbonosFactura {
 
 const VACIO: ResultadoAbonosFactura = { emitidos: [], a_mano: [], fallidos: [] }
 
+const num = (v: unknown): number => {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
 /**
- * Abona a la factura recién emitida el honorario de cada pago anterior del negocio.
+ * Abona a la factura del negocio el honorario de cada pago que todavía no lo tenga.
  *
  * Solo actúa si la línea declara el honorario como abono
  * (`config_extra.siigo.recibo_por_concepto.honorario.tipo = 'abono'`): una línea que no
  * lo declara no cambia en nada.
  */
-export async function abonarPagosPreviosALaFactura(
+export async function abonarPagosDelNegocio(
   workspaceId: string,
   negocioId: string,
   staffNombre: string | null,
@@ -71,7 +81,7 @@ export async function abonarPagosPreviosALaFactura(
     const svc = createServiceClient()
 
     const { data: neg } = await db(svc)
-      .from('negocios').select('linea_id').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+      .from('negocios').select('linea_id, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
     if (!neg?.linea_id) return VACIO
 
     const { data: linea } = await db(svc)
@@ -81,11 +91,32 @@ export async function abonarPagosPreviosALaFactura(
     const porConcepto = leerReciboPorConcepto(cfgSiigo)
     if (porConcepto?.honorario?.tipo !== 'abono') return VACIO
 
+    // ── ¿Hay factura a la cual abonar? ──
+    // Sin factura no hay nada que hacer: el abono sale el día que se facture. Se decide UNA
+    // vez aquí, y no cobro por cobro, porque este camino corre con CADA pago que entra y la
+    // mayoría de los negocios todavía no tiene factura: preguntarlo por cobro costaría
+    // cuatro lecturas por pago sin emitir nada. La factura CARGADA sin vínculo sí sigue: no
+    // se puede abonar, pero el pendiente tiene que quedar dicho para Tesorería.
+    const marcaFactura = ((neg.metadata ?? {}) as Record<string, unknown>).siigo_factura as
+      { numero?: string; siigo_id?: string } | undefined
+    const facturaVinculada = !!(marcaFactura?.numero && marcaFactura?.siigo_id)
+    if (!facturaVinculada && !marcaFactura?.numero) {
+      let cargada = false
+      try {
+        cargada = !!(await leerFacturaDeUnNegocio(svc, workspaceId, negocioId))?.resolucion.factura?.numero
+      } catch (e) {
+        // Sin poder leer el bloque se trata como "sin factura": un abono que no sale se
+        // reintenta con el siguiente pago; uno cruzado a ciegas no se deshace.
+        console.error('[abonos-factura] no se pudo leer la factura cargada del negocio:', (e as Error).message)
+      }
+      if (!cargada) return VACIO
+    }
+
     // El más viejo primero: el saldo de la factura se va consumiendo en el orden en que
     // entró la plata, que es el orden en que Tesorería lo cruzaría a mano.
     const { data: filas, error } = await db(svc)
       .from('cobros')
-      .select('id, fecha, siigo_recibo, recibo_no_aplica')
+      .select('id, fecha, siigo_recibo, recibo_no_aplica, split_json')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', negocioId)
       .is('anulado_at', null)
@@ -95,20 +126,47 @@ export async function abonarPagosPreviosALaFactura(
       console.error('[abonos-factura] no se pudieron leer los pagos del negocio:', error.message)
       return VACIO
     }
+    const cobros = (filas ?? []) as Array<{
+      id: string; siigo_recibo: unknown; recibo_no_aplica: unknown
+      split_json?: { origen?: string; confirmado_at?: string | null } | null
+    }>
+    if (cobros.length === 0) return VACIO
+
+    // El honorario de cada cobro sale del reparto canónico. Una sola lectura para todos:
+    // un cobro de pura tarifa no pide abono, y descartarlo aquí ahorra su ida a la emisión.
+    const { data: reparto } = await db(svc)
+      .from('v_cobro_valor')
+      .select('cobro_id, a_tramo1, a_tramo2, excedente')
+      .in('cobro_id', cobros.map(c => c.id))
+    const honorarioPorCobro = new Map<string, number>(
+      ((reparto ?? []) as Array<Record<string, unknown>>).map(f => [
+        String(f.cobro_id), num(f.a_tramo1) + num(f.a_tramo2) + num(f.excedente),
+      ]),
+    )
+
+    const { data: conc } = await db(svc)
+      .from('negocio_conciliacion')
+      .select('conciliado')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', negocioId)
+      .maybeSingle()
+    const negocioConciliado = (conc as { conciliado?: boolean } | null)?.conciliado === true
 
     const resultado: ResultadoAbonosFactura = { emitidos: [], a_mano: [], fallidos: [] }
-    for (const c of (filas ?? []) as Array<{
-      id: string; siigo_recibo: unknown; recibo_no_aplica: unknown
-    }>) {
-      if (c.recibo_no_aplica) continue
-      // Lo que ya está acusado no se vuelve a mirar. `emitirReciboDeCobro` lo filtraría
-      // igual, pero saltarlo aquí ahorra una ida a Siigo por cobro.
-      if (hayReciboPorElTotal(c.siigo_recibo) || componentesEmitidos(c.siigo_recibo).has('honorario')) continue
+    for (const c of cobros) {
+      const razon = porQueNoSeAbona(c, {
+        honorario: honorarioPorCobro.has(c.id) ? honorarioPorCobro.get(c.id)! : null,
+        negocioConciliado,
+        facturaVinculada,
+      })
+      if (razon) continue
 
       const r = await emitirReciboDeCobro(workspaceId, c.id, staffNombre, {
         bloqueReciboSlug: cfgSiigo?.bloque_recibo_slug,
         porConcepto,
         soloComponentes: ['honorario'],
+        // Regla 5: el abono no le avisa a nadie. Tampoco genera PDF (lo decide la
+        // emisión: ningún abono se renderiza).
         avisarAlCliente: false,
       })
 
@@ -117,8 +175,9 @@ export async function abonarPagosPreviosALaFactura(
         for (const m of r.a_mano ?? []) resultado.a_mano.push({ cobro_id: c.id, ...m })
         continue
       }
-      // `ya_emitido`: el cobro no tiene porción honorario, o ya la acusó. No es trabajo.
-      if (r.motivo === 'ya_emitido') continue
+      // `ya_emitido`: el cobro no tiene porción honorario, o ya la acusó. `espera_factura`:
+      // el negocio no tiene factura. Ninguno es trabajo.
+      if (r.motivo === 'ya_emitido' || r.motivo === 'espera_factura') continue
       if (r.motivo === 'abono_a_mano') {
         for (const m of r.a_mano) resultado.a_mano.push({ cobro_id: c.id, ...m })
         continue
@@ -132,7 +191,7 @@ export async function abonarPagosPreviosALaFactura(
     }
     return resultado
   } catch (e) {
-    console.error('[abonos-factura] falló el abono de los pagos anteriores:', (e as Error).message)
+    console.error('[abonos-factura] falló el abono de los pagos del negocio:', (e as Error).message)
     return VACIO
   }
 }

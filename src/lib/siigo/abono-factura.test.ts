@@ -138,6 +138,8 @@ let postsVoucher: Array<{ body: VoucherSim; clave: string; rechazado: boolean }>
 let consecutivos: Record<number, number>
 /** Si devuelve un error, Siigo rechaza ese POST (y NO crea el documento). */
 let rechazar: ((body: VoucherSim) => Error | null) | null
+/** Cada GET a una factura: preguntarle a Siigo también cuesta, y un «a mano» no lo repite. */
+let getsFactura: number
 
 vi.mock('./client', async () => {
   const real = await vi.importActual<typeof import('./client')>('./client')
@@ -156,6 +158,7 @@ vi.mock('./client', async () => {
       if (metodo === 'GET' && ruta.startsWith('/v1/invoices?')) return { results: [] }
       if (metodo === 'GET' && ruta.endsWith('/pdf')) return {}
       if (metodo === 'GET' && ruta.startsWith('/v1/invoices/')) {
+        getsFactura++
         const id = decodeURIComponent(ruta.slice('/v1/invoices/'.length))
         const f = facturas[id]
         if (!f) throw new real.SiigoError('Invoice not found', 404)
@@ -239,8 +242,9 @@ vi.mock('@/app/(app)/negocios/negocio-v2-actions', () => ({ cerrarNegocioSiQueda
 
 import { SiigoError } from './client'
 import { emitirReciboDeCobro } from './recibos'
-import { emitirReciboAutomatico } from './recibo-automatico'
-import { abonarPagosPreviosALaFactura } from './abonos-factura'
+import { alRegistrarCobro, abonarAlRegistrarPago } from './recibo-automatico'
+import { abonarPagosDelNegocio } from './abonos-factura'
+import { abonarRezago } from './rezago-abonos'
 import { emitirFacturaNegocio } from './facturas'
 import { abonosAManoDelCobro, leerReciboPorConcepto, recibosDelCobro } from './recibo-componentes'
 
@@ -303,6 +307,7 @@ beforeEach(() => {
   postsVoucher = []
   consecutivos = {}
   rechazar = null
+  getsFactura = 0
   avisos = []
   archivados = []
   facturaCargada = null
@@ -319,7 +324,7 @@ describe('1 · la factura ya existe cuando entra el pago', () => {
     const f = facturaEmitida()
     cobro('cob-mixto', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: TARIFA })
 
-    await emitirReciboAutomatico(WS, 'cob-mixto')
+    await alRegistrarCobro(WS, 'cob-mixto')
 
     expect(creados()).toHaveLength(2)
     const [abono, rc3] = creados().map(p => p.body)
@@ -340,7 +345,7 @@ describe('1 · la factura ya existe cuando entra el pago', () => {
   it('la marca dice que es un abono y a qué factura', async () => {
     facturaEmitida()
     cobro('cob-mixto', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: TARIFA })
-    await emitirReciboAutomatico(WS, 'cob-mixto')
+    await alRegistrarCobro(WS, 'cob-mixto')
 
     const [hon, pas] = marcas('cob-mixto')
     expect(hon).toMatchObject({ componente: 'honorario', tipo: 'abono', factura: { numero: 'FV-2-540', siigo_id: 'fv-540' }, valor: HONORARIO })
@@ -350,22 +355,26 @@ describe('1 · la factura ya existe cuando entra el pago', () => {
     expect(pas).not.toHaveProperty('tipo')
   })
 
-  it('el cliente recibe UN aviso, con los dos documentos en el historial del bloque', async () => {
+  it('el cliente recibe UN aviso, y en el bloque queda SOLO el RC-3: el abono no tiene PDF', async () => {
+    // Regla 5 del brief del 2026-09-22 (recibo solo UPME): el abono es un asiento interno.
+    // El correo se arma con la lista del bloque, así que el cliente lee solo su RC-3.
     facturaEmitida()
     cobro('cob-mixto', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: TARIFA })
-    await emitirReciboAutomatico(WS, 'cob-mixto')
+    await alRegistrarCobro(WS, 'cob-mixto')
 
     expect(avisos).toEqual([NEG])
     expect(archivados.map(a => a.entrada)).toMatchObject([
-      { componente: 'honorario', tipo: 'abono', factura: 'FV-2-540', concepto: 'Honorarios de asesoría · abono a la factura FV-2-540' },
       { componente: 'pasante', concepto: 'Recaudo pago certificación UPME' },
     ])
+    expect(archivados).toHaveLength(1)
+    // El abono existe en Siigo y en la marca, sin archivo.
+    expect(marcas('cob-mixto')[0]).toMatchObject({ componente: 'honorario', tipo: 'abono', archivo_url: null })
   })
 
   it('el abono y el anticipo usan claves de idempotencia distintas', async () => {
     facturaEmitida()
     cobro('cob-mixto', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: TARIFA })
-    await emitirReciboAutomatico(WS, 'cob-mixto')
+    await alRegistrarCobro(WS, 'cob-mixto')
 
     expect(creados().map(p => p.clave)).toEqual(['cobmixtoabhon', 'cobmixtorcpas'])
   })
@@ -479,7 +488,7 @@ describe('3 · un cobro con RC-1 de anticipo ya emitido', () => {
       fecha: '2026-09-15', honorario: HONORARIO, tarifa: TARIFA,
       siigo_recibo: { numero: 'RC-1-67', siigo_id: 'y', valor: HONORARIO + TARIFA, archivo_url: null, at: '', por: null },
     })
-    const r = await abonarPagosPreviosALaFactura(WS, NEG, 'Diana')
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Diana')
     expect(r.emitidos).toEqual([])
     expect(postsVoucher).toHaveLength(0)
   })
@@ -615,7 +624,7 @@ describe('6 · reintento después de un fallo parcial', () => {
     expect(r.ok && r.abonos.fallidos.map(a => a.cobro_id)).toEqual(['cob-2'])
 
     rechazar = null
-    const again = await abonarPagosPreviosALaFactura(WS, NEG, 'Diana')
+    const again = await abonarPagosDelNegocio(WS, NEG, 'Diana')
 
     expect(again.emitidos.map(a => a.cobro_id)).toEqual(['cob-2'])
     expect(vouchers).toHaveLength(2)
@@ -732,6 +741,214 @@ describe('CONTROL · sin `tipo: abono` el honorario sigue siendo anticipo', () =
     cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
     expect(r.ok && r.abonos).toEqual({ emitidos: [], a_mano: [], fallidos: [] })
+    expect(postsVoucher).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Brief del 2026-09-22 «Tesorería solo emite recibos de la tarifa UPME»: el abono es
+//    100 % automático al registrar el pago, sin depender de `recibo_automatico`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('7 · el abono sale solo al registrar el pago, aunque recibo_automatico esté apagado', () => {
+  /** La configuración real de SOENA hoy: `recibo_automatico` en false. */
+  const apagado = () => {
+    tablas.lineas_negocio[0].config_extra = { siigo: { ...SIIGO_LINEA, recibo_automatico: false } }
+  }
+
+  it('un pago de puro honorario en un negocio facturado se abona solo, SIN PDF y SIN aviso', async () => {
+    apagado()
+    const f = facturaEmitida()
+    cobro('cob-h', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+
+    await alRegistrarCobro(WS, 'cob-h')
+
+    expect(creados().map(p => [p.body.type, p.body.document.id, p.clave])).toEqual([['DebtPayment', RC1, 'cobhabhon']])
+    expect(f.balance).toBe(0)
+    // Regla 5: un asiento interno. Nada al bloque del recibo, nada al cliente.
+    expect(archivados).toEqual([])
+    expect(avisos).toEqual([])
+    expect(marcas('cob-h')[0]).toMatchObject({ tipo: 'abono', archivo_url: null, factura: { numero: 'FV-2-540' } })
+  })
+
+  it('un pago mixto abona el honorario y NO emite el RC-3: ese lo gobierna recibo_automatico', async () => {
+    apagado()
+    facturaEmitida()
+    cobro('cob-mixto', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: TARIFA })
+
+    await alRegistrarCobro(WS, 'cob-mixto')
+
+    expect(creados().map(p => p.body.type)).toEqual(['DebtPayment'])
+    expect(avisos).toEqual([])
+  })
+
+  it('sin factura no se toca Siigo: el abono espera a que se facture', async () => {
+    cobro('cob-h', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+
+    await alRegistrarCobro(WS, 'cob-h')
+
+    expect(postsVoucher).toHaveLength(0)
+    expect(getsFactura).toBe(0)
+    expect(marcas('cob-h')).toEqual([])
+  })
+
+  it('si Siigo falla, registrar el pago NO lanza y el cobro queda sin marca', async () => {
+    apagado()
+    facturaEmitida()
+    cobro('cob-h', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+    rechazar = () => new SiigoError('Service unavailable', 503)
+
+    await expect(alRegistrarCobro(WS, 'cob-h')).resolves.toBeUndefined()
+
+    expect(vouchers).toHaveLength(0)
+    expect(marcas('cob-h')).toEqual([])
+    expect(aMano('cob-h')).toEqual([])
+  })
+
+  it('el pago siguiente del MISMO negocio recoge el abono que falló la vez anterior', async () => {
+    apagado()
+    const f = facturaEmitida()
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+    rechazar = () => new SiigoError('Service unavailable', 503)
+    await alRegistrarCobro(WS, 'cob-1')
+    expect(vouchers).toHaveLength(0)
+
+    rechazar = null
+    cobro('cob-2', { fecha: '2026-09-15', honorario: TRAMO, tarifa: 0 })
+    await abonarAlRegistrarPago(WS, NEG)
+
+    // Del más viejo al más nuevo, cada uno una vez.
+    expect(creados().map(p => p.clave)).toEqual(['cob1abhon', 'cob2abhon'])
+    expect(f.balance).toBe(0)
+  })
+
+  it('una porción propuesta por el comercial NO se abona hasta que la financiera la acepte', async () => {
+    apagado()
+    facturaEmitida()
+    cobro('cob-rep', { fecha: '2026-09-15', honorario: TRAMO, tarifa: 0 })
+    const fila = tablas.cobros.find(c => c.id === 'cob-rep')!
+    fila.split_json = { split_id: 's-1', origen: 'comercial' }
+
+    await abonarAlRegistrarPago(WS, NEG)
+    expect(postsVoucher).toHaveLength(0)
+
+    // `aceptarRepartoComercial` estampa la marca y vuelve a llamar al abono.
+    fila.split_json = { split_id: 's-1', origen: 'comercial', confirmado_at: '2026-09-16T10:00:00Z' }
+    await abonarAlRegistrarPago(WS, NEG)
+    expect(creados().map(p => p.clave)).toEqual(['cobrepabhon'])
+  })
+
+  it('un «a mano» NO se vuelve a preguntar en cada pago nuevo', async () => {
+    apagado()
+    facturaEmitida({ saldo: 0 })
+    cobro('cob-1', { fecha: '2026-09-01', honorario: HONORARIO, tarifa: 0 })
+
+    await abonarAlRegistrarPago(WS, NEG)
+    expect(aMano('cob-1')).toMatchObject([{ abono_a_mano: { motivo: 'factura_saldada' } }])
+    const gets = getsFactura
+
+    await abonarAlRegistrarPago(WS, NEG)
+    expect(getsFactura).toBe(gets)
+    expect(postsVoucher).toHaveLength(0)
+  })
+
+  it('la factura SIN vínculo sí se reintenta el día que se adopta', async () => {
+    apagado()
+    facturaCargada = 'FV-2-540'
+    cobro('cob-1', { fecha: '2026-09-01', honorario: HONORARIO, tarifa: 0 })
+    await abonarAlRegistrarPago(WS, NEG)
+    expect(aMano('cob-1')).toMatchObject([{ abono_a_mano: { motivo: 'factura_sin_vinculo' } }])
+
+    // Adoptarla le pone la marca con su id de Siigo.
+    facturaEmitida()
+    await abonarAlRegistrarPago(WS, NEG)
+
+    expect(creados().map(p => p.body.type)).toEqual(['DebtPayment'])
+    expect(marcas('cob-1')[0]).toMatchObject({ tipo: 'abono' })
+  })
+
+  it('CONTROL: sin `tipo: abono` en la línea, registrar el pago no abona nada', async () => {
+    tablas.lineas_negocio[0].config_extra = {
+      siigo: {
+        ...SIIGO_LINEA,
+        recibo_automatico: false,
+        recibo_por_concepto: {
+          honorario: { document_id: RC1, concepto: 'Honorarios de asesoría' },
+          pasante: { document_id: RC3, concepto: 'Recaudo pago certificación UPME' },
+        },
+      },
+    }
+    facturaEmitida()
+    cobro('cob-h', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+
+    await alRegistrarCobro(WS, 'cob-h')
+
+    expect(postsVoucher).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. El rezago en lote: idempotente
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('8 · el rezago de abonos en lote', () => {
+  beforeEach(() => {
+    tablas.lineas_negocio[0].config_extra = { siigo: { ...SIIGO_LINEA, recibo_automatico: false } }
+  })
+
+  it('simular solo LEE: lista lo que abonaría sin hablarle a Siigo', async () => {
+    facturaEmitida()
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+    cobro('cob-2', { fecha: '2026-09-05', honorario: TRAMO, tarifa: TARIFA })
+    cobro('cob-tar', { fecha: '2026-09-06', honorario: 0, tarifa: TARIFA })
+
+    const r = await abonarRezago(WS, { aplicar: false })
+
+    expect(r.aplicado).toBe(false)
+    expect(r.candidatos.map(c => c.cobro_id)).toEqual(['cob-1', 'cob-2'])
+    expect(r.valor).toBe(TRAMO * 2)
+    expect(postsVoucher).toHaveLength(0)
+    expect(getsFactura).toBe(0)
+  })
+
+  it('aplicado dos veces, NO duplica: la segunda corrida no encuentra nada', async () => {
+    const f = facturaEmitida()
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+    cobro('cob-2', { fecha: '2026-09-05', honorario: TRAMO, tarifa: TARIFA })
+
+    const primera = await abonarRezago(WS, { aplicar: true, staffNombre: 'Lote' })
+    expect(primera.emitidos.map(e => e.cobro_id)).toEqual(['cob-1', 'cob-2'])
+    expect(f.balance).toBe(0)
+    const documentos = vouchers.length
+
+    const segunda = await abonarRezago(WS, { aplicar: true, staffNombre: 'Lote' })
+
+    expect(segunda.candidatos).toEqual([])
+    expect(segunda.emitidos).toEqual([])
+    expect(vouchers).toHaveLength(documentos)
+    // Solo abonos: el RC-3 de esos pagos no es asunto del lote.
+    expect(vouchers.map(v => v.type)).toEqual(['DebtPayment', 'DebtPayment'])
+  })
+
+  it('no toca los pagos del corte histórico, los que ya tienen anticipo ni los negocios sin factura', async () => {
+    facturaEmitida()
+    cobro('cob-na', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+    tablas.cobros.find(c => c.id === 'cob-na')!.recibo_no_aplica = { motivo: 'Negocio ya facturado' }
+    cobro('cob-ant', {
+      fecha: '2026-09-02', honorario: TRAMO, tarifa: 0,
+      siigo_recibo: [{ numero: 'RC-1-80', siigo_id: 'x', valor: TRAMO, archivo_url: null, at: '', por: null, componente: 'honorario' }],
+    })
+    // Otro negocio, sin factura.
+    tablas.negocios.push({ id: 'neg-otro', workspace_id: WS, codigo: 'V0600', nombre: 'OTRO', linea_id: LINEA, metadata: {} })
+    tablas.cobros.push({
+      id: 'cob-otro', negocio_id: 'neg-otro', workspace_id: WS, monto: TRAMO, fecha: '2026-09-03',
+      tipo_cobro: 'pago', siigo_recibo: null, anulado_at: null, retencion: 0, recibo_no_aplica: null,
+    })
+    tablas.v_cobro_valor.push({ cobro_id: 'cob-otro', workspace_id: WS, a_tramo1: TRAMO, a_tramo2: 0, a_tarifa: 0, excedente: 0 })
+
+    const r = await abonarRezago(WS, { aplicar: true })
+
+    expect(r.candidatos).toEqual([])
     expect(postsVoucher).toHaveLength(0)
   })
 })

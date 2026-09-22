@@ -12,6 +12,11 @@
  * La lista es POR PAGO, no por negocio. Un negocio con tres pagos tiene tres líneas y
  * tres recibos: el 24% de los negocios de SOENA ya recibió más de un pago (medido el
  * 2026-09-02), así que agrupar por negocio escondería justo lo que hay que ver.
+ *
+ * Desde el 2026-09-22 (brief «Tesorería solo emite recibos de la tarifa UPME») el botón
+ * emite SOLO el RC-3 de la tarifa. El honorario se abona solo a la factura y ese abono no
+ * se pinta aquí; lo único que se ve de él es lo que quedó para Tesorería («Abonos a
+ * mano»), como aviso y sin botón.
  */
 
 import { useMemo, useState, useTransition } from 'react'
@@ -19,7 +24,12 @@ import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban, Mail } from 
 import { toast } from 'sonner'
 import BusquedaInput from '@/components/busqueda-input'
 import { emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
-import type { ControlRecibos, PagoConRecibo, EstadoRecibo } from '@/lib/actions/recibos-control-actions'
+import type {
+  AbonoParaTesoreria,
+  ControlRecibos,
+  PagoConRecibo,
+  EstadoRecibo,
+} from '@/lib/actions/recibos-control-actions'
 import { docDeRecibo, hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
 import type { ComponenteRecibo } from '@/lib/siigo/recibo-componentes'
 
@@ -42,10 +52,13 @@ const fmtFecha = (f: string | null) =>
 
 const VERDE = 'var(--acento)'
 
+/** Las listas del panel: los tres estados del recibo, más los abonos que van a mano. */
+type Vista = EstadoRecibo | 'abonos_a_mano'
+
 export default function TabRecibos(
   { control, onCambio }: { control: ControlRecibos; onCambio: () => void },
 ) {
-  const [vista, setVista] = useState<EstadoRecibo>('pendiente')
+  const [vista, setVista] = useState<Vista>('pendiente')
   const [q, setQ] = useState('')
 
   const term = q.trim().toLowerCase()
@@ -57,6 +70,12 @@ export default function TabRecibos(
         .some(v => v?.toLowerCase().includes(term)),
     )
   }, [control.pagos, vista, term])
+
+  const abonosVisibles = useMemo(() => {
+    const todos = control.abonos_a_mano ?? []
+    if (!term) return todos
+    return todos.filter(a => [a.negocio_codigo, a.cliente, a.motivo].some(v => v?.toLowerCase().includes(term)))
+  }, [control.abonos_a_mano, term])
 
   const t = control.totales
 
@@ -89,9 +108,13 @@ export default function TabRecibos(
 
       <div className="mb-3 flex flex-wrap gap-1">
         {([
-          { k: 'pendiente' as EstadoRecibo, label: `Sin recibo (${t.pendientes})` },
-          { k: 'con_recibo' as EstadoRecibo, label: `Con recibo (${t.con_recibo})` },
-          { k: 'no_aplica' as EstadoRecibo, label: `No aplica (${t.no_aplica})` },
+          { k: 'pendiente' as Vista, label: `Sin recibo (${t.pendientes})` },
+          { k: 'con_recibo' as Vista, label: `Con recibo (${t.con_recibo})` },
+          { k: 'no_aplica' as Vista, label: `No aplica (${t.no_aplica})` },
+          // Solo aparece si hay algo: en un workspace sin abono a la factura sería ruido.
+          ...((t.abonos_a_mano ?? 0) > 0
+            ? [{ k: 'abonos_a_mano' as Vista, label: `Abonos a mano (${t.abonos_a_mano})` }]
+            : []),
         ]).map(o => (
           <button
             key={o.k}
@@ -108,7 +131,21 @@ export default function TabRecibos(
         ))}
       </div>
 
-      {visibles.length === 0 ? (
+      {vista === 'abonos_a_mano' ? (
+        <div className="space-y-1.5">
+          <p className="mb-2 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+            El honorario se abona solo a la factura. Estos son los que ONE no pudo abonar:
+            crúzalos en Siigo. No llevan recibo de caja.
+          </p>
+          {abonosVisibles.length === 0 ? (
+            <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
+              <p className="text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
+                {term ? `Sin resultados para "${q.trim()}".` : 'No hay abonos pendientes a mano.'}
+              </p>
+            </div>
+          ) : abonosVisibles.map(a => <FilaAbonoAMano key={a.cobro_id} abono={a} />)}
+        </div>
+      ) : visibles.length === 0 ? (
         <div className="rounded-lg border p-6 text-center" style={{ borderColor: '#E5E7EB' }}>
           <p className="text-[13px]" style={{ color: 'var(--tinta-suave)' }}>
             {term
@@ -136,37 +173,23 @@ export default function TabRecibos(
 export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => void }) {
   const [pendiente, startTransition] = useTransition()
   const [abierto, setAbierto] = useState(false)
-  const [valor, setValor] = useState('')
   const [justificacion, setJustificacion] = useState('')
   const [duplicados, setDuplicados] = useState<Array<{ numero: string; fecha: string; valor: number }> | null>(null)
 
-  const escrito = valor.replace(/[^\d]/g, '')
-  // Vacío es válido y es lo normal: se emite por el monto del pago, que es el dato
-  // exacto. Se escribe solo para corregirlo contra el soporte, porque los casos del
-  // cargue masivo no tienen comprobante.
-  const montoValido = escrito === '' || Number(escrito) > 0
-
   function emitir() {
     startTransition(async () => {
+      // Sin valor: el recibo acusa la porción UPME que sale del reparto del pago. El
+      // servidor no acepta otra cifra (ver `emitirReciboDeNegocio`).
       const r = await emitirReciboDeNegocio(pago.negocio_id, {
         cobroId: pago.cobro_id,
-        valorPagado: escrito === '' ? undefined : Number(escrito),
         justificacionDuplicado: justificacion.trim() || undefined,
       })
       if (r.ok) {
-        // Un pago mixto produce DOS documentos: el mensaje los nombra a los dos, o el
-        // segundo quedaría emitido sin que nadie lo sepa.
-        const nombrados = r.recibos.length > 1
-          ? `Recibos ${r.recibos.map(x => x.numero).join(' y ')} emitidos`
-          : `Recibo ${r.numero} emitido`
         toast.success(
           r.archivada
-            ? `${nombrados} y archivado${r.recibos.length > 1 ? 's' : ''}.`
-            : `${nombrados}. El PDF no se pudo archivar: revísalo.`,
+            ? `Recibo ${r.numero} emitido y archivado.`
+            : `Recibo ${r.numero} emitido. El PDF no se pudo archivar: revísalo.`,
         )
-        // Lo que NO salió con este pago (el honorario que espera la factura, el abono
-        // que quedó para Tesorería) se dice aparte: el éxito de uno no puede tapar al otro.
-        for (const nota of r.notas) toast.warning(nota)
         setAbierto(false)
         onCambio()
         return
@@ -199,8 +222,17 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
         </div>
       </div>
 
-      <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
-        {fmtCOP(pago.monto)}
+      <span className="shrink-0 text-right">
+        <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+          {fmtCOP(pago.monto)}
+        </span>
+        {/* En un pago mixto el recibo acusa solo la tarifa: se dice cuánto es, para que
+            nadie espere un recibo por el pago entero. */}
+        {pago.valor_upme != null && pago.valor_upme > 0 && Math.round(pago.valor_upme) !== Math.round(pago.monto) && (
+          <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
+            tarifa UPME {fmtCOP(pago.valor_upme)}
+          </span>
+        )}
       </span>
 
       <div className="shrink-0">
@@ -224,8 +256,6 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
                 >
                   <Check className="h-3.5 w-3.5" />
                   {r.numero}
-                  {/* El abono cruza una factura: se nombra, porque no es un anticipo suelto. */}
-                  {r.abono_de && <span style={{ color: 'var(--tinta-suave)' }}>· abono {r.abono_de}</span>}
                   <ExternalLink className="h-3 w-3" />
                 </a>
               ) : (
@@ -233,7 +263,7 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
                 // decirlo es más útil que mostrar un enlace roto.
                 <span key={r.numero} className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--acento)' }}>
                   <Check className="h-3.5 w-3.5" />
-                  {r.numero}{r.abono_de ? ` · abono ${r.abono_de}` : ''} · sin PDF
+                  {r.numero} · sin PDF
                 </span>
               )
             })}
@@ -296,29 +326,7 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
 
       {abierto && (
         <div className="mt-2 w-full rounded-md border p-3" style={{ borderColor: '#E5E7EB', backgroundColor: '#FAFAFA' }}>
-          <p className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
-            No es una factura: acusa la plata que entregó el cliente. La factura va aparte,
-            por el honorario pactado.
-          </p>
-
-          <label className="mt-2 block">
-            <span className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
-              Valor recibido (opcional)
-            </span>
-            <input
-              value={valor}
-              onChange={e => setValor(e.target.value)}
-              disabled={pendiente}
-              inputMode="numeric"
-              placeholder={String(Math.round(pago.monto))}
-              className="mt-1 w-full rounded-md border px-2.5 py-1.5 text-[13px] tabular-nums disabled:opacity-50"
-              style={{ borderColor: '#E5E7EB', color: 'var(--tinta)' }}
-            />
-            <span className="text-[10px]" style={{ color: 'var(--tinta-suave)' }}>
-              Déjalo vacío para emitir por {fmtCOP(pago.monto)}, el monto del pago registrado.
-              Escríbelo solo si el soporte dice otra cosa.
-            </span>
-          </label>
+          <ResumenReciboUpme pago={pago} />
 
           {duplicados && (
             <div className="mt-2 rounded-md border p-2" style={{ borderColor: '#F0C060', backgroundColor: '#FFF8E6' }}>
@@ -352,7 +360,7 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
             </button>
             <button
               onClick={emitir}
-              disabled={pendiente || !montoValido || (duplicados != null && justificacion.trim().length < 10)}
+              disabled={pendiente || (duplicados != null && justificacion.trim().length < 10)}
               className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
               style={{ backgroundColor: VERDE }}
             >
@@ -362,6 +370,72 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Qué emite el botón, antes de emitirlo.
+ *
+ * Regla 3 del brief del 2026-09-22: el formulario muestra y emite SOLO la porción UPME del
+ * pago, no su monto. No hay campo para escribir otra cifra: la porción sale del reparto del
+ * pago, y si el soporte dice otra cosa lo que está mal es el monto del pago.
+ *
+ * Exportado para pintarlo solo en una prueba de render: el formulario vive detrás de un
+ * estado (`abierto`) que sin DOM no se puede cambiar.
+ */
+export function ResumenReciboUpme({ pago }: { pago: PagoConRecibo }) {
+  const valor = pago.valor_upme
+  const mixto = valor != null && Math.round(valor) !== Math.round(pago.monto)
+  return (
+    <div>
+      <p className="text-[12px] font-semibold" style={{ color: 'var(--tinta)' }}>
+        Recibo de caja por el recaudo de la tarifa UPME
+      </p>
+      <div className="mt-2 text-[10px] uppercase tracking-wide" style={{ color: 'var(--tinta-suave)' }}>
+        Valor del recibo
+      </div>
+      <div className="text-[15px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+        {valor != null ? fmtCOP(valor) : '—'}
+      </div>
+      <p className="mt-1 text-[10px]" style={{ color: 'var(--tinta-suave)' }}>
+        {mixto
+          ? `Es la porción UPME de este pago de ${fmtCOP(pago.monto)}. El honorario no lleva recibo: se abona solo a la factura del negocio.`
+          : 'Es la porción UPME de este pago.'}
+        {' '}Si el soporte dice otra cosa, corrige el monto del pago.
+      </p>
+    </div>
+  )
+}
+
+/** Un honorario que el abono automático le dejó a Tesorería. Aviso, sin botón. */
+export function FilaAbonoAMano({ abono }: { abono: AbonoParaTesoreria }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2"
+         style={{ borderColor: '#F0C060', backgroundColor: '#FFFBF0' }}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-semibold" style={{ color: 'var(--tinta)' }}>
+            {abono.negocio_codigo ?? '—'}
+          </span>
+          <span className="truncate text-[12px]" style={{ color: 'var(--tinta-suave)' }}>{abono.cliente ?? '—'}</span>
+        </div>
+        <div className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+          {fmtFecha(abono.fecha)} · pago de {fmtCOP(abono.monto)}
+        </div>
+      </div>
+      <span className="shrink-0 text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+        {fmtCOP(abono.valor)}
+      </span>
+      <div className="w-full sm:w-auto">
+        <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Abono a mano en Siigo: {abono.motivo}
+        </span>
+        {abono.detalle && (
+          <p className="text-[10px]" style={{ color: 'var(--tinta-suave)' }}>{abono.detalle}</p>
+        )}
+      </div>
     </div>
   )
 }

@@ -4,7 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { emitirReciboAutomatico } from '@/lib/siigo/recibo-automatico'
+import { alRegistrarCobro } from '@/lib/siigo/recibo-automatico'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 
 // Cast a untyped para columnas/tipos nuevos no en database.ts (tipo_cobro 'externo')
@@ -166,10 +166,11 @@ export async function registrarPagoExterno(
         .eq('id', negocioBloqueId)
     }
 
-    // ── 5. El recibo de caja de esta plata ───────────────────────────────────
-    // Solo si la línea lo declara. No devuelve error: el pago ya quedó registrado y
-    // eso es lo que la persona pidió.
-    await emitirReciboAutomatico(workspaceId, cobroId)
+    // ── 5. Lo que va a Siigo por esta plata ──────────────────────────────────
+    // El abono del honorario a la factura (siempre, si hay factura) y el RC-3 de la
+    // tarifa (solo con `recibo_automatico`). No devuelve error: el pago ya quedó
+    // registrado y eso es lo que la persona pidió.
+    await alRegistrarCobro(workspaceId, cobroId)
 
     // Si este pago dejó el negocio con plata de más, se le avisa a la financiera
     // (opt-in `aviso_sobrepago`). Nunca devuelve error.

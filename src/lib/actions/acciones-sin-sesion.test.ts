@@ -48,7 +48,10 @@ vi.mock('@/lib/actions/get-workspace', () => ({
 vi.mock('@/lib/epayco', () => ({
   consultarTransaccionEpayco: (ref: number) => consultarTransaccionEpayco(ref),
 }))
-vi.mock('@/lib/siigo/recibo-automatico', () => ({ emitirReciboAutomatico: async () => null }))
+vi.mock('@/lib/siigo/recibo-automatico', () => ({
+  alRegistrarCobro: async () => null,
+  abonarAlRegistrarPago: async () => null,
+}))
 vi.mock('@/lib/cobros/aviso-sobrepago-servidor', () => ({ avisarSobrepagoSiCorresponde: async () => null }))
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())

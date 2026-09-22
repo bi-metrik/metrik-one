@@ -64,7 +64,7 @@
 - ⚠️⚠️ [Conciliación por referencia](project_conciliacion_por_referencia.md) — backfill de 9 filas NO aplicado
 - ⚠️⚠️ [Panel de recibos: destinatario y autor](project_panel_destinatario_y_autor.md) — #814 sin mergear: migración ANTES
 - ⚠️⚠️ [Un recibo por concepto](project_recibo_por_concepto.md) — la marca tiene DOS formas y un consumidor SQL lee una
-- ⚠️⚠️ [Factura libre y abono a la factura](project_factura_libre_abono.md) — #818 SIN mergear, SQL SOENA sin aplicar; vencimiento del NOMBRE, no del `prefix`
+- ⚠️⚠️ [Recibo solo UPME y abono automático](project_factura_libre_abono.md) — #823 SIN mergear; rezago de 34 SIN correr
 - ⚠️⚠️ [El correo del recibo](project_correo_recibo_dos_documentos.md) — #804 sin mergear; SQL de copy DESPUÉS de `notificar-etapa`
 - ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — config SOENA sin aplicar; caso V0497
 - ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — config SOENA sin aplicar
