@@ -25,6 +25,15 @@ const VUELO = {
   destino: 'Armenia AXM',
   fechaSalida: '23 oct',
   fechaRegreso: '25 oct',
+  // Las horas del banco real (`3.57.39_PM-3`): la ida sale 05:50 y llega 10:15 tras la
+  // escala de Bogota. La duracion va vacia a proposito — esa captura muestra la duracion
+  // de cada TRAMO y no la del recorrido, y sumar los tramos omite la conexion.
+  horaSalida: '05:50',
+  horaLlegada: '10:15',
+  duracionIda: null,
+  horaSalidaRegreso: '18:45',
+  horaLlegadaRegreso: '22:10',
+  duracionRegreso: null,
   numeroVuelo: '9459 4867 9842 9488',
   escalaIda: 'Bogota BOG',
   escalaRegreso: 'Bogota BOG',
@@ -165,6 +174,58 @@ describe('el documento del cliente', () => {
     expect(t).toContain('Bogota BOG')
   })
 
+  /**
+   * §2.3 de la referencia: la tabla de vuelos lleva SALIDA, LLEGADA y DURACIÓN.
+   *
+   * Hasta el 2026-09-22 esas tres columnas no se podían llenar porque el dato no existía en
+   * ninguna ranura. Las horas se miden contra las tres capturas reales del banco
+   * (`qa/2026-09-22_horas-de-vuelo`): 15 de 15 corridas correctas.
+   */
+  it('imprime la hora de salida y de llegada de la ida y del regreso', async () => {
+    const t = await texto(props())
+    expect(t).toContain('SALIDA')
+    expect(t).toContain('LLEGADA')
+    expect(t).toContain('05:50')
+    expect(t).toContain('10:15')
+    expect(t).toContain('18:45')
+    expect(t).toContain('22:10')
+    // Dos trayectos: la fila se distingue por su sentido, y el regreso va al revés.
+    expect(t).toContain('Ida')
+    expect(t).toContain('Regreso')
+  })
+
+  it('⚠️ la columna DURACIÓN no se imprime cuando ninguna fila la tiene', async () => {
+    // La captura de un vuelo con escala muestra la duración de cada TRAMO, no la del
+    // recorrido: una columna con dos rayas es la «tabla con guiones» que este documento
+    // no puede tener.
+    // ⚠️ Se mira el ENCABEZADO de la tabla y no la palabra suelta: «DURACIÓN» también es
+    // una de las cuatro fichas de la portada, y ahí sí tiene dato.
+    const t = await texto(props())
+    expect(t).toContain('SALIDA LLEGADA ESCALA')
+    expect(t).not.toContain('LLEGADA DURACIÓN')
+  })
+
+  it('con duración leída, la columna sí aparece con su valor', async () => {
+    const t = await texto(props({
+      viaje: viaje({ vuelos: [{ ...VUELO, duracionIda: '4 h 15 m', duracionRegreso: '4 h 30 m' }] }),
+    }))
+    expect(t).toContain('LLEGADA DURACIÓN ESCALA')
+    // Sin el número de adelante: el renderizador parte la corrida después del dígito.
+    expect(t).toContain('h 15 m')
+  })
+
+  it('un viaje de solo ida no imprime una fila de regreso vacía', async () => {
+    const t = await texto(props({
+      viaje: viaje({
+        vuelos: [{ ...VUELO, fechaRegreso: null, horaSalidaRegreso: null, horaLlegadaRegreso: null, escalaRegreso: null }],
+      }),
+    }))
+    expect(t).toContain('05:50')
+    expect(t).not.toContain('22:10')
+    // Con una sola fila la columna del sentido sobra: no hay nada que distinguir.
+    expect(t).not.toContain('Regreso')
+  })
+
   it('imprime la ficha de hotel con noches, habitación y plan', async () => {
     const t = await texto(props())
     expect(t).toContain('Crown Paradise')
@@ -269,7 +330,11 @@ describe('los tres niveles de detalle', () => {
     const t = await texto(props({ viaje: viaje({ nivelDetalle: 'normal' }) }))
     expect(t).toContain('Standard Double')
     expect(t).not.toContain('guia en espanol')
-    expect(t).not.toContain('Cancelacion gratuita')
+    // ⚠️ La política de cancelación SÍ sale en «normal» desde el 2026-09-22. Estaba
+    // condicionada a «muy detallada», y ese nivel es inerte (su bloque sigue oculto), así
+    // que no se imprimía NUNCA — y §2.4 de la referencia la lista en la ficha del hotel.
+    // Una tarifa no reembolsable es una condición, no letra chica.
+    expect(t).toContain('Cancelacion gratuita')
   })
 
   it('«general» recorta la descripción y el detalle de precios por línea', async () => {
@@ -277,6 +342,9 @@ describe('los tres niveles de detalle', () => {
     expect(t).not.toContain('Standard Double')
     expect(t).not.toContain('BASIC Standard economy')
     expect(t).not.toContain('articulo personal')
+    expect(t).not.toContain('Cancelacion gratuita')
+    // Las horas NO se recortan en ningún nivel: son el itinerario, no la letra chica.
+    expect(t).toContain('05:50')
   })
 
   it('⚠️ lo que el cliente TIENE que pagar no se recorta en ningún nivel', async () => {

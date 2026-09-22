@@ -39,6 +39,12 @@ import { Document, Page, Text, View, Image as PdfImage } from '@react-pdf/render
 import type { CotizacionPDFProps, ViajePDF } from './cotizacion-props'
 import type { PrecioPorPasajeroPDF } from './cotizacion-props'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
+import {
+  columnasConDato,
+  trayectosDelVuelo,
+  type ColumnaTrayecto,
+  type TrayectoPDF,
+} from '@/lib/cotizaciones/detalle-viaje'
 
 const GRIS_TEXTO = '#4B4B4B'
 const GRIS_ETIQUETA = '#8A8A8A'
@@ -103,6 +109,96 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
       <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: NEGRO, flex: 1 }}>
         {valor}
       </Text>
+    </View>
+  )
+}
+
+/**
+ * La tabla de vuelos de la referencia (§2.3): una fila por trayecto, ida y regreso.
+ *
+ * ⚠️ Las columnas NO son fijas: se imprimen solo las que tienen dato en alguna fila
+ * (`columnasConDato`). Una columna DURACIÓN con dos rayas es exactamente la «tabla con
+ * guiones» que este documento no puede tener — la captura de un vuelo con escala no trae
+ * el total del recorrido y esa columna desaparece sola.
+ */
+const TITULO_COLUMNA: Record<ColumnaTrayecto, string> = {
+  sentido: '',
+  ruta: 'RUTA',
+  fecha: 'FECHA',
+  salida: 'SALIDA',
+  llegada: 'LLEGADA',
+  duracion: 'DURACIÓN',
+  escala: 'ESCALA',
+}
+
+/** El ancho relativo de cada columna. Se reparte entre las que efectivamente salen. */
+const PESO_COLUMNA: Record<ColumnaTrayecto, number> = {
+  sentido: 15,
+  ruta: 30,
+  fecha: 16,
+  salida: 13,
+  llegada: 13,
+  duracion: 16,
+  escala: 22,
+}
+
+/**
+ * Lo que vale para TODO el itinerario y no para un trayecto: tarifa, equipaje, adicionales.
+ *
+ * ⚠️ NO usa `Dato`, que reserva una columna fija de 74 pt para la etiqueta. Mirando la
+ * página se vio que esa columna coincide con el inicio de la RUTA en una tarjeta y no en
+ * la de al lado, porque la tabla ajusta sus anchos a las columnas que tenga: el mismo
+ * documento mostraba las dos formas. Aquí la etiqueta y el valor van pegados, así que la
+ * alineación deja de depender de qué columnas trajo la captura.
+ */
+function MetaVuelo({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <View style={{ flexDirection: 'row', marginTop: 2.5 }}>
+      <Text style={{ fontSize: 7.5, color: GRIS_ETIQUETA }}>{`${etiqueta} `}</Text>
+      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: NEGRO, flex: 1 }}>
+        {valor}
+      </Text>
+    </View>
+  )
+}
+
+function TablaTrayectos({ trayectos, color }: { trayectos: TrayectoPDF[]; color: string }) {
+  const columnas = columnasConDato(trayectos)
+  if (columnas.length === 0) return null
+  const total = columnas.reduce((a, c) => a + PESO_COLUMNA[c], 0)
+  const ancho = (c: ColumnaTrayecto) => `${(PESO_COLUMNA[c] / total) * 100}%`
+  // Con una sola columna con dato («RUTA» y nada más) una tabla es más ruido que la línea
+  // suelta que ya se imprimía. El encabezado solo aparece si hay algo que encabezar.
+  const conEncabezado = columnas.some(c => c !== 'sentido' && c !== 'ruta')
+  return (
+    <View style={{ marginTop: 4 }}>
+      {conEncabezado && (
+        <View style={{ flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: GRIS_BORDE, paddingBottom: 2 }}>
+          {columnas.map(c => (
+            <Text key={`th-${c}`} style={{ fontSize: 6, color: GRIS_ETIQUETA, letterSpacing: 0.6, width: ancho(c) }}>
+              {TITULO_COLUMNA[c]}
+            </Text>
+          ))}
+        </View>
+      )}
+      {trayectos.map((t, i) => (
+        <View key={`tr-${i}`} style={{ flexDirection: 'row', paddingTop: 2.5 }}>
+          {columnas.map(c => (
+            <Text
+              key={`td-${i}-${c}`}
+              hyphenationCallback={SIN_GUION}
+              style={{
+                fontSize: 7.5,
+                color: c === 'sentido' ? color : NEGRO,
+                fontFamily: c === 'sentido' ? 'Helvetica-Bold' : 'Helvetica',
+                width: ancho(c),
+              }}
+            >
+              {t[c] ?? ''}
+            </Text>
+          ))}
+        </View>
+      ))}
     </View>
   )
 }
@@ -261,13 +357,7 @@ export default function CotizacionTrappvelPDF({
                 // ⚠️ La flecha «→» NO existe en la codificación de las fuentes estándar
                 // del PDF: se vio impresa como un apóstrofo («Cúcuta CUC ’Armenia AXM»)
                 // mirando la página, no en ninguna prueba. La raya larga sí existe.
-                const ruta = [vu.origen, vu.destino].filter(Boolean).join(' – ')
-                const fechas = [vu.fechaSalida, vu.fechaRegreso].filter(Boolean).join(' · ')
-                const escalaIda = vu.escalaIda
-                  ? `Escala en ${vu.escalaIda}`
-                  : vu.escalas === 0
-                    ? 'Vuelo directo'
-                    : null
+                const trayectos = trayectosDelVuelo(vu)
                 return (
                   <View
                     key={`vuelo-${i}`}
@@ -279,20 +369,22 @@ export default function CotizacionTrappvelPDF({
                       marginBottom: 5,
                     }}
                   >
+                    {/* La aerolínea y el número de vuelo encabezan el bloque, no una
+                        columna: la lectura los trae para el itinerario COMPLETO (en la
+                        captura de Avianca, «9459 · 4867 · 9842 · 9488» son los cuatro
+                        tramos juntos). Repartirlos por trayecto sería inventar a cuál
+                        pertenece cada uno. */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                       <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: NEGRO }}>
                         {vu.aerolinea ?? vu.linea}
                       </Text>
-                      {ruta !== '' && (
-                        <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: acento }}>{ruta}</Text>
+                      {vu.numeroVuelo && (
+                        <Text style={{ fontSize: 7.5, color: GRIS_ETIQUETA }}>{`Vuelo ${vu.numeroVuelo}`}</Text>
                       )}
                     </View>
-                    {fechas !== '' && <Dato etiqueta="Fechas" valor={fechas} />}
-                    {vu.numeroVuelo && <Dato etiqueta="Nº de vuelo" valor={vu.numeroVuelo} />}
-                    {escalaIda && <Dato etiqueta="Ida" valor={escalaIda} />}
-                    {vu.escalaRegreso && <Dato etiqueta="Regreso" valor={`Escala en ${vu.escalaRegreso}`} />}
-                    {!general && vu.tarifa && <Dato etiqueta="Tarifa" valor={vu.tarifa} />}
-                    {!general && vu.equipaje && <Dato etiqueta="Equipaje" valor={vu.equipaje} />}
+                    <TablaTrayectos trayectos={trayectos} color={acento} />
+                    {!general && vu.tarifa && <MetaVuelo etiqueta="Tarifa" valor={vu.tarifa} />}
+                    {!general && vu.equipaje && <MetaVuelo etiqueta="Equipaje" valor={vu.equipaje} />}
                     {/* §1.2 · el adicional va DENTRO del vuelo, no como item aparte:
                         *«mantener dentro de cada bloque todo el hilo de variables»*.
                         Sale en los TRES niveles —incluido el general— porque es plata que
@@ -300,7 +392,7 @@ export default function CotizacionTrappvelPDF({
                         obligaciones (decision 3 de la cabecera). Sin cifra: el dinero
                         vive en «Inversion» y se imprime una sola vez. */}
                     {vu.adicionales.length > 0 && (
-                      <Dato etiqueta="Adicionales" valor={vu.adicionales.join(' · ')} />
+                      <MetaVuelo etiqueta="Adicionales" valor={vu.adicionales.join(' · ')} />
                     )}
                   </View>
                 )
@@ -340,7 +432,13 @@ export default function CotizacionTrappvelPDF({
                   {!general && h.habitacion && <Dato etiqueta="Habitación" valor={h.habitacion} />}
                   {!general && h.regimen && <Dato etiqueta="Plan" valor={h.regimen} />}
                   {!general && h.ocupacion && <Dato etiqueta="Acomodación" valor={h.ocupacion} />}
-                  {detallada && h.cancelacion && <Dato etiqueta="Cancelación" valor={h.cancelacion} />}
+                  {/* ⚠️ La política de cancelación estaba condicionada a «muy detallada»,
+                      y ese nivel es INERTE: su bloque sigue oculto, así que todo sale en
+                      «normal» y la política NO se imprimía nunca. §2.4 de la referencia la
+                      lista dentro de la ficha del hotel. Pasa a `!general`, igual que
+                      habitación, plan y acomodación: una tarifa no reembolsable es una
+                      condición que el cliente tiene que conocer ANTES de pagar. */}
+                  {!general && h.cancelacion && <Dato etiqueta="Cancelación" valor={h.cancelacion} />}
                   {h.localizador && <Dato etiqueta="Localizador" valor={h.localizador} />}
                   {/* Ver la nota del vuelo: el adicional vive dentro de su bloque. */}
                   {h.adicionales.length > 0 && (

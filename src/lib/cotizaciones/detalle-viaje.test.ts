@@ -12,15 +12,19 @@ import { describe, expect, it } from 'vitest'
 
 import {
   cargosEnDestinoDeItems,
+  columnasConDato,
   destinoDeItinerario,
   detalleDeLectura,
   duracionDelViaje,
+  duracionLegible,
   equipajeEnPalabras,
   fechaCorta,
+  horaCorta,
   hotelesDeItems,
   leerConfigDocumentoViaje,
   nivelDetalleDesde,
   rangoDeFechas,
+  trayectosDelVuelo,
   vuelosDeItems,
 } from './detalle-viaje'
 
@@ -31,6 +35,12 @@ const CAMPOS_VUELO = [
   { label: 'Destino', valor: 'Armenia AXM' },
   { label: 'Salida', valor: '--10-23' },
   { label: 'Regreso', valor: '--10-25' },
+  // Las horas salen de la misma captura (medidas el 2026-09-22 contra el modelo vivo).
+  // La duración va vacía porque la pantalla solo muestra la de cada TRAMO.
+  { label: 'Hora de salida (ida)', valor: '05:50' },
+  { label: 'Hora de llegada (ida)', valor: '10:15' },
+  { label: 'Hora de salida (regreso)', valor: '18:45' },
+  { label: 'Hora de llegada (regreso)', valor: '22:10' },
   { label: 'Nº de vuelo', valor: '9459 · 4867 · 9842 · 9488' },
   { label: 'Escalas', valor: '1' },
   { label: 'Escala (ida)', valor: 'Bogotá BOG' },
@@ -163,6 +173,111 @@ describe('vuelosDeItems', () => {
       { nombre: 'EQUIPAJE COMPRADO APARTE', grupo: null, tarifa_pax: null },
     ]
     expect(vuelosDeItems(items).map(v => v.linea)).toEqual(['AVIANCA'])
+  })
+
+  it('trae las horas de la captura real', () => {
+    const [v] = vuelosDeItems([item('AVIANCA', 'vuelo', CAMPOS_VUELO)])
+    expect(v.horaSalida).toBe('05:50')
+    expect(v.horaLlegada).toBe('10:15')
+    expect(v.horaSalidaRegreso).toBe('18:45')
+    expect(v.horaLlegadaRegreso).toBe('22:10')
+    // Esa pantalla muestra la duración de cada TRAMO, no la del recorrido: hueco.
+    expect(v.duracionIda).toBeNull()
+    expect(v.duracionRegreso).toBeNull()
+  })
+})
+
+describe('horas y duración', () => {
+  it('normaliza la hora a 24 horas', () => {
+    expect(horaCorta('05:50')).toBe('05:50')
+    expect(horaCorta('5:50')).toBe('05:50')
+    expect(horaCorta('6:45 PM')).toBe('18:45')
+    expect(horaCorta('12:10 a.m.')).toBe('00:10')
+    expect(horaCorta('12:10 p.m.')).toBe('12:10')
+  })
+
+  it('⚠️ lo que no se reconoce como hora NO se imprime', () => {
+    // Este texto lo escribe un modelo mirando una pantalla y acaba en la tabla que ve el
+    // cliente. Un hueco lo llena una persona; una hora rara la copia el viajero.
+    expect(horaCorta('mañana temprano')).toBeNull()
+    expect(horaCorta('05:90')).toBeNull()
+    expect(horaCorta('25:10')).toBeNull()
+    expect(horaCorta(null)).toBeNull()
+    expect(horaCorta('')).toBeNull()
+  })
+
+  it('la duración se lee y se deja legible', () => {
+    expect(duracionLegible('2h:50m')).toBe('2 h 50 m')
+    expect(duracionLegible('4h 15m')).toBe('4 h 15 m')
+    expect(duracionLegible('11 horas 20 min')).toBe('11 h 20 m')
+    expect(duracionLegible('45m')).toBe('45 m')
+    expect(duracionLegible(null)).toBeNull()
+  })
+
+  it('una duración con otra forma se copia tal cual: la pantalla la mostró', () => {
+    expect(duracionLegible('día completo')).toBe('día completo')
+  })
+})
+
+describe('trayectosDelVuelo', () => {
+  const vuelo = () => vuelosDeItems([item('AVIANCA', 'vuelo', CAMPOS_VUELO)])[0]
+
+  it('arma la ida y el regreso del vuelo real, con la ruta invertida a la vuelta', () => {
+    const [ida, regreso] = trayectosDelVuelo(vuelo())
+    expect(ida).toEqual({
+      sentido: 'Ida',
+      ruta: 'Cúcuta CUC – Armenia AXM',
+      fecha: '23 oct',
+      salida: '05:50',
+      llegada: '10:15',
+      duracion: null,
+      escala: 'Bogotá BOG',
+    })
+    expect(regreso.ruta).toBe('Armenia AXM – Cúcuta CUC')
+    expect(regreso.fecha).toBe('25 oct')
+    expect(regreso.salida).toBe('18:45')
+    expect(regreso.llegada).toBe('22:10')
+  })
+
+  it('un viaje de solo ida no produce una fila de regreso vacía', () => {
+    const v = { ...vuelo(), fechaRegreso: null, horaSalidaRegreso: null, horaLlegadaRegreso: null }
+    expect(trayectosDelVuelo(v).map(t => t.sentido)).toEqual(['Ida'])
+  })
+
+  it('«Directo» solo se afirma con escalas = 0, nunca con una escala sin leer', () => {
+    const v = vuelo()
+    expect(trayectosDelVuelo({ ...v, escalaIda: null, escalas: 0 })[0].escala).toBe('Directo')
+    // Sin conteo, un `escala_ida` vacío puede ser directo o una pantalla que no mostró el
+    // recorrido: son cosas distintas y no se deciden por el silencio.
+    expect(trayectosDelVuelo({ ...v, escalaIda: null, escalas: null })[0].escala).toBeNull()
+    // `escalas` cuenta solo la IDA: el regreso no hereda su «Directo».
+    expect(trayectosDelVuelo({ ...v, escalaRegreso: null, escalas: 0 })[1].escala).toBeNull()
+  })
+})
+
+describe('columnasConDato', () => {
+  const vuelo = () => vuelosDeItems([item('AVIANCA', 'vuelo', CAMPOS_VUELO)])[0]
+
+  it('⚠️ la columna sin un solo dato NO se imprime: nada de tabla con guiones', () => {
+    // El vuelo real no trae duración de recorrido: esa columna desaparece entera.
+    expect(columnasConDato(trayectosDelVuelo(vuelo()))).toEqual([
+      'sentido', 'ruta', 'fecha', 'salida', 'llegada', 'escala',
+    ])
+  })
+
+  it('con duración leída, la columna aparece', () => {
+    const t = trayectosDelVuelo({ ...vuelo(), duracionIda: '2 h 50 m' })
+    expect(columnasConDato(t)).toContain('duracion')
+  })
+
+  it('con un solo trayecto la columna del sentido sobra', () => {
+    const t = trayectosDelVuelo({ ...vuelo(), fechaRegreso: null, horaSalidaRegreso: null, horaLlegadaRegreso: null })
+    expect(columnasConDato(t)).not.toContain('sentido')
+  })
+
+  it('una línea sin captura no produce ninguna columna', () => {
+    const [v] = vuelosDeItems([{ nombre: 'VUELO POR CONFIRMAR', grupo: 'vuelo', tarifa_pax: null }])
+    expect(columnasConDato(trayectosDelVuelo(v))).toEqual([])
   })
 })
 
