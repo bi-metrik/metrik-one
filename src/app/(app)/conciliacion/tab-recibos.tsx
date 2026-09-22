@@ -164,6 +164,9 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
             ? `${nombrados} y archivado${r.recibos.length > 1 ? 's' : ''}.`
             : `${nombrados}. El PDF no se pudo archivar: revísalo.`,
         )
+        // Lo que NO salió con este pago (el honorario que espera la factura, el abono
+        // que quedó para Tesorería) se dice aparte: el éxito de uno no puede tapar al otro.
+        for (const nota of r.notas) toast.warning(nota)
         setAbierto(false)
         onCambio()
         return
@@ -221,6 +224,8 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
                 >
                   <Check className="h-3.5 w-3.5" />
                   {r.numero}
+                  {/* El abono cruza una factura: se nombra, porque no es un anticipo suelto. */}
+                  {r.abono_de && <span style={{ color: 'var(--tinta-suave)' }}>· abono {r.abono_de}</span>}
                   <ExternalLink className="h-3 w-3" />
                 </a>
               ) : (
@@ -228,7 +233,7 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
                 // decirlo es más útil que mostrar un enlace roto.
                 <span key={r.numero} className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--acento)' }}>
                   <Check className="h-3.5 w-3.5" />
-                  {r.numero} · sin PDF
+                  {r.numero}{r.abono_de ? ` · abono ${r.abono_de}` : ''} · sin PDF
                 </span>
               )
             })}

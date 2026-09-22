@@ -319,6 +319,92 @@ describe('getControlRecibos — un pago mixto a medias sigue pendiente', () => {
 })
 
 /**
+ * El honorario que se ABONA a la factura (2026-09-22).
+ *
+ * El panel no puede ofrecer un botón que vuelva sin emitir nada. Tres casos en que el
+ * honorario no lo resuelve un clic: el negocio no tiene factura (se abona al facturar),
+ * el pago trae retención (lo cruza Tesorería) o una emisión anterior ya lo dejó «a mano».
+ */
+describe('getControlRecibos — el honorario que se abona a la factura', () => {
+  const LINEA_ABONO = {
+    id: 'lin-1',
+    config_extra: {
+      siigo: {
+        recibo_por_concepto: {
+          honorario: { document_id: 4594, concepto: 'Honorarios de asesoría', tipo: 'abono' },
+          pasante: { document_id: 33546, concepto: 'Recaudo pago certificación UPME' },
+        },
+      },
+    },
+  }
+  const fila = (id: string) => (getControlRecibos().then(r => r.data!.pagos.find(p => p.cobro_id === id)!))
+
+  beforeEach(() => {
+    lineas = [LINEA_ABONO]
+    reparto = [
+      { cobro_id: 'c1', a_tramo1: 0, a_tramo2: 0, a_tarifa: 701_812, excedente: 0 },
+      { cobro_id: 'c2', a_tramo1: 637_500, a_tramo2: 0, a_tarifa: 0, excedente: 0 },
+    ]
+    cobros[0].siigo_recibo = null
+  })
+
+  it('sin factura, un pago de puro honorario NO es emitible: falta la factura', async () => {
+    const c2 = await fila('c2')
+    expect(c2.estado).toBe('pendiente')
+    expect(c2.faltantes).toEqual(['la factura del negocio: el honorario se abona a ella'])
+  })
+
+  it('sin factura, un pago mixto SÍ es emitible (sale la tarifa), con el aviso del honorario', async () => {
+    reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    const c1 = await fila('c1')
+    expect(c1.faltantes).toEqual([])
+    expect(c1.avisos).toContain('el honorario se abona a la factura cuando se emita: ahora sale solo la tarifa')
+  })
+
+  it('con factura, el pago de puro honorario se puede emitir', async () => {
+    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
+    const c2 = await fila('c2')
+    expect(c2.faltantes).toEqual([])
+  })
+
+  it('con factura y retención, lo cruza Tesorería: no es emitible', async () => {
+    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
+    cobros[1].retencion = 50_000
+    const c2 = await fila('c2')
+    expect(c2.faltantes).toEqual(['el abono a mano en Siigo: el pago trae retención'])
+  })
+
+  it('un «a mano» guardado se nombra por su razón, y no cuenta como recibo', async () => {
+    negocios[0].metadata = { ...(negocios[0].metadata as Fila), siigo_factura: { numero: 'FV-2-540', siigo_id: 'x' } }
+    cobros[1].siigo_recibo = [{
+      componente: 'honorario', abono_a_mano: { motivo: 'factura_saldada', detalle: '…' }, valor: 637_500, at: '', por: null,
+    }]
+    const c2 = await fila('c2')
+    expect(c2.estado).toBe('pendiente')
+    expect(c2.recibos).toEqual([])
+    expect(c2.faltantes).toEqual(['el abono a mano en Siigo: la factura ya no tenía saldo (sobrepago)'])
+  })
+
+  it('un abono emitido dice a qué factura se abonó', async () => {
+    cobros[1].siigo_recibo = [{
+      numero: 'RC-1-90', archivo_url: null, componente: 'honorario', tipo: 'abono',
+      factura: { numero: 'FV-2-540', siigo_id: 'x' },
+    }]
+    const c2 = await fila('c2')
+    expect(c2.estado).toBe('con_recibo')
+    expect(c2.recibos).toEqual([{ numero: 'RC-1-90', url: null, componente: 'honorario', abono_de: 'FV-2-540' }])
+  })
+
+  it('CONTROL: en una línea sin abono el mismo pago sin factura sí es emitible', async () => {
+    lineas = [{ id: 'lin-1', config_extra: { siigo: { recibo_por_concepto: {
+      honorario: { document_id: 4594, concepto: 'Honorarios de asesoría' },
+    } } } }]
+    const c2 = await fila('c2')
+    expect(c2.faltantes).toEqual([])
+  })
+})
+
+/**
  * Control de compatibilidad: una línea sin `recibo_por_concepto` no paga nada.
  *
  * Es lo que protege a `metrik`, a `valida` y a SOENA mientras el comprobante de la

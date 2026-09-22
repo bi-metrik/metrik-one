@@ -153,8 +153,8 @@ const emitir = () =>
   emitirFacturaNegocio(
     WS, NEG, 'Diana',
     { emitir: true },
-    // Honorario cubierto: lo único que puede frenar la emisión es lo que se prueba.
-    { modelo: null, recaudado: 637500, ivaPct: 19, staffId: null },
+    // El recaudo ya no frena la emisión (2026-09-22): lo único que puede frenar es lo que se prueba.
+    { ivaPct: 19, staffId: null },
   )
 
 beforeEach(() => {

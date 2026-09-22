@@ -12,8 +12,10 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  abonosAManoDelCobro,
   componentesConValor,
   componentesEmitidos,
+  conEntradaDeComponente,
   hayReciboPorElTotal,
   leerReciboPorConcepto,
   planDeEmision,
@@ -22,6 +24,7 @@ import {
   recibosDelCobro,
   repartoDeCobro,
   SUFIJO_IDEMPOTENCIA,
+  SUFIJO_IDEMPOTENCIA_ABONO,
   tieneRecibo,
 } from './recibo-componentes'
 
@@ -201,5 +204,104 @@ describe('componentesConValor', () => {
   it('devuelve solo las bolsas con plata, en orden de imputación', () => {
     expect(componentesConValor({ honorario: 0, pasante: 600_000 })).toEqual(['pasante'])
     expect(componentesConValor({ honorario: 1, pasante: 1 })).toEqual(['honorario', 'pasante'])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El honorario como ABONO a la factura (2026-09-22)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('leerReciboPorConcepto: el honorario puede declararse abono', () => {
+  it('honorario con tipo abono se lee como abono', () => {
+    const cfg = leerReciboPorConcepto({
+      recibo_por_concepto: { honorario: { document_id: 4594, concepto: 'Honorarios de asesoría', tipo: 'abono' } },
+    })
+    expect(cfg?.honorario?.tipo).toBe('abono')
+  })
+
+  it('sin tipo es anticipo, el de siempre: la config de hoy no cambia de significado', () => {
+    // Es la config que SOENA tiene en producción el 2026-09-22.
+    const cfg = leerReciboPorConcepto({
+      recibo_por_concepto: {
+        honorario: { document_id: 4594, concepto: 'Honorarios de asesoría' },
+        pasante: { document_id: 33546, concepto: 'Recaudo pago certificación UPME' },
+      },
+    })
+    expect(cfg?.honorario?.tipo).toBeUndefined()
+    expect(cfg?.pasante?.tipo).toBeUndefined()
+  })
+
+  it('el componente PASANTE nunca es abono: la tarifa no está en la factura', () => {
+    const cfg = leerReciboPorConcepto({
+      recibo_por_concepto: { pasante: { document_id: 33546, concepto: 'x', tipo: 'abono' } },
+    })
+    expect(cfg?.pasante?.tipo).toBeUndefined()
+  })
+
+  it('un tipo desconocido tampoco es abono', () => {
+    const cfg = leerReciboPorConcepto({
+      recibo_por_concepto: { honorario: { document_id: 4594, concepto: 'x', tipo: 'Abono ' } },
+    })
+    expect(cfg?.honorario?.tipo).toBeUndefined()
+  })
+})
+
+describe('planDeEmision: el abono sale con su propio sufijo', () => {
+  const cfg = {
+    honorario: { document_id: 4594, concepto: 'Honorarios de asesoría', tipo: 'abono' as const },
+    pasante: { document_id: 33546, concepto: 'Recaudo pago certificación UPME' },
+  }
+
+  it('el honorario sale como abono y la tarifa como anticipo', () => {
+    const plan = planDeEmision({ honorario: 637_500, pasante: 701_812 }, cfg)
+    expect(plan.ok && plan.componentes.map(c => [c.componente, c.tipo ?? 'anticipo', c.sufijoIdempotencia]))
+      .toEqual([['honorario', 'abono', 'abhon'], ['pasante', 'anticipo', 'rcpas']])
+  })
+
+  it('⚠️ el sufijo del abono NO se cambia nunca, y no es el del anticipo', () => {
+    // Si cambiara entre despliegues, un reintento dejaría de reconocer el abono que ya
+    // existe en Siigo y cruzaría la factura dos veces.
+    expect(SUFIJO_IDEMPOTENCIA_ABONO).toBe('abhon')
+    expect(SUFIJO_IDEMPOTENCIA_ABONO).not.toBe(SUFIJO_IDEMPOTENCIA.honorario)
+  })
+})
+
+describe('las entradas «a mano» viven en la lista sin contar como recibo', () => {
+  const A_MANO = {
+    componente: 'honorario' as const,
+    abono_a_mano: { motivo: 'retencion', detalle: 'El pago trae retención…' },
+    valor: 637_500, at: '', por: null,
+  }
+  const MARCA_PASANTE = {
+    numero: 'RC-3-5', siigo_id: 'b', valor: 701_812, archivo_url: null, at: '', por: null,
+    componente: 'pasante' as const,
+  }
+
+  it('no cuenta como recibo en ninguno de los criterios', () => {
+    expect(recibosDelCobro([A_MANO])).toEqual([])
+    expect(tieneRecibo([A_MANO])).toBe(false)
+    expect(componentesEmitidos([A_MANO]).has('honorario')).toBe(false)
+    expect(primerRecibo([A_MANO, MARCA_PASANTE])?.numero).toBe('RC-3-5')
+  })
+
+  it('se lee con su propio helper', () => {
+    expect(abonosAManoDelCobro([MARCA_PASANTE, A_MANO])).toEqual([A_MANO])
+    expect(abonosAManoDelCobro(MARCA_VIEJA)).toEqual([])
+    expect(abonosAManoDelCobro(null)).toEqual([])
+  })
+
+  it('⚠️ escribir el recibo de la TARIFA no borra el «a mano» del honorario', () => {
+    // Reconstruir la lista con `recibosDelCobro` lo habría borrado, y el pendiente quedaba
+    // sin su explicación.
+    expect(conEntradaDeComponente([A_MANO], MARCA_PASANTE)).toEqual([A_MANO, MARCA_PASANTE])
+  })
+
+  it('el recibo del honorario que por fin sale REEMPLAZA su «a mano»', () => {
+    const abono = { ...MARCA_HONORARIO, tipo: 'abono' as const }
+    expect(conEntradaDeComponente([A_MANO, MARCA_PASANTE], abono)).toEqual([MARCA_PASANTE, abono])
+  })
+
+  it('la marca vieja por el total entra a la lista y no se toca', () => {
+    expect(conEntradaDeComponente(MARCA_VIEJA, MARCA_PASANTE)).toEqual([MARCA_VIEJA, MARCA_PASANTE])
   })
 })

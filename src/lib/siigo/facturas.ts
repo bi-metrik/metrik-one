@@ -9,6 +9,15 @@
 // revisa en pantalla. Siigo solo recibe lo que de verdad se emite, así que su
 // contabilidad no acumula borradores que alguien tendría que anular.
 //
+// ── La factura NO espera el recaudo (decisión de Mauricio, 2026-09-22) ─────
+//
+// Del 2026-09-08 al 2026-09-22 la factura solo salía con el honorario recaudado (el
+// gate de `estadoDeRecaudo`, con su banda del 1%). Desde el 22 sale en cualquier
+// momento, A CRÉDITO (forma de pago 1055, la de siempre), y la cuenta por cobrar que
+// eso abre se cierra con ABONOS: los pagos que ya habían entrado se abonan al emitir
+// (`abonos-factura.ts`), y los que entren después se abonan con el pago. Lo demás
+// sigue igual: RUT, honorario aprobado, datos de la factura, negocio abierto.
+//
 // Server-only.
 // ============================================================
 
@@ -17,11 +26,9 @@ import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './c
 import { borradorFactura, SUCURSAL_POR_DEFECTO, type BorradorFactura } from './mapeo'
 import { resolverConceptoDeNegocio } from './concepto-negocio'
 import { asegurarClienteSiigo, corregirContactoParaFactura, identificacionDelNegocio } from './clientes'
-import { descuadreConciliacion, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { archivarPdfEnBloque } from './archivar-documento'
+import { abonarPagosPreviosALaFactura, type ResultadoAbonosFactura } from './abonos-factura'
 import { leerFacturaDeUnNegocio } from '@/lib/facturacion/leer-factura-del-negocio'
-import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
-import { bandaMaterialidadFacturacion } from '@/lib/facturacion/caso-listo'
 import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 // PostgREST corta en 1.000 filas sin avisar, y aquí una fila que falte se lee
 // como "esa factura está libre". Ver el módulo.
@@ -246,15 +253,6 @@ export interface OpcionesEmision {
    */
   justificacionDuplicado?: string
   /**
-   * Justificación para emitir con un residuo del honorario sin recaudar, dentro
-   * de la banda de materialidad. Sin ella, el descuadre BLOQUEA.
-   *
-   * ⚠️ No abre el gate del saldo: por encima de la banda no hay justificación que
-   * sirva, porque eso ya no es un residuo, es cartera. Esta llave solo cubre la
-   * franja entre la tolerancia del producto y el 1% del honorario.
-   */
-  justificacionDescuadre?: string
-  /**
    * Lo que la financiera corrigió en la pantalla de revisión antes de darle a
    * facturar. Es la aplicación del principio de siempre (ONE sugiere, la
    * financiera edita) al único momento en que todavía se puede: después de emitir,
@@ -280,18 +278,13 @@ export type ResultadoEmision =
       /** `false` si la factura salió pero su PDF no se pudo dejar en el negocio. */
       archivada: boolean
       /**
-       * Presente SOLO si de verdad se cruzó la banda de materialidad. Quien llama
-       * lo usa para dejar el rastro en `activity_log`: mandar la justificación no
-       * es lo mismo que haberla necesitado, y anunciar una autorización que no
-       * hizo falta llenaría el timeline de ruido.
+       * Lo que pasó con los pagos que el negocio ya tenía: los abonos que salieron,
+       * los que quedaron para Tesorería y los que fallaron. Vacío si la línea no
+       * abona el honorario a la factura o si no había pagos.
        */
-      descuadre_justificado?: { faltante: number; justificacion: string }
+      abonos: ResultadoAbonosFactura
     }
   | { ok: false; motivo: 'faltan_datos'; faltantes: string[] }
-  /** Debe plata de verdad: por encima de la banda NO hay justificación que abra. */
-  | { ok: false; motivo: 'saldo_pendiente'; faltante: number; banda: number }
-  /** Dentro de la banda y sin justificación escrita. La pantalla pide el texto. */
-  | { ok: false; motivo: 'descuadre_de_recaudo'; faltante: number; banda: number }
   | { ok: false; motivo: 'ya_facturado_en_one'; numero: string }
   | {
       ok: false; motivo: 'duplicado_en_siigo'
@@ -340,14 +333,10 @@ export interface MarcaFactura {
   /** Presente solo si se emitió pasando por encima de un duplicado. */
   justificacion_duplicado?: string
   /**
-   * Presente solo si se emitió con un residuo del honorario sin recaudar, dentro
-   * de la banda de materialidad.
-   *
-   * Guarda el texto, **el faltante del momento** y quién lo autorizó. El faltante
-   * va congelado a propósito: es el número sobre el que se decidió, y a los tres
-   * meses el saldo del negocio ya no lo puede reconstruir (un cobro posterior lo
-   * borra). Sin él, la justificación quedaría explicando una cifra que nadie
-   * puede volver a ver.
+   * HISTÓRICO: solo en facturas emitidas entre el 2026-09-08 y el 2026-09-22 con un
+   * residuo del honorario sin recaudar, dentro de la banda de materialidad. Desde que
+   * la factura no espera el recaudo ya no se escribe; se conserva en el tipo porque
+   * esas marcas existen y son el rastro de una autorización real.
    */
   justificacion_descuadre?: { texto: string; faltante: number; por: string | null; at: string }
   /**
@@ -410,7 +399,7 @@ export async function emitirFacturaNegocio(
   negocioId: string,
   staffNombre: string | null,
   opciones: OpcionesEmision,
-  contexto: { modelo: ModeloDinero | null; recaudado: number; ivaPct?: number; staffId?: string | null },
+  contexto: { ivaPct?: number; staffId?: string | null } = {},
 ): Promise<ResultadoEmision> {
   const svc = createServiceClient()
 
@@ -435,34 +424,11 @@ export async function emitirFacturaNegocio(
   const cargada = await numeroFacturaCargado(svc, workspaceId, negocioId)
   if (cargada) return { ok: false, motivo: 'ya_facturado_en_one', numero: cargada }
 
-  // ── 2. Saldo ──────────────────────────────────────────────────────────────
-  // Solo se factura con el honorario cubierto. El faltante se mide contra el
-  // HONORARIO, nunca contra honorario + tarifa: quien le paga la tarifa directo
-  // a la UPME no le debe nada a SOENA, y medirlo simétrico lo dejaría sin
-  // facturar para siempre (ya se midió: 62 casos retenidos, #206).
-  //
-  // Tres ramas, no dos (decisión de Mauricio, 2026-09-08):
-  //
-  //   faltante <= tolerancia .......... sigue de largo, igual que siempre
-  //   faltante  > banda ............... BLOQUEA sin apelación: es la condición
-  //                                     de entrada, no hay justificación que abra
-  //   en la banda, sin justificación .. bloquea y pide el texto
-  //   en la banda, con justificación .. emite POR EL HONORARIO COMPLETO
-  //
-  // ⚠️ El valor de la factura NO baja a lo recaudado. Cambiarlo arrastraría la
-  // base gravable y el plan de cobro, y eso no está en esta decisión: lo que la
-  // financiera autoriza es facturar sin ese residuo, no facturar por menos.
+  // ── 2. El valor ───────────────────────────────────────────────────────────
+  // La factura sale por el honorario aprobado COMPLETO, esté o no recaudado: desde el
+  // 2026-09-22 el recaudo no es condición para facturar (ver el encabezado). Lo que
+  // falte por pagar queda como saldo de la factura en Siigo, y lo cierran los abonos.
   const honorario = negocio.precio_aprobado == null ? 0 : Number(negocio.precio_aprobado)
-  const { faltante } = descuadreConciliacion(honorario, contexto.modelo, contexto.recaudado)
-  const banda = bandaMaterialidadFacturacion(negocio.precio_aprobado == null ? null : honorario)
-  const justificacionDescuadre = opciones.justificacionDescuadre?.trim()
-  if (faltante > banda) {
-    return { ok: false, motivo: 'saldo_pendiente', faltante, banda }
-  }
-  const hayDescuadre = faltante > TOLERANCIA_SALDO_COP
-  if (hayDescuadre && !justificacionDescuadre) {
-    return { ok: false, motivo: 'descuadre_de_recaudo', faltante, banda }
-  }
 
   // ── 2.bis. Las correcciones de la pantalla ────────────────────────────────
   // Van ANTES de asegurar el tercero, y no después: si el tercero se crea primero,
@@ -578,18 +544,6 @@ export async function emitirFacturaNegocio(
       por: staffNombre,
       producto_code: productoCode,
       ...(justificacion ? { justificacion_duplicado: justificacion } : {}),
-      // Sin rastro escrito, la decisión de la financiera no existe el día que
-      // alguien audite por qué esta factura salió con plata sin recaudar.
-      ...(hayDescuadre && justificacionDescuadre
-        ? {
-            justificacion_descuadre: {
-              texto: justificacionDescuadre,
-              faltante,
-              por: staffNombre,
-              at: new Date().toISOString(),
-            },
-          }
-        : {}),
     }
 
     // ⚠️ La marca se fusiona sobre el estado de AHORA, no sobre `negocio.metadata`,
@@ -609,6 +563,14 @@ export async function emitirFacturaNegocio(
       console.error('[siigo] factura emitida pero NO marcada en el negocio:', guardada.mensaje)
     }
 
+    // ── 7. Los pagos que ya habían entrado se abonan a esta factura ─────────
+    // Solo con la marca guardada: el abono lee la factura DE la marca, y sin ella no
+    // sabría a qué cruzar. Nunca lanza (ver `abonos-factura.ts`): lo que no salga queda
+    // pendiente en el control de recibos, y la factura sigue siendo un éxito.
+    const abonos: ResultadoAbonosFactura = guardada.ok
+      ? await abonarPagosPreviosALaFactura(workspaceId, negocioId, staffNombre)
+      : { emitidos: [], a_mano: [], fallidos: [] }
+
     // Si el caso ya estaba ESPERANDO en su etapa de cierre, la factura que acaba de
     // emitirse es justo lo que le faltaba. Nada de lo que pase aqui puede convertir una
     // emision exitosa en un fallo: la factura ya existe en Siigo y es irreversible.
@@ -624,11 +586,7 @@ export async function emitirFacturaNegocio(
       ok: true, numero: marca.numero, siigo_id: marca.siigo_id,
       total: honorario, emitida: opciones.emitir,
       archivada: !opciones.bloqueFacturaSlug || archivoUrl != null,
-      // Solo si de verdad se cruzó la banda: mandar la justificación no es lo
-      // mismo que haberla necesitado.
-      ...(hayDescuadre && justificacionDescuadre
-        ? { descuadre_justificado: { faltante, justificacion: justificacionDescuadre } }
-        : {}),
+      abonos,
     }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message

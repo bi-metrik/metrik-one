@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { baseYTotalGravado, borradorFactura, borradorRecibo, emailPlausible } from './mapeo'
+import { baseYTotalGravado, borradorAbono, borradorFactura, borradorRecibo, emailPlausible } from './mapeo'
 import type { SiigoConfig } from './client'
 
 const CFG: SiigoConfig = {
@@ -140,5 +140,43 @@ describe('emailPlausible', () => {
     ]) {
       expect(emailPlausible(bueno)).toBe(true)
     }
+  })
+})
+
+describe('borradorAbono — la forma de los abonos que Tesorería ya hace a mano', () => {
+  // RC-1-22, leído del Siigo de SOENA el 2026-09-22 (solo GET):
+  // { document: {id: 4594}, type: 'DebtPayment', date: '2025-10-06',
+  //   customer: {identification: '900660737', branch_office: 0},
+  //   items: [{ due: {prefix: 'FV-1', consecutive: 17, quote: 1, date: '2025-08-20'}, value: 2082500 }],
+  //   payment: {id: 1059, value: 2082500} }
+  const SOENA = { ...CFG, reciboDocumentId: 4594, reciboPaymentId: 1059 }
+  const VENC = { prefix: 'FV-1', consecutive: 17, quote: 1, date: '2025-08-20' }
+
+  it('reproduce RC-1-22 campo por campo', () => {
+    const { payload, faltantes } = borradorAbono(
+      SOENA, '900660737', 2_082_500, '2025-10-06', 'Honorarios de asesoría', VENC, 0, 4594,
+    )
+    expect(faltantes).toEqual([])
+    expect(payload).toEqual({
+      document: { id: 4594 },
+      date: '2025-10-06',
+      type: 'DebtPayment',
+      customer: { identification: '900660737', branch_office: 0 },
+      items: [{ due: VENC, value: 2_082_500 }],
+      payment: { id: 1059, value: 2_082_500 },
+      observations: 'Honorarios de asesoría',
+    })
+  })
+
+  it('el valor del ítem y el del pago son el MISMO número', () => {
+    const { payload } = borradorAbono(SOENA, '1', 318_750, FECHA, 'x', VENC)
+    expect(payload.items[0].value).toBe(payload.payment.value)
+  })
+
+  it('sin identificación, sin valor o sin vencimiento no sale', () => {
+    expect(borradorAbono(SOENA, '', 1, FECHA, 'x', VENC).faltantes).toContain('identificación')
+    expect(borradorAbono(SOENA, '1', 0, FECHA, 'x', VENC).faltantes).toContain('valor del abono')
+    expect(borradorAbono(SOENA, '1', 1, FECHA, 'x', { ...VENC, prefix: '' }).faltantes)
+      .toContain('factura a la que se abona')
   })
 })

@@ -77,7 +77,6 @@ describe('cola de facturación — lotes por encima del techo de PostgREST', () 
     expect(ultimo.cliente).toBe('VICTOR RESTREPO')
     expect(ultimo.faltan_cliente).toEqual([])
     expect(ultimo.faltan_factura).toEqual([])
-    expect(ultimo.falta_saldo).toBe(0)
   })
 
   it('el concepto sale del servicio contratado, no del default', async () => {
