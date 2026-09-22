@@ -8,12 +8,17 @@
 import { describe, it, expect } from 'vitest'
 import {
   decidirAbono,
+  detalleDuplicado,
+  esMotivoAbonoAMano,
   ETIQUETA_ABONO_A_MANO,
+  loQueAplicaALaFactura,
   MOTIVOS_ABONO_A_MANO,
   redondearCentavos,
   retencionDelCobro,
+  revisarAbonosExistentes,
   vencimientoDeFactura,
   type FacturaSiigoLeida,
+  type VoucherSiigoLeido,
 } from './abono'
 
 /** `GET /v1/invoices/{id}` de FV-2-540, tal como respondió Siigo el 2026-09-22. */
@@ -137,5 +142,119 @@ describe('redondearCentavos y las etiquetas', () => {
 
   it('cada motivo tiene su frase: la lista es cerrada', () => {
     for (const m of MOTIVOS_ABONO_A_MANO) expect(ETIQUETA_ABONO_A_MANO[m]).toBeTruthy()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El control de duplicados: el caso V0409, con las cifras de producción
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('revisarAbonosExistentes: duplicado es la MISMA factura', () => {
+  /**
+   * RC-1-96 es el abono de V0408 (otro vehículo del mismo cliente) contra SU factura,
+   * FV-2-511: $510.000, pagado el 2026-08-27. Leído de `cobros.siigo_recibo` de V0408.
+   */
+  const RC_1_96: VoucherSiigoLeido = {
+    id: '9dc764f5', name: 'RC-1-96', date: '2026-08-27', type: 'DebtPayment',
+    customer: { identification: '9771470' },
+    items: [{ due: { prefix: 'FV-2', consecutive: 511 }, value: 510_000 }],
+    payment: { value: 510_000 },
+  }
+  /** V0409 va a abonarle a FV-2-528 lo mismo, el mismo día, al mismo cliente. */
+  const V0409 = {
+    identificacion: '9771470',
+    vencimiento: { prefix: 'FV-2', consecutive: 528 },
+    valor: 510_000,
+    conocidos: new Set<string>(),
+  }
+
+  it('V0409: el abono del vehículo hermano (mismo cliente, valor y fecha, OTRA factura) no es duplicado', () => {
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [RC_1_96] })).toEqual({ duplicados: [], sinLeer: [] })
+  })
+
+  it('el mismo abono contra FV-2-528 sí lo es', () => {
+    const contra528 = { ...RC_1_96, items: [{ due: { prefix: 'FV-2', consecutive: 528 }, value: 510_000 }] }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [contra528] }).duplicados)
+      .toEqual([{ numero: 'RC-1-96', fecha: '2026-08-27', valor: 510_000 }])
+  })
+
+  it('la misma factura por OTRO valor no es duplicado: el plan 50/50 abona dos veces la misma', () => {
+    const parcial = { ...RC_1_96, items: [{ due: { prefix: 'FV-2', consecutive: 528 }, value: 255_000 }] }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [parcial] }).duplicados).toEqual([])
+  })
+
+  it('la fecha no se exige: un abono a mano se fecha el día que se cruza, no el del pago', () => {
+    const otroDia = { ...RC_1_96, date: '2026-09-15', items: [{ due: { prefix: 'FV-2', consecutive: 528 }, value: 510_000 }] }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [otroDia] }).duplicados).toHaveLength(1)
+  })
+
+  it('el prefijo se compara sin distinguir mayúsculas ni espacios, y el consecutivo como número', () => {
+    const raro = { ...RC_1_96, items: [{ due: { prefix: ' fv-2 ', consecutive: '528' }, value: '510000' }] }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [raro] }).duplicados).toHaveLength(1)
+  })
+
+  it('FV-1-528 no es FV-2-528', () => {
+    const otroComprobante = { ...RC_1_96, items: [{ due: { prefix: 'FV-1', consecutive: 528 }, value: 510_000 }] }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [otroComprobante] }).duplicados).toEqual([])
+  })
+
+  it('un abono que ONE ya le emitió a este negocio no es duplicado', () => {
+    const contra528 = { ...RC_1_96, items: [{ due: { prefix: 'FV-2', consecutive: 528 }, value: 510_000 }] }
+    const r = revisarAbonosExistentes({ ...V0409, vouchers: [contra528], conocidos: new Set(['RC-1-96']) })
+    expect(r.duplicados).toEqual([])
+  })
+
+  it('un anticipo del mismo cliente y valor no cruza facturas: no cuenta', () => {
+    const anticipo = { ...RC_1_96, type: 'AdvancePayment', items: undefined }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [anticipo] })).toEqual({ duplicados: [], sinLeer: [] })
+  })
+
+  it('un abono del cliente sin ítems legibles NO se da por bueno: se devuelve para leer su detalle', () => {
+    const sinItems = { ...RC_1_96, items: undefined }
+    const sinDue = { ...RC_1_96, name: 'RC-1-97', items: [{ value: 510_000 }] }
+    const r = revisarAbonosExistentes({ ...V0409, vouchers: [sinItems, sinDue] })
+    expect(r.duplicados).toEqual([])
+    expect(r.sinLeer.map(v => v.name)).toEqual(['RC-1-96', 'RC-1-97'])
+  })
+
+  it('uno ilegible de OTRO cliente no se pide: no puede cruzar esta factura', () => {
+    const ajeno = { ...RC_1_96, customer: { identification: '11111111' }, items: undefined }
+    expect(revisarAbonosExistentes({ ...V0409, vouchers: [ajeno] })).toEqual({ duplicados: [], sinLeer: [] })
+  })
+
+  it('un Detailed con líneas contables sin vencimiento se lee por las que sí lo tienen', () => {
+    const detallado: VoucherSiigoLeido = {
+      name: 'RC-2-7', type: 'Detailed', date: '2026-09-01', customer: { identification: '9771470' },
+      items: [
+        { due: { prefix: 'FV-2', consecutive: 528 }, value: 510_000 },
+        { value: 20_000 },
+      ],
+    }
+    expect(loQueAplicaALaFactura(detallado, V0409.vencimiento)).toEqual({ cruza: true, valor: 510_000 })
+    expect(loQueAplicaALaFactura(detallado, { prefix: 'FV-2', consecutive: 511 })).toEqual({ cruza: false })
+  })
+
+  it('si el ítem que cruza no trae valor, cuenta el del pago', () => {
+    const sinValor = { ...RC_1_96, items: [{ due: { prefix: 'FV-2', consecutive: 528 } }] }
+    expect(loQueAplicaALaFactura(sinValor, V0409.vencimiento)).toEqual({ cruza: true, valor: 510_000 })
+  })
+
+  it('la frase de la marca nombra el abono, su fecha y la factura', () => {
+    const d = detalleDuplicado('FV-2-528', [{ numero: 'RC-1-96', fecha: '2026-08-27', valor: 510_000 }])
+    expect(d).toContain('RC-1-96 (2026-08-27)')
+    expect(d).toContain('FV-2-528')
+    expect(d).toMatch(/510\.000/)
+  })
+})
+
+describe('los motivos nuevos tienen su frase', () => {
+  it('la marca de V0409 (duplicado_en_siigo) deja de caer en la etiqueta genérica', () => {
+    expect(esMotivoAbonoAMano('duplicado_en_siigo')).toBe(true)
+    expect(ETIQUETA_ABONO_A_MANO.duplicado_en_siigo).toBe('en Siigo ya hay un abono que parece ser este')
+  })
+
+  it('y lo que no se pudo revisar tiene la suya', () => {
+    expect(esMotivoAbonoAMano('abonos_sin_revisar')).toBe(true)
+    expect(ETIQUETA_ABONO_A_MANO.abonos_sin_revisar).toBeTruthy()
   })
 })

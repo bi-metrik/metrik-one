@@ -126,7 +126,7 @@ interface FacturaSim {
 interface VoucherSim {
   id: string; name: string; date: string; type: string
   document: { id: number }; customer: { identification: string }
-  items?: Array<{ due: { prefix: string; consecutive: number }; value: number }>
+  items?: Array<{ due?: { prefix: string; consecutive: number }; value: number }>
   payment: { value: number }; observations?: string
 }
 
@@ -140,6 +140,21 @@ let consecutivos: Record<number, number>
 let rechazar: ((body: VoucherSim) => Error | null) | null
 /** Cada GET a una factura: preguntarle a Siigo también cuesta, y un «a mano» no lo repite. */
 let getsFactura: number
+/** Cómo se porta la lista de recibos de Siigo en cada prueba. Vacío = como Siigo. */
+let siigoVouchers: {
+  /** La lista no trae los ítems: el vencimiento solo sale del detalle. */
+  listaSinItems?: boolean
+  /** Siigo ignora `page` y devuelve siempre la primera. */
+  ignorarPagina?: boolean
+  /** Un `total_results` distinto de lo que de verdad hay. */
+  totalDeclarado?: number
+  fallarPagina?: (pagina: number) => Error | null
+  fallarDetalle?: (id: string) => Error | null
+}
+/** Las páginas de `GET /v1/vouchers` que se pidieron, en orden. */
+let paginasPedidas: number[]
+/** Los recibos cuyo detalle se pidió (`GET /v1/vouchers/{id}`). */
+let detallesPedidos: string[]
 
 vi.mock('./client', async () => {
   const real = await vi.importActual<typeof import('./client')>('./client')
@@ -165,8 +180,33 @@ vi.mock('./client', async () => {
         return structuredClone(f)
       }
       if (metodo === 'GET' && ruta.startsWith('/v1/vouchers?')) {
-        const doc = Number(new URLSearchParams(ruta.split('?')[1]).get('document_id'))
-        return { results: vouchers.filter(v => v.document.id === doc).map(v => structuredClone(v)) }
+        // Como Siigo: paginado, con `total_results`. Sin `page`, la primera.
+        const q = new URLSearchParams(ruta.split('?')[1])
+        const doc = Number(q.get('document_id'))
+        const pagina = siigoVouchers.ignorarPagina ? 1 : Number(q.get('page') ?? 1)
+        const tam = Number(q.get('page_size') ?? 25)
+        paginasPedidas.push(pagina)
+        const error = siigoVouchers.fallarPagina?.(pagina) ?? null
+        if (error) throw error
+        const delDoc = vouchers.filter(v => v.document.id === doc)
+        const lote = delDoc.slice((pagina - 1) * tam, pagina * tam).map(v => {
+          const copia = structuredClone(v)
+          if (siigoVouchers.listaSinItems) delete copia.items
+          return copia
+        })
+        return {
+          results: lote,
+          pagination: { page: pagina, page_size: tam, total_results: siigoVouchers.totalDeclarado ?? delDoc.length },
+        }
+      }
+      if (metodo === 'GET' && ruta.startsWith('/v1/vouchers/')) {
+        const id = decodeURIComponent(ruta.slice('/v1/vouchers/'.length))
+        detallesPedidos.push(id)
+        const error = siigoVouchers.fallarDetalle?.(id) ?? null
+        if (error) throw error
+        const v = vouchers.find(x => x.id === id)
+        if (!v) throw new real.SiigoError('Voucher not found', 404)
+        return structuredClone(v)
       }
       if (metodo === 'POST' && ruta === '/v1/invoices') {
         const body = opts!.body as { date: string; customer: { identification: string }; payments: Array<{ value: number; due_date: string }> }
@@ -199,7 +239,7 @@ vi.mock('./client', async () => {
           name: `RC-${doc === RC1 ? 1 : 3}-${consecutivos[doc]}`,
         }
         if (body.type === 'DebtPayment') {
-          const due = body.items![0].due
+          const due = body.items![0].due!
           const f = Object.values(facturas).find(x => x.name === `${due.prefix}-${due.consecutive}`)
           if (!f) throw new real.SiigoError('Due not found', 400)
           f.balance = Math.round((f.balance - body.items![0].value) * 100) / 100
@@ -264,9 +304,11 @@ const POR_CONCEPTO = leerReciboPorConcepto(SIIGO_LINEA)!
 
 function cobro(id: string, p: {
   fecha: string; honorario: number; tarifa: number; retencion?: number; siigo_recibo?: unknown
+  /** Otro negocio del workspace. Sin él, el de siempre. */
+  negocio?: string
 }) {
   tablas.cobros.push({
-    id, negocio_id: NEG, workspace_id: WS, monto: p.honorario + p.tarifa, fecha: p.fecha,
+    id, negocio_id: p.negocio ?? NEG, workspace_id: WS, monto: p.honorario + p.tarifa, fecha: p.fecha,
     tipo_cobro: 'pago', siigo_recibo: p.siigo_recibo ?? null, anulado_at: null,
     retencion: p.retencion ?? 0, recibo_no_aplica: null,
   })
@@ -308,6 +350,9 @@ beforeEach(() => {
   consecutivos = {}
   rechazar = null
   getsFactura = 0
+  siigoVouchers = {}
+  paginasPedidas = []
+  detallesPedidos = []
   avisos = []
   archivados = []
   facturaCargada = null
@@ -950,5 +995,273 @@ describe('8 · el rezago de abonos en lote', () => {
 
     expect(r.candidatos).toEqual([])
     expect(postsVoucher).toHaveLength(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. El control de duplicados del abono (brief del 2026-09-22, caso V0409)
+//
+// V0409 no recibió su abono: el control encontró RC-1-96 —mismo cliente, $510.000, mismo
+// día— y lo tomó por el suyo, cuando RC-1-96 es el abono de V0408 (otro vehículo) contra
+// otra factura. Y solo miraba la primera página de recibos.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('9 · el control de duplicados del abono', () => {
+  const NEG_HERMANO = 'neg-v0409'
+
+  /** Un abono que ya está en Siigo y que ONE no emitió (hecho a mano, o de otro negocio). */
+  function abonoEnSiigo(p: {
+    id: string; nombre: string; fecha?: string; valor: number
+    factura?: { prefix: string; consecutive: number } | null
+    cliente?: string
+  }) {
+    vouchers.push({
+      id: p.id, name: p.nombre, date: p.fecha ?? '2026-09-16', type: 'DebtPayment',
+      document: { id: RC1 }, customer: { identification: p.cliente ?? CLIENTE },
+      items: p.factura === null ? [{ value: p.valor }] : [{ due: p.factura ?? { prefix: 'FV-2', consecutive: 540 }, value: p.valor }],
+      payment: { value: p.valor },
+    })
+  }
+
+  /** El vehículo hermano: mismo cliente, su propia factura por el mismo valor. */
+  function negocioHermano() {
+    facturas['fv-541'] = {
+      id: 'fv-541', name: 'FV-2-541', number: 541, date: '2026-09-10', total: HONORARIO, balance: HONORARIO,
+      customer: { identification: CLIENTE, branch_office: 0 },
+      payments: [{ id: 1055, value: HONORARIO, due_date: '2026-09-10' }],
+    }
+    tablas.negocios.push({
+      id: NEG_HERMANO, workspace_id: WS, codigo: 'V0503', nombre: 'CLIENTE PRUEBA - OTRO VEHÍCULO',
+      linea_id: LINEA, precio_aprobado: HONORARIO,
+      metadata: { siigo_factura: { numero: 'FV-2-541', siigo_id: 'fv-541', total: HONORARIO, emitida: true } },
+    })
+  }
+
+  it('dos negocios del mismo cliente, mismo valor y misma fecha, con facturas distintas: cada uno recibe su abono', async () => {
+    const f540 = facturaEmitida()
+    negocioHermano()
+    cobro('cob-a', { fecha: '2026-08-27', honorario: HONORARIO, tarifa: 0 })
+    cobro('cob-b', { fecha: '2026-08-27', honorario: HONORARIO, tarifa: 0, negocio: NEG_HERMANO })
+
+    const a = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+    const b = await abonarPagosDelNegocio(WS, NEG_HERMANO, 'Lote')
+
+    expect(a.emitidos.map(e => e.cobro_id)).toEqual(['cob-a'])
+    // El abono del hermano (mismo cliente, mismo valor, mismo día) ya está en Siigo y NO
+    // es el de este negocio: cruza otra factura.
+    expect(b).toMatchObject({ emitidos: [{ cobro_id: 'cob-b', valor: HONORARIO }], a_mano: [], fallidos: [] })
+    expect(creados().map(p => [p.body.items![0].due!.consecutive, p.body.items![0].value])).toEqual([
+      [540, HONORARIO], [541, HONORARIO],
+    ])
+    expect(f540.balance).toBe(0)
+    expect(facturas['fv-541'].balance).toBe(0)
+    expect(aMano('cob-b')).toEqual([])
+  })
+
+  it('un abono que YA existe para la misma factura no se duplica: queda a mano con el abono que se encontró', async () => {
+    // Plan 50/50: Tesorería cruzó a mano el primer pago (RC-1-41) y la factura quedó con
+    // la mitad de saldo. Cuando ONE llega a ese pago, el abono ya está.
+    const f = facturaEmitida({ saldo: TRAMO })
+    abonoEnSiigo({ id: 'v-manual', nombre: 'RC-1-41', fecha: '2026-09-02', valor: TRAMO })
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(r.emitidos).toEqual([])
+    expect(r.a_mano).toMatchObject([{ cobro_id: 'cob-1', motivo: 'duplicado_en_siigo' }])
+    expect(postsVoucher).toHaveLength(0)
+    expect(f.balance).toBe(TRAMO)
+    const [marca] = aMano('cob-1')
+    expect(marca).toMatchObject({ componente: 'honorario', valor: TRAMO, abono_a_mano: { motivo: 'duplicado_en_siigo' } })
+    expect(marca.abono_a_mano.detalle).toContain('RC-1-41')
+    expect(marca.abono_a_mano.detalle).toContain('FV-2-540')
+  })
+
+  it('y el mismo abono contra OTRA factura del cliente no frena nada', async () => {
+    const f = facturaEmitida({ saldo: TRAMO })
+    abonoEnSiigo({ id: 'v-otro', nombre: 'RC-1-41', fecha: '2026-09-01', valor: TRAMO, factura: { prefix: 'FV-2', consecutive: 511 } })
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(r.emitidos.map(e => e.cobro_id)).toEqual(['cob-1'])
+    expect(f.balance).toBe(0)
+  })
+
+  it('un cliente con más de 100 abonos y el duplicado en la página 2: se detecta', async () => {
+    const f = facturaEmitida({ saldo: TRAMO })
+    // 120 abonos del MISMO cliente, a otras facturas y por otros valores: la primera página
+    // entera no dice nada. El duplicado es el 121, en la segunda.
+    for (let i = 0; i < 120; i++) {
+      abonoEnSiigo({ id: `v-${i}`, nombre: `RC-1-${i + 1}`, valor: 100_000 + i, factura: { prefix: 'FV-2', consecutive: 1_000 + i } })
+    }
+    abonoEnSiigo({ id: 'v-dup', nombre: 'RC-1-121', valor: TRAMO })
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(paginasPedidas).toEqual([1, 2])
+    expect(r.a_mano).toMatchObject([{ cobro_id: 'cob-1', motivo: 'duplicado_en_siigo' }])
+    expect(aMano('cob-1')[0].abono_a_mano.detalle).toContain('RC-1-121')
+    expect(postsVoucher).toHaveLength(0)
+    expect(f.balance).toBe(TRAMO)
+  })
+
+  it('con más de 100 abonos y ninguno de esta factura, lee todas las páginas y abona', async () => {
+    facturaEmitida()
+    for (let i = 0; i < 230; i++) {
+      abonoEnSiigo({ id: `v-${i}`, nombre: `RC-1-${i + 1}`, valor: HONORARIO, factura: { prefix: 'FV-2', consecutive: 1_000 + i } })
+    }
+    cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(paginasPedidas).toEqual([1, 2, 3])
+    expect(r.emitidos.map(e => e.cobro_id)).toEqual(['cob-1'])
+  })
+
+  it('si falla la consulta de abonos existentes: NO se emite y queda marca a mano', async () => {
+    const f = facturaEmitida()
+    cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+    siigoVouchers.fallarPagina = () => new SiigoError('Service unavailable', 503)
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(r.emitidos).toEqual([])
+    expect(r.a_mano).toMatchObject([{ cobro_id: 'cob-1', motivo: 'abonos_sin_revisar' }])
+    expect(postsVoucher).toHaveLength(0)
+    expect(f.balance).toBe(HONORARIO)
+    expect(aMano('cob-1')).toMatchObject([{ componente: 'honorario', valor: HONORARIO, abono_a_mano: { motivo: 'abonos_sin_revisar' } }])
+  })
+
+  it('también si falla a mitad: una lista a medias no se da por revisada', async () => {
+    facturaEmitida()
+    for (let i = 0; i < 150; i++) {
+      abonoEnSiigo({ id: `v-${i}`, nombre: `RC-1-${i + 1}`, valor: 1_000 + i, factura: { prefix: 'FV-2', consecutive: 1_000 + i } })
+    }
+    cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+    siigoVouchers.fallarPagina = pagina => (pagina === 2 ? new SiigoError('Too many requests', 429) : null)
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(r.a_mano).toMatchObject([{ motivo: 'abonos_sin_revisar' }])
+    expect(postsVoucher).toHaveLength(0)
+  })
+
+  it('si Siigo entrega menos recibos de los que dice tener, tampoco se da por revisada', async () => {
+    facturaEmitida()
+    abonoEnSiigo({ id: 'v-1', nombre: 'RC-1-1', valor: 5_000, factura: { prefix: 'FV-2', consecutive: 999 } })
+    cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+    siigoVouchers.totalDeclarado = 180
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(r.a_mano).toMatchObject([{ motivo: 'abonos_sin_revisar' }])
+    expect(aMano('cob-1')[0].abono_a_mano.detalle).toContain('180')
+    expect(postsVoucher).toHaveLength(0)
+  })
+
+  it('si Siigo ignora la página y repite la primera, no se toma como el final de la lista', async () => {
+    facturaEmitida()
+    for (let i = 0; i < 150; i++) {
+      abonoEnSiigo({ id: `v-${i}`, nombre: `RC-1-${i + 1}`, valor: 1_000 + i, factura: { prefix: 'FV-2', consecutive: 1_000 + i } })
+    }
+    cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+    siigoVouchers.ignorarPagina = true
+
+    const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+    expect(r.a_mano).toMatchObject([{ motivo: 'abonos_sin_revisar' }])
+    expect(postsVoucher).toHaveLength(0)
+  })
+
+  it('lo que no se pudo revisar no lo destraba una justificación: nadie vio nada', async () => {
+    facturaEmitida()
+    cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+    siigoVouchers.fallarPagina = () => new SiigoError('Service unavailable', 503)
+
+    const r = await emitirReciboDeCobro(WS, 'cob-1', 'Diana', { porConcepto: POR_CONCEPTO, justificacionDuplicado: 'lo revisé' })
+
+    expect(r).toMatchObject({ ok: false, motivo: 'abono_a_mano', a_mano: [{ motivo: 'abonos_sin_revisar' }] })
+    expect(postsVoucher).toHaveLength(0)
+  })
+
+  it('un «a mano» por duplicado no se vuelve a preguntar con el pago siguiente', async () => {
+    facturaEmitida({ saldo: TRAMO })
+    abonoEnSiigo({ id: 'v-manual', nombre: 'RC-1-41', valor: TRAMO })
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+    await abonarAlRegistrarPago(WS, NEG)
+    const paginas = paginasPedidas.length
+    expect(aMano('cob-1')).toMatchObject([{ abono_a_mano: { motivo: 'duplicado_en_siigo' } }])
+
+    await abonarAlRegistrarPago(WS, NEG)
+
+    expect(paginasPedidas.length).toBe(paginas)
+    expect(postsVoucher).toHaveLength(0)
+  })
+
+  describe('cuando la lista de Siigo no trae los ítems', () => {
+    beforeEach(() => { siigoVouchers.listaSinItems = true })
+
+    it('lee el detalle de los abonos del cliente, y si pagan otra factura, abona', async () => {
+      const f = facturaEmitida()
+      abonoEnSiigo({ id: 'v-hermano', nombre: 'RC-1-96', fecha: '2026-08-27', valor: HONORARIO, factura: { prefix: 'FV-2', consecutive: 511 } })
+      // Un abono de OTRO cliente no puede cruzar esta factura: ni se pide su detalle.
+      abonoEnSiigo({ id: 'v-ajeno', nombre: 'RC-1-97', valor: HONORARIO, cliente: '11111111' })
+      cobro('cob-1', { fecha: '2026-08-27', honorario: HONORARIO, tarifa: 0 })
+
+      const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+      expect(detallesPedidos).toEqual(['v-hermano'])
+      expect(r.emitidos.map(e => e.cobro_id)).toEqual(['cob-1'])
+      expect(f.balance).toBe(0)
+    })
+
+    it('y si el detalle dice que es esta factura, es duplicado', async () => {
+      facturaEmitida({ saldo: TRAMO })
+      abonoEnSiigo({ id: 'v-manual', nombre: 'RC-1-41', valor: TRAMO })
+      cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+
+      const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+      expect(r.a_mano).toMatchObject([{ motivo: 'duplicado_en_siigo' }])
+      expect(postsVoucher).toHaveLength(0)
+    })
+
+    it('si el detalle no se puede leer, no se abona a ciegas', async () => {
+      facturaEmitida()
+      abonoEnSiigo({ id: 'v-hermano', nombre: 'RC-1-96', valor: HONORARIO, factura: { prefix: 'FV-2', consecutive: 511 } })
+      cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+      siigoVouchers.fallarDetalle = () => new SiigoError('Service unavailable', 503)
+
+      const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+      expect(r.a_mano).toMatchObject([{ motivo: 'abonos_sin_revisar' }])
+      expect(aMano('cob-1')[0].abono_a_mano.detalle).toContain('RC-1-96')
+      expect(postsVoucher).toHaveLength(0)
+    })
+
+    it('un abono cuyo detalle tampoco dice a qué factura pagó, tampoco', async () => {
+      facturaEmitida()
+      abonoEnSiigo({ id: 'v-raro', nombre: 'RC-1-50', valor: HONORARIO, factura: null })
+      cobro('cob-1', { fecha: '2026-09-15', honorario: HONORARIO, tarifa: 0 })
+
+      const r = await abonarPagosDelNegocio(WS, NEG, 'Lote')
+
+      expect(r.a_mano).toMatchObject([{ motivo: 'abonos_sin_revisar' }])
+      expect(postsVoucher).toHaveLength(0)
+    })
+  })
+
+  it('CONTROL: los abonos que ONE ya le emitió a este negocio siguen sin contar como duplicado', async () => {
+    // El plan 50/50: el segundo abono es del MISMO valor contra la MISMA factura. Con la
+    // factura como criterio, sin excluir los conocidos, el segundo quedaría a mano.
+    cobro('cob-1', { fecha: '2026-09-01', honorario: TRAMO, tarifa: 0 })
+    cobro('cob-2', { fecha: '2026-09-05', honorario: TRAMO, tarifa: 0 })
+
+    const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
+
+    expect(r.ok && r.abonos.emitidos.map(a => a.cobro_id)).toEqual(['cob-1', 'cob-2'])
+    expect(r.ok && r.abonos.a_mano).toEqual([])
   })
 })

@@ -69,6 +69,13 @@ export const MOTIVOS_ABONO_A_MANO = [
   'factura_ilegible',
   /** El negocio tiene factura, pero no el vínculo con Siigo (cargada a mano, sin adoptar). */
   'factura_sin_vinculo',
+  /**
+   * Siigo ya tiene un abono a ESTA factura, por el mismo valor, que ONE no emitió. Lo
+   * decide `revisarAbonosExistentes`: sin la misma factura no hay duplicado.
+   */
+  'duplicado_en_siigo',
+  /** No se pudieron revisar COMPLETOS los abonos que Siigo ya tiene: no se abona a ciegas. */
+  'abonos_sin_revisar',
 ] as const
 export type MotivoAbonoAMano = (typeof MOTIVOS_ABONO_A_MANO)[number]
 
@@ -223,6 +230,153 @@ export function decidirAbono(input: {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ¿Siigo ya tiene ESTE abono? El control de duplicados
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Un recibo de caja tal como lo devuelve `GET /v1/vouchers` (lista o detalle). Solo lo que se usa. */
+export interface VoucherSiigoLeido {
+  id?: string
+  name?: string
+  date?: string
+  /** `DebtPayment` (abono), `AdvancePayment` (anticipo) o `Detailed`. */
+  type?: string
+  customer?: { identification?: string }
+  items?: Array<{
+    due?: { prefix?: string; consecutive?: number | string } | null
+    value?: number | string
+  }> | null
+  payment?: { value?: number | string }
+}
+
+/** Un abono que Siigo ya tiene contra la factura, para decirlo en la marca. */
+export interface AbonoExistente {
+  numero: string
+  fecha: string
+  valor: number
+}
+
+const norm = (s: unknown): string => String(s ?? '').trim().toUpperCase()
+
+/**
+ * Qué le aplica un recibo a UNA factura, leído de sus ítems.
+ *
+ *  - `{ cruza: true, valor }`: algún ítem vence contra esa factura; `valor` es lo que le
+ *    aplica (la suma de esos ítems, o el pago entero si los ítems no traen valor).
+ *  - `{ cruza: false }`: se leyó entero y no la toca.
+ *  - `'ilegible'`: no se puede saber. Un abono sin ítems, o con un ítem sin vencimiento
+ *    legible, no dice a qué factura pagó: tratarlo como «no la toca» sería decidir a ciegas.
+ *
+ * Un anticipo (`AdvancePayment`) no cruza facturas por definición: no se lee.
+ */
+export function loQueAplicaALaFactura(
+  v: VoucherSiigoLeido,
+  factura: { prefix: string; consecutive: number },
+): { cruza: true; valor: number } | { cruza: false } | 'ilegible' {
+  if (v.type === 'AdvancePayment') return { cruza: false }
+  const items = v.items
+  if (!Array.isArray(items) || items.length === 0) return 'ilegible'
+
+  const prefijo = norm(factura.prefix)
+  let legible = true
+  let cruza = false
+  let valor = 0
+  for (const it of items) {
+    const due = it?.due
+    if (!due) {
+      // En un `Detailed` hay líneas contables sin vencimiento (retenciones, cuentas): no
+      // cruzan factura. En un abono TODO ítem cruza una: sin vencimiento es ilegible.
+      if (v.type !== 'Detailed') legible = false
+      continue
+    }
+    const consecutivo = Number(due.consecutive)
+    if (!norm(due.prefix) || !Number.isSafeInteger(consecutivo)) { legible = false; continue }
+    if (norm(due.prefix) === prefijo && consecutivo === factura.consecutive) {
+      cruza = true
+      const n = Number(it.value)
+      if (Number.isFinite(n)) valor += n
+    }
+  }
+  // Un ítem que SÍ cruza la factura basta, aunque otro no se lea: la pregunta es si esta
+  // factura ya recibió el pago, y ese ítem la responde.
+  if (cruza) {
+    if (!(valor > 0)) {
+      const pago = Number(v.payment?.value)
+      valor = Number.isFinite(pago) ? pago : 0
+    }
+    return { cruza: true, valor: redondearCentavos(valor) }
+  }
+  return legible ? { cruza: false } : 'ilegible'
+}
+
+/**
+ * ¿Alguno de estos recibos de Siigo es el abono que ONE está por emitir?
+ *
+ * ⚠️⚠️ **Es duplicado solo si paga la MISMA factura** (brief del 2026-09-22, caso V0409).
+ * El control anterior comparaba cliente y valor, y un cliente con dos vehículos tiene dos
+ * facturas por el MISMO valor: V0408 y V0409, mismo cliente, $510.000 cada una, pagadas el
+ * mismo día. El control tomó el abono de V0408 (RC-1-96, contra FV-2-511) por el de V0409, y
+ * FV-2-528 se quedó con su saldo entero. Coincidir en cliente, valor y fecha NO basta: la
+ * factura es obligatoria, y el valor se sigue exigiendo encima de ella.
+ *
+ * El valor se sigue exigiendo porque el plan 50/50 abona DOS veces la misma factura: sin él,
+ * cualquier abono que ONE no conozca frenaría todos los demás pagos del negocio.
+ *
+ * La fecha NO se exige: Tesorería fecha su abono el día que lo cruza, no el día del pago, y
+ * exigirla dejaría pasar justo el duplicado de un abono hecho a mano. Viaja en `existentes`
+ * para que quien revise la vea.
+ *
+ * Devuelve también los que no se pudieron leer (`sinLeer`), para que quien consulta pida su
+ * detalle en vez de darlos por buenos. Solo cuentan los del MISMO cliente: un abono de otro
+ * tercero no puede cruzar esta factura.
+ */
+export function revisarAbonosExistentes(input: {
+  vouchers: readonly VoucherSiigoLeido[]
+  identificacion: string
+  vencimiento: { prefix: string; consecutive: number }
+  /** Lo que ONE va a abonar. */
+  valor: number
+  /** Números de recibo que ONE ya le emitió a ESTE negocio: son sus otros pagos, no un duplicado. */
+  conocidos: ReadonlySet<string>
+}): { duplicados: AbonoExistente[]; sinLeer: VoucherSiigoLeido[] } {
+  const delCliente = soloDigitos(input.identificacion)
+  const valor = Math.round(redondearCentavos(input.valor))
+  const duplicados: AbonoExistente[] = []
+  const sinLeer: VoucherSiigoLeido[] = []
+
+  for (const v of input.vouchers) {
+    const numero = String(v.name ?? '').trim()
+    if (numero && input.conocidos.has(numero)) continue
+
+    const lectura = loQueAplicaALaFactura(v, input.vencimiento)
+    if (lectura === 'ilegible') {
+      if (delCliente && soloDigitos(v.customer?.identification) === delCliente) sinLeer.push(v)
+      continue
+    }
+    if (!lectura.cruza) continue
+    if (Math.round(lectura.valor) !== valor) continue
+    duplicados.push({ numero: numero || '(sin número)', fecha: v.date ?? '', valor: lectura.valor })
+  }
+  return { duplicados, sinLeer }
+}
+
+/** La frase que queda en la marca cuando Siigo ya tiene el abono. */
+export function detalleDuplicado(numeroFactura: string, existentes: readonly AbonoExistente[]): string {
+  const cuales = existentes
+    .map(e => (e.fecha ? `${e.numero} (${e.fecha})` : e.numero))
+    .join(', ')
+  const valor = existentes[0]?.valor ?? 0
+  return `Siigo ya tiene ${existentes.length === 1 ? 'el abono' : 'los abonos'} ${cuales} a la factura `
+    + `${numeroFactura} por ${fmtCOP(valor)}, que ONE no emitió: no se abona otra vez. `
+    + 'Si no corresponde a este pago, cruza el abono a mano.'
+}
+
+/** La frase que queda en la marca cuando no se pudo revisar completo lo que Siigo tiene. */
+export function detalleSinRevisar(numeroFactura: string, causa: string): string {
+  return `No se pudo revisar si Siigo ya tiene un abono a la factura ${numeroFactura} (${causa}): `
+    + 'el abono no sale a ciegas. Revisa Siigo y crúzalo a mano.'
+}
+
 /**
  * La RAZÓN corta de cada motivo, para la pantalla. Una por motivo: la lista es cerrada.
  * Se lee detrás de «el abono a mano en Siigo:».
@@ -235,6 +389,11 @@ export const ETIQUETA_ABONO_A_MANO: Readonly<Record<MotivoAbonoAMano, string>> =
   factura_de_otro_tercero: 'la factura es de otro tercero',
   factura_ilegible: 'no se pudo leer la factura',
   factura_sin_vinculo: 'la factura no está vinculada a Siigo (adóptala)',
+  // «Parece», y no «es»: la marca la pone un control automático y el detalle nombra el
+  // abono que encontró. Es la frase que también le sirve a V0409, cuya marca la escribió
+  // el control viejo al confundir el abono del vehículo hermano.
+  duplicado_en_siigo: 'en Siigo ya hay un abono que parece ser este',
+  abonos_sin_revisar: 'no se pudo revisar si en Siigo ya estaba',
 })
 
 /** ¿Es uno de los motivos conocidos? Una marca con un motivo que no está en la lista se nombra genérico. */
