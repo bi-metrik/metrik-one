@@ -745,9 +745,18 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     })
     const t = await texto(solo('Providencia'))
     expect(t.split('Providencia').length - 1).toBe(2)
-    // Si el título NO nombra el destino, el capítulo conserva su nombre.
+    // Aunque el título no lo nombre, la ficha DESTINO ya lo dice: un solo destino no se
+    // repite como capítulo (2026-09-22, antes aquí salía dos veces).
     const u = await texto(solo('Luna de miel familia Porras'))
-    expect(u.split('Providencia').length - 1).toBe(2)
+    expect(u.split('Providencia').length - 1).toBe(1)
+  })
+
+  it('5c · con un titular redactado, el capítulo tampoco repite el destino bajo las fotos', async () => {
+    const t = await texto(cot0006({ titular: 'Dos islas, un mismo mar de siete colores' }))
+    // La ficha DESTINO lo dice una vez; el encabezado del capítulo ya no.
+    // La ficha es angosta y parte el nombre en dos renglones: se cuenta con `\s+`.
+    expect(t.match(/San Andres -\s+Providencia/g) ?? []).toHaveLength(1)
+    expect(t).toMatch(/siete\s+colores/)
   })
 
   it('5b · con varios destinos cada capítulo conserva su nombre y su «DESTINO N DE M»', async () => {

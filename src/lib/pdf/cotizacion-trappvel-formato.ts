@@ -478,6 +478,20 @@ export function yaEstaEnElTitulo(nombre: string | null | undefined, titulo: stri
   return ` ${comparable(titulo)} `.includes(` ${n} `)
 }
 
+/**
+ * ¿La portada ya dijo este nombre? Con un solo capítulo, su nombre casi siempre es el
+ * destino, y la portada lo dice por tres lados: el título, el nombre del negocio y la ficha
+ * DESTINO. Con un titular redactado el título ya no es el nombre del negocio, así que
+ * comparar solo contra el título dejaba pasar el «San Andrés - Providencia» repetido bajo las
+ * fotos (COT-2026-0006). Se compara contra los tres.
+ */
+export function yaLoDiceLaPortada(
+  nombre: string | null | undefined,
+  portada: (string | null | undefined)[],
+): boolean {
+  return portada.some(t => !!t && yaEstaEnElTitulo(nombre, t))
+}
+
 /** El vuelo tiene regreso si la captura leyó algo suyo: la misma regla de `trayectosDelVuelo`. */
 export function tieneRegreso(v: VueloPDF): boolean {
   return v.fechaRegreso !== null || v.horaSalidaRegreso !== null || v.horaLlegadaRegreso !== null

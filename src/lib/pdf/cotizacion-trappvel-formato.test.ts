@@ -18,6 +18,7 @@ import {
   tituloConAcento,
   vueloDesdeNombre,
   yaEstaEnElTitulo,
+  yaLoDiceLaPortada,
   type FilaPorPasajeroDoc,
 } from './cotizacion-trappvel-formato'
 import type { HotelPDF } from '@/lib/cotizaciones/detalle-viaje'
@@ -197,6 +198,14 @@ describe('el nombre del capítulo contra el título de la portada', () => {
   it('ya está dicho si el título lo nombra entero, sin importar tildes ni puntuación', () => {
     expect(yaEstaEnElTitulo('San Andrés - Providencia', 'San Andrés - Providencia')).toBe(true)
     expect(yaEstaEnElTitulo('Cancun', 'Viaje a Cancún · familia Sánchez')).toBe(true)
+  })
+
+  it('la portada lo dice por el título, el nombre del negocio o la ficha DESTINO', () => {
+    // COT-2026-0006 con titular: el título ya no nombra el destino, el negocio sí.
+    expect(yaLoDiceLaPortada('San Andrés - Providencia', ['Dos islas, un mismo mar', 'San Andrés - Providencia', null])).toBe(true)
+    expect(yaLoDiceLaPortada('Providencia', ['Luna de miel', null, 'Providencia'])).toBe(true)
+    expect(yaLoDiceLaPortada('Cartagena', ['Luna de miel', 'Familia Porras', 'Caribe'])).toBe(false)
+    expect(yaLoDiceLaPortada(null, ['San Andrés'])).toBe(false)
   })
 
   it('no lo está si el título no lo nombra, o solo lo contiene dentro de otra palabra', () => {
