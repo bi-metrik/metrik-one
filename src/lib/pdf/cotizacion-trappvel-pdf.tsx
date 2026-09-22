@@ -63,6 +63,7 @@ import {
   capitulosDelViaje,
   circuloDeFecha,
   claveDeFecha,
+  clienteDeLaPortada,
   colorDeSigla,
   colorDeTarifa,
   conAnio,
@@ -79,7 +80,7 @@ import {
   sinTildes,
   tieneRegreso,
   tituloConAcento,
-  yaEstaEnElTitulo,
+  yaLoDiceLaPortada,
   type Capitulo,
   type Fecha,
 } from './cotizacion-trappvel-formato'
@@ -481,14 +482,16 @@ function LineaDeTiempo({ entradas }: { entradas: EntradaTiempo[] }) {
           </View>
         )
       })
-  // El rótulo viaja con la primera entrada: solo, al pie de una página, parece un corte.
+  // El rótulo viaja con las DOS primeras entradas en un bloque que no se parte (#819): solo,
+  // o con un único día al pie de la página, parece un corte y el día a día arranca en la
+  // hoja siguiente. Si el bloque no cabe, pasa entero a la página que sigue.
   return (
     <View style={{ marginTop: 16 }}>
       <View wrap={false}>
         <Antetitulo texto="DÍA A DÍA" color={C.magenta} />
-        {filas[0]}
+        {filas.slice(0, 2)}
       </View>
-      {filas.slice(1)}
+      {filas.slice(2)}
     </View>
   )
 }
@@ -830,7 +833,9 @@ export default function CotizacionTrappvelPDF({
   const detallada = v.nivelDetalle === 'muy_detallada'
   const general = v.nivelDetalle === 'general'
 
-  const titulo = (negocio?.nombre ?? cotizacion.descripcion ?? 'Propuesta de viaje').trim()
+  // El titular del texto para el cliente, si una persona lo revisó; si no, el de siempre.
+  const titulo = (v.titular?.trim() || negocio?.nombre || cotizacion.descripcion || 'Propuesta de viaje').trim()
+  const intro = v.intro?.trim() || null
   const acento = tituloConAcento(titulo, v.destino)
   const bloquesDia = (dias ?? []).filter(d => d.items.length > 0)
   const opcionales = sugeridos ?? []
@@ -1021,7 +1026,8 @@ export default function CotizacionTrappvelPDF({
    * ⚠️ Hasta el 2026-09-22 la columna repetía, con un chulo delante, exactamente la lista de
    * «Inversión» que el cliente acababa de leer media página arriba: no decía nada que no
    * estuviera dicho, y su título prometía una cosa que no era. Ahora solo sale con una lista
-   * de inclusiones de verdad (`viaje.incluye`), que todavía no llena nadie.
+   * de inclusiones de verdad (`viaje.incluye`): la del texto para el cliente que una persona
+   * revisó.
    */
   const incluye = (v.incluye ?? []).map(t => t.trim()).filter(Boolean)
 
@@ -1108,8 +1114,13 @@ export default function CotizacionTrappvelPDF({
             {acento.despues}
           </Text>
           <Text style={{ fontSize: 10, color: C.gris, marginTop: 5 }}>
-            {[empresa.contacto_nombre, empresa.nombre].filter(Boolean).join(' · ') || 'Propuesta de viaje'}
+            {clienteDeLaPortada(empresa.contacto_nombre, empresa.nombre) ?? 'Propuesta de viaje'}
           </Text>
+          {intro && (
+            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 12, color: C.texto, lineHeight: 1.45, marginTop: 10 }}>
+              {intro}
+            </Text>
+          )}
 
           {/* Sin foto la banda no aparece y el bloque sube: nada de rectángulo vacío. */}
           {v.foto && <FotoConRotulo foto={v.foto} alto={190} />}
@@ -1137,9 +1148,12 @@ export default function CotizacionTrappvelPDF({
             if (!hayAlgo) return null
             const nombreCiudad = c.ciudad ? (lugarConCodigo(c.ciudad)?.nombre ?? c.ciudad) : null
             // Con un solo capítulo, su nombre casi siempre es el destino que la portada ya
-            // dice en 34 pt («San Andrés - Providencia» salía dos veces en la misma página).
-            // Sin el nombre tampoco va la línea de fechas: la repite la tarjeta del hotel.
-            const conNombre = nombreCiudad !== null && (multiples || !yaEstaEnElTitulo(nombreCiudad, titulo))
+            // dice («San Andrés - Providencia» salía dos veces en la misma página). La portada
+            // lo dice en el título, en el nombre del negocio o en la ficha DESTINO: con un
+            // titular redactado el título ya no es el nombre del negocio, y hay que mirar los
+            // tres. Sin el nombre tampoco va la línea de fechas: la repite la tarjeta del hotel.
+            const conNombre = nombreCiudad !== null
+              && (multiples || !yaLoDiceLaPortada(nombreCiudad, [titulo, negocio?.nombre, v.destino]))
             const fechasCapitulo = conNombre && c.hotel
               ? [rangoCompacto(c.hotel.checkIn, c.hotel.checkOut), c.hotel.noches ? `${c.hotel.noches} ${c.hotel.noches === 1 ? 'noche' : 'noches'}` : null].filter(Boolean).join(' · ')
               : null
@@ -1445,7 +1459,7 @@ export default function CotizacionTrappvelPDF({
           )}
 
           {/* ── Antes de viajar (§4.9) ─────────────────────────────────────────
-              ⚠️ Sin campo todavía: nadie llena `antesDeViajar` y el recuadro no sale. */}
+              Sale del texto para el cliente revisado; sin él, el recuadro no se imprime. */}
           {antesDeViajar.length > 0 && (
             <View
               wrap={false}

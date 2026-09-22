@@ -450,6 +450,21 @@ function comparable(s: string): string {
 }
 
 /**
+ * La línea bajo el título de la portada: contacto y empresa, sin repetir.
+ *
+ * Una persona natural suele quedar con una empresa creada a su nombre, así que contacto y
+ * empresa dicen lo mismo y la portada imprimía «Ana Gómez · Ana Gómez». Se comparan sin
+ * mayúsculas, sin tildes, sin puntuación y sin espacios sobrantes; si son el mismo nombre,
+ * sale uno solo (el del contacto, como se escribió). `null` si no hay ninguno.
+ */
+export function clienteDeLaPortada(contacto: string | null | undefined, empresa: string | null | undefined): string | null {
+  const c = contacto?.trim() || null
+  const e = empresa?.trim() || null
+  if (c && e && comparable(c) === comparable(e)) return c
+  return [c, e].filter(Boolean).join(' · ') || null
+}
+
+/**
  * ¿Este nombre ya está dicho en el título de la portada?
  *
  * Con un solo capítulo, su nombre es casi siempre el destino del negocio, y el título de la
@@ -461,6 +476,20 @@ export function yaEstaEnElTitulo(nombre: string | null | undefined, titulo: stri
   const n = comparable(nombre ?? '')
   if (n === '') return false
   return ` ${comparable(titulo)} `.includes(` ${n} `)
+}
+
+/**
+ * ¿La portada ya dijo este nombre? Con un solo capítulo, su nombre casi siempre es el
+ * destino, y la portada lo dice por tres lados: el título, el nombre del negocio y la ficha
+ * DESTINO. Con un titular redactado el título ya no es el nombre del negocio, así que
+ * comparar solo contra el título dejaba pasar el «San Andrés - Providencia» repetido bajo las
+ * fotos (COT-2026-0006). Se compara contra los tres.
+ */
+export function yaLoDiceLaPortada(
+  nombre: string | null | undefined,
+  portada: (string | null | undefined)[],
+): boolean {
+  return portada.some(t => !!t && yaEstaEnElTitulo(nombre, t))
 }
 
 /** El vuelo tiene regreso si la captura leyó algo suyo: la misma regla de `trayectosDelVuelo`. */

@@ -8,6 +8,7 @@ import {
   TOKENS,
   absorberRedondeo,
   capitulosDelViaje,
+  clienteDeLaPortada,
   colorDeTarifa,
   leerFecha,
   lugarLegible,
@@ -17,6 +18,7 @@ import {
   tituloConAcento,
   vueloDesdeNombre,
   yaEstaEnElTitulo,
+  yaLoDiceLaPortada,
   type FilaPorPasajeroDoc,
 } from './cotizacion-trappvel-formato'
 import type { HotelPDF } from '@/lib/cotizaciones/detalle-viaje'
@@ -174,10 +176,36 @@ describe('el redondeo del precio por pasajero', () => {
   })
 })
 
+describe('el cliente bajo el título de la portada', () => {
+  it('⚠️ persona natural: contacto y empresa son el mismo nombre y sale UNA vez', () => {
+    expect(clienteDeLaPortada('Ligia Sanchez', 'Ligia Sanchez')).toBe('Ligia Sanchez')
+    // Sin distinguir tildes, mayúsculas ni espacios de más.
+    expect(clienteDeLaPortada('LIGIA  SÁNCHEZ', 'Ligia Sanchez')).toBe('LIGIA  SÁNCHEZ')
+  })
+
+  it('con empresa y contacto distintos salen los dos, como siempre', () => {
+    expect(clienteDeLaPortada('Ana Pérez', 'Viajes Andinos SAS')).toBe('Ana Pérez · Viajes Andinos SAS')
+  })
+
+  it('con uno solo sale ese, y sin ninguno no sale nada', () => {
+    expect(clienteDeLaPortada(null, 'Viajes Andinos SAS')).toBe('Viajes Andinos SAS')
+    expect(clienteDeLaPortada('Ana Pérez', '  ')).toBe('Ana Pérez')
+    expect(clienteDeLaPortada(null, null)).toBeNull()
+  })
+})
+
 describe('el nombre del capítulo contra el título de la portada', () => {
   it('ya está dicho si el título lo nombra entero, sin importar tildes ni puntuación', () => {
     expect(yaEstaEnElTitulo('San Andrés - Providencia', 'San Andrés - Providencia')).toBe(true)
     expect(yaEstaEnElTitulo('Cancun', 'Viaje a Cancún · familia Sánchez')).toBe(true)
+  })
+
+  it('la portada lo dice por el título, el nombre del negocio o la ficha DESTINO', () => {
+    // COT-2026-0006 con titular: el título ya no nombra el destino, el negocio sí.
+    expect(yaLoDiceLaPortada('San Andrés - Providencia', ['Dos islas, un mismo mar', 'San Andrés - Providencia', null])).toBe(true)
+    expect(yaLoDiceLaPortada('Providencia', ['Luna de miel', null, 'Providencia'])).toBe(true)
+    expect(yaLoDiceLaPortada('Cartagena', ['Luna de miel', 'Familia Porras', 'Caribe'])).toBe(false)
+    expect(yaLoDiceLaPortada(null, ['San Andrés'])).toBe(false)
   })
 
   it('no lo está si el título no lo nombra, o solo lo contiene dentro de otra palabra', () => {

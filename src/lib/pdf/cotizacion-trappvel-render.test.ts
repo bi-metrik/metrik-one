@@ -19,6 +19,7 @@ import { textoDelPDF } from './texto-del-pdf'
 import type { CotizacionPDFProps, ViajePDF } from './cotizacion-props'
 import { vuelosDeItems } from '@/lib/cotizaciones/detalle-viaje'
 import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
+import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/documento-cliente'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -744,9 +745,18 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     })
     const t = await texto(solo('Providencia'))
     expect(t.split('Providencia').length - 1).toBe(2)
-    // Si el título NO nombra el destino, el capítulo conserva su nombre.
+    // Aunque el título no lo nombre, la ficha DESTINO ya lo dice: un solo destino no se
+    // repite como capítulo (2026-09-22, antes aquí salía dos veces).
     const u = await texto(solo('Luna de miel familia Porras'))
-    expect(u.split('Providencia').length - 1).toBe(2)
+    expect(u.split('Providencia').length - 1).toBe(1)
+  })
+
+  it('5c · con un titular redactado, el capítulo tampoco repite el destino bajo las fotos', async () => {
+    const t = await texto(cot0006({ titular: 'Dos islas, un mismo mar de siete colores' }))
+    // La ficha DESTINO lo dice una vez; el encabezado del capítulo ya no.
+    // La ficha es angosta y parte el nombre en dos renglones: se cuenta con `\s+`.
+    expect(t.match(/San Andres -\s+Providencia/g) ?? []).toHaveLength(1)
+    expect(t).toMatch(/siete\s+colores/)
   })
 
   it('5b · con varios destinos cada capítulo conserva su nombre y su «DESTINO N DE M»', async () => {
@@ -765,4 +775,82 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     expect(t).toContain('DESTINO 1 DE 2 Madrid')
     expect(t).toContain('DESTINO 2 DE 2 Roma')
   })
+})
+
+
+/**
+ * El texto para el cliente (2026-09-22): titular, presentación, «Incluido en el plan» y
+ * «Antes de viajar», redactados por ONE y revisados por el equipo.
+ *
+ * Las props del viaje se arman con `textoParaElViaje`, la MISMA función que usa la acción
+ * del PDF: así lo que se prueba es la regla completa («solo sale lo revisado»), no una
+ * copia de ella.
+ */
+describe('el texto para el cliente', () => {
+  const TEXTO = {
+    titular: 'Cancun entre ruinas mayas y mar turquesa',
+    intro: 'Cinco dias para descansar frente al Caribe y conocer Chichen Itza.',
+    incluye: ['Tiquetes aereos con Avianca y articulo personal', 'Cuatro noches en el Crown Paradise con todo incluido'],
+    antes_de_viajar: ['Lleve pasaporte vigente', 'Los impuestos del hotel se pagan alla'],
+  }
+  const doc = (revisado: boolean): DocumentoCliente => ({
+    ...TEXTO,
+    origen: 'ia',
+    modelo: 'gemini-2.5-flash',
+    redactado_en: '2026-09-22T20:00:00.000Z',
+    fuente_hash: 'abc',
+    revisado_por: revisado ? 'staff-1' : null,
+    revisado_por_nombre: revisado ? 'Edgar' : null,
+    revisado_en: revisado ? '2026-09-22T21:00:00.000Z' : null,
+  })
+  const conTexto = (d: DocumentoCliente | null) => props({ viaje: viaje(textoParaElViaje(d)) })
+
+  it('revisado: el titular reemplaza al nombre del negocio en la portada', async () => {
+    const t = await texto(conTexto(doc(true)))
+    // El título es grande y parte renglón: el extractor deja un espacio doble en cada corte.
+    expect(t).toMatch(/PROPUESTA DE VIAJE · COTIZACIÓN Cancun\s+entre ruinas mayas y\s+mar turquesa/)
+    expect(t).not.toContain('familia Sanchez')
+  })
+
+  it('revisado: la presentación sale bajo el título', async () => {
+    expect(await texto(conTexto(doc(true)))).toContain('descansar frente al Caribe y conocer Chichen Itza')
+  })
+
+  it('revisado: «Incluido en el plan» lista lo que el cliente recibe', async () => {
+    const t = await texto(conTexto(doc(true)))
+    expect(t).toContain('Incluido en el plan')
+    expect(t).toContain('Tiquetes aereos con Avianca y articulo personal')
+  })
+
+  it('revisado: «Antes de viajar» sale en su recuadro', async () => {
+    const t = await texto(conTexto(doc(true)))
+    expect(t).toContain('Antes de viajar:')
+    expect(t).toContain('Lleve pasaporte vigente')
+  })
+
+  it('⚠️⚠️ un borrador de ONE sin revisar no imprime NADA: el documento sale como sin texto', async () => {
+    const borrador = await texto(conTexto(doc(false)))
+    expect(borrador).not.toContain('ruinas mayas')
+    expect(borrador).not.toContain('Lleve pasaporte vigente')
+    expect(borrador).not.toContain('Incluido en el plan')
+    expect(borrador).toBe(await texto(conTexto(null)))
+  })
+
+  it('persona natural: el cliente bajo el título sale una vez, no «Ligia Sanchez · Ligia Sanchez»', async () => {
+    const t = await texto(props())
+    expect(t).not.toContain('Ligia Sanchez · Ligia Sanchez')
+    expect(t).toContain('Ligia Sanchez')
+    const conEmpresa = await texto(props({ empresa: { ...props().empresa, nombre: 'Viajes Andinos SAS' } }))
+    expect(conEmpresa).toContain('Ligia Sanchez · Viajes Andinos SAS')
+  })
+
+  it('R6 · las plantillas de los demás workspaces ignoran el texto: su salida no cambia un carácter', async () => {
+    const base = props({ viaje: null })
+    const conElTexto = props({ viaje: viaje(textoParaElViaje(doc(true))) })
+    for (const plantilla of [CotizacionPDF, CotizacionTermotechPDF]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const render = async (p: CotizacionPDFProps) => textoDelPDF(Buffer.from(await renderToBuffer(createElement(plantilla, p) as any)))
+      expect(await render(conElTexto)).toBe(await render(base))
+    }
+  }, 30_000)
 })

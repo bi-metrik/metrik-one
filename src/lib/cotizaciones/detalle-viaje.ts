@@ -508,6 +508,46 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
   return out
 }
 
+/**
+ * Los traslados y las actividades de la cotización, en palabras y sin proveedor ni precio.
+ *
+ * Los consume el redactor del texto para el cliente (`documento-cliente.ts`): es lo que el
+ * cliente RECIBE además de vuelos y hotel. Sale de la lectura de la ranura; una línea de
+ * traslado o actividad sin lectura aporta solo su nombre, que el redactor limpia.
+ *
+ * ⚠️ Si la lectura no trae QUÉ es (el trayecto, el nombre de la actividad), el nombre de la
+ * línea va primero: «Día completo · San Andrés» a secas no dice qué se compró, y un modelo
+ * que recibe eso rellena el hueco inventando.
+ */
+export interface ServicioPDF {
+  tipo: 'traslado' | 'actividad'
+  /** «Aeropuerto - hotel · Privado», «Tour Johnny Cay · Día completo · San Andrés». */
+  descripcion: string
+  fecha: string | null
+}
+
+export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
+  const out: ServicioPDF[] = []
+  for (const item of items) {
+    const slug = ranuraDelItem(item)?.slug
+    if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') continue
+    const d = detalleDelItem(item)
+    const esTraslado = slug === 'traslado_detalle'
+    const que = texto(d, esTraslado ? 'trayecto' : 'nombre') ?? ((item.nombre ?? '').trim() || null)
+    const partes = esTraslado
+      ? [que, texto(d, 'tipo_vehiculo')]
+      : [que, texto(d, 'duracion'), texto(d, 'ciudad')]
+    const descripcion = partes.filter((p): p is string => Boolean(p)).join(' · ')
+    if (!descripcion) continue
+    out.push({
+      tipo: slug === 'traslado_detalle' ? 'traslado' : 'actividad',
+      descripcion,
+      fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+    })
+  }
+  return out
+}
+
 /** Los cargos que se pagan en destino, en su moneda local. */
 export function cargosEnDestinoDeItems(items: ItemConLectura[]): CargoEnDestinoPDF[] {
   const out: CargoEnDestinoPDF[] = []
