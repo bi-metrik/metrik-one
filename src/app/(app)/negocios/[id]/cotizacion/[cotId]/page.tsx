@@ -3,6 +3,7 @@ import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import { getAdicionalesDeCotizacion } from '@/app/(app)/negocios/adicional-actions'
 import { getPoliticaRecargo } from '@/app/(app)/negocios/recargo-actions'
 import { getSalidaDeCotizacion } from '@/app/(app)/negocios/margen-salida-actions'
+import { getTextoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { notFound } from 'next/navigation'
@@ -25,7 +26,7 @@ export default async function CotizacionNegocioPage({
   const { id, cotId } = await params
 
   // getFiscalProfile tiene getWorkspace() interno que THROWS — catch para no crashear
-  const [cotizacion, items, fiscalResult, itinerarios, adicionales, salida] = await Promise.all([
+  const [cotizacion, items, fiscalResult, itinerarios, adicionales, salida, textoCliente] = await Promise.all([
     getCotizacion(cotId),
     getCotizacionItems(cotId),
     getFiscalProfile().catch(() => ({ success: false as const, data: null })),
@@ -40,6 +41,9 @@ export default async function CotizacionNegocioPage({
     // El margen mínimo en la salida: si puede enviarse y quién puede autorizarla. Si no
     // se puede leer, la pantalla queda como siempre; el candado real está en el servidor.
     getSalidaDeCotizacion(cotId).catch(() => null),
+    // El texto para el cliente. `null` con cualquier plantilla que no lo imprima, y si
+    // la lectura falla: el editor queda como siempre, sin el botón «Texto».
+    getTextoCliente(cotId).catch(() => null),
   ])
 
   // Regla 2 · el recargo fijo que declara la línea del negocio. Sin línea, o sin la
@@ -247,6 +251,7 @@ export default async function CotizacionNegocioPage({
       lineasPorTipo={lineasPorTipo}
       adicionales={adicionales as Parameters<typeof CotizacionEditor>[0]['adicionales']}
       salida={salida}
+      textoCliente={textoCliente}
     />
   )
 }

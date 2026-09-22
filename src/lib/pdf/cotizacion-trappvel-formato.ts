@@ -450,6 +450,21 @@ function comparable(s: string): string {
 }
 
 /**
+ * La línea bajo el título de la portada: contacto y empresa, sin repetir.
+ *
+ * Una persona natural suele quedar con una empresa creada a su nombre, así que contacto y
+ * empresa dicen lo mismo y la portada imprimía «Ana Gómez · Ana Gómez». Se comparan sin
+ * mayúsculas, sin tildes, sin puntuación y sin espacios sobrantes; si son el mismo nombre,
+ * sale uno solo (el del contacto, como se escribió). `null` si no hay ninguno.
+ */
+export function clienteDeLaPortada(contacto: string | null | undefined, empresa: string | null | undefined): string | null {
+  const c = contacto?.trim() || null
+  const e = empresa?.trim() || null
+  if (c && e && comparable(c) === comparable(e)) return c
+  return [c, e].filter(Boolean).join(' · ') || null
+}
+
+/**
  * ¿Este nombre ya está dicho en el título de la portada?
  *
  * Con un solo capítulo, su nombre es casi siempre el destino del negocio, y el título de la

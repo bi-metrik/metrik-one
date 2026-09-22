@@ -72,3 +72,17 @@ const PLANTILLAS_CON_FOTOS = new Set(['trappvel'])
 export function plantillaUsaFotosDeCiudad(slug: string | null | undefined): boolean {
   return !!slug && PLANTILLAS_CON_FOTOS.has(slug)
 }
+
+/**
+ * Las plantillas que imprimen el texto para el cliente (titular, intro, «Incluido en el
+ * plan» y «Antes de viajar») que redacta ONE y revisa el equipo. Hoy solo la de Trappvel.
+ *
+ * Misma razón que las fotos: la pregunta vive junto al registro. Con otra plantilla el
+ * editor no muestra el panel, la acción no redacta y el PDF no lee la columna, así que su
+ * documento sale idéntico al de antes.
+ */
+const PLANTILLAS_CON_TEXTO_DEL_CLIENTE = new Set(['trappvel'])
+
+export function plantillaUsaTextoDelCliente(slug: string | null | undefined): boolean {
+  return !!slug && PLANTILLAS_CON_TEXTO_DEL_CLIENTE.has(slug)
+}

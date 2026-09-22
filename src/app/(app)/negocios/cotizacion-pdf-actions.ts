@@ -22,7 +22,7 @@ import {
   etiquetaDeAdicional,
   totalesDeAdicionales,
 } from '@/lib/cotizaciones/adicionales'
-import { itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { aportaAlTotal, lineasQueDescribeElDocumento } from '@/lib/cotizaciones/lineas-del-documento'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
@@ -41,7 +41,9 @@ import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
   plantillaUsaFotosDeCiudad,
+  plantillaUsaTextoDelCliente,
 } from '@/lib/pdf/plantillas-cotizacion'
+import { avisoDelTextoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
@@ -412,22 +414,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    *
    * Una sugerencia FUERA DEL PRECIO no aporta: no entra al detalle ni al Subtotal, y
    * se imprime con su precio en «actividades adicionales no incluidas» (abajo).
+   *
+   * La regla vive en `lineas-del-documento.ts`: la comparte el redactor del texto para
+   * el cliente, que tiene que describir las mismas líneas que este documento imprime.
    */
-  const aportanAlTotal = new Set(
-    itemsQueAportanAlTotal(
-      items.filter(i => i.id).map(i => ({
-        id: i.id as string,
-        grupo: i.grupo ?? null,
-        opcion_de: i.opcion_de ?? null,
-        es_ajuste: i.es_ajuste ?? false,
-        orden: i.orden ?? 0,
-        dia_relativo: i.dia_relativo ?? null,
-        entra_al_precio: i.entra_al_precio ?? null,
-      })),
-    ),
-  )
-  /** El ítem de cuadre entra siempre: su rama vive fuera de las ranuras. */
-  const aporta = (i: ItemRow) => !i.id || aportanAlTotal.has(i.id) || i.es_ajuste === true
+  const aporta = aportaAlTotal(items)
 
   /**
    * §4.3 · el aviso de cobertura también sale AQUÍ, no solo en el editor.
@@ -898,11 +889,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * vuelo que el cliente no está comprando.
    */
   const idsDelPrincipal = bloques?.find(b => b.esPrincipal)?.itemIds ?? null
-  const itemsImpresos = idsDelPrincipal
-    ? idsDelPrincipal.map(id => itemPorId.get(id)).filter((i): i is ItemRow => i !== undefined)
-    : items.filter(aporta)
+  const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aporta)
 
   let viajePDF: CotizacionPDFProps['viaje'] = null
+  // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
+  let avisoTexto: string | null = null
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
     const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
@@ -951,7 +942,19 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const fotos = plantillaUsaFotosDeCiudad(templateSlug)
       ? fotosDelViaje({ destino, vuelos, hoteles }, fotosDeCiudad)
       : null
+    /**
+     * El texto para el cliente (titular, intro, «Incluido en el plan», «Antes de viajar»).
+     * Solo lo lee la plantilla que lo imprime, y solo sale lo que una persona REVISÓ
+     * (`textoImprimible`). Sin texto revisado las claves ni se agregan: el documento sale
+     * idéntico al de antes.
+     */
+    const documentoCliente = plantillaUsaTextoDelCliente(templateSlug)
+      ? leerDocumentoCliente((cot as unknown as Record<string, unknown>).documento_cliente)
+      : null
+    const textoCliente = textoParaElViaje(documentoCliente)
+    avisoTexto = avisoDelTextoEnPdf(documentoCliente)
     const viaje = {
+      ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
       destino,
       fechas: rangoDeFechas(delNegocio.fechas.inicio, delNegocio.fechas.fin),
@@ -978,6 +981,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       || vuelos.length > 0
       || hoteles.length > 0
       || cargosEnDestino.length > 0
+      || Object.keys(textoCliente).length > 0
     viajePDF = hayAlgoQueDescribir ? viaje : null
   }
 
@@ -1047,6 +1051,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       borrador: true as const,
       aviso: avisoBorrador,
       avisosCobertura,
+      avisoTexto,
       renderedVia: 'react-pdf' as const,
     }
   }
@@ -1082,6 +1087,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     aviso: externo.aviso,
     avisosCobertura,
     avisosCaptura,
+    avisoTexto,
     renderedVia: 'react-pdf' as const,
   }
 }

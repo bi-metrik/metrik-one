@@ -90,15 +90,23 @@ export interface ViajePDF {
    */
   fechaInicio?: string | null
   /**
-   * El recuadro «Antes de viajar» (§4.9 del sistema visual). ⚠️ SIN CAMPO todavía: nadie lo
-   * llena y el recuadro no se imprime. No se inventa contenido por defecto.
+   * El titular de la portada, del texto para el cliente (`cotizaciones.documento_cliente`).
+   * Reemplaza al nombre del negocio como título. Ausente o `null`, el título es el de
+   * siempre. Solo llega un texto que una persona REVISÓ (`textoImprimible`).
+   */
+  titular?: string | null
+  /** Una o dos frases que presentan el viaje, bajo el título. Misma regla que `titular`. */
+  intro?: string | null
+  /**
+   * El recuadro «Antes de viajar» (§4.9 del sistema visual). Sale del texto para el cliente
+   * revisado; sin él, no se imprime. No se inventa contenido por defecto.
    */
   antesDeViajar?: string[]
   /**
    * «Incluido en el plan»: lo que el cliente RECIBE (traslados, equipaje, alimentación,
-   * impuestos), en frases cortas. ⚠️ SIN CAMPO todavía, como `antesDeViajar`: nadie lo
-   * llena y la columna no se imprime. Ya NO se arma con los nombres de las líneas, que es la
-   * lista de «Inversión» repetida.
+   * impuestos), en frases cortas. Sale del texto para el cliente revisado; sin él, la
+   * columna no se imprime. NO se arma con los nombres de las líneas, que es la lista de
+   * «Inversión» repetida.
    */
   incluye?: string[]
   vuelos: VueloPDF[]

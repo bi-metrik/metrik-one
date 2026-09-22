@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
-  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle,
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -47,7 +47,9 @@ import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import CostoManualItem from '@/app/(app)/negocios/costo-manual-item'
 import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
+import DocumentoClientePanel from '@/app/(app)/negocios/documento-cliente-panel'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
+import { estadoDelTexto, type PanelTextoCliente } from '@/lib/cotizaciones/documento-cliente'
 
 /**
  * Sin adicionales y sin poder guardarlos: lo que recibe toda cotización que no es de
@@ -254,9 +256,18 @@ interface Props {
    * el piso en la salida y la pantalla es la de siempre.
    */
   salida?: SalidaVista | null
+  /**
+   * El texto para el cliente (titular, intro, «Incluido», «Antes de viajar»), leído por el
+   * servidor (`documento-cliente-actions.ts`). Solo llega con la plantilla que lo imprime:
+   * ausente o `null`, el editor no muestra el botón ni el panel.
+   */
+  textoCliente?: PanelTextoCliente | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null }: Props) {
+  // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
+  // el equipo tiene que hacer aquí, y cerrado no lo vería.
+  const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -402,6 +413,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         for (const a of (res as { avisosCaptura?: string[] }).avisosCaptura ?? []) {
           toast.error(`Pantallazo desactualizado en ${a}`, { duration: Infinity, closeButton: true })
         }
+        // Un borrador de ONE sin revisar no sale en el PDF. Avisa, no bloquea: el PDF ya
+        // salió con el texto de siempre.
+        const avisoTexto = (res as { avisoTexto?: string | null }).avisoTexto
+        if (avisoTexto) toast.warning(avisoTexto, { duration: 10000, closeButton: true })
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
@@ -802,6 +817,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             <FileDown className="h-3 w-3" />
             PDF
           </button>
+          {textoCliente && (
+            <button
+              type="button"
+              onClick={() => setVerTextoCliente(v => !v)}
+              aria-expanded={verTextoCliente}
+              className={`relative inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent ${verTextoCliente ? 'bg-accent' : ''}`}
+            >
+              <FileText className="h-3 w-3" />
+              Texto
+              {estadoDelTexto(textoCliente.documento) === 'borrador' && (
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-500" aria-label="Borrador sin revisar" />
+              )}
+            </button>
+          )}
           <button
             onClick={handleDuplicar}
             disabled={isPending}
@@ -814,6 +843,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       </div>
 
       <PanelMargenSalida cotizacionId={cotizacion.id} salida={salida} />
+
+      {textoCliente && verTextoCliente && (
+        <DocumentoClientePanel cotizacionId={cotizacion.id} inicial={textoCliente} />
+      )}
 
       {frozen && (
         <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 dark:bg-blue-950/20 dark:border-blue-900/30 dark:text-blue-300">

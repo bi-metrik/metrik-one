@@ -8,6 +8,7 @@ import {
   TOKENS,
   absorberRedondeo,
   capitulosDelViaje,
+  clienteDeLaPortada,
   colorDeTarifa,
   leerFecha,
   lugarLegible,
@@ -171,6 +172,24 @@ describe('el redondeo del precio por pasajero', () => {
 
   it('sin residuo no toca nada', () => {
     expect(absorberRedondeo(FILAS, 0)).toEqual({ filas: FILAS, residuo: 0 })
+  })
+})
+
+describe('el cliente bajo el título de la portada', () => {
+  it('⚠️ persona natural: contacto y empresa son el mismo nombre y sale UNA vez', () => {
+    expect(clienteDeLaPortada('Ligia Sanchez', 'Ligia Sanchez')).toBe('Ligia Sanchez')
+    // Sin distinguir tildes, mayúsculas ni espacios de más.
+    expect(clienteDeLaPortada('LIGIA  SÁNCHEZ', 'Ligia Sanchez')).toBe('LIGIA  SÁNCHEZ')
+  })
+
+  it('con empresa y contacto distintos salen los dos, como siempre', () => {
+    expect(clienteDeLaPortada('Ana Pérez', 'Viajes Andinos SAS')).toBe('Ana Pérez · Viajes Andinos SAS')
+  })
+
+  it('con uno solo sale ese, y sin ninguno no sale nada', () => {
+    expect(clienteDeLaPortada(null, 'Viajes Andinos SAS')).toBe('Viajes Andinos SAS')
+    expect(clienteDeLaPortada('Ana Pérez', '  ')).toBe('Ana Pérez')
+    expect(clienteDeLaPortada(null, null)).toBeNull()
   })
 })
 
