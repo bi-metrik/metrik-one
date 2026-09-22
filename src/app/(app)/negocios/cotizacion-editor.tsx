@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
-  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator,
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -43,6 +43,7 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
+import CostoManualItem from '@/app/(app)/negocios/costo-manual-item'
 import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 
@@ -61,12 +62,15 @@ import {
 } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { nombreProvisionalDeGrupo } from '@/lib/cotizaciones/nombre-linea'
 import {
+  composicionDeLinea,
+  confirmacionDesactualizada,
   confirmadaVigente,
   leerTarifaPax,
   lineaPorPasajero,
   precioPorPasajero,
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
+import { lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
@@ -379,6 +383,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         for (const a of (res as { avisosCobertura?: string[] }).avisosCobertura ?? []) {
           toast.warning(a, { duration: Infinity, closeButton: true })
         }
+        // Brief del 2026-09-22 · líneas con el pantallazo de otros pasajeros. Mismo criterio:
+        // el documento salió, y quien lo descargó tiene que saber que su precio no es el de hoy.
+        for (const a of (res as { avisosCaptura?: string[] }).avisosCaptura ?? []) {
+          toast.error(`Pantallazo desactualizado en ${a}`, { duration: Infinity, closeButton: true })
+        }
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
@@ -635,6 +644,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
    * de que alguien arme una combinación. Avisa, no bloquea: dos opciones distintas
    * pueden ser legítimas y quien decide es la persona.
    */
+  /**
+   * Las líneas con el pantallazo o el costo de OTROS pasajeros (brief del 2026-09-22).
+   *
+   * El cambio que las deja viejas casi nunca pasa aquí: pasa en el negocio, cuando alguien
+   * corrige los pasajeros del viaje. Por eso el aviso va arriba y nombra cada línea: con la
+   * lista cerrada, la alerta de cada una no se ve. Avisa, no bloquea — no hay un control de
+   * envío donde sumarlo (`captura-desactualizada.ts`); lo que sí se niega es confirmar el
+   * costo de cada línea mientras esté vieja.
+   */
+  const desactualizadas = lineasDesactualizadas(
+    initialItems.map(i => ({
+      id: i.id,
+      nombre: i.nombre ?? null,
+      grupo: i.grupo ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      tarifa_pax: i.tarifa_pax,
+    })),
+    composicionViaje,
+  )
+
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
       id: i.id,
@@ -784,6 +813,32 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </div>
       )}
 
+      {/* Brief del 2026-09-22 · el precio de estas líneas no corresponde a los pasajeros de
+          hoy. En borrador, se reemplaza el pantallazo; fuera de borrador la regla de
+          Mauricio es otra cotización, y el aviso lo dice así. */}
+      {desactualizadas.length > 0 && (
+        <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {desactualizadas.length === 1
+              ? 'Una línea tiene el pantallazo de otros pasajeros: su precio no corresponde al viaje de hoy.'
+              : `${desactualizadas.length} líneas tienen el pantallazo de otros pasajeros: su precio no corresponde al viaje de hoy.`}
+          </p>
+          <ul className="mt-1.5 space-y-1 pl-5">
+            {desactualizadas.map(l => (
+              <li key={l.itemId}>
+                <span className="font-medium">«{l.nombre}»</span>: {l.motivos.join(' ')}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 pl-5">
+            {editable
+              ? 'Pega el pantallazo nuevo en cada una y vuelve a confirmar su costo antes de enviar la cotización.'
+              : 'Esta cotización ya no se edita: duplícala para cotizar con los pasajeros de hoy.'}
+          </p>
+        </div>
+      )}
+
       {/* Items editor */}
       <div className="space-y-3">
           {/* Abrir o cerrar todos los items de una. Con una cotizacion larga, abrir
@@ -890,7 +945,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // cascada, repartido en proporción al costo confirmado de cada tipo. Solo si
             // ese costo sigue siendo el de la línea: si alguien editó los rubros después,
             // el reparto describiría otra versión.
-            const precioPorPax = tarifaDelItem.confirmada && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
+            // Tampoco si la confirmación es de OTROS pasajeros u otra moneda (brief del
+            // 2026-09-22): repartir entre 2 adultos un precio que la línea ya dice que es
+            // para 3 es exactamente el precio mal que la alerta de la línea denuncia.
+            const precioPorPax = tarifaDelItem.confirmada
+              && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
+              && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
               ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
               : null
 
@@ -1341,6 +1401,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 Suma de {rubrosConfirmados.length} rubro{rubrosConfirmados.length === 1 ? '' : 's'}
                               </p>
                             </>
+                          ) : lineasPorTipo ? (
+                            /* En un viaje el proveedor puede cobrar en otra moneda: el costo a
+                               mano la declara, COP por defecto (brief del 2026-09-22). Guarda
+                               pesos en `subtotal` y anota lo escrito. Fuera del flujo de viaje,
+                               la casilla en pesos de siempre. */
+                            <CostoManualItem
+                              itemId={item.id}
+                              subtotalPesos={costoManual}
+                              tarifaPax={item.tarifa_pax}
+                              onCambio={() => router.refresh()}
+                            />
                           ) : (
                             <>
                               <div className="relative">

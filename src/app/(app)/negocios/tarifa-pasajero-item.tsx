@@ -9,6 +9,7 @@ import {
   confirmarMenorNoPaga,
   confirmarTarifaPorPasajero,
   corregirCampoDeFicha,
+  elegirMonedaDeTarifa,
   leerCasillaDeItem,
   quitarCasillaDeItem,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
@@ -18,16 +19,21 @@ import { margenDelProveedor, type MargenProveedor } from '@/lib/cotizaciones/mar
 import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import {
+  capturasDesactualizadas,
   casillasDe,
   composicionDeLectura,
   composicionDeLinea,
+  confirmacionDesactualizada,
   confirmadaVigente,
   describirOcupacion,
   faltanPorAcomodar,
   formatoMonto,
   leerTarifaPax,
   lineaPorPasajero,
+  MENSAJE_MONEDA_ASUMIDA,
   mismaComposicion,
+  MONEDAS_FRECUENTES,
+  monedaDeTarifa,
   ocupacionObservada,
   resolverTarifa,
   tarifaMasReciente,
@@ -36,9 +42,11 @@ import {
   type ClaveCasilla,
   type Composicion,
   type LecturaCasilla,
+  type MonedaDeTarifa,
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { Correcciones } from '@/lib/cotizaciones/correcciones'
+import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 /**
  * Pantallazos de una línea con precio por tipo de pasajero (diseño §6.1).
@@ -61,9 +69,8 @@ import type { Correcciones } from '@/lib/cotizaciones/correcciones'
  *
  * Toda acción que escribe la tarifa devuelve la que quedó, y la casilla pinta con ella sin
  * esperar el refresco de la página: manda la más nueva de las dos (`tarifaMasReciente`).
- * Pegar directo y elegir la moneda después de un rechazo pasan por el MISMO `leer`, así
- * que quedan igual. Antes, el camino de la moneda dejaba la casilla 1 vacía y la 2 sin
- * activar hasta recargar, con la lectura ya guardada.
+ * Elegir la moneda también: `elegirMonedaDeTarifa` devuelve la tarifa guardada. (Hasta el
+ * 2026-09-16 el camino de la moneda dejaba la casilla 1 vacía hasta recargar.)
  *
  * ## El orden del bloque (diseño del 2026-09-21, §3)
  *
@@ -77,6 +84,14 @@ import type { Correcciones } from '@/lib/cotizaciones/correcciones'
  * La secuencia de capturas complementarias (2 y 3) arranca DESPUÉS de la primera lectura:
  * la razón por la que existen —saber qué casillas pedir— aplica a la SEGUNDA captura, no a
  * la primera.
+ *
+ * ## Lo que queda viejo se dice, no se borra (brief del 2026-09-22)
+ *
+ * Si cambian los pasajeros —de la línea o del viaje que la línea hereda—, cada captura
+ * buscada para otros pasajeros lleva su alerta PERSISTENTE, dentro de su casilla y dicha en
+ * palabras («Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos: pega uno
+ * nuevo»). Pegar la nueva la quita. El costo cargado, igual: se queda y dice que es de otro
+ * grupo. Y la moneda que la captura no mostraba queda SUPUESTA hasta un clic.
  */
 export default function TarifaPasajeroItem({
   itemId,
@@ -108,15 +123,23 @@ export default function TarifaPasajeroItem({
 
   const [leyendo, setLeyendo] = useState<ClaveCasilla | null>(null)
   const [previews, setPreviews] = useState<Partial<Record<ClaveCasilla, string>>>({})
-  const [rechazos, setRechazos] = useState<Partial<Record<ClaveCasilla, { mensaje: string; detalle?: string; pideMoneda?: boolean }>>>({})
+  const [rechazos, setRechazos] = useState<Partial<Record<ClaveCasilla, { mensaje: string; detalle?: string }>>>({})
   const [ultimoMensaje, setUltimoMensaje] = useState<string | null>(null)
   const [detalleAbierto, setDetalleAbierto] = useState<Partial<Record<ClaveCasilla | 'resultado', boolean>>>({})
   const [editandoComposicion, setEditandoComposicion] = useState(false)
   const [tasa, setTasa] = useState('')
   const [isPending, startTransition] = useTransition()
 
+  // La moneda con que se costea (la elegida, la leída o COP supuesta) y lo que quedó viejo.
+  // Salen del MISMO módulo que usa el servidor: la pantalla no puede dar por vigente lo que
+  // la confirmación va a rechazar.
+  const monedaTarifa = monedaDeTarifa(tarifa)
+  const viejas = composicion ? capturasDesactualizadas(composicion, casillas, ranura.slug) : []
+  const alertaDe = (clave: ClaveCasilla) => viejas.find(v => v.clave === clave)?.mensaje ?? null
+  const confirmacionVieja = confirmacionDesactualizada(tarifa, composicion)
+
   const defs = composicion ? casillasDe(composicion, ranura.slug) : []
-  const estado = composicion ? resolverTarifa(composicion, casillas, ranura.slug) : null
+  const estado = composicion ? resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda }) : null
   const primera = casillas.grupo_completo
   const primeraResuelve = !!(composicion && primera && traeDesgloseCompleto(primera, composicion))
 
@@ -137,21 +160,23 @@ export default function TarifaPasajeroItem({
   const pedirComposicion = !composicion && !!primera
   const mostrarComposicion = !!composicion && (!!primera || !!tarifa.composicion)
 
-  function leer(clave: ClaveCasilla, dataUrl: string, monedaIndicada?: string) {
+  function leer(clave: ClaveCasilla, dataUrl: string) {
     setPreviews(p => ({ ...p, [clave]: dataUrl }))
     setRechazos(r => ({ ...r, [clave]: undefined }))
     setUltimoMensaje(null)
     setLeyendo(clave)
     void (async () => {
       try {
-        const r = await leerCasillaDeItem(itemId, clave, dataUrl, monedaIndicada ?? null)
+        // Sin moneda visible ya no hay rechazo que resolver aquí: la lectura se guarda con
+        // COP supuesta y la pregunta sale DESPUÉS, persistente (`MonedaDeLaTarifa`).
+        const r = await leerCasillaDeItem(itemId, clave, dataUrl)
         if (r.ok) {
           setGuardada(r.tarifa)
           setUltimoMensaje(r.mensaje)
           setPreviews(p => ({ ...p, [clave]: undefined }))
           onCambio()
         } else {
-          setRechazos(x => ({ ...x, [clave]: { mensaje: r.mensaje, detalle: r.detalle, pideMoneda: r.pideMoneda } }))
+          setRechazos(x => ({ ...x, [clave]: { mensaje: r.mensaje, detalle: r.detalle } }))
         }
       } finally {
         setLeyendo(null)
@@ -196,15 +221,18 @@ export default function TarifaPasajeroItem({
   const tasaNum = Number(tasa.replace(/[^\d.,]/g, '').replace(',', '.'))
   const tasaValida = enCOP || (Number.isFinite(tasaNum) && tasaNum > 0)
 
-  // ¿Hay una lectura más nueva que la última confirmación? Entonces hay algo por confirmar.
+  // ¿Hay una lectura más nueva que la última confirmación, o la confirmación quedó vieja
+  // (otros pasajeros, otra moneda)? Entonces hay algo por confirmar.
   const ultimaLectura = Object.values(casillas).reduce<string>((m, l) => (l && l.leidaEn > m ? l.leidaEn : m), '')
   const confirmada = tarifa.confirmada ?? null
-  const hayPorConfirmar = estado?.estado === 'resuelta' && (!confirmada || ultimaLectura > confirmada.confirmadaEn)
+  const hayPorConfirmar = estado?.estado === 'resuelta'
+    && (!confirmada || ultimaLectura > confirmada.confirmadaEn || !!confirmacionVieja)
   const confirmadaAlDia = !!confirmada && confirmadaVigente(confirmada, costoUnitarioLinea)
   // El margen que la captura ya fija. Se calcula con el MISMO helper que usa el servidor al
   // confirmar: escrito dos veces, la pantalla anunciaría un porcentaje y la línea guardaría
-  // otro (es la lección de `seleccionSupuesta`).
-  const margenProveedor = margenDelProveedor(casillas.grupo_completo)
+  // otro (es la lección de `seleccionSupuesta`). Los montos, en la moneda de la línea.
+  const margenLeido = margenDelProveedor(casillas.grupo_completo)
+  const margenProveedor = margenLeido ? { ...margenLeido, moneda: monedaTarifa.moneda } : null
 
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
@@ -240,6 +268,8 @@ export default function TarifaPasajeroItem({
         lectura={primera}
         ficha={{ ranura, correcciones: tarifa.correcciones, onGuardar: corregir }}
         rechazo={rechazos.grupo_completo}
+        desactualizada={alertaDe('grupo_completo')}
+        moneda={monedaTarifa}
         preview={previews.grupo_completo}
         leyendo={leyendo === 'grupo_completo'}
         detalleAbierto={!!detalleAbierto.grupo_completo}
@@ -247,8 +277,20 @@ export default function TarifaPasajeroItem({
         onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, grupo_completo: !x.grupo_completo }))}
         onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), 'Pantallazo quitado.')}
         onPegar={e => pegar('grupo_completo', e)}
-        onMoneda={mon => leer('grupo_completo', previews.grupo_completo as string, mon)}
       />
+
+      {/* ── La moneda de la tarifa (parte 2): editable, COP por defecto, nunca callada ──
+          Aparece con la primera lectura. Si la captura no la mostraba, la alerta queda
+          aquí hasta que alguien la acepte o la cambie: el costo no se confirma antes. */}
+      {primera && (
+        <MonedaDeLaTarifa
+          itemId={itemId}
+          info={monedaTarifa}
+          deshabilitado={isPending || leyendo !== null}
+          onGuardada={setGuardada}
+          onCambio={onCambio}
+        />
+      )}
 
       {/* ── 2 · A quién cubre esta línea: RESULTADO de la lectura (§2.4, P7) ──
           Solo se habla cuando hay algo que decir: después de una lectura, o cuando
@@ -281,6 +323,8 @@ export default function TarifaPasajeroItem({
               numerada
               lectura={casillas[d.clave]}
               rechazo={rechazos[d.clave]}
+              desactualizada={alertaDe(d.clave)}
+              moneda={monedaTarifa}
               preview={previews[d.clave]}
               leyendo={leyendo === d.clave}
               detalleAbierto={!!detalleAbierto[d.clave]}
@@ -288,13 +332,21 @@ export default function TarifaPasajeroItem({
               onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, [d.clave]: !x[d.clave] }))}
               onQuitar={() => accion(() => quitarCasillaDeItem(itemId, d.clave), `Pantallazo ${d.numero} quitado.`)}
               onPegar={e => pegar(d.clave, e)}
-              onMoneda={mon => leer(d.clave, previews[d.clave] as string, mon)}
             />
           ))}
 
           {/* ── Qué encontró (P4) y qué falta ── */}
-          {ultimoMensaje && estado?.estado !== 'falta' && estado?.estado !== 'resuelta' && (
+          {ultimoMensaje && estado?.estado !== 'falta' && estado?.estado !== 'resuelta' && estado?.estado !== 'desactualizada' && (
             <p className="text-[11px] font-medium">{ultimoMensaje}</p>
+          )}
+          {/* Las capturas viejas ya dicen, cada una en su casilla, qué hay que reemplazar.
+              Aquí solo el efecto: con ellas no hay costo, ni se puede confirmar. */}
+          {estado?.estado === 'desactualizada' && (
+            <p className="rounded-md bg-red-50 p-2 text-[11px] font-medium text-red-900">
+              {estado.capturas.length === 1
+                ? 'Hay un pantallazo buscado para otros pasajeros: el costo por pasajero no se calcula hasta reemplazarlo.'
+                : `Hay ${estado.capturas.length} pantallazos buscados para otros pasajeros: el costo por pasajero no se calcula hasta reemplazarlos.`}
+            </p>
           )}
           {estado?.estado === 'falta' && (
             <p className="rounded-md bg-amber-50 p-2 text-[11px] font-medium text-amber-900">{estado.mensaje}</p>
@@ -319,6 +371,13 @@ export default function TarifaPasajeroItem({
           {/* ── El resultado, ya partido (P6) ── */}
           {estado?.estado === 'resuelta' && hayPorConfirmar && (
             <div className="space-y-2 rounded-md border bg-background p-2.5">
+              {/* Por qué se vuelve a confirmar, cuando lo cargado quedó viejo. */}
+              {confirmacionVieja && (
+                <p className="flex items-start gap-1.5 rounded bg-amber-50 p-1.5 text-[11px] font-medium text-amber-900">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  {confirmacionVieja.mensaje}
+                </p>
+              )}
               <p className="text-[11px] font-medium">{ultimoMensaje ?? estado.mensaje}</p>
               <p className="text-sm font-semibold tabular-nums">{lineaPorPasajero(estado.costos, estado.moneda)}</p>
               <p className="text-[10px] text-muted-foreground">
@@ -372,9 +431,16 @@ export default function TarifaPasajeroItem({
                 </div>
               )}
 
+              {/* La moneda supuesta frena aquí también: el servidor lo rechaza igual, y un
+                  botón que se deja apretar para responder «no» enseña a ignorar la pantalla. */}
+              {monedaTarifa.asumida && (
+                <p className="text-[10px] font-medium text-amber-800">
+                  Acepta o cambia la moneda de la tarifa (arriba) para poder confirmar el costo.
+                </p>
+              )}
               <button
                 type="button"
-                disabled={isPending || !tasaValida}
+                disabled={isPending || !tasaValida || monedaTarifa.asumida}
                 onClick={() => accion(() => confirmarTarifaPorPasajero(itemId, enCOP ? null : tasaNum), 'Costo por pasajero cargado. Revisa el margen de la línea.')}
                 className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
               >
@@ -387,8 +453,19 @@ export default function TarifaPasajeroItem({
           )}
 
           {confirmada && !hayPorConfirmar && (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-2">
-              <p className="text-[11px] font-medium text-emerald-900">
+            <div className={confirmacionVieja
+              ? 'rounded-md border border-amber-300 bg-amber-50 p-2'
+              : 'rounded-md border border-emerald-200 bg-emerald-50/60 p-2'}
+            >
+              {/* Lo cargado sigue siendo el costo de la línea (nadie lo borra), pero si es de
+                  otro grupo u otra moneda se dice ENCIMA, no debajo en letra chica. */}
+              {confirmacionVieja && (
+                <p className="mb-1 flex items-start gap-1.5 text-[11px] font-medium text-amber-900">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {confirmacionVieja.mensaje}
+                </p>
+              )}
+              <p className={`text-[11px] font-medium ${confirmacionVieja ? 'text-amber-900' : 'text-emerald-900'}`}>
                 Costo cargado por pasajero: {lineaPorPasajero(confirmada.costos.map(c => ({ tipo: c.tipo, unitario: c.unitarioCOP })), 'COP')}
               </p>
               {confirmada.margenProveedor && (
@@ -436,6 +513,8 @@ function Casilla({
   numerada,
   lectura,
   rechazo,
+  desactualizada,
+  moneda,
   preview,
   leyendo,
   detalleAbierto,
@@ -443,7 +522,6 @@ function Casilla({
   onToggleDetalle,
   onQuitar,
   onPegar,
-  onMoneda,
   ficha,
 }: {
   def: CasillaDef
@@ -458,7 +536,14 @@ function Casilla({
     correcciones: Correcciones | undefined
     onGuardar: (slug: string, valor: string | null) => Promise<boolean>
   }
-  rechazo?: { mensaje: string; detalle?: string; pideMoneda?: boolean }
+  rechazo?: { mensaje: string; detalle?: string }
+  /**
+   * La captura se buscó para otros pasajeros (`capturasDesactualizadas`). La alerta vive
+   * DENTRO de la casilla, pegada a lo que hay que reemplazar, y se va sola al pegar la nueva.
+   */
+  desactualizada: string | null
+  /** La moneda con que se costea la línea: los montos leídos se dicen en ella. */
+  moneda: MonedaDeTarifa
   preview?: string
   leyendo: boolean
   detalleAbierto: boolean
@@ -466,7 +551,6 @@ function Casilla({
   onToggleDetalle: () => void
   onQuitar: () => void
   onPegar: (e: React.ClipboardEvent) => void
-  onMoneda: (moneda: string) => void
 }) {
   const comoSeLlama = numerada ? `el pantallazo ${def.numero}: ${def.titulo}` : 'el pantallazo del proveedor'
   return (
@@ -485,12 +569,21 @@ function Casilla({
           {lectura && (
             <LecturaResumen
               lectura={lectura}
+              moneda={moneda}
               abierta={detalleAbierto}
               onToggle={onToggleDetalle}
               onQuitar={onQuitar}
               deshabilitado={deshabilitado}
               ficha={ficha}
             />
+          )}
+
+          {/* Persistente, no un toast: se queda mientras la captura sea de otra ocupación. */}
+          {lectura && desactualizada && (
+            <p className="mt-1.5 flex items-start gap-1.5 rounded-md border border-red-300 bg-red-50 p-2 text-[11px] font-medium text-red-900">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {desactualizada}
+            </p>
           )}
 
           <div
@@ -525,29 +618,152 @@ function Casilla({
                 {rechazo.mensaje}
               </p>
               {rechazo.detalle && <p className="mt-0.5 pl-5 text-[10px] text-red-800">{rechazo.detalle}</p>}
-              {/* RX3: la captura solo muestra «$». La persona dice en qué moneda está
-                  y se vuelve a leer: el sistema no la supone (R-P5). */}
-              {rechazo.pideMoneda && preview && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-5">
-                  <span className="text-[10px] text-red-900">¿En qué moneda está el precio?</span>
-                  {['COP', 'USD', 'EUR', 'MXN'].map(mon => (
-                    <button
-                      key={mon}
-                      type="button"
-                      disabled={deshabilitado}
-                      onClick={() => onMoneda(mon)}
-                      className="rounded border bg-background px-2 py-0.5 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
-                    >
-                      {mon}
-                    </button>
-                  ))}
-                </div>
-              )}
               <p className="mt-0.5 pl-5 text-[10px] text-red-700">Este pantallazo no se guardó.</p>
             </div>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * La moneda de la tarifa: editable, COP por defecto, y nunca callada (brief del 2026-09-22).
+ *
+ * ## Por qué la supuesta se ve distinto de la leída
+ *
+ * «$» solo no dice si son pesos o dólares, y un USD tomado por COP deja el costo miles de
+ * veces corto: es el error más caro del motor. Cuando la captura no la mostraba, COP va
+ * PRESELECCIONADA pero con alerta persistente y un clic para aceptarla o cambiarla; el
+ * servidor no confirma el costo antes (`MENSAJE_MONEDA_ASUMIDA`).
+ *
+ * ## Lo que dijo la IA no se pierde
+ *
+ * Elegir otra moneda se guarda aparte, con quién y cuándo (patrón de #821). Si la captura sí
+ * mostraba una y la persona eligió otra, se enseñan las dos.
+ */
+function MonedaDeLaTarifa({
+  itemId,
+  info,
+  deshabilitado,
+  onGuardada,
+  onCambio,
+}: {
+  itemId: string
+  info: MonedaDeTarifa
+  deshabilitado: boolean
+  onGuardada: (tarifa: TarifaPax) => void
+  onCambio: () => void
+}) {
+  const [cambiando, setCambiando] = useState(false)
+  const [otra, setOtra] = useState('')
+  const [isPending, startTransition] = useTransition()
+  const apagado = deshabilitado || isPending
+
+  function elegir(moneda: string | null) {
+    startTransition(async () => {
+      const r = await elegirMonedaDeTarifa(itemId, moneda)
+      if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la moneda'); return }
+      if (r.tarifa) onGuardada(r.tarifa)
+      toast.success(
+        r.confirmacionDesactualizada
+          ? 'Moneda cambiada. El costo que estaba cargado quedó desactualizado: vuelve a confirmarlo.'
+          : moneda === null
+            ? 'Vuelve a la moneda que muestra el pantallazo.'
+            : `La tarifa queda en ${moneda.toUpperCase()}.`,
+      )
+      setCambiando(false)
+      setOtra('')
+      onCambio()
+    })
+  }
+
+  const opciones = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {MONEDAS_FRECUENTES.map(m => (
+        <button
+          key={m}
+          type="button"
+          disabled={apagado}
+          onClick={() => elegir(m)}
+          className={`rounded border px-2 py-0.5 text-[11px] font-medium hover:bg-accent disabled:opacity-50 ${
+            m === info.moneda && !info.asumida ? 'border-primary bg-primary/10' : 'bg-background'
+          }`}
+        >
+          {info.asumida && m === 'COP' ? 'Sí, es COP' : m}
+        </button>
+      ))}
+      <input
+        value={otra}
+        onChange={e => setOtra(e.target.value.toUpperCase().slice(0, 3))}
+        placeholder="Otra"
+        aria-label="Otra moneda (código de tres letras)"
+        className="w-16 rounded border bg-background px-1.5 py-0.5 text-[11px] uppercase"
+      />
+      {otra.length === 3 && (
+        <button
+          type="button"
+          disabled={apagado}
+          onClick={() => elegir(otra)}
+          className="rounded border bg-background px-2 py-0.5 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
+        >
+          Usar {otra}
+        </button>
+      )}
+    </div>
+  )
+
+  if (info.asumida) {
+    return (
+      <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2">
+        <p className="flex items-start gap-1.5 text-[11px] font-medium text-amber-900">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {MENSAJE_MONEDA_ASUMIDA}
+        </p>
+        <p className="mt-0.5 pl-5 text-[10px] text-amber-800">
+          «$» solo no dice si son pesos o dólares. Un precio en dólares tomado por pesos deja el costo miles de veces corto.
+        </p>
+        <div className="mt-1.5 pl-5">{opciones}</div>
+      </div>
+    )
+  }
+
+  const origen = info.origen === 'persona' && info.decision
+    ? `la eligió ${info.decision.por ?? 'una persona'}${info.decision.en ? ` · ${formatBogotaFechaCorta(info.decision.en)}` : ''}`
+    : 'leída del pantallazo'
+  // Lo que dijo la IA, cuando la persona eligió otra: se enseña al lado, nunca en su lugar.
+  const leidaDistinta = info.origen === 'persona' && info.leida && info.leida !== info.moneda ? info.leida : null
+
+  return (
+    <div className="mt-2 rounded-md bg-muted/30 px-2 py-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px]">
+          <span className="font-medium">Moneda de la tarifa:</span> {info.moneda}
+          <span className="ml-1 text-muted-foreground">· {origen}</span>
+          {leidaDistinta && <span className="ml-1 text-amber-800">· el pantallazo dice {leidaDistinta}</span>}
+        </p>
+        <div className="flex items-center gap-2">
+          {leidaDistinta && (
+            <button
+              type="button"
+              disabled={apagado}
+              onClick={() => elegir(null)}
+              className="text-[10px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              Volver a {leidaDistinta}
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={apagado}
+            onClick={() => setCambiando(v => !v)}
+            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            <Pencil className="h-3 w-3" /> Cambiar moneda
+          </button>
+        </div>
+      </div>
+      {cambiando && <div className="mt-1.5">{opciones}</div>}
     </div>
   )
 }
@@ -573,6 +789,7 @@ function MargenDelPantallazo({ margen }: { margen: MargenProveedor | null }) {
 
 function LecturaResumen({
   lectura,
+  moneda,
   abierta,
   onToggle,
   onQuitar,
@@ -580,6 +797,8 @@ function LecturaResumen({
   ficha,
 }: {
   lectura: LecturaCasilla
+  /** La moneda con que se costea la línea: los montos se dicen en ella, no en la leída. */
+  moneda: MonedaDeTarifa
   abierta: boolean
   onToggle: () => void
   onQuitar: () => void
@@ -597,13 +816,15 @@ function LecturaResumen({
     : obs.adultos !== null || obs.ninos !== null || obs.infantes !== null
       ? describirOcupacion({ adultos: obs.adultos ?? 0, ninos: obs.ninos ?? 0, infantes: obs.infantes ?? 0 })
       : `${obs.total} personas`
+  const mon = moneda.moneda
   return (
     <div className="mt-1.5 rounded border bg-muted/20 px-2 py-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px]">
-          <span className="font-medium">Leído:</span> {formatoMonto(lectura.total, lectura.moneda)} · {ocupacion}
+          <span className="font-medium">Leído:</span> {formatoMonto(lectura.total, mon)}
+          {moneda.asumida && <span className="font-medium text-amber-800"> (moneda sin confirmar)</span>} · {ocupacion}
           {lectura.porTipo.length > 0 && ' · con precio por tipo de pasajero'}
-          {lectura.aPagarAgencia !== null && ` · a pagar agencia ${formatoMonto(lectura.aPagarAgencia, lectura.moneda)}`}
+          {lectura.aPagarAgencia !== null && ` · a pagar agencia ${formatoMonto(lectura.aPagarAgencia, mon)}`}
         </p>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onToggle} className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground">
@@ -627,7 +848,7 @@ function LecturaResumen({
               {lectura.porTipo.map(f => (
                 <div key={f.tipo} className="min-w-0">
                   <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">Fila {f.tipo === 'nino' ? 'niños' : f.tipo === 'adulto' ? 'adultos' : 'infantes'}</span>
-                  <span className="block truncate text-[11px] tabular-nums">{f.cantidad} · {formatoMonto(f.subtotal, lectura.moneda)}</span>
+                  <span className="block truncate text-[11px] tabular-nums">{f.cantidad} · {formatoMonto(f.subtotal, mon)}</span>
                 </div>
               ))}
             </div>
@@ -646,7 +867,7 @@ function LecturaResumen({
           {lectura.porTipo.map(f => (
             <div key={f.tipo} className="min-w-0">
               <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">Fila {f.tipo === 'nino' ? 'niños' : f.tipo === 'adulto' ? 'adultos' : 'infantes'}</span>
-              <span className="block truncate text-[11px] tabular-nums">{f.cantidad} · {formatoMonto(f.subtotal, lectura.moneda)}</span>
+              <span className="block truncate text-[11px] tabular-nums">{f.cantidad} · {formatoMonto(f.subtotal, mon)}</span>
             </div>
           ))}
           {lectura.campos.map(c => (
@@ -709,8 +930,9 @@ function ComposicionDeLinea({
       const r = await actualizarComposicionDeItem(itemId, propia)
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
       if (r.tarifa) onGuardada(r.tarifa)
-      toast.success(r.borroLecturas
-        ? 'Pasajeros de la línea actualizados. Los pantallazos leídos se borraron: eran para otra ocupación.'
+      // Nada se borra: lo que quedó viejo lleva su alerta en la casilla (brief del 2026-09-22).
+      toast.success((r.desactualizadas ?? 0) > 0 || r.confirmacionDesactualizada
+        ? 'Pasajeros de la línea actualizados. Los pantallazos de la ocupación anterior quedaron marcados: pega uno nuevo.'
         : 'Pasajeros de la línea actualizados.')
       onEditar(false)
       onCambio()
@@ -807,11 +1029,11 @@ function ComposicionDeLinea({
         )}
       </div>
       {/* ⚠️ Solo si la línea YA sabía a cuántos cubre. Respondiendo la pregunta que sale
-          después de pegar no se borra nada (no hay ocupación anterior que invalidar), y
-          advertirlo ahí sería falso: quien lee esa frase no contesta y vuelve a pegar. */}
+          después de pegar no queda nada viejo (no hay ocupación anterior), y advertirlo ahí
+          sería falso: quien lee esa frase no contesta y vuelve a pegar. */}
       {hayLecturas && composicion && (
         <p className="mt-1 text-[10px] text-amber-800">
-          Cambiar los pasajeros borra los pantallazos leídos de esta línea: eran búsquedas para otra ocupación.
+          Cambiar los pasajeros deja marcados los pantallazos de esta línea como desactualizados: habrá que pegar uno nuevo.
         </p>
       )}
     </div>

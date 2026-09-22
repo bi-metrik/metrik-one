@@ -12,14 +12,21 @@ import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import {
   aPesos,
+  capturasDesactualizadas,
+  casillasVigentes,
+  codigoDeMoneda,
   composicionDeLectura,
   composicionDeLinea,
+  confirmacionDesactualizada,
   leerTarifaPax,
+  MENSAJE_MONEDA_ASUMIDA,
   mismaComposicion,
+  monedaDeTarifa,
   NOMBRE_TIPO,
   normalizarComposicion,
   resolverTarifa,
   validarLecturaEnCasilla,
+  type CasillasLeidas,
   type ClaveCasilla,
   type TarifaConfirmada,
   type TarifaPax,
@@ -56,6 +63,19 @@ import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
  * ## Toda escritura devuelve la tarifa que quedó
  *
  * La casilla pinta con ella sin esperar el refresco de la página (`tarifaMasReciente`).
+ *
+ * ## Nada se borra por cambiar los pasajeros (brief del 2026-09-22, parte 1)
+ *
+ * Una captura buscada para otros pasajeros se CONSERVA y se marca desactualizada
+ * (`capturasDesactualizadas`); la confirmación, igual (`confirmacionDesactualizada`). Con
+ * cualquiera de las dos, `resolverTarifa` no calcula costo y la confirmación se niega. La
+ * alerta se va sola cuando se pega la captura nueva.
+ *
+ * ## La moneda (parte 2)
+ *
+ * Una captura sin moneda ya no se rechaza (RX3): se guarda con COP supuesta y el costo no
+ * se confirma hasta que una persona la acepte o la cambie (`elegirMonedaDeTarifa`). Lo que
+ * dijo la IA queda en cada casilla; lo que eligió la persona, aparte y con quién y cuándo.
  */
 
 const CLAVES: ClaveCasilla[] = ['grupo_completo', 'sin_infantes', 'solo_adultos']
@@ -70,7 +90,7 @@ const TIPO_RUBRO_POR_PASAJERO: TipoRubroViaje = 'tarifa'
 
 export type ResultadoCasilla =
   | { ok: true; mensaje: string; alertas: string[]; tarifa: TarifaPax }
-  | { ok: false; codigo: string; mensaje: string; detalle?: string; pideMoneda?: boolean }
+  | { ok: false; codigo: string; mensaje: string; detalle?: string }
 
 export type ResultadoTarifa = { success: boolean; error?: string; tarifa?: TarifaPax }
 
@@ -173,6 +193,21 @@ async function contexto(itemId: string) {
   return { supabase, item, ranura, viaje, tarifa, composicion }
 }
 
+/**
+ * Quién escribe, para anotarlo junto a lo que decidió (correcciones de la ficha, moneda).
+ * Sin nombre legible queda `null`: mejor sin nombre que con el equivocado.
+ */
+async function quienEscribe(supabase: unknown): Promise<{ por: string | null; porId: string | null }> {
+  const { userId } = await getWorkspace()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: perfil } = await (supabase as any)
+    .from('profiles').select('full_name').eq('id', userId).maybeSingle()
+  return {
+    por: (perfil?.full_name as string | null | undefined)?.trim() || null,
+    porId: userId ?? null,
+  }
+}
+
 // ── Leer un pantallazo en su casilla ─────────────────────────────────────────
 
 export async function leerCasillaDeItem(
@@ -221,6 +256,10 @@ export async function leerCasillaDeItem(
     fechasViaje: viaje.fechas,
     monedaIndicada: monedaIndicada ?? null,
     soloMinimosDeCosto: true,
+    // RX3 deja de ser un rechazo aquí: sin moneda visible se preselecciona COP, marcada
+    // como supuesta, y `confirmarTarifaPorPasajero` no deja pasar el costo hasta que una
+    // persona la acepte o la cambie. Este es el único camino con ese freno.
+    monedaSiFalta: 'COP',
   })
   if (!veredicto.ok) {
     return {
@@ -228,7 +267,6 @@ export async function leerCasillaDeItem(
       codigo: veredicto.codigo,
       mensaje: veredicto.instruccion,
       detalle: veredicto.motivo,
-      pideMoneda: veredicto.codigo === 'RX3',
     }
   }
 
@@ -247,13 +285,21 @@ export async function leerCasillaDeItem(
   // coincide, la línea sigue heredándola y la pantalla lo sigue diciendo así.
   const fijaOcupacion = !!laDeLaCaptura && (!composicion || !mismaComposicion(laDeLaCaptura, composicion))
   const composicionEfectiva = laDeLaCaptura ?? composicion
+  // Para quiénes se buscó esta captura. Es lo que permite decir, si mañana cambian los
+  // pasajeros de la línea o del viaje, que quedó vieja (`capturasDesactualizadas`). Sin
+  // composición todavía no hay qué anotar: se completa al responder la pregunta.
+  if (composicionEfectiva) leida.paraComposicion = composicionEfectiva
 
   const validacion = validarLecturaEnCasilla({
     clave,
     lectura: leida,
     composicion: composicionEfectiva,
-    casillas: tarifa.casillas ?? {},
+    // Se compara contra las capturas que siguen VIGENTES: una vieja de otra ocupación haría
+    // rechazar una buena por una resta que ya no existe.
+    casillas: casillasVigentes(composicionEfectiva, tarifa.casillas ?? {}, ranura.slug),
     ranuraSlug: ranura.slug,
+    // Un pantallazo 1 nuevo retira la moneda elegida (ver abajo): no se le exige.
+    monedaDecidida: clave === 'grupo_completo' ? null : tarifa.moneda?.valor ?? null,
   })
   if (!validacion.ok) {
     return { ok: false, codigo: validacion.codigo, mensaje: validacion.mensaje }
@@ -261,10 +307,11 @@ export async function leerCasillaDeItem(
   leida.alertas = [...leida.alertas, ...validacion.alertas]
 
   const guardado = await guardarTarifa(supabase, itemId, actual => {
-    // Si la ocupación de la línea cambia, las otras casillas se van: eran búsquedas para
-    // otra ocupación y restar sobre ellas daría el precio de un grupo que nadie cotizó.
-    const cambiaOcupacion = fijaOcupacion && !!composicion
-    const casillas = cambiaOcupacion ? {} : { ...(actual.casillas ?? {}) }
+    // ⚠️ Las otras casillas NO se borran aunque la ocupación de la línea cambie (hasta el
+    // 2026-09-22 se borraban). Quedan marcadas como desactualizadas y `resolverTarifa` no
+    // resta sobre ellas: la persona ve cuál hay que reemplazar en vez de encontrarlas
+    // vacías sin saber por qué. Lo mismo con la confirmación.
+    const casillas: CasillasLeidas = { ...(actual.casillas ?? {}) }
     // Una casilla nueva invalida cualquier confirmación de «el menor no paga»: la resta que
     // se confirmó ya no es la misma.
     for (const k of CLAVES) {
@@ -272,12 +319,16 @@ export async function leerCasillaDeItem(
       if (l?.menorNoPagaConfirmado) casillas[k] = { ...l, menorNoPagaConfirmado: false }
     }
     casillas[clave] = leida
-    return {
+    const siguiente: TarifaPax = {
       ...actual,
       ...(fijaOcupacion ? { composicion: laDeLaCaptura } : {}),
       casillas,
-      ...(cambiaOcupacion ? { confirmada: null } : {}),
     }
+    // Un pantallazo 1 nuevo es otra búsqueda, quizá de otro proveedor: la moneda que alguien
+    // eligió para la captura anterior no se hereda a ciegas. Si esta la muestra, manda esta;
+    // si no, vuelve a quedar supuesta y hay que aceptarla otra vez.
+    if (clave === 'grupo_completo') delete siguiente.moneda
+    return siguiente
   })
   if ('error' in guardado) return { ok: false, codigo: 'GUARDAR', mensaje: guardado.error }
 
@@ -318,7 +369,9 @@ export async function leerCasillaDeItem(
 
   // El mensaje sale de lo que QUEDÓ guardado (que puede traer una casilla que otra persona
   // pegó mientras el modelo leía), no de la foto tomada al empezar.
-  const estado = resolverTarifa(composicionEfectiva, guardado.tarifa.casillas ?? {}, ranura.slug)
+  const estado = resolverTarifa(composicionEfectiva, guardado.tarifa.casillas ?? {}, ranura.slug, {
+    moneda: monedaDeTarifa(guardado.tarifa).moneda,
+  })
   return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas, tarifa: guardado.tarifa }
 }
 
@@ -371,15 +424,19 @@ export async function confirmarMenorNoPaga(
 /**
  * Cambia cuántos adultos, niños e infantes cubre la línea. `null` vuelve a la del viaje.
  *
- * ⚠️ Si la composición efectiva cambia, las lecturas se BORRAN: eran búsquedas para otra
- * ocupación, y restar sobre ellas daría precios de otro grupo. El costo confirmado se
- * queda en `rubros` (quitarlo sería tirar un costo que alguien aprobó), pero su reparto por
- * pasajero deja de valer y se retira.
+ * ⚠️ Si la composición efectiva cambia, NADA se borra (brief del 2026-09-22, parte 1). Las
+ * capturas eran búsquedas para otra ocupación: se conservan y quedan marcadas como
+ * desactualizadas (`capturasDesactualizadas`), y `resolverTarifa` no resta sobre ellas.
+ * Hasta ese día se borraban, y un toast que se iba era lo único que lo decía.
+ *
+ * El costo confirmado se queda en `rubros` (quitarlo sería tirar un costo que alguien
+ * aprobó) y la confirmación queda marcada (`confirmacionDesactualizada`): el reparto por
+ * pasajero deja de imprimirse y no se vuelve a confirmar hasta pegar la captura nueva.
  */
 export async function actualizarComposicionDeItem(
   itemId: string,
   composicion: { adultos: number | string; ninos: number | string; infantes: number | string } | null,
-): Promise<ResultadoTarifa & { borroLecturas?: boolean }> {
+): Promise<ResultadoTarifa & { desactualizadas?: number; confirmacionDesactualizada?: boolean }> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
 
@@ -389,20 +446,79 @@ export async function actualizarComposicionDeItem(
   }
   const nueva = propia ?? ctx.viaje.composicion
   const anterior = ctx.composicion
-  // ⚠️ Sin composición ANTERIOR no hay nada que invalidar: es la respuesta a la pregunta
-  // que sale DESPUÉS de pegar cuando la captura no dice a cuántos cubre (§2.4), y borrarle
-  // ahí la lectura obligaría a pegar el mismo pantallazo dos veces.
-  const cambia = !!anterior && (!nueva || !mismaComposicion(nueva, anterior))
-  const habiaLecturas = Object.keys(ctx.tarifa.casillas ?? {}).length > 0
 
-  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => ({
-    ...actual,
-    composicion: propia,
-    ...(cambia ? { casillas: {}, confirmada: null } : {}),
-  }))
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    const siguiente: TarifaPax = { ...actual, composicion: propia }
+    // Sin composición ANTERIOR esto es la respuesta a la pregunta que sale DESPUÉS de pegar
+    // cuando la captura no dice a cuántos cubre (§2.4): esa respuesta ES para quiénes se
+    // buscó. Se anota en las capturas que no lo sabían, o mañana un cambio de pasajeros no
+    // tendría contra qué compararse y la captura vieja pasaría por vigente.
+    if (!anterior && nueva) {
+      const casillas: CasillasLeidas = { ...(actual.casillas ?? {}) }
+      for (const k of CLAVES) {
+        const l = casillas[k]
+        if (l && !l.paraComposicion) casillas[k] = { ...l, paraComposicion: nueva }
+      }
+      siguiente.casillas = casillas
+    }
+    return siguiente
+  })
   if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
-  return { success: true, borroLecturas: cambia && habiaLecturas, tarifa: guardado.tarifa }
+  return {
+    success: true,
+    tarifa: guardado.tarifa,
+    desactualizadas: capturasDesactualizadas(nueva, guardado.tarifa.casillas ?? {}, ctx.ranura.slug).length,
+    confirmacionDesactualizada: !!confirmacionDesactualizada(guardado.tarifa, nueva),
+  }
+}
+
+// ── La moneda de la tarifa (brief del 2026-09-22, parte 2) ──────────────────
+
+/**
+ * Acepta o cambia la moneda de la tarifa de la línea. `null` vuelve a la que leyó la IA (o
+ * a COP supuesta, si ninguna captura la mostraba).
+ *
+ * Es el «un clic» del brief: con la moneda supuesta, el costo no se confirma hasta pasar
+ * por aquí. Lo que dijo la IA sigue en cada casilla; esto se guarda aparte, con quién y
+ * cuándo (`tarifa_pax.moneda`), igual que las correcciones de la ficha (#821).
+ *
+ * ⚠️ Cambiarla DESPUÉS de confirmar no toca los rubros: la confirmación queda marcada como
+ * desactualizada (`confirmacionDesactualizada`), el reparto por pasajero deja de
+ * imprimirse, y hay que volver a confirmar —con la tasa, si no es COP—. Es la misma regla
+ * que un cambio de pasajeros.
+ */
+export async function elegirMonedaDeTarifa(
+  itemId: string,
+  moneda: string | null,
+): Promise<ResultadoTarifa & { confirmacionDesactualizada?: boolean }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const { supabase, item, tarifa, composicion } = ctx
+  if (!tarifa.casillas?.grupo_completo) {
+    return { success: false, error: 'Pega primero el pantallazo del proveedor: la moneda es la de su precio.' }
+  }
+
+  let valor: string | null = null
+  if (moneda !== null) {
+    valor = codigoDeMoneda(moneda)
+    if (!valor) return { success: false, error: 'Escribe la moneda con su código de tres letras: COP, USD, EUR, MXN…' }
+  }
+  const { por, porId } = valor ? await quienEscribe(supabase) : { por: null, porId: null }
+
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
+    const siguiente: TarifaPax = { ...actual }
+    if (valor) siguiente.moneda = { valor, por, porId, en: new Date().toISOString() }
+    else delete siguiente.moneda
+    return siguiente
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return {
+    success: true,
+    tarifa: guardado.tarifa,
+    confirmacionDesactualizada: !!confirmacionDesactualizada(guardado.tarifa, composicion),
+  }
 }
 
 // ── Confirmar el costo por pasajero ──────────────────────────────────────────
@@ -417,8 +533,14 @@ export async function confirmarTarifaPorPasajero(
   if (!composicion) return { success: false, error: 'La línea no tiene composición' }
 
   const casillas = tarifa.casillas ?? {}
-  const estado = resolverTarifa(composicion, casillas, ranura.slug)
+  // La moneda con que se costea: la elegida por una persona, o la que mostró la captura.
+  const monedaTarifa = monedaDeTarifa(tarifa)
+  // Una captura buscada para otros pasajeros sale aquí como `desactualizada`: no hay costo
+  // que confirmar, y el motivo dice cuál reemplazar (brief del 2026-09-22, parte 1).
+  const estado = resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda })
   if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje }
+  // «$» sin moneda: COP está preseleccionada pero nadie la ha dicho. No pasa callada.
+  if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA }
 
   const moneda = estado.moneda
   const costos: TarifaConfirmada['costos'] = []
@@ -492,7 +614,10 @@ export async function confirmarTarifaPorPasajero(
   //
   // ⚠️ El margen NO se reconvierte a pesos: es una razón entre dos números de la MISMA
   // captura, así que no depende de la tasa. Lo que sí queda en pesos es el costo.
-  const margenProveedor = margenDelProveedor(casillas.grupo_completo)
+  const margenLeido = margenDelProveedor(casillas.grupo_completo)
+  // La razón no depende de la moneda; lo que se anota junto a los dos precios, sí: es la
+  // que manda para la línea, no la que leyó la IA si una persona la cambió.
+  const margenProveedor = margenLeido ? { ...margenLeido, moneda } : null
   const convencion = item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO
   // ¿El margen que hay escrito hoy es el que puso una captura anterior, o alguien lo movió?
   //
@@ -555,13 +680,19 @@ export async function confirmarTarifaPorPasajero(
     // APLIQUE sigue decidiéndolo `patchMargen` de arriba; esto solo lo deja anotado.
     margenProveedor,
   }
-  const guardado = await guardarTarifa(supabase, itemId, actual => ({
-    ...actual,
-    confirmada,
-    // La marca solo se mueve cuando el sistema ESCRIBIÓ: si respetó una descripción humana,
-    // la marca vieja sigue siendo distinta de lo que hay y la protección se mantiene.
-    ...(reescribeDescripcion ? { descripcionDelSistema: descripcionNueva } : {}),
-  }))
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
+    const siguiente: TarifaPax = {
+      ...actual,
+      confirmada,
+      // La marca solo se mueve cuando el sistema ESCRIBIÓ: si respetó una descripción humana,
+      // la marca vieja sigue siendo distinta de lo que hay y la protección se mantiene.
+      ...(reescribeDescripcion ? { descripcionDelSistema: descripcionNueva } : {}),
+    }
+    // El costo a mano deja de aplicar (arriba `subtotal` quedó en 0 y mandan los rubros): su
+    // anotación de moneda ya no explica nada.
+    delete siguiente.costoManual
+    return siguiente
+  })
   if ('error' in guardado) return { success: false, error: guardado.error }
 
   await recalcularTotales(item.cotizacionId)
@@ -608,15 +739,11 @@ export async function corregirCampoDeFicha(
     correccion = { valor: v.valor }
   }
 
-  const { userId } = await getWorkspace()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: perfil } = await (supabase as any)
-    .from('profiles').select('full_name').eq('id', userId).maybeSingle()
-  const por = (perfil?.full_name as string | null | undefined)?.trim() || null
+  const { por, porId } = await quienEscribe(supabase)
 
   const siguientes = { ...(tarifa.correcciones ?? {}) }
   if (correccion) {
-    siguientes[slug] = { valor: correccion.valor, por, porId: userId ?? null, en: new Date().toISOString() }
+    siguientes[slug] = { valor: correccion.valor, por, porId, en: new Date().toISOString() }
   } else {
     delete siguientes[slug]
   }

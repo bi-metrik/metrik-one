@@ -35,7 +35,8 @@ import {
   vuelosDeItems,
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
-import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { describirOcupacion, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -436,6 +437,39 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     })),
   ).map(a => a.texto)
 
+  /**
+   * Brief del 2026-09-22 · las líneas con el pantallazo o el costo de OTROS pasajeros.
+   *
+   * Mismo criterio que el aviso de cobertura: quien imprime no siempre es quien cargó, y el
+   * cambio que las dejó viejas suele ocurrir en el negocio (los pasajeros del viaje), no en
+   * la cotización. AVISA, NO BLOQUEA: el documento no tiene candado y el brief pide no
+   * inventar uno. Lo que sí cambia en el documento es que el reparto por pasajero de una
+   * confirmación vieja ya no se imprime (`precioPorPasajeroDeItem`).
+   *
+   * Los pasajeros del viaje se leen UNA vez y solo si alguna línea tiene tarifa por
+   * pasajero: una cotización que no es de viaje no paga la consulta (R6).
+   */
+  const hayTarifaPorPasajero = items.some(i => {
+    const t = leerTarifaPax(i.tarifa_pax)
+    return !!t.confirmada || Object.keys(t.casillas ?? {}).length > 0
+  })
+  const viajeDelNegocio = negocioInfo && hayTarifaPorPasajero
+    ? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
+    : null
+  const composicionViaje = viajeDelNegocio?.composicion ?? null
+  const avisosCaptura = hayTarifaPorPasajero
+    ? lineasDesactualizadas(
+        items.filter(i => i.id).map(i => ({
+          id: i.id as string,
+          nombre: i.nombre,
+          grupo: i.grupo ?? null,
+          es_ajuste: i.es_ajuste ?? false,
+          tarifa_pax: i.tarifa_pax,
+        })),
+        composicionViaje,
+      ).map(l => `«${l.nombre}»: ${l.motivos.join(' ')}`)
+    : []
+
   // Calculate fiscal
   type Regimen = FiscalProfile['regimen_tributario']
   const vendorProfile: FiscalProfile = {
@@ -609,6 +643,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         archivoReferencia: externo.referencia,
         aviso: externo.aviso,
         avisosCobertura,
+        avisosCaptura,
         renderedVia: 'weasyprint' as const,
       }
     } catch (e) {
@@ -683,7 +718,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
             descuento_porcentaje: descuentoVisible(i),
             cantidad: Number(i.cantidad) || 1,
             unidad: i.unidad ?? null,
-            precioPorPasajero: precioPorPasajeroDeItem(i),
+            precioPorPasajero: precioPorPasajeroDeItem(i, composicionViaje),
             ...adicionalesDe(i),
           })),
       }))
@@ -713,7 +748,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     descuento_porcentaje: descuentoVisible(i),
     cantidad: Number(i.cantidad) || 1,
     unidad: i.unidad ?? null,
-    precioPorPasajero: precioPorPasajeroDeItem(i),
+    precioPorPasajero: precioPorPasajeroDeItem(i, composicionViaje),
     ...adicionalesDe(i),
   })
 
@@ -833,7 +868,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
   let viajePDF: CotizacionPDFProps['viaje'] = null
   if (plantillaPropia && negocioInfo) {
-    const { viaje: delNegocio } = await leerViajeDelNegocio(supabase, negocioInfo.id)
+    // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
+    const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -993,6 +1029,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     archivoReferencia: externo.referencia,
     aviso: externo.aviso,
     avisosCobertura,
+    avisosCaptura,
     renderedVia: 'react-pdf' as const,
   }
 }

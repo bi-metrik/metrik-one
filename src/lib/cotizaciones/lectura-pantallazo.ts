@@ -136,6 +136,16 @@ export interface ContextoLectura {
    */
   monedaIndicada?: string | null
   /**
+   * La moneda que se PRESELECCIONA cuando la captura no la muestra (o solo «$»), en vez de
+   * rechazar con RX3. Brief del 2026-09-22, parte 2: el cargue por casillas guarda la
+   * lectura con COP marcada como SUPUESTA (`CampoLeido.supuesto`), y el costo no se deja
+   * confirmar hasta que una persona la acepte o la cambie (`monedaDeTarifa`).
+   *
+   * ⚠️ Solo lo pide quien tiene ese freno aguas abajo. Sin esta opción RX3 sigue siendo un
+   * rechazo, que es lo seguro para cualquier camino que no sepa pedir la confirmación.
+   */
+  monedaSiFalta?: string | null
+  /**
    * Cargue por casillas: RX2 solo por los mínimos de COSTO (`MINIMOS_DE_COSTO`). Los
    * descriptivos que falten se avisan. Ver el comentario de `MINIMOS_DE_COSTO`.
    */
@@ -193,6 +203,11 @@ export interface CampoLeido {
   alertaRevision: boolean
   /** El valor no está en la imagen: se tomó del ítem o del viaje (7.4). */
   delItem?: boolean
+  /**
+   * El valor no está en la imagen NI en el ítem: es el que se preselecciona por defecto
+   * (hoy solo la moneda, `ContextoLectura.monedaSiFalta`). Nadie lo ha dicho todavía.
+   */
+  supuesto?: boolean
 }
 
 export interface Aceptacion {
@@ -291,6 +306,16 @@ export function evaluarLectura(
     moneda.delItem = true
     avisosDelItem.push(`La captura no muestra la moneda: se usa ${indicada}, indicada a mano. Confírmala.`)
   }
+  // RX3 deja de ser un rechazo donde quien llama sabe frenar la confirmación: la moneda se
+  // preselecciona y queda marcada como supuesta. No va aviso de texto: la marca es la que
+  // hace que la pantalla lo diga de forma persistente, y un aviso además lo repetiría.
+  const porDefecto = (contexto.monedaSiFalta ?? '').trim().toUpperCase()
+  if (moneda && moneda.valor === null && /^[A-Z]{3}$/.test(porDefecto)) {
+    moneda.valor = porDefecto
+    moneda.alertaRevision = true
+    moneda.supuesto = true
+    moneda.confidence = 0
+  }
 
   // Fechas sin año: se completan con el año del viaje, marcadas.
   const inicioViaje = contexto.fechasViaje?.inicio ?? null
@@ -337,6 +362,7 @@ export function evaluarLectura(
   // RX3 antes que RX2 aunque `moneda` sea un mínimo más: es el error más caro del
   // motor y su instrucción es distinta (se puede indicar a mano, no hace falta otra
   // captura). Agruparlo con los demás faltantes lo escondería en una lista.
+  // Con `monedaSiFalta` ya no llega aquí vacía: se rechaza solo sin esa opción.
   if (porSlug.get('moneda')?.valor === null || porSlug.get('moneda')?.valor === undefined) {
     return {
       ok: false,
