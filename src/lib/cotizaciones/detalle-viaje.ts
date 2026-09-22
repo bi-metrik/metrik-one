@@ -95,6 +95,17 @@ export interface VueloPDF {
    * vive en «Inversión» y se imprime una sola vez.
    */
   adicionales: string[]
+  /**
+   * El número de vuelo «tal como aparece» en la captura (`AV8520`, o varios). Volvió al
+   * documento el 2026-09-22 con el sistema visual: la referencia de Europa sí lo trae, y
+   * Mauricio decidió imprimirlo **solo si hay dato**. Opcional: ausente = no se leyó.
+   */
+  numeroVuelo?: string | null
+  /**
+   * Las tarifas de la propuesta a las que pertenece, como índices de `itinerarios`.
+   * Ausente = cotización de una sola opción: pertenece a la única que hay.
+   */
+  tarifas?: number[]
 }
 
 export interface HotelPDF {
@@ -114,6 +125,14 @@ export interface HotelPDF {
   localizador: string | null
   /** Ver `VueloPDF.adicionales`: van dentro de la ficha, sin cifra. */
   adicionales: string[]
+  /** Ver `VueloPDF.tarifas`. */
+  tarifas?: number[]
+  /**
+   * La foto del hotel (camino B de la §5 de `propuesta-visual.md`). ⚠️ SIN CONSTRUIR: nadie
+   * la llena todavía. La plantilla ya le reserva la miniatura y, sin foto, la tarjeta
+   * arranca en el texto.
+   */
+  foto?: { url: string } | null
 }
 
 /**
@@ -383,6 +402,7 @@ export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
       tarifa: texto(d, 'familia_tarifa'),
       equipaje: equipajeEnPalabras(d),
       adicionales: item.adicionales ?? [],
+      numeroVuelo: texto(d, 'numero_vuelo'),
     })
   }
   return out

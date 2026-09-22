@@ -46,8 +46,8 @@ export function ciudadesEnTexto(texto: string | null | undefined): string[] {
     .filter(Boolean)
 }
 
-function aFotoPDF(f: FotoCiudad): FotoPDF {
-  return { url: f.ruta, rotulo: f.rotulo, credito: f.credito }
+function aFotoPDF(f: FotoCiudad, lugares: string[] = []): FotoPDF {
+  return { url: f.ruta, rotulo: f.rotulo, credito: f.credito, lugares }
 }
 
 export function fotosDelViaje(
@@ -85,7 +85,13 @@ export function fotosDelViaje(
     if (foto) ciudades.push(foto)
   }
 
-  return { portada: portada ? aFotoPDF(portada) : null, ciudades: ciudades.map(aFotoPDF) }
+  // Todos los nombres con que el viaje llama a cada ciudad: la plantilla los usa para
+  // poner la foto en el capítulo de su ciudad.
+  const lugaresDe = (ciudad: string) => candidatas.filter(c => buscar(c)[0]?.ciudad === ciudad)
+  return {
+    portada: portada ? aFotoPDF(portada, lugaresDe(portada.ciudad)) : null,
+    ciudades: ciudades.map(f => aFotoPDF(f, lugaresDe(f.ciudad))),
+  }
 }
 
 /**

@@ -834,16 +834,45 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   let viajePDF: CotizacionPDFProps['viaje'] = null
   if (plantillaPropia && negocioInfo) {
     const { viaje: delNegocio } = await leerViajeDelNegocio(supabase, negocioInfo.id)
-    const paraLectura = itemsImpresos.map(i => ({
+    const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
       tarifa_pax: i.tarifa_pax,
       // §1.2 · el adicional se ve DENTRO del vuelo. Es la misma lista que va en
       // «Inversión»: escrita dos veces, la ficha y el precio dirían cosas distintas.
       adicionales: adicionalesDe(i).adicionales ?? [],
-    }))
+    })
+    const paraLectura = itemsImpresos.map(paraLecturaDe)
     const vuelos = vuelosDeItems(paraLectura)
     const hoteles = hotelesDeItems(paraLectura)
+
+    /**
+     * Con VARIAS tarifas en la propuesta, los vuelos y hoteles del documento son los de las
+     * tres, cada uno marcado con las tarifas a las que pertenece (índices de
+     * `itinerariosPDF`, mismo orden de `bloques`). Es lo que deja al documento pintar cada
+     * opción con su color de punta a punta (§3 del sistema visual).
+     *
+     * ⚠️ Solo cambia lo que se DESCRIBE. El destino, las fotos y los cargos en destino
+     * siguen saliendo de la principal: son del viaje que el documento recomienda, y una
+     * alternativa no puede cambiar la portada. El dinero no se toca.
+     *
+     * Con una sola tarifa, o sin itinerarios, no se marca nada y el documento describe lo
+     * que imprime, como hasta hoy.
+     */
+    let vuelosDelDocumento = vuelos
+    let hotelesDelDocumento = hoteles
+    if (bloques && bloques.length > 1) {
+      const tarifasDe = new Map<string, number[]>()
+      bloques.forEach((b, idx) => {
+        for (const id of b.itemIds) tarifasDe.set(id, [...(tarifasDe.get(id) ?? []), idx])
+      })
+      const itemsDeLaPropuesta = [...tarifasDe.keys()]
+        .map(id => itemPorId.get(id))
+        .filter((i): i is ItemRow => i !== undefined)
+      const marcar = <T,>(lista: T[], i: ItemRow) => lista.map(x => ({ ...x, tarifas: tarifasDe.get(i.id as string) ?? [] }))
+      vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDeItems([paraLecturaDe(i)]), i))
+      hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
+    }
     const cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
     const config = leerConfigDocumentoViaje(ws?.config_extra)
     const destino = delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles)
@@ -861,8 +890,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       // (async, en la base), se cambia allá y esta línea sigue igual.
       foto: fotos?.portada ?? null,
       fotosCiudades: fotos?.ciudades ?? [],
-      vuelos,
-      hoteles,
+      fechaInicio: delNegocio.fechas.inicio,
+      vuelos: vuelosDelDocumento,
+      hoteles: hotelesDelDocumento,
       cargosEnDestino,
       nivelDetalle: delNegocio.nivelDetalle,
       pie: config.pie,
