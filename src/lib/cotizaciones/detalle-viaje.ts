@@ -55,9 +55,10 @@
  */
 
 import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
-import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
+import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 /** Lo mínimo de una línea para reconstruir su detalle. */
 export interface ItemConLectura {
@@ -339,15 +340,52 @@ function casillaDelItem(item: ItemConLectura): LecturaCasilla | null {
 }
 
 /**
+ * La ranura cuya lectura es ESTA: la única cuyas etiquetas propias aparecen en los campos.
+ *
+ * ## Por qué hace falta (COT-2026-0006, 2026-09-22)
+ *
+ * El vuelo «AVIANCA BOG - ADZ» tiene su lectura completa guardada —aerolínea, fechas,
+ * números de vuelo— pero su `items.grupo` es `avianca bog - adz`, un nombre libre que no
+ * resuelve a ninguna ranura (es anterior a la gramática `tipo [n] [: nombre]`, o alguien
+ * lo renombró al crearle una alternativa). Preguntando solo por el grupo, el documento lo
+ * cobraba en «Inversión» y lo borraba de la tabla de vuelos y del día a día: el cliente
+ * veía el precio de un vuelo que el itinerario no mencionaba.
+ *
+ * ⚠️ Esto NO es adivinar por el nombre. Cada lectura se hizo con el contrato de UNA ranura
+ * y guarda sus etiquetas literales («Aerolínea», «Check-in»…): se compara contra las
+ * etiquetas que solo esa ranura declara. «Moneda» o «Precio» las comparten todas y no
+ * cuentan. Si dos ranuras empatan, o ninguna aparece, la respuesta es `null`.
+ */
+export function ranuraDeLectura(campos: { label: string; valor: string }[] | undefined): DefinicionRanura | null {
+  if (!campos || campos.length === 0) return null
+  const ranuras = slugsDeRanura().map(s => ranuraPorSlug(s)).filter((r): r is DefinicionRanura => r !== null)
+  const cuantas = new Map<string, number>()
+  for (const r of ranuras) for (const c of r.campos) cuantas.set(c.label, (cuantas.get(c.label) ?? 0) + 1)
+  const presentes = new Set(campos.map(c => c.label))
+  const candidatas = ranuras.filter(r => r.campos.some(c => cuantas.get(c.label) === 1 && presentes.has(c.label)))
+  return candidatas.length === 1 ? candidatas[0] : null
+}
+
+/**
+ * La ranura de la línea: la de su grupo y, si el grupo no es una, la de su lectura.
+ *
+ * El grupo manda cuando resuelve: es la decisión explícita de quien cotiza.
+ */
+export function ranuraDelItem(item: ItemConLectura): DefinicionRanura | null {
+  return ranuraDeGrupo(item.grupo) ?? ranuraDeLectura(casillaDelItem(item)?.campos)
+}
+
+/**
  * El detalle de la línea tal como se imprime: lo leído, con lo corregido encima.
  *
  * ⚠️ Las correcciones se aplican aunque la línea no tenga lectura: son de la línea, no de la
  * casilla. Una línea sin ranura no tiene ni lo uno ni lo otro.
  */
 function detalleDelItem(item: ItemConLectura): Record<string, string> {
-  if (!ranuraDeGrupo(item.grupo)) return {}
+  const ranura = ranuraDelItem(item)
+  if (!ranura) return {}
   return aplicarCorrecciones(
-    detalleDeLectura(item.grupo, casillaDelItem(item)?.campos),
+    leidosPorSlug(ranura, casillaDelItem(item)?.campos),
     leerTarifaPax(item.tarifa_pax).correcciones,
   )
 }
@@ -387,17 +425,33 @@ export function equipajeEnPalabras(d: Record<string, string>): string | null {
   return lleva.length === 0 ? 'Sin equipaje incluido' : lleva.join(' + ')
 }
 
-/** Los vuelos del documento, en el orden en que vienen las líneas. */
+/**
+ * Los vuelos del documento, en el orden en que vienen las líneas.
+ *
+ * Es vuelo la línea cuya ranura es la de vuelo (por su grupo o por su lectura, ver
+ * `ranuraDelItem`) y, sin ranura ninguna, la que se NOMBRA como un vuelo: una aerolínea
+ * conocida y una ruta en códigos IATA («AVIANCA BOG - ADZ»). Esta última no tiene más dato
+ * que su nombre, y el documento imprime solo eso: aerolínea y ruta, sin fechas ni horas.
+ *
+ * ⚠️ Lo que se toma del NOMBRE nunca se mezcla con lo LEÍDO: la ruta del nombre solo entra
+ * si la lectura no trae ni origen ni destino. Un origen de la captura con el destino del
+ * nombre sería una ruta que nadie escribió.
+ */
 export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
   const out: VueloPDF[] = []
   for (const item of items) {
-    if (ranuraDeGrupo(item.grupo)?.slug !== 'vuelo_detalle') continue
+    const ranura = ranuraDelItem(item)
+    const delNombre = vueloDesdeNombre(item.nombre)
+    const esVuelo = ranura?.slug === 'vuelo_detalle'
+      || (ranura === null && delNombre.aerolinea !== null && delNombre.origen !== null && delNombre.destino !== null)
+    if (!esVuelo) continue
     const d = detalleDelItem(item)
+    const rutaLeida = texto(d, 'origen') !== null || texto(d, 'destino') !== null
     out.push({
       linea: (item.nombre ?? '').trim(),
-      aerolinea: texto(d, 'aerolinea'),
-      origen: texto(d, 'origen'),
-      destino: texto(d, 'destino'),
+      aerolinea: texto(d, 'aerolinea') ?? delNombre.aerolinea,
+      origen: rutaLeida ? texto(d, 'origen') : delNombre.origen,
+      destino: rutaLeida ? texto(d, 'destino') : delNombre.destino,
       fechaSalida: fechaCorta(texto(d, 'fecha_salida')),
       fechaRegreso: fechaCorta(texto(d, 'fecha_regreso')),
       horaSalida: horaCorta(texto(d, 'hora_salida')),
@@ -433,7 +487,7 @@ function nochesDe(d: Record<string, string>): number | null {
 export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
   const out: HotelPDF[] = []
   for (const item of items) {
-    if (ranuraDeGrupo(item.grupo)?.slug !== 'hotel_detalle') continue
+    if (ranuraDelItem(item)?.slug !== 'hotel_detalle') continue
     const d = detalleDelItem(item)
     out.push({
       linea: (item.nombre ?? '').trim(),

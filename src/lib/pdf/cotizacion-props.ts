@@ -94,6 +94,13 @@ export interface ViajePDF {
    * llena y el recuadro no se imprime. No se inventa contenido por defecto.
    */
   antesDeViajar?: string[]
+  /**
+   * «Incluido en el plan»: lo que el cliente RECIBE (traslados, equipaje, alimentación,
+   * impuestos), en frases cortas. ⚠️ SIN CAMPO todavía, como `antesDeViajar`: nadie lo
+   * llena y la columna no se imprime. Ya NO se arma con los nombres de las líneas, que es la
+   * lista de «Inversión» repetida.
+   */
+  incluye?: string[]
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]
