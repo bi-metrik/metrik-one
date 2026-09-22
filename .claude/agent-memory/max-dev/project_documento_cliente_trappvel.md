@@ -10,6 +10,13 @@ metadata:
 migración de esquema y sin una sola escritura a producción.** Sigue a
 [[lectura-fina-trappvel]] (#784, Entrega A) y [[trappvel-pantalla-cotizacion]] (#777).
 
+## ✅ El SQL YA SE APLICÓ (medido el 2026-09-22 contra la base)
+
+`cotizacion_template_slug = 'trappvel'`, el campo `presentacion_destino` en
+`condiciones_del_viaje` y `config_extra.documento_viaje` (pie + firma de Edgar) **están en
+producción**. O sea que **la plantilla está encendida y lo que se toque lo ve el cliente en
+la siguiente cotización**. Lo de abajo se conserva porque el ORDEN sigue siendo la lección.
+
 ## ⚠️⚠️ SQL pendiente, y el orden NO es cosmético
 
 `proyectos/trappvel/clarity/migrations/2026-09-21_documento-cliente-PENDIENTE.sql` —
@@ -52,11 +59,13 @@ nada falle**. Vive en `src/lib/cotizaciones/detalle-viaje.ts` (puro).
 
 ## Lo que NO se lee hoy (y por eso no se imprime)
 
-**Estrellas del hotel, localizador y hora de salida/llegada de cada vuelo** no están en el
-contrato de ninguna ranura — medido el 2026-09-21 contra `ranuras-pantallazo.ts` y contra
-el banco real. ⚠️ **El brief afirmaba que «la lectura ya guarda los horarios»: es falso.**
-No se tocó el contrato de lectura (territorio de la Entrega A, recién medido contra el
-modelo vivo). Los campos existen en el tipo y llegan vacíos.
+**Estrellas del hotel y localizador** no están en el contrato de ninguna ranura. Los campos
+existen en el tipo y llegan vacíos.
+
+⚠️ **Las horas de vuelo SALIERON de esta lista el 2026-09-22**: el #812 las agregó a la
+ranura y las midió (18 de 18). Lo que sigue vigente es que el brief y la §3 de
+`propuesta-visual.md` afirmaban que «la lectura ya los guarda» **y era falso**. Ver
+[[horas-de-vuelo-trappvel]].
 
 ## Las cuatro decisiones de la plantilla
 
