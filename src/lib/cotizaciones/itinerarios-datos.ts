@@ -36,6 +36,7 @@ import {
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
 import { costoDeRubrosConfirmados } from './rubros-sugeridos'
+import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import {
   adjuntarAdicionales,
   faltaLaTablaDeAdicionales,
@@ -102,6 +103,12 @@ export interface ItemDeCotizacion extends ItemConGrupo {
    * sin una sola línea de código que lo saque.
    */
   adicionales: Adicional[]
+  /**
+   * La base del IVA que declara la línea (`items.base_iva`, `iva-cotizacion.ts`). `null`
+   * = sigue al workspace. Llega `null` mientras la columna no exista: el `select('*')`
+   * la trae `undefined`, y eso es exactamente «sigue al workspace».
+   */
+  base_iva?: BaseIvaLinea | null
 }
 
 export interface ContextoCotizacion {
@@ -125,6 +132,12 @@ export interface ContextoCotizacion {
    * todo sigue como antes: el candado está en marcar (R6).
    */
   pisoEnLaSalida?: boolean
+  /**
+   * El `config_extra` de la línea del negocio, crudo. Lo usa el IVA para reconocer el
+   * recargo fijo (`recargo-linea.ts`), que es plata de la agencia aunque no tenga costo.
+   * `null` sin negocio o sin línea.
+   */
+  configLinea?: unknown
 }
 
 export interface ItinerarioCalculado {
@@ -216,6 +229,7 @@ export async function contextoDeCotizacion(
       margen_porcentaje: fila.margen_porcentaje ?? null,
       precio_venta: fila.precio_venta ?? 0,
       precio_manual: fila.precio_manual ?? false,
+      base_iva: esBaseIvaLinea(fila.base_iva) ? fila.base_iva : null,
     }
   })
 
@@ -228,6 +242,7 @@ export async function contextoDeCotizacion(
   // configuración de la línea, para saber si el piso se exige en la salida.
   let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
   let pisoEnLaSalida = false
+  let configLineaLeida: unknown = null
   const negocioId = (cot.negocio_id ?? null) as string | null
   if (negocioId) {
     const { data: negocio } = await supabase
@@ -238,6 +253,7 @@ export async function contextoDeCotizacion(
     const linea = (negocio as { lineas_negocio?: unknown } | null)?.lineas_negocio
     const fila = Array.isArray(linea) ? linea[0] : linea
     const configLinea = (fila as { config_extra?: unknown } | null)?.config_extra
+    configLineaLeida = configLinea ?? null
     if (cot.piso_margen_pct == null || cot.aviso_margen_pct == null) {
       const politica = politicaMargenDeLinea(configLinea)
       politicaLinea = { pisoPct: politica.pisoPct, avisoPct: politica.avisoPct }
@@ -264,6 +280,7 @@ export async function contextoDeCotizacion(
     negocioId,
     oportunidadId: (cot.oportunidad_id ?? null) as string | null,
     pisoEnLaSalida,
+    configLinea: configLineaLeida,
   }
 }
 

@@ -78,6 +78,7 @@ import { lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
+  lineaDeRecargo,
   RECARGO_POR_DEFECTO,
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
@@ -96,6 +97,21 @@ import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
+import {
+  CONFIG_IVA_POR_DEFECTO,
+  esBaseIvaLinea,
+  ivaSobreIngresoPropio,
+  lineasParaIva,
+  liquidarIva,
+  motivoIvaSinCalcular,
+  tarifaIvaDelVendedor,
+  TEXTO_IVA_SIN_CALCULAR,
+  ETIQUETA_BASE_IVA,
+  BASES_IVA_LINEA,
+  type BaseIvaLinea,
+  type ConfigIvaCotizacion,
+  type MetaDeLineaParaIva,
+} from '@/lib/fiscal/iva-cotizacion'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
 import type { FiscalProfile, Client } from '@/types/database'
 
@@ -151,6 +167,11 @@ interface ItemRow {
    * casilla y costo por pasajero confirmado. Ausente = la línea se ve como hoy.
    */
   tarifa_pax?: unknown
+  /**
+   * Sobre qué va el IVA de la línea (`items.base_iva`). Ausente o `null` = sigue al
+   * workspace. Solo cuenta donde el workspace liquida el IVA sobre el ingreso propio.
+   */
+  base_iva?: string | null
   rubros: RubroRow[]
 }
 
@@ -262,9 +283,14 @@ interface Props {
    * ausente o `null`, el editor no muestra el botón ni el panel.
    */
   textoCliente?: PanelTextoCliente | null
+  /**
+   * Sobre qué va el IVA (`iva-cotizacion.ts`), ya leído del `config_extra` del workspace.
+   * Ausente = IVA sobre el total, lo de siempre.
+   */
+  configIva?: ConfigIvaCotizacion | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -660,6 +686,41 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })),
     politicaRecargo,
   )
+
+  /**
+   * El IVA sobre el INGRESO PROPIO (`iva-cotizacion.ts`, regla de Felipe del 2026-09-22).
+   *
+   * Solo donde el workspace lo declara. Sale de la MISMA cascada que la pantalla ya
+   * muestra, con las mismas funciones que usan el PDF y «Aprobar»: por eso las tres
+   * superficies dicen la misma cifra. `ivaPorLinea` cubre todas las líneas (también las
+   * alternativas, que necesitan su marca); `ivaVigente`, lo que la cotización cobra hoy.
+   *
+   * Con la base apagada las dos quedan en `null` y el resumen fiscal es el de siempre.
+   */
+  const conIvaSobreIngresoPropio = ivaSobreIngresoPropio(configIva ?? CONFIG_IVA_POR_DEFECTO)
+  const recargoId = conIvaSobreIngresoPropio
+    ? lineaDeRecargo(initialItems.map(i => ({ id: i.id, nombre: i.nombre, es_ajuste: i.es_ajuste ?? false })), politicaRecargo)?.id ?? null
+    : null
+  const itemPorIdParaIva = new Map(initialItems.map(i => [i.id, i]))
+  const metaIva = (id: string): MetaDeLineaParaIva | undefined => {
+    const item = itemPorIdParaIva.get(id)
+    if (!item) return undefined
+    return {
+      nombre: item.nombre,
+      baseIva: esBaseIvaLinea(item.base_iva) ? item.base_iva : null,
+      esDeLaAgencia: item.id === recargoId || item.es_ajuste === true,
+    }
+  }
+  const opcionesIva = {
+    tarifaPct: tarifaIvaDelVendedor(fiscalProfile),
+    descuentoComercialPct: cotizacion.descuento_porcentaje,
+  }
+  const ivaPorLinea = conIvaSobreIngresoPropio
+    ? new Map(liquidarIva(lineasParaIva(cascada.lineas, metaIva), opcionesIva).lineas.map(l => [l.id, l]))
+    : null
+  const ivaVigente = conIvaSobreIngresoPropio
+    ? liquidarIva(lineasParaIva(cascadaTotal.lineas, metaIva), opcionesIva)
+    : null
 
   const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s => s.combinable ? !hayPrincipal : true)
   const hayCombinable = supuestos.some(s => s.combinable)
@@ -1140,6 +1201,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         Margen {margenTexto}
                       </span>
                     )}
+                    {/* Precio sin costo con el IVA sobre el ingreso propio: no se inventa
+                        una base. Se dice en la línea, que es donde se arregla. */}
+                    {!isAjuste && !esFueraDelPrecio && ivaPorLinea?.get(item.id)?.sinCosto && (
+                      <span className="block text-[10px] font-medium text-amber-700">{TEXTO_IVA_SIN_CALCULAR}</span>
+                    )}
                   </div>
                   {editable && !isAjuste && (
                     <button
@@ -1608,6 +1674,50 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             El pantallazo decía {pantallazoDecia}.
                           </p>
                         )}
+                        {/* Sobre qué va el IVA de esta línea. Solo donde el workspace
+                            liquida el IVA sobre el ingreso propio; en los demás no hay nada
+                            que elegir. Cambiarla no mueve el precio: solo el IVA. */}
+                        {ivaPorLinea && (() => {
+                          const ivaLinea = ivaPorLinea.get(item.id)
+                          const declarada: BaseIvaLinea | null = esBaseIvaLinea(item.base_iva) ? item.base_iva : null
+                          return (
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                              <span className="text-muted-foreground">IVA de la línea:</span>
+                              {editable ? (
+                                <select
+                                  aria-label="Base del IVA de la línea"
+                                  value={declarada ?? ''}
+                                  disabled={isPending}
+                                  className="rounded border bg-background px-1 py-0.5 text-[10px]"
+                                  onChange={e => {
+                                    const valor = e.target.value
+                                    const base = esBaseIvaLinea(valor) ? valor : null
+                                    startTransition(async () => {
+                                      const res = await updateItem(item.id, { base_iva: base })
+                                      if (!res.success) toast.error(res.error ?? 'No se pudo guardar')
+                                      router.refresh()
+                                    })
+                                  }}
+                                >
+                                  <option value="">
+                                    {`Automático (${ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base].split(':')[0].toLowerCase() : 'a nombre de un tercero'})`}
+                                  </option>
+                                  {BASES_IVA_LINEA.map(b => (
+                                    <option key={b} value={b}>{ETIQUETA_BASE_IVA[b]}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span>{ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base] : ''}</span>
+                              )}
+                              {ivaLinea && !ivaLinea.sinCosto && (
+                                <span className="tabular-nums text-muted-foreground">· {formatCOP(ivaLinea.iva)}</span>
+                              )}
+                              {ivaLinea?.sinCosto && (
+                                <span className="font-medium text-amber-700">· {TEXTO_IVA_SIN_CALCULAR}</span>
+                              )}
+                            </div>
+                          )
+                        })()}
                         {/* El descuento comercial vive al final de la cascada y NO se
                             reparte por línea, así que el margen de arriba está por
                             encima del que queda de verdad. Decirlo cuesta una línea;
@@ -2432,11 +2542,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
               )
             }
+            // Con el IVA sobre el ingreso propio, el IVA ya viene liquidado por línea (el
+            // mismo que imprime el PDF y fija «Aprobar») y las retenciones van sobre la
+            // misma base. Sin esa configuración, lo de siempre: IVA sobre el total.
             const resumen = generarResumenFiscal(
               fiscalProfile as FiscalProfile,
               clientFiscal as unknown as Client,
               valor,
-              costoTotal
+              costoTotal,
+              ivaVigente ? { iva: ivaVigente.iva, baseGravable: ivaVigente.baseGravable } : undefined,
             )
             // De la factura a la plata que de verdad queda, renglón por renglón. Antes
             // "tú recibes" repetía la cifra de "el cliente paga" porque contaba el IVA
@@ -2450,8 +2564,18 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {resumen.iva > 0 && (
                     <div className="mt-1 space-y-0.5 text-[10px] text-blue-600">
                       <div className="flex justify-between"><span>Tu cotización</span><span className="tabular-nums">{formatCOP(valor)}</span></div>
-                      <div className="flex justify-between"><span>IVA que le cobras</span><span className="tabular-nums">+{formatCOP(resumen.iva)}</span></div>
+                      <div className="flex justify-between">
+                        <span>{ivaVigente ? 'IVA sobre la tarifa de la agencia' : 'IVA que le cobras'}</span>
+                        <span className="tabular-nums">+{formatCOP(resumen.iva)}</span>
+                      </div>
                     </div>
+                  )}
+                  {/* Una línea con precio y sin costo deja el IVA incompleto: se dice aquí,
+                      y el PDF sale como borrador hasta cargarlo. */}
+                  {ivaVigente && !ivaVigente.calculable && (
+                    <p className="mt-1 text-center text-[10px] font-medium text-amber-700">
+                      {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador hasta entonces.
+                    </p>
                   )}
                 </div>
 

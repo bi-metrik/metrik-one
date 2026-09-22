@@ -21,6 +21,7 @@ import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itin
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
 import { createServiceClient } from '@/lib/supabase/server'
+import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -222,9 +223,21 @@ export async function updateItem(id: string, updates: {
   precio_manual?: boolean
   /** Costo unitario escrito a mano. Solo aplica al ítem SIN rubros. */
   subtotal?: number
+  /**
+   * Sobre qué va el IVA de esta línea (`iva-cotizacion.ts`). `null` = sigue al workspace.
+   * No mueve el precio ni la cascada: solo el IVA, y solo donde el workspace liquida el IVA
+   * sobre el ingreso propio.
+   */
+  base_iva?: BaseIvaLinea | null
 }) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  // Un valor fuera de los tres se rechaza en el servidor: una server action es un endpoint
+  // alcanzable aunque la pantalla solo ofrezca tres opciones.
+  if (updates.base_iva !== undefined && updates.base_iva !== null && !esBaseIvaLinea(updates.base_iva)) {
+    return { success: false, error: 'Base de IVA desconocida' }
+  }
 
   // El margen es el único campo del ítem que decide cuánto gana la agencia, y lo puede
   // cambiar cualquiera que abra la cotización. El valor anterior se lee ANTES de
@@ -245,6 +258,7 @@ export async function updateItem(id: string, updates: {
   // `subtotal`, que es de donde ya lo leen `costo_total` y el presupuesto de Ejecución.
   // El guard vive abajo: con rubros, el costo lo mandan ellos.
   if (updates.subtotal !== undefined) patch.subtotal = Math.max(0, Math.round(updates.subtotal))
+  if (updates.base_iva !== undefined) patch.base_iva = updates.base_iva
 
   // Escribir el valor unitario a mano ES declarar que el precio lo pone una persona.
   // Sin esto, el siguiente recalcularTotales lo reemplazaria por el costo de rubros
@@ -966,6 +980,9 @@ export async function duplicarCotizacion(id: string) {
           // rubros por adulto y niño pero perdería el reparto que imprime el PDF, y las
           // lecturas de donde salió cada número.
           ...(item.tarifa_pax !== undefined ? { tarifa_pax: item.tarifa_pax } : {}),
+          // La base del IVA de la línea viaja con ella: sin esto la copia de una línea
+          // comisionable volvería a cobrarle IVA al viajero.
+          ...(item.base_iva !== undefined ? { base_iva: item.base_iva } : {}),
         })
         .select('id')
         .single()

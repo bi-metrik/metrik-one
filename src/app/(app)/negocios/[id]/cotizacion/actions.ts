@@ -12,6 +12,7 @@ import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 import { motivoParaNoSalir } from '@/lib/cotizaciones/piso-salida-datos'
+import { precioAprobadoDeCotizacion } from '@/lib/fiscal/iva-cotizacion-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 
 export async function getCotizacionesNegocio(negocioId: string) {
@@ -145,6 +146,16 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
     return { success: false as const, error: 'Solo se pueden aprobar cotizaciones en borrador o enviadas' }
   }
 
+  // Lo que el cliente paga. Con el IVA sobre el ingreso propio (`iva-cotizacion.ts`) es el
+  // TOTAL del PDF, IVA incluido; sin esa configuración, `valor_total` como siempre. Se
+  // resuelve ANTES de marcar nada: si el IVA no se puede calcular, no se aprueba.
+  const precio = await precioAprobadoDeCotizacion(supabase, {
+    workspaceId,
+    cotizacionId,
+    valorTotal: (cot as { valor_total: number | null }).valor_total,
+  })
+  if (!precio.ok) return { success: false as const, error: precio.error }
+
   // Marcar cotización como aceptada (enviada → aceptada)
   const { error: updErr } = await supabase
     .from('cotizaciones')
@@ -157,7 +168,7 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: negErr } = await (supabase as any)
     .from('negocios')
-    .update({ precio_aprobado: (cot as { valor_total: number | null }).valor_total })
+    .update({ precio_aprobado: precio.precio })
     .eq('id', negocioId)
 
   if (negErr) return { success: false as const, error: negErr.message }
