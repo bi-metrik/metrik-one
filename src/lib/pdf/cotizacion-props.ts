@@ -347,6 +347,24 @@ export interface CotizacionPDFProps {
   } | null
 
   /**
+   * Los precios de ESTE documento ya traen el IVA adentro (`iva-cotizacion.ts`): el
+   * workspace liquida el IVA sobre el ingreso propio y la plantilla lo sabe imprimir
+   * (`plantillaImprimePreciosConIva`). Cada línea, cada tarifa, la tabla por pasajero y el
+   * TOTAL ya lo incluyen, así que la plantilla NO imprime «Subtotal» ni «IVA» aparte.
+   *
+   * `null` o ausente en todo lo demás: la plantilla imprime Subtotal, IVA y TOTAL como
+   * siempre.
+   */
+  ivaEnPrecios?: {
+    /** El IVA del TOTAL. */
+    iva: number
+    /** `true` = «Incluye IVA de $X sobre la tarifa de servicio de la agencia» (`linea_incluida`). */
+    nota: boolean
+    /** El IVA de cada tarifa, en el orden de `itinerarios`. */
+    porBloque: number[]
+  } | null
+
+  /**
    * Nombre del negocio al que cuelga la cotización. Es el mismo dato que el payload
    * de WeasyPrint ya manda como `proyecto`, y en la plantilla `termotech` alimenta
    * dos cosas: la fila «Proyecto» y el título del capítulo de la tabla.

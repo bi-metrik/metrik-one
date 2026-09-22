@@ -86,3 +86,19 @@ const PLANTILLAS_CON_TEXTO_DEL_CLIENTE = new Set(['trappvel'])
 export function plantillaUsaTextoDelCliente(slug: string | null | undefined): boolean {
   return !!slug && PLANTILLAS_CON_TEXTO_DEL_CLIENTE.has(slug)
 }
+
+/**
+ * Las plantillas que imprimen los precios CON el IVA incluido cuando el workspace liquida
+ * el IVA sobre el ingreso propio (`iva-cotizacion.ts`). Hoy solo la de Trappvel.
+ *
+ * Esas plantillas reciben cada línea con su IVA ya sumado y el TOTAL con el IVA adentro, y
+ * no imprimen «Subtotal» ni «IVA» aparte: con `linea_incluida` dicen «Incluye IVA de $X» y
+ * con `oculto` no lo dicen. Una plantilla que no esté aquí sigue imprimiendo Subtotal, IVA
+ * y TOTAL por separado, con el IVA que le llegue: sumarle el IVA a sus líneas lo cobraría
+ * dos veces en su propio pie.
+ */
+const PLANTILLAS_CON_PRECIOS_CON_IVA = new Set(['trappvel'])
+
+export function plantillaImprimePreciosConIva(slug: string | null | undefined): boolean {
+  return !!slug && PLANTILLAS_CON_PRECIOS_CON_IVA.has(slug)
+}

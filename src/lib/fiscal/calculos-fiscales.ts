@@ -360,11 +360,25 @@ export function generarResumenFiscal(
   perfil: FiscalProfile,
   client: Client,
   precioFinal: number,
-  costoTotal: number = 0
+  costoTotal: number = 0,
+  /**
+   * El IVA ya liquidado sobre el ingreso propio (`iva-cotizacion.ts`), con la base que lo
+   * produjo. Ausente = el IVA va sobre `precioFinal`, que es lo de siempre y lo que recibe
+   * todo workspace que no declare la base nueva. Las retenciones van sobre la MISMA base
+   * que el IVA.
+   */
+  ivaLiquidado?: { iva: number; baseGravable: number }
 ): ResumenFiscal {
-  const iva = calcularIVA(perfil, precioFinal)
+  const iva = ivaLiquidado
+    ? { iva_valor: ivaLiquidado.iva, total_con_iva: precioFinal + ivaLiquidado.iva }
+    : calcularIVA(perfil, precioFinal)
   const totalPagaCliente = iva.total_con_iva
-  const retenciones = calcularRetenciones(perfil, client, precioFinal, iva.iva_valor)
+  const retenciones = calcularRetenciones(
+    perfil,
+    client,
+    ivaLiquidado ? ivaLiquidado.baseGravable : precioFinal,
+    iva.iva_valor,
+  )
   // El IVA lo recaudas para la DIAN: entra a la cuenta y vuelve a salir. Contarlo
   // como ingreso propio inflaba "tú recibes" hasta igualar "el cliente paga" y
   // subía el margen neto por encima del margen real de la cotización.

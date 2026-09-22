@@ -86,6 +86,7 @@ import {
 } from './cotizacion-trappvel-formato'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
+import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 
 /** Ver la nota de `SIN_GUION` en la plantilla de Termotech: la regla es por `<Text>`. */
@@ -825,6 +826,7 @@ export default function CotizacionTrappvelPDF({
   sugeridos,
   preciosPorPasajero,
   fiscal,
+  ivaEnPrecios,
   negocio,
   emisor,
   viaje,
@@ -843,7 +845,14 @@ export default function CotizacionTrappvelPDF({
   // Lo que el cliente paga: la MISMA lista que alimenta el Subtotal. Ver decisión 2.
   const lineas = lineasImpresas(items)
   const subtotal = lineas.reduce((a, l) => a + l.total, 0)
-  const iva = fiscal?.iva ?? 0
+  /**
+   * Con el IVA dentro de los precios (`ivaEnPrecios`), cada línea ya lo trae y el TOTAL
+   * también: «Subtotal» e «IVA» no se imprimen aparte, y la nota dice cuánto IVA lleva el
+   * total —si el workspace la pide (`linea_incluida`)—. Sin eso, lo de siempre.
+   */
+  const ivaIncluido = ivaEnPrecios ?? null
+  const notaIva = ivaIncluido && ivaIncluido.nota && ivaIncluido.iva > 0 ? textoIvaIncluido(ivaIncluido.iva, pesos) : null
+  const iva = ivaIncluido ? 0 : fiscal?.iva ?? 0
   const total = fiscal?.totalBruto ?? subtotal + iva
 
   /**
@@ -854,11 +863,14 @@ export default function CotizacionTrappvelPDF({
    */
   const bloques = (itinerarios ?? []).map((it, i) => {
     const t = tituloDeBloquePDF(it.nombre, it.esPrincipal, i + 1)
+    const ivaDelBloque = ivaIncluido?.nota ? ivaIncluido.porBloque[i] ?? 0 : 0
     return {
       titulo: t,
       color: colorDeTarifa(t, it.esPrincipal),
       esPrincipal: it.esPrincipal,
       precio: it.precio,
+      /** Solo con `linea_incluida`: cuánto IVA trae el precio de esta tarifa. */
+      notaIva: ivaDelBloque > 0 ? `Incluye IVA de ${pesos(ivaDelBloque)}` : null,
       lineas: lineasImpresas(it.items),
     }
   })
@@ -1077,6 +1089,10 @@ export default function CotizacionTrappvelPDF({
           <Text style={{ fontSize: 13, fontFamily: 'Helvetica-Bold', color: C.blanco }}>{pesos(total)}</Text>
         </View>
       </View>
+      {/* Dentro de la misma caja que el TOTAL: la nota no se separa de la cifra que explica. */}
+      {notaIva && (
+        <Text style={{ fontSize: 7.5, color: C.gris, marginTop: 4, textAlign: 'right' }}>{notaIva}</Text>
+      )}
     </View>
   )
 
@@ -1223,6 +1239,9 @@ export default function CotizacionTrappvelPDF({
                         </Text>
                       )}
                       <Text style={{ fontSize: 18, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: 5 }}>{pesos(b.precio)}</Text>
+                      {b.notaIva && (
+                        <Text style={{ fontSize: 7, color: C.gris, marginTop: 1 }}>{b.notaIva}</Text>
+                      )}
                       {/* El nivel general recorta el desglose, nunca el nombre y el precio
                           de cada opción: eso ES lo que el cliente tiene que decidir. */}
                       {!general && (

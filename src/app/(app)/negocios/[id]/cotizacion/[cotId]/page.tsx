@@ -12,6 +12,11 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
+  CONFIG_IVA_POR_DEFECTO,
+  leerConfigIvaCotizacion,
+  type ConfigIvaCotizacion,
+} from '@/lib/fiscal/iva-cotizacion'
+import {
   politicaMargenDeLinea,
   umbralesDeCotizacion,
   UMBRALES_MARGEN_POR_DEFECTO,
@@ -226,6 +231,26 @@ export default async function CotizacionNegocioPage({
     }
   }
 
+  // Sobre qué va el IVA de esta cotización (`iva-cotizacion.ts`). Del `config_extra` del
+  // workspace solo viaja lo ya interpretado, nunca el jsonb. Si no se puede leer, lo de
+  // siempre: IVA sobre el total, que es lo que reciben todos los workspaces que no declaran
+  // nada.
+  let configIva: ConfigIvaCotizacion = CONFIG_IVA_POR_DEFECTO
+  try {
+    const { supabase: sbIva, workspaceId: wsIva } = await getWorkspace()
+    if (wsIva) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: wsRow } = await (sbIva as any)
+        .from('workspaces')
+        .select('config_extra')
+        .eq('id', wsIva)
+        .maybeSingle()
+      configIva = leerConfigIvaCotizacion((wsRow as { config_extra?: unknown } | null)?.config_extra)
+    }
+  } catch {
+    // Sin respuesta, el IVA de siempre.
+  }
+
   const cotRow = cotizacion as unknown as { piso_margen_pct?: number | null; aviso_margen_pct?: number | null }
   const umbrales = umbralesDeCotizacion(
     { pisoPct: cotRow.piso_margen_pct, avisoPct: cotRow.aviso_margen_pct },
@@ -252,6 +277,7 @@ export default async function CotizacionNegocioPage({
       adicionales={adicionales as Parameters<typeof CotizacionEditor>[0]['adicionales']}
       salida={salida}
       textoCliente={textoCliente}
+      configIva={configIva}
     />
   )
 }

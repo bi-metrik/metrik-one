@@ -40,6 +40,7 @@ import { lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
+  plantillaImprimePreciosConIva,
   plantillaUsaFotosDeCiudad,
   plantillaUsaTextoDelCliente,
 } from '@/lib/pdf/plantillas-cotizacion'
@@ -49,6 +50,14 @@ import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
+import {
+  clienteParaRetenciones,
+  fiscalSobreIngresoPropio,
+  ivaSobreIngresoPropio,
+  leerConfigIvaCotizacion,
+  motivoIvaSinCalcular,
+} from '@/lib/fiscal/iva-cotizacion'
+import { ivaDeLaCotizacion, type IvaDeCotizacion } from '@/lib/fiscal/iva-cotizacion-datos'
 import { createElement } from 'react'
 import {
   isPdfRenderConfigured,
@@ -248,10 +257,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     staffId: staffId ?? null,
     registrarPerdida: true,
   })
-  const esBorrador = salida?.aplica === true && salida.bloquea
-  const avisoBorrador = esBorrador
-    ? `PDF de borrador, con marca de agua: no se puede enviar. ${salida!.mensaje}`
-    : null
+  // El borrador se decide más abajo, cuando se sabe si el IVA se pudo calcular.
+  const salidaBloquea = salida?.aplica === true && salida.bloquea
 
   // Get empresa: primero por oportunidad, luego por negocio, luego fallback
   type EmpresaRow = {
@@ -507,7 +514,47 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // más baja que la del sistema, y liquidaba el IVA sobre esa base equivocada. Sin
   // descuento no se notaba: por eso llevaba tiempo ahí.
   const valorNeto = cot.valor_total
-  const fiscal = calcularFiscal(valorNeto, vendorProfile, buyerProfile)
+  let fiscal = calcularFiscal(valorNeto, vendorProfile, buyerProfile)
+
+  /**
+   * El IVA sobre el INGRESO PROPIO (`iva-cotizacion.ts`, regla de Felipe del 2026-09-22):
+   * solo en el workspace que declara `config_extra.iva_cotizacion.base = ingreso_propio`.
+   *
+   * ⚠️ Sin esa declaración no se lee nada más y `fiscal` es el de la línea de arriba, byte
+   * a byte el de siempre: ningún otro workspace cambia un peso ni paga una consulta.
+   *
+   * ⚠️ El perfil del vendedor se lee de la BASE (`iva_responsible`), no del mapeo viejo de
+   * arriba: ese traduce `tax_regime = 'ordinario'` como «no responsable» y deja el IVA en 0.
+   * Se conserva intacto para los demás; aquí no se usa.
+   */
+  const configIva = leerConfigIvaCotizacion(ws?.config_extra)
+  let ivaCot: IvaDeCotizacion | null = null
+  if (ivaSobreIngresoPropio(configIva)) {
+    ivaCot = await ivaDeLaCotizacion(supabase, { workspaceId, cotizacionId, config: configIva })
+    if (ivaCot) {
+      fiscal = fiscalSobreIngresoPropio({
+        subtotal: valorNeto,
+        liquidacion: ivaCot.vigente,
+        perfil: ivaCot.perfil,
+        cliente: clienteParaRetenciones(empresa),
+      })
+    }
+  }
+
+  /**
+   * Borrador: bajo el margen mínimo sin la autorización del dueño (hueco 1), o con una línea
+   * cuyo IVA no se pudo calcular porque tiene precio y no tiene costo. En los dos casos el
+   * PDF se descarga IGUAL —hace falta ver los borradores— pero con marca de agua, y no se
+   * guarda ni se registra: no es un documento del cliente. No se inventa una base de IVA.
+   */
+  const ivaSinCalcular = ivaCot !== null && !ivaCot.calculable
+  const esBorrador = salidaBloquea || ivaSinCalcular
+  const avisoBorrador = esBorrador
+    ? `PDF de borrador, con marca de agua: no se puede enviar. ${[
+        salidaBloquea ? salida!.mensaje : null,
+        ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
+      ].filter(Boolean).join(' ')}`
+    : null
 
   // ============================================================
   // Que plantilla visual usa la cotizacion de este workspace
@@ -614,6 +661,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
           borrador: true as const,
           aviso: avisoBorrador,
           avisosCobertura,
+          // Un borrador también sale con los pantallazos de otros pasajeros: quien lo
+          // descargó tiene que saberlo antes de corregir el margen, no después.
+          avisosCaptura,
           renderedVia: 'weasyprint' as const,
         }
       }
@@ -730,26 +780,26 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       valorAdicionales: totalesDeAdicionales(lista).precio,
     }
   }
-  const itinerariosPDF = bloques
-    ? bloques.map(b => ({
-        nombre: b.nombre,
-        esPrincipal: b.esPrincipal,
-        precio: b.precio,
-        items: b.itemIds
-          .map(id => itemPorId.get(id))
-          .filter((i): i is ItemRow => i !== undefined)
-          .map(i => ({
-            nombre: i.nombre ?? '',
-            descripcion: i.descripcion ?? null,
-            precio_venta: Number(i.precio_venta) || 0,
-            descuento_porcentaje: descuentoVisible(i),
-            cantidad: Number(i.cantidad) || 1,
-            unidad: i.unidad ?? null,
-            precioPorPasajero: precioPorPasajeroDeItem(i, composicionViaje),
-            ...adicionalesDe(i),
-          })),
-      }))
-    : null
+  /**
+   * Precios CON el IVA incluido, línea por línea (regla de Felipe, punto 4: «el documento
+   * muestra el total final con IVA incluido»).
+   *
+   * Solo con la base `ingreso_propio` encendida y con una plantilla que lo sepa imprimir
+   * (`plantillaImprimePreciosConIva`). A cada línea se le suma SU IVA —el mismo que suma el
+   * total—, así que la columna, las tarifas, la tabla por pasajero y el TOTAL siguen
+   * cuadrando entre sí sin una cifra aparte. Con `linea_incluida` la plantilla dice además
+   * cuánto IVA lleva; con `oculto` no lo dice, y los números son los mismos.
+   *
+   * Sin la base encendida, `ivaDe` no devuelve nada y cada cifra es la de siempre.
+   */
+  const preciosConIva = ivaCot !== null && plantillaImprimePreciosConIva(templateSlug)
+  const ivaDe = (i: ItemRow) => (preciosConIva && i.id ? ivaCot!.porItem.get(i.id) ?? null : null)
+  const conIva = (i: ItemRow): ItemRow => {
+    const iva = ivaDe(i)
+    if (!iva || iva.ivaBase === 0) return i
+    const cantidad = Number(i.cantidad) || 1
+    return { ...i, precio_venta: (Number(i.precio_venta) || 0) + iva.ivaBase / cantidad }
+  }
 
   // ⚠️ Con itinerarios, la lista PLANA de items que alimenta el resumen fiscal se
   // reemplaza por la del PRINCIPAL. Si no, el «Subtotal» sumaria AVIANCA **y** WINGO
@@ -768,16 +818,44 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   //
   // Sin ranuras con alternativas devuelve todos los ítems: el PDF de Termotech, Arca
   // y WMC no cambia una línea.
-  const paraPlantilla = (i: ItemRow) => ({
-    nombre: i.nombre ?? '',
-    descripcion: i.descripcion ?? null,
-    precio_venta: Number(i.precio_venta) || 0,
-    descuento_porcentaje: descuentoVisible(i),
-    cantidad: Number(i.cantidad) || 1,
-    unidad: i.unidad ?? null,
-    precioPorPasajero: precioPorPasajeroDeItem(i, composicionViaje),
-    ...adicionalesDe(i),
-  })
+  const paraPlantilla = (original: ItemRow) => {
+    const i = conIva(original)
+    const adicionales = adicionalesDe(original)
+    const ivaAdicionales = ivaDe(original)?.ivaAdicionales ?? 0
+    return {
+      nombre: i.nombre ?? '',
+      descripcion: i.descripcion ?? null,
+      precio_venta: Number(i.precio_venta) || 0,
+      descuento_porcentaje: descuentoVisible(i),
+      cantidad: Number(i.cantidad) || 1,
+      unidad: i.unidad ?? null,
+      precioPorPasajero: precioPorPasajeroDeItem(i, composicionViaje),
+      ...adicionales,
+      ...(adicionales.valorAdicionales !== undefined && ivaAdicionales > 0
+        ? { valorAdicionales: adicionales.valorAdicionales + ivaAdicionales }
+        : {}),
+    }
+  }
+
+  /** El IVA de una tarifa: la suma del de sus líneas, que es lo que suma su columna. */
+  const ivaDeLasLineas = (ids: string[]) =>
+    ids.reduce((a, id) => {
+      const item = itemPorId.get(id)
+      return a + (item ? ivaDe(item)?.iva ?? 0 : 0)
+    }, 0)
+  const ivaPorBloque = (bloques ?? []).map(b => ivaDeLasLineas(b.itemIds))
+
+  const itinerariosPDF = bloques
+    ? bloques.map((b, idx) => ({
+        nombre: b.nombre,
+        esPrincipal: b.esPrincipal,
+        precio: b.precio + ivaPorBloque[idx],
+        items: b.itemIds
+          .map(id => itemPorId.get(id))
+          .filter((i): i is ItemRow => i !== undefined)
+          .map(paraPlantilla),
+      }))
+    : null
 
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
   const itemsParaResumen = itemsDelPrincipal ?? items.filter(aporta).map(paraPlantilla)
@@ -863,6 +941,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     : idsSugeridosVisibles
         .map(id => porId.get(id))
         .filter((i): i is ItemRow => i !== undefined)
+        // Con IVA incluido como el resto del documento: el precio de una actividad
+        // opcional es lo que el cliente pagaría si la toma.
+        .map(conIva)
         .map(i => ({
           nombre: i.nombre ?? '',
           descripcion: i.descripcion ?? null,
@@ -1031,6 +1112,15 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     // pasajero quedaría por debajo del TOTAL sin que el documento lo explique.
     preciosPorPasajero: preciosPorPasajeroDelViaje(itemsParaResumen),
     fiscal,
+    // Los precios ya traen el IVA adentro (ver `preciosConIva`). `null` en todo lo demás:
+    // la plantilla imprime Subtotal, IVA y TOTAL como siempre.
+    ivaEnPrecios: preciosConIva
+      ? {
+          iva: fiscal.iva,
+          nota: configIva.enDocumento === 'linea_incluida',
+          porBloque: ivaPorBloque,
+        }
+      : null,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
     viaje: viajePDF,
@@ -1051,6 +1141,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       borrador: true as const,
       aviso: avisoBorrador,
       avisosCobertura,
+      // Mismo criterio que en el camino del servicio externo: el borrador no calla el aviso.
+      avisosCaptura,
       avisoTexto,
       renderedVia: 'react-pdf' as const,
     }
