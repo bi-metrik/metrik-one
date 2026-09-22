@@ -26,15 +26,11 @@ const VUELO = {
   fechaSalida: '23 oct',
   fechaRegreso: '25 oct',
   // Las horas del banco real (`3.57.39_PM-3`): la ida sale 05:50 y llega 10:15 tras la
-  // escala de Bogota. La duracion va vacia a proposito — esa captura muestra la duracion
-  // de cada TRAMO y no la del recorrido, y sumar los tramos omite la conexion.
+  // escala de Bogota.
   horaSalida: '05:50',
   horaLlegada: '10:15',
-  duracionIda: null,
   horaSalidaRegreso: '18:45',
   horaLlegadaRegreso: '22:10',
-  duracionRegreso: null,
-  numeroVuelo: '9459 4867 9842 9488',
   escalaIda: 'Bogota BOG',
   escalaRegreso: 'Bogota BOG',
   escalas: 1,
@@ -127,7 +123,11 @@ const props = (over: Partial<CotizacionPDFProps> = {}): CotizacionPDFProps => ({
   sugeridos: [
     { nombre: 'SNORKEL EN ISLA MUJERES', descripcion: 'Medio dia', precio_venta: 260_000, cantidad: 1, unidad: 'pax' },
   ],
-  preciosPorPasajero: { filas: [{ tipo: 'adulto', precioUnitario: 641_507 }], sinReparto: ['HOTEL CROWN PARADISE'] },
+  preciosPorPasajero: {
+    filas: [{ tipo: 'adulto', cantidad: 2, precioUnitario: 641_507 }],
+    cubierto: 1_283_014,
+    sinReparto: ['HOTEL CROWN PARADISE'],
+  },
   fiscal: null,
   negocio: { nombre: 'Viaje a Cancun - familia Sanchez' },
   emisor: null,
@@ -165,12 +165,11 @@ describe('el documento del cliente', () => {
     expect(await texto(props())).toContain('zona arqueologica maya')
   })
 
-  it('imprime la tabla de vuelos con códigos IATA, número de vuelo y escala', async () => {
+  it('imprime la tabla de vuelos con aerolínea, códigos IATA y escala', async () => {
     const t = await texto(props())
     expect(t).toContain('Avianca')
     expect(t).toContain('CUC')
     expect(t).toContain('AXM')
-    expect(t).toContain('9459')
     expect(t).toContain('Bogota BOG')
   })
 
@@ -194,24 +193,15 @@ describe('el documento del cliente', () => {
     expect(t).toContain('Regreso')
   })
 
-  it('⚠️ la columna DURACIÓN no se imprime cuando ninguna fila la tiene', async () => {
-    // La captura de un vuelo con escala muestra la duración de cada TRAMO, no la del
-    // recorrido: una columna con dos rayas es la «tabla con guiones» que este documento
-    // no puede tener.
-    // ⚠️ Se mira el ENCABEZADO de la tabla y no la palabra suelta: «DURACIÓN» también es
-    // una de las cuatro fichas de la portada, y ahí sí tiene dato.
+  it('⚠️ la tabla NO trae DURACIÓN ni número de vuelo: no están en la referencia', async () => {
+    // El itinerario que Trappvel manda hoy tiene cinco columnas (AERO, RUTA, FECHA,
+    // SALIDA, LLEGADA). Se mira el ENCABEZADO y no la palabra suelta: «DURACIÓN» también
+    // es una de las cuatro fichas de la portada, y ahí sí tiene dato.
     const t = await texto(props())
     expect(t).toContain('SALIDA LLEGADA ESCALA')
     expect(t).not.toContain('LLEGADA DURACIÓN')
-  })
-
-  it('con duración leída, la columna sí aparece con su valor', async () => {
-    const t = await texto(props({
-      viaje: viaje({ vuelos: [{ ...VUELO, duracionIda: '4 h 15 m', duracionRegreso: '4 h 30 m' }] }),
-    }))
-    expect(t).toContain('LLEGADA DURACIÓN ESCALA')
-    // Sin el número de adelante: el renderizador parte la corrida después del dígito.
-    expect(t).toContain('h 15 m')
+    // El número de vuelo se sigue viendo en la plataforma; en el documento, no.
+    expect(t).not.toContain('9459')
   })
 
   it('un viaje de solo ida no imprime una fila de regreso vacía', async () => {
@@ -269,7 +259,35 @@ describe('el documento del cliente', () => {
     const t = await texto(props())
     expect(t).toContain('PRECIO POR PASAJERO')
     expect(t).toContain('Adulto')
+    expect(t).toContain('Se cobra por el grupo: HOTEL CROWN PARADISE')
+  })
+
+  /**
+   * ⚠️⚠️ La tabla por pasajero y el TOTAL son dinero del MISMO viaje, y hasta hoy se
+   * imprimían como dos hechos sueltos que nadie reconciliaba: en la prueba real de
+   * Providencia la suma por pasajero quedaba 360.000 por debajo del total y el documento
+   * no lo decía. Aquí se mide que la columna CIERRA.
+   */
+  it('⚠️⚠️ la columna por pasajero + lo del grupo da exactamente el TOTAL', async () => {
+    const t = await texto(props())
+    // ⚠️ Sin el «$»: `Intl` lo separa con un espacio duro y `toContain` no lo encuentra.
+    // 2 adultos x 641.507 = 1.283.014 (`cubierto`), y el resto hasta 5.075.235.
+    expect(t).toContain('1.283.014')
+    expect(t).toContain('3.792.221')
+    expect(t).toContain('5.075.235')
+    expect(1_283_014 + 3_792_221).toBe(5_075_235)
+  })
+
+  it('sin poder reconciliar, el documento lo DICE en vez de sugerir que la columna suma', async () => {
+    const t = await texto(props({
+      preciosPorPasajero: {
+        filas: [{ tipo: 'adulto', cantidad: null, precioUnitario: 641_507 }],
+        cubierto: null,
+        sinReparto: ['HOTEL CROWN PARADISE'],
+      },
+    }))
     expect(t).toContain('No incluye lo que se cobra por el grupo')
+    expect(t).not.toContain('Se cobra por el grupo:')
   })
 
   it('el pie de marca y la firma salen de la configuración del workspace', async () => {
@@ -294,6 +312,90 @@ describe('el documento del cliente', () => {
       vendedor: { ...props().vendedor, email: 'hola@trappvel.com' },
     }))
     expect(t).toContain('hola@trappvel.com')
+  })
+})
+
+/**
+ * R7 · las TRES tarifas que van en la propuesta.
+ *
+ * ⚠️⚠️ Esta plantilla recibia `itinerarios` desde que existe y NO lo consumia: la palabra
+ * aparecia dos veces en el archivo y las dos eran comentarios. Encenderla para Trappvel
+ * fue lo que perdio las tres opciones — antes una cotizacion salia con la generica, que si
+ * las imprime. O sea que el documento se le pasaban tres tarifas armadas y mostraba UNA.
+ */
+describe('las tres tarifas (Economica / Recomendada / Premium)', () => {
+  const ITIN: CotizacionPDFProps['itinerarios'] = [
+    {
+      nombre: 'Recomendada', esPrincipal: true, precio: 5_075_235,
+      items: [{ nombre: 'TIQUETES AEREOS', descripcion: null, precio_venta: 1_294_351, descuento_porcentaje: 0, cantidad: 1, unidad: null }],
+    },
+    {
+      nombre: 'Económica', esPrincipal: false, precio: 3_900_000,
+      items: [{ nombre: 'TIQUETES LOW COST', descripcion: null, precio_venta: 900_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }],
+    },
+    {
+      nombre: 'Premium', esPrincipal: false, precio: 8_400_000,
+      items: [{ nombre: 'TIQUETES FLEX', descripcion: null, precio_venta: 2_100_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }],
+    },
+  ]
+
+  /**
+   * Un documento CORTO, de una sola pagina.
+   *
+   * ⚠️ `textoDelPDF` concatena los `stream` en el orden del BINARIO, que no es el de las
+   * paginas: en un PDF de dos hojas el texto de la segunda puede salir primero. Comparar
+   * posiciones solo significa algo dentro de una misma pagina.
+   */
+  const corto = (over: Partial<CotizacionPDFProps> = {}) =>
+    props({ viaje: viaje({ vuelos: [], hoteles: [], cargosEnDestino: [] }), dias: null, sugeridos: null, ...over })
+
+  it('imprime las TRES con su nombre y su precio, la recomendada primero', async () => {
+    const t = await texto(corto({ itinerarios: ITIN }))
+    expect(t).toContain('RECOMENDADA')
+    expect(t).toContain('ECONÓMICA')
+    expect(t).toContain('PREMIUM')
+    expect(t).toContain('3.900.000')
+    expect(t).toContain('8.400.000')
+    // El orden lo fija `bloquesParaPDF` (principal primero) y el documento lo respeta:
+    // la Recomendada va primera por ser la principal, no por precio.
+    expect(t.indexOf('RECOMENDADA')).toBeLessThan(t.indexOf('ECONÓMICA'))
+    expect(t.indexOf('ECONÓMICA')).toBeLessThan(t.indexOf('PREMIUM'))
+  })
+
+  it('cada bloque imprime SU combinacion, no el abanico completo', async () => {
+    const t = await texto(props({ itinerarios: ITIN }))
+    expect(t).toContain('TIQUETES LOW COST')
+    expect(t).toContain('TIQUETES FLEX')
+  })
+
+  it('⚠️ dice cual total manda: sin eso el cliente ve tres precios y no sabe que acepta', async () => {
+    const t = await texto(props({ itinerarios: ITIN }))
+    expect(t).toContain('El total de abajo corresponde a la opción recomendada')
+    // El TOTAL sigue siendo el del principal (R5), no la suma de los tres.
+    expect(t).toContain('5.075.235')
+  })
+
+  it('1b · con UNA sola tarifa el documento sale como hoy: sin encabezados ni aclaracion', async () => {
+    const t = await texto(props({ itinerarios: [ITIN![0]] }))
+    expect(t).not.toContain('RECOMENDADA')
+    expect(t).not.toContain('El total de abajo corresponde')
+    expect(t).toContain('TIQUETES AEREOS')
+  })
+
+  it('R6 · sin itinerarios el documento no cambia un caracter', async () => {
+    const sin = await texto(props())
+    const conNull = await texto(props({ itinerarios: null }))
+    expect(conNull).toBe(sin)
+  })
+
+  it('⚠️ el nombre y el precio de cada opcion salen tambien en el nivel «general»', async () => {
+    // El nivel recorta descripcion, nunca lo que el cliente tiene que decidir: sin los
+    // encabezados, las tres tarifas serian invisibles justo en el formato mas corto.
+    const t = await texto(props({ itinerarios: ITIN, viaje: viaje({ nivelDetalle: 'general' }) }))
+    expect(t).toContain('ECONÓMICA')
+    expect(t).toContain('3.900.000')
+    // Lo que SI se recorta es el desglose linea por linea.
+    expect(t).not.toContain('TIQUETES LOW COST')
   })
 })
 

@@ -911,6 +911,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     sugeridos: sugeridosPDF && sugeridosPDF.length > 0 ? sugeridosPDF : null,
     // Sobre lo que SUMA el total impreso: el principal si hay itinerarios, si no la lista
     // plana. Mismo arreglo que alimenta el Subtotal, así que no puede contar otra cosa.
+    // ⚠️ Los adicionales viajan a propósito: su plata NO está en el reparto por pasajero
+    // (`precio_venta` es el precio BASE de la variante) y sin nombrarlos la tabla por
+    // pasajero quedaría por debajo del TOTAL sin que el documento lo explique.
     preciosPorPasajero: preciosPorPasajeroDelViaje(itemsParaResumen),
     fiscal,
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,

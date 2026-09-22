@@ -95,7 +95,11 @@ describe('PDF · precio por pasajero', () => {
         { nombre: 'Asistencia médica', descripcion: null, precio_venta: 200000, descuento_porcentaje: 0, cantidad: 1 },
       ],
       preciosPorPasajero: {
-        filas: [{ tipo: 'adulto', precioUnitario: 2300000 }, { tipo: 'nino', precioUnitario: 1400000 }],
+        filas: [
+          { tipo: 'adulto', cantidad: 2, precioUnitario: 2300000 },
+          { tipo: 'nino', cantidad: 1, precioUnitario: 1400000 },
+        ],
+        cubierto: 6000000,
         sinReparto: ['Asistencia médica'],
       },
     }))
