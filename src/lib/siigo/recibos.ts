@@ -85,10 +85,16 @@ import {
 } from './recibo-componentes'
 import {
   decidirAbono,
+  detalleDuplicado,
+  detalleSinRevisar,
+  redondearCentavos,
   retencionDelCobro,
+  revisarAbonosExistentes,
+  type AbonoExistente,
   type FacturaSiigoLeida,
   type MotivoAbonoAMano,
   type Vencimiento,
+  type VoucherSiigoLeido,
 } from './abono'
 
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
@@ -217,6 +223,9 @@ function db(client: unknown): any {
  * MISMO valor. La garantía dura contra la doble emisión del mismo cobro no es esta
  * consulta: es `claveIdempotencia(cobroId, 'rc')`, que hace que un reintento devuelva
  * el recibo que ya existe en vez de crear otro.
+ *
+ * Solo para el ANTICIPO. El abono a la factura tiene su propio control, que exige la misma
+ * factura y no se salta cuando la consulta falla: `revisarAbonosDeLaFactura`.
  */
 export async function recibosDelClienteEnSiigo(
   workspaceId: string,
@@ -231,23 +240,11 @@ export async function recibosDelClienteEnSiigo(
    * siempre por el de la configuración buscaría el duplicado en el cajón equivocado.
    */
   documentId?: number,
-  /**
-   * Qué clase de recibo se busca. El abono a la factura busca abonos: un anticipo del
-   * mismo valor no dice nada sobre si esta factura ya se cruzó, y al revés.
-   */
-  tipo: 'AdvancePayment' | 'DebtPayment' = 'AdvancePayment',
 ): Promise<Array<{ numero: string; fecha: string; valor: number }>> {
   try {
-    const r = await siigoRequest<{
-      results?: Array<{ name?: string; date?: string; type?: string; payment?: { value?: number }
-        customer?: { identification?: string } }>
-    }>(
-      workspaceId,
-      `/v1/vouchers?document_id=${documentId ?? cfg.reciboDocumentId}&page_size=100`,
-      { maxEspera429Ms },
-    )
-    return (r.results ?? [])
-      .filter(v => v.customer?.identification === identificacion && v.type === tipo)
+    const todos = await vouchersDelComprobante(workspaceId, documentId ?? cfg.reciboDocumentId, maxEspera429Ms)
+    return todos
+      .filter(v => v.customer?.identification === identificacion && v.type === 'AdvancePayment')
       .map(v => ({
         numero: v.name ?? '(sin número)',
         fecha: v.date ?? '',
@@ -260,6 +257,135 @@ export async function recibosDelClienteEnSiigo(
     console.error('[siigo] no se pudo consultar recibos del cliente:', (e as Error).message)
     return []
   }
+}
+
+/** Lo que Siigo acepta como máximo por página en `GET /v1/vouchers`. */
+const TAM_PAGINA_VOUCHERS = 100
+/**
+ * Techo de páginas por comprobante: 20.000 recibos. SOENA tenía ~100 RC-1 el 2026-09-22.
+ * Llegar aquí no es "ya se vio todo": es una lista que no se pudo terminar de leer.
+ */
+const MAX_PAGINAS_VOUCHERS = 200
+
+/**
+ * TODOS los recibos de un comprobante, página por página hasta el final. **Lanza** si no
+ * puede asegurar que los trajo todos.
+ *
+ * ⚠️ Hasta el 2026-09-22 se leía solo la primera página (`page_size=100`), y la consulta
+ * ni siquiera filtraba por cliente: con más de 100 recibos en el comprobante, un duplicado
+ * real quedaba fuera de la vista sin que nada lo dijera. Leer hasta el final no depende de
+ * ningún filtro de Siigo que no se haya verificado (el de facturas ignora en silencio
+ * `identification` y devuelve TODO), y el filtro por cliente se sigue haciendo aquí.
+ *
+ * Qué cuenta como «no se pudo leer completo», y por eso lanza:
+ *   - Siigo dice `total_results` y entregó menos (páginas que se acaban antes de tiempo);
+ *   - una página que no trae ningún recibo nuevo (Siigo ignoró `page` y repite la misma);
+ *   - más de `MAX_PAGINAS_VOUCHERS` páginas.
+ * Quien llama decide qué hacer con eso: el abono no sale; el anticipo sigue como antes.
+ */
+export async function vouchersDelComprobante(
+  workspaceId: string,
+  documentId: number,
+  maxEspera429Ms = 0,
+): Promise<VoucherSiigoLeido[]> {
+  const vistos = new Map<string, VoucherSiigoLeido>()
+  let total: number | null = null
+  for (let pagina = 1; pagina <= MAX_PAGINAS_VOUCHERS; pagina++) {
+    const r = await siigoRequest<{
+      results?: VoucherSiigoLeido[]
+      pagination?: { total_results?: number | string }
+    }>(
+      workspaceId,
+      `/v1/vouchers?document_id=${documentId}&page=${pagina}&page_size=${TAM_PAGINA_VOUCHERS}`,
+      { maxEspera429Ms },
+    )
+    const t = Number(r.pagination?.total_results)
+    if (r.pagination?.total_results != null && Number.isFinite(t)) total = t
+
+    const lote = r.results ?? []
+    if (lote.length === 0) {
+      if (total != null && vistos.size < total) {
+        throw new Error(`Siigo dice ${total} recibos en el comprobante ${documentId} y entregó ${vistos.size}`)
+      }
+      return [...vistos.values()]
+    }
+    let nuevos = 0
+    lote.forEach((v, i) => {
+      const clave = v.id || v.name || `p${pagina}#${i}`
+      if (!vistos.has(clave)) nuevos++
+      vistos.set(clave, v)
+    })
+    if (nuevos === 0) {
+      throw new Error(`Siigo repitió la página ${pagina} del comprobante ${documentId}: no se sabe si hay más`)
+    }
+    if (total != null && vistos.size >= total) return [...vistos.values()]
+  }
+  throw new Error(`el comprobante ${documentId} tiene más de ${MAX_PAGINAS_VOUCHERS} páginas de recibos`)
+}
+
+/** Cuántos detalles de recibo se piden, como máximo, cuando la lista no trae sus ítems. */
+const MAX_DETALLES_VOUCHER = 50
+
+type RevisionAbonos =
+  | { tipo: 'limpio' }
+  | { tipo: 'duplicado'; existentes: AbonoExistente[] }
+  | { tipo: 'sin_revisar'; causa: string }
+
+/**
+ * ¿Siigo ya tiene el abono que ONE está por emitir contra ESTA factura?
+ *
+ * Es el control del abono, y a diferencia del del anticipo NO se salta cuando falla: el
+ * abono es automático y sin nadie mirando, así que lo que no se pudo revisar completo
+ * frena el abono y queda «a mano» (brief del 2026-09-22). Nunca se emite a ciegas.
+ *
+ * La regla vive en `revisarAbonosExistentes` (puro). Aquí solo se trae lo que necesita:
+ * la lista entera del comprobante y, para los recibos del cliente cuyo vencimiento no
+ * venga en la lista, su detalle uno por uno.
+ */
+async function revisarAbonosDeLaFactura(
+  workspaceId: string,
+  documentId: number,
+  identificacion: string,
+  vencimiento: Vencimiento,
+  valor: number,
+  conocidos: ReadonlySet<string>,
+): Promise<RevisionAbonos> {
+  let lista: VoucherSiigoLeido[]
+  try {
+    lista = await vouchersDelComprobante(workspaceId, documentId, ESPERA_429_EMISION_MS)
+  } catch (e) {
+    return { tipo: 'sin_revisar', causa: `la consulta a Siigo falló: ${(e as Error).message}` }
+  }
+
+  const base = { identificacion, vencimiento, valor, conocidos }
+  const primera = revisarAbonosExistentes({ ...base, vouchers: lista })
+  if (primera.duplicados.length > 0) return { tipo: 'duplicado', existentes: primera.duplicados }
+  if (primera.sinLeer.length === 0) return { tipo: 'limpio' }
+
+  // La lista no dijo a qué factura pagaron algunos recibos del cliente: se lee su detalle.
+  if (primera.sinLeer.length > MAX_DETALLES_VOUCHER) {
+    return { tipo: 'sin_revisar', causa: `${primera.sinLeer.length} recibos del cliente sin vencimiento legible` }
+  }
+  const detalles: VoucherSiigoLeido[] = []
+  for (const v of primera.sinLeer) {
+    if (!v.id) return { tipo: 'sin_revisar', causa: `el recibo ${v.name ?? '(sin número)'} no trae id para leerlo` }
+    try {
+      detalles.push(await siigoRequest<VoucherSiigoLeido>(
+        workspaceId, `/v1/vouchers/${encodeURIComponent(v.id)}`, { maxEspera429Ms: ESPERA_429_EMISION_MS },
+      ))
+    } catch (e) {
+      return { tipo: 'sin_revisar', causa: `no se pudo leer el recibo ${v.name ?? v.id}: ${(e as Error).message}` }
+    }
+  }
+  const segunda = revisarAbonosExistentes({ ...base, vouchers: detalles })
+  if (segunda.duplicados.length > 0) return { tipo: 'duplicado', existentes: segunda.duplicados }
+  if (segunda.sinLeer.length > 0) {
+    return {
+      tipo: 'sin_revisar',
+      causa: `no se pudo leer a qué factura pagó ${segunda.sinLeer.map(v => v.name ?? v.id).join(', ')}`,
+    }
+  }
+  return { tipo: 'limpio' }
 }
 
 /**
@@ -475,34 +601,66 @@ export async function emitirReciboDeCobro(
       return { ok: false, motivo: 'abono_a_mano', a_mano: aMano.map(soloTexto) }
     }
 
-    // ── 4. ¿Siigo ya recaudó ESTE MISMO VALOR de este cliente? ──
+    // ── 4. ¿Siigo ya tiene lo que se va a emitir? ──
     // Se pregunta por TODOS los componentes antes de emitir el primero: descubrir el
     // duplicado a mitad del bucle dejaría un recibo emitido y el otro no, por una
     // comprobación que se podía hacer antes.
+    const justificacion = opciones.justificacionDuplicado?.trim()
     const existentes: Array<{ numero: string; fecha: string; valor: number }> = []
+    const listos: Preparado[] = []
+    /** Los «a mano» que salen de ESTE paso: se guardan antes de emitir, como los de arriba. */
+    const aManoDelControl: EntradaAMano[] = []
+    let conocidos: Set<string> | null = null
     for (const comp of preparados) {
+      // El anticipo: ¿este cliente ya tiene un recibo por este valor? Informa y pide
+      // justificación; si la consulta falla, sigue (ver `recibosDelClienteEnSiigo`).
       if (!comp.abono) {
         existentes.push(...await recibosDelClienteEnSiigo(
           workspaceId, identificacion, cfg, ESPERA_429_EMISION_MS, comp.valor, comp.documentId,
         ))
+        listos.push(comp)
         continue
       }
-      // ⚠️ En el abono, los recibos que ONE ya le conoce a ESTE negocio no son duplicado:
-      // son los abonos de sus otros pagos. El plan 50/50 de SOENA produce dos abonos del
-      // MISMO valor contra la misma factura, y sin esto el segundo siempre pediría
-      // justificación, que es enseñarle a Tesorería a escribirla sin leer.
-      const conocidos = await numerosDeRecibosDelNegocio(svc, workspaceId, negocioId)
-      existentes.push(...(await recibosDelClienteEnSiigo(
-        workspaceId, identificacion, cfg, ESPERA_429_EMISION_MS, comp.valor, comp.documentId, 'DebtPayment',
-      )).filter(e => !conocidos.has(e.numero)))
+      // El abono: ¿esta FACTURA ya recibió este pago? Ver `revisarAbonosDeLaFactura`.
+      //
+      // ⚠️ Los recibos que ONE ya le conoce a ESTE negocio no son duplicado: son los abonos
+      // de sus otros pagos. El plan 50/50 de SOENA produce dos abonos del MISMO valor
+      // contra la misma factura, y sin esto el segundo nunca saldría.
+      conocidos ??= await numerosDeRecibosDelNegocio(svc, workspaceId, negocioId)
+      const revision = await revisarAbonosDeLaFactura(
+        workspaceId, comp.documentId ?? cfg.reciboDocumentId, identificacion,
+        comp.abono.vencimiento, comp.valor, conocidos,
+      )
+      // La justificación es de una persona que VIO los duplicados y decidió. Lo que no se
+      // pudo revisar no lo vio nadie: eso no lo destraba ninguna justificación.
+      if (revision.tipo === 'limpio' || (revision.tipo === 'duplicado' && justificacion)) {
+        listos.push(comp)
+        continue
+      }
+      // El abono es automático: no hay a quién pedirle la justificación. Queda «a mano» con
+      // el abono que se encontró, o con lo que no se pudo revisar, y no se reintenta solo.
+      const numeroFactura = comp.abono.factura.numero
+      aManoDelControl.push({
+        componente: comp.componente!,
+        valor: redondearCentavos(comp.valor + comp.abono.sinAbonar),
+        ...(revision.tipo === 'duplicado'
+          ? { motivo: 'duplicado_en_siigo' as const, detalle: detalleDuplicado(numeroFactura, revision.existentes) }
+          : { motivo: 'abonos_sin_revisar' as const, detalle: detalleSinRevisar(numeroFactura, revision.causa) }),
+      })
     }
-    const justificacion = opciones.justificacionDuplicado?.trim()
+    for (const m of aManoDelControl) {
+      await guardarEntradaAMano(svc, workspaceId, cobroId, m, staffNombre)
+      aMano.push(m)
+    }
+    if (listos.length === 0) {
+      return { ok: false, motivo: 'abono_a_mano', a_mano: aMano.map(soloTexto) }
+    }
     if (existentes.length > 0 && !justificacion) {
       return { ok: false, motivo: 'duplicado_en_siigo', existentes }
     }
 
     // ── 5. Emitir, un recibo por componente ──
-    for (const comp of preparados) {
+    for (const comp of listos) {
       let fechaRecibo = fechaPago
       let motivoFechaDistinta: string | null = null
       const abono = comp.abono ?? null
@@ -723,7 +881,7 @@ export async function emitirReciboDeCobro(
     }
 
     // El abono no se archiva (ver el paso 6): no cuenta como PDF que faltó.
-    const sinBloque = preparados.every(c => !c.bloqueSlug || c.abono)
+    const sinBloque = listos.every(c => !c.bloqueSlug || c.abono)
     return {
       ok: true,
       numero: emitidos[0].numero,
