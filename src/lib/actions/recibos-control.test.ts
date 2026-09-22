@@ -44,8 +44,29 @@ let fallaTabla: string | null
 /** Columnas pedidas a cada tabla, para poder afirmar sobre ellas. */
 let selects: Record<string, string>
 
+/**
+ * Lo que responde `emails_cliente_negocio`: el correo al que DE VERDAD le llega el aviso.
+ *
+ * Es una fuente aparte del contacto a propósito. La regla de precedencia (el correo del
+ * RUT gana) vive SOLO en SQL, así que aquí se dobla su RESPUESTA, no su lógica: lo que
+ * estas pruebas fijan es que el panel use esa respuesta y no `contactos.email`.
+ */
+let emailsPorNegocio: Record<string, string | null>
+/** Si está puesto, la RPC falla. */
+let fallaRpc: string | null
+/** Llamadas a la RPC, para afirmar que la página no hace una por cobro. */
+let llamadasRpc: Array<{ fn: string; ids: string[] }>
+
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
+    rpc: async (fn: string, args: { p_negocio_ids: string[] }) => {
+      llamadasRpc.push({ fn, ids: args.p_negocio_ids })
+      if (fallaRpc) return { data: null, error: { message: fallaRpc } }
+      return {
+        data: args.p_negocio_ids.map(id => ({ negocio_id: id, email: emailsPorNegocio[id] ?? null })),
+        error: null,
+      }
+    },
     from: (tabla: string) => {
       const fuente = tabla === 'cobros' ? () => cobros
         : tabla === 'negocios' ? () => negocios
@@ -75,6 +96,11 @@ import { getControlRecibos } from './recibos-control-actions'
 beforeEach(() => {
   fallaTabla = null
   selects = {}
+  fallaRpc = null
+  llamadasRpc = []
+  // El caso base: el negocio no tiene RUT con correo, así que la RPC cae al del contacto
+  // y devuelve exactamente lo mismo que `contactos.email`.
+  emailsPorNegocio = { 'neg-1': 'jose@ejemplo.com' }
   negocios = [{
     id: 'neg-1', codigo: 'V0451', nombre: 'Cliente Uno', contacto_id: 'ct-1',
     carpeta_url: 'https://drive/x', linea_id: 'lin-1',
@@ -159,15 +185,21 @@ describe('getControlRecibos — el control es por pago, no por negocio', () => {
     expect(data!.pagos.find(p => p.cobro_id === 'c2')!.faltantes).toEqual(['RUT del cliente'])
   })
 
-  it('sin correo el recibo SI se emite: es aviso, no bloqueo', async () => {
+  it('sin correo en NINGUNA parte el recibo SI se emite: es aviso, no bloqueo', async () => {
     // El correo solo decide si al cliente se le avisa. Contarlo como faltante era la
     // otra mitad del contador que mentia.
+    //
+    // ⚠️ "Sin correo" es que no lo tenga NI el RUT NI el contacto, o sea que la RPC no
+    // devuelva ninguno. Mirar solo `contactos.email` es lo que hacía falsa la
+    // advertencia en 112 de los 119 casos donde salía.
     contactos[0].email = null
+    emailsPorNegocio = {}
     const { data } = await getControlRecibos()
 
     const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
     expect(pendiente.faltantes).toEqual([])
     expect(pendiente.avisos).toContain('al cliente no se le avisa: no hay correo')
+    expect(pendiente.correo).toBeNull()
     expect(data!.totales.emitibles).toBe(1)
   })
 
@@ -333,5 +365,77 @@ describe('getControlRecibos — un fallo se reporta, no se esconde', () => {
 
     expect(selects.cobros).toContain('notas')
     expect(selects.cobros).not.toMatch(/\bconcepto\b/)
+  })
+})
+
+/**
+ * A quién se le avisa lo decide la MISMA fuente que el aviso, no el contacto.
+ *
+ * EL CASO QUE IMPORTA: V0502 de SOENA. El panel decía "al cliente no se le avisa: no hay
+ * correo" —el contacto, Paula Andrea Oliveros, no tiene correo— y el aviso salió igual, a
+ * `johncifuentes@hotmail.com`, el titular del RUT. Esa frase no es decorativa: quien emite
+ * la lee para decidir si le toca avisarle al cliente por otro lado, y en ese caso la leyó.
+ *
+ * MEDIDO CONTRA PRODUCCIÓN el 2026-09-22 sobre los 410 cobros pendientes de SOENA: la
+ * advertencia salía en **119** casos y era FALSA en **112**; en otros **73** la columna
+ * `correo` mostraba una dirección distinta de la que iba a recibir el soporte; y solo **7**
+ * no tenían de verdad a dónde avisar.
+ *
+ * LAS QUE SE VIERON FALLAR contra `origin/main` (advertencia y columna leídas de
+ * `contactos.email`):
+ *   - "contacto sin correo y RUT con correo → NO sale la advertencia" → salía
+ *   - "la columna muestra la dirección que recibe"                    → mostraba la del contacto
+ *   - "el destinatario se resuelve en una sola ida"                   → no se resolvía
+ *   - "si no se puede resolver, el panel lo dice"                     → mostraba el del contacto
+ *
+ * La de "sin correo en NINGUNA parte" (arriba) pasa en las dos versiones a propósito: está
+ * para que el arreglo no tape una advertencia legítima.
+ */
+describe('getControlRecibos — el destinatario sale de email_cliente_negocio', () => {
+  it('el contacto no tiene correo pero el RUT sí: la advertencia NO sale', async () => {
+    contactos[0].email = null
+    emailsPorNegocio = { 'neg-1': 'johncifuentes@hotmail.com' }
+    const { data } = await getControlRecibos()
+
+    const pendiente = data!.pagos.find(p => p.cobro_id === 'c2')!
+    expect(pendiente.avisos).not.toContain('al cliente no se le avisa: no hay correo')
+    expect(pendiente.correo).toBe('johncifuentes@hotmail.com')
+  })
+
+  it('la columna correo muestra la dirección que RECIBE, no la del contacto', async () => {
+    contactos[0].email = 'paula@ejemplo.com'
+    emailsPorNegocio = { 'neg-1': 'titular@rut.co' }
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'c2')!.correo).toBe('titular@rut.co')
+  })
+
+  it('los correos de la página se resuelven en UNA ida a la base, no una por cobro', async () => {
+    // El panel muestra 410 cobros sobre ~300 negocios en SOENA: una llamada por cobro son
+    // 410 idas y vueltas por carga de pantalla.
+    negocios.push({
+      id: 'neg-2', codigo: 'V0502', nombre: 'Cliente Dos', contacto_id: 'ct-1',
+      carpeta_url: 'https://drive/y', linea_id: 'lin-1', metadata: {},
+    })
+    cobros.push({
+      id: 'c3', negocio_id: 'neg-2', monto: 550035, fecha: '2026-09-01', concepto: 'Abono',
+      siigo_recibo: null, recibo_no_aplica: null,
+    })
+    await getControlRecibos()
+
+    expect(llamadasRpc).toHaveLength(1)
+    expect(llamadasRpc[0].fn).toBe('emails_cliente_negocio')
+    // Por NEGOCIO, no por cobro: los dos pagos de neg-1 preguntan una sola vez.
+    expect(llamadasRpc[0].ids).toEqual(['neg-1', 'neg-2'])
+  })
+
+  it('si no se puede resolver el destinatario, el panel DICE que falló', async () => {
+    // Caer al correo del contacto sería volver a la respuesta equivocada con la misma cara
+    // que la correcta, que es exactamente el defecto que esto corrige.
+    fallaRpc = 'function public.emails_cliente_negocio(uuid[]) does not exist'
+    const r = await getControlRecibos()
+
+    expect(r.data).toBeNull()
+    expect(r.error).toContain('emails_cliente_negocio')
   })
 })

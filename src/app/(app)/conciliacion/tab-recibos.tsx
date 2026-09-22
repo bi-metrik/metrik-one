@@ -15,7 +15,7 @@
  */
 
 import { useMemo, useState, useTransition } from 'react'
-import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban } from 'lucide-react'
+import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import BusquedaInput from '@/components/busqueda-input'
 import { emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
@@ -264,6 +264,17 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
                 <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
                   <AlertTriangle className="h-3.5 w-3.5" />
                   Falta el recibo de {pago.componentes_pendientes.map(c => ETIQUETA_COMPONENTE[c]).join(' y ')}
+                </span>
+              )}
+              {/* A dónde va el aviso, con nombre propio. El dato existía y no se pintaba
+                  en ninguna parte: por eso nadie vio que el panel decía "no hay correo"
+                  sobre casos a los que el aviso sí les llegaba (112 de 119 en SOENA,
+                  medido el 2026-09-22). Decir la dirección es más útil que decir de qué
+                  documento salió: es lo que quien emite puede verificar. */}
+              {pago.correo && (
+                <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+                  <Mail className="h-3.5 w-3.5" />
+                  se le avisa a {pago.correo}
                 </span>
               )}
               {/* El recibo sale igual: esto se dice ANTES de emitir, no se calla. */}

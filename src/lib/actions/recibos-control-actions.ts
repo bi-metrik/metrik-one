@@ -61,6 +61,14 @@ export interface PagoConRecibo {
   negocio_id: string
   negocio_codigo: string | null
   cliente: string | null
+  /**
+   * La dirección a la que de VERDAD le llega el aviso del recibo, resuelta con
+   * `email_cliente_negocio` (la misma fuente que usa `notificar-etapa`): el correo del
+   * RUT gana, el del contacto es el respaldo.
+   *
+   * ⚠️ No es `contactos.email`. Leerlo de ahí era el defecto: el titular del RUT es el
+   * dueño de la plata y el contacto muchas veces es quien vendió.
+   */
   correo: string | null
   monto: number
   fecha: string | null
@@ -279,6 +287,22 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
   )
   const contactoPorId = new Map(contactos.map(c => [c.id, c]))
 
+  // ── ¿A quién se le avisa de verdad? ──
+  //
+  // Lo resuelve la MISMA fuente que el aviso: `email_cliente_negocio`, que prefiere el
+  // correo del RUT y solo cae al del contacto si el RUT no lo trae. El panel leía
+  // `contacto.email` a secas y decía lo contrario de lo que el sistema hacía: medido
+  // contra producción el 2026-09-22 sobre los 410 cobros pendientes de SOENA, la
+  // advertencia "no hay correo" salía en 119 casos y era FALSA en 112, y en otros 73 la
+  // dirección mostrada no era la que iba a recibir el soporte. Quien emite lee esa frase
+  // para decidir si le toca avisarle al cliente por otro lado.
+  //
+  // La precedencia NO se copia aquí a propósito: el titular del RUT es el dueño de la
+  // plata y el contacto muchas veces es quien vendió. Dos definiciones de "a quién se le
+  // escribe" se desincronizan sin que nadie lo note, que es exactamente cómo nació este
+  // defecto.
+  const emailPorNegocio = await correosDelCliente(svc, negocioIds)
+
   // ── ¿Hay con qué identificar al cliente ante Siigo? ──
   //
   // La marca `siigo_cliente` responde que sí sin leer nada más: el tercero ya existe.
@@ -328,6 +352,9 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     const meta = (neg?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
     const contacto = neg?.contacto_id ? contactoPorId.get(neg.contacto_id) : undefined
 
+    // A quién le llega el aviso: lo dice la RPC, no el contacto. Ver `correosDelCliente`.
+    const correo = (c.negocio_id ? emailPorNegocio.get(c.negocio_id) : null) ?? null
+
     const esperados = esperadosDe(c)
     const marcas = recibosDelCobro(c.siigo_recibo)
 
@@ -359,7 +386,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       // consumió numeración en Siigo. Frenar por esto dejaría plata sin acusar por un
       // problema de archivo.
       if (!neg?.carpeta_url) avisos.push('el PDF no queda archivado: el negocio no tiene carpeta')
-      if (!contacto?.email) avisos.push('al cliente no se le avisa: no hay correo')
+      if (!correo) avisos.push('al cliente no se le avisa: no hay correo')
     }
 
     return {
@@ -367,7 +394,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       negocio_id: c.negocio_id ?? '',
       negocio_codigo: neg?.codigo ?? null,
       cliente: contacto?.nombre ?? neg?.nombre ?? null,
-      correo: contacto?.email ?? null,
+      correo,
       monto: Number(c.monto ?? 0),
       fecha: c.fecha,
       concepto: c.notas,
@@ -401,4 +428,43 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       emitibles: pendientes.filter(p => p.faltantes.length === 0).length,
     },
   }
+}
+
+/**
+ * Los correos a los que de verdad les llega el aviso, por negocio.
+ *
+ * Delega en `emails_cliente_negocio`, que no es más que `email_cliente_negocio` —la
+ * fuente única, la que usa `notificar-etapa`— aplicada a una lista. La regla de
+ * precedencia vive SOLO en SQL: ver la migración `20260922000001`.
+ *
+ * Por lotes de 500 y no de una: PostgREST recorta cualquier respuesta en 1.000 filas
+ * devolviendo 200 y sin `error`, así que una sola llamada con todos los negocios sería
+ * correcta hoy (~300 en SOENA) y empezaría a perder correos en silencio el día que
+ * pasen de mil. Con lotes de 500 son dos idas a la base por cada mil negocios, no una
+ * por negocio, que es lo que había que evitar.
+ *
+ * Si la función no está en la base, esto LANZA. Es deliberado: el panel entero dice que
+ * falló en vez de volver a mostrar el correo del contacto, que es la respuesta
+ * equivocada con la misma cara que la correcta.
+ */
+async function correosDelCliente(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  negocioIds: string[],
+): Promise<Map<string, string>> {
+  const porNegocio = new Map<string, string>()
+  for (let i = 0; i < negocioIds.length; i += 500) {
+    const { data, error } = await svc.rpc('emails_cliente_negocio', {
+      p_negocio_ids: negocioIds.slice(i, i + 500),
+    })
+    if (error) {
+      throw new Error(
+        `No se pudo resolver a quién se le avisa (emails_cliente_negocio): ${error.message}`,
+      )
+    }
+    for (const fila of (data ?? []) as Array<{ negocio_id: string; email: string | null }>) {
+      if (fila.email) porNegocio.set(fila.negocio_id, fila.email)
+    }
+  }
+  return porNegocio
 }
