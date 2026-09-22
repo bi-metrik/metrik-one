@@ -35,6 +35,25 @@ de `metrik-one/`, así que todo lo demás se resuelve solo. **No hace falta syml
 `^0.3.0` y todo pasó; CI usa **0.5.8**. Un verde contra otra versión mayor no dice nada del
 verde de CI. Comprobar con `git show origin/main:package.json | grep pglite`.
 
+⚠️ **Si el `node_modules` del worktree YA es un symlink al del repo principal, esa receta no
+sirve**: colgarle `@electric-sql` adentro escribe en el `node_modules` compartido. La variante
+que funcionó (2026-09-22, PR #814) es **no tocar `node_modules` y aliasar**: un
+`vitest.pglite.config.ts` **temporal** en el worktree, copia del `vitest.config.ts` del repo
+más una línea en `resolve.alias`:
+
+```ts
+'@electric-sql/pglite': '<scratchpad>/node_modules/@electric-sql/pglite/dist/index.js',
+```
+
+y correr `npx vitest run --config vitest.pglite.config.ts <archivo>`. **Borrar el config antes
+de commitear** (no está en `.gitignore`). Ventaja: no deja nada dentro de `node_modules` y
+sirve igual para la suite completa.
+
+⚠️ **`tsc --noEmit` va a marcar el archivo en local y está bien:** sin los tipos del paquete,
+`TS2307` más un `TS7006` por cada `row =>` del test. Los tres tests de migración que ya están
+en `main` tienen exactamente los mismos errores en la torre y CI los da en verde — o sea que
+esos errores **no** son señal de que el test esté mal.
+
 ⚠️ **Limpiar antes de commitear.** `node_modules` está ignorado, así que no ensucia el commit,
 pero dejarlo colgando de `/tmp` deja una prueba que pasa hoy y falla mañana sin explicación.
 
