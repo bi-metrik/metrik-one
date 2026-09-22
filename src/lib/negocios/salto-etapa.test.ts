@@ -89,11 +89,51 @@ describe('el residuo inmaterial no retiene: una sola vara para todo el sistema',
     expect(debeSaltarPorSaldo(637_500, -701_812, true)).toBe(false) // V0121, el caso original
   })
 
-  // Sin `conciliar_sobrepago` la etapa nunca miró el sobrepago: cualquier saldo cubierto
-  // saltaba y sigue saltando. La tolerancia no le agrega ni le quita nada.
-  it('sin conciliación el comportamiento no cambia', () => {
+  // Sin `conciliar_sobrepago` la etapa nunca miró el sobrepago: cualquier saldo a favor
+  // saltaba y sigue saltando, por grande que sea.
+  it('sin conciliación, el sobrepago sigue saltando sin importar el tamaño', () => {
     expect(debeSaltarPorSaldo(637_500, -701_812, false)).toBe(true)
-    expect(debeSaltarPorSaldo(637_500, 999, false)).toBe(false)
+  })
+})
+
+// La rama SIN conciliación exigía el cero exacto por el lado del faltante hasta 2026-09-22,
+// mientras los gates `saldo_cero` y `saldo:handoff` ya toleraban $1.000. El salto no puede ser
+// más estricto que los gates que juzgan la misma plata.
+//
+// V0498 (SOENA): valor a recaudar $1.195.159, recibido $1.194.898, faltan $261. Al salir de
+// Certificación cayó en "Segundo cobro" (`saltar_si_saldo_cero: true`) en vez de saltarla.
+describe('sin conciliación, un faltante inmaterial también cuenta como cubierto', () => {
+  it('V0498: faltan $261 y la etapa se salta', () => {
+    const precio = 1_195_159
+    const recibido = 1_194_898
+    expect(precio - recibido).toBe(261)
+    expect(debeSaltarPorSaldo(precio, precio - recibido, false)).toBe(true)
+  })
+
+  // Piso literal a propósito, como arriba: si alguien mueve la constante, esto tiene que
+  // hablar del número que decidió el negocio.
+  it('el borde del piso entra: faltan $1.000 y salta', () => {
+    expect(debeSaltarPorSaldo(637_500, 1_000, false)).toBe(true)
+    expect(debeSaltarPorSaldo(637_500, 999, false)).toBe(true)
+  })
+
+  it('un peso por encima del piso ya es un faltante real y retiene', () => {
+    expect(debeSaltarPorSaldo(637_500, 1_001, false)).toBe(false)
+  })
+
+  it('un faltante grande sigue reteniendo', () => {
+    expect(debeSaltarPorSaldo(637_500, 300_000, false)).toBe(false)
+    expect(debeSaltarPorSaldo(1_195_159, 425_000, false)).toBe(false)
+  })
+
+  // La tolerancia no rescata a un negocio sin precio: sin monto de referencia no hay saldo.
+  it('sin precio sigue sin saltar aunque el faltante sea inmaterial', () => {
+    expect(debeSaltarPorSaldo(0, 261, false)).toBe(false)
+  })
+
+  // Un saldo que no es número no puede leerse como cubierto.
+  it('un saldo no numérico no salta', () => {
+    expect(debeSaltarPorSaldo(637_500, Number.NaN, false)).toBe(false)
   })
 })
 

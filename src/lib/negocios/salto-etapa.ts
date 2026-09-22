@@ -59,15 +59,26 @@ export function aplicaSaltoPorSaldo(etapa: EtapaSalto | null | undefined): boole
  * Con el saldo ya calculado, ¿corresponde saltar esta etapa?
  *
  * Con `conciliar_sobrepago` activo salta el pago CUADRADO: un sobrepago real tiene que entrar
- * a la etapa para conciliarse en vez de pasar de largo. Sin él, cualquier saldo cubierto
- * (cero o negativo) salta, que es el comportamiento histórico.
+ * a la etapa para conciliarse en vez de pasar de largo. Sin él, salta todo saldo CUBIERTO:
+ * cualquier saldo a favor del cliente (cero o negativo) y también un faltante inmaterial,
+ * dentro del piso de `tolerancia-saldo.ts`.
  *
- * ⚠️ "Cuadrado" NO es cero absoluto, es dentro del piso de materialidad (`saldoCuadrado`).
- * Exigir el cero exacto abría una franja donde el motor retenía un caso que, ya adentro, sus
- * propios gates daban por cuadrado: el gate `saldo_cero` de esa misma etapa tolera $1.000.
- * Dos varas para la misma plata, y en medio quedaban varados los que pagaron redondeando
- * (SOENA 2026-08-06: V0276 con $120 de más, V0274 con $688). El piso lo decide el CFO y vive
- * en `tolerancia-saldo.ts`.
+ * ⚠️ En ninguna de las dos ramas "cubierto" es el cero absoluto. Es el piso de materialidad
+ * (`saldoCuadrado`), el mismo con el que juzgan los gates `saldo_cero` y `saldo:handoff`.
+ * Exigir el cero exacto abría una franja donde el motor retenía un caso que sus propios gates
+ * ya daban por cuadrado, y eso pasó por los dos lados:
+ *
+ *  - por sobrepago, en la rama con conciliación (SOENA 2026-08-06: V0276 con $120 de más,
+ *    V0274 con $688, varados a conciliar una plata que no había que resolver);
+ *  - por faltante, en la rama sin conciliación, que hasta 2026-09-22 seguía exigiendo
+ *    `saldo <= 0`. V0498 debía $261 (valor a recaudar $1.195.159, recibido $1.194.898) y al
+ *    salir de Certificación cayó en "Segundo cobro" (`saltar_si_saldo_cero: true`) en vez
+ *    de saltarla, aunque $261 está bajo el piso con el que juzgan los gates de saldo. El
+ *    salto no puede ser más estricto que los gates.
+ *
+ * Decisión de Mauricio (2026-08-06): el piso aplica a TODO el sistema, y el número lo decide
+ * el CFO en `tolerancia-saldo.ts`, no aquí. La tolerancia solo destraba el AVANCE: no crea un
+ * cobro, no reconoce ingreso y no toca el precio; los $261 siguen en los datos y a la vista.
  *
  * Un negocio sin precio nunca salta: sin monto de referencia el saldo no significa nada.
  */
@@ -77,5 +88,6 @@ export function debeSaltarPorSaldo(
   conciliarSobrepago: boolean,
 ): boolean {
   if (!(precio > 0)) return false
-  return conciliarSobrepago ? saldoCuadrado(saldo) : saldo <= 0
+  if (conciliarSobrepago) return saldoCuadrado(saldo)
+  return saldo <= 0 || saldoCuadrado(saldo)
 }
