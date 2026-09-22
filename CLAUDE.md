@@ -384,6 +384,14 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### Sistema visual del documento de Trappvel (2026-09-22)
+
+- **La forma la manda `proyectos/trappvel/clarity/docs/diseno/sistema-visual-documento.md`**; el contenido, `propuesta-visual.md` y el brief del 22-sep. Solo la plantilla de Trappvel: Termotech sale identico byte a byte (sin fecha ni ID).
+- **Reglas puras en `src/lib/pdf/cotizacion-trappvel-formato.ts`** (color por tarifa, sigla IATA, numeros de vuelo, capitulos por ciudad, fechas), con sus pruebas. El JSX solo pinta.
+- **Con varias tarifas cada vuelo y cada hotel lleva la marca de SU tarifa**: la accion marca `tarifas` (indices de `bloques`) sobre `VueloPDF`/`HotelPDF` recorriendo los items de cada propuesta. Destino, fotos y cargos siguen saliendo de la principal.
+- **⚠️⚠️ `minPresenceAhead` de react-pdf NO funciona en el primer hijo de un contenedor.** Solo corta antes de un elemento que tenga hermanos ANTES en su mismo padre (`breakingImprovesPresence`), y un titulo es siempre el primer hijo de su seccion: el rotulo «DIA A DIA» quedo solo al pie con el `minPresenceAhead` puesto. Tampoco alcanza a un elemento que no sea hermano: la ultima fila dentro de una tarjeta no ve el TOTAL que esta fuera. La salida que si funciona: **pegar el titulo a su primer renglon en un `View wrap={false}`**, y cuando algo tiene que ver lo que sigue, que sea **hermano directo** (fragmento, no caja). Asi quedaron el TOTAL, los titulos y la firma, que salia sola en la ultima pagina.
+- **Se verifica mirando el PNG, no leyendo el codigo**: los tres cortes feos (firma sola, rotulo solo, tarjeta de inversion partida) pasaban todas las pruebas de texto.
+
 ### Fotos provisionales por ciudad en el documento de Trappvel (2026-09-22)
 
 - **Banco provisional en el repo, no en la base** (`src/lib/pdf/fotos-ciudad.ts`): 16 fotos de Wikimedia Commons, dos por ciudad, en `src/lib/pdf/templates/fotos-ciudad/`. **`fotosDeCiudad(ciudad)` es la unica puerta**: cuando llegue el banco real (tabla + bucket, pendiente de decidir quien aprueba una foto) se reescribe esa funcion y nada mas.
