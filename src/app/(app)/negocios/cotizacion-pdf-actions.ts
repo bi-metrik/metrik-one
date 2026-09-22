@@ -57,6 +57,8 @@ import {
 import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
+import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
+import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -232,6 +234,22 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     .single()
 
   if (!cot) return { success: false, error: 'Cotización no encontrada' }
+
+  // ¿Puede salir al cliente? Bajo el margen mínimo y sin la autorización del dueño, el
+  // PDF se descarga IGUAL —hace falta ver los borradores— pero con marca de agua, y no
+  // se guarda ni se registra: no es un documento del cliente. Donde la línea no exige
+  // el piso en la salida, `aplica` es falso y todo sigue como antes.
+  const salida = await evaluarSalida(supabase, {
+    servicio: createServiceClient,
+    workspaceId,
+    cotizacionId,
+    staffId: staffId ?? null,
+    registrarPerdida: true,
+  })
+  const esBorrador = salida?.aplica === true && salida.bloquea
+  const avisoBorrador = esBorrador
+    ? `PDF de borrador, con marca de agua: no se puede enviar. ${salida!.mensaje}`
+    : null
 
   // Get empresa: primero por oportunidad, luego por negocio, luego fallback
   type EmpresaRow = {
@@ -591,7 +609,25 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     }
 
     try {
-      const buffer = await renderViaService(templateSlug, payload)
+      const renderizado = await renderViaService(templateSlug, payload)
+
+      // Borrador bajo el piso: marca de agua y fuera. Ni almacenamiento, ni Drive, ni
+      // registro de decisiones — no es un documento del cliente.
+      if (esBorrador) {
+        const conMarca = await ponerMarcaDeBorrador(renderizado)
+        return {
+          success: true,
+          pdf: conMarca.toString('base64'),
+          filename: `${cot.codigo ?? cot.consecutivo}-BORRADOR.pdf`,
+          fiscal,
+          borrador: true as const,
+          aviso: avisoBorrador,
+          avisosCobertura,
+          renderedVia: 'weasyprint' as const,
+        }
+      }
+
+      const buffer = renderizado
       const filename = `${cot.codigo ?? cot.consecutivo}.pdf`
 
       // Almacenamiento externo: el PDF va al proyecto del cliente y Drive ni se intenta.
@@ -999,6 +1035,22 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer = await renderToBuffer(element as any)
+
+  // Borrador bajo el piso: marca de agua y fuera, sin guardar ni registrar (ver arriba).
+  if (esBorrador) {
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(buffer))
+    return {
+      success: true,
+      pdf: conMarca.toString('base64'),
+      filename: `${cot.consecutivo}-BORRADOR.pdf`,
+      fiscal,
+      borrador: true as const,
+      aviso: avisoBorrador,
+      avisosCobertura,
+      renderedVia: 'react-pdf' as const,
+    }
+  }
+
   const base64 = Buffer.from(buffer).toString('base64')
   const filename = `${cot.consecutivo}.pdf`
 

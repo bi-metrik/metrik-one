@@ -15,6 +15,8 @@ import {
 } from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
+import PanelMargenSalida from '@/app/(app)/negocios/panel-margen-salida'
+import type { SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO, etiquetaTipoRubro } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import { CONVENCION_MARGEN_POR_DEFECTO, margenParaPrecio, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
@@ -246,9 +248,15 @@ interface Props {
    * Es el mismo corte que `itinerarios`.
    */
   adicionales?: { disponible: boolean; porItem: Record<string, FilaAdicional[]> }
+  /**
+   * El margen mínimo en la SALIDA (`margen-salida-actions.ts`): si la cotización puede
+   * enviarse, la autorización del dueño y quién puede darla. Ausente = la línea no exige
+   * el piso en la salida y la pantalla es la de siempre.
+   */
+  salida?: SalidaVista | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const estado = cotizacion.estado as EstadoCotizacion
@@ -372,11 +380,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         a.click()
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
-        toast.success('PDF descargado')
-        // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
-        // proyecto del cliente. El servidor dice por qué; aquí solo se muestra.
         const aviso = (res as { aviso?: string | null }).aviso
-        if (aviso) toast.error(aviso)
+        if ((res as { borrador?: boolean }).borrador) {
+          // Bajo el margen mínimo y sin autorización: el PDF lleva marca de agua y no
+          // se guardó. Se dice en ámbar y se queda en pantalla, no como un «listo».
+          toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
+        } else {
+          toast.success('PDF descargado')
+          // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
+          // proyecto del cliente. El servidor dice por qué; aquí solo se muestra.
+          if (aviso) toast.error(aviso)
+        }
         // §4.3 · qué cubre cada opción. Sale AQUÍ y no solo en el banner porque quien
         // imprime no siempre es quien cargó: el PDF ya salió (avisa, no bloquea) y el
         // aviso se queda en pantalla hasta que alguien lo cierre.
@@ -798,6 +812,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </button>
         </div>
       </div>
+
+      <PanelMargenSalida cotizacionId={cotizacion.id} salida={salida} />
 
       {frozen && (
         <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 dark:bg-blue-950/20 dark:border-blue-900/30 dark:text-blue-300">

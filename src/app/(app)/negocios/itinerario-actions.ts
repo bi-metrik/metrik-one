@@ -28,6 +28,8 @@ import {
   type ItinerarioCalculado,
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { nombreDeAlternativa } from '@/lib/cotizaciones/nombre-linea'
+import { revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
+import { createServiceClient } from '@/lib/supabase/server'
 
 /**
  * Itinerarios de una cotización: leer, combinar y decidir cuáles van al cliente.
@@ -328,6 +330,7 @@ export async function cambiarOpcionDeItinerario(itinerarioId: string, grupo: str
   if (errIns) return { success: false, error: errIns.message }
 
   const desmarcados = await desmarcarLosQueYaNoPueden(supabase, cab.cotizacionId)
+  await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true, desmarcados }
 }
@@ -369,6 +372,7 @@ export async function marcarEnPropuesta(itinerarioId: string, vaEnPropuesta: boo
     .eq('id', itinerarioId)
   if (errUpd) return { success: false, error: errUpd.message }
 
+  await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true, soltoPrincipal: patch.es_principal === false }
 }
@@ -413,6 +417,7 @@ export async function marcarPrincipal(itinerarioId: string) {
     .eq('id', itinerarioId)
   if (errUpd) return { success: false, error: errUpd.message }
 
+  await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true }
 }
@@ -500,6 +505,7 @@ export async function eliminarItinerario(itinerarioId: string) {
   if (errDel) return { success: false, error: errDel.message }
 
   const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
+  await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
   revalidarCotizacion(ctx?.negocioId ?? null, ctx?.oportunidadId ?? null)
   return { success: true, eraPrincipal: cab.esPrincipal }
 }
@@ -805,6 +811,28 @@ function grupoSugerido(nombre: string | null): string {
   }
   const limpio = (nombre ?? '').trim().toLowerCase().slice(0, 40)
   return limpio === '' ? 'componente' : limpio
+}
+
+/**
+ * Cambiar qué tarifas van en la propuesta, o qué opción lleva cada una, cambia lo que el
+ * dueño autorizó bajo el mínimo: si había una autorización vigente, aquí se pierde y se
+ * anota, con quien hizo el cambio como autor. Sin autorización vigente es una consulta.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function revisarExcepcionDelDueno(supabase: any, cotizacionId: string): Promise<void> {
+  // Nunca tumba la acción: corre después de un cambio que ya se guardó.
+  try {
+    const { workspaceId, staffId } = await getWorkspace()
+    if (!workspaceId) return
+    await revisarExcepcionTrasCambio(supabase, {
+      servicio: createServiceClient,
+      workspaceId,
+      cotizacionId,
+      staffId,
+    })
+  } catch (e) {
+    console.error('[itinerarios] no se pudo revisar la excepción de margen:', e instanceof Error ? e.message : String(e))
+  }
 }
 
 function revalidarCotizacion(negocioId: string | null, oportunidadId: string | null) {

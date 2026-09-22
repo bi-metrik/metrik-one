@@ -15,6 +15,7 @@ import {
   type CotizacionMedida,
 } from './gate-margen'
 import { cascadaVigente, contextoDeCotizacion, leerItinerarios } from './itinerarios-datos'
+import { evaluarSalida } from './piso-salida-datos'
 
 // El cliente tipado obliga a arrastrar medio `database.ts` por cada `select`, y las
 // tablas de itinerarios ni siquiera están en los tipos generados.
@@ -43,6 +44,14 @@ export interface VeredictoGateMargen {
 export async function evaluarGateMargen(
   supabase: Supabase,
   negocioId: string,
+  /**
+   * Para las líneas que exigen el piso en la SALIDA (`piso-salida.ts`): con esto el gate
+   * aplica la MISMA regla que el PDF, «Enviar» y «Aprobar» —cada tarifa marcada, margen
+   * sin medir cuenta como bajo el piso— y una autorización vigente del dueño cuenta como
+   * aprobación. Sin esto, o en una línea que no exige el piso en la salida, el gate mide
+   * como siempre (R6).
+   */
+  salida?: { workspaceId: string; servicio: () => Supabase; staffId?: string | null },
 ): Promise<VeredictoGateMargen> {
   const { data, error } = await supabase
     .from('cotizaciones')
@@ -61,16 +70,39 @@ export async function evaluarGateMargen(
   )
 
   const medidas: CotizacionMedida[] = []
+  const bloqueosEnLaSalida: string[] = []
   for (const cot of candidatas) {
     const ctx = await contextoDeCotizacion(supabase, cot.id)
     // Una cotización que no se puede reconstruir no se juzga: no es «bajo el piso»,
     // es que no está. Las candidatas salen de una lectura que ya funcionó.
     if (!ctx) continue
+
+    // La línea exige el piso en la salida: la regla es la de `evaluarSalida`, la misma
+    // que frena el PDF, «Enviar» y «Aprobar». Aquí un margen sin medir SÍ frena: el
+    // gate está en la etapa de cotización y lo que sale de ella es lo que va al cliente.
+    if (ctx.pisoEnLaSalida && salida) {
+      const veredicto = await evaluarSalida(supabase, {
+        servicio: salida.servicio,
+        workspaceId: salida.workspaceId,
+        cotizacionId: cot.id,
+        staffId: salida.staffId ?? null,
+        registrarPerdida: true,
+      })
+      if (veredicto?.bloquea) {
+        bloqueosEnLaSalida.push(`${cot.codigo ?? 'La cotización'}: ${veredicto.mensaje}`)
+      }
+      continue
+    }
+
     const filas = await leerItinerarios(supabase, cot.id)
     const cascada = cascadaVigente(ctx, filas)
     medidas.push({ ...cot, margenRealPct: cascada.margenRealPct, umbrales: ctx.umbrales })
   }
 
   const bajoPiso = cotizacionesBajoPiso(medidas)
-  return { bloquea: bajoPiso.length > 0, mensaje: mensajeGateMargen(bajoPiso) }
+  const mensajes = [...bloqueosEnLaSalida, mensajeGateMargen(bajoPiso)].filter(m => m !== '')
+  return {
+    bloquea: bajoPiso.length > 0 || bloqueosEnLaSalida.length > 0,
+    mensaje: mensajes.join(' '),
+  }
 }

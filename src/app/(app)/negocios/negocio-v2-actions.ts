@@ -136,6 +136,7 @@ import {
 } from '@/lib/negocios/aprobacion-bloque'
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { evaluarGateMargen } from '@/lib/cotizaciones/gate-margen-datos'
+import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
 import { abonarAlRegistrarPago } from '@/lib/siigo/recibo-automatico'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
@@ -3574,7 +3575,7 @@ export async function cambiarEtapaNegocioConGate(
   /** Presente solo con `error === 'requiere_confirmacion'`. */
   confirmacion?: ConfirmacionAvance
 }> {
-  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, role, areas, impersonating, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // El override de gate (omitir gates con motivo): owner/admin, o quien el workspace
@@ -4109,31 +4110,6 @@ export async function cambiarEtapaNegocioConGate(
       }
     }
 
-    // Gate custom: margen_sobre_piso — una cotización por debajo del piso de margen
-    // NO deja avanzar de etapa. Opt-in por etapa (config_extra.gates), mensaje propio
-    // en config_extra.gate_messages['margen_sobre_piso'].
-    //
-    // Es la mitad que le faltaba al piso: hasta hoy rechazaba marcar un itinerario
-    // para la propuesta, y una cotización sin itinerarios —toda cotización de hoy— no
-    // pasaba por ningún candado. Lo que se le anunció al equipo el 2026-09-14 fue
-    // «por debajo del piso BLOQUEA avanzar».
-    //
-    // ⚠️ El margen se recalcula contra la BASE con la misma regla del editor
-    // (`cascadaVigente`), no se lee de `cotizaciones.valor_total`: esa columna es
-    // costo DIRECTO contra precio, y con AIU declarado el margen sale por encima del
-    // real. Decidir con una cifra que la pantalla no muestra es exactamente el defecto
-    // que este frente viene a cerrar.
-    if (etapaGates.includes('margen_sobre_piso')) {
-      const veredicto = await evaluarGateMargen(supabase, negocioId)
-      if (veredicto.bloquea) {
-        const gateMessagesMargen = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
-        // ⚠️ El mensaje configurado por la etapa reemplaza al del helper, que trae las
-        // tres cifras. Quien lo configure asume que su texto se entiende sin ellas.
-        const nombre = gateMessagesMargen['margen_sobre_piso'] ?? veredicto.mensaje
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
-      }
-    }
-
     // Gate custom: sobrepago_conciliado — si el total cobrado supera el precio del
     // negocio, exige que el sobrepago esté conciliado (campo `accion_extra` con valor).
     // Si no hay sobrepago, no exige nada (no estorba a negocios con pago normal).
@@ -4252,6 +4228,49 @@ export async function cambiarEtapaNegocioConGate(
             : `Conciliación pendiente: sobran ${fmt.format(descuadre.exceso)} sobre el valor a recaudar`
         const nombre = gateMessages['conciliacion_diana'] ?? defaultMsg
         return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+      }
+    }
+  }
+
+  // Gate custom: margen_sobre_piso — una cotización por debajo del piso de margen NO
+  // deja avanzar de etapa. Opt-in por etapa (config_extra.gates), mensaje propio en
+  // config_extra.gate_messages['margen_sobre_piso'].
+  //
+  // ⚠️ Vive FUERA del bloque de gates que salta el override, a propósito (decisión del
+  // 2026-09-22): saltarlo dando un motivo es SOLO del dueño del workspace. Un admin, o
+  // quien el workspace declare en `omitir_gate`, sigue saltándose los demás gates con su
+  // motivo, pero este lo frena igual. Una autorización vigente del dueño sobre la
+  // cotización cuenta como aprobación (lo resuelve `evaluarGateMargen`).
+  //
+  // ⚠️ El margen se recalcula contra la BASE con la misma regla del editor, no se lee
+  // de `cotizaciones.valor_total`: esa columna es costo DIRECTO contra precio, y con
+  // AIU declarado el margen sale por encima del real.
+  if (negocio.etapa_actual_id) {
+    const gatesDeLaEtapa = (etapaActualConfigExtra.gates ?? []) as string[]
+    if (gatesDeLaEtapa.includes('margen_sobre_piso')) {
+      const esDueno = esDuenoDelWorkspace({
+        role,
+        impersonating,
+        platformAdmin: await leerPlatformAdmin(createServiceClient(), userId),
+      })
+      if (!(motivoOverride && esDueno)) {
+        const veredicto = await evaluarGateMargen(supabase, negocioId, {
+          workspaceId,
+          servicio: createServiceClient,
+          staffId,
+        })
+        if (veredicto.bloquea) {
+          const gateMessagesMargen = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+          // ⚠️ El mensaje configurado por la etapa reemplaza al del helper, que trae las
+          // cifras. Quien lo configure asume que su texto se entiende sin ellas.
+          const nombre = gateMessagesMargen['margen_sobre_piso'] ?? veredicto.mensaje
+          // Para quien no es el dueño, el bloqueo no cede al override: la pantalla no
+          // le ofrece «Omitir» sobre algo que el servidor le va a rechazar.
+          return {
+            error: 'gate_bloqueado',
+            bloquesPendientes: [{ nombre, es_gate: true, ...(esDueno ? {} : { omitible: false }) }],
+          }
+        }
       }
     }
   }

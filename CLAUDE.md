@@ -384,6 +384,14 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### Nada sale al cliente bajo el margen mínimo sin la firma del dueño (Trappvel, 2026-09-22)
+
+- **Una sola regla** (`src/lib/cotizaciones/piso-salida.ts` + `piso-salida-datos.ts`) la usan el PDF, los dos «Enviar», «Aprobar» (también la aprobación vieja y `updateCotizacion` con `estado`) y el gate `margen_sobre_piso`. Con tarifas marcadas mide **cada una**; sin tarifas, la cascada vigente. Sin precio **o sin costo** no hay margen (`margenMedible`): `cascada.margenRealPct` da 100 % sin costo, y eso se leía como la mejor tarifa.
+- **Solo donde la línea declara `margen.piso_pct` y tiene el gate en alguna etapa** (`ContextoCotizacion.pisoEnLaSalida`). Hoy, solo «Viaje a medida» de Trappvel. Las demás líneas no cambian: ni marca de agua, ni rechazo, y marcar una tarifa bajo el piso sigue rechazado ahí.
+- ⚠️ **En esas líneas bajo el piso ya NO impide marcar una tarifa**: el candado pasó a la salida, donde el dueño puede autorizarla. Si siguiera en marcar, la autorización no tendría qué autorizar.
+- **PDF bajo el piso: sale con marca de agua** (`src/lib/pdf/marca-borrador.ts`, pdf-lib sobre los bytes, sirve a cualquier motor) y **no se guarda ni se registra** en `decisiones_combinacion`.
+- **La excepción la da solo el dueño** (`src/lib/permissions/dueno-workspace.ts`: `role === 'owner'`, sin «Ver como» y sin `platform_admin`, porque un platform admin dentro del workspace conserva su rol). Queda en `cotizacion_excepciones_margen` (**server-only**: con grant, cualquier operadora se fabricaría una por PostgREST) atada a una huella del estado autorizado; se pierde sola al cambiar un precio, un costo o un margen, y las dos cosas quedan en `activity_log`. Saltar el gate con motivo pasa a ser solo del dueño (el gate salió del bloque que salta el override).
+
 ### Trappvel: capturas de otros pasajeros y moneda editable por bloque (2026-09-22)
 
 - **⚠️⚠️ Cambiar los pasajeros (de la línea o del viaje que la línea hereda) ya NO borra casillas ni confirmación: las MARCA.** Cada casilla guarda `paraComposicion`; `capturasDesactualizadas` compara casilla por casilla y `resolverTarifa` devuelve `desactualizada` (sin costo). Antes, con la línea heredando, un precio buscado para 2 se dividía entre 3 en silencio.

@@ -11,6 +11,8 @@ import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
+import { motivoParaNoSalir } from '@/lib/cotizaciones/piso-salida-datos'
+import { createServiceClient } from '@/lib/supabase/server'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -75,8 +77,15 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
 }
 
 export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false as const, error: 'No autenticado' }
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // Bajo el margen mínimo, sin la autorización del dueño, no sale (decisión del
+  // 2026-09-22). En el servidor: el botón es solo la puerta visible.
+  const motivo = await motivoParaNoSalir(supabase, {
+    servicio: createServiceClient, workspaceId, cotizacionId, staffId,
+  })
+  if (motivo) return { success: false as const, error: motivo }
 
   // Verificar que la cotización está en borrador
   const { data: cot, error: cotErr } = await supabase
@@ -113,8 +122,15 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
 }
 
 export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false as const, error: 'No autenticado' }
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // Aprobar fija `precio_aprobado` con el total de la cotización: bajo el mínimo, solo
+  // con la autorización vigente del dueño.
+  const motivo = await motivoParaNoSalir(supabase, {
+    servicio: createServiceClient, workspaceId, cotizacionId, staffId,
+  })
+  if (motivo) return { success: false as const, error: motivo }
 
   // Obtener valor_total y estado de la cotización
   const { data: cot, error: cotErr } = await supabase
