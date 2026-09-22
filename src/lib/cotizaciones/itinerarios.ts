@@ -359,6 +359,22 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
 
 // ── El piso de margen: aquí sí bloquea ───────────────────────────────────────
 
+/**
+ * El margen de un agregado (una tarifa, una cotización), o `null` si NO se puede medir.
+ *
+ * ⚠️ `cascada.margenRealPct` solo vale `null` sin PRECIO. Sin COSTO devuelve 100 %: una
+ * tarifa cuyas líneas tienen precio escrito a mano y ningún costo cargado se lee como
+ * la mejor de todas, cuando lo único cierto es que no hay con qué medirla. Aquí las dos
+ * ausencias cuentan igual.
+ *
+ * Es del AGREGADO a propósito: una línea sin costo dentro de un agregado que sí lo tiene
+ * (el recargo fijo, un fee) no lo vuelve inmedible.
+ */
+export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'>): number | null {
+  if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
+  return cascada.margenRealPct
+}
+
 /** Por qué un itinerario no puede salir en la propuesta. `null` = sí puede. */
 export type MotivoRechazo =
   | { tipo: 'incompleto'; grupos: string[] }

@@ -28,6 +28,7 @@ import {
   cascadaDeItinerario,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  margenMedible,
   motivoDeRechazo,
   ranurasSinResolver,
   textoDeRechazo,
@@ -114,6 +115,16 @@ export interface ContextoCotizacion {
   umbrales: UmbralesMargen
   negocioId: string | null
   oportunidadId: string | null
+  /**
+   * ¿El piso se exige en la SALIDA (PDF, Enviar, Aprobar)? Solo en las líneas que
+   * declaran el piso en su configuración Y tienen el gate `margen_sobre_piso` en alguna
+   * etapa (`piso-salida-datos.ts`). Hoy: «Viaje a medida» de Trappvel.
+   *
+   * Donde es `true`, una tarifa bajo el piso SÍ se puede marcar para la propuesta: el
+   * candado se mueve a la salida, donde el dueño puede autorizarla. Ausente o `false`,
+   * todo sigue como antes: el candado está en marcar (R6).
+   */
+  pisoEnLaSalida?: boolean
 }
 
 export interface ItinerarioCalculado {
@@ -131,6 +142,12 @@ export interface ItinerarioCalculado {
   margenRealPct: number | null
   /** Por qué NO puede ir en la propuesta. `null` = puede. */
   bloqueo: string | null
+  /**
+   * Puede ir en la propuesta, pero está bajo el piso: solo donde el piso se exige en la
+   * salida (`pisoEnLaSalida`). La pantalla lo dice; el PDF sale como borrador y «Enviar»
+   * lo rechaza hasta que el dueño lo autorice. Ausente o `null` = nada que decir.
+   */
+  bajoPiso?: string | null
   /** Por qué se eligió esta combinación (§3.3). Se captura aquí, en la tabla. */
   motivoCodigo: string | null
   motivoTexto: string | null
@@ -207,19 +224,29 @@ export async function contextoDeCotizacion(
   // le cobraría a la tarifa que eligió LATAM la maleta que alguien cargó en Avianca.
   const items: ItemDeCotizacion[] = adjuntarAdicionales(sinAdicionales, filasAdicionales)
 
-  // La política de la línea solo hace falta si la cotización no congeló los umbrales.
+  // La política de la línea hace falta si la cotización no congeló los umbrales, y la
+  // configuración de la línea, para saber si el piso se exige en la salida.
   let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
+  let pisoEnLaSalida = false
   const negocioId = (cot.negocio_id ?? null) as string | null
-  if (negocioId && (cot.piso_margen_pct == null || cot.aviso_margen_pct == null)) {
+  if (negocioId) {
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('lineas_negocio(config_extra)')
+      .select('linea_id, lineas_negocio(config_extra)')
       .eq('id', negocioId)
       .maybeSingle()
     const linea = (negocio as { lineas_negocio?: unknown } | null)?.lineas_negocio
     const fila = Array.isArray(linea) ? linea[0] : linea
-    const politica = politicaMargenDeLinea((fila as { config_extra?: unknown } | null)?.config_extra)
-    politicaLinea = { pisoPct: politica.pisoPct, avisoPct: politica.avisoPct }
+    const configLinea = (fila as { config_extra?: unknown } | null)?.config_extra
+    if (cot.piso_margen_pct == null || cot.aviso_margen_pct == null) {
+      const politica = politicaMargenDeLinea(configLinea)
+      politicaLinea = { pisoPct: politica.pisoPct, avisoPct: politica.avisoPct }
+    }
+    pisoEnLaSalida = await lineaExigePisoEnLaSalida(
+      supabase,
+      (negocio as { linea_id?: string | null } | null)?.linea_id ?? null,
+      configLinea,
+    )
   }
 
   return {
@@ -236,7 +263,40 @@ export async function contextoDeCotizacion(
     ),
     negocioId,
     oportunidadId: (cot.oportunidad_id ?? null) as string | null,
+    pisoEnLaSalida,
   }
+}
+
+/**
+ * ¿La línea exige el piso en la salida? Las dos condiciones de R6: declara el piso en su
+ * configuración (`config_extra.margen.piso_pct`) y alguna de sus etapas tiene el gate
+ * `margen_sobre_piso`.
+ *
+ * Si las etapas no se pueden leer, `false`: es el comportamiento de antes, con el candado
+ * en marcar la tarifa. Encender la regla nueva por un fallo de lectura le cambiaría el
+ * flujo a una línea que no la pidió.
+ */
+export async function lineaExigePisoEnLaSalida(
+  supabase: Supabase,
+  lineaId: string | null,
+  configLinea: unknown,
+): Promise<boolean> {
+  if (!lineaId || !lineaDeclaraPiso(configLinea)) return false
+  const { data, error } = await supabase
+    .from('etapas_negocio')
+    .select('config_extra')
+    .eq('linea_id', lineaId)
+  if (error || !Array.isArray(data)) return false
+  return (data as { config_extra?: { gates?: unknown } | null }[]).some(e => {
+    const gates = e.config_extra?.gates
+    return Array.isArray(gates) && gates.includes('margen_sobre_piso')
+  })
+}
+
+/** La línea escribió su piso. Sin él rigen los valores de fábrica, que nadie eligió. */
+export function lineaDeclaraPiso(configLinea: unknown): boolean {
+  const margen = (configLinea as { margen?: { piso_pct?: unknown } } | null | undefined)?.margen
+  return !!margen && typeof margen === 'object' && margen.piso_pct !== null && margen.piso_pct !== undefined
 }
 
 /**
@@ -326,9 +386,17 @@ export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario
   const cascada: Cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
   const motivo = motivoDeRechazo({
     ranurasFaltantes: faltantes,
-    margenRealPct: cascada.margenRealPct,
+    // Donde el piso se exige en la salida, el margen es el de `margenMedible` —sin costo
+    // tampoco hay margen—, el mismo que usa la salida: la tabla no puede dar por buena
+    // una tarifa que el PDF va a marcar como borrador. En las demás líneas, como antes.
+    margenRealPct: ctx.pisoEnLaSalida === true ? margenMedible(cascada) : cascada.margenRealPct,
     pisoPct: ctx.umbrales.pisoPct,
   })
+  // Donde el piso se exige en la SALIDA, bajo el piso deja de impedir marcar la tarifa:
+  // el candado pasa al PDF, a «Enviar» y a «Aprobar», donde el dueño puede autorizarla.
+  // Si siguiera impidiendo marcarla, la autorización no tendría nada que autorizar —
+  // la Económica al 3 % nunca llegaría a la propuesta—. Incompleta sigue bloqueando.
+  const bajoPisoSinCandado = ctx.pisoEnLaSalida === true && motivo?.tipo === 'bajo_piso'
   // La selección que la pantalla pinta en los desplegables: lo elegido que todavía
   // existe. Un id de un ítem borrado no se devuelve — dejaría una celda apuntando a
   // una opción que no está en su lista.
@@ -344,7 +412,10 @@ export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario
     costo: cascada.costoDeVenta,
     precio: cascada.precioVenta,
     margenRealPct: cascada.margenRealPct,
-    bloqueo: motivo ? textoDeRechazo(motivo) : null,
+    bloqueo: motivo && !bajoPisoSinCandado ? textoDeRechazo(motivo) : null,
+    bajoPiso: bajoPisoSinCandado && motivo
+      ? `${textoDeRechazo(motivo)}. Sale como borrador y no se envía sin la autorización del dueño`
+      : null,
     motivoCodigo: fila.motivoCodigo,
     motivoTexto: fila.motivoTexto,
   }

@@ -449,6 +449,12 @@ export default function TablaCombinaciones({
                       {it.bloqueo && !it.vaEnPropuesta && (
                         <div className="mt-0.5 text-[10px] leading-tight text-red-600">{it.bloqueo}</div>
                       )}
+                      {/* Donde el piso se exige en la salida, bajo el mínimo SÍ se puede
+                          marcar: el candado está en el PDF, «Enviar» y «Aprobar», y el dueño
+                          puede autorizarla. Aquí solo se avisa. */}
+                      {!it.bloqueo && it.bajoPiso && (
+                        <div className="mt-0.5 text-[10px] leading-tight text-red-600">{it.bajoPiso}</div>
+                      )}
                     </td>
 
                     <td className="px-3 py-2">

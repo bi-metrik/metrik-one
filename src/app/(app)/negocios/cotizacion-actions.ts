@@ -19,6 +19,8 @@ import { adjuntarAdicionales } from '@/lib/cotizaciones/adicionales'
 import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
+import { createServiceClient } from '@/lib/supabase/server'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -122,8 +124,18 @@ export async function createCotizacionDetallada(oportunidadId: string) {
 }
 
 export async function updateCotizacion(id: string, updates: Record<string, unknown>) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  // Este endpoint acepta cualquier columna, así que también es una puerta a `estado`.
+  // Mandar o aprobar por aquí tiene que pasar por el mismo margen mínimo que los botones.
+  if (updates.estado === 'enviada' || updates.estado === 'aceptada') {
+    if (!workspaceId) return { success: false, error: 'No autenticado' }
+    const motivo = await motivoParaNoSalir(supabase, {
+      servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
+    })
+    if (motivo) return { success: false, error: motivo }
+  }
 
   const { error: dbError } = await supabase
     .from('cotizaciones')
@@ -686,8 +698,15 @@ export async function deleteRubro(id: string) {
 // ── State transitions ────────────────────────────
 
 export async function enviarCotizacion(id: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // Bajo el margen mínimo, sin la autorización del dueño, no sale (decisión del
+  // 2026-09-22). En el servidor: el botón es solo la puerta visible.
+  const motivo = await motivoParaNoSalir(supabase, {
+    servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
+  })
+  if (motivo) return { success: false, error: motivo }
 
   // Get cotización to find oportunidad_id y negocio_id
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -738,8 +757,13 @@ export async function enviarCotizacion(id: string) {
 }
 
 export async function aceptarCotizacion(id: string) {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  const motivo = await motivoParaNoSalir(supabase, {
+    servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
+  })
+  if (motivo) return { success: false, error: motivo }
 
   const { error: dbError } = await supabase
     .from('cotizaciones')
@@ -1096,8 +1120,23 @@ export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado:
  * servidor y la pantalla no puedan discrepar sobre cuánto vale la cotización.
  */
 export async function recalcularTotales(cotizacionId: string) {
-  const { supabase, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
+
+  // Recalcular corre después de cada cambio de precio, costo o margen: es el momento en
+  // que una autorización del dueño bajo el mínimo puede dejar de valer, y se anota
+  // aquí, con quien hizo el cambio como autor. Sin autorización vigente es una consulta.
+  // Nunca tumba el recálculo: corre después de un cambio que ya se guardó.
+  const revisarExcepcion = async () => {
+    if (!workspaceId) return
+    try {
+      await revisarExcepcionTrasCambio(supabase, {
+        servicio: createServiceClient, workspaceId, cotizacionId, staffId,
+      })
+    } catch (e) {
+      console.error('[recalcularTotales] no se pudo revisar la excepción de margen:', e instanceof Error ? e.message : String(e))
+    }
+  }
 
   // Los parámetros de la cascada se leen de la fila, no de la línea de negocio: se
   // congelan al crear la cotización y no se resincronizan, para que reconfigurar la
@@ -1244,6 +1283,7 @@ export async function recalcularTotales(cotizacionId: string) {
       .update({ costo_total: cascadaTotal.costoDirecto } as never)
       .eq('id', cotizacionId)
 
+    await revisarExcepcion()
     return { success: true, costoTotal: cascadaTotal.costoDirecto, valorVenta: valorFijado }
   }
 
@@ -1278,6 +1318,8 @@ export async function recalcularTotales(cotizacionId: string) {
   const desmarcados = ctxItin && filasItin && filasItin.length > 0
     ? await desmarcarLosQueYaNoPueden(supabase, cotizacionId, { ctx: ctxItin, filas: filasItin })
     : []
+
+  await revisarExcepcion()
 
   return {
     success: true,
