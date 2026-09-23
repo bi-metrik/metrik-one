@@ -588,24 +588,48 @@ describe('tarifa por pasajero · las reglas aprobadas el 2026-09-16', () => {
     expect(r.codigo).toBe('RX2')
   })
 
-  it('fecha sin año: se completa con el del viaje, y un regreso de enero cae en el año siguiente', () => {
+  it('fecha sin año con viaje: el año se deduce sin aviso, y un regreso de enero cae en el año siguiente', () => {
     const r = evaluarLectura(
       VUELO,
       vueloOk({ fecha_salida: v('--12-29'), fecha_regreso: v('--01-02') }),
-      { fechasViaje: { inicio: '2026-12-29', fin: '2027-01-02' } },
+      { fechasViaje: { inicio: '2026-12-29', fin: '2027-01-02' }, hoy: '2026-09-23' },
     )
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.campos.find(c => c.slug === 'fecha_salida')?.valor).toBe('2026-12-29')
     expect(r.campos.find(c => c.slug === 'fecha_regreso')?.valor).toBe('2027-01-02')
-    expect(r.avisos.some(a => a.includes('no muestra el año'))).toBe(true)
+    expect(r.avisos.some(a => a.includes('no muestra el año'))).toBe(false)
+    expect(r.campos.find(c => c.slug === 'fecha_regreso')?.alertaRevision).toBe(false)
   })
 
-  it('fecha sin año y sin viaje: queda vacía, nunca con un año inventado', () => {
-    const r = evaluarLectura(VUELO, vueloOk({ fecha_regreso: v('--01-02') }))
+  it('«Lun 23 Nov» y «Mié 25 Nov» sin viaje: 2026, sin aviso ni marca', () => {
+    const r = evaluarLectura(
+      VUELO,
+      vueloOk({ fecha_salida: v('--11-23/lun'), fecha_regreso: v('--11-25/mie') }),
+      { hoy: '2026-09-23' },
+    )
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.campos.find(c => c.slug === 'fecha_regreso')?.valor).toBeNull()
+    expect(r.campos.find(c => c.slug === 'fecha_salida')).toMatchObject({ valor: '2026-11-23', alertaRevision: false })
+    expect(r.campos.find(c => c.slug === 'fecha_regreso')).toMatchObject({ valor: '2026-11-25', alertaRevision: false })
+    expect(r.avisos).toEqual([])
+  })
+
+  it('un día de la semana que no coincide sí queda marcado, con el año que asumió', () => {
+    const r = evaluarLectura(VUELO, vueloOk({ fecha_salida: v('--11-23/dom') }), { hoy: '2026-09-23' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'fecha_salida')).toMatchObject({ valor: '2026-11-23', alertaRevision: true })
+    expect(r.avisos.some(a => a.includes('se asume 2026'))).toBe(true)
+  })
+
+  it('R6 · fechas con año: no cambian y no hay aviso', () => {
+    const r = evaluarLectura(VUELO, vueloOk(), { hoy: '2026-09-23' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'fecha_salida')?.valor).toBe('2026-12-12')
+    expect(r.campos.find(c => c.slug === 'fecha_regreso')?.valor).toBe('2026-12-18')
+    expect(r.avisos).toEqual([])
   })
 
   it('RX3 con moneda indicada a mano: se acepta, marcada', () => {
