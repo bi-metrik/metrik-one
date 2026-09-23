@@ -17,6 +17,9 @@
  *  4. Otro workspace (Termotech): lo mismo que hoy.
  *  5. Dos líneas con reglas distintas en la misma cotización.
  * Y el hallazgo del #824: el PDF de borrador no calla los pantallazos viejos.
+ *
+ * Adenda del 23-sep (bloque 6): con `precio: 'iva_incluido'` el TOTAL es el de la cascada,
+ * el IVA se extrae del ingreso propio y «Aprobar» fija ese mismo total.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -248,6 +251,15 @@ function sembrar(opts: {
 }
 
 const IVA_INGRESO_PROPIO = { iva_cotizacion: { base: 'ingreso_propio', en_documento: 'linea_incluida' } }
+/** La configuración que se le va a encender a Trappvel: el IVA va ADENTRO del precio. */
+const IVA_ADENTRO = { iva_cotizacion: { base: 'ingreso_propio', en_documento: 'linea_incluida', precio: 'iva_incluido' } }
+
+/** Las dos líneas de COT-2026-0006 (San Andrés - Providencia), tal cual en producción. */
+const COT_0006 = () => [
+  linea('avianca bog-adz', 6_208_296, 7_303_878, { orden: 1 }),
+  linea('satena adz-providencia', 3_292_196, 3_873_172, { orden: 2 }),
+]
+const VALOR_0006 = 11_177_050
 
 type ResultadoPDF = {
   success: boolean
@@ -447,5 +459,162 @@ describe('el PDF de borrador no calla los pantallazos de otros pasajeros', () =>
     expect(pdf.borrador).toBe(true)
     expect(pdf.avisosCaptura).toHaveLength(1)
     expect(pdf.avisosCaptura![0]).toContain('«HOTEL CARTAGENA»')
+  })
+})
+
+// ── 6 · El IVA ADENTRO del precio (adenda del 23-sep) ─────────────────────────
+
+describe('6 · Trappvel con el IVA dentro del precio', () => {
+  it('COT-2026-0002: el TOTAL es el de hoy y el IVA es el 19/119 del ingreso propio', async () => {
+    sembrar({ items: COT_0002(), configWorkspace: IVA_ADENTRO })
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.borrador).toBeUndefined()
+    expect(pdf.fiscal.subtotal).toBe(VALOR_0002)
+    expect(pdf.fiscal.totalBruto).toBe(VALOR_0002)
+    // 2.316.229 × 19/119, redondeado por línea: 318.568 + 51.250.
+    expect(pdf.fiscal.iva).toBe(369_818)
+
+    const t = texto(pdf)
+    expect(t).toContain(cifra(VALOR_0002))
+    expect(t).toContain('Incluye IVA de')
+    expect(t).toContain(cifra(369_818))
+    // Las líneas salen con el precio de la cascada: no se les suma nada.
+    expect(t).toContain(cifra(13_301_621))
+    expect(t).toContain(cifra(2_139_905))
+    expect(t).not.toContain(cifra(13_301_621 + 318_568))
+    // Ni el total ni el IVA del modo «aparte».
+    expect(t).not.toContain(cifra(15_881_609))
+    expect(t).not.toContain(cifra(440_083))
+
+    const aprobada = await aceptarCotizacionNegocio(COT, NEG)
+    expect(aprobada.success).toBe(true)
+    expect(precioAprobado()).toBe(VALOR_0002)
+    expect(precioAprobado()).toBe(pdf.fiscal.totalBruto)
+  })
+
+  it('COT-2026-0006: el TOTAL es el de hoy y el IVA es $267.686', async () => {
+    sembrar({ items: COT_0006(), valorTotal: VALOR_0006, configWorkspace: IVA_ADENTRO })
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.borrador).toBeUndefined()
+    expect(pdf.fiscal.totalBruto).toBe(VALOR_0006)
+    expect(pdf.fiscal.iva).toBe(267_686)
+    expect(texto(pdf)).toContain(cifra(VALOR_0006))
+    await aceptarCotizacionNegocio(COT, NEG)
+    expect(precioAprobado()).toBe(VALOR_0006)
+  })
+
+  it('con el IVA oculto el TOTAL es el mismo y no hay nota', async () => {
+    sembrar({
+      items: COT_0002(),
+      configWorkspace: { iva_cotizacion: { base: 'ingreso_propio', en_documento: 'oculto', precio: 'iva_incluido' } },
+    })
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.fiscal.totalBruto).toBe(VALOR_0002)
+    const t = texto(pdf)
+    expect(t).toContain(cifra(VALOR_0002))
+    expect(t).not.toContain('Incluye IVA de')
+    expect(t).not.toContain(cifra(369_818))
+  })
+
+  it('el subtotal de la cotización no se mueve', async () => {
+    sembrar({ items: COT_0002(), configWorkspace: IVA_ADENTRO })
+    await recalcularTotales(COT)
+    expect((tablas.cotizaciones[0] as Fila).valor_total).toBe(VALOR_0002)
+  })
+
+  it('una línea con precio y sin costo sigue frenando el PDF y «Aprobar»', async () => {
+    sembrar({
+      items: [...COT_0002(), linea('tour a mano', 0, 500_000, { orden: 3 })],
+      valorTotal: VALOR_0002 + 500_000,
+      configWorkspace: IVA_ADENTRO,
+    })
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.borrador).toBe(true)
+    const res = await aceptarCotizacionNegocio(COT, NEG)
+    expect(res.success).toBe(false)
+    expect(precioAprobado()).toBeNull()
+  })
+
+  it('con dos tarifas, cada tarifa sale con su precio de hoy y la nota de SU IVA', async () => {
+    // Recomendada: LATAM + hotel (la de COT-2026-0002). Económica: AVIANCA + el mismo hotel.
+    sembrar({
+      items: [
+        linea('latam bog-mco', 11_306_378, 13_301_621, { orden: 1, grupo: 'vuelo' }),
+        linea('avianca bog-mco', 11_000_000, 12_941_176, { orden: 2, grupo: 'vuelo', opcion_de: 'latam bog-mco' }),
+        linea('hotel decameron', 1_818_919, 2_139_905, { orden: 3, grupo: 'hotel' }),
+      ],
+      configWorkspace: IVA_ADENTRO,
+    })
+    tablas.cotizacion_itinerarios = [
+      { id: 'it-1', cotizacion_id: COT, nombre: 'Recomendada', orden: 1, va_en_propuesta: true, es_principal: true },
+      { id: 'it-2', cotizacion_id: COT, nombre: 'Económica', orden: 2, va_en_propuesta: true, es_principal: false },
+    ]
+    tablas.itinerario_opciones = [
+      { itinerario_id: 'it-1', item_id: 'latam bog-mco' },
+      { itinerario_id: 'it-1', item_id: 'hotel decameron' },
+      { itinerario_id: 'it-2', item_id: 'avianca bog-mco' },
+      { itinerario_id: 'it-2', item_id: 'hotel decameron' },
+    ]
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.fiscal.totalBruto).toBe(VALOR_0002)
+    const t = texto(pdf)
+    // Cada tarifa con el precio de la cascada: 15.441.526 y 12.941.176 + 2.139.905.
+    expect(t).toContain(cifra(VALOR_0002))
+    expect(t).toContain(cifra(15_081_081))
+    // Ninguna con su IVA sumado encima (369.818 y 309.936 + 51.250).
+    expect(t).not.toContain(cifra(VALOR_0002 + 369_818))
+    expect(t).not.toContain(cifra(15_081_081 + 361_186))
+    // Y cada una dice cuánto IVA lleva adentro.
+    // (Entre «$» y la cifra va un espacio duro.)
+    expect(t).toMatch(/Incluye IVA de \$\s369\.818 LATAM/)
+    expect(t).toMatch(/Incluye IVA de \$\s361\.186 AVIANCA/)
+  })
+
+  it('los adicionales de una línea salen con su precio, sin sumarles el IVA', async () => {
+    sembrar({ items: COT_0002(), valorTotal: VALOR_0002 + 250_000, configWorkspace: IVA_ADENTRO })
+    tablas.item_adicionales = [{
+      id: 'ad-1', item_id: 'latam bog-mco', codigo: null, nombre: 'Maleta de 23 kg', cantidad: 1,
+      costo: 200_000, precio: 250_000, moneda: 'COP', origen: 'manual', orden: 1,
+    }]
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.fiscal.totalBruto).toBe(VALOR_0002 + 250_000)
+    // El adicional deja $50.000: adentro van 50.000 × 19/119 = $7.983.
+    expect(pdf.fiscal.iva).toBe(369_818 + 7_983)
+    const t = texto(pdf)
+    // La línea imprime su precio más el adicional, tal cual: 13.301.621 + 250.000.
+    expect(t).toContain(cifra(13_301_621 + 250_000))
+    expect(t).not.toContain(cifra(13_301_621 + 250_000 + 7_983))
+  })
+
+  it('con una plantilla que no lo sabe imprimir, el PDF sale como borrador y dice por qué', async () => {
+    sembrar({ items: COT_0002(), configWorkspace: IVA_ADENTRO, plantilla: 'termotech' })
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.borrador).toBe(true)
+    expect(pdf.aviso).toContain('IVA dentro del precio')
+    expect(subidas).toEqual([])
+    // El total del cobro sigue siendo el de la cascada.
+    expect(pdf.fiscal.totalBruto).toBe(VALOR_0002)
+  })
+})
+
+describe('6 · `iva_aparte` declarado es el #830, peso por peso', () => {
+  it('mismo resultado fiscal, mismo documento y mismo precio aprobado que sin la llave', async () => {
+    sembrar({ items: COT_0002(), configWorkspace: IVA_INGRESO_PROPIO })
+    const sinLlave = await generateCotizacionPDF(COT) as ResultadoPDF
+    await aceptarCotizacionNegocio(COT, NEG)
+    const aprobadoSinLlave = precioAprobado()
+
+    sembrar({
+      items: COT_0002(),
+      configWorkspace: { iva_cotizacion: { base: 'ingreso_propio', en_documento: 'linea_incluida', precio: 'iva_aparte' } },
+    })
+    const aparte = await generateCotizacionPDF(COT) as ResultadoPDF
+    await aceptarCotizacionNegocio(COT, NEG)
+
+    expect(aparte.fiscal).toEqual(sinLlave.fiscal)
+    expect(aparte.fiscal.totalBruto).toBe(15_881_609)
+    expect(texto(aparte)).toBe(texto(sinLlave))
+    expect(precioAprobado()).toBe(aprobadoSinLlave)
+    expect(precioAprobado()).toBe(15_881_609)
   })
 })

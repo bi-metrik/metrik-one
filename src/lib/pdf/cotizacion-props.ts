@@ -352,6 +352,10 @@ export interface CotizacionPDFProps {
    * (`plantillaImprimePreciosConIva`). Cada línea, cada tarifa, la tabla por pasajero y el
    * TOTAL ya lo incluyen, así que la plantilla NO imprime «Subtotal» ni «IVA» aparte.
    *
+   * Cómo llegó adentro no le importa a la plantilla: con `precio: 'iva_aparte'` la acción
+   * se lo sumó a cada cifra; con `iva_incluido` la cascada ya lo traía y ninguna cifra se
+   * movió. En los dos casos `iva` es lo que el TOTAL lleva adentro.
+   *
    * `null` o ausente en todo lo demás: la plantilla imprime Subtotal, IVA y TOTAL como
    * siempre.
    */

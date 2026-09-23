@@ -24,6 +24,7 @@ import {
 import { lineaDeRecargo, politicaRecargoDeLinea } from '@/lib/cotizaciones/recargo-linea'
 import type { FiscalProfile } from '@/types/database'
 import {
+  ivaIncluidoEnElPrecio,
   ivaSobreIngresoPropio,
   leerConfigIvaCotizacion,
   lineasParaIva,
@@ -90,6 +91,8 @@ export async function ivaDeLaCotizacion(
   const opciones = {
     tarifaPct: tarifaIvaDelVendedor(perfil),
     descuentoComercialPct: ctx.params.descuentoComercialPct,
+    // Encima o adentro del precio: la misma cuenta que hace el editor con su pantalla.
+    precio: args.config.precio,
   }
 
   const todas = liquidarIva(lineasParaIva(calcularCascada(ctx.items, ctx.params).lineas, metaDe), opciones)
@@ -121,10 +124,14 @@ export async function ivaDeLaCotizacion(
  * Lo que «Aprobar» escribe en `negocios.precio_aprobado`: lo que el cliente paga.
  *
  * Con la base apagada es `valor_total`, exactamente lo de siempre. Con la base encendida
- * es `valor_total` + el IVA sobre el ingreso propio: el mismo TOTAL que imprime el PDF, así
- * que el cobro y el documento no pueden decir cifras distintas. Si el IVA no se puede
- * calcular (una línea sin costo), no se aprueba: aprobar con un IVA incompleto fijaría un
- * precio que no es.
+ * y el IVA encima (`iva_aparte`) es `valor_total` + el IVA sobre el ingreso propio; con el
+ * IVA adentro (`iva_incluido`) es `valor_total` a secas, porque el precio ya lo trae. En los
+ * dos casos es el mismo TOTAL que imprime el PDF, así que el cobro y el documento no pueden
+ * decir cifras distintas.
+ *
+ * Si el IVA no se puede calcular (una línea sin costo), no se aprueba, tampoco con el IVA
+ * adentro: el precio sería el correcto, pero la cotización no tiene un documento que se
+ * pueda enviar (el PDF sale como borrador) y aprobarla fijaría un cobro cuyo IVA nadie sabe.
  */
 export async function precioAprobadoDeCotizacion(
   supabase: Supabase,
@@ -141,5 +148,6 @@ export async function precioAprobadoDeCotizacion(
   const iva = await ivaDeLaCotizacion(supabase, { ...args, config })
   if (!iva) return { ok: false, error: 'No se pudo leer la cotización para calcular su IVA' }
   if (!iva.calculable) return { ok: false, error: motivoIvaSinCalcular(iva.sinCosto) }
+  if (ivaIncluidoEnElPrecio(config)) return { ok: true, precio: args.valorTotal }
   return { ok: true, precio: (Number(args.valorTotal) || 0) + iva.vigente.iva }
 }

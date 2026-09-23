@@ -51,8 +51,10 @@ import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
+  MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA,
   clienteParaRetenciones,
   fiscalSobreIngresoPropio,
+  ivaIncluidoEnElPrecio,
   ivaSobreIngresoPropio,
   leerConfigIvaCotizacion,
   motivoIvaSinCalcular,
@@ -548,11 +550,18 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * guarda ni se registra: no es un documento del cliente. No se inventa una base de IVA.
    */
   const ivaSinCalcular = ivaCot !== null && !ivaCot.calculable
-  const esBorrador = salidaBloquea || ivaSinCalcular
+  // Con el IVA DENTRO del precio, solo una plantilla que lo sepa imprimir dice la verdad: las
+  // demás pintan «Subtotal, IVA, TOTAL» y sumarían con los ojos un IVA que el TOTAL no trae.
+  // Hoy solo Trappvel cotiza así, y su plantilla sabe; esto frena al siguiente que no.
+  const ivaIncluidoSinPlantilla = ivaCot !== null
+    && ivaIncluidoEnElPrecio(configIva)
+    && !plantillaImprimePreciosConIva(ws?.cotizacion_template_slug ?? PLANTILLA_POR_DEFECTO)
+  const esBorrador = salidaBloquea || ivaSinCalcular || ivaIncluidoSinPlantilla
   const avisoBorrador = esBorrador
     ? `PDF de borrador, con marca de agua: no se puede enviar. ${[
         salidaBloquea ? salida!.mensaje : null,
         ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
+        ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
       ].filter(Boolean).join(' ')}`
     : null
 
@@ -785,16 +794,22 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * muestra el total final con IVA incluido»).
    *
    * Solo con la base `ingreso_propio` encendida y con una plantilla que lo sepa imprimir
-   * (`plantillaImprimePreciosConIva`). A cada línea se le suma SU IVA —el mismo que suma el
-   * total—, así que la columna, las tarifas, la tabla por pasajero y el TOTAL siguen
-   * cuadrando entre sí sin una cifra aparte. Con `linea_incluida` la plantilla dice además
-   * cuánto IVA lleva; con `oculto` no lo dice, y los números son los mismos.
+   * (`plantillaImprimePreciosConIva`). Con `linea_incluida` la plantilla dice además cuánto
+   * IVA lleva; con `oculto` no lo dice, y los números son los mismos.
+   *
+   * Cómo llega el IVA a cada precio depende de `precio`:
+   *  · `iva_aparte`: a cada línea se le SUMA su IVA —el mismo que suma el total—, así que la
+   *    columna, las tarifas, la tabla por pasajero y el TOTAL cuadran sin una cifra aparte.
+   *  · `iva_incluido`: el precio de la cascada YA lo trae. No se le suma nada a ninguna cifra;
+   *    lo único que cambia es la nota, que dice cuánto IVA va adentro.
    *
    * Sin la base encendida, `ivaDe` no devuelve nada y cada cifra es la de siempre.
    */
   const preciosConIva = ivaCot !== null && plantillaImprimePreciosConIva(templateSlug)
+  const sumaIvaAlPrecio = preciosConIva && !ivaIncluidoEnElPrecio(configIva)
   const ivaDe = (i: ItemRow) => (preciosConIva && i.id ? ivaCot!.porItem.get(i.id) ?? null : null)
   const conIva = (i: ItemRow): ItemRow => {
+    if (!sumaIvaAlPrecio) return i
     const iva = ivaDe(i)
     if (!iva || iva.ivaBase === 0) return i
     const cantidad = Number(i.cantidad) || 1
@@ -821,7 +836,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const paraPlantilla = (original: ItemRow) => {
     const i = conIva(original)
     const adicionales = adicionalesDe(original)
-    const ivaAdicionales = ivaDe(original)?.ivaAdicionales ?? 0
+    const ivaAdicionales = sumaIvaAlPrecio ? ivaDe(original)?.ivaAdicionales ?? 0 : 0
     return {
       nombre: i.nombre ?? '',
       descripcion: i.descripcion ?? null,
@@ -837,7 +852,10 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     }
   }
 
-  /** El IVA de una tarifa: la suma del de sus líneas, que es lo que suma su columna. */
+  /**
+   * El IVA de una tarifa: la suma del de sus líneas. Con el IVA encima es lo que se le suma a
+   * su precio; con el IVA adentro es lo que su precio ya trae, y solo va a la nota.
+   */
   const ivaDeLasLineas = (ids: string[]) =>
     ids.reduce((a, id) => {
       const item = itemPorId.get(id)
@@ -849,7 +867,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     ? bloques.map((b, idx) => ({
         nombre: b.nombre,
         esPrincipal: b.esPrincipal,
-        precio: b.precio + ivaPorBloque[idx],
+        precio: b.precio + (sumaIvaAlPrecio ? ivaPorBloque[idx] : 0),
         items: b.itemIds
           .map(id => itemPorId.get(id))
           .filter((i): i is ItemRow => i !== undefined)
@@ -1112,8 +1130,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     // pasajero quedaría por debajo del TOTAL sin que el documento lo explique.
     preciosPorPasajero: preciosPorPasajeroDelViaje(itemsParaResumen),
     fiscal,
-    // Los precios ya traen el IVA adentro (ver `preciosConIva`). `null` en todo lo demás:
-    // la plantilla imprime Subtotal, IVA y TOTAL como siempre.
+    // Los precios ya traen el IVA adentro (ver `preciosConIva`): sumado aquí con `iva_aparte`,
+    // o de fábrica con `iva_incluido`. `null` en todo lo demás: la plantilla imprime
+    // Subtotal, IVA y TOTAL como siempre.
     ivaEnPrecios: preciosConIva
       ? {
           iva: fiscal.iva,
