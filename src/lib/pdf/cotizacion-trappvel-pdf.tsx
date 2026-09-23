@@ -34,13 +34,21 @@
  * Recomendada magenta, Económica verde, Premium púrpura. Un vuelo o un hotel lleva el
  * chip de las tarifas a las que pertenece, así el cliente sigue su opción sin leyenda.
  *
+ * **6 · Un solo sistema visual, y reglas que escalan en vez de un número de páginas**
+ * (2026-09-23, revisión de COT-2026-0006). Todo título de sección con su ícono en el
+ * círculo gris; dos cajas y nada más: la tarjeta gris y la barra en degradado; el ámbar,
+ * solo como franja. Toda foto que no es la de portada va en miniatura 3:2, encuadrada en
+ * su foco. El día a día no repite la tabla de vuelos, y «Antes de viajar» va con «Incluido»,
+ * no suelto al final. Las reglas puras viven en `cotizacion-trappvel-formato.ts`.
+ *
  * ⚠️ Las fuentes estándar del PDF (Helvetica) NO traen «→», «✔», «✕», «●» ni «★»: un
  * carácter que la fuente no tiene se imprime como otro (la flecha salió como apóstrofo).
  * Todos esos signos van dibujados en SVG, nunca como texto.
  */
 
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import {
+  Circle,
   Defs,
   Document,
   Image as PdfImage,
@@ -58,6 +66,7 @@ import {
 import type { CotizacionPDFProps, FotoPDF, PrecioPorPasajeroPDF, ViajePDF } from './cotizacion-props'
 import { creditosDeFotos } from './fotos-del-viaje'
 import {
+  CANAL_COLUMNAS,
   TOKENS as C,
   absorberRedondeo,
   capitulosDelViaje,
@@ -67,10 +76,14 @@ import {
   colorDeSigla,
   colorDeTarifa,
   conAnio,
+  diaADiaSeImprime,
   diaDeLaSemana,
+  disposicionDeListas,
+  encuadreDeFoto,
   esDeLaPrincipal,
   fechaDelDia,
   fechaEnCapitulo,
+  gruposPorDia,
   leerFecha,
   lugarConCodigo,
   lugarLegible,
@@ -83,6 +96,7 @@ import {
   yaLoDiceLaPortada,
   type Capitulo,
   type Fecha,
+  type ListaDelCierre,
 } from './cotizacion-trappvel-formato'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
@@ -164,7 +178,49 @@ function IconoX({ color, tam = 8 }: { color: string; tam?: number }) {
   )
 }
 
-function IconoAvion() {
+/** Los íconos de sección: línea magenta de 1,6 sobre el círculo gris (§2, el de «Vuelos»). */
+type IconoDeSeccion = 'avion' | 'dinero' | 'incluye' | 'alerta' | 'calendario' | 'opcionales' | 'destino' | 'maleta' | 'info'
+
+function Trazos({ tipo }: { tipo: IconoDeSeccion }) {
+  const t = { stroke: C.magenta, strokeWidth: 1.6, fill: 'none' }
+  switch (tipo) {
+    case 'avion':
+      return <Path d="M2 11 L22 2 L15 22 L11 13 Z M11 13 L22 2" {...t} />
+    case 'dinero':
+      return (
+        <>
+          <Rect x="2.5" y="6" width="19" height="12" rx="2" {...t} />
+          <Circle cx="12" cy="12" r="3" {...t} />
+        </>
+      )
+    case 'incluye':
+      return <Path d="M4.5 12.5 L9.5 17.5 L19.5 6.5" {...t} />
+    case 'alerta':
+      return <Path d="M12 3 L22 20.5 H2 Z M12 9.5 V14 M12 16.8 V17.6" {...t} />
+    case 'calendario':
+      return <Path d="M3.5 5.5 H20.5 V20.5 H3.5 Z M3.5 10 H20.5 M8 3 V7.5 M16 3 V7.5" {...t} />
+    case 'opcionales':
+      return <Path d="M12 4 V20 M4 12 H20" {...t} />
+    case 'destino':
+      return (
+        <>
+          <Path d="M12 21.5 C12 21.5 5 14.5 5 9.5 C5 5.6 8.1 2.5 12 2.5 C15.9 2.5 19 5.6 19 9.5 C19 14.5 12 21.5 12 21.5 Z" {...t} />
+          <Circle cx="12" cy="9.5" r="2.6" {...t} />
+        </>
+      )
+    case 'maleta':
+      return <Path d="M3 8 H21 V20 H3 Z M8.5 8 V4.5 H15.5 V8 M3 13 H21" {...t} />
+    case 'info':
+      return (
+        <>
+          <Circle cx="12" cy="12" r="9" {...t} />
+          <Path d="M12 10.5 V16.5 M12 7 V7.8" {...t} />
+        </>
+      )
+  }
+}
+
+function IconoSeccion({ tipo }: { tipo: IconoDeSeccion }) {
   return (
     <View
       style={{
@@ -178,7 +234,7 @@ function IconoAvion() {
       }}
     >
       <Svg width={12} height={12} viewBox="0 0 24 24">
-        <Path d="M2 11 L22 2 L15 22 L11 13 Z M11 13 L22 2" stroke={C.magenta} strokeWidth={1.6} fill="none" />
+        <Trazos tipo={tipo} />
       </Svg>
     </View>
   )
@@ -229,7 +285,10 @@ function Antetitulo({ texto, color, punto }: { texto: string; color: string; pun
 }
 
 /**
- * El título de una sección (§2: 22 pt, mayúscula inicial).
+ * El título de una sección (§2: 22 pt, mayúscula inicial), SIEMPRE con su ícono en el círculo
+ * gris, como «Vuelos». Desde el 2026-09-23 es el mismo para todas las secciones: «Incluido»
+ * iba en verde a 14 pt, «A tener en cuenta» en rojo, «Día a día» en un antetítulo de 8,5 y
+ * «Antes de viajar» dentro de su recuadro: cinco estilos para la misma jerarquía.
  *
  * ⚠️⚠️ Un título NUNCA va solo: quien lo usa lo mete en un `View wrap={false}` junto con
  * el primer renglón de lo que titula. `minPresenceAhead` no sirve aquí, y parecía que sí:
@@ -237,67 +296,97 @@ function Antetitulo({ texto, color, punto }: { texto: string; color: string; pun
  * un título es siempre el primer hijo de su sección. Medido: el rótulo «DÍA A DÍA» quedó
  * solo al pie de la página con el `minPresenceAhead` puesto.
  */
-function Titulo({ texto, icono }: { texto: string; icono?: ReactNode }) {
+function Titulo({ texto, icono }: { texto: string; icono: IconoDeSeccion }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, marginBottom: 10 }}>
-      {icono}
+      <IconoSeccion tipo={icono} />
       <Text style={{ fontSize: 22, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{texto}</Text>
     </View>
   )
 }
 
-/**
- * Una foto con su rótulo en mayúsculas blancas abajo a la izquierda, sobre una veladura
- * negra al 35 % (§4.2): blanco a secas sobre el cielo de una foto que nadie revisó queda
- * ilegible.
- */
-function FotoConRotulo({ foto, alto }: { foto: FotoPDF; alto: number }) {
+/** El rótulo de una foto: mayúsculas blancas sobre una veladura negra al 35 % (§4.2). */
+function Rotulo({ texto, chico = false, ancho }: { texto: string; chico?: boolean; ancho?: number }) {
+  const borde = chico ? 8 : 10
   return (
-    <View wrap={false} style={{ marginTop: 14, position: 'relative' }}>
-      <PdfImage src={foto.url} style={{ width: '100%', height: alto, objectFit: 'cover', borderRadius: 8 }} />
-      {foto.rotulo && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 10,
-            bottom: 10,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-            borderRadius: 4,
-            paddingVertical: 3,
-            paddingHorizontal: 7,
-          }}
-        >
-          <Text style={{ fontSize: 7, color: C.blanco, letterSpacing: 1.2 }}>{foto.rotulo.toUpperCase()}</Text>
-        </View>
-      )}
+    <View
+      style={{
+        position: 'absolute',
+        left: borde,
+        bottom: borde,
+        // En una miniatura el rótulo largo parte renglón en vez de salirse de la foto.
+        maxWidth: ancho ? ancho - borde * 2 : undefined,
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        borderRadius: 4,
+        paddingVertical: chico ? 2.5 : 3,
+        paddingHorizontal: chico ? 6 : 7,
+      }}
+    >
+      <Text style={{ fontSize: chico ? 6 : 7, color: C.blanco, letterSpacing: chico ? 0.8 : 1.2 }}>{texto.toUpperCase()}</Text>
     </View>
   )
 }
 
-/** Varias fotos lado a lado, cada una con su rótulo. La franja no se parte entre páginas. */
-function FranjaDeFotos({ fotos, alto }: { fotos: FotoPDF[]; alto: number }) {
-  if (fotos.length === 0) return null
-  if (fotos.length === 1) return <FotoConRotulo foto={fotos[0]} alto={alto} />
+/**
+ * La foto de portada, a todo el ancho (§4.2), encuadrada en su foco: la de Johnny Cay dejaba
+ * la isla en el borde de arriba porque el recorte iba por el centro.
+ */
+function FotoConRotulo({ foto, alto }: { foto: FotoPDF; alto: number }) {
   return (
-    <View wrap={false} style={{ flexDirection: 'row', marginTop: 14 }}>
+    <View wrap={false} style={{ marginTop: 14, position: 'relative' }}>
+      <PdfImage
+        src={foto.url}
+        style={{
+          width: ANCHO_CONTENIDO,
+          height: alto,
+          objectFit: 'cover',
+          objectPosition: encuadreDeFoto(foto.foco, foto.proporcion, ANCHO_CONTENIDO / alto),
+          borderRadius: 8,
+        }}
+      />
+      {foto.rotulo && <Rotulo texto={foto.rotulo} />}
+    </View>
+  )
+}
+
+/**
+ * Toda foto que no es la de portada va en miniatura 3:2, una sola medida en todo el
+ * documento: un tercio del ancho menos el canal.
+ *
+ * ⚠️ Hasta el 2026-09-23 las fotos de la franja se repartían el ancho a 112 pt de alto:
+ * franjas 3,6 veces más anchas que altas, y en «El Acuario» solo se veía cielo. Una foto
+ * de viaje es 4:3 o 3:2; con esa forma el recorte le quita poco, y el foco decide qué.
+ */
+const CANAL_FOTOS = 8
+const ANCHO_MINIATURA = (ANCHO_CONTENIDO - CANAL_FOTOS * 2) / 3
+const ALTO_MINIATURA = ANCHO_MINIATURA / 1.5
+
+function Miniatura({ foto }: { foto: FotoPDF }) {
+  return (
+    <View style={{ width: ANCHO_MINIATURA, height: ALTO_MINIATURA, position: 'relative' }}>
+      <PdfImage
+        src={foto.url}
+        style={{
+          width: ANCHO_MINIATURA,
+          height: ALTO_MINIATURA,
+          objectFit: 'cover',
+          objectPosition: encuadreDeFoto(foto.foco, foto.proporcion, ANCHO_MINIATURA / ALTO_MINIATURA),
+          borderRadius: 8,
+        }}
+      />
+      {foto.rotulo && <Rotulo texto={foto.rotulo} chico ancho={ANCHO_MINIATURA} />}
+    </View>
+  )
+}
+
+/** Varias miniaturas en fila, tres por renglón. La franja no se parte entre páginas. */
+function FranjaDeFotos({ fotos }: { fotos: FotoPDF[] }) {
+  if (fotos.length === 0) return null
+  return (
+    <View wrap={false} style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 14 }}>
       {fotos.map((f, i) => (
-        <View key={`foto-${i}`} style={{ flexGrow: 1, flexBasis: 0, marginLeft: i === 0 ? 0 : 8, position: 'relative' }}>
-          <PdfImage src={f.url} style={{ width: '100%', height: alto * 0.75, objectFit: 'cover', borderRadius: 8 }} />
-          {f.rotulo && (
-            <View
-              style={{
-                position: 'absolute',
-                left: 8,
-                bottom: 8,
-                backgroundColor: 'rgba(0,0,0,0.35)',
-                borderRadius: 4,
-                paddingVertical: 2.5,
-                paddingHorizontal: 6,
-              }}
-            >
-              <Text style={{ fontSize: 6.5, color: C.blanco, letterSpacing: 1 }}>{f.rotulo.toUpperCase()}</Text>
-            </View>
-          )}
+        <View key={`foto-${i}`} style={{ marginLeft: i % 3 === 0 ? 0 : CANAL_FOTOS, marginTop: i < 3 ? 0 : CANAL_FOTOS }}>
+          <Miniatura foto={f} />
         </View>
       ))}
     </View>
@@ -354,7 +443,7 @@ function ChipsDeTarifa({ tarifas, de }: { tarifas: TarifaDoc[]; de: { tarifas?: 
 
 // ── Hotel (§4.3) ──────────────────────────────────────────────────────────────
 
-function TarjetaHotel({ h, general, tarifas }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[] }) {
+function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; arriba?: boolean }) {
   const resumen = [
     rangoCompacto(h.checkIn, h.checkOut),
     h.noches ? `${h.noches} ${h.noches === 1 ? 'noche' : 'noches'}` : null,
@@ -369,7 +458,7 @@ function TarjetaHotel({ h, general, tarifas }: { h: HotelPDF; general: boolean; 
     h.localizador ? `Localizador: ${h.localizador}` : null,
   ].filter(Boolean).join(' · ')
   return (
-    <View wrap={false} style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: 11, marginTop: 12 }}>
+    <View wrap={false} style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: 11, marginTop: arriba ? 0 : 12 }}>
       {h.foto && (
         <PdfImage src={h.foto.url} style={{ width: 80, height: 60, objectFit: 'cover', borderRadius: 8, marginRight: 11 }} />
       )}
@@ -443,56 +532,65 @@ function Circulo({ e }: { e: EntradaTiempo }) {
   )
 }
 
+/** Una tarjeta del día a día: un vuelo o una actividad. */
+function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
+  return (
+    <View style={{ marginTop: primera ? 0 : 6, backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 }}>
+      {'texto' in e.titulo ? (
+        <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta }}>
+          {e.titulo.texto}
+        </Text>
+      ) : (
+        <Ruta desde={e.titulo.desde} hasta={e.titulo.hasta} tam={10} negrita />
+      )}
+      {e.subtitulo && ('texto' in e.subtitulo ? (
+        <Text style={{ fontSize: 8.5, color: C.purpura, marginTop: 2 }}>{e.subtitulo.texto}</Text>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+          <Text style={{ fontSize: 8.5, color: C.purpura }}>
+            {[e.subtitulo.aerolinea, e.subtitulo.salida].filter(Boolean).join(' · ')}
+          </Text>
+          {e.subtitulo.salida && e.subtitulo.llegada && <Flecha color={C.purpura} alto={6} />}
+          {e.subtitulo.llegada && <Text style={{ fontSize: 8.5, color: C.purpura }}>{e.subtitulo.llegada}</Text>}
+        </View>
+      ))}
+      {e.notas.map((n, j) => (
+        <Text key={`n-${j}`} hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.gris, marginTop: 2 }}>{n}</Text>
+      ))}
+      {e.vinetas.map((v, j) => (
+        <View key={`v-${j}`} style={{ flexDirection: 'row', marginTop: 3 }}>
+          <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: C.magenta, marginTop: 3.5, marginRight: 6 }} />
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{v}</Text>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+/**
+ * El día a día: un bloque por DÍA, que no se parte. El círculo va una vez por día y las
+ * tarjetas de ese día (el vuelo que llega, el traslado de la tarde) quedan juntas.
+ *
+ * El título viaja con el primer día (#819, afinado el 2026-09-23): solo al pie de la
+ * página parece un corte. Si el bloque no cabe, pasa entero a la página que sigue.
+ */
 function LineaDeTiempo({ entradas }: { entradas: EntradaTiempo[] }) {
   if (entradas.length === 0) return null
-  const filas = entradas.map((e, i) => {
-        const mismaFecha = i > 0 && e.fecha !== null && entradas[i - 1].fecha !== null
-          && claveDeFecha(e.fecha) === claveDeFecha(entradas[i - 1].fecha as Fecha)
-        return (
-          <View key={`t-${i}`} wrap={false} style={{ flexDirection: 'row', marginTop: 8 }}>
-            <View style={{ width: 34, marginRight: 10 }}>{mismaFecha ? null : <Circulo e={e} />}</View>
-            <View style={{ flex: 1, backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 }}>
-              {'texto' in e.titulo ? (
-                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta }}>
-                  {e.titulo.texto}
-                </Text>
-              ) : (
-                <Ruta desde={e.titulo.desde} hasta={e.titulo.hasta} tam={10} negrita />
-              )}
-              {e.subtitulo && ('texto' in e.subtitulo ? (
-                <Text style={{ fontSize: 8.5, color: C.purpura, marginTop: 2 }}>{e.subtitulo.texto}</Text>
-              ) : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                  <Text style={{ fontSize: 8.5, color: C.purpura }}>
-                    {[e.subtitulo.aerolinea, e.subtitulo.salida].filter(Boolean).join(' · ')}
-                  </Text>
-                  {e.subtitulo.salida && e.subtitulo.llegada && <Flecha color={C.purpura} alto={6} />}
-                  {e.subtitulo.llegada && <Text style={{ fontSize: 8.5, color: C.purpura }}>{e.subtitulo.llegada}</Text>}
-                </View>
-              ))}
-              {e.notas.map((n, j) => (
-                <Text key={`n-${j}`} hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.gris, marginTop: 2 }}>{n}</Text>
-              ))}
-              {e.vinetas.map((v, j) => (
-                <View key={`v-${j}`} style={{ flexDirection: 'row', marginTop: 3 }}>
-                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: C.magenta, marginTop: 3.5, marginRight: 6 }} />
-                  <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{v}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )
-      })
-  // El rótulo viaja con las DOS primeras entradas en un bloque que no se parte (#819): solo,
-  // o con un único día al pie de la página, parece un corte y el día a día arranca en la
-  // hoja siguiente. Si el bloque no cabe, pasa entero a la página que sigue.
-  return (
-    <View style={{ marginTop: 16 }}>
-      <View wrap={false}>
-        <Antetitulo texto="DÍA A DÍA" color={C.magenta} />
-        {filas.slice(0, 2)}
+  const dias = gruposPorDia(entradas).map((grupo, i) => (
+    <View key={`dia-${i}`} wrap={false} style={{ flexDirection: 'row', marginTop: i === 0 ? 0 : 8 }}>
+      <View style={{ width: 34, marginRight: 10 }}><Circulo e={grupo[0]} /></View>
+      <View style={{ flex: 1 }}>
+        {grupo.map((e, j) => <TarjetaDelDia key={`t-${j}`} e={e} primera={j === 0} />)}
       </View>
-      {filas.slice(2)}
+    </View>
+  ))
+  return (
+    <View>
+      <View wrap={false}>
+        <Titulo texto="Día a día" icono="calendario" />
+        {dias[0]}
+      </View>
+      {dias.slice(1)}
     </View>
   )
 }
@@ -739,9 +837,9 @@ const ALTO_TOTALES = 70
  *  eso se parte, con el TOTAL pegado a la última línea. */
 const LINEAS_EN_UN_BLOQUE = 8
 
-/** Alto del cierre (créditos + firma) con su margen: lo que la última sección pide tener
- *  debajo en su misma página. */
-const ALTO_CIERRE = 90
+/** Alto del cierre (créditos al lado de la firma) con su margen: lo que la última sección
+ *  pide tener debajo en su misma página. */
+const ALTO_CIERRE = 70
 
 /**
  * Una fila de dinero: el concepto a la izquierda, su total a la derecha.
@@ -756,7 +854,11 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
   ultima?: boolean
   /** Lo que la última fila pide ADEMÁS del TOTAL: el cierre, si viene detrás. */
   presenciaExtra?: number
-  /** Dentro de la tarjeta de «Inversión» con una tarifa: cada fila dibuja su tramo del borde. */
+  /**
+   * Dentro de la tarjeta de «Inversión» con una tarifa: cada fila pinta su tramo del fondo
+   * gris y redondea la esquina que le toca. Es la MISMA tarjeta del precio por pasajero
+   * (§ un solo sistema visual, 2026-09-23): la caja blanca con borde era un tercer estilo.
+   */
   tarjeta?: PosicionEnTarjeta
 }) {
   const arriba = tarjeta === 'primera' || tarjeta === 'unica'
@@ -793,11 +895,7 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
       wrap={false}
       minPresenceAhead={ultima ? ALTO_TOTALES + (presenciaExtra ?? 0) : 0}
       style={tarjeta ? {
-        borderLeftWidth: 0.75,
-        borderRightWidth: 0.75,
-        borderTopWidth: arriba ? 0.75 : 0,
-        borderBottomWidth: abajo ? 0.75 : 0,
-        borderColor: C.linea,
+        backgroundColor: C.tarjeta,
         borderTopLeftRadius: arriba ? 8 : 0,
         borderTopRightRadius: arriba ? 8 : 0,
         borderBottomLeftRadius: abajo ? 8 : 0,
@@ -813,6 +911,61 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
 }
 
 type PosicionEnTarjeta = 'unica' | 'primera' | 'media' | 'ultima'
+
+// ── Incluido, a tener en cuenta y antes de viajar (§4.6, §4.9) ───────────────
+
+const LISTAS: Record<ListaDelCierre, { titulo: string; icono: IconoDeSeccion }> = {
+  incluye: { titulo: 'Incluido en el plan', icono: 'incluye' },
+  noIncluye: { titulo: 'A tener en cuenta', icono: 'alerta' },
+  antes: { titulo: 'Antes de viajar', icono: 'maleta' },
+}
+
+/**
+ * Un ítem de lista, con el marcador de SU lista: chulo verde lo que incluye, equis roja lo
+ * que no, viñeta en «Antes de viajar».
+ *
+ * «Antes de viajar» era un recuadro ámbar con los consejos unidos por « · » en un solo
+ * párrafo. Ahora es una lista, y el ámbar queda solo como la franja delgada de la izquierda
+ * (§ un solo sistema visual, 2026-09-23). El aire entre ítems va por dentro (`paddingBottom`)
+ * para que la franja no se corte entre uno y otro.
+ */
+function ItemDeLista({ lista, texto, ultimo, presencia }: {
+  lista: ListaDelCierre
+  texto: string
+  ultimo: boolean
+  /** Lo que este ítem pide tener debajo en su página: el cierre, si es lo último. */
+  presencia?: number
+}) {
+  const antes = lista === 'antes'
+  return (
+    <View
+      wrap={false}
+      minPresenceAhead={presencia}
+      style={{
+        flexDirection: 'row',
+        paddingBottom: ultimo ? 0 : 4,
+        ...(antes ? { borderLeftWidth: 2, borderLeftColor: C.ambarBorde, paddingLeft: 10 } : {}),
+      }}
+    >
+      <View style={{ width: 14, paddingTop: antes ? 4.5 : 1.5 }}>
+        {lista === 'incluye' && <IconoCheck color={C.verde} />}
+        {lista === 'noIncluye' && <IconoX color={C.rojo} />}
+        {antes && <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: C.magenta }} />}
+      </View>
+      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1, lineHeight: 1.3 }}>{texto}</Text>
+    </View>
+  )
+}
+
+/** Una lista entera dentro de una columna: la fila de dos columnas no se parte. */
+function ListaEnColumna({ lista, items }: { lista: ListaDelCierre; items: string[] }) {
+  return (
+    <View>
+      <Titulo texto={LISTAS[lista].titulo} icono={LISTAS[lista].icono} />
+      {items.map((t, i) => <ItemDeLista key={`${lista}-${i}`} lista={lista} texto={t} ultimo={i === items.length - 1} />)}
+    </View>
+  )
+}
 
 // ── Documento ─────────────────────────────────────────────────────────────────
 
@@ -1003,11 +1156,16 @@ export default function CotizacionTrappvelPDF({
     return a.orden - b.orden
   })
 
+  // ⚠️ Un día a día que es SOLO vuelos repite, tarjeta por tarjeta, la tabla de «Vuelos»:
+  // en COT-2026-0006 eran las cuatro filas de la tabla otra vez, media página de lo mismo.
+  // Con un solo día que no sea vuelo el día a día sí cuenta algo, y los vuelos van en él.
+  const diaADia = diaADiaSeImprime(entradas.map(e => ({ esVuelo: 'desde' in e.titulo }))) ? entradas : []
+
   // Con varios capítulos, cada entrada va al de su fecha. Sin fechas no se puede saber a
   // qué ciudad pertenece un día: la línea de tiempo sale aparte, después de los capítulos.
   const entradasDe = new Map<number, EntradaTiempo[]>()
   const entradasSueltas: EntradaTiempo[] = []
-  for (const e of entradas) {
+  for (const e of diaADia) {
     if (!multiples) {
       entradasDe.set(0, [...(entradasDe.get(0) ?? []), e])
       continue
@@ -1053,13 +1211,19 @@ export default function CotizacionTrappvelPDF({
   // regla se habría quedado sin a quién pegarle el cierre en un documento sin opcionales ni
   // cargos, que es justo el más corto.
   const hayPorPasajero = Boolean(preciosPorPasajero && preciosPorPasajero.filas.length > 0)
+  //
+  // ⚠️ «Antes de viajar» iba de ÚLTIMO, suelto: era lo único que quedaba para la última
+  // página, y COT-2026-0006 terminaba en una hoja al 70 % en blanco con ese recuadro y la
+  // firma. Desde el 2026-09-23 va con «Incluido» (`disposicionDeListas`), y el final del
+  // documento son las secciones que de verdad son largas.
+  const listas: Record<ListaDelCierre, string[]> = { incluye, noIncluye, antes: antesDeViajar }
+  const filasDeListas = disposicionDeListas(listas, ANCHO_CONTENIDO)
   const seccionesFinales = [
     'inversion',
     hayPorPasajero && 'porPasajero',
-    (incluye.length > 0 || noIncluye.length > 0) && 'incluido',
+    filasDeListas.length > 0 && 'listas',
     opcionales.length > 0 && 'opcionales',
     v.cargosEnDestino.length > 0 && 'cargos',
-    antesDeViajar.length > 0 && 'antes',
     cotizacion.notas && 'notas',
   ].filter((x): x is string => Boolean(x))
   const ultimaSeccion = firma ? seccionesFinales[seccionesFinales.length - 1] : undefined
@@ -1154,7 +1318,7 @@ export default function CotizacionTrappvelPDF({
           )}
 
           {/* Las fotos de ciudades que no tienen capítulo propio (una ciudad sin hotel). */}
-          <FranjaDeFotos fotos={fotosSueltas} alto={150} />
+          <FranjaDeFotos fotos={fotosSueltas} />
 
           {/* ── Un capítulo por ciudad (§4.3) ──────────────────────────────── */}
           {capitulos.map((c, i) => {
@@ -1184,18 +1348,35 @@ export default function CotizacionTrappvelPDF({
                 {fechasCapitulo && <Text style={{ fontSize: 9, color: C.gris, marginTop: 2 }}>{fechasCapitulo}</Text>}
               </>
             )
+            const conEncabezado = multiples || conNombre
+            // Con UNA foto, la foto va en miniatura al lado del encabezado y de la tarjeta del
+            // hotel (2026-09-23). Antes era una banda de 150 pt a todo el ancho entre los dos:
+            // cada ciudad gastaba un tercio de página antes de decir en qué hotel duerme.
+            const fotoAlLado = fotos.length === 1 && (conEncabezado || c.hotel !== null)
             // El nombre de la ciudad viaja con lo primero que muestra el capítulo (fotos u
             // hotel): un título de capítulo solo al pie de la página parece un corte.
             const conFotos = fotos.length > 0
             const conHotel = !conFotos && c.hotel !== null
             return (
-              <View key={`capitulo-${i}`} style={{ marginTop: multiples || conNombre ? 26 : 0 }}>
-                <View wrap={false}>
-                  {encabezado}
-                  {conFotos && <FranjaDeFotos fotos={fotos} alto={150} />}
-                  {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
-                </View>
-                {!conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
+              <View key={`capitulo-${i}`} style={{ marginTop: conEncabezado ? 26 : 0 }}>
+                {fotoAlLado ? (
+                  <View wrap={false} style={{ flexDirection: 'row' }}>
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      {encabezado}
+                      {c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} arriba={!conEncabezado} />}
+                    </View>
+                    <Miniatura foto={fotos[0]} />
+                  </View>
+                ) : (
+                  <>
+                    <View wrap={false}>
+                      {encabezado}
+                      {conFotos && <FranjaDeFotos fotos={fotos} />}
+                      {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
+                    </View>
+                    {!conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
+                  </>
+                )}
                 {c.alternativas.map((h, j) => (
                   <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} />
                 ))}
@@ -1207,7 +1388,7 @@ export default function CotizacionTrappvelPDF({
 
           {/* ── Vuelos (§4.4) ──────────────────────────────────────────────── */}
           {v.vuelos.length > 0 && (
-            <TablaVuelos vuelos={v.vuelos} general={general} tarifas={tarifas} titulo={<Titulo texto="Vuelos" icono={<IconoAvion />} />} />
+            <TablaVuelos vuelos={v.vuelos} general={general} tarifas={tarifas} titulo={<Titulo texto="Vuelos" icono="avion" />} />
           )}
 
           {/* ── Inversión (§4.5) ─────────────────────────────────────────────
@@ -1216,7 +1397,7 @@ export default function CotizacionTrappvelPDF({
               total nunca queda solo en la página siguiente. */}
           {porTarifas ? (
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
-              <Titulo texto="Inversión" />
+              <Titulo texto="Inversión" icono="dinero" />
               <View style={{ flexDirection: 'row' }}>
                 {bloques.map((b, i) => (
                   <View
@@ -1226,8 +1407,11 @@ export default function CotizacionTrappvelPDF({
                       flexBasis: 0,
                       marginLeft: i === 0 ? 0 : 8,
                       borderRadius: 8,
-                      borderWidth: b.esPrincipal ? 1.5 : 0.75,
-                      borderColor: b.esPrincipal ? C.magenta : C.linea,
+                      backgroundColor: C.tarjeta,
+                      // La recomendada se distingue por el borde magenta; las demás, sin borde.
+                      // ⚠️ `borderWidth: 0` revienta react-pdf («Invalid border width»): el
+                      // borde se omite, no se pone en cero.
+                      ...(b.esPrincipal ? { borderWidth: 1.5, borderColor: C.magenta } : {}),
                     }}
                   >
                     <View style={{ height: 4, backgroundColor: b.color, borderTopLeftRadius: 7, borderTopRightRadius: 7 }} />
@@ -1267,7 +1451,7 @@ export default function CotizacionTrappvelPDF({
             // Pocas líneas: la tarjeta entera y el TOTAL no se parten. Partida en dos
             // páginas, la tarjeta queda abierta por abajo en una y por arriba en la otra.
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
-              <Titulo texto="Inversión" />
+              <Titulo texto="Inversión" icono="dinero" />
               {lineas.map((l, i) => (
                 <LineaPrecio
                   key={`precio-${i}`}
@@ -1285,7 +1469,7 @@ export default function CotizacionTrappvelPDF({
             // Por eso el borde de la tarjeta lo dibuja cada fila.
             <>
               <View wrap={false} minPresenceAhead={lineas.length === 1 ? ALTO_TOTALES : 0}>
-                <Titulo texto="Inversión" />
+                <Titulo texto="Inversión" icono="dinero" />
                 <LineaPrecio l={lineas[0]} detallada={detallada} tarjeta={lineas.length === 1 ? 'unica' : 'primera'} />
               </View>
               {lineas.slice(1).map((l, i) => (
@@ -1303,7 +1487,7 @@ export default function CotizacionTrappvelPDF({
             </>
           ) : (
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
-              <Titulo texto="Inversión" />
+              <Titulo texto="Inversión" icono="dinero" />
               {totales()}
             </View>
           )}
@@ -1374,41 +1558,46 @@ export default function CotizacionTrappvelPDF({
             <Text style={{ fontSize: 8.5, color: C.texto, marginTop: 10 }}>{`Forma de pago: ${cotizacion.condiciones_pago}`}</Text>
           )}
 
-          {/* ── Incluido / A tener en cuenta (§4.6) ────────────────────────────
-              Dos columnas sin caja. Una columna sin datos no se imprime, y la de «Incluido»
-              solo existe con inclusiones de verdad (ver `incluye`). */}
-          {(incluye.length > 0 || noIncluye.length > 0) && (
-            <View wrap={false} minPresenceAhead={conCierre('incluido')} style={{ flexDirection: 'row', marginTop: 26 }}>
-              {incluye.length > 0 && (
-                <View style={{ flex: 1, paddingRight: noIncluye.length > 0 ? 14 : 0 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
-                    <IconoCheck color={C.verde} tam={12} />
-                    <Text style={{ fontSize: 14, fontFamily: 'Helvetica-Bold', color: C.verde, marginLeft: 6 }}>Incluido en el plan</Text>
-                  </View>
-                  {incluye.map((texto, i) => (
-                    <View key={`incluye-${i}`} style={{ flexDirection: 'row', marginBottom: 4 }}>
-                      <View style={{ marginTop: 1.5, marginRight: 6 }}><IconoCheck color={C.verde} /></View>
-                      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{texto}</Text>
+          {/* ── Incluido, a tener en cuenta y antes de viajar (§4.6, §4.9) ────────
+              Cómo se reparten lo decide `disposicionDeListas`: lado a lado si son cortas,
+              a todo el ancho si no. Una fila de dos columnas no se parte; una lista a todo
+              el ancho sí, entre ítems, con el título pegado al primero. La última pieza
+              pide tener el cierre debajo si «listas» es la última sección. */}
+          {filasDeListas.map((fila, f) => {
+            const presencia = f === filasDeListas.length - 1 ? conCierre('listas') : undefined
+            if (fila.length > 1) {
+              return (
+                <View key={`listas-${f}`} wrap={false} minPresenceAhead={presencia} style={{ flexDirection: 'row' }}>
+                  {fila.map((columna, c) => (
+                    <View key={`col-${c}`} style={{ flexGrow: 1, flexBasis: 0, marginLeft: c === 0 ? 0 : CANAL_COLUMNAS }}>
+                      {columna.map(l => <ListaEnColumna key={l} lista={l} items={listas[l]} />)}
                     </View>
                   ))}
                 </View>
-              )}
-              {noIncluye.length > 0 && (
-                <View style={{ flex: 1, paddingLeft: incluye.length > 0 ? 14 : 0 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7 }}>
-                    <IconoX color={C.rojo} tam={11} />
-                    <Text style={{ fontSize: 14, fontFamily: 'Helvetica-Bold', color: C.rojo, marginLeft: 6 }}>A tener en cuenta</Text>
-                  </View>
-                  {noIncluye.map((n, i) => (
-                    <View key={`noincluye-${i}`} style={{ flexDirection: 'row', marginBottom: 4 }}>
-                      <View style={{ marginTop: 1.5, marginRight: 6 }}><IconoX color={C.rojo} /></View>
-                      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{n}</Text>
-                    </View>
-                  ))}
+              )
+            }
+            const l = fila[0][0]
+            const items = listas[l]
+            // ⚠️ Fragmento, no caja: el último ítem tiene que ser HERMANO del cierre para que
+            // su `minPresenceAhead` lo alcance (la misma razón que en «Opcionales»).
+            return (
+              <Fragment key={`listas-${f}`}>
+                <View wrap={false} minPresenceAhead={items.length === 1 ? presencia : undefined}>
+                  <Titulo texto={LISTAS[l].titulo} icono={LISTAS[l].icono} />
+                  <ItemDeLista lista={l} texto={items[0]} ultimo={items.length === 1} />
                 </View>
-              )}
-            </View>
-          )}
+                {items.slice(1).map((t, i) => (
+                  <ItemDeLista
+                    key={`${l}-${i + 1}`}
+                    lista={l}
+                    texto={t}
+                    ultimo={i === items.length - 2}
+                    presencia={i === items.length - 2 ? presencia : undefined}
+                  />
+                ))}
+              </Fragment>
+            )
+          })}
 
           {/* ── Opcionales (§4.7) ──────────────────────────────────────────── */}
           {opcionales.length > 0 && (() => {
@@ -1440,7 +1629,7 @@ export default function CotizacionTrappvelPDF({
             return (
               <>
                 <View wrap={false} minPresenceAhead={opcionales.length === 1 ? conCierre('opcionales') : undefined}>
-                  <Titulo texto="Opcionales" />
+                  <Titulo texto="Opcionales" icono="opcionales" />
                   <Text style={{ fontSize: 8.5, color: C.gris, marginBottom: 4 }}>
                     Actividades que se pueden coordinar aparte. No están incluidas en el precio de arriba.
                   </Text>
@@ -1455,12 +1644,15 @@ export default function CotizacionTrappvelPDF({
               Plata del viajero: sale en los TRES niveles de detalle (decisión 3). */}
           {v.cargosEnDestino.length > 0 && (
             <View wrap={false} minPresenceAhead={conCierre('cargos')}>
-              <Titulo texto="Cargos a pagar en destino" />
-              <View style={{ flexDirection: 'row', backgroundColor: C.tinta, borderRadius: 4, paddingVertical: 5, paddingHorizontal: 8 }}>
-                <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '22%' }}>CIUDAD / HOTEL</Text>
-                <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '33%' }}>CONCEPTO</Text>
-                <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '20%' }}>MONTO APROX.</Text>
-                <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '25%' }}>OBSERVACIÓN</Text>
+              <Titulo texto="Cargos a pagar en destino" icono="destino" />
+              <View style={{ position: 'relative', height: 18, borderRadius: 4 }}>
+                <Degradado ancho={ANCHO_CONTENIDO} alto={18} id="degradado-cargos" />
+                <View style={{ flexDirection: 'row', paddingHorizontal: 8, paddingTop: 5.5 }}>
+                  <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '22%' }}>CIUDAD / HOTEL</Text>
+                  <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '33%' }}>CONCEPTO</Text>
+                  <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '20%' }}>MONTO APROX.</Text>
+                  <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '25%' }}>OBSERVACIÓN</Text>
+                </View>
               </View>
               {v.cargosEnDestino.map((c, i) => (
                 <View
@@ -1477,43 +1669,32 @@ export default function CotizacionTrappvelPDF({
             </View>
           )}
 
-          {/* ── Antes de viajar (§4.9) ─────────────────────────────────────────
-              Sale del texto para el cliente revisado; sin él, el recuadro no se imprime. */}
-          {antesDeViajar.length > 0 && (
-            <View
-              wrap={false}
-              minPresenceAhead={conCierre('antes')}
-              style={{ marginTop: 20, backgroundColor: C.ambarFondo, borderLeftWidth: 3, borderLeftColor: C.ambarBorde, borderRadius: 4, padding: 10 }}
-            >
-              <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.ambarTexto, lineHeight: 1.4 }}>
-                <Text style={{ fontFamily: 'Helvetica-Bold' }}>Antes de viajar: </Text>
-                {antesDeViajar.join(' · ')}
-              </Text>
-            </View>
-          )}
-
           {/* ── Información importante ─────────────────────────────────────── */}
           {cotizacion.notas && (
             <View wrap={false} minPresenceAhead={conCierre('notas')}>
-              <Titulo texto="Información importante" />
+              <Titulo texto="Información importante" icono="info" />
               <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, lineHeight: 1.45 }}>
                 {cotizacion.notas}
               </Text>
             </View>
           )}
 
-          {/* ── Cierre: créditos de las fotos (§4.10) justo encima de la firma ──
-              Sin crédito, la licencia de casi todas (CC BY / BY-SA) no se cumple. Solo
-              las que se imprimieron, y la línea no existe si no hubo ninguna. */}
+          {/* ── Cierre: los créditos de las fotos (§4.10) AL LADO de la firma ─────
+              Sin crédito, la licencia de casi todas (CC BY / BY-SA) no se cumple. Solo las
+              que se imprimieron, y la línea no existe si no hubo ninguna. Encima de la firma
+              sumaban 30 pt más al bloque que tiene que caber con la última sección. */}
           {(creditos.length > 0 || firma) && (
-            <View wrap={false} style={{ marginTop: 24 }}>
+            <View
+              wrap={false}
+              style={{ marginTop: 24, flexDirection: 'row', alignItems: 'flex-end', justifyContent: creditos.length > 0 ? 'space-between' : 'center' }}
+            >
               {creditos.length > 0 && (
-                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7, color: C.gris, lineHeight: 1.4 }}>
+                <Text hyphenationCallback={SIN_GUION} style={{ flex: 1, fontSize: 6.5, color: C.gris, lineHeight: 1.4, paddingRight: firma ? 24 : 0 }}>
                   {`Fotografías: ${creditos.join(' · ')}`}
                 </Text>
               )}
               {firma && (
-                <View style={{ marginTop: creditos.length > 0 ? 14 : 2, alignItems: 'center' }}>
+                <View style={{ alignItems: creditos.length > 0 ? 'flex-end' : 'center', maxWidth: 220 }}>
                   <Text style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{firma.nombre}</Text>
                   {firma.cargo && <Text style={{ fontSize: 8.5, color: C.gris, marginTop: 1 }}>{firma.cargo}</Text>}
                   {firma.contacto && <Text style={{ fontSize: 8, color: C.gris, marginTop: 1 }}>{firma.contacto}</Text>}

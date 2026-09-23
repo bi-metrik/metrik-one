@@ -53,6 +53,21 @@ export interface FotoPDF {
    * Con ellos la plantilla pone la foto en el capítulo de su ciudad sin conocer el banco.
    */
   lugares?: string[]
+  /**
+   * Dónde está lo que la foto quiere mostrar, en fracciones del ancho y del alto del
+   * archivo (`{ x: 0.3, y: 0.72 }` = la cabaña del Acuario). Con él la plantilla encuadra
+   * cada recorte alrededor del sujeto en vez de cortar siempre por el centro. Ausente, el
+   * centro: una foto propia del cliente no trae foco y sale como antes.
+   */
+  foco?: FocoDeFoto
+  /** Ancho entre alto del archivo. Sin él no se puede calcular el encuadre y va al centro. */
+  proporcion?: number
+}
+
+/** Un punto de la foto en fracciones de su ancho (`x`) y de su alto (`y`), de 0 a 1. */
+export interface FocoDeFoto {
+  x: number
+  y: number
 }
 
 /**

@@ -384,6 +384,14 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### Documento de Trappvel: fotos encuadradas y menos páginas (2026-09-23)
+
+- **Cada foto del banco trae su foco** (`fotos-ciudad.ts`: `foco`, `ancho`, `alto`), fijado MIRANDO cada foto; `encuadreDeFoto` saca de ese punto el `objectPosition` de cada marco (portada 2,7:1, miniatura 3:2). Una prueba compara las medidas declaradas contra el archivo.
+- **Toda foto que no es la de portada va en miniatura 3:2.** Con una sola foto, el capítulo la pone al lado del encabezado y del hotel, no en una banda de 150 pt.
+- **Sin «Día a día» si todo es vuelo** (repetía la tabla); con él, un bloque por día que no se parte y el título pegado al primero. **«Antes de viajar» va con «Incluido»**, como lista (`disposicionDeListas`: lado a lado si caben, a todo el ancho si no); créditos al lado de la firma.
+- **Un solo sistema visual:** todo título con su ícono en el círculo gris; cajas, la tarjeta gris y el degradado; el ámbar solo como franja. ⚠️ `borderWidth: 0` revienta react-pdf («Invalid border width»): el borde se omite, no se pone en cero.
+- COT-2026-0006 pasa de 3 páginas a 2; un viaje de tres ciudades, de 6 a 5. Termotech y la genérica, idénticas byte a byte.
+
 ### Nada sale al cliente bajo el margen mínimo sin la firma del dueño (Trappvel, 2026-09-22)
 
 - **Una sola regla** (`src/lib/cotizaciones/piso-salida.ts` + `piso-salida-datos.ts`) la usan el PDF, los dos «Enviar», «Aprobar» (también la aprobación vieja y `updateCotizacion` con `estado`) y el gate `margen_sobre_piso`. Con tarifas marcadas mide **cada una**; sin tarifas, la cascada vigente. Sin precio **o sin costo** no hay margen (`margenMedible`): `cascada.margenRealPct` da 100 % sin costo, y eso se leía como la mejor tarifa.

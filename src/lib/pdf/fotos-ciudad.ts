@@ -36,6 +36,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import type { FocoDeFoto } from './cotizacion-props'
+
 /** Una foto del banco, con lo que la licencia obliga a decir de ella. */
 export interface FotoCiudad {
   /** La ciudad canónica del banco. Dos textos que nombran la misma ciudad dan la misma. */
@@ -48,6 +50,10 @@ export interface FotoCiudad {
   licencia: string
   /** El crédito tal como se imprime: `Felviper (Wikimedia Commons, CC BY-SA 4.0)`. */
   credito: string
+  /** Dónde está el sujeto, en fracciones del archivo. Ver `Entrada.foco`. */
+  foco: FocoDeFoto
+  /** Ancho entre alto del archivo, para calcular el encuadre de cada recorte. */
+  proporcion: number
 }
 
 const CARPETA = path.join(process.cwd(), 'src/lib/pdf/templates/fotos-ciudad')
@@ -59,6 +65,21 @@ interface Entrada {
   licencia: string
   /** La página de Commons, para poder volver a la fuente. No se imprime. */
   fuente: string
+  /**
+   * Las medidas del archivo en píxeles. Se declaran en vez de leerse en cada documento; una
+   * prueba las compara contra el archivo real, así que no pueden quedar desfasadas.
+   */
+  ancho: number
+  alto: number
+  /**
+   * El centro de lo que la foto muestra, en fracciones del ancho (`x`) y del alto (`y`).
+   *
+   * ⚠️ Se fijó MIRANDO cada foto con una cuadrícula encima (2026-09-23), no calculado. Sin
+   * él, todo recorte corta por el centro, y en «El Acuario» el centro es cielo: la cabaña
+   * está abajo a la izquierda. El encuadre de cada marco (portada, miniatura) sale de este
+   * punto con `encuadreDeFoto`; el punto es uno solo para todos los tamaños.
+   */
+  foco: FocoDeFoto
 }
 
 interface CiudadDelBanco {
@@ -87,6 +108,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Luka Peternel',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Cancun-beach-Mexico-2016-Luka-Peternel.jpg',
+        ancho: 1600,
+        alto: 1067,
+        foco: { x: 0.5, y: 0.52 },
       },
       {
         archivo: 'cancun-2.jpg',
@@ -94,6 +118,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'dronepicr',
         licencia: 'CC BY 2.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Cancun_Strand_Luftbild_(21552302623).jpg',
+        ancho: 1600,
+        alto: 899,
+        foco: { x: 0.5, y: 0.6 },
       },
     ],
   },
@@ -106,6 +133,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'ProtoplasmaKid',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Catedral_Metropolitana_de_la_Ciudad_de_M%C3%A9xico_1.jpg',
+        ancho: 1600,
+        alto: 900,
+        foco: { x: 0.5, y: 0.36 },
       },
       {
         archivo: 'ciudad-de-mexico-2.jpg',
@@ -113,6 +143,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Drkgk',
         licencia: 'CC0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Bas%C3%ADlica_de_Santa_Mar%C3%ADa_de_Guadalupe_2018.jpg',
+        ancho: 1600,
+        alto: 1200,
+        foco: { x: 0.5, y: 0.5 },
       },
     ],
   },
@@ -125,6 +158,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Matt Joseph',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:2026-09-03_-_Plaza_Mayor_in_Madrid_Spain.jpg',
+        ancho: 1600,
+        alto: 1200,
+        foco: { x: 0.45, y: 0.45 },
       },
       {
         archivo: 'madrid-2.jpg',
@@ -132,6 +168,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Alvesgaspar',
         licencia: 'CC BY-SA 3.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Madrid_May_2014-35a.jpg',
+        ancho: 1600,
+        alto: 543,
+        foco: { x: 0.5, y: 0.5 },
       },
     ],
   },
@@ -144,6 +183,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Wilfredor',
         licencia: 'CC0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Colosseum_of_Rome,_Italy.jpg',
+        ancho: 1600,
+        alto: 1007,
+        foco: { x: 0.32, y: 0.45 },
       },
       {
         archivo: 'roma-2.jpg',
@@ -151,6 +193,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Wilfredor',
         licencia: 'CC0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Fontaine_Trevi_-_Rome.jpg',
+        ancho: 1600,
+        alto: 971,
+        foco: { x: 0.5, y: 0.55 },
       },
     ],
   },
@@ -163,6 +208,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'DimiTalen',
         licencia: 'CC0',
         fuente: 'https://commons.wikimedia.org/wiki/File:View_up_the_Seine_from_Pont_d%27I%C3%A9na,_Paris,_2016.jpg',
+        ancho: 1600,
+        alto: 680,
+        foco: { x: 0.5, y: 0.55 },
       },
       {
         archivo: 'paris-2.jpg',
@@ -170,6 +218,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Josh Hallett',
         licencia: 'CC BY-SA 2.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Avenue_des_Champs-%C3%89lys%C3%A9es_July_24,_2009_N1.jpg',
+        ancho: 1600,
+        alto: 1067,
+        foco: { x: 0.5, y: 0.45 },
       },
     ],
   },
@@ -182,6 +233,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Felipe Restrepo Acosta',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:2017_Bogot%C3%A1_Bas%C3%ADlica_del_Se%C3%B1or_Ca%C3%ADdo_de_Monserrate.jpg',
+        ancho: 1600,
+        alto: 1200,
+        foco: { x: 0.45, y: 0.5 },
       },
       {
         archivo: 'bogota-2.jpg',
@@ -189,6 +243,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Alejandro Turola',
         licencia: 'CC0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Panor%C3%A1mica_de_Usaquen,_Bogot%C3%A1_D.C.jpg',
+        ancho: 1600,
+        alto: 1067,
+        foco: { x: 0.5, y: 0.5 },
       },
     ],
   },
@@ -201,6 +258,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Jorge Dos Oceanos',
         licencia: 'CC BY-SA 3.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Johnny_Cay.jpg',
+        ancho: 1600,
+        alto: 1200,
+        foco: { x: 0.5, y: 0.33 },
       },
       {
         archivo: 'san-andres-2.jpg',
@@ -208,6 +268,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Mr.Jhosimar',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Acuario_de_San_Andr%C3%A9s_Islas.JPG',
+        ancho: 1600,
+        alto: 1199,
+        foco: { x: 0.3, y: 0.72 },
       },
     ],
   },
@@ -220,6 +283,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Felviper',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:Panorama_Old_Providence_McBean_Lagoon.JPG',
+        ancho: 1600,
+        alto: 352,
+        foco: { x: 0.65, y: 0.5 },
       },
       {
         archivo: 'providencia-2.jpg',
@@ -227,6 +293,9 @@ const BANCO: Record<string, CiudadDelBanco> = {
         autor: 'Felviper',
         licencia: 'CC BY-SA 4.0',
         fuente: 'https://commons.wikimedia.org/wiki/File:The_Peak_en_Providencia.JPG',
+        ancho: 1600,
+        alto: 1200,
+        foco: { x: 0.52, y: 0.55 },
       },
     ],
   },
@@ -289,6 +358,8 @@ export function fotosDeCiudad(ciudad: string): FotoCiudad[] {
       autor: e.autor,
       licencia: e.licencia,
       credito: creditoDe(e),
+      foco: e.foco,
+      proporcion: e.ancho / e.alto,
     }))
     .filter(f => fs.existsSync(f.ruta))
 }
