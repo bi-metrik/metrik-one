@@ -219,7 +219,10 @@ REGLAS DE EXTRACCION:
   Respeta la convencion de la pantalla: si dice 1.234,56 el valor es 1234.56; si dice
   1,234.56 tambien es 1234.56.
 - Fechas en formato AAAA-MM-DD. Si la pantalla muestra dia y mes pero NO el ano
-  (ej. "Vie, 23 Oct"), devuelve --MM-DD (ej. --10-23). NUNCA inventes el ano.
+  (ej. "Vie, 23 Oct"), devuelve --MM-DD (ej. --10-23). NUNCA inventes el ano. Si ademas
+  muestra el dia de la semana, agregalo despues de una barra con sus tres primeras letras
+  en minuscula y sin tilde, tal como lo muestra (ej. "Vie, 23 Oct" -> --10-23/vie; "Mie
+  25 Nov" -> --11-25/mie). Si no muestra dia de la semana, no lo agregues.
 - Booleanos: la cadena "true" o "false". null si la pantalla no lo dice.
 
 PASO 3b — LOS ICONOS DE EQUIPAJE, ANTES DE DECIDIR SI VAN INCLUIDOS. Si la pantalla

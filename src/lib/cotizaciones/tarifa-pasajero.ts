@@ -26,6 +26,7 @@
  * clasifica al menor según el proveedor (CC4b); el sistema compara cantidades (TP3).
  */
 
+import { esAvisoDeAnioViejo } from './anio-fecha'
 import type { MargenProveedor } from './margen-proveedor'
 import { leerCorrecciones, type Correcciones } from './correcciones'
 
@@ -1328,7 +1329,9 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
       casillas[clave] = {
         ...l,
         porTipo: Array.isArray(l.porTipo) ? l.porTipo : [],
-        alertas: Array.isArray(l.alertas) ? l.alertas : [],
+        // El aviso de «año completado con el del viaje» de las lecturas anteriores al 2026-09-23
+        // ya no se muestra: hoy el año se deduce sin preguntar (`anio-fecha.ts`).
+        alertas: Array.isArray(l.alertas) ? l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a)) : [],
         notasCliente: Array.isArray(l.notasCliente) ? l.notasCliente : [],
         campos: Array.isArray(l.campos) ? l.campos : [],
         identidad: l.identidad && typeof l.identidad === 'object' ? l.identidad : {},

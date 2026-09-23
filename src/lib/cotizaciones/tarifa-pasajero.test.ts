@@ -465,6 +465,13 @@ describe('leerTarifaPax', () => {
     expect(leerTarifaPax({ casillas: {} }).actualizadaEn).toBeNull()
     expect(leerTarifaPax({ actualizadaEn: 42 }).actualizadaEn).toBeNull()
   })
+
+  it('el aviso viejo de «año completado con el del viaje» deja de mostrarse al leer; los demás siguen', () => {
+    const viejo = 'La captura no muestra el año de salida y regreso: se completa con el del viaje (2026). Confírmalo.'
+    const otro = 'La captura muestra 3 pasajeros y la línea dice 2.'
+    const t = leerTarifaPax({ casillas: { grupo_completo: { ...CANCUN, alertas: [viejo, otro] } } })
+    expect(t.casillas?.grupo_completo?.alertas).toEqual([otro])
+  })
 })
 
 describe('tarifaMasReciente · qué pinta la casilla después de guardar', () => {

@@ -36,6 +36,8 @@ import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
 import { estrellasDesdeTexto } from './estrellas'
 import { tramosDeCampos, textoDeTramo } from './tramos-vuelo'
+import { deducirAnio, esFechaSinAnio, fechaSinDiaDeLaSemana } from './anio-fecha'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // ── Lo que devuelve el modelo, antes de juzgarlo ─────────────────────────────
 
@@ -152,6 +154,8 @@ export interface LecturaCruda {
  */
 export interface ContextoLectura {
   fechasViaje?: { inicio: string | null; fin: string | null } | null
+  /** Hoy en Bogotá («AAAA-MM-DD»), para deducir el año de una fecha sin él. Por defecto, hoy. */
+  hoy?: string
   /**
    * La moneda que la persona indicó a mano porque la captura solo muestra «$» (RX3). Se
    * usa SOLO si la captura no la trae, y queda marcada para revisión.
@@ -174,31 +178,10 @@ export interface ContextoLectura {
   soloMinimosDeCosto?: boolean
 }
 
-/** «--MM-DD»: la pantalla mostró día y mes, sin año. */
-const SIN_ANIO = /^--(\d{2})-(\d{2})$/
-
 /**
- * Completa el año de una fecha que la pantalla muestra sin él, con el año del viaje.
- *
- * Medido contra el modelo vivo el 2026-09-16: con la instrucción de devolver null cuando
- * no hay año, el modelo **inventó 2023** en dos pantallazos de Amadeus («Vie, 23 Oct») y
- * en LATAM sí devolvió null — que rechazaba la captura por la fecha de salida. Darle una
- * forma legítima de decir «sin año» y completarlo aquí con el viaje es lo único estable.
- *
- * El año es el del inicio del viaje; si así la fecha queda más de 30 días ANTES del
- * inicio, es del año siguiente (un regreso «02 Ene» de un viaje que sale el 29 de dic).
+ * El regreso de cada fecha de ida: el que no puede quedar antes (regla 3 de `anio-fecha.ts`).
  */
-export function completarAnio(valor: string, inicioViaje: string | null): string | null {
-  const m = SIN_ANIO.exec(valor.trim())
-  if (!m) return valor
-  const inicio = /^(\d{4})-(\d{2})-(\d{2})/.exec(inicioViaje ?? '')
-  if (!inicio) return null
-  const anio = Number(inicio[1])
-  const candidato = Date.UTC(anio, Number(m[1]) - 1, Number(m[2]))
-  const base = Date.UTC(anio, Number(inicio[2]) - 1, Number(inicio[3]))
-  const final = candidato < base - 30 * 86_400_000 ? anio + 1 : anio
-  return `${final}-${m[1]}-${m[2]}`
-}
+const REGRESO_DE: Record<string, string> = { fecha_regreso: 'fecha_salida', check_out: 'check_in' }
 
 // ── El veredicto del sistema ─────────────────────────────────────────────────
 
@@ -363,24 +346,33 @@ export function evaluarLectura(
     moneda.confidence = 0
   }
 
-  // Fechas sin año: se completan con el año del viaje, marcadas.
-  const inicioViaje = contexto.fechasViaje?.inicio ?? null
-  const completadas: string[] = []
+  // Fechas sin año (las apps de los proveedores nunca lo muestran): el año se DEDUCE sin
+  // preguntar (`anio-fecha.ts`). Solo si la deducción falla queda marcada y con aviso.
+  const hoy = contexto.hoy ?? todayBogotaISO()
+  const resueltas = new Map<string, string>()
   for (const def of ranura.campos.filter(d => d.tipo === 'fecha')) {
     const campo = porSlug.get(def.slug)
-    if (!campo || campo.valor === null || !SIN_ANIO.test(campo.valor)) continue
-    const completa = completarAnio(campo.valor, inicioViaje)
-    campo.valor = completa
-    if (completa !== null) {
-      campo.alertaRevision = true
-      completadas.push(def.label.toLowerCase())
+    if (!campo || campo.valor === null) continue
+    if (!esFechaSinAnio(campo.valor)) {
+      campo.valor = fechaSinDiaDeLaSemana(campo.valor)
+      resueltas.set(def.slug, campo.valor)
+      continue
     }
-  }
-  if (completadas.length > 0 && inicioViaje) {
-    avisosDelItem.push(
-      `La captura no muestra el año de ${completadas.join(' y ')}: se completa con el del viaje ` +
-      `(${inicioViaje.slice(0, 4)}). Confírmalo.`,
-    )
+    const ida = REGRESO_DE[def.slug]
+    const deducido = deducirAnio({
+      valor: campo.valor,
+      hoy,
+      viaje: contexto.fechasViaje ?? null,
+      noAntesDe: ida ? resueltas.get(ida) ?? null : null,
+      nombre: `la fecha de ${def.label.toLowerCase()}`,
+    })
+    if (!deducido) continue
+    campo.valor = deducido.fecha
+    resueltas.set(def.slug, deducido.fecha)
+    if (deducido.aviso) {
+      campo.alertaRevision = true
+      avisosDelItem.push(deducido.aviso)
+    }
   }
 
   // 7.4 · la tarjeta de hotel no muestra las fechas: se toman las del viaje, marcadas.
