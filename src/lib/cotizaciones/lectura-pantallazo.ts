@@ -101,6 +101,14 @@ export interface IconoEquipajeCrudo {
   estado: 'encendido' | 'apagado' | null
 }
 
+/** Una opción con precio propio que el modelo dice ver en la captura. */
+export interface OpcionVista {
+  nombre: string
+  precio: string | null
+  /** La pantalla la marca como la elegida («✓ Seleccionada», resaltada, o la repite el resumen). */
+  seleccionada: boolean
+}
+
 export interface LecturaCruda {
   veredicto: VeredictoImagen
   /** Una línea del modelo explicando qué vio. Se usa para el mensaje de rechazo. */
@@ -115,6 +123,17 @@ export interface LecturaCruda {
   totalGeneral?: number | null
   /** Cuántas opciones con precio propio contó el modelo en la captura (RX1, regla 7.5). */
   opcionesVisibles?: number | null
+  /**
+   * Las opciones que el modelo dice ver, con la marca de la que la pantalla da por elegida
+   * (P8 del ensayo del 2026-09-23). Son las que se le ofrecen a la persona cuando la captura
+   * es de verdad ambigua («¿Cuál de estas?»).
+   */
+  opcionesVistas?: OpcionVista[]
+  /**
+   * Esta lectura se hizo SOBRE una opción ya elegida: la que la pantalla marcaba
+   * (`marcada`) o la que tocó la persona (`persona`). `null`/ausente = lectura normal.
+   */
+  elegida?: { nombre: string; precio: string | null; por: 'marcada' | 'persona' } | null
   /**
    * Lo que vieron las dos corridas de la detección de estrellas (`detectarEstrellas`,
    * `src/lib/ai/extraer-ranura.ts`). Es la evidencia del campo `estrellas`: sin ella, un campo
@@ -195,6 +214,27 @@ export interface Rechazo {
    * está con el proveedor abierto en otra pestaña y tiene que saber qué capturar.
    */
   instruccion: string
+  /**
+   * RX1 con varias opciones legibles: las que se le ofrecen a la persona para que toque una
+   * («¿Cuál de estas?») en vez de volver al proveedor (P8 del ensayo del 2026-09-23). Vacío o
+   * ausente = no hay de dónde elegir.
+   */
+  opciones?: { nombre: string; precio: string | null }[]
+}
+
+/**
+ * Las opciones que se le ofrecen a la persona: las distintas, con nombre, hasta ocho. Con
+ * menos de dos no hay nada que elegir y no se ofrece.
+ */
+export function opcionesParaElegir(vistas: OpcionVista[] | null | undefined): { nombre: string; precio: string | null }[] {
+  const vistas_ = (vistas ?? []).filter(o => o.nombre.trim() !== '')
+  const unicas = new Map<string, { nombre: string; precio: string | null }>()
+  for (const o of vistas_) {
+    const clave = `${o.nombre.trim().toLowerCase()}|${(o.precio ?? '').trim()}`
+    if (!unicas.has(clave)) unicas.set(clave, { nombre: o.nombre.trim(), precio: o.precio?.trim() || null })
+  }
+  const lista = [...unicas.values()].slice(0, 8)
+  return lista.length >= 2 ? lista : []
 }
 
 /** Un campo ya juzgado: valor limpio, si hay que revisarlo, y con cuánta certeza. */
@@ -258,7 +298,9 @@ export function evaluarLectura(
 ): VeredictoLectura {
   // RX1 en dos capas: si el modelo dice «detalle único» pero contó dos o más opciones con
   // precio, se contradice a sí mismo, y la duda se resuelve rechazando.
-  const contradice = cruda.veredicto === 'detalle_unico'
+  // P8 · una lectura hecha sobre una opción YA ELEGIDA (la marcada por la pantalla o la que
+  // tocó la persona) ve las demás a propósito: contarlas no la contradice.
+  const contradice = cruda.veredicto === 'detalle_unico' && !cruda.elegida
     && typeof cruda.opcionesVisibles === 'number' && cruda.opcionesVisibles >= 2
   if (cruda.veredicto === 'varias_opciones' || contradice) {
     return {
@@ -266,6 +308,7 @@ export function evaluarLectura(
       codigo: 'RX1',
       motivo: `La captura muestra más de una opción tarifaria. ${cruda.observacion ?? ''}`.trim(),
       instruccion: instruccionRX1(ranura),
+      opciones: opcionesParaElegir(cruda.opcionesVistas),
     }
   }
   if (cruda.veredicto === 'otra_ranura') {
@@ -753,7 +796,7 @@ export function resumenDeLinea(
       etiqueta(numerosSinTramo?.includes('·') ? 'Vuelos' : 'Vuelo', numerosSinTramo),
       etiqueta('Tarifa', v('familia_tarifa')),
       escalasTexto(v('escalas'), v('escala_ida'), v('escala_regreso')),
-      equipajeTexto(v('equipaje_bodega'), v('equipaje_mano'), v('equipaje_personal')),
+      equipajeTexto(v('equipaje_bodega'), v('equipaje_mano'), v('equipaje_personal'), v('equipaje_bodega_kg'), v('equipaje_mano_kg')),
     )
     return { nombre, descripcion: unir(partes) }
   }
@@ -867,15 +910,22 @@ function equipajeTexto(
   bodega: string | null,
   mano: string | null,
   personal: string | null,
+  bodegaKg: string | null = null,
+  manoKg: string | null = null,
 ): string | null {
   if (personal === 'true' && mano === 'false' && bodega === 'false') {
     return 'Solo artículo personal (sin equipaje de mano ni de bodega)'
   }
+  // P3 · el peso, cuando la captura lo escribe: «de 23 kg».
+  const kg = (v: string | null) => {
+    const n = Number((v ?? '').trim().replace(',', '.'))
+    return Number.isFinite(n) && n > 0 ? ` de ${String(n).replace('.', ',')} kg` : ''
+  }
 
   const trozos: string[] = []
-  if (bodega === 'true') trozos.push('Con equipaje de bodega')
+  if (bodega === 'true') trozos.push(`Con equipaje de bodega${kg(bodegaKg)}`)
   if (bodega === 'false') trozos.push('Sin equipaje de bodega')
-  if (mano === 'true') trozos.push('con equipaje de mano')
+  if (mano === 'true') trozos.push(`con equipaje de mano${kg(manoKg)}`)
   if (mano === 'false') trozos.push('sin equipaje de mano')
   if (personal === 'true' && mano !== 'true') trozos.push('con artículo personal')
   return trozos.length > 0 ? trozos.join(', ') : null

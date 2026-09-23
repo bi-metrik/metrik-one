@@ -34,6 +34,38 @@ const TRES = [
   item('vc', 800, 1000, { grupo: 'vuelo', opcion_de: 'va' }),
 ]
 
+describe('medirSalida · el conteo de líneas (P1 del ensayo del 2026-09-23)', () => {
+  it('una cotización vacía no tiene líneas que medir', () => {
+    expect(medirSalida(ctx([]), null).conteo).toEqual({ lineas: 0, sinCosto: 0 })
+  })
+
+  it('cuenta las líneas sin costo ni precio', () => {
+    const m = medirSalida(ctx([
+      item('a', 0, 0, { precio_manual: false }),
+      item('b', 0, 0, { precio_manual: false }),
+      item('c', 800, 1000),
+    ]), null)
+    expect(m.conteo).toEqual({ lineas: 3, sinCosto: 2 })
+  })
+
+  it('el recargo (precio escrito sin costo) NO cuenta como faltante: entra así a propósito', () => {
+    const m = medirSalida(ctx([item('p', 700, 1000), item('recargo', 0, 100)]), null)
+    expect(m.conteo).toEqual({ lineas: 2, sinCosto: 0 })
+  })
+
+  it('con tarifas marcadas cuenta la unión de sus líneas, una vez cada una', () => {
+    const m = medirSalida(ctx(TRES), [tarifa('eco', 'Económica', 1, ['va']), tarifa('rec', 'Recomendada', 2, ['vb'])])
+    expect(m.conteo.lineas).toBe(2)
+  })
+
+  it('el conteo no entra en la huella: no mueve un peso', () => {
+    const vacia = medirSalida(ctx([item('p', 800, 1000)]), null)
+    const conFaltante = medirSalida(ctx([item('p', 800, 1000)]), null)
+    expect(vacia.firma).toBe(conFaltante.firma)
+    expect(vacia.firma).not.toContain('sinCosto')
+  })
+})
+
 describe('medirSalida · la regla única', () => {
   it('sin tarifas marcadas mide la cotización entera', () => {
     const m = medirSalida(ctx([item('p', 970, 1000)]), null)

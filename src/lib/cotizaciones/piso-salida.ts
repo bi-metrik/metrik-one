@@ -82,9 +82,25 @@ export interface DetalleDeSalida {
   lineas: LineaAutorizada[]
 }
 
+/**
+ * Cuántas líneas se miden y a cuántas les falta con qué medir (P1 del ensayo del
+ * 2026-09-23). NO entra en la huella: dice por qué se ve lo que se ve, no mueve un peso.
+ */
+export interface ConteoDeLineas {
+  /** Líneas medidas (sin el ítem de cuadre). Cero = la cotización está vacía. */
+  lineas: number
+  /**
+   * Líneas sin costo NI precio: todavía no hay con qué calcular su margen. Una línea con
+   * precio escrito y sin costo (el recargo fijo) NO cuenta: entra así a propósito.
+   */
+  sinCosto: number
+}
+
 export interface MedicionDeSalida {
   pisoPct: number
   sujetos: SujetoDeSalida[]
+  /** Ver `ConteoDeLineas`. Sobre la unión de las líneas de todo lo que se mide. */
+  conteo: ConteoDeLineas
   /** Los sujetos que frenan. Vacío = en el piso o encima. */
   bajoPiso: SujetoDeSalida[]
   detalle: DetalleDeSalida
@@ -149,7 +165,39 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
       .map(item => ({ id: item.id, nombre: item.nombre, cifras: cifrasDeLinea(item) })),
   }
 
-  return { pisoPct, sujetos, bajoPiso: sujetos.filter(s => s.bajoPiso), detalle, firma: firmaDe(detalle) }
+  return {
+    pisoPct,
+    sujetos,
+    conteo: conteoDeLineas(ctx, marcadas.length > 0 ? marcadas : null, filas),
+    bajoPiso: sujetos.filter(s => s.bajoPiso),
+    detalle,
+    firma: firmaDe(detalle),
+  }
+}
+
+/**
+ * Las líneas que se miden, contadas: la unión de las de cada tarifa marcada, o las de la
+ * cascada vigente. Sale de la MISMA cascada que mide el margen, así que no puede decir
+ * «falta el costo» de una línea que el margen sí está contando.
+ */
+function conteoDeLineas(
+  ctx: ContextoCotizacion,
+  marcadas: FilaItinerario[] | null,
+  filas: FilaItinerario[] | null,
+): ConteoDeLineas {
+  const ajuste = new Set(ctx.items.filter(i => i.es_ajuste === true).map(i => i.id))
+  const cascadas = marcadas
+    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params))
+    : [cascadaVigente(ctx, filas)]
+  const vistas = new Map<string, boolean>()
+  for (const cascada of cascadas) {
+    for (const l of cascada.lineas) {
+      if (!l.id || ajuste.has(l.id)) continue
+      const sinCosto = !(l.costoLinea > 0) && !(l.precioLinea > 0)
+      vistas.set(l.id, (vistas.get(l.id) ?? false) || sinCosto)
+    }
+  }
+  return { lineas: vistas.size, sinCosto: [...vistas.values()].filter(Boolean).length }
 }
 
 /**

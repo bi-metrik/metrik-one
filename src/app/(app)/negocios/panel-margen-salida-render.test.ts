@@ -77,6 +77,29 @@ describe('el panel del margen mínimo', () => {
     expect(html(null)).toBe('')
   })
 
+  it('P1 · la cotización vacía no lleva nota', () => {
+    expect(html({ ...BASE, lineas: 0, lineasSinCosto: 0, bajoMinimo: [{ nombre: null, margenPct: null }] })).toBe('')
+  })
+
+  it('P1 · líneas sin costo: aviso neutro, sin rojo y sin el botón de autorizar', () => {
+    const h = html({
+      ...BASE,
+      puedeAutorizar: true,
+      lineas: 3,
+      lineasSinCosto: 3,
+      bajoMinimo: [{ nombre: null, margenPct: null }],
+    })
+    expect(h).toContain('Falta el costo de 3 líneas para calcular el margen.')
+    expect(h).not.toContain('Bajo el margen mínimo')
+    expect(h).not.toContain('Autorizar bajo el mínimo')
+    expect(h).not.toContain('red-')
+  })
+
+  it('P1 · margen medido y bajo: la nota roja dice el margen real', () => {
+    const h = html({ ...BASE, lineas: 2, lineasSinCosto: 0, bajoMinimo: [{ nombre: null, margenPct: 3.2 }] })
+    expect(h).toContain('Margen 3,2 %, mínimo 5 %. No se puede enviar ni aprobar.')
+  })
+
   it('la fecha va en hora de Bogotá', () => {
     // 02:00 UTC del 23 son las 21:00 del 22 en Bogotá.
     expect(fechaCorta('2026-09-23T02:00:00Z')).toBe('22-sep')

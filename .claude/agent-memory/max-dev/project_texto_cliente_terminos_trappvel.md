@@ -1,6 +1,6 @@
 ---
 name: texto-cliente-terminos-trappvel
-description: "#841 — términos en el panel del texto (config_extra.terminos_base, propuesta NO guardada sola), dónde sale cada campo, validador de estilo que marca sin reescribir, few-shot con iniciales en código, y Trappvel sin resumen fiscal; los datos de config los carga la sesión principal"
+description: "#841/#848 — términos del texto (config_extra.terminos_base; desde #848 se copian al CREAR la cotización), dónde sale cada campo, validador de estilo que marca sin reescribir, few-shot con iniciales en código, y Trappvel sin resumen fiscal; los datos de config los carga la sesión principal"
 metadata:
   type: project
 ---
@@ -20,11 +20,13 @@ de Trappvel, el panel no decía dónde sale cada campo y el texto sonaba a folle
   textos sueltos = presentación, u objetos con los cuatro campos). ⚠️ `ejemplos_texto` AUSENTE
   usa tres ejemplos iniciales que viven en código (`EJEMPLOS_TEXTO_INICIALES`); una lista vacía
   los apaga. No es lo mismo quitar la clave que dejarla en `[]`.
-- ⚠️⚠️ **La propuesta de términos NO se guarda sola.** Se propone al abrir el panel de un borrador
-  sin términos y se guarda con «Guardar texto revisado». Si nadie abre el panel, el PDF sale sin
-  términos. La única señal es el punto ámbar «Términos sin guardar» del botón «Texto». Si Edgar
-  reporta PDFs sin términos, la salida es copiarlos al crear la cotización, y eso es decisión de
-  Mauricio (el brief eligió «al abrir el panel»).
+- **Desde #848 (C5, 2026-09-23, mergeado) la cotización NACE con los términos guardados**:
+  `terminos-al-crear.ts` copia `terminos_base` al insert si la plantilla del workspace es
+  `trappvel`, en la creación manual y en la auto-cotización. Duplicar hereda los de la
+  original. El panel sigue proponiendo (punto ámbar) SOLO si `terminos_condiciones` está
+  vacío: las cotizaciones anteriores a #848 (sin backfill) y la que el asesor dejó vacía.
+  Si Edgar ve un PDF sin términos en una cotización nueva, mirar primero que la línea
+  tenga `terminos_base` cargado.
 - **El PDF nunca lee `terminos_base`**: imprime la copia de `terminos_condiciones`. Así un
   documento enviado no cambia si cambia el texto base.
 - **El validador cuenta el entusiasmo por FRASE, no por palabra**: la apertura real

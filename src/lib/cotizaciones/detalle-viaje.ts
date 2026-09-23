@@ -60,7 +60,7 @@ import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
-import { leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
+import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
 
 /** Lo mínimo de una línea para reconstruir su detalle. */
 export interface ItemConLectura {
@@ -428,13 +428,6 @@ function numero(d: Record<string, string>, slug: string): number | null {
   return parseMontoCop(v)
 }
 
-function booleano(d: Record<string, string>, slug: string): boolean | null {
-  const v = (d[slug] ?? '').trim().toLowerCase()
-  if (v === 'true' || v === 'sí' || v === 'si') return true
-  if (v === 'false' || v === 'no') return false
-  return null
-}
-
 /**
  * El equipaje en palabras, a partir de los tres booleanos del icono resaltado.
  *
@@ -443,20 +436,26 @@ function booleano(d: Record<string, string>, slug: string): boolean | null {
  * los deja vacíos cuando el cruce de evidencia no cuadra (#792).
  */
 export function equipajeEnPalabras(d: Record<string, string>): string | null {
-  return equipajeDeTramo({
-    personal: booleano(d, 'equipaje_personal'),
-    mano: booleano(d, 'equipaje_mano'),
-    bodega: booleano(d, 'equipaje_bodega'),
-  })
+  return equipajeDeTramo(equipajeDeCampos(slug => d[slug]))
 }
 
-/** El mismo criterio, sobre el equipaje de un tramo guardado. */
-export function equipajeDeTramo({ personal, mano, bodega }: EquipajeTramo): string | null {
+/**
+ * El mismo criterio, sobre el equipaje de un tramo guardado. Con la cantidad y el peso cuando
+ * la captura los dio (P3 del ensayo del 2026-09-23): «equipaje de bodega de 23 kg», y
+ * «2 × …» cuando va más de una pieza. Un tramo guardado antes de las piezas se dice como antes.
+ */
+export function equipajeDeTramo({ personal, mano, bodega, piezas }: EquipajeTramo): string | null {
   if (personal === null && mano === null && bodega === null) return null
   const lleva: string[] = []
-  if (personal) lleva.push('artículo personal')
-  if (mano) lleva.push('equipaje de mano')
-  if (bodega) lleva.push('equipaje de bodega')
+  const pieza = (tipo: 'personal' | 'mano' | 'bodega', nombre: string) => {
+    const p = piezas?.[tipo]
+    const cuantas = p?.cantidad && p.cantidad > 1 ? `${p.cantidad} × ` : ''
+    const kg = p?.pesoKg ? ` de ${String(p.pesoKg).replace('.', ',')} kg` : ''
+    return `${cuantas}${nombre}${kg}`
+  }
+  if (personal) lleva.push(pieza('personal', 'artículo personal'))
+  if (mano) lleva.push(pieza('mano', 'equipaje de mano'))
+  if (bodega) lleva.push(pieza('bodega', 'equipaje de bodega'))
   return lleva.length === 0 ? 'Sin equipaje incluido' : lleva.join(' + ')
 }
 

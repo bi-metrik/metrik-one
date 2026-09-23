@@ -53,7 +53,7 @@
 - ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — el nivel de detalle nace inerte; `→` no existe en el PDF
 - ⚠️⚠️ [Arreglos 1-5 del PDF Trappvel (#822)](project_arreglos_documento_trappvel_0006.md) — un grupo libre borraba un vuelo del documento
 - ⚠️ [Texto del cliente redactado por ONE (#826)](project_texto_cliente_trappvel.md) — mergeado; el PDF imprime solo lo revisado
-- ⚠️⚠️ [Términos y estilo del texto (#841)](project_texto_cliente_terminos_trappvel.md) — la propuesta de términos NO se guarda sola; `ejemplos_texto` ausente ≠ `[]`
+- ⚠️⚠️ [Términos y estilo del texto (#841)](project_texto_cliente_terminos_trappvel.md) — #848: nacen copiados al crear; `ejemplos_texto` ausente ≠ `[]`
 - ⚠️ [Fotos, franja y tabla de vuelos del documento Trappvel (#832, #838)](project_documento_trappvel_fotos_ritmo.md) — foto al lado aprobada; tabla corta va entera
 - ⚠️⚠️ [La Recomendada manda y el cliente escoge (#836)](project_recomendada_tarifa_elegida.md) — `es_principal` ya no decide; el gate de margen no mira la Recomendada
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`

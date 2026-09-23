@@ -51,6 +51,15 @@ type Paso =
   | { estado: 'eligiendo_tipo'; preview: string; dataUrl: string; motivo: string }
   | { estado: 'leyendo'; preview: string; donde: string }
   | { estado: 'rechazado'; mensaje: string; detalle?: string }
+  /** P8 · la captura trae varias opciones y ninguna marcada: la persona toca una. */
+  | {
+      estado: 'eligiendo_opcion'
+      preview: string
+      dataUrl: string
+      itemId: string
+      mensaje: string
+      opciones: { nombre: string; precio: string | null }[]
+    }
 
 /** «Nueva ranura aparte» en el selector: no es un grupo, así que no puede chocar con uno. */
 const APARTE = '__aparte__'
@@ -122,19 +131,37 @@ export default function CapturaCotizacion({
       setPaso({ estado: 'rechazado', mensaje: creada.error })
       return
     }
-    const lectura = await leerCasillaDeItem(creada.itemId, 'grupo_completo', dataUrl)
+    await leerEnLaOpcion(creada.itemId, dataUrl, null)
+  }
+
+  /**
+   * Lee la captura en la opción recién creada. Con `enfoque`, sobre la opción que tocó la
+   * persona en «¿Cuál de estas?» (P8): la misma imagen, sin volver a pegarla.
+   */
+  async function leerEnLaOpcion(itemId: string, dataUrl: string, enfoque: { nombre: string; precio: string | null } | null) {
+    if (enfoque) setPaso({ estado: 'leyendo', preview: dataUrl, donde: enfoque.nombre })
+    const lectura = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, enfoque)
     if (!lectura.ok) {
+      // P8 · varias opciones legibles: la opción se queda esperando a que la persona elija.
+      if (!enfoque && (lectura.opciones ?? []).length > 0) {
+        setPaso({ estado: 'eligiendo_opcion', preview: dataUrl, dataUrl, itemId, mensaje: lectura.mensaje, opciones: lectura.opciones ?? [] })
+        return
+      }
       // La opción nació para esta captura: si la captura no sirve, se va con ella.
-      await deleteItem(creada.itemId)
-      await recalcularTotales(cotizacionId)
+      await descartarOpcion(itemId)
       setPaso({ estado: 'rechazado', mensaje: lectura.mensaje, detalle: lectura.detalle })
-      router.refresh()
       return
     }
     toast.success(lectura.mensaje || 'Pantallazo leído.')
     for (const a of lectura.alertas) toast.warning(a, { duration: 8000 })
     setPaso({ estado: 'libre' })
-    onOpcionCreada?.(creada.itemId)
+    onOpcionCreada?.(itemId)
+    router.refresh()
+  }
+
+  async function descartarOpcion(itemId: string) {
+    await deleteItem(itemId)
+    await recalcularTotales(cotizacionId)
     router.refresh()
   }
 
@@ -317,6 +344,35 @@ export default function CapturaCotizacion({
               Descartar
             </button>
           </div>
+        </div>
+      )}
+
+      {paso.estado === 'eligiendo_opcion' && (
+        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5" role="group" aria-label="¿Cuál de estas?">
+          <p className="flex items-start gap-1.5 text-[11px] font-medium text-amber-900">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {paso.mensaje}
+          </p>
+          <div className="mt-1.5 space-y-1">
+            {paso.opciones.map(o => (
+              <button
+                key={`${o.nombre}|${o.precio ?? ''}`}
+                type="button"
+                onClick={() => void leerEnLaOpcion(paso.itemId, paso.dataUrl, o)}
+                className="flex w-full items-center justify-between gap-2 rounded border bg-background px-2 py-1 text-left text-xs hover:bg-accent"
+              >
+                <span className="min-w-0 flex-1 truncate">{o.nombre}</span>
+                {o.precio && <span className="shrink-0 tabular-nums font-medium">{o.precio}</span>}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => { const id = paso.itemId; setPaso({ estado: 'libre' }); void descartarOpcion(id) }}
+            className="mt-1.5 rounded-md px-2.5 py-1 text-xs text-[#6B7280] hover:bg-accent"
+          >
+            Descartar
+          </button>
         </div>
       )}
 
