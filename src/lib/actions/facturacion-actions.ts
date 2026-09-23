@@ -21,6 +21,7 @@ import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/worksp
 import { canEditBloque, type Area, type Role, type UserContext } from '@/lib/permissions/can-edit'
 import { bloqueoPorNegocioCerrado } from '@/lib/negocios/negocio-abierto'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { borradorCliente, borradorFactura, type RutExtraido } from '@/lib/siigo/mapeo'
 import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
 import {
@@ -287,12 +288,6 @@ const TOTALES_VACIOS: ColaFacturacion['totales'] = {
 const fmtCOP = (v: number): string =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-const num = (v: unknown): number | null => {
-  if (v == null || v === '') return null
-  const n = Number(String(v).replace(/[^\d.-]/g, ''))
-  return Number.isFinite(n) ? n : null
-}
-
 export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
@@ -446,8 +441,9 @@ async function armarColaFacturacion(
       }
       if (plano.numero_identificacion || plano.nit) rutPorNegocio.set(b.negocio_id, plano as RutExtraido)
     } else if (slug === 'comprobante_pago_upme') {
-      const v = num(campos.valor_pagado?.value)
-      if (v && v > 0) upmePorNegocio.set(b.negocio_id, v)
+      // Extraído del comprobante: «350.906» son 350.906 pesos, no 350,906.
+      const v = parseMontoCop(campos.valor_pagado?.value)
+      if (v !== null && v > 0) upmePorNegocio.set(b.negocio_id, v)
     } else if (slug === 'servicio_contratado') {
       // Plano, no bajo `campos`. Conserva la primera instancia con valor: el
       // bloque vive en Negociación y se hereda de solo lectura aguas abajo.

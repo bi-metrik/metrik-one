@@ -4,6 +4,7 @@ import path from 'path'
 import { nombreOficialSeccional } from '@/lib/dian/seccionales'
 import { drawFixed, drawCells, type Cell, type CellGroup } from './acroform'
 import { TIPO_DOCUMENTO_DIAN } from '@/lib/dian/tipo-documento'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 // Sobre el PDF oficial de la DIAN (Formato 010). El fondo no se modifica.
 // TODAS las casillas (datos variables + deterministas) se ESTAMPAN como texto
@@ -211,10 +212,21 @@ const DEFAULT_FONT_SIZE = 8
 // Aplica el tamaño compacto por defecto solo cuando la casilla no fija uno propio.
 const compact = (cell: Cell): Cell => (cell.size == null ? { ...cell, size: DEFAULT_FONT_SIZE } : cell)
 
-function formatCurrency(v: string | null): string | null {
+/**
+ * Casilla 56 (valor solicitado) en pesos, sin decimales y con punto de miles.
+ *
+ * El valor viene de la Factura o de la casilla corregida a mano, y en los dos casos
+ * puede traer el punto de miles. Con `Number(v.replace(/[^\d.-]/g, ''))` «350.906» se
+ * leía 350,906 y la casilla imprimía «351»: una cifra plausible en un formulario que
+ * va a la DIAN. Pasa por el normalizador único de montos.
+ *
+ * Sin un monto legible devuelve el texto tal cual, como antes. Exportada solo para
+ * poder probarla sin armar el PDF.
+ */
+export function formatCurrency(v: string | null): string | null {
   if (!v) return null
-  const n = Number(String(v).replace(/[^\d.-]/g, ''))
-  if (isNaN(n)) return v
+  const n = parseMontoCop(v)
+  if (n === null) return v
   return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(n))
 }
 

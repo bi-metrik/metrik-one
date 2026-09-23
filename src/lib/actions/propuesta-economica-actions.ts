@@ -26,6 +26,7 @@ import { clausulasAHtml, normalizarTerminos } from '@/lib/propuesta/terminos'
 import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
 import { fuenteDeLaTarifa, faltaConfirmarTarifa } from '@/lib/upme/tarifa-propuesta'
 import { descuentoImplicito, motivoDescuentoRechazado } from '@/lib/propuesta/gate-descuento'
@@ -395,7 +396,8 @@ async function loadBloqueContext(
       .maybeSingle()
     const campos = (facturaBloque?.data?.campos ?? {}) as Record<string, { value?: unknown }>
     const raw = campos[valorField]?.value
-    const valorSinIva = parsearNumeroCop(raw)
+    // Normalizador único de montos: «350.906,00» son 350.906 pesos, no 350,906.
+    const valorSinIva = parseMontoCop(raw)
     if (valorSinIva != null && valorSinIva > 0) {
       // Cálculo INFORMATIVO. Nunca lanza; nunca bloquea.
       tarifaDetalle = calcularTarifaUpmeDetalle(valorSinIva, uvtDelAnio(tarifaAnio))
@@ -440,15 +442,6 @@ async function loadBloqueContext(
     /** Bloques declarados en `requiere_bloques` que aún no tienen respuesta. */
     requisitosFaltantes,
   }
-}
-
-/** Parsea un valor COP que puede venir número o string ("$ 120.000.000"). */
-function parsearNumeroCop(raw: unknown): number | null {
-  if (raw === null || raw === undefined || raw === '') return null
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
-  const limpio = String(raw).replace(/[^\d.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '')
-  const n = Number(limpio)
-  return Number.isFinite(n) ? n : null
 }
 
 // ── Action: generar nueva version ───────────────────────────────────────────

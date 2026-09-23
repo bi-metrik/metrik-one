@@ -22,9 +22,8 @@ campo. **Todo número que venga de una lectura pasa por `parseMontoCop`**, nunca
 pero `items.descripcion` y `notasCliente` tienen el «50,08 COP» escrito como texto al leer:
 solo cambian si se vuelve a leer el pantallazo.
 
-⚠️ **Mismo patrón vivo en SOENA, sin tocar:** `BloqueFacturacion.tsx:71`,
-`negocio-v2-actions.ts:1579`, `conciliacion-actions.ts:1628` (`valor_unitario_sin_iva`
-extraído de facturas → tarifa UPME). Latente: «350.906» se leería 350,906.
+El mismo patrón en SOENA (`BloqueFacturacion`, la tarifa UPME desde la factura, la cola, el
+010, el auto_fill y la propuesta) se cerró en #842: ver [[soena-parse-monto-cop]].
 
 ## A2 · la casilla no se apaga con `isPending`
 

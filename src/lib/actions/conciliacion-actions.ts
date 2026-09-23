@@ -31,6 +31,7 @@ import {
   type CobroParaRecaudo,
 } from '@/lib/negocios/recaudo-confirmado'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
+import { valorSinIvaDeFactura } from '@/lib/upme/valor-factura'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
 import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
 import { porcionesPorConfirmar as contarPorcionesPorConfirmar } from '@/lib/cobros/confirmacion-por-referencia'
@@ -1623,11 +1624,12 @@ export async function leerModeloDineroCompleto(
       .select('data, bloque_configs!inner(slug)')
       .eq('negocio_id', negocioId)
       .eq('bloque_configs.slug', 'factura_venta_vehiculo')
-    for (const fb of ((facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
-      const campos = (fb.data?.campos ?? {}) as Record<string, { value?: unknown }>
-      const valorSinIva = Number(String(campos.valor_unitario_sin_iva?.value ?? '').replace(/[^\d.-]/g, ''))
-      if (Number.isFinite(valorSinIva) && valorSinIva > 0) { tarifaRef = calcularTarifaUpmePorAnio(valorSinIva); break }
-    }
+    // Misma lectura que la inicialización del bloque de confirmación: el punto de
+    // miles se lee como miles («350.906» son 350.906 pesos, no 350,906).
+    const valorSinIva = valorSinIvaDeFactura(
+      (facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>,
+    )
+    if (valorSinIva > 0) tarifaRef = calcularTarifaUpmePorAnio(valorSinIva)
   }
 
   // Si el negocio NO contrató la certificación UPME, no hay tarifa que pasar al

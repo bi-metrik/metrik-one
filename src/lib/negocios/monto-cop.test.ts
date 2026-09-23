@@ -73,6 +73,48 @@ describe('parseMontoCop — separador de miles vs decimal', () => {
   })
 })
 
+// Los lectores de SOENA (valor sin IVA de la factura, valor pagado a la UPME, valor
+// solicitado del 010) usaban `Number(v.replace(/[^\d.-]/g, ''))`, que conserva el
+// punto de miles. Lo que ese regex hacía con cada entrada está al lado.
+describe('parseMontoCop — lo que leían mal los lectores de SOENA', () => {
+  it('un solo punto de miles ya no se lee como decimal', () => {
+    expect(parseMontoCop('350.906')).toBe(350906) //         el regex: 350,906
+    expect(parseMontoCop('$ 350.906')).toBe(350906) //       el regex: 350,906
+  })
+
+  it('varios puntos de miles ya no dan NaN', () => {
+    expect(parseMontoCop('$ 98.500.000')).toBe(98500000) //  el regex: NaN
+    expect(parseMontoCop('1.234.567')).toBe(1234567) //      el regex: NaN
+  })
+
+  it('miles con punto y decimales con coma', () => {
+    expect(parseMontoCop('1.234.567,89')).toBeCloseTo(1234567.89, 2) //   el regex: NaN
+    expect(parseMontoCop('$ 1.234.567,89')).toBeCloseTo(1234567.89, 2) // el regex: NaN
+    expect(parseMontoCop('350.906,00')).toBe(350906) //                   el regex: 350,906
+  })
+
+  it('el número sin separadores sigue entrando igual', () => {
+    expect(parseMontoCop('5439880')).toBe(5439880)
+    expect(parseMontoCop('350906')).toBe(350906)
+    expect(parseMontoCop('350906.00')).toBe(350906)
+  })
+
+  // Un número ya numérico pasa tal cual: la función no puede saber si un 350.906 que
+  // llegó como número de JSON quería decir 350.906 pesos. Esa lectura se decide antes
+  // (el extractor de documentos pasa el valor a texto y ahí sí aplica la regla).
+  it('un número de JavaScript no se reinterpreta', () => {
+    expect(parseMontoCop(350906)).toBe(350906)
+    expect(parseMontoCop(350.906)).toBe(350.906)
+    expect(parseMontoCop(Number.NaN)).toBeNull()
+    expect(parseMontoCop(Number.POSITIVE_INFINITY)).toBeNull()
+  })
+
+  it('texto sin cifras es null, no cero', () => {
+    expect(parseMontoCop('pendiente')).toBeNull() //         el regex: 0
+    expect(parseMontoCop('-')).toBeNull() //                 el regex: NaN
+  })
+})
+
 describe('montosCoinciden — tolerancia de materialidad', () => {
   // Casos reales de SOENA, ambos legítimos y ambos distintos al peso.
   it('V0253: $248 de diferencia entra en tolerancia', () => {
