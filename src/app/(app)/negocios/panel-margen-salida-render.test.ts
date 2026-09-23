@@ -39,7 +39,8 @@ describe('el panel del margen mínimo', () => {
     const h = html(BASE)
     expect(h).toContain('Bajo el margen mínimo: no se puede enviar ni aprobar')
     expect(h).toContain('La tarifa Económica deja un margen de 3 %')
-    expect(h).toContain('marca de agua')
+    // El motivo real, con el mismo nombre que imprime la marca del PDF.
+    expect(h).toContain('El PDF se descarga como borrador, con la marca «margen bajo el mínimo».')
   })
 
   it('a una operadora o a un admin NO le dibuja «Autorizar bajo el mínimo»', () => {

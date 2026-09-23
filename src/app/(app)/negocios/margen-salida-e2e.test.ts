@@ -330,6 +330,9 @@ describe('1 · cotización bajo el piso sin tarifas marcadas', () => {
     expect(subidas).toEqual([])
     expect(tablas.decisiones_combinacion).toEqual([])
     expect(res.aviso).toContain('3 %')
+    // Solo el margen: la marca de siempre, letra por letra.
+    const { PDFDocument } = await import('pdf-lib')
+    expect((await PDFDocument.load(Buffer.from(res.pdf, 'base64'))).getTitle()).toBe(TEXTO_MARCA_BORRADOR)
   })
 
   it('«Enviar» del editor se rechaza en el servidor, con margen y mínimo', async () => {

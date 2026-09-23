@@ -30,7 +30,7 @@ describe('la marca de agua de borrador', () => {
     doc.addPage([595, 842])
     doc.addPage([842, 595])
     doc.addPage([595, 842])
-    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()))
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()), ['margen'])
 
     const leido = await PDFDocument.load(conMarca)
     expect(leido.getPageCount()).toBe(3)
@@ -44,7 +44,7 @@ describe('la marca de agua de borrador', () => {
   it('es semitransparente: deja leer el documento', async () => {
     const doc = await PDFDocument.create()
     doc.addPage([595, 842])
-    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()))
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()), ['margen'])
     // El estado gráfico con la opacidad puede ir dentro de un flujo de objetos: se busca
     // en el archivo y en los flujos inflados.
     const todo = [conMarca.toString('latin1'), ...flujos(conMarca)].join('\n')
@@ -59,7 +59,7 @@ describe('la marca por pantallazos de otros pasajeros (decisión del 2026-09-22)
     const doc = await PDFDocument.create()
     doc.addPage([595, 842])
     doc.addPage([595, 842])
-    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()), 'pantallazos')
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()), ['pantallazos'])
     const conFrase = flujos(conMarca).filter(f => f.includes(`<${hex('pantallazos por actualizar · no enviar')}>`))
     expect(conFrase).toHaveLength(2)
     expect(flujos(conMarca).filter(f => f.includes(`<${hex('BORRADOR')}>`))).toHaveLength(2)
@@ -67,11 +67,42 @@ describe('la marca por pantallazos de otros pasajeros (decisión del 2026-09-22)
     expect((await PDFDocument.load(conMarca)).getTitle()).toBe(TEXTO_MARCA_PANTALLAZOS)
   })
 
-  it('sin motivo, la del margen como siempre (el piso de #824 no cambia)', async () => {
+  it('solo el margen: la marca de siempre, letra por letra (el piso de #824 no cambia)', async () => {
     const doc = await PDFDocument.create()
     doc.addPage([595, 842])
-    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()))
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()), ['margen'])
     expect((await PDFDocument.load(conMarca)).getTitle()).toBe(TEXTO_MARCA_BORRADOR)
+    expect(TEXTO_MARCA_BORRADOR).toBe('BORRADOR · margen bajo el mínimo · no enviar')
     expect(TEXTO_MARCA_PANTALLAZOS).toBe('BORRADOR · pantallazos por actualizar · no enviar')
+  })
+})
+
+describe('la marca dice el motivo REAL (decisión del 2026-09-23)', () => {
+  const paginas = async (n: number, tamano: [number, number] = [595, 842]) => {
+    const doc = await PDFDocument.create()
+    for (let i = 0; i < n; i++) doc.addPage(tamano)
+    return Buffer.from(await doc.save())
+  }
+
+  it.each([
+    [['iva_sin_calcular'], 'IVA sin calcular · no enviar'],
+    [['iva_incluido_sin_plantilla'], 'IVA incluido sin plantilla · no enviar'],
+  ] as const)('%j: en todas las páginas, y nada del margen', async (motivos, linea) => {
+    const conMarca = await ponerMarcaDeBorrador(await paginas(2), motivos)
+    expect(flujos(conMarca).filter(f => f.includes(`<${hex(linea)}>`))).toHaveLength(2)
+    expect(flujos(conMarca).some(f => f.includes(hex('margen bajo el mínimo')))).toBe(false)
+    expect((await PDFDocument.load(conMarca)).getTitle()).toBe(`BORRADOR · ${linea}`)
+  })
+
+  it('dos motivos: se leen los dos, también en una página apaisada', async () => {
+    const linea = 'pantallazos por actualizar · IVA incluido sin plantilla · no enviar'
+    for (const tamano of [[595, 842], [842, 595]] as Array<[number, number]>) {
+      const conMarca = await ponerMarcaDeBorrador(await paginas(1, tamano), ['pantallazos', 'iva_incluido_sin_plantilla'])
+      expect(flujos(conMarca).filter(f => f.includes(`<${hex(linea)}>`))).toHaveLength(1)
+    }
+  })
+
+  it('sin motivos no hay marca que poner', async () => {
+    await expect(ponerMarcaDeBorrador(await paginas(1), [])).rejects.toThrow('al menos un motivo')
   })
 })

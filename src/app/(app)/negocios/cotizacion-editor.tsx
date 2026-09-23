@@ -75,6 +75,7 @@ import {
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
+import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
@@ -957,7 +958,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </ul>
           <p id="aviso-captura-desactualizada" className="mt-1.5 pl-5">
             {editable
-              ? `${motivoEnvio} Hasta entonces no se puede enviar ni aprobar, y el PDF sale como borrador, con marca de agua.`
+              ? `${motivoEnvio} Hasta entonces no se puede enviar ni aprobar, y el PDF sale como borrador, con la marca «${etiquetaDeMotivo('pantallazos')}».`
               : 'Esta cotización ya no se edita: duplícala para cotizar con los pasajeros de hoy.'}
           </p>
         </div>
@@ -2594,7 +2595,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       y el PDF sale como borrador hasta cargarlo. */}
                   {ivaVigente && !ivaVigente.calculable && (
                     <p className="mt-1 text-center text-[10px] font-medium text-amber-700">
-                      {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador hasta entonces.
+                      {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador, con la marca «{etiquetaDeMotivo('iva_sin_calcular')}», hasta entonces.
                     </p>
                   )}
                 </div>

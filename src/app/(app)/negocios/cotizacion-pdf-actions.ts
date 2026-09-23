@@ -72,7 +72,8 @@ import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
-import { ponerMarcaDeBorrador, type MotivoDeBorrador } from '@/lib/pdf/marca-borrador'
+import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
+import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -570,17 +571,23 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const ivaIncluidoSinPlantilla = ivaCot !== null
     && ivaIncluidoEnElPrecio(configIva)
     && !plantillaImprimePreciosConIva(ws?.cotizacion_template_slug ?? PLANTILLA_POR_DEFECTO)
-  const esBorrador = salidaBloquea || ivaSinCalcular || ivaIncluidoSinPlantilla || motivoPantallazos !== null
-  // La marca dice el motivo. Los pantallazos van primero: con el precio de otros pasajeros,
-  // el margen tampoco dice nada.
-  const motivoDeMarca: MotivoDeBorrador = motivoPantallazos !== null ? 'pantallazos' : 'margen'
+  // Los motivos REALES, en un solo sitio (`motivos-borrador.ts`): la marca de agua y el
+  // aviso de pantalla salen de esta misma lista. Es borrador si hay al menos uno, que es
+  // exactamente el OR de las cuatro condiciones de siempre.
+  const motivosBorrador = motivosDeBorrador({
+    pantallazos: motivoPantallazos !== null,
+    margen: salidaBloquea,
+    ivaSinCalcular,
+    ivaIncluidoSinPlantilla,
+  })
+  const esBorrador = motivosBorrador.length > 0
   const avisoBorrador = esBorrador
-    ? `PDF de borrador, con marca de agua: no se puede enviar. ${[
-        motivoPantallazos,
-        salidaBloquea ? salida!.mensaje : null,
-        ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
-        ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
-      ].filter(Boolean).join(' ')}`
+    ? avisoDeBorrador(motivosBorrador, {
+        pantallazos: motivoPantallazos,
+        margen: salidaBloquea ? salida!.mensaje : null,
+        iva_sin_calcular: ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
+        iva_incluido_sin_plantilla: ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
+      })
     : null
 
   // ============================================================
@@ -680,7 +687,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       // agua y fuera. Ni almacenamiento, ni Drive, ni registro de decisiones — no es un
       // documento del cliente.
       if (esBorrador) {
-        const conMarca = await ponerMarcaDeBorrador(renderizado, motivoDeMarca)
+        const conMarca = await ponerMarcaDeBorrador(renderizado, motivosBorrador)
         return {
           success: true,
           pdf: conMarca.toString('base64'),
@@ -1170,7 +1177,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
   // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {
-    const conMarca = await ponerMarcaDeBorrador(Buffer.from(buffer), motivoDeMarca)
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(buffer), motivosBorrador)
     return {
       success: true,
       pdf: conMarca.toString('base64'),
