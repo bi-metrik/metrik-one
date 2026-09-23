@@ -85,6 +85,7 @@ import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
   lineaDeRecargo,
+  pasajerosDelViaje,
   RECARGO_POR_DEFECTO,
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
@@ -731,6 +732,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       tarifa_pax: i.tarifa_pax,
     })),
     politicaRecargo,
+    // B4 · solo cuenta si el recargo va por pasajero: los que viajan según el negocio.
+    pasajerosDelViaje(composicionViaje),
   )
 
   /**
@@ -2419,10 +2422,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               <div>
                 <p>
                   <span className="font-medium">{recargo.etiqueta}</span> de{' '}
-                  <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>: esta
+                  <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>
+                  {/* B4 · por pasajero se dice la cuenta, no solo el total. */}
+                  {recargo.porPasajero && (recargo.porPasajero.pasajeros !== null
+                    ? ` (${formatCOP(recargo.porPasajero.valor)} por pasajero × ${recargo.porPasajero.pasajeros})`
+                    : ' por pasajero')}
+                  : esta
                   {' '}cotización {politicaRecargo.vuelos === 'internacionales' ? 'lleva un vuelo internacional' : 'tiene un componente al que le corresponde'}
                   {' '}y todavía no lo lleva.
                 </p>
+                {recargo.porPasajero && recargo.porPasajero.pasajeros === null && (
+                  <p className="mt-1 text-amber-800">
+                    Va por pasajero y el negocio todavía no dice quiénes viajan: complétalo en la etapa del viaje para poder agregarlo.
+                  </p>
+                )}
                 {/* Un origen o destino que no se reconoce cuenta como internacional: se
                     ofrece el recargo, pero se dice por qué, para que alguien lo mire. */}
                 {recargo.dudosos.length > 0 && (
@@ -2434,7 +2447,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               </div>
               <button
                 type="button"
-                disabled={isPending}
+                disabled={isPending || recargo.porPasajero?.pasajeros === null}
                 onClick={() =>
                   startTransition(async () => {
                     const r = await aplicarRecargo(cotizacion.id)

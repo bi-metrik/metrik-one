@@ -209,9 +209,27 @@ describe('Edgar cambia el recargo', () => {
     expect(r).toEqual({ ok: true })
     expect(linea().recargo).toEqual({
       aplica_a: ['vuelo_detalle'], activo: true, etiqueta: 'Recargo de emision', valor: 120000, vuelos: 'internacionales', provisional: false,
+      // B4 · quien guarda deja escrita la base, aunque sea la de siempre.
+      base: 'por_reserva',
     })
     expect(logs().map(l => l.campo_modificado)).toEqual(['recargo.valor', 'recargo.vuelos'])
     expect(linea().margen.provisional).toBe(true)
+  })
+
+  it('B4 · por pasajero: queda escrito y en el historial, dicho en palabras', async () => {
+    const r = await guardarRecargo(LINEA, { activo: true, etiqueta: 'Recargo de emisión', valor: 100000, vuelos: 'todos', base: 'por_pasajero' })
+    expect(r).toEqual({ ok: true })
+    expect(linea().recargo).toMatchObject({ base: 'por_pasajero', provisional: false })
+    const cambio = logs().find(l => l.campo_modificado === 'recargo.base')
+    expect(cambio).toBeDefined()
+    expect(JSON.stringify(cambio)).toContain('por cada pasajero')
+  })
+
+  it('B4 · una base que no existe: no se guarda', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await guardarRecargo(LINEA, { activo: true, etiqueta: 'R', valor: 1, vuelos: 'todos', base: 'por_vuelo' as any })
+    expect(r).toEqual({ error: expect.stringContaining('por cada pasajero') })
+    expect(escrituras).toEqual([])
   })
 
   it('una opción de vuelos que no existe: no se guarda', async () => {

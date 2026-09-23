@@ -15,7 +15,7 @@
  * registro dice «piso», quien lee el historial no reconoce lo que cambió.
  */
 
-import type { VuelosDelRecargo } from './recargo-linea'
+import type { BaseDelRecargo, VuelosDelRecargo } from './recargo-linea'
 
 /** Cómo se llaman las cosas en la pantalla y en el historial. Lenguaje del dueño. */
 export const ETIQUETA = {
@@ -25,11 +25,17 @@ export const ETIQUETA = {
   recargoValor: 'Valor del recargo',
   recargoEtiqueta: 'Nombre del recargo en la cotización',
   recargoVuelos: 'Vuelos a los que aplica el recargo',
+  recargoBase: 'Cómo se cobra el recargo',
 } as const
 
 const VUELOS_EN_PALABRAS: Record<VuelosDelRecargo, string> = {
   todos: 'todos los vuelos',
   internacionales: 'solo vuelos internacionales',
+}
+
+const BASE_EN_PALABRAS: Record<BaseDelRecargo, string> = {
+  por_reserva: 'una vez por reserva',
+  por_pasajero: 'por cada pasajero',
 }
 
 type ConfigExtra = Record<string, unknown> | null | undefined
@@ -130,6 +136,8 @@ export interface RecargoAntesYDespues {
   etiqueta: string
   valor: number
   vuelos: VuelosDelRecargo
+  /** Ausente = por reserva, lo de siempre (B4 del brief del 2026-09-23). */
+  base?: BaseDelRecargo
 }
 
 /** Qué cambió en el recargo de una línea. Mismo criterio que `cambiosDeMargen`. */
@@ -148,16 +156,26 @@ export function cambiosDeRecargo(
   if (previo.vuelos !== nuevo.vuelos) {
     out.push(cambio('recargo.vuelos', ETIQUETA.recargoVuelos, lineaNombre, VUELOS_EN_PALABRAS[previo.vuelos], VUELOS_EN_PALABRAS[nuevo.vuelos], previo.vuelos, nuevo.vuelos))
   }
+  const basePrevia = previo.base ?? 'por_reserva'
+  const baseNueva = nuevo.base ?? 'por_reserva'
+  if (basePrevia !== baseNueva) {
+    out.push(cambio('recargo.base', ETIQUETA.recargoBase, lineaNombre, BASE_EN_PALABRAS[basePrevia], BASE_EN_PALABRAS[baseNueva], basePrevia, baseNueva))
+  }
   if (previo.etiqueta !== nuevo.etiqueta) {
     out.push(cambio('recargo.etiqueta', ETIQUETA.recargoEtiqueta, lineaNombre, `«${previo.etiqueta}»`, `«${nuevo.etiqueta}»`, previo.etiqueta, nuevo.etiqueta))
   }
   if (out.length === 0 && previo.provisional) {
     const resumen = nuevo.activo
-      ? `${cop(nuevo.valor)}, ${VUELOS_EN_PALABRAS[nuevo.vuelos]}`
+      ? `${cop(nuevo.valor)}${baseNueva === 'por_pasajero' ? ' por pasajero' : ''}, ${VUELOS_EN_PALABRAS[nuevo.vuelos]}`
       : 'apagado'
     out.push(confirmacion('recargo.provisional', lineaNombre, `recargo ${resumen}`))
   }
   return out
+}
+
+/** Las palabras de una base de cobro, para la pantalla. */
+export function baseEnPalabras(b: BaseDelRecargo): string {
+  return BASE_EN_PALABRAS[b]
 }
 
 /** Las palabras de una opción de vuelos, para la pantalla. */

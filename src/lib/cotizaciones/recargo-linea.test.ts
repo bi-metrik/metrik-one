@@ -4,9 +4,11 @@ import {
   aQuienLeCorresponde,
   estadoDelRecargo,
   lineaDeRecargo,
+  pasajerosDelViaje,
   politicaRecargoDeLinea,
   recargoCorresponde,
   RECARGO_POR_DEFECTO,
+  vecesDelRecargo,
 } from './recargo-linea'
 import { calcularCascada } from './totales'
 import { itemsQueAportanAlTotal } from './itinerarios'
@@ -43,6 +45,8 @@ describe('dónde vive el valor por defecto', () => {
       valor: 100_000,
       aplicaA: ['vuelo_detalle'],
       vuelos: 'todos',
+      // B4 · sin declararlo, una vez por la reserva: lo de siempre.
+      base: 'por_reserva',
     })
   })
 
@@ -290,5 +294,58 @@ describe('solo para vuelos internacionales', () => {
       item({ id: 'r', nombre: 'Recargo de emisión', grupo: null, precio_venta: 100_000 }),
     ]
     expect(estadoDelRecargo(items, soloInternacionales)).toEqual({ estado: 'no_aplica' })
+  })
+})
+
+// ── B4 · por reserva o por pasajero (brief del 2026-09-23, hallazgo 19) ─────────
+
+describe('B4 · el recargo por pasajero', () => {
+  const porPasajero = politicaRecargoDeLinea({ recargo: { ...CONFIG.recargo, base: 'por_pasajero' } })
+
+  it('solo el valor exacto cobra por pasajero; cualquier otra cosa es por reserva', () => {
+    expect(porPasajero.base).toBe('por_pasajero')
+    expect(politicaRecargoDeLinea({ recargo: { ...CONFIG.recargo, base: 'POR_PASAJERO' } }).base).toBe('por_reserva')
+    expect(politicaRecargoDeLinea({ recargo: { ...CONFIG.recargo, base: 4 } }).base).toBe('por_reserva')
+    expect(RECARGO_POR_DEFECTO.base).toBe('por_reserva')
+  })
+
+  it('cuentan todos los que viajan, infantes incluidos; sin composición no hay cuenta', () => {
+    expect(pasajerosDelViaje({ adultos: 2, ninos: 1, infantes: 1 })).toBe(4)
+    expect(pasajerosDelViaje({ adultos: 0, ninos: 0, infantes: 0 })).toBeNull()
+    expect(pasajerosDelViaje(null)).toBeNull()
+    expect(vecesDelRecargo(porPasajero, 4)).toBe(4)
+    expect(vecesDelRecargo(porPasajero, null)).toBeNull()
+    // Por reserva es una vez, viajen cuantos viajen.
+    expect(vecesDelRecargo(politicaRecargoDeLinea(CONFIG), 4)).toBe(1)
+  })
+
+  it('lo que se ofrece es el valor por los que viajan, y dice la cuenta', () => {
+    expect(estadoDelRecargo([item()], porPasajero, 4)).toEqual({
+      estado: 'falta',
+      valor: 400_000,
+      etiqueta: 'Recargo de emisión',
+      dudosos: [],
+      porPasajero: { valor: 100_000, pasajeros: 4 },
+    })
+  })
+
+  it('sin saber cuántos viajan se ofrece el de UNO y lo dice', () => {
+    const e = estadoDelRecargo([item()], porPasajero, null)
+    expect(e).toMatchObject({ estado: 'falta', valor: 100_000, porPasajero: { valor: 100_000, pasajeros: null } })
+  })
+
+  it('puesto por los que viajan es «puesto»; si cambian los pasajeros, dice las dos cifras', () => {
+    const recargo = item({ id: 'r', nombre: 'Recargo de emisión', grupo: null, precio_venta: 100_000, cantidad: 4 })
+    expect(estadoDelRecargo([item(), recargo], porPasajero, 4)).toMatchObject({ estado: 'puesto', valor: 400_000 })
+    expect(estadoDelRecargo([item(), recargo], porPasajero, 5)).toMatchObject({
+      estado: 'distinto', valorEnLaLinea: 400_000, valorVigente: 500_000,
+    })
+  })
+
+  it('por reserva, nada cambia: la línea en una vez es «puesto» aunque viajen cuatro', () => {
+    const recargo = item({ id: 'r', nombre: 'Recargo de emisión', grupo: null, precio_venta: 100_000 })
+    expect(estadoDelRecargo([item(), recargo], politicaRecargoDeLinea(CONFIG), 4)).toMatchObject({ estado: 'puesto', valor: 100_000 })
+    // Y lo que se ofrece no trae la cuenta por pasajero.
+    expect(estadoDelRecargo([item()], politicaRecargoDeLinea(CONFIG), 4)).not.toHaveProperty('porPasajero')
   })
 })
