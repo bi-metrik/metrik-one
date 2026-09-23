@@ -101,9 +101,9 @@ describe('§2.5 · en un viaje no se ofrecen rubros', () => {
 })
 
 describe('§2.3 · el grupo sale de la primera fila', () => {
-  it('con líneas por tipo, el desplegable vive detrás de «Mover a otra opción»', () => {
+  it('con líneas por tipo, el desplegable vive detrás del menú ⋯ de la opción («Pasar a otra ranura…»)', () => {
     const html = pintar(true)
-    expect(sinEtiquetas(html)).toContain('Mover a otra opción')
+    expect(html).toContain('aria-label="Más acciones de la opción"')
     expect(html).not.toContain('aria-label="Grupo de la línea"')
   })
 
@@ -115,13 +115,16 @@ describe('§2.3 · el grupo sale de la primera fila', () => {
 })
 
 describe('§2.2 · «Agregar otra opción» va al pie', () => {
-  it('con líneas por tipo, DESPUÉS del costo y de la descripción', () => {
-    const texto = sinEtiquetas(pintar(true))
-    expect(texto).toContain('Agregar otra opción de vuelo')
-    expect(texto.indexOf('Agregar otra opción de vuelo'))
-      .toBeGreaterThan(texto.indexOf('Descripción (visible al cliente)'))
-    expect(texto.indexOf('Agregar otra opción de vuelo'))
-      .toBeGreaterThan(texto.indexOf('Costo de la línea'))
+  it('con líneas por tipo sube al ENCABEZADO del bloque como «+ Opción» (P6), antes de las opciones', () => {
+    // Con tres opciones abiertas el botón del pie quedaba lejos y su ayuda parecía del bloque
+    // siguiente (caso Providencia, 2026-09-23).
+    const html = pintar(true)
+    expect(html).toContain('title="Agregar otra opción de vuelo"')
+    expect(html.indexOf('title="Agregar otra opción de vuelo"'))
+      .toBeLessThan(html.indexOf('data-opcion-abierta'))
+    // La descripción editable ya no está en la opción de un bloque: su lugar es la nota.
+    expect(sinEtiquetas(html)).not.toContain('Descripción (visible al cliente)')
+    expect(sinEtiquetas(html)).toContain('Nota para el cliente')
   })
 
   it('sin líneas por tipo se queda donde estaba: ANTES del costo', () => {

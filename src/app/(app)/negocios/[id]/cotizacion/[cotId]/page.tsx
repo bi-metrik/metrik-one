@@ -206,12 +206,15 @@ export default async function CotizacionNegocioPage({
   let composicionViaje: Composicion | null = null
   // El destino nombra las ranuras que todavía no tienen nombre («Hotel en Cancún»).
   let destinoViaje: string | null = null
+  // Las fechas del viaje, para el renglón del paso «Viaje» (brief del 2026-09-23).
+  let fechasViaje: { inicio: string | null; fin: string | null } | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
     const { viaje, error: errViaje } = await leerViajeDelNegocio(sbViaje, id)
     if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
     composicionViaje = viaje.composicion
     destinoViaje = viaje.destino
+    fechasViaje = viaje.fechas
   } catch {
     // Sin composición del viaje la pantalla la pide por línea.
   }
@@ -293,6 +296,7 @@ export default async function CotizacionNegocioPage({
       configIva={configIva}
       mostrarResumenFiscal={mostrarResumenFiscal}
       destinoViaje={destinoViaje}
+      fechasViaje={fechasViaje}
     />
   )
 }
