@@ -48,6 +48,11 @@ describe('el nombre de la ranura se arma solo (hallazgo 23)', () => {
     expect(ciudadCorta('Cancún, Quintana Roo, México')).toBe('Cancún')
     expect(ciudadCorta('San Andrés Isla (ADZ)')).toBe('San Andrés Isla')
     expect(ciudadCorta('  ')).toBeNull()
+    // Lo que devolvió la detección sobre el banco real (2026-09-23).
+    expect(ciudadCorta('Cancun (y alrededores)')).toBe('Cancun')
+    expect(ciudadCorta('Cancún y alrededores')).toBe('Cancún')
+    expect(ciudadCorta('Quimbaya, Quindío - Colombia')).toBe('Quimbaya')
+    expect(ciudadCorta('Orlando MCO')).toBe('Orlando')
   })
 })
 

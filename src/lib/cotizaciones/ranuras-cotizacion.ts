@@ -143,12 +143,17 @@ export function comoNombrePropio(texto: string): string {
  * La ciudad de un lugar leído, sin el país ni el código del aeropuerto: «Cancún, México» →
  * «Cancún», «Bogotá BOG» → «Bogotá». Un código solo («BOG») se deja como está: es lo único
  * que hay y dice algo.
+ *
+ * También sin la coletilla de los buscadores: Booking titula «Cancún y alrededores», y la
+ * detección lo leyó como «Cancun (y alrededores)» en el banco real del 2026-09-16. «Hotel en
+ * Cancun (y alrededores)» no es un nombre que alguien escribiría.
  */
 export function ciudadCorta(lugar: string | null | undefined): string | null {
   let t = (lugar ?? '').trim()
   if (t === '') return null
   const coma = t.indexOf(',')
   if (coma > 0) t = t.slice(0, coma).trim()
+  t = t.replace(/\s*\(\s*y alrededores\s*\)\s*$/i, '').replace(/\s+y alrededores$/i, '').trim()
   const conCodigo = /^(.*\S)\s+\(?([A-Z]{3})\)?$/.exec(t)
   if (conCodigo) t = conCodigo[1]
   return t === '' ? null : comoNombrePropio(t)
