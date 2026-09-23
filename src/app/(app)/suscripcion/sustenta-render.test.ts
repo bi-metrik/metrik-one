@@ -23,7 +23,7 @@ vi.mock('./acciones', () => ({
   registrarEventoSustenta: async () => {},
 }))
 
-const { SeccionSustenta, TarjetaSustenta, ConfirmacionSustenta, PanelContenido, MatrizDecorativa } = await import(
+const { SeccionSustenta, TarjetaSustenta, ConfirmacionSustenta, PanelContenido, PanelSustenta, MatrizDecorativa } = await import(
   './sustenta'
 )
 
@@ -49,7 +49,8 @@ describe('la tarjeta de Sustenta', () => {
   const t = texto(html)
 
   it('dice el copy aprobado, con los dos CTAs y el descarte', () => {
-    expect(t).toContain('SUSTENTA · de MeTRIK ONE')
+    expect(t).toContain('Recomendado para tu CDA')
+    expect(t).toContain('¿Quieres más control sobre tu SARLAFT?')
     expect(t).toContain('Valida revisa las listas. Sustenta sostiene todo tu SARLAFT.')
     expect(t).toContain('conectados a las consultas que tu equipo ya hace en Valida')
     expect(t).toContain('Matriz de riesgos y controles al día, sin hojas de cálculo sueltas.')
@@ -70,11 +71,29 @@ describe('la tarjeta de Sustenta', () => {
     expect(t).not.toMatch(VETADAS)
   })
 
-  it('la marca es un wordmark con el escudo, y el titular es un encabezado nombrado', () => {
-    expect(html).toContain('data-wordmark-sustenta')
-    expect(html).toContain('lucide-shield-check')
+  it('la marca es el lockup de producto «MéTRIK sustenta», no un wordmark improvisado', () => {
+    expect(html).toContain('data-metrik-lockup="sustenta"')
+    expect(t).toContain('MéTRIK sustenta')
+    expect(t).not.toContain('SUSTENTA · de MeTRIK ONE')
+    expect(html).not.toContain('data-wordmark-sustenta')
+    // «MéTRIK» con é minúscula y tilde: nunca MeTRIK ni METRIK en lo que se ve.
+    expect(t).not.toMatch(/MeTRIK|METRIK/)
+  })
+
+  it('el orden: distintivo, lockup, gancho y titular, que sigue siendo un encabezado nombrado', () => {
+    const orden = ['Recomendado para tu CDA', 'MéTRIK sustenta', '¿Quieres más control sobre tu SARLAFT?', 'Valida revisa las listas.']
+    const pos = orden.map((o) => t.indexOf(o))
+    expect(pos.every((p) => p >= 0)).toBe(true)
+    expect([...pos].sort((a, b) => a - b)).toEqual(pos)
     expect(html).toMatch(/<h2 id="sustenta-titular"/)
     expect(html).toContain('aria-labelledby="sustenta-titular"')
+  })
+
+  it('el distintivo es discreto y con tokens de ONE, sin tono de promoción', () => {
+    const chip = /<span[^>]*data-distintivo-sustenta[^>]*>/.exec(html)?.[0] ?? ''
+    expect(chip).toContain('text-acento')
+    expect(chip).toContain('dark:text-acento-claro')
+    expect(t).not.toMatch(/promoci[oó]n|oferta|gratis/i)
   })
 
   it('la matriz es decorativa: 9 celdas en escritorio y una franja de 3 en el teléfono', () => {
@@ -121,18 +140,18 @@ describe('la matriz, ya en pantalla', () => {
 describe('la confirmación', () => {
   it('recién pedida: con el nombre y el de Mauricio', () => {
     const t = texto(renderToStaticMarkup(React.createElement(ConfirmacionSustenta, { recien: true, nombre: 'Ana' })))
-    expect(t).toContain('Listo, Ana. Mauricio Moreno, de MeTRIK, te escribirá para agendar la demostración.')
+    expect(t).toContain('Listo, Ana. Mauricio Moreno, de MéTRIK, te escribirá para agendar la demostración.')
     expect(t).not.toMatch(/[!¡]/)
   })
 
   it('recién pedida sin nombre conocido: no inventa uno', () => {
     const t = texto(renderToStaticMarkup(React.createElement(ConfirmacionSustenta, { recien: true, nombre: null })))
-    expect(t).toContain('Listo. Mauricio Moreno, de MeTRIK, te escribirá')
+    expect(t).toContain('Listo. Mauricio Moreno, de MéTRIK, te escribirá')
   })
 
   it('pedida antes (por esta persona o por otra del CDA)', () => {
     const t = texto(renderToStaticMarkup(React.createElement(ConfirmacionSustenta, { recien: false, nombre: 'Ana' })))
-    expect(t).toBe('Sustenta Ya recibimos tu solicitud. Te escribiremos para agendar la demostración.')
+    expect(t).toBe('MéTRIK sustenta Ya recibimos tu solicitud. Te escribiremos para agendar la demostración.')
   })
 
   it('la sección arranca en la confirmación si ya estaba pedida, sin CTAs', () => {
@@ -152,6 +171,12 @@ describe('la confirmación', () => {
 describe('el panel «Ver cómo funciona»', () => {
   const html = renderToStaticMarkup(React.createElement(PanelContenido))
   const t = texto(html)
+
+  it('el encabezado del panel usa el mismo lockup', () => {
+    const panel = renderToStaticMarkup(React.createElement(PanelSustenta, { onCerrar: () => {}, pie: null }))
+    expect(panel).toContain('data-metrik-lockup="sustenta"')
+    expect(texto(panel)).toMatch(/^MéTRIK sustenta/)
+  })
 
   it('encabeza con el titular y trae tres vistas ilustradas, una por beneficio', () => {
     expect(t).toContain('Valida revisa las listas. Sustenta sostiene todo tu SARLAFT.')

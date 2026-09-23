@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { CircleCheck, FileText, FolderCheck, Grid3x3, SearchCheck, ShieldCheck, UserCheck, X } from 'lucide-react'
+import MetrikLockup from '@/components/metrik-lockup'
 import { textoConfirmacion } from '@/lib/seccion-suscripcion/sugerencias'
 import { descartarSustenta, pedirContactoDeSustenta, registrarEventoSustenta } from './acciones'
 
@@ -32,19 +33,24 @@ type Estado =
 
 // ── Piezas de marca ───────────────────────────────────────────────────────────────────────
 
-export function WordmarkSustenta({ tamano = 'md' }: { tamano?: 'sm' | 'md' }) {
-  const caja = tamano === 'sm' ? 'size-7 rounded-md' : 'size-9 rounded-lg'
-  const icono = tamano === 'sm' ? 'size-4' : 'size-5'
-  const texto = tamano === 'sm' ? 'text-base' : 'text-lg'
+/**
+ * El lockup de producto «MéTRIK sustenta», el mismo patrón de «MéTRIK one»: sale de la fuente única
+ * (`metrik-lockup.tsx`), nunca de un wordmark hecho aquí.
+ */
+export function LockupSustenta({ tamano = 'md' }: { tamano?: 'sm' | 'md' }) {
+  return <MetrikLockup size={tamano} producto="sustenta" />
+}
+
+/** El distintivo que dice qué es la tarjeta: una recomendación, no una promoción. */
+export const DISTINTIVO = 'Recomendado para tu CDA'
+
+function Distintivo() {
   return (
-    <span data-wordmark-sustenta className="inline-flex items-center gap-2">
-      <span
-        aria-hidden
-        className={`grid shrink-0 place-items-center bg-acento/10 text-acento dark:bg-acento-claro/15 dark:text-acento-claro ${caja}`}
-      >
-        <ShieldCheck className={icono} strokeWidth={2.25} />
-      </span>
-      <span className={`font-bold tracking-tight text-card-foreground ${texto}`}>Sustenta</span>
+    <span
+      data-distintivo-sustenta
+      className="inline-flex w-fit items-center rounded-full border border-acento/25 bg-acento/5 px-2.5 py-0.5 text-xs font-medium text-acento dark:border-acento-claro/30 dark:bg-acento-claro/10 dark:text-acento-claro"
+    >
+      {DISTINTIVO}
     </span>
   )
 }
@@ -118,6 +124,7 @@ function FranjaDecorativa({ visible }: { visible: boolean }) {
 
 // ── Copy ─────────────────────────────────────────────────────────────────────────────────
 
+export const GANCHO = '¿Quieres más control sobre tu SARLAFT?'
 export const TITULAR = 'Valida revisa las listas. Sustenta sostiene todo tu SARLAFT.'
 export const BAJADA =
   'Matriz de riesgos, segmentación, vinculación de contrapartes y soportes en un solo lugar, conectados a las consultas que tu equipo ya hace en Valida.'
@@ -265,11 +272,18 @@ export function TarjetaSustenta(p: {
             <FranjaDecorativa visible={visible} />
           </div>
           <div className="space-y-3">
-            <WordmarkSustenta />
-            <p className="text-xs font-semibold tracking-wide text-muted-foreground">SUSTENTA · de MeTRIK ONE</p>
-            <h2 id="sustenta-titular" className="text-lg font-bold leading-snug text-card-foreground sm:text-xl">
-              {TITULAR}
-            </h2>
+            <div className="flex flex-col items-start gap-2.5">
+              <Distintivo />
+              <LockupSustenta />
+            </div>
+            <div className="space-y-1 pt-1">
+              <p data-gancho-sustenta className="text-sm font-medium text-muted-foreground">
+                {GANCHO}
+              </p>
+              <h2 id="sustenta-titular" className="text-lg font-bold leading-snug text-card-foreground sm:text-xl">
+                {TITULAR}
+              </h2>
+            </div>
             <p className="text-sm leading-relaxed text-muted-foreground">{BAJADA}</p>
           </div>
           <ul className="space-y-2.5">
@@ -323,7 +337,7 @@ export function ConfirmacionSustenta({ recien, nombre }: { recien: boolean; nomb
       aria-label="Sustenta"
       className="space-y-3 rounded-xl border border-acento/20 bg-card p-5 text-card-foreground dark:border-acento-claro/20"
     >
-      <WordmarkSustenta tamano="sm" />
+      <LockupSustenta tamano="sm" />
       <MensajeConfirmacion recien={recien} nombre={nombre} />
     </section>
   )
@@ -360,7 +374,7 @@ export function PanelSustenta({ onCerrar, pie }: { onCerrar: () => void; pie: Re
       >
         <div className="flex-1 overflow-y-auto p-5 sm:p-6">
           <div className="flex items-start justify-between gap-3">
-            <WordmarkSustenta />
+            <LockupSustenta />
             <button
               ref={cerrarRef}
               type="button"

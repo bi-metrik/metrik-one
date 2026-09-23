@@ -23,3 +23,12 @@ visible pero **pierde los eventos en silencio**. El CTA depende además de `inte
   visible) y un `.mjs` de solo lectura por CDP. `next build` SÍ corrió en esta sesión.
 
 Relacionado: [[project-seccion-suscripcion-cda]], [[medir-contraste-en-el-render]].
+
+**v2 (2026-09-23, rama `feat/sustenta-lockup-y-cuota-vencida`):** la marca pasa al lockup de
+producto: `MetrikLockup` acepta `producto="sustenta"` (default `one`, los usos viejos no cambian).
+- ⚠️ El brief pedía pesos 800/300; el componente usa **700/400 por la decisión de marca del
+  2026-09-07** (Schibsted arranca en 400). Se respetó la fuente única, no el brief.
+- ⚠️ La línea de acento del lockup usa `--acento` también en oscuro: casi invisible sobre carbón.
+  Es de todos los lockups, no de Sustenta; si se toca, cambia login y demás.
+- Marca en texto corrido: la app mezcla `MéTRIK` y `MeTRIK` (~69 vs ~41 visibles); en
+  /suscripcion quedó todo en `MéTRIK` (tarjeta de pago + confirmación de Sustenta).

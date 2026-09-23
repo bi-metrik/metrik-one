@@ -78,8 +78,11 @@ export function TarjetaPago({ lectura }: { lectura: LecturaPago }) {
           ) : (
             <p className="max-w-xs text-sm text-tinta-suave" data-sin-enlace>
               {pago.enlaceVencido
-                ? 'El enlace de pago de esta cuota venció. MeTRIK te enviará uno nuevo.'
-                : `El enlace de pago estará disponible antes del ${fechaCorta(pago.fechaVencimiento)}.`}
+                ? 'El enlace de pago de esta cuota venció. MéTRIK te enviará uno nuevo.'
+                : pago.vencida
+                  ? // Prometer el enlace «antes del» una fecha ya pasada no tiene sentido.
+                    'MéTRIK te enviará el enlace de pago de esta cuota.'
+                  : `El enlace de pago estará disponible antes del ${fechaCorta(pago.fechaVencimiento)}.`}
             </p>
           )}
         </div>

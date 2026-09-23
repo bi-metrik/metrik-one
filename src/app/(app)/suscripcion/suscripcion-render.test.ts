@@ -91,8 +91,26 @@ describe('la tarjeta de pago', () => {
     expect(texto(html)).toContain('El enlace de pago estará disponible antes del 30/09/2026.')
   })
 
-  it('con el enlace vencido tampoco: dice que venció', () => {
-    expect(texto(pendiente({ enlacePago: null, enlaceVencido: true }))).toContain('El enlace de pago de esta cuota venció.')
+  it('sin enlace y con la cuota ya vencida: no promete una fecha pasada', () => {
+    const html = pendiente({ enlacePago: null, vencida: true })
+    const sinEnlace = texto(/<p[^>]*data-sin-enlace[^>]*>[\s\S]*?<\/p>/.exec(html)?.[0] ?? '')
+    expect(html).not.toMatch(/>Pagar en línea</)
+    expect(sinEnlace).toBe('MéTRIK te enviará el enlace de pago de esta cuota.')
+    expect(texto(html)).not.toContain('estará disponible antes')
+  })
+
+  it('con el enlace vencido tampoco: dice que venció (vencida o no la cuota)', () => {
+    for (const vencida of [false, true]) {
+      const t = texto(pendiente({ enlacePago: null, enlaceVencido: true, vencida }))
+      expect(t).toContain('El enlace de pago de esta cuota venció. MéTRIK te enviará uno nuevo.')
+      expect(t).not.toContain('estará disponible antes')
+    }
+  })
+
+  it('la marca se escribe MéTRIK en lo que se ve', () => {
+    for (const extra of [{ enlacePago: null }, { enlacePago: null, vencida: true }, { enlacePago: null, enlaceVencido: true }]) {
+      expect(texto(pendiente(extra))).not.toMatch(/MeTRIK|METRIK/)
+    }
   })
 
   it('una cuota vencida lo dice, y un abono parcial también', () => {
