@@ -82,6 +82,9 @@ import {
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
+import { estadoDePasos, resumenDelViaje } from '@/lib/cotizaciones/estado-pasos'
+import { ordenarComoElViaje } from '@/lib/cotizaciones/opcion-viaje'
+import PasosCotizacion from '@/app/(app)/negocios/pasos-cotizacion'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
@@ -181,6 +184,11 @@ interface ItemRow {
    * workspace. Solo cuenta donde el workspace liquida el IVA sobre el ingreso propio.
    */
   base_iva?: string | null
+  /** Los tramos guardados del vuelo (B3). Los lee la ficha de la opción (P2). */
+  tramos?: unknown
+  /** El cargo en destino de la opción (B2). */
+  cargo_destino_valor?: number | string | null
+  cargo_destino_moneda?: string | null
   rubros: RubroRow[]
 }
 
@@ -309,9 +317,14 @@ interface Props {
    * tiene uno («Hotel en Cancún»). Ausente = la ranura se sugiere con su tipo a secas.
    */
   destinoViaje?: string | null
+  /**
+   * Las fechas del viaje (etapa 1 del negocio), para el renglón del paso «Viaje» del flujo de
+   * Trappvel. Ausente = el renglón no las dice.
+   */
+  fechasViaje?: { inicio: string | null; fin: string | null } | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -404,8 +417,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // opciones (hallazgo 11 del ensayo). Fuera de él, un solo grupo con todas, sin envoltura:
   // Termotech, Arca y WMC ven exactamente los mismos nodos que antes (R6).
   const bloquesDeLineas: BloqueDeLineas<ItemRow>[] = lineasPorTipo
-    ? bloquesPorRanura(itemsVisibles)
+    // P6 · los bloques como el viaje: vuelos por el orden de su tramo, hotel, traslados,
+    // actividades y lo suelto al final.
+    ? ordenarComoElViaje(bloquesPorRanura(itemsVisibles))
     : [{ grupo: null, etiqueta: null, tipo: null, lineas: itemsVisibles }]
+  // El lugar de cada vuelo en el viaje: «Vuelo 1 · BOG → ADZ», «Vuelo 2 · ADZ → PVA».
+  const numeroDeVuelo = new Map<string, number>()
+  for (const b of bloquesDeLineas) if (b.grupo && b.tipo === 'vuelo') numeroDeVuelo.set(b.grupo, numeroDeVuelo.size + 1)
   const abrirLinea = (itemId: string) => setExpandedItems(prev => new Set(prev).add(itemId))
   const todosExpandidos = itemsVisibles.length > 0 && itemsVisibles.every(i => expandedItems.has(i.id))
   const toggleTodos = () => {
@@ -874,8 +892,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
   const costoTotal = cascadaTotal.costoDirecto
 
-  return (
-    <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+  // ── Los trozos de la pantalla ──────────────────────────────────────────────
+  //
+  // Fuera del flujo de viaje se pintan en el MISMO orden y con los MISMOS nodos de
+  // siempre (R6, lo fija `cotizacion-editor-r6-render.test.ts` byte a byte). En el
+  // flujo de viaje (Trappvel) se reparten en los cinco pasos (`PasosCotizacion`).
+  const jsxEncabezado = (
+    <>
       {/* Header */}
       <div className="flex items-center gap-3">
         <button
@@ -926,7 +949,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           )}
         </div>
         <div className="flex gap-1.5">
-          {editable && (
+          {editable && !lineasPorTipo && (
             <button
               onClick={handleEnviar}
               disabled={isPending || motivoBotonEnviar !== null}
@@ -946,7 +969,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             <FileDown className="h-3 w-3" />
             PDF
           </button>
-          {textoCliente && (
+          {textoCliente && !lineasPorTipo && (
             <button
               type="button"
               onClick={() => setVerTextoCliente(v => !v)}
@@ -972,27 +995,42 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </button>
         </div>
       </div>
-
+    </>
+  )
+  const jsxPanelMargen = (
+    <>
       <PanelMargenSalida cotizacionId={cotizacion.id} salida={salida} />
-
+    </>
+  )
+  const jsxPanelTexto = (
+    <>
       {textoCliente && verTextoCliente && (
         <DocumentoClientePanel cotizacionId={cotizacion.id} inicial={textoCliente} />
       )}
-
+    </>
+  )
+  const jsxAvisoCongelada = (
+    <>
       {frozen && (
         <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 dark:bg-blue-950/20 dark:border-blue-900/30 dark:text-blue-300">
           <Lock className="h-4 w-4 shrink-0" />
           Esta cotización está congelada porque ya hay una cotización aprobada en este negocio.
         </div>
       )}
-
+    </>
+  )
+  const jsxAvisoNoEditable = (
+    <>
       {!editable && !frozen && (
         <div className="flex items-center gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
           <Lock className="h-4 w-4" />
           Esta cotización está en estado <strong>{estadoConfig?.label}</strong> y no se puede editar. Puedes duplicarla.
         </div>
       )}
-
+    </>
+  )
+  const jsxAvisoDesactualizadas = (
+    <>
       {/* Brief del 2026-09-22 · el precio de estas líneas no corresponde a los pasajeros de
           hoy. En borrador, se reemplaza el pantallazo; fuera de borrador la regla de
           Mauricio es otra cotización, y el aviso lo dice así. */}
@@ -1018,331 +1056,506 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </p>
         </div>
       )}
+    </>
+  )
+  const jsxExpandir = (
+    <>
+      {/* Abrir o cerrar todos los items de una. Con una cotizacion larga, abrir
+          uno por uno para ver los costos es el trabajo entero. El boton dice la
+          accion que va a ejecutar, no el estado en que esta. */}
+      {itemsVisibles.length > 1 && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={toggleTodos}
+            className="flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+          >
+            {todosExpandidos ? (
+              <><ChevronRight className="h-3 w-3" /> Contraer todo</>
+            ) : (
+              <><ChevronDown className="h-3 w-3" /> Expandir todo</>
+            )}
+          </button>
+        </div>
+      )}
+    </>
+  )
+  const jsxLista = (
+    <>
+      {/* Items */}
+      {bloquesDeLineas.map((bloque, indiceBloque) => {
+        const enBloqueDeRanura = bloque.grupo !== null
+        const lineasDelBloque = bloque.lineas.map(item => {
+        const itemCantidad = Number(item.cantidad) || 1
+        const itemPrecio = Number(item.precio_venta) || 0
+        const itemDescPct = Number(item.descuento_porcentaje) || 0
+        const isAjuste = item.es_ajuste === true
+        const isNegativo = itemPrecio < 0
+        // El segundo interruptor. `esFueraDelPrecio` es la regla completa (la misma
+        // que saca la línea del total); `puedeSalirDelPrecio` dice si el interruptor
+        // tiene sentido en esta línea: una sugerencia, o sea grupo no combinable y
+        // sin día. En cualquier otra línea no se ofrece, porque el servidor lo
+        // rechazaría.
+        const lineaDelInterruptor = {
+          id: item.id,
+          grupo: item.grupo ?? null,
+          es_ajuste: item.es_ajuste ?? false,
+          dia_relativo: item.dia_relativo ?? null,
+          entra_al_precio: item.entra_al_precio ?? null,
+        }
+        const esFueraDelPrecio = fueraDelPrecio(lineaDelInterruptor)
+        const puedeSalirDelPrecio =
+          puedeSerSugerido(lineaDelInterruptor) && diaDeItem(lineaDelInterruptor) === null
+        const rubrosConfirmados = soloConfirmados(item.rubros ?? [])
+        const rubrosSugeridos = soloSugeridos(item.rubros ?? [])
+        const tieneRubros = rubrosConfirmados.length > 0
+        const costoUnitario = rubrosConfirmados.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
+        // Costo del ítem que no se desglosa: vive en `subtotal`, escrito a mano.
+        const costoManual = tieneRubros ? 0 : Number(item.subtotal) || 0
+        const costoDelItem = tieneRubros ? costoUnitario : costoManual
+        // La línea ya calculada por la cascada. Es la misma que guarda el servidor.
+        const linea = lineaPorItem.get(item.id)
+        const costoLinea = linea?.costoLinea ?? 0
+        // El costo con su parte de los administrativos: es contra ESTE número contra
+        // el que la cascada aplica el margen, así que es contra el que hay que
+        // despejarlo cuando alguien escribe el precio al cliente. Usar `costoLinea`
+        // pelado daría un margen que no reproduce el precio pedido.
+        const costoDeVentaLinea = linea?.costoDeVentaLinea ?? 0
+        const precioLinea = linea?.precioLinea ?? Math.round(itemPrecio * itemCantidad)
+        // El margen propio es una EXCEPCIÓN declarada, no un campo vacío: `null`
+        // quiere decir "usa el de la cotización", y 0 quiere decir "esta línea va
+        // a costo". Leer los dos como 0 borraría la diferencia.
+        const margenPropio = item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
+        const itemMargen = linea?.margenAplicado ?? margenCotizacion
+        const precioFijadoAMano = item.precio_manual === true || (costoLinea <= 0 && itemPrecio > 0)
+        // Cuándo esta línea tiene algo propio que contar. Si no, su precio es el
+        // reflejo del margen general y no aporta nada repetirlo aquí.
+        const lineaDecideSuPrecio = margenPropio || precioFijadoAMano
+        // El margen REAL de la línea sale de la cascada, no se recalcula aquí: es
+        // la misma aritmética que aplica el servidor al guardar, y ya trae la parte
+        // de los administrativos que le toca a esta línea.
+        const margenRealPct = linea?.margenRealPct ?? null
+        const margenTexto = formatMargenPct(margenRealPct)
+        // Ni bloquean ni avisan lo mismo: bajo el piso es ROJO, entre piso y aviso
+        // es ámbar. Ninguno de los dos frena el envío — el rechazo en servidor
+        // llega con los itinerarios.
+        const nivelMargen = nivelDeMargen(margenRealPct, umbrales)
+        // Lo que se leyó del pantallazo de esta línea. Se resuelve ANTES del origen del
+        // margen porque el origen depende de lo que la captura haya fijado.
+        const tarifaDelItem = leerTarifaPax(item.tarifa_pax)
+        // El margen que puso el pantallazo, si esta línea se costeó con uno que traía
+        // los dos precios. Vive en `items.tarifa_pax` desde que se confirmó, así que
+        // sobrevive a cualquier edición posterior del margen: es el único número que
+        // permite decir «me moví tanto de lo que el proveedor me daba».
+        const margenDelPantallazo = tarifaDelItem.confirmada?.margenProveedor
+          ? margenDeLineaSegunConvencion(tarifaDelItem.confirmada.margenProveedor, convencionMargen)
+          : null
+        const margenEscrito = margenPropio ? Number(item.margen_porcentaje) : null
+        const origenMargen = origenDelMargen({
+          margenPropio,
+          precioManual: precioFijadoAMano,
+          margenDelPantallazo,
+          margenActual: margenEscrito,
+        })
+        // El número del pantallazo se enseña al lado del editado, nunca en su lugar.
+        // Solo cuando difieren: repetirlo idéntico haría dudar de si son dos cifras.
+        const pantallazoDecia = margenDelPantallazo !== null && origenMargen !== 'proveedor'
+          ? formatMargenPct(margenDelPantallazo)
+          : null
+        // La ranura de captura se DERIVA del grupo. `null` es respuesta legítima
+        // y frecuente: el método día a día y los componentes propios no tienen
+        // contrato de pantallazo y se costean a mano, como hoy.
+        const ranuraDeItem = ranuraDeGrupo(item.grupo)
+        // El precio por pasajero de la línea (P6): el precio que ya calculó la
+        // cascada, repartido en proporción al costo confirmado de cada tipo. Solo si
+        // ese costo sigue siendo el de la línea: si alguien editó los rubros después,
+        // el reparto describiría otra versión.
+        // Tampoco si la confirmación es de OTROS pasajeros u otra moneda (brief del
+        // 2026-09-22): repartir entre 2 adultos un precio que la línea ya dice que es
+        // para 3 es exactamente el precio mal que la alerta de la línea denuncia.
+        const precioPorPax = tarifaDelItem.confirmada
+          && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
+          && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
+          ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
+          : null
 
-      {/* Items editor */}
-      <div className="space-y-3">
-          {/* Abrir o cerrar todos los items de una. Con una cotizacion larga, abrir
-              uno por uno para ver los costos es el trabajo entero. El boton dice la
-              accion que va a ejecutar, no el estado en que esta. */}
-          {itemsVisibles.length > 1 && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={toggleTodos}
-                className="flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-              >
-                {todosExpandidos ? (
-                  <><ChevronRight className="h-3 w-3" /> Contraer todo</>
-                ) : (
-                  <><ChevronDown className="h-3 w-3" /> Expandir todo</>
-                )}
-              </button>
-            </div>
-          )}
-          {/* Items */}
-          {bloquesDeLineas.map((bloque, indiceBloque) => {
-            const enBloqueDeRanura = bloque.grupo !== null
-            const lineasDelBloque = bloque.lineas.map(item => {
-            const itemCantidad = Number(item.cantidad) || 1
-            const itemPrecio = Number(item.precio_venta) || 0
-            const itemDescPct = Number(item.descuento_porcentaje) || 0
-            const isAjuste = item.es_ajuste === true
-            const isNegativo = itemPrecio < 0
-            // El segundo interruptor. `esFueraDelPrecio` es la regla completa (la misma
-            // que saca la línea del total); `puedeSalirDelPrecio` dice si el interruptor
-            // tiene sentido en esta línea: una sugerencia, o sea grupo no combinable y
-            // sin día. En cualquier otra línea no se ofrece, porque el servidor lo
-            // rechazaría.
-            const lineaDelInterruptor = {
-              id: item.id,
-              grupo: item.grupo ?? null,
-              es_ajuste: item.es_ajuste ?? false,
-              dia_relativo: item.dia_relativo ?? null,
-              entra_al_precio: item.entra_al_precio ?? null,
-            }
-            const esFueraDelPrecio = fueraDelPrecio(lineaDelInterruptor)
-            const puedeSalirDelPrecio =
-              puedeSerSugerido(lineaDelInterruptor) && diaDeItem(lineaDelInterruptor) === null
-            const rubrosConfirmados = soloConfirmados(item.rubros ?? [])
-            const rubrosSugeridos = soloSugeridos(item.rubros ?? [])
-            const tieneRubros = rubrosConfirmados.length > 0
-            const costoUnitario = rubrosConfirmados.reduce((s: number, r: RubroRow) => s + (r.valor_total ?? 0), 0)
-            // Costo del ítem que no se desglosa: vive en `subtotal`, escrito a mano.
-            const costoManual = tieneRubros ? 0 : Number(item.subtotal) || 0
-            const costoDelItem = tieneRubros ? costoUnitario : costoManual
-            // La línea ya calculada por la cascada. Es la misma que guarda el servidor.
-            const linea = lineaPorItem.get(item.id)
-            const costoLinea = linea?.costoLinea ?? 0
-            // El costo con su parte de los administrativos: es contra ESTE número contra
-            // el que la cascada aplica el margen, así que es contra el que hay que
-            // despejarlo cuando alguien escribe el precio al cliente. Usar `costoLinea`
-            // pelado daría un margen que no reproduce el precio pedido.
-            const costoDeVentaLinea = linea?.costoDeVentaLinea ?? 0
-            const precioLinea = linea?.precioLinea ?? Math.round(itemPrecio * itemCantidad)
-            // El margen propio es una EXCEPCIÓN declarada, no un campo vacío: `null`
-            // quiere decir "usa el de la cotización", y 0 quiere decir "esta línea va
-            // a costo". Leer los dos como 0 borraría la diferencia.
-            const margenPropio = item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
-            const itemMargen = linea?.margenAplicado ?? margenCotizacion
-            const precioFijadoAMano = item.precio_manual === true || (costoLinea <= 0 && itemPrecio > 0)
-            // Cuándo esta línea tiene algo propio que contar. Si no, su precio es el
-            // reflejo del margen general y no aporta nada repetirlo aquí.
-            const lineaDecideSuPrecio = margenPropio || precioFijadoAMano
-            // El margen REAL de la línea sale de la cascada, no se recalcula aquí: es
-            // la misma aritmética que aplica el servidor al guardar, y ya trae la parte
-            // de los administrativos que le toca a esta línea.
-            const margenRealPct = linea?.margenRealPct ?? null
-            const margenTexto = formatMargenPct(margenRealPct)
-            // Ni bloquean ni avisan lo mismo: bajo el piso es ROJO, entre piso y aviso
-            // es ámbar. Ninguno de los dos frena el envío — el rechazo en servidor
-            // llega con los itinerarios.
-            const nivelMargen = nivelDeMargen(margenRealPct, umbrales)
-            // Lo que se leyó del pantallazo de esta línea. Se resuelve ANTES del origen del
-            // margen porque el origen depende de lo que la captura haya fijado.
-            const tarifaDelItem = leerTarifaPax(item.tarifa_pax)
-            // El margen que puso el pantallazo, si esta línea se costeó con uno que traía
-            // los dos precios. Vive en `items.tarifa_pax` desde que se confirmó, así que
-            // sobrevive a cualquier edición posterior del margen: es el único número que
-            // permite decir «me moví tanto de lo que el proveedor me daba».
-            const margenDelPantallazo = tarifaDelItem.confirmada?.margenProveedor
-              ? margenDeLineaSegunConvencion(tarifaDelItem.confirmada.margenProveedor, convencionMargen)
-              : null
-            const margenEscrito = margenPropio ? Number(item.margen_porcentaje) : null
-            const origenMargen = origenDelMargen({
-              margenPropio,
-              precioManual: precioFijadoAMano,
-              margenDelPantallazo,
-              margenActual: margenEscrito,
-            })
-            // El número del pantallazo se enseña al lado del editado, nunca en su lugar.
-            // Solo cuando difieren: repetirlo idéntico haría dudar de si son dos cifras.
-            const pantallazoDecia = margenDelPantallazo !== null && origenMargen !== 'proveedor'
-              ? formatMargenPct(margenDelPantallazo)
-              : null
-            // La ranura de captura se DERIVA del grupo. `null` es respuesta legítima
-            // y frecuente: el método día a día y los componentes propios no tienen
-            // contrato de pantallazo y se costean a mano, como hoy.
-            const ranuraDeItem = ranuraDeGrupo(item.grupo)
-            // El precio por pasajero de la línea (P6): el precio que ya calculó la
-            // cascada, repartido en proporción al costo confirmado de cada tipo. Solo si
-            // ese costo sigue siendo el de la línea: si alguien editó los rubros después,
-            // el reparto describiría otra versión.
-            // Tampoco si la confirmación es de OTROS pasajeros u otra moneda (brief del
-            // 2026-09-22): repartir entre 2 adultos un precio que la línea ya dice que es
-            // para 3 es exactamente el precio mal que la alerta de la línea denuncia.
-            const precioPorPax = tarifaDelItem.confirmada
-              && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
-              && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
-              ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
-              : null
+        // EL BOTÓN DICE LO QUE HACE (§4.2). Se llamaba «Agregar alternativa a esta
+        // línea», y «alternativa» no dice ninguna de las dos cosas que importan: que
+        // COMPITE y que solo una entra al precio. Con la ranura resuelta el botón la
+        // nombra («otra opción de vuelo»), que es el vocabulario con el que la persona
+        // está pensando. Dónde se pinta lo decide el flujo (§2.2), no este bloque.
+        const botonOtraOpcion = (
+          <>
+            {/* La opción nace VACÍA de costo: es otro proveedor, no una variante del
+                mismo precio. Copiarle los rubros dejaría a WINGO costando lo que
+                AVIANCA sin que se note. */}
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => {
+                startTransition(async () => {
+                  const res = await agregarOpcionAItem(item.id, '')
+                  if (!res.success) { toast.error(res.error); return }
+                  toast.success(`Otra opción en «${res.grupo}». Solo una entra al precio: cárgale su costo.`)
+                  router.refresh()
+                })
+              }}
+              className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              <Plus className="h-3 w-3" />
+              {ranuraDeItem
+                ? `Agregar otra opción de ${ranuraDeItem.label.toLowerCase()}`
+                : 'Agregar otra opción a esta línea'}
+            </button>
+            {/* El apaño de la §6 del diseño, y es requisito mientras una opción no
+                pueda tener varias líneas que sumen (§4.1, sin construir): el segundo
+                tramo de un mismo viaje NO va aquí. Cargado como opción, el motor se
+                queda con uno solo y el PDF sale sin el otro — con el precio incompleto
+                y buen aspecto. */}
+            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+              Solo una opción entra al precio final. Las demás quedan para comparar.
+              {' '}Un tramo adicional del mismo viaje no es una opción: va como componente aparte.
+            </p>
+          </>
+        )
 
-            // EL BOTÓN DICE LO QUE HACE (§4.2). Se llamaba «Agregar alternativa a esta
-            // línea», y «alternativa» no dice ninguna de las dos cosas que importan: que
-            // COMPITE y que solo una entra al precio. Con la ranura resuelta el botón la
-            // nombra («otra opción de vuelo»), que es el vocabulario con el que la persona
-            // está pensando. Dónde se pinta lo decide el flujo (§2.2), no este bloque.
-            const botonOtraOpcion = (
-              <>
-                {/* La opción nace VACÍA de costo: es otro proveedor, no una variante del
-                    mismo precio. Copiarle los rubros dejaría a WINGO costando lo que
-                    AVIANCA sin que se note. */}
-                <button
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => {
-                    startTransition(async () => {
-                      const res = await agregarOpcionAItem(item.id, '')
-                      if (!res.success) { toast.error(res.error); return }
-                      toast.success(`Otra opción en «${res.grupo}». Solo una entra al precio: cárgale su costo.`)
-                      router.refresh()
-                    })
-                  }}
-                  className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
-                >
-                  <Plus className="h-3 w-3" />
-                  {ranuraDeItem
-                    ? `Agregar otra opción de ${ranuraDeItem.label.toLowerCase()}`
-                    : 'Agregar otra opción a esta línea'}
-                </button>
-                {/* El apaño de la §6 del diseño, y es requisito mientras una opción no
-                    pueda tener varias líneas que sumen (§4.1, sin construir): el segundo
-                    tramo de un mismo viaje NO va aquí. Cargado como opción, el motor se
-                    queda con uno solo y el PDF sale sin el otro — con el precio incompleto
-                    y buen aspecto. */}
-                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-                  Solo una opción entra al precio final. Las demás quedan para comparar.
-                  {' '}Un tramo adicional del mismo viaje no es una opción: va como componente aparte.
-                </p>
-              </>
-            )
-
-            return (
-            <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
-              <div
-                className={`flex ${isAjuste ? '' : 'cursor-pointer'} items-center justify-between px-4 py-3`}
-                onClick={() => !isAjuste && toggleItem(item.id)}
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {!isAjuste && (expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />)}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{item.nombre || 'Item sin nombre'}</span>
-                      {isAjuste && (
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
-                      )}
-                      {/* La ranura, visible sin abrir la linea: con nueve lineas en
-                          pantalla, saber cuales compiten entre si es la unica forma de
-                          leer la lista. «opción» se dice aparte porque una opcion
-                          no se suma al total salvo que un itinerario la elija.
-                          ⚠️ Se pinta la ETIQUETA de la ranura, no el grupo crudo: con dos
-                          vuelos, «vuelo» y «vuelo 2: san andrés a providencia» se leen
-                          como dos cosas sin relación, y el chip existe justo para que se
-                          vea de un vistazo cuáles son del mismo tipo y cuáles compiten. */}
-                      {/* Dentro del bloque de su ranura el chip sobra: el encabezado ya la nombra. */}
-                      {!isAjuste && item.grupo && !enBloqueDeRanura && (
-                        <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          {etiquetaDeRanura(item.grupo)}{item.opcion_de ? ' · opción' : ''}
-                        </span>
-                      )}
-                      {/* «Opción 2» es un relleno hasta que se lea su pantallazo, y lo dice. */}
-                      {!isAjuste && lineasPorTipo && esNombreDeOpcion(item.nombre) && !leerTarifaPax(item.tarifa_pax).casillas?.grupo_completo && (
-                        <span className="text-[10px] text-muted-foreground">· pega el pantallazo</span>
-                      )}
-                      {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
-                          líneas en pantalla, en qué sección del documento sale cada una
-                          es justo lo que hay que poder leer de un vistazo. Solo se
-                          pintan cuando la cotización ya usa días, para no meterle ruido
-                          a una cotización que no es un viaje. */}
-                      {!isAjuste && porDias && item.dia_relativo != null && (
-                        <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
-                          Día {item.dia_relativo}
-                        </span>
-                      )}
-                      {!isAjuste && idsSugeridos.has(item.id) && (
-                        <span
-                          title={
-                            esFueraDelPrecio
-                              ? 'Se imprime al final como actividad adicional no incluida, con su precio a la vista. No suma al total.'
-                              : 'Sin día: se imprime al final como actividad adicional no incluida'
-                          }
-                          className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                        >
-                          Sugerida{esFueraDelPrecio ? ' · fuera del precio' : ''}{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
-                        </span>
-                      )}
-                      {!isAjuste && costoDelItem === 0 && (
-                        <span
-                          title="Este item no tiene costo, así que no suma al costo total ni deja medir margen"
-                          className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                        >
-                          Sin costo
-                        </span>
-                      )}
-                    </div>
-                    {!isAjuste && (item.descripcion || costoDelItem > 0) && (
-                      <span className="text-[10px] text-muted-foreground truncate block">
-                        {costoDelItem > 0 && <span>Costo unit. {formatCOP(costoDelItem)}</span>}
-                        {costoDelItem > 0 && item.descripcion && <span> · </span>}
-                        {item.descripcion}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="text-right">
-                    {itemCantidad > 1 && (
-                      <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
-                    )}
-                    <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''} ${esFueraDelPrecio ? 'text-muted-foreground' : ''}`}>{formatCOP(precioLinea)}</span>
-                    {/* Fuera del precio la cifra sigue a la vista (es la que el cliente
-                        lee en el documento), pero se dice que no suma: una columna de
-                        precios donde una no cuenta, sin decirlo, se lee mal. */}
-                    {esFueraDelPrecio && (
-                      <span className="block text-[10px] text-muted-foreground">No suma al total</span>
-                    )}
-                    {/* El descuento del ítem ya está dentro del costo: repetirlo aquí
-                        como rebaja del precio lo contaría dos veces. */}
-                    {!isAjuste && costoLinea > 0 && (
-                      <span className="block text-[10px] text-muted-foreground">Costo {formatCOP(costoLinea)}</span>
-                    )}
-                    {/* El margen de la línea, SIEMPRE que se pueda medir — también
-                        cuando lo hereda de la cotización. Antes solo aparecía en las
-                        líneas con excepción propia, así que armar un viaje entero sin
-                        una sola excepción dejaba la pantalla sin un solo margen a la
-                        vista: exactamente lo que hay que poder ver mientras se arma. */}
-                    {!isAjuste && margenTexto && (
-                      <span
-                        className={`block text-[10px] font-medium tabular-nums ${claseNivelMargen(nivelMargen)}`}
-                        title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
-                      >
-                        Margen {margenTexto}
-                      </span>
-                    )}
-                    {/* Precio sin costo con el IVA sobre el ingreso propio: no se inventa
-                        una base. Se dice en la línea, que es donde se arregla. */}
-                    {!isAjuste && !esFueraDelPrecio && ivaPorLinea?.get(item.id)?.sinCosto && (
-                      <span className="block text-[10px] font-medium text-amber-700">{TEXTO_IVA_SIN_CALCULAR}</span>
-                    )}
-                  </div>
-                  {editable && !isAjuste && (
-                    <button
-                      onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
-                      className="rounded p-1 text-red-500 hover:bg-red-50"
+        return (
+        <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
+          <div
+            className={`flex ${isAjuste ? '' : 'cursor-pointer'} items-center justify-between px-4 py-3`}
+            onClick={() => !isAjuste && toggleItem(item.id)}
+          >
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              {!isAjuste && (expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />)}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium truncate">{item.nombre || 'Item sin nombre'}</span>
+                  {isAjuste && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
+                  )}
+                  {/* La ranura, visible sin abrir la linea: con nueve lineas en
+                      pantalla, saber cuales compiten entre si es la unica forma de
+                      leer la lista. «opción» se dice aparte porque una opcion
+                      no se suma al total salvo que un itinerario la elija.
+                      ⚠️ Se pinta la ETIQUETA de la ranura, no el grupo crudo: con dos
+                      vuelos, «vuelo» y «vuelo 2: san andrés a providencia» se leen
+                      como dos cosas sin relación, y el chip existe justo para que se
+                      vea de un vistazo cuáles son del mismo tipo y cuáles compiten. */}
+                  {/* Dentro del bloque de su ranura el chip sobra: el encabezado ya la nombra. */}
+                  {!isAjuste && item.grupo && !enBloqueDeRanura && (
+                    <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {etiquetaDeRanura(item.grupo)}{item.opcion_de ? ' · opción' : ''}
+                    </span>
+                  )}
+                  {/* «Opción 2» es un relleno hasta que se lea su pantallazo, y lo dice. */}
+                  {!isAjuste && lineasPorTipo && esNombreDeOpcion(item.nombre) && !leerTarifaPax(item.tarifa_pax).casillas?.grupo_completo && (
+                    <span className="text-[10px] text-muted-foreground">· pega el pantallazo</span>
+                  )}
+                  {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
+                      líneas en pantalla, en qué sección del documento sale cada una
+                      es justo lo que hay que poder leer de un vistazo. Solo se
+                      pintan cuando la cotización ya usa días, para no meterle ruido
+                      a una cotización que no es un viaje. */}
+                  {!isAjuste && porDias && item.dia_relativo != null && (
+                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                      Día {item.dia_relativo}
+                    </span>
+                  )}
+                  {!isAjuste && idsSugeridos.has(item.id) && (
+                    <span
+                      title={
+                        esFueraDelPrecio
+                          ? 'Se imprime al final como actividad adicional no incluida, con su precio a la vista. No suma al total.'
+                          : 'Sin día: se imprime al final como actividad adicional no incluida'
+                      }
+                      className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                     >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+                      Sugerida{esFueraDelPrecio ? ' · fuera del precio' : ''}{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
+                    </span>
+                  )}
+                  {!isAjuste && costoDelItem === 0 && (
+                    <span
+                      title="Este item no tiene costo, así que no suma al costo total ni deja medir margen"
+                      className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                    >
+                      Sin costo
+                    </span>
                   )}
                 </div>
+                {!isAjuste && (item.descripcion || costoDelItem > 0) && (
+                  <span className="text-[10px] text-muted-foreground truncate block">
+                    {costoDelItem > 0 && <span>Costo unit. {formatCOP(costoDelItem)}</span>}
+                    {costoDelItem > 0 && item.descripcion && <span> · </span>}
+                    {item.descripcion}
+                  </span>
+                )}
               </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="text-right">
+                {itemCantidad > 1 && (
+                  <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
+                )}
+                <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''} ${esFueraDelPrecio ? 'text-muted-foreground' : ''}`}>{formatCOP(precioLinea)}</span>
+                {/* Fuera del precio la cifra sigue a la vista (es la que el cliente
+                    lee en el documento), pero se dice que no suma: una columna de
+                    precios donde una no cuenta, sin decirlo, se lee mal. */}
+                {esFueraDelPrecio && (
+                  <span className="block text-[10px] text-muted-foreground">No suma al total</span>
+                )}
+                {/* El descuento del ítem ya está dentro del costo: repetirlo aquí
+                    como rebaja del precio lo contaría dos veces. */}
+                {!isAjuste && costoLinea > 0 && (
+                  <span className="block text-[10px] text-muted-foreground">Costo {formatCOP(costoLinea)}</span>
+                )}
+                {/* El margen de la línea, SIEMPRE que se pueda medir — también
+                    cuando lo hereda de la cotización. Antes solo aparecía en las
+                    líneas con excepción propia, así que armar un viaje entero sin
+                    una sola excepción dejaba la pantalla sin un solo margen a la
+                    vista: exactamente lo que hay que poder ver mientras se arma. */}
+                {!isAjuste && margenTexto && (
+                  <span
+                    className={`block text-[10px] font-medium tabular-nums ${claseNivelMargen(nivelMargen)}`}
+                    title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
+                  >
+                    Margen {margenTexto}
+                  </span>
+                )}
+                {/* Precio sin costo con el IVA sobre el ingreso propio: no se inventa
+                    una base. Se dice en la línea, que es donde se arregla. */}
+                {!isAjuste && !esFueraDelPrecio && ivaPorLinea?.get(item.id)?.sinCosto && (
+                  <span className="block text-[10px] font-medium text-amber-700">{TEXTO_IVA_SIN_CALCULAR}</span>
+                )}
+              </div>
+              {editable && !isAjuste && (
+                <button
+                  onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
+                  className="rounded p-1 text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
 
-              {!isAjuste && expandedItems.has(item.id) && (
-                <div className="border-t px-4 pb-3 pt-2">
-                  {/* La FICHA de la línea: cómo se llama, en qué ranura compite y en
-                      qué unidad se vende.
+          {!isAjuste && expandedItems.has(item.id) && (
+            <div className="border-t px-4 pb-3 pt-2">
+              {/* La FICHA de la línea: cómo se llama, en qué ranura compite y en
+                  qué unidad se vende.
 
-                      · El NOMBRE no tenía input en ninguna parte: se pintaba como
-                        texto en el encabezado. Una alternativa nace llamándose
-                        «Vuelo BOG-PUJ (alternativa)» y no había forma de renombrarla a
-                        «WINGO», que es justo lo que distingue una opción de otra en la
-                        tabla de combinaciones y en el PDF. Va aquí y no en el
-                        encabezado porque ese renglón alterna la línea al hacer clic.
-                      · El GRUPO pasa de texto libre a lista: ver `SelectorRanura`. */}
-                  {editable && (
-                    <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <div className="col-span-2">
-                        <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                          Nombre de la línea
-                        </label>
-                        <input
-                          type="text"
-                          defaultValue={item.nombre ?? ''}
-                          placeholder="AVIANCA BOG–PUJ, Hard Rock Punta Cana…"
-                          maxLength={200}
-                          aria-label="Nombre de la línea"
-                          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-                          onBlur={e => {
-                            const val = comoSeGuarda(e.target.value.trim())
-                            // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
-                            e.target.value = val
-                            if (val === (item.nombre ?? '')) return
-                            startTransition(async () => {
-                              const res = await updateItem(item.id, { nombre: val })
-                              if (!res.success) { toast.error(res.error); return }
-                              router.refresh()
-                            })
-                          }}
-                          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                        />
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          Es lo que distingue una alternativa de otra y lo que imprime el PDF
-                        </p>
-                      </div>
-                      {/* EL GRUPO ya lo fijó el botón que se apretó («+ Vuelo») y el chip
-                          del encabezado lo repite. En el flujo de viaje deja la primera
-                          fila y pasa a una acción secundaria: volver a preguntarlo en cada
-                          línea es preguntar lo que el sistema ya sabe. Fuera de ese flujo
-                          (Termotech, Arca, WMC) el campo se queda donde estaba. */}
-                      {!lineasPorTipo && (
+                  · El NOMBRE no tenía input en ninguna parte: se pintaba como
+                    texto en el encabezado. Una alternativa nace llamándose
+                    «Vuelo BOG-PUJ (alternativa)» y no había forma de renombrarla a
+                    «WINGO», que es justo lo que distingue una opción de otra en la
+                    tabla de combinaciones y en el PDF. Va aquí y no en el
+                    encabezado porque ese renglón alterna la línea al hacer clic.
+                  · El GRUPO pasa de texto libre a lista: ver `SelectorRanura`. */}
+              {editable && (
+                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="col-span-2">
+                    <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                      Nombre de la línea
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue={item.nombre ?? ''}
+                      placeholder="AVIANCA BOG–PUJ, Hard Rock Punta Cana…"
+                      maxLength={200}
+                      aria-label="Nombre de la línea"
+                      className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                      onBlur={e => {
+                        const val = comoSeGuarda(e.target.value.trim())
+                        // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
+                        e.target.value = val
+                        if (val === (item.nombre ?? '')) return
+                        startTransition(async () => {
+                          const res = await updateItem(item.id, { nombre: val })
+                          if (!res.success) { toast.error(res.error); return }
+                          router.refresh()
+                        })
+                      }}
+                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                    />
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      Es lo que distingue una alternativa de otra y lo que imprime el PDF
+                    </p>
+                  </div>
+                  {/* EL GRUPO ya lo fijó el botón que se apretó («+ Vuelo») y el chip
+                      del encabezado lo repite. En el flujo de viaje deja la primera
+                      fila y pasa a una acción secundaria: volver a preguntarlo en cada
+                      línea es preguntar lo que el sistema ya sabe. Fuera de ese flujo
+                      (Termotech, Arca, WMC) el campo se queda donde estaba. */}
+                  {!lineasPorTipo && (
+                    <SelectorRanura
+                      valor={item.grupo ?? null}
+                      gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                      disabled={isPending}
+                      onCambio={val => {
+                        startTransition(async () => {
+                          const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                          if (!res.success) { toast.error(res.error); return }
+                          router.refresh()
+                        })
+                      }}
+                    />
+                  )}
+                  {/* LA UNIDAD no se teclea en el flujo de viaje.
+                      La escribe la propia ranura al leer el pantallazo
+                      (`ranura.unidadPorDefecto`), y al confirmar la tarifa por
+                      pasajero el servidor la deja en `null` a propósito: la línea es
+                      el grupo y el reparto lo dicen los rubros. Teclear «pax» aquí
+                      era pedir a mano un dato que el flujo escribe solo y que
+                      además borra un minuto después. */}
+                  {!lineasPorTipo && (
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                        Unidad
+                      </label>
+                      <input
+                        type="text"
+                        defaultValue={item.unidad ?? ''}
+                        placeholder="pax, noches, trayectos…"
+                        className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                        onBlur={e => {
+                          const val = e.target.value.trim()
+                          if (val === (item.unidad ?? '')) return
+                          startTransition(async () => {
+                            const res = await actualizarRanuraDeItem(item.id, { unidad: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                      />
+                      {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
+                          pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
+                          morfología del español sobre texto libre acierta a veces. Por eso
+                          el marcador sugiere la forma en plural, que es la del caso común. */}
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Se imprime tal cual al cliente
+                      </p>
+                    </div>
+                  )}
+                  {/* EL DÍA. Un solo interruptor: con día la línea imprime en el
+                      itinerario día por día; sin día, y si declara un grupo que no
+                      se combina, cae al paquete de «actividades adicionales no
+                      incluidas». No hay un segundo desplegable de sección.
+
+                      Los vuelos y hoteles no lo muestran: se comparan en la tabla
+                      de combinaciones y su sitio lo decide el itinerario elegido.
+                      Ofrecer un campo que el servidor va a rechazar es peor que no
+                      ofrecerlo. */}
+                  {puedeLlevarDia({ id: item.id, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false }) && (
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                        Día del viaje
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        defaultValue={item.dia_relativo ?? ''}
+                        placeholder="Sin día"
+                        aria-label="Día del viaje"
+                        // Fuera del precio no lleva día: con día entraría al
+                        // itinerario, o sea incluida. El servidor lo rechaza, así
+                        // que la pantalla no lo ofrece.
+                        disabled={esFueraDelPrecio}
+                        className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+                        onBlur={e => {
+                          const txt = e.target.value.trim()
+                          const val = txt === '' ? null : Number(txt)
+                          if (val === (item.dia_relativo ?? null)) return
+                          startTransition(async () => {
+                            const res = await actualizarDiaDeItem(item.id, { dia_relativo: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                      />
+                      {/* El día es RELATIVO: el itinerario se arma antes de que la
+                          salida tenga fecha. */}
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {esFueraDelPrecio
+                          ? 'Fuera del precio: márcala para que entre al precio antes de darle un día'
+                          : idsSugeridos.has(item.id)
+                            ? 'Sin día: sale como actividad adicional no incluida'
+                            : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
+                      </p>
+                    </div>
+                  )}
+                  {/* EL SEGUNDO INTERRUPTOR: ¿entra al precio? Separa MOSTRAR el
+                      precio de COBRARLO. Solo se ofrece en una sugerencia (grupo que
+                      no se combina, sin día): en cualquier otra línea sacarla del
+                      precio la haría desaparecer del documento sin sumar, y el
+                      servidor lo rechaza. No es el check de mostrar: aquel es
+                      visibilidad, este es plata, y por eso recalcula el total. */}
+                  {puedeSalirDelPrecio && (
+                    <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
+                      <input
+                        type="checkbox"
+                        defaultChecked={!esFueraDelPrecio}
+                        disabled={isPending}
+                        aria-label="Entra al precio de la cotización"
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        onChange={e => {
+                          const val = e.target.checked
+                          startTransition(async () => {
+                            const res = await actualizarDiaDeItem(item.id, { entra_al_precio: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                      />
+                      <span className="text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground">Entra al precio de la cotización.</span>{' '}
+                        {esFueraDelPrecio
+                          ? 'Fuera del precio: se ofrece con su valor a la vista y no suma ni al total, ni al costo, ni al margen.'
+                          : 'Desmárcala para ofrecerla como actividad adicional: el cliente ve su precio y no suma al total.'}
+                      </span>
+                    </label>
+                  )}
+                  {/* El check de la sugerencia. Solo aparece cuando la línea ES una
+                      sugerencia: un interruptor que no aplica confunde más que
+                      ayudar, y aquí «no aplica» se sabe con certeza. */}
+                  {idsSugeridos.has(item.id) && (
+                    <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
+                      <input
+                        type="checkbox"
+                        defaultChecked={item.mostrar_en_sugeridos !== false}
+                        disabled={isPending}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        onChange={e => {
+                          const val = e.target.checked
+                          startTransition(async () => {
+                            const res = await actualizarDiaDeItem(item.id, { mostrar_en_sugeridos: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                      />
+                      <span className="text-[11px] text-muted-foreground">
+                        Mostrarla al cliente entre las actividades sugeridas.{' '}
+                        {esFueraDelPrecio ? (
+                          <span>Fuera del precio: oculta, ni se ve ni se cobra.</span>
+                        ) : (
+                          <span className="text-amber-700">
+                            Ocultarla NO la saca del total: para eso, desmarca «Entra al precio».
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  )}
+                  {/* Fuera del flujo de viaje el botón se queda donde estaba: el
+                      bloque de Termotech, Arca y WMC no cambia. */}
+                  {!lineasPorTipo && <div className="col-span-2 sm:col-span-4">{botonOtraOpcion}</div>}
+                  {/* MOVER LA LÍNEA A OTRA OPCIÓN. El grupo decide con quién compite:
+                      es el caso raro de querer que dos líneas se comparen entre sí, y
+                      por eso vive detrás de un clic en vez de en la primera fila. */}
+                  {lineasPorTipo && (
+                    <div className="col-span-2 sm:col-span-4">
+                      {moverGrupoDe === item.id ? (
                         <SelectorRanura
                           valor={item.grupo ?? null}
                           gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
@@ -1351,1404 +1564,1440 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             startTransition(async () => {
                               const res = await actualizarRanuraDeItem(item.id, { grupo: val })
                               if (!res.success) { toast.error(res.error); return }
+                              setMoverGrupoDe(null)
                               router.refresh()
                             })
                           }}
                         />
-                      )}
-                      {/* LA UNIDAD no se teclea en el flujo de viaje.
-                          La escribe la propia ranura al leer el pantallazo
-                          (`ranura.unidadPorDefecto`), y al confirmar la tarifa por
-                          pasajero el servidor la deja en `null` a propósito: la línea es
-                          el grupo y el reparto lo dicen los rubros. Teclear «pax» aquí
-                          era pedir a mano un dato que el flujo escribe solo y que
-                          además borra un minuto después. */}
-                      {!lineasPorTipo && (
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                            Unidad
-                          </label>
-                          <input
-                            type="text"
-                            defaultValue={item.unidad ?? ''}
-                            placeholder="pax, noches, trayectos…"
-                            className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-                            onBlur={e => {
-                              const val = e.target.value.trim()
-                              if (val === (item.unidad ?? '')) return
-                              startTransition(async () => {
-                                const res = await actualizarRanuraDeItem(item.id, { unidad: val })
-                                if (!res.success) { toast.error(res.error); return }
-                                router.refresh()
-                              })
-                            }}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                          />
-                          {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
-                              pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
-                              morfología del español sobre texto libre acierta a veces. Por eso
-                              el marcador sugiere la forma en plural, que es la del caso común. */}
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            Se imprime tal cual al cliente
-                          </p>
-                        </div>
-                      )}
-                      {/* EL DÍA. Un solo interruptor: con día la línea imprime en el
-                          itinerario día por día; sin día, y si declara un grupo que no
-                          se combina, cae al paquete de «actividades adicionales no
-                          incluidas». No hay un segundo desplegable de sección.
-
-                          Los vuelos y hoteles no lo muestran: se comparan en la tabla
-                          de combinaciones y su sitio lo decide el itinerario elegido.
-                          Ofrecer un campo que el servidor va a rechazar es peor que no
-                          ofrecerlo. */}
-                      {puedeLlevarDia({ id: item.id, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false }) && (
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                            Día del viaje
-                          </label>
-                          <input
-                            type="number"
-                            min={1}
-                            step={1}
-                            defaultValue={item.dia_relativo ?? ''}
-                            placeholder="Sin día"
-                            aria-label="Día del viaje"
-                            // Fuera del precio no lleva día: con día entraría al
-                            // itinerario, o sea incluida. El servidor lo rechaza, así
-                            // que la pantalla no lo ofrece.
-                            disabled={esFueraDelPrecio}
-                            className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
-                            onBlur={e => {
-                              const txt = e.target.value.trim()
-                              const val = txt === '' ? null : Number(txt)
-                              if (val === (item.dia_relativo ?? null)) return
-                              startTransition(async () => {
-                                const res = await actualizarDiaDeItem(item.id, { dia_relativo: val })
-                                if (!res.success) { toast.error(res.error); return }
-                                router.refresh()
-                              })
-                            }}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                          />
-                          {/* El día es RELATIVO: el itinerario se arma antes de que la
-                              salida tenga fecha. */}
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            {esFueraDelPrecio
-                              ? 'Fuera del precio: márcala para que entre al precio antes de darle un día'
-                              : idsSugeridos.has(item.id)
-                                ? 'Sin día: sale como actividad adicional no incluida'
-                                : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
-                          </p>
-                        </div>
-                      )}
-                      {/* EL SEGUNDO INTERRUPTOR: ¿entra al precio? Separa MOSTRAR el
-                          precio de COBRARLO. Solo se ofrece en una sugerencia (grupo que
-                          no se combina, sin día): en cualquier otra línea sacarla del
-                          precio la haría desaparecer del documento sin sumar, y el
-                          servidor lo rechaza. No es el check de mostrar: aquel es
-                          visibilidad, este es plata, y por eso recalcula el total. */}
-                      {puedeSalirDelPrecio && (
-                        <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
-                          <input
-                            type="checkbox"
-                            defaultChecked={!esFueraDelPrecio}
-                            disabled={isPending}
-                            aria-label="Entra al precio de la cotización"
-                            className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                            onChange={e => {
-                              const val = e.target.checked
-                              startTransition(async () => {
-                                const res = await actualizarDiaDeItem(item.id, { entra_al_precio: val })
-                                if (!res.success) { toast.error(res.error); return }
-                                router.refresh()
-                              })
-                            }}
-                          />
-                          <span className="text-[11px] text-muted-foreground">
-                            <span className="font-medium text-foreground">Entra al precio de la cotización.</span>{' '}
-                            {esFueraDelPrecio
-                              ? 'Fuera del precio: se ofrece con su valor a la vista y no suma ni al total, ni al costo, ni al margen.'
-                              : 'Desmárcala para ofrecerla como actividad adicional: el cliente ve su precio y no suma al total.'}
-                          </span>
-                        </label>
-                      )}
-                      {/* El check de la sugerencia. Solo aparece cuando la línea ES una
-                          sugerencia: un interruptor que no aplica confunde más que
-                          ayudar, y aquí «no aplica» se sabe con certeza. */}
-                      {idsSugeridos.has(item.id) && (
-                        <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
-                          <input
-                            type="checkbox"
-                            defaultChecked={item.mostrar_en_sugeridos !== false}
-                            disabled={isPending}
-                            className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                            onChange={e => {
-                              const val = e.target.checked
-                              startTransition(async () => {
-                                const res = await actualizarDiaDeItem(item.id, { mostrar_en_sugeridos: val })
-                                if (!res.success) { toast.error(res.error); return }
-                                router.refresh()
-                              })
-                            }}
-                          />
-                          <span className="text-[11px] text-muted-foreground">
-                            Mostrarla al cliente entre las actividades sugeridas.{' '}
-                            {esFueraDelPrecio ? (
-                              <span>Fuera del precio: oculta, ni se ve ni se cobra.</span>
-                            ) : (
-                              <span className="text-amber-700">
-                                Ocultarla NO la saca del total: para eso, desmarca «Entra al precio».
-                              </span>
-                            )}
-                          </span>
-                        </label>
-                      )}
-                      {/* Fuera del flujo de viaje el botón se queda donde estaba: el
-                          bloque de Termotech, Arca y WMC no cambia. */}
-                      {!lineasPorTipo && <div className="col-span-2 sm:col-span-4">{botonOtraOpcion}</div>}
-                      {/* MOVER LA LÍNEA A OTRA OPCIÓN. El grupo decide con quién compite:
-                          es el caso raro de querer que dos líneas se comparen entre sí, y
-                          por eso vive detrás de un clic en vez de en la primera fila. */}
-                      {lineasPorTipo && (
-                        <div className="col-span-2 sm:col-span-4">
-                          {moverGrupoDe === item.id ? (
-                            <SelectorRanura
-                              valor={item.grupo ?? null}
-                              gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
-                              disabled={isPending}
-                              onCambio={val => {
-                                startTransition(async () => {
-                                  const res = await actualizarRanuraDeItem(item.id, { grupo: val })
-                                  if (!res.success) { toast.error(res.error); return }
-                                  setMoverGrupoDe(null)
-                                  router.refresh()
-                                })
-                              }}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setMoverGrupoDe(item.id)}
-                              className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
-                            >
-                              Mover a otra opción
-                            </button>
-                          )}
-                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setMoverGrupoDe(item.id)}
+                          className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
+                        >
+                          Mover a otra opción
+                        </button>
                       )}
                     </div>
                   )}
+                </div>
+              )}
 
-                  {/* El cargue de pantallazo SOLO existe si la ranura de la línea tiene
-                      contrato de captura (§3.1). Un ítem sin grupo, o con un grupo propio
-                      como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
-                      parezca y ese número acaba dentro de un costo. */}
-                  {editable && ranuraDeItem && (
-                    <TarifaPasajeroItem
-                      itemId={item.id}
-                      ranura={ranuraDeItem}
-                      composicionViaje={composicionViaje}
-                      tarifaPax={item.tarifa_pax}
-                      costoUnitarioLinea={costoUnitario}
-                      sugeridosGuardados={rubrosSugeridos}
-                      onCambio={() => router.refresh()}
-                    />
-                  )}
-                  {/* Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Se ofrecen donde
-                      se ofrece el cargue de pantallazo —líneas con ranura del catálogo—
-                      porque es donde la pregunta significa algo: una línea de Termotech no
-                      gana una sección al abrir su cotización, que es R6 en la pantalla.
-                      ⚠️ NO se condiciona a `editable`: una cotización ya enviada tiene que
-                      poder MOSTRAR sus adicionales; lo que se apaga es escribirlos. */}
-                  {ranuraDeItem && (
-                    <AdicionalesItem
-                      itemId={item.id}
-                      filas={adicionales.porItem[item.id] ?? []}
-                      disponible={adicionales.disponible}
-                      editable={editable}
-                    />
-                  )}
-                  {/* Item sale fields */}
-                  {editable && (
-                    <div className="mb-3 space-y-2">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {/* La captura de un ítem es COSTO, nada más: cuánto cuesta la
-                            unidad, cuántas van, y qué descuento da el proveedor. El
-                            precio no se escribe aquí, se calcula abajo con el margen.
-                            Mientras costo y precio se vieron como dos casillas iguales,
-                            nadie supo cuál mandaba: la cotización de la bomba quedó con
-                            el precio lleno, el costo en cero y `costo_total` sin nada
-                            que sumar. */}
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                            {tieneRubros ? 'Costo unit. (rubros)' : 'Costo unitario'}
-                          </label>
-                          {tieneRubros ? (
-                            <>
-                              <div className="rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm tabular-nums text-muted-foreground">
-                                {formatCOP(costoUnitario)}
-                              </div>
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                                Suma de {rubrosConfirmados.length} rubro{rubrosConfirmados.length === 1 ? '' : 's'}
-                              </p>
-                            </>
-                          ) : lineasPorTipo ? (
-                            /* En un viaje el proveedor puede cobrar en otra moneda: el costo a
-                               mano la declara, COP por defecto (brief del 2026-09-22). Guarda
-                               pesos en `subtotal` y anota lo escrito. Fuera del flujo de viaje,
-                               la casilla en pesos de siempre. */
-                            <CostoManualItem
-                              itemId={item.id}
-                              subtotalPesos={costoManual}
-                              tarifaPax={item.tarifa_pax}
-                              onCambio={() => router.refresh()}
+              {/* El cargue de pantallazo SOLO existe si la ranura de la línea tiene
+                  contrato de captura (§3.1). Un ítem sin grupo, o con un grupo propio
+                  como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
+                  parezca y ese número acaba dentro de un costo. */}
+              {editable && ranuraDeItem && (
+                <TarifaPasajeroItem
+                  itemId={item.id}
+                  ranura={ranuraDeItem}
+                  composicionViaje={composicionViaje}
+                  tarifaPax={item.tarifa_pax}
+                  costoUnitarioLinea={costoUnitario}
+                  sugeridosGuardados={rubrosSugeridos}
+                  onCambio={() => router.refresh()}
+                />
+              )}
+              {/* Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Se ofrecen donde
+                  se ofrece el cargue de pantallazo —líneas con ranura del catálogo—
+                  porque es donde la pregunta significa algo: una línea de Termotech no
+                  gana una sección al abrir su cotización, que es R6 en la pantalla.
+                  ⚠️ NO se condiciona a `editable`: una cotización ya enviada tiene que
+                  poder MOSTRAR sus adicionales; lo que se apaga es escribirlos. */}
+              {ranuraDeItem && (
+                <AdicionalesItem
+                  itemId={item.id}
+                  filas={adicionales.porItem[item.id] ?? []}
+                  disponible={adicionales.disponible}
+                  editable={editable}
+                />
+              )}
+              {/* Item sale fields */}
+              {editable && (
+                <div className="mb-3 space-y-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {/* La captura de un ítem es COSTO, nada más: cuánto cuesta la
+                        unidad, cuántas van, y qué descuento da el proveedor. El
+                        precio no se escribe aquí, se calcula abajo con el margen.
+                        Mientras costo y precio se vieron como dos casillas iguales,
+                        nadie supo cuál mandaba: la cotización de la bomba quedó con
+                        el precio lleno, el costo en cero y `costo_total` sin nada
+                        que sumar. */}
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                        {tieneRubros ? 'Costo unit. (rubros)' : 'Costo unitario'}
+                      </label>
+                      {tieneRubros ? (
+                        <>
+                          <div className="rounded border border-dashed bg-muted/40 px-2 py-1.5 text-sm tabular-nums text-muted-foreground">
+                            {formatCOP(costoUnitario)}
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                            Suma de {rubrosConfirmados.length} rubro{rubrosConfirmados.length === 1 ? '' : 's'}
+                          </p>
+                        </>
+                      ) : lineasPorTipo ? (
+                        /* En un viaje el proveedor puede cobrar en otra moneda: el costo a
+                           mano la declara, COP por defecto (brief del 2026-09-22). Guarda
+                           pesos en `subtotal` y anota lo escrito. Fuera del flujo de viaje,
+                           la casilla en pesos de siempre. */
+                        <CostoManualItem
+                          itemId={item.id}
+                          subtotalPesos={costoManual}
+                          tarifaPax={item.tarifa_pax}
+                          onCambio={() => router.refresh()}
+                        />
+                      ) : (
+                        <>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Costo"
+                              defaultValue={costoManual ? costoManual.toLocaleString('es-CO') : ''}
+                              onBlur={e => {
+                                const raw = e.target.value.replace(/[^0-9]/g, '')
+                                const val = Number(raw) || 0
+                                if (val === costoManual) return
+                                e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                startTransition(async () => {
+                                  const res = await updateItem(item.id, { subtotal: val })
+                                  if (!res.success) { toast.error(res.error); return }
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm tabular-nums"
                             />
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">Lo que le pagas al proveedor</p>
+                        </>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Cantidad</label>
+                      <input
+                        type="number"
+                        defaultValue={itemCantidad}
+                        placeholder="1"
+                        min="0.01"
+                        step="0.01"
+                        className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
+                        onBlur={e => {
+                          const val = Math.max(0.01, Number(e.target.value) || 1)
+                          if (val === itemCantidad) return
+                          startTransition(async () => {
+                            await updateItem(item.id, { cantidad: val })
+                            await recalcularTotales(cotizacion.id)
+                            router.refresh()
+                          })
+                        }}
+                      />
+                    </div>
+
+                    {/* Descuento de COMPRA. Se llama así a propósito: baja el costo,
+                        no el precio. El que baja el precio es el descuento comercial
+                        y vive al final de la cotización. */}
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Desc. compra %</label>
+                      <input
+                        type="number"
+                        defaultValue={itemDescPct || ''}
+                        placeholder="0"
+                        min="0"
+                        max="100"
+                        className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
+                        onBlur={e => {
+                          const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                          if (pct === itemDescPct) return
+                          startTransition(async () => {
+                            await updateItem(item.id, { descuento_porcentaje: pct })
+                            await recalcularTotales(cotizacion.id)
+                            router.refresh()
+                          })
+                        }}
+                      />
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">Del proveedor</p>
+                    </div>
+
+                    {/* Costo de la línea: el resultado de las tres casillas de la
+                        izquierda. Es lo que suma al costo total de la cotización. */}
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de la línea</label>
+                      <div className="rounded border bg-muted/40 px-2 py-1.5 text-sm font-medium tabular-nums">
+                        {formatCOP(costoLinea)}
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">Suma al costo total</p>
+                    </div>
+                  </div>
+
+                  {/* PRECIO DE LA LÍNEA — resultado, no captura.
+                      El margen lo pone la cotización completa. Una línea puede
+                      marginar distinto, pero como excepción declarada y marcada: un
+                      equipo que el cliente puede cotizar aparte no aguanta el mismo
+                      margen que la ingeniería, y con un único porcentaje para todo se
+                      sale caro donde te comparan y barato donde no. */}
+                  <div className="rounded-md border bg-muted/20 px-3 py-2">
+                    {/* La línea solo enseña precio cuando ELLA decide algo: margen
+                        propio, o un precio viejo escrito a mano. Mientras el margen
+                        lo ponga la cotización, repetirlo en cada ítem es el mismo
+                        número doce veces y esconde cuál de las doce es la excepción. */}
+                    {/* Cuando la línea hereda el margen NO se escribe ninguna frase
+                        aquí: la fila de abajo ya dice «hereda el margen de la
+                        cotización» al lado del porcentaje. Decirlo dos veces con
+                        palabras distintas hace dudar de si son dos cosas. */}
+                    {lineaDecideSuPrecio && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-muted-foreground">
+                          {precioFijadoAMano
+                            ? 'Precio de esta línea, escrito a mano'
+                            : `Precio de esta línea: costo + ${itemMargen}% propio de la línea`}
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
+                      </div>
+                    )}
+
+                    {/* El margen real de la línea y DE DÓNDE SALE.
+                        Un "0,0%" no dice lo mismo si la línea va a costo por
+                        decisión de alguien que si simplemente hereda el margen de
+                        la cotización: sin el origen al lado, los dos casos se leen
+                        igual y uno de los dos es un viaje regalado.
+                        Una línea sin margen medible (recién capturada, sin costo o
+                        sin precio) no muestra nada: regañar por no haber llegado
+                        todavía enseña a ignorar el aviso. */}
+                    {margenTexto && (
+                      <p className={`mt-0.5 text-[10px] tabular-nums ${claseNivelMargen(nivelMargen)}`}>
+                        Margen real {margenTexto}
+                        <span className="ml-1 text-muted-foreground">· {etiquetaOrigenMargen(origenMargen)}</span>
+                        {nivelMargen === 'bajo_piso' && (
+                          <span className="ml-1 font-semibold">
+                            · bajo el margen mínimo de {formatMargenPct(umbrales.pisoPct)}
+                            {pisoBloqueaAvance && ' · no deja avanzar'}
+                          </span>
+                        )}
+                        {nivelMargen === 'aviso' && (
+                          <span className="ml-1 font-medium">
+                            · bajo el aviso de {formatMargenPct(umbrales.avisoPct)}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {/* Lo que dijo la captura NO se pierde cuando alguien lo mueve.
+                        Sin este renglón, una línea editada deja a la agencia sin saber
+                        cuánto se separó de lo que el proveedor le daba, y el número
+                        original no está en ninguna otra pantalla. */}
+                    {pantallazoDecia && (
+                      <p className="text-[10px] text-muted-foreground">
+                        El pantallazo decía {pantallazoDecia}.
+                      </p>
+                    )}
+                    {/* Sobre qué va el IVA de esta línea. Solo donde el workspace
+                        liquida el IVA sobre el ingreso propio; en los demás no hay nada
+                        que elegir. Cambiarla no mueve el precio: solo el IVA. */}
+                    {ivaPorLinea && (() => {
+                      const ivaLinea = ivaPorLinea.get(item.id)
+                      const declarada: BaseIvaLinea | null = esBaseIvaLinea(item.base_iva) ? item.base_iva : null
+                      return (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                          <span className="text-muted-foreground">IVA de la línea:</span>
+                          {editable ? (
+                            <select
+                              aria-label="Base del IVA de la línea"
+                              value={declarada ?? ''}
+                              disabled={isPending}
+                              className="rounded border bg-background px-1 py-0.5 text-[10px]"
+                              onChange={e => {
+                                const valor = e.target.value
+                                const base = esBaseIvaLinea(valor) ? valor : null
+                                startTransition(async () => {
+                                  const res = await updateItem(item.id, { base_iva: base })
+                                  if (!res.success) toast.error(res.error ?? 'No se pudo guardar')
+                                  router.refresh()
+                                })
+                              }}
+                            >
+                              <option value="">
+                                {`Automático (${ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base].split(':')[0].toLowerCase() : 'a nombre de un tercero'})`}
+                              </option>
+                              {BASES_IVA_LINEA.map(b => (
+                                <option key={b} value={b}>{ETIQUETA_BASE_IVA[b]}</option>
+                              ))}
+                            </select>
                           ) : (
-                            <>
+                            <span>{ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base] : ''}</span>
+                          )}
+                          {ivaLinea && !ivaLinea.sinCosto && (
+                            <span className="tabular-nums text-muted-foreground">· {formatCOP(ivaLinea.iva)}{ivaAdentro ? ' incluido' : ''}</span>
+                          )}
+                          {ivaLinea?.sinCosto && (
+                            <span className="font-medium text-amber-700">· {TEXTO_IVA_SIN_CALCULAR}</span>
+                          )}
+                        </div>
+                      )
+                    })()}
+                    {/* El descuento comercial vive al final de la cascada y NO se
+                        reparte por línea, así que el margen de arriba está por
+                        encima del que queda de verdad. Decirlo cuesta una línea;
+                        callarlo deja una pantalla sana diciendo algo falso. */}
+                    {margenTexto && (Number(cotizacion.descuento_porcentaje) || 0) > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Antes del descuento comercial de {cotizacion.descuento_porcentaje}%.
+                      </p>
+                    )}
+                    {/* Precio por pasajero: lo que ve el cliente en el PDF (P6). */}
+                    {precioPorPax && precioPorPax.length > 0 && (
+                      <p className="mt-0.5 text-[11px] tabular-nums">
+                        <span className="text-muted-foreground">Precio por pasajero: </span>
+                        <span className="font-medium">
+                          {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
+                        </span>
+                      </p>
+                    )}
+
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {!precioFijadoAMano && !margenPropio && (
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => {
+                            startTransition(async () => {
+                              await updateItem(item.id, { margen_porcentaje: margenCotizacion })
+                              await recalcularTotales(cotizacion.id)
+                              router.refresh()
+                            })
+                          }}
+                          className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                        >
+                          Marginar distinto
+                        </button>
+                      )}
+
+                      {!precioFijadoAMano && margenPropio && (
+                        <>
+                          <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            {nombreDelMargen(convencionMargen)}
+                            <input
+                              key={`margen-${item.id}-${itemMargen}`}
+                              type="number"
+                              defaultValue={itemMargen}
+                              step="0.01"
+                              className="w-16 rounded border bg-background px-1.5 py-0.5 text-[11px] tabular-nums"
+                              onBlur={e => {
+                                const pct = Number(e.target.value) || 0
+                                if (pct === itemMargen) return
+                                startTransition(async () => {
+                                  await updateItem(item.id, { margen_porcentaje: pct })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                            />
+                            %
+                          </label>
+                          {/* La SEGUNDA puerta a la misma decisión: escribir el precio
+                              que va a pagar el cliente y dejar que el margen se
+                              acomode. Escribe el MISMO campo que la casilla de la
+                              izquierda (`margen_porcentaje`), no un precio aparte: con
+                              `precio_manual` la línea dejaría de reaccionar a un cambio
+                              de costo y el margen mostrado quedaría al día con un
+                              precio que ya no le corresponde.
+                              El margen se despeja contra el costo de la línea CON su
+                              parte de los administrativos, que es contra lo que la
+                              cascada calcula el precio. */}
+                          {costoDeVentaLinea > 0 && (
+                            <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                              Precio al cliente
                               <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">$</span>
                                 <input
+                                  key={`precio-obj-${item.id}-${precioLinea}`}
                                   type="text"
                                   inputMode="numeric"
-                                  placeholder="Costo"
-                                  defaultValue={costoManual ? costoManual.toLocaleString('es-CO') : ''}
+                                  defaultValue={precioLinea ? precioLinea.toLocaleString('es-CO') : ''}
+                                  className="w-28 rounded border bg-background py-0.5 pr-1.5 pl-4 text-[11px] tabular-nums"
                                   onBlur={e => {
-                                    const raw = e.target.value.replace(/[^0-9]/g, '')
-                                    const val = Number(raw) || 0
-                                    if (val === costoManual) return
-                                    e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                    const objetivo = Number(e.target.value.replace(/[^0-9]/g, '')) || 0
+                                    if (objetivo === precioLinea) return
+                                    const nuevo = margenParaPrecio(costoDeVentaLinea, objetivo, convencionMargen)
+                                    if (nuevo === null) {
+                                      // Un precio que no supera el costo pediría margen
+                                      // negativo. Se dice y se devuelve la casilla a lo
+                                      // que hay: escribirlo dejaría la línea a pérdida
+                                      // sin que nadie lo haya pedido.
+                                      e.target.value = precioLinea.toLocaleString('es-CO')
+                                      toast.error(
+                                        `El precio tiene que superar el costo de la línea (${formatCOP(costoDeVentaLinea)}).`,
+                                      )
+                                      return
+                                    }
                                     startTransition(async () => {
-                                      const res = await updateItem(item.id, { subtotal: val })
-                                      if (!res.success) { toast.error(res.error); return }
+                                      await updateItem(item.id, { margen_porcentaje: nuevo })
                                       await recalcularTotales(cotizacion.id)
                                       router.refresh()
                                     })
                                   }}
                                   onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                  className="w-full rounded border bg-background py-1.5 pr-2 pl-7 text-sm tabular-nums"
                                 />
                               </div>
-                              <p className="mt-0.5 text-[10px] text-muted-foreground">Lo que le pagas al proveedor</p>
-                            </>
+                            </label>
                           )}
-                        </div>
-
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Cantidad</label>
-                          <input
-                            type="number"
-                            defaultValue={itemCantidad}
-                            placeholder="1"
-                            min="0.01"
-                            step="0.01"
-                            className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
-                            onBlur={e => {
-                              const val = Math.max(0.01, Number(e.target.value) || 1)
-                              if (val === itemCantidad) return
-                              startTransition(async () => {
-                                await updateItem(item.id, { cantidad: val })
-                                await recalcularTotales(cotizacion.id)
-                                router.refresh()
-                              })
-                            }}
-                          />
-                        </div>
-
-                        {/* Descuento de COMPRA. Se llama así a propósito: baja el costo,
-                            no el precio. El que baja el precio es el descuento comercial
-                            y vive al final de la cotización. */}
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Desc. compra %</label>
-                          <input
-                            type="number"
-                            defaultValue={itemDescPct || ''}
-                            placeholder="0"
-                            min="0"
-                            max="100"
-                            className="w-full rounded border bg-background px-2 py-1.5 text-sm tabular-nums"
-                            onBlur={e => {
-                              const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0))
-                              if (pct === itemDescPct) return
-                              startTransition(async () => {
-                                await updateItem(item.id, { descuento_porcentaje: pct })
-                                await recalcularTotales(cotizacion.id)
-                                router.refresh()
-                              })
-                            }}
-                          />
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">Del proveedor</p>
-                        </div>
-
-                        {/* Costo de la línea: el resultado de las tres casillas de la
-                            izquierda. Es lo que suma al costo total de la cotización. */}
-                        <div>
-                          <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Costo de la línea</label>
-                          <div className="rounded border bg-muted/40 px-2 py-1.5 text-sm font-medium tabular-nums">
-                            {formatCOP(costoLinea)}
-                          </div>
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">Suma al costo total</p>
-                        </div>
-                      </div>
-
-                      {/* PRECIO DE LA LÍNEA — resultado, no captura.
-                          El margen lo pone la cotización completa. Una línea puede
-                          marginar distinto, pero como excepción declarada y marcada: un
-                          equipo que el cliente puede cotizar aparte no aguanta el mismo
-                          margen que la ingeniería, y con un único porcentaje para todo se
-                          sale caro donde te comparan y barato donde no. */}
-                      <div className="rounded-md border bg-muted/20 px-3 py-2">
-                        {/* La línea solo enseña precio cuando ELLA decide algo: margen
-                            propio, o un precio viejo escrito a mano. Mientras el margen
-                            lo ponga la cotización, repetirlo en cada ítem es el mismo
-                            número doce veces y esconde cuál de las doce es la excepción. */}
-                        {/* Cuando la línea hereda el margen NO se escribe ninguna frase
-                            aquí: la fila de abajo ya dice «hereda el margen de la
-                            cotización» al lado del porcentaje. Decirlo dos veces con
-                            palabras distintas hace dudar de si son dos cosas. */}
-                        {lineaDecideSuPrecio && (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-muted-foreground">
-                              {precioFijadoAMano
-                                ? 'Precio de esta línea, escrito a mano'
-                                : `Precio de esta línea: costo + ${itemMargen}% propio de la línea`}
-                            </span>
-                            <span className="text-sm font-semibold tabular-nums">{formatCOP(precioLinea)}</span>
-                          </div>
-                        )}
-
-                        {/* El margen real de la línea y DE DÓNDE SALE.
-                            Un "0,0%" no dice lo mismo si la línea va a costo por
-                            decisión de alguien que si simplemente hereda el margen de
-                            la cotización: sin el origen al lado, los dos casos se leen
-                            igual y uno de los dos es un viaje regalado.
-                            Una línea sin margen medible (recién capturada, sin costo o
-                            sin precio) no muestra nada: regañar por no haber llegado
-                            todavía enseña a ignorar el aviso. */}
-                        {margenTexto && (
-                          <p className={`mt-0.5 text-[10px] tabular-nums ${claseNivelMargen(nivelMargen)}`}>
-                            Margen real {margenTexto}
-                            <span className="ml-1 text-muted-foreground">· {etiquetaOrigenMargen(origenMargen)}</span>
-                            {nivelMargen === 'bajo_piso' && (
-                              <span className="ml-1 font-semibold">
-                                · bajo el margen mínimo de {formatMargenPct(umbrales.pisoPct)}
-                                {pisoBloqueaAvance && ' · no deja avanzar'}
-                              </span>
-                            )}
-                            {nivelMargen === 'aviso' && (
-                              <span className="ml-1 font-medium">
-                                · bajo el aviso de {formatMargenPct(umbrales.avisoPct)}
-                              </span>
-                            )}
-                          </p>
-                        )}
-                        {/* Lo que dijo la captura NO se pierde cuando alguien lo mueve.
-                            Sin este renglón, una línea editada deja a la agencia sin saber
-                            cuánto se separó de lo que el proveedor le daba, y el número
-                            original no está en ninguna otra pantalla. */}
-                        {pantallazoDecia && (
-                          <p className="text-[10px] text-muted-foreground">
-                            El pantallazo decía {pantallazoDecia}.
-                          </p>
-                        )}
-                        {/* Sobre qué va el IVA de esta línea. Solo donde el workspace
-                            liquida el IVA sobre el ingreso propio; en los demás no hay nada
-                            que elegir. Cambiarla no mueve el precio: solo el IVA. */}
-                        {ivaPorLinea && (() => {
-                          const ivaLinea = ivaPorLinea.get(item.id)
-                          const declarada: BaseIvaLinea | null = esBaseIvaLinea(item.base_iva) ? item.base_iva : null
-                          return (
-                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
-                              <span className="text-muted-foreground">IVA de la línea:</span>
-                              {editable ? (
-                                <select
-                                  aria-label="Base del IVA de la línea"
-                                  value={declarada ?? ''}
-                                  disabled={isPending}
-                                  className="rounded border bg-background px-1 py-0.5 text-[10px]"
-                                  onChange={e => {
-                                    const valor = e.target.value
-                                    const base = esBaseIvaLinea(valor) ? valor : null
-                                    startTransition(async () => {
-                                      const res = await updateItem(item.id, { base_iva: base })
-                                      if (!res.success) toast.error(res.error ?? 'No se pudo guardar')
-                                      router.refresh()
-                                    })
-                                  }}
-                                >
-                                  <option value="">
-                                    {`Automático (${ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base].split(':')[0].toLowerCase() : 'a nombre de un tercero'})`}
-                                  </option>
-                                  {BASES_IVA_LINEA.map(b => (
-                                    <option key={b} value={b}>{ETIQUETA_BASE_IVA[b]}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <span>{ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base] : ''}</span>
-                              )}
-                              {ivaLinea && !ivaLinea.sinCosto && (
-                                <span className="tabular-nums text-muted-foreground">· {formatCOP(ivaLinea.iva)}{ivaAdentro ? ' incluido' : ''}</span>
-                              )}
-                              {ivaLinea?.sinCosto && (
-                                <span className="font-medium text-amber-700">· {TEXTO_IVA_SIN_CALCULAR}</span>
-                              )}
-                            </div>
-                          )
-                        })()}
-                        {/* El descuento comercial vive al final de la cascada y NO se
-                            reparte por línea, así que el margen de arriba está por
-                            encima del que queda de verdad. Decirlo cuesta una línea;
-                            callarlo deja una pantalla sana diciendo algo falso. */}
-                        {margenTexto && (Number(cotizacion.descuento_porcentaje) || 0) > 0 && (
-                          <p className="text-[10px] text-muted-foreground">
-                            Antes del descuento comercial de {cotizacion.descuento_porcentaje}%.
-                          </p>
-                        )}
-                        {/* Precio por pasajero: lo que ve el cliente en el PDF (P6). */}
-                        {precioPorPax && precioPorPax.length > 0 && (
-                          <p className="mt-0.5 text-[11px] tabular-nums">
-                            <span className="text-muted-foreground">Precio por pasajero: </span>
-                            <span className="font-medium">
-                              {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
-                            </span>
-                          </p>
-                        )}
-
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                          {!precioFijadoAMano && !margenPropio && (
+                          {/* Volver al número del proveedor. Es la mitad que hace
+                              reversible la edición: sin esto, «no se pierde» sería
+                              solo poder leerlo. */}
+                          {pantallazoDecia && margenDelPantallazo !== null && (
                             <button
                               type="button"
                               disabled={isPending}
                               onClick={() => {
                                 startTransition(async () => {
-                                  await updateItem(item.id, { margen_porcentaje: margenCotizacion })
+                                  await updateItem(item.id, { margen_porcentaje: margenDelPantallazo })
                                   await recalcularTotales(cotizacion.id)
                                   router.refresh()
                                 })
                               }}
                               className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
                             >
-                              Marginar distinto
+                              Volver al del pantallazo
                             </button>
                           )}
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => {
+                              startTransition(async () => {
+                                // `null`, no 0: 0 es "esta línea va a costo" y es una
+                                // decisión distinta a "usa el margen de la cotización".
+                                await updateItem(item.id, { margen_porcentaje: null })
+                                await recalcularTotales(cotizacion.id)
+                                router.refresh()
+                              })
+                            }}
+                            className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                          >
+                            Usar el de la cotización
+                          </button>
+                        </>
+                      )}
 
-                          {!precioFijadoAMano && margenPropio && (
-                            <>
-                              <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                {nombreDelMargen(convencionMargen)}
-                                <input
-                                  key={`margen-${item.id}-${itemMargen}`}
-                                  type="number"
-                                  defaultValue={itemMargen}
-                                  step="0.01"
-                                  className="w-16 rounded border bg-background px-1.5 py-0.5 text-[11px] tabular-nums"
-                                  onBlur={e => {
-                                    const pct = Number(e.target.value) || 0
-                                    if (pct === itemMargen) return
-                                    startTransition(async () => {
-                                      await updateItem(item.id, { margen_porcentaje: pct })
-                                      await recalcularTotales(cotizacion.id)
-                                      router.refresh()
-                                    })
-                                  }}
-                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                />
-                                %
-                              </label>
-                              {/* La SEGUNDA puerta a la misma decisión: escribir el precio
-                                  que va a pagar el cliente y dejar que el margen se
-                                  acomode. Escribe el MISMO campo que la casilla de la
-                                  izquierda (`margen_porcentaje`), no un precio aparte: con
-                                  `precio_manual` la línea dejaría de reaccionar a un cambio
-                                  de costo y el margen mostrado quedaría al día con un
-                                  precio que ya no le corresponde.
-                                  El margen se despeja contra el costo de la línea CON su
-                                  parte de los administrativos, que es contra lo que la
-                                  cascada calcula el precio. */}
-                              {costoDeVentaLinea > 0 && (
-                                <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                                  Precio al cliente
-                                  <div className="relative">
-                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">$</span>
-                                    <input
-                                      key={`precio-obj-${item.id}-${precioLinea}`}
-                                      type="text"
-                                      inputMode="numeric"
-                                      defaultValue={precioLinea ? precioLinea.toLocaleString('es-CO') : ''}
-                                      className="w-28 rounded border bg-background py-0.5 pr-1.5 pl-4 text-[11px] tabular-nums"
-                                      onBlur={e => {
-                                        const objetivo = Number(e.target.value.replace(/[^0-9]/g, '')) || 0
-                                        if (objetivo === precioLinea) return
-                                        const nuevo = margenParaPrecio(costoDeVentaLinea, objetivo, convencionMargen)
-                                        if (nuevo === null) {
-                                          // Un precio que no supera el costo pediría margen
-                                          // negativo. Se dice y se devuelve la casilla a lo
-                                          // que hay: escribirlo dejaría la línea a pérdida
-                                          // sin que nadie lo haya pedido.
-                                          e.target.value = precioLinea.toLocaleString('es-CO')
-                                          toast.error(
-                                            `El precio tiene que superar el costo de la línea (${formatCOP(costoDeVentaLinea)}).`,
-                                          )
-                                          return
-                                        }
-                                        startTransition(async () => {
-                                          await updateItem(item.id, { margen_porcentaje: nuevo })
-                                          await recalcularTotales(cotizacion.id)
-                                          router.refresh()
-                                        })
-                                      }}
-                                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                    />
-                                  </div>
-                                </label>
-                              )}
-                              {/* Volver al número del proveedor. Es la mitad que hace
-                                  reversible la edición: sin esto, «no se pierde» sería
-                                  solo poder leerlo. */}
-                              {pantallazoDecia && margenDelPantallazo !== null && (
-                                <button
-                                  type="button"
-                                  disabled={isPending}
-                                  onClick={() => {
-                                    startTransition(async () => {
-                                      await updateItem(item.id, { margen_porcentaje: margenDelPantallazo })
-                                      await recalcularTotales(cotizacion.id)
-                                      router.refresh()
-                                    })
-                                  }}
-                                  className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
-                                >
-                                  Volver al del pantallazo
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                disabled={isPending}
-                                onClick={() => {
-                                  startTransition(async () => {
-                                    // `null`, no 0: 0 es "esta línea va a costo" y es una
-                                    // decisión distinta a "usa el margen de la cotización".
-                                    await updateItem(item.id, { margen_porcentaje: null })
-                                    await recalcularTotales(cotizacion.id)
-                                    router.refresh()
+                      {/* Ya no hay forma de entrar a "precio a mano": para poner una
+                          cifra exacta se escribe en el costo, con cantidad 1, sin
+                          descuento y sin margen. Las líneas que YA quedaron fijadas
+                          conservan su casilla y su salida de vuelta al cálculo. */}
+
+                      {precioFijadoAMano && (
+                        <>
+                          <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">$</span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Valor unitario"
+                              defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
+                              onBlur={e => {
+                                const raw = e.target.value.replace(/[^0-9]/g, '')
+                                const val = Number(raw) || 0
+                                if (val === itemPrecio) return
+                                e.target.value = val ? val.toLocaleString('es-CO') : ''
+                                startTransition(async () => {
+                                  await updateItem(item.id, { precio_venta: val, precio_manual: true })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              className="w-32 rounded border bg-background py-0.5 pr-1.5 pl-5 text-[11px] tabular-nums"
+                            />
+                          </div>
+                          {/* Sin costo contra el cual recalcular, "volver al cálculo"
+                              dejaría el precio en cero y la línea parecería borrada. */}
+                          {costoLinea > 0 && (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  await updateItem(item.id, { precio_manual: false })
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                            >
+                              Volver a calcularlo desde el costo
+                            </button>
+                          )}
+                          {/* Con precio a mano el margen no gobierna nada, pero el
+                              número del pantallazo sigue siendo el punto de referencia
+                              y volver a él tiene que ser un clic: se suelta el precio
+                              fijado Y se repone el margen del proveedor, porque hacer
+                              solo lo primero devolvería la línea al margen de la
+                              cotización, que no es de donde salió. */}
+                          {pantallazoDecia && margenDelPantallazo !== null && costoLinea > 0 && (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => {
+                                startTransition(async () => {
+                                  await updateItem(item.id, {
+                                    precio_manual: false,
+                                    margen_porcentaje: margenDelPantallazo,
                                   })
-                                }}
-                                className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
-                              >
-                                Usar el de la cotización
-                              </button>
-                            </>
+                                  await recalcularTotales(cotizacion.id)
+                                  router.refresh()
+                                })
+                              }}
+                              className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                            >
+                              Volver al del pantallazo
+                            </button>
                           )}
-
-                          {/* Ya no hay forma de entrar a "precio a mano": para poner una
-                              cifra exacta se escribe en el costo, con cantidad 1, sin
-                              descuento y sin margen. Las líneas que YA quedaron fijadas
-                              conservan su casilla y su salida de vuelta al cálculo. */}
-
-                          {precioFijadoAMano && (
-                            <>
-                              <div className="relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">$</span>
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  placeholder="Valor unitario"
-                                  defaultValue={itemPrecio ? itemPrecio.toLocaleString('es-CO') : ''}
-                                  onBlur={e => {
-                                    const raw = e.target.value.replace(/[^0-9]/g, '')
-                                    const val = Number(raw) || 0
-                                    if (val === itemPrecio) return
-                                    e.target.value = val ? val.toLocaleString('es-CO') : ''
-                                    startTransition(async () => {
-                                      await updateItem(item.id, { precio_venta: val, precio_manual: true })
-                                      await recalcularTotales(cotizacion.id)
-                                      router.refresh()
-                                    })
-                                  }}
-                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                                  className="w-32 rounded border bg-background py-0.5 pr-1.5 pl-5 text-[11px] tabular-nums"
-                                />
-                              </div>
-                              {/* Sin costo contra el cual recalcular, "volver al cálculo"
-                                  dejaría el precio en cero y la línea parecería borrada. */}
-                              {costoLinea > 0 && (
-                                <button
-                                  type="button"
-                                  disabled={isPending}
-                                  onClick={() => {
-                                    startTransition(async () => {
-                                      await updateItem(item.id, { precio_manual: false })
-                                      await recalcularTotales(cotizacion.id)
-                                      router.refresh()
-                                    })
-                                  }}
-                                  className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
-                                >
-                                  Volver a calcularlo desde el costo
-                                </button>
-                              )}
-                              {/* Con precio a mano el margen no gobierna nada, pero el
-                                  número del pantallazo sigue siendo el punto de referencia
-                                  y volver a él tiene que ser un clic: se suelta el precio
-                                  fijado Y se repone el margen del proveedor, porque hacer
-                                  solo lo primero devolvería la línea al margen de la
-                                  cotización, que no es de donde salió. */}
-                              {pantallazoDecia && margenDelPantallazo !== null && costoLinea > 0 && (
-                                <button
-                                  type="button"
-                                  disabled={isPending}
-                                  onClick={() => {
-                                    startTransition(async () => {
-                                      await updateItem(item.id, {
-                                        precio_manual: false,
-                                        margen_porcentaje: margenDelPantallazo,
-                                      })
-                                      await recalcularTotales(cotizacion.id)
-                                      router.refresh()
-                                    })
-                                  }}
-                                  className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
-                                >
-                                  Volver al del pantallazo
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descripción (visible al cliente)</label>
-                        <input
-                          defaultValue={item.descripcion ?? ''}
-                          placeholder="Describe qué incluye este item..."
-                          className="w-full rounded border bg-background px-2 py-1.5 text-xs"
-                          onBlur={e => {
-                            const val = comoSeGuarda(e.target.value)
-                            // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
-                            e.target.value = val
-                            if (val === (item.descripcion ?? '')) return
-                            startTransition(async () => {
-                              await updateItem(item.id, { descripcion: val })
-                            })
-                          }}
-                        />
-                      </div>
-
-                      {/* AL PIE, DESPUÉS DEL COSTO Y LA DESCRIPCIÓN (§2.2). Un botón que
-                          agrega algo va después de lo que agrega: arriba, entre el nombre
-                          y el contenido, se leía como si aplicara a lo que venía abajo.
-                          Solo en el flujo de viaje: fuera de él el bloque queda como hoy. */}
-                      {/* En un bloque de ranura el botón vive al pie del bloque, una sola vez. */}
-                      {lineasPorTipo && !enBloqueDeRanura && <div className="border-t pt-2">{botonOtraOpcion}</div>}
+                        </>
+                      )}
                     </div>
-                  )}
-                  {/* Rubros table (internal costs).
-                      ⚠️ Solo los CONFIRMADOS. Los sugeridos por un pantallazo se
-                      revisan en su propio panel, con la captura al lado: mezclarlos
-                      aquí los haría ver como costo ya aceptado, que es lo que R-P1
-                      prohíbe, y ademas el total de la tabla no cuadraría con el
-                      costo del item. */}
-                  {rubrosConfirmados.length > 0 && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b text-left text-muted-foreground">
-                            <th className="pb-1 pr-2">Tipo</th>
-                            <th className="pb-1 pr-2">Descripción</th>
-                            <th className="pb-1 pr-2">Cant.</th>
-                            <th className="pb-1 pr-2">Unit.</th>
-                            <th className="pb-1 pr-2 text-right">Vr. Unit.</th>
-                            <th className="pb-1 text-right">Total</th>
-                            {editable && <th className="pb-1 w-12" />}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rubrosConfirmados.map((r: RubroRow) => (
-                            <tr key={r.id} className="border-b border-dashed">
-                              <td className="py-1.5 pr-2">
-                                {etiquetaTipoRubro(r.tipo)}
-                              </td>
-                              <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">
-                                {r.descripcion || '—'}
-                              </td>
-                              <td className="py-1.5 pr-2">{r.cantidad}</td>
-                              <td className="py-1.5 pr-2">{r.unidad}</td>
-                              <td className="py-1.5 pr-2 text-right">{formatCOP(r.valor_unitario ?? 0)}</td>
-                              <td className="py-1.5 text-right font-medium">{formatCOP(r.valor_total ?? 0)}</td>
-                              {editable && (
-                                <td className="py-1.5">
-                                  <div className="flex gap-0.5">
-                                    <button
-                                      onClick={() => startEditRubro(r, item.id)}
-                                      className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteRubro(r.id)}
-                                      className="rounded p-0.5 text-red-500 hover:bg-red-50"
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  </div>
 
-                  {/* Add / Edit rubro */}
-                  {editable && addingRubroFor === item.id ? (
-                    <div className="mt-2 space-y-2 rounded-md bg-muted/30 p-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={newRubro.tipo}
-                          onChange={e => {
-                            const t = TIPOS_RUBRO.find(r => r.value === e.target.value)
-                            setNewRubro(p => ({ ...p, tipo: e.target.value, unidad: t?.unidadDefault ?? 'unidades' }))
-                          }}
-                          className="rounded border bg-background px-2 py-1.5 text-xs"
-                        >
-                          {TIPOS_RUBRO.map(t => (
-                            <option key={t.value} value={t.value}>{t.label}</option>
-                          ))}
-                          {/* Un rubro que escribió el sistema con un tipo fuera del selector
-                              (la tarifa por pasajero escribe `tarifa`): sin esta opción el
-                              select pintaría el primer tipo mientras guarda otro. */}
-                          {!TIPOS_RUBRO.some(t => t.value === newRubro.tipo) && (
-                            <option value={newRubro.tipo}>{etiquetaTipoRubro(newRubro.tipo)}</option>
-                          )}
-                        </select>
-                        <input
-                          placeholder="Descripción"
-                          value={newRubro.descripcion}
-                          onChange={e => {
-                            const val = e.target.value
-                            setNewRubro(p => {
-                              const next = { ...p, descripcion: val }
-                              // Auto-fill tarifa when selecting staff from datalist
-                              if ((p.tipo === 'mo_propia' || p.tipo === 'mo_terceros') && staffMembers?.length) {
-                                const match = staffMembers.find(s => s.nombre === val)
-                                if (match && match.tarifa_hora > 0) {
-                                  next.valor_unitario = Math.round(match.tarifa_hora).toString()
-                                }
-                              }
-                              return next
-                            })
-                          }}
-                          className="rounded border bg-background px-2 py-1.5 text-xs"
-                          list={(newRubro.tipo === 'mo_propia' || newRubro.tipo === 'mo_terceros') && staffMembers?.length ? 'staff-list' : undefined}
-                        />
-                        <input
-                          type="number"
-                          placeholder="Cantidad"
-                          value={newRubro.cantidad}
-                          onChange={e => setNewRubro(p => ({ ...p, cantidad: e.target.value }))}
-                          className="rounded border bg-background px-2 py-1.5 text-xs"
-                        />
-                        <input
-                          placeholder="Unidad"
-                          value={newRubro.unidad}
-                          onChange={e => setNewRubro(p => ({ ...p, unidad: e.target.value }))}
-                          className="rounded border bg-background px-2 py-1.5 text-xs"
-                        />
-                        <CalcInput
-                          placeholder="Valor unitario"
-                          value={newRubro.valor_unitario}
-                          onChange={v => setNewRubro(p => ({ ...p, valor_unitario: v }))}
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => { setAddingRubroFor(null); setEditingRubroId(null); setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' }) }}
-                          className="rounded border px-2 py-1 text-xs hover:bg-accent"
-                        >
-                          Cancelar
-                        </button>
-                        {editingRubroId ? (
-                          <button
-                            onClick={() => handleUpdateRubro(editingRubroId)}
-                            disabled={isPending || !Number(newRubro.valor_unitario)}
-                            className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                          >
-                            Guardar cambios
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleAddRubro(item.id)}
-                            disabled={isPending || !Number(newRubro.valor_unitario)}
-                            className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
-                          >
-                            Agregar rubro
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ) : editable && !lineasPorTipo ? (
-                    /* EN UN VIAJE NO SE AGREGAN RUBROS (§2.5). Un rubro es la forma
-                       genérica de costear un ítem por partes (mano de obra por horas,
-                       materiales) y nació para Termotech. En un viaje el desglose
-                       equivalente —tarifa, tasas, fee— ya lo trae el pantallazo, y agregar
-                       un rubro ANULA el costo escrito: es una trampa, no una opción. Quien
-                       costea a mano escribe el costo y detalla en la descripción.
-                       Los rubros que YA existen (los que escribe la tarifa por pasajero)
-                       se siguen viendo y corrigiendo arriba. */
-                    <button
-                      onClick={() => {
-                        // Desglosar anula el costo escrito a mano: con rubros, el costo lo
-                        // mandan ellos. Avisarlo antes es lo unico que evita que el costo
-                        // de la factura del proveedor desaparezca sin que nadie lo note.
-                        if (!tieneRubros && costoManual > 0 &&
-                            !window.confirm('Este item pasa a costearse por rubros. El costo que escribiste deja de aplicar. ¿Sigues?')) {
-                          return
-                        }
-                        setEditingRubroId(null)
-                        setAddingRubroFor(item.id)
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descripción (visible al cliente)</label>
+                    <input
+                      defaultValue={item.descripcion ?? ''}
+                      placeholder="Describe qué incluye este item..."
+                      className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                      onBlur={e => {
+                        const val = comoSeGuarda(e.target.value)
+                        // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
+                        e.target.value = val
+                        if (val === (item.descripcion ?? '')) return
+                        startTransition(async () => {
+                          await updateItem(item.id, { descripcion: val })
+                        })
                       }}
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Agregar rubro
-                    </button>
-                  ) : null}
+                    />
+                  </div>
+
+                  {/* AL PIE, DESPUÉS DEL COSTO Y LA DESCRIPCIÓN (§2.2). Un botón que
+                      agrega algo va después de lo que agrega: arriba, entre el nombre
+                      y el contenido, se leía como si aplicara a lo que venía abajo.
+                      Solo en el flujo de viaje: fuera de él el bloque queda como hoy. */}
+                  {/* En un bloque de ranura el botón vive al pie del bloque, una sola vez. */}
+                  {lineasPorTipo && !enBloqueDeRanura && <div className="border-t pt-2">{botonOtraOpcion}</div>}
                 </div>
               )}
-            </div>
-          )})
-            if (!enBloqueDeRanura) {
-              return <Fragment key={`sueltas-${bloque.lineas[0]?.id ?? indiceBloque}`}>{lineasDelBloque}</Fragment>
-            }
-            return (
-              <BloqueRanura
-                key={bloque.grupo}
-                bloque={{ grupo: bloque.grupo, etiqueta: bloque.etiqueta, tipo: bloque.tipo, opciones: bloque.lineas.length }}
-                cotizacionId={cotizacion.id}
-                editable={editable}
-                destinoViaje={destinoViaje}
-                onOpcionCreada={abrirLinea}
-              >
-                {lineasDelBloque}
-              </BloqueRanura>
-            )
-          })}
-
-          {/* Add item actions */}
-          {editable && (
-            <div className="space-y-2">
-              {/* PASO 1 DEL FLUJO DE NOOR · una sola zona de pegado para la cotización: ONE ve si
-                  es hotel o vuelo, crea la ranura con su nombre y lee el precio. Los botones de
-                  abajo quedan para costear a mano lo que no tiene pantallazo. Solo en el flujo
-                  de viaje: fuera de él no hay pantallazos que leer (R6). */}
-              {lineasPorTipo && (
-                <CapturaCotizacion cotizacionId={cotizacion.id} onOpcionCreada={abrirLinea} />
-              )}
-              {lineasPorTipo && (
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  O agrégalo sin pantallazo
-                </p>
-              )}
-              {/* Single row: input + add button + catalog button. Con líneas por tipo, los
-                  botones de tipo reemplazan al input; «+ Otro» lo abre debajo. */}
-              <div className={lineasPorTipo ? 'relative flex flex-wrap gap-2' : 'relative flex gap-2'}>
-                {lineasPorTipo ? (
-                  <>
-                    {gruposCanonicos().map(g => (
-                      <button
-                        key={g.grupo}
-                        onClick={() => handleAddItemDeGrupo(g)}
-                        disabled={isPending}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        {g.label}
-                      </button>
-                    ))}
-                    {/* EL BOTÓN DEL COMPONENTE SUELTO (§4.2). Se llamaba «Otro», que no
-                        dice lo único que hay que saber para elegirlo: una línea sin
-                        ranura SUMA SIEMPRE, no compite con nadie. */}
-                    <button
-                      onClick={() => setMostrarOtro(v => !v)}
-                      disabled={isPending}
-                      aria-expanded={mostrarOtro}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Otro componente del viaje
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <input
-                      value={newItemName}
-                      onChange={e => setNewItemName(e.target.value)}
-                      placeholder="Nombre del item..."
-                      className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
-                      onKeyDown={e => e.key === 'Enter' && handleAddItem()}
-                    />
-                    <button
-                      onClick={handleAddItem}
-                      disabled={isPending || !newItemName.trim()}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Item
-                    </button>
-                  </>
-                )}
-                {/* EL CATÁLOGO no aplica al flujo de viaje.
-                    Es una lista de servicios con precio fijo, y aquí el costo entra por
-                    pantallazo del proveedor: no hay dos viajes con el mismo precio.
-                    Medido el 2026-09-17 contra producción: el workspace de Trappvel tiene
-                    CERO servicios, así que el botón solo abría un panel que decía que no
-                    hay nada. Ocupaba el renglón de «+ Vuelo / + Hotel», que es el que se
-                    usa. */}
-                {!lineasPorTipo && (
-                  <button
-                    onClick={loadCatalog}
-                    disabled={catalogLoading}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
-                  >
-                    {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
-                    Desde catálogo
-                  </button>
-                )}
-
-                {/* Catalog dropdown */}
-                {!lineasPorTipo && showCatalog && (
-                  <div className="absolute right-0 top-full z-10 mt-1 w-80 rounded-lg border border-blue-200 bg-background shadow-lg p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-blue-800">Agregar desde catálogo</span>
-                      <button onClick={() => setShowCatalog(false)} className="text-xs text-blue-600 hover:underline">Cerrar</button>
-                    </div>
-                    {catalogItems.length === 0 ? (
-                      <p className="py-3 text-center text-xs text-muted-foreground">
-                        No tienes servicios en tu catálogo. Créalos en Config → Mis servicios.
-                      </p>
-                    ) : (
-                      <div className="space-y-1 max-h-48 overflow-y-auto">
-                        {catalogItems.map(s => {
-                          const tpl = s.rubros_template as { tipo: string; cantidad: number; unidad: string; valor_unitario: number }[] | null
-                          return (
-                            <button
-                              key={s.id}
-                              onClick={() => handleAddFromCatalog(s.id)}
-                              disabled={isPending}
-                              className="flex w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
-                            >
-                              <div className="min-w-0">
-                                <span className="font-medium">{s.nombre}</span>
-                                {tpl && tpl.length > 0 && (
-                                  <span className="ml-2 text-[10px] text-muted-foreground">{tpl.length} rubros</span>
-                                )}
+              {/* Rubros table (internal costs).
+                  ⚠️ Solo los CONFIRMADOS. Los sugeridos por un pantallazo se
+                  revisan en su propio panel, con la captura al lado: mezclarlos
+                  aquí los haría ver como costo ya aceptado, que es lo que R-P1
+                  prohíbe, y ademas el total de la tabla no cuadraría con el
+                  costo del item. */}
+              {rubrosConfirmados.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="pb-1 pr-2">Tipo</th>
+                        <th className="pb-1 pr-2">Descripción</th>
+                        <th className="pb-1 pr-2">Cant.</th>
+                        <th className="pb-1 pr-2">Unit.</th>
+                        <th className="pb-1 pr-2 text-right">Vr. Unit.</th>
+                        <th className="pb-1 text-right">Total</th>
+                        {editable && <th className="pb-1 w-12" />}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rubrosConfirmados.map((r: RubroRow) => (
+                        <tr key={r.id} className="border-b border-dashed">
+                          <td className="py-1.5 pr-2">
+                            {etiquetaTipoRubro(r.tipo)}
+                          </td>
+                          <td className="py-1.5 pr-2 text-muted-foreground max-w-[120px] truncate">
+                            {r.descripcion || '—'}
+                          </td>
+                          <td className="py-1.5 pr-2">{r.cantidad}</td>
+                          <td className="py-1.5 pr-2">{r.unidad}</td>
+                          <td className="py-1.5 pr-2 text-right">{formatCOP(r.valor_unitario ?? 0)}</td>
+                          <td className="py-1.5 text-right font-medium">{formatCOP(r.valor_total ?? 0)}</td>
+                          {editable && (
+                            <td className="py-1.5">
+                              <div className="flex gap-0.5">
+                                <button
+                                  onClick={() => startEditRubro(r, item.id)}
+                                  className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRubro(r.id)}
+                                  className="rounded p-0.5 text-red-500 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
                               </div>
-                              <span className="shrink-0 text-xs font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Add / Edit rubro */}
+              {editable && addingRubroFor === item.id ? (
+                <div className="mt-2 space-y-2 rounded-md bg-muted/30 p-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={newRubro.tipo}
+                      onChange={e => {
+                        const t = TIPOS_RUBRO.find(r => r.value === e.target.value)
+                        setNewRubro(p => ({ ...p, tipo: e.target.value, unidad: t?.unidadDefault ?? 'unidades' }))
+                      }}
+                      className="rounded border bg-background px-2 py-1.5 text-xs"
+                    >
+                      {TIPOS_RUBRO.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                      {/* Un rubro que escribió el sistema con un tipo fuera del selector
+                          (la tarifa por pasajero escribe `tarifa`): sin esta opción el
+                          select pintaría el primer tipo mientras guarda otro. */}
+                      {!TIPOS_RUBRO.some(t => t.value === newRubro.tipo) && (
+                        <option value={newRubro.tipo}>{etiquetaTipoRubro(newRubro.tipo)}</option>
+                      )}
+                    </select>
+                    <input
+                      placeholder="Descripción"
+                      value={newRubro.descripcion}
+                      onChange={e => {
+                        const val = e.target.value
+                        setNewRubro(p => {
+                          const next = { ...p, descripcion: val }
+                          // Auto-fill tarifa when selecting staff from datalist
+                          if ((p.tipo === 'mo_propia' || p.tipo === 'mo_terceros') && staffMembers?.length) {
+                            const match = staffMembers.find(s => s.nombre === val)
+                            if (match && match.tarifa_hora > 0) {
+                              next.valor_unitario = Math.round(match.tarifa_hora).toString()
+                            }
+                          }
+                          return next
+                        })
+                      }}
+                      className="rounded border bg-background px-2 py-1.5 text-xs"
+                      list={(newRubro.tipo === 'mo_propia' || newRubro.tipo === 'mo_terceros') && staffMembers?.length ? 'staff-list' : undefined}
+                    />
+                    <input
+                      type="number"
+                      placeholder="Cantidad"
+                      value={newRubro.cantidad}
+                      onChange={e => setNewRubro(p => ({ ...p, cantidad: e.target.value }))}
+                      className="rounded border bg-background px-2 py-1.5 text-xs"
+                    />
+                    <input
+                      placeholder="Unidad"
+                      value={newRubro.unidad}
+                      onChange={e => setNewRubro(p => ({ ...p, unidad: e.target.value }))}
+                      className="rounded border bg-background px-2 py-1.5 text-xs"
+                    />
+                    <CalcInput
+                      placeholder="Valor unitario"
+                      value={newRubro.valor_unitario}
+                      onChange={v => setNewRubro(p => ({ ...p, valor_unitario: v }))}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setAddingRubroFor(null); setEditingRubroId(null); setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' }) }}
+                      className="rounded border px-2 py-1 text-xs hover:bg-accent"
+                    >
+                      Cancelar
+                    </button>
+                    {editingRubroId ? (
+                      <button
+                        onClick={() => handleUpdateRubro(editingRubroId)}
+                        disabled={isPending || !Number(newRubro.valor_unitario)}
+                        className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                      >
+                        Guardar cambios
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleAddRubro(item.id)}
+                        disabled={isPending || !Number(newRubro.valor_unitario)}
+                        className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+                      >
+                        Agregar rubro
+                      </button>
                     )}
                   </div>
-                )}
-              </div>
-              {/* QUÉ HACE CADA BOTÓN, en la pantalla donde se elige (§4.2).
-                  ⚠️ Esta frase decía lo CONTRARIO hasta el 2026-09-21: «+ Vuelo» sobre una
-                  cotización que ya tenía un vuelo creaba otra OPCIÓN en la misma ranura, y
-                  solo una sumaba — el error silencioso que dejó el viaje a Providencia sin
-                  el tramo a la isla. Ahora crea «Vuelo 2», que suma aparte, y la opción que
-                  compite tiene su propio botón DENTRO de la línea. Son dos cosas distintas
-                  y cada una tiene su botón, así que la frase ya puede explicar las dos. */}
-              {lineasPorTipo && (
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  <span className="font-medium text-foreground">Vuelo, Hotel, Actividad y Traslado</span>{' '}
-                  agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
-                  vuelo, el nuevo es «Vuelo 2» y los dos van en el viaje (un segundo tramo va así).
-                  {' '}Para una <span className="font-medium">alternativa</span> del mismo componente —otra
-                  aerolínea, otro horario— se usa «Agregar otra opción de…» al pie de su bloque (o se
-                  pega su pantallazo arriba y se responde «sí, otra opción»): esas compiten y solo una
-                  entra al precio.
-                  {' '}<span className="font-medium text-foreground">Otro componente del viaje</span> es
-                  una línea sin ranura: suma siempre y no compite con nadie.
-                </p>
-              )}
-              {lineasPorTipo && mostrarOtro && (
-                <div className="flex gap-2">
-                  <input
-                    value={newItemName}
-                    onChange={e => setNewItemName(e.target.value)}
-                    placeholder="Nombre de la línea..."
-                    aria-label="Nombre de la línea"
-                    autoFocus
-                    className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') handleAddItem()
-                      if (e.key === 'Escape') setMostrarOtro(false)
-                    }}
-                  />
+                </div>
+              ) : editable && !lineasPorTipo ? (
+                /* EN UN VIAJE NO SE AGREGAN RUBROS (§2.5). Un rubro es la forma
+                   genérica de costear un ítem por partes (mano de obra por horas,
+                   materiales) y nació para Termotech. En un viaje el desglose
+                   equivalente —tarifa, tasas, fee— ya lo trae el pantallazo, y agregar
+                   un rubro ANULA el costo escrito: es una trampa, no una opción. Quien
+                   costea a mano escribe el costo y detalla en la descripción.
+                   Los rubros que YA existen (los que escribe la tarifa por pasajero)
+                   se siguen viendo y corrigiendo arriba. */
+                <button
+                  onClick={() => {
+                    // Desglosar anula el costo escrito a mano: con rubros, el costo lo
+                    // mandan ellos. Avisarlo antes es lo unico que evita que el costo
+                    // de la factura del proveedor desaparezca sin que nadie lo note.
+                    if (!tieneRubros && costoManual > 0 &&
+                        !window.confirm('Este item pasa a costearse por rubros. El costo que escribiste deja de aplicar. ¿Sigues?')) {
+                      return
+                    }
+                    setEditingRubroId(null)
+                    setAddingRubroFor(item.id)
+                  }}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <Plus className="h-3 w-3" />
+                  Agregar rubro
+                </button>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )})
+        if (!enBloqueDeRanura) {
+          return <Fragment key={`sueltas-${bloque.lineas[0]?.id ?? indiceBloque}`}>{lineasDelBloque}</Fragment>
+        }
+        return (
+          <BloqueRanura
+            key={bloque.grupo}
+            bloque={{ grupo: bloque.grupo, etiqueta: bloque.etiqueta, tipo: bloque.tipo, opciones: bloque.lineas.length }}
+            cotizacionId={cotizacion.id}
+            editable={editable}
+            destinoViaje={destinoViaje}
+            onOpcionCreada={abrirLinea}
+          >
+            {lineasDelBloque}
+          </BloqueRanura>
+        )
+      })}
+    </>
+  )
+  const jsxAgregar = (
+    <>
+      {/* Add item actions */}
+      {editable && (
+        <div className="space-y-2">
+          {/* PASO 1 DEL FLUJO DE NOOR · una sola zona de pegado para la cotización: ONE ve si
+              es hotel o vuelo, crea la ranura con su nombre y lee el precio. Los botones de
+              abajo quedan para costear a mano lo que no tiene pantallazo. Solo en el flujo
+              de viaje: fuera de él no hay pantallazos que leer (R6). */}
+          {lineasPorTipo && (
+            <CapturaCotizacion cotizacionId={cotizacion.id} onOpcionCreada={abrirLinea} />
+          )}
+          {lineasPorTipo && (
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              O agrégalo sin pantallazo
+            </p>
+          )}
+          {/* Single row: input + add button + catalog button. Con líneas por tipo, los
+              botones de tipo reemplazan al input; «+ Otro» lo abre debajo. */}
+          <div className={lineasPorTipo ? 'relative flex flex-wrap gap-2' : 'relative flex gap-2'}>
+            {lineasPorTipo ? (
+              <>
+                {gruposCanonicos().map(g => (
                   <button
-                    onClick={handleAddItem}
-                    disabled={isPending || !newItemName.trim()}
+                    key={g.grupo}
+                    onClick={() => handleAddItemDeGrupo(g)}
+                    disabled={isPending}
                     className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Agregar
+                    {g.label}
                   </button>
+                ))}
+                {/* EL BOTÓN DEL COMPONENTE SUELTO (§4.2). Se llamaba «Otro», que no
+                    dice lo único que hay que saber para elegirlo: una línea sin
+                    ranura SUMA SIEMPRE, no compite con nadie. */}
+                <button
+                  onClick={() => setMostrarOtro(v => !v)}
+                  disabled={isPending}
+                  aria-expanded={mostrarOtro}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Otro componente del viaje
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  value={newItemName}
+                  onChange={e => setNewItemName(e.target.value)}
+                  placeholder="Nombre del item..."
+                  className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
+                  onKeyDown={e => e.key === 'Enter' && handleAddItem()}
+                />
+                <button
+                  onClick={handleAddItem}
+                  disabled={isPending || !newItemName.trim()}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Item
+                </button>
+              </>
+            )}
+            {/* EL CATÁLOGO no aplica al flujo de viaje.
+                Es una lista de servicios con precio fijo, y aquí el costo entra por
+                pantallazo del proveedor: no hay dos viajes con el mismo precio.
+                Medido el 2026-09-17 contra producción: el workspace de Trappvel tiene
+                CERO servicios, así que el botón solo abría un panel que decía que no
+                hay nada. Ocupaba el renglón de «+ Vuelo / + Hotel», que es el que se
+                usa. */}
+            {!lineasPorTipo && (
+              <button
+                onClick={loadCatalog}
+                disabled={catalogLoading}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-blue-300 px-3 py-2 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50"
+              >
+                {catalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+                Desde catálogo
+              </button>
+            )}
+
+            {/* Catalog dropdown */}
+            {!lineasPorTipo && showCatalog && (
+              <div className="absolute right-0 top-full z-10 mt-1 w-80 rounded-lg border border-blue-200 bg-background shadow-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-blue-800">Agregar desde catálogo</span>
+                  <button onClick={() => setShowCatalog(false)} className="text-xs text-blue-600 hover:underline">Cerrar</button>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Las combinaciones, ANTES de la cascada: son la decisión de qué se le
-              manda al cliente, y la cascada de abajo es el total del principal.
-              Leerlas después dejaría el total sin contexto. No se pinta nada si la
-              cotización no tiene opciones (R6). */}
-          {itinerarios && (
-            <TablaCombinaciones
-              cotizacionId={cotizacion.id}
-              estado={itinerarios}
-              editable={editable}
-              explicarVacio={lineasPorTipo}
-            />
-          )}
-
-          {/* R-A1 · qué ranura se resolvió sola. Va ARRIBA de la cascada porque
-              explica el número que sigue: sin esto el total se lee como si alguien
-              hubiera elegido, y nadie eligió. Se nombra la opción tomada y las que
-              quedaron fuera — «hay una suposición» sin decir cuál no se puede
-              corregir. No aparece cuando hay itinerario principal: ahí la decisión
-              está tomada y la toma la tabla de combinaciones. */}
-          {/* Regla 2 · el recargo fijo. Se OFRECE donde corresponde y, cuando el
-              número de la línea no es el vigente, se dicen los DOS. Lo que no se hace
-              nunca es agregarlo solo: una línea de precio que aparece sin que nadie la
-              pida es peor que una que falta, porque sale impresa al cliente. */}
-          {recargo.estado === 'falta' && editable && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900">
-              <div>
-                <p>
-                  <span className="font-medium">{recargo.etiqueta}</span> de{' '}
-                  <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>
-                  {/* B4 · por pasajero se dice la cuenta, no solo el total. */}
-                  {recargo.porPasajero && (recargo.porPasajero.pasajeros !== null
-                    ? ` (${formatCOP(recargo.porPasajero.valor)} por pasajero × ${recargo.porPasajero.pasajeros})`
-                    : ' por pasajero')}
-                  : esta
-                  {' '}cotización {politicaRecargo.vuelos === 'internacionales' ? 'lleva un vuelo internacional' : 'tiene un componente al que le corresponde'}
-                  {' '}y todavía no lo lleva.
-                </p>
-                {recargo.porPasajero && recargo.porPasajero.pasajeros === null && (
-                  <p className="mt-1 text-amber-800">
-                    Va por pasajero y el negocio todavía no dice quiénes viajan: complétalo en la etapa del viaje para poder agregarlo.
+                {catalogItems.length === 0 ? (
+                  <p className="py-3 text-center text-xs text-muted-foreground">
+                    No tienes servicios en tu catálogo. Créalos en Config → Mis servicios.
                   </p>
-                )}
-                {/* Un origen o destino que no se reconoce cuenta como internacional: se
-                    ofrece el recargo, pero se dice por qué, para que alguien lo mire. */}
-                {recargo.dudosos.length > 0 && (
-                  <p className="mt-1 text-amber-800">
-                    Se contó como internacional sin poder confirmarlo: {recargo.dudosos.join('; ')}.
-                    {' '}Revisa de dónde a dónde va antes de agregarlo.
-                  </p>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {catalogItems.map(s => {
+                      const tpl = s.rubros_template as { tipo: string; cantidad: number; unidad: string; valor_unitario: number }[] | null
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => handleAddFromCatalog(s.id)}
+                          disabled={isPending}
+                          className="flex w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-medium">{s.nombre}</span>
+                            {tpl && tpl.length > 0 && (
+                              <span className="ml-2 text-[10px] text-muted-foreground">{tpl.length} rubros</span>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-xs font-medium">{formatCOP(s.precio_estandar ?? 0)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
+            )}
+          </div>
+          {/* QUÉ HACE CADA BOTÓN, en la pantalla donde se elige (§4.2).
+              ⚠️ Esta frase decía lo CONTRARIO hasta el 2026-09-21: «+ Vuelo» sobre una
+              cotización que ya tenía un vuelo creaba otra OPCIÓN en la misma ranura, y
+              solo una sumaba — el error silencioso que dejó el viaje a Providencia sin
+              el tramo a la isla. Ahora crea «Vuelo 2», que suma aparte, y la opción que
+              compite tiene su propio botón DENTRO de la línea. Son dos cosas distintas
+              y cada una tiene su botón, así que la frase ya puede explicar las dos. */}
+          {lineasPorTipo && (
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">Vuelo, Hotel, Actividad y Traslado</span>{' '}
+              agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
+              vuelo, el nuevo es «Vuelo 2» y los dos van en el viaje (un segundo tramo va así).
+              {' '}Para una <span className="font-medium">alternativa</span> del mismo componente —otra
+              aerolínea, otro horario— se usa «Agregar otra opción de…» al pie de su bloque (o se
+              pega su pantallazo arriba y se responde «sí, otra opción»): esas compiten y solo una
+              entra al precio.
+              {' '}<span className="font-medium text-foreground">Otro componente del viaje</span> es
+              una línea sin ranura: suma siempre y no compite con nadie.
+            </p>
+          )}
+          {lineasPorTipo && mostrarOtro && (
+            <div className="flex gap-2">
+              <input
+                value={newItemName}
+                onChange={e => setNewItemName(e.target.value)}
+                placeholder="Nombre de la línea..."
+                aria-label="Nombre de la línea"
+                autoFocus
+                className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm"
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleAddItem()
+                  if (e.key === 'Escape') setMostrarOtro(false)
+                }}
+              />
               <button
-                type="button"
-                disabled={isPending || recargo.porPasajero?.pasajeros === null}
-                onClick={() =>
-                  startTransition(async () => {
-                    const r = await aplicarRecargo(cotizacion.id)
-                    if (!r.success) { toast.error(r.error); return }
-                    await recalcularTotales(cotizacion.id)
-                    toast.success(`${r.etiqueta} agregado por ${formatCOP(r.valor)}`)
-                    router.refresh()
-                  })
-                }
-                className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                onClick={handleAddItem}
+                disabled={isPending || !newItemName.trim()}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
               >
-                Agregar recargo
+                <Plus className="h-3.5 w-3.5" />
+                Agregar
               </button>
             </div>
           )}
-
-          {recargo.estado === 'distinto' && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-900">
-              <span className="font-medium">{recargo.etiqueta}</span>: esta cotización lo lleva por{' '}
-              <span className="font-medium tabular-nums">{formatCOP(recargo.valorEnLaLinea)}</span> y el
-              {' '}vigente de la línea es{' '}
-              <span className="font-medium tabular-nums">{formatCOP(recargo.valorVigente)}</span>. Se
-              {' '}respeta el de la cotización; se cambia editando esa línea.
-            </div>
-          )}
-
-          {/* ⚠️⚠️ El aviso de dinero: sugerencias que están sumando al total.
-              Va ROJO y no ámbar, y va pegado a los totales, porque no es un supuesto
-              que alguien pueda dejar pasar: el documento va a decir «no incluida»
-              sobre una línea que el cliente está pagando. */}
-          {avisoSugeridos.length > 0 && (
-            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900">
-              <p className="font-medium">
-                {avisoSugeridos.length === 1
-                  ? 'Una línea se va a imprimir como «no incluida» y está sumando al total.'
-                  : `${avisoSugeridos.length} líneas se van a imprimir como «no incluidas» y están sumando al total.`}
+        </div>
+      )}
+    </>
+  )
+  const jsxTabla = (
+    <>
+      {/* Las combinaciones, ANTES de la cascada: son la decisión de qué se le
+          manda al cliente, y la cascada de abajo es el total del principal.
+          Leerlas después dejaría el total sin contexto. No se pinta nada si la
+          cotización no tiene opciones (R6). */}
+      {itinerarios && (
+        <TablaCombinaciones
+          cotizacionId={cotizacion.id}
+          estado={itinerarios}
+          editable={editable}
+          explicarVacio={lineasPorTipo}
+        />
+      )}
+    </>
+  )
+  const jsxRecargo = (
+    <>
+      {/* R-A1 · qué ranura se resolvió sola. Va ARRIBA de la cascada porque
+          explica el número que sigue: sin esto el total se lee como si alguien
+          hubiera elegido, y nadie eligió. Se nombra la opción tomada y las que
+          quedaron fuera — «hay una suposición» sin decir cuál no se puede
+          corregir. No aparece cuando hay itinerario principal: ahí la decisión
+          está tomada y la toma la tabla de combinaciones. */}
+      {/* Regla 2 · el recargo fijo. Se OFRECE donde corresponde y, cuando el
+          número de la línea no es el vigente, se dicen los DOS. Lo que no se hace
+          nunca es agregarlo solo: una línea de precio que aparece sin que nadie la
+          pida es peor que una que falta, porque sale impresa al cliente. */}
+      {recargo.estado === 'falta' && editable && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900">
+          <div>
+            <p>
+              <span className="font-medium">{recargo.etiqueta}</span> de{' '}
+              <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>
+              {/* B4 · por pasajero se dice la cuenta, no solo el total. */}
+              {recargo.porPasajero && (recargo.porPasajero.pasajeros !== null
+                ? ` (${formatCOP(recargo.porPasajero.valor)} por pasajero × ${recargo.porPasajero.pasajeros})`
+                : ' por pasajero')}
+              : esta
+              {' '}cotización {politicaRecargo.vuelos === 'internacionales' ? 'lleva un vuelo internacional' : 'tiene un componente al que le corresponde'}
+              {' '}y todavía no lo lleva.
+            </p>
+            {recargo.porPasajero && recargo.porPasajero.pasajeros === null && (
+              <p className="mt-1 text-amber-800">
+                Va por pasajero y el negocio todavía no dice quiénes viajan: complétalo en la etapa del viaje para poder agregarlo.
               </p>
-              <ul className="mt-1.5 space-y-1">
-                {avisoSugeridos.map(a => (
-                  <li key={a.id}>
-                    <span className="font-medium">«{nombrePorItem.get(a.id)}»</span>: suma{' '}
-                    <span className="font-medium tabular-nums">{formatCOP(a.precioLinea)}</span> al total
-                    {a.oculta && (
-                      <span className="font-medium"> y además está oculta, así que el cliente ni la ve</span>
-                    )}
-                    .
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1.5">
-                Son{' '}
-                <span className="font-medium tabular-nums">{formatCOP(plataEnAviso)}</span>{' '}
-                que el cliente paga y el documento declara como no incluidos. Tres salidas:
-                {' '}<span className="font-medium">asígnale un día</span> para que entre al itinerario,
-                {' '}<span className="font-medium">desmarca «Entra al precio»</span> si es una sugerencia
-                (el cliente sigue viendo su valor), o <span className="font-medium">déjala en cero</span>.
+            )}
+            {/* Un origen o destino que no se reconoce cuenta como internacional: se
+                ofrece el recargo, pero se dice por qué, para que alguien lo mire. */}
+            {recargo.dudosos.length > 0 && (
+              <p className="mt-1 text-amber-800">
+                Se contó como internacional sin poder confirmarlo: {recargo.dudosos.join('; ')}.
+                {' '}Revisa de dónde a dónde va antes de agregarlo.
               </p>
-            </div>
-          )}
-
-          {/* §4.3 · el aviso que le habría salvado el PDF a Alejandra.
-              Va ANTES del de supuestos a propósito: aquel dice cuál opción cuenta, y
-              este dice que las opciones no eran comparables en primer lugar — o sea que
-              elegir una de las dos es la pregunta equivocada. El texto lo arma
-              `cobertura-opciones.ts`, el mismo que se imprime al generar el PDF. */}
-          {avisosCobertura.length > 0 && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-              <p className="font-medium">
-                {avisosCobertura.length === 1
-                  ? 'Revisa qué cubre cada opción antes de imprimir.'
-                  : `Revisa qué cubre cada opción en ${avisosCobertura.length} ranuras antes de imprimir.`}
-              </p>
-              <ul className="mt-1.5 space-y-1">
-                {avisosCobertura.map(a => (
-                  <li key={a.grupo}>{a.texto}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {supuestos.length > 0 && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-              <p className="font-medium">
-                {supuestos.length === 1
-                  ? 'Una ranura no tiene elección: el total toma una opción por supuesto.'
-                  : `${supuestos.length} ranuras no tienen elección: el total toma una opción por supuesto en cada una.`}
-              </p>
-              <ul className="mt-1.5 space-y-1">
-                {supuestos.map(s => (
-                  <li key={s.grupo}>
-                    <span className="font-medium">{s.grupo}</span>: cuenta{' '}
-                    <span className="font-medium">«{nombrePorItem.get(s.elegido)}»</span>
-                    {s.descartados.length > 0 && (
-                      <>
-                        {' '}y queda fuera del total{' '}
-                        {s.descartados.map(id => `«${nombrePorItem.get(id)}»`).join(', ')}
-                      </>
-                    )}
-                    {!s.combinable && <span className="text-amber-800"> · no se cruza en la tabla</span>}.
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1.5">
-                {hayCombinable
-                  ? 'Arma las combinaciones y marca la principal para decidir los vuelos y hoteles.'
-                  : 'Tours, traslados y planes no abren columna en la tabla: para cambiar cuál suma, borra la alternativa o reordena las líneas.'}
-                {' '}Cada ranura aporta una sola vez: el total nunca suma las dos.
-              </p>
-            </div>
-          )}
-
-          {/* La cascada de la cotización: costo, administrativos, margen, descuento. */}
-          <TotalesMargen
-            cascada={cascadaTotal}
-            margenPct={margenCotizacion}
-            convencionMargen={convencionMargen}
-            descuentoPct={Number(cotizacion.descuento_porcentaje) || 0}
-            editable={editable}
-            aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
-            aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
-            umbrales={umbrales}
-            pisoBloqueaAvance={pisoBloqueaAvance}
-            ofrecerAdministrativos={!lineasPorTipo}
-            onMargenChange={pct => {
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={isPending || recargo.porPasajero?.pasajeros === null}
+            onClick={() =>
               startTransition(async () => {
-                await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+                const r = await aplicarRecargo(cotizacion.id)
+                if (!r.success) { toast.error(r.error); return }
                 await recalcularTotales(cotizacion.id)
+                toast.success(`${r.etiqueta} agregado por ${formatCOP(r.valor)}`)
                 router.refresh()
               })
-            }}
-            onAIUChange={(adminPct, imprevPct) => {
-              startTransition(async () => {
-                await aplicarAIU(cotizacion.id, adminPct, imprevPct)
-                router.refresh()
-              })
-            }}
-            onDescuentoChange={pct => {
-              startTransition(async () => {
-                await updateCotizacion(cotizacion.id, { descuento_porcentaje: pct })
-                await recalcularTotales(cotizacion.id)
-                router.refresh()
-              })
-            }}
-          />
+            }
+            className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            Agregar recargo
+          </button>
+        </div>
+      )}
 
-          {/* Quién movió el margen y cuándo. Debajo de la cascada a propósito: se
-              consulta cuando la cifra de arriba sorprende, no mientras se captura. */}
-          <RastroMargen cotizacionId={cotizacion.id} />
-
-          {/* Terminos y condiciones (van al final de la cotizacion) */}
-          {!terminosEnPanel && (editable || terminos.trim()) && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                Términos y condiciones
-              </label>
-              {editable ? (
-                <textarea
-                  value={terminos}
-                  onChange={e => setTerminos(e.target.value)}
-                  onBlur={() => {
-                    const valor = terminos.trim()
-                    if (valor === (cotizacion.terminos_condiciones ?? '')) return
-                    startTransition(async () => {
-                      const res = await updateCotizacion(cotizacion.id, {
-                        terminos_condiciones: valor || null,
-                      })
-                      if (!res.success) toast.error(res.error)
-                      router.refresh()
-                    })
-                  }}
-                  rows={5}
-                  placeholder="Validez de la oferta, garantía, alcance, condiciones de entrega…"
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm leading-relaxed"
-                />
-              ) : (
-                <p className="whitespace-pre-wrap rounded-md border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                  {terminos}
+      {recargo.estado === 'distinto' && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-900">
+          <span className="font-medium">{recargo.etiqueta}</span>: esta cotización lo lleva por{' '}
+          <span className="font-medium tabular-nums">{formatCOP(recargo.valorEnLaLinea)}</span> y el
+          {' '}vigente de la línea es{' '}
+          <span className="font-medium tabular-nums">{formatCOP(recargo.valorVigente)}</span>. Se
+          {' '}respeta el de la cotización; se cambia editando esa línea.
+        </div>
+      )}
+    </>
+  )
+  const jsxAvisoPlata = (
+    <>
+      {/* ⚠️⚠️ El aviso de dinero: sugerencias que están sumando al total.
+          Va ROJO y no ámbar, y va pegado a los totales, porque no es un supuesto
+          que alguien pueda dejar pasar: el documento va a decir «no incluida»
+          sobre una línea que el cliente está pagando. */}
+      {avisoSugeridos.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+          <p className="font-medium">
+            {avisoSugeridos.length === 1
+              ? 'Una línea se va a imprimir como «no incluida» y está sumando al total.'
+              : `${avisoSugeridos.length} líneas se van a imprimir como «no incluidas» y están sumando al total.`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {avisoSugeridos.map(a => (
+              <li key={a.id}>
+                <span className="font-medium">«{nombrePorItem.get(a.id)}»</span>: suma{' '}
+                <span className="font-medium tabular-nums">{formatCOP(a.precioLinea)}</span> al total
+                {a.oculta && (
+                  <span className="font-medium"> y además está oculta, así que el cliente ni la ve</span>
+                )}
+                .
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5">
+            Son{' '}
+            <span className="font-medium tabular-nums">{formatCOP(plataEnAviso)}</span>{' '}
+            que el cliente paga y el documento declara como no incluidos. Tres salidas:
+            {' '}<span className="font-medium">asígnale un día</span> para que entre al itinerario,
+            {' '}<span className="font-medium">desmarca «Entra al precio»</span> si es una sugerencia
+            (el cliente sigue viendo su valor), o <span className="font-medium">déjala en cero</span>.
+          </p>
+        </div>
+      )}
+    </>
+  )
+  const jsxCobertura = (
+    <>
+      {/* §4.3 · el aviso que le habría salvado el PDF a Alejandra.
+          Va ANTES del de supuestos a propósito: aquel dice cuál opción cuenta, y
+          este dice que las opciones no eran comparables en primer lugar — o sea que
+          elegir una de las dos es la pregunta equivocada. El texto lo arma
+          `cobertura-opciones.ts`, el mismo que se imprime al generar el PDF. */}
+      {avisosCobertura.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-medium">
+            {avisosCobertura.length === 1
+              ? 'Revisa qué cubre cada opción antes de imprimir.'
+              : `Revisa qué cubre cada opción en ${avisosCobertura.length} ranuras antes de imprimir.`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {avisosCobertura.map(a => (
+              <li key={a.grupo}>{a.texto}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  )
+  const jsxSupuestosJsx = (
+    <>
+      {supuestos.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-medium">
+            {supuestos.length === 1
+              ? 'Una ranura no tiene elección: el total toma una opción por supuesto.'
+              : `${supuestos.length} ranuras no tienen elección: el total toma una opción por supuesto en cada una.`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {supuestos.map(s => (
+              <li key={s.grupo}>
+                <span className="font-medium">{s.grupo}</span>: cuenta{' '}
+                <span className="font-medium">«{nombrePorItem.get(s.elegido)}»</span>
+                {s.descartados.length > 0 && (
+                  <>
+                    {' '}y queda fuera del total{' '}
+                    {s.descartados.map(id => `«${nombrePorItem.get(id)}»`).join(', ')}
+                  </>
+                )}
+                {!s.combinable && <span className="text-amber-800"> · no se cruza en la tabla</span>}.
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5">
+            {hayCombinable
+              ? 'Arma las combinaciones y marca la principal para decidir los vuelos y hoteles.'
+              : 'Tours, traslados y planes no abren columna en la tabla: para cambiar cuál suma, borra la alternativa o reordena las líneas.'}
+            {' '}Cada ranura aporta una sola vez: el total nunca suma las dos.
+          </p>
+        </div>
+      )}
+    </>
+  )
+  const jsxTotales = (
+    <>
+      {/* La cascada de la cotización: costo, administrativos, margen, descuento. */}
+      <TotalesMargen
+        cascada={cascadaTotal}
+        margenPct={margenCotizacion}
+        convencionMargen={convencionMargen}
+        descuentoPct={Number(cotizacion.descuento_porcentaje) || 0}
+        editable={editable}
+        aiuAdminPct={cotizacion.aiu_admin_pct ?? null}
+        aiuImprevPct={cotizacion.aiu_imprevistos_pct ?? null}
+        umbrales={umbrales}
+        pisoBloqueaAvance={pisoBloqueaAvance}
+        ofrecerAdministrativos={!lineasPorTipo}
+        onMargenChange={pct => {
+          startTransition(async () => {
+            await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+            await recalcularTotales(cotizacion.id)
+            router.refresh()
+          })
+        }}
+        onAIUChange={(adminPct, imprevPct) => {
+          startTransition(async () => {
+            await aplicarAIU(cotizacion.id, adminPct, imprevPct)
+            router.refresh()
+          })
+        }}
+        onDescuentoChange={pct => {
+          startTransition(async () => {
+            await updateCotizacion(cotizacion.id, { descuento_porcentaje: pct })
+            await recalcularTotales(cotizacion.id)
+            router.refresh()
+          })
+        }}
+      />
+    </>
+  )
+  const jsxRastro = (
+    <>
+      {/* Quién movió el margen y cuándo. Debajo de la cascada a propósito: se
+          consulta cuando la cifra de arriba sorprende, no mientras se captura. */}
+      <RastroMargen cotizacionId={cotizacion.id} />
+    </>
+  )
+  const jsxTerminosJsx = (
+    <>
+      {/* Terminos y condiciones (van al final de la cotizacion) */}
+      {!terminosEnPanel && (editable || terminos.trim()) && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            Términos y condiciones
+          </label>
+          {editable ? (
+            <textarea
+              value={terminos}
+              onChange={e => setTerminos(e.target.value)}
+              onBlur={() => {
+                const valor = terminos.trim()
+                if (valor === (cotizacion.terminos_condiciones ?? '')) return
+                startTransition(async () => {
+                  const res = await updateCotizacion(cotizacion.id, {
+                    terminos_condiciones: valor || null,
+                  })
+                  if (!res.success) toast.error(res.error)
+                  router.refresh()
+                })
+              }}
+              rows={5}
+              placeholder="Validez de la oferta, garantía, alcance, condiciones de entrega…"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm leading-relaxed"
+            />
+          ) : (
+            <p className="whitespace-pre-wrap rounded-md border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              {terminos}
+            </p>
+          )}
+        </div>
+      )}
+    </>
+  )
+  const jsxIvaNota = (
+    <>
+      {/* Sin el resumen fiscal (Trappvel), el aviso de un IVA incompleto no se pierde con él:
+          es lo único de ese bloque que cambia lo que sale en el PDF. */}
+      {!mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 && (
+        <p className="rounded-lg bg-amber-50 p-3 text-center text-[10px] font-medium text-amber-700">
+          {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador, con la marca «{etiquetaDeMotivo('iva_sin_calcular')}», hasta entonces.
+        </p>
+      )}
+    </>
+  )
+  const jsxFiscal = (
+    <>
+      {/* Fiscal result */}
+      {mostrarResumenFiscal && (() => {
+        // `precioVenta` ya trae el descuento comercial aplicado: restarlo otra vez
+        // aquí le bajaba el neto al vendedor sin que nada lo explicara.
+        //
+        // Sale de `cascadaTotal`, no de `cascada`: lo que el vendedor recibe es lo
+        // que se cobra, y lo que se cobra suma cada ranura UNA vez (R-A1).
+        const valor = cascadaTotal.precioVenta
+        const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
+        if (!hasFiscal || valor === 0) {
+          return (
+            <div className="rounded-lg bg-green-50 p-4 text-center">
+              <p className="text-xs font-medium text-green-700">TÚ RECIBES</p>
+              <p className="text-2xl font-bold text-green-700">{formatCOP(valor)}</p>
+              <p className="mt-1 text-[10px] text-green-600">
+                {!fiscalProfile?.is_complete
+                  ? 'Completa tu perfil fiscal en Configuración para ver el desglose'
+                  : 'Completa el perfil fiscal del cliente para ver el desglose'}
+              </p>
+            </div>
+          )
+        }
+        // Con el IVA sobre el ingreso propio, el IVA ya viene liquidado por línea (el
+        // mismo que imprime el PDF y fija «Aprobar») y las retenciones van sobre la
+        // misma base. Sin esa configuración, lo de siempre: IVA sobre el total.
+        // Con el IVA ADENTRO el cliente paga la cotización tal cual y el IVA sale de ahí.
+        const resumen = generarResumenFiscal(
+          fiscalProfile as FiscalProfile,
+          clientFiscal as unknown as Client,
+          valor,
+          costoTotal,
+          ivaVigente
+            ? { iva: ivaVigente.iva, baseGravable: ivaVigente.baseGravable, incluido: ivaAdentro }
+            : undefined,
+        )
+        // De la factura a la plata que de verdad queda, renglón por renglón. Antes
+        // "tú recibes" repetía la cifra de "el cliente paga" porque contaba el IVA
+        // como ingreso propio, y de ahí salía un margen neto MAYOR al de la
+        // cotización, que es imposible.
+        return (
+          <div className="space-y-2">
+            <div className="rounded-lg bg-blue-50 p-3">
+              <p className="text-center text-[10px] font-medium text-blue-600">EL CLIENTE TE FACTURA Y PAGA</p>
+              <p className="text-center text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
+              {resumen.iva > 0 && (
+                <div className="mt-1 space-y-0.5 text-[10px] text-blue-600">
+                  <div className="flex justify-between">
+                    <span>{ivaAdentro ? 'Tu cotización, con el IVA adentro' : 'Tu cotización'}</span>
+                    <span className="tabular-nums">{formatCOP(valor)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>{ivaAdentro ? 'Incluye IVA sobre la tarifa de la agencia' : ivaVigente ? 'IVA sobre la tarifa de la agencia' : 'IVA que le cobras'}</span>
+                    <span className="tabular-nums">{ivaAdentro ? '' : '+'}{formatCOP(resumen.iva)}</span>
+                  </div>
+                </div>
+              )}
+              {/* Una línea con precio y sin costo deja el IVA incompleto: se dice aquí,
+                  y el PDF sale como borrador hasta cargarlo. */}
+              {ivaVigente && !ivaVigente.calculable && (
+                <p className="mt-1 text-center text-[10px] font-medium text-amber-700">
+                  {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador, con la marca «{etiquetaDeMotivo('iva_sin_calcular')}», hasta entonces.
                 </p>
               )}
             </div>
-          )}
 
-          {/* Sin el resumen fiscal (Trappvel), el aviso de un IVA incompleto no se pierde con él:
-              es lo único de ese bloque que cambia lo que sale en el PDF. */}
-          {!mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 && (
-            <p className="rounded-lg bg-amber-50 p-3 text-center text-[10px] font-medium text-amber-700">
-              {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador, con la marca «{etiquetaDeMotivo('iva_sin_calcular')}», hasta entonces.
-            </p>
-          )}
-
-          {/* Fiscal result */}
-          {mostrarResumenFiscal && (() => {
-            // `precioVenta` ya trae el descuento comercial aplicado: restarlo otra vez
-            // aquí le bajaba el neto al vendedor sin que nada lo explicara.
-            //
-            // Sale de `cascadaTotal`, no de `cascada`: lo que el vendedor recibe es lo
-            // que se cobra, y lo que se cobra suma cada ranura UNA vez (R-A1).
-            const valor = cascadaTotal.precioVenta
-            const hasFiscal = fiscalProfile?.is_complete && clientFiscal?.agente_retenedor != null
-            if (!hasFiscal || valor === 0) {
-              return (
-                <div className="rounded-lg bg-green-50 p-4 text-center">
-                  <p className="text-xs font-medium text-green-700">TÚ RECIBES</p>
-                  <p className="text-2xl font-bold text-green-700">{formatCOP(valor)}</p>
-                  <p className="mt-1 text-[10px] text-green-600">
-                    {!fiscalProfile?.is_complete
-                      ? 'Completa tu perfil fiscal en Configuración para ver el desglose'
-                      : 'Completa el perfil fiscal del cliente para ver el desglose'}
-                  </p>
-                </div>
-              )
-            }
-            // Con el IVA sobre el ingreso propio, el IVA ya viene liquidado por línea (el
-            // mismo que imprime el PDF y fija «Aprobar») y las retenciones van sobre la
-            // misma base. Sin esa configuración, lo de siempre: IVA sobre el total.
-            // Con el IVA ADENTRO el cliente paga la cotización tal cual y el IVA sale de ahí.
-            const resumen = generarResumenFiscal(
-              fiscalProfile as FiscalProfile,
-              clientFiscal as unknown as Client,
-              valor,
-              costoTotal,
-              ivaVigente
-                ? { iva: ivaVigente.iva, baseGravable: ivaVigente.baseGravable, incluido: ivaAdentro }
-                : undefined,
-            )
-            // De la factura a la plata que de verdad queda, renglón por renglón. Antes
-            // "tú recibes" repetía la cifra de "el cliente paga" porque contaba el IVA
-            // como ingreso propio, y de ahí salía un margen neto MAYOR al de la
-            // cotización, que es imposible.
-            return (
-              <div className="space-y-2">
-                <div className="rounded-lg bg-blue-50 p-3">
-                  <p className="text-center text-[10px] font-medium text-blue-600">EL CLIENTE TE FACTURA Y PAGA</p>
-                  <p className="text-center text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
-                  {resumen.iva > 0 && (
-                    <div className="mt-1 space-y-0.5 text-[10px] text-blue-600">
-                      <div className="flex justify-between">
-                        <span>{ivaAdentro ? 'Tu cotización, con el IVA adentro' : 'Tu cotización'}</span>
-                        <span className="tabular-nums">{formatCOP(valor)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>{ivaAdentro ? 'Incluye IVA sobre la tarifa de la agencia' : ivaVigente ? 'IVA sobre la tarifa de la agencia' : 'IVA que le cobras'}</span>
-                        <span className="tabular-nums">{ivaAdentro ? '' : '+'}{formatCOP(resumen.iva)}</span>
-                      </div>
-                    </div>
-                  )}
-                  {/* Una línea con precio y sin costo deja el IVA incompleto: se dice aquí,
-                      y el PDF sale como borrador hasta cargarlo. */}
-                  {ivaVigente && !ivaVigente.calculable && (
-                    <p className="mt-1 text-center text-[10px] font-medium text-amber-700">
-                      {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador, con la marca «{etiquetaDeMotivo('iva_sin_calcular')}», hasta entonces.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-lg bg-amber-50 p-3">
-                  <p className="mb-1 text-center text-[10px] font-medium text-amber-700">DE ESO, NO TODO ES TUYO</p>
-                  <div className="space-y-0.5 text-[10px] text-amber-700">
-                    {resumen.iva_trasladado > 0 && (
-                      <div className="flex justify-between">
-                        <span>{ivaAdentro ? 'De tu ingreso propio, IVA que le entregas a la DIAN' : 'IVA: se lo entregas a la DIAN'}</span>
-                        <span className="tabular-nums">-{formatCOP(resumen.iva_trasladado)}</span>
-                      </div>
-                    )}
-                    {resumen.retefuente_valor > 0 && (
-                      <div className="flex justify-between"><span>ReteFuente que te descuentan ({resumen.retefuente_pct}%)</span><span className="tabular-nums">-{formatCOP(resumen.retefuente_valor)}</span></div>
-                    )}
-                    {resumen.reteica_valor > 0 && (
-                      <div className="flex justify-between"><span>ReteICA que te descuentan ({resumen.reteica_pct}‰)</span><span className="tabular-nums">-{formatCOP(resumen.reteica_valor)}</span></div>
-                    )}
-                    {resumen.iva_trasladado === 0 && resumen.retefuente_valor === 0 && resumen.reteica_valor === 0 && (
-                      <p className="text-center">Sin IVA ni retenciones: te entra completo</p>
-                    )}
+            <div className="rounded-lg bg-amber-50 p-3">
+              <p className="mb-1 text-center text-[10px] font-medium text-amber-700">DE ESO, NO TODO ES TUYO</p>
+              <div className="space-y-0.5 text-[10px] text-amber-700">
+                {resumen.iva_trasladado > 0 && (
+                  <div className="flex justify-between">
+                    <span>{ivaAdentro ? 'De tu ingreso propio, IVA que le entregas a la DIAN' : 'IVA: se lo entregas a la DIAN'}</span>
+                    <span className="tabular-nums">-{formatCOP(resumen.iva_trasladado)}</span>
                   </div>
-                </div>
+                )}
+                {resumen.retefuente_valor > 0 && (
+                  <div className="flex justify-between"><span>ReteFuente que te descuentan ({resumen.retefuente_pct}%)</span><span className="tabular-nums">-{formatCOP(resumen.retefuente_valor)}</span></div>
+                )}
+                {resumen.reteica_valor > 0 && (
+                  <div className="flex justify-between"><span>ReteICA que te descuentan ({resumen.reteica_pct}‰)</span><span className="tabular-nums">-{formatCOP(resumen.reteica_valor)}</span></div>
+                )}
+                {resumen.iva_trasladado === 0 && resumen.retefuente_valor === 0 && resumen.reteica_valor === 0 && (
+                  <p className="text-center">Sin IVA ni retenciones: te entra completo</p>
+                )}
+              </div>
+            </div>
 
-                <div className="rounded-lg bg-green-50 p-3">
-                  <p className="text-center text-[10px] font-medium text-green-600">TE QUEDA EN CAJA</p>
-                  <p className="text-center text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
-                  <div className="mt-1 space-y-0.5 text-[10px] text-green-700">
-                    <div className="flex justify-between"><span>Menos lo que te cuestan los ítems</span><span className="tabular-nums">-{formatCOP(costoTotal)}</span></div>
-                    {resumen.seguridad_social > 0 && (
-                      <div className="flex justify-between"><span>Menos tu seguridad social</span><span className="tabular-nums">-{formatCOP(resumen.seguridad_social)}</span></div>
-                    )}
-                    <div className="flex justify-between border-t border-green-200 pt-0.5 font-semibold">
-                      <span>Te ganas</span>
-                      <span className="tabular-nums">{formatCOP(resumen.ganancia_real)} · {resumen.margen_real_neto_pct}%</span>
-                    </div>
-                  </div>
+            <div className="rounded-lg bg-green-50 p-3">
+              <p className="text-center text-[10px] font-medium text-green-600">TE QUEDA EN CAJA</p>
+              <p className="text-center text-xl font-bold text-green-700">{formatCOP(resumen.neto_recibido)}</p>
+              <div className="mt-1 space-y-0.5 text-[10px] text-green-700">
+                <div className="flex justify-between"><span>Menos lo que te cuestan los ítems</span><span className="tabular-nums">-{formatCOP(costoTotal)}</span></div>
+                {resumen.seguridad_social > 0 && (
+                  <div className="flex justify-between"><span>Menos tu seguridad social</span><span className="tabular-nums">-{formatCOP(resumen.seguridad_social)}</span></div>
+                )}
+                <div className="flex justify-between border-t border-green-200 pt-0.5 font-semibold">
+                  <span>Te ganas</span>
+                  <span className="tabular-nums">{formatCOP(resumen.ganancia_real)} · {resumen.margen_real_neto_pct}%</span>
                 </div>
               </div>
-            )
-          })()}
+            </div>
+          </div>
+        )
+      })()}
+    </>
+  )
+
+  // ── Los cinco pasos del flujo de viaje (Trappvel) ───────────────────────────
+  const conCosto = (i: ItemRow) => (lineaPorItem.get(i.id)?.costoLinea ?? 0) > 0
+  const estadoPasos = estadoDePasos({
+    viaje: { destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje },
+    ranuras: bloquesDeLineas
+      .filter(b => b.grupo !== null)
+      .map(b => ({ etiqueta: b.etiqueta ?? '', opciones: b.lineas.length, conCosto: b.lineas.filter(conCosto).length })),
+    sueltasSinCosto: bloquesDeLineas
+      .filter(b => b.grupo === null)
+      .flatMap(b => b.lineas)
+      .filter(i => !conCosto(i) && !((lineaPorItem.get(i.id)?.precioLinea ?? 0) > 0)).length,
+    tarifasEnPropuesta: (itinerarios?.itinerarios ?? []).filter(i => i.vaEnPropuesta).length,
+    texto: textoCliente ? estadoDelTexto(textoCliente.documento) : null,
+    bloqueoEnvio: editable ? motivoBotonEnviar : null,
+    estadoCotizacion: cotizacion.estado,
+  })
+  const enPropuesta = (itinerarios?.itinerarios ?? []).filter(i => i.vaEnPropuesta)
+  const pasosDelViaje = lineasPorTipo ? (
+    <PasosCotizacion
+      pasos={[
+        {
+          id: 'viaje',
+          titulo: 'Viaje',
+          ...estadoPasos.viaje,
+          contenido: (
+            // Sale de las condiciones del viaje (DA1) y aquí no se edita.
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-[#1A1A1A]">
+                {resumenDelViaje({ destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje })
+                  || 'El negocio todavía no dice a dónde, cuándo ni quiénes viajan.'}
+              </p>
+              <a href={backUrl ?? `/negocios/${oportunidadId}`} className="text-xs text-primary underline underline-offset-2">
+                Cambiar en el negocio
+              </a>
+            </div>
+          ),
+        },
+        {
+          id: 'componentes',
+          titulo: 'Componentes',
+          ...estadoPasos.componentes,
+          contenido: (
+            <>
+              {jsxAgregar}
+              {jsxExpandir}
+              {jsxLista}
+              {jsxRecargo}
+              {jsxAvisoPlata}
+              {jsxCobertura}
+            </>
+          ),
+        },
+        {
+          id: 'tarifas',
+          titulo: 'Tarifas',
+          ...estadoPasos.tarifas,
+          contenido: (
+            <>
+              {jsxTabla}
+              {jsxSupuestosJsx}
+              {jsxTotales}
+              {jsxRastro}
+            </>
+          ),
+        },
+        {
+          id: 'texto',
+          titulo: 'Texto para el cliente',
+          ...estadoPasos.texto,
+          contenido: textoCliente ? (
+            <>
+              <DocumentoClientePanel cotizacionId={cotizacion.id} inicial={textoCliente} />
+              {jsxTerminosJsx}
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">Esta plantilla no lleva texto para el cliente.</p>
+              {jsxTerminosJsx}
+            </>
+          ),
+        },
+        {
+          id: 'revisar',
+          titulo: 'Revisar y enviar',
+          ...estadoPasos.revisar,
+          contenido: (
+            <>
+              <div className="rounded-lg border bg-muted/20 p-3 text-xs">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">Total de la cotización</span>
+                  <span className="text-base font-semibold tabular-nums">{formatCOP(cascadaTotal.precioVenta)}</span>
+                </div>
+                <div className="mt-0.5 flex justify-between gap-2 text-muted-foreground">
+                  <span>Costo {formatCOP(cascadaTotal.costoDeVenta)}</span>
+                  <span>Margen {formatMargenPct(cascadaTotal.margenRealPct) ?? '—'}</span>
+                </div>
+                {enPropuesta.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 border-t pt-2">
+                    {enPropuesta.map(t => (
+                      <li key={t.id} className="flex justify-between gap-2">
+                        <span>{t.nombre ?? 'Tarifa'}</span>
+                        <span className="tabular-nums">
+                          {formatCOP(t.precio)}
+                          <span className="ml-1 text-muted-foreground">· {formatMargenPct(t.margenRealPct) ?? '—'}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {jsxAvisoDesactualizadas}
+              {jsxPanelMargen}
+              {jsxIvaNota}
+              {jsxFiscal}
+              <div className="flex flex-wrap gap-2">
+                {editable && (
+                  <button
+                    onClick={handleEnviar}
+                    disabled={isPending || motivoBotonEnviar !== null}
+                    title={motivoBotonEnviar ?? undefined}
+                    aria-describedby={motivoEnvio ? 'aviso-captura-desactualizada' : undefined}
+                    className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="h-3 w-3" />
+                    Enviar
+                  </button>
+                )}
+                <button
+                  onClick={handleDescargarPDF}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                >
+                  <FileDown className="h-3 w-3" />
+                  Descargar PDF
+                </button>
+              </div>
+              {editable && motivoBotonEnviar && (
+                <p className="text-[11px] text-muted-foreground">{motivoBotonEnviar}</p>
+              )}
+            </>
+          ),
+        },
+      ]}
+    />
+  ) : null
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+      {jsxEncabezado}
+      {!lineasPorTipo && jsxPanelMargen}
+      {!lineasPorTipo && jsxPanelTexto}
+      {jsxAvisoCongelada}
+      {jsxAvisoNoEditable}
+      {!lineasPorTipo && jsxAvisoDesactualizadas}
+      {lineasPorTipo ? pasosDelViaje : (
+        <div className="space-y-3">
+          {jsxExpandir}
+          {jsxLista}
+          {jsxAgregar}
+          {jsxTabla}
+          {jsxRecargo}
+          {jsxAvisoPlata}
+          {jsxCobertura}
+          {jsxSupuestosJsx}
+          {jsxTotales}
+          {jsxRastro}
+          {jsxTerminosJsx}
+          {jsxIvaNota}
+          {jsxFiscal}
         </div>
+      )}
 
       {/* Staff datalist for mano de obra rubros */}
       {staffMembers && staffMembers.length > 0 && (
