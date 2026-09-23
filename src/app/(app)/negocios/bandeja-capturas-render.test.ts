@@ -35,7 +35,7 @@ vi.mock('@/app/(app)/negocios/ranura-actions', () => ({
   detectarCaptura: async () => ({ ok: false, codigo: 'SIN_TIPO', mensaje: '' }),
 }))
 
-const { FilaCaptura, enElAireCaptura } = await import('./bandeja-capturas')
+const { FilaCaptura, enElAireCaptura, opcionesParaComparar } = await import('./bandeja-capturas')
 type Captura = Parameters<typeof FilaCaptura>[0]['captura']
 type Item = NonNullable<Parameters<typeof FilaCaptura>[0]['item']>
 
@@ -134,6 +134,58 @@ describe('trabajo en el aire (aviso al recargar)', () => {
     expect(enElAireCaptura({ estado: { fase: 'lista', alertas: [] }, itemId: 'i' })).toBe(false)
     expect(enElAireCaptura({ estado: { fase: 'eligiendo_tipo', motivo: '' }, itemId: null })).toBe(false)
     expect(enElAireCaptura({ estado: { fase: 'rechazada', mensaje: '' }, itemId: null })).toBe(false)
+  })
+})
+
+describe('el pantallazo repetido (P10)', () => {
+  it('misma imagen: dice dónde está ya, que no se procesó, y ofrece Deshacer', () => {
+    const html = pintar(captura({ estado: { fase: 'repetida', mensaje: 'Ya está como Opción 2 de Vuelo 1' }, itemId: null }), null)
+    expect(html).toContain('Ya está como Opción 2 de Vuelo 1')
+    expect(html).toContain('no se volvió a procesar')
+    expect(html).toContain('Deshacer')
+    expect(html).not.toContain('Aceptar')
+  })
+
+  it('parece igual: Descartar (por defecto) y Agregar igual, sin Aceptar', () => {
+    const html = pintar(captura({
+      estado: { fase: 'parecida', conItemId: 'item-0', donde: 'Opción 1 de Vuelo 1', alertas: [] },
+      leida: leidaAvianca(),
+    }), null)
+    expect(html).toContain('Parece igual a Opción 1 de Vuelo 1')
+    expect(html).toContain('Descartar')
+    expect(html).toContain('Agregar igual')
+    expect(html).not.toContain('Aceptar')
+    // Descartar es la primera y la destacada.
+    expect(html.indexOf('Descartar')).toBeLessThan(html.indexOf('Agregar igual'))
+  })
+
+  it('otro precio: Reemplazar el precio de la opción, o Agregar como otra opción', () => {
+    const html = pintar(captura({
+      estado: { fase: 'otro_precio', conItemId: 'item-0', donde: 'Opción 1 de Vuelo 1', corta: 'Opción 1', alertas: [] },
+      leida: leidaAvianca(),
+    }), null)
+    expect(html).toContain('Reemplazar el precio de Opción 1')
+    expect(html).toContain('Agregar como otra opción')
+    expect(html).not.toContain('Aceptar')
+  })
+
+  it('una parecida sin responder es trabajo en el aire (su opción existe y se retira al salir)', () => {
+    expect(enElAireCaptura({ estado: { fase: 'parecida', conItemId: 'x', donde: '', alertas: [] }, itemId: 'i' })).toBe(true)
+    expect(enElAireCaptura({ estado: { fase: 'otro_precio', conItemId: 'x', donde: '', corta: '', alertas: [] }, itemId: 'i' })).toBe(false)
+  })
+})
+
+describe('las opciones contra las que se compara (P10)', () => {
+  it('suma las de la página y las leídas en la bandeja, sin la propia ni las borradas', () => {
+    const items: Item[] = [{ id: 'p1' }, { id: 'item-1', nombre: 'vieja' }]
+    const cs = [
+      captura({ id: 'c-propia', itemId: 'item-9', leida: { id: 'item-9' } }),
+      captura({ id: 'c-otra', itemId: 'item-1', leida: { id: 'item-1', nombre: 'fresca' } }),
+      captura({ id: 'c-borrada', itemId: 'item-5', leida: { id: 'item-5' }, estado: { fase: 'borrada', antes: { fase: 'lista', alertas: [] } } }),
+    ]
+    const r = opcionesParaComparar(items, cs, 'c-propia')
+    expect(r.map(o => o.id).sort()).toEqual(['item-1', 'p1'])
+    expect(r.find(o => o.id === 'item-1')?.nombre).toBe('fresca')
   })
 })
 

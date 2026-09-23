@@ -77,6 +77,34 @@ describe('sin quitar nada, el recorrido de siempre', () => {
   })
 })
 
+describe('el pantallazo repetido (P10)', () => {
+  it('parecida a una que ya estaba: la fila pregunta, abierta, y la opción nueva NO se borra sola', async () => {
+    const t = armar()
+    t.deps.comparar = () => ({ fase: 'parecida', conItemId: 'item-0', donde: 'Opción 1 de Vuelo 1' })
+    await procesarCaptura(t.deps)
+    const ultimo = t.informados.at(-1)!
+    expect(ultimo.estado).toEqual({ fase: 'parecida', conItemId: 'item-0', donde: 'Opción 1 de Vuelo 1', alertas: [] })
+    expect(ultimo.abierta).toBe(true)
+    expect(ultimo.leida?.id).toBe('item-1')
+    expect(t.descartados).toEqual([])
+  })
+
+  it('mismo servicio con otro precio: se ofrece reemplazar', async () => {
+    const t = armar()
+    t.deps.comparar = () => ({ fase: 'otro_precio', conItemId: 'item-0', donde: 'Opción 1 de Vuelo 1', corta: 'Opción 1' })
+    await procesarCaptura(t.deps)
+    expect(t.fases().at(-1)).toBe('otro_precio')
+  })
+
+  it('sin parecido (o sin comparar), queda lista como siempre', async () => {
+    const t = armar()
+    t.deps.comparar = () => null
+    await procesarCaptura(t.deps)
+    expect(t.fases().at(-1)).toBe('lista')
+    expect(t.informados.at(-1)!.abierta).toBeUndefined()
+  })
+})
+
 describe('la × mientras se analiza (P11)', () => {
   it('quitada mientras se lee: la opción que nació para ella se borra y la fila no se toca más', async () => {
     const lectura = diferida<Lectura>()

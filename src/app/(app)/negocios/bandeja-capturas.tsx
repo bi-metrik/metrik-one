@@ -14,6 +14,16 @@ import {
 import { confirmarTarifaPorPasajero, leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { leerCaptura, procesarCaptura, type DependenciasDeProceso, type EstadoDeProceso } from '@/lib/cotizaciones/proceso-captura'
+import {
+  compararConExistentes,
+  huellaDeImagen,
+  mensajeMismaImagen,
+  nombreDeOpcion,
+  opcionConLaMismaImagen,
+  opcionCorta,
+  type OpcionComparable,
+  type Ubicacion,
+} from '@/lib/cotizaciones/captura-repetida'
 import { crearUbicador, type Ubicador } from '@/lib/cotizaciones/ubicador-capturas'
 import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -42,7 +52,15 @@ import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
  * de la página: el refresco que las trae puede llegar tarde, y la fila decía «La lectura no
  * dejó datos» sobre una lectura completa (COT-2026-0011).
  *
- * Solo el flujo de viaje (Trappvel) la monta. La imagen no se guarda.
+ * ## El pantallazo repetido (P10)
+ *
+ * La misma imagen (misma huella) no se procesa: la fila dice dónde está ya y se quita sola;
+ * «Deshacer» la procesa igual. Otra imagen con el mismo servicio y precio se lee y pregunta
+ * («Descartar» por defecto, o «Agregar igual»). El mismo servicio con otro precio no es
+ * repetido: se ofrece reemplazar el precio de la opción que ya estaba o dejarla como otra.
+ * Nunca se decide en silencio (`captura-repetida.ts`).
+ *
+ * Solo el flujo de viaje (Trappvel) la monta. La imagen no se guarda; su huella, sí.
  */
 
 export type Estado =
@@ -53,6 +71,10 @@ export type Estado =
    * «Deshacer» no devuelve un estado viejo: la vuelve a la cola y se analiza de nuevo.
    */
   | { fase: 'borrada'; antes: Estado; reanudar?: boolean }
+  /** P10 · la misma imagen ya se había pegado: no se procesa. */
+  | { fase: 'repetida'; mensaje: string }
+  /** La repetida se quitó sola: no se pinta. */
+  | { fase: 'descartada' }
 
 export interface Captura {
   id: string
@@ -68,6 +90,8 @@ export interface Captura {
   leida: ItemDeBandeja | null
   abierta: boolean
   error: string | null
+  /** Huella del archivo (`huellaDeImagen`), para reconocer la misma imagen pegada otra vez. */
+  huella?: string | null
 }
 
 export interface ItemDeBandeja {
@@ -89,7 +113,24 @@ const ESPERA_BORRADO_MS = 6000
  */
 export function enElAireCaptura(c: Pick<Captura, 'estado' | 'itemId'>): boolean {
   const f = c.estado.fase
-  return f === 'mirando' || f === 'ubicando' || f === 'leyendo' || (f === 'eligiendo_opcion' && c.itemId !== null)
+  return f === 'mirando' || f === 'ubicando' || f === 'leyendo'
+    || ((f === 'eligiendo_opcion' || f === 'parecida') && c.itemId !== null)
+}
+
+/**
+ * Las opciones contra las que se compara una captura: las de la página y las que dejaron las
+ * otras capturas de la bandeja que todavía no llegaron a ella. La lectura de la bandeja manda
+ * sobre la de la página, que puede venir de antes.
+ */
+export function opcionesParaComparar(items: readonly ItemDeBandeja[], capturas: readonly Captura[], excepto: string): OpcionComparable[] {
+  const porId = new Map<string, OpcionComparable>()
+  for (const i of items) porId.set(i.id, i)
+  for (const c of capturas) {
+    if (c.id === excepto || !c.leida || !c.itemId) continue
+    if (c.estado.fase === 'borrada' || c.estado.fase === 'rechazada' || c.estado.fase === 'descartada') continue
+    porId.set(c.leida.id, c.leida)
+  }
+  return [...porId.values()]
 }
 
 /** ¿Se está analizando? La × también vale aquí (P11): la lectura en vuelo se descarta. */
@@ -98,6 +139,7 @@ export function enProceso(e: Estado): boolean {
 }
 
 let contador = 0
+const SIN_UBICACIONES: Record<string, Ubicacion> = {}
 const nuevoId = () => `cap-${Date.now()}-${++contador}`
 
 export default function BandejaCapturas({
@@ -105,6 +147,7 @@ export default function BandejaCapturas({
   items,
   composicion,
   onOpcionCreada,
+  ubicaciones = SIN_UBICACIONES,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización, para mostrar lo leído de cada captura antes de aceptarla. */
@@ -112,6 +155,8 @@ export default function BandejaCapturas({
   composicion: Composicion | null
   /** La opción aceptada, para abrirla en su bloque. */
   onOpcionCreada?: (itemId: string) => void
+  /** Dónde vive cada opción de la página, para nombrarla («Opción 2 de Vuelo 1»). */
+  ubicaciones?: Record<string, Ubicacion>
 }) {
   const router = useRouter()
   const [capturas, setCapturas] = useState<Captura[]>([])
@@ -132,6 +177,18 @@ export default function BandejaCapturas({
   // Las capturas vigentes, para la limpieza al salir (el efecto no ve el estado de ese momento).
   const vigentes = useRef<Captura[]>([])
   useEffect(() => { vigentes.current = capturas }, [capturas])
+  // Lo mismo para las líneas de la página y sus nombres: la comparación (P10) corre dentro de
+  // una pasada asíncrona y tiene que ver lo de ESE momento, no lo del render que la lanzó.
+  const itemsVivos = useRef(items)
+  const ubicacionesVivas = useRef(ubicaciones)
+  useEffect(() => { itemsVivos.current = items; ubicacionesVivas.current = ubicaciones }, [items, ubicaciones])
+  // Qué captura trajo cada huella primero. Se escribe al pegar, sin esperar al render: dos
+  // pegadas seguidas de la misma imagen se reconocen aunque la primera no se haya pintado.
+  const huellas = useRef(new Map<string, string>())
+  // Capturas que el asesor pidió procesar igual: no se comparan (P10).
+  const forzadas = useRef(new Set<string>())
+  // Repetidas en su ventana de «Deshacer», antes de quitarse solas.
+  const ocultar = useRef(new Map<string, ReturnType<typeof setTimeout>>())
 
   const actualizar = useCallback((id: string, cambio: Partial<Captura>) => {
     setCapturas(cs => cs.map(c => (c.id === id ? { ...c, ...cambio } : c)))
@@ -184,6 +241,15 @@ export default function BandejaCapturas({
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
       refrescar: () => router.refresh(),
+      comparar: forzadas.current.has(id) ? undefined : leida => {
+        const r = compararConExistentes(leida, opcionesParaComparar(itemsVivos.current, vigentes.current, id))
+        if (!r) return null
+        const otra = vigentes.current.find(x => x.itemId === r.con.id)
+        const donde = nombreDeOpcion(r.con.id, ubicacionesVivas.current, otra?.etiqueta)
+        return r.tipo === 'parecida'
+          ? { fase: 'parecida', conItemId: r.con.id, donde }
+          : { fase: 'otro_precio', conItemId: r.con.id, donde, corta: opcionCorta(r.con.id, ubicacionesVivas.current) }
+      },
     }
   }, [actualizar, cotizacionId, descartarOpcion, nuevoTurno, router, ubicador])
 
@@ -201,16 +267,36 @@ export default function BandejaCapturas({
       return
     }
     const lector = new FileReader()
-    lector.onload = ev => {
+    lector.onload = ev => void (async () => {
       const dataUrl = ev.target?.result as string
       const id = nuevoId()
-      setCapturas(cs => [...cs, {
-        id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, itemId: null, donde: null, tipo: null, etiqueta: null, leida: null, abierta: false, error: null,
-      }])
+      const huella = await huellaDeImagen(dataUrl)
+      const base: Captura = {
+        id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, itemId: null, donde: null, tipo: null, etiqueta: null, leida: null, abierta: false, error: null, huella,
+      }
+      // P10 · ¿esta imagen ya se pegó? En la página (la huella quedó con su lectura) o en esta
+      // misma bandeja, mientras esa captura siga viva.
+      const enPagina = opcionConLaMismaImagen(huella, itemsVivos.current)
+      const previaId = huella ? huellas.current.get(huella) : undefined
+      const previa = previaId ? vigentes.current.find(x => x.id === previaId) : undefined
+      const previaViva = !!previaId && (!previa || !['borrada', 'rechazada', 'descartada'].includes(previa.estado.fase))
+      if (enPagina || previaViva) {
+        const itemId = enPagina?.id ?? previa?.itemId ?? null
+        const mensaje = mensajeMismaImagen(itemId, ubicacionesVivas.current, previa?.etiqueta)
+        setCapturas(cs => [...cs, { ...base, estado: { fase: 'repetida', mensaje } }])
+        // Se quita sola; mientras tanto «Deshacer» la procesa igual.
+        ocultar.current.set(id, setTimeout(() => {
+          ocultar.current.delete(id)
+          actualizar(id, { estado: { fase: 'descartada' } })
+        }, ESPERA_BORRADO_MS))
+        return
+      }
+      if (huella) huellas.current.set(huella, id)
+      setCapturas(cs => [...cs, base])
       void procesar(id, dataUrl)
-    }
+    })()
     lector.readAsDataURL(archivo)
-  }, [procesar])
+  }, [actualizar, procesar])
 
   // Ctrl/Cmd+V en cualquier parte de la cotización. Lo que pegue una zona propia (la lectura
   // de una línea) ya viene con `defaultPrevented`, y en un campo de texto se pega texto.
@@ -237,11 +323,15 @@ export default function BandejaCapturas({
   useEffect(() => {
     const pendientes = borrados.current
     const actuales = vigentes
+    const repetidas = ocultar.current
     return () => {
       for (const { reloj, ejecutar } of pendientes.values()) { clearTimeout(reloj); ejecutar() }
       pendientes.clear()
+      for (const reloj of repetidas.values()) clearTimeout(reloj)
+      repetidas.clear()
+      // «Parece igual» sin respuesta se resuelve con su opción por defecto: Descartar.
       for (const c of actuales.current) {
-        if (c.itemId && c.estado.fase === 'eligiendo_opcion') void descartarOpcion(c.itemId)
+        if (c.itemId && (c.estado.fase === 'eligiendo_opcion' || c.estado.fase === 'parecida')) void descartarOpcion(c.itemId)
       }
     }
   }, [descartarOpcion])
@@ -278,6 +368,17 @@ export default function BandejaCapturas({
   }
 
   function deshacer(c: Captura) {
+    if (c.estado.fase === 'repetida') {
+      // Procesarla igual: el asesor ya vio que se repetía, no se le vuelve a preguntar.
+      const reloj = ocultar.current.get(c.id)
+      if (reloj) clearTimeout(reloj)
+      ocultar.current.delete(c.id)
+      forzadas.current.add(c.id)
+      nuevoTurno(c.id)
+      actualizar(c.id, { estado: { fase: 'mirando' } })
+      void procesar(c.id, c.dataUrl)
+      return
+    }
     const b = borrados.current.get(c.id)
     if (b) clearTimeout(b.reloj)
     borrados.current.delete(c.id)
@@ -290,6 +391,46 @@ export default function BandejaCapturas({
       return
     }
     actualizar(c.id, { estado: c.estado.antes })
+  }
+
+  /** «Agregar igual» / «Agregar como otra opción»: queda como una opción más, lista para aceptar. */
+  function agregarIgual(c: Captura) {
+    if (c.estado.fase !== 'parecida' && c.estado.fase !== 'otro_precio') return
+    actualizar(c.id, { estado: { fase: 'lista', alertas: c.estado.alertas } })
+  }
+
+  /**
+   * «Reemplazar el precio de Opción 2»: el pantallazo nuevo se lee sobre la opción que ya
+   * estaba (su precio queda al día) y la opción que nació para esta captura se retira.
+   */
+  async function reemplazarPrecio(c: Captura) {
+    if (c.estado.fase !== 'otro_precio' || !c.itemId) return
+    const antes = c.estado
+    const nuevaId = c.itemId
+    const turno = nuevoTurno(c.id)
+    const vigente = () => turnos.current.get(c.id) === turno
+    actualizar(c.id, { estado: { fase: 'leyendo' }, donde: `Reemplazando el precio de ${antes.donde}`, error: null })
+    let r: Awaited<ReturnType<typeof leerCasillaDeItem>>
+    try {
+      r = await leerCasillaDeItem(antes.conItemId, 'grupo_completo', c.dataUrl, null, null)
+    } catch {
+      r = { ok: false, codigo: 'RED', mensaje: 'No se pudo reemplazar el precio. Inténtalo otra vez.' }
+    }
+    // Quitada mientras se reemplazaba: la × ya se llevó la opción nueva (P11).
+    if (!vigente()) { router.refresh(); return }
+    if (!r.ok) {
+      actualizar(c.id, { estado: antes, donde: c.donde, error: r.mensaje })
+      return
+    }
+    await descartarOpcion(nuevaId)
+    actualizar(c.id, {
+      estado: { fase: 'lista', alertas: r.alertas },
+      itemId: antes.conItemId,
+      leida: r.opcion ?? null,
+      donde: `Precio reemplazado en ${antes.donde}`,
+      abierta: false,
+    })
+    router.refresh()
   }
 
   async function aceptar(c: Captura) {
@@ -307,7 +448,7 @@ export default function BandejaCapturas({
     router.refresh()
   }
 
-  const visibles = capturas.filter(c => c.estado.fase !== 'aceptada')
+  const visibles = capturas.filter(c => c.estado.fase !== 'aceptada' && c.estado.fase !== 'descartada')
   const enCurso = capturas.filter(c => ['mirando', 'ubicando', 'leyendo'].includes(c.estado.fase)).length
 
   return (
@@ -368,6 +509,8 @@ export default function BandejaCapturas({
                 onDeshacer={() => deshacer(c)}
                 onElegirTipo={t => { actualizar(c.id, { abierta: false }); void procesar(c.id, c.dataUrl, t) }}
                 onElegirOpcion={o => { if (c.itemId) void leer(c.id, c.itemId, c.dataUrl, o) }}
+                onAgregarIgual={() => agregarIgual(c)}
+                onReemplazarPrecio={() => void reemplazarPrecio(c)}
               />
             ))}
           </ul>
@@ -399,6 +542,8 @@ export function FilaCaptura({
   onDeshacer,
   onElegirTipo,
   onElegirOpcion,
+  onAgregarIgual,
+  onReemplazarPrecio,
 }: {
   captura: Captura
   item: ItemDeBandeja | null
@@ -411,12 +556,30 @@ export function FilaCaptura({
   onDeshacer: () => void
   onElegirTipo: (t: TipoRanura) => void
   onElegirOpcion: (o: { nombre: string; precio: string | null }) => void
+  /** P10 · «Agregar igual» / «Agregar como otra opción». */
+  onAgregarIgual?: () => void
+  /** P10 · «Reemplazar el precio de Opción N». */
+  onReemplazarPrecio?: () => void
 }) {
   if (c.estado.fase === 'borrada') {
     return (
       <li className="flex items-center justify-between gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[11px] text-[#6B7280]">
         <span>{c.estado.reanudar ? 'Quitada · se dejó de analizar' : 'Borrada'}</span>
         <button type="button" onClick={onDeshacer} className="font-medium text-primary underline underline-offset-2">
+          Deshacer
+        </button>
+      </li>
+    )
+  }
+  if (c.estado.fase === 'repetida') {
+    return (
+      <li className="flex items-center justify-between gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[11px] text-[#6B7280]" data-captura-repetida>
+        <span className="flex min-w-0 items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element -- data URL del portapapeles */}
+          <img src={c.preview} alt="" className="h-6 w-9 shrink-0 rounded object-cover" />
+          <span className="truncate">{c.estado.mensaje} · no se volvió a procesar</span>
+        </span>
+        <button type="button" onClick={onDeshacer} className="shrink-0 font-medium text-primary underline underline-offset-2">
           Deshacer
         </button>
       </li>
@@ -440,7 +603,9 @@ export function FilaCaptura({
           : e.fase === 'eligiendo_tipo' ? 'No se reconoce qué es'
             : e.fase === 'eligiendo_opcion' ? '¿Cuál de estas?'
               : e.fase === 'rechazada' ? e.mensaje
-                : ''
+                : e.fase === 'parecida' ? `Parece igual a ${e.donde}`
+                  : e.fase === 'otro_precio' ? `El mismo servicio que ${e.donde}, con otro precio`
+                    : ''
 
   return (
     <li className="rounded-lg border bg-background" data-captura={c.id}>
@@ -451,7 +616,7 @@ export function FilaCaptura({
           <img src={c.preview} alt="" className="h-8 w-12 shrink-0 rounded object-cover" />
           <span className="min-w-0">
             <span className="block truncate text-xs font-medium text-[#1A1A1A]">{titulo}</span>
-            <span className={`flex items-center gap-1 truncate text-[10px] ${e.fase === 'rechazada' ? 'text-red-700' : 'text-[#6B7280]'}`}>
+            <span className={`flex items-center gap-1 truncate text-[10px] ${e.fase === 'rechazada' ? 'text-red-700' : e.fase === 'parecida' || e.fase === 'otro_precio' ? 'font-medium text-amber-700' : 'text-[#6B7280]'}`}>
               {trabajando && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
               {linea}
             </span>
@@ -465,6 +630,43 @@ export function FilaCaptura({
           >
             Revisar en su bloque
           </button>
+        )}
+        {e.fase === 'parecida' && (
+          <>
+            {/* «Descartar» es la opción por defecto: la opción repetida se va (con Deshacer). */}
+            <button
+              type="button"
+              onClick={onBorrar}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
+            >
+              Descartar
+            </button>
+            <button
+              type="button"
+              onClick={onAgregarIgual}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
+            >
+              Agregar igual
+            </button>
+          </>
+        )}
+        {e.fase === 'otro_precio' && (
+          <>
+            <button
+              type="button"
+              onClick={onReemplazarPrecio}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
+            >
+              Reemplazar el precio de {e.corta}
+            </button>
+            <button
+              type="button"
+              onClick={onAgregarIgual}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
+            >
+              Agregar como otra opción
+            </button>
+          </>
         )}
         {confirmable && (
           <button
@@ -542,6 +744,16 @@ export function FilaCaptura({
             </>
           )}
           {e.fase === 'rechazada' && e.detalle && <p className="text-[11px] text-red-800">{e.detalle}</p>}
+          {(e.fase === 'parecida' || e.fase === 'otro_precio') && (
+            <>
+              <p className="mb-1 text-[11px] text-amber-900">
+                {e.fase === 'parecida'
+                  ? `Mismo servicio, mismas fechas y mismo precio que ${e.donde}. Descártala si la pegaste dos veces.`
+                  : `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`}
+              </p>
+              {ficha.length > 0 && <ul className="space-y-0.5 text-[#1A1A1A]">{ficha.map((r, i) => <li key={i}>{r}</li>)}</ul>}
+            </>
+          )}
           {trabajando && <p className="text-[11px] text-[#6B7280]">Todavía se está procesando.</p>}
         </div>
       )}

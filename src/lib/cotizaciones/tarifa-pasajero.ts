@@ -282,6 +282,12 @@ export interface LecturaCasilla {
    * no se deja confirmar (`monedaDeTarifa`). Ausente = la moneda estaba en la captura.
    */
   monedaAsumida?: boolean
+  /**
+   * Huella del archivo que se leyó (`huellaDeImagen`): la bandeja la compara para no procesar
+   * dos veces el mismo pantallazo (P10). La imagen sigue sin guardarse; solo su huella.
+   * Ausente en las lecturas anteriores al 2026-09-23.
+   */
+  huellaImagen?: string
 }
 
 /**

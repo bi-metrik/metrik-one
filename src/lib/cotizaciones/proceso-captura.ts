@@ -37,6 +37,15 @@ export type EstadoDeProceso =
   | { fase: 'eligiendo_tipo'; motivo: string }
   | { fase: 'eligiendo_opcion'; mensaje: string; opciones: OpcionDeLectura[] }
   | { fase: 'rechazada'; mensaje: string; detalle?: string }
+  /** P10 · otra imagen con el mismo servicio y el mismo precio que una opción que ya estaba. */
+  | { fase: 'parecida'; conItemId: string; donde: string; alertas: string[] }
+  /** P10 · el mismo servicio con otro precio: no es repetido, se pregunta qué hacer. */
+  | { fase: 'otro_precio'; conItemId: string; donde: string; corta: string; alertas: string[] }
+
+/** Lo que la comparación con las opciones que ya había encontró (P10). */
+export type Parecido =
+  | { fase: 'parecida'; conItemId: string; donde: string }
+  | { fase: 'otro_precio'; conItemId: string; donde: string; corta: string }
 
 export interface CambioDeCaptura {
   estado?: EstadoDeProceso
@@ -67,6 +76,11 @@ export interface DependenciasDeProceso {
   vigente: () => boolean
   informar: (cambio: CambioDeCaptura) => void
   refrescar: () => void
+  /**
+   * P10 · compara la opción recién leída con las que ya había. Sin ella (o si el asesor pidió
+   * procesarla igual), la fila queda lista como siempre.
+   */
+  comparar?: (leida: OpcionLeida) => Parecido | null
 }
 
 const LECTURA_CAIDA = 'No se pudo leer el pantallazo. Vuelve a pegarlo.'
@@ -112,7 +126,13 @@ export async function leerCaptura(deps: DependenciasDeProceso, itemId: string, e
     deps.refrescar()
     return
   }
-  deps.informar({ estado: { fase: 'lista', alertas: lectura.alertas }, leida: lectura.opcion ?? null })
+  const parecido = lectura.opcion && deps.comparar ? deps.comparar(lectura.opcion) : null
+  deps.informar({
+    estado: parecido ? { ...parecido, alertas: lectura.alertas } : { fase: 'lista', alertas: lectura.alertas },
+    leida: lectura.opcion ?? null,
+    // Lo que se pregunta se muestra abierto: nunca se decide en silencio.
+    ...(parecido ? { abierta: true } : {}),
+  })
   deps.refrescar()
 }
 
