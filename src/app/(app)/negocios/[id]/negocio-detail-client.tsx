@@ -36,6 +36,8 @@ import { EtapasNoAplican } from './etapas-no-aplican'
 import { AvisoNoAplicaPanel } from './aviso-no-aplica'
 import type { AvisoNoAplica } from '@/lib/negocios/no-aplica'
 import PanelContacto from './panel-contacto'
+import { encabezadoDelMarco, type MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
+import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '../marco-cotizacion-contexto'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
@@ -2222,9 +2224,25 @@ interface Props {
   banner?: React.ReactNode
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
+  /**
+   * Negocio de viaje (Trappvel): el viaje con su IATA en el encabezado y la solicitud, el
+   * perfil y las cotizaciones abiertas en el panel. Ausente en toda otra línea (R6).
+   */
+  viaje?: MarcoDelNegocio | null
+  /**
+   * La cotización de un negocio de viaje se pinta DENTRO de este mismo marco: mismo
+   * encabezado y mismo panel, y en la zona central el editor en vez de los bloques
+   * (corrección de Mauricio a #874: ir y volver no puede mover nada).
+   */
+  centro?: React.ReactNode
+  /** La cotización abierta en `centro`, que el panel resalta. */
+  cotActualId?: string | null
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
+
+/** El valor del contexto del marco: estable, para no re-renderizar el editor. */
+const MARCO_ACTIVO = { activo: true } as const
 
 export default function NegocioDetailClient({
   negocio,
@@ -2257,10 +2275,29 @@ export default function NegocioDetailClient({
   errorMsg,
   banner,
   extras,
+  viaje = null,
+  centro,
+  cotActualId = null,
 }: Props) {
   useEffect(() => {
     if (errorMsg) toast.error(errorMsg)
   }, [errorMsg])
+
+  // Con la cotización en el centro, su zona de pegado se pega JUSTO debajo de este
+  // encabezado fijo: se mide su alto y viaja como variable CSS. En el negocio no se mide.
+  const encabezadoRef = useRef<HTMLDivElement>(null)
+  const [altoEncabezado, setAltoEncabezado] = useState(0)
+  const conCentro = centro !== undefined
+  useEffect(() => {
+    const el = encabezadoRef.current
+    if (!conCentro || !el || typeof ResizeObserver === 'undefined') return
+    const medir = () => setAltoEncabezado(el.offsetHeight)
+    medir()
+    const ro = new ResizeObserver(medir)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [conCentro])
+  const lineaViaje = viaje ? encabezadoDelMarco(viaje.viaje, viaje.iataDestino) : null
 
   // Un negocio cerrado se ve y se descarga; no se alimenta. Se deriva de `estado`
   // con el criterio unico del producto — NO de `cierre_motivo`, que es NULL en todo
@@ -2346,7 +2383,10 @@ export default function NegocioDetailClient({
        (no cabe) y el panel entra como tarjeta plegable dentro de la misma
        columna, justo debajo del header. */
     <AlmacenamientoExternoProvider externo={almacenamientoExterno}>
-    <div className="mx-auto max-w-2xl lg:max-w-5xl px-4 py-4">
+    <div
+      className="mx-auto max-w-2xl lg:max-w-5xl px-4 py-4"
+      style={conCentro ? ({ [VAR_ALTO_ENCABEZADO]: `${altoEncabezado}px` } as React.CSSProperties) : undefined}
+    >
       <div className="lg:grid lg:grid-cols-[1fr_18rem] lg:items-start lg:gap-6">
         {/* ── COLUMNA PRINCIPAL ── */}
         <div className="min-w-0">
@@ -2385,7 +2425,7 @@ export default function NegocioDetailClient({
           `backdrop-blur`, que crea un containing block y ya obligó a sacar tres
           modales por portal a `document.body`. El panel es `sticky` (no `fixed`)
           y vive fuera de este nodo, así que no lo toca. */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
+      <div ref={encabezadoRef} className="sticky top-0 z-30 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
         <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {/* Fila A — estado: [STAGE] › [E{N} ETAPA] */}
@@ -2454,6 +2494,24 @@ export default function NegocioDetailClient({
             canEdit={puedeCorregirDocumentos(userRole)}
           />
         </h1>
+        {/* Negocio de viaje: a dónde, cuándo y quiénes, con el IATA de los vuelos leídos.
+            En ámbar si al negocio le faltan fechas o pasajeros (absorbe el P9). */}
+        {lineaViaje && (
+          <div
+            data-encabezado-viaje
+            className={`mt-1 inline-flex max-w-full flex-col rounded-md px-2 py-0.5 ${lineaViaje.motivo ? 'border border-amber-200 bg-amber-50' : '-mx-2'}`}
+          >
+            <p className="text-xs font-medium text-foreground">
+              {lineaViaje.resumen || 'El negocio todavía no dice a dónde, cuándo ni quiénes viajan'}
+            </p>
+            {lineaViaje.motivo && (
+              <p className="flex items-center gap-1 text-[11px] font-medium text-amber-800">
+                <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                {lineaViaje.motivo}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Badge + Filas 3, 4, 5 (scrollean) */}
@@ -2554,11 +2612,19 @@ export default function NegocioDetailClient({
             contacto={negocio.contactos}
             empresa={negocio.empresas}
             campanas={negocio.campanas_contacto ?? null}
+            viaje={viaje}
+            cotActualId={cotActualId}
           />
         </div>
       </div>
 
-      {/* ── BODY: Bloques ── */}
+      {/* ── CENTRO: la cotización, cuando se pinta dentro del marco del negocio ── */}
+      {conCentro ? (
+        <MarcoCotizacionContexto.Provider value={MARCO_ACTIVO}>
+          <div data-centro-cotizacion>{centro}</div>
+        </MarcoCotizacionContexto.Provider>
+      ) : (
+      /* ── BODY: Bloques ── */
       <div className="space-y-4">
         {/* La ayuda de la etapa va ARRIBA de los bloques, no en un documento aparte:
             un documento aparte no se abre mientras se trabaja. Opt-in por configuración
@@ -2647,6 +2713,7 @@ export default function NegocioDetailClient({
             queden alineados con ella (antes eran hermanos con su propio ancho). */}
         {extras}
       </div>
+      )}
 
         </div>
         {/* ── PANEL DEL CONTACTO (escritorio) ──
@@ -2661,6 +2728,8 @@ export default function NegocioDetailClient({
             contacto={negocio.contactos}
             empresa={negocio.empresas}
             campanas={negocio.campanas_contacto ?? null}
+            viaje={viaje}
+            cotActualId={cotActualId}
           />
         </aside>
       </div>

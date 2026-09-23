@@ -9,6 +9,8 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { plantillaMuestraResumenFiscal } from '@/lib/pdf/plantillas-cotizacion'
 import { notFound } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
+import NegocioDetailClient from '@/app/(app)/negocios/[id]/negocio-detail-client'
+import { cargarVistaNegocio } from '@/app/(app)/negocios/[id]/vista-negocio'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -270,7 +272,7 @@ export default async function CotizacionNegocioPage({
     politicaLinea,
   )
 
-  return (
+  const editor = (
     <CotizacionEditor
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
@@ -299,4 +301,16 @@ export default async function CotizacionNegocioPage({
       fechasViaje={fechasViaje}
     />
   )
+
+  // Cotización de viaje (Trappvel): se pinta DENTRO del marco del negocio, con el mismo
+  // encabezado y el mismo panel que su página (corrección de Mauricio a #874). El centro
+  // es el editor; lo demás sale de la MISMA carga que usa la página del negocio. Fuera del
+  // flujo de viaje, o si la carga no trae viaje, la pantalla de siempre (R6).
+  if (lineasPorTipo) {
+    const vista = await cargarVistaNegocio(id)
+    if (vista?.viaje) {
+      return <NegocioDetailClient {...vista} extras={null} centro={editor} cotActualId={cotId} />
+    }
+  }
+  return editor
 }

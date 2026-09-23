@@ -3,16 +3,12 @@
 import { createContext } from 'react'
 
 /**
- * Lo que el marco del negocio (`marco-cotizacion.tsx`) le ofrece a la cotización que
- * envuelve. `null` = no hay marco: la cotización se pinta como siempre (R6).
+ * La cotización de viaje se está pintando dentro del marco del negocio
+ * (`NegocioDetailClient` con `centro`): mismo encabezado y mismo panel que la página del
+ * negocio. `null` = sin marco, y la cotización se pinta como siempre (R6).
  */
 export interface ContextoMarcoCotizacion {
-  /**
-   * La bandeja avisa si tiene trabajo en el aire. Es la MISMA condición del aviso al
-   * recargar (`enElAire` de `bandeja-capturas.tsx`): el marco la usa para preguntar
-   * antes de cambiar de cotización.
-   */
-  avisarEnElAire: (enElAire: boolean) => void
+  activo: true
 }
 
 export const MarcoCotizacionContexto = createContext<ContextoMarcoCotizacion | null>(null)

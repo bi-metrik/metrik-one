@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, Camera, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,7 +29,8 @@ import { crearUbicador, type Ubicador } from '@/lib/cotizaciones/ubicador-captur
 import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
-import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '@/app/(app)/negocios/marco-cotizacion-contexto'
+import { VAR_ALTO_ENCABEZADO } from '@/app/(app)/negocios/marco-cotizacion-contexto'
+import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 
 /**
  * La bandeja de capturas (P7 del caso Providencia, versión de Mauricio del 2026-09-23):
@@ -358,13 +359,21 @@ export default function BandejaCapturas({
     return () => window.removeEventListener('beforeunload', alSalir)
   }, [enElAire])
 
-  // Con marco, la misma condición le dice al marco que pregunte antes de cambiar de cotización.
-  const marco = useContext(MarcoCotizacionContexto)
+  // Dentro del marco del negocio, la MISMA condición pregunta antes de salir por un enlace
+  // (otra cotización del panel, el encabezado, el menú). Escucha en captura sobre el
+  // documento: corre antes que el `Link`, que respeta `defaultPrevented`. Así el aviso vive
+  // en la cotización y el encabezado y el panel del negocio no cambian.
   useEffect(() => {
-    if (!marco) return
-    marco.avisarEnElAire(enElAire)
-    return () => marco.avisarEnElAire(false)
-  }, [marco, enElAire])
+    if (!fija || !enElAire) return
+    function alTocar(e: MouseEvent) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      const enlace = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
+      if (!enlace || !saleDeLaPagina(enlace.href, window.location.href, enlace.target)) return
+      if (!window.confirm(PREGUNTA_AL_SALIR)) e.preventDefault()
+    }
+    document.addEventListener('click', alTocar, true)
+    return () => document.removeEventListener('click', alTocar, true)
+  }, [fija, enElAire])
 
   // Arrastrar y soltar: las imágenes entran por el mismo camino que el pegado.
   const [arrastrando, setArrastrando] = useState(false)

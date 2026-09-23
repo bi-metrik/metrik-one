@@ -2,18 +2,20 @@
  * El negocio alrededor de la cotización de viaje (Trappvel, decisión de layout del
  * 2026-09-23).
  *
- * La cotización sigue en su propia pantalla, pero trae del negocio lo que quien cotiza
- * necesita tener a la vista: arriba un encabezado fijo (titular, destino, fechas,
- * pasajeros, etapa) y a la derecha una columna de solo lectura con la solicitud, el
- * contacto, el perfil del cliente y las cotizaciones abiertas del negocio.
+ * La cotización se pinta DENTRO del mismo marco de la página del negocio: el mismo
+ * encabezado y el mismo panel derecho, con los mismos componentes (corrección de
+ * Mauricio a #874: ir y volver entre las dos pantallas no puede mover nada). Lo que la
+ * cotización necesitaba ver —el viaje con su IATA, la solicitud, el perfil del cliente y
+ * las cotizaciones abiertas— entra a ESOS componentes y se ve también en el negocio.
  *
  * Aquí vive lo PURO: de filas de la base a lo que se pinta. La lectura está en
  * `marco-negocio-datos.ts`.
  *
  * Lo que se decidió (y por qué) — ver el PR del marco:
  * - El presupuesto no está en la solicitud: sale de «Bolsillo declarado» del perfil.
- * - El código IATA del destino no tiene tabla propia: sale de los vuelos ya leídos
- *   de las cotizaciones del negocio, y SOLO si el vuelo llega a una ciudad con el
+ * - El código IATA del destino no tiene tabla propia: sale de los vuelos ya leídos de
+ *   las cotizaciones ABIERTAS del negocio (no de la que esté abierta en pantalla, para
+ *   que las dos pantallas digan lo mismo), y SOLO si el vuelo llega a una ciudad con el
  *   mismo nombre del destino. Sin vuelo que coincida, va el nombre solo.
  * - Cotizaciones abiertas: borrador, enviada y aceptada. Fuera: rechazada y vencida.
  * - La lista se muestra en las etapas 2 (Cotización) y 3 (Seguimiento).
@@ -51,12 +53,6 @@ export interface PerfilDelCliente {
   notas: string | null
 }
 
-export interface ContactoDelNegocio {
-  nombre: string | null
-  telefono: string | null
-  email: string | null
-}
-
 export interface CotizacionDeLaLista {
   id: string
   codigo: string
@@ -76,17 +72,14 @@ export interface EtapaDelNegocio {
 
 export interface MarcoDelNegocio {
   negocioId: string
-  titular: string | null
-  etapa: EtapaDelNegocio | null
   viaje: {
     destino: string | null
     fechas: { inicio: string | null; fin: string | null }
     composicion: Composicion | null
   }
-  /** El código IATA del destino según los vuelos de cada cotización (por id). */
-  iataPorCotizacion: Record<string, string | null>
+  /** El código IATA del destino según los vuelos de las cotizaciones abiertas. */
+  iataDestino: string | null
   solicitud: SolicitudDelViaje
-  contacto: ContactoDelNegocio | null
   perfil: PerfilDelCliente | null
   /** `null` = la etapa del negocio no lista cotizaciones. */
   cotizaciones: CotizacionDeLaLista[] | null

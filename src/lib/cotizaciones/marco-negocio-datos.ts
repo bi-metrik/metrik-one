@@ -64,10 +64,10 @@ export async function leerMarcoDelNegocio(supabase: unknown, workspaceId: string
     neg.data.contacto_id
       ? sb
         .from('contactos')
-        .select('nombre, telefono, email, custom_data')
+        .select('custom_data')
         .eq('id', neg.data.contacto_id)
         .eq('workspace_id', workspaceId)
-        .maybeSingle() as Promise<Resultado<{ nombre: string | null; telefono: string | null; email: string | null; custom_data: unknown }>>
+        .maybeSingle() as Promise<Resultado<{ custom_data: unknown }>>
       : Promise.resolve({ data: null, error: null }),
     sb
       .from('cotizaciones')
@@ -86,7 +86,7 @@ export async function leerMarcoDelNegocio(supabase: unknown, workspaceId: string
   const abiertas = cotizacionesAbiertas(cots.data ?? [])
 
   // El IATA sale de los vuelos ya leídos de las cotizaciones abiertas.
-  const iataPorCotizacion: Record<string, string | null> = {}
+  let iataDestino: string | null = null
   if (abiertas.length > 0 && viaje.destino) {
     const items = await sb
       .from('items')
@@ -94,9 +94,7 @@ export async function leerMarcoDelNegocio(supabase: unknown, workspaceId: string
       .in('cotizacion_id', abiertas.map(c => c.id))
       .ilike('grupo', 'vuelo%') as Resultado<(LineaParaCobertura & { cotizacion_id: string })[]>
     if (items.error) console.warn('[marco-negocio] no se pudieron leer los vuelos:', items.error.message)
-    for (const c of abiertas) {
-      iataPorCotizacion[c.id] = iataDelDestino(viaje.destino, (items.data ?? []).filter(i => i.cotizacion_id === c.id))
-    }
+    iataDestino = iataDelDestino(viaje.destino, items.data ?? [])
   }
 
   const etapaRaw = neg.data.etapas_negocio
@@ -104,14 +102,9 @@ export async function leerMarcoDelNegocio(supabase: unknown, workspaceId: string
 
   return {
     negocioId,
-    titular: contacto.data?.nombre?.trim() || null,
-    etapa,
     viaje,
-    iataPorCotizacion,
+    iataDestino,
     solicitud: solicitudDesdeFilas(filas, viaje),
-    contacto: contacto.data
-      ? { nombre: contacto.data.nombre, telefono: contacto.data.telefono, email: contacto.data.email }
-      : null,
     perfil: perfilDesdeCustomData(contacto.data?.custom_data),
     cotizaciones: muestraCotizaciones(etapa) && !cots.error ? abiertas : null,
     puedeCrearCotizacion: !abiertas.some(c => c.estado === 'aceptada'),
