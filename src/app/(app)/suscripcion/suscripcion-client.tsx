@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CreditCard, FileText, LayoutDashboard, Users } from 'lucide-react'
+import { ResumenLicencias } from './resumen-licencias'
 import { SeccionSustenta, type EstadoSustenta } from './sustenta'
 import { UsuariosPanel, type DatosUsuarios } from './usuarios-panel'
 
@@ -71,22 +72,12 @@ export default function SuscripcionClient(p: Props) {
           {p.principal}
 
           {p.licencias && (
-            <section data-resumen-licencias className="rounded-lg border border-border bg-white p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-tinta">
-                  {p.licencias.usados} de {p.licencias.total} usuarios en uso
-                </p>
-                <button type="button" onClick={() => ir('usuarios')} className="text-sm font-semibold text-acento">
-                  Ver usuarios
-                </button>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-papel" aria-hidden>
-                <div
-                  className="h-full rounded-full bg-acento"
-                  style={{ width: `${Math.min(100, Math.round((p.licencias.usados / Math.max(1, p.licencias.total)) * 100))}%` }}
-                />
-              </div>
-            </section>
+            <ResumenLicencias
+              usados={p.licencias.usados}
+              total={p.licencias.total}
+              personas={p.usuarios.lista ?? []}
+              onVerUsuarios={() => ir('usuarios')}
+            />
           )}
 
           {p.terminosResumen && (
