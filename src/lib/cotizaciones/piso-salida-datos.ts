@@ -18,6 +18,7 @@
  * esté bajo el piso sale como borrador, que es el lado seguro.
  */
 
+import { motivoFaltaCosto } from './falta-costo'
 import { createHash } from 'node:crypto'
 
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
@@ -61,6 +62,13 @@ export interface SalidaDeCotizacion {
   dueno: string | null
   /** `false` con el SQL pendiente: no se puede autorizar todavía. */
   excepcionesDisponibles: boolean
+  /**
+   * Una línea sin costo NI precio entra al total que sale (`falta-costo.ts`, decisión de
+   * Mauricio del 2026-09-23): no se envía y el PDF sale como borrador incompleto. La firma
+   * del dueño NO la levanta: autoriza un margen, no un precio al que le falta un servicio.
+   * `null` = no falta ningún costo en lo que sale.
+   */
+  faltaCosto: string | null
 }
 
 const SIN_REGLA: SalidaDeCotizacion = {
@@ -74,6 +82,7 @@ const SIN_REGLA: SalidaDeCotizacion = {
   mensaje: '',
   dueno: null,
   excepcionesDisponibles: true,
+  faltaCosto: null,
 }
 
 export function huellaDe(medicion: MedicionDeSalida): string {
@@ -151,6 +160,7 @@ export async function evaluarSalida(
     mensaje: bloquea ? mensajeDeSalida(medicion.bajoPiso, medicion.pisoPct, dueno) : '',
     dueno,
     excepcionesDisponibles: disponible,
+    faltaCosto: motivoFaltaCosto(medicion.conteo.faltantes),
   }
 }
 
@@ -242,7 +252,9 @@ export function recortarParaLog(texto: string, max = 280): string {
  *     dice nada. Aplica a TODA línea con tarifas, no solo a la que exige el piso: la
  *     leyenda «el total corresponde a la opción recomendada» la imprime cualquiera. Sin
  *     tarifas (`[]`) es una consulta y no dice nada (R6).
- *  2. El margen mínimo en la salida (`evaluarSalida`), solo donde la línea lo exige.
+ *  2. Ninguna línea sin costo en el total que sale (`falta-costo.ts`), solo donde la línea
+ *     exige el piso en la salida.
+ *  3. El margen mínimo en la salida (`evaluarSalida`), solo donde la línea lo exige.
  */
 export async function motivoParaNoSalir(
   supabase: Supabase,
@@ -253,6 +265,8 @@ export async function motivoParaNoSalir(
 
   const salida = await evaluarSalida(supabase, { ...args, registrarPerdida: true })
   if (!salida) return null
+  // Antes que el margen: con un servicio en cero, el margen tampoco dice nada.
+  if (salida.faltaCosto) return salida.faltaCosto
   return salida.bloquea ? salida.mensaje : null
 }
 

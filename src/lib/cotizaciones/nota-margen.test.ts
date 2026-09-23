@@ -58,3 +58,20 @@ describe('la nota del margen mínimo dice la causa real (P1 del ensayo del 2026-
     expect(notaDeMargen(vieja).tipo).toBe('bloquea')
   })
 })
+
+describe('una línea sin costo entra al total que sale (Mauricio, 2026-09-23)', () => {
+  const FALTA = 'Falta el costo de Vuelo a Providencia · Opción 1: el cliente recibiría un precio sin ese servicio.'
+  it('apaga Enviar con el motivo, aunque el margen se pueda medir y esté bien', () => {
+    const nota = notaDeMargen({ ...BASE, bloquea: false, bajoMinimo: [], lineasSinCosto: 1, faltaCosto: FALTA })
+    expect(nota).toEqual({ tipo: 'incompleta', texto: FALTA, motivoBoton: FALTA })
+  })
+  it('va antes que el margen bajo el mínimo y la firma del dueño no la levanta', () => {
+    expect(notaDeMargen({ ...BASE, faltaCosto: FALTA }).tipo).toBe('incompleta')
+    expect(notaDeMargen({ ...BASE, excepcion: {}, faltaCosto: FALTA }).tipo).toBe('incompleta')
+  })
+  it('sin línea sin costo en el total, el aviso neutro de siempre no apaga Enviar', () => {
+    const nota = notaDeMargen({ ...BASE, bloquea: false, bajoMinimo: [], lineasSinCosto: 1, faltaCosto: null })
+    expect(nota.tipo).toBe('faltan_costos')
+    expect('motivoBoton' in nota ? nota.motivoBoton : null).toBeNull()
+  })
+})

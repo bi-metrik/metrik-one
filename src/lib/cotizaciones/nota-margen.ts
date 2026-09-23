@@ -27,6 +27,8 @@ export interface SalidaParaNota {
   lineas?: number
   lineasSinCosto?: number
   bajoMinimo?: { nombre: string | null; margenPct: number | null }[]
+  /** Una línea sin costo entra al total que sale (`falta-costo.ts`). Ausente = no aplica. */
+  faltaCosto?: string | null
 }
 
 export type NotaDeMargen =
@@ -36,8 +38,13 @@ export type NotaDeMargen =
   | { tipo: 'autorizada' }
   /** Cotización vacía: sin nota, y el botón apagado con `motivoBoton`. */
   | { tipo: 'sin_lineas'; motivoBoton: string }
-  /** Líneas sin costo ni precio: aviso neutro. */
+  /** Líneas sin costo ni precio que NO entran al total que sale: aviso neutro. */
   | { tipo: 'faltan_costos'; texto: string; motivoBoton: string | null }
+  /**
+   * Una línea sin costo entra al total que sale (decisión de Mauricio del 2026-09-23):
+   * no se envía, y ni la firma del dueño lo levanta. Va antes que el margen.
+   */
+  | { tipo: 'incompleta'; texto: string; motivoBoton: string }
   /** Margen medido y bajo el mínimo: la nota roja, con el margen real. */
   | { tipo: 'bajo_minimo'; titulo: string; motivoBoton: string }
   /** Frena por otra razón que no se resume en una cifra (una tarifa incompleta). */
@@ -54,6 +61,7 @@ export function textoFaltanCostos(n: number): string {
 
 export function notaDeMargen(salida: SalidaParaNota | null | undefined): NotaDeMargen {
   if (!salida || !salida.aplica) return { tipo: 'nada' }
+  if (salida.faltaCosto) return { tipo: 'incompleta', texto: salida.faltaCosto, motivoBoton: salida.faltaCosto }
   if (salida.excepcion) return { tipo: 'autorizada' }
 
   const lineas = salida.lineas

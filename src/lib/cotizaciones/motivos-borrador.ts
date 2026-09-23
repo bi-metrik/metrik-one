@@ -22,6 +22,7 @@
 export type MotivoDeBorrador =
   | 'pantallazos'
   | 'recomendada'
+  | 'incompleto'
   | 'margen'
   | 'iva_sin_calcular'
   | 'iva_incluido_sin_plantilla'
@@ -35,6 +36,7 @@ export type MotivoDeBorrador =
 export const ORDEN_DE_MOTIVOS: readonly MotivoDeBorrador[] = [
   'pantallazos',
   'recomendada',
+  'incompleto',
   'margen',
   'iva_sin_calcular',
   'iva_incluido_sin_plantilla',
@@ -43,6 +45,7 @@ export const ORDEN_DE_MOTIVOS: readonly MotivoDeBorrador[] = [
 const ETIQUETAS: Record<MotivoDeBorrador, string> = {
   pantallazos: 'pantallazos por actualizar',
   recomendada: 'falta la tarifa Recomendada',
+  incompleto: 'borrador incompleto: falta un costo',
   margen: 'margen bajo el mínimo',
   iva_sin_calcular: 'IVA sin calcular',
   iva_incluido_sin_plantilla: 'IVA incluido sin plantilla',
@@ -57,6 +60,11 @@ export interface CondicionesDeBorrador {
   pantallazos: boolean
   /** Con tarifas: no hay una sola Recomendada marcada «va en propuesta» (`motivoSinRecomendada`). */
   sinRecomendada: boolean
+  /**
+   * Una línea sin costo ni precio entra al total que sale (`falta-costo.ts`): el cliente
+   * recibiría un precio sin ese servicio. Opcional: ausente = no aplica.
+   */
+  faltaCosto?: boolean
   margen: boolean
   ivaSinCalcular: boolean
   ivaIncluidoSinPlantilla: boolean
@@ -67,6 +75,7 @@ export function motivosDeBorrador(c: CondicionesDeBorrador): MotivoDeBorrador[] 
   const aplica: Record<MotivoDeBorrador, boolean> = {
     pantallazos: c.pantallazos,
     recomendada: c.sinRecomendada,
+    incompleto: c.faltaCosto === true,
     margen: c.margen,
     iva_sin_calcular: c.ivaSinCalcular,
     iva_incluido_sin_plantilla: c.ivaIncluidoSinPlantilla,

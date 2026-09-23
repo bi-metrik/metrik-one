@@ -624,3 +624,51 @@ describe('marcar una tarifa dice cuál salió de la propuesta y por qué (ensayo
     expect('desmarcados' in res ? res.desmarcados : null).toEqual([])
   })
 })
+
+describe('una línea sin costo entra al total que sale (Mauricio, 2026-09-23)', () => {
+  const FALTA = 'Falta el costo de Vuelo a Providencia · Opción 1: el cliente recibiría un precio sin ese servicio.'
+  const vuelo3 = 'vuelo 3: Vuelo a Providencia'
+
+  it('sin tarifas: «Enviar» se rechaza con el nombre de la línea y el PDF sale como borrador incompleto', async () => {
+    sembrar({ items: [linea('paquete', 700, 1000, { orden: 1 }), linea('op1', 0, 0, { grupo: vuelo3, nombre: 'OPCIÓN 1', precio_manual: false, orden: 2 })] })
+    const res = await enviarCotizacion(COT)
+    expect(res.success).toBe(false)
+    expect(res.error).toBe(FALTA)
+    expect((await enviarCotizacionNegocio(COT, NEG)).error).toBe(FALTA)
+    const pdf = await generateCotizacionPDF(COT) as { borrador?: boolean; pdf: string; aviso?: string }
+    expect(pdf.borrador).toBe(true)
+    expect(textoDelPDF(pdf.pdf)).toContain('borrador incompleto')
+    expect(pdf.aviso).toContain(FALTA)
+    expect(subidas).toEqual([])
+  })
+
+  it('con tarifas: si ninguna MARCADA la lleva, sale', async () => {
+    sembrar({
+      items: [
+        linea('va', 700, 1000, { grupo: 'vuelo', orden: 1 }),
+        linea('op1', 0, 0, { grupo: vuelo3, nombre: 'OPCIÓN 1', precio_manual: false, orden: 2 }),
+        linea('op2', 700, 1000, { grupo: vuelo3, nombre: 'SATENA', orden: 3 }),
+      ],
+      // La opción vacía existe, pero la tarifa marcada lleva la otra del mismo vuelo.
+      itinerarios: [{ id: 'it-rec', nombre: 'Recomendada', orden: 1, va: true, principal: true, seleccion: ['va', 'op2'] }],
+    })
+    expect(await enviarCotizacion(COT)).toMatchObject({ success: true })
+  })
+
+  it('con tarifas: si una MARCADA la lleva, no sale', async () => {
+    sembrar({
+      items: [
+        linea('va', 700, 1000, { grupo: 'vuelo', orden: 1 }),
+        linea('op1', 0, 0, { grupo: vuelo3, nombre: 'OPCIÓN 1', precio_manual: false, orden: 2 }),
+        linea('op2', 700, 1000, { grupo: vuelo3, nombre: 'SATENA', orden: 3 }),
+      ],
+      itinerarios: [{ id: 'it-rec', nombre: 'Recomendada', orden: 1, va: true, principal: true, seleccion: ['va', 'op1'] }],
+    })
+    expect((await enviarCotizacion(COT)).error).toBe(FALTA)
+  })
+
+  it('en otra línea (sin la regla) nada cambia (R6)', async () => {
+    sembrar({ conRegla: false, items: [linea('paquete', 700, 1000, { orden: 1 }), linea('op1', 0, 0, { grupo: vuelo3, nombre: 'OPCIÓN 1', precio_manual: false, orden: 2 })] })
+    expect((await enviarCotizacion(COT)).success).toBe(true)
+  })
+})

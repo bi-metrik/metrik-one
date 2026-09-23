@@ -36,7 +36,7 @@ const TRES = [
 
 describe('medirSalida · el conteo de líneas (P1 del ensayo del 2026-09-23)', () => {
   it('una cotización vacía no tiene líneas que medir', () => {
-    expect(medirSalida(ctx([]), null).conteo).toEqual({ lineas: 0, sinCosto: 0 })
+    expect(medirSalida(ctx([]), null).conteo).toEqual({ lineas: 0, sinCosto: 0, faltantes: [] })
   })
 
   it('cuenta las líneas sin costo ni precio', () => {
@@ -45,12 +45,13 @@ describe('medirSalida · el conteo de líneas (P1 del ensayo del 2026-09-23)', (
       item('b', 0, 0, { precio_manual: false }),
       item('c', 800, 1000),
     ]), null)
-    expect(m.conteo).toEqual({ lineas: 3, sinCosto: 2 })
+    expect(m.conteo).toMatchObject({ lineas: 3, sinCosto: 2 })
+    expect(m.conteo.faltantes.map(f => f.id)).toEqual(['a', 'b'])
   })
 
   it('el recargo (precio escrito sin costo) NO cuenta como faltante: entra así a propósito', () => {
     const m = medirSalida(ctx([item('p', 700, 1000), item('recargo', 0, 100)]), null)
-    expect(m.conteo).toEqual({ lineas: 2, sinCosto: 0 })
+    expect(m.conteo).toEqual({ lineas: 2, sinCosto: 0, faltantes: [] })
   })
 
   it('con tarifas marcadas cuenta la unión de sus líneas, una vez cada una', () => {
@@ -191,5 +192,28 @@ describe('causaDePerdida · qué cambió', () => {
   it('una tarifa que sale de la propuesta', () => {
     const hoy = medirSalida(ctx(TRES.map(i => ({ ...i }))), [tarifa('rec', 'Recomendada', 2, ['vb'])]).detalle
     expect(causaDePerdida(antes, hoy)).toBe('La tarifa Económica ya no está en la propuesta.')
+  })
+})
+
+describe('medirSalida · la línea sin costo que entra al total que sale (Mauricio, 2026-09-23)', () => {
+  const VUELO3 = 'vuelo 3: Vuelo a Providencia'
+  const COT11 = [
+    item('avianca', 2_184_600, 2_570_118, { grupo: 'vuelo' }),
+    item('op1', 0, 0, { grupo: VUELO3, nombre: 'OPCIÓN 1', precio_manual: false }),
+    item('op2', 0, 0, { grupo: VUELO3, nombre: 'OPCIÓN 2', precio_manual: false }),
+  ]
+
+  it('sin tarifas: la opción vacía que suma hoy es un faltante, con su nombre y su ranura', () => {
+    const { faltantes } = medirSalida(ctx(COT11), null).conteo
+    expect(faltantes).toHaveLength(1)
+    expect(faltantes[0]).toMatchObject({ grupo: VUELO3 })
+    expect(['OPCIÓN 1', 'OPCIÓN 2']).toContain(faltantes[0].nombre)
+  })
+
+  it('con tarifas: solo cuenta si una tarifa MARCADA la lleva', () => {
+    const fuera = medirSalida(ctx(COT11), [tarifa('t1', 'Recomendada', 1, ['avianca']), tarifa('t2', 'Borrador', 2, ['avianca', 'op1'], false)])
+    expect(fuera.conteo.faltantes).toEqual([])
+    const dentro = medirSalida(ctx(COT11), [tarifa('t1', 'Recomendada', 1, ['avianca', 'op2'])])
+    expect(dentro.conteo.faltantes.map(f => f.id)).toEqual(['op2'])
   })
 })
