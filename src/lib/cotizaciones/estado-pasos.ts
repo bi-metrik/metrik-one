@@ -1,15 +1,19 @@
 /**
- * El estado de cada uno de los cinco pasos del editor de Trappvel (brief del 2026-09-23).
+ * El estado de cada uno de los cuatro pasos del editor de Trappvel (brief del 2026-09-23), y
+ * el encabezado del viaje.
  *
  * Puro: la pantalla le pasa lo que ya tiene calculado y esto decide si cada paso está hecho,
  * pendiente o con error, y la línea que lo explica. Vive aparte del JSX para que la regla de
  * «cuándo está hecho» tenga su prueba y no dependa de cómo se pinte.
  *
- *  1. Viaje: hecho con quiénes viajan y el destino o las fechas (salen de DA1, no se editan aquí).
- *  2. Componentes: hecho cuando cada ranura tiene al menos una opción con costo.
- *  3. Tarifas: hecho con al menos una tarifa en la propuesta.
- *  4. Texto para el cliente: hecho cuando se guardó revisado (o si la plantilla no lo lleva).
- *  5. Revisar y enviar: error si algo impide enviar; hecho cuando ya salió de borrador.
+ *  · El viaje NO es un paso (P9, decisión de Mauricio del 2026-09-23): destino, fechas y
+ *    pasajeros salen del negocio y aquí no hay nada que decidir. Es el encabezado fijo de la
+ *    cotización (`encabezadoDelViaje`), en ámbar si al negocio le faltan fechas o pasajeros.
+ *  1. Componentes: hecho cuando cada ranura tiene al menos una opción con costo.
+ *  2. Tarifas: hecho con al menos una tarifa en la propuesta.
+ *  3. Texto para el cliente: hecho cuando se guardó revisado (o si la plantilla no lo lleva).
+ *  4. Revisar y enviar: error si algo impide enviar; pendiente con lo que le falta al viaje;
+ *     hecho cuando ya salió de borrador.
  */
 
 import { describirOcupacion, type Composicion } from './tarifa-pasajero'
@@ -67,11 +71,28 @@ export function resumenDelViaje(e: EntradaPasos['viaje']): string {
   ].filter(Boolean).join(' · ')
 }
 
-export function estadoDePasos(e: EntradaPasos): Record<'viaje' | 'componentes' | 'tarifas' | 'texto' | 'revisar', ResultadoPaso> {
-  const viajeListo = !!e.viaje.composicion && (!!e.viaje.destino?.trim() || !!e.viaje.fechas?.inicio)
-  const viaje: ResultadoPaso = viajeListo
-    ? { estado: 'hecho', detalle: resumenDelViaje(e.viaje) }
-    : { estado: 'pendiente', detalle: 'Faltan las condiciones del viaje en el negocio' }
+export interface EncabezadoDelViaje {
+  /** «Providencia · 9 al 13 nov 2026 · 2 adultos, 1 infante». Vacío si el negocio no dice nada. */
+  resumen: string
+  /** Por qué va en ámbar: «Faltan las fechas del viaje en el negocio». `null` = completo. */
+  motivo: string | null
+}
+
+/** El encabezado fijo de la cotización de viaje (P9). */
+export function encabezadoDelViaje(v: EntradaPasos['viaje']): EncabezadoDelViaje {
+  const sinFechas = !v.fechas?.inicio && !v.fechas?.fin
+  const sinPasajeros = !v.composicion
+  const falta = sinFechas && sinPasajeros
+    ? 'las fechas y los pasajeros'
+    : sinFechas
+      ? 'las fechas del viaje'
+      : sinPasajeros
+        ? 'los pasajeros'
+        : null
+  return { resumen: resumenDelViaje(v), motivo: falta ? `Faltan ${falta} en el negocio` : null }
+}
+
+export function estadoDePasos(e: EntradaPasos): Record<'componentes' | 'tarifas' | 'texto' | 'revisar', ResultadoPaso> {
 
   const sinCosto = e.ranuras.filter(r => r.conCosto === 0)
   const problemasComp = sinCosto.length + e.sueltasSinCosto
@@ -96,11 +117,16 @@ export function estadoDePasos(e: EntradaPasos): Record<'viaje' | 'componentes' |
     : { estado: 'pendiente', detalle: e.texto === 'borrador' ? 'Borrador de ONE sin revisar' : 'Sin texto' }
 
   const yaSalio = !!e.estadoCotizacion && e.estadoCotizacion !== 'borrador'
+  // Lo que le falta al viaje se lista aquí como pendiente: el encabezado lo dice arriba,
+  // pero es este paso el que se revisa antes de mandar algo al cliente.
+  const faltaViaje = encabezadoDelViaje(e.viaje).motivo
   const revisar: ResultadoPaso = yaSalio
     ? { estado: 'hecho', detalle: 'Enviada' }
     : e.bloqueoEnvio
-      ? { estado: 'error', problemas: 1, detalle: e.bloqueoEnvio }
-      : { estado: 'pendiente', detalle: 'Lista para revisar y enviar' }
+      ? { estado: 'error', problemas: 1, detalle: faltaViaje ? `${e.bloqueoEnvio} · ${faltaViaje}` : e.bloqueoEnvio }
+      : faltaViaje
+        ? { estado: 'pendiente', detalle: faltaViaje }
+        : { estado: 'pendiente', detalle: 'Lista para revisar y enviar' }
 
-  return { viaje, componentes, tarifas, texto, revisar }
+  return { componentes, tarifas, texto, revisar }
 }
