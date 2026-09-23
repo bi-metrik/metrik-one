@@ -16,6 +16,7 @@
 - ⚠️⚠️ [Sección Suscripción de los CDA](project_seccion_suscripcion_cda.md) — #851: migración 20260924060000 ANTES del merge; sin valor_usuario_adicional no vende
 - ⚠️ [Suscripción solo para la designada (#857)](project_suscripcion_solo_designado.md) — «Ver como» compara la persona EFECTIVA; CDA sin vitrinas
 - ⚠️⚠️ [Pago en línea de cuotas (Bold temporal)](project_pago_en_linea_bold.md) — #850: migración SIN aplicar; la pasarela sale de un dato
+- ⚠️⚠️ [Enlace de pago automático de cuotas CDA](project_enlace_pago_automatico.md) — cron paso 6; ignora `planes_cobro.activo` a propósito
 - ⚠️ [Tarjeta de Sustenta en /suscripcion](project_sustenta_tarjeta_marca.md) — migración de eventos SIN aplicar; sin ella se pierden en silencio
 - ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad
 - ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761; wa-webhook SIN redesplegar
