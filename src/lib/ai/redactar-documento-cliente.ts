@@ -8,7 +8,8 @@
 // ⚠️ La firma es la que protege el dato: recibe SOLO `ViajeParaRedactar`, que se arma
 // campo por campo en `documento-cliente.ts` sin el nombre del cliente ni precios. No
 // acepta la cotización, el negocio ni las líneas: así esa regla no se puede romper por
-// descuido desde quien llama.
+// descuido desde quien llama. Lo único que entra aparte son los ejemplos de la voz de la
+// agencia (`config_extra.ejemplos_texto` de la línea), que ya llegan limpios de cifras.
 //
 // Server-only. Nunca se llama al renderizar el PDF: solo desde el botón «Redactar con ONE».
 // ============================================================
@@ -50,6 +51,7 @@ function repararJson(text: string): string {
 export async function redactarTextoCliente(
   viaje: ViajeParaRedactar,
   apiKey: string,
+  opciones?: { ejemplos?: readonly TextoCliente[] },
 ): Promise<{ texto: TextoCliente; modelo: string }> {
   if (!apiKey) throw new Error('GEMINI_API_KEY no configurada en el servidor')
 
@@ -58,7 +60,7 @@ export async function redactarTextoCliente(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      system_instruction: { parts: [{ text: promptDelRedactor() }] },
+      system_instruction: { parts: [{ text: promptDelRedactor(opciones?.ejemplos ?? []) }] },
       contents: [{ parts: [{ text: contenidoDelRedactor(viaje) }] }],
       generationConfig: {
         temperature: 0.4,

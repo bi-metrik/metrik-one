@@ -17,6 +17,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import React from 'react'
 
 import type { DocumentoCliente, PanelTextoCliente } from '@/lib/cotizaciones/documento-cliente'
+import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
 
 vi.mock('sonner', () => ({ toast: { error: () => {}, success: () => {}, warning: () => {} } }))
 // Las acciones arrastran `server-only` y el cliente de Supabase; el panel solo necesita sus
@@ -52,11 +53,21 @@ const panel = (over: Partial<PanelTextoCliente> = {}): PanelTextoCliente => ({
   desactualizado: false,
   hayViaje: true,
   editable: true,
+  terminos: null,
+  terminosBase: null,
   ...over,
 })
 
-const pintar = (p: PanelTextoCliente) =>
-  texto(renderToStaticMarkup(React.createElement(DocumentoClientePanel, { cotizacionId: 'c1', inicial: p })))
+const html = (p: PanelTextoCliente) =>
+  renderToStaticMarkup(React.createElement(DocumentoClientePanel, { cotizacionId: 'c1', inicial: p }))
+const pintar = (p: PanelTextoCliente) => texto(html(p))
+
+/** El contenido del textarea de términos, tal como lo escapa React. */
+function cuadroDeTerminos(h: string): string | null {
+  const m = /<textarea id="terminos-c1"[^>]*>([\s\S]*?)<\/textarea>/.exec(h)
+  if (!m) return null
+  return m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;/g, "'")
+}
 
 describe('el panel del texto para el cliente', () => {
   it('⚠️ un borrador de ONE lleva su marca y avisa que el PDF no lo imprime', () => {
@@ -96,5 +107,74 @@ describe('el panel del texto para el cliente', () => {
   it('sin viaje que describir, lo explica en vez de dejar un botón mudo', () => {
     const t = pintar(panel({ documento: null, hayViaje: false }))
     expect(t).toContain('hace falta el destino del viaje')
+  })
+})
+
+describe('dónde sale cada campo (C1)', () => {
+  it('⚠️ cada campo dice, debajo del rótulo, dónde sale en el PDF y para qué', () => {
+    const t = pintar(panel())
+    expect(t).toContain('Titular Es el título de la portada. Si lo dejas vacío, sale el nombre del negocio.')
+    expect(t).toContain('Presentación Sale debajo del título, en la primera página. Una o dos frases que presenten el viaje.')
+    expect(t).toContain('Incluido en el plan Sale al final, en la lista de lo que incluye el precio.')
+    expect(t).toContain('Antes de viajar Sale al final. Consejos para el viajero: documentos, clima, qué llevar.')
+    expect(t).toContain('Términos y condiciones Sale al cierre del documento, antes de la firma. Las reglas de la reserva.')
+  })
+
+  it('términos es la ÚLTIMA sección, antes del único botón de guardar', () => {
+    const t = pintar(panel())
+    const i = t.indexOf('Términos y condiciones')
+    expect(i).toBeGreaterThan(t.indexOf('Antes de viajar'))
+    expect(t.indexOf('Guardar texto revisado')).toBeGreaterThan(i)
+    expect(t.split('Guardar texto revisado').length - 1).toBe(1)
+  })
+
+  it('la miniatura del documento existe y se oculta en celular: queda la línea de ayuda', () => {
+    const h = html(panel())
+    expect(h).toContain('Portada · página 1')
+    expect(h).toContain('Cierre')
+    expect(h).toMatch(/class="hidden items-end gap-3 sm:flex" aria-hidden="true"/)
+  })
+})
+
+describe('los términos en el panel (C2)', () => {
+  it('⚠️⚠️ un borrador sin términos nace con el texto base de la línea, marcado como no guardado', () => {
+    const h = html(panel({ terminos: null, terminosBase: TERMINOS_BASE_TRAPPVEL }))
+    expect(cuadroDeTerminos(h)).toBe(TERMINOS_BASE_TRAPPVEL)
+    const t = texto(h)
+    expect(t).toContain('Propuestos con las condiciones de siempre de la línea')
+    expect(t).toContain('Cambios sin guardar')
+  })
+
+  it('los términos guardados mandan sobre el texto base: son la copia de ESTA cotización', () => {
+    const h = html(panel({ terminos: 'Tarifa válida por 3 días.', terminosBase: TERMINOS_BASE_TRAPPVEL }))
+    expect(cuadroDeTerminos(h)).toBe('Tarifa válida por 3 días.')
+    expect(texto(h)).not.toContain('Propuestos con las condiciones de siempre')
+  })
+
+  it('sin texto base, el cuadro queda vacío con un ejemplo en gris', () => {
+    const h = html(panel({ terminos: null, terminosBase: null }))
+    expect(cuadroDeTerminos(h)).toBe('')
+    expect(h).toMatch(/placeholder="Condiciones generales/)
+    expect(texto(h)).not.toContain('Cambios sin guardar')
+  })
+
+  it('una cotización que ya no es borrador muestra sus términos y no propone el base', () => {
+    const t = pintar(panel({ editable: false, terminos: 'Tarifa válida por 3 días.', terminosBase: TERMINOS_BASE_TRAPPVEL }))
+    expect(t).toContain('Tarifa válida por 3 días.')
+    expect(t).not.toContain('Medios de pago')
+    expect(pintar(panel({ editable: false, terminos: null, terminosBase: TERMINOS_BASE_TRAPPVEL }))).not.toContain('Medios de pago')
+  })
+})
+
+describe('el estilo del borrador (C4)', () => {
+  it('⚠️ un borrador con fórmulas de folleto lo dice, sin reescribirlo', () => {
+    const t = pintar(panel({ documento: { ...DOC, titular: 'Descubra San Andrés', intro: 'Un rincón del Caribe.' } }))
+    expect(t).toContain('Revisa el estilo antes de guardar')
+    expect(t).toContain('«Descubra» (Titular): suena a folleto.')
+    expect(t).toContain('«rincón» (Presentación): suena a folleto.')
+  })
+
+  it('un texto limpio no muestra el aviso', () => {
+    expect(pintar(panel())).not.toContain('Revisa el estilo')
   })
 })

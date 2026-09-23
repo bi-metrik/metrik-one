@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
+  plantillaMuestraResumenFiscal,
   slugsConPlantillaPropia,
 } from './plantillas-cotizacion'
 
@@ -41,5 +42,17 @@ describe('plantillaCotizacionPropia', () => {
     // el slug nuevo no esté ya en uso por el servicio externo. `trappvel` se agregó el
     // 2026-09-21 y se comprobó contra producción que ningún workspace lo tenía puesto.
     expect(slugsConPlantillaPropia()).toEqual(['termotech', 'trappvel'])
+  })
+})
+
+describe('plantillaMuestraResumenFiscal (hallazgo 33 del 2026-09-23)', () => {
+  it('Trappvel no pinta el resumen fiscal del editor', () => {
+    expect(plantillaMuestraResumenFiscal('trappvel')).toBe(false)
+  })
+
+  it('R6 · Termotech, WMC, la genérica y un workspace sin plantilla lo siguen viendo', () => {
+    for (const slug of ['termotech', 'wmc', PLANTILLA_POR_DEFECTO, null, undefined, '', 'constructor']) {
+      expect(plantillaMuestraResumenFiscal(slug)).toBe(true)
+    }
   })
 })

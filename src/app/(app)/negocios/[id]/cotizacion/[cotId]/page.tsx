@@ -6,6 +6,7 @@ import { getSalidaDeCotizacion } from '@/app/(app)/negocios/margen-salida-action
 import { getTextoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { plantillaMuestraResumenFiscal } from '@/lib/pdf/plantillas-cotizacion'
 import { notFound } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
@@ -235,17 +236,23 @@ export default async function CotizacionNegocioPage({
   // workspace solo viaja lo ya interpretado, nunca el jsonb. Si no se puede leer, lo de
   // siempre: IVA sobre el total, que es lo que reciben todos los workspaces que no declaran
   // nada.
+  //
+  // De la misma fila sale la plantilla, que decide si el editor pinta el resumen fiscal del
+  // final (hallazgo 33: Trappvel no). Si no se puede leer, se pinta, como siempre.
   let configIva: ConfigIvaCotizacion = CONFIG_IVA_POR_DEFECTO
+  let mostrarResumenFiscal = true
   try {
     const { supabase: sbIva, workspaceId: wsIva } = await getWorkspace()
     if (wsIva) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: wsRow } = await (sbIva as any)
         .from('workspaces')
-        .select('config_extra')
+        .select('config_extra, cotizacion_template_slug')
         .eq('id', wsIva)
         .maybeSingle()
-      configIva = leerConfigIvaCotizacion((wsRow as { config_extra?: unknown } | null)?.config_extra)
+      const fila = wsRow as { config_extra?: unknown; cotizacion_template_slug?: string | null } | null
+      configIva = leerConfigIvaCotizacion(fila?.config_extra)
+      mostrarResumenFiscal = plantillaMuestraResumenFiscal(fila?.cotizacion_template_slug)
     }
   } catch {
     // Sin respuesta, el IVA de siempre.
@@ -281,6 +288,7 @@ export default async function CotizacionNegocioPage({
       salida={salida}
       textoCliente={textoCliente}
       configIva={configIva}
+      mostrarResumenFiscal={mostrarResumenFiscal}
     />
   )
 }

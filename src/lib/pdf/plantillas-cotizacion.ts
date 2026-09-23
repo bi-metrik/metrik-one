@@ -104,3 +104,18 @@ const PLANTILLAS_CON_PRECIOS_CON_IVA = new Set(['trappvel'])
 export function plantillaImprimePreciosConIva(slug: string | null | undefined): boolean {
   return !!slug && PLANTILLAS_CON_PRECIOS_CON_IVA.has(slug)
 }
+
+/**
+ * Las plantillas cuyo editor NO pinta el resumen fiscal del final («El cliente te factura y
+ * paga / De eso, no todo es tuyo / Te queda en caja»). Hoy solo la de Trappvel.
+ *
+ * Decisión de Mauricio del 2026-09-23 (hallazgo 33 del ensayo de cotización): para la
+ * agencia no aporta, y es el único sitio donde salía un tercer margen («Te ganas 13 %»)
+ * distinto de los dos del resumen de arriba. Los demás workspaces lo siguen viendo igual.
+ * El aviso de un IVA que no se pudo calcular sí sigue saliendo: cambia lo que imprime el PDF.
+ */
+const PLANTILLAS_SIN_RESUMEN_FISCAL = new Set(['trappvel'])
+
+export function plantillaMuestraResumenFiscal(slug: string | null | undefined): boolean {
+  return !(slug && PLANTILLAS_SIN_RESUMEN_FISCAL.has(slug))
+}
