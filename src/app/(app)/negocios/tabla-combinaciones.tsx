@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useTransition } from 'react'
+import { Fragment, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -16,6 +16,14 @@ import {
   type EstadoItinerarios,
 } from '@/app/(app)/negocios/itinerario-actions'
 import { nombreDeItinerario } from '@/lib/cotizaciones/itinerarios'
+import {
+  anotarClic,
+  anotarRespuesta,
+  conciliarConServidor,
+  marcaEnCamino,
+  marcaVisible,
+  type MarcasPendientes,
+} from '@/lib/cotizaciones/marcas-en-propuesta'
 import { etiquetaDeMotivo, MOTIVOS_COMBINACION } from '@/lib/cotizaciones/motivo-combinacion'
 import { esTarifaConNombre, NOMBRES_TARIFA, tarifasQueFaltan } from '@/lib/cotizaciones/tarifas'
 import { nivelDeMargen } from '@/lib/cotizaciones/convencion-margen'
@@ -86,6 +94,18 @@ export default function TablaCombinaciones({
   const [nombres, setNombres] = useState<Record<string, string>>({})
   const [nombresRanura, setNombresRanura] = useState<Record<string, string>>({})
   const [motivos, setMotivos] = useState<Record<string, string>>({})
+  // «Va en propuesta» no pasa por `isPending`: marcar tres tarifas seguidas perdía el clic del
+  // medio (ensayo del 2026-09-23). Cada clic se ve de inmediato y su llamada se encola, en el
+  // orden en que se hizo. Las reglas viven en `marcas-en-propuesta.ts`.
+  const [marcas, setMarcas] = useState<MarcasPendientes>({})
+  const colaDeMarcas = useRef<Promise<void>>(Promise.resolve())
+  // Cada dato nuevo del servidor retira las anotaciones que ya no hacen falta. Se ajusta al
+  // pintar y no en un efecto: con un efecto habría un cuadro con el dato viejo encima.
+  const [itinerariosVistos, setItinerariosVistos] = useState(estado.itinerarios)
+  if (itinerariosVistos !== estado.itinerarios) {
+    setItinerariosVistos(estado.itinerarios)
+    setMarcas(m => conciliarConServidor(m, estado.itinerarios))
+  }
 
   const {
     ranuras,
@@ -153,6 +173,36 @@ export default function TablaCombinaciones({
         return
       }
       if (exito) toast.success(exito)
+      router.refresh()
+    })
+  }
+
+  /**
+   * Marca o desmarca una tarifa para la propuesta, sin bloquear la tabla.
+   *
+   * ⚠️ La cola no es un adorno: marcar recalcula el total de la cotización leyendo TODAS las
+   * tarifas. Dos llamadas a la vez podrían escribir el total con una lectura vieja de la otra.
+   * Encadenadas, cada una ve lo que dejó la anterior, en el orden de los clics.
+   */
+  function marcar(id: string, nombre: string, valor: boolean) {
+    setMarcas(m => anotarClic(m, id, valor))
+    colaDeMarcas.current = colaDeMarcas.current.then(async () => {
+      let r: Awaited<ReturnType<typeof marcarEnPropuesta>>
+      try {
+        r = await marcarEnPropuesta(id, valor)
+      } catch (e) {
+        r = { success: false, error: e instanceof Error ? e.message : 'No se pudo guardar' }
+      }
+      setMarcas(m => anotarRespuesta(m, id, valor, r.success))
+      if (!r.success) {
+        // Con nombre: con tres clics seguidos, «no se pudo» a secas no dice cuál volvió atrás.
+        toast.error(`«${nombre}»: ${r.error ?? 'no se pudo guardar'}`)
+        return
+      }
+      toast.success(valor ? `«${nombre}» va en la propuesta` : `«${nombre}» sale de la propuesta`)
+      for (const d of ('desmarcados' in r ? r.desmarcados : undefined) ?? []) {
+        toast.warning(`«${nombreDeItinerario(d.nombre, 0)}» salió de la propuesta: ${d.motivo}`)
+      }
       router.refresh()
     })
   }
@@ -441,19 +491,20 @@ export default function TablaCombinaciones({
                       <label className="inline-flex cursor-pointer items-center gap-1">
                         <input
                           type="checkbox"
-                          checked={it.vaEnPropuesta}
-                          disabled={!editable || isPending || (!it.vaEnPropuesta && it.bloqueo !== null)}
-                          // El interruptor se deshabilita cuando hay bloqueo, pero el
-                          // servidor RECHAZA igual: el candado no es este atributo.
+                          checked={marcaVisible(it.id, it.vaEnPropuesta, marcas)}
+                          // ⚠️ Sin `isPending`: deshabilitarla mientras otra acción corre es lo
+                          // que perdía el segundo de tres clics seguidos. Solo la apaga lo que
+                          // de verdad impide marcar, y el servidor RECHAZA igual: el candado no
+                          // es este atributo.
+                          disabled={!editable || (!marcaVisible(it.id, it.vaEnPropuesta, marcas) && it.bloqueo !== null)}
                           title={it.bloqueo ?? undefined}
-                          onChange={e =>
-                            correr(
-                              () => marcarEnPropuesta(it.id, e.target.checked),
-                              e.target.checked ? 'Va en la propuesta' : 'Fuera de la propuesta',
-                            )
-                          }
+                          aria-label={`Va en propuesta: ${nombreDeItinerario(it.nombre, i + 1)}`}
+                          onChange={e => marcar(it.id, nombreDeItinerario(it.nombre, i + 1), e.target.checked)}
                           className="h-3.5 w-3.5"
                         />
+                        {marcaEnCamino(it.id, marcas) && (
+                          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-label="Guardando" />
+                        )}
                       </label>
                       {it.bloqueo && !it.vaEnPropuesta && (
                         <div className="mt-0.5 text-[10px] leading-tight text-red-600">{it.bloqueo}</div>

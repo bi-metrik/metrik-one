@@ -600,3 +600,27 @@ describe('8 · una línea sin piso configurado ni gate', () => {
 it('el texto de la marca es el pedido', () => {
   expect(TEXTO_MARCA_BORRADOR).toBe('BORRADOR · margen bajo el mínimo · no enviar')
 })
+
+describe('marcar una tarifa dice cuál salió de la propuesta y por qué (ensayo del 2026-09-23)', () => {
+  // `marcarEnPropuesta` recalcula los totales, y el recálculo desmarca las tarifas que ya no
+  // pueden ir, con su motivo. Antes se botaba esa respuesta: la tarifa desaparecía de la
+  // propuesta sin que la pantalla lo dijera.
+  it('devuelve la tarifa desmarcada con su motivo', async () => {
+    sembrarTresTarifas(false)
+    tablas.cotizacion_itinerarios[2].va_en_propuesta = false
+    const res = await marcarEnPropuesta('it-pre', true)
+    expect(res.success).toBe(true)
+    const desmarcados = ('desmarcados' in res ? res.desmarcados : undefined) ?? []
+    expect(desmarcados.map(d => d.id)).toEqual(['it-eco'])
+    expect(desmarcados[0].motivo).toContain('3')
+    expect(tablas.cotizacion_itinerarios[0].va_en_propuesta).toBe(false)
+  })
+
+  it('sin nada que desmarcar, la lista va vacía', async () => {
+    sembrarTresTarifas(true)
+    tablas.cotizacion_itinerarios[2].va_en_propuesta = false
+    const res = await marcarEnPropuesta('it-pre', true)
+    expect(res.success).toBe(true)
+    expect('desmarcados' in res ? res.desmarcados : null).toEqual([])
+  })
+})

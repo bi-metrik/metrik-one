@@ -20,6 +20,7 @@ import {
 } from '@/lib/cotizaciones/adicionales'
 import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
 import { formatCOP } from '@/lib/contacts/constants'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 /**
  * Los adicionales de UNA variante: la maleta extra, la silla, el seguro.
@@ -301,9 +302,12 @@ function Campo({
   )
 }
 
-/** Un número escrito con puntos de miles o coma decimal, como lo teclea quien cotiza. */
+/**
+ * Un número escrito con puntos de miles o coma decimal, como lo teclea quien cotiza: «1.200,50»,
+ * «4.980.000», «1200.50». Pasa por el normalizador único de montos (`parseMontoCop`), el mismo
+ * que lee los pantallazos, para que un monto no se lea de dos formas según dónde se escribió.
+ * Un negativo llega tal cual: lo rechaza el servidor con su motivo, no se voltea el signo aquí.
+ */
 function numero(texto: string): number {
-  const limpio = texto.replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '')
-  const n = Number(limpio)
-  return Number.isFinite(n) ? n : 0
+  return parseMontoCop(texto) ?? 0
 }

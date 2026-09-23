@@ -9,6 +9,8 @@
  * Puro: sin red y sin base.
  */
 
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
+
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import {
   aplicarCorrecciones,
@@ -17,7 +19,13 @@ import {
   type CorreccionCampo,
   type Correcciones,
 } from './correcciones'
-import { resumenDeLinea, numeroLeido, type CampoLeido } from './lectura-pantallazo'
+import {
+  cifraInverosimil,
+  monedaDelMonto,
+  numeroLeido,
+  resumenDeLinea,
+  type CampoLeido,
+} from './lectura-pantallazo'
 import type { CasillasLeidas } from './tarifa-pasajero'
 import { horaCorta } from './detalle-viaje'
 import { estrellasDesdeTexto } from './estrellas'
@@ -72,28 +80,14 @@ export function validarCorreccion(def: CampoRanura, entrada: string | null | und
       : { ok: false, error: `Escribe un número entero${minimo > 0 ? ' mayor que cero' : ''}.` }
   }
   if (def.tipo === 'currency') {
-    const n = numeroDeMonto(t)
+    // «329,44», «1.234,56», «1,234.56», «50.080» o «329.44»: pasa por el normalizador único
+    // de montos, el mismo que lee la lectura del modelo. Si la ficha leyera «50.080» de otra
+    // forma, guardaría un número y el documento imprimiría otro.
+    const n = parseMontoCop(t)
     return n !== null && n >= 0 ? { ok: true, valor: String(n) } : { ok: false, error: 'Escribe solo el valor, sin símbolo.' }
   }
   if (t.length > MAX_TEXTO) return { ok: false, error: `Máximo ${MAX_TEXTO} caracteres.` }
   return { ok: true, valor: t }
-}
-
-/**
- * Un monto escrito a mano: «329,44», «1.234,56», «1,234.56» o «329.44».
- *
- * El último separador con dos cifras o menos detrás es el decimal; los demás son de miles.
- */
-function numeroDeMonto(t: string): number | null {
-  const limpio = t.replace(/[^\d.,]/g, '')
-  if (!/\d/.test(limpio)) return null
-  const ultimo = Math.max(limpio.lastIndexOf('.'), limpio.lastIndexOf(','))
-  const decimales = ultimo >= 0 ? limpio.length - ultimo - 1 : 0
-  const normal = ultimo >= 0 && decimales <= 2
-    ? `${limpio.slice(0, ultimo).replace(/[.,]/g, '')}.${limpio.slice(ultimo + 1)}`
-    : limpio.replace(/[.,]/g, '')
-  const n = Number(normal)
-  return Number.isFinite(n) ? n : null
 }
 
 // ── Lo que ve la persona ─────────────────────────────────────────────────────
@@ -108,6 +102,39 @@ export interface CampoDeFicha {
   vigente: string | null
   /** La corrección de una persona, si la hay. */
   correccion: CorreccionCampo | null
+  /**
+   * El monto está en pesos y por debajo del piso de verosimilitud (`cifraInverosimil`): la
+   * pantalla lo marca «revisa esta cifra». Nunca en un campo que ya corrigió una persona.
+   */
+  revisarCifra: boolean
+}
+
+/**
+ * Los montos que la lectura dejó en pesos por debajo del piso de verosimilitud.
+ *
+ * Ensayo del 2026-09-23: «Impuestos en destino 50.080 COP» se guardó como 50,08 y así llegó al
+ * PDF del cliente. El normalizador ya lee bien ese texto, pero el modelo también puede devolver
+ * «50,08» a secas, y ahí no hay regla que adivine: lo único honesto es no guardarlo en silencio.
+ * Recorre TODOS los montos de la ranura, también los de costo (que no se corrigen en la ficha
+ * sino en los rubros), porque la marca tiene que verse donde se ve la cifra.
+ *
+ * Un monto que corrigió una persona no se marca: la decisión ya la tomó alguien que miró.
+ * Sin moneda leída se usa la de la lectura (`monedaLectura`), que es con la que se costea.
+ */
+export function cifrasPorRevisar(
+  ranura: DefinicionRanura,
+  campos: { label: string; valor: string }[] | undefined,
+  correcciones: Correcciones | null | undefined,
+  monedaLectura: string | null = null,
+): Set<string> {
+  const vigentes = aplicarCorrecciones(leidosPorSlug(ranura, campos), correcciones)
+  const out = new Set<string>()
+  for (const def of ranura.campos) {
+    if (def.tipo !== 'currency' || correcciones?.[def.slug]) continue
+    const valor = numeroLeido(vigentes[def.slug] ?? null)
+    if (cifraInverosimil(valor, monedaDelMonto(def.slug, s => vigentes[s], monedaLectura))) out.add(def.slug)
+  }
+  return out
 }
 
 /**
@@ -120,10 +147,13 @@ export function fichaDeLinea(
   ranura: DefinicionRanura,
   campos: { label: string; valor: string }[] | undefined,
   correcciones: Correcciones | null | undefined,
+  /** La moneda de la lectura (`LecturaCasilla.moneda`), para los montos que no traen la suya. */
+  monedaLectura: string | null = null,
 ): CampoDeFicha[] {
   const crudo = new Map((campos ?? []).map(c => [c.label, c.valor]))
   const leidos = leidosPorSlug(ranura, campos)
   const vigentes = aplicarCorrecciones(leidos, correcciones)
+  const porRevisar = cifrasPorRevisar(ranura, campos, correcciones, monedaLectura)
   return camposCorregibles(ranura).map(def => ({
     slug: def.slug,
     label: def.label,
@@ -131,6 +161,7 @@ export function fichaDeLinea(
     leido: crudo.get(def.label) ?? null,
     vigente: vigentes[def.slug] ?? null,
     correccion: correcciones?.[def.slug] ?? null,
+    revisarCifra: porRevisar.has(def.slug),
   }))
 }
 

@@ -398,9 +398,13 @@ export async function marcarEnPropuesta(itinerarioId: string, vaEnPropuesta: boo
 
   await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
   // Marcar o sacar la Recomendada decide si hay principal: el total se rehace aquí.
-  await recalcularTotales(cab.cotizacionId)
+  const recalculo = await recalcularTotales(cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
-  return { success: true, soltoPrincipal: patch.es_principal === false }
+  // El recálculo desmarca las tarifas que ya no pueden ir (§2.6.5) y lo devuelve con su
+  // motivo. Aquí se botaba: si una tarifa salía de la propuesta al marcar otra, la pantalla
+  // no lo decía. Se pasa tal cual para que la tabla lo avise, como ya hace al cambiar una celda.
+  const desmarcados = 'desmarcados' in recalculo ? (recalculo.desmarcados ?? []) : []
+  return { success: true, soltoPrincipal: patch.es_principal === false, desmarcados }
 }
 
 /**

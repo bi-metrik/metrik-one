@@ -30,6 +30,8 @@
  * a Gemini por caso de prueba.
  */
 
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
+
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
 import { estrellasDesdeTexto } from './estrellas'
@@ -473,6 +475,16 @@ function avisosDeLectura(
     )
   }
 
+  // El piso de verosimilitud: un monto en pesos por debajo de mil no se guarda en silencio.
+  // Se guarda (quitarlo sería otro dato inventado), pero con el aviso a la vista.
+  for (const def of ranura.campos) {
+    if (def.tipo !== 'currency') continue
+    const valor = numero(porSlug.get(def.slug)?.valor)
+    const monedaMonto = monedaDelMonto(def.slug, s => porSlug.get(s)?.valor)
+    if (!cifraInverosimil(valor, monedaMonto)) continue
+    avisos.push(avisoCifraInverosimil(def.label, valor as number))
+  }
+
   const total = numero(porSlug.get('precio_total')?.valor)
   if (desglose.length > 0 && total !== null && !desgloseReconcilia(desglose, total)) {
     avisos.push(
@@ -491,6 +503,15 @@ function avisosDeLectura(
   }
 
   return avisos
+}
+
+/** El aviso de una cifra en pesos por debajo del piso. El mismo texto en la lectura y en la ficha. */
+export function avisoCifraInverosimil(label: string, valor: number): string {
+  return (
+    `Revisa esta cifra: «${label}» se leyó como ${valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })} COP. ` +
+    'En pesos, un monto menor a $1.000 casi siempre es un separador de miles mal leído. ' +
+    'Compárala con la captura en «Ver y corregir lo leído».'
+  )
 }
 
 /** Lo que suma el desglose leído. */
@@ -634,15 +655,52 @@ function fecha(valor: string | null | undefined): number | null {
   return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
 }
 
-/** Un número leído por el modelo (sin separadores de miles), o `null`. */
+/** Un número leído por el modelo, con o sin separadores de miles, o `null`. */
 export function numeroLeido(valor: string | null | undefined): number | null {
   return numero(valor)
 }
 
+/**
+ * ⚠️ Pasa por `parseMontoCop`, el normalizador único. El prompt pide el número «sin
+ * separadores de miles» y el modelo NO lo cumple siempre: en el ensayo del 2026-09-23
+ * devolvió "50.080" en un hotel y "64200" en otro, y `Number()` sobre el primero daba
+ * 50,08 — que llegó así al PDF del cliente.
+ */
 function numero(valor: string | null | undefined): number | null {
   if (valor === null || valor === undefined || valor.trim() === '') return null
-  const n = Number(valor.replace(/[^\d.-]/g, ''))
-  return Number.isFinite(n) ? n : null
+  return parseMontoCop(valor)
+}
+
+/**
+ * Por debajo de esto, un monto en pesos no se cree sin que alguien lo mire.
+ *
+ * Ningún cargo de un viaje cuesta menos de mil pesos. Una cifra así casi siempre es un
+ * separador de miles leído como decimal («50.080» → 50,08), y es un error MUDO: el número
+ * es plausible a la vista y la línea no falla. Por eso no se descarta ni se corrige solo:
+ * se marca, y la persona decide.
+ */
+export const PISO_VEROSIMIL_COP = 1000
+
+/** ¿Este monto, en esta moneda, pide una revisión antes de creerlo? Solo pesos. */
+export function cifraInverosimil(valor: number | null, moneda: string | null | undefined): boolean {
+  if (valor === null || !(valor > 0)) return false
+  return (moneda ?? '').trim().toUpperCase() === 'COP' && valor < PISO_VEROSIMIL_COP
+}
+
+/**
+ * La moneda en que está escrito un monto de la ranura.
+ *
+ * Los impuestos en destino traen la suya (MXN, USD); si no la dicen, son de la moneda de la
+ * captura, que es el mismo criterio de la nota al cliente (`lectura-casilla.ts`).
+ */
+export function monedaDelMonto(
+  slug: string,
+  valores: (slug: string) => string | null | undefined,
+  monedaPorDefecto: string | null = null,
+): string | null {
+  const moneda = valores('moneda') ?? monedaPorDefecto
+  if (slug === 'impuestos_destino_valor') return valores('impuestos_destino_moneda') ?? moneda
+  return moneda
 }
 
 /**

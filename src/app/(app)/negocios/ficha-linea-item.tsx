@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, ExternalLink, Pencil, RotateCcw, X } from 'lucide-react'
+import { AlertTriangle, Check, ExternalLink, Pencil, RotateCcw, X } from 'lucide-react'
 
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { CAMPOS_DE_COSTO, type Correcciones } from '@/lib/cotizaciones/correcciones'
-import { fichaDeLinea, valorLegible, type CampoDeFicha } from '@/lib/cotizaciones/ficha-linea'
+import { cifrasPorRevisar, fichaDeLinea, valorLegible, type CampoDeFicha } from '@/lib/cotizaciones/ficha-linea'
 import { busquedaDeCategoria } from '@/lib/cotizaciones/estrellas'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
@@ -27,6 +27,7 @@ import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 export default function FichaDeLinea({
   ranura,
   campos,
+  moneda = null,
   correcciones,
   deshabilitado,
   onGuardar,
@@ -34,14 +35,20 @@ export default function FichaDeLinea({
   ranura: DefinicionRanura
   /** `LecturaCasilla.campos` de la captura principal. */
   campos: { label: string; valor: string }[]
+  /** `LecturaCasilla.moneda`: la de los montos que no traen la suya. */
+  moneda?: string | null
   correcciones: Correcciones | undefined
   deshabilitado: boolean
   /** `valor: null` vuelve a lo leído; un texto (incluso vacío) corrige. */
   onGuardar: (slug: string, valor: string | null) => Promise<boolean>
 }) {
-  const ficha = fichaDeLinea(ranura, campos, correcciones)
+  const ficha = fichaDeLinea(ranura, campos, correcciones, moneda)
   const vigente = (slug: string) => ficha.find(c => c.slug === slug)?.vigente ?? null
   const deCosto = campos.filter(c => ranura.campos.some(d => d.label === c.label && CAMPOS_DE_COSTO.includes(d.slug)))
+  // La marca de los montos de costo sale del MISMO criterio que la de la ficha: no se corrigen
+  // aquí, pero la cifra se ve aquí, y es aquí donde tiene que decir que se revise.
+  const porRevisar = cifrasPorRevisar(ranura, campos, correcciones, moneda)
+  const slugDe = (label: string) => ranura.campos.find(d => d.label === label)?.slug ?? ''
 
   return (
     <div className="mt-1 space-y-2">
@@ -62,12 +69,16 @@ export default function FichaDeLinea({
             Lo que entra al costo · se corrige en los rubros, los pasajeros o el margen de la línea
           </p>
           <div className="mt-0.5 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
-            {deCosto.map(c => (
-              <div key={c.label} className="min-w-0">
-                <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">{c.label}</span>
-                <span className="block truncate text-[11px]">{c.valor}</span>
-              </div>
-            ))}
+            {deCosto.map(c => {
+              const revisar = porRevisar.has(slugDe(c.label))
+              return (
+                <div key={c.label} className={`min-w-0 ${revisar ? 'rounded bg-amber-50 px-1' : ''}`}>
+                  <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">{c.label}</span>
+                  <span className="block truncate text-[11px]">{c.valor}</span>
+                  {revisar && <AvisoRevisarCifra />}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -105,7 +116,7 @@ function FilaDeFicha({
   }
 
   return (
-    <div className="min-w-0 rounded px-1 py-0.5 hover:bg-muted/40">
+    <div className={`min-w-0 rounded px-1 py-0.5 ${campo.revisarCifra && !editando ? 'bg-amber-50' : 'hover:bg-muted/40'}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">{campo.label}</span>
         {!editando && (
@@ -150,6 +161,8 @@ function FilaDeFicha({
         </span>
       )}
 
+      {campo.revisarCifra && !editando && <AvisoRevisarCifra />}
+
       {corregido && !editando && (
         <div className="flex flex-wrap items-center gap-x-1.5 text-[9px] text-amber-800">
           <span>
@@ -181,6 +194,22 @@ function FilaDeFicha({
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * «Revisa esta cifra»: un monto en pesos por debajo de mil (`cifraInverosimil`).
+ *
+ * Persistente y al lado del dato, no un toast: la cifra ya está guardada y lo que se pide es
+ * mirarla contra la captura. Casi siempre es un punto de miles leído como decimal («50.080» que
+ * quedó en 50,08), y así llegaba al documento del cliente.
+ */
+function AvisoRevisarCifra() {
+  return (
+    <span className="mt-0.5 flex items-start gap-0.5 text-[9px] font-medium text-amber-800">
+      <AlertTriangle className="mt-px h-2.5 w-2.5 shrink-0" />
+      Revisa esta cifra: en pesos, menos de $1.000 casi nunca es real
+    </span>
   )
 }
 

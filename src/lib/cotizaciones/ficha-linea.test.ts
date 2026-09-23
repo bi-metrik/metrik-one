@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { descripcionDeLinea, descripcionReescribible, fichaDeLinea, validarCorreccion, valorLegible } from './ficha-linea'
+import {
+  cifrasPorRevisar,
+  descripcionDeLinea,
+  descripcionReescribible,
+  fichaDeLinea,
+  validarCorreccion,
+  valorLegible,
+} from './ficha-linea'
 import { ranuraPorSlug } from './ranuras-pantallazo'
 import type { LecturaCasilla } from './tarifa-pasajero'
 
@@ -37,6 +44,10 @@ describe('validar lo que escribe una persona', () => {
   it('montos con la coma o el punto de la pantalla', () => {
     expect(validarCorreccion(def(HOTEL, 'impuestos_destino_valor'), '329,44')).toEqual({ ok: true, valor: '329.44' })
     expect(validarCorreccion(def(HOTEL, 'impuestos_destino_valor'), '1.234,56')).toEqual({ ok: true, valor: '1234.56' })
+  })
+  it('una corrección «50.080» es cincuenta mil, igual que en la lectura', () => {
+    expect(validarCorreccion(def(HOTEL, 'impuestos_destino_valor'), '50.080')).toEqual({ ok: true, valor: '50080' })
+    expect(validarCorreccion(def(HOTEL, 'impuestos_destino_valor'), '-5').ok).toBe(false)
   })
   it('vacío es «vacío a propósito» (null), no un error', () => {
     expect(validarCorreccion(def(HOTEL, 'regimen'), '   ')).toEqual({ ok: true, valor: null })
@@ -120,5 +131,50 @@ describe('cuándo el sistema puede reescribir la descripción', () => {
   it('sin marca: confirmada antes de la marca → como antes; nunca confirmada → la escribió una persona', () => {
     expect(descripcionReescribible('lo que sea', undefined, true)).toBe(true)
     expect(descripcionReescribible('lo que sea', undefined, false)).toBe(false)
+  })
+})
+
+describe('«revisa esta cifra» · el piso de verosimilitud de los montos en pesos', () => {
+  const lectura = (impuesto: string, moneda: string | null = 'COP', precio = '8258260') => [
+    { label: 'Hotel', valor: 'Riu Caribe' },
+    { label: 'Moneda', valor: 'COP' },
+    { label: 'Precio', valor: precio },
+    { label: 'Impuestos en destino', valor: impuesto },
+    ...(moneda ? [{ label: 'Moneda de los impuestos en destino', valor: moneda }] : []),
+  ]
+
+  it('marca un monto en pesos menor a mil, y solo ese', () => {
+    expect([...cifrasPorRevisar(HOTEL, lectura('50,08'), undefined)]).toEqual(['impuestos_destino_valor'])
+    expect(cifrasPorRevisar(HOTEL, lectura('50.080'), undefined).size).toBe(0)
+  })
+
+  it('la ficha lo dice en el campo que se corrige', () => {
+    const f = fichaDeLinea(HOTEL, lectura('64,2'), undefined)
+    expect(f.find(c => c.slug === 'impuestos_destino_valor')?.revisarCifra).toBe(true)
+    expect(f.find(c => c.slug === 'regimen')?.revisarCifra).toBe(false)
+  })
+
+  it('otra moneda no se mide contra pesos', () => {
+    expect(cifrasPorRevisar(HOTEL, lectura('329.44', 'MXN'), undefined).size).toBe(0)
+  })
+
+  it('los impuestos sin moneda propia se miden en la de la captura', () => {
+    expect(cifrasPorRevisar(HOTEL, lectura('50,08', null), undefined).size).toBe(1)
+  })
+
+  it('sin ninguna moneda leída manda la de la lectura (la supuesta no se lista como leída)', () => {
+    const sinMonedas = lectura('50,08', null).filter(c => c.label !== 'Moneda')
+    expect(cifrasPorRevisar(HOTEL, sinMonedas, undefined, 'COP').size).toBe(1)
+    expect(cifrasPorRevisar(HOTEL, sinMonedas, undefined, 'USD').size).toBe(0)
+    expect(cifrasPorRevisar(HOTEL, sinMonedas, undefined).size).toBe(0)
+  })
+
+  it('lo que corrigió una persona ya no se marca: la decisión es suya', () => {
+    const corregido = { impuestos_destino_valor: { valor: '500', por: 'Ana', porId: null, en: '2026-09-23' } }
+    expect(cifrasPorRevisar(HOTEL, lectura('50,08'), corregido).size).toBe(0)
+  })
+
+  it('también los montos de costo, que se corrigen en los rubros pero se ven en la ficha', () => {
+    expect([...cifrasPorRevisar(HOTEL, lectura('50.080', 'COP', '825'), undefined)]).toEqual(['precio_total'])
   })
 })

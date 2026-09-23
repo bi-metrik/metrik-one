@@ -305,6 +305,18 @@ describe('cargosEnDestinoDeItems', () => {
     expect(c.observacion).toContain('No está incluido en el precio')
   })
 
+  it('lo guardado con punto de miles sale entero en el documento (ensayo del 2026-09-23)', () => {
+    // La lectura guarda el texto que devolvió el modelo. El Riu quedó con «50.080» y el PDF del
+    // cliente imprimió «50,08 COP». Como el texto sigue guardado, la corrección alcanza también
+    // a las lecturas viejas: basta volver a generar el documento.
+    const conImpuesto = (valor: string) => CAMPOS_HOTEL.map(c =>
+      c.label === 'Impuestos en destino' ? { ...c, valor }
+        : c.label === 'Moneda de los impuestos en destino' ? { ...c, valor: 'COP' } : c)
+    expect(cargosEnDestinoDeItems([item('RIU', 'hotel', conImpuesto('50.080'))])[0].monto).toBe('50.080 COP')
+    expect(cargosEnDestinoDeItems([item('SUNSCAPE', 'hotel', conImpuesto('64.200'))])[0].monto).toBe('64.200 COP')
+    expect(cargosEnDestinoDeItems([item('HYATT', 'hotel', conImpuesto('64200'))])[0].monto).toBe('64.200 COP')
+  })
+
   it('sin impuestos en destino no hay fila', () => {
     const sinImpuestos = CAMPOS_HOTEL.filter(c => !c.label.startsWith('Impuestos') && !c.label.startsWith('Moneda de'))
     expect(cargosEnDestinoDeItems([item('H', 'hotel', sinImpuestos)])).toEqual([])
