@@ -11,7 +11,6 @@ import {
   eliminarItinerario,
   guardarMotivoDeTarifa,
   marcarEnPropuesta,
-  marcarPrincipal,
   renombrarItinerario,
   renombrarRanura,
   type EstadoItinerarios,
@@ -95,6 +94,8 @@ export default function TablaCombinaciones({
     umbrales,
     tablasAusentes,
     motivoDisponible,
+    recomendadaFalta,
+    aceptadaId,
   } = estado
   // Cuáles de las tres faltan, con el MISMO helper que usa la acción: escrito dos veces,
   // el botón diría que no hay nada que crear y el servidor crearía, o al revés.
@@ -336,7 +337,7 @@ export default function TablaCombinaciones({
                         {it.esPrincipal && (
                           <Star
                             className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500"
-                            aria-label="Principal"
+                            aria-label="Da el total del documento"
                           />
                         )}
                         {editable ? (
@@ -363,6 +364,14 @@ export default function TablaCombinaciones({
                       {!esTarifaConNombre(it.nombre) && (
                         <div className="text-[10px] leading-tight text-muted-foreground">
                           No es una de las tres tarifas
+                        </div>
+                      )}
+                      {/* La que el cliente escogió al aprobar. Después de aprobar es la que
+                          rige el negocio, aunque no sea la Recomendada: su precio es el
+                          precio aprobado. */}
+                      {aceptadaId === it.id && (
+                        <div className="mt-0.5 text-[10px] font-medium leading-tight text-emerald-700 dark:text-emerald-400">
+                          La escogió el cliente
                         </div>
                       )}
                       {/* UNA TARIFA INCOMPLETA SE VE INCOMPLETA Y DICE QUÉ LE FALTA.
@@ -459,20 +468,6 @@ export default function TablaCombinaciones({
 
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1">
-                        {editable && !it.esPrincipal && (
-                          <button
-                            type="button"
-                            disabled={isPending || it.bloqueo !== null}
-                            title={
-                              it.bloqueo ??
-                              'Marcar como principal: su total pasa a ser el valor de la cotización'
-                            }
-                            onClick={() => correr(() => marcarPrincipal(it.id), 'Principal actualizado')}
-                            className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40"
-                          >
-                            <Star className="h-3.5 w-3.5" />
-                          </button>
-                        )}
                         {editable && (
                           <button
                             type="button"
@@ -561,21 +556,21 @@ export default function TablaCombinaciones({
         </div>
       )}
 
-      {/* Mismo aviso cuando hay combinaciones pero ninguna es principal: el precio de
-          la cotización sale de un supuesto y no de una decisión, y la causa está a un
-          clic de distancia. */}
-      {itinerarios.length > 0 && !itinerarios.some(i => i.esPrincipal) && (
+      {/* Sin la Recomendada en la propuesta el valor de la cotización sale de un
+          supuesto, y «Enviar», «Aprobar» y el PDF lo rechazan. Se dice aquí, con la
+          MISMA frase del servidor (`motivoSinRecomendada`), que es donde se arregla. */}
+      {itinerarios.length > 0 && recomendadaFalta && (
         <div className="border-t bg-amber-50 px-4 py-2 text-[11px] font-medium text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-          Ninguna tarifa está marcada como principal: el valor de la cotización sale de
-          una opción tomada por supuesto, no de esta tabla. Marca una con la estrella.
+          {recomendadaFalta}
         </div>
       )}
 
       {itinerarios.length > 0 && (
         <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-          La tarifa con <Star className="inline h-3 w-3 fill-amber-400 text-amber-500" /> es la
-          {' '}<strong>principal</strong>: su total es el valor de la cotización y el costeo con el
-          {' '}que sigue el negocio. Bajo el margen mínimo de {formatMargenPct(umbrales.pisoPct)} no se puede
+          La <strong>Recomendada</strong> (<Star className="inline h-3 w-3 fill-amber-400 text-amber-500" />)
+          {' '}da el valor de la cotización y el TOTAL del documento: no se elige a mano. Si el
+          {' '}cliente pide otra combinación, duplica la cotización y arma la Recomendada con lo que
+          {' '}pidió. Al aprobar se escoge la tarifa que tomó el cliente. Bajo el margen mínimo de {formatMargenPct(umbrales.pisoPct)} no se puede
           {' '}marcar para propuesta, y una tarifa incompleta tampoco.
         </div>
       )}

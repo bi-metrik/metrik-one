@@ -72,6 +72,7 @@ import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
+import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
 
@@ -263,6 +264,14 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   })
   // El borrador se decide más abajo, cuando se sabe si el IVA se pudo calcular.
   const salidaBloquea = salida?.aplica === true && salida.bloquea
+
+  /**
+   * La Recomendada manda el documento (decisión del 2026-09-22): con tarifas, el TOTAL y
+   * la leyenda «corresponde a la opción recomendada» salen de ella. Sin la Recomendada en
+   * la propuesta el total sería un supuesto, así que el PDF sale como borrador, igual que
+   * bajo el margen mínimo. Sin tarifas (`[]`, R6) no dice nada y todo sigue como antes.
+   */
+  const sinRecomendada = motivoSinRecomendada((await leerItinerarios(supabase, cotizacionId)) ?? [])
 
   // Get empresa: primero por oportunidad, luego por negocio, luego fallback
   type EmpresaRow = {
@@ -559,8 +568,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
   /**
    * Borrador: bajo el margen mínimo sin la autorización del dueño (hueco 1), con una línea
-   * cuyo IVA no se pudo calcular porque tiene precio y no tiene costo, o con pantallazos de
-   * otros pasajeros (ver `motivoPantallazos`). En todos los casos el PDF se descarga IGUAL
+   * cuyo IVA no se pudo calcular porque tiene precio y no tiene costo, con pantallazos de
+   * otros pasajeros (ver `motivoPantallazos`) o con tarifas y sin la Recomendada en la
+   * propuesta (ver `sinRecomendada`). En todos los casos el PDF se descarga IGUAL
    * —hace falta ver los borradores— pero con marca de agua, y no se guarda ni se registra:
    * no es un documento del cliente. No se inventa una base de IVA.
    */
@@ -573,9 +583,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     && !plantillaImprimePreciosConIva(ws?.cotizacion_template_slug ?? PLANTILLA_POR_DEFECTO)
   // Los motivos REALES, en un solo sitio (`motivos-borrador.ts`): la marca de agua y el
   // aviso de pantalla salen de esta misma lista. Es borrador si hay al menos uno, que es
-  // exactamente el OR de las cuatro condiciones de siempre.
+  // exactamente el OR de las condiciones. La Recomendada fuera de la propuesta tiene su
+  // propio motivo: sin ella el total es un supuesto, y eso no es un problema de margen.
   const motivosBorrador = motivosDeBorrador({
     pantallazos: motivoPantallazos !== null,
+    sinRecomendada: sinRecomendada !== null,
     margen: salidaBloquea,
     ivaSinCalcular,
     ivaIncluidoSinPlantilla,
@@ -584,6 +596,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const avisoBorrador = esBorrador
     ? avisoDeBorrador(motivosBorrador, {
         pantallazos: motivoPantallazos,
+        recomendada: sinRecomendada,
         margen: salidaBloquea ? salida!.mensaje : null,
         iva_sin_calcular: ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
         iva_incluido_sin_plantilla: ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,

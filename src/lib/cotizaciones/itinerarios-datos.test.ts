@@ -212,10 +212,31 @@ describe('R5 · totalDelPrincipal', () => {
     expect(await totalDelPrincipal(clienteFalso(), COT, ctx!)).toBeNull()
   })
 
-  it('con itinerarios pero sin principal devuelve null, no «el primero»', async () => {
+  it('con la Recomendada FUERA de la propuesta devuelve null, no «el primero»', async () => {
     // Elegir el primero le cambiaría el precio a la cotización sin que nadie lo haya
-    // decidido.
+    // decidido. Y T5: un total que sale de una tarifa que el cliente no va a ver es peor
+    // que no tener principal.
+    itinerario('it-cara').va_en_propuesta = false
+    const ctx = await contextoDeCotizacion(clienteFalso(), COT)
+    expect(await totalDelPrincipal(clienteFalso(), COT, ctx!)).toBeNull()
+  })
+
+  it('2026-09-22 · manda la tarifa LLAMADA Recomendada, no la columna `es_principal`', async () => {
+    // El defecto que abrió el brief: la corona se ponía a mano y la Económica podía
+    // quedar como principal. Con la columna marcada al revés, sigue mandando la
+    // Recomendada.
     itinerario('it-cara').es_principal = false
+    itinerario('it-barata').es_principal = true
+    const ctx = await contextoDeCotizacion(clienteFalso(), COT)
+    const principal = await totalDelPrincipal(clienteFalso(), COT, ctx!)
+    expect(principal?.itinerarioId).toBe('it-cara')
+    const filas = await leerItinerarios(clienteFalso(), COT)
+    expect(filas?.find(f => f.id === 'it-barata')?.esPrincipal).toBe(false)
+    expect(filas?.find(f => f.id === 'it-cara')?.esPrincipal).toBe(true)
+  })
+
+  it('sin ninguna tarifa llamada Recomendada no hay principal, aunque la columna diga otra cosa', async () => {
+    itinerario('it-cara').nombre = 'Plan oro'
     const ctx = await contextoDeCotizacion(clienteFalso(), COT)
     expect(await totalDelPrincipal(clienteFalso(), COT, ctx!)).toBeNull()
   })

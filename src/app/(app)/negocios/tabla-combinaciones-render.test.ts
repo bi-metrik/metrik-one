@@ -36,7 +36,6 @@ vi.mock('@/app/(app)/negocios/itinerario-actions', () => ({
   cambiarOpcionDeItinerario: async () => ({ success: true, desmarcados: [] }),
   marcarEnPropuesta: async () => ({ success: true }),
   guardarMotivoDeTarifa: async () => ({ success: true, motivo: { codigo: null, texto: null } }),
-  marcarPrincipal: async () => ({ success: true }),
   renombrarItinerario: async () => ({ success: true }),
   eliminarItinerario: async () => ({ success: true }),
 }))
@@ -111,6 +110,8 @@ const BASE = {
   // El SQL del registro de decisiones está pendiente: por defecto la base todavía NO
   // tiene las columnas del motivo, que es el estado con el que sale este deploy.
   motivoDisponible: false,
+  recomendadaFalta: null as string | null,
+  aceptadaId: null as string | null,
 }
 
 describe('R6 · una cotización sin opciones no gana una sección', () => {
@@ -236,9 +237,25 @@ describe('estados de la pantalla', () => {
     expect(html).toContain('disabled')
   })
 
-  it('el principal se distingue en la fila', () => {
+  it('la Recomendada, que da el total, se distingue en la fila', () => {
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
-    expect(html).toContain('Principal')
+    expect(html).toContain('Da el total del documento')
+  })
+
+  it('NO hay forma de elegir la principal a mano: el botón de la estrella no existe', () => {
+    // Decisión del 2026-09-22: la principal es la Recomendada, sin que nadie la elija.
+    // La Económica NO es principal y la tabla es editable: si el botón existiera, estaría
+    // en su fila.
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() }, true)
+    expect(html).not.toContain('Marcar como principal')
+    expect(html).not.toContain('Principal actualizado')
+  })
+
+  it('la tarifa que escogió el cliente se ve después de aprobar', () => {
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios(), aceptadaId: 'it-barata' }, false)
+    // Una sola vez, y en SU fila: la Económica va después de la Recomendada en la tabla.
+    expect(html.split('La escogió el cliente').length - 1).toBe(1)
+    expect(html.indexOf('La escogió el cliente')).toBeGreaterThan(html.indexOf('>Económica<'))
   })
 
   it('sin combinaciones AVISA que el total sale de un supuesto', () => {
@@ -250,18 +267,19 @@ describe('estados de la pantalla', () => {
     expect(html).not.toContain('suma todas las')
   })
 
-  it('con combinaciones pero SIN principal, avisa lo mismo', () => {
+  it('sin la Recomendada en la propuesta, lo dice con la frase del servidor', () => {
+    const motivo = 'La tarifa Recomendada no está marcada «va en propuesta», y el total del documento sale de ella. Márcala para poder enviar.'
     const sinPrincipal = itinerarios().map(i => ({ ...i, esPrincipal: false }))
-    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: sinPrincipal })
-    expect(html).toContain('Ninguna tarifa está marcada como principal')
+    const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: sinPrincipal, recomendadaFalta: motivo })
+    expect(html).toContain('La tarifa Recomendada no está marcada')
     expect(html).not.toContain('suma todas las alternativas')
   })
 
-  it('con un principal marcado, el aviso NO aparece', () => {
-    // El control que hace válidas las dos pruebas de arriba: sin él, un aviso pintado
-    // siempre las pasaría igual.
+  it('con la Recomendada en la propuesta, el aviso NO aparece', () => {
+    // El control que hace válida la prueba de arriba: sin él, un aviso pintado siempre
+    // la pasaría igual.
     const html = pintar({ ...BASE, ranuras: RANURAS, itinerarios: itinerarios() })
-    expect(html).not.toContain('Ninguna tarifa está marcada como principal')
+    expect(html).not.toContain('La tarifa Recomendada no está marcada')
   })
 })
 

@@ -4,8 +4,9 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2, PencilLine } from 'lucide-react'
 import { toast } from 'sonner'
-import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador, corregirCotizacionAceptada } from '../cotizacion/actions'
+import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador, corregirCotizacionAceptada, opcionesDeAprobacion } from '../cotizacion/actions'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
+import ElegirTarifaAprobacion, { type TarifaOpcion } from './ElegirTarifaAprobacion'
 
 interface CotizacionResumen {
   id: string
@@ -63,6 +64,15 @@ const ESTADO_ORDER: Record<string, number> = {
 export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false }: BloqueCotizacionProps) {
   const [isPending, startTransition] = useTransition()
   const [optimisticAceptadaId, setOptimisticAceptadaId] = useState<string | null>(null)
+  /**
+   * La pregunta de la tarifa, abierta para una cotización. `null` = cerrada. Solo se abre
+   * si la cotización tiene tarifas: sin ellas «Aprobar» aprueba directo, como siempre.
+   */
+  const [eleccion, setEleccion] = useState<{
+    cotizacionId: string
+    tarifas: TarifaOpcion[]
+    elegida: string | null
+  } | null>(null)
 
   const aceptada = cotizaciones.find(c => c.estado === 'aceptada') ??
     (optimisticAceptadaId ? cotizaciones.find(c => c.id === optimisticAceptadaId) : null)
@@ -110,16 +120,36 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
     })
   }
 
-  const handleAprobar = (cotizacionId: string) => {
+  /** Aprueba de verdad. `itinerarioId` = la tarifa que escogió el cliente, o `null` sin tarifas. */
+  const ejecutarAprobacion = async (cotizacionId: string, itinerarioId: string | null) => {
     setOptimisticAceptadaId(cotizacionId)
+    const res = await aceptarCotizacionNegocio(cotizacionId, negocioId, itinerarioId)
+    if (!res.success) {
+      setOptimisticAceptadaId(null)
+      toast.error(res.error)
+    } else {
+      setEleccion(null)
+      toast.success('Cotización aprobada — bloque en solo lectura')
+    }
+  }
+
+  /**
+   * «Aprobar» primero pregunta al servidor si hay tarifas. Con tarifas abre la pregunta
+   * «¿qué tarifa escogió el cliente?»; sin ellas aprueba directo, como siempre. El
+   * servidor vuelve a exigir la tarifa al aprobar: esto solo decide qué se dibuja.
+   */
+  const handleAprobar = (cotizacionId: string) => {
     startTransition(async () => {
-      const res = await aceptarCotizacionNegocio(cotizacionId, negocioId)
-      if (!res.success) {
-        setOptimisticAceptadaId(null)
-        toast.error(res.error)
-      } else {
-        toast.success('Cotización aprobada — bloque en solo lectura')
+      const opciones = await opcionesDeAprobacion(cotizacionId)
+      if (!opciones.success) {
+        toast.error(opciones.error)
+        return
       }
+      if (opciones.tarifas.length === 0) {
+        await ejecutarAprobacion(cotizacionId, null)
+        return
+      }
+      setEleccion({ cotizacionId, tarifas: opciones.tarifas, elegida: opciones.preseleccion })
     })
   }
 
@@ -166,6 +196,21 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
 
   return (
     <div className="space-y-3">
+      {eleccion && (
+        <ElegirTarifaAprobacion
+          tarifas={eleccion.tarifas}
+          elegida={eleccion.elegida}
+          pendiente={isPending}
+          onElegir={id => setEleccion(e => (e ? { ...e, elegida: id } : e))}
+          onCancelar={() => setEleccion(null)}
+          onConfirmar={() => {
+            const { cotizacionId, elegida } = eleccion
+            if (!elegida) return
+            startTransition(async () => { await ejecutarAprobacion(cotizacionId, elegida) })
+          }}
+        />
+      )}
+
       {/* Banner solo lectura */}
       {hayAceptada && (
         <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700 dark:border-green-900/30 dark:bg-green-950/20 dark:text-green-400">

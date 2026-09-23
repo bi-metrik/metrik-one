@@ -10,10 +10,15 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
-import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
-import { motivoParaNoSalir } from '@/lib/cotizaciones/piso-salida-datos'
+import { motivoParaNoSalir, recortarParaLog } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
-import { precioAprobadoDeCotizacion } from '@/lib/fiscal/iva-cotizacion-datos'
+import { precioAprobadoDeCotizacion, preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
+import { calcularItinerario, contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
+import { preseleccionDeAprobacion, textoDeAprobacion, validarTarifaElegida } from '@/lib/cotizaciones/aprobacion-tarifa'
+import { registrarEleccionDelCliente } from '@/lib/cotizaciones/aprobacion-tarifa-datos'
+import { recomendadaDe } from '@/lib/cotizaciones/tarifas'
+import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
+import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
 
 export async function getCotizacionesNegocio(negocioId: string) {
@@ -128,7 +133,73 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
   return { success: true as const }
 }
 
-export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+/** Una tarifa como la ve quien aprueba: su nombre y lo que costaría si el cliente la escoge. */
+export interface TarifaParaAprobar {
+  itinerarioId: string
+  nombre: string | null
+  esRecomendada: boolean
+  /** Lo que queda en `precio_aprobado` si la escogen. `null` si su IVA no se pudo calcular. */
+  precio: number | null
+  motivo: string | null
+}
+
+/**
+ * Lo que «Aprobar» tiene que preguntar antes de aprobar.
+ *
+ * Sin tarifas devuelve una lista vacía y el botón aprueba directo, como siempre (R6). Con
+ * tarifas devuelve las que iban en la propuesta, con el precio que dejaría cada una —el
+ * MISMO cálculo que hace la aprobación (`preciosDeLasTarifas`)—, y cuál ofrecer marcada.
+ */
+export async function opcionesDeAprobacion(cotizacionId: string) {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  const precios = await preciosDeLasTarifas(supabase, { workspaceId, cotizacionId })
+  if (!precios.ok) return { success: false as const, error: precios.error }
+
+  const tarifas: TarifaParaAprobar[] = precios.tarifas.map(t => ({
+    itinerarioId: t.itinerarioId,
+    nombre: t.nombre,
+    esRecomendada: t.esRecomendada,
+    precio: t.precio,
+    motivo: t.motivo,
+  }))
+  if (tarifas.length === 0) return { success: true as const, tarifas, preseleccion: null }
+
+  const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+  return {
+    success: true as const,
+    tarifas,
+    preseleccion: preseleccionDeAprobacion(tarifas, ctx?.tarifaAceptadaId ?? null),
+  }
+}
+
+/**
+ * Aprueba la cotización y fija el precio del negocio.
+ *
+ * ## Con tarifas: el cliente escoge (decisión del 2026-09-22)
+ *
+ * La Recomendada manda el DOCUMENTO, pero el cliente puede tomar otra. Si la cotización
+ * tiene tarifas, `itinerarioId` es obligatorio y tiene que ser una de las que iban en la
+ * propuesta (`validarTarifaElegida`). Entonces:
+ *  · `precio_aprobado` es el precio de ESA tarifa, con el IVA de #830 si el workspace lo
+ *    declara (`preciosDeLasTarifas`), no `valor_total` (que es el de la Recomendada);
+ *  · la elección queda en `cotizaciones.tarifa_aceptada_id`, en el MISMO update que el
+ *    estado: si la columna no existe, no se aprueba a medias;
+ *  · queda en `decisiones_combinacion` (evento `aceptacion`) y en el timeline.
+ *
+ * La elegida pasa por el mismo margen mínimo que la salida (#824): `motivoParaNoSalir`
+ * mide CADA tarifa de la propuesta, y la elegida es una de ellas.
+ *
+ * ## Sin tarifas: exactamente como antes
+ *
+ * `valor_total` (+ IVA si aplica) a `precio_aprobado`, sin escoger nada.
+ */
+export async function aceptarCotizacionNegocio(
+  cotizacionId: string,
+  negocioId: string,
+  itinerarioId?: string | null,
+) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
@@ -138,8 +209,8 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
   const motivoCapturas = await motivoPorCapturasDesactualizadas(supabase, { cotizacionId, destino: 'aceptada' })
   if (motivoCapturas) return { success: false as const, error: motivoCapturas }
 
-  // Aprobar fija `precio_aprobado` con el total de la cotización: bajo el mínimo, solo
-  // con la autorización vigente del dueño.
+  // Aprobar fija `precio_aprobado`: con tarifas, solo con la Recomendada en la propuesta;
+  // bajo el mínimo, solo con la autorización vigente del dueño.
   const motivo = await motivoParaNoSalir(supabase, {
     servicio: createServiceClient, workspaceId, cotizacionId, staffId,
   })
@@ -148,7 +219,7 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
   // Obtener valor_total y estado de la cotización
   const { data: cot, error: cotErr } = await supabase
     .from('cotizaciones')
-    .select('valor_total, estado')
+    .select('valor_total, estado, consecutivo')
     .eq('id', cotizacionId)
     .single()
 
@@ -158,20 +229,53 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
     return { success: false as const, error: 'Solo se pueden aprobar cotizaciones en borrador o enviadas' }
   }
 
-  // Lo que el cliente paga. Con el IVA sobre el ingreso propio (`iva-cotizacion.ts`) es el
-  // TOTAL del PDF, IVA incluido; sin esa configuración, `valor_total` como siempre. Se
-  // resuelve ANTES de marcar nada: si el IVA no se puede calcular, no se aprueba.
-  const precio = await precioAprobadoDeCotizacion(supabase, {
-    workspaceId,
-    cotizacionId,
-    valorTotal: (cot as { valor_total: number | null }).valor_total,
-  })
-  if (!precio.ok) return { success: false as const, error: precio.error }
+  // ¿Tiene tarifas? Entonces el cliente escogió una, y tiene que ser de la propuesta.
+  const filas = (await leerItinerarios(supabase, cotizacionId)) ?? []
+  const eleccion = validarTarifaElegida(filas, itinerarioId)
+  if (!eleccion.ok) return { success: false as const, error: eleccion.error }
+  const tarifa = eleccion.tarifa
 
-  // Marcar cotización como aceptada (enviada → aceptada)
+  // Lo que el cliente paga. Se resuelve ANTES de marcar nada: si el IVA no se puede
+  // calcular, no se aprueba.
+  let precioAprobado: number | null
+  let precioRecomendada: number | null = null
+  if (tarifa) {
+    // La elegida, recalculada contra la base: completa y (donde el piso no se movió a la
+    // salida) sobre el mínimo. Una tarifa marcada ya lo cumple; esto cubre la carrera
+    // entre marcarla y aprobar.
+    const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+    if (!ctx) return { success: false as const, error: 'Cotización no encontrada' }
+    const bloqueo = calcularItinerario(ctx, tarifa).bloqueo
+    if (bloqueo) return { success: false as const, error: bloqueo }
+
+    const precios = await preciosDeLasTarifas(supabase, { workspaceId, cotizacionId })
+    if (!precios.ok) return { success: false as const, error: precios.error }
+    const suya = precios.tarifas.find(t => t.itinerarioId === tarifa.id)
+    if (!suya) return { success: false as const, error: 'Esa tarifa no iba en la propuesta: el cliente no la tuvo delante.' }
+    if (suya.precio === null) return { success: false as const, error: suya.motivo ?? 'No se pudo calcular el precio de esa tarifa' }
+    precioAprobado = suya.precio
+    precioRecomendada = precios.tarifas.find(t => t.esRecomendada)?.precio ?? null
+  } else {
+    // Sin tarifas: con el IVA sobre el ingreso propio es el TOTAL del PDF, IVA incluido;
+    // sin esa configuración, `valor_total` como siempre.
+    const precio = await precioAprobadoDeCotizacion(supabase, {
+      workspaceId,
+      cotizacionId,
+      valorTotal: (cot as { valor_total: number | null }).valor_total,
+    })
+    if (!precio.ok) return { success: false as const, error: precio.error }
+    precioAprobado = precio.precio
+  }
+
+  // Marcar cotización como aceptada. Con tarifa, la elección va en el MISMO update: si no
+  // se puede guardar cuál fue, la cotización no queda aceptada a medias.
   const { error: updErr } = await supabase
     .from('cotizaciones')
-    .update({ estado: 'aceptada', updated_at: new Date().toISOString() } as never)
+    .update({
+      estado: 'aceptada',
+      updated_at: new Date().toISOString(),
+      ...(tarifa ? { tarifa_aceptada_id: tarifa.id } : {}),
+    } as never)
     .eq('id', cotizacionId)
 
   if (updErr) return { success: false as const, error: updErr.message }
@@ -180,7 +284,7 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: negErr } = await (supabase as any)
     .from('negocios')
-    .update({ precio_aprobado: precio.precio })
+    .update({ precio_aprobado: precioAprobado })
     .eq('id', negocioId)
 
   if (negErr) return { success: false as const, error: negErr.message }
@@ -208,6 +312,38 @@ export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: 
         updated_at: new Date().toISOString(),
       })
       .in('id', cotBloqueIds)
+  }
+
+  // La elección, registrada. Solo con tarifas: una cotización plana no escogió nada (R6).
+  if (tarifa) {
+    await registrarEleccionDelCliente(supabase, {
+      servicio: createServiceClient,
+      workspaceId,
+      cotizacionId,
+      negocioId,
+      staffId: staffId ?? null,
+      elegidaId: tarifa.id,
+    })
+    const recomendada = recomendadaDe(filas).fila
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId ?? null,
+      campo_modificado: 'precio_aprobado',
+      valor_anterior: null,
+      valor_nuevo: precioAprobado != null ? String(precioAprobado) : null,
+      contenido: recortarParaLog(textoDeAprobacion({
+        codigo: (cot as { consecutivo?: string | null }).consecutivo || 'La cotización',
+        tarifa: tarifa.nombre,
+        precio: formatCOP(precioAprobado ?? 0),
+        recomendada: recomendada && precioRecomendada !== null
+          ? { nombre: recomendada.nombre, precio: formatCOP(precioRecomendada) }
+          : null,
+        eraLaRecomendada: recomendada?.id === tarifa.id,
+      })),
+    }, 'aceptarCotizacionNegocio')
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -271,9 +407,11 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
   // La cotización existe, es de este negocio y de este workspace. El filtro por
   // workspace es explícito y no se delega al RLS del cliente: es el control, no un
   // efecto secundario de por dónde se leyó.
+  // `*` y no la lista: `tarifa_aceptada_id` la agrega una migración, y nombrarla antes de
+  // aplicarla devolvería un 400 que dejaría sin poder corregir a TODOS los workspaces.
   const { data: cotRow, error: cotErr } = await supabase
     .from('cotizaciones')
-    .select('id, estado, valor_total, consecutivo, negocio_id, workspace_id')
+    .select('*')
     .eq('id', cotizacionId)
     .maybeSingle()
 
@@ -283,6 +421,7 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     consecutivo: string | null
     negocio_id: string | null
     workspace_id: string | null
+    tarifa_aceptada_id?: string | null
   } | null
 
   if (cotErr) return { success: false as const, error: cotErr.message }
@@ -393,7 +532,26 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
   }
 
   // 4. Rastro. `autor_id` es FK a staff(id), NO a profiles(id).
+  //
+  // ⚠️ La tarifa que el cliente escogió NO se borra (`tarifa_aceptada_id` se queda): la
+  // corrección arregla un ítem, no cambia lo que el cliente tomó. La próxima aprobación
+  // vuelve a preguntar y la ofrece marcada (`preseleccionDeAprobacion`), y el rastro dice
+  // de qué tarifa venía el precio — sin eso, un precio que no es el del TOTAL del
+  // documento quedaría sin explicación en la historia del negocio.
+  let tarifaAnterior: string | null = null
+  if (cot.tarifa_aceptada_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: tarifaRow } = await (supabase as any)
+      .from('cotizacion_itinerarios')
+      .select('nombre')
+      .eq('id', cot.tarifa_aceptada_id)
+      .maybeSingle()
+    tarifaAnterior = ((tarifaRow as { nombre?: string | null } | null)?.nombre ?? '').trim() || null
+  }
   const precioAnterior = negocio.precio_aprobado
+  const venia = precioAnterior != null
+    ? ` (venía aprobada por ${formatCOP(precioAnterior)}${tarifaAnterior ? `, tarifa ${tarifaAnterior}` : ''})`
+    : ''
   await registrarActividad(supabase, {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
@@ -403,9 +561,7 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     campo_modificado: 'precio_aprobado',
     valor_anterior: precioAnterior != null ? String(precioAnterior) : null,
     valor_nuevo: null,
-    contenido: `${cot.consecutivo ? `Cotización ${cot.consecutivo}` : 'La cotización'} volvió a borrador para corregirla${
-      precioAnterior != null ? ` (venía aprobada por ${formatCOP(precioAnterior)})` : ''
-    }.`.slice(0, 280),
+    contenido: `${cot.consecutivo ? `Cotización ${cot.consecutivo}` : 'La cotización'} volvió a borrador para corregirla${venia}.`.slice(0, 280),
   }, 'corregirCotizacionAceptada')
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -469,97 +625,25 @@ export async function eliminarCotizacionBorrador(cotizacionId: string, negocioId
   return { success: true as const }
 }
 
+/**
+ * «Duplicar» desde el bloque del negocio. Es el MISMO camino que el del editor
+ * (`duplicarCotizacionCompleta`): hasta el 2026-09-22 este botón creaba una cotización
+ * sin ítems pero con el `valor_total` de la original, o sea un total que no salía de nada.
+ *
+ * La copia nace en `borrador` y vuelve a medir: se recalcula aquí mismo, así que su total
+ * y su margen salen de lo que se copió, no de lo que la original tenía guardado.
+ */
 export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
-  // Leer cotización original.
-  //
-  // ⚠️ La política de margen (convención + default + umbrales) se COPIA de la
-  // original, no se vuelve a resolver contra la línea. Duplicar es corregir el mismo
-  // documento, así que tiene que cotizar con las mismas reglas: resolverla de nuevo
-  // haría que una copia de una cotización vieja saliera con OTRO precio para los
-  // mismos ítems, sin que nada en pantalla lo explique. Antes esto no se copiaba y la
-  // copia caía al default de la columna (`markup`) — con `sobre_venta` en la línea,
-  // un costo de 1.000.000 al 15% pasaba de 1.176.471 a 1.150.000 al duplicar.
-  // `convencion_margen` y `margen_default_pct` existen en la base desde
-  // `20260911220000` pero todavía no están en los tipos generados (`database.ts`),
-  // igual que el `as never` del insert de `createCotizacionDetalladaNegocio`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: originalRaw, error: origErr } = await (supabase as any)
-    .from('cotizaciones')
-    .select('modo, descripcion, valor_total, convencion_margen, margen_porcentaje, margen_default_pct, aiu_admin_pct, aiu_imprevistos_pct, descuento_porcentaje')
-    .eq('id', cotizacionId)
-    .single()
+  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId })
+  if (!res.ok) return { success: false as const, error: res.error }
 
-  if (origErr || !originalRaw) return { success: false as const, error: 'Cotización no encontrada' }
-  const original = originalRaw as {
-    modo: string | null
-    descripcion: string | null
-    valor_total: number | null
-    convencion_margen: string | null
-    margen_porcentaje: number | null
-    margen_default_pct: number | null
-    aiu_admin_pct: number | null
-    aiu_imprevistos_pct: number | null
-    descuento_porcentaje: number | null
-  }
-
-  // Los umbrales se piden APARTE y tolerando el error: si la migración no está
-  // aplicada, pedirlos en el `select` de arriba lo tumbaría entero y duplicar
-  // dejaría de funcionar. Misma tolerancia que el insert.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: umbralesOriginal } = await (supabase as any)
-    .from('cotizaciones')
-    .select('piso_margen_pct, aviso_margen_pct')
-    .eq('id', cotizacionId)
-    .maybeSingle()
-
-  // Nuevo consecutivo
-  const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
-    p_workspace_id: workspaceId,
-  })
-  const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
-
-  // El nombre NO se hereda tal cual: dos variantes del mismo negocio con la misma
-  // etiqueta son justo lo que la comercial no puede distinguir en la lista. Se
-  // resuelve contra las demás cotizaciones de ESTE negocio.
-  const { data: hermanos } = await supabase
-    .from('cotizaciones')
-    .select('descripcion')
-    .eq('negocio_id', negocioId)
-  const descripcionCopia = nombreParaDuplicado(
-    original.descripcion,
-    (hermanos ?? []).map(h => h.descripcion),
-  )
-
-  // Los tipos generados de `cotizaciones` todavia no declaran `piso_margen_pct` ni
-  // `aviso_margen_pct` (falta regenerar `database.ts`), asi que el cliente tipado
-  // rechaza el objeto entero.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: dbError } = await (supabase as any).from('cotizaciones').insert({
-    workspace_id: workspaceId,
-    negocio_id: negocioId,
-    consecutivo,
-    codigo: '',
-    modo: original.modo,
-    descripcion: descripcionCopia,
-    valor_total: original.valor_total,
-    estado: 'borrador',
-    // La cascada entera de la original: cambiar cualquiera de estos al duplicar le
-    // mueve el precio a la copia sin que nadie lo haya pedido.
-    convencion_margen: original.convencion_margen,
-    margen_porcentaje: original.margen_porcentaje,
-    margen_default_pct: original.margen_default_pct,
-    aiu_admin_pct: original.aiu_admin_pct,
-    aiu_imprevistos_pct: original.aiu_imprevistos_pct,
-    descuento_porcentaje: original.descuento_porcentaje,
-    piso_margen_pct: umbralesOriginal?.piso_margen_pct ?? null,
-    aviso_margen_pct: umbralesOriginal?.aviso_margen_pct ?? null,
-  }).select('id').single()
-
-  if (dbError) return { success: false as const, error: dbError.message }
+  // Una cotización rápida no tiene líneas: su total es el que traía, y recalcular lo
+  // pondría en cero.
+  if (res.modo === 'detallada') await recalcularTotales(res.id)
 
   revalidatePath(`/negocios/${negocioId}`)
-  return { success: true as const, id: (data as { id: string }).id }
+  return { success: true as const, id: res.id }
 }

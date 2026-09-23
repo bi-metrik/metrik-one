@@ -22,6 +22,7 @@ vi.mock('../cotizacion/actions', () => ({
   duplicarCotizacionNegocio: async () => ({ success: true }),
   eliminarCotizacionBorrador: async () => ({ success: true }),
   corregirCotizacionAceptada: async () => ({ success: true }),
+  opcionesDeAprobacion: async () => ({ success: true, tarifas: [], preseleccion: null }),
 }))
 vi.mock('sonner', () => ({ toast: { error: () => {}, success: () => {} } }))
 vi.mock('next/link', () => ({

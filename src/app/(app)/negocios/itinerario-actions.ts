@@ -11,7 +11,13 @@ import {
   ranurasCombinables,
   ranurasNoCombinables,
 } from '@/lib/cotizaciones/itinerarios'
-import { renombreDeRanura, tarifasQueFaltan } from '@/lib/cotizaciones/tarifas'
+import {
+  choqueDeNombreDeTarifa,
+  esRecomendada,
+  motivoSinRecomendada,
+  renombreDeRanura,
+  tarifasQueFaltan,
+} from '@/lib/cotizaciones/tarifas'
 import { normalizarMotivo } from '@/lib/cotizaciones/motivo-combinacion'
 import {
   etiquetaDeRanura,
@@ -89,6 +95,18 @@ export interface EstadoItinerarios {
    */
   tablasAusentes: boolean
   /**
+   * Por qué la cotización no puede salir por la regla de la Recomendada
+   * (`motivoSinRecomendada`): no existe, está repetida o no va en la propuesta. `null` =
+   * todo en orden, o no hay tarifas. La pantalla lo dice donde se arman las tarifas; el
+   * rechazo de verdad vive en «Enviar», «Aprobar» y el PDF.
+   */
+  recomendadaFalta: string | null
+  /**
+   * La tarifa que el cliente eligió al aprobar, solo mientras la cotización está
+   * `aceptada`. `null` en cualquier otro caso.
+   */
+  aceptadaId: string | null
+  /**
    * `true` cuando la base ya tiene las columnas del motivo (§3.3).
    *
    * Mismo criterio que `tablasAusentes` y por el mismo motivo: el deploy va antes que
@@ -116,6 +134,8 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
     umbrales: UMBRALES_MARGEN_POR_DEFECTO,
     tablasAusentes: false,
     motivoDisponible: false,
+    recomendadaFalta: null,
+    aceptadaId: null,
   }
 
   const { supabase, error } = await getWorkspace()
@@ -160,6 +180,8 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
     fijosConAlternativas,
     umbrales: ctx.umbrales,
     tablasAusentes: false,
+    recomendadaFalta: motivoSinRecomendada(filas),
+    aceptadaId: ctx.estado === 'aceptada' ? ctx.tarifaAceptadaId ?? null : null,
     // `every` y no `some`: si una sola fila llegó sin las columnas, la base no las
     // tiene y el control no se puede ofrecer.
     motivoDisponible: filas.length > 0 && filas.every(f => f.traeColumnasDeMotivo),
@@ -331,6 +353,8 @@ export async function cambiarOpcionDeItinerario(itinerarioId: string, grupo: str
 
   const desmarcados = await desmarcarLosQueYaNoPueden(supabase, cab.cotizacionId)
   await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
+  // Si la celda es de la Recomendada, el total del documento se movió.
+  await recalcularTotales(cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true, desmarcados }
 }
@@ -373,20 +397,24 @@ export async function marcarEnPropuesta(itinerarioId: string, vaEnPropuesta: boo
   if (errUpd) return { success: false, error: errUpd.message }
 
   await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
+  // Marcar o sacar la Recomendada decide si hay principal: el total se rehace aquí.
+  await recalcularTotales(cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true, soltoPrincipal: patch.es_principal === false }
 }
 
 /**
- * T5 y T7 · exactamente un principal, y tiene que ir en la propuesta.
+ * La principal NO se elige: es la Recomendada (decisión de Mauricio, 2026-09-22).
  *
- * T7 · cuando el cliente elige, se marca ese itinerario como principal y el negocio
- * sigue con ESE costeo: `recalcularTotales` pone su total en `cotizaciones.valor_total`.
- * Los demás quedan como historia de la cotización; no se borran.
+ * Hasta ese día esta acción dejaba poner la corona en cualquier tarifa, y el documento
+ * decía «el total corresponde a la opción recomendada» con el TOTAL de la Económica. El
+ * botón salió de la pantalla; esta acción queda porque una server action exportada es un
+ * endpoint alcanzable aunque ningún botón la invoque, y **rechaza toda tarifa que no sea
+ * la Recomendada**. Sobre la Recomendada equivale a marcarla para la propuesta: la regla
+ * (`idDelPrincipal`) la vuelve principal sola.
  *
- * ⚠️ El principal pasa por el MISMO candado que `va_en_propuesta`. Es el que fija el
- * precio del negocio, así que dejarlo entrar por debajo del piso sería la puerta
- * trasera al control que este frente construye.
+ * ⚠️ Pasa por el MISMO candado que `va_en_propuesta`: es la que fija el total del
+ * documento, y dejarla entrar incompleta sería la puerta trasera al control.
  */
 export async function marcarPrincipal(itinerarioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -395,45 +423,60 @@ export async function marcarPrincipal(itinerarioId: string) {
   const cab = await leerCabecera(supabase, itinerarioId)
   if (!cab) return { success: false, error: 'Itinerario no encontrado' }
 
+  if (!esRecomendada(cab.nombre)) {
+    return {
+      success: false,
+      error: 'La principal es siempre la tarifa Recomendada: no se elige a mano. Si el cliente pide otra combinación, duplica la cotización y arma la Recomendada con lo que pidió.',
+    }
+  }
+
   const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
   if (!ctx) return { success: false, error: 'Cotización no encontrada' }
 
   const calculado = calcularItinerario(ctx, cab)
   if (calculado.bloqueo) return { success: false, error: calculado.bloqueo }
 
-  // Soltar el anterior ANTES de marcar el nuevo: el índice único parcial
-  // `idx_itinerario_principal_unico` rechaza dos principales a la vez.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (supabase as any)
-    .from('cotizacion_itinerarios')
-    .update({ es_principal: false })
-    .eq('cotizacion_id', cab.cotizacionId)
-    .neq('id', itinerarioId)
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any)
     .from('cotizacion_itinerarios')
-    .update({ es_principal: true, va_en_propuesta: true })
+    .update({ va_en_propuesta: true })
     .eq('id', itinerarioId)
   if (errUpd) return { success: false, error: errUpd.message }
 
   await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
+  await recalcularTotales(cab.cotizacionId)
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true }
 }
 
-/** T6 · el nombre es libre y viaja al PDF. Vacío: el PDF numera. */
+/**
+ * T6 · el nombre es libre y viaja al PDF. Vacío: el PDF numera.
+ *
+ * ⚠️ Desde el 2026-09-22 el nombre también decide cuál manda el total: la «Recomendada».
+ * Por eso dos tarifas no pueden quedar con el mismo de los tres nombres
+ * (`choqueDeNombreDeTarifa`), y renombrar recalcula: quitarle el nombre a la Recomendada
+ * deja la cotización sin principal, y ponérselo a otra se lo da.
+ */
 export async function renombrarItinerario(itinerarioId: string, nombre: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
+  const cab = await leerCabecera(supabase, itinerarioId)
+  if (!cab) return { success: false, error: 'Itinerario no encontrado' }
+
   const limpio = nombre.trim()
+  const hermanas = (await leerItinerarios(supabase, cab.cotizacionId)) ?? []
+  const choque = choqueDeNombreDeTarifa(limpio, itinerarioId, hermanas)
+  if (choque) return { success: false, error: choque }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any)
     .from('cotizacion_itinerarios')
     .update({ nombre: limpio === '' ? null : limpio })
     .eq('id', itinerarioId)
   if (errUpd) return { success: false, error: errUpd.message }
+
+  await recalcularTotales(cab.cotizacionId)
   return { success: true }
 }
 
@@ -506,6 +549,8 @@ export async function eliminarItinerario(itinerarioId: string) {
 
   const ctx = await contextoDeCotizacion(supabase, cab.cotizacionId)
   await revisarExcepcionDelDueno(supabase, cab.cotizacionId)
+  // Borrar la Recomendada deja la cotización sin principal: el total vuelve al supuesto.
+  await recalcularTotales(cab.cotizacionId)
   revalidarCotizacion(ctx?.negocioId ?? null, ctx?.oportunidadId ?? null)
   return { success: true, eraPrincipal: cab.esPrincipal }
 }

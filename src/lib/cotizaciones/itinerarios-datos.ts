@@ -35,6 +35,7 @@ import {
   type ItemConGrupo,
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
+import { idDelPrincipal } from './tarifas'
 import { costoDeRubrosConfirmados } from './rubros-sugeridos'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import {
@@ -66,6 +67,14 @@ export interface FilaItinerario {
   nombre: string | null
   orden: number
   vaEnPropuesta: boolean
+  /**
+   * ¿Esta tarifa manda sobre `valor_total` y el TOTAL del documento?
+   *
+   * ⚠️ DERIVADO, no leído de `es_principal`: es la Recomendada que va en la propuesta
+   * (`idDelPrincipal`, decisión del 2026-09-22). La columna quedó informativa. Lo
+   * resuelven `leerItinerarios` y `leerCabecera`, que ven a las hermanas; una fila suelta
+   * sin sus hermanas no puede saberlo.
+   */
   esPrincipal: boolean
   seleccion: string[]
   /** Por qué se eligió esta combinación (§3.3). Opcional, nunca bloquea. */
@@ -138,6 +147,14 @@ export interface ContextoCotizacion {
    * `null` sin negocio o sin línea.
    */
   configLinea?: unknown
+  /** El estado de la cotización (`borrador`, `enviada`, `aceptada`…). */
+  estado?: string | null
+  /**
+   * La tarifa que el cliente eligió al aprobar (`cotizaciones.tarifa_aceptada_id`).
+   * `null` sin tarifas, sin aprobar, o con la migración pendiente: el `select('*')` la
+   * trae `undefined` y eso es exactamente «nadie eligió».
+   */
+  tarifaAceptadaId?: string | null
 }
 
 export interface ItinerarioCalculado {
@@ -281,6 +298,8 @@ export async function contextoDeCotizacion(
     oportunidadId: (cot.oportunidad_id ?? null) as string | null,
     pisoEnLaSalida,
     configLinea: configLineaLeida,
+    estado: (cot.estado ?? null) as string | null,
+    tarifaAceptadaId: (cot.tarifa_aceptada_id ?? null) as string | null,
   }
 }
 
@@ -374,10 +393,28 @@ export async function leerItinerarios(
     return null
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((data ?? []) as any[]).map(aFila)
+  return conPrincipalPorRegla(((data ?? []) as any[]).map(aFila))
 }
 
-/** Una cabecera con su selección, por id. */
+/**
+ * Las filas con `esPrincipal` resuelto por la regla (`idDelPrincipal`), no por la columna.
+ *
+ * Es el ÚNICO sitio donde se decide: `valor_total` (`totalDelPrincipal`), el gate
+ * (`cascadaVigente`), el PDF (`bloquesParaPDF`), la tabla y la copia leen las filas por
+ * aquí. Si alguno leyera `es_principal` crudo, una marca vieja volvería a poner el total
+ * del documento en la Económica.
+ */
+export function conPrincipalPorRegla(filas: FilaItinerario[]): FilaItinerario[] {
+  const principal = idDelPrincipal(filas)
+  return filas.map(f => ({ ...f, esPrincipal: f.id === principal }))
+}
+
+/**
+ * Una cabecera con su selección, por id.
+ *
+ * Lee también a sus hermanas: sin ellas no se puede saber si es la principal (hace falta
+ * saber si hay otra «Recomendada»). Son acciones de una tabla, no de cada tecla.
+ */
 export async function leerCabecera(
   supabase: Supabase,
   itinerarioId: string,
@@ -388,7 +425,9 @@ export async function leerCabecera(
     .eq('id', itinerarioId)
     .maybeSingle()
   if (error || !data) return null
-  return aFila(data)
+  const propia = aFila(data)
+  const hermanas = await leerItinerarios(supabase, propia.cotizacionId)
+  return hermanas?.find(f => f.id === propia.id) ?? { ...propia, esPrincipal: false }
 }
 
 /**
@@ -553,7 +592,8 @@ function aFila(data: any): FilaItinerario {
     nombre: (data.nombre ?? null) as string | null,
     orden: (data.orden ?? 0) as number,
     vaEnPropuesta: data.va_en_propuesta === true,
-    esPrincipal: data.es_principal === true,
+    // Provisional: `conPrincipalPorRegla` lo reemplaza con las hermanas a la vista.
+    esPrincipal: false,
     seleccion: ((data.itinerario_opciones ?? []) as { item_id: string }[]).map(o => o.item_id),
     motivoCodigo: (data.motivo_codigo ?? null) as string | null,
     motivoTexto: (data.motivo_texto ?? null) as string | null,

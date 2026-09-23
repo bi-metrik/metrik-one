@@ -51,19 +51,23 @@ const hotel = (over: Partial<HotelPDF>): HotelPDF => ({
   ...over,
 })
 
-describe('el color de cada tarifa', () => {
-  it('la principal es magenta aunque se llame distinto', () => {
-    expect(colorDeTarifa('Económica', true)).toBe(TOKENS.magenta)
+describe('el color de cada tarifa va por su NOMBRE (2026-09-22)', () => {
+  it('Recomendada magenta, Económica verde, Premium púrpura, con o sin tilde', () => {
+    expect(colorDeTarifa('Recomendada')).toBe(TOKENS.magenta)
+    expect(colorDeTarifa('Económica')).toBe(TOKENS.verde)
+    expect(colorDeTarifa('ECONOMICA')).toBe(TOKENS.verde)
+    expect(colorDeTarifa('Premium')).toBe(TOKENS.purpura)
   })
 
-  it('económica es verde y premium púrpura, con o sin tilde', () => {
-    expect(colorDeTarifa('Económica', false)).toBe(TOKENS.verde)
-    expect(colorDeTarifa('ECONOMICA', false)).toBe(TOKENS.verde)
-    expect(colorDeTarifa('Premium', false)).toBe(TOKENS.purpura)
+  it('las tres salen con tres colores distintos: nunca dos magenta', () => {
+    // El defecto que abrió esto: con la Económica como principal, el documento pintaba
+    // la Económica Y la Recomendada de magenta.
+    const colores = ['Económica', 'Recomendada', 'Premium'].map(colorDeTarifa)
+    expect(new Set(colores).size).toBe(3)
   })
 
   it('un nombre que no se reconoce recibe azul, que no choca con ninguna', () => {
-    expect(colorDeTarifa('Plan familiar', false)).toBe(TOKENS.azul)
+    expect(colorDeTarifa('Plan familiar')).toBe(TOKENS.azul)
   })
 })
 

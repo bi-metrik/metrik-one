@@ -417,9 +417,11 @@ describe('R-A1 · las tres cifras cuadran, con y sin alternativas', () => {
     // saldría con las cifras de AVIANCA y nadie lo notaría — las dos son plausibles.
     sembrar({ conAlternativa: true })
     ausentes = new Set()
+    // La principal es la tarifa LLAMADA Recomendada que va en la propuesta (2026-09-22):
+    // aquí la Recomendada elige WINGO, justo la que el supuesto habría descartado.
     tablas.cotizacion_itinerarios = [
       {
-        id: 'it-1', cotizacion_id: COT, nombre: 'Económica', orden: 1,
+        id: 'it-1', cotizacion_id: COT, nombre: 'Recomendada', orden: 1,
         va_en_propuesta: true, es_principal: true,
       },
     ]
@@ -442,7 +444,15 @@ describe('R-A1 · las tres cifras cuadran, con y sin alternativas', () => {
     // Con UN solo itinerario en la propuesta el documento imprime la tabla plana, sin
     // titular el bloque: a un cliente con una sola opción no se le presenta como una
     // elección entre varias. Es deliberado (`bloques.length > 1` en la plantilla).
-    expect(texto).not.toContain('Económica ·')
+    expect(texto).not.toContain('Recomendada ·')
+
+    // El control de la regla nueva: la MISMA tarifa, marcada «principal» en la columna
+    // pero llamada Económica, ya NO manda. Sin Recomendada no hay principal y el total
+    // vuelve al supuesto (AVIANCA). Si la columna `es_principal` siguiera decidiendo, el
+    // total se quedaría en el de WINGO.
+    tablas.cotizacion_itinerarios[0].nombre = 'Económica'
+    const sinRecomendada = await medir()
+    expect(sinRecomendada.totalEnPantalla).toBe(4_080_460)
   }, 30_000)
 
   it('DOS itinerarios en la propuesta: el título del principal no repite «recomendada»', async () => {
@@ -482,12 +492,16 @@ describe('R-A1 · las tres cifras cuadran, con y sin alternativas', () => {
     // Y el del principal NO dice «recomendada» dos veces (defecto #1 del encargo).
     expect(enMinuscula).not.toContain('recomendada \u00b7 recomendada')
 
-    // El control que hace válida la comprobación de arriba: un nombre que NO la dice
-    // sí recibe el sufijo. Sin esto, un título que nunca agregara el sufijo pasaría
-    // igual y la prueba no estaría midiendo nada.
+    // Desde el 2026-09-22 la principal ES la tarifa llamada Recomendada, así que el
+    // sufijo ya no tiene a quién agregarse: si la Recomendada se renombra, deja de haber
+    // principal. El documento sale como BORRADOR (sin la Recomendada no hay total que
+    // defender) y ningún bloque se presenta como «recomendada».
     tablas.cotizacion_itinerarios[0].nombre = 'Premium'
-    const conSufijo = (await medir()).texto.toLowerCase()
-    expect(conSufijo).toContain('premium \u00b7 recomendada')
+    await recalcularTotales(COT)
+    const res = await generateCotizacionPDF(COT) as { success: boolean; borrador?: boolean; aviso?: string; pdf: string }
+    expect(res.borrador).toBe(true)
+    expect(res.aviso).toContain('ninguna se llama «Recomendada»')
+    expect(textoDelPDF(res.pdf).toLowerCase()).not.toContain('premium \u00b7 recomendada')
   }, 30_000)
 
   it('la alternativa descartada CONSERVA su precio de línea', async () => {

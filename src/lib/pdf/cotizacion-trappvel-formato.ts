@@ -43,12 +43,13 @@ export const TOKENS = {
  * Un color por tarifa, el MISMO en todo el documento: así el cliente sigue su opción de
  * punta a punta sin leer una leyenda.
  *
- * La principal es magenta aunque se llame distinto: es la que el documento recomienda y
- * la única cuyo precio coincide con el TOTAL. Una tarifa que no se deja reconocer por su
- * nombre recibe azul, que no choca con ninguna de las tres.
+ * **Va por el NOMBRE** (decisión de Mauricio, 2026-09-22): Recomendada magenta, Económica
+ * verde, Premium púrpura. Hasta ese día la principal se pintaba magenta sin importar cómo
+ * se llamara, y con la Económica como principal el documento salía con DOS tarifas
+ * magenta. Una tarifa que no se deja reconocer por su nombre recibe azul, que no choca
+ * con ninguna de las tres.
  */
-export function colorDeTarifa(titulo: string, esPrincipal: boolean): string {
-  if (esPrincipal) return TOKENS.magenta
+export function colorDeTarifa(titulo: string): string {
   const t = sinTildes(titulo)
   if (t.includes('econom')) return TOKENS.verde
   if (t.includes('premium')) return TOKENS.purpura

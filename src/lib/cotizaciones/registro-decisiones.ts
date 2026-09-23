@@ -270,6 +270,77 @@ export function armarFilasDeRegistro(args: {
   })
 }
 
+// ── La elección del cliente al aprobar (2026-09-22) ──────────────────────────
+
+/** Una tarifa como se le ofreció al cliente: nombre y precio del momento, copiados. */
+export interface TarifaOfrecida {
+  itinerario_id: string
+  nombre: string | null
+  /** Precio SIN IVA, el de su cascada: la misma unidad que `precio_elegida`. */
+  precio: number
+}
+
+/**
+ * La fila que registra QUÉ TARIFA escogió el cliente, frente a la que se le recomendó.
+ *
+ * Es el otro dato que va a aprender el motor (§3.4): la salida dice qué se le ofreció;
+ * la aceptación dice qué tomó. Vive en la MISMA tabla porque tiene la misma forma —una
+ * tarifa con su combinación, sus descartadas, su viaje y quién— y se une con las filas
+ * de la salida por `cotizacion_id`. Lo que la distingue es `evento = 'aceptacion'` y las
+ * columnas de la recomendada, que la salida no llena.
+ *
+ * ⚠️ R1 sigue valiendo: `propuesta` es la del MOTOR y sigue nula. La Recomendada no es
+ * «la propuesta»: es lo que la agencia le recomendó al cliente, y va en sus columnas.
+ *
+ * ⚠️ `elegida` y `descartadas` son las VARIANTES de la tarifa escogida, con la misma
+ * forma que en la salida. Las otras tarifas que se le ofrecieron van en
+ * `tarifas_ofrecidas`, con su precio del momento: mezclar las dos cosas en `descartadas`
+ * daría una columna con dos formas.
+ */
+export interface FilaAceptacion extends FilaDecision {
+  evento: 'aceptacion'
+  recomendada_itinerario_id: string | null
+  recomendada_nombre: string | null
+  precio_recomendada: number | null
+  tarifas_ofrecidas: TarifaOfrecida[]
+}
+
+export function armarFilaDeAceptacion(args: {
+  workspaceId: string
+  cotizacionId: string
+  negocioId: string | null
+  ctx: ContextoCotizacion
+  /** Las tarifas que iban en la propuesta: lo que el cliente tuvo delante. */
+  ofrecidas: FilaItinerario[]
+  elegida: FilaItinerario
+  recomendada: FilaItinerario | null
+  contexto: ContextoViajeRegistrado
+  quien: QuienDecidio
+  aceptadaAt: string
+}): FilaAceptacion {
+  const [base] = armarFilasDeRegistro({
+    workspaceId: args.workspaceId,
+    cotizacionId: args.cotizacionId,
+    negocioId: args.negocioId,
+    ctx: args.ctx,
+    filas: [args.elegida],
+    contexto: args.contexto,
+    quien: args.quien,
+    salidaAt: args.aceptadaAt,
+  })
+  const precioDe = (f: FilaItinerario) => cascadaDeItinerario(args.ctx.items, f.seleccion, args.ctx.params).precioVenta
+  return {
+    ...base,
+    evento: 'aceptacion',
+    recomendada_itinerario_id: args.recomendada?.id ?? null,
+    recomendada_nombre: args.recomendada?.nombre ?? null,
+    precio_recomendada: args.recomendada ? precioDe(args.recomendada) : null,
+    tarifas_ofrecidas: [...args.ofrecidas]
+      .sort((a, b) => a.orden - b.orden)
+      .map(f => ({ itinerario_id: f.id, nombre: f.nombre, precio: precioDe(f) })),
+  }
+}
+
 // ── La escritura ─────────────────────────────────────────────────────────────
 
 /** La tabla que crea la migración pendiente. */
@@ -321,7 +392,7 @@ type Supabase = any
  */
 export async function registrarSalidaAlCliente(
   service: Supabase,
-  filas: FilaDecision[],
+  filas: (FilaDecision | FilaAceptacion)[],
 ): Promise<ResultadoRegistro> {
   if (filas.length === 0) return { registradas: 0, error: null, faltaMigracion: false }
   try {

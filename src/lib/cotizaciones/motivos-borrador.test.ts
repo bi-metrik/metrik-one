@@ -8,33 +8,40 @@ import {
   type CondicionesDeBorrador,
 } from './motivos-borrador'
 
-/** Las 16 combinaciones de las cuatro condiciones. */
+/** Las 32 combinaciones de las cinco condiciones. */
 function todas(): CondicionesDeBorrador[] {
   const out: CondicionesDeBorrador[] = []
-  for (let i = 0; i < 16; i++) {
+  for (let i = 0; i < 32; i++) {
     out.push({
       pantallazos: (i & 1) !== 0,
       margen: (i & 2) !== 0,
       ivaSinCalcular: (i & 4) !== 0,
       ivaIncluidoSinPlantilla: (i & 8) !== 0,
+      sinRecomendada: (i & 16) !== 0,
     })
   }
   return out
 }
 
 describe('motivos de borrador: CUÁNDO no cambia, solo el texto', () => {
-  it('es borrador exactamente cuando antes: el OR de las cuatro condiciones, en las 16 combinaciones', () => {
+  it('es borrador exactamente cuando antes: el OR de las cinco condiciones, en las 32 combinaciones', () => {
     for (const c of todas()) {
       const antes = c.pantallazos || c.margen || c.ivaSinCalcular || c.ivaIncluidoSinPlantilla
+        || c.sinRecomendada
       expect(motivosDeBorrador(c).length > 0).toBe(antes)
     }
   })
 
-  it('cada condición aporta su motivo, y en un orden fijo: pantallazos, margen, IVA', () => {
-    expect(motivosDeBorrador({ pantallazos: true, margen: true, ivaSinCalcular: true, ivaIncluidoSinPlantilla: true }))
-      .toEqual(['pantallazos', 'margen', 'iva_sin_calcular', 'iva_incluido_sin_plantilla'])
-    expect(motivosDeBorrador({ pantallazos: false, margen: false, ivaSinCalcular: true, ivaIncluidoSinPlantilla: false }))
-      .toEqual(['iva_sin_calcular'])
+  it('cada condición aporta su motivo, y en un orden fijo: pantallazos, Recomendada, margen, IVA', () => {
+    expect(motivosDeBorrador({
+      pantallazos: true, sinRecomendada: true, margen: true, ivaSinCalcular: true, ivaIncluidoSinPlantilla: true,
+    })).toEqual(['pantallazos', 'recomendada', 'margen', 'iva_sin_calcular', 'iva_incluido_sin_plantilla'])
+    expect(motivosDeBorrador({
+      pantallazos: false, sinRecomendada: false, margen: false, ivaSinCalcular: true, ivaIncluidoSinPlantilla: false,
+    })).toEqual(['iva_sin_calcular'])
+    expect(motivosDeBorrador({
+      pantallazos: false, sinRecomendada: true, margen: false, ivaSinCalcular: false, ivaIncluidoSinPlantilla: false,
+    })).toEqual(['recomendada'])
   })
 })
 
@@ -42,6 +49,7 @@ describe('el texto de la marca', () => {
   it('un motivo: su nombre llano', () => {
     expect(textoDeMarca(['margen'])).toBe('BORRADOR · margen bajo el mínimo · no enviar')
     expect(textoDeMarca(['pantallazos'])).toBe('BORRADOR · pantallazos por actualizar · no enviar')
+    expect(textoDeMarca(['recomendada'])).toBe('BORRADOR · falta la tarifa Recomendada · no enviar')
     expect(textoDeMarca(['iva_sin_calcular'])).toBe('BORRADOR · IVA sin calcular · no enviar')
     expect(textoDeMarca(['iva_incluido_sin_plantilla'])).toBe('BORRADOR · IVA incluido sin plantilla · no enviar')
   })

@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { contextoDeCotizacion, leerItinerarios } from './itinerarios-datos'
 import { causaDePerdida, medirSalida, mensajeDeSalida, pctTexto, type DetalleDeSalida, type MedicionDeSalida } from './piso-salida'
+import { motivoSinRecomendada } from './tarifas'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Supabase = any
@@ -230,14 +231,26 @@ export function recortarParaLog(texto: string, max = 280): string {
 }
 
 /**
- * Para las acciones que mandan algo al cliente («Enviar», «Aprobar»): `null` si puede
- * salir, o el motivo en lenguaje de operadora. Si la excepción acaba de perderse, lo
- * anota.
+ * Para las acciones que mandan algo al cliente («Enviar», «Aprobar», y el `estado` por el
+ * endpoint genérico): `null` si puede salir, o el motivo en lenguaje de operadora. Si la
+ * excepción acaba de perderse, lo anota.
+ *
+ * Dos reglas, en este orden:
+ *  1. **La Recomendada manda el documento** (2026-09-22): con tarifas, la Recomendada
+ *     tiene que existir, ser una sola e ir en la propuesta (`motivoSinRecomendada`). Va
+ *     primero porque sin ella el total del documento es un supuesto y medir su margen no
+ *     dice nada. Aplica a TODA línea con tarifas, no solo a la que exige el piso: la
+ *     leyenda «el total corresponde a la opción recomendada» la imprime cualquiera. Sin
+ *     tarifas (`[]`) es una consulta y no dice nada (R6).
+ *  2. El margen mínimo en la salida (`evaluarSalida`), solo donde la línea lo exige.
  */
 export async function motivoParaNoSalir(
   supabase: Supabase,
   args: { servicio: () => Supabase; workspaceId: string; cotizacionId: string; staffId?: string | null },
 ): Promise<string | null> {
+  const sinRecomendada = motivoSinRecomendada((await leerItinerarios(supabase, args.cotizacionId)) ?? [])
+  if (sinRecomendada) return sinRecomendada
+
   const salida = await evaluarSalida(supabase, { ...args, registrarPerdida: true })
   if (!salida) return null
   return salida.bloquea ? salida.mensaje : null

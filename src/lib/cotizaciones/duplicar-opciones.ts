@@ -29,6 +29,12 @@ export interface ItinerarioOriginal {
   va_en_propuesta: boolean
   es_principal: boolean
   seleccion: string[]
+  /**
+   * El motivo de la combinación (§3.3). `undefined` = la base no tiene las columnas: no se
+   * nombran en el insert, porque nombrarlas tumbaría la copia entera con un 42703.
+   */
+  motivo_codigo?: string | null
+  motivo_texto?: string | null
 }
 
 /**
@@ -84,9 +90,115 @@ export function itinerariosParaLaCopia(
       // combinación que dejó de valer se desmarca sola y lo dice.
       va_en_propuesta: orig.va_en_propuesta,
       es_principal: orig.es_principal,
+      // El motivo es parte de la tarifa: por qué se armó así sigue siendo cierto en la copia.
+      ...(orig.motivo_codigo !== undefined ? { motivo_codigo: orig.motivo_codigo } : {}),
+      ...(orig.motivo_texto !== undefined ? { motivo_texto: orig.motivo_texto } : {}),
     },
     seleccion: orig.seleccion
       .map(id => mapaItems.get(id))
       .filter((id): id is string => typeof id === 'string'),
   }))
+}
+
+// ── La copia COMPLETA (2026-09-22) ───────────────────────────────────────────
+
+/**
+ * Qué NO viaja de la cotización original. Todo lo demás se copia tal cual.
+ *
+ * ⚠️ Lista de EXCLUSIÓN y no de inclusión, a propósito: «duplicar copia todo». Una
+ * columna nueva de la cotización (una condición comercial, un texto del documento) viaja
+ * sola, sin que nadie tenga que acordarse de agregarla aquí. Hasta el 2026-09-22 cada
+ * camino copiaba su propia lista, y el del bloque del negocio no copiaba ni los ítems.
+ *
+ * Fuera quedan: la identidad (id, consecutivo, código, fechas de la fila), el ESTADO (la
+ * copia nace en borrador), lo que dejó el ENVÍO (fechas, correo) y la elección del cliente
+ * al aprobar. Las excepciones de margen viven en otra tabla y no se copian: la copia
+ * vuelve a medir su margen.
+ */
+export const COLUMNAS_QUE_NO_VIAJAN = [
+  'id',
+  'workspace_id',
+  'consecutivo',
+  'codigo',
+  'estado',
+  'created_at',
+  'updated_at',
+  'fecha_envio',
+  'fecha_validez',
+  'email_enviado_a',
+  'duplicada_de',
+  'tarifa_aceptada_id',
+  // Embebidos de un `select` con relaciones: no son columnas.
+  'oportunidades',
+  'items',
+] as const
+
+/**
+ * La fila de la cotización COPIA, lista para insertar.
+ *
+ * @param original La fila entera (`select('*')`).
+ */
+export function cotizacionParaLaCopia(
+  original: Record<string, unknown>,
+  args: { workspaceId: string; consecutivo: string; descripcion: string | null; originalId: string },
+): Record<string, unknown> {
+  const fuera = new Set<string>(COLUMNAS_QUE_NO_VIAJAN)
+  const copia: Record<string, unknown> = {}
+  for (const [col, valor] of Object.entries(original)) {
+    if (fuera.has(col)) continue
+    copia[col] = valor
+  }
+  return {
+    ...copia,
+    workspace_id: args.workspaceId,
+    consecutivo: args.consecutivo,
+    codigo: '',
+    estado: 'borrador',
+    descripcion: args.descripcion,
+    duplicada_de: args.originalId,
+    ...('documento_cliente' in original
+      ? { documento_cliente: documentoClienteSinRevisar(original.documento_cliente) }
+      : {}),
+  }
+}
+
+/**
+ * El texto del documento del cliente, de vuelta a BORRADOR.
+ *
+ * Se copia el texto (redactarlo otra vez cuesta y casi siempre sirve), pero no la
+ * revisión: `revisado_en` es la firma de que alguien lo leyó para ESE documento, y la
+ * copia existe justamente para cambiar algo. Con la firma copiada, el PDF de la copia
+ * imprimiría un texto que nadie revisó contra lo que ahora dice.
+ */
+export function documentoClienteSinRevisar(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw ?? null
+  return { ...(raw as Record<string, unknown>), revisado_en: null, revisado_por: null, revisado_por_nombre: null }
+}
+
+/**
+ * La línea copia. Todo lo de la línea viaja —la tarifa por pasajero con sus casillas, su
+ * confirmación y sus correcciones; la ranura; el día; la base del IVA; el margen tal cual
+ * (`null` sigue siendo «usa el de la cotización», nunca 0)— salvo su identidad y el
+ * vínculo `opcion_de`, que se repone en una segunda pasada (`remapearOpcionDe`): el
+ * titular puede venir DESPUÉS de su opción.
+ */
+export function itemParaLaCopia(item: Record<string, unknown>, nuevaCotizacionId: string): Record<string, unknown> {
+  const { id: _id, cotizacion_id: _c, created_at: _ca, updated_at: _ua, rubros: _r, opcion_de: _o, ...resto } = item
+  return { ...resto, cotizacion_id: nuevaCotizacionId }
+}
+
+/**
+ * El rubro copia, CONFIRMADO O SUGERIDO: la copia es el mismo documento y una sugerencia
+ * pendiente sigue siendo la misma pregunta (su lectura viaja en `tarifa_pax.casillas`).
+ * `valor_total` es GENERATED en la base y no se puede insertar.
+ */
+export function rubroParaLaCopia(rubro: Record<string, unknown>, nuevoItemId: string): Record<string, unknown> {
+  const { id: _id, item_id: _i, valor_total: _v, created_at: _ca, updated_at: _ua, ...resto } = rubro
+  return { ...resto, item_id: nuevoItemId }
+}
+
+/** El adicional copia, colgado de la VARIANTE copia (nunca de la original). */
+export function adicionalParaLaCopia(fila: Record<string, unknown>, nuevoItemId: string): Record<string, unknown> {
+  const { id: _id, item_id: _i, created_at: _ca, ...resto } = fila
+  return { ...resto, item_id: nuevoItemId }
 }
