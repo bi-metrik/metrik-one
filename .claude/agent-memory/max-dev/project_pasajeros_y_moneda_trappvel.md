@@ -41,9 +41,30 @@ de CC1/CC2 al leer una nueva (`casillasVigentes`): si no, una vieja rechazaría 
 - Costo a mano en otra moneda: `subtotal` en pesos + `tarifa_pax.costoManual`, vigente solo si
   `round(valor × tasa) === subtotal`. Rubros siguen solo COP.
 
+## ⚠️ El envío SÍ se frena desde el PR siguiente (feat/trappvel-bloquear-envio-desactualizado)
+
+Mauricio decidió (2026-09-22) cerrar la pendiente #1: con una línea desactualizada la cotización
+**no sale de borrador**. Freno en el servidor, `captura-desactualizada-datos.ts`
+(`motivoPorCapturasDesactualizadas`), en las CUATRO puertas: `enviarCotizacion`,
+`enviarCotizacionNegocio`, `aceptarCotizacionNegocio` (solo si está en borrador: `skip_enviar`
+salta el envío) y `updateCotizacion({ estado })`. Va ANTES de `motivoParaNoSalir` (margen).
+
+**Why:** #824 (piso de margen) ya había creado un control de salida; mi reporte del #825 decía
+«no existe control de envío» sin haberlo visto — verificar contra `origin/main` antes de afirmar
+que algo no existe.
+
+**How to apply:** el texto sale de `motivoParaNoEnviar` (puro) y es el mismo en el botón del
+editor y en el rechazo; no reescribir la regla en otra parte. No frena: el PDF (se descarga con
+el aviso y, ojo, se sigue guardando y registrando como «sale al cliente»), aprobar una
+`enviada`, ni nada sin `tarifa_pax` (`hayTarifaPorPasajero`: ni lee el viaje). Si no puede leer
+líneas o pasajeros, FRENA. El bloque `BloqueCotizacion` no deshabilita sus botones: solo el
+servidor lo frena y el toast trae el motivo. Instrumento de R6 en la prueba: registrar los
+SELECT por columnas (`negocio_bloques|adultos…`), no por tabla — aprobar también escribe en
+`negocio_bloques`.
+
 ## Queda para Mauricio
 
-Bloquear «enviar» con capturas viejas (no existe control de envío; hoy solo aviso), editar
-adicionales ya creados, y las tarjetas de hotel viejas sin ocupación que no se pueden marcar.
+Editar adicionales ya creados, y las tarjetas de hotel viejas sin ocupación que no se pueden
+marcar.
 
 Relacionado: [[tarifa-por-pasajero]], [[orden-bloque-item-trappvel]], [[pruebas-por-mutacion]].

@@ -36,7 +36,7 @@
 - ⚠️⚠️ [Entra al precio: el segundo interruptor](project_entra_al_precio.md) — #728 SIN mergear (migración sin aplicar)
 - ⚠️ [Pantallazo por ranura (Trappvel)](project_pantallazo_ranuras.md) — el desglose del modelo no es estable
 - ⚠️⚠️ [Tarifa por pasajero (Trappvel)](project_tarifa_por_pasajero.md) — la casilla pinta lo del servidor; «AD» no es adulto
-- ⚠️⚠️ [Pasajeros y moneda (Trappvel)](project_pasajeros_y_moneda_trappvel.md) — #825: captura vieja se MARCA, no se borra; RX3 ya no rechaza
+- ⚠️⚠️ [Pasajeros y moneda (Trappvel)](project_pasajeros_y_moneda_trappvel.md) — #825: captura vieja se MARCA; con ella la cotización no sale de borrador
 - ⚠️⚠️ [Orden del bloque de ítem (Trappvel)](project_orden_bloque_item_trappvel.md) — la captura fija la ocupación salvo ajuste humano
 - ⚠️⚠️ [Lectura fina del pantallazo](project_lectura_fina_trappvel.md) — el juicio sobre una IMAGEN no es estable, su descripción sí
 - ⚠️⚠️ [Margen por ítem leído de la captura](project_margen_por_item_proveedor.md) — el neto LEÍDO manda
