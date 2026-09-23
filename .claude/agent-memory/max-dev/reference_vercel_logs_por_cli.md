@@ -31,4 +31,16 @@ existencia de las peticiones, no para su contenido.
 
 ⚠️ Invocar SIEMPRE con `timeout`: el CLI de Vercel se cuelga sin error (gotcha del CLAUDE.md).
 
+⚠️⚠️ **El CLI REPITE las filas: deduplicar por `id` antes de contar nada.** Medido el
+2026-09-23 (#839): 1.000 filas devueltas eran ~50 peticiones distintas, cada una repetida
+hasta 20 veces. Dos consecuencias: el tope `-n 1000` se llena con copias y **corta la
+ventana antes de tiempo** (pedir ventanas cortas de `--since/--until` y unirlas), y contar
+POST sin deduplicar da veinte veces lo real.
+
+**Sirve para contar CLICS que no llegaron.** Un reporte de «marqué tres y quedó una sin
+guardar» se resolvió contando POST de server action en la ventana: dos POST para tres
+clics = el clic nunca salió del navegador (casilla deshabilitada por `isPending`), no un
+fallo del servidor. Es la forma de separar «la pantalla lo perdió» de «el servidor lo
+deshizo» sin reproducir nada.
+
 Relacionado: [[verificar-deploy-sin-vercel-cli]], [[tarifa-por-pasajero]], [[qa-pantalla-viva-cdp]].
