@@ -76,9 +76,22 @@ vi.mock('@/lib/google-drive', () => ({
   uploadFileToDrive: async () => { throw new Error('Drive no debe llamarse') },
   createDriveFolder: async () => { throw new Error('Drive no debe llamarse') },
 }))
+/**
+ * El servicio de render externo (PATH A del PDF, WeasyPrint). Apagado por defecto; las
+ * pruebas del PDF lo encienden para cubrir los dos caminos: el que usa Trappvel
+ * (@react-pdf, plantilla propia) y el de las plantillas de otros workspaces.
+ */
+let servicioDeRender = false
 vi.mock('@/lib/pdf/pdf-render-client', () => ({
-  isPdfRenderConfigured: () => false,
-  renderViaService: async () => { throw new Error('no debería llamarse') },
+  isPdfRenderConfigured: () => servicioDeRender,
+  renderCotizacion: async () => {
+    const { PDFDocument, StandardFonts } = await import('pdf-lib')
+    const doc = await PDFDocument.create()
+    const fuente = await doc.embedFont(StandardFonts.Helvetica)
+    doc.addPage([595, 842]).drawText('Cotizacion del servicio externo', { x: 50, y: 780, size: 12, font: fuente })
+    doc.addPage([595, 842])
+    return Buffer.from(await doc.save())
+  },
 }))
 
 // ── El doble de la base ──────────────────────────────────────────────────────
@@ -184,6 +197,7 @@ function constructor(tabla: string) {
 }
 
 import { generateCotizacionPDF } from './cotizacion-pdf-actions'
+import { textoDelPDF } from '@/lib/pdf/texto-del-pdf'
 import { enviarCotizacion, updateCotizacion } from './cotizacion-actions'
 import { aceptarCotizacionNegocio, enviarCotizacionNegocio } from './[id]/cotizacion/actions'
 
@@ -237,12 +251,20 @@ function sembrar(opts: {
   /** La línea de negocio declara el piso de margen (Trappvel). `false` = otro workspace. */
   conRegla?: boolean
   estado?: string
+  /** `workspaces.cotizacion_template_slug`. Por defecto la genérica (`metrik`). */
+  plantilla?: string
+  /**
+   * La primera línea marcada como tarifa de la propuesta (un itinerario principal): con
+   * eso, un PDF que SÍ sale al cliente deja filas en `decisiones_combinacion`.
+   */
+  enPropuesta?: boolean
 }) {
   const conRegla = opts.conRegla !== false
   secuencia = 0
   subidas.length = 0
   lecturas = []
   fallaLectura = new Set()
+  servicioDeRender = false
   tablas = {
     cotizaciones: [{
       id: COT, workspace_id: WS, negocio_id: NEG, oportunidad_id: null,
@@ -268,14 +290,21 @@ function sembrar(opts: {
     // «Condiciones del viaje» (etapa 1). El doble no evalúa `data->adultos`: la fila ya
     // trae las columnas que la consulta proyecta.
     negocio_bloques: opts.viaje ? [{ negocio_id: NEG, ...opts.viaje }] : [],
-    cotizacion_itinerarios: [],
-    itinerario_opciones: [],
+    cotizacion_itinerarios: opts.enPropuesta
+      ? [{ id: 'it-1', cotizacion_id: COT, nombre: 'Recomendada', orden: 1, va_en_propuesta: true, es_principal: true }]
+      : [],
+    itinerario_opciones: opts.enPropuesta && opts.items[0]
+      ? [{ itinerario_id: 'it-1', item_id: opts.items[0].id }]
+      : [],
     cotizacion_excepciones_margen: [],
     activity_log: [],
     decisiones_combinacion: [],
     profiles: [{ id: 'p-ale', workspace_id: WS, role: 'operator', full_name: 'Alejandra Lancheros', platform_admin: false }],
-    staff: [{ id: 's-ale', full_name: 'Alejandra Lancheros' }],
-    workspaces: [{ id: WS, name: 'Trappvel', logo_url: null, color_primario: null, cotizacion_template_slug: 'metrik', config_extra: {} }],
+    staff: [{ id: 's-ale', full_name: 'Alejandra Lancheros', position: 'Asesora' }],
+    workspaces: [{
+      id: WS, name: 'Trappvel', logo_url: null, color_primario: null,
+      cotizacion_template_slug: opts.plantilla ?? 'metrik', config_extra: {},
+    }],
     empresas: [],
     fiscal_profiles: [],
   }
@@ -445,5 +474,128 @@ describe('5 · si no se pueden leer los pasajeros del viaje, no sale', () => {
       'No se pudieron leer los pasajeros del viaje para comprobar los pantallazos: vuelve a intentarlo.',
     )
     expect(estadoCot()).toBe('borrador')
+  })
+})
+
+// ── 6 · El PDF con pantallazos de otros pasajeros ────────────────────────────
+
+/**
+ * Decisión de Mauricio (2026-09-22): el PDF de una cotización con capturas o costo
+ * confirmado de otros pasajeros sale como BORRADOR. Se descarga (hace falta verlo), pero
+ * con marca de agua en cada página y sin guardarse ni registrarse como salida al cliente.
+ */
+type ResultadoPDF = {
+  success: boolean
+  pdf: string
+  filename: string
+  borrador?: boolean
+  aviso?: string | null
+  avisosCaptura?: string[]
+  renderedVia?: string
+}
+
+const pdfDe = async () => (await generateCotizacionPDF(COT)) as ResultadoPDF
+const textoDe = (r: ResultadoPDF) => textoDelPDF(Buffer.from(r.pdf, 'base64'))
+const MARCA_PANTALLAZOS = 'pantallazos por actualizar · no enviar'
+
+describe('6 · el PDF con pantallazos de otros pasajeros sale como BORRADOR', () => {
+  it('plantilla de Trappvel: marca de agua, sin guardar y sin registrar la salida', async () => {
+    sembrar({
+      items: [hotel('hotel cartagena', { casillas: { grupo_completo: lectura(DOS) } })],
+      viaje: TRES, plantilla: 'trappvel', enPropuesta: true,
+    })
+    const r = await pdfDe()
+    expect(r.success).toBe(true)
+    expect(r.borrador).toBe(true)
+    expect(r.filename).toMatch(/-BORRADOR\.pdf$/)
+    expect(r.aviso).toContain(PEGAR_HOTEL)
+    expect(r.avisosCaptura).toHaveLength(1)
+    const texto = textoDe(r)
+    expect(texto).toContain('BORRADOR')
+    expect(texto).toContain(MARCA_PANTALLAZOS)
+    expect(subidas).toEqual([])
+    expect(tablas.decisiones_combinacion).toEqual([])
+  })
+
+  it('solo falta reconfirmar el costo: también sale como borrador', async () => {
+    sembrar({
+      items: [hotel('hotel santa marta', { casillas: { grupo_completo: lectura(TRES) }, confirmada: confirmada(DOS) })],
+      viaje: TRES, plantilla: 'trappvel',
+    })
+    const r = await pdfDe()
+    expect(r.borrador).toBe(true)
+    expect(r.aviso).toContain('vuelve a confirmar el costo de: «HOTEL SANTA MARTA».')
+    expect(textoDe(r)).toContain(MARCA_PANTALLAZOS)
+    expect(subidas).toEqual([])
+  })
+
+  it('con el pantallazo de hoy vuelve a salir limpio, se guarda y se registra', async () => {
+    sembrar({
+      items: [hotel('hotel cartagena', { casillas: { grupo_completo: lectura(TRES) }, confirmada: confirmada(TRES) })],
+      viaje: TRES, plantilla: 'trappvel', enPropuesta: true,
+    })
+    const r = await pdfDe()
+    expect(r.success).toBe(true)
+    expect(r.borrador).toBeUndefined()
+    expect(r.filename).not.toMatch(/BORRADOR/)
+    expect(textoDe(r)).not.toContain('BORRADOR')
+    expect(subidas).toEqual([r.filename])
+    expect(tablas.decisiones_combinacion.length).toBeGreaterThan(0)
+  })
+
+  it('por el servicio de render externo (plantillas de otros workspaces), la misma regla', async () => {
+    sembrar({
+      items: [hotel('hotel cartagena', { casillas: { grupo_completo: lectura(DOS) } })],
+      viaje: TRES, plantilla: 'wmc',
+    })
+    servicioDeRender = true
+    const r = await pdfDe()
+    expect(r.renderedVia).toBe('weasyprint')
+    expect(r.borrador).toBe(true)
+    expect(textoDe(r)).toContain(MARCA_PANTALLAZOS)
+    expect(subidas).toEqual([])
+  })
+
+  it('por el servicio externo, con el pantallazo de hoy: limpio y guardado', async () => {
+    sembrar({
+      items: [hotel('hotel cartagena', { casillas: { grupo_completo: lectura(TRES) } })],
+      viaje: TRES, plantilla: 'wmc',
+    })
+    servicioDeRender = true
+    const r = await pdfDe()
+    expect(r.renderedVia).toBe('weasyprint')
+    expect(r.borrador).toBeUndefined()
+    expect(subidas).toEqual([r.filename])
+  })
+
+  it('si no se pueden leer los pasajeros del viaje, borrador: el lado seguro', async () => {
+    sembrar({
+      items: [hotel('hotel cartagena', { casillas: { grupo_completo: lectura(TRES) } })],
+      viaje: TRES, plantilla: 'trappvel',
+    })
+    fallaLectura.add('negocio_bloques')
+    const r = await pdfDe()
+    expect(r.borrador).toBe(true)
+    expect(r.aviso).toContain('No se pudieron leer los pasajeros del viaje para comprobar los pantallazos')
+    expect(subidas).toEqual([])
+  })
+})
+
+describe('6b · R6 · el PDF sin tarifa por pasajero, igual que antes', () => {
+  it('otro workspace (genérica, sin piso): limpio, guardado y sin leer los pasajeros', async () => {
+    sembrar({ items: [linea('paquete'), linea('seguro')], conRegla: false })
+    const r = await pdfDe()
+    expect(r.success).toBe(true)
+    expect(r.borrador).toBeUndefined()
+    expect(textoDe(r)).not.toContain('BORRADOR')
+    expect(subidas).toEqual([r.filename])
+    expect(leyoPasajeros()).toBe(false)
+  })
+
+  it('Trappvel con un hotel todavía sin pantallazo: limpio', async () => {
+    sembrar({ items: [hotel('hotel cartagena', null)], viaje: TRES, plantilla: 'trappvel' })
+    const r = await pdfDe()
+    expect(r.borrador).toBeUndefined()
+    expect(subidas).toEqual([r.filename])
   })
 })

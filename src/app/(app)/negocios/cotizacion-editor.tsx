@@ -420,8 +420,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         URL.revokeObjectURL(url)
         const aviso = (res as { aviso?: string | null }).aviso
         if ((res as { borrador?: boolean }).borrador) {
-          // Bajo el margen mínimo y sin autorización: el PDF lleva marca de agua y no
-          // se guardó. Se dice en ámbar y se queda en pantalla, no como un «listo».
+          // Bajo el margen mínimo sin autorización, o con pantallazos de otros pasajeros:
+          // el PDF lleva marca de agua y no se guardó. Se dice en ámbar y se queda en
+          // pantalla, no como un «listo».
           toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
         } else {
           toast.success('PDF descargado')
@@ -435,8 +436,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         for (const a of (res as { avisosCobertura?: string[] }).avisosCobertura ?? []) {
           toast.warning(a, { duration: Infinity, closeButton: true })
         }
-        // Brief del 2026-09-22 · líneas con el pantallazo de otros pasajeros. Mismo criterio:
-        // el documento salió, y quien lo descargó tiene que saber que su precio no es el de hoy.
+        // Brief del 2026-09-22 · líneas con el pantallazo de otros pasajeros. El PDF salió
+        // como borrador (marca de agua, sin guardar); cada línea dice qué la dejó vieja.
         for (const a of (res as { avisosCaptura?: string[] }).avisosCaptura ?? []) {
           toast.error(`Pantallazo desactualizado en ${a}`, { duration: Infinity, closeButton: true })
         }
@@ -751,7 +752,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
    * Y mientras haya alguna, «Enviar» se deshabilita con `motivoEnvio` (decisión de Mauricio
    * del 2026-09-22). Es el MISMO texto con que el servidor rechaza el envío
    * (`captura-desactualizada-datos.ts`): el botón es solo la puerta visible, el control es
-   * del servidor. El PDF no se frena.
+   * del servidor. El PDF se descarga, pero sale como borrador con marca de agua.
    */
   const desactualizadas = lineasDesactualizadas(
     initialItems.map(i => ({
@@ -956,7 +957,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </ul>
           <p id="aviso-captura-desactualizada" className="mt-1.5 pl-5">
             {editable
-              ? `${motivoEnvio} Hasta entonces no se puede enviar ni aprobar; el PDF sí se descarga.`
+              ? `${motivoEnvio} Hasta entonces no se puede enviar ni aprobar, y el PDF sale como borrador, con marca de agua.`
               : 'Esta cotización ya no se edita: duplícala para cotizar con los pasajeros de hoy.'}
           </p>
         </div>

@@ -20,8 +20,10 @@
  * deshabilita con el MISMO texto, `motivoParaNoEnviar`: pantalla y servidor salen de estas
  * dos funciones y no se pueden separar.
  *
- * El PDF NO se frena: descargarlo en borrador sigue saliendo con el aviso. Y una cotización
- * que ya salió (`enviada`) se sigue pudiendo aprobar: registra lo que el cliente aceptó.
+ * El PDF se descarga, pero como BORRADOR: marca de agua «pantallazos por actualizar» en
+ * cada página, sin guardarse ni registrarse como salida al cliente (`cotizacion-pdf-actions`
+ * usa estas mismas funciones). Y una cotización que ya salió (`enviada`) se sigue pudiendo
+ * aprobar: registra lo que el cliente aceptó.
  *
  * Puro: sin red, sin base.
  */
