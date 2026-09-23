@@ -6,7 +6,12 @@ import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { comprarLicencia, cotizarLicencia, liberarLicencia } from '@/lib/seccion-suscripcion/licencias-servidor'
 import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
-import { descartarSugerencia, pedirContactoSustenta } from '@/lib/seccion-suscripcion/sustenta-servidor'
+import { eventoDelNavegador, origenCta } from '@/lib/seccion-suscripcion/sugerencias'
+import {
+  descartarSugerencia,
+  pedirContactoSustenta,
+  registrarEventoSugerencia,
+} from '@/lib/seccion-suscripcion/sustenta-servidor'
 import {
   MENSAJE_INVITACION,
   esRolAsignable,
@@ -199,23 +204,50 @@ export async function reenviarInvitacionEspacio(p: { usuarioId: string }): Promi
 export async function descartarSustenta(): Promise<Resultado> {
   const r = await ctxOk()
   if (!r.ok) return r
-  const res = await descartarSugerencia({ usuarioId: r.ctx.usuarioId, ahora: new Date() })
+  const [res] = await Promise.all([
+    descartarSugerencia({ usuarioId: r.ctx.usuarioId, ahora: new Date() }),
+    registrarEventoSugerencia({ workspaceId: r.ctx.workspaceId, usuarioId: r.ctx.usuarioId, evento: 'descarte' }),
+  ])
   if (res.ok) revalidatePath('/suscripcion')
   return res
 }
 
-export async function pedirContactoDeSustenta(): Promise<Resultado<{ yaExistia: boolean }>> {
+/**
+ * «Quiero una demostración», desde la tarjeta o desde el pie del panel. Idempotente por espacio: el
+ * segundo clic (o el de otra persona del mismo CDA) no crea otro lead y responde `yaExistia`. El clic
+ * se mide siempre; el lead, una vez.
+ */
+export async function pedirContactoDeSustenta(
+  p: { origen?: string } = {},
+): Promise<Resultado<{ yaExistia: boolean; nombre: string | null }>> {
   const r = await ctxOk()
   if (!r.ok) return r
-  const res = await pedirContactoSustenta({
-    workspaceId: r.ctx.workspaceId,
-    usuarioId: r.ctx.usuarioId,
-    role: r.ctx.role,
-    empresaIdEnMetrik: r.ctx.contrato.empresaId,
-    cobradorId: r.ctx.contrato.cobradorId,
-    empresaNombre: r.ctx.contrato.empresaNombre,
-  })
+  const [res] = await Promise.all([
+    pedirContactoSustenta({
+      workspaceId: r.ctx.workspaceId,
+      usuarioId: r.ctx.usuarioId,
+      role: r.ctx.role,
+      empresaIdEnMetrik: r.ctx.contrato.empresaId,
+      cobradorId: r.ctx.contrato.cobradorId,
+      empresaNombre: r.ctx.contrato.empresaNombre,
+    }),
+    registrarEventoSugerencia({
+      workspaceId: r.ctx.workspaceId,
+      usuarioId: r.ctx.usuarioId,
+      evento: 'cta',
+      origen: origenCta(p?.origen),
+    }),
+  ])
   if (!res.ok) return res
   revalidatePath('/suscripcion')
-  return { ok: true, yaExistia: res.yaExistia }
+  return { ok: true, yaExistia: res.yaExistia, nombre: res.nombre }
+}
+
+/** Vista de la tarjeta y apertura del panel. Nunca falla hacia la pantalla. */
+export async function registrarEventoSustenta(evento: string): Promise<void> {
+  const e = eventoDelNavegador(evento)
+  if (!e) return
+  const r = await ctxOk()
+  if (!r.ok) return
+  await registrarEventoSugerencia({ workspaceId: r.ctx.workspaceId, usuarioId: r.ctx.usuarioId, evento: e })
 }

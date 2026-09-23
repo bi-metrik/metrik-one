@@ -7,19 +7,25 @@ import {
   asuntoAvisoLead,
   descartadaHasta,
   mostrarSugerencia,
+  primerNombre,
   textoAvisoLead,
+  type EventoSugerencia,
+  type OrigenCta,
 } from './sugerencias'
 
 /**
- * El bloque de Sustenta del lado del servidor: si se muestra, «Ahora no» y «Quiero que me contacten».
+ * La tarjeta de Sustenta del lado del servidor: si se muestra, «Ahora no», «Quiero una demostración»
+ * y la medición de sus eventos.
  *
  * - El descarte vive en `sugerencias_descartadas` (por persona, no en localStorage): cambia de equipo
  *   y la tarjeta sigue oculta los 30 días.
  * - El interés vive en `interes_servicios`, único por (espacio, servicio): esa restricción es la que
- *   hace idempotente el lead. Dos clics, dos pestañas o dos personas del mismo CDA crean UN contacto.
+ *   hace idempotente el lead de la demostración. Dos clics, dos pestañas o dos personas del mismo CDA crean UN contacto.
  * - El lead va al espacio de metrik (directorio comercial de MeTRIK) y el aviso a Mauricio por correo.
  *
- * Todo por cliente de servicio: las dos tablas son server-only.
+ * - Los eventos (vista, panel, cta, descarte) van a `sugerencias_eventos`, una fila por evento.
+ *
+ * Todo por cliente de servicio: las tres tablas son server-only.
  */
 
 /** El espacio de MeTRIK: donde vive el directorio comercial al que llega el lead. */
@@ -83,11 +89,11 @@ export async function descartarSugerencia(p: { usuarioId: string; ahora: Date })
 }
 
 export type ResultadoContacto =
-  | { ok: true; yaExistia: boolean; avisoEnviado: boolean }
+  | { ok: true; yaExistia: boolean; avisoEnviado: boolean; nombre: string | null }
   | { ok: false; error: string }
 
 /**
- * «Quiero que me contacten». Reclama el único por (espacio, servicio); si ya estaba, no crea nada
+ * «Quiero una demostración». Reclama el único por (espacio, servicio); si ya estaba, no crea nada
  * más y responde como éxito (la persona ya quedó en lista). Si crear el contacto falla, suelta el
  * reclamo para que se pueda reintentar. El correo a Mauricio no deshace el lead si falla: el lead ya
  * está en el directorio y es lo que importa.
@@ -120,7 +126,7 @@ export async function pedirContactoSustenta(p: {
     .maybeSingle()
   if (reclamo.error) {
     // 23505: ya había un «quiero que me contacten» de este espacio. Idempotente.
-    if (reclamo.error.code === '23505') return { ok: true, yaExistia: true, avisoEnviado: false }
+    if (reclamo.error.code === '23505') return { ok: true, yaExistia: true, avisoEnviado: false, nombre: null }
     console.error('[sustenta] reclamo:', reclamo.error.message)
     return { ok: false, error: 'No se pudo registrar tu solicitud. Intenta de nuevo.' }
   }
@@ -144,7 +150,7 @@ export async function pedirContactoSustenta(p: {
       email: correo,
       segmento: 'primer_contacto',
       fuente_adquisicion: 'contacto_directo',
-      fuente_detalle: 'Sección Suscripción de ONE: pidió conocer Sustenta',
+      fuente_detalle: 'Sección Suscripción de ONE: pidió una demostración de Sustenta',
       custom_data: {
         origen_interes: {
           servicio: CLAVE_SUSTENTA,
@@ -176,7 +182,33 @@ export async function pedirContactoSustenta(p: {
     rol: etiquetaRol(p.role),
   })
   if (!aviso.ok) console.error('[sustenta] aviso:', aviso.error)
-  return { ok: true, yaExistia: false, avisoEnviado: aviso.ok }
+  return { ok: true, yaExistia: false, avisoEnviado: aviso.ok, nombre: primerNombre(perfilR.data?.full_name as string | undefined) }
+}
+
+/**
+ * Una fila de medición. Nunca falla hacia afuera: si no se puede escribir, se registra en el log y
+ * la pantalla sigue. El espacio y la persona los pone quien llama, desde la sesión.
+ */
+export async function registrarEventoSugerencia(p: {
+  workspaceId: string
+  usuarioId: string
+  evento: EventoSugerencia
+  origen?: OrigenCta
+}): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const svc = createServiceClient() as any
+    const { error } = await svc.from('sugerencias_eventos').insert({
+      workspace_id: p.workspaceId,
+      profile_id: p.usuarioId,
+      clave: CLAVE_SUSTENTA,
+      evento: p.evento,
+      origen: p.evento === 'cta' ? (p.origen ?? 'tarjeta') : null,
+    })
+    if (error) console.error('[sustenta] evento:', error.message)
+  } catch (e) {
+    console.error('[sustenta] evento:', (e as Error).message)
+  }
 }
 
 async function avisarLead(d: {

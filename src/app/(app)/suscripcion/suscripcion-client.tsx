@@ -1,11 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { createPortal } from 'react-dom'
-import { useRouter } from 'next/navigation'
-import { toast } from 'sonner'
-import { CreditCard, FileText, LayoutDashboard, Users, X } from 'lucide-react'
-import { descartarSustenta, pedirContactoDeSustenta } from './acciones'
+import { useState } from 'react'
+import { CreditCard, FileText, LayoutDashboard, Users } from 'lucide-react'
+import { SeccionSustenta, type EstadoSustenta } from './sustenta'
 import { UsuariosPanel, type DatosUsuarios } from './usuarios-panel'
 
 export type PestanaSuscripcion = 'resumen' | 'pagos' | 'usuarios' | 'terminos'
@@ -16,8 +13,8 @@ interface Props {
   principal: React.ReactNode
   licencias: { usados: number; total: number } | null
   terminosResumen: string | null
-  mostrarSustenta: boolean
-  sustentaSolicitada: boolean
+  /** `oferta`: la tarjeta; `solicitada`: la confirmación que se queda; `null`: nada («Ahora no» vigente). */
+  sustenta: EstadoSustenta | null
   pagos: React.ReactNode
   terminos: React.ReactNode
   usuarios: DatosUsuarios
@@ -104,7 +101,7 @@ export default function SuscripcionClient(p: Props) {
             </section>
           )}
 
-          {p.mostrarSustenta && !p.sustentaSolicitada && <BloqueSustenta />}
+          {p.sustenta && <SeccionSustenta inicial={p.sustenta} />}
         </div>
       )}
 
@@ -116,120 +113,5 @@ export default function SuscripcionClient(p: Props) {
       )}
       {tab === 'terminos' && <div data-pestana="terminos">{p.terminos}</div>}
     </div>
-  )
-}
-
-/**
- * Sustenta, al pie del Resumen: neutro, descartable y sin precio. «Conocer Sustenta» abre un panel
- * con un solo botón; nada se abre solo.
- */
-export function BloqueSustenta() {
-  const router = useRouter()
-  const [abierto, setAbierto] = useState(false)
-  const [oculto, setOculto] = useState(false)
-  const [solicitado, setSolicitado] = useState(false)
-  const [pendiente, iniciar] = useTransition()
-
-  if (oculto) return null
-
-  function ahoraNo() {
-    iniciar(async () => {
-      const r = await descartarSustenta()
-      if (!r.ok) {
-        toast.error(r.error)
-        return
-      }
-      setOculto(true)
-      router.refresh()
-    })
-  }
-
-  function quieroQueMeContacten() {
-    iniciar(async () => {
-      const r = await pedirContactoDeSustenta()
-      if (!r.ok) {
-        toast.error(r.error)
-        return
-      }
-      setSolicitado(true)
-    })
-  }
-
-  return (
-    <>
-      <section data-bloque-sustenta className="rounded-lg border border-border bg-papel p-4 sm:p-5">
-        <p className="text-sm font-semibold text-tinta">Más allá de las listas</p>
-        <p className="mt-1 text-sm text-tinta">
-          Valida te dice si una persona aparece en una lista. Sustenta organiza todo el sistema de cumplimiento de tu
-          CDA: matriz de riesgos, segmentación, vinculación de contrapartes y soportes listos para la auditoría.
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setAbierto(true)}
-            className="rounded-md border border-border bg-white px-4 py-2 text-sm font-semibold text-tinta"
-          >
-            Conocer Sustenta
-          </button>
-          <button type="button" onClick={ahoraNo} disabled={pendiente} className="text-sm text-tinta-suave">
-            Ahora no
-          </button>
-        </div>
-      </section>
-
-      {abierto &&
-        createPortal(
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setAbierto(false)}>
-          <aside
-            role="dialog"
-            aria-label="Sustenta"
-            data-panel-sustenta
-            onClick={(e) => e.stopPropagation()}
-            className="flex h-full w-full max-w-md flex-col overflow-y-auto bg-white p-5 shadow-xl"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h2 className="text-lg font-semibold text-tinta">Sustenta</h2>
-              <button type="button" aria-label="Cerrar" onClick={() => setAbierto(false)} className="text-tinta-suave">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="mt-2 text-sm text-tinta">
-              El sistema de cumplimiento de tu CDA en un solo lugar, sobre la misma plataforma donde ya usas Valida.
-            </p>
-            <ul className="mt-4 space-y-3 text-sm text-tinta">
-              <li className="rounded-md border border-border p-3">
-                <span className="font-semibold">Matriz de riesgos.</span> Riesgos, causas y controles con su
-                calificación, al día.
-              </li>
-              <li className="rounded-md border border-border p-3">
-                <span className="font-semibold">Segmentación y contrapartes.</span> La vinculación de cada
-                contraparte con sus soportes.
-              </li>
-              <li className="rounded-md border border-border p-3">
-                <span className="font-semibold">Listo para la auditoría.</span> Los soportes ordenados cuando los
-                pidan.
-              </li>
-            </ul>
-            <div className="mt-6">
-              {solicitado ? (
-                <p className="rounded-md bg-papel p-3 text-sm text-tinta" data-sustenta-solicitado>
-                  Listo. Alguien de MeTRIK te va a contactar.
-                </p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={quieroQueMeContacten}
-                  disabled={pendiente}
-                  className="w-full rounded-md bg-acento px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-                >
-                  Quiero que me contacten
-                </button>
-              )}
-            </div>
-          </aside>
-        </div>,
-          document.body,
-        )}
-    </>
   )
 }
