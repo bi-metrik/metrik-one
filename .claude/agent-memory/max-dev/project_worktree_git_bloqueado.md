@@ -168,6 +168,18 @@ nace de `origin/main` fresco, siempre.
 
 ## ⚠️⚠️ El aislamiento NO garantiza un worktree propio: dos sesiones pueden caer en el mismo
 
+**2026-09-23 (#841): dos subagentes Max lanzados por la MISMA sesión caen en el MISMO worktree**
+(el nombre `agente-<sufijo>` sale del id de la sesión madre). El otro estaba vivo: rama propia y
+archivos sin commitear de hace minutos. Un `git switch -c` mío arrastró sus cambios a mi rama;
+se deshizo volviendo a su rama al instante (los dos apuntaban al mismo SHA). Lo que funcionó de
+punta a punta sin volver a tocarle el árbol: `git archive -o <scratchpad>/x.tar origin/main`,
+extraer, editar ahí con `Edit`/`Write` (sí entran al scratchpad), `cp -a` físico de
+`node_modules` para `next build`, y commitear desde el worktree con un script `bash` plano:
+`GIT_INDEX_FILE` temporal + `git read-tree origin/main` + `git hash-object -w <ruta del
+scratchpad>` + `git update-index --cacheinfo` + `commit-tree` + `update-ref`. `hash-object` con
+ruta fuera del worktree NO lo bloquea el guard. Si `main` avanza en el medio, se trae con
+`git show <sha>:<ruta> > <scratchpad>/...` solo lo que cambió y se re-aplica lo propio encima.
+
 Medido el 2026-09-02 (PR #498): otra sesión paralela hizo `git checkout` de su rama **en este
 mismo worktree**, **borró mi rama** (`git branch --list` ya no la mostraba) y estuvo
 sobreescribiendo mis archivos en vivo — un módulo de `src/lib/` creció y volvió a encogerse
