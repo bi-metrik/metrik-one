@@ -60,6 +60,7 @@
 - ⚠️⚠️ [Términos y estilo del texto (#841)](project_texto_cliente_terminos_trappvel.md) — #848: nacen copiados al crear; `ejemplos_texto` ausente ≠ `[]`
 - ⚠️ [Fotos, franja y tabla de vuelos del documento Trappvel (#832, #838)](project_documento_trappvel_fotos_ritmo.md) — foto al lado aprobada; tabla corta va entera
 - ⚠️⚠️ [La Recomendada manda y el cliente escoge (#836)](project_recomendada_tarifa_elegida.md) — `es_principal` ya no decide; el gate de margen no mira la Recomendada
+- ⚠️ [Cotización con el negocio adentro (Trappvel)](project_cotizacion_con_negocio_trappvel.md) — #872 mergeado; layout espera OK; presupuesto vive en el perfil
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`
 - ⚠️⚠️ [Captura de cotización, Parte B (#847)](project_captura_cotizacion_parte_b.md) — SIN mergear: migración de ranuras ANTES del merge
 - ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
