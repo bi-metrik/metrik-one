@@ -9,6 +9,7 @@ import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
 import { registrarMapeoAutomaticoWA } from '../../centro-costos.ts';
 import { BOTONES_SOPORTE, MSG_SOPORTE } from './soporte-foto.ts';
+import { descripcionParaGuardar, descripcionVisible, detalleGasto } from '../../wa-gasto-descripcion.ts';
 
 export async function executeRegistro(ctx: HandlerContext): Promise<void> {
   const { session, supabase } = ctx;
@@ -31,18 +32,13 @@ export async function executeRegistro(ctx: HandlerContext): Promise<void> {
   }
 }
 
-/** Build a clean title for a gasto: use NLP concept if short, else "[Categoria] — [Monto]" */
-function buildGastoTitle(concept: string | undefined, categoria: string, amount: number): string {
-  const categoriaLabel = CATEGORIA_LABELS[categoria] || categoria;
-  if (concept && concept.length <= 40) return concept;
-  const montoStr = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
-  return `${categoriaLabel} — ${montoStr}`;
-}
-
 async function executeW01(ctx: HandlerContext): Promise<boolean> {
   const { supabase, user, session } = ctx;
   const c = session.context;
-  const titulo = buildGastoTitle(c.parsed_fields?.concept, c.categoria || 'otros', c.amount!);
+  // La descripcion completa, sin tope de longitud (la columna es `text`).
+  // "Categoria — $monto" solo cuando el mensaje no traia ningun detalle.
+  const titulo = descripcionParaGuardar(c.parsed_fields, c.categoria || 'otros', c.amount!);
+  const detalle = detalleGasto(c.parsed_fields);
   const tipo = c.destino_tipo === 'empresa' ? 'empresa' : 'directo';
 
   const insertData: Record<string, unknown> = {
@@ -103,6 +99,7 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
     msg = `✅ ${formatCOP(c.amount!)} registrado en ${bold(c.proyecto_nombre || 'negocio')}.`;
   }
 
+  if (detalle) msg += `\n📝 ${descripcionVisible(detalle)}`;
   await ctx.sendMessage(msg);
   // Copy imperativo, no una pregunta de si/no: "¿Tienes soporte fotográfico?" con un solo
   // boton dejaba sin donde tocar a quien contestaba "Si". Los dos botones son las dos

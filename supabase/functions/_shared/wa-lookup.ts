@@ -280,7 +280,13 @@ export function matchCategory(hint: string): string | null {
     if (cat === 'otros') continue;
     for (const kw of keywords) {
       const normalizedKw = kw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      if (lower.includes(normalizedKw)) return cat;
+      // Las palabras de 3 letras o menos ('gas', 'bus', 'app', 'luz') se exigen
+      // enteras: por subcadena, 'gas' casaba con "GASTOS de mano de obra" y lo
+      // mandaba a arriendo (gasto real del 2026-07-06).
+      const casa = normalizedKw.length <= 3
+        ? new RegExp(`(^|[^a-z0-9])${normalizedKw}([^a-z0-9]|$)`).test(lower)
+        : lower.includes(normalizedKw);
+      if (casa) return cat;
     }
   }
   return null;
