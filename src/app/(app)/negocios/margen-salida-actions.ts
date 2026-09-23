@@ -46,6 +46,11 @@ export interface SalidaVista {
   lineasSinCosto?: number
   /** Lo que frena, con su margen real (`null` = no se puede medir). */
   bajoMinimo?: { nombre: string | null; margenPct: number | null }[]
+  /**
+   * Una línea sin costo entra al total que sale: el motivo para no enviar
+   * («Falta el costo de Vuelo a Providencia · Opción 1: …»). `null`/ausente = no aplica.
+   */
+  faltaCosto?: string | null
 }
 
 const SIN_REGLA: SalidaVista = {
@@ -108,6 +113,7 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
     lineas: salida.medicion?.conteo.lineas,
     lineasSinCosto: salida.medicion?.conteo.sinCosto,
     bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({ nombre: s.nombre, margenPct: s.margenRealPct })),
+    faltaCosto: salida.faltaCosto,
   }
 }
 

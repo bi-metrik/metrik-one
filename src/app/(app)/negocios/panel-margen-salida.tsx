@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Info, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Info, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { autorizarBajoElMinimo, type SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
@@ -57,6 +57,21 @@ export default function PanelMargenSalida({
   if (!salida || !salida.aplica) return null
   const nota = notaDeMargen(salida)
   if (nota.tipo === 'sin_lineas' || nota.tipo === 'nada') return null
+
+  if (nota.tipo === 'incompleta') {
+    return (
+      <div
+        role="alert"
+        data-nota="incompleta"
+        className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <p>
+          {nota.texto} No se puede enviar; el PDF sale como borrador incompleto.
+        </p>
+      </div>
+    )
+  }
 
   if (nota.tipo === 'faltan_costos') {
     return (

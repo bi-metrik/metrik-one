@@ -94,6 +94,11 @@ export interface ConteoDeLineas {
    * precio escrito y sin costo (el recargo fijo) NO cuenta: entra así a propósito.
    */
   sinCosto: number
+  /**
+   * Esas mismas líneas, con su nombre y su ranura: entran al total que sale y su precio es
+   * cero, así que el cliente recibiría un precio sin ese servicio (`falta-costo.ts`).
+   */
+  faltantes: { id: string; nombre: string | null; grupo: string | null }[]
 }
 
 export interface MedicionDeSalida {
@@ -197,7 +202,14 @@ function conteoDeLineas(
       vistas.set(l.id, (vistas.get(l.id) ?? false) || sinCosto)
     }
   }
-  return { lineas: vistas.size, sinCosto: [...vistas.values()].filter(Boolean).length }
+  const porId = new Map(ctx.items.map(i => [i.id, i]))
+  const faltantes = [...vistas.entries()]
+    .filter(([, sinCosto]) => sinCosto)
+    .map(([id]) => {
+      const item = porId.get(id)
+      return { id, nombre: item?.nombre ?? null, grupo: (item?.grupo ?? null) as string | null }
+    })
+  return { lineas: vistas.size, sinCosto: faltantes.length, faltantes }
 }
 
 /**

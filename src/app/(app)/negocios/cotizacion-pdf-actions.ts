@@ -592,6 +592,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const motivosBorrador = motivosDeBorrador({
     pantallazos: motivoPantallazos !== null,
     sinRecomendada: sinRecomendada !== null,
+    faltaCosto: salida?.aplica === true && salida.faltaCosto !== null,
     margen: salidaBloquea,
     ivaSinCalcular,
     ivaIncluidoSinPlantilla,
@@ -601,6 +602,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     ? avisoDeBorrador(motivosBorrador, {
         pantallazos: motivoPantallazos,
         recomendada: sinRecomendada,
+        incompleto: salida?.aplica === true ? salida.faltaCosto : null,
         margen: salidaBloquea ? salida!.mensaje : null,
         iva_sin_calcular: ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
         iva_incluido_sin_plantilla: ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
