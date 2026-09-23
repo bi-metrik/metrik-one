@@ -9,6 +9,7 @@ import {
   faltaLaTablaDeAdicionales,
   normalizarAdicional,
   type EntradaAdicional,
+  type MargenDeCotizacion,
 } from '@/lib/cotizaciones/adicionales'
 
 /**
@@ -92,6 +93,34 @@ async function recalcularYRevalidar(cotizacionId: string, negocioId: string | nu
   return desmarcados
 }
 
+/**
+ * El margen global de la cotización: de él sale el precio de un adicional sin precio a
+ * mano (P4). El mismo respaldo que la cascada: el de la cotización, y si no tiene, el de su
+ * línea. `null` si no se puede leer — ahí se pide escribir el precio.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function margenDe(supabase: any, cotizacionId: string): Promise<MargenDeCotizacion | null> {
+  const { data } = await supabase
+    .from('cotizaciones')
+    .select('margen_porcentaje, margen_default_pct, convencion_margen')
+    .eq('id', cotizacionId)
+    .maybeSingle()
+  if (!data) return null
+  const margen = data.margen_porcentaje ?? data.margen_default_pct ?? null
+  return { margenPct: margen === null ? null : Number(margen), convencion: data.convencion_margen ?? null }
+}
+
+/**
+ * ¿La base todavía no tiene `item_adicionales.precio_manual`? Entonces se escribe sin ella:
+ * el precio derivado queda guardado como número (se pierde que se recalcula con el margen,
+ * no el precio). Un 204 de otra columna no se toma por este.
+ */
+function faltaPrecioManual(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  if (!error) return false
+  return (error.message ?? '').includes('precio_manual')
+    && ['PGRST204', '42703'].includes(error.code ?? '')
+}
+
 /** El negocio de una cotización, para revalidar su ruta. `null` si no cuelga de uno. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function negocioDe(supabase: any, cotizacionId: string): Promise<string | null> {
@@ -116,8 +145,8 @@ export async function agregarAdicional(itemId: string, entrada: EntradaAdicional
   const item = await resolverItem(supabase, itemId)
   if (!item.ok) return { success: false, error: item.error }
 
-  const limpio = normalizarAdicional(entrada)
-  if (!limpio.ok) return { success: false, error: limpio.motivo }
+  const limpio = normalizarAdicional(entrada, await margenDe(supabase, item.cotizacionId))
+  if (!limpio.ok) return { success: false, error: limpio.motivo, requiereConfirmacion: limpio.requiereConfirmacion === true }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: ultimo } = await (supabase as any)
@@ -128,24 +157,23 @@ export async function agregarAdicional(itemId: string, entrada: EntradaAdicional
     .limit(1)
   const orden = ((ultimo?.[0]?.orden as number | undefined) ?? 0) + 1
 
+  const fila = {
+    item_id: itemId,
+    codigo: limpio.valor.codigo,
+    nombre: limpio.valor.nombre,
+    cantidad: limpio.valor.cantidad,
+    costo: limpio.valor.costo,
+    precio: limpio.valor.precio,
+    moneda: limpio.valor.moneda,
+    tasa_cop: limpio.valor.tasaCop,
+    // Ver la nota de la cabecera: NO llega por parámetro.
+    origen: 'manual',
+    orden,
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: creado, error: errIns } = await (supabase as any)
-    .from('item_adicionales')
-    .insert({
-      item_id: itemId,
-      codigo: limpio.valor.codigo,
-      nombre: limpio.valor.nombre,
-      cantidad: limpio.valor.cantidad,
-      costo: limpio.valor.costo,
-      precio: limpio.valor.precio,
-      moneda: limpio.valor.moneda,
-      tasa_cop: limpio.valor.tasaCop,
-      // Ver la nota de la cabecera: NO llega por parámetro.
-      origen: 'manual',
-      orden,
-    })
-    .select('id')
-    .single()
+  const insertar = (f: Record<string, unknown>) => (supabase as any).from('item_adicionales').insert(f).select('id').single()
+  let { data: creado, error: errIns } = await insertar({ ...fila, precio_manual: limpio.valor.precioManual })
+  if (faltaPrecioManual(errIns)) ({ data: creado, error: errIns } = await insertar(fila))
   if (errIns) return { success: false, error: mensajeDeTablaAusente(errIns) ?? errIns.message }
 
   const desmarcados = await recalcularYRevalidar(item.cotizacionId, await negocioDe(supabase, item.cotizacionId))
@@ -175,22 +203,22 @@ export async function actualizarAdicional(adicionalId: string, entrada: EntradaA
   const item = await resolverItem(supabase, actual.item_id as string)
   if (!item.ok) return { success: false, error: item.error }
 
-  const limpio = normalizarAdicional(entrada)
-  if (!limpio.ok) return { success: false, error: limpio.motivo }
+  const limpio = normalizarAdicional(entrada, await margenDe(supabase, item.cotizacionId))
+  if (!limpio.ok) return { success: false, error: limpio.motivo, requiereConfirmacion: limpio.requiereConfirmacion === true }
 
+  const cambios = {
+    codigo: limpio.valor.codigo,
+    nombre: limpio.valor.nombre,
+    cantidad: limpio.valor.cantidad,
+    costo: limpio.valor.costo,
+    precio: limpio.valor.precio,
+    moneda: limpio.valor.moneda,
+    tasa_cop: limpio.valor.tasaCop,
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: errUpd } = await (supabase as any)
-    .from('item_adicionales')
-    .update({
-      codigo: limpio.valor.codigo,
-      nombre: limpio.valor.nombre,
-      cantidad: limpio.valor.cantidad,
-      costo: limpio.valor.costo,
-      precio: limpio.valor.precio,
-      moneda: limpio.valor.moneda,
-      tasa_cop: limpio.valor.tasaCop,
-    })
-    .eq('id', adicionalId)
+  const actualizar = (f: Record<string, unknown>) => (supabase as any).from('item_adicionales').update(f).eq('id', adicionalId)
+  let { error: errUpd } = await actualizar({ ...cambios, precio_manual: limpio.valor.precioManual })
+  if (faltaPrecioManual(errUpd)) ({ error: errUpd } = await actualizar(cambios))
   if (errUpd) return { success: false, error: mensajeDeTablaAusente(errUpd) ?? errUpd.message }
 
   const desmarcados = await recalcularYRevalidar(item.cotizacionId, await negocioDe(supabase, item.cotizacionId))

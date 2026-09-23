@@ -1560,6 +1560,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       filas={adicionales.porItem[item.id] ?? []}
                       disponible={adicionales.disponible}
                       editable={editable}
+                      margen={{ margenPct: margenCotizacion, convencion: convencionMargen }}
                     />
                   )}
                   {/* Item sale fields */}
