@@ -1,12 +1,20 @@
 /**
  * Quién ve la sección Suscripción y en qué estado está. Puro: todo entra por parámetro.
  *
- * ## Quién la ve (diseño de Noor, 2026-09-23)
+ * ## Quién la ve (pedido de Mauricio, 2026-09-23)
  *
- * El dueño, los administradores y la persona designada del contrato. Para cualquier otro rol la
- * ruta no existe (404, no «sin permiso») y el menú no la muestra: el operador nunca ve plata,
- * términos ni licencias. El rol es el EFECTIVO (con «Ver como» un dueño que mira como operador
- * tampoco la ve); la persona designada se compara con la persona REAL de la sesión.
+ * SOLO la persona designada del contrato (`aceptante_designado_id`): la que acepta los Términos es la
+ * que maneja la plata y las licencias. El dueño, los administradores, los supervisores y los
+ * operadores que no sean la persona designada no la ven: la ruta no existe (404, no «sin permiso») y
+ * el menú no la muestra. Un contrato sin persona designada: nadie del espacio la ve.
+ *
+ * La persona que se compara es la EFECTIVA: con «Ver como», un platform admin ve exactamente lo que
+ * vería la persona que está mirando (si mira como la designada, la ve; como un operador, no). Esa
+ * vista es de SOLO LECTURA (`puedeOperarSuscripcion`): ni acepta términos, ni compra licencias, ni
+ * toca usuarios, ni pide la demostración de Sustenta a nombre del cliente.
+ *
+ * Es la regla ÚNICA: la usan el menú, `/suscripcion`, la franja y los avisos de `/valida`, las
+ * pestañas y archivos de pagos (`puedeVerPagosCda`) y cada acción de `/suscripcion`.
  *
  * ## Los cinco estados
  *
@@ -25,15 +33,27 @@
 import type { ProximoPago } from '@/lib/valida-cda/pago-pendiente'
 import { fechaDiaMes, sumarDias, type EstadoMora } from '@/lib/valida-cda/plazos'
 
-export const ROLES_CON_SUSCRIPCION = ['owner', 'admin'] as const
-
+/**
+ * ¿La persona ve la sección Suscripción (y la plata del contrato donde aparezca)? Solo si es la persona
+ * designada del contrato. `usuarioId` es la persona EFECTIVA (la de «Ver como» si la hay).
+ */
 export function puedeVerSuscripcion(p: {
-  role: string | null | undefined
   usuarioId: string | null | undefined
   designadoId: string | null | undefined
 }): boolean {
-  if (p.role && (ROLES_CON_SUSCRIPCION as readonly string[]).includes(p.role)) return true
   return Boolean(p.usuarioId && p.designadoId && p.usuarioId === p.designadoId)
+}
+
+/**
+ * ¿Además puede OPERARLA (comprar, retirar, invitar, aceptar, pedir Sustenta)? Solo la persona designada
+ * en su propia sesión: un platform admin en «Ver como» la ve, pero en solo lectura.
+ */
+export function puedeOperarSuscripcion(p: {
+  usuarioId: string | null | undefined
+  designadoId: string | null | undefined
+  impersonando: boolean
+}): boolean {
+  return !p.impersonando && puedeVerSuscripcion(p)
 }
 
 /** Días antes del vencimiento en que la cuota pasa a «próxima a vencer». */

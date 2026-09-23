@@ -9,6 +9,7 @@ import { evaluarConDesignacion, leerAceptacionesUsuario } from '@/lib/valida-api
 import { esFuncionAusente } from '@/lib/valida-api/mapeo'
 import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/valida-api/terminos-servidor'
 import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
+import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import { enPlazoParaAceptar, estadoMora, mensajeSuspendidoPorMora, type EstadoMora } from './plazos'
 
 /**
@@ -62,7 +63,14 @@ export type EntradaValidaCda =
       workspaceId: string
       /** La persona REAL de la sesión, nunca la de «Ver como». */
       usuarioId: string
-      /** El rol del espacio (puede venir de «Ver como»): solo decide si se muestra la plata. */
+      /**
+       * La persona EFECTIVA: la de «Ver como» si un platform admin está mirando como otra, si no la
+       * real. Decide si se VE la plata (`puedeVerSuscripcion`); nunca quién acepta ni quién opera.
+       */
+      usuarioEfectivoId: string
+      /** Un platform admin en «Ver como»: la suscripción se le muestra en solo lectura. */
+      impersonando: boolean
+      /** El rol del espacio (puede venir de «Ver como»). Ya no decide quién ve la plata. */
       role: string
       estado: EstadoEntrada
       hoy: string
@@ -106,7 +114,7 @@ async function resolver(): Promise<EntradaValidaCda> {
   if (!user) return { tipo: 'sin_sesion' }
 
   // Cliente de SESIÓN: la RPC deriva el espacio de `current_user_workspace_id()`.
-  const { supabase, role } = await getWorkspace()
+  const { supabase, role, userId: usuarioEfectivoId, impersonating } = await getWorkspace()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const servicios = await (supabase as any).rpc('mis_servicios')
   if (servicios.error) {
@@ -142,6 +150,8 @@ async function resolver(): Promise<EntradaValidaCda> {
     tipo: 'ok',
     workspaceId,
     usuarioId: user.id,
+    usuarioEfectivoId: usuarioEfectivoId ?? user.id,
+    impersonando: impersonating === true,
     role: role ?? 'read_only',
     estado,
     hoy,
@@ -204,13 +214,13 @@ export async function validaCdaPermiteOperar(): Promise<{ ok: true } | { ok: fal
 }
 
 /**
- * ¿Quien entra ve la plata del contrato (tarjeta de pago, pestaña Pagos, recibos y facturas)? El
- * dueño y los administradores del espacio, y la persona designada por la empresa. Solo con el
- * contrato pagado por este espacio. Sin poder leer la designación, no.
+ * ¿Quien entra ve la plata del contrato (tarjeta de pago, pestaña Pagos, recibos, facturas, la franja
+ * y los avisos de cuota en `/valida`)? Solo la persona designada por la empresa, con la misma regla de
+ * `/suscripcion` (`puedeVerSuscripcion`). Solo con el contrato pagado por este espacio. Sin poder leer
+ * la designación, no.
  */
 export async function puedeVerPagosCda(e: EntradaValidaCda): Promise<boolean> {
   if (e.tipo !== 'ok' || !e.servicioContratadoId) return false
-  if (e.role === 'owner' || e.role === 'admin') return true
   const designacion = await designacionDelEspacio(e.workspaceId)
-  return designacion !== 'error' && designacion.designadoId === e.usuarioId
+  return designacion !== 'error' && puedeVerSuscripcion({ usuarioId: e.usuarioEfectivoId, designadoId: designacion.designadoId })
 }

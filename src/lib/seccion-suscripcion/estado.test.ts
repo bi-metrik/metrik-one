@@ -1,25 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import type { ProximoPago } from '@/lib/valida-cda/pago-pendiente'
-import { fechaConAnio, franjaValida, periodoCorto, puedeVerSuscripcion, resumenEstado, tonoDelPunto } from './estado'
+import { fechaConAnio, franjaValida, periodoCorto, puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunto } from './estado'
 
-describe('quién ve Suscripción', () => {
-  it('el dueño y los administradores', () => {
-    expect(puedeVerSuscripcion({ role: 'owner', usuarioId: 'u1', designadoId: null })).toBe(true)
-    expect(puedeVerSuscripcion({ role: 'admin', usuarioId: 'u1', designadoId: 'u9' })).toBe(true)
+describe('quién ve Suscripción: solo la persona designada', () => {
+  // Datos de cda-pruebas: el designado es el dueño; el operador no.
+  const DESIGNADO = '76856b58-6220-40f0-ae59-e08933d8f8f6'
+  const OPERADOR = 'de50ff2a-cc51-4dc7-99a9-a39c67cd04b7'
+
+  it('la persona designada la ve (sea cual sea su rol)', () => {
+    expect(puedeVerSuscripcion({ usuarioId: DESIGNADO, designadoId: DESIGNADO })).toBe(true)
   })
 
-  it('la persona designada aunque sea operadora', () => {
-    expect(puedeVerSuscripcion({ role: 'operator', usuarioId: 'u1', designadoId: 'u1' })).toBe(true)
+  it('nadie más: ni el operador, ni un dueño o administrador que no sea la persona designada', () => {
+    expect(puedeVerSuscripcion({ usuarioId: OPERADOR, designadoId: DESIGNADO })).toBe(false)
+    expect(puedeVerSuscripcion({ usuarioId: 'otro-owner', designadoId: DESIGNADO })).toBe(false)
+    expect(puedeVerSuscripcion({ usuarioId: 'otro-admin', designadoId: DESIGNADO })).toBe(false)
   })
 
-  it('nadie más: operador, supervisor, solo lectura, contador', () => {
-    for (const role of ['operator', 'supervisor', 'read_only', 'contador', null]) {
-      expect(puedeVerSuscripcion({ role, usuarioId: 'u1', designadoId: 'u9' }), String(role)).toBe(false)
-    }
+  it('un contrato sin persona designada: nadie la ve', () => {
+    expect(puedeVerSuscripcion({ usuarioId: DESIGNADO, designadoId: null })).toBe(false)
+    expect(puedeVerSuscripcion({ usuarioId: null, designadoId: null })).toBe(false)
   })
 
-  it('sin designación leída no hay coincidencia por null', () => {
-    expect(puedeVerSuscripcion({ role: 'operator', usuarioId: null, designadoId: null })).toBe(false)
+  it('la persona designada la opera; «Ver como» la ve en solo lectura', () => {
+    expect(puedeOperarSuscripcion({ usuarioId: DESIGNADO, designadoId: DESIGNADO, impersonando: false })).toBe(true)
+    // Un platform admin mirando como la persona designada: la ve, pero no opera.
+    expect(puedeVerSuscripcion({ usuarioId: DESIGNADO, designadoId: DESIGNADO })).toBe(true)
+    expect(puedeOperarSuscripcion({ usuarioId: DESIGNADO, designadoId: DESIGNADO, impersonando: true })).toBe(false)
+    expect(puedeOperarSuscripcion({ usuarioId: OPERADOR, designadoId: DESIGNADO, impersonando: false })).toBe(false)
   })
 })
 

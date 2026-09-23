@@ -13,7 +13,7 @@ import { terminosAceptadosPorEmpresa } from './terminos-empresa'
  * cada una carga sola y dice por qué no cargó, nunca una lista vacía en su lugar.
  *
  * Las dos exigen lo mismo que la página: la entrada del CDA con los términos aceptados. Pagos exige
- * además dueño, administrador o persona designada (`puedeVerPagosCda`).
+ * además ser la persona designada del contrato (`puedeVerPagosCda`, la regla de `/suscripcion`).
  */
 
 export type ResultadoPagosCda =
@@ -27,7 +27,7 @@ export async function leerPagosCda(e: EntradaValidaCda): Promise<ResultadoPagosC
   if (!(await puedeVerPagosCda(e))) {
     return {
       estado: 'sin_acceso',
-      razon: 'Los pagos los ven el dueño y los administradores del espacio, y la persona designada por tu empresa.',
+      razon: 'Los pagos los ve la persona designada por tu empresa.',
     }
   }
   return leerPestanaPagosCda(e.servicioContratadoId, e.hoy)

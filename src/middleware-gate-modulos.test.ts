@@ -98,17 +98,20 @@ describe('middleware: gate por módulo', () => {
     expect(await pedir(DOMINIO_BASE, '/negocios')).toBe('/valida')
   })
 
-  it('lo que el CDA sí tiene abre: Valida, Suscripción, la vitrina de Tableros y lo común', async () => {
+  it('lo que el CDA sí tiene abre: Valida, Suscripción y lo común', async () => {
     perfil = { role: 'operator', slug: 'cda-caqueta' }
     expect(await pedir(TENANT, '/valida')).toBeNull()
+    // El middleware la deja pasar; quién la ve lo decide la página (404 si no es la persona designada).
     expect(await pedir(TENANT, '/suscripcion')).toBeNull()
-    expect(await pedir(TENANT, '/tableros')).toBeNull()
     expect(await pedir(TENANT, '/servicios')).toBeNull()
   })
 
-  it('Números ya no abre en un CDA: usa ONE solo con Valida', async () => {
-    perfil = { role: 'operator', slug: 'cda-caqueta' }
-    expect(await pedir(TENANT, '/numeros')).not.toBeNull()
+  it('ni Números ni Tableros abren en un CDA: usa ONE solo con Valida, y rebotan a /valida', async () => {
+    for (const role of ['operator', 'owner']) {
+      perfil = { role, slug: 'cda-caqueta' }
+      expect(await pedir(TENANT, '/numeros'), role).toBe('/valida')
+      expect(await pedir(TENANT, '/tableros'), role).toBe('/valida')
+    }
   })
 
   it('un workspace con Clarity abre /negocios igual que antes', async () => {

@@ -19,7 +19,7 @@ describe('ensayarRutasBloqueadas', () => {
     expect(cda.slug).toBe('cda')
     expect(cda.rutasBloqueadas).toContain('/negocios')
     expect(cda.rutasBloqueadas).not.toContain('/valida')
-    expect(cda.rutasBloqueadas).not.toContain('/tableros') // vitrina
+    expect(cda.rutasBloqueadas).toContain('/tableros') // un CDA no abre ninguna vitrina
     expect(cda.rutasBloqueadas).toContain('/numeros') // un CDA usa ONE solo con Valida
     expect(cda.usoBloqueado).toEqual([{ ruta: '/negocios', eventos: 2, ultimo: '2026-09-01T00:00:00Z' }])
     expect(cda.entidadesSinRuta).toEqual(['workspace'])
