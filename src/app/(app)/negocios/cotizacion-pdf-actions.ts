@@ -35,8 +35,8 @@ import {
   vuelosDeItems,
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
-import { describirOcupacion, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
-import { lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada'
+import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { hayTarifaPorPasajero, lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -460,22 +460,21 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    *
    * Mismo criterio que el aviso de cobertura: quien imprime no siempre es quien cargó, y el
    * cambio que las dejó viejas suele ocurrir en el negocio (los pasajeros del viaje), no en
-   * la cotización. AVISA, NO BLOQUEA: el documento no tiene candado y el brief pide no
-   * inventar uno. Lo que sí cambia en el documento es que el reparto por pasajero de una
-   * confirmación vieja ya no se imprime (`precioPorPasajeroDeItem`).
+   * la cotización. Aquí AVISA, NO BLOQUEA: descargar el PDF en borrador sigue saliendo
+   * (decisión de Mauricio del 2026-09-22); lo que se frena es sacar la cotización de
+   * borrador —«Enviar», «Aprobar»—, en `captura-desactualizada-datos.ts`. Lo que sí
+   * cambia en el documento es que el reparto por pasajero de una confirmación vieja ya no
+   * se imprime (`precioPorPasajeroDeItem`).
    *
    * Los pasajeros del viaje se leen UNA vez y solo si alguna línea tiene tarifa por
    * pasajero: una cotización que no es de viaje no paga la consulta (R6).
    */
-  const hayTarifaPorPasajero = items.some(i => {
-    const t = leerTarifaPax(i.tarifa_pax)
-    return !!t.confirmada || Object.keys(t.casillas ?? {}).length > 0
-  })
-  const viajeDelNegocio = negocioInfo && hayTarifaPorPasajero
+  const conTarifaPorPasajero = hayTarifaPorPasajero(items)
+  const viajeDelNegocio = negocioInfo && conTarifaPorPasajero
     ? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
     : null
   const composicionViaje = viajeDelNegocio?.composicion ?? null
-  const avisosCaptura = hayTarifaPorPasajero
+  const avisosCaptura = conTarifaPorPasajero
     ? lineasDesactualizadas(
         items.filter(i => i.id).map(i => ({
           id: i.id as string,

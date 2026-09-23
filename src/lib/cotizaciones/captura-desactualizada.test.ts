@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { lineasDesactualizadas } from './captura-desactualizada'
+import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from './captura-desactualizada'
 import { precioPorPasajeroDeItem } from './precio-pasajero-pdf'
 
 const lectura = (over: Record<string, unknown> = {}) => ({
@@ -28,6 +28,7 @@ describe('las líneas desactualizadas de una cotización', () => {
       itemId: 'h',
       nombre: 'HOTEL',
       motivos: ['Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos: pega uno nuevo.'],
+      arreglo: 'pantallazo',
     }])
   })
 
@@ -46,6 +47,7 @@ describe('las líneas desactualizadas de una cotización', () => {
       TRES,
     )
     expect(r[0].motivos[0]).toContain('El costo cargado es para 2 adultos y la línea ahora cubre 3 adultos')
+    expect(r[0].arreglo).toBe('confirmacion')
   })
 
   it('nada viejo, línea sin ranura, o cuadre: no aparecen (R6)', () => {
@@ -58,6 +60,52 @@ describe('las líneas desactualizadas de una cotización', () => {
       { id: 's', nombre: 'SEGURO', grupo: null, tarifa_pax: { casillas: { grupo_completo: lectura() } } },
       { id: 'a', nombre: 'AJUSTE', grupo: 'hotel', es_ajuste: true, tarifa_pax: { casillas: { grupo_completo: lectura() } } },
     ], TRES)).toEqual([])
+  })
+})
+
+describe('el motivo para no dejar salir la cotización (decisión del 2026-09-22)', () => {
+  const hotelViejo = { id: 'h', nombre: 'HOTEL', grupo: 'hotel', tarifa_pax: { casillas: { grupo_completo: lectura() } } }
+  const nueva = lectura({ ocupacion: { adultos: 3, ninos: 0, infantes: 0, total: 3 }, paraComposicion: TRES })
+  const vueloSinReconfirmar = {
+    id: 'v', nombre: 'HOTEL 2', grupo: 'hotel',
+    tarifa_pax: { casillas: { grupo_completo: nueva }, confirmada: confirmada() },
+  }
+
+  it('sin líneas viejas, puede salir', () => {
+    expect(motivoParaNoEnviar([])).toBeNull()
+    expect(motivoParaNoEnviar(lineasDesactualizadas([hotelViejo], DOS))).toBeNull()
+  })
+
+  it('nombra lo que hay que pegar y, aparte, lo que solo hay que reconfirmar', () => {
+    const lineas = lineasDesactualizadas([hotelViejo, vueloSinReconfirmar], TRES)
+    expect(motivoParaNoEnviar(lineas)).toBe(
+      'Antes de enviar, pega el pantallazo nuevo en: «HOTEL». Y vuelve a confirmar el costo de: «HOTEL 2».',
+    )
+    expect(motivoParaNoEnviar(lineas, 'aprobar')).toMatch(/^Antes de aprobar, pega el pantallazo nuevo en: «HOTEL»\./)
+  })
+
+  it('varias líneas del mismo arreglo van en una sola lista', () => {
+    const otro = { ...hotelViejo, id: 'h2', nombre: 'HOTEL SANTA MARTA' }
+    expect(motivoParaNoEnviar(lineasDesactualizadas([hotelViejo, otro], TRES))).toBe(
+      'Antes de enviar, pega el pantallazo nuevo en: «HOTEL», «HOTEL SANTA MARTA».',
+    )
+  })
+
+  it('otra moneda que la confirmada también frena: solo hay que reconfirmar', () => {
+    const enUSD = {
+      id: 'u', nombre: 'HOTEL USD', grupo: 'hotel',
+      tarifa_pax: { casillas: { grupo_completo: lectura({ moneda: 'USD' }) }, confirmada: confirmada('COP') },
+    }
+    expect(motivoParaNoEnviar(lineasDesactualizadas([enUSD], DOS))).toBe(
+      'Antes de enviar, vuelve a confirmar el costo de: «HOTEL USD».',
+    )
+  })
+
+  it('hayTarifaPorPasajero: casillas o costo confirmado; nada más cuenta (R6)', () => {
+    expect(hayTarifaPorPasajero([hotelViejo])).toBe(true)
+    expect(hayTarifaPorPasajero([{ tarifa_pax: { confirmada: confirmada() } }])).toBe(true)
+    expect(hayTarifaPorPasajero([{ tarifa_pax: null }, { tarifa_pax: { casillas: {} } }, {}])).toBe(false)
+    expect(hayTarifaPorPasajero([])).toBe(false)
   })
 })
 

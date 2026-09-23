@@ -20,6 +20,7 @@ import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/dup
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
+import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 
@@ -132,6 +133,12 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
   // Mandar o aprobar por aquí tiene que pasar por el mismo margen mínimo que los botones.
   if (updates.estado === 'enviada' || updates.estado === 'aceptada') {
     if (!workspaceId) return { success: false, error: 'No autenticado' }
+    // Primero los pantallazos: con el precio de otros pasajeros, el margen tampoco dice
+    // nada. Mismo freno que los botones (`captura-desactualizada-datos.ts`).
+    const motivoCapturas = await motivoPorCapturasDesactualizadas(supabase, {
+      cotizacionId: id, destino: updates.estado,
+    })
+    if (motivoCapturas) return { success: false, error: motivoCapturas }
     const motivo = await motivoParaNoSalir(supabase, {
       servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
     })
@@ -714,6 +721,12 @@ export async function deleteRubro(id: string) {
 export async function enviarCotizacion(id: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
+  // 2026-09-22). Va antes del margen: con el precio de otros pasajeros, el margen
+  // tampoco dice nada.
+  const motivoCapturas = await motivoPorCapturasDesactualizadas(supabase, { cotizacionId: id, destino: 'enviada' })
+  if (motivoCapturas) return { success: false, error: motivoCapturas }
 
   // Bajo el margen mínimo, sin la autorización del dueño, no sale (decisión del
   // 2026-09-22). En el servidor: el botón es solo la puerta visible.
