@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useRef, useState, useTransition } from 'react'
+import { Fragment, useContext, useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
@@ -48,6 +48,7 @@ import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
 import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
 import BandejaCapturas from '@/app/(app)/negocios/bandeja-capturas'
+import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
@@ -336,6 +337,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  // El marco del negocio (layout del 2026-09-23): encabezado fijo y columna a la derecha. Solo
+  // en el flujo de viaje; sin marco, la pantalla de siempre (R6).
+  const marcoDelNegocio = useContext(MarcoCotizacionContexto)
+  const conMarco = lineasPorTipo && marcoDelNegocio !== null
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
@@ -1043,12 +1048,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     <>
       {/* Header */}
       <div className="flex items-center gap-3">
+        {/* Con el marco, «Volver al negocio» ya está en el encabezado fijo. */}
+        {!conMarco && (
         <button
           onClick={() => backUrl ? router.push(backUrl) : router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold">{cotizacion.codigo || cotizacion.consecutivo || 'Sin codigo'}</h1>
@@ -2692,7 +2700,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               es hotel o vuelo, crea la ranura con su nombre y lee el precio. Los botones de
               abajo quedan para costear a mano lo que no tiene pantallazo. Solo en el flujo
               de viaje: fuera de él no hay pantallazos que leer (R6). */}
-          {lineasPorTipo && (
+          {lineasPorTipo && !conMarco && (
             <BandejaCapturas
               cotizacionId={cotizacion.id}
               items={initialItems}
@@ -3256,7 +3264,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // P9 · el viaje no es un paso: es el encabezado fijo de la cotización. Sale del negocio
   // y aquí no se edita; en ámbar si al negocio le faltan fechas o pasajeros.
   const viaje = encabezadoDelViaje({ destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje })
-  const jsxEncabezadoViaje = lineasPorTipo ? (
+  // Con el marco del negocio, este encabezado vive arriba, en el marco (lo absorbe).
+  const jsxEncabezadoViaje = lineasPorTipo && !conMarco ? (
     <div
       data-encabezado-viaje
       className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 ${viaje.motivo ? 'border-amber-200 bg-amber-50' : 'bg-muted/20'}`}
@@ -3414,6 +3423,18 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {jsxAvisoNoEditable}
       {!lineasPorTipo && jsxAvisoDesactualizadas}
       {jsxEncabezadoViaje}
+      {/* R3 · con el marco, la zona de pegado es hija directa de este contenedor: así queda
+          fija bajo el encabezado del negocio mientras se recorre TODA la cotización. */}
+      {conMarco && editable && (
+        <BandejaCapturas
+          fija
+          cotizacionId={cotizacion.id}
+          items={initialItems}
+          composicion={composicionViaje}
+          onOpcionCreada={mostrarOpcion}
+          ubicaciones={ubicacionesDeOpciones}
+        />
+      )}
       {lineasPorTipo ? pasosDelViaje : (
         <div className="space-y-3">
           {jsxExpandir}
