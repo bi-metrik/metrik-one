@@ -6285,7 +6285,7 @@ async function saldoCobrosCubierto(
       .single(),
     supabase
       .from('cobros')
-      .select('monto, fecha')
+      .select('monto, fecha, retencion_iva')
       .eq('negocio_id', negocioId)
       ,
     leerModeloDineroCompleto(supabase, negocioId),
@@ -6296,7 +6296,7 @@ async function saldoCobrosCubierto(
   // Un workspace sin modelo de dinero (sin tarifa pasante) da tarifa 0, y entonces el
   // valor a recaudar es el precio: el comportamiento generico no cambia.
   const aRecaudar = valorARecaudar(precio, modelo)
-  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null }>)
+  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null; retencion_iva: number | null }>)
   return bloqueCobrosCompleto({ valorARecaudar: aRecaudar, cobrado: totalCobrado })
 }
 
@@ -6881,7 +6881,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .eq('workspace_id', workspaceId),
     db(supabase)
       .from('cobros')
-      .select('id, notas, monto, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo')
+      .select('id, notas, monto, retencion_iva, retencion_iva_estado, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', id)
       .order('created_at', { ascending: true }),
@@ -8250,6 +8250,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       id: c.id as string,
       concepto: c.notas as string | null,
       monto: c.monto as number,
+      // Retención de IVA del cliente (acta 2026-09-23): cubre la cuota aunque no sea efectivo.
+      retencion_iva: Number(c.retencion_iva ?? 0),
+      retencion_iva_estado: (c.retencion_iva_estado as string | null) ?? null,
       revisado: (c.revisado as boolean | null) ?? false,
       tipo_cobro: c.tipo_cobro as string | null,
       fecha: c.fecha as string | null,

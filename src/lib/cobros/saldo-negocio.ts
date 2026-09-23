@@ -43,10 +43,17 @@ export interface CobroParaSaldo {
   monto?: number | null
   /** Sin fecha = todavia no entro. Una cuota programada no es plata recibida. */
   fecha?: string | null
+  /**
+   * Retencion de IVA que practico el cliente sobre ese pago (`cobros.retencion_iva`). No entro en
+   * efectivo pero cubre lo que el cliente debe: sin ella, una cuota pagada por el neto dejaria la
+   * retencion como saldo. Ver `lib/cobros/retencion-iva.ts`.
+   */
+  retencion_iva?: number | string | null
 }
 
 /**
- * Lo efectivamente recaudado: solo los cobros con fecha.
+ * Lo efectivamente recaudado: solo los cobros con fecha, con la retencion de IVA que el cliente
+ * practico sobre ellos (lo que el cliente ya no debe).
  *
  * Es la misma cuenta que hace la tarjeta del negocio (`BloqueCobros`), y por eso el
  * numero de la pantalla y el veredicto del motor dejan de poder contradecirse.
@@ -57,6 +64,8 @@ export function cobradoConfirmado(cobros: readonly CobroParaSaldo[]): number {
     if (!c.fecha) continue
     const n = Number(c.monto ?? 0)
     if (Number.isFinite(n)) total += n
+    const r = Number(c.retencion_iva ?? 0)
+    if (Number.isFinite(r) && r > 0) total += r
   }
   return total
 }

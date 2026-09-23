@@ -26,6 +26,11 @@
  * Un pago por MÁS de lo esperado sí se registra, con el monto real: el excedente lo descuenta de la
  * siguiente cuota el reparto FIFO al generar su enlace (regla del excedente).
  *
+ * Retención de IVA (`retencion-iva.ts`): si el enlace salió por el neto, el cobro ya trae la
+ * retención en «certificado pendiente» y aquí se conserva: el pago del neto deja la cuota en cero.
+ * Si el cliente pagó el total (no retuvo), la retención se quita: contarla además del total le
+ * descontaría de más la cuota siguiente.
+ *
  * La marca de conciliación (`cobros.split_json.confirmado_at`, #738) NO aplica aquí: solo cuenta en
  * porciones que el comercial propuso repartir (`origen = 'comercial'`), y un cobro programado pagado
  * por su enlace no es una porción de un reparto.
@@ -56,6 +61,11 @@ export interface CobroParaPago {
   tipoCobro: string | null
   externalRef: string | null
   notas: string | null
+  /**
+   * La retención de IVA que el cliente practica sobre la cuota (`cobros.retencion_iva`), escrita al
+   * generar el enlace por el neto. `monto` es el neto que se espera en efectivo.
+   */
+  retencionIva?: number
 }
 
 export interface RepoPagoEnLinea {
@@ -162,8 +172,14 @@ export async function registrarPagoAprobado(
     }
   }
 
-  const excedente = pagado - esperado
-  const notaExcedente = excedente > 0 ? `Pagado en línea con $${excedente} de más: se descuenta de la siguiente cuota.` : null
+  const retencion = Math.max(0, Math.round(cobro.retencionIva ?? 0))
+  // Pagó el total en vez del neto: no retuvo. La cuota se cubre con la plata, no con la retención.
+  const noRetuvo = retencion > 0 && pagado >= esperado + retencion
+  const excedente = pagado - (noRetuvo ? esperado + retencion : esperado)
+  const notasNuevas = [
+    noRetuvo ? `Pagado en línea por el total, sin retención de IVA: se quitó la retención de $${retencion}.` : null,
+    excedente > 0 ? `Pagado en línea con $${excedente} de más: se descuenta de la siguiente cuota.` : null,
+  ].filter((x): x is string => x !== null)
   const r = await repo.confirmarPago({
     cobroId: cobro.id,
     workspaceId: cobro.workspaceId,
@@ -171,12 +187,14 @@ export async function registrarPagoAprobado(
     externalRef: refPago,
     fuente: repo.pasarela,
     monto: pagado,
-    notas: notaExcedente ? [cobro.notas, notaExcedente].filter(Boolean).join(' · ') : null,
+    notas: notasNuevas.length > 0 ? [cobro.notas, ...notasNuevas].filter(Boolean).join(' · ') : null,
+    ...(noRetuvo ? { quitarRetencionIva: true } : {}),
   })
   if (r.ok) {
+    const conRetencion = retencion > 0 && !noRetuvo ? `, con $${retencion} de retención de IVA por certificar` : ''
     return {
       resultado: 'registrado',
-      detalle: `Pago en línea de $${pagado} registrado (${refPago})${excedente > 0 ? `, con $${excedente} de excedente` : ''}.`,
+      detalle: `Pago en línea de $${pagado} registrado (${refPago})${conRetencion}${excedente > 0 ? `, con $${excedente} de excedente` : ''}.`,
       cobroId: cobro.id,
       cobro,
     }

@@ -18,6 +18,12 @@ interface Cobro {
   id: string
   concepto: string | null
   monto: number
+  /**
+   * Retención de IVA que el cliente practicó sobre este pago (acta 2026-09-23). No entró en
+   * efectivo, pero el cliente ya no la debe: cuenta para el saldo, no para «Cobrado».
+   */
+  retencion_iva?: number
+  retencion_iva_estado?: string | null
   revisado: boolean
   tipo_cobro: string | null
   fecha: string | null
@@ -272,7 +278,12 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
   const programados = cobros.filter(c => c.tipo_cobro === 'programado' && c.fecha === null)
 
   const totalCobrado = confirmados.reduce((s, c) => s + c.monto, 0)
-  const saldoPendiente = precioTotal - totalCobrado
+  // La retención de IVA de los pagos confirmados: el cliente pagó el neto y certifica el resto.
+  const retencionIva = confirmados.reduce((s, c) => s + (c.retencion_iva ?? 0), 0)
+  const retencionIvaPorCertificar = confirmados
+    .filter(c => c.retencion_iva_estado === 'certificado_pendiente')
+    .reduce((s, c) => s + (c.retencion_iva ?? 0), 0)
+  const saldoPendiente = precioTotal - totalCobrado - retencionIva
   // Un saldo NEGATIVO es plata a favor del cliente y hay que decirlo. Antes se pintaba
   // como `saldoPendiente > 0 ? saldoPendiente : 0`, así que un sobrepago se veía igual
   // que un negocio al día: "Saldo $0". La cifra existía en los datos y la pantalla la
@@ -372,6 +383,13 @@ export default function BloqueCobros({ cobros, precioTotal, modo, pendienteHando
             </p>
           </div>
         </div>
+      )}
+
+      {retencionIva > 0 && (
+        <p className="text-center text-[10px] text-tinta-suave">
+          Retención de IVA del cliente: <span className="font-medium text-tinta tabular-nums">{fmt(retencionIva)}</span>
+          {retencionIvaPorCertificar > 0 && <> · certificado pendiente por {fmt(retencionIvaPorCertificar)}</>}
+        </p>
       )}
 
       {/* Pendiente para pasar a operaciones (gate saldo:handoff). El cliente debe

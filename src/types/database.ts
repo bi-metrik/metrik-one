@@ -5143,6 +5143,10 @@ export type Database = {
           proyecto_id: string | null
           recibo_no_aplica: Json | null
           retencion: number | null
+          retencion_iva: number
+          retencion_iva_certificado_fecha: string | null
+          retencion_iva_certificado_soporte: string | null
+          retencion_iva_estado: string | null
           revisado: boolean
           revisado_at: string | null
           revisado_por: string | null
@@ -5179,6 +5183,10 @@ export type Database = {
           proyecto_id?: string | null
           recibo_no_aplica?: Json | null
           retencion?: number | null
+          retencion_iva?: number
+          retencion_iva_certificado_fecha?: string | null
+          retencion_iva_certificado_soporte?: string | null
+          retencion_iva_estado?: string | null
           revisado?: boolean
           revisado_at?: string | null
           revisado_por?: string | null
@@ -5215,6 +5223,10 @@ export type Database = {
           proyecto_id?: string | null
           recibo_no_aplica?: Json | null
           retencion?: number | null
+          retencion_iva?: number
+          retencion_iva_certificado_fecha?: string | null
+          retencion_iva_certificado_soporte?: string | null
+          retencion_iva_estado?: string | null
           revisado?: boolean
           revisado_at?: string | null
           revisado_por?: string | null
@@ -11721,6 +11733,7 @@ export type Database = {
           created_at: string
           fecha_vencimiento: string
           id: string
+          iva: number
           monto: number
           numero: number
           plan_cobro_id: string
@@ -11733,6 +11746,7 @@ export type Database = {
           created_at?: string
           fecha_vencimiento: string
           id?: string
+          iva?: number
           monto: number
           numero: number
           plan_cobro_id: string
@@ -11745,6 +11759,7 @@ export type Database = {
           created_at?: string
           fecha_vencimiento?: string
           id?: string
+          iva?: number
           monto?: number
           numero?: number
           plan_cobro_id?: string
@@ -16889,6 +16904,12 @@ export type Database = {
           recibo_numero: string
           recibo_origen: string
           recibo_path: string
+          factura_cufe: string
+          factura_fecha: string
+          factura_numero: string
+          factura_pdf_path: string
+          factura_xml_path: string
+          retencion_iva: number
         }[]
       }
       mis_documentos_de_servicio: {

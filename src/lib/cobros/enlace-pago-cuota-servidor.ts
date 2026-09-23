@@ -11,6 +11,7 @@ import {
   type CobroProgramadoDeCuota,
 } from './enlace-pago-cuota'
 import { referenciaEnlaceCobro } from './referencia-enlace'
+import { pctRetencionIvaDelEspacio, retencionIvaDeCuota } from './retencion-iva'
 
 /** Cuánto vive un enlace desde que se genera. El ciclo manual de los CDA: se manda el 20, vence el 27. */
 export const DIAS_VIGENCIA_ENLACE = 7
@@ -28,6 +29,11 @@ export const DIAS_VIGENCIA_ENLACE = 7
  * Orden de las escrituras: primero el cobro programado (si no existía), porque la referencia del
  * enlace lleva su id; después el enlace en la pasarela; al final el enlace en el cobro. Si la pasarela falla, el
  * cobro programado queda creado y sin enlace: es la misma fila que crearía la plantilla SQL.
+ *
+ * Retención de IVA (`retencion-iva.ts`): si el espacio cobrador la declara, la cuota lleva IVA y el
+ * cliente pagador es responsable de IVA, el enlace sale por el saldo MENOS la retención, y el cobro
+ * programado queda con `monto` = el neto y `retencion_iva` = la retención, en «certificado
+ * pendiente». Al pagarse, el reparto FIFO cuenta las dos cosas y la cuota queda en cero.
  */
 
 export type ResultadoEnlaceCuota =
@@ -39,6 +45,8 @@ export type ResultadoEnlaceCuota =
       url: string
       expira: string | null
       monto: number | null
+      /** La retención de IVA descontada del enlace. 0 si no aplica o si el enlace ya estaba vigente. */
+      retencionIva: number
       negocioId: string
       numero: number
       pasarela: string | null
@@ -57,7 +65,7 @@ export async function generarEnlacePagoCuota(
 
   const cuota = await db
     .from('plan_cobro_cuotas')
-    .select('id, numero, monto, fecha_vencimiento, concepto_detalle, plan_cobro_id')
+    .select('id, numero, monto, iva, fecha_vencimiento, concepto_detalle, plan_cobro_id')
     .eq('id', p.cuotaId)
     .eq('workspace_id', p.workspaceId)
     .maybeSingle()
@@ -98,7 +106,7 @@ export async function generarEnlacePagoCuota(
 
   const cobros = await db
     .from('cobros')
-    .select('id, monto, fecha, anulado_at, tipo_cobro, plan_cobro_id, numero_cuota, enlace_pago_url, enlace_pago_expira')
+    .select('id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, plan_cobro_id, numero_cuota, enlace_pago_url, enlace_pago_expira')
     .eq('negocio_id', negocioId)
     .eq('workspace_id', p.workspaceId)
   if (cobros.error) return { ok: false, error: `No se pudieron leer los cobros: ${cobros.error.message}` }
@@ -106,6 +114,7 @@ export async function generarEnlacePagoCuota(
   type FilaCobro = {
     id: string
     monto: number | string | null
+    retencion_iva: number | string | null
     fecha: string | null
     anulado_at: string | null
     tipo_cobro: string | null
@@ -144,8 +153,29 @@ export async function generarEnlacePagoCuota(
   // Mismo criterio de `mis_cobros_de_servicio`: anulado > sin fecha (programado) > pagado.
   const cobrosFifo: CobroRecibido[] = filasCobro.map((c) => ({
     monto: Number(c.monto ?? 0),
+    retencionIva: Number(c.retencion_iva ?? 0),
     estado: c.anulado_at ? 'anulado' : c.fecha === null ? 'programado' : 'pagado',
   }))
+
+  // La configuración del espacio: la retención de IVA que recibe (y, más abajo, la pasarela).
+  const ws = await db.from('workspaces').select('config_extra').eq('id', p.workspaceId).maybeSingle()
+  if (ws.error) return { ok: false, error: `No se pudo leer la configuración del espacio: ${ws.error.message}` }
+  const pctRetencion = pctRetencionIvaDelEspacio(ws.data?.config_extra ?? null)
+  const ivaCuota = Number(cuota.data.iva ?? 0)
+
+  // El pagador solo se lee si la retención puede aplicar: sin configuración o sin IVA no cambia nada.
+  let pagadorResponsableIva: boolean | null = null
+  if (pctRetencion > 0 && ivaCuota > 0) {
+    const neg = await db.from('negocios').select('empresa_id').eq('id', negocioId).eq('workspace_id', p.workspaceId).maybeSingle()
+    if (neg.error) return { ok: false, error: `No se pudo leer el cliente del negocio: ${neg.error.message}` }
+    const empresaId = (neg.data?.empresa_id as string | null | undefined) ?? null
+    if (empresaId) {
+      const emp = await db.from('empresas').select('responsable_iva').eq('id', empresaId).eq('workspace_id', p.workspaceId).maybeSingle()
+      if (emp.error) return { ok: false, error: `No se pudo leer el cliente del negocio: ${emp.error.message}` }
+      pagadorResponsableIva = (emp.data?.responsable_iva as boolean | null | undefined) ?? null
+    }
+  }
+  const retencionIva = retencionIvaDeCuota({ ivaCuota, pagadorResponsableIva, pct: pctRetencion })
 
   const decision = decidirEnlaceCuota({
     cuota: {
@@ -162,16 +192,15 @@ export async function generarEnlacePagoCuota(
     cobros: cobrosFifo,
     hoy: todayBogotaISO(new Date(ahoraMs)),
     ahoraMs,
+    retencionIva,
   })
   if (decision.accion === 'rechazar') return { ok: false, error: decision.motivo }
   if (decision.accion === 'vigente') {
-    return { ok: true, estado: 'vigente', cobroId: cobro?.id ?? null, url: decision.url, expira: decision.expira, monto: null, negocioId, numero: cuota.data.numero, pasarela: null }
+    return { ok: true, estado: 'vigente', cobroId: cobro?.id ?? null, url: decision.url, expira: decision.expira, monto: null, retencionIva: 0, negocioId, numero: cuota.data.numero, pasarela: null }
   }
 
   // La pasarela, por dato: el plan de la cuota o la configuración de cobros del espacio.
   const resolver = deps.adapterPara ?? adapterPara
-  const ws = await db.from('workspaces').select('config_extra').eq('id', p.workspaceId).maybeSingle()
-  if (ws.error) return { ok: false, error: `No se pudo leer la configuración del espacio: ${ws.error.message}` }
   const pasarela = pasarelaDeEnlaces({
     pasarelaPlan: plan.data.pasarela ?? null,
     configWorkspace: ws.data?.config_extra ?? null,
@@ -182,6 +211,17 @@ export async function generarEnlacePagoCuota(
   // Sin llaves no se escribe nada: ni siquiera el cobro programado.
   const faltante = adapter.faltaConfiguracion?.() ?? null
   if (faltante) return { ok: false, error: faltante }
+
+  // La retención en el cobro: lo que el cliente retiene y su certificado por llegar. Cuenta para la
+  // cuota solo cuando el cobro se paga (el reparto FIFO no mira los programados). Si la retención
+  // dejó de aplicar (el dato del cliente cambió), se limpia la que hubiera quedado de un enlace viejo.
+  const retencionAnterior = Number(delaCuota?.retencion_iva ?? 0)
+  const camposRetencion: Record<string, unknown> =
+    decision.retencionIva > 0
+      ? { retencion_iva: decision.retencionIva, retencion_iva_estado: 'certificado_pendiente', retencion: decision.retencionIva }
+      : retencionAnterior > 0
+        ? { retencion_iva: 0, retencion_iva_estado: null, retencion: 0 }
+        : {}
 
   // 1. El cobro programado de la cuota, si todavía no existe.
   let cobroId = cobro?.id ?? null
@@ -201,6 +241,7 @@ export async function generarEnlacePagoCuota(
         revisado: false,
         notas: `Cuota ${cuota.data.numero}${plan.data.total_cuotas ? ` de ${plan.data.total_cuotas}` : ''}`,
         retencion: 0,
+        ...camposRetencion,
       })
       .select('id')
       .single()
@@ -227,7 +268,7 @@ export async function generarEnlacePagoCuota(
   //    no se le pone enlace a una cuota pagada; y si en el medio OTRO proceso ya guardó un enlace
   //    (el botón y el cron a la vez, o dos corridas del cron), gana el primero. Sin esta segunda
   //    guarda el cliente recibiría dos enlaces y dos correos por la misma cuota.
-  const patch: Record<string, unknown> = { enlace_pago_url: enlace.url, enlace_pago_expira: enlace.expira }
+  const patch: Record<string, unknown> = { enlace_pago_url: enlace.url, enlace_pago_expira: enlace.expira, ...(cobro ? camposRetencion : {}) }
   if (cobro && Math.round(cobro.monto) !== decision.monto) {
     // Regla del excedente: el cobro de esta cuota queda por lo que falta, no por el valor pleno.
     patch.monto = decision.monto
@@ -253,5 +294,5 @@ export async function generarEnlacePagoCuota(
     }
   }
 
-  return { ok: true, estado: 'generado', cobroId, url: enlace.url, expira: enlace.expira, monto: decision.monto, negocioId, numero: cuota.data.numero, pasarela }
+  return { ok: true, estado: 'generado', cobroId, url: enlace.url, expira: enlace.expira, monto: decision.monto, retencionIva: decision.retencionIva, negocioId, numero: cuota.data.numero, pasarela }
 }

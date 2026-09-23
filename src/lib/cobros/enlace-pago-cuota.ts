@@ -39,7 +39,14 @@ export interface CobroProgramadoDeCuota {
 export type DecisionEnlace =
   | { accion: 'rechazar'; motivo: string }
   | { accion: 'vigente'; url: string; expira: string | null }
-  | { accion: 'generar'; monto: number; descripcion: string }
+  | {
+      accion: 'generar'
+      /** Lo que se cobra por el enlace: el saldo de la cuota menos la retención de IVA. */
+      monto: number
+      descripcion: string
+      /** La retención de IVA que el cliente practica sobre esta cuota (0 si no aplica). */
+      retencionIva: number
+    }
 
 /** Margen para no entregar un enlace que vence en minutos. */
 const MARGEN_VIGENCIA_MS = 60 * 60 * 1000
@@ -71,6 +78,12 @@ export function decidirEnlaceCuota(p: {
   cobros: readonly CobroRecibido[]
   hoy: string
   ahoraMs: number
+  /**
+   * La retención de IVA que el cliente le practica a ESTA cuota (`retencionIvaDeCuota`). El enlace
+   * sale por el saldo menos esta cifra: el cliente paga el neto y certifica el resto. 0 u omitido =
+   * enlace por el saldo, como siempre.
+   */
+  retencionIva?: number
 }): DecisionEnlace {
   const { cuota, cobro } = p
   if (cobro?.anuladoAt) return { accion: 'rechazar', motivo: `El cobro de la cuota ${cuota.numero} está anulado. Revísalo antes de generar un enlace.` }
@@ -89,7 +102,15 @@ export function decidirEnlaceCuota(p: {
     return { accion: 'vigente', url: cobro.enlacePagoUrl, expira: cobro.enlacePagoExpira }
   }
 
-  return { accion: 'generar', monto: Math.round(estado.saldo), descripcion: descripcionCuota(cuota) }
+  const retencionIva = Math.max(0, Math.round(p.retencionIva ?? 0))
+  const monto = Math.round(estado.saldo) - retencionIva
+  if (monto <= 0) {
+    return {
+      accion: 'rechazar',
+      motivo: `A la cuota ${cuota.numero} solo le falta la retención de IVA que practica el cliente: no hay nada que cobrar por enlace.`,
+    }
+  }
+  return { accion: 'generar', monto, descripcion: descripcionCuota(cuota), retencionIva }
 }
 
 const RE_PERIODO = /periodo del \d{2}\/\d{2}\/\d{4} al \d{2}\/\d{2}\/\d{4}/i

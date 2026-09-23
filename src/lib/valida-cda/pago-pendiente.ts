@@ -59,6 +59,13 @@ export interface FacturaDeCuota {
 export interface CobroRecibido {
   monto: number
   estado: 'pagado' | 'programado' | 'anulado'
+  /**
+   * La retención de IVA que el cliente practicó sobre la cuota de este cobro (`cobros.retencion_iva`).
+   * No es plata que entró, pero CUBRE la cuota: sin ella, una cuota pagada por el neto quedaría con
+   * la retención como saldo y el cliente aparecería debiendo lo que ya retuvo. Ver
+   * `src/lib/cobros/retencion-iva.ts`.
+   */
+  retencionIva?: number
 }
 
 export type ProximoPago =
@@ -121,8 +128,10 @@ function cuotasEnOrden(cuotas: readonly CuotaDeServicio[]): CuotaDeServicio[] {
     .sort((a, b) => a.fechaVencimiento.localeCompare(b.fechaVencimiento) || a.numero - b.numero)
 }
 
+/** Lo que cubre cuotas: lo que entró más la retención de IVA de esos mismos pagos. */
 function totalRecibido(cobros: readonly CobroRecibido[]): number {
-  return cobros.filter((c) => c.estado === 'pagado').reduce((s, c) => s + (Number.isFinite(c.monto) ? c.monto : 0), 0)
+  const num = (n: number | undefined) => (typeof n === 'number' && Number.isFinite(n) ? n : 0)
+  return cobros.filter((c) => c.estado === 'pagado').reduce((s, c) => s + num(c.monto) + num(c.retencionIva), 0)
 }
 
 /** El enlace que se puede pintar y si había uno ya vencido. */

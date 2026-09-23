@@ -46,6 +46,8 @@ interface FilaCobro {
   estado: string
   recibo_numero: string | null
   recibo_path: string | null
+  /** La retención de IVA que el cliente practicó (20260924100000). Ausente antes de esa migración. */
+  retencion_iva?: number | string | null
 }
 
 /** Un pago recibido del contrato, para la pestaña Pagos. */
@@ -116,7 +118,13 @@ async function leerCuenta(servicioContratadoId: string): Promise<LecturaCuenta> 
             : null,
       }),
     ),
-    cobros: filasCobro.map((c): CobroRecibido => ({ monto: Number(c.monto ?? 0), estado: estadoCobro(c.estado) })),
+    cobros: filasCobro.map(
+      (c): CobroRecibido => ({
+        monto: Number(c.monto ?? 0),
+        estado: estadoCobro(c.estado),
+        retencionIva: Number(c.retencion_iva ?? 0),
+      }),
+    ),
     pagos: filasCobro.map(
       (c): PagoRecibidoCda => ({
         cobroId: c.cobro_id,
