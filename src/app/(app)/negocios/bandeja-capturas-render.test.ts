@@ -136,3 +136,22 @@ describe('trabajo en el aire (aviso al recargar)', () => {
     expect(enElAireCaptura({ estado: { fase: 'rechazada', mensaje: '' }, itemId: null })).toBe(false)
   })
 })
+
+describe('la × mientras se analiza (P11)', () => {
+  const boton = (html: string) => html.match(/<button[^>]*data-quitar-captura[^>]*>/)?.[0] ?? ''
+
+  it('en «Analizando…» la × está habilitada y dice que deja de analizar', () => {
+    for (const fase of ['mirando', 'ubicando', 'leyendo'] as const) {
+      const b = boton(pintar(captura({ estado: { fase }, leida: null }), null))
+      expect(b).not.toBe('')
+      expect(b).not.toContain('disabled')
+      expect(b).toContain('se deja de analizar')
+    }
+  })
+
+  it('quitada a mitad del análisis, la fila lo dice y ofrece Deshacer', () => {
+    const html = pintar(captura({ estado: { fase: 'borrada', antes: { fase: 'mirando' }, reanudar: true } }), null)
+    expect(html).toContain('se dejó de analizar')
+    expect(html).toContain('Deshacer')
+  })
+})

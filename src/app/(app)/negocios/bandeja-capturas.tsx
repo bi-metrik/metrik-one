@@ -13,7 +13,7 @@ import {
 } from '@/app/(app)/negocios/ranura-actions'
 import { confirmarTarifaPorPasajero, leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
-import type { CapturaDetectada } from '@/lib/cotizaciones/bandeja-capturas'
+import { leerCaptura, procesarCaptura, type DependenciasDeProceso, type EstadoDeProceso } from '@/lib/cotizaciones/proceso-captura'
 import { crearUbicador, type Ubicador } from '@/lib/cotizaciones/ubicador-capturas'
 import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -46,15 +46,13 @@ import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
  */
 
 export type Estado =
-  | { fase: 'mirando' }
-  | { fase: 'ubicando' }
-  | { fase: 'leyendo' }
-  | { fase: 'lista'; alertas: string[] }
-  | { fase: 'eligiendo_tipo'; motivo: string }
-  | { fase: 'eligiendo_opcion'; mensaje: string; opciones: { nombre: string; precio: string | null }[] }
-  | { fase: 'rechazada'; mensaje: string; detalle?: string }
+  | EstadoDeProceso
   | { fase: 'aceptada' }
-  | { fase: 'borrada'; antes: Estado }
+  /**
+   * Quitada por el asesor. `reanudar`: se quitó mientras se analizaba (P11), así que
+   * «Deshacer» no devuelve un estado viejo: la vuelve a la cola y se analiza de nuevo.
+   */
+  | { fase: 'borrada'; antes: Estado; reanudar?: boolean }
 
 export interface Captura {
   id: string
@@ -92,6 +90,11 @@ const ESPERA_BORRADO_MS = 6000
 export function enElAireCaptura(c: Pick<Captura, 'estado' | 'itemId'>): boolean {
   const f = c.estado.fase
   return f === 'mirando' || f === 'ubicando' || f === 'leyendo' || (f === 'eligiendo_opcion' && c.itemId !== null)
+}
+
+/** ¿Se está analizando? La × también vale aquí (P11): la lectura en vuelo se descarta. */
+export function enProceso(e: Estado): boolean {
+  return e.fase === 'mirando' || e.fase === 'ubicando' || e.fase === 'leyendo'
 }
 
 let contador = 0
@@ -150,84 +153,47 @@ export default function BandejaCapturas({
     }
   }, [cotizacionId, ubicador])
 
-  const leer = useCallback(async (id: string, itemId: string, dataUrl: string, enfoque: { nombre: string; precio: string | null } | null) => {
-    actualizar(id, { estado: { fase: 'leyendo' } })
-    let lectura: Awaited<ReturnType<typeof leerCasillaDeItem>>
-    try {
-      lectura = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, enfoque)
-    } catch {
-      // La acción se cayó (tiempo agotado, red). Antes la fila quedaba en «Leyendo…» para
-      // siempre, sin poder borrarse, y la opción vacía se quedaba en su bloque (COT-2026-0011).
-      lectura = { ok: false, codigo: 'ACCION_CAIDA', mensaje: 'No se pudo leer el pantallazo. Vuelve a pegarlo.' }
-    }
-    if (!lectura.ok) {
-      if (!enfoque && (lectura.opciones ?? []).length > 0) {
-        actualizar(id, { estado: { fase: 'eligiendo_opcion', mensaje: lectura.mensaje, opciones: lectura.opciones ?? [] }, abierta: true })
-        return
-      }
-      // La opción nació para esta captura: si la captura no sirve, se va con ella.
-      const retirada = await descartarOpcion(itemId)
-      actualizar(id, {
-        estado: { fase: 'rechazada', mensaje: lectura.mensaje, detalle: lectura.detalle },
-        itemId: retirada ? null : itemId,
-        leida: null,
-        error: retirada ? null : 'No se pudo retirar la opción vacía: bórrala en su bloque.',
-      })
-      router.refresh()
-      return
-    }
-    actualizar(id, { estado: { fase: 'lista', alertas: lectura.alertas }, leida: lectura.opcion ?? null })
-    router.refresh()
-  }, [actualizar, descartarOpcion, router])
+  /**
+   * Cada pasada de una captura lleva un turno. Quitarla (o volverla a la cola) cambia el
+   * turno, y la pasada vieja deja de ser vigente: lo que devuelva se descarta al llegar (P11).
+   */
+  const turnos = useRef(new Map<string, number>())
+  const nuevoTurno = useCallback((id: string) => {
+    const t = (turnos.current.get(id) ?? 0) + 1
+    turnos.current.set(id, t)
+    return t
+  }, [])
 
-  /** Crea la opción donde corresponde. Corre dentro de la fila: nunca dos a la vez. */
-  const ubicar = useCallback(async (id: string, captura: CapturaDetectada, ranuras: RanuraConLugar[]) => {
-    actualizar(id, { estado: { fase: 'ubicando' }, tipo: captura.tipo })
-    let u: Awaited<ReturnType<Ubicador['ubicar']>>
-    try {
-      u = await ubicador().ubicar(captura, ranuras)
-    } catch {
-      u = { ok: false, error: 'No se pudo ubicar el pantallazo. Vuelve a pegarlo.' }
+  /** Las acciones reales para una pasada de la captura `id`. */
+  const dependencias = useCallback((id: string, dataUrl: string): DependenciasDeProceso => {
+    const turno = turnos.current.get(id) ?? nuevoTurno(id)
+    return {
+      detectar: () => detectarCaptura(cotizacionId, dataUrl),
+      // `RanuraConLugar` y `RanuraExistente` son la misma forma vista desde dos módulos.
+      ubicar: (captura, ranuras) => ubicador().ubicar(captura, ranuras as RanuraConLugar[]),
+      leer: async (itemId, enfoque) => {
+        try {
+          return await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, enfoque)
+        } catch {
+          // La acción se cayó (tiempo agotado, red). Antes la fila quedaba en «Leyendo…» para
+          // siempre, sin poder borrarse, y la opción vacía se quedaba en su bloque (COT-2026-0011).
+          return { ok: false, mensaje: 'No se pudo leer el pantallazo. Vuelve a pegarlo.' }
+        }
+      },
+      descartar: descartarOpcion,
+      vigente: () => turnos.current.get(id) === turno,
+      informar: cambio => actualizar(id, cambio),
+      refrescar: () => router.refresh(),
     }
-    if (!u.ok) {
-      actualizar(id, { estado: { fase: 'rechazada', mensaje: u.error } })
-      return null
-    }
-    const etiqueta = u.etiqueta ?? definicionDeTipo(captura.tipo).label
-    actualizar(id, {
-      itemId: u.itemId,
-      etiqueta,
-      donde: u.como === 'hermana' ? `Otra opción de ${etiqueta}` : `${etiqueta} · nuevo`,
-    })
-    return u.itemId
-  }, [actualizar, ubicador])
+  }, [actualizar, cotizacionId, descartarOpcion, nuevoTurno, router, ubicador])
 
   const procesar = useCallback(async (id: string, dataUrl: string, tipoElegido?: TipoRanura) => {
-    let captura: CapturaDetectada
-    let ranuras: RanuraConLugar[] = []
-    if (tipoElegido) {
-      captura = { tipo: tipoElegido, lugar: null, origen: null, destino: null }
-    } else {
-      actualizar(id, { estado: { fase: 'mirando' } })
-      let r: Awaited<ReturnType<typeof detectarCaptura>>
-      try {
-        r = await detectarCaptura(cotizacionId, dataUrl)
-      } catch {
-        // Todavía no existe opción: con la acción caída basta con dejar elegir el tipo a mano.
-        r = { ok: false, codigo: 'LECTURA', mensaje: 'No se pudo mirar el pantallazo. Dinos qué es o vuelve a pegarlo.' }
-      }
-      if (!r.ok) {
-        actualizar(id, r.codigo === 'SIN_TIPO' || r.codigo === 'LECTURA'
-          ? { estado: { fase: 'eligiendo_tipo', motivo: r.mensaje }, abierta: true }
-          : { estado: { fase: 'rechazada', mensaje: r.mensaje } })
-        return
-      }
-      captura = { tipo: r.tipo, lugar: r.lugar, origen: r.origen, destino: r.destino }
-      ranuras = r.ranuras
-    }
-    const itemId = await ubicar(id, captura, ranuras)
-    if (itemId) await leer(id, itemId, dataUrl, null)
-  }, [actualizar, cotizacionId, leer, ubicar])
+    await procesarCaptura(dependencias(id, dataUrl), tipoElegido)
+  }, [dependencias])
+
+  const leer = useCallback(async (id: string, itemId: string, dataUrl: string, enfoque: { nombre: string; precio: string | null } | null) => {
+    await leerCaptura(dependencias(id, dataUrl), itemId, enfoque)
+  }, [dependencias])
 
   const agregar = useCallback((archivo: File) => {
     if (!archivo.type.startsWith('image/')) {
@@ -290,6 +256,17 @@ export default function BandejaCapturas({
   }, [enElAire])
 
   function borrar(c: Captura) {
+    if (enProceso(c.estado)) {
+      // Se quita a mitad del análisis (P11): la pasada en vuelo deja de ser vigente y, si ya
+      // había creado la opción, la borra ella misma al llegar. «Deshacer» la vuelve a la cola.
+      nuevoTurno(c.id)
+      actualizar(c.id, {
+        estado: { fase: 'borrada', antes: { fase: 'mirando' }, reanudar: true },
+        itemId: null, leida: null, donde: null, error: null, abierta: false,
+      })
+      if (c.itemId) void descartarOpcion(c.itemId).then(() => router.refresh())
+      return
+    }
     actualizar(c.id, { estado: { fase: 'borrada', antes: c.estado }, abierta: false })
     if (!c.itemId) return
     const itemId = c.itemId
@@ -304,7 +281,15 @@ export default function BandejaCapturas({
     const b = borrados.current.get(c.id)
     if (b) clearTimeout(b.reloj)
     borrados.current.delete(c.id)
-    if (c.estado.fase === 'borrada') actualizar(c.id, { estado: c.estado.antes })
+    if (c.estado.fase !== 'borrada') return
+    if (c.estado.reanudar) {
+      // Vuelve a la cola: se analiza de nuevo desde cero, con un turno propio.
+      nuevoTurno(c.id)
+      actualizar(c.id, { estado: { fase: 'mirando' } })
+      void procesar(c.id, c.dataUrl)
+      return
+    }
+    actualizar(c.id, { estado: c.estado.antes })
   }
 
   async function aceptar(c: Captura) {
@@ -430,7 +415,7 @@ export function FilaCaptura({
   if (c.estado.fase === 'borrada') {
     return (
       <li className="flex items-center justify-between gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[11px] text-[#6B7280]">
-        <span>Borrada</span>
+        <span>{c.estado.reanudar ? 'Quitada · se dejó de analizar' : 'Borrada'}</span>
         <button type="button" onClick={onDeshacer} className="font-medium text-primary underline underline-offset-2">
           Deshacer
         </button>
@@ -494,9 +479,9 @@ export function FilaCaptura({
         <button
           type="button"
           onClick={onBorrar}
-          disabled={trabajando}
-          aria-label="Borrar esta captura"
-          className="shrink-0 rounded p-1 text-[#6B7280] hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          aria-label={trabajando ? 'Quitar esta captura (se deja de analizar)' : 'Borrar esta captura'}
+          data-quitar-captura
+          className="shrink-0 rounded p-1 text-[#6B7280] hover:bg-red-50 hover:text-red-600"
         >
           <X className="h-3.5 w-3.5" />
         </button>
