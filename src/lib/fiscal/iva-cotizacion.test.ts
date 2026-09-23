@@ -12,6 +12,7 @@ import {
   CONFIG_IVA_POR_DEFECTO,
   clienteParaRetenciones,
   fiscalSobreIngresoPropio,
+  ivaIncluidoEnElPrecio,
   ivaSobreIngresoPropio,
   leerConfigIvaCotizacion,
   lineasParaIva,
@@ -223,5 +224,135 @@ describe('el resultado fiscal', () => {
 
   it('la frase del documento', () => {
     expect(textoIvaIncluido(190_000, n => `$${n}`)).toBe('Incluye IVA de $190000 sobre la tarifa de servicio de la agencia.')
+  })
+})
+
+/**
+ * Adenda del 23-sep: Edgar cotiza con el IVA ADENTRO del precio. El total que ve el cliente
+ * es el de la cascada, sin sumarle nada; el IVA se EXTRAE del ingreso propio (19/119).
+ */
+describe('el IVA dentro del precio (precio: iva_incluido)', () => {
+  const AL_19_ADENTRO = { tarifaPct: 19, precio: 'iva_incluido' as const }
+
+  it('sin la llave, el IVA va aparte: lo del #830', () => {
+    expect(CONFIG_IVA_POR_DEFECTO.precio).toBe('iva_aparte')
+    expect(leerConfigIvaCotizacion({ iva_cotizacion: { base: 'ingreso_propio' } }).precio).toBe('iva_aparte')
+    expect(ivaIncluidoEnElPrecio(leerConfigIvaCotizacion({ iva_cotizacion: { base: 'ingreso_propio' } }))).toBe(false)
+    expect(ivaIncluidoEnElPrecio(null)).toBe(false)
+  })
+
+  it('solo el valor exacto lo mete adentro', () => {
+    const leer = (precio: unknown) => leerConfigIvaCotizacion({ iva_cotizacion: { base: 'ingreso_propio', precio } }).precio
+    expect(leer('iva_incluido')).toBe('iva_incluido')
+    expect(leer('IVA_INCLUIDO')).toBe('iva_aparte')
+    expect(leer('incluido')).toBe('iva_aparte')
+    expect(leer(true)).toBe('iva_aparte')
+    expect(leer('iva_aparte')).toBe('iva_aparte')
+  })
+
+  it('el ejemplo del brief: $1 M de ingreso propio lleva $159.664 de IVA adentro', () => {
+    const liq = liquidarIva([linea('paquete', 10_000_000, 9_000_000)], AL_19_ADENTRO)
+    expect(liq.iva).toBe(159_664) // 1.000.000 × 19 / 119
+    expect(liq.baseGravable).toBe(840_336) // lo demás del ingreso propio
+    expect(liq.baseGravable + liq.iva).toBe(1_000_000)
+    expect(liq.precio).toBe('iva_incluido')
+  })
+
+  it('COT-2026-0002: $369.818 de IVA dentro de $2.316.229 de ingreso propio', () => {
+    const liq = liquidarIva([
+      linea('latam bog-mco', 13_301_621, 11_306_378),
+      linea('prueba hotel decameron', 2_139_905, 1_818_919),
+      linea('prueba hotel cancun', 0, 0),
+    ], AL_19_ADENTRO)
+    expect(liq.lineas.map(l => l.iva)).toEqual([318_568, 51_250, 0])
+    expect(liq.iva).toBe(369_818)
+    expect(liq.baseGravable).toBe(1_946_411)
+    // El 19/119 del ingreso propio, salvo el redondeo por línea.
+    expect(Math.abs(liq.iva - 2_316_229 * 19 / 119)).toBeLessThan(1)
+  })
+
+  it('COT-2026-0006: $267.686 de IVA dentro de $1.676.558 de ingreso propio', () => {
+    const liq = liquidarIva([
+      linea('avianca bog-adz', 7_303_878, 6_208_296),
+      linea('satena adz-providencia', 3_873_172, 3_292_196),
+    ], AL_19_ADENTRO)
+    expect(liq.lineas.map(l => l.iva)).toEqual([174_925, 92_761])
+    expect(liq.iva).toBe(267_686)
+    expect(liq.baseGravable).toBe(1_408_872)
+  })
+
+  it('con iva_aparte declarado la cuenta es idéntica a la de sin llave', () => {
+    const lineas = [
+      linea('latam bog-mco', 13_301_621, 11_306_378),
+      linea('servicio', 300_000, 100_000, { baseDeclarada: 'valor_completo' }),
+      linea('vuelo', 1_000_000, 900_000, { precioAdicionales: 150_000, costoAdicionales: 100_000 }),
+    ]
+    expect(liquidarIva(lineas, { tarifaPct: 19, precio: 'iva_aparte' })).toEqual(liquidarIva(lineas, AL_19))
+  })
+
+  it('los adicionales también llevan su IVA adentro, aparte de la línea', () => {
+    const liq = liquidarIva([linea('vuelo', 1_000_000, 900_000, { precioAdicionales: 150_000, costoAdicionales: 100_000 })], AL_19_ADENTRO)
+    expect(liq.lineas[0].ivaBase).toBe(15_966) // 100.000 × 19/119
+    expect(liq.lineas[0].ivaAdicionales).toBe(7_983) // 50.000 × 19/119
+    expect(liq.baseGravable).toBe(150_000 - 23_949)
+  })
+
+  it('sin responsable de IVA no hay nada que sacar', () => {
+    const liq = liquidarIva([linea('a', 10_000_000, 9_000_000)], { tarifaPct: 0, precio: 'iva_incluido' })
+    expect(liq.iva).toBe(0)
+    expect(liq.baseGravable).toBe(1_000_000)
+  })
+
+  const perfil = {
+    person_type: 'persona_juridica',
+    tax_regime: 'ordinario',
+    iva_responsible: true,
+    is_declarante: true,
+    self_withholder: false,
+    ica_city: '',
+  } as unknown as FiscalProfile
+
+  it('el total que paga el cliente es el subtotal, sin sumarle el IVA', () => {
+    const liq = liquidarIva([linea('paquete', 10_000_000, 9_000_000)], AL_19_ADENTRO)
+    const f = fiscalSobreIngresoPropio({ subtotal: 10_000_000, liquidacion: liq, perfil, cliente: clienteParaRetenciones({ tipo_persona: 'natural' }) })
+    expect(f.iva).toBe(159_664)
+    expect(f.totalBruto).toBe(10_000_000)
+    expect(f.teQueda).toBe(10_000_000)
+  })
+
+  it('las retenciones van sobre la base neta de IVA', () => {
+    const cliente = clienteParaRetenciones({ tipo_persona: 'juridica', agente_retenedor: true })
+    const adentro = fiscalSobreIngresoPropio({
+      subtotal: 10_000_000,
+      liquidacion: liquidarIva([linea('paquete', 10_000_000, 9_000_000)], AL_19_ADENTRO),
+      perfil,
+      cliente,
+    })
+    // Control: la misma base neta ($840.336) liquidada con el IVA aparte.
+    const control = fiscalSobreIngresoPropio({
+      subtotal: 9_840_336,
+      liquidacion: liquidarIva([linea('paquete', 9_840_336, 9_000_000)], AL_19),
+      perfil,
+      cliente,
+    })
+    expect(adentro.reteFuente).toBe(control.reteFuente)
+    expect(adentro.reteFuente).toBeLessThan(40_000) // no sobre el millón entero
+    expect(adentro.reteFuente).toBeGreaterThan(0)
+  })
+
+  it('el resumen del editor: el cliente paga la cotización y de ahí sale el IVA', () => {
+    const cliente = { person_type: 'persona_natural', tax_regime: 'ordinario', agente_retenedor: false, gran_contribuyente: false } as unknown as Client
+    const r = generarResumenFiscal(perfil, cliente, 15_441_526, 13_125_297, { iva: 369_818, baseGravable: 1_946_411, incluido: true })
+    expect(r.iva).toBe(369_818)
+    expect(r.total_paga_cliente).toBe(15_441_526)
+    expect(r.iva_trasladado).toBe(369_818)
+    expect(r.neto_recibido).toBe(15_441_526 - 369_818)
+  })
+
+  it('el resumen del editor con incluido: false es el del #830', () => {
+    const cliente = { person_type: 'persona_natural', tax_regime: 'ordinario', agente_retenedor: false, gran_contribuyente: false } as unknown as Client
+    const aparte = generarResumenFiscal(perfil, cliente, 15_441_526, 13_125_297, { iva: 440_083, baseGravable: 2_316_229, incluido: false })
+    const sinLlave = generarResumenFiscal(perfil, cliente, 15_441_526, 13_125_297, { iva: 440_083, baseGravable: 2_316_229 })
+    expect(aparte).toEqual(sinLlave)
   })
 })

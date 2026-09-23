@@ -75,7 +75,9 @@ const TRASLADO_SIN_COSTO = {
   margen_porcentaje: null, precio_manual: true, rubros: [], grupo: null, opcion_de: null,
 }
 
-const EN_INGRESO_PROPIO = { base: 'ingreso_propio', enDocumento: 'linea_incluida' } as const
+const EN_INGRESO_PROPIO = { base: 'ingreso_propio', enDocumento: 'linea_incluida', precio: 'iva_aparte' } as const
+/** La configuración de Trappvel desde la adenda del 23-sep: el IVA va DENTRO del precio. */
+const IVA_ADENTRO = { base: 'ingreso_propio', enDocumento: 'linea_incluida', precio: 'iva_incluido' } as const
 
 function pintar(items: unknown[], configIva: unknown = undefined) {
   return renderToStaticMarkup(
@@ -130,6 +132,33 @@ describe('el resumen del editor con el IVA sobre el ingreso propio', () => {
     expect(texto).toContain('IVA sin calcular: falta el costo')
     expect(texto).toContain('La línea «TRASLADO AEROPUERTO» tiene precio y no tiene costo')
     expect(texto).toContain('El PDF sale como borrador hasta entonces.')
+  })
+})
+
+describe('con el IVA dentro del precio (adenda del 23-sep)', () => {
+  it('el cliente paga la cotización tal cual y el IVA sale de lo que gana la agencia', () => {
+    const texto = sinEtiquetas(pintar([VUELO], IVA_ADENTRO))
+    // Ingreso propio $176.471; adentro van 176.471 × 19/119 = $28.176.
+    expect(texto).toContain('EL CLIENTE TE FACTURA Y PAGA $ 1.176.471')
+    expect(texto).toContain('Tu cotización, con el IVA adentro')
+    expect(texto).toContain('Incluye IVA sobre la tarifa de la agencia $ 28.176')
+    // Nada se suma encima: ni el IVA aparte ni el total con IVA.
+    expect(texto).not.toContain('+$ 28.176')
+    expect(texto).not.toContain('+$ 33.529')
+    expect(texto).not.toContain('1.204.647')
+    expect(texto).not.toContain('1.210.000')
+  })
+
+  it('«tú recibes» muestra que ese IVA sale del ingreso propio y va a la DIAN', () => {
+    const texto = sinEtiquetas(pintar([VUELO], IVA_ADENTRO))
+    expect(texto).toContain('De tu ingreso propio, IVA que le entregas a la DIAN -$ 28.176')
+    // Te queda: 1.176.471 − 28.176.
+    expect(texto).toContain('TE QUEDA EN CAJA $ 1.148.295')
+  })
+
+  it('la línea dice que su IVA va incluido', () => {
+    expect(sinEtiquetas(pintar([VUELO], IVA_ADENTRO))).toContain('· $ 28.176 incluido')
+    expect(sinEtiquetas(pintar([VUELO], EN_INGRESO_PROPIO))).not.toContain('incluido')
   })
 })
 

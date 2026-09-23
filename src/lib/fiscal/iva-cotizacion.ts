@@ -14,6 +14,11 @@
  *
  *  · `config_extra.iva_cotizacion.base` del WORKSPACE: `valor_completo` (lo de siempre,
  *    el defecto de todos) o `ingreso_propio`.
+ *  · `config_extra.iva_cotizacion.precio` del WORKSPACE, solo con la base encendida:
+ *      - `iva_aparte` (el defecto): el IVA se SUMA encima del precio de la cascada.
+ *      - `iva_incluido`: el precio de la cascada YA trae el IVA. El total no se mueve y
+ *        el IVA se EXTRAE del ingreso propio: iva = gravable × t / (100 + t). Es como
+ *        cotiza Trappvel (Edgar, 2026-09-23: «ya va incluido en el precio»).
  *  · `items.base_iva` de cada LÍNEA, cuando la línea no sigue al workspace:
  *      - `ingreso_propio`: la línea se vende a nombre de un tercero; el IVA va sobre
  *        precio − lo que se le paga al tercero. Es el defecto con la base encendida.
@@ -56,15 +61,25 @@ export const BASES_IVA_LINEA: readonly BaseIvaLinea[] = ['ingreso_propio', 'valo
 /** Cómo sale el IVA en el documento del cliente. Lo decide Edgar, no Felipe. */
 export type IvaEnDocumento = 'linea_incluida' | 'oculto'
 
+/**
+ * Si el IVA va ENCIMA del precio de la cascada o ya viene ADENTRO. Lo decide Edgar.
+ *
+ * Con `iva_incluido` lo que el cliente paga es exactamente el precio de la cascada, y el
+ * IVA sale de lo que gana la agencia. Con `iva_aparte` el cliente paga el precio más el IVA.
+ */
+export type PrecioConIva = 'iva_aparte' | 'iva_incluido'
+
 export interface ConfigIvaCotizacion {
   base: 'valor_completo' | 'ingreso_propio'
   enDocumento: IvaEnDocumento
+  precio: PrecioConIva
 }
 
 /** Lo de siempre: IVA sobre el total. Es lo que recibe todo workspace que no declare nada. */
 export const CONFIG_IVA_POR_DEFECTO: ConfigIvaCotizacion = {
   base: 'valor_completo',
   enDocumento: 'linea_incluida',
+  precio: 'iva_aparte',
 }
 
 export function esBaseIvaLinea(valor: unknown): valor is BaseIvaLinea {
@@ -82,16 +97,26 @@ export function leerConfigIvaCotizacion(configExtra: unknown): ConfigIvaCotizaci
   const cfg = (configExtra ?? null) as { iva_cotizacion?: unknown } | null
   const iva = cfg && typeof cfg === 'object' ? cfg.iva_cotizacion : null
   if (!iva || typeof iva !== 'object') return CONFIG_IVA_POR_DEFECTO
-  const { base, en_documento } = iva as { base?: unknown; en_documento?: unknown }
+  const { base, en_documento, precio } = iva as { base?: unknown; en_documento?: unknown; precio?: unknown }
   return {
     base: base === 'ingreso_propio' ? 'ingreso_propio' : 'valor_completo',
     enDocumento: en_documento === 'oculto' ? 'oculto' : 'linea_incluida',
+    // Sin la llave, lo del #830: el IVA encima. Solo el valor exacto lo mete adentro.
+    precio: precio === 'iva_incluido' ? 'iva_incluido' : 'iva_aparte',
   }
 }
 
 /** ¿La cotización liquida el IVA por línea, sobre el ingreso propio? */
 export function ivaSobreIngresoPropio(config: ConfigIvaCotizacion): boolean {
   return config.base === 'ingreso_propio'
+}
+
+/**
+ * ¿El precio de la cascada ya trae el IVA adentro? Tolera una config sin `precio` (armada a
+ * mano, o de antes de la llave): cae a `iva_aparte`, lo del #830.
+ */
+export function ivaIncluidoEnElPrecio(config: Pick<ConfigIvaCotizacion, 'precio'> | null | undefined): boolean {
+  return config?.precio === 'iva_incluido'
 }
 
 /**
@@ -130,7 +155,10 @@ export interface IvaDeLinea {
   id: string
   nombre: string | null
   base: BaseIvaLinea
-  /** Lo que queda gravado, antes de la tarifa. */
+  /**
+   * Lo que queda gravado, sin el IVA. Con `iva_aparte` es el ingreso propio entero; con
+   * `iva_incluido` es el ingreso propio MENOS el IVA que trae adentro.
+   */
   baseGravable: number
   /** IVA sobre la parte base de la línea. */
   ivaBase: number
@@ -146,6 +174,8 @@ export interface LiquidacionIva {
   lineas: IvaDeLinea[]
   baseGravable: number
   iva: number
+  /** Cómo se liquidó: encima del precio o extraído de él. Lo leen el resultado fiscal y el PDF. */
+  precio: PrecioConIva
   /** Las líneas sin costo medible, por nombre. Vacío = el IVA es completo. */
   sinCosto: string[]
   /** `false` si alguna línea no tiene costo: el IVA de arriba le falta esa parte. */
@@ -163,14 +193,25 @@ function redondear(n: number): number {
  * El descuento comercial se aplica a cada línea en proporción a su precio, que es como
  * lo aplica la cascada al total: la parte del tercero no se descuenta —el tercero cobra
  * lo suyo—, así que el descuento sale del ingreso propio.
+ *
+ * `precio` decide la cuenta, con el mismo gravable en los dos casos:
+ *  · `iva_aparte` (defecto): iva = gravable × t / 100. El gravable es la base.
+ *  · `iva_incluido`: el gravable YA trae el IVA. iva = gravable × t / (100 + t) y la base
+ *    es el gravable menos ese IVA. Con t = 19, el IVA es 19/119 del ingreso propio.
  */
 export function liquidarIva(
   lineas: readonly LineaParaIva[],
-  opciones: { tarifaPct: number; descuentoComercialPct?: number | null },
+  opciones: { tarifaPct: number; descuentoComercialPct?: number | null; precio?: PrecioConIva | null },
 ): LiquidacionIva {
   const tarifa = Math.max(0, Number(opciones.tarifaPct) || 0)
   const desc = Math.min(100, Math.max(0, Number(opciones.descuentoComercialPct) || 0))
   const factor = 1 - desc / 100
+  const precioConIva: PrecioConIva = opciones.precio === 'iva_incluido' ? 'iva_incluido' : 'iva_aparte'
+  // El IVA de un gravable. Adentro, la base es 100 y el gravable 100 + t. ⚠️ Aparte se
+  // conserva la aritmética exacta del #830 (`g × t / 100`): multiplicar por `t / 100` ya
+  // redondeado puede mover un peso en un gravable que cae justo en ,5.
+  const ivaDeGravable = (g: number) =>
+    precioConIva === 'iva_incluido' ? (g * tarifa) / (100 + tarifa) : (g * tarifa) / 100
 
   const resultado: IvaDeLinea[] = []
   for (const l of lineas) {
@@ -194,16 +235,19 @@ export function liquidarIva(
     }
     // `sin_iva`: todo en cero. La línea comisionable no le cobra IVA al viajero.
 
-    const ivaBase = redondear((gravableBase * tarifa) / 100)
-    const ivaAdicionales = redondear((gravableAdic * tarifa) / 100)
+    const ivaBase = redondear(ivaDeGravable(gravableBase))
+    const ivaAdicionales = redondear(ivaDeGravable(gravableAdic))
+    const iva = ivaBase + ivaAdicionales
+    const gravable = redondear(gravableBase + gravableAdic)
     resultado.push({
       id: l.id,
       nombre: l.nombre,
       base,
-      baseGravable: redondear(gravableBase + gravableAdic),
+      // Adentro, el IVA sale del ingreso propio: lo que queda gravado es lo demás.
+      baseGravable: precioConIva === 'iva_incluido' ? gravable - iva : gravable,
       ivaBase,
       ivaAdicionales,
-      iva: ivaBase + ivaAdicionales,
+      iva,
       sinCosto,
     })
   }
@@ -216,6 +260,7 @@ export function liquidarIva(
     sinCosto,
     calculable: sinCosto.length === 0,
     tarifaPct: tarifa,
+    precio: precioConIva,
   }
 }
 
@@ -269,7 +314,11 @@ export function lineasParaIva(
  *
  * Misma forma que `calcularFiscal` (lo que ya reciben el PDF y el servicio externo). Las
  * retenciones van sobre la MISMA base que el IVA (Felipe, punto 5): un cliente empresa
- * retiene sobre la remuneración de la agencia, no sobre lo recibido para terceros.
+ * retiene sobre la remuneración de la agencia, no sobre lo recibido para terceros. Con el
+ * IVA adentro esa base ya viene neta de IVA (`baseGravable` de la liquidación).
+ *
+ * El total depende de cómo se liquidó: con `iva_aparte` es el subtotal MÁS el IVA; con
+ * `iva_incluido` es el subtotal a secas, porque el IVA ya está dentro del precio.
  */
 export function fiscalSobreIngresoPropio(args: {
   subtotal: number
@@ -283,7 +332,7 @@ export function fiscalSobreIngresoPropio(args: {
   const ret = perfil
     ? calcularRetenciones(perfil, cliente, liquidacion.baseGravable, iva)
     : { retefuente_pct: 0, retefuente_valor: 0, reteica_pct: 0, reteica_valor: 0, reteiva_pct: 0, reteiva_valor: 0, total_retenciones: 0 }
-  const totalBruto = subtotal + iva
+  const totalBruto = liquidacion.precio === 'iva_incluido' ? subtotal : subtotal + iva
   return {
     subtotal,
     iva,
@@ -340,6 +389,13 @@ export const ETIQUETA_BASE_IVA: Record<BaseIvaLinea, string> = {
   valor_completo: 'Servicio propio: IVA sobre el precio entero',
   sin_iva: 'Comisionable: sin IVA al viajero',
 }
+
+/**
+ * Por qué el PDF sale como borrador cuando el IVA va dentro del precio y la plantilla no lo
+ * sabe imprimir: su pie diría «Subtotal, IVA, TOTAL» con un IVA que el TOTAL no suma.
+ */
+export const MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA =
+  'Este workspace cotiza con el IVA dentro del precio y la plantilla del documento no lo sabe imprimir: mostraría un IVA que el TOTAL no suma.'
 
 /** Lo que dice el editor en una línea sin costo. */
 export const TEXTO_IVA_SIN_CALCULAR = 'IVA sin calcular: falta el costo'

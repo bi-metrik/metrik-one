@@ -100,6 +100,7 @@ import { generarResumenFiscal } from '@/lib/fiscal/calculos-fiscales'
 import {
   CONFIG_IVA_POR_DEFECTO,
   esBaseIvaLinea,
+  ivaIncluidoEnElPrecio,
   ivaSobreIngresoPropio,
   lineasParaIva,
   liquidarIva,
@@ -696,8 +697,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
    * alternativas, que necesitan su marca); `ivaVigente`, lo que la cotización cobra hoy.
    *
    * Con la base apagada las dos quedan en `null` y el resumen fiscal es el de siempre.
+   *
+   * `ivaAdentro`: el workspace cotiza con el IVA DENTRO del precio (`precio: 'iva_incluido'`).
+   * El cliente paga lo mismo; el IVA se saca de lo que gana la agencia en vez de sumarse.
    */
-  const conIvaSobreIngresoPropio = ivaSobreIngresoPropio(configIva ?? CONFIG_IVA_POR_DEFECTO)
+  const configIvaEfectiva = configIva ?? CONFIG_IVA_POR_DEFECTO
+  const conIvaSobreIngresoPropio = ivaSobreIngresoPropio(configIvaEfectiva)
+  const ivaAdentro = conIvaSobreIngresoPropio && ivaIncluidoEnElPrecio(configIvaEfectiva)
   const recargoId = conIvaSobreIngresoPropio
     ? lineaDeRecargo(initialItems.map(i => ({ id: i.id, nombre: i.nombre, es_ajuste: i.es_ajuste ?? false })), politicaRecargo)?.id ?? null
     : null
@@ -714,6 +720,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const opcionesIva = {
     tarifaPct: tarifaIvaDelVendedor(fiscalProfile),
     descuentoComercialPct: cotizacion.descuento_porcentaje,
+    precio: configIvaEfectiva.precio,
   }
   const ivaPorLinea = conIvaSobreIngresoPropio
     ? new Map(liquidarIva(lineasParaIva(cascada.lineas, metaIva), opcionesIva).lineas.map(l => [l.id, l]))
@@ -1710,7 +1717,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 <span>{ivaLinea ? ETIQUETA_BASE_IVA[ivaLinea.base] : ''}</span>
                               )}
                               {ivaLinea && !ivaLinea.sinCosto && (
-                                <span className="tabular-nums text-muted-foreground">· {formatCOP(ivaLinea.iva)}</span>
+                                <span className="tabular-nums text-muted-foreground">· {formatCOP(ivaLinea.iva)}{ivaAdentro ? ' incluido' : ''}</span>
                               )}
                               {ivaLinea?.sinCosto && (
                                 <span className="font-medium text-amber-700">· {TEXTO_IVA_SIN_CALCULAR}</span>
@@ -2545,12 +2552,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             // Con el IVA sobre el ingreso propio, el IVA ya viene liquidado por línea (el
             // mismo que imprime el PDF y fija «Aprobar») y las retenciones van sobre la
             // misma base. Sin esa configuración, lo de siempre: IVA sobre el total.
+            // Con el IVA ADENTRO el cliente paga la cotización tal cual y el IVA sale de ahí.
             const resumen = generarResumenFiscal(
               fiscalProfile as FiscalProfile,
               clientFiscal as unknown as Client,
               valor,
               costoTotal,
-              ivaVigente ? { iva: ivaVigente.iva, baseGravable: ivaVigente.baseGravable } : undefined,
+              ivaVigente
+                ? { iva: ivaVigente.iva, baseGravable: ivaVigente.baseGravable, incluido: ivaAdentro }
+                : undefined,
             )
             // De la factura a la plata que de verdad queda, renglón por renglón. Antes
             // "tú recibes" repetía la cifra de "el cliente paga" porque contaba el IVA
@@ -2563,10 +2573,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <p className="text-center text-lg font-bold text-blue-700">{formatCOP(resumen.total_paga_cliente)}</p>
                   {resumen.iva > 0 && (
                     <div className="mt-1 space-y-0.5 text-[10px] text-blue-600">
-                      <div className="flex justify-between"><span>Tu cotización</span><span className="tabular-nums">{formatCOP(valor)}</span></div>
                       <div className="flex justify-between">
-                        <span>{ivaVigente ? 'IVA sobre la tarifa de la agencia' : 'IVA que le cobras'}</span>
-                        <span className="tabular-nums">+{formatCOP(resumen.iva)}</span>
+                        <span>{ivaAdentro ? 'Tu cotización, con el IVA adentro' : 'Tu cotización'}</span>
+                        <span className="tabular-nums">{formatCOP(valor)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>{ivaAdentro ? 'Incluye IVA sobre la tarifa de la agencia' : ivaVigente ? 'IVA sobre la tarifa de la agencia' : 'IVA que le cobras'}</span>
+                        <span className="tabular-nums">{ivaAdentro ? '' : '+'}{formatCOP(resumen.iva)}</span>
                       </div>
                     </div>
                   )}
@@ -2584,7 +2597,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <div className="space-y-0.5 text-[10px] text-amber-700">
                     {resumen.iva_trasladado > 0 && (
                       <div className="flex justify-between">
-                        <span>IVA: se lo entregas a la DIAN</span>
+                        <span>{ivaAdentro ? 'De tu ingreso propio, IVA que le entregas a la DIAN' : 'IVA: se lo entregas a la DIAN'}</span>
                         <span className="tabular-nums">-{formatCOP(resumen.iva_trasladado)}</span>
                       </div>
                     )}

@@ -366,11 +366,15 @@ export function generarResumenFiscal(
    * produjo. Ausente = el IVA va sobre `precioFinal`, que es lo de siempre y lo que recibe
    * todo workspace que no declare la base nueva. Las retenciones van sobre la MISMA base
    * que el IVA.
+   *
+   * `incluido` = el IVA ya viene DENTRO de `precioFinal` (`precio: 'iva_incluido'`): el
+   * cliente paga `precioFinal` a secas, y de eso el IVA se le entrega a la DIAN.
    */
-  ivaLiquidado?: { iva: number; baseGravable: number }
+  ivaLiquidado?: { iva: number; baseGravable: number; incluido?: boolean }
 ): ResumenFiscal {
+  const ivaAdentro = ivaLiquidado?.incluido === true
   const iva = ivaLiquidado
-    ? { iva_valor: ivaLiquidado.iva, total_con_iva: precioFinal + ivaLiquidado.iva }
+    ? { iva_valor: ivaLiquidado.iva, total_con_iva: ivaAdentro ? precioFinal : precioFinal + ivaLiquidado.iva }
     : calcularIVA(perfil, precioFinal)
   const totalPagaCliente = iva.total_con_iva
   const retenciones = calcularRetenciones(
@@ -379,12 +383,15 @@ export function generarResumenFiscal(
     ivaLiquidado ? ivaLiquidado.baseGravable : precioFinal,
     iva.iva_valor,
   )
+  // Lo que de verdad es de la agencia antes de retenciones. Con el IVA encima es el precio;
+  // con el IVA adentro, el precio menos ese IVA, que también se le entrega a la DIAN.
+  const ingresoSinIva = ivaAdentro ? precioFinal - iva.iva_valor : precioFinal
   // El IVA lo recaudas para la DIAN: entra a la cuenta y vuelve a salir. Contarlo
   // como ingreso propio inflaba "tú recibes" hasta igualar "el cliente paga" y
   // subía el margen neto por encima del margen real de la cotización.
   // El reteIVA tampoco se resta aquí: es un adelanto contra ese mismo IVA ajeno.
-  const netoRecibido = precioFinal - retenciones.retefuente_valor - retenciones.reteica_valor
-  const seguridadSocial = calcularSeguridadSocial(precioFinal, perfil.person_type)
+  const netoRecibido = ingresoSinIva - retenciones.retefuente_valor - retenciones.reteica_valor
+  const seguridadSocial = calcularSeguridadSocial(ingresoSinIva, perfil.person_type)
   const gananciaReal = netoRecibido - costoTotal - seguridadSocial
   const margenRealNeto = precioFinal > 0
     ? (gananciaReal / precioFinal) * 100
