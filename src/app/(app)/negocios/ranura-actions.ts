@@ -19,7 +19,8 @@ import {
   siguienteNumeroDeTipo,
   type TipoRanura,
 } from '@/lib/cotizaciones/ranuras-cotizacion'
-import { asignarRanura, crearRanura, ranuraDelGrupo } from '@/lib/cotizaciones/ranuras-datos'
+import { asignarRanura, crearRanura, ranuraDelGrupo, retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
+import { desmarcarLosQueYaNoPueden } from '@/lib/cotizaciones/itinerarios-datos'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
@@ -215,6 +216,39 @@ export async function agregarOpcionARanura(
 
   revalidar(c.cotizacion)
   return { success: true, itemId: creada.id, grupo: clave }
+}
+
+/**
+ * Borra una ranura ENTERA: todas sus opciones, y con ellas sus adicionales y sus vínculos a
+ * tarifas (los dos por `on delete cascade`) — P12 del caso Providencia.
+ *
+ * Es el mismo borrado que `deleteItem` hace opción por opción, en una sola pasada: primero las
+ * líneas, después se desmarcan las tarifas de la propuesta que quedaron incompletas (una
+ * tarifa sin su vuelo no puede llegarle al cliente) y por último se retira la fila de la
+ * ranura. Solo toca líneas de ESTA cotización y de ESTE grupo; el ajuste nunca.
+ */
+export async function eliminarRanura(
+  cotizacionId: string,
+  grupo: string,
+): Promise<{ success: true; borradas: number; desmarcadas: string[] } | { success: false; error: string }> {
+  const c = await contexto(cotizacionId)
+  if ('error' in c) return { success: false, error: c.error }
+
+  const clave = normalizarGrupo(grupo)
+  if (!clave || !formaDesdeGrupo(clave)) return { success: false, error: 'Esa no es una ranura de esta cotización' }
+  const opciones = c.items.filter(i => normalizarGrupo(i.grupo as string | null) === clave && i.es_ajuste !== true)
+  if (opciones.length === 0) return { success: true, borradas: 0, desmarcadas: [] }
+
+  const ids = opciones.map(o => o.id as string)
+  const { error } = await c.supabase.from('items').delete().in('id', ids).eq('cotizacion_id', cotizacionId)
+  if (error) return { success: false, error: (error.message as string) ?? 'No se pudo borrar el bloque' }
+
+  const desmarcados = await desmarcarLosQueYaNoPueden(c.supabase, cotizacionId)
+  const ranuraIds = [...new Set(opciones.map(o => o.ranura_id).filter((id): id is string => typeof id === 'string'))]
+  for (const id of ranuraIds) await retirarRanuraSiQuedoVacia(c.supabase, id)
+
+  revalidar(c.cotizacion)
+  return { success: true, borradas: ids.length, desmarcadas: desmarcados.map(d => d.nombre ?? 'Tarifa') }
 }
 
 export interface RanuraConLugar {

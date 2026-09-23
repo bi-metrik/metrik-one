@@ -1,10 +1,10 @@
 'use client'
 
-import { Fragment, useState, useTransition } from 'react'
+import { Fragment, useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
-  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, MoreHorizontal,
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, MoreHorizontal, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -46,9 +46,11 @@ import {
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
+import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
 import BandejaCapturas from '@/app/(app)/negocios/bandeja-capturas'
 import { estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
-import { crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
+import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
+import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
 import CostoManualItem from '@/app/(app)/negocios/costo-manual-item'
 import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
@@ -324,6 +326,9 @@ interface Props {
    */
   fechasViaje?: { inicio: string | null; fin: string | null } | null
 }
+
+/** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
+const ESPERA_DESHACER_MS = 6000
 
 export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
@@ -921,6 +926,81 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       alerta: t.casillas?.grupo_completo?.alertas?.[0] ?? null,
     }
   }
+  // P12 · borrar una opción o un bloque entero: sin diálogo y con «Deshacer». Lo borrado se
+  // esconde en el acto y se borra de verdad al vencer la ventana; si antes se sale de la
+  // cotización, se borra en ese momento (un borrado aceptado no se pierde por navegar).
+  const [ocultos, setOcultos] = useState<ReadonlySet<string>>(() => new Set())
+  const borradosEnEspera = useRef(new Map<string, { reloj: ReturnType<typeof setTimeout>; ejecutar: () => void }>())
+  useEffect(() => {
+    const enEspera = borradosEnEspera.current
+    return () => {
+      for (const { reloj, ejecutar } of enEspera.values()) { clearTimeout(reloj); ejecutar() }
+      enEspera.clear()
+    }
+  }, [])
+  const programarBorrado = (
+    clave: string,
+    itemIds: string[],
+    aviso: string,
+    borrar: () => Promise<{ ok: true } | { ok: false; error: string }>,
+  ) => {
+    if (borradosEnEspera.current.has(clave)) return
+    const mostrar = () => setOcultos(prev => {
+      const n = new Set(prev)
+      for (const id of itemIds) n.delete(id)
+      return n
+    })
+    setOcultos(prev => new Set([...prev, ...itemIds]))
+    const ejecutar = () => {
+      borradosEnEspera.current.delete(clave)
+      void borrar().then(r => {
+        if (!r.ok) {
+          toast.error(r.error)
+          mostrar()
+          return
+        }
+        router.refresh()
+      })
+    }
+    const reloj = setTimeout(ejecutar, ESPERA_DESHACER_MS)
+    borradosEnEspera.current.set(clave, { reloj, ejecutar })
+    toast(aviso, {
+      duration: ESPERA_DESHACER_MS,
+      action: {
+        label: 'Deshacer',
+        onClick: () => {
+          clearTimeout(reloj)
+          borradosEnEspera.current.delete(clave)
+          mostrar()
+        },
+      },
+    })
+  }
+  const tarifasDeLaCotizacion = itinerarios?.itinerarios ?? []
+  const eliminarOpcion = (item: ItemRow) => {
+    const marcadas = tarifasMarcadasCon(tarifasDeLaCotizacion, [item.id])
+    if (marcadas.length > 0 && !window.confirm(preguntaTarifaMarcada(marcadas, 'opcion'))) return
+    programarBorrado(`item:${item.id}`, [item.id], `Se borró «${item.nombre || 'la opción'}».`, async () => {
+      const res = await deleteItem(item.id)
+      if (!res.success) return { ok: false, error: res.error ?? 'No se pudo borrar la opción' }
+      await recalcularTotales(cotizacion.id)
+      return { ok: true }
+    })
+  }
+  const eliminarBloque = (bloque: { grupo: string | null; lineas: ItemRow[] }) => {
+    const grupo = bloque.grupo
+    if (!grupo) return
+    const opciones = bloque.lineas.filter(l => l.es_ajuste !== true && !ocultos.has(l.id))
+    if (opciones.length === 0) return
+    const marcadas = tarifasMarcadasCon(tarifasDeLaCotizacion, opciones.map(o => o.id))
+    if (marcadas.length > 0 && !window.confirm(preguntaTarifaMarcada(marcadas, 'bloque'))) return
+    programarBorrado(`bloque:${grupo}`, opciones.map(o => o.id), avisoDeBorradoDeBloque(opciones.map(estadoDeOpcion)), async () => {
+      const res = await eliminarRanura(cotizacion.id, grupo)
+      if (!res.success) return { ok: false, error: res.error }
+      await recalcularTotales(cotizacion.id)
+      return { ok: true }
+    })
+  }
   const estadosDeBloque: EstadoDeBloque[] = lineasPorTipo
     ? bloquesDeLineas
       .filter(b => b.grupo !== null)
@@ -1124,7 +1204,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {/* Items */}
       {bloquesDeLineas.map((bloque, indiceBloque) => {
         const enBloqueDeRanura = bloque.grupo !== null
-        const lineasDelBloque = bloque.lineas.map(item => {
+        const lineasVisibles = bloque.lineas.filter(l => !ocultos.has(l.id))
+        if (lineasVisibles.length === 0) return null
+        const lineasDelBloque = lineasVisibles.map(item => {
         const itemCantidad = Number(item.cantidad) || 1
         const itemPrecio = Number(item.precio_venta) || 0
         const itemDescPct = Number(item.descuento_porcentaje) || 0
@@ -2103,7 +2185,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         type="button"
                         role="menuitem"
                         disabled={isPending}
-                        onClick={() => { setMenuOpcionDe(null); handleDeleteItem(item.id) }}
+                        onClick={() => { setMenuOpcionDe(null); eliminarOpcion(item) }}
                         className="block w-full rounded px-2 py-1.5 text-left text-red-600 hover:bg-red-50 disabled:opacity-50"
                       >
                         Borrar
@@ -2267,6 +2349,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   className="rounded p-1 text-red-500 hover:bg-red-50"
                 >
                   <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+              {/* P12 · la opción de un bloque se borra desde su fila, sin abrirla y sin
+                  diálogo: el aviso ofrece «Deshacer». */}
+              {editable && !isAjuste && vistaDeOpcion && (
+                <button
+                  type="button"
+                  aria-label={`Eliminar opción ${item.nombre || ''}`.trim()}
+                  title="Eliminar opción"
+                  data-eliminar-opcion={item.id}
+                  onClick={e => { e.stopPropagation(); eliminarOpcion(item) }}
+                  className="rounded p-1 text-[#6B7280] hover:bg-red-50 hover:text-red-600"
+                >
+                  <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
@@ -2548,7 +2644,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         return (
           <BloqueRanura
             key={bloque.grupo}
-            bloque={{ grupo: bloque.grupo, etiqueta: bloque.etiqueta, tipo: bloque.tipo, opciones: bloque.lineas.length }}
+            bloque={{ grupo: bloque.grupo, etiqueta: bloque.etiqueta, tipo: bloque.tipo, opciones: lineasVisibles.length }}
             cotizacionId={cotizacion.id}
             editable={editable}
             destinoViaje={destinoViaje}
@@ -2556,6 +2652,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             titulo={tituloDeBloque(bloque, numeroDeVuelo.get(bloque.grupo ?? '') ?? null).titulo}
             estado={estadosDeBloque.find(e => e.grupo === bloque.grupo) ?? null}
             id={idDeBloque(bloque.grupo ?? '')}
+            onEliminar={editable ? () => eliminarBloque(bloque) : undefined}
           >
             {lineasDelBloque}
           </BloqueRanura>
@@ -3252,28 +3349,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               {jsxPanelMargen}
               {jsxIvaNota}
               {jsxFiscal}
-              <div className="flex flex-wrap gap-2">
-                {editable && (
-                  <button
-                    onClick={handleEnviar}
-                    disabled={isPending || motivoBotonEnviar !== null}
-                    title={motivoBotonEnviar ?? undefined}
-                    aria-describedby={motivoEnvio ? 'aviso-captura-desactualizada' : undefined}
-                    className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Send className="h-3 w-3" />
-                    Enviar
-                  </button>
-                )}
-                <button
-                  onClick={handleDescargarPDF}
-                  disabled={isPending}
-                  className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
-                >
-                  <FileDown className="h-3 w-3" />
-                  Descargar PDF
-                </button>
-              </div>
+              {/* P13 · Descargar a la izquierda, Enviar a la derecha; en el celular Enviar arriba. */}
+              <BotonesRevisar
+                editable={editable}
+                pendiente={isPending}
+                motivoParaNoEnviar={motivoBotonEnviar}
+                describedBy={motivoEnvio ? 'aviso-captura-desactualizada' : undefined}
+                onDescargar={handleDescargarPDF}
+                onEnviar={handleEnviar}
+              />
               {editable && motivoBotonEnviar && (
                 <p className="text-[11px] text-muted-foreground">{motivoBotonEnviar}</p>
               )}
