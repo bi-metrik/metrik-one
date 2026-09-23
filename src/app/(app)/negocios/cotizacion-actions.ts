@@ -16,6 +16,7 @@ import {
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { adjuntarAdicionales } from '@/lib/cotizaciones/adicionales'
 import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
+import { retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
@@ -482,11 +483,12 @@ export async function deleteItem(id: string) {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
-  // Fetch item details before deleting
+  // Fetch item details before deleting. `select('*')`: `ranura_id` la agrega
+  // `20260923233000`, y nombrarla devolvería un 400 mientras no esté aplicada.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: item } = await (supabase as any)
     .from('items')
-    .select('cotizacion_id, servicio_origen_id, subtotal, es_ajuste')
+    .select('*')
     .eq('id', id)
     .single()
 
@@ -557,6 +559,10 @@ export async function deleteItem(id: string) {
   // `items.opcion_de`: la ranura entera desaparece y los itinerarios vuelven a estar
   // completos sin ella. Es el desenlace correcto y no hace falta nada mas.
   const desmarcados = await desmarcarLosQueYaNoPueden(supabase, item.cotizacion_id)
+
+  // La ranura que se quedó sin opciones se retira: pintarla sería un bloque vacío de algo
+  // que el cliente ya no va a comprar. Con otras opciones vivas, se queda.
+  await retirarRanuraSiQuedoVacia(supabase, (item.ranura_id ?? null) as string | null)
 
   return { success: true, desmarcados }
 }

@@ -269,7 +269,17 @@ export default function TablaCombinaciones({
                 // que el botón no hizo nada.
                 const partes = [`${r.creadas} tarifa${r.creadas === 1 ? '' : 's'} nueva${r.creadas === 1 ? '' : 's'}`]
                 if (r.yaExistian) partes.push(`${r.yaExistian} ya estaban`)
-                toast.success(`${partes.join(', ')}. Elige una opción por ranura en cada una.`)
+                const marcadas = 'marcadas' in r ? r.marcadas ?? [] : []
+                toast.success(
+                  `${partes.join(', ')}, repartidas por precio: la más barata en la Económica y la más cara en la Premium. `
+                  + (marcadas.length > 0
+                    ? `En la propuesta: ${marcadas.join(', ')}. Desmarca la que no vaya.`
+                    : 'Revisa la elección de cada una.'),
+                )
+                // La que no pudo nacer marcada dice por qué, con su nombre.
+                for (const s of ('sinMarcar' in r ? r.sinMarcar ?? [] : [])) {
+                  toast.warning(`«${s.nombre}» no quedó en la propuesta: ${s.motivo}`)
+                }
                 router.refresh()
               })
             }
@@ -338,11 +348,13 @@ export default function TablaCombinaciones({
                         los decide el catálogo: dejarlos escribir fundiría dos ranuras.
                         ⚠️ Renombra la ranura ENTERA, no la línea: cambiar el grupo de una
                         sola variante la partiría en dos y el total se duplicaría. */}
-                    <div className="whitespace-nowrap">{r.prefijo}</div>
+                    {/* Un nombre que ya dice el tipo («Hotel en Cancún») no se repite debajo de
+                        «Hotel»: la etiqueta ES el nombre. */}
+                    {r.etiqueta !== r.nombre && <div className="whitespace-nowrap">{r.prefijo}</div>}
                     {editable && r.renombrable ? (
                       <input
                         value={nombresRanura[r.grupo] ?? r.nombre}
-                        placeholder="ponle nombre…"
+                        placeholder={r.sugerencia || 'Nombre de la ranura'}
                         aria-label={`Nombre de la ranura ${r.prefijo}`}
                         title={`Renombra «${r.prefijo}» completa: sus ${r.candidatos.length} opciones`}
                         onChange={e => setNombresRanura(n => ({ ...n, [r.grupo]: e.target.value }))}
