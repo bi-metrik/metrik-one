@@ -36,6 +36,7 @@ import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import type {
   FilaTipoPaxCruda,
   IconoEquipajeCrudo,
+  OpcionVista,
   LecturaCruda,
   VeredictoImagen,
 } from '@/lib/cotizaciones/lectura-pantallazo'
@@ -127,7 +128,32 @@ function camposDeLaLectura(ranura: DefinicionRanura) {
   return ranura.campos.filter(c => !c.aparte)
 }
 
-export function construirPrompt(ranura: DefinicionRanura): string {
+/**
+ * La opción que ya se eligió en una captura con varias (P8 del ensayo del 2026-09-23): la
+ * que la pantalla marca como seleccionada, o la que tocó la persona en «¿Cuál de estas?».
+ */
+export interface EnfoqueDeLectura {
+  nombre: string
+  precio: string | null
+}
+
+/**
+ * El bloque que se agrega al prompt cuando la opción YA está elegida. No se relaja la regla
+ * de no elegir: quien eligió es la pantalla o la persona, y el modelo solo lee esa fila.
+ */
+function bloqueDeEnfoque(enfoque: EnfoqueDeLectura): string {
+  return `OPCION YA ELEGIDA — ESTO MANDA SOBRE LA REGLA DE VARIAS OPCIONES. La pantalla muestra
+varias opciones y la persona que cotiza YA ELIGIO una:
+"${enfoque.nombre.replace(/"/g, "'")}"${enfoque.precio ? ` con precio ${enfoque.precio}` : ''}.
+No eres tu quien elige: la eleccion ya esta hecha. Por eso:
+- El veredicto es "detalle_unico" y "campos" describe SOLO esa opcion (su habitacion, su
+  regimen, sus condiciones, su precio). Lo comun a todas (el hotel, la ciudad, las fechas, la
+  ocupacion) se lee de la pantalla como siempre.
+- Solo si esa opcion NO aparece en la pantalla, responde "varias_opciones" y deja "campos" vacio.
+- En "opciones_vistas" sigue listando todas las que ves.`
+}
+
+export function construirPrompt(ranura: DefinicionRanura, enfoque: EnfoqueDeLectura | null = null): string {
   const campos = camposDeLaLectura(ranura)
     .map(c => `- ${c.slug} (${c.label}${c.min ? ', OBLIGATORIO' : ''}): ${c.descripcion_ai}`)
     .join('\n')
@@ -140,15 +166,23 @@ QUE NO SIRVE: ${ranura.queNoSirve}
 
 PASO 1 — LISTA LAS OPCIONES QUE SE VEN, ANTES DE EXTRAER NADA. En "opciones_vistas"
 devuelve una entrada por cada producto con SU PROPIO precio que aparece DIBUJADO en la
-imagen: { "nombre": el nombre tal como se ve, "precio": el precio tal como se ve }.
+imagen: { "nombre": el nombre tal como se ve, "precio": el precio tal como se ve,
+"seleccionada": true o false }.
 Tarjetas de hotel, filas de vuelos, habitaciones o tarifas entre las que habria que elegir.
+- "seleccionada" es true SOLO si la pantalla MARCA esa opcion como la elegida: un
+  "Seleccionada" o un check junto a ella, la fila resaltada como elegida, un radio o casilla
+  marcado. Un resumen o encabezado de la reserva ("1 x Suite · AD") NO es otra opcion: si
+  repite el nombre y el precio de una fila, esa fila es la seleccionada. Todo lo demas, false.
+- En "nombre" de una habitacion pon la habitacion Y su regimen tal como se ven
+  ("Suite Ocean View · Alojamiento y desayuno"): dos filas de la misma habitacion con
+  distinto regimen son dos opciones distintas.
 - Solo lo que SE VE. Un contador o un filtro como "2 Hoteles (de 267)" no es un producto
   visible: no inventes una entrada por el. Si solo se ve una tarjeta, hay una entrada.
 - Un precio TACHADO (el de antes de un descuento) no es otra opcion: va en la misma entrada.
 - Una tabla que separa el precio de UNA reserva por tipo de pasajero (adultos, ninos,
   infantes) es UNA opcion, no varias.
 
-PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
+${enfoque ? bloqueDeEnfoque(enfoque) + '\n\n' : ''}PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
 
 - "varias_opciones": se ven DOS O MAS opciones con precio propio entre las que habria que
   ELEGIR (dos o mas entradas en opciones_vistas): un listado con varios hoteles, un comparador, una
@@ -229,7 +263,7 @@ en "por_tipo_pax" una fila por cada tipo:
 En "total_general" devuelve el total de ESA tabla (la fila "Total General" o "Sub-Total"
 que suma todas las filas). Si la pantalla NO separa el precio por tipo de pasajero (un
 solo precio para todo el grupo), devuelve "por_tipo_pax" vacio y "total_general" null:
-NUNCA repartas un total entre tipos de pasajero.`
+NUNCA repartas un total entre tipos de pasajero.${enfoque ? '\n\nRECUERDA: la opcion ya esta elegida (ver OPCION YA ELEGIDA): detalle_unico y los campos de ESA opcion.' : ''}`
 }
 
 // ── Esquema de salida ────────────────────────────────────────────────────────
@@ -242,7 +276,7 @@ function construirEsquema(ranura: DefinicionRanura) {
         type: 'ARRAY',
         items: {
           type: 'OBJECT',
-          properties: { nombre: { type: 'STRING' }, precio: { type: 'STRING' } },
+          properties: { nombre: { type: 'STRING' }, precio: { type: 'STRING' }, seleccionada: { type: 'BOOLEAN' } },
         },
       },
       veredicto: { type: 'STRING', enum: VEREDICTOS },
@@ -394,7 +428,14 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
           .filter(k => k !== '|'),
       ).size
 
-  return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles, iconosEquipaje }
+  const opcionesVistas: OpcionVista[] = (vistas ?? []).flatMap(v => {
+    const o = (v ?? {}) as Record<string, unknown>
+    const nombre = textoOVacio(o.nombre)
+    if (nombre === null) return []
+    return [{ nombre, precio: textoOVacio(o.precio), seleccionada: o.seleccionada === true }]
+  })
+
+  return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles, opcionesVistas, iconosEquipaje }
 }
 
 const SLUGS_EQUIPAJE = ['equipaje_personal', 'equipaje_mano', 'equipaje_bodega']
@@ -608,14 +649,33 @@ export async function extraerRanuraDesdeImagen(
   mimeType: string,
   ranura: DefinicionRanura,
   apiKey: string,
+  /** La opción que ya eligió la persona en «¿Cuál de estas?» (P8). */
+  enfoque: EnfoqueDeLectura | null = null,
 ): Promise<ResultadoExtraccion<LecturaCruda>> {
   // Las estrellas se detectan EN PARALELO con la lectura: solo necesitan la imagen, así que
   // no le suman espera a quien cotiza (la lectura tarda más que ellas).
   const deteccion = pideEstrellas(ranura) ? detectarEstrellas(buffer, mimeType, apiKey) : null
-  const lectura = await extraerConReintento(
-    () => unaLlamada(buffer, mimeType, ranura, apiKey),
+  let lectura = await extraerConReintento(
+    () => unaLlamada(buffer, mimeType, ranura, apiKey, enfoque),
     `ranura:${ranura.slug}`,
   )
+  if (lectura.data && enfoque) {
+    lectura.data.elegida = lectura.data.veredicto === 'detalle_unico' ? { ...enfoque, por: 'persona' } : null
+  }
+  // P8 · la pantalla YA marca una opción como elegida (el Deep Blue del ensayo del 2026-09-23:
+  // «✓ Seleccionada» en una de tres filas). No se rechaza: se vuelve a leer SOBRE esa fila.
+  // Solo con UNA marcada: dos marcas son tan ambiguas como ninguna.
+  const marcada = !enfoque ? opcionMarcada(lectura.data) : null
+  if (marcada) {
+    const enfocada = await extraerConReintento(
+      () => unaLlamada(buffer, mimeType, ranura, apiKey, marcada),
+      `ranura:${ranura.slug}:marcada`,
+    )
+    if (enfocada.data?.veredicto === 'detalle_unico') {
+      enfocada.data.elegida = { ...marcada, por: 'marcada' }
+      lectura = enfocada
+    }
+  }
   // ⚠️ Si la detección tarda MÁS que la lectura, se le da una gracia corta y no más. Medido en
   // el banco real: una de 35 detecciones llegó al tope de 20 s y la lectura esperó con ella.
   // Unas estrellas no valen diez segundos más con quien cotiza mirando el indicador: sin
@@ -635,6 +695,21 @@ export async function extraerRanuraDesdeImagen(
       : { value: String(estrellas.valor), confidence: 0.9 }
   }
   return lectura
+}
+
+/**
+ * La opción que la pantalla da por elegida, si la lectura se rechazó por varias opciones y
+ * la marca es UNA sola. `null` en cualquier otro caso (sin rechazo, sin marca, dos marcas).
+ */
+export function opcionMarcada(lectura: LecturaCruda | null | undefined): EnfoqueDeLectura | null {
+  if (!lectura) return null
+  const varias = lectura.veredicto === 'varias_opciones'
+    || (lectura.veredicto === 'detalle_unico' && (lectura.opcionesVisibles ?? 0) >= 2)
+  if (!varias) return null
+  const marcadas = (lectura.opcionesVistas ?? []).filter(o => o.seleccionada)
+  const distintas = new Set(marcadas.map(o => `${o.nombre.toLowerCase()}|${o.precio ?? ''}`))
+  if (distintas.size !== 1) return null
+  return { nombre: marcadas[0].nombre, precio: marcadas[0].precio }
 }
 
 // ── Estrellas: se DETECTAN, no se cuentan de un vistazo ──────────────────────
@@ -832,6 +907,7 @@ async function unaLlamada(
   mimeType: string,
   ranura: DefinicionRanura,
   apiKey: string,
+  enfoque: EnfoqueDeLectura | null = null,
 ): Promise<ResultadoExtraccion<LecturaCruda>> {
   if (!apiKey) return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
 
@@ -848,7 +924,7 @@ async function unaLlamada(
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: construirPrompt(ranura) }] },
+        system_instruction: { parts: [{ text: construirPrompt(ranura, enfoque) }] },
         contents: [{
           parts: [
             { text: 'Clasifica y lee la siguiente captura.' },

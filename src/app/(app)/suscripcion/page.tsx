@@ -31,10 +31,12 @@ interface Props {
 
 /**
  * `/suscripcion`: la suscripción del espacio a un servicio de MeTRIK, hoy la licencia de Valida de
- * los CDA. Solo la ven el dueño, los administradores y la persona designada del espacio que PAGA el
- * contrato; a cualquier otro (operador, espacio sin contrato, AFI, metrik) la ruta no existe (404),
- * igual que el ítem del menú. Todo se resuelve en el servidor en cada navegación: la regla vive en
- * `contextoSuscripcion` y la vuelven a exigir las acciones.
+ * los CDA. Solo la ve la persona designada del contrato del espacio que lo PAGA; a cualquier otro
+ * (dueño o administrador que no sea la persona designada, operador, espacio sin contrato, AFI,
+ * metrik) la ruta no existe (404), igual que el ítem del menú. Un platform admin en «Ver como» la ve
+ * si mira como la persona designada, en solo lectura. Todo se resuelve en el servidor en cada
+ * navegación: la regla vive en `puedeVerSuscripcion` (vía `contextoSuscripcion`) y la vuelven a
+ * exigir las acciones.
  */
 export default async function SuscripcionPage({ searchParams }: Props) {
   const ctx = await contextoSuscripcion()
@@ -66,7 +68,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
     : `Vigente desde el ${fechaConAnio(contrato.vigenteDesde)} · renovación mensual`
 
   // Términos pendientes: la tarjeta de pago cede su lugar a la aceptación (el estado lo manda).
-  const puedeAceptar = !aprobada && ctx.designadoId !== null && ctx.designadoId === ctx.usuarioId
+  const soloLectura = ctx.soloLectura
+  const puedeAceptar = !aprobada && !soloLectura && ctx.designadoId !== null && ctx.designadoId === ctx.usuarioId
   const principal =
     resumen.estado === 'terminos_pendientes' ? (
       <section data-terminos-pendientes className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 sm:p-5">
@@ -102,7 +105,9 @@ export default async function SuscripcionPage({ searchParams }: Props) {
       : equipo.usuarios.map((u) => ({
           ...u,
           ultimoIngresoTexto: u.ultimoIngreso ? (formatBogotaFechaCortaAno(u.ultimoIngreso) ?? null) : null,
-          acciones: accionesSobreUsuario({ actorId: ctx.usuarioId, objetivo: u, designadoId: ctx.designadoId }),
+          acciones: soloLectura
+            ? { puedeRetirar: false, puedeCambiarRol: false, puedeReenviar: false, nota: null }
+            : accionesSobreUsuario({ actorId: ctx.usuarioId, objetivo: u, designadoId: ctx.designadoId }),
         }))
 
   return (
@@ -122,6 +127,15 @@ export default async function SuscripcionPage({ searchParams }: Props) {
           </span>
         </div>
         <p className="text-xs text-tinta-suave">{vigencia}</p>
+        {soloLectura && (
+          <p
+            data-solo-lectura
+            className="rounded-md border border-border bg-papel px-3 py-2 text-xs text-tinta-suave"
+          >
+            Estás viendo como la persona designada del contrato: solo lectura, sin aceptar términos ni tocar
+            licencias o usuarios.
+          </p>
+        )}
         {resumen.estado !== 'terminos_pendientes' && resumen.mensaje && (
           <p className="text-sm text-tinta" data-mensaje-estado>
             {resumen.mensaje}
@@ -138,8 +152,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
             : { usados: equipo.cupo.usados, total: equipo.cupo.licencias }
         }
         terminosResumen={terminosResumen}
-        mostrarSustenta={sugerencia.mostrar}
-        sustentaSolicitada={sugerencia.yaSolicitado}
+        sustenta={soloLectura ? null : sugerencia.yaSolicitado ? 'solicitada' : sugerencia.mostrar ? 'oferta' : null}
         pagos={<PestanaPagos carga={pagos} />}
         terminos={
           aprobada ? (
@@ -156,6 +169,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
           valorAdicional: equipo === 'error' ? null : equipo.licencias.valorAdicional,
           adicionalesVigentes: equipo === 'error' ? 0 : equipo.licencias.adicionalesVigentes.length,
           licenciasContrato: equipo === 'error' ? null : equipo.licencias.licencias,
+          soloLectura,
         }}
       />
     </div>

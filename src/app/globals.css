@@ -46,6 +46,15 @@
   --alerta: #B3382C;
   --advertencia: #B87515;
   --papel: #F3F1EC;
+  /* El TIPO de un bloque de la cotización de viaje (P6 del ensayo del 2026-09-23): la
+     franja de color a la izquierda del bloque. PROVISIONALES, tomados de la paleta de
+     Tailwind (sky-600, violet-600, amber-600, emerald-600, slate-500): los define Ren y
+     basta con cambiarlos aquí. El color nunca va solo: lleva el ícono y el nombre del tipo. */
+  --tipo-vuelo: #0284C7;
+  --tipo-hotel: #7C3AED;
+  --tipo-traslado: #D97706;
+  --tipo-actividad: #059669;
+  --tipo-otro: #64748B;
 }
 
 :root {

@@ -15,6 +15,7 @@ import {
   rutaGateada,
   rutaPermitida,
   soportePasaGate,
+  vitrinasDelEspacio,
   type ContextoGate,
 } from './gate'
 import { WORKSPACES_2026_09_15, workspaceMedido } from './__fixtures__/workspaces-2026-09-15'
@@ -90,22 +91,32 @@ describe('lo que no se puede cerrar', () => {
     }
   })
 
-  it('la vitrina de un CDA abre Tableros y Valida; Números ya no (usa ONE solo con Valida)', () => {
+  it('la vitrina de un CDA abre solo Valida: ni Números ni Tableros (usa ONE solo con Valida)', () => {
     for (const slug of ['cda-caqueta', 'cda-elcarmen', 'cda-puertotest', 'maxitec']) {
       expect(rutaPermitida('/numeros', ctx(slug)), slug).toBe(false)
-      expect(rutaPermitida('/tableros', ctx(slug)), slug).toBe(true)
+      expect(rutaPermitida('/tableros', ctx(slug)), slug).toBe(false)
       expect(rutaPermitida('/valida', ctx(slug)), slug).toBe(true)
     }
-    // Control: sin vitrina, las mismas rutas se cierran. Sin este caso no se distingue
-    // "la vitrina abre" de "el gate nunca cierra".
-    expect(rutaPermitida('/tableros', ctx('cda-caqueta', { modoVitrina: false }))).toBe(false)
-    // Control: una vitrina con otro módulo además de Valida conserva Números. Se razona por
-    // módulo encendido, no por el slug.
+    // Control: una vitrina con otro módulo además de Valida conserva Números y Tableros. Se razona
+    // por módulo encendido, no por el slug. Sin este caso no se distingue "el CDA no abre la
+    // vitrina" de "la vitrina ya no abre para nadie".
     const conOtro = { modules: { valida_consulta: true, compliance: true }, modoVitrina: true, platformAdmin: false }
     expect(rutaPermitida('/numeros', conOtro)).toBe(true)
-    // Una llave de función no es un módulo: no le devuelve Números a un CDA.
+    expect(rutaPermitida('/tableros', conOtro)).toBe(true)
+    // Una llave de función no es un módulo: no le devuelve las vitrinas a un CDA.
     const conLlave = { modules: { valida_consulta: true, fab_registrar_pago: true }, modoVitrina: true, platformAdmin: false }
     expect(rutaPermitida('/numeros', conLlave)).toBe(false)
+    expect(rutaPermitida('/tableros', conLlave)).toBe(false)
+  })
+
+  it('cda-pruebas (medido 2026-09-23: solo valida_consulta, en vitrina): Tableros y Números rebotan a /valida', () => {
+    const cdaPruebas = { modules: { valida_consulta: true }, modoVitrina: true, platformAdmin: false }
+    for (const role of ['owner', 'operator']) {
+      expect(destinoSiBloqueada('/tableros', { ...cdaPruebas, role }), role).toBe('/valida')
+      expect(destinoSiBloqueada('/numeros', { ...cdaPruebas, role }), role).toBe('/valida')
+      expect(destinoSiBloqueada('/valida', { ...cdaPruebas, role }), role).toBeNull()
+    }
+    expect(vitrinasDelEspacio(cdaPruebas.modules)).toEqual([])
   })
 
   it('una llave de función abre SOLO su ruta: comparativa en metrik, solicitudes con el bot', () => {

@@ -94,9 +94,34 @@ describe('menú contra gate por módulo', () => {
     }
   })
 
-  it('guardia: un CDA en vitrina sigue viendo Valida y Tableros, y ya no Números', () => {
+  it('guardia: un CDA en vitrina sigue viendo Valida, y ya no Números ni Tableros', () => {
     const hrefs = hrefsDelMenu('cda-caqueta', 'operator')
-    expect(hrefs).toEqual(expect.arrayContaining(['/valida', '/tableros']))
+    expect(hrefs).toContain('/valida')
     expect(hrefs).not.toContain('/numeros')
+    expect(hrefs).not.toContain('/tableros')
+  })
+
+  it('cda-pruebas: ni el operador ni el dueño designado ven Tableros ni Números (menú lateral y barra móvil)', () => {
+    // Medido 2026-09-23 por PostgREST: solo `valida_consulta`, en vitrina.
+    for (const role of ['operator', 'owner']) {
+      const props = {
+        fullName: 'Persona de prueba',
+        workspaceName: 'CDA Pruebas',
+        role,
+        modules: { valida_consulta: true },
+        modoVitrina: true,
+        hasLineas: false,
+        platformAdminState: null,
+        // El designado ve Suscripción; el operador no (el layout le pasa null).
+        suscripcion: role === 'owner' ? { tono: 'verde' as const } : null,
+        children: null,
+      }
+      const html = renderToStaticMarkup(React.createElement(AppShell, props))
+      const hrefs = [...new Set([...html.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]))]
+      expect(hrefs, role).toContain('/valida')
+      expect(hrefs, role).not.toContain('/tableros')
+      expect(hrefs, role).not.toContain('/numeros')
+      expect(hrefs.includes('/suscripcion'), role).toBe(role === 'owner')
+    }
   })
 })

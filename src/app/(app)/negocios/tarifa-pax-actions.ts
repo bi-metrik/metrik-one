@@ -91,7 +91,14 @@ const TIPO_RUBRO_POR_PASAJERO: TipoRubroViaje = 'tarifa'
 
 export type ResultadoCasilla =
   | { ok: true; mensaje: string; alertas: string[]; tarifa: TarifaPax }
-  | { ok: false; codigo: string; mensaje: string; detalle?: string }
+  | {
+      ok: false
+      codigo: string
+      mensaje: string
+      detalle?: string
+      /** RX1 con opciones legibles: la persona toca una en vez de volver al proveedor (P8). */
+      opciones?: { nombre: string; precio: string | null }[]
+    }
 
 export type ResultadoTarifa = { success: boolean; error?: string; tarifa?: TarifaPax }
 
@@ -222,6 +229,8 @@ export async function leerCasillaDeItem(
   clave: ClaveCasilla,
   dataUrl: string,
   monedaIndicada?: string | null,
+  /** La opción que la persona tocó en «¿Cuál de estas?» (P8 del ensayo del 2026-09-23). */
+  enfoque?: { nombre: string; precio: string | null } | null,
 ): Promise<ResultadoCasilla> {
   if (!CLAVES.includes(clave)) return { ok: false, codigo: 'CASILLA', mensaje: 'Casilla desconocida.' }
   // Lee con la llave de Gemini de MeTRIK: la puerta de Clarity va antes de tocar el ítem,
@@ -249,7 +258,11 @@ export async function leerCasillaDeItem(
   const apiKey = getServerKey('gemini')
   if (!apiKey) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la lectura de capturas. Avísale a MeTRIK.' }
 
-  const lectura = await extraerRanuraDesdeImagen(Buffer.from(m[2], 'base64'), m[1], ranura, apiKey)
+  // Lo que llega del navegador se acota: es texto que va al prompt.
+  const enfoqueLimpio = enfoque && typeof enfoque.nombre === 'string' && enfoque.nombre.trim() !== ''
+    ? { nombre: enfoque.nombre.trim().slice(0, 160), precio: typeof enfoque.precio === 'string' ? enfoque.precio.trim().slice(0, 40) || null : null }
+    : null
+  const lectura = await extraerRanuraDesdeImagen(Buffer.from(m[2], 'base64'), m[1], ranura, apiKey, enfoqueLimpio)
   if (!lectura.data) {
     return {
       ok: false,
@@ -269,11 +282,15 @@ export async function leerCasillaDeItem(
     monedaSiFalta: 'COP',
   })
   if (!veredicto.ok) {
+    const opciones = veredicto.opciones ?? []
     return {
       ok: false,
       codigo: veredicto.codigo,
-      mensaje: veredicto.instruccion,
+      // P8 · con opciones legibles no se manda a la persona de vuelta al proveedor: se le
+      // pregunta cuál de las que se leyeron es.
+      mensaje: opciones.length > 0 ? '¿Cuál de estas? La captura trae varias opciones: toca la que vas a cotizar.' : veredicto.instruccion,
       detalle: veredicto.motivo,
+      ...(opciones.length > 0 ? { opciones } : {}),
     }
   }
 

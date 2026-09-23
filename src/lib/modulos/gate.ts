@@ -113,12 +113,14 @@ export function soloValida(modules: ContextoGate['modules']): boolean {
 }
 
 /**
- * Las vitrinas que abre `modo_vitrina` en ESTE espacio. «Números» sale de un espacio que usa ONE
- * solo con Valida (decisión del 2026-09-23, sección Suscripción de los CDA): mostraba cifras de un
- * negocio que el CDA no lleva en ONE. Tableros se queda.
+ * Las vitrinas que abre `modo_vitrina` en ESTE espacio. Un espacio que usa ONE solo con Valida (los
+ * CDA) no abre NINGUNA: «Números» salió el 2026-09-23 (cifras de un negocio que el CDA no lleva en
+ * ONE) y «Tableros» el mismo día, por la misma regla de ver lo justo (decisión de Mauricio). A un CDA
+ * le quedan Valida, Suscripción para la persona designada y el menú de perfil. Las demás vitrinas
+ * (un espacio con otro módulo además de Valida) conservan las dos.
  */
 export function vitrinasDelEspacio(modules: ContextoGate['modules']): readonly string[] {
-  return soloValida(modules) ? RUTAS_VITRINA.filter((r) => r !== '/numeros') : RUTAS_VITRINA
+  return soloValida(modules) ? [] : RUTAS_VITRINA
 }
 
 export function rutaPermitida(pathname: string, ctx: ContextoGate): boolean {

@@ -498,6 +498,10 @@ function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; ge
             {`Adicionales: ${h.adicionales.join(' · ')}`}
           </Text>
         )}
+        {/* P2 · la nota que escribió una persona para el cliente, debajo de la tarjeta. */}
+        {h.nota ? (
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.texto, marginTop: 3 }}>{h.nota}</Text>
+        ) : null}
       </View>
     </View>
   )
@@ -795,6 +799,10 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
             {meta !== '' && (
               <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris, marginTop: 4 }}>{meta}</Text>
             )}
+            {/* P2 · la nota que escribió una persona para el cliente, debajo del vuelo. */}
+            {g.v.nota ? (
+              <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.texto, marginTop: 3 }}>{g.v.nota}</Text>
+            ) : null}
           </View>
         )
       })

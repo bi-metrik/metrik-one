@@ -27,7 +27,8 @@ vi.mock('./acciones', () => ({
   reenviarInvitacionEspacio: async () => ({ ok: true }),
   retirarDelEspacio: async () => ({ ok: true, sesionCerrada: true, licenciaLiberada: false, desdeCuota: null }),
   descartarSustenta: async () => ({ ok: true }),
-  pedirContactoDeSustenta: async () => ({ ok: true, yaExistia: false }),
+  pedirContactoDeSustenta: async () => ({ ok: true, yaExistia: false, nombre: 'Ana' }),
+  registrarEventoSustenta: async () => {},
 }))
 
 const { TarjetaPago } = await import('./tarjeta-pago')
@@ -231,6 +232,25 @@ describe('la pestaña Usuarios', () => {
     expect(sinValor).toContain('2 de 2 licencias en uso')
     expect(sinValor).not.toMatch(/\$/)
   })
+
+  it('en «Ver como» (solo lectura) se ve la lista, sin «Agregar usuario»', () => {
+    const lectura = texto(
+      renderToStaticMarkup(
+        React.createElement(UsuariosPanel, {
+          datos: {
+            lista,
+            cupo: { licencias: 2, usados: 2, libres: 0 },
+            valorAdicional: 50000,
+            adicionalesVigentes: 0,
+            licenciasContrato: 2,
+            soloLectura: true,
+          },
+        }),
+      ),
+    )
+    expect(lectura).toContain('Beto Díaz')
+    expect(lectura).not.toContain('Agregar usuario')
+  })
 })
 
 describe('el Resumen', () => {
@@ -242,8 +262,7 @@ describe('el Resumen', () => {
           principal: null,
           licencias: { usados: 2, total: 2 },
           terminosResumen: 'Aceptados el 25 sept 2026 por Alba Rosas.',
-          mostrarSustenta: true,
-          sustentaSolicitada: false,
+          sustenta: 'oferta',
           pagos: null,
           terminos: null,
           usuarios: { lista: [], cupo: null, valorAdicional: null, adicionalesVigentes: 0, licenciasContrato: null },
@@ -257,15 +276,18 @@ describe('el Resumen', () => {
     for (const p of ['Resumen', 'Pagos', 'Usuarios', 'Términos']) expect(t).toContain(p)
     expect(t).toContain('2 de 2 usuarios en uso')
     expect(t).toContain('Aceptados el 25 sept 2026 por Alba Rosas.')
-    expect(t).toContain('Más allá de las listas')
+    expect(t).toContain('Sustenta sostiene todo tu SARLAFT')
     expect(t).toContain('Ahora no')
-    expect(t.indexOf('usuarios en uso')).toBeLessThan(t.indexOf('Más allá de las listas'))
+    expect(t.indexOf('usuarios en uso')).toBeLessThan(t.indexOf('Sustenta sostiene'))
     expect(t).not.toMatch(/[!¡]/)
     expect(t).not.toMatch(PROVEEDOR)
   })
 
-  it('Sustenta no vuelve a salir a quien ya pidió que lo contacten, ni con «Ahora no» vigente', () => {
-    expect(pintar({ sustentaSolicitada: true })).not.toContain('Más allá de las listas')
-    expect(pintar({ mostrarSustenta: false })).not.toContain('Más allá de las listas')
+  it('a quien ya pidió la demostración le queda la confirmación, no la oferta; con «Ahora no» vigente, nada', () => {
+    const solicitada = pintar({ sustenta: 'solicitada' })
+    expect(solicitada).not.toContain('Sustenta sostiene')
+    expect(solicitada).toContain('Ya recibimos tu solicitud. Te escribiremos para agendar la demostración.')
+    const oculta = pintar({ sustenta: null })
+    expect(oculta).not.toContain('Sustenta')
   })
 })

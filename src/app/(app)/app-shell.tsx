@@ -45,7 +45,7 @@ import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
 import ImpersonationBar from './impersonation-bar'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
-import { rutaPermitida } from '@/lib/modulos/gate'
+import { rutaPermitida, vitrinasDelEspacio } from '@/lib/modulos/gate'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -110,8 +110,8 @@ interface AppShellProps {
   notificationBell?: React.ReactNode
   platformAdminState?: PlatformAdminState | null
   /**
-   * La sección Suscripción (`/suscripcion`), solo para el dueño, los administradores y la persona
-   * designada de un espacio que paga un contrato de Valida. `null` = no se ofrece (la ruta da 404).
+   * La sección Suscripción (`/suscripcion`), solo para la persona designada del contrato de un
+   * espacio que paga Valida (`puedeVerSuscripcion`). `null` = no se ofrece (la ruta da 404).
    * El tono pinta el punto de estado; `null` = sin punto.
    */
   suscripcion?: { tono: 'verde' | 'ambar' | 'rojo' | null } | null
@@ -428,9 +428,9 @@ export default function AppShell({
   const mod = modules ?? { business: true }
   // ── Modo vitrina ──
   // En modo vitrina solo sobreviven 3 hrefs en TODO el nav: Valida (funcional)
-  // + Tableros + Números (vitrinas de upsell a ONE). Números sale de un espacio que
-  // usa ONE solo con Valida (los CDA): lo quita `moduloGate`, que pregunta a
-  // `vitrinasDelEspacio` (lib/modulos/gate.ts), la misma regla del middleware. Cualquier item con otro href
+  // + Tableros + Números (vitrinas de upsell a ONE). Un espacio que usa ONE solo con
+  // Valida (los CDA) no conserva ninguna de las dos vitrinas: las quita `moduloGate`, que
+  // pregunta a `vitrinasDelEspacio` (lib/modulos/gate.ts), la misma regla del middleware. Cualquier item con otro href
   // se filtra. Aplica a cada grupo (incluidos los "siempre visibles" como
   // Directorio/Configuración). Helper único para no duplicar la lista.
   const VITRINA_HREFS = ['/valida', '/tableros', '/numeros'] as const
@@ -540,7 +540,8 @@ export default function AppShell({
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
   const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
-    ? ['/valida', '/tableros', '/numeros']
+    // Valida más las vitrinas que abre ESTE espacio (un CDA, ninguna): la misma regla del menú.
+    ? ['/valida', ...vitrinasDelEspacio(mod)]
     : (!mod.business && mod.compliance)
     ? ['/riesgos', '/matriz', '/tableros', '/directorio']
     // Cliente de API directa: una sola pantalla, que es su primaria.

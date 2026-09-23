@@ -14,13 +14,16 @@
 - ⚠️⚠️ [Entrada única de /valida-api](project_entrada_unica_valida_api.md) — Términos exige texto_sha256 = sha256(texto_md) tal cual
 - ⚠️⚠️ [Plazo, mora y facturas de los CDA en Valida](project_valida_cda_gracia_facturas.md) — #849: migración SIN aplicar; cargar un CDA tras el 30-sep lo cierra
 - ⚠️⚠️ [Sección Suscripción de los CDA](project_seccion_suscripcion_cda.md) — #851: migración 20260924060000 ANTES del merge; sin valor_usuario_adicional no vende
+- ⚠️ [Suscripción solo para la designada (#857)](project_suscripcion_solo_designado.md) — «Ver como» compara la persona EFECTIVA; CDA sin vitrinas
 - ⚠️⚠️ [Pago en línea de cuotas (Bold temporal)](project_pago_en_linea_bold.md) — #850: migración SIN aplicar; la pasarela sale de un dato
+- ⚠️ [Tarjeta de Sustenta en /suscripcion](project_sustenta_tarjeta_marca.md) — migración de eventos SIN aplicar; sin ella se pierden en silencio
 - ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad
 - ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761; wa-webhook SIN redesplegar
 - ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — #577 sin mergear: nadie se suspende solo
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el sync sigue sin correr
 - ⚠️⚠️ [Ventas por ciudad en Marketing](project_marketing_ventas_por_ciudad.md) — #689 sin mergear: migración ANTES del merge
+- ⚠️ [Rediseño cotización Trappvel](project_rediseno_cotizacion_trappvel.md) — #853 (P4) SIN mergear: migración ANTES
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — 4 migraciones sin aplicar; tres definiciones de «venta»
 - ⚠️⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #721 SIN mergear: migración antes del merge
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra: solo fixtures
@@ -53,7 +56,7 @@
 - ⚠️⚠️ [Documento del cliente de Trappvel](project_documento_cliente_trappvel.md) — el nivel de detalle nace inerte; `→` no existe en el PDF
 - ⚠️⚠️ [Arreglos 1-5 del PDF Trappvel (#822)](project_arreglos_documento_trappvel_0006.md) — un grupo libre borraba un vuelo del documento
 - ⚠️ [Texto del cliente redactado por ONE (#826)](project_texto_cliente_trappvel.md) — mergeado; el PDF imprime solo lo revisado
-- ⚠️⚠️ [Términos y estilo del texto (#841)](project_texto_cliente_terminos_trappvel.md) — la propuesta de términos NO se guarda sola; `ejemplos_texto` ausente ≠ `[]`
+- ⚠️⚠️ [Términos y estilo del texto (#841)](project_texto_cliente_terminos_trappvel.md) — #848: nacen copiados al crear; `ejemplos_texto` ausente ≠ `[]`
 - ⚠️ [Fotos, franja y tabla de vuelos del documento Trappvel (#832, #838)](project_documento_trappvel_fotos_ritmo.md) — foto al lado aprobada; tabla corta va entera
 - ⚠️⚠️ [La Recomendada manda y el cliente escoge (#836)](project_recomendada_tarifa_elegida.md) — `es_principal` ya no decide; el gate de margen no mira la Recomendada
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`

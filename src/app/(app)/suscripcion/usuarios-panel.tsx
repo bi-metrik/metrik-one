@@ -35,6 +35,8 @@ export interface DatosUsuarios {
   valorAdicional: number | null
   adicionalesVigentes: number
   licenciasContrato: number | null
+  /** «Ver como» de un platform admin: se ve la lista, sin agregar a nadie. */
+  soloLectura?: boolean
 }
 
 /**
@@ -81,7 +83,7 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
           {contador}
           {precio}
         </p>
-        {datos.cupo && !agregando && (
+        {datos.cupo && !agregando && !datos.soloLectura && (
           <button
             type="button"
             onClick={abrirAgregar}

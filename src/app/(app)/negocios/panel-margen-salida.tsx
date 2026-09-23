@@ -2,11 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ShieldAlert, ShieldCheck } from 'lucide-react'
+import { Info, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { autorizarBajoElMinimo, type SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
+import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
@@ -33,6 +34,11 @@ export function fechaCorta(iso: string): string {
  *  · **Autorizada:** «Autorizada por Edgar el 22-sep: <motivo>».
  *  · **En el mínimo o encima:** nada. La pantalla de siempre.
  *
+ * Y dos que NO son «bajo el mínimo» aunque el servidor frene igual (P1 del ensayo del
+ * 2026-09-23, `nota-margen.ts`): una cotización **vacía** no lleva nota —el botón de enviar
+ * dice por qué está apagado—, y una con **líneas sin costo** lleva un aviso neutro que dice
+ * cuántas faltan. El rojo queda para el margen que de verdad se midió.
+ *
  * El botón es solo la puerta visible: `autorizarBajoElMinimo` vuelve a comprobar en el
  * servidor que quien firma es el dueño.
  */
@@ -49,6 +55,20 @@ export default function PanelMargenSalida({
   const [isPending, startTransition] = useTransition()
 
   if (!salida || !salida.aplica) return null
+  const nota = notaDeMargen(salida)
+  if (nota.tipo === 'sin_lineas' || nota.tipo === 'nada') return null
+
+  if (nota.tipo === 'faltan_costos') {
+    return (
+      <div
+        role="status"
+        className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground"
+      >
+        <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <p>{nota.texto}</p>
+      </div>
+    )
+  }
 
   if (salida.excepcion) {
     return (
@@ -94,7 +114,11 @@ export default function PanelMargenSalida({
       <div className="flex items-start gap-2">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <div className="space-y-1">
-          <p className="font-semibold">Bajo el margen mínimo: no se puede enviar ni aprobar</p>
+          <p className="font-semibold">
+            {nota.tipo === 'bajo_minimo'
+              ? `${nota.titulo} No se puede enviar ni aprobar.`
+              : 'Bajo el margen mínimo: no se puede enviar ni aprobar'}
+          </p>
           <p>{salida.mensaje}</p>
           <p className="text-[11px] text-red-800/80 dark:text-red-300/80">
             El PDF se descarga como borrador, con la marca «{etiquetaDeMotivo('margen')}».

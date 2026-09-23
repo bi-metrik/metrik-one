@@ -87,9 +87,18 @@ vi.mock('@/lib/modulos/exigir-modulo', () => ({
 vi.mock('@/lib/supabase/auth-user', () => ({
   getCachedUser: async () => ({ user: escenario.usuario ? { id: escenario.usuario, email: 'x@y.co' } : null }),
 }))
+/** La sesión que ve `getWorkspace`: el rol y la persona EFECTIVOS («Ver como» los cambia). */
+const sesionWs: { role: string; userId: string | null; impersonating: boolean } = {
+  role: 'operator',
+  userId: null,
+  impersonating: false,
+}
+
 vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({
-    role: 'operator',
+    role: sesionWs.role,
+    userId: sesionWs.userId ?? escenario.usuario,
+    impersonating: sesionWs.impersonating,
     supabase: {
       rpc: async (nombre: string) =>
         nombre === 'mis_servicios' ? escenario.servicios : nombre === 'mis_cuotas_de_servicio' ? escenario.cuotas : escenario.cobros,
@@ -116,10 +125,13 @@ vi.mock('@/lib/supabase/server', () => ({
 // `cache()` de React deduplica por request; en la prueba cada caso es un request nuevo.
 vi.mock('react', async (original) => ({ ...(await original<typeof import('react')>()), cache: <T,>(f: T) => f }))
 
-const { entradaValidaCda, terminosValidaPermitenOperar, validaCdaPermiteOperar, MENSAJE_TERMINOS_PENDIENTES } =
+const { entradaValidaCda, puedeVerPagosCda, terminosValidaPermitenOperar, validaCdaPermiteOperar, MENSAJE_TERMINOS_PENDIENTES } =
   await import('./puerta')
 
 beforeEach(() => {
+  sesionWs.role = 'operator'
+  sesionWs.userId = null
+  sesionWs.impersonating = false
   escenario.modulo = { ok: true, workspaceId: WS }
   escenario.usuario = OPERADOR
   escenario.servicios = { data: [CONTRATO_CDA], error: null }
@@ -304,5 +316,41 @@ describe('mora de más de 30 días (cláusula 11.1)', () => {
     escenario.hoy = '2026-12-31'
     escenario.servicios = { data: [], error: null }
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+})
+
+describe('quién ve la plata del contrato (franja, avisos de cuota, pagos y archivos)', () => {
+  it('la persona designada sí, sea cual sea su rol', async () => {
+    escenario.usuario = DESIGNADA
+    expect(await puedeVerPagosCda(await entradaValidaCda())).toBe(true)
+  })
+
+  it('un dueño o un administrador que no son la persona designada, no; tampoco el operador', async () => {
+    for (const role of ['owner', 'admin', 'operator']) {
+      sesionWs.role = role
+      escenario.usuario = OPERADOR
+      expect(await puedeVerPagosCda(await entradaValidaCda()), role).toBe(false)
+    }
+  })
+
+  it('sin persona designada, nadie; sin poder leer la designación, tampoco', async () => {
+    sesionWs.role = 'owner'
+    escenario.usuario = DESIGNADA
+    escenario.designacion = { designadoId: null, designadoNombre: null }
+    expect(await puedeVerPagosCda(await entradaValidaCda())).toBe(false)
+    escenario.designacion = 'error'
+    expect(await puedeVerPagosCda(await entradaValidaCda())).toBe(false)
+  })
+
+  it('«Ver como» mira con los ojos de la persona efectiva: como la designada sí, como un operador no', async () => {
+    escenario.usuario = OPERADOR // la sesión real, que no es la designada
+    sesionWs.impersonating = true
+    sesionWs.userId = DESIGNADA
+    const comoDesignada = await entradaValidaCda()
+    expect(comoDesignada.tipo === 'ok' && comoDesignada.impersonando).toBe(true)
+    expect(comoDesignada.tipo === 'ok' && comoDesignada.usuarioId).toBe(OPERADOR)
+    expect(await puedeVerPagosCda(comoDesignada)).toBe(true)
+    sesionWs.userId = OPERADOR
+    expect(await puedeVerPagosCda(await entradaValidaCda())).toBe(false)
   })
 })

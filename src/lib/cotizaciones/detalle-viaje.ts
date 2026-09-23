@@ -58,9 +58,10 @@ import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
+import { notaDeLaLinea } from './nota-linea'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
-import { leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
+import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
 
 /** Lo mínimo de una línea para reconstruir su detalle. */
 export interface ItemConLectura {
@@ -84,6 +85,11 @@ export interface ItemConLectura {
   cargo_destino_moneda?: string | null
   /** Los tramos guardados del vuelo (B3). Ausente o ilegible = se derivan de la lectura. */
   tramos?: unknown
+  /**
+   * La descripción de la línea. Solo se imprime si la escribió una PERSONA (`notaDeLaLinea`):
+   * es la nota para el cliente (P2 del 2026-09-23). Ausente = sin nota.
+   */
+  descripcion?: string | null
 }
 
 export interface VueloPDF {
@@ -131,6 +137,11 @@ export interface VueloPDF {
    * Ausente = cotización de una sola opción: pertenece a la única que hay.
    */
   tarifas?: number[]
+  /**
+   * La nota para el cliente que escribió una persona en la opción (P2 del 2026-09-23). Se
+   * imprime debajo de la tarjeta. `null` o ausente = sin nota.
+   */
+  nota?: string | null
 }
 
 export interface HotelPDF {
@@ -155,6 +166,8 @@ export interface HotelPDF {
   adicionales: string[]
   /** Ver `VueloPDF.tarifas`. */
   tarifas?: number[]
+  /** Ver `VueloPDF.nota`. */
+  nota?: string | null
   /**
    * La foto del hotel (camino B de la §5 de `propuesta-visual.md`). ⚠️ SIN CONSTRUIR: nadie
    * la llena todavía. La plantilla ya le reserva la miniatura y, sin foto, la tarjeta
@@ -428,13 +441,6 @@ function numero(d: Record<string, string>, slug: string): number | null {
   return parseMontoCop(v)
 }
 
-function booleano(d: Record<string, string>, slug: string): boolean | null {
-  const v = (d[slug] ?? '').trim().toLowerCase()
-  if (v === 'true' || v === 'sí' || v === 'si') return true
-  if (v === 'false' || v === 'no') return false
-  return null
-}
-
 /**
  * El equipaje en palabras, a partir de los tres booleanos del icono resaltado.
  *
@@ -443,20 +449,26 @@ function booleano(d: Record<string, string>, slug: string): boolean | null {
  * los deja vacíos cuando el cruce de evidencia no cuadra (#792).
  */
 export function equipajeEnPalabras(d: Record<string, string>): string | null {
-  return equipajeDeTramo({
-    personal: booleano(d, 'equipaje_personal'),
-    mano: booleano(d, 'equipaje_mano'),
-    bodega: booleano(d, 'equipaje_bodega'),
-  })
+  return equipajeDeTramo(equipajeDeCampos(slug => d[slug]))
 }
 
-/** El mismo criterio, sobre el equipaje de un tramo guardado. */
-export function equipajeDeTramo({ personal, mano, bodega }: EquipajeTramo): string | null {
+/**
+ * El mismo criterio, sobre el equipaje de un tramo guardado. Con la cantidad y el peso cuando
+ * la captura los dio (P3 del ensayo del 2026-09-23): «equipaje de bodega de 23 kg», y
+ * «2 × …» cuando va más de una pieza. Un tramo guardado antes de las piezas se dice como antes.
+ */
+export function equipajeDeTramo({ personal, mano, bodega, piezas }: EquipajeTramo): string | null {
   if (personal === null && mano === null && bodega === null) return null
   const lleva: string[] = []
-  if (personal) lleva.push('artículo personal')
-  if (mano) lleva.push('equipaje de mano')
-  if (bodega) lleva.push('equipaje de bodega')
+  const pieza = (tipo: 'personal' | 'mano' | 'bodega', nombre: string) => {
+    const p = piezas?.[tipo]
+    const cuantas = p?.cantidad && p.cantidad > 1 ? `${p.cantidad} × ` : ''
+    const kg = p?.pesoKg ? ` de ${String(p.pesoKg).replace('.', ',')} kg` : ''
+    return `${cuantas}${nombre}${kg}`
+  }
+  if (personal) lleva.push(pieza('personal', 'artículo personal'))
+  if (mano) lleva.push(pieza('mano', 'equipaje de mano'))
+  if (bodega) lleva.push(pieza('bodega', 'equipaje de bodega'))
   return lleva.length === 0 ? 'Sin equipaje incluido' : lleva.join(' + ')
 }
 
@@ -507,6 +519,7 @@ export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
       adicionales: item.adicionales ?? [],
       numeroVuelo: texto(d, 'numero_vuelo'),
       numeros: { ida: ida?.numero ?? null, regreso: regreso?.numero ?? null, sinAsignar: numerosSinTramo },
+      nota: notaDeLaLinea(item),
     })
   }
   return out
@@ -582,6 +595,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,
       adicionales: item.adicionales ?? [],
+      nota: notaDeLaLinea(item),
     })
   }
   return out

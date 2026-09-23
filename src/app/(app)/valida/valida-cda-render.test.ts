@@ -145,7 +145,7 @@ describe('los avisos que ven todos (plazo y mora)', () => {
     expect(texto(html)).toContain('En Suscripción está la cuota vencida')
     expect(html).toContain('href="/suscripcion?tab=pagos"')
     expect(texto(renderToStaticMarkup(React.createElement(PausaPorMora, { mora, vePagos: false })))).toContain(
-      'la persona designada por tu empresa pueden ver y pagar',
+      'La persona designada por tu empresa puede ver y pagar',
     )
   })
 })
