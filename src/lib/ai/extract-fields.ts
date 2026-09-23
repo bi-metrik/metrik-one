@@ -13,6 +13,8 @@
 // marginal. Familia 2.5 → se controla con `thinkingBudget` numérico (la
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
+import { normalizarMontoExtraido } from './monto-extraido'
+
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -265,36 +267,10 @@ export async function extractFieldsFromDocument(
       let value = field.value !== null ? String(field.value).trim() || null : null
       const confidence = field.confidence ?? 0
 
-      // Post-process currency fields: strip currency symbols and separators
+      // Campos currency: pesos enteros como texto. La regla (y por qué los miles con
+      // coma se leen como miles) vive en `normalizarMontoExtraido`.
       if (value && campo.tipo === 'currency') {
-        // Remove $, spaces, dots (thousand sep in COP), then treat comma as decimal
-        let cleaned = value.replace(/[$\s]/g, '')
-        // If contains dots and comma: "1.500.000,50" → remove dots, replace comma with dot
-        if (cleaned.includes('.') && cleaned.includes(',')) {
-          cleaned = cleaned.replace(/\./g, '').replace(',', '.')
-        }
-        // If contains only dots: "1.500.000" → thousand separators, remove them
-        else if ((cleaned.match(/\./g) || []).length > 1) {
-          cleaned = cleaned.replace(/\./g, '')
-        }
-        // If contains single dot: could be decimal "1500.50" or thousand "1.500"
-        // Heuristic: if exactly 3 digits after dot, it's a thousand separator in COP context
-        else if (cleaned.includes('.')) {
-          const afterDot = cleaned.split('.')[1]
-          if (afterDot && afterDot.length === 3) {
-            cleaned = cleaned.replace('.', '') // thousand separator
-          }
-          // else leave as decimal
-        }
-        // If contains only comma: "1500,50" → decimal separator
-        else if (cleaned.includes(',')) {
-          cleaned = cleaned.replace(',', '.')
-        }
-        // Round to integer for COP (no cents)
-        const num = parseFloat(cleaned)
-        if (!isNaN(num)) {
-          value = String(Math.round(num))
-        }
+        value = normalizarMontoExtraido(value)
       }
 
       // Confidence < 0.70 → manual required, value forced to null
