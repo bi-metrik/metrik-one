@@ -54,9 +54,14 @@ salta el envío) y `updateCotizacion({ estado })`. Va ANTES de `motivoParaNoSali
 que algo no existe.
 
 **How to apply:** el texto sale de `motivoParaNoEnviar` (puro) y es el mismo en el botón del
-editor y en el rechazo; no reescribir la regla en otra parte. No frena: el PDF (se descarga con
-el aviso y, ojo, se sigue guardando y registrando como «sale al cliente»), aprobar una
-`enviada`, ni nada sin `tarifa_pax` (`hayTarifaPorPasajero`: ni lee el viaje). Si no puede leer
+editor, en el rechazo y en el aviso del PDF; no reescribir la regla en otra parte. **El PDF
+sale como BORRADOR** (PR siguiente, `feat/trappvel-pdf-borrador-marca-agua`): marca
+`ponerMarcaDeBorrador(pdf, 'pantallazos')` sobre los bytes (cubre @react-pdf y el servicio
+externo sin tocar la plantilla), sin guardar ni registrar la salida. Única vía del PDF:
+`generateCotizacionPDF` (botón «PDF» del editor); no hay correo, bot, link público ni cron que lo
+mande. No frena: aprobar una `enviada`, ni nada sin `tarifa_pax` (`hayTarifaPorPasajero`: ni lee
+el viaje). Los borradores por IVA reusan la marca «margen bajo el mínimo»: texto equivocado,
+no corregido. Si no puede leer
 líneas o pasajeros, FRENA. El bloque `BloqueCotizacion` no deshabilita sus botones: solo el
 servidor lo frena y el toast trae el motivo. Instrumento de R6 en la prueba: registrar los
 SELECT por columnas (`negocio_bloques|adultos…`), no por tabla — aprobar también escribe en
