@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, Camera, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,6 +29,7 @@ import { crearUbicador, type Ubicador } from '@/lib/cotizaciones/ubicador-captur
 import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 
 /**
  * La bandeja de capturas (P7 del caso Providencia, versión de Mauricio del 2026-09-23):
@@ -151,6 +152,7 @@ export default function BandejaCapturas({
   composicion,
   onOpcionCreada,
   ubicaciones = SIN_UBICACIONES,
+  fija = false,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización, para mostrar lo leído de cada captura antes de aceptarla. */
@@ -160,6 +162,12 @@ export default function BandejaCapturas({
   onOpcionCreada?: (itemId: string) => void
   /** Dónde vive cada opción de la página, para nombrarla («Opción 2 de Vuelo 1»). */
   ubicaciones?: Record<string, Ubicacion>
+  /**
+   * R3 (layout del 2026-09-23): dentro del marco del negocio la zona de pegado es una
+   * franja de una línea, fija bajo el encabezado, y la lista de capturas queda en el flujo
+   * de la página debajo de ella: se desplaza con la página y nunca tapa un bloque (R2).
+   */
+  fija?: boolean
 }) {
   const router = useRouter()
   const [capturas, setCapturas] = useState<Captura[]>([])
@@ -350,6 +358,35 @@ export default function BandejaCapturas({
     return () => window.removeEventListener('beforeunload', alSalir)
   }, [enElAire])
 
+  // Con marco, la misma condición le dice al marco que pregunte antes de cambiar de cotización.
+  const marco = useContext(MarcoCotizacionContexto)
+  useEffect(() => {
+    if (!marco) return
+    marco.avisarEnElAire(enElAire)
+    return () => marco.avisarEnElAire(false)
+  }, [marco, enElAire])
+
+  // Arrastrar y soltar: las imágenes entran por el mismo camino que el pegado.
+  const [arrastrando, setArrastrando] = useState(false)
+  const alArrastrar = {
+    onDragOver: (e: DragEvent) => {
+      if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return
+      e.preventDefault()
+      if (!arrastrando) setArrastrando(true)
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+      setArrastrando(false)
+    },
+    onDrop: (e: DragEvent) => {
+      const imagenes = Array.from(e.dataTransfer?.files ?? []).filter(f => f.type.startsWith('image/'))
+      setArrastrando(false)
+      if (imagenes.length === 0) return
+      e.preventDefault()
+      for (const f of imagenes) agregar(f)
+    },
+  }
+
   function borrar(c: Captura) {
     if (enProceso(c.estado)) {
       // Se quita a mitad del análisis (P11): la pasada en vuelo deja de ser vigente y, si ya
@@ -473,9 +510,109 @@ export default function BandejaCapturas({
   const visibles = capturas.filter(c => c.estado.fase !== 'aceptada' && c.estado.fase !== 'descartada')
   const enCurso = capturas.filter(c => ['mirando', 'ubicando', 'leyendo'].includes(c.estado.fase)).length
 
+  const entradaArchivos = (
+    <input
+      ref={entrada}
+      type="file"
+      accept="image/*"
+      multiple
+      className="hidden"
+      aria-label="Subir pantallazos"
+      onChange={e => {
+        const archivos = Array.from(e.target.files ?? [])
+        e.target.value = ''
+        for (const a of archivos) agregar(a)
+      }}
+    />
+  )
+
+  // R2 (2026-09-23): con muchas filas la lista tapaba los bloques de abajo y no se veía dónde
+  // caían las opciones aceptadas. Tiene tope de alto y se desplaza por dentro. Con el marco
+  // (`fija`) va en el flujo de la página, debajo de la franja fija.
+  const listaCapturas = visibles.length > 0 ? (
+    <ul className={fija ? 'space-y-1.5 rounded-xl border bg-[#F5F4F2] p-2 sm:max-h-[40vh] sm:overflow-y-auto' : 'mt-2 space-y-1.5 sm:max-h-[40vh] sm:overflow-y-auto'} aria-label="Capturas pegadas" data-lista-capturas>
+      {visibles.map(c => (
+        <FilaCaptura
+          key={c.id}
+          captura={c}
+          item={items.find(i => i.id === c.itemId) ?? null}
+          composicion={composicion}
+          onAlternar={() => actualizar(c.id, { abierta: !c.abierta })}
+          onAceptar={() => void aceptar(c)}
+          onRevisar={() => { if (c.itemId) onOpcionCreada?.(c.itemId) }}
+          onBorrar={() => borrar(c)}
+          onDeshacer={() => deshacer(c)}
+          onElegirTipo={t => { actualizar(c.id, { abierta: false }); void procesar(c.id, c.dataUrl, t) }}
+          onElegirOpcion={o => { if (c.itemId) void leer(c.id, c.itemId, c.dataUrl, o) }}
+          onAgregarIgual={() => agregarIgual(c)}
+          onReemplazarPrecio={() => void reemplazarPrecio(c)}
+        />
+      ))}
+    </ul>
+  ) : null
+
+  if (fija) {
+    return (
+      <>
+        <div
+          data-bandeja-capturas
+          data-bandeja-fija
+          {...alArrastrar}
+          className="sticky z-10 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur"
+          style={{ top: `var(${VAR_ALTO_ENCABEZADO}, 0px)` }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              tabIndex={0}
+              role="button"
+              aria-label="Pegar pantallazos"
+              className={`hidden min-h-[40px] min-w-0 flex-1 items-center gap-1.5 rounded-lg border-2 border-dashed px-3 text-[11px] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30 sm:flex ${arrastrando ? 'border-[#10B981] bg-[#10B981]/10 text-[#1A1A1A]' : 'border-[#10B981]/40 bg-[#F5F4F2] text-[#6B7280]'}`}
+            >
+              <ImageIcon className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="truncate">
+                {arrastrando
+                  ? 'Suelta aquí los pantallazos'
+                  : enCurso > 0
+                    ? `Procesando ${enCurso}… puedes seguir pegando`
+                    : 'Pantallazos del proveedor: pega (Ctrl+V / Cmd+V), arrástralos aquí o súbelos'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => entrada.current?.click()}
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#10B981] px-3 py-2 text-xs font-medium text-white sm:hidden"
+            >
+              <Camera className="h-4 w-4" aria-hidden />
+              {enCurso > 0 ? `Procesando ${enCurso}… · Subir otra` : 'Pegar / Subir foto'}
+            </button>
+            <button
+              type="button"
+              onClick={() => entrada.current?.click()}
+              className="hidden shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-[#1A1A1A] hover:bg-accent sm:inline-flex"
+            >
+              <Camera className="h-3.5 w-3.5" aria-hidden />
+              Subir foto
+            </button>
+            {visibles.length > 0 && (
+              <button
+                type="button"
+                onClick={() => document.querySelector('[data-lista-capturas]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
+                className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                {visibles.length} en la bandeja
+              </button>
+            )}
+          </div>
+          {entradaArchivos}
+        </div>
+        {listaCapturas}
+      </>
+    )
+  }
+
   return (
     <>
-      <div className="rounded-xl border-2 border-dashed border-[#10B981]/40 bg-[#F5F4F2] p-3 sm:sticky sm:top-2 sm:z-10" data-bandeja-capturas>
+      <div className="rounded-xl border-2 border-dashed border-[#10B981]/40 bg-[#F5F4F2] p-3 sm:sticky sm:top-2 sm:z-10" data-bandeja-capturas {...alArrastrar}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-xs font-semibold text-[#1A1A1A]">Pantallazos del proveedor</p>
@@ -502,44 +639,9 @@ export default function BandejaCapturas({
           <ImageIcon className="h-4 w-4" />
           {enCurso > 0 ? `Procesando ${enCurso}… puedes seguir pegando` : 'Pega aquí con Ctrl+V / Cmd+V'}
         </div>
-        <input
-          ref={entrada}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          aria-label="Subir pantallazos"
-          onChange={e => {
-            const archivos = Array.from(e.target.files ?? [])
-            e.target.value = ''
-            for (const a of archivos) agregar(a)
-          }}
-        />
+        {entradaArchivos}
 
-        {/* R2 (2026-09-23): la bandeja es fija arriba en el escritorio; con muchas filas tapaba
-            los bloques de abajo y no se veía dónde caían las opciones aceptadas. La lista de
-            filas tiene tope de alto y se desplaza por dentro; la zona de pegado no se mueve. */}
-        {visibles.length > 0 && (
-          <ul className="mt-2 space-y-1.5 sm:max-h-[40vh] sm:overflow-y-auto" aria-label="Capturas pegadas" data-lista-capturas>
-            {visibles.map(c => (
-              <FilaCaptura
-                key={c.id}
-                captura={c}
-                item={items.find(i => i.id === c.itemId) ?? null}
-                composicion={composicion}
-                onAlternar={() => actualizar(c.id, { abierta: !c.abierta })}
-                onAceptar={() => void aceptar(c)}
-                onRevisar={() => { if (c.itemId) onOpcionCreada?.(c.itemId) }}
-                onBorrar={() => borrar(c)}
-                onDeshacer={() => deshacer(c)}
-                onElegirTipo={t => { actualizar(c.id, { abierta: false }); void procesar(c.id, c.dataUrl, t) }}
-                onElegirOpcion={o => { if (c.itemId) void leer(c.id, c.itemId, c.dataUrl, o) }}
-                onAgregarIgual={() => agregarIgual(c)}
-                onReemplazarPrecio={() => void reemplazarPrecio(c)}
-              />
-            ))}
-          </ul>
-        )}
+        {listaCapturas}
       </div>
 
       {/* En el celular pegar es difícil: un botón flotante abre la galería o la cámara. */}
