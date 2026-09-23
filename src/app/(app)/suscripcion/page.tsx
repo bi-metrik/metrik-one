@@ -138,8 +138,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
             : { usados: equipo.cupo.usados, total: equipo.cupo.licencias }
         }
         terminosResumen={terminosResumen}
-        mostrarSustenta={sugerencia.mostrar}
-        sustentaSolicitada={sugerencia.yaSolicitado}
+        sustenta={sugerencia.yaSolicitado ? 'solicitada' : sugerencia.mostrar ? 'oferta' : null}
         pagos={<PestanaPagos carga={pagos} />}
         terminos={
           aprobada ? (
