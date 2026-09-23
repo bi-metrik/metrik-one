@@ -35,6 +35,7 @@ const { TarjetaPago } = await import('./tarjeta-pago')
 const { PestanaPagos } = await import('./pestana-pagos')
 const { UsuariosPanel } = await import('./usuarios-panel')
 const { default: SuscripcionClient } = await import('./suscripcion-client')
+const { ResumenLicencias, iniciales } = await import('./resumen-licencias')
 
 function texto(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -292,11 +293,11 @@ describe('el Resumen', () => {
   it('las cuatro pestañas, las licencias en uso, los términos y Sustenta al final', () => {
     const t = pintar()
     for (const p of ['Resumen', 'Pagos', 'Usuarios', 'Términos']) expect(t).toContain(p)
-    expect(t).toContain('2 de 2 usuarios en uso')
+    expect(t).toContain('Usuarios 2 de 2 en uso')
     expect(t).toContain('Aceptados el 25 sept 2026 por Alba Rosas.')
     expect(t).toContain('Sustenta sostiene todo tu SARLAFT')
     expect(t).toContain('Ahora no')
-    expect(t.indexOf('usuarios en uso')).toBeLessThan(t.indexOf('Sustenta sostiene'))
+    expect(t.indexOf('2 de 2 en uso')).toBeLessThan(t.indexOf('Sustenta sostiene'))
     expect(t).not.toMatch(/[!¡]/)
     expect(t).not.toMatch(PROVEEDOR)
   })
@@ -307,5 +308,55 @@ describe('el Resumen', () => {
     expect(solicitada).toContain('Ya recibimos tu solicitud. Te escribiremos para agendar la demostración.')
     const oculta = pintar({ sustenta: null })
     expect(oculta).not.toContain('Sustenta')
+  })
+})
+
+describe('el bloque de licencias del Resumen', () => {
+  const persona = (n: number) => ({ id: `u${n}`, nombre: `Persona Numero${n}`, correo: null })
+  const html = (usados: number, total: number) =>
+    renderToStaticMarkup(
+      React.createElement(ResumenLicencias, {
+        usados,
+        total,
+        personas: Array.from({ length: usados }, (_, i) => persona(i + 1)),
+        onVerUsuarios: () => {},
+      }),
+    )
+  const cuenta = (h: string, marca: string) => h.split(`${marca}="`).length - 1
+
+  it('sin barra de progreso: un avatar por usuario y ningún círculo libre si está lleno', () => {
+    const h = html(2, 2)
+    expect(h).not.toMatch(/style="width/)
+    expect(h).not.toContain('bg-papel')
+    expect(cuenta(h, 'data-avatar-licencia')).toBe(2)
+    expect(cuenta(h, 'data-licencia-libre')).toBe(0)
+    expect(h).toContain('aria-label="2 de 2 licencias en uso"')
+    expect(texto(h)).toContain('Usuarios 2 de 2 en uso')
+    expect(texto(h)).toContain('PN')
+    expect(texto(h)).toContain('Ver usuarios')
+    // Lleno está bien: ni alerta ni advertencia.
+    expect(h).not.toMatch(/alerta|advertencia|amber|red-/)
+  })
+
+  it('un círculo punteado por licencia libre', () => {
+    const h = html(2, 3)
+    expect(cuenta(h, 'data-avatar-licencia')).toBe(2)
+    expect(cuenta(h, 'data-licencia-libre')).toBe(1)
+    expect(h).toContain('border-dashed')
+    expect(texto(h)).toContain('2 de 3 en uso')
+  })
+
+  it('con más de cuatro usuarios, cuatro avatares y «+N»', () => {
+    const h = html(6, 6)
+    expect(cuenta(h, 'data-avatar-licencia')).toBe(4)
+    expect(h).toContain('data-avatar-mas')
+    expect(texto(h)).toContain('+2')
+  })
+
+  it('las iniciales salen del nombre, o del correo si no hay nombre', () => {
+    expect(iniciales('Alba Rosas')).toBe('AR')
+    expect(iniciales('Alba María Rosas Pérez')).toBe('AP')
+    expect(iniciales('alba')).toBe('AL')
+    expect(iniciales('  ', 'zoe@cda.co')).toBe('Z')
   })
 })
