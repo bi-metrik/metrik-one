@@ -581,6 +581,28 @@ describe('6 · el PDF con pantallazos de otros pasajeros sale como BORRADOR', ()
   })
 })
 
+describe('6c · varios motivos a la vez: la marca los dice todos', () => {
+  it('pantallazo viejo Y margen bajo el mínimo: la marca nombra los dos', async () => {
+    sembrar({
+      items: [linea('hotel cartagena', {
+        grupo: 'hotel', tarifa_pax: { casillas: { grupo_completo: lectura(DOS) } }, subtotal: 970, precio_venta: 1000,
+      })],
+      viaje: TRES, plantilla: 'trappvel',
+    })
+    ;(tablas.cotizaciones[0] as Fila).costo_total = 970
+    const r = await pdfDe()
+    expect(r.borrador).toBe(true)
+    const { PDFDocument } = await import('pdf-lib')
+    const titulo = (await PDFDocument.load(Buffer.from(r.pdf, 'base64'))).getTitle()
+    expect(titulo).toBe('BORRADOR · pantallazos por actualizar · margen bajo el mínimo · no enviar')
+    // El aviso de la pantalla trae los dos motivos, en el mismo orden que la marca.
+    expect(r.aviso).toContain(PEGAR_HOTEL)
+    expect(r.aviso).toContain('3 %')
+    expect(r.aviso!.indexOf(PEGAR_HOTEL)).toBeLessThan(r.aviso!.indexOf('3 %'))
+    expect(subidas).toEqual([])
+  })
+})
+
 describe('6b · R6 · el PDF sin tarifa por pasajero, igual que antes', () => {
   it('otro workspace (genérica, sin piso): limpio, guardado y sin leer los pasajeros', async () => {
     sembrar({ items: [linea('paquete'), linea('seguro')], conRegla: false })

@@ -131,7 +131,7 @@ describe('el resumen del editor con el IVA sobre el ingreso propio', () => {
     expect(html).toContain('<span class="block text-[10px] font-medium text-amber-700">IVA sin calcular: falta el costo</span>')
     expect(texto).toContain('IVA sin calcular: falta el costo')
     expect(texto).toContain('La línea «TRASLADO AEROPUERTO» tiene precio y no tiene costo')
-    expect(texto).toContain('El PDF sale como borrador hasta entonces.')
+    expect(texto).toContain('El PDF sale como borrador, con la marca «IVA sin calcular», hasta entonces.')
   })
 })
 

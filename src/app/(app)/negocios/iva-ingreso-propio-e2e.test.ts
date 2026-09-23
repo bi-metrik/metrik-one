@@ -172,6 +172,7 @@ import { generateCotizacionPDF } from './cotizacion-pdf-actions'
 import { recalcularTotales } from './cotizacion-actions'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
 import { textoDelPDF } from '@/lib/pdf/texto-del-pdf'
+import { PDFDocument } from 'pdf-lib'
 import { calcularFiscal } from '@/lib/fiscal/calculos'
 
 // ── Escenario ────────────────────────────────────────────────────────────────
@@ -272,6 +273,8 @@ type ResultadoPDF = {
 }
 
 const texto = (res: ResultadoPDF) => textoDelPDF(Buffer.from(res.pdf, 'base64'))
+/** El texto COMPLETO de la marca de agua: la marca lo deja como título del PDF. */
+const marca = async (res: ResultadoPDF) => (await PDFDocument.load(Buffer.from(res.pdf, 'base64'))).getTitle()
 const precioAprobado = () => (tablas.negocios[0] as Fila).precio_aprobado
 const cifra = (n: number) => n.toLocaleString('es-CO').replace(/,/g, '.')
 
@@ -347,6 +350,10 @@ describe('2 · una línea con precio y sin costo', () => {
     expect(pdf.filename).toMatch(/BORRADOR\.pdf$/)
     expect(pdf.aviso).toContain('«TOUR A MANO» tiene precio y no tiene costo')
     expect(texto(pdf)).toContain('BORRADOR')
+    // La marca dice el motivo REAL: el IVA, no el margen (decisión de Mauricio, 2026-09-23).
+    expect(await marca(pdf)).toBe('BORRADOR · IVA sin calcular · no enviar')
+    expect(texto(pdf)).toContain('IVA sin calcular · no enviar')
+    expect(texto(pdf)).not.toContain('margen bajo el m')
     expect(subidas).toEqual([])
     // El IVA de la línea sin costo no se calcula: no se le pone el 19 % a sus $500.000.
     expect(pdf.fiscal.iva).toBe(440_083)
@@ -591,6 +598,8 @@ describe('6 · Trappvel con el IVA dentro del precio', () => {
     const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
     expect(pdf.borrador).toBe(true)
     expect(pdf.aviso).toContain('IVA dentro del precio')
+    expect(await marca(pdf)).toBe('BORRADOR · IVA incluido sin plantilla · no enviar')
+    expect(texto(pdf)).not.toContain('margen bajo el m')
     expect(subidas).toEqual([])
     // El total del cobro sigue siendo el de la cascada.
     expect(pdf.fiscal.totalBruto).toBe(VALOR_0002)

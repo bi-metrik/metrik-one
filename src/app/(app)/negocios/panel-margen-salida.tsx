@@ -6,6 +6,7 @@ import { ShieldAlert, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { autorizarBajoElMinimo, type SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
+import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
@@ -96,7 +97,7 @@ export default function PanelMargenSalida({
           <p className="font-semibold">Bajo el margen mínimo: no se puede enviar ni aprobar</p>
           <p>{salida.mensaje}</p>
           <p className="text-[11px] text-red-800/80 dark:text-red-300/80">
-            El PDF se descarga como borrador, con marca de agua.
+            El PDF se descarga como borrador, con la marca «{etiquetaDeMotivo('margen')}».
           </p>
           {salida.perdida && (
             <p className="text-[11px] text-red-800/80 dark:text-red-300/80">
