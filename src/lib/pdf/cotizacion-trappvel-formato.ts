@@ -602,6 +602,109 @@ export function disposicionDeListas(
   return filas
 }
 
+// ── Franja de fotos ───────────────────────────────────────────────────────────
+
+/**
+ * La forma de una foto en un renglón de tres (ancho / alto): 3:2, la de una foto de viaje,
+ * a la que el recorte le quita poco. De ella sale el alto de TODO renglón de la franja.
+ */
+export const FORMA_DE_FOTO_EN_TERCIO = 3 / 2
+
+/** Un renglón de la franja: qué fotos lleva (desde la posición `desde`) y cuánto mide cada una. */
+export interface RenglonDeFotos {
+  desde: number
+  fotos: number
+  ancho: number
+  alto: number
+}
+
+/**
+ * Cómo se reparten N fotos en renglones que llenan el ancho del contenido.
+ *
+ * Hasta el 2026-09-23 cada foto medía un tercio del ancho fuera cual fuera la cuenta: con
+ * dos fotos (COT-2026-0006) la franja dejaba el tercio de la derecha vacío. Ahora cada
+ * renglón se reparte el ancho entero entre SUS fotos, así que nunca queda un hueco:
+ *
+ * - Hasta tres por renglón, y los renglones lo más parejos posible: cuatro van 2 + 2, no
+ *   3 + 1, y cinco van 3 + 2. Un renglón de una sola foto solo existe si hay una sola.
+ * - Todo renglón mide de alto lo que medía el de tres (3:2 a un tercio del ancho): con
+ *   menos fotos cada una es más ancha, no más alta. Así una franja de 3 + 2 no queda con
+ *   dos renglones de alto distinto, una sola foto es una tira y no una segunda portada, y
+ *   llenar el hueco no le agrega alto al documento. El recorte lo guía el foco de cada foto.
+ */
+export function renglonesDeFotos(n: number, anchoContenido: number, canal: number): RenglonDeFotos[] {
+  if (n <= 0) return []
+  const alto = (anchoContenido - canal * 2) / 3 / FORMA_DE_FOTO_EN_TERCIO
+  const cuantos = Math.ceil(n / 3)
+  const base = Math.floor(n / cuantos)
+  const conUnaMas = n % cuantos
+  const renglones: RenglonDeFotos[] = []
+  let desde = 0
+  for (let i = 0; i < cuantos; i += 1) {
+    const fotos = base + (i < conUnaMas ? 1 : 0)
+    const ancho = (anchoContenido - canal * (fotos - 1)) / fotos
+    renglones.push({ desde, fotos, ancho, alto })
+    desde += fotos
+  }
+  return renglones
+}
+
+// ── Tabla de vuelos ───────────────────────────────────────────────────────────
+
+/** Lo que mide el encabezado en degradado de la tabla de vuelos. */
+export const ALTO_ENCABEZADO_VUELOS = 18
+
+/** Lo que la tabla de vuelos imprime de un vuelo (un grupo: su ida, su regreso y su línea gris). */
+export interface GrupoDeVuelosAMedir {
+  /** Una fila por tramo: si lleva la escala bajo la ruta y si lleva la marca de su tarifa. */
+  filas: { conEscala: boolean; conTarifa: boolean }[]
+  /** La línea gris de abajo (números sin tramo, tarifa, equipaje, adicionales). Vacía, no sale. */
+  meta: string
+}
+
+// Medidas del JSX de `TablaVuelos`, a 1,1 veces el tamaño de la letra por renglón: un
+// vuelo de un tramo con escala y línea gris mide 43 pt; uno de ida y regreso, 67. La fila
+// nunca mide menos que la píldora de la sigla (14 pt), que va en la columna de aerolínea.
+const RELLENO_GRUPO = 12
+const ALTO_SIGLA = 14
+const RENGLON_RUTA = 9.4
+const RENGLON_CHICO = 8.3
+const AIRE_ESCALA = 1
+const ALTO_MARCA_TARIFA = 13
+const AIRE_ENTRE_FILAS = 5
+const AIRE_META = 4
+const CARACTER_META = 3.75
+
+/** Cuánto mide un grupo de la tabla de vuelos a este ancho de línea gris. Estimado, no medido. */
+export function altoEstimadoDeGrupoDeVuelos(g: GrupoDeVuelosAMedir, anchoMeta: number): number {
+  const filas = g.filas.reduce(
+    (a, f) => a + Math.max(
+      ALTO_SIGLA,
+      RENGLON_RUTA + (f.conEscala ? AIRE_ESCALA + RENGLON_CHICO : 0) + (f.conTarifa ? ALTO_MARCA_TARIFA : 0),
+    ),
+    0,
+  ) + AIRE_ENTRE_FILAS * Math.max(0, g.filas.length - 1)
+  const porRenglon = Math.max(1, Math.floor(anchoMeta / CARACTER_META))
+  const meta = g.meta === '' ? 0 : AIRE_META + RENGLON_CHICO * Math.ceil(g.meta.length / porRenglon)
+  return RELLENO_GRUPO + filas + meta
+}
+
+/**
+ * ¿La tabla de vuelos va entera, sin partirse?
+ *
+ * Una tabla corta es una sola lectura: partirla, aun repitiendo el encabezado, deja dos
+ * vuelos de un mismo viaje en dos hojas. COT-2026-0006 tenía Avianca en la primera y
+ * SATENA en la segunda, sin encabezado. Pero ir entera tiene un precio: si no cabe, baja
+ * completa y deja en blanco lo que sobraba arriba. Por eso va entera solo si mide, con su
+ * título y su encabezado, lo mismo que una columna de listas (`ALTO_MAXIMO_COLUMNA`): lo
+ * más que deja en blanco es un tercio de página. Más larga, se parte entre vuelos y el
+ * encabezado se repite arriba de cada página que ocupa.
+ */
+export function tablaDeVuelosVaEntera(altosDeGrupos: number[]): boolean {
+  const alto = ALTO_TITULO + ALTO_ENCABEZADO_VUELOS + altosDeGrupos.reduce((a, h) => a + h, 0)
+  return alto <= ALTO_MAXIMO_COLUMNA
+}
+
 // ── Utilidades ────────────────────────────────────────────────────────────────
 
 export function sinTildes(s: string): string {

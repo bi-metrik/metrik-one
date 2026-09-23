@@ -391,6 +391,8 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 - **Sin «Día a día» si todo es vuelo** (repetía la tabla); con él, un bloque por día que no se parte y el título pegado al primero. **«Antes de viajar» va con «Incluido»**, como lista (`disposicionDeListas`: lado a lado si caben, a todo el ancho si no); créditos al lado de la firma.
 - **Un solo sistema visual:** todo título con su ícono en el círculo gris; cajas, la tarjeta gris y el degradado; el ámbar solo como franja. ⚠️ `borderWidth: 0` revienta react-pdf («Invalid border width»): el borde se omite, no se pone en cero.
 - COT-2026-0006 pasa de 3 páginas a 2; un viaje de tres ciudades, de 6 a 5. Termotech y la genérica, idénticas byte a byte.
+- **La franja de fotos llena el ancho** (`renglonesDeFotos`): dos fotos van a mitades y una a todo el ancho, todas con el alto del renglón de tres; el foco recorta cada marco. Con dos, antes quedaba un tercio vacío.
+- **La tabla de vuelos no se parte sin su encabezado.** Corta (`tablaDeVuelosVaEntera`, el mismo tope de un tercio de hoja que las listas) va entera a la hoja donde quepa; larga, se parte entre aerolíneas y repite el encabezado. ⚠️ En react-pdf un hijo `fixed` se repite en cada trozo del View que lo contiene, no en toda la página: por eso el encabezado vive dentro del contenedor de la tabla.
 
 ### Nada sale al cliente bajo el margen mínimo sin la firma del dueño (Trappvel, 2026-09-22)
 

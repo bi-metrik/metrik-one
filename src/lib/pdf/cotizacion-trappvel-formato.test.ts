@@ -5,9 +5,12 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ALTO_ENCABEZADO_VUELOS,
   ALTO_MAXIMO_COLUMNA,
+  FORMA_DE_FOTO_EN_TERCIO,
   TOKENS,
   absorberRedondeo,
+  altoEstimadoDeGrupoDeVuelos,
   altoEstimadoDeLista,
   capitulosDelViaje,
   clienteDeLaPortada,
@@ -20,7 +23,9 @@ import {
   lugarLegible,
   numerosDeVuelo,
   rangoCompacto,
+  renglonesDeFotos,
   siglaAerolinea,
+  tablaDeVuelosVaEntera,
   tituloConAcento,
   vueloDesdeNombre,
   yaEstaEnElTitulo,
@@ -414,5 +419,94 @@ describe('«Incluido», «A tener en cuenta» y «Antes de viajar»', () => {
     expect(altoEstimadoDeLista(['corto'], 250)).toBeLessThan(altoEstimadoDeLista(['x'.repeat(200)], 250))
     // A4 con los márgenes del documento deja ~736 pt de contenido por página.
     expect(ALTO_MAXIMO_COLUMNA).toBeLessThanOrEqual(736 / 2.5)
+  })
+})
+
+describe('la franja de fotos de la portada', () => {
+  const ANCHO_CONTENIDO = 515.28
+  const CANAL = 8
+  const reparto = (n: number) => renglonesDeFotos(n, ANCHO_CONTENIDO, CANAL).map(r => r.fotos)
+
+  it('sin fotos no hay renglones', () => {
+    expect(renglonesDeFotos(0, ANCHO_CONTENIDO, CANAL)).toEqual([])
+  })
+
+  it('hasta tres fotos van en un renglón; de ahí en adelante, repartidas sin dejar una sola', () => {
+    expect(reparto(1)).toEqual([1])
+    expect(reparto(2)).toEqual([2])
+    expect(reparto(3)).toEqual([3])
+    expect(reparto(4)).toEqual([2, 2])
+    expect(reparto(5)).toEqual([3, 2])
+    expect(reparto(6)).toEqual([3, 3])
+    expect(reparto(7)).toEqual([3, 2, 2])
+  })
+
+  it('⚠️ todo renglón llena el ancho del contenido: con dos fotos, dos mitades y no dos tercios', () => {
+    for (let n = 1; n <= 7; n += 1) {
+      for (const r of renglonesDeFotos(n, ANCHO_CONTENIDO, CANAL)) {
+        expect(r.fotos * r.ancho + CANAL * (r.fotos - 1)).toBeCloseTo(ANCHO_CONTENIDO, 6)
+      }
+    }
+    // COT-2026-0006: dos fotos secundarias. Antes cada una medía un tercio y quedaba un hueco.
+    const [dos] = renglonesDeFotos(2, ANCHO_CONTENIDO, CANAL)
+    expect(dos.ancho).toBeCloseTo((ANCHO_CONTENIDO - CANAL) / 2, 6)
+    expect(dos.ancho).toBeGreaterThan((ANCHO_CONTENIDO - 2 * CANAL) / 3)
+  })
+
+  it('cada renglón toma sus fotos en orden, sin saltarse ni repetir ninguna', () => {
+    const rs = renglonesDeFotos(7, ANCHO_CONTENIDO, CANAL)
+    expect(rs.map(r => r.desde)).toEqual([0, 3, 5])
+    expect(rs.reduce((a, r) => a + r.fotos, 0)).toBe(7)
+  })
+
+  it('todo renglón mide de alto lo que el de tres en 3:2: menos fotos, más anchas, no más altas', () => {
+    const tercio = renglonesDeFotos(3, ANCHO_CONTENIDO, CANAL)[0]
+    expect(tercio.ancho / tercio.alto).toBeCloseTo(FORMA_DE_FOTO_EN_TERCIO, 6)
+    for (let n = 1; n <= 7; n += 1) {
+      for (const r of renglonesDeFotos(n, ANCHO_CONTENIDO, CANAL)) expect(r.alto).toBeCloseTo(tercio.alto, 6)
+    }
+    // Una sola foto es una tira baja, no una segunda portada.
+    const [una] = renglonesDeFotos(1, ANCHO_CONTENIDO, CANAL)
+    expect(una.ancho / una.alto).toBeGreaterThan(4)
+  })
+})
+
+describe('la tabla de vuelos, entera o partida con su encabezado', () => {
+  const ANCHO_META = 515.28 - 16
+  const ida = { conEscala: false, conTarifa: false }
+  const conEscala = { conEscala: true, conTarifa: false }
+  const nota = 'Tarifa Basic · 1 artículo personal'
+
+  it('calibrado contra el render: un tramo con escala y nota, 43 pt; ida y regreso, 67', () => {
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(43, 0)
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(67, 0)
+  })
+
+  it('una fila nunca mide menos que la píldora de la sigla', () => {
+    const sola = altoEstimadoDeGrupoDeVuelos({ filas: [ida], meta: '' }, ANCHO_META)
+    expect(sola).toBe(12 + 14)
+  })
+
+  it('la marca de la tarifa, la escala y una nota larga lo hacen crecer', () => {
+    const base = altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota }, ANCHO_META)
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [{ conEscala: true, conTarifa: true }], meta: nota }, ANCHO_META)).toBeGreaterThan(base)
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota.repeat(8) }, ANCHO_META)).toBeGreaterThan(base)
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: '' }, ANCHO_META)).toBeLessThan(base)
+  })
+
+  it('COT-2026-0006 (dos aerolíneas de ida y regreso) va entera: Avianca y SATENA juntas', () => {
+    const grupo = altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)
+    expect(tablaDeVuelosVaEntera([grupo, grupo])).toBe(true)
+  })
+
+  it('una tabla larga se parte: ir entera dejaría más de un tercio de hoja en blanco', () => {
+    const grupo = altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)
+    expect(tablaDeVuelosVaEntera(Array(6).fill(grupo))).toBe(false)
+  })
+
+  it('el borde es el de las listas del cierre, con título y encabezado incluidos', () => {
+    const resto = ALTO_MAXIMO_COLUMNA - 60 - ALTO_ENCABEZADO_VUELOS
+    expect(tablaDeVuelosVaEntera([resto])).toBe(true)
+    expect(tablaDeVuelosVaEntera([resto + 0.5])).toBe(false)
   })
 })

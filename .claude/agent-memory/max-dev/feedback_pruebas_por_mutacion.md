@@ -190,3 +190,18 @@ contra ese respaldo; o commitear primero y mutar sobre lo commiteado. Después d
 del sello «Aprobado» siguió verde con el sello BORRADO, porque la línea «Aprobado por ti el…»
 también contiene la palabra. **How to apply:** para un rótulo corto, afirmar sobre el nodo
 (atributo `data-*` + su texto exacto con `toBe`), no sobre el texto de toda la pantalla.
+
+## ⚠️ Una prueba de MAQUETACIÓN con una sola posición pasa por casualidad: barrer
+
+**2026-09-23 (PR #838).** «La tabla de vuelos de COT-0006 va entera» salió verde con la
+tabla forzada a partirse: en esa posición el título ya saltaba de hoja por su propio
+`minPresenceAhead`, así que las dos ramas daban la misma página. Lo mismo con «el título no
+queda solo al pie»: con el fixture tal cual, el título caía a media hoja y quitarle la
+presencia no cambiaba nada. Ninguna de las dos mutaciones cayó hasta que la prueba **corrió
+la tabla hacia el pie una línea a la vez** (alargando la presentación, 0 a 30 líneas),
+pasando por la franja exacta donde cabe una cosa y no la siguiente.
+
+**How to apply:** una regla de corte de página solo se prueba en la posición donde el corte
+cambia de lado. Barrer una variable que empuje el bloque (texto de relleno previo) y afirmar
+en cada paso; medir antes con `origenesDeTexto` (render test de Trappvel) que el barrido
+cruza el pie, y ver caer la mutación. Un solo fixture verde no dice nada de cortes.

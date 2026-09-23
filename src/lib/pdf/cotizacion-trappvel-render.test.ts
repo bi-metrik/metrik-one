@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
+import { inflateSync } from 'node:zlib'
 
 import CotizacionPDF from './cotizacion-pdf'
 import CotizacionTermotechPDF from './cotizacion-termotech-pdf'
@@ -17,7 +18,7 @@ import CotizacionTrappvelPDF from './cotizacion-trappvel-pdf'
 import { plantillaCotizacionPropia } from './plantillas-cotizacion'
 import { textoDelPDF } from './texto-del-pdf'
 import type { CotizacionPDFProps, ViajePDF } from './cotizacion-props'
-import { vuelosDeItems } from '@/lib/cotizaciones/detalle-viaje'
+import { vuelosDeItems, type VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/documento-cliente'
 import { fotosDelViaje } from './fotos-del-viaje'
@@ -160,6 +161,60 @@ function porPagina(t: string, consecutivo: string): Map<number, string> {
 async function texto(p: CotizacionPDFProps): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return textoDelPDF(Buffer.from(await renderToBuffer(createElement(CotizacionTrappvelPDF, p) as any)))
+}
+
+async function pdfDe(p: CotizacionPDFProps): Promise<Buffer> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return Buffer.from(await renderToBuffer(createElement(CotizacionTrappvelPDF, p) as any))
+}
+
+type Matriz = [number, number, number, number, number, number]
+const por = (m: Matriz, c: Matriz): Matriz => [
+  m[0] * c[0] + m[1] * c[2], m[0] * c[1] + m[1] * c[3],
+  m[2] * c[0] + m[3] * c[2], m[2] * c[1] + m[3] * c[3],
+  m[4] * c[0] + m[5] * c[2] + c[4], m[4] * c[1] + m[5] * c[3] + c[5],
+]
+
+/**
+ * Dónde empieza cada bloque de texto de la página, en puntos. `textoDelPDF` dice QUÉ se
+ * imprime; esto dice DÓNDE, para las pocas pruebas que afirman sobre la maquetación.
+ * react-pdf coloca cada caja con `cm` anidados entre `q` y `Q`: se sigue esa pila.
+ */
+function origenesDeTexto(buf: Buffer): { texto: string; x: number; y: number }[] {
+  const salida: { texto: string; x: number; y: number }[] = []
+  const num = '(-?[\\d.]+)'
+  const seis = `${num} ${num} ${num} ${num} ${num} ${num}`
+  let desde = 0
+  for (;;) {
+    const ini = buf.indexOf('stream', desde)
+    if (ini === -1) break
+    let inicio = ini + 'stream'.length
+    if (buf[inicio] === 0x0d) inicio++
+    if (buf[inicio] === 0x0a) inicio++
+    const fin = buf.indexOf('endstream', inicio)
+    if (fin === -1) break
+    desde = fin + 'endstream'.length
+    let c: string
+    try { c = inflateSync(buf.subarray(inicio, fin)).toString('latin1') } catch { continue }
+    let ctm: Matriz = [1, 0, 0, 1, 0, 0]
+    const pila: Matriz[] = []
+    const re = new RegExp(`(?:^|\\n)(q|Q)(?=\\n)|${seis} cm|BT([\\s\\S]*?)ET`, 'g')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(c)) !== null) {
+      if (m[1] === 'q') pila.push(ctm)
+      else if (m[1] === 'Q') ctm = pila.pop() ?? [1, 0, 0, 1, 0, 0]
+      else if (m[2] !== undefined) ctm = por(m.slice(2, 8).map(Number) as Matriz, ctm)
+      else {
+        const tm = new RegExp(`${seis} Tm`).exec(m[8])
+        const [e, f] = tm ? [Number(tm[5]), Number(tm[6])] : [0, 0]
+        const texto = (m[8].match(/<([0-9A-Fa-f\s]*)>/g) ?? [])
+          .map(h => h.slice(1, -1).replace(/\s+/g, '').match(/../g)?.map(b => String.fromCharCode(parseInt(b, 16))).join('') ?? '')
+          .join('')
+        salida.push({ texto, x: e * ctm[0] + f * ctm[2] + ctm[4], y: e * ctm[1] + f * ctm[3] + ctm[5] })
+      }
+    }
+  }
+  return salida
 }
 
 describe('la plantilla trappvel está registrada', () => {
@@ -745,12 +800,16 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     expect(t).toMatch(/28 NOV San Andrés Isla Bogotá Avianca/)
   })
 
-  it('1c · ⚠️ con su texto real no termina en una hoja con solo «Antes de viajar» y la firma', async () => {
-    // El documento REAL: las fotos del banco y el texto revisado tal como está en producción.
-    // Antes del 2026-09-23 la tercera hoja quedaba al 70 % en blanco con esas dos cosas.
+  /** El documento REAL: las fotos del banco y el texto revisado tal como está en producción. */
+  const real0006 = (): CotizacionPDFProps => {
     const base = cot0006()
     const f = fotosDelViaje({ destino: base.viaje!.destino, vuelos: base.viaje!.vuelos, hoteles: [] }, fotosDeCiudad)
-    const t = await texto({ ...base, viaje: { ...base.viaje!, ...textoParaElViaje(DOC_0006), foto: f.portada, fotosCiudades: f.ciudades } })
+    return { ...base, viaje: { ...base.viaje!, ...textoParaElViaje(DOC_0006), foto: f.portada, fotosCiudades: f.ciudades } }
+  }
+
+  it('1c · ⚠️ con su texto real no termina en una hoja con solo «Antes de viajar» y la firma', async () => {
+    // Antes del 2026-09-23 la tercera hoja quedaba al 70 % en blanco con esas dos cosas.
+    const t = await texto(real0006())
     const paginas = porPagina(t, 'COT-2026-0006')
     const ultima = paginas.get(Math.max(...paginas.keys()))!
     expect(ultima).toContain('Edgar Javier Alarcon S.')
@@ -758,6 +817,36 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     // Con la firma viaja la inversión, no una hoja casi vacía.
     expect(ultima).toContain('TOTAL')
     expect(paginas.size).toBe(2)
+  })
+
+  it('1d · ⚠️ la tabla de vuelos va entera: Avianca y SATENA bajo el mismo encabezado, en la misma hoja', async () => {
+    // Hasta el 2026-09-23 Avianca quedaba en la primera hoja y SATENA en la segunda, sin
+    // la fila de títulos que dice qué es cada columna. La prueba corre la tabla hacia el
+    // pie de la hoja una línea a la vez (sin presentación y luego alargándola): en alguna de
+    // esas posiciones cabe la primera aerolínea y no la segunda, que es donde se partía.
+    const base = real0006()
+    const linea = 'Una línea más de presentación, para correr la tabla de vuelos hacia el pie de la hoja. '
+    for (let k = 0; k <= 8; k += 1) {
+      const p = { ...base, viaje: { ...base.viaje!, intro: linea.repeat(k) } }
+      const paginas = [...porPagina(await texto(p), 'COT-2026-0006').values()]
+      const conTabla = paginas.filter(h => h.includes('AEROLÍNEA RUTA FECHA'))
+      expect(conTabla, `presentación de ${k} líneas`).toHaveLength(1)
+      for (const dato of ['Vuelos', 'Avianca', '9782', '9779', 'SATENA', '8832', '8833']) {
+        expect(conTabla[0], `presentación de ${k} líneas`).toContain(dato)
+      }
+    }
+  }, 60_000)
+
+  it('1e · ⚠️ las dos fotos de la portada llenan el ancho: dos mitades, sin el tercio vacío', async () => {
+    const rotulos = origenesDeTexto(await pdfDe(real0006()))
+    const acuario = rotulos.find(r => r.texto.includes('EL ACUARIO'))
+    const lagoon = rotulos.find(r => r.texto.includes('MCBEAN LAGOON'))
+    expect(acuario).toBeDefined()
+    expect(lagoon).toBeDefined()
+    // Mismo renglón, y la segunda empieza a media página (su ancho, la mitad menos el
+    // canal, más el canal). En tercios estaba a 174 pt de la primera y dejaba el hueco.
+    expect(lagoon!.y).toBeCloseTo(acuario!.y, 1)
+    expect(lagoon!.x - acuario!.x).toBeCloseTo((515.28 - 8) / 2 + 8, 0)
   })
 
   it('2 · cada número de vuelo va en SU fila: 8832 a la ida, 8833 al regreso', async () => {
@@ -932,4 +1021,57 @@ describe('el texto para el cliente', () => {
       expect(await render(conElTexto)).toBe(await render(base))
     }
   }, 30_000)
+})
+
+describe('una tabla de vuelos que no cabe en una hoja', () => {
+  const dos = (n: number) => String(n).padStart(2, '0')
+  // Doce aerolíneas de ida y regreso, con escala: cada una con sus números y su tarifa propios.
+  const vuelo = (n: number): VueloPDF => ({
+    ...VUELO,
+    linea: `VUELO ${n}`,
+    fechaSalida: `${n} jun 2027`,
+    fechaRegreso: `${n + 14} jun 2027`,
+    tarifa: `Tarifa ${dos(n)}X`,
+    numeroVuelo: `QA${dos(n)}1, QA${dos(n)}2`,
+  })
+  const largo = () => props({
+    cotizacion: { ...props().cotizacion, consecutivo: 'COT-QA-VUELOS' },
+    dias: null,
+    viaje: viaje({ vuelos: Array.from({ length: 12 }, (_, i) => vuelo(i + 1)) }),
+  })
+  const hojas = async () => [...porPagina(await texto(largo()), 'COT-QA-VUELOS').values()]
+  const veces = (hoja: string, frase: string) => hoja.split(frase).length - 1
+
+  it('⚠️ el encabezado se repite arriba de cada hoja que lleva vuelos, y de ninguna otra', async () => {
+    const paginas = await hojas()
+    const conVuelos = paginas.filter(p => /QA\d{3}/.test(p))
+    expect(conVuelos.length).toBeGreaterThan(1)
+    for (const p of conVuelos) expect(veces(p, 'AEROLÍNEA RUTA FECHA')).toBe(1)
+    for (const p of paginas.filter(p => !/QA\d{3}/.test(p))) expect(veces(p, 'AEROLÍNEA RUTA FECHA')).toBe(0)
+  })
+
+  it('una aerolínea no se parte: su ida, su regreso y su línea gris van en la misma hoja', async () => {
+    const paginas = await hojas()
+    for (let n = 1; n <= 12; n += 1) {
+      const hoja = paginas.find(p => p.includes(`QA${dos(n)}1`))
+      expect(hoja, `vuelo ${n}`).toBeDefined()
+      expect(hoja).toContain(`QA${dos(n)}2`)
+      expect(hoja).toContain(`Tarifa ${dos(n)}X`)
+    }
+  })
+
+  it('el título «Vuelos» no queda solo al pie: va con el encabezado y la primera aerolínea', async () => {
+    // Se corre la tabla hacia el pie una línea a la vez: entre 0 y 30 líneas el título baja
+    // de media hoja hasta saltar a la siguiente, y en algún punto cabe él y no lo que sigue,
+    // que es donde quedaría huérfano (visto caer quitando su `minPresenceAhead`).
+    const linea = 'Una línea más de presentación, para correr la tabla de vuelos hacia el pie de la hoja. '
+    for (let k = 0; k <= 30; k += 1) {
+      const p = largo()
+      const paginas = [...porPagina(await texto({ ...p, viaje: { ...p.viaje!, presentacion: linea.repeat(k) } }), 'COT-QA-VUELOS').values()]
+      const conTitulo = paginas.filter(h => h.includes('Vuelos AEROLÍNEA'))
+      expect(conTitulo, `presentación de ${k} líneas`).toHaveLength(1)
+      expect(conTitulo[0], `presentación de ${k} líneas`).toContain('QA011')
+      for (const h of paginas.filter(h => !/QA\d{3}/.test(h))) expect(veces(h, 'AEROLÍNEA RUTA FECHA'), `presentación de ${k} líneas`).toBe(0)
+    }
+  }, 120_000)
 })

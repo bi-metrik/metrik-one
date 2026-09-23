@@ -66,9 +66,11 @@ import {
 import type { CotizacionPDFProps, FotoPDF, PrecioPorPasajeroPDF, ViajePDF } from './cotizacion-props'
 import { creditosDeFotos } from './fotos-del-viaje'
 import {
+  ALTO_ENCABEZADO_VUELOS,
   CANAL_COLUMNAS,
   TOKENS as C,
   absorberRedondeo,
+  altoEstimadoDeGrupoDeVuelos,
   capitulosDelViaje,
   circuloDeFecha,
   claveDeFecha,
@@ -89,8 +91,10 @@ import {
   lugarLegible,
   numerosDeVuelo,
   rangoCompacto,
+  renglonesDeFotos,
   siglaAerolinea,
   sinTildes,
+  tablaDeVuelosVaEntera,
   tieneRegreso,
   tituloConAcento,
   yaLoDiceLaPortada,
@@ -350,43 +354,53 @@ function FotoConRotulo({ foto, alto }: { foto: FotoPDF; alto: number }) {
 }
 
 /**
- * Toda foto que no es la de portada va en miniatura 3:2, una sola medida en todo el
- * documento: un tercio del ancho menos el canal.
+ * La miniatura al lado del hotel (una sola foto en el capítulo) mide un tercio del ancho
+ * menos el canal, en 3:2. En la franja cada foto recibe el marco de su renglón.
  *
- * ⚠️ Hasta el 2026-09-23 las fotos de la franja se repartían el ancho a 112 pt de alto:
- * franjas 3,6 veces más anchas que altas, y en «El Acuario» solo se veía cielo. Una foto
- * de viaje es 4:3 o 3:2; con esa forma el recorte le quita poco, y el foco decide qué.
+ * ⚠️ Antes del foco por foto (#832) una franja 3,6 veces más ancha que alta recortaba al
+ * centro, y en «El Acuario» solo se veía cielo. Un marco apaisado solo sirve porque el
+ * recorte lo guía el foco de cada foto (`encuadreDeFoto`), recalculado para ESE marco.
  */
 const CANAL_FOTOS = 8
 const ANCHO_MINIATURA = (ANCHO_CONTENIDO - CANAL_FOTOS * 2) / 3
 const ALTO_MINIATURA = ANCHO_MINIATURA / 1.5
 
-function Miniatura({ foto }: { foto: FotoPDF }) {
+function Miniatura({ foto, ancho = ANCHO_MINIATURA, alto = ALTO_MINIATURA }: { foto: FotoPDF; ancho?: number; alto?: number }) {
   return (
-    <View style={{ width: ANCHO_MINIATURA, height: ALTO_MINIATURA, position: 'relative' }}>
+    <View style={{ width: ancho, height: alto, position: 'relative' }}>
       <PdfImage
         src={foto.url}
         style={{
-          width: ANCHO_MINIATURA,
-          height: ALTO_MINIATURA,
+          width: ancho,
+          height: alto,
           objectFit: 'cover',
-          objectPosition: encuadreDeFoto(foto.foco, foto.proporcion, ANCHO_MINIATURA / ALTO_MINIATURA),
+          // El recorte se recalcula para la forma de ESTE marco: el foco es de la foto.
+          objectPosition: encuadreDeFoto(foto.foco, foto.proporcion, ancho / alto),
           borderRadius: 8,
         }}
       />
-      {foto.rotulo && <Rotulo texto={foto.rotulo} chico ancho={ANCHO_MINIATURA} />}
+      {foto.rotulo && <Rotulo texto={foto.rotulo} chico ancho={ancho} />}
     </View>
   )
 }
 
-/** Varias miniaturas en fila, tres por renglón. La franja no se parte entre páginas. */
+/**
+ * Varias fotos en renglones que llenan el ancho: dos van a mitades, tres a tercios, una a
+ * todo el ancho, y todo renglón con el alto del de tres (`renglonesDeFotos`). Hasta el
+ * 2026-09-23 cada foto medía un tercio fuera cual fuera la cuenta, y con dos quedaba un
+ * hueco a la derecha. No se parte entre páginas.
+ */
 function FranjaDeFotos({ fotos }: { fotos: FotoPDF[] }) {
   if (fotos.length === 0) return null
   return (
-    <View wrap={false} style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 14 }}>
-      {fotos.map((f, i) => (
-        <View key={`foto-${i}`} style={{ marginLeft: i % 3 === 0 ? 0 : CANAL_FOTOS, marginTop: i < 3 ? 0 : CANAL_FOTOS }}>
-          <Miniatura foto={f} />
+    <View wrap={false} style={{ marginTop: 14 }}>
+      {renglonesDeFotos(fotos.length, ANCHO_CONTENIDO, CANAL_FOTOS).map((r, i) => (
+        <View key={`renglon-${i}`} style={{ flexDirection: 'row', marginTop: i === 0 ? 0 : CANAL_FOTOS }}>
+          {fotos.slice(r.desde, r.desde + r.fotos).map((f, j) => (
+            <View key={`foto-${j}`} style={{ marginLeft: j === 0 ? 0 : CANAL_FOTOS }}>
+              <Miniatura foto={f} ancho={r.ancho} alto={r.alto} />
+            </View>
+          ))}
         </View>
       ))}
     </View>
@@ -743,15 +757,16 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
         </View>
       </View>
   )
+  const metas = grupos.map(g => [
+    numerosSinTramo(g.v),
+    !general ? g.v.tarifa : null,
+    !general ? g.v.equipaje : null,
+    // §1.2 · el adicional va DENTRO del vuelo y sale en los TRES niveles: es plata
+    // que el cliente paga. Sin cifra: el dinero vive en «Inversión».
+    g.v.adicionales.length > 0 ? `Adicionales: ${g.v.adicionales.join(' · ')}` : null,
+  ].filter(Boolean).join(' · '))
   const bloques = grupos.map((g, gi) => {
-        const meta = [
-          numerosSinTramo(g.v),
-          !general ? g.v.tarifa : null,
-          !general ? g.v.equipaje : null,
-          // §1.2 · el adicional va DENTRO del vuelo y sale en los TRES niveles: es plata
-          // que el cliente paga. Sin cifra: el dinero vive en «Inversión».
-          g.v.adicionales.length > 0 ? `Adicionales: ${g.v.adicionales.join(' · ')}` : null,
-        ].filter(Boolean).join(' · ')
+        const meta = metas[gi]
         return (
           <View
             key={`vuelo-${gi}`}
@@ -771,16 +786,44 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
           </View>
         )
       })
-  // Título, encabezado y primer vuelo no se separan: ninguno de los tres queda solo.
-  return (
-    <View>
+  // Cada aerolínea (sus tramos y su nota de equipaje) es un bloque que no se parte.
+  // Lo que se decide aquí es qué pasa con la TABLA cuando no cabe en lo que queda de hoja.
+  const altos = grupos.map((g, gi) => altoEstimadoDeGrupoDeVuelos({
+    filas: g.filas.map(f => ({
+      conEscala: Boolean(f.escala),
+      conTarifa: (f.vuelo.tarifas ?? []).some(i => tarifas[i] !== undefined),
+    })),
+    meta: metas[gi],
+  }, ANCHO_CONTENIDO - 16))
+
+  // Tabla corta (la de casi todo viaje): va ENTERA, con su título, a la hoja donde quepa.
+  // Partirla deja el encabezado en una hoja y la mitad de las aerolíneas en la otra, sin
+  // columnas que las nombren; mover la tabla completa cuesta como mucho un tercio de hoja
+  // en blanco, la misma regla que ya aplican las listas del cierre.
+  if (tablaDeVuelosVaEntera(altos)) {
+    return (
       <View wrap={false}>
         {titulo}
         {encabezado}
-        {bloques[0]}
+        {bloques}
       </View>
-      {bloques.slice(1)}
-    </View>
+    )
+  }
+
+  // Tabla larga: se parte entre aerolíneas y el encabezado se REPITE en cada hoja. En
+  // react-pdf un hijo `fixed` se copia en cada trozo del View que lo contiene (no en cada
+  // página del documento): por eso vive dentro del contenedor de la tabla y no en la hoja.
+  // El título (con su marca de presencia) queda HERMANO del contenedor para no ser su
+  // primer hijo: `minPresenceAhead` no actúa sobre un primer hijo, y así el título nunca
+  // queda solo al pie. La marca pide que quepan el encabezado y la primera aerolínea.
+  return (
+    <>
+      <View minPresenceAhead={ALTO_ENCABEZADO_VUELOS + altos[0] + 20}>{titulo}</View>
+      <View>
+        <View fixed>{encabezado}</View>
+        {bloques}
+      </View>
+    </>
   )
 }
 
