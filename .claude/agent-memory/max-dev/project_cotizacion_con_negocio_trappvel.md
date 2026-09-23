@@ -1,6 +1,6 @@
 ---
 name: cotizacion-con-negocio-trappvel
-description: "#872 (R1/R2 bandeja) mergeado 2026-09-23; el header+columna del negocio en la cotización (Trappvel) espera el OK del boceto. Dónde vive cada dato y qué NO existe"
+description: "#872 (R1/R2 bandeja) y #874 (encabezado+columna+franja fija) mergeados 2026-09-23. Dónde vive cada dato del marco, qué NO existe y cómo medir un sticky"
 metadata:
   type: project
 ---
@@ -27,7 +27,7 @@ condicionado a `lineasPorTipo`.
 (medido por GET de PostgREST con control 42703). Pero **el SQL no está en
 `supabase/migrations/`**: el repo miente sobre ese esquema.
 
-## Header + columna del negocio (pendiente del OK del boceto)
+## Header + columna del negocio — #874 mergeado (squash `e01a1cc`), sin migración
 
 Solo Trappvel. Qué hay y qué no, medido en producción:
 - **Solicitud** (`condiciones_del_viaje`, etapa 1): destino, nacional/internacional,
@@ -46,7 +46,14 @@ Solo Trappvel. Qué hay y qué no, medido en producción:
 - **Estados de cotización** (CHECK): borrador, enviada, aceptada, rechazada, vencida.
   Hoy Trappvel solo tiene `borrador` (13). `valor_total` YA es el total de la
   Recomendada (`itinerarios-datos.ts`).
-- La bandeja ya trae arrastrar, Ctrl+V y «Subir foto» (botón flotante en celular).
+- ⚠️ La bandeja NO tenía arrastrar y soltar (el resumen previo lo afirmaba): lo agregó #874.
+- Vive en `negocios/[id]/cotizacion/layout.tsx` (no en la página) para no desmontarse al
+  cambiar de cotización; el editor detecta el marco por CONTEXTO (`marco-cotizacion-contexto.ts`),
+  no por prop: sin contexto, R6 byte a byte. Datos: `marco-negocio.ts` (puro) + `-datos.ts`.
+- Lista de cotizaciones en etapas `numero` 2 y 3; abiertas = borrador/enviada/aceptada.
+- ⚠️ `chrome --headless --screenshot` mide mal un sticky con alto medido por
+  ResizeObserver (dio 105 px contra 125 reales en 390 px). Medir por CDP con
+  `Emulation.setDeviceMetricsOverride` (node + `ws` del repo) y `getBoundingClientRect`.
 
 Relacionado: [[recomendada-tarifa-elegida]], [[registro-decisiones-combinacion]],
 [[pruebas-por-mutacion]].
