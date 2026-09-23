@@ -13,8 +13,8 @@
  *     la primera vez futura de esa fecha. Nunca «el año en curso», que en diciembre falla
  *     para un viaje de enero.
  *  3. El regreso nunca queda antes de la salida: si quedaría, es del año siguiente.
- *  4. Solo hay aviso cuando la deducción falla: el día de la semana no coincide en ninguno
- *     de los dos años posibles, o la fecha queda a más de 30 días de las del viaje. El aviso
+ *  4. Solo hay aviso cuando la deducción falla: el día de la semana no coincide en ninguna
+ *     de las dos apariciones posibles, o la fecha queda a más de 30 días de las del viaje. El aviso
  *     dice qué año asumió y por qué.
  *
  * Puro: el «hoy» entra por parámetro (Bogotá, lo pone quien llama).
@@ -142,7 +142,7 @@ export function deducirAnio(e: EntradaAnio): AnioDeducido | null {
   let motivo: string | null = null
 
   if (semana !== null) {
-    // Regla 1: los dos años posibles desde el piso; el primero donde cae ese día.
+    // Regla 1: las dos apariciones posibles desde el piso; la primera donde cae ese día.
     const posibles = apariciones(mes, dia, piso, 2)
     const coincide = posibles.find(f => new Date(ms(f)).getUTCDay() === semana)
     if (coincide) {
