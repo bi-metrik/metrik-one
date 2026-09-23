@@ -27,6 +27,17 @@
  * monto. `modo` se escribe, y lo que no calce con él se rechaza al guardar (CHECK en la base)
  * y aquí.
  *
+ * ## Fijo más porcentaje de lo adicional (decisión de Mauricio, 2026-09-23)
+ *
+ * AFI conserva los **$50.000 fijos por CDA al mes** y además recibe el **20 % de todo lo adicional**
+ * que compre ese CDA sobre su licencia (usuarios adicionales de la cláusula 2.3). Es el modo
+ * `fijo_mas_porcentaje`: `monto_fijo` por cobro, más `pct` sobre la PARTE ADICIONAL de ese cobro
+ * (`CobroDeCiclo.valorAdicional`), nunca sobre el cobro entero. Un cobro que no declara su parte
+ * adicional genera solo el fijo: un campo ausente nunca autoriza una comisión.
+ *
+ * Otro servicio que el CDA compre aparte (Sustenta) es otro contrato, y su 20 % va en la comisión
+ * de ESE contrato con modo `porcentaje`.
+ *
  * Módulo puro. El único que decide cuánta comisión se debe; lo consumen la ficha del contrato,
  * el motor de cobro (B3) y la liquidación.
  */
@@ -35,7 +46,7 @@
 export const BASES_COMISION = ['cada_cobro', 'primer_cobro'] as const
 export type BaseComision = (typeof BASES_COMISION)[number]
 
-export const MODOS_COMISION = ['porcentaje', 'monto_fijo'] as const
+export const MODOS_COMISION = ['porcentaje', 'monto_fijo', 'fijo_mas_porcentaje'] as const
 export type ModoComision = (typeof MODOS_COMISION)[number]
 
 export interface Comision {
@@ -44,9 +55,9 @@ export interface Comision {
   /** NIT del canal: es el `tercero_nit` del gasto, y el gasto se emite contra él. */
   beneficiario_nit: string
   modo: ModoComision
-  /** Solo con `porcentaje`. Entre 0 y 100, exclusivo el 0. */
+  /** Con `porcentaje` (sobre el cobro) y con `fijo_mas_porcentaje` (sobre lo adicional). Entre 0 y 100, exclusivo el 0. */
   pct?: number
-  /** Solo con `monto_fijo`. En pesos, por cobro. */
+  /** Con `monto_fijo` y con `fijo_mas_porcentaje`. En pesos, por cobro. */
   monto_fijo?: number
   base: BaseComision
   /** Pago único al cerrar el contrato, aparte de la comisión por cobro. Opcional. */
@@ -97,6 +108,13 @@ export function problemasDeComision(c: unknown): ProblemaComision[] {
       p.push({ campo: 'monto_fijo', mensaje: 'un monto fijo se declara y es mayor que cero' })
     }
     if (o.pct !== undefined) p.push({ campo: 'pct', mensaje: 'no aplica con modo `monto_fijo`' })
+  } else if (o.modo === 'fijo_mas_porcentaje') {
+    if (typeof o.monto_fijo !== 'number' || !Number.isFinite(o.monto_fijo) || o.monto_fijo <= 0) {
+      p.push({ campo: 'monto_fijo', mensaje: 'el fijo se declara y es mayor que cero' })
+    }
+    if (typeof o.pct !== 'number' || !Number.isFinite(o.pct) || o.pct <= 0 || o.pct > 100) {
+      p.push({ campo: 'pct', mensaje: 'el porcentaje de lo adicional se declara y va entre 0 (exclusivo) y 100' })
+    }
   }
 
   if (o.fee_unico !== undefined && (typeof o.fee_unico !== 'number' || !Number.isFinite(o.fee_unico) || o.fee_unico <= 0)) {
@@ -111,6 +129,11 @@ export interface CobroDeCiclo {
   valor: number
   /** Si es el primer cobro aprobado de este contrato. Decide `primer_cobro` y el `fee_unico`. */
   esPrimerCobro: boolean
+  /**
+   * La parte del cobro que es adicional a la licencia (usuarios adicionales). Solo la mira
+   * `fijo_mas_porcentaje`. Ausente = 0: sin declararla no hay porcentaje que pagar.
+   */
+  valorAdicional?: number
 }
 
 export interface ComisionCalculada {
@@ -123,6 +146,7 @@ export interface ComisionCalculada {
     | 'base_primer_cobro_ya_pasado'
     | 'porcentaje'
     | 'monto_fijo'
+    | 'fijo_mas_porcentaje'
   /** Cómo se llegó al número, para la descripción del gasto y para la pantalla. */
   detalle: string
 }
@@ -168,6 +192,25 @@ export function calcularComision(comision: Comision | null | undefined, cobro: C
       feeUnico,
       motivo: 'monto_fijo',
       detalle: `monto fijo pactado de ${valor} por cobro`,
+    }
+  }
+
+  if (comision.modo === 'fijo_mas_porcentaje') {
+    const fijo = comision.monto_fijo as number
+    const pctAdicional = comision.pct as number
+    const adicional =
+      typeof cobro.valorAdicional === 'number' && Number.isFinite(cobro.valorAdicional) && cobro.valorAdicional > 0
+        ? cobro.valorAdicional
+        : 0
+    const sobreAdicional = Math.round((adicional * pctAdicional) / 100)
+    return {
+      valor: fijo + sobreAdicional,
+      feeUnico,
+      motivo: 'fijo_mas_porcentaje',
+      detalle:
+        adicional > 0
+          ? `monto fijo de ${fijo} + ${pctAdicional} % de ${adicional} adicional`
+          : `monto fijo de ${fijo} (sin adicional en este cobro)`,
     }
   }
 

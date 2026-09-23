@@ -102,6 +102,25 @@ export function moduloActivo(id: IdModulo, modules: ContextoGate['modules']): bo
   return modulesEfectivos(modules)[MODULOS[id].clave] === true
 }
 
+/**
+ * ¿El espacio usa ONE solo con Valida? Se razona por MÓDULO encendido (las llaves de función no
+ * cuentan): un CDA tiene `valida_consulta` y nada más.
+ */
+export function soloValida(modules: ContextoGate['modules']): boolean {
+  const m = modulesEfectivos(modules)
+  const encendidos = IDS_MODULO.filter((id) => m[MODULOS[id].clave] === true)
+  return encendidos.length === 1 && encendidos[0] === 'valida'
+}
+
+/**
+ * Las vitrinas que abre `modo_vitrina` en ESTE espacio. «Números» sale de un espacio que usa ONE
+ * solo con Valida (decisión del 2026-09-23, sección Suscripción de los CDA): mostraba cifras de un
+ * negocio que el CDA no lleva en ONE. Tableros se queda.
+ */
+export function vitrinasDelEspacio(modules: ContextoGate['modules']): readonly string[] {
+  return soloValida(modules) ? RUTAS_VITRINA.filter((r) => r !== '/numeros') : RUTAS_VITRINA
+}
+
 export function rutaPermitida(pathname: string, ctx: ContextoGate): boolean {
   if (!rutaGateada(pathname)) return true
   if (ctx.platformAdmin) return true
@@ -109,7 +128,7 @@ export function rutaPermitida(pathname: string, ctx: ContextoGate): boolean {
   const modules = modulesEfectivos(ctx.modules)
   if (modulosDeRuta(pathname).some((id) => moduloActivo(id, modules))) return true
   if (RUTAS_POR_FUNCION.some((f) => coincide(pathname, f.ruta) && modules[f.funcion] === true)) return true
-  if (ctx.modoVitrina && RUTAS_VITRINA.some((r) => coincide(pathname, r))) return true
+  if (ctx.modoVitrina && vitrinasDelEspacio(modules).some((r) => coincide(pathname, r))) return true
   return false
 }
 

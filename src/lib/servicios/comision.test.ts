@@ -147,3 +147,39 @@ describe('llaves de idempotencia', () => {
     expect(refComisionFeeUnico('c1')).toBe('comision-fee-c1')
   })
 })
+
+describe('AFI desde el 2026-09-23: $50.000 fijos por CDA + 20 % de lo adicional', () => {
+  const AFI_CDA: Comision = {
+    beneficiario_empresa_id: 'ecc378c7-10c4-4984-a31d-5533a598ad71',
+    beneficiario_nit: '902003244-6',
+    modo: 'fijo_mas_porcentaje',
+    monto_fijo: 50_000,
+    pct: 20,
+    base: 'cada_cobro',
+  }
+
+  it('es una comisión coherente', () => {
+    expect(problemasDeComision(AFI_CDA)).toEqual([])
+  })
+
+  it('cuota sin adicionales: solo los $50.000', () => {
+    const r = calcularComision(AFI_CDA, { valor: 150_000, esPrimerCobro: false, valorAdicional: 0 })
+    expect(r).toMatchObject({ valor: 50_000, motivo: 'fijo_mas_porcentaje' })
+  })
+
+  it('cuota con un usuario adicional y su prorrata: 20 % de lo adicional, nunca de la licencia', () => {
+    // 150.000 de licencia + 48.333 de prorrata + 50.000 del periodo = 248.333; adicional 98.333.
+    const r = calcularComision(AFI_CDA, { valor: 248_333, esPrimerCobro: false, valorAdicional: 98_333 })
+    expect(r.valor).toBe(50_000 + 19_667)
+  })
+
+  it('sin declarar la parte adicional no se paga porcentaje (un campo ausente no autoriza comisión)', () => {
+    expect(calcularComision(AFI_CDA, { valor: 248_333, esPrimerCobro: false }).valor).toBe(50_000)
+  })
+
+  it('le faltan el fijo o el porcentaje: se rechaza', () => {
+    expect(problemasDeComision({ ...AFI_CDA, pct: undefined }).map((p) => p.campo)).toContain('pct')
+    expect(problemasDeComision({ ...AFI_CDA, monto_fijo: undefined }).map((p) => p.campo)).toContain('monto_fijo')
+    expect(problemasDeComision({ ...AFI_CDA, pct: 120 }).map((p) => p.campo)).toContain('pct')
+  })
+})

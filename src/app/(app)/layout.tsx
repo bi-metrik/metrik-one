@@ -12,6 +12,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 import { getNotificaciones } from '@/lib/actions/notificaciones'
 import { versionDelBuild } from '@/lib/version/build'
 import { accesoWorkspace } from '@/lib/suscripciones/estado'
+import { menuSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 
 export default async function AppLayout({
   children,
@@ -175,6 +176,9 @@ export default async function AppLayout({
   const modoVitrina = (workspace.config_extra as { modo_vitrina?: boolean } | null)
     ?.modo_vitrina === true
   const hasLineas = (lineasResult.count ?? 0) > 0
+  // Suscripción: solo en un espacio con Valida (los CDA), y solo para quien la maneja. La misma
+  // resolución (cacheada por request) la usan `/suscripcion` y la franja de `/valida`.
+  const suscripcion = workspaceModules.valida_consulta ? await menuSuscripcion() : null
 
   // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
   // el contador en el primer render. Antes el componente arrancaba vacío y solo
@@ -200,6 +204,7 @@ export default async function AppLayout({
         navRolesOverride={navRolesOverride}
         modoVitrina={modoVitrina}
         hasLineas={hasLineas}
+        suscripcion={suscripcion}
         notificationBell={
           <NotificationBell
             userId={user.id}

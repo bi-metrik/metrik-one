@@ -6,13 +6,11 @@ import { listarConsultasValida } from '@/lib/actions/valida-consultas';
 import { getTutorialProgress } from '@/lib/actions/tutorial-progress';
 import { armarEstadoEntradaPagina } from '@/lib/valida-api/entrada-aprobacion';
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica';
-import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor';
+import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor';
+import { franjaValida } from '@/lib/seccion-suscripcion/estado';
 import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
-import { PestanaTerminos } from '@/components/terminos/pestana-terminos';
 import ValidaClient from './valida-client';
-import { AvisoMora, AvisoPlazoTerminos, PausaPorMora } from './avisos-cda';
-import { PagoPendienteCard } from './pago-pendiente-card';
-import { PestanaPagosCda } from './pestana-pagos-cda';
+import { AvisoMora, AvisoPlazoTerminos, FranjaSuscripcion, PausaPorMora } from './avisos-cda';
 import { TerminosCda } from './terminos-cda';
 
 export const dynamic = 'force-dynamic';
@@ -116,10 +114,7 @@ export default async function ValidaPage({ searchParams }: Props) {
     if (neg) negocioInicial = neg;
   }
 
-  // Las pestañas Pagos y Términos, una vez aceptados los términos (el mismo patrón de Valida API).
-  const aprobada = entrada.tipo === 'ok' && entrada.estado.estado === 'aprobada';
-
-  const [historial, tutorialProgress, pagos, terminos] = await Promise.all([
+  const [historial, tutorialProgress, suscripcion] = await Promise.all([
     // En pausa las consultas no se muestran, y su lectura la negaría la misma puerta.
     enPausa
       ? Promise.resolve(null)
@@ -128,19 +123,24 @@ export default async function ValidaPage({ searchParams }: Props) {
           ...(negocioInicial ? { negocio_id: negocioInicial.id } : {}),
         }),
     getTutorialProgress('valida_standalone'),
-    aprobada && vePagos ? leerPagosCda(entrada) : Promise.resolve(null),
-    aprobada ? leerTerminosEmpresaCda(entrada) : Promise.resolve(null),
+    // La suscripción (pago, usuarios, términos) vive en /suscripcion. Aquí, a quien la maneja, solo
+    // una línea cuando hay algo que hacer; el operador ve únicamente los avisos obligatorios.
+    vePagos ? contextoSuscripcion() : Promise.resolve(null),
   ]);
 
-  // El próximo pago de la licencia: solo a quienes manejan la plata del espacio o a la persona
-  // designada. Los demás no ven montos; el aviso de mora (sin montos) sí lo ven todos.
-  const pago = vePagos && mora.tipo === 'ok' ? mora.lectura : null;
+  const franja =
+    suscripcion?.tipo === 'ok'
+      ? franjaValida(
+          suscripcion.resumen,
+          suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
+        )
+      : null;
   const encabezado =
-    avisoPlazo || pago || estadoMora?.estado === 'en_mora' ? (
+    avisoPlazo || franja || estadoMora?.estado === 'en_mora' ? (
       <div className="space-y-3">
         {avisoPlazo}
         {estadoMora?.estado === 'en_mora' && <AvisoMora mora={estadoMora} />}
-        {pago && <PagoPendienteCard lectura={pago} />}
+        {franja && <FranjaSuscripcion texto={franja} />}
       </div>
     ) : null;
 
@@ -153,14 +153,6 @@ export default async function ValidaPage({ searchParams }: Props) {
       modoVitrina={modoVitrina}
       encabezado={encabezado}
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
-      seccionesCda={
-        aprobada && terminos
-          ? {
-              pagos: pagos ? <PestanaPagosCda carga={pagos} /> : null,
-              terminos: <PestanaTerminos carga={terminos} alcance="empresa" />,
-            }
-          : null
-      }
     />
   );
 }

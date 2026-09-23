@@ -536,3 +536,56 @@ describe('la plantilla de enlaces de pago', () => {
     expect(error).toContain('ya está pagada')
   })
 })
+
+describe('comisión de AFI y valor del usuario adicional (2026-09-23)', () => {
+  const COMISION_AFI = leer('sql/valida-cda/2026-09-23_comision-afi-y-usuario-adicional.sql')
+  const real = () => {
+    const de = 'c_ensayo            constant boolean := true;'
+    expect(COMISION_AFI.split(de).length - 1).toBe(1)
+    return COMISION_AFI.replace(de, 'c_ensayo            constant boolean := false;')
+  }
+  const cambios = () => contar('public.servicios_contratados_cambios', `campo in ('parametros', 'comision')`)
+
+  it('sin la migración 20260924060000 no corre: el modo nuevo no pasa el CHECK', async () => {
+    expect(await correr(real())).toContain('falta la migración 20260924060000')
+    expect(await cambios()).toBe(0)
+  })
+
+  it('con la migración, el ensayo recorre los 4 contratos y no deja nada', async () => {
+    // La migración cuelga `interes_servicios` de `contactos`, que este esquema de prueba no trae.
+    await db.exec('create table if not exists public.contactos (id uuid primary key)')
+    await db.exec(migracion('20260924060000_suscripcion_cda_licencias_usuarios_comision.sql'))
+    const error = await correr(COMISION_AFI)
+    expect(error).toContain('ENSAYO OK: 4 contratos de CDA encontrados, 8 cambios registrados')
+    expect(await cambios()).toBe(0)
+    expect(await contar('public.servicios_contratados', `comision is not null`)).toBe(0)
+  })
+
+  it('aplicado: fijo de $50.000 más el 20 % de lo adicional a AFI, y el valor del usuario adicional', async () => {
+    expect(await correr(real())).toBe('')
+    const filas = await db.query<{ valor: number; licencias: number; comision: Record<string, unknown> }>(`
+      select (parametros->>'valor_usuario_adicional')::int as valor, (parametros->>'licencias')::int as licencias, comision
+        from public.servicios_contratados`)
+    expect(filas.rows).toHaveLength(4)
+    for (const f of filas.rows) {
+      expect(f.valor).toBe(50000)
+      expect(f.licencias).toBe(2) // no toca lo demás de los parámetros
+      expect(f.comision).toEqual({
+        modo: 'fijo_mas_porcentaje',
+        monto_fijo: 50000,
+        pct: 20,
+        base: 'cada_cobro',
+        beneficiario_empresa_id: 'ecc378c7-10c4-4984-a31d-5533a598ad71',
+        beneficiario_nit: '902003244-6',
+      })
+    }
+    // Cada cambio con su fila en la bitácora: antes, después y quién.
+    expect(await cambios()).toBe(8)
+    expect(await contar('public.servicios_contratados_cambios', `campo = 'comision' and valor_anterior is null and registrado_por = '${MAURICIO}'`)).toBe(4)
+  })
+
+  it('una segunda corrida no cambia nada ni deja otra fila', async () => {
+    expect(await correr(real())).toBe('')
+    expect(await cambios()).toBe(8)
+  })
+})

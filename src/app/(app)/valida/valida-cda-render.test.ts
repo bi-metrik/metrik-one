@@ -7,8 +7,9 @@
  *     apagada; los textos nombran «Valida», no «Valida API»;
  *   - un operador ve un aviso con el nombre de quien falta, sin casilla, sin firma y sin el aviso de
  *     la Política (no acepta nada);
- *   - el pago: monto, período, vencimiento y un botón «Pagar en línea» que abre el enlace de pago en otra
- *     pestaña; sin enlace, dice que llega; vencido, lo dice; al día, lo dice; sin lectura, lo dice.
+ *   - los avisos de plazo y mora que ven todos, y la franja que lleva a Suscripción.
+ *
+ * El pago y la pestaña Pagos se mudaron a `/suscripcion` (ver `suscripcion-render.test.ts`).
  *
  * Se queda en `.ts`: `vitest.config.ts` solo recoge `*.test.ts`.
  */
@@ -23,9 +24,7 @@ vi.mock('@/lib/valida-api/acciones', () => ({ aprobarEntradaValidaApi: async () 
 vi.mock('@/lib/valida-cda/acciones', () => ({ aprobarEntradaValidaCda: async () => ({ ok: true, yaEstaba: false }) }))
 
 const { TerminosCda } = await import('./terminos-cda')
-const { PagoPendienteCard } = await import('./pago-pendiente-card')
-const { AvisoMora, AvisoPlazoTerminos, PausaPorMora } = await import('./avisos-cda')
-const { PestanaPagosCda } = await import('./pestana-pagos-cda')
+const { AvisoMora, AvisoPlazoTerminos, FranjaSuscripcion, PausaPorMora } = await import('./avisos-cda')
 const { PestanaTerminos } = await import('@/components/terminos/pestana-terminos')
 
 function texto(html: string): string {
@@ -112,82 +111,6 @@ describe('un operador espera a la persona designada', () => {
   })
 })
 
-describe('el próximo pago', () => {
-  const LINK = 'https://checkout.bold.co/payment/LNK_PRUEBA'
-  const pendiente = (extra: Record<string, unknown> = {}) =>
-    renderToStaticMarkup(
-      React.createElement(PagoPendienteCard, {
-        lectura: {
-          estado: 'ok',
-          pago: {
-            estado: 'pendiente',
-            numero: 1,
-            concepto: 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
-            fechaVencimiento: '2026-09-30',
-            monto: 150000,
-            abonado: 0,
-            saldo: 150000,
-            vencida: false,
-            enlacePago: LINK,
-            enlaceVencido: false,
-            ...extra,
-          },
-        },
-      }),
-    )
-
-  it('monto, período, vencimiento y que no lleva IVA', () => {
-    const t = texto(pendiente())
-    expect(t).toContain('$150.000')
-    expect(t).toContain('periodo del 23/09/2026 al 22/10/2026')
-    expect(t).toContain('Vence el 30/09/2026')
-    expect(t).toContain('Sin IVA')
-    expect(t).toContain('numeral 21 del artículo 476')
-  })
-
-  it('el botón «Pagar en línea» abre el enlace de pago en otra pestaña, sin pasar la página de origen', () => {
-    const html = pendiente()
-    const boton = /<a[^>]*>Pagar en línea<\/a>/.exec(html)?.[0] ?? ''
-    expect(boton).toContain(`href="${LINK}"`)
-    expect(boton).toContain('target="_blank"')
-    expect(boton).toContain('rel="noopener noreferrer"')
-  })
-
-  it('sin enlace no hay botón: dice que llega', () => {
-    const html = pendiente({ enlacePago: null })
-    expect(html).not.toMatch(/>Pagar en línea</)
-    expect(texto(html)).toContain('MeTRIK te enviará el enlace de pago de esta cuota antes de su vencimiento.')
-  })
-
-  it('con el enlace vencido tampoco: dice que venció', () => {
-    const t = texto(pendiente({ enlacePago: null, enlaceVencido: true }))
-    expect(t).toContain('El enlace de pago de esta cuota venció.')
-  })
-
-  it('una cuota vencida lo dice, y un abono parcial también', () => {
-    const t = texto(pendiente({ vencida: true, abonado: 50000, saldo: 100000 }))
-    expect(t).toContain('Pago vencido')
-    expect(t).toContain('Venció el 30/09/2026')
-    expect(t).toContain('$100.000')
-    expect(t).toContain('Ya abonaste $50.000 de $150.000.')
-  })
-
-  it('al día lo dice; sin cuotas no inventa nada; sin lectura lo dice', () => {
-    const alDia = renderToStaticMarkup(
-      React.createElement(PagoPendienteCard, { lectura: { estado: 'ok', pago: { estado: 'al_dia', cuotasPagadas: 1 } } }),
-    )
-    expect(texto(alDia)).toContain('Tu suscripción a Valida está al día.')
-    const sinCuotas = renderToStaticMarkup(
-      React.createElement(PagoPendienteCard, { lectura: { estado: 'ok', pago: { estado: 'sin_cuotas' } } }),
-    )
-    expect(sinCuotas).toBe('')
-    const caida = renderToStaticMarkup(
-      React.createElement(PagoPendienteCard, { lectura: { estado: 'no_disponible', motivo: 'base' } }),
-    )
-    expect(texto(caida)).toContain('No se pudo cargar tu próximo pago')
-  })
-})
-
 describe('los avisos que ven todos (plazo y mora)', () => {
   it('el plazo dice hasta cuándo y, a la designada, le ofrece aceptar', () => {
     const html = renderToStaticMarkup(
@@ -216,69 +139,22 @@ describe('los avisos que ven todos (plazo y mora)', () => {
     expect(t).not.toMatch(/\$/)
   })
 
-  it('la pausa manda a Pagos a quien puede pagar', () => {
+  it('la pausa manda a Suscripción a quien puede pagar', () => {
     const mora = { estado: 'suspendido' as const, vencio: '2026-09-30', corteDesde: '2026-10-31' }
-    expect(texto(renderToStaticMarkup(React.createElement(PausaPorMora, { mora, vePagos: true })))).toContain('En la pestaña Pagos')
+    const html = renderToStaticMarkup(React.createElement(PausaPorMora, { mora, vePagos: true }))
+    expect(texto(html)).toContain('En Suscripción está la cuota vencida')
+    expect(html).toContain('href="/suscripcion?tab=pagos"')
     expect(texto(renderToStaticMarkup(React.createElement(PausaPorMora, { mora, vePagos: false })))).toContain(
       'la persona designada por tu empresa pueden ver y pagar',
     )
   })
 })
 
-describe('la pestaña Pagos del CDA', () => {
-  const cuota = {
-    cuotaId: '55555555-5555-4555-8555-555555555555',
-    numero: 1,
-    concepto: 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
-    fechaVencimiento: '2026-09-30',
-    monto: 150000,
-    abonado: 0,
-    saldo: 150000,
-    estado: 'vencida' as const,
-    enlacePago: 'https://checkout.bold.co/payment/LNK_1',
-    factura: { numero: 'FE-123', pdf: true, xml: true },
-  }
-  const html = renderToStaticMarkup(
-    React.createElement(PestanaPagosCda, {
-      carga: {
-        estado: 'ok',
-        cuotas: [cuota, { ...cuota, cuotaId: null, numero: 2, estado: 'pendiente', enlacePago: null, factura: null }],
-        pagos: [
-          { cobroId: 'b91b4a14-cce1-4cfa-88d5-f235aa9e1060', fecha: '2026-09-25', monto: 150000, fuente: 'bold', estado: 'pagado', reciboNumero: 'RC-1', reciboDescargable: true },
-        ],
-      },
-    }),
-  )
-  const t = texto(html)
-
-  it('cada cuota con su período, valor, vencimiento y estado', () => {
-    expect(t).toContain('Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026')
-    expect(t).toContain('30/09/2026')
-    expect(t).toContain('Vencida')
-    expect(t).toContain('Pendiente')
-  })
-
-  it('Pagar en línea abre la pasarela en otra pestaña; la factura baja por la ruta autorizada, nunca por el bucket', () => {
-    expect(html).toContain('href="https://checkout.bold.co/payment/LNK_1"')
-    expect(html).toContain('target="_blank"')
-    expect(html).toContain('href="/api/valida/archivo/factura_pdf/55555555-5555-4555-8555-555555555555"')
-    expect(html).toContain('href="/api/valida/archivo/factura_xml/55555555-5555-4555-8555-555555555555"')
-    expect(html).not.toContain('facturas/')
-  })
-
-  it('un pago que entró por la pasarela se nombra «Pago en línea», nunca por el proveedor', () => {
-    expect(t).toContain('Pago en línea')
-    expect(t.toLowerCase()).not.toContain('bold')
-  })
-
-  it('el recibo del pago baja por la misma ruta', () => {
-    expect(html).toContain('href="/api/valida/archivo/recibo/b91b4a14-cce1-4cfa-88d5-f235aa9e1060"')
-    expect(t).toContain('RC-1')
-  })
-
-  it('sin acceso lo dice, en vez de una lista vacía', () => {
-    const sin = texto(renderToStaticMarkup(React.createElement(PestanaPagosCda, { carga: { estado: 'sin_acceso', razon: 'Los pagos los ven el dueño.' } })))
-    expect(sin).toBe('Los pagos los ven el dueño.')
+describe('la franja que lleva a Suscripción', () => {
+  it('una línea con el aviso y «Pagar», que lleva a /suscripcion', () => {
+    const html = renderToStaticMarkup(React.createElement(FranjaSuscripcion, { texto: 'Tu cuota vence el 30-sep' }))
+    expect(texto(html)).toBe('Tu cuota vence el 30-sep Pagar')
+    expect(html).toContain('href="/suscripcion"')
   })
 })
 
