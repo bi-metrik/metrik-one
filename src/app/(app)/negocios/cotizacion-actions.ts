@@ -555,9 +555,11 @@ export async function deleteItem(id: string) {
   // cliente (R2), y esta es la unica puerta que lo puede dejar asi sin que nadie
   // toque la tabla de combinaciones.
   //
-  // ⚠️ Borrar el TITULAR se lleva sus opciones por `on delete cascade` de
-  // `items.opcion_de`: la ranura entera desaparece y los itinerarios vuelven a estar
-  // completos sin ella. Es el desenlace correcto y no hace falta nada mas.
+  // ⚠️ Una línea con `opcion_de` (el modelo de antes) cae con su titular por el `on delete
+  // cascade`: la ranura entera desaparece y los itinerarios vuelven a estar completos sin
+  // ella. Desde la Parte B (2026-09-23) las opciones de una ranura son HERMANAS
+  // (`opcion_de` null, `ranura_id` compartido): borrar una se lleva solo esa, y las demás
+  // siguen compitiendo por la ranura.
   const desmarcados = await desmarcarLosQueYaNoPueden(supabase, item.cotizacion_id)
 
   // La ranura que se quedó sin opciones se retira: pintarla sería un bloque vacío de algo

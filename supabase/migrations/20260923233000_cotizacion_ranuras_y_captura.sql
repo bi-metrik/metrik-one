@@ -251,13 +251,15 @@ where ranura_id is not null
 
 -- ── Backfill 2 · el cargo en destino desde la lectura ─────────────────────────────
 --
--- Espejo conservador de `cargoDeLectura` (src/lib/cotizaciones/cargo-destino.ts): la
+-- Espejo conservador de `cargoLeidoDelItem` (src/lib/cotizaciones/detalle-viaje.ts): la
 -- lectura del pantallazo (`tarifa_pax.casillas`, la del grupo completo o la primera que
 -- haya) con la corrección de la ficha encima. Una corrección vacía BORRA el dato, igual que
 -- `aplicarCorrecciones`. La moneda es la del cargo, sin caer a la de la captura (el
 -- documento tampoco la supone). El monto pasa por la regla de `parseMontoCop`, pero SOLO en
 -- las formas sin ambigüedad; cualquier otra queda en NULL y el documento la sigue derivando
--- de la lectura con el normalizador de verdad. Idempotente: solo llena lo que está en NULL.
+-- de la lectura con el normalizador de verdad. Un monto que no cabe en `numeric(14, 2)` (una
+-- lectura desbocada) también queda en NULL: no puede tumbar la migración. Idempotente: solo
+-- llena lo que está en NULL.
 
 with lecturas as (
   select
@@ -313,6 +315,7 @@ from montos m
 where i.id = m.id
   and m.valor is not null
   and m.valor > 0
+  and m.valor < 1000000000000
   and i.cargo_destino_valor is null;
 
 -- ── Backfill 3 · los tramos: NO se hace en SQL, a propósito ──────────────────────
@@ -321,5 +324,5 @@ where i.id = m.id
 -- escala) es la regla de `numerosDeVuelo`, y copiarla aquí es tener dos versiones de una
 -- regla que imprime el documento. `items.tramos` nace NULL en las líneas existentes y el
 -- código los deriva de la MISMA lectura con la MISMA función que los escribe al leer
--- (`tramosDeLinea`): el documento sale idéntico. Se llenan solos al volver a leer o al
--- corregir la ficha.
+-- (`tramosDeCampos`, vía `tramosDelItem` y `tramosLeidosDelItem`): el documento sale
+-- idéntico. Se llenan solos al volver a leer o al corregir la ficha.
