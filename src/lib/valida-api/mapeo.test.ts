@@ -74,6 +74,32 @@ describe('mapearCobros', () => {
   it('un recibo sin PDF propio (archivado en Drive) NO se ofrece para descargar', () => {
     expect(mapearCobros([{ ...fila, recibo_path: null }])[0].reciboDescargable).toBe(false)
   })
+
+  it('sin factura cargada (o con la RPC de antes de 20260924090000) no inventa una', () => {
+    expect(mapearCobros([fila])[0].factura).toBeNull()
+    expect(mapearCobros([{ ...fila, factura_numero: 'FE-1', factura_pdf_path: null, factura_xml_path: null }])[0].factura).toBeNull()
+  })
+
+  it('la factura con PDF y XML se ofrece sin exponer sus rutas', () => {
+    const c = mapearCobros([
+      {
+        ...fila,
+        factura_numero: 'FE-1',
+        factura_cufe: 'f'.repeat(96),
+        factura_fecha: '2026-09-23',
+        factura_pdf_path: 'ws/facturas/abc.pdf',
+        factura_xml_path: 'ws/facturas/abc.xml',
+      },
+    ])[0]
+    expect(c.factura).toEqual({
+      numero: 'FE-1',
+      cufe: 'f'.repeat(96),
+      fecha: '2026-09-23',
+      pdfDescargable: true,
+      xmlDescargable: true,
+    })
+    expect(JSON.stringify(c)).not.toContain('facturas/')
+  })
 })
 
 describe('mapearDocumentos', () => {

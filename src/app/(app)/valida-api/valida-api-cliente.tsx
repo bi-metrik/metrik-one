@@ -18,6 +18,7 @@ import { AvisoCarga, PestanaTerminos } from '@/components/terminos/pestana-termi
 import { generarLlaveValidaApi, revocarLlaveValidaApi } from '@/lib/valida-api/acciones'
 import { vistaConsumo } from '@/lib/valida-api/consumo-vista'
 import type {
+  FacturaDeCobro,
   LlaveRecienEmitida,
   ResultadoLlaves,
   ResultadoPagos,
@@ -375,7 +376,8 @@ function PestanaPagos({ carga }: { carga: ResultadoPagos }) {
                     <th className="py-1 pr-3 font-medium">Valor</th>
                     <th className="py-1 pr-3 font-medium">Medio</th>
                     <th className="py-1 pr-3 font-medium">Estado</th>
-                    <th className="py-1 font-medium">Recibo</th>
+                    <th className="py-1 pr-3 font-medium">Recibo</th>
+                    <th className="py-1 font-medium">Factura</th>
                   </tr>
                 </thead>
                 <tbody className="text-tinta">
@@ -386,7 +388,7 @@ function PestanaPagos({ carga }: { carga: ResultadoPagos }) {
                       <td className={`py-1.5 pr-3 ${c.estado === 'anulado' ? 'line-through text-tinta-suave' : ''}`}>{formatCOP(c.monto)}</td>
                       <td className="py-1.5 pr-3">{c.fuente ?? '—'}</td>
                       <td className="py-1.5 pr-3">{ETIQUETA_ESTADO_COBRO[c.estado]}</td>
-                      <td className="py-1.5">
+                      <td className="py-1.5 pr-3">
                         {c.reciboDescargable ? (
                           <a href={`/api/valida-api/archivo/recibo/${c.cobroId}`} className="font-semibold text-acento">
                             {c.reciboNumero ?? 'Descargar'}
@@ -394,6 +396,9 @@ function PestanaPagos({ carga }: { carga: ResultadoPagos }) {
                         ) : (
                           (c.reciboNumero ?? '—')
                         )}
+                      </td>
+                      <td className="py-1.5">
+                        <CeldaFactura cobroId={c.cobroId} factura={c.factura} />
                       </td>
                     </tr>
                   ))}
@@ -404,6 +409,35 @@ function PestanaPagos({ carga }: { carga: ResultadoPagos }) {
         </section>
       ))}
     </div>
+  )
+}
+
+/**
+ * La factura electrónica del cobro: el número descarga el PDF y, si MeTRIK cargó el XML, un enlace
+ * aparte lo baja. Las dos descargas pasan por la ruta firmada del módulo; aquí no se pinta ninguna
+ * ruta del bucket ni un enlace de Drive (§5.4).
+ */
+function CeldaFactura({ cobroId, factura }: { cobroId: string; factura: FacturaDeCobro | null }) {
+  if (!factura) return <>—</>
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-2">
+      {factura.pdfDescargable ? (
+        <a
+          href={`/api/valida-api/archivo/factura/${cobroId}`}
+          className="font-semibold text-acento"
+          title={factura.cufe ? `CUFE ${factura.cufe}` : undefined}
+        >
+          {factura.numero}
+        </a>
+      ) : (
+        <span>{factura.numero}</span>
+      )}
+      {factura.xmlDescargable && (
+        <a href={`/api/valida-api/archivo/factura_xml/${cobroId}`} className="text-acento">
+          XML
+        </a>
+      )}
+    </span>
   )
 }
 

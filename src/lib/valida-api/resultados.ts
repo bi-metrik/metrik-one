@@ -61,6 +61,17 @@ export interface CobroDeServicio {
   reciboOrigen: string | null
   /** true = hay PDF en el bucket privado y se descarga por la ruta firmada. */
   reciboDescargable: boolean
+  /** La factura electrónica del cobro (`facturas_cobro`), o null si MeTRIK no la ha cargado. */
+  factura: FacturaDeCobro | null
+}
+
+export interface FacturaDeCobro {
+  numero: string
+  cufe: string | null
+  fecha: string | null
+  /** true = hay PDF (o XML) en el bucket privado y se descarga por la ruta firmada. */
+  pdfDescargable: boolean
+  xmlDescargable: boolean
 }
 
 export interface ServicioConPagos {
