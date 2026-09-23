@@ -124,14 +124,14 @@ function FranjaDecorativa({ visible }: { visible: boolean }) {
 
 // ── Copy ─────────────────────────────────────────────────────────────────────────────────
 
-export const GANCHO = '¿Quieres más control sobre tu SARLAFT?'
+export const GANCHO = '¿Tu SARLAFT está listo para la próxima auditoría?'
 export const TITULAR = 'Valida revisa las listas. Sustenta sostiene todo tu SARLAFT.'
 export const BAJADA =
   'Matriz de riesgos, segmentación, vinculación de contrapartes y soportes en un solo lugar, conectados a las consultas que tu equipo ya hace en Valida.'
 const BENEFICIOS = [
   { icono: Grid3x3, texto: 'Matriz de riesgos y controles al día, sin hojas de cálculo sueltas.' },
   { icono: UserCheck, texto: 'Cada contraparte vinculada con su consulta de listas y su soporte.' },
-  { icono: FolderCheck, texto: 'Evidencia organizada y trazable para el oficial de cumplimiento y la revisión.' },
+  { icono: FolderCheck, texto: 'Llega a la auditoría con cada soporte en su lugar y sin buscar a última hora.' },
 ] as const
 export const CTA_PRIMARIO = 'Quiero una demostración'
 export const CTA_SECUNDARIO = 'Ver cómo funciona'
