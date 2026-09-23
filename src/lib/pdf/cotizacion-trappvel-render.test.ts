@@ -509,6 +509,33 @@ describe('las tres tarifas (Economica / Recomendada / Premium)', () => {
     expect(t).toContain('La que recomendamos')
   })
 
+  it('B2 · cada tarifa muestra el cargo en destino de SU hotel, con su nombre y su marca', async () => {
+    // Hallazgo 29 del ensayo del 2026-09-23: solo salía el de la principal, y quien escogía
+    // Sunscape o Hyatt no veía el cargo del suyo.
+    const t = await texto(props({
+      itinerarios: ITIN,
+      viaje: viaje({
+        vuelos: [],
+        hoteles: [],
+        cargosEnDestino: [
+          { ...CARGO, hotel: 'Crown Paradise', monto: '329,44 MXN', tarifas: [0] },
+          { ...CARGO, hotel: 'Sunscape', monto: '50.080 MXN', tarifas: [1] },
+          { ...CARGO, hotel: 'Hyatt Ziva', monto: '1.200 MXN', tarifas: [2] },
+        ],
+      }),
+    }))
+    for (const s of ['Crown Paradise', 'Sunscape', 'Hyatt Ziva']) expect(t).toContain(s)
+    // El texto del PDF separa el número de la moneda con más de un espacio.
+    for (const m of [/329,44\s+MXN/, /50\.080\s+MXN/, /1\.200\s+MXN/]) expect(t).toMatch(m)
+    // El hotel va con SU monto, no con el de otro: Sunscape antes de 50.080.
+    expect(t).toMatch(/Sunscape\s+ECONÓMICA\s+Impuestos y tasas de hospedaje\s+50\.080/)
+    // Cada cargo lleva la marca de su tarifa: la tarjeta de «Inversión» más la del cargo.
+    expect(t.split('ECONÓMICA').length - 1).toBe(2)
+    expect(t.split('PREMIUM').length - 1).toBe(2)
+    // «A tener en cuenta» lo dice UNA vez: tres hoteles de la misma ciudad no son tres avisos.
+    expect(t.split('que se pagan en destino').length - 1).toBe(1)
+  })
+
   it('con UNA sola tarifa no aparece ningún nombre de tarifa en vuelos ni hoteles', async () => {
     const t = await texto(props({
       itinerarios: [ITIN![0]],

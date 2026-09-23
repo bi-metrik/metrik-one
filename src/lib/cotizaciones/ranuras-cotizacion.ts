@@ -119,13 +119,16 @@ export function siguienteNumeroDeTipo(
 const CONECTORES = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y', 'e', 'en', 'a'])
 
 /**
- * Un nombre de lugar escrito como nombre propio: «CANCÚN» → «Cancún», «SAN ANDRÉS» →
+ * Un nombre de lugar escrito como nombre propio: «CANCÚN» → «Cancún», «san andrés» →
  * «San Andrés». Solo se toca si viene TODO en mayúscula (la etapa 1 de Trappvel guarda en
- * mayúscula); lo que alguien escribió con su propia caja se respeta.
+ * mayúscula) o todo en minúscula (tecleado de corrido); una caja mezclada es de alguien que
+ * la escribió así a propósito y se respeta.
  */
 export function comoNombrePropio(texto: string): string {
   const t = texto.trim().replace(/\s+/g, ' ')
-  if (t === '' || t !== t.toLocaleUpperCase('es-CO')) return t
+  const todoMayuscula = t === t.toLocaleUpperCase('es-CO')
+  const todoMinuscula = t === t.toLocaleLowerCase('es-CO')
+  if (t === '' || (!todoMayuscula && !todoMinuscula)) return t
   return t
     .toLocaleLowerCase('es-CO')
     .split(' ')

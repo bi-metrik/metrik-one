@@ -161,7 +161,7 @@ export default function CapturaCotizacion({
         onPaste={pegar}
         tabIndex={0}
         role="button"
-        aria-label="Pegar el pantallazo del proveedor"
+        aria-label="Pegar un pantallazo para crear el componente"
         aria-busy={ocupado}
         className="mt-2 flex min-h-[64px] items-center justify-center gap-3 rounded-lg border border-dashed bg-background p-2 focus:outline-none focus:ring-2 focus:ring-[#10B981]/30"
       >
@@ -200,7 +200,7 @@ export default function CapturaCotizacion({
           type="file"
           accept="image/*"
           className="hidden"
-          aria-label="Subir el pantallazo del proveedor"
+          aria-label="Subir un pantallazo para crear el componente"
           onChange={e => {
             const archivo = e.target.files?.[0]
             e.target.value = ''
