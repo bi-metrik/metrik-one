@@ -165,6 +165,7 @@ import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
+import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -2876,6 +2877,10 @@ async function crearCotizacionAutomatica(
   })
   const consecutivo = consecutivoRaw ?? `COT-${bogotaYear()}-${Date.now()}`
 
+  // Mismos términos de nacimiento que la cotización creada a mano (C5): solo con la
+  // plantilla de Trappvel y un texto base en la línea; en cualquier otro caso, nada.
+  const terminos = await terminosInicialesDeCotizacion(supabase, { workspaceId, negocioId })
+
   // 2. Crear cotización detallada en borrador
   const { data: cotData, error: cotErr } = await supabase
     .from('cotizaciones')
@@ -2887,6 +2892,7 @@ async function crearCotizacionAutomatica(
       modo: 'detallada',
       valor_total: precioEstimado,
       estado: 'borrador',
+      ...(terminos ? { terminos_condiciones: terminos } : {}),
     })
     .select('id')
     .single()
