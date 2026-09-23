@@ -12,8 +12,10 @@
  * - Las condiciones de siempre: `lineas_negocio.config_extra.terminos_base`, por línea, al
  *   lado de `recargo` y `margen`. NO es «Mi negocio → Términos de la propuesta»: ese vive en
  *   el `bloque_configs` de la propuesta de Clarity y no tiene que ver con esta cotización.
- * - El prellenado es una COPIA que se propone al abrir el panel de un borrador sin términos
- *   (`terminosAlAbrir`). Si el texto base cambia después, las cotizaciones ya guardadas no
+ * - Desde C5 (2026-09-23) la cotización NACE con una copia guardada del texto base
+ *   (`terminos-al-crear.ts`). El panel sigue proponiéndolo al abrir un borrador SIN términos
+ *   (`terminosAlAbrir`): cubre a las creadas antes de C5, que no se tocaron, y a la que el
+ *   asesor dejó vacía. Si el texto base cambia después, las cotizaciones ya guardadas no
  *   cambian: el PDF nunca lee el texto base.
  *
  * ## El formato que se escribe

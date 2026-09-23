@@ -18,6 +18,7 @@ import { preseleccionDeAprobacion, textoDeAprobacion, validarTarifaElegida } fro
 import { registrarEleccionDelCliente } from '@/lib/cotizaciones/aprobacion-tarifa-datos'
 import { recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
+import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -50,6 +51,11 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // cotizaciones ya enviadas a clientes.
   const { convencion, defaultPct, pisoPct, avisoPct } = await politicaMargenDelNegocio(supabase, negocioId)
 
+  // Los términos también nacen COPIADOS de la línea (C5, 2026-09-23), solo con la plantilla
+  // que imprime el texto del cliente (Trappvel). Sin texto base, o en otro workspace, `null`
+  // y la fila nace igual que antes: por eso la clave solo se manda cuando hay texto.
+  const terminos = await terminosInicialesDeCotizacion(supabase, { workspaceId, negocioId })
+
   // ⚠️ Insert DIRECTO. Hasta el 2026-09-14 esto pasaba por `insertarCotizacionTolerante`,
   // que reintentaba sin las columnas de umbral si la migración no estaba aplicada. La
   // migración `20260914160000_cotizaciones_umbrales_margen.sql` YA está aplicada en
@@ -73,6 +79,7 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     margen_default_pct: defaultPct,
     piso_margen_pct: pisoPct,
     aviso_margen_pct: avisoPct,
+    ...(terminos ? { terminos_condiciones: terminos } : {}),
   }).select('id').single()
 
   if (dbError) return { success: false as const, error: dbError.message ?? 'Error al crear cotización' }
