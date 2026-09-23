@@ -32,7 +32,6 @@ describe('wompi entra al vocabulario', () => {
   })
 
   it('una pasarela sin adaptador sigue devolviendo `null`', () => {
-    expect(adapterPara('bold')).toBeNull()
     expect(adapterPara('epayco')).toBeNull()
     expect(adapterPara('paypal')).toBeNull()
   })

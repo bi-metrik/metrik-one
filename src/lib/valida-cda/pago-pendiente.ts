@@ -16,12 +16,13 @@
  * ## El enlace
  *
  * Vive en el cobro programado de la cuota (`cobros.enlace_pago_url` y `enlace_pago_expira`), la
- * misma fila donde el ciclo de suscripciones anota el intento de la pasarela. Hoy Mauricio crea el
- * enlace a mano en el panel de Bold (Bold no cobra recurrente); con el adaptador `bold-link` lo
- * escribirá el ciclo. El botón lee lo mismo en los dos casos.
+ * misma fila donde el ciclo de suscripciones anota el intento de la pasarela. Lo escribe el botón
+ * «Generar enlace de pago» de la ficha del negocio (por el adaptador de la pasarela), o se carga a
+ * mano con la plantilla SQL. El botón «Pagar en línea» lee lo mismo en todos los casos.
  *
- * La base solo exige https; aquí se exige además que sea de Bold, porque es un botón de pago frente
- * al cliente y un dominio equivocado (un error al pegarlo) lo mandaría a pagar a otro lado. Un
+ * La base solo exige https; aquí se exige además que sea de una pasarela conocida
+ * (`DOMINIOS_ENLACE_PAGO`), porque es un botón de pago frente al cliente y un dominio equivocado (un
+ * error al pegarlo) lo mandaría a pagar a otro lado. Un
  * enlace que no pasa, o que ya venció, no se pinta: la tarjeta dice que el enlace llega, en vez de
  * ofrecer uno dudoso o muerto.
  *
@@ -30,6 +31,7 @@
  */
 
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { TODOS_LOS_DOMINIOS_DE_PAGO } from '@/lib/suscripciones/pasarela/dominios'
 
 export interface CuotaDeServicio {
   numero: number
@@ -73,16 +75,13 @@ export type ProximoPago =
       /** Lo que falta de esta cuota. */
       saldo: number
       vencida: boolean
-      /** El enlace de Bold de esta cuota, solo si es de Bold, https y no ha vencido. */
+      /** El enlace de pago de esta cuota, solo si es de una pasarela conocida, https y no ha vencido. */
       enlacePago: string | null
       /** Había enlace y ya venció: hay que pedir uno nuevo. */
       enlaceVencido: boolean
     }
 
-/** Dominios de la pasarela que pueden salir en el botón «Pagar». */
-const HOSTS_PASARELA = ['bold.co'] as const
-
-/** ¿El enlace es https y de Bold? Cualquier otra cosa no se pinta. */
+/** ¿El enlace es https y de una pasarela conocida? Cualquier otra cosa no se pinta. */
 export function enlaceDePagoValido(url: string | null | undefined): string | null {
   if (!url) return null
   let u: URL
@@ -94,7 +93,7 @@ export function enlaceDePagoValido(url: string | null | undefined): string | nul
   if (u.protocol !== 'https:') return null
   if (u.username || u.password) return null
   const host = u.hostname.toLowerCase()
-  const esDeLaPasarela = HOSTS_PASARELA.some((h) => host === h || host.endsWith(`.${h}`))
+  const esDeLaPasarela = TODOS_LOS_DOMINIOS_DE_PAGO.some((h) => host === h || host.endsWith(`.${h}`))
   return esDeLaPasarela ? u.toString() : null
 }
 
@@ -110,7 +109,7 @@ export interface CuotaConEstado {
   abonado: number
   saldo: number
   estado: EstadoCuota
-  /** El enlace de Bold, solo si la cuota tiene saldo y el enlace es de Bold, https y vigente. */
+  /** El enlace de pago, solo si la cuota tiene saldo y el enlace es de una pasarela conocida, https y vigente. */
   enlacePago: string | null
   factura: FacturaDeCuota | null
 }

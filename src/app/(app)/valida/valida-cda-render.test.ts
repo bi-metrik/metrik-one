@@ -7,7 +7,7 @@
  *     apagada; los textos nombran «Valida», no «Valida API»;
  *   - un operador ve un aviso con el nombre de quien falta, sin casilla, sin firma y sin el aviso de
  *     la Política (no acepta nada);
- *   - el pago: monto, período, vencimiento y un botón «Pagar» que abre el enlace de Bold en otra
+ *   - el pago: monto, período, vencimiento y un botón «Pagar en línea» que abre el enlace de pago en otra
  *     pestaña; sin enlace, dice que llega; vencido, lo dice; al día, lo dice; sin lectura, lo dice.
  *
  * Se queda en `.ts`: `vitest.config.ts` solo recoge `*.test.ts`.
@@ -145,9 +145,9 @@ describe('el próximo pago', () => {
     expect(t).toContain('numeral 21 del artículo 476')
   })
 
-  it('el botón «Pagar» abre el enlace de Bold en otra pestaña, sin pasar la página de origen', () => {
+  it('el botón «Pagar en línea» abre el enlace de pago en otra pestaña, sin pasar la página de origen', () => {
     const html = pendiente()
-    const boton = /<a[^>]*>Pagar<\/a>/.exec(html)?.[0] ?? ''
+    const boton = /<a[^>]*>Pagar en línea<\/a>/.exec(html)?.[0] ?? ''
     expect(boton).toContain(`href="${LINK}"`)
     expect(boton).toContain('target="_blank"')
     expect(boton).toContain('rel="noopener noreferrer"')
@@ -155,7 +155,7 @@ describe('el próximo pago', () => {
 
   it('sin enlace no hay botón: dice que llega', () => {
     const html = pendiente({ enlacePago: null })
-    expect(html).not.toMatch(/>Pagar</)
+    expect(html).not.toMatch(/>Pagar en línea</)
     expect(texto(html)).toContain('MeTRIK te enviará el enlace de pago de esta cuota antes de su vencimiento.')
   })
 
@@ -258,12 +258,17 @@ describe('la pestaña Pagos del CDA', () => {
     expect(t).toContain('Pendiente')
   })
 
-  it('Pagar abre Bold en otra pestaña; la factura baja por la ruta autorizada, nunca por el bucket', () => {
+  it('Pagar en línea abre la pasarela en otra pestaña; la factura baja por la ruta autorizada, nunca por el bucket', () => {
     expect(html).toContain('href="https://checkout.bold.co/payment/LNK_1"')
     expect(html).toContain('target="_blank"')
     expect(html).toContain('href="/api/valida/archivo/factura_pdf/55555555-5555-4555-8555-555555555555"')
     expect(html).toContain('href="/api/valida/archivo/factura_xml/55555555-5555-4555-8555-555555555555"')
     expect(html).not.toContain('facturas/')
+  })
+
+  it('un pago que entró por la pasarela se nombra «Pago en línea», nunca por el proveedor', () => {
+    expect(t).toContain('Pago en línea')
+    expect(t.toLowerCase()).not.toContain('bold')
   })
 
   it('el recibo del pago baja por la misma ruta', () => {

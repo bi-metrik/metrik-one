@@ -8,8 +8,11 @@
  *
  *   - `manual`       (Fase 1, esta) — no cobra: deja el cobro programado y una persona
  *                    confirma el pago desde el bloque de cobros, como hoy.
- *   - `bold-link`    (Fase 2) — un link de pago por cuota + webhook CloudEvents. El
- *                    cliente hace clic cada mes.
+ *   - `bold`         — un enlace de pago por cuota + webhook (`bold.ts`). El cliente hace
+ *                    clic cada mes. TEMPORAL (decisión de Mauricio, 2026-09-23): cuando MeTRIK
+ *                    tenga la cuenta en Davivienda todo migra a ePayco. Por eso nada fuera del
+ *                    adaptador y de su ruta de webhook sabe que existe Bold: la pantalla, la base
+ *                    y el registro del pago hablan de «pago en línea».
  *   - `epayco-token` (Fase 2) — cargo por token contra la tarjeta guardada. Débito
  *                    sin clic.
  *
@@ -115,14 +118,30 @@ export interface CapacidadesPasarela {
   webhook: boolean
 }
 
-/** Un evento de pasarela ya verificado y normalizado. Lo produce `verificarWebhook`. */
+/**
+ * Un evento de pasarela ya verificado y normalizado. Lo produce `verificarWebhook`, y es TODO lo
+ * que el registro del pago (`src/lib/cobros/pago-en-linea.ts`) sabe de la pasarela: cada
+ * adaptador traduce su formato a esta forma.
+ */
 export interface EventoPasarela {
   tipo: 'aprobado' | 'rechazado' | 'anulado' | 'otro'
-  /** Id ÚNICO del evento/transacción en la pasarela: es la clave de idempotencia del webhook. */
+  /** Id de la NOTIFICACIÓN: clave de idempotencia del webhook (una fila por evento). */
+  eventoId: string
+  /** El tipo tal cual lo manda la pasarela (SALE_APPROVED, …), para el rastro. */
+  tipoOriginal: string
+  /** Id de la TRANSACCIÓN en la pasarela. Varias notificaciones pueden traer la misma. */
   transaccionId: string
-  /** Referencia del comercio que viajó en el cargo (`SolicitudCargo.referencia`), si vuelve. */
+  /**
+   * Cómo queda el pago en `cobros.external_ref`: lo decide cada pasarela para que no choque con
+   * las referencias de otra (Bold: `bold-<transacción>`).
+   */
+  referenciaPago: string
+  /** Referencia del comercio que viajó en el cargo o el enlace, si vuelve. */
   referencia: string | null
+  /** Id del ENLACE en la pasarela, si el evento lo trae (sirve para volver al cobro por su URL). */
+  idEnlace: string | null
   monto: number | null
+  moneda: string | null
   ocurridoAt: string | null
   /** El cuerpo tal cual llegó, para dejarlo en la bandeja de eventos. */
   crudo: unknown
@@ -131,6 +150,21 @@ export interface EventoPasarela {
 export type VerificacionWebhook =
   | { ok: true; evento: EventoPasarela }
   | { ok: false; motivo: 'firma_invalida' | 'sin_firma' | 'cuerpo_invalido' | 'no_configurado' }
+
+/** Un enlace de pago para UN cobro (la cuota de un plan). Independiente de la suscripción. */
+export interface SolicitudEnlacePago {
+  cobroId: string
+  /** COP, entero y positivo. Monto cerrado: el cliente no lo puede cambiar. */
+  monto: number
+  descripcion: string
+  /** Referencia del comercio: `referenciaEnlaceCobro` (única por enlace, estable por cobro). */
+  referencia: string
+  expiraMs: number
+}
+
+export type ResultadoEnlacePago =
+  | { ok: true; idEnlace: string; url: string; expira: string }
+  | { ok: false; error: string; reintentable: boolean }
 
 export interface PasarelaAdapter {
   readonly nombre: Pasarela
@@ -144,6 +178,12 @@ export interface PasarelaAdapter {
    * route handler tiene que responder 200 en menos de 2 s (Bold reintenta 5 veces).
    */
   verificarWebhook?(cuerpoCrudo: string, cabeceras: Record<string, string | undefined>): VerificacionWebhook
+  /** Por qué la pasarela no puede operar ahora (p. ej. le faltan llaves), o `null` si puede. */
+  faltaConfiguracion?(): string | null
+  /** Crea un enlace de pago para un cobro. Solo las pasarelas con `linkDePago`. */
+  crearEnlacePago?(s: SolicitudEnlacePago): Promise<ResultadoEnlacePago>
+  /** El id del enlace de esta pasarela dentro de una URL de enlace, o `null` si no es suya. */
+  idEnlaceDeUrl?(url: string | null | undefined): string | null
 }
 
 /**

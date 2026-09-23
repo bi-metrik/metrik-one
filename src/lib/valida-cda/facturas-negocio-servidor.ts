@@ -19,6 +19,11 @@ export interface CuotaConFactura {
   monto: number
   fechaVencimiento: string
   factura: { numero: string; pdf: boolean; xml: boolean; cargadaAt: string } | null
+  /**
+   * El cobro programado de la cuota (`plan_cobro_id` + `numero_cuota`), si existe: de él salen el
+   * estado de pago y el enlace de pago en línea. `null` = todavía no hay cobro para esa cuota.
+   */
+  cobro: { pagado: boolean; anulado: boolean; enlaceUrl: string | null; enlaceExpira: string | null } | null
 }
 
 export type LecturaFacturasNegocio =
@@ -51,7 +56,7 @@ export async function leerFacturasDeCuotas(workspaceId: string, negocioId: strin
 
   const cuotas = await svc
     .from('plan_cobro_cuotas')
-    .select('id, numero, monto, fecha_vencimiento, concepto_detalle')
+    .select('id, numero, monto, fecha_vencimiento, concepto_detalle, plan_cobro_id')
     .in('plan_cobro_id', idsPlan)
     .eq('workspace_id', workspaceId)
     .order('fecha_vencimiento', { ascending: true })
@@ -66,8 +71,38 @@ export async function leerFacturasDeCuotas(workspaceId: string, negocioId: strin
     monto: number | string
     fecha_vencimiento: string
     concepto_detalle: string | null
+    plan_cobro_id: string
   }[]
   if (filas.length === 0) return { estado: 'ok', cuotas: [] }
+
+  // Los cobros programados de esas cuotas: estado de pago y enlace de pago en línea.
+  const cobros = await svc
+    .from('cobros')
+    .select('plan_cobro_id, numero_cuota, fecha, anulado_at, enlace_pago_url, enlace_pago_expira')
+    .in('plan_cobro_id', idsPlan)
+    .eq('workspace_id', workspaceId)
+    .eq('tipo_cobro', 'programado')
+  if (cobros.error) {
+    console.error('[facturas-cuota] cobros de las cuotas:', cobros.error.message)
+    return { estado: 'no_disponible' }
+  }
+  const cobroPorCuota = new Map<string, CuotaConFactura['cobro']>()
+  for (const c of (cobros.data ?? []) as {
+    plan_cobro_id: string
+    numero_cuota: number | null
+    fecha: string | null
+    anulado_at: string | null
+    enlace_pago_url: string | null
+    enlace_pago_expira: string | null
+  }[]) {
+    if (c.numero_cuota === null) continue
+    cobroPorCuota.set(`${c.plan_cobro_id}:${c.numero_cuota}`, {
+      pagado: c.fecha !== null && c.anulado_at === null,
+      anulado: c.anulado_at !== null,
+      enlaceUrl: c.enlace_pago_url,
+      enlaceExpira: c.enlace_pago_expira,
+    })
+  }
 
   const facturas = await svc
     .from('facturas_cuota')
@@ -103,6 +138,7 @@ export async function leerFacturasDeCuotas(workspaceId: string, negocioId: strin
         monto: Number(c.monto),
         fechaVencimiento: c.fecha_vencimiento,
         factura: f ? { numero: f.numero, pdf: Boolean(f.pdf_path), xml: Boolean(f.xml_path), cargadaAt: f.updated_at } : null,
+        cobro: cobroPorCuota.get(`${c.plan_cobro_id}:${c.numero}`) ?? null,
       }
     }),
   }

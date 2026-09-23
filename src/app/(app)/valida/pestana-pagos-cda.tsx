@@ -1,12 +1,13 @@
 import { AvisoCarga } from '@/components/terminos/pestana-terminos'
 import { formatCOP } from '@/lib/cobros/format'
+import { etiquetaFuentePago } from '@/lib/suscripciones/pasarela/dominios'
 import { fechaCorta, type CuotaConEstado, type EstadoCuota } from '@/lib/valida-cda/pago-pendiente'
 import type { PagoRecibidoCda } from '@/lib/valida-cda/pago-servidor'
 import type { ResultadoPagosCda } from '@/lib/valida-cda/pestanas-servidor'
 
 /**
  * La pestaña Pagos de `/valida` de un CDA, con el patrón de la de Valida API: las cuotas del contrato
- * (período, valor, vencimiento, estado, el enlace de Bold si hay uno vigente y la factura electrónica)
+ * (período, valor, vencimiento, estado, el enlace de pago en línea si hay uno vigente y la factura electrónica)
  * y, debajo, los pagos recibidos con su recibo.
  *
  * Las descargas van por `/api/valida/archivo/<clase>/<id>`, que vuelve a autorizar con la MISMA RPC
@@ -116,7 +117,7 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
             rel="noopener noreferrer"
             className="inline-flex items-center rounded-md bg-acento px-3 py-1 font-semibold text-white"
           >
-            Pagar
+            Pagar en línea
           </a>
         ) : (
           '—'
@@ -150,7 +151,7 @@ function FilaPago({ pago: p }: { pago: PagoRecibidoCda }) {
     <tr className="border-t border-border">
       <td className="py-1.5 pr-3">{p.fecha ? fechaCorta(p.fecha) : '—'}</td>
       <td className={`py-1.5 pr-3 ${p.estado === 'anulado' ? 'text-tinta-suave line-through' : ''}`}>{formatCOP(p.monto)}</td>
-      <td className="py-1.5 pr-3">{p.fuente ?? '—'}</td>
+      <td className="py-1.5 pr-3">{etiquetaFuentePago(p.fuente) ?? '—'}</td>
       <td className="py-1.5 pr-3">{ETIQUETA_PAGO[p.estado]}</td>
       <td className="py-1.5">
         {p.reciboDescargable ? (
