@@ -1,0 +1,138 @@
+/**
+ * La fila de una captura en la bandeja (bug #859, COT-2026-0011).
+ *
+ * Lo que se fija:
+ *  1. La ficha sale de lo que devolvió la lectura (`leida`), no de la lista de líneas de la
+ *     página: con la opción recién creada todavía vacía en la página (el refresco llega tarde),
+ *     la fila pinta la aerolínea y los tramos, y NUNCA dice «La lectura no dejó datos».
+ *  2. Mientras no llega nada que pintar: «Preparando la ficha…», sin «Aceptar».
+ *  3. Con la ficha vacía no se ofrece «Aceptar»: se manda a revisar en su bloque.
+ *  4. El título es el nombre real de la ranura, no «Vuelo» a secas.
+ *  5. Qué cuenta como trabajo en el aire (para el aviso al recargar).
+ *
+ * Se queda en `.ts` por el `include` de vitest.
+ */
+import { describe, expect, it, vi } from 'vitest'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+import fixture from '@/lib/cotizaciones/providencia-equipaje.fixture.json'
+import { ranuraPorSlug } from '@/lib/cotizaciones/ranuras-pantallazo'
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {}, refresh: () => {}, back: () => {} }) }))
+vi.mock('sonner', () => ({ toast: { success: () => {}, error: () => {}, warning: () => {} } }))
+vi.mock('@/app/(app)/negocios/cotizacion-actions', () => ({
+  deleteItem: async () => ({ success: true }),
+  recalcularTotales: async () => ({ success: true }),
+}))
+vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({
+  leerCasillaDeItem: async () => ({ ok: true, mensaje: '', alertas: [] }),
+  confirmarTarifaPorPasajero: async () => ({ success: true }),
+}))
+vi.mock('@/app/(app)/negocios/ranura-actions', () => ({
+  crearRanuraConOpcion: async () => ({ success: true, itemId: 'x', grupo: 'vuelo' }),
+  agregarOpcionARanura: async () => ({ success: true, itemId: 'x', grupo: 'vuelo' }),
+  detectarCaptura: async () => ({ ok: false, codigo: 'SIN_TIPO', mensaje: '' }),
+}))
+
+const { FilaCaptura, enElAireCaptura } = await import('./bandeja-capturas')
+type Captura = Parameters<typeof FilaCaptura>[0]['captura']
+type Item = NonNullable<Parameters<typeof FilaCaptura>[0]['item']>
+
+const VUELO = ranuraPorSlug('vuelo_detalle')!
+const LECTURAS = fixture as unknown as Record<string, Record<string, string | null>>
+
+/** La opción como la devuelve `leerCasillaDeItem` tras leer la captura de Avianca. */
+function leidaAvianca(): Item {
+  const valores = LECTURAS['01-vuelo1-bog-adz-avianca.png']
+  const campos = VUELO.campos
+    .filter(c => valores[c.slug] !== null && valores[c.slug] !== undefined)
+    .map(c => ({ label: c.label, valor: valores[c.slug] as string }))
+  return {
+    id: 'item-1',
+    nombre: 'OPCIÓN 1',
+    grupo: 'vuelo 3',
+    tarifa_pax: { casillas: { grupo_completo: { moneda: 'COP', total: 1, campos } } },
+    tramos: null,
+    cargo_destino_valor: null,
+    cargo_destino_moneda: null,
+  }
+}
+
+function captura(extra: Partial<Captura> = {}): Captura {
+  return {
+    id: 'cap-1',
+    preview: 'data:image/png;base64,AA==',
+    dataUrl: 'data:image/png;base64,AA==',
+    estado: { fase: 'lista', alertas: [] },
+    itemId: 'item-1',
+    donde: 'Vuelo a Providencia · nuevo',
+    tipo: 'vuelo',
+    etiqueta: 'Vuelo a Providencia',
+    leida: null,
+    abierta: true,
+    error: null,
+    ...extra,
+  }
+}
+
+function pintar(c: Captura, item: Item | null) {
+  const nada = () => {}
+  return renderToStaticMarkup(React.createElement(FilaCaptura, {
+    captura: c,
+    item,
+    composicion: { adultos: 2, ninos: 0, infantes: 1 },
+    onAlternar: nada,
+    onAceptar: nada,
+    onRevisar: nada,
+    onBorrar: nada,
+    onDeshacer: nada,
+    onElegirTipo: nada,
+    onElegirOpcion: nada,
+  }))
+}
+
+describe('la fila de una captura leída', () => {
+  it('pinta la ficha con lo que devolvió la lectura aunque la página aún tenga la opción vacía', () => {
+    // La página todavía trae la opción recién creada, sin lectura (el refresco llega tarde).
+    const vacia: Item = { id: 'item-1', nombre: 'OPCIÓN 1', grupo: 'vuelo 3', tarifa_pax: null }
+    const html = pintar(captura({ leida: leidaAvianca() }), vacia)
+    expect(html).toContain('Avianca')
+    expect(html).toContain('BOG 06:05')
+    expect(html).not.toContain('La lectura no dejó datos')
+    expect(html).toContain('Aceptar')
+  })
+
+  it('sin lectura ni opción en la página: «Preparando la ficha…» y sin Aceptar', () => {
+    const html = pintar(captura({ leida: null }), null)
+    expect(html).toContain('Preparando la ficha…')
+    expect(html).not.toContain('Aceptar')
+    expect(html).not.toContain('La lectura no dejó datos')
+  })
+
+  it('con la ficha vacía no ofrece Aceptar: manda a revisar en su bloque', () => {
+    const vacia: Item = { id: 'item-1', nombre: 'OPCIÓN 1', grupo: 'vuelo 3', tarifa_pax: null }
+    const html = pintar(captura({ leida: vacia }), null)
+    expect(html).not.toContain('Aceptar')
+    expect(html).toContain('Revisar en su bloque')
+  })
+
+  it('el título es el nombre real de la ranura cuando la opción aún no tiene nombre', () => {
+    const html = pintar(captura({ estado: { fase: 'leyendo' }, leida: null }), null)
+    expect(html).toContain('Vuelo a Providencia')
+  })
+})
+
+describe('trabajo en el aire (aviso al recargar)', () => {
+  it('cuenta lo que se procesa y la opción que espera a que se elija cuál leer', () => {
+    expect(enElAireCaptura({ estado: { fase: 'leyendo' }, itemId: 'i' })).toBe(true)
+    expect(enElAireCaptura({ estado: { fase: 'mirando' }, itemId: null })).toBe(true)
+    expect(enElAireCaptura({ estado: { fase: 'eligiendo_opcion', mensaje: '', opciones: [] }, itemId: 'i' })).toBe(true)
+  })
+
+  it('no cuenta lo que ya terminó ni lo que no dejó nada creado', () => {
+    expect(enElAireCaptura({ estado: { fase: 'lista', alertas: [] }, itemId: 'i' })).toBe(false)
+    expect(enElAireCaptura({ estado: { fase: 'eligiendo_tipo', motivo: '' }, itemId: null })).toBe(false)
+    expect(enElAireCaptura({ estado: { fase: 'rechazada', mensaje: '' }, itemId: null })).toBe(false)
+  })
+})

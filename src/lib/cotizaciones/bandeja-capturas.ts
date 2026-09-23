@@ -159,3 +159,37 @@ export function resumenDeBloques(estados: readonly EstadoDeBloque[]): string {
   if (atencion > 0) partes.push(`${atencion} ${atencion === 1 ? 'requiere' : 'requieren'} atención`)
   return partes.join(' · ')
 }
+
+// ── Lo que la lectura dejó en la opción ──────────────────────────────────────
+
+/**
+ * La opción tal como quedó guardada después de leer su captura: lo que la ficha de la bandeja
+ * necesita para pintarse sin esperar a que la página vuelva a traer las líneas.
+ *
+ * ⚠️ La ficha sale de AQUÍ y no de la lista de líneas de la página: el refresco que la trae
+ * puede llegar tarde (las acciones del servidor van en fila), y mientras tanto la bandeja
+ * decía «La lectura no dejó datos para la ficha» sobre una lectura completa (COT-2026-0011).
+ */
+export interface OpcionLeida {
+  id: string
+  nombre: string | null
+  grupo: string | null
+  tarifa_pax: unknown
+  tramos: unknown
+  cargo_destino_valor: number | string | null
+  cargo_destino_moneda: string | null
+}
+
+/** Arma la opción desde la fila de `items` (con `select('*')`: las columnas nuevas pueden faltar). */
+export function opcionLeidaDeFila(fila: Record<string, unknown> | null | undefined): OpcionLeida | null {
+  if (!fila || typeof fila.id !== 'string') return null
+  return {
+    id: fila.id,
+    nombre: typeof fila.nombre === 'string' ? fila.nombre : null,
+    grupo: typeof fila.grupo === 'string' ? fila.grupo : null,
+    tarifa_pax: fila.tarifa_pax ?? null,
+    tramos: fila.tramos ?? null,
+    cargo_destino_valor: (fila.cargo_destino_valor as number | string | null | undefined) ?? null,
+    cargo_destino_moneda: typeof fila.cargo_destino_moneda === 'string' ? fila.cargo_destino_moneda : null,
+  }
+}

@@ -23,6 +23,8 @@ import { asignarRanura, crearRanura, ranuraDelGrupo } from '@/lib/cotizaciones/r
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
+import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { SIN_OPCIONES } from '@/lib/cotizaciones/ubicador-capturas'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 
 /**
@@ -136,7 +138,7 @@ export async function crearRanuraConOpcion(
   cotizacionId: string,
   tipo: TipoRanura,
   pistas: PistasDeLugar = {},
-): Promise<{ success: true; itemId: string; grupo: string } | { success: false; error: string }> {
+): Promise<{ success: true; itemId: string; grupo: string; etiqueta: string | null } | { success: false; error: string }> {
   if (!esTipoRanura(tipo)) return { success: false, error: 'Tipo de componente desconocido' }
   const c = await contexto(cotizacionId)
   if ('error' in c) return { success: false, error: c.error }
@@ -167,7 +169,9 @@ export async function crearRanuraConOpcion(
   if (ranuraId) await asignarRanura(c.supabase, creada.id, ranuraId)
 
   revalidar(c.cotizacion)
-  return { success: true, itemId: creada.id, grupo }
+  // El nombre visible de la ranura, para que la bandeja diga «Vuelo San Andrés–Providencia» y
+  // no «Vuelo» mientras la lista de la pantalla todavía no la trae.
+  return { success: true, itemId: creada.id, grupo, etiqueta: etiquetaDeRanura(grupo) }
 }
 
 /**
@@ -181,14 +185,15 @@ export async function crearRanuraConOpcion(
 export async function agregarOpcionARanura(
   cotizacionId: string,
   grupo: string,
-): Promise<{ success: true; itemId: string; grupo: string } | { success: false; error: string }> {
+): Promise<{ success: true; itemId: string; grupo: string } | { success: false; error: string; codigo?: string }> {
   const c = await contexto(cotizacionId)
   if ('error' in c) return { success: false, error: c.error }
 
   const clave = normalizarGrupo(grupo)
   if (!clave || !formaDesdeGrupo(clave)) return { success: false, error: 'Esa no es una ranura de esta cotización' }
   const opciones = c.items.filter(i => normalizarGrupo(i.grupo as string | null) === clave && i.es_ajuste !== true)
-  if (opciones.length === 0) return { success: false, error: 'Esa ranura ya no tiene opciones: créala de nuevo' }
+  // Con código: la bandeja lo reconoce y abre una ranura nueva en vez de mostrar el error.
+  if (opciones.length === 0) return { success: false, error: 'Esa ranura ya no tiene opciones: créala de nuevo', codigo: SIN_OPCIONES }
 
   const n = siguienteNumeroDeOpcion(opciones.map(o => (o.nombre ?? null) as string | null))
   const modelo = opciones[0]

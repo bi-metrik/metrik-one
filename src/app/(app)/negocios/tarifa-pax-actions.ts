@@ -42,6 +42,7 @@ import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
+import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -90,7 +91,14 @@ const CLAVES: ClaveCasilla[] = ['grupo_completo', 'sin_infantes', 'solo_adultos'
 const TIPO_RUBRO_POR_PASAJERO: TipoRubroViaje = 'tarifa'
 
 export type ResultadoCasilla =
-  | { ok: true; mensaje: string; alertas: string[]; tarifa: TarifaPax }
+  | {
+      ok: true
+      mensaje: string
+      alertas: string[]
+      tarifa: TarifaPax
+      /** La opción como quedó guardada: la bandeja pinta su ficha con esto (`OpcionLeida`). */
+      opcion?: OpcionLeida | null
+    }
   | {
       ok: false
       codigo: string
@@ -190,6 +198,21 @@ async function guardarTarifa(
     }
   }
   return { tarifa: siguiente }
+}
+
+/**
+ * La opción como quedó después de la lectura, para que la bandeja pinte la ficha sin esperar
+ * el refresco de la página. Si no se puede leer, `null`: la bandeja cae a la lista de líneas.
+ */
+async function fotoDeOpcion(supabase: unknown, itemId: string): Promise<OpcionLeida | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from('items').select('*').eq('id', itemId).maybeSingle()
+    if (error) return null
+    return opcionLeidaDeFila(data as Record<string, unknown> | null)
+  } catch {
+    return null
+  }
 }
 
 async function contexto(itemId: string) {
@@ -379,6 +402,9 @@ export async function leerCasillaDeItem(
 
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
 
+  // Después del nombre: es la foto que pinta la ficha de la bandeja.
+  const opcion = await fotoDeOpcion(supabase, itemId)
+
   // La captura no dijo a cuántos cubre y nadie lo había declarado: la pregunta sale AHORA,
   // con la lectura ya guardada, y diciendo por qué (§2.4). Preguntarlo antes de pegar era
   // pedir un dato que el pantallazo trae en el 80% de los casos.
@@ -388,6 +414,7 @@ export async function leerCasillaDeItem(
       mensaje: 'Este pantallazo no dice a cuántos pasajeros cubre. Escribe cuántos adultos, niños e infantes cubre esta línea.',
       alertas: leida.alertas,
       tarifa: guardado.tarifa,
+      opcion,
     }
   }
 
@@ -396,7 +423,7 @@ export async function leerCasillaDeItem(
   const estado = resolverTarifa(composicionEfectiva, guardado.tarifa.casillas ?? {}, ranura.slug, {
     moneda: monedaDeTarifa(guardado.tarifa).moneda,
   })
-  return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas, tarifa: guardado.tarifa }
+  return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas, tarifa: guardado.tarifa, opcion }
 }
 
 // ── Quitar la lectura de una casilla ─────────────────────────────────────────

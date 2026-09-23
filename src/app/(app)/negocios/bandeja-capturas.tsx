@@ -13,7 +13,8 @@ import {
 } from '@/app/(app)/negocios/ranura-actions'
 import { confirmarTarifaPorPasajero, leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
-import { ubicarCaptura, type CapturaDetectada, type RanuraCandidata } from '@/lib/cotizaciones/bandeja-capturas'
+import type { CapturaDetectada } from '@/lib/cotizaciones/bandeja-capturas'
+import { crearUbicador, type Ubicador } from '@/lib/cotizaciones/ubicador-capturas'
 import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -32,15 +33,19 @@ import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
  *    Deshacer»). Abierta antes de aceptar muestra SOLO lo que se confirma; al aceptar se abre
  *    la opción en su bloque, con la nota, los adicionales y el precio.
  *
- * ⚠️ Detectar y leer van en paralelo, pero UBICAR va en fila: dos capturas del mismo vuelo
- * nuevo pegadas a la vez crearían dos ranuras si las dos preguntaran al mismo tiempo. La
- * fila recuerda la ruta de las ranuras que ella misma creó, porque la lectura de la primera
- * opción puede no haber terminado cuando llega la segunda captura.
+ * ⚠️ Detectar y leer van en paralelo, pero UBICAR va en fila (`ubicador-capturas.ts`): dos
+ * capturas del mismo vuelo nuevo pegadas a la vez crearían dos ranuras si las dos preguntaran
+ * al mismo tiempo. La fila recuerda las ranuras que ella misma creó, y las OLVIDA cuando su
+ * última opción se borra: si no, un hotel pegado después iba a una ranura muerta.
+ *
+ * ⚠️ La ficha de cada fila sale de lo que devolvió la lectura (`OpcionLeida`), no de las líneas
+ * de la página: el refresco que las trae puede llegar tarde, y la fila decía «La lectura no
+ * dejó datos» sobre una lectura completa (COT-2026-0011).
  *
  * Solo el flujo de viaje (Trappvel) la monta. La imagen no se guarda.
  */
 
-type Estado =
+export type Estado =
   | { fase: 'mirando' }
   | { fase: 'ubicando' }
   | { fase: 'leyendo' }
@@ -51,7 +56,7 @@ type Estado =
   | { fase: 'aceptada' }
   | { fase: 'borrada'; antes: Estado }
 
-interface Captura {
+export interface Captura {
   id: string
   preview: string
   dataUrl: string
@@ -59,6 +64,10 @@ interface Captura {
   itemId: string | null
   donde: string | null
   tipo: TipoRanura | null
+  /** El nombre visible de la ranura donde quedó («Vuelo San Andrés–Providencia»). */
+  etiqueta: string | null
+  /** La opción como la dejó la lectura: la ficha se pinta con esto, sin esperar el refresco. */
+  leida: ItemDeBandeja | null
   abierta: boolean
   error: string | null
 }
@@ -75,6 +84,15 @@ export interface ItemDeBandeja {
 
 /** Cuánto espera una captura borrada antes de borrar su opción: la ventana de «Deshacer». */
 const ESPERA_BORRADO_MS = 6000
+
+/**
+ * ¿Hay trabajo de esta captura que se perdería al recargar? Lo que se está procesando, y la
+ * opción que espera a que se elija cuál leer (existe en su bloque y todavía está vacía).
+ */
+export function enElAireCaptura(c: Pick<Captura, 'estado' | 'itemId'>): boolean {
+  const f = c.estado.fase
+  return f === 'mirando' || f === 'ubicando' || f === 'leyendo' || (f === 'eligiendo_opcion' && c.itemId !== null)
+}
 
 let contador = 0
 const nuevoId = () => `cap-${Date.now()}-${++contador}`
@@ -95,71 +113,94 @@ export default function BandejaCapturas({
   const router = useRouter()
   const [capturas, setCapturas] = useState<Captura[]>([])
   const entrada = useRef<HTMLInputElement>(null)
-  // La fila de ubicación y lo que ella misma creó (ver la cabecera).
-  const filaUbicar = useRef<Promise<void>>(Promise.resolve())
-  const creadasAqui = useRef<RanuraCandidata[]>([])
-  const borrados = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  // La fila de ubicación (ver la cabecera). Se crea al primer uso: una sola por bandeja.
+  const ubicadorRef = useRef<Ubicador | null>(null)
+  const ubicador = useCallback((): Ubicador => {
+    if (!ubicadorRef.current) {
+      ubicadorRef.current = crearUbicador({
+        agregar: grupo => agregarOpcionARanura(cotizacionId, grupo),
+        crear: captura => crearRanuraConOpcion(cotizacionId, captura.tipo, { lugar: captura.lugar, origen: captura.origen, destino: captura.destino }),
+      })
+    }
+    return ubicadorRef.current
+  }, [cotizacionId])
+  // Borrados en su ventana de «Deshacer»: el reloj y lo que hay que ejecutar si nadie deshace.
+  const borrados = useRef(new Map<string, { reloj: ReturnType<typeof setTimeout>; ejecutar: () => void }>())
+  // Las capturas vigentes, para la limpieza al salir (el efecto no ve el estado de ese momento).
+  const vigentes = useRef<Captura[]>([])
+  useEffect(() => { vigentes.current = capturas }, [capturas])
 
   const actualizar = useCallback((id: string, cambio: Partial<Captura>) => {
     setCapturas(cs => cs.map(c => (c.id === id ? { ...c, ...cambio } : c)))
   }, [])
 
+  /**
+   * Retira la opción que nació para una captura que no sirvió. Si era la última de su ranura,
+   * `deleteItem` retira también la ranura y la fila deja de ofrecerla. Nunca lanza: un fallo aquí
+   * no puede dejar la fila colgada.
+   */
+  const descartarOpcion = useCallback(async (itemId: string) => {
+    try {
+      await deleteItem(itemId)
+      ubicador().olvidarOpcion(itemId)
+      await recalcularTotales(cotizacionId)
+      return true
+    } catch {
+      return false
+    }
+  }, [cotizacionId, ubicador])
+
   const leer = useCallback(async (id: string, itemId: string, dataUrl: string, enfoque: { nombre: string; precio: string | null } | null) => {
     actualizar(id, { estado: { fase: 'leyendo' } })
-    const lectura = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, enfoque)
+    let lectura: Awaited<ReturnType<typeof leerCasillaDeItem>>
+    try {
+      lectura = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, enfoque)
+    } catch {
+      // La acción se cayó (tiempo agotado, red). Antes la fila quedaba en «Leyendo…» para
+      // siempre, sin poder borrarse, y la opción vacía se quedaba en su bloque (COT-2026-0011).
+      lectura = { ok: false, codigo: 'ACCION_CAIDA', mensaje: 'No se pudo leer el pantallazo. Vuelve a pegarlo.' }
+    }
     if (!lectura.ok) {
       if (!enfoque && (lectura.opciones ?? []).length > 0) {
         actualizar(id, { estado: { fase: 'eligiendo_opcion', mensaje: lectura.mensaje, opciones: lectura.opciones ?? [] }, abierta: true })
         return
       }
       // La opción nació para esta captura: si la captura no sirve, se va con ella.
-      await deleteItem(itemId)
-      await recalcularTotales(cotizacionId)
-      actualizar(id, { estado: { fase: 'rechazada', mensaje: lectura.mensaje, detalle: lectura.detalle }, itemId: null })
+      const retirada = await descartarOpcion(itemId)
+      actualizar(id, {
+        estado: { fase: 'rechazada', mensaje: lectura.mensaje, detalle: lectura.detalle },
+        itemId: retirada ? null : itemId,
+        leida: null,
+        error: retirada ? null : 'No se pudo retirar la opción vacía: bórrala en su bloque.',
+      })
       router.refresh()
       return
     }
-    actualizar(id, { estado: { fase: 'lista', alertas: lectura.alertas } })
+    actualizar(id, { estado: { fase: 'lista', alertas: lectura.alertas }, leida: lectura.opcion ?? null })
     router.refresh()
-  }, [actualizar, cotizacionId, router])
+  }, [actualizar, descartarOpcion, router])
 
   /** Crea la opción donde corresponde. Corre dentro de la fila: nunca dos a la vez. */
-  const ubicar = useCallback((id: string, dataUrl: string, captura: CapturaDetectada, ranuras: RanuraConLugar[]) => {
-    const tarea = filaUbicar.current.then(async () => {
-      actualizar(id, { estado: { fase: 'ubicando' }, tipo: captura.tipo })
-      // Lo que la base sabe de cada ranura, completado con lo que esta bandeja recuerda de las
-      // que creó: la lectura de su primera opción puede no haber terminado todavía.
-      const candidatas: RanuraCandidata[] = [
-        ...ranuras.map(r => {
-          const aqui = creadasAqui.current.find(c => c.grupo === r.grupo)
-          return {
-            grupo: r.grupo,
-            tipo: captura.tipo,
-            lugar: r.lugar ?? aqui?.lugar ?? null,
-            origen: r.origen ?? aqui?.origen ?? null,
-            destino: r.destino ?? aqui?.destino ?? null,
-          }
-        }),
-        ...creadasAqui.current.filter(c => !ranuras.some(r => r.grupo === c.grupo)),
-      ]
-      const u = ubicarCaptura(captura, candidatas)
-      const creada = u.como === 'hermana'
-        ? await agregarOpcionARanura(cotizacionId, u.grupo)
-        : await crearRanuraConOpcion(cotizacionId, captura.tipo, { lugar: captura.lugar, origen: captura.origen, destino: captura.destino })
-      if (!creada.success) {
-        actualizar(id, { estado: { fase: 'rechazada', mensaje: creada.error } })
-        return null
-      }
-      if (u.como === 'nueva') {
-        creadasAqui.current.push({ grupo: creada.grupo, tipo: captura.tipo, lugar: captura.lugar, origen: captura.origen, destino: captura.destino })
-      }
-      const etiqueta = ranuras.find(r => r.grupo === creada.grupo)?.etiqueta ?? definicionDeTipo(captura.tipo).label
-      actualizar(id, { itemId: creada.itemId, donde: u.como === 'hermana' ? `Otra opción de ${etiqueta}` : `${definicionDeTipo(captura.tipo).label} nuevo` })
-      return creada.itemId
+  const ubicar = useCallback(async (id: string, captura: CapturaDetectada, ranuras: RanuraConLugar[]) => {
+    actualizar(id, { estado: { fase: 'ubicando' }, tipo: captura.tipo })
+    let u: Awaited<ReturnType<Ubicador['ubicar']>>
+    try {
+      u = await ubicador().ubicar(captura, ranuras)
+    } catch {
+      u = { ok: false, error: 'No se pudo ubicar el pantallazo. Vuelve a pegarlo.' }
+    }
+    if (!u.ok) {
+      actualizar(id, { estado: { fase: 'rechazada', mensaje: u.error } })
+      return null
+    }
+    const etiqueta = u.etiqueta ?? definicionDeTipo(captura.tipo).label
+    actualizar(id, {
+      itemId: u.itemId,
+      etiqueta,
+      donde: u.como === 'hermana' ? `Otra opción de ${etiqueta}` : `${etiqueta} · nuevo`,
     })
-    filaUbicar.current = tarea.then(() => undefined, () => undefined)
-    return tarea
-  }, [actualizar, cotizacionId])
+    return u.itemId
+  }, [actualizar, ubicador])
 
   const procesar = useCallback(async (id: string, dataUrl: string, tipoElegido?: TipoRanura) => {
     let captura: CapturaDetectada
@@ -168,7 +209,13 @@ export default function BandejaCapturas({
       captura = { tipo: tipoElegido, lugar: null, origen: null, destino: null }
     } else {
       actualizar(id, { estado: { fase: 'mirando' } })
-      const r = await detectarCaptura(cotizacionId, dataUrl)
+      let r: Awaited<ReturnType<typeof detectarCaptura>>
+      try {
+        r = await detectarCaptura(cotizacionId, dataUrl)
+      } catch {
+        // Todavía no existe opción: con la acción caída basta con dejar elegir el tipo a mano.
+        r = { ok: false, codigo: 'LECTURA', mensaje: 'No se pudo mirar el pantallazo. Dinos qué es o vuelve a pegarlo.' }
+      }
       if (!r.ok) {
         actualizar(id, r.codigo === 'SIN_TIPO' || r.codigo === 'LECTURA'
           ? { estado: { fase: 'eligiendo_tipo', motivo: r.mensaje }, abierta: true }
@@ -178,7 +225,7 @@ export default function BandejaCapturas({
       captura = { tipo: r.tipo, lugar: r.lugar, origen: r.origen, destino: r.destino }
       ranuras = r.ranuras
     }
-    const itemId = await ubicar(id, dataUrl, captura, ranuras)
+    const itemId = await ubicar(id, captura, ranuras)
     if (itemId) await leer(id, itemId, dataUrl, null)
   }, [actualizar, cotizacionId, leer, ubicar])
 
@@ -192,7 +239,7 @@ export default function BandejaCapturas({
       const dataUrl = ev.target?.result as string
       const id = nuevoId()
       setCapturas(cs => [...cs, {
-        id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, itemId: null, donde: null, tipo: null, abierta: false, error: null,
+        id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, itemId: null, donde: null, tipo: null, etiqueta: null, leida: null, abierta: false, error: null,
       }])
       void procesar(id, dataUrl)
     }
@@ -218,28 +265,44 @@ export default function BandejaCapturas({
     return () => window.removeEventListener('paste', alPegar)
   }, [agregar])
 
+  // Al salir de la cotización (navegar dentro de la app) nada se queda a medias: los borrados en
+  // su ventana de «Deshacer» se ejecutan ya, y la opción que esperaba a que se eligiera cuál
+  // leer se retira. Antes el reloj se cancelaba y la opción se quedaba vacía en su bloque.
   useEffect(() => {
     const pendientes = borrados.current
-    return () => { for (const t of pendientes.values()) clearTimeout(t) }
-  }, [])
+    const actuales = vigentes
+    return () => {
+      for (const { reloj, ejecutar } of pendientes.values()) { clearTimeout(reloj); ejecutar() }
+      pendientes.clear()
+      for (const c of actuales.current) {
+        if (c.itemId && c.estado.fase === 'eligiendo_opcion') void descartarOpcion(c.itemId)
+      }
+    }
+  }, [descartarOpcion])
+
+  // Recargar o cerrar la pestaña corta todo lo que está en el aire: el navegador pregunta antes.
+  const enElAire = capturas.some(c => enElAireCaptura(c)) || capturas.some(c => c.estado.fase === 'borrada' && c.itemId)
+  useEffect(() => {
+    if (!enElAire) return
+    function alSalir(e: BeforeUnloadEvent) { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', alSalir)
+    return () => window.removeEventListener('beforeunload', alSalir)
+  }, [enElAire])
 
   function borrar(c: Captura) {
     actualizar(c.id, { estado: { fase: 'borrada', antes: c.estado }, abierta: false })
     if (!c.itemId) return
     const itemId = c.itemId
-    borrados.current.set(c.id, setTimeout(() => {
+    const ejecutar = () => {
       borrados.current.delete(c.id)
-      void (async () => {
-        await deleteItem(itemId)
-        await recalcularTotales(cotizacionId)
-        router.refresh()
-      })()
-    }, ESPERA_BORRADO_MS))
+      void descartarOpcion(itemId).then(() => router.refresh())
+    }
+    borrados.current.set(c.id, { reloj: setTimeout(ejecutar, ESPERA_BORRADO_MS), ejecutar })
   }
 
   function deshacer(c: Captura) {
-    const t = borrados.current.get(c.id)
-    if (t) clearTimeout(t)
+    const b = borrados.current.get(c.id)
+    if (b) clearTimeout(b.reloj)
     borrados.current.delete(c.id)
     if (c.estado.fase === 'borrada') actualizar(c.id, { estado: c.estado.antes })
   }
@@ -315,6 +378,7 @@ export default function BandejaCapturas({
                 composicion={composicion}
                 onAlternar={() => actualizar(c.id, { abierta: !c.abierta })}
                 onAceptar={() => void aceptar(c)}
+                onRevisar={() => { if (c.itemId) onOpcionCreada?.(c.itemId) }}
                 onBorrar={() => borrar(c)}
                 onDeshacer={() => deshacer(c)}
                 onElegirTipo={t => { actualizar(c.id, { abierta: false }); void procesar(c.id, c.dataUrl, t) }}
@@ -338,12 +402,14 @@ export default function BandejaCapturas({
   )
 }
 
-function FilaCaptura({
+/** Exportada para la prueba de render: es donde vive la ficha. */
+export function FilaCaptura({
   captura: c,
   item,
   composicion,
   onAlternar,
   onAceptar,
+  onRevisar,
   onBorrar,
   onDeshacer,
   onElegirTipo,
@@ -354,6 +420,8 @@ function FilaCaptura({
   composicion: Composicion | null
   onAlternar: () => void
   onAceptar: () => void
+  /** Abre la opción en su bloque: la salida cuando la ficha no tiene nada que confirmar. */
+  onRevisar?: () => void
   onBorrar: () => void
   onDeshacer: () => void
   onElegirTipo: (t: TipoRanura) => void
@@ -371,12 +439,19 @@ function FilaCaptura({
   }
   const e = c.estado
   const trabajando = e.fase === 'mirando' || e.fase === 'ubicando' || e.fase === 'leyendo'
-  const ficha = item ? fichaDeOpcion({ ...item, nombre: item.nombre ?? null, grupo: item.grupo ?? null }, composicion) : []
-  const titulo = item?.nombre || (c.tipo ? definicionDeTipo(c.tipo).label : 'Pantallazo')
+  // Lo que devolvió la lectura manda sobre la lista de la página, que puede venir de antes de
+  // la lectura (la opción recién creada, vacía).
+  const opcion = c.leida ?? item
+  const ficha = opcion ? fichaDeOpcion({ ...opcion, nombre: opcion.nombre ?? null, grupo: opcion.grupo ?? null }, composicion) : []
+  // La ficha todavía no llega: ni la lectura la trajo ni la página la tiene.
+  const preparando = e.fase === 'lista' && !opcion
+  // Con la ficha vacía no se ofrece «Aceptar» como si todo estuviera bien: se manda al bloque.
+  const confirmable = e.fase === 'lista' && ficha.length > 0
+  const titulo = opcion?.nombre || c.etiqueta || (c.tipo ? definicionDeTipo(c.tipo).label : 'Pantallazo')
   const linea = e.fase === 'mirando' ? 'Mirando qué es…'
     : e.fase === 'ubicando' ? 'Ubicándolo…'
       : e.fase === 'leyendo' ? `Leyendo${c.donde ? ` · ${c.donde}` : ''}…`
-        : e.fase === 'lista' ? (c.donde ?? 'Leído')
+        : e.fase === 'lista' ? (preparando ? 'Preparando la ficha…' : (c.donde ?? 'Leído'))
           : e.fase === 'eligiendo_tipo' ? 'No se reconoce qué es'
             : e.fase === 'eligiendo_opcion' ? '¿Cuál de estas?'
               : e.fase === 'rechazada' ? e.mensaje
@@ -397,7 +472,16 @@ function FilaCaptura({
             </span>
           </span>
         </button>
-        {e.fase === 'lista' && (
+        {e.fase === 'lista' && !confirmable && !preparando && onRevisar && (
+          <button
+            type="button"
+            onClick={onRevisar}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
+          >
+            Revisar en su bloque
+          </button>
+        )}
+        {confirmable && (
           <button
             type="button"
             onClick={onAceptar}
@@ -424,10 +508,15 @@ function FilaCaptura({
         <div className="border-t px-2.5 py-2 text-xs">
           {e.fase === 'lista' && (
             <>
-              {ficha.length > 0 ? (
+              {preparando ? (
+                <p className="flex items-center gap-1 text-[11px] text-[#6B7280]">
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                  Preparando la ficha…
+                </p>
+              ) : ficha.length > 0 ? (
                 <ul className="space-y-0.5 text-[#1A1A1A]">{ficha.map((r, i) => <li key={i}>{r}</li>)}</ul>
               ) : (
-                <p className="text-[11px] text-[#6B7280]">La lectura no dejó datos para la ficha.</p>
+                <p className="text-[11px] text-[#6B7280]">La lectura no dejó datos para la ficha: revísala en su bloque.</p>
               )}
               {e.alertas.map(a => (
                 <p key={a} className="mt-1 flex items-start gap-1 text-[11px] font-medium text-amber-700">
