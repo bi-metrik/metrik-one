@@ -211,12 +211,25 @@ export async function agregarPagoFab(
   // sostiene el control de duplicados. En un workspace que cobra por transferencia no
   // hay nada que teclear, así que la referencia se genera, igual que en el panel de
   // pagos externos. Lo que dice de dónde entró la plata es el comprobante adjunto.
-  if (!pago.referencia?.trim()) {
-    if (await workspaceCobraPorEpayco(supabase, workspaceId)) {
+  //
+  // Lo mismo con el nombre de la fuente: sin pasarela el modal no la pregunta (manda
+  // `fuente: 'otra'` sin nombre), y `registrarPagoEnNegocio` exige ese nombre. Se
+  // completa con 'manual', que vale igual para transferencia, efectivo o cheque. Solo
+  // aquí: la vía directa sigue rechazando "otra" a secas.
+  const faltaReferencia = !pago.referencia?.trim()
+  const faltaFuente = pago.fuente === 'otra' && !pago.fuente_nombre?.trim()
+  if (faltaReferencia || faltaFuente) {
+    const conPasarela = await workspaceCobraPorEpayco(supabase, workspaceId)
+    if (conPasarela && faltaReferencia) {
       return { success: false, error: 'Ingresa la referencia del pago' }
     }
-    const dia = (pago.fecha || todayBogotaISO()).replace(/-/g, '')
-    pago.referencia = `${PREFIJO_REF_AUTOGENERADA}${dia}-${randomUUID().slice(0, 6).toUpperCase()}`
+    if (!conPasarela) {
+      if (faltaReferencia) {
+        const dia = (pago.fecha || todayBogotaISO()).replace(/-/g, '')
+        pago.referencia = `${PREFIJO_REF_AUTOGENERADA}${dia}-${randomUUID().slice(0, 6).toUpperCase()}`
+      }
+      if (faltaFuente) pago.fuente_nombre = 'manual'
+    }
   }
   let soporte: Record<string, unknown> | null = null
   if (soporte_subido?.storage_path) {

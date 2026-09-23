@@ -155,6 +155,36 @@ describe('referencia del pago del FAB', () => {
 })
 
 /**
+ * La fuente del pago.
+ *
+ * EL CASO QUE IMPORTA (bug en producción, Termotech, 2026-09-23): sin pasarela el modal
+ * oculta el campo de fuente y manda `fuente: 'otra'` sin nombre; la vía común exige el
+ * nombre, así que TODO pago se rechazaba con «Indica el nombre de la fuente del pago».
+ * El FAB lo completa con 'manual' solo donde no hay pasarela.
+ */
+describe('fuente del pago del FAB', () => {
+  it('sin pasarela, sin nombre de fuente ni referencia, el pago entra con fuente "manual"', async () => {
+    const r = await agregarPagoFab(pago({ fuente_nombre: undefined, referencia: '' }))
+    expect(r.success).toBe(true)
+    expect(cobroGuardado()?.fuente).toBe('manual')
+    expect(String(cobroGuardado()?.external_ref)).toContain(PREFIJO_REF_AUTOGENERADA)
+  })
+
+  it('sin pasarela, con referencia pero con la fuente en blanco, también entra como "manual"', async () => {
+    const r = await agregarPagoFab(pago({ fuente_nombre: '  ', referencia: 'TRF-0009' }))
+    expect(r.success).toBe(true)
+    expect(cobroGuardado()?.fuente).toBe('manual')
+    expect(cobroGuardado()?.external_ref).toBe('TRF-0009')
+  })
+
+  it('la fuente escrita a mano se respeta, no se pisa con "manual"', async () => {
+    const r = await agregarPagoFab(pago({ referencia: '' }))
+    expect(r.success).toBe(true)
+    expect(cobroGuardado()?.fuente).toBe('Transferencia Bancolombia')
+  })
+})
+
+/**
  * TERCERA RONDA (2026-09-16): el FAB de pago es de Clarity, y la cuenta de ePayco es la de
  * SOENA. VISTO FALLAR contra `origin/main`: caen los 4; quitando la guarda de modulo de
  * `ctxFabPago` caen 2, la de ePayco en `repartirPagoComercial` 1 y la de
