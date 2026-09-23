@@ -8,6 +8,8 @@ import { telDesdeTelefono, whatsappDesdeTelefono } from '@/lib/contactos/telefon
 import type { ResumenCampanas } from '@/lib/contactos/campanas'
 import { ROLES_CONTACTO, resolverStatusContacto } from '@/lib/catalogos/constants'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import type { MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
+import PanelViaje from './panel-viaje'
 
 /**
  * Panel del contacto dentro del negocio.
@@ -68,6 +70,13 @@ interface Props {
   empresa: EmpresaPanel | null
   campanas: ResumenCampanas | null
   variant: 'rail' | 'movil'
+  /**
+   * Negocio de viaje (Trappvel): la solicitud, el perfil del cliente y las cotizaciones
+   * abiertas. `null`/ausente en toda otra línea, y entonces el panel no cambia (R6).
+   */
+  viaje?: MarcoDelNegocio | null
+  /** La cotización abierta en pantalla, que la lista resalta. En el negocio no hay. */
+  cotActualId?: string | null
 }
 
 function labelRol(rol: string | null): string | null {
@@ -85,7 +94,7 @@ function Fila({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
-function Cuerpo({ contacto, empresa, campanas }: Omit<Props, 'variant'>) {
+function Cuerpo({ contacto, empresa, campanas, viaje, cotActualId }: Omit<Props, 'variant'>) {
   const espejo = esEmpresaEspejo(empresa, contacto?.id ?? null)
   const tel = telDesdeTelefono(contacto?.telefono)
   const wa = whatsappDesdeTelefono(contacto?.telefono)
@@ -191,6 +200,9 @@ function Cuerpo({ contacto, empresa, campanas }: Omit<Props, 'variant'>) {
         )}
       </section>
 
+      {/* ── Viaje (solo líneas de viaje) ── */}
+      {viaje && <PanelViaje viaje={viaje} cotActualId={cotActualId ?? null} />}
+
       {/* ── Origen ── */}
       {campanas && (
         <section className="rounded-lg border border-dashed border-border p-3">
@@ -268,11 +280,11 @@ function Cuerpo({ contacto, empresa, campanas }: Omit<Props, 'variant'>) {
   )
 }
 
-export default function PanelContacto({ contacto, empresa, campanas, variant }: Props) {
+export default function PanelContacto({ contacto, empresa, campanas, variant, viaje, cotActualId }: Props) {
   const [abierto, setAbierto] = useState(false)
 
   if (variant === 'rail') {
-    return <Cuerpo contacto={contacto} empresa={empresa} campanas={campanas} />
+    return <Cuerpo contacto={contacto} empresa={empresa} campanas={campanas} viaje={viaje} cotActualId={cotActualId} />
   }
 
   // ── Móvil: tarjeta plegable con resumen siempre visible ──
@@ -333,7 +345,7 @@ export default function PanelContacto({ contacto, empresa, campanas, variant }: 
 
       {abierto && (
         <div className="border-t border-border p-3">
-          <Cuerpo contacto={contacto} empresa={empresa} campanas={campanas} />
+          <Cuerpo contacto={contacto} empresa={empresa} campanas={campanas} viaje={viaje} cotActualId={cotActualId} />
         </div>
       )}
     </div>

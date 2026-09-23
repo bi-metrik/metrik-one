@@ -6,9 +6,8 @@
  *     pegado es UNA franja fija, hija directa del contenedor del editor y fuera del paso
  *     «Componentes»: así se queda pegada bajo el encabezado en toda la cotización (R3).
  *  2. R6 · fuera del flujo de viaje el marco no cambia un byte del editor.
- *  3. El marco pinta titular, destino con IATA, etapa, la columna (solicitud, contacto, perfil)
- *     y las cotizaciones abiertas con la actual resaltada y las demás como enlace.
- *  4. En el celular la franja nace cerrada: la columna se pinta una sola vez (la del escritorio).
+ *
+ * El marco mismo (encabezado y columna del negocio) lo fija `marco-identico-render.test.ts`.
  *
  * Se queda en `.ts` por el `include` de vitest.
  */
@@ -74,9 +73,7 @@ vi.mock('@/app/(app)/negocios/itinerario-actions', () => ({
 }))
 
 const { default: CotizacionEditor } = await import('./cotizacion-editor')
-const { default: MarcoCotizacion } = await import('./marco-cotizacion')
 const { MarcoCotizacionContexto } = await import('./marco-cotizacion-contexto')
-type Marco = Parameters<typeof MarcoCotizacion>[0]['marco']
 
 const cotizacion = {
   id: 'cot-1', codigo: 'COT-2026-0011', consecutivo: 'COT-2026-0011', modo: 'detallada',
@@ -100,7 +97,7 @@ const editor = (lineasPorTipo: boolean) =>
   })
 
 const conContexto = (hijo: React.ReactElement) =>
-  React.createElement(MarcoCotizacionContexto.Provider, { value: { avisarEnElAire: () => {} } }, hijo)
+  React.createElement(MarcoCotizacionContexto.Provider, { value: { activo: true } }, hijo)
 
 describe('el editor dentro del marco del negocio', () => {
   it('no repite el encabezado P9 y la zona de pegado es una franja fija fuera del paso «Componentes»', () => {
@@ -124,80 +121,5 @@ describe('el editor dentro del marco del negocio', () => {
 
   it('R6 · fuera del flujo de viaje el marco no cambia un byte', () => {
     expect(renderToStaticMarkup(conContexto(editor(false)))).toBe(renderToStaticMarkup(editor(false)))
-  })
-})
-
-const marco = (extra: Partial<Marco> = {}): Marco => ({
-  negocioId: 'neg-1',
-  titular: 'María Fernanda Ríos',
-  etapa: { nombre: 'Cotización', stage: 'venta', numero: 2 },
-  viaje: {
-    destino: 'Providencia',
-    fechas: { inicio: '2026-11-09', fin: '2026-11-13' },
-    composicion: { adultos: 2, ninos: 1, infantes: 0 },
-  },
-  iataPorCotizacion: { 'cot-1': 'PVA', 'cot-2': null },
-  solicitud: {
-    destino: 'Providencia', alcance: 'Nacional', fechas: '9 al 13 nov 2026',
-    tipoDeFechas: 'fechas fijas', pasajeros: '2 adultos, 1 niño', requisitos: 'Cuna',
-  },
-  contacto: { nombre: 'María Fernanda Ríos', telefono: '+57 300 1234567', email: 'maria@correo.co' },
-  perfil: { tipo: 'Leisure', conQuienViaja: 'PAREJA', bolsillo: 'Medio', preferencias: 'Todo incluido', notas: null },
-  cotizaciones: [
-    { id: 'cot-1', codigo: 'COT-2026-0011', estado: 'borrador', valorTotal: 8450000, editadaEl: '2026-09-23T15:00:00Z' },
-    { id: 'cot-2', codigo: 'COT-2026-0009', estado: 'enviada', valorTotal: 0, editadaEl: '2026-09-20T15:00:00Z' },
-  ],
-  puedeCrearCotizacion: true,
-  ...extra,
-})
-
-const pintarMarco = (m: Marco) =>
-  renderToStaticMarkup(React.createElement(MarcoCotizacion, { marco: m }, React.createElement('div', null, 'EDITOR')))
-
-describe('el marco del negocio', () => {
-  it('encabezado: volver, etapa, titular y el viaje con el IATA de la cotización abierta', () => {
-    const html = pintarMarco(marco())
-    expect(html).toContain('Volver al negocio')
-    expect(html).toContain('href="/negocios/neg-1"')
-    expect(html).toContain('COMERCIAL › 2 · Cotización')
-    expect(html).toContain('María Fernanda Ríos')
-    expect(html).toContain('Providencia · PVA · 9 al 13 nov 2026 · 2 adultos, 1 niño')
-    expect(html).toContain('EDITOR')
-  })
-
-  it('ámbar de P9 cuando al negocio le faltan los pasajeros', () => {
-    const html = pintarMarco(marco({ viaje: { destino: 'Providencia', fechas: { inicio: '2026-11-09', fin: '2026-11-13' }, composicion: null } }))
-    expect(html).toContain('bg-amber-50')
-    expect(html).toContain('Faltan los pasajeros en el negocio')
-  })
-
-  it('columna: solicitud, contacto, perfil y cotizaciones; la actual resaltada y sin enlace', () => {
-    const html = pintarMarco(marco())
-    for (const t of ['Solicitud', 'Contacto', 'Perfil del cliente', 'Cotizaciones', 'Bolsillo', 'Requisitos', 'Editar en el negocio']) {
-      expect(html).toContain(t)
-    }
-    expect(html).toContain('aria-current="page"')
-    expect(html).not.toContain('href="/negocios/neg-1/cotizacion/cot-1"')
-    expect(html).toContain('href="/negocios/neg-1/cotizacion/cot-2"')
-    expect(html).toContain('$8.450.000')
-    expect(html).toContain('Sin total')
-    expect(html).toContain('Nueva cotización')
-    expect(html).toContain('wa.me/573001234567')
-  })
-
-  it('en el celular la franja nace cerrada: la columna se pinta una sola vez', () => {
-    const html = pintarMarco(marco())
-    expect(html).toContain('aria-expanded="false"')
-    expect(html.match(/data-columna-negocio/g)?.length).toBe(1)
-  })
-
-  it('fuera de las etapas 2 y 3 no hay sección de cotizaciones', () => {
-    const html = pintarMarco(marco({ cotizaciones: null }))
-    expect(html).not.toContain('data-lista-cotizaciones')
-    expect(html).not.toContain('Nueva cotización')
-  })
-
-  it('con una aceptada no se ofrece crear otra', () => {
-    expect(pintarMarco(marco({ puedeCrearCotizacion: false }))).not.toContain('Nueva cotización')
   })
 })

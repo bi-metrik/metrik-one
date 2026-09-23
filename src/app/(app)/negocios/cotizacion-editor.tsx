@@ -337,8 +337,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  // El marco del negocio (layout del 2026-09-23): encabezado fijo y columna a la derecha. Solo
-  // en el flujo de viaje; sin marco, la pantalla de siempre (R6).
+  // El marco del negocio (2026-09-23): la cotización de viaje se pinta dentro del mismo
+  // encabezado y panel de la página del negocio. Solo en el flujo de viaje; sin marco, la
+  // pantalla de siempre (R6).
   const marcoDelNegocio = useContext(MarcoCotizacionContexto)
   const conMarco = lineasPorTipo && marcoDelNegocio !== null
   const estado = cotizacion.estado as EstadoCotizacion
@@ -1048,15 +1049,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     <>
       {/* Header */}
       <div className="flex items-center gap-3">
-        {/* Con el marco, «Volver al negocio» ya está en el encabezado fijo. */}
-        {!conMarco && (
         <button
           onClick={() => backUrl ? router.push(backUrl) : router.back()}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold">{cotizacion.codigo || cotizacion.consecutivo || 'Sin codigo'}</h1>
@@ -3264,7 +3262,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // P9 · el viaje no es un paso: es el encabezado fijo de la cotización. Sale del negocio
   // y aquí no se edita; en ámbar si al negocio le faltan fechas o pasajeros.
   const viaje = encabezadoDelViaje({ destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje })
-  // Con el marco del negocio, este encabezado vive arriba, en el marco (lo absorbe).
+  // Con el marco del negocio, el viaje lo dice el encabezado del negocio (lo absorbe).
   const jsxEncabezadoViaje = lineasPorTipo && !conMarco ? (
     <div
       data-encabezado-viaje
