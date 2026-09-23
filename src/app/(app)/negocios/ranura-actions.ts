@@ -22,6 +22,7 @@ import {
 import { asignarRanura, crearRanura, ranuraDelGrupo } from '@/lib/cotizaciones/ranuras-datos'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 
 /**
@@ -211,6 +212,32 @@ export async function agregarOpcionARanura(
   return { success: true, itemId: creada.id, grupo: clave }
 }
 
+export interface RanuraConLugar {
+  grupo: string
+  etiqueta: string
+  opciones: number
+  lugar: string | null
+  origen: string | null
+  destino: string | null
+}
+
+/** Las ranuras del tipo, cada una con el primer lugar o ruta que alguna de sus opciones leyó. */
+function ranurasConLugar(items: Record<string, unknown>[], tipo: TipoRanura): RanuraConLugar[] {
+  const lineas = items as { id: string; grupo?: string | null; es_ajuste?: boolean | null; nombre?: string | null; tarifa_pax?: unknown; tramos?: unknown }[]
+  return ranurasDelTipo(lineas, tipo).map(r => {
+    const clave = normalizarGrupo(r.grupo)
+    const lugares = lineas
+      .filter(i => normalizarGrupo(i.grupo ?? null) === clave)
+      .map(i => lugarDeOpcion({ nombre: i.nombre ?? null, grupo: i.grupo ?? null, tarifa_pax: i.tarifa_pax, tramos: i.tramos }))
+    return {
+      ...r,
+      lugar: lugares.find(l => l.lugar)?.lugar ?? null,
+      origen: lugares.find(l => l.origen)?.origen ?? null,
+      destino: lugares.find(l => l.destino)?.destino ?? null,
+    }
+  })
+}
+
 export type ResultadoDeteccion =
   | {
       ok: true
@@ -218,8 +245,11 @@ export type ResultadoDeteccion =
       lugar: string | null
       origen: string | null
       destino: string | null
-      /** Las ranuras de ese tipo que ya tiene la cotización: dónde podría ir como otra opción. */
-      ranuras: { grupo: string; etiqueta: string; opciones: number }[]
+      /**
+       * Las ranuras de ese tipo que ya tiene la cotización: dónde podría ir como otra opción.
+       * Con el lugar o la ruta que leyeron sus opciones (P7): la bandeja agrupa con eso.
+       */
+      ranuras: RanuraConLugar[]
     }
   | { ok: false; codigo: 'SIN_TIPO' | 'CONTEXTO' | 'MODULO' | 'CONFIG' | 'IMAGEN' | 'LECTURA'; mensaje: string }
 
@@ -258,6 +288,6 @@ export async function detectarCaptura(cotizacionId: string, dataUrl: string): Pr
     lugar: r.data.lugar,
     origen: r.data.origen,
     destino: r.data.destino,
-    ranuras: ranurasDelTipo(c.items as { id: string; grupo?: string | null; es_ajuste?: boolean | null }[], r.data.tipo),
+    ranuras: ranurasConLugar(c.items, r.data.tipo),
   }
 }

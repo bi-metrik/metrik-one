@@ -46,7 +46,8 @@ import {
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
-import CapturaCotizacion from '@/app/(app)/negocios/captura-cotizacion'
+import BandejaCapturas from '@/app/(app)/negocios/bandeja-capturas'
+import { estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
 import CostoManualItem from '@/app/(app)/negocios/costo-manual-item'
@@ -443,6 +444,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // El lugar de cada vuelo en el viaje: «Vuelo 1 · BOG → ADZ», «Vuelo 2 · ADZ → PVA».
   const numeroDeVuelo = new Map<string, number>()
   for (const b of bloquesDeLineas) if (b.grupo && b.tipo === 'vuelo') numeroDeVuelo.set(b.grupo, numeroDeVuelo.size + 1)
+  const idDeBloque = (grupo: string) => `bloque-${grupo.replace(/[^a-z0-9]+/gi, '-')}`
   const abrirLinea = (itemId: string) => setExpandedItems(prev => new Set(prev).add(itemId))
   const todosExpandidos = itemsVisibles.length > 0 && itemsVisibles.every(i => expandedItems.has(i.id))
   const toggleTodos = () => {
@@ -909,6 +911,24 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const plataEnAviso = avisoSugeridos.reduce((s, a) => s + a.precioLinea, 0)
 
   const lineaPorItem = new Map(cascada.lineas.map(l => [l.id, l]))
+  // P7 · cada opción y cada bloque dicen si están completos o qué les falta.
+  const estadoDeOpcion = (i: ItemRow) => {
+    const t = leerTarifaPax(i.tarifa_pax)
+    return {
+      nombre: i.nombre || 'Opción',
+      conCosto: (lineaPorItem.get(i.id)?.costoLinea ?? 0) > 0,
+      sinConfirmar: !!t.casillas?.grupo_completo && !t.confirmada,
+      alerta: t.casillas?.grupo_completo?.alertas?.[0] ?? null,
+    }
+  }
+  const estadosDeBloque: EstadoDeBloque[] = lineasPorTipo
+    ? bloquesDeLineas
+      .filter(b => b.grupo !== null)
+      .map(b => estadoDeBloque(
+        { grupo: b.grupo as string, etiqueta: tituloDeBloque(b, numeroDeVuelo.get(b.grupo as string) ?? null).titulo },
+        b.lineas.map(estadoDeOpcion),
+      ))
+    : []
   const costoTotal = cascadaTotal.costoDirecto
 
   // ── Los trozos de la pantalla ──────────────────────────────────────────────
@@ -2184,6 +2204,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 {vistaDeOpcion && resumenDeOpcion(lecturaOpcion) && (
                   <span className="block truncate text-[11px] text-muted-foreground">{resumenDeOpcion(lecturaOpcion)}</span>
                 )}
+                {/* P7 · la opción dice si está completa o qué le falta. */}
+                {vistaDeOpcion && (() => {
+                  const e = estadoDeBloque({ grupo: item.id, etiqueta: '' }, [estadoDeOpcion(item)])
+                  return e.completo ? (
+                    <span className="block text-[10px] font-medium text-[#10B981]">Completa ✓</span>
+                  ) : (
+                    <span className="block truncate text-[10px] font-medium text-amber-700">
+                      Requiere atención: {e.motivo?.replace(/^[^:]*: /, '')}
+                    </span>
+                  )
+                })()}
                 {!isAjuste && !vistaDeOpcion && (item.descripcion || costoDelItem > 0) && (
                   <span className="text-[10px] text-muted-foreground truncate block">
                     {costoDelItem > 0 && <span>Costo unit. {formatCOP(costoDelItem)}</span>}
@@ -2522,6 +2553,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             destinoViaje={destinoViaje}
             onOpcionCreada={abrirLinea}
             titulo={tituloDeBloque(bloque, numeroDeVuelo.get(bloque.grupo ?? '') ?? null).titulo}
+            estado={estadosDeBloque.find(e => e.grupo === bloque.grupo) ?? null}
+            id={idDeBloque(bloque.grupo ?? '')}
           >
             {lineasDelBloque}
           </BloqueRanura>
@@ -2539,7 +2572,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               abajo quedan para costear a mano lo que no tiene pantallazo. Solo en el flujo
               de viaje: fuera de él no hay pantallazos que leer (R6). */}
           {lineasPorTipo && (
-            <CapturaCotizacion cotizacionId={cotizacion.id} onOpcionCreada={abrirLinea} />
+            <BandejaCapturas
+              cotizacionId={cotizacion.id}
+              items={initialItems}
+              composicion={composicionViaje}
+              onOpcionCreada={abrirLinea}
+            />
           )}
           {lineasPorTipo && (
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3117,8 +3155,31 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           id: 'componentes',
           titulo: 'Componentes',
           ...estadoPasos.componentes,
+          // P7 · con bloques, el encabezado los cuenta: «3 bloques · 2 completos · 1 requiere atención».
+          ...(estadosDeBloque.length > 0 ? {
+            detalle: resumenDeBloques(estadosDeBloque),
+            ...(estadosDeBloque.some(e => !e.completo)
+              ? { estado: 'error' as const, problemas: estadosDeBloque.filter(e => !e.completo).length }
+              : {}),
+          } : {}),
           contenido: (
             <>
+              {estadosDeBloque.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const primero = estadosDeBloque.find(e => !e.completo)
+                    if (!primero || typeof document === 'undefined') return
+                    document.getElementById(idDeBloque(primero.grupo))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }}
+                  className="w-full rounded-md border bg-background px-3 py-1.5 text-left text-xs font-medium text-[#1A1A1A] hover:bg-accent"
+                >
+                  {resumenDeBloques(estadosDeBloque)}
+                  {estadosDeBloque.some(e => !e.completo) && (
+                    <span className="ml-1 text-primary underline underline-offset-2">Ir al primero que falta</span>
+                  )}
+                </button>
+              )}
               {jsxAgregar}
               {jsxExpandir}
               {jsxLista}

@@ -1,0 +1,50 @@
+{
+  "08-hotel-providencia-agua-dulce.png": {
+    "tipo": "hotel",
+    "lugar": "Providencia",
+    "origen": null,
+    "destino": null
+  },
+  "06-hotel-providencia-deep-blue.png": {
+    "tipo": "hotel",
+    "lugar": "Providencia",
+    "origen": null,
+    "destino": null
+  },
+  "01-vuelo1-bog-adz-avianca.png": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "Bogotá (BOG)",
+    "destino": "San Andrés (ADZ)"
+  },
+  "05-vuelo2-adz-pva-satena-tarde.png": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "San Andrés (ADZ)",
+    "destino": "Providencia (PVA)"
+  },
+  "07-hotel-providencia-sirius.png": {
+    "tipo": "hotel",
+    "lugar": "Providencia",
+    "origen": null,
+    "destino": null
+  },
+  "03-vuelo1-bog-adz-wingo.png": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "Bogotá",
+    "destino": "San Andrés"
+  },
+  "02-vuelo1-bog-adz-latam.png": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "Bogotá",
+    "destino": "San Andrés"
+  },
+  "04-vuelo2-adz-pva-satena-manana.png": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "San Andrés",
+    "destino": "Providencia"
+  }
+}
