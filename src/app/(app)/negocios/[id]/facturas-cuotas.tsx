@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Copy, FileCheck2, Link2, Upload } from 'lucide-react'
 import { cargarFacturaCuota } from '@/lib/actions/factura-cuota-carga'
 import { generarEnlacePagoDeCuota } from '@/lib/actions/enlace-pago-cuota'
+import { enlaceVigente } from '@/lib/cobros/enlace-pago-cuota'
 import { formatCOP } from '@/lib/cobros/format'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechaCorta } from '@/lib/valida-cda/pago-pendiente'
@@ -28,7 +29,8 @@ export function FacturasCuotas({ cuotas }: { cuotas: CuotaConFactura[] }) {
           <p className="text-sm font-semibold text-tinta">Cuotas: facturas y enlaces de pago</p>
           <p className="text-xs text-tinta-suave">
             El PDF y el XML de cada cuota, y su enlace de pago en línea. El cliente ve las dos cosas en la pestaña
-            Pagos de su Valida.
+            Pagos de su Valida. El enlace se genera solo cuando faltan 7 días o menos para el vencimiento, y la
+            persona designada recibe un correo; el botón sirve para adelantarlo o reponer uno vencido.
           </p>
         </div>
       </div>
@@ -128,13 +130,6 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConFactura }) {
   )
 }
 
-/** ¿El enlace sirve todavía? Sin fecha de vencimiento se trata como vigente (igual que la pantalla del cliente). */
-function enlaceVigente(expira: string | null, ahora: number): boolean {
-  if (!expira) return true
-  const t = Date.parse(expira)
-  return !Number.isNaN(t) && t > ahora
-}
-
 /**
  * El enlace de pago en línea de la cuota: el vigente, con su vencimiento y para copiar; o el botón que lo
  * genera (también cuando el que había venció). Una cuota pagada o con el cobro anulado no ofrece enlace.
@@ -149,7 +144,8 @@ function EnlacePagoCuota({ cuota: c }: { cuota: CuotaConFactura }) {
   if (c.cobro?.anulado) return <p className="mt-1 text-tinta-suave">Cobro anulado: sin enlace de pago.</p>
 
   const url = c.cobro?.enlaceUrl ?? null
-  const vigente = url !== null && enlaceVigente(c.cobro?.enlaceExpira ?? null, ahora)
+  // La misma regla del botón y del cron: un enlace que vence en menos de una hora ya no cuenta.
+  const vigente = url !== null && enlaceVigente({ enlacePagoUrl: url, enlacePagoExpira: c.cobro?.enlaceExpira ?? null }, ahora)
 
   function generar() {
     iniciar(async () => {

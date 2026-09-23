@@ -44,6 +44,24 @@ export type DecisionEnlace =
 /** Margen para no entregar un enlace que vence en minutos. */
 const MARGEN_VIGENCIA_MS = 60 * 60 * 1000
 
+/**
+ * ¿El enlace guardado en el cobro todavía sirve? La MISMA regla para el botón y para el paso
+ * automático del cron: si los dos la escribieran por separado, el cron generaría enlaces que el
+ * botón consideraría vigentes, o al revés.
+ *
+ * Sin fecha de vencimiento no hay cómo saber si sirve: se trata como vigente, igual que la
+ * pantalla del cliente, que lo pinta. Reemplazarlo lo decide quien lo cargó.
+ */
+export function enlaceVigente(
+  cobro: Pick<CobroProgramadoDeCuota, 'enlacePagoUrl' | 'enlacePagoExpira'>,
+  ahoraMs: number,
+): boolean {
+  if (!cobro.enlacePagoUrl) return false
+  if (cobro.enlacePagoExpira === null) return true
+  const expira = Date.parse(cobro.enlacePagoExpira)
+  return !Number.isNaN(expira) && expira > ahoraMs + MARGEN_VIGENCIA_MS
+}
+
 export function decidirEnlaceCuota(p: {
   cuota: CuotaParaEnlace
   cobro: CobroProgramadoDeCuota | null
@@ -67,13 +85,8 @@ export function decidirEnlaceCuota(p: {
     return { accion: 'rechazar', motivo: `La cuota ${cuota.numero} ya quedó cubierta con los pagos anteriores.` }
   }
 
-  if (cobro?.enlacePagoUrl) {
-    const expira = cobro.enlacePagoExpira ? Date.parse(cobro.enlacePagoExpira) : Number.NaN
-    // Sin fecha de vencimiento no hay cómo saber si sirve: se trata como vigente, igual que la
-    // pantalla del cliente, que lo pinta. Reemplazarlo lo decide quien lo cargó.
-    if (cobro.enlacePagoExpira === null || (!Number.isNaN(expira) && expira > p.ahoraMs + MARGEN_VIGENCIA_MS)) {
-      return { accion: 'vigente', url: cobro.enlacePagoUrl, expira: cobro.enlacePagoExpira }
-    }
+  if (cobro?.enlacePagoUrl && enlaceVigente(cobro, p.ahoraMs)) {
+    return { accion: 'vigente', url: cobro.enlacePagoUrl, expira: cobro.enlacePagoExpira }
   }
 
   return { accion: 'generar', monto: Math.round(estado.saldo), descripcion: descripcionCuota(cuota) }

@@ -15,6 +15,7 @@ import {
 } from '@/lib/suscripciones/ciclo'
 import { POLITICA_FASE_1 } from '@/lib/suscripciones/estado'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
+import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib/cobros/enlace-automatico-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -26,7 +27,10 @@ import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 //   5. Suscripciones de licencia (`suscripciones`): corre el ciclo de cobro de las que
 //      tienen `proximo_cobro <= hoy`. Fase 1 = pasarela `manual`, que no cobra: el
 //      efecto sobre los planes de hoy es cero (ver el bloque del paso 5).
-//   6. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   6. Enlaces de pago en linea de los contratos de servicio (CDA): la cuota que vence en 7 dias
+//      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
+//      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
+//   7. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -411,6 +415,20 @@ export async function GET(req: NextRequest) {
     suscripcionesErrores.push({ suscripcion_id: '*', error: err instanceof Error ? err.message : String(err) })
   }
 
+  // ── 6. Enlaces de pago en linea de los contratos de servicio ──
+  // Va de ultimo a proposito: no cambia nada de lo que hacen los pasos 1 a 5, y si falla no los
+  // tumba. Mira el CONTRATO (`servicios_contratados` activo o pausado) y la pasarela en linea del
+  // plan, no `planes_cobro.activo`, que es el interruptor del emisor de cuentas: asi el plan de
+  // pruebas de cda-pruebas (inactivo para que el emisor no le emita) recibe su enlace igual.
+  // Idempotente: una cuota con enlace vigente no se toca y el correo sale solo con un enlace nuevo.
+  let enlacesAutomaticos: ResumenEnlacesAutomaticos | null = null
+  let enlacesAutomaticosError: string | null = null
+  try {
+    enlacesAutomaticos = await generarEnlacesAutomaticos({ hoy: hoyStr, ahoraMs: hoy.getTime() }, { db: supabase })
+  } catch (err) {
+    enlacesAutomaticosError = err instanceof Error ? err.message : String(err)
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -431,5 +449,7 @@ export async function GET(req: NextRequest) {
       detalle: r.detalle ?? null,
     })),
     suscripciones_errores: suscripcionesErrores,
+    enlaces_automaticos: enlacesAutomaticos,
+    enlaces_automaticos_error: enlacesAutomaticosError,
   })
 }
