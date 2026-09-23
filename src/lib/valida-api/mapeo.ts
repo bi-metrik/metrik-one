@@ -96,7 +96,15 @@ interface FilaCobro {
   recibo_numero: string | null
   recibo_origen: string | null
   recibo_path: string | null
+  // Opcionales: antes de 20260924090000 la RPC no las devuelve, y la pestaña no se cae por eso.
+  factura_numero?: string | null
+  factura_cufe?: string | null
+  factura_fecha?: string | null
+  factura_pdf_path?: string | null
+  factura_xml_path?: string | null
 }
+
+const hayRuta = (r: string | null | undefined) => typeof r === 'string' && r.length > 0
 
 /** Solo los servicios que el workspace PAGA: la plata de un contrato ajeno no se muestra. */
 export function serviciosQuePaga(filas: readonly FilaServicio[]): FilaServicio[] {
@@ -115,7 +123,19 @@ export function mapearCobros(filas: readonly FilaCobro[]): CobroDeServicio[] {
     reciboOrigen: c.recibo_origen,
     // Un recibo con número pero sin PDF propio (los de Siigo archivados en Drive) NO se ofrece
     // para descargar: aquí nunca sale un enlace de Drive (§5.4).
-    reciboDescargable: typeof c.recibo_path === 'string' && c.recibo_path.length > 0,
+    reciboDescargable: hayRuta(c.recibo_path),
+    // La factura solo se nombra si trae número y algún archivo propio: las rutas nunca salen de
+    // aquí, y un enlace de Drive tampoco (§5.4).
+    factura:
+      c.factura_numero && (hayRuta(c.factura_pdf_path) || hayRuta(c.factura_xml_path))
+        ? {
+            numero: c.factura_numero,
+            cufe: c.factura_cufe ?? null,
+            fecha: c.factura_fecha ?? null,
+            pdfDescargable: hayRuta(c.factura_pdf_path),
+            xmlDescargable: hayRuta(c.factura_xml_path),
+          }
+        : null,
   }))
 }
 

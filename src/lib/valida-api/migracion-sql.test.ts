@@ -34,6 +34,8 @@ const MIGRACIONES = [
   // Reemplaza mis_documentos_de_servicio(): la constancia tiene que ser de un negocio del
   // cliente, no solo del mismo PDF. Probar C2 sin ella probaría una función que ya no corre.
   '20260916213000_mis_documentos_de_servicio_por_negocio.sql',
+  // Reemplaza mis_cobros_de_servicio() para sumarle la factura del cobro (`facturas_cobro`).
+  '20260924090000_facturas_cobro.sql',
 ].map((archivo) => join(process.cwd(), 'supabase/migrations', archivo))
 
 const WS_METRIK = '00000000-0000-4000-8000-000000000001'
@@ -275,6 +277,87 @@ describe('mis_cobros_de_servicio(): solo quien paga ve la plata', () => {
        where n.nspname = 'public' and p.proname = 'mis_cobros_de_servicio'`,
     )
     expect(cols.rows.map((c) => c.nombre)).not.toContain('notas')
+  })
+})
+
+describe('facturas_cobro: la factura del cobro sale solo por mis_cobros_de_servicio()', () => {
+  const COBRO_CLIENTE = '00000000-0000-4000-8000-0000000000e1'
+  const COBRO_AJENO = '00000000-0000-4000-8000-0000000000e3'
+  const CUFE = 'c'.repeat(96)
+
+  beforeAll(async () => {
+    await db.exec(`
+      insert into public.facturas_cobro (workspace_id, cobro_id, numero, cufe, fecha_emision, pdf_path, pdf_sha256)
+      values
+        ('${WS_METRIK}', '${COBRO_CLIENTE}', 'FE-1', '${CUFE}', date '2026-09-23', '${WS_METRIK}/facturas/${SHA('a')}.pdf', '${SHA('a')}'),
+        ('${WS_METRIK}', '${COBRO_AJENO}', 'FE-2', '${CUFE}', date '2026-09-23', '${WS_METRIK}/facturas/${SHA('b')}.pdf', '${SHA('b')}');
+    `)
+  })
+
+  it('el pagador ve la factura de su cobro, con número, CUFE, fecha y ruta', async () => {
+    const filas = await comoWorkspace<{
+      cobro_id: string
+      factura_numero: string | null
+      factura_cufe: string | null
+      factura_fecha: string | null
+      factura_pdf_path: string | null
+      factura_xml_path: string | null
+    }>(
+      WS_CLIENTE,
+      `select cobro_id, factura_numero, factura_cufe, factura_fecha::text, factura_pdf_path, factura_xml_path
+         from public.mis_cobros_de_servicio('${SC_CLIENTE}')`,
+    )
+    const pagado = filas.find((f) => f.cobro_id === COBRO_CLIENTE)
+    expect(pagado).toEqual({
+      cobro_id: COBRO_CLIENTE,
+      factura_numero: 'FE-1',
+      factura_cufe: CUFE,
+      factura_fecha: '2026-09-23',
+      factura_pdf_path: `${WS_METRIK}/facturas/${SHA('a')}.pdf`,
+      factura_xml_path: null,
+    })
+    // El cobro anulado no tiene factura: la columna sale vacía, no se inventa.
+    expect(filas.find((f) => f.cobro_id !== COBRO_CLIENTE)?.factura_numero).toBeNull()
+    // La factura del cobro ajeno no se cuela por ningún lado.
+    expect(JSON.stringify(filas)).not.toContain('FE-2')
+  })
+
+  it('el beneficiario que no paga y el contrato ajeno no ven facturas', async () => {
+    expect(await comoWorkspace(WS_CLIENTE, `select 1 from public.mis_cobros_de_servicio('${SC_BENEF}')`)).toHaveLength(0)
+    expect(await comoWorkspace(WS_CLIENTE, `select 1 from public.mis_cobros_de_servicio('${SC_AJENO}')`)).toHaveLength(0)
+  })
+
+  it('la RPC sigue con la ACL de antes del DROP: authenticated sí, anon no', async () => {
+    const r = await db.query<{ anon: boolean; auth: boolean }>(
+      `select has_function_privilege('anon', 'public.mis_cobros_de_servicio(uuid)', 'execute') as anon,
+              has_function_privilege('authenticated', 'public.mis_cobros_de_servicio(uuid)', 'execute') as auth`,
+    )
+    expect(r.rows[0]).toEqual({ anon: false, auth: true })
+  })
+
+  it('la tabla no se concede a nadie de fuera y tiene RLS', async () => {
+    const r = await db.query<{ anon: boolean; auth: boolean; upd: boolean; rls: boolean }>(
+      `select has_table_privilege('anon', 'public.facturas_cobro', 'select') as anon,
+              has_table_privilege('authenticated', 'public.facturas_cobro', 'select') as auth,
+              has_table_privilege('authenticated', 'public.facturas_cobro', 'update') as upd,
+              (select relrowsecurity from pg_class where oid = 'public.facturas_cobro'::regclass) as rls`,
+    )
+    expect(r.rows[0]).toEqual({ anon: false, auth: false, upd: false, rls: true })
+  })
+
+  it('un CUFE que no es un SHA-384 (96 hex) rebota, y también un segundo PDF para el mismo cobro', async () => {
+    const insertar = async (cobro: string, cufe: string) => {
+      try {
+        await db.exec(`insert into public.facturas_cobro (workspace_id, cobro_id, numero, cufe, fecha_emision, xml_path, xml_sha256)
+                       values ('${WS_METRIK}', '${cobro}', 'FE-9', '${cufe}', date '2026-09-23', 'x.xml', '${SHA('d')}')`)
+        return 'ok'
+      } catch (e) {
+        return (e as Error).message
+      }
+    }
+    // El de 90 caracteres que hoy guarda la metadata del negocio de 4D SOFT.
+    expect(await insertar('00000000-0000-4000-8000-0000000000e2', 'a'.repeat(90))).toContain('facturas_cobro_cufe')
+    expect(await insertar(COBRO_CLIENTE, CUFE)).toContain('facturas_cobro_cobro_id_key')
   })
 })
 

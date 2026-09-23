@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const COBRO_ID = 'b91b4a14-cce1-4cfa-88d5-f235aa9e1060'
 const SERVICIO_ID = '5d6f0a2e-7a55-4a4e-9a0b-6f1d2f3c4b5a'
 
-const escenario = { aprobada: false }
+const escenario = { aprobada: false, conFactura: false }
 const rpc = vi.fn()
 const firmar = vi.fn()
 
@@ -43,11 +43,24 @@ const pedir = (clase: string) =>
 
 beforeEach(() => {
   escenario.aprobada = false
+  escenario.conFactura = false
   rpc.mockReset()
   rpc.mockImplementation(async (nombre: string) =>
     nombre === 'mis_servicios'
       ? { data: [{ servicio_contratado_id: SERVICIO_ID, es_pagador: true }], error: null }
-      : { data: [{ cobro_id: COBRO_ID, recibo_path: 'recibos/rc-1.pdf', recibo_numero: 'RC-1' }], error: null },
+      : {
+          data: [
+            {
+              cobro_id: COBRO_ID,
+              recibo_path: 'recibos/rc-1.pdf',
+              recibo_numero: 'RC-1',
+              factura_numero: escenario.conFactura ? 'FE-1' : null,
+              factura_pdf_path: escenario.conFactura ? 'ws/facturas/aaa.pdf' : null,
+              factura_xml_path: null,
+            },
+          ],
+          error: null,
+        },
   )
   firmar.mockReset()
   firmar.mockResolvedValue({ data: { signedUrl: 'https://firmada.example/rc-1.pdf' }, error: null })
@@ -66,6 +79,49 @@ describe('descarga de archivos del módulo', () => {
     const r = await pedir('recibo')
     expect(r.status).toBe(302)
     expect(r.headers.get('location')).toBe('https://firmada.example/rc-1.pdf')
+  })
+
+  it('la factura se autoriza con mis_cobros_de_servicio y se baja con su número', async () => {
+    escenario.aprobada = true
+    escenario.conFactura = true
+    const r = await pedir('factura')
+    expect(r.status).toBe(302)
+    expect(rpc).toHaveBeenCalledWith('mis_cobros_de_servicio', { p_servicio_contratado_id: SERVICIO_ID })
+    expect(firmar).toHaveBeenCalledWith('ws/facturas/aaa.pdf', 60, { download: 'FE-1.pdf' })
+  })
+
+  it('sin la entrada aprobada, la factura tampoco: 403 sin consultar ni firmar', async () => {
+    escenario.conFactura = true
+    const r = await pedir('factura')
+    expect(r.status).toBe(403)
+    expect(rpc).not.toHaveBeenCalled()
+    expect(firmar).not.toHaveBeenCalled()
+  })
+
+  it('un cobro sin factura cargada responde 404 y no firma nada', async () => {
+    escenario.aprobada = true
+    const r = await pedir('factura')
+    expect(r.status).toBe(404)
+    expect(firmar).not.toHaveBeenCalled()
+  })
+
+  it('un XML que no se cargó responde 404 aunque el PDF exista', async () => {
+    escenario.aprobada = true
+    escenario.conFactura = true
+    const r = await pedir('factura_xml')
+    expect(r.status).toBe(404)
+    expect(firmar).not.toHaveBeenCalled()
+  })
+
+  it('el cobro de otro cliente (no está en lo que la RPC devuelve) responde 404', async () => {
+    escenario.aprobada = true
+    escenario.conFactura = true
+    const otro = '11111111-2222-4333-8444-555555555555'
+    const r = await GET(new Request(`https://x/api/valida-api/archivo/factura/${otro}`), {
+      params: Promise.resolve({ clase: 'factura', id: otro }),
+    })
+    expect(r.status).toBe(404)
+    expect(firmar).not.toHaveBeenCalled()
   })
 
   it('el PDF de los términos ya no se sirve: 404, sin consultar ni firmar', async () => {
