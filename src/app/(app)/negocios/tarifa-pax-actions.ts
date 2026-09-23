@@ -43,6 +43,7 @@ import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
+import { huellaDeImagen } from '@/lib/cotizaciones/captura-repetida'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -318,6 +319,9 @@ export async function leerCasillaDeItem(
   }
 
   const leida = construirLecturaCasilla(ranura, veredicto, new Date().toISOString())
+  // La huella del archivo, para que la bandeja no procese dos veces el mismo pantallazo (P10).
+  const huella = await huellaDeImagen(dataUrl)
+  if (huella) leida.huellaImagen = huella
 
   // ── Quién decide a cuántos cubre la línea (§2.4) ──────────────────────────
   //

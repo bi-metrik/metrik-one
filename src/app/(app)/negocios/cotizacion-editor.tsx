@@ -449,6 +449,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // El lugar de cada vuelo en el viaje: «Vuelo 1 · BOG → ADZ», «Vuelo 2 · ADZ → PVA».
   const numeroDeVuelo = new Map<string, number>()
   for (const b of bloquesDeLineas) if (b.grupo && b.tipo === 'vuelo') numeroDeVuelo.set(b.grupo, numeroDeVuelo.size + 1)
+  // Dónde vive cada opción («Opción 2 de Vuelo 1 · BOG → ADZ»): la bandeja la nombra así al
+  // avisar de un pantallazo repetido (P10).
+  const ubicacionesDeOpciones: Record<string, { bloque: string; opcion: number }> = {}
+  if (lineasPorTipo) {
+    for (const b of bloquesDeLineas) {
+      if (!b.grupo) continue
+      const bloque = tituloDeBloque(b, numeroDeVuelo.get(b.grupo) ?? null).titulo
+      b.lineas.forEach((l, i) => { ubicacionesDeOpciones[l.id] = { bloque, opcion: i + 1 } })
+    }
+  }
   const idDeBloque = (grupo: string) => `bloque-${grupo.replace(/[^a-z0-9]+/gi, '-')}`
   const abrirLinea = (itemId: string) => setExpandedItems(prev => new Set(prev).add(itemId))
   const todosExpandidos = itemsVisibles.length > 0 && itemsVisibles.every(i => expandedItems.has(i.id))
@@ -2675,6 +2685,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               items={initialItems}
               composicion={composicionViaje}
               onOpcionCreada={abrirLinea}
+              ubicaciones={ubicacionesDeOpciones}
             />
           )}
           {lineasPorTipo && (
