@@ -104,5 +104,14 @@ Vite no tiene router ni server actions. Para ver qué pinta una pantalla DESPUÉ
 - ⚠️ `qa-*` rompe `next build` si tiene errores de tipos: los dobles tienen que tipar como las reales.
   Borrar la carpeta, `.next` y el `.mjs` antes de commitear.
 
+**El control en la otra dirección sale barato: montar la versión de `main` al lado.**
+(#839, 2026-09-23.) `git show "origin/main:<ruta del componente>" > <arnés>/vieja.tsx` y un
+`?v=vieja|nueva` en el `main.tsx` del arnés eligen cuál montar sobre el MISMO doble. Así
+el QA no solo dice que el arreglo funciona: muestra que `main` reproduce el defecto del
+reporte (ahí, 2 llamadas para 3 clics, igual que en producción). Un doble del servidor con
+demora (`setTimeout` de 1,5 s) y un `router.refresh` doblado que re-renderiza con un
+`estado` nuevo bastan para las carreras de clics. `.click()` sobre una casilla
+deshabilitada no hace nada, igual que un clic real.
+
 Relacionado: [[capturas-ui-sin-servidor]], [[medir-contraste-render]],
 [[medicion-con-vitest]], [[pruebas-por-mutacion]], [[vercel-logs-por-cli]].
