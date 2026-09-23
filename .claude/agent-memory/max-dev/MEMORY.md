@@ -54,7 +54,7 @@
 - ⚠️ [Fotos, franja y tabla de vuelos del documento Trappvel (#832, #838)](project_documento_trappvel_fotos_ritmo.md) — foto al lado aprobada; tabla corta va entera
 - ⚠️⚠️ [La Recomendada manda y el cliente escoge (#836)](project_recomendada_tarifa_elegida.md) — `es_principal` ya no decide; el gate de margen no mira la Recomendada
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`; Parte B espera a Mauricio
-- ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; `extract-fields` sigue abierto
+- ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
 - ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge

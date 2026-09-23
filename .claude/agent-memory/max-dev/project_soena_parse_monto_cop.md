@@ -21,9 +21,11 @@ ediciones a mano y los datos migrados.
 **How to apply:**
 - Todo monto leído de texto pasa por `parseMontoCop`; el valor sin IVA de la Factura, por
   `valorSinIvaDeFactura` (`src/lib/upme/valor-factura.ts`).
-- ⚠️ Sigue abierto, fuera del PR: `src/lib/ai/extract-fields.ts:274` (todos los workspaces)
-  lee `350,906` y `1,500,000` (miles con coma) como decimales → 351 y 2. Es el ESCRITOR aguas
-  arriba de todos estos campos.
+- ✅ Cerrado en #843 (2026-09-23): el extractor (`src/lib/ai/monto-extraido.ts`) manda a
+  `parseMontoCop` SOLO la forma exacta de miles con coma; todo lo demás sigue la regla vieja
+  copiada tal cual, para no mover ninguna lectura que ya estuviera bien. `350,906` = miles.
+  Los valores ya guardados NO se corrigieron: un mal leído se ve como monto diminuto
+  (`::numeric < 1000`) en `negocio_bloques.data->'campos'-><slug>->>'value'`.
 - ⚠️ `parseMontoCop('$ -5.000')` da **+5000**: solo cuenta el signo si el texto empieza por
   `-` o va entre paréntesis. No se tocó porque lo comparte Trappvel (un «Descuento -$50.000»
   leído de un pantallazo saldría positivo).
