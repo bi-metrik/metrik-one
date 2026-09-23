@@ -34,6 +34,8 @@ export type ResultadoEnlaceCuota =
   | {
       ok: true
       estado: 'generado' | 'vigente'
+      /** El cobro programado donde quedó el enlace. `null` solo si ya estaba vigente sin cobro leído. */
+      cobroId: string | null
       url: string
       expira: string | null
       monto: number | null
@@ -163,7 +165,7 @@ export async function generarEnlacePagoCuota(
   })
   if (decision.accion === 'rechazar') return { ok: false, error: decision.motivo }
   if (decision.accion === 'vigente') {
-    return { ok: true, estado: 'vigente', url: decision.url, expira: decision.expira, monto: null, negocioId, numero: cuota.data.numero, pasarela: null }
+    return { ok: true, estado: 'vigente', cobroId: cobro?.id ?? null, url: decision.url, expira: decision.expira, monto: null, negocioId, numero: cuota.data.numero, pasarela: null }
   }
 
   // La pasarela, por dato: el plan de la cuota o la configuración de cobros del espacio.
@@ -221,27 +223,35 @@ export async function generarEnlacePagoCuota(
   })
   if (!enlace.ok) return { ok: false, error: enlace.error }
 
-  // 3. El enlace en el cobro. Guarda dentro del update: si en el medio alguien confirmó el pago,
-  //    no se le pone enlace a una cuota pagada.
+  // 3. El enlace en el cobro. Guardas dentro del update: si en el medio alguien confirmó el pago,
+  //    no se le pone enlace a una cuota pagada; y si en el medio OTRO proceso ya guardó un enlace
+  //    (el botón y el cron a la vez, o dos corridas del cron), gana el primero. Sin esta segunda
+  //    guarda el cliente recibiría dos enlaces y dos correos por la misma cuota.
   const patch: Record<string, unknown> = { enlace_pago_url: enlace.url, enlace_pago_expira: enlace.expira }
   if (cobro && Math.round(cobro.monto) !== decision.monto) {
     // Regla del excedente: el cobro de esta cuota queda por lo que falta, no por el valor pleno.
     patch.monto = decision.monto
   }
-  const escrito = await db
+  const escritoBase = db
     .from('cobros')
     .update(patch)
     .eq('id', cobroId)
     .eq('workspace_id', p.workspaceId)
     .is('fecha', null)
     .is('anulado_at', null)
-    .select('id')
+  const conGuarda = cobro?.enlacePagoUrl
+    ? escritoBase.eq('enlace_pago_url', cobro.enlacePagoUrl)
+    : escritoBase.is('enlace_pago_url', null)
+  const escrito = await conGuarda.select('id')
   if (escrito.error) {
     return { ok: false, error: `La pasarela creó el enlace (${enlace.idEnlace}) pero no se pudo guardar: ${escrito.error.message}` }
   }
   if ((escrito.data ?? []).length === 0) {
-    return { ok: false, error: `La cuota se pagó o se anuló mientras se generaba el enlace. La pasarela creó ${enlace.idEnlace}; no se guardó.` }
+    return {
+      ok: false,
+      error: `La cuota se pagó, se anuló o recibió otro enlace mientras se generaba este. La pasarela creó ${enlace.idEnlace}; no se guardó.`,
+    }
   }
 
-  return { ok: true, estado: 'generado', url: enlace.url, expira: enlace.expira, monto: decision.monto, negocioId, numero: cuota.data.numero, pasarela }
+  return { ok: true, estado: 'generado', cobroId, url: enlace.url, expira: enlace.expira, monto: decision.monto, negocioId, numero: cuota.data.numero, pasarela }
 }
