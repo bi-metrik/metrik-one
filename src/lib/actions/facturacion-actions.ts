@@ -26,8 +26,10 @@ import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
 import {
   leerReciboPorConcepto,
   primerRecibo,
+  recibosDelCobro,
   type ConfigReciboPorConcepto,
 } from '@/lib/siigo/recibo-componentes'
+import { leerTitularCorregido, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
   conceptoFactura,
@@ -105,6 +107,44 @@ export interface CasoPorFacturar {
    * sistema ya tenía.
    */
   email: string | null
+  /**
+   * Nombre del CONTACTO del negocio: con quién se habla, que muchas veces no es el
+   * titular (quien pagó, quien vendió). Se muestra al lado del titular para que se
+   * vea que la factura NO sale a su nombre.
+   */
+  contacto_nombre: string | null
+  /**
+   * A nombre de quién salen la factura, el recibo de la tarifa UPME y los abonos,
+   * desglosado para que la revisión lo pueda corregir. Sale del MISMO borrador que
+   * la emisión (`borradorCliente` con la corrección aplicada): `cliente` e
+   * `identificacion` son esto mismo, ya unido.
+   */
+  titular: {
+    /** Código de tipo de documento de Siigo: 13 cédula, 22 extranjería, 31 NIT. */
+    tipo_documento: string
+    numero: string | null
+    dv: string | null
+    /** Persona: `[nombres, apellidos]`. Empresa: `[razón social]`. */
+    nombre: string[]
+    /** La corrección vigente. `null` = el titular es el del RUT. */
+    corregido: {
+      por: string | null
+      at: string
+      /** Lo que dice el RUT, que la corrección no borró. */
+      rut: { identificacion: string | null; nombre: string | null }
+    } | null
+  }
+  /**
+   * Identificación del tercero que ONE ya tiene amarrado en Siigo (la marca), o null.
+   * Si la corrección cambia el documento, la factura va a OTRO tercero y la pantalla
+   * lo dice.
+   */
+  tercero_siigo: string | null
+  /**
+   * Recibos de caja que ya salieron para este negocio. Una corrección del titular no
+   * los cambia (ya salieron), y la pantalla lo avisa antes de facturar.
+   */
+  recibos_emitidos: string[]
   /**
    * Qué concepto sale en la factura y por qué. Se muestra ANTES de emitir: es
    * lo que el cliente va a leer y lo que queda ante la DIAN.
@@ -441,25 +481,35 @@ async function armarColaFacturacion(
   // de ahí y no de `negocios.metadata`. Un negocio puede tener varios: se muestra el
   // último emitido.
   const ultimoReciboPorNegocio = new Map<string, string>()
+  // Todos, no solo el último: son los documentos que una corrección del titular ya no
+  // alcanza, y la revisión los nombra antes de facturar.
+  const recibosPorNegocio = new Map<string, string[]>()
   for (const c of cobrosRes) {
     if (c.anulado_at) continue
     const recibo = primerRecibo(c.siigo_recibo)
     if (recibo) ultimoReciboPorNegocio.set(c.negocio_id, recibo.numero)
+    for (const r of recibosDelCobro(c.siigo_recibo)) {
+      const lista = recibosPorNegocio.get(c.negocio_id) ?? []
+      if (!lista.includes(r.numero)) lista.push(r.numero)
+      recibosPorNegocio.set(c.negocio_id, lista)
+    }
   }
 
   // ── Contactos (email y teléfono ganan sobre el RUT: los mantiene el comercial) ──
   const contactoIds = candidatos.map(n => n.contacto_id).filter((x): x is string => !!x)
   const contactos = new Map<string, { email: string | null; telefono: string | null }>()
+  const nombreContacto = new Map<string, string | null>()
   if (contactoIds.length > 0) {
-    const cs = await traerTodo<{ id: string; email: string | null; telefono: string | null }>(
+    const cs = await traerTodo<{ id: string; nombre?: string | null; email: string | null; telefono: string | null }>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (d, h) => (svc as any)
-        .from('contactos').select('id, email, telefono')
+        .from('contactos').select('id, nombre, email, telefono')
         .in('id', contactoIds).order('id').range(d, h),
       { etiqueta: 'facturacion/contactos' },
     )
     for (const c of cs) {
       contactos.set(c.id, { email: c.email, telefono: c.telefono })
+      nombreContacto.set(c.id, c.nombre ?? null)
     }
   }
 
@@ -503,7 +553,10 @@ async function armarColaFacturacion(
   const casos: CasoPorFacturar[] = candidatos.map(n => {
     const rut = rutPorNegocio.get(n.id) ?? {}
     const contacto = contactos.get(n.contacto_id ?? '') ?? { email: null, telefono: null }
-    const cli = borradorCliente(rut, contacto)
+    // El titular corregido manda sobre el RUT, igual que en la emisión: la revisión
+    // tiene que mostrar a nombre de quién va a salir de verdad.
+    const titularCorregido = leerTitularCorregido(n.metadata)
+    const cli = borradorCliente(rut, contacto, titularCorregido)
     const honorario = n.precio_aprobado == null ? null : Number(n.precio_aprobado)
     // El concepto sale del MISMO helper que usa la emisión: si la pantalla y el
     // documento lo resolvieran por su cuenta, se verían distintos el día que
@@ -536,6 +589,19 @@ async function armarColaFacturacion(
       etapa_numero: n.etapas_negocio?.numero ?? null,
       identificacion: cli.payload.identification || null,
       cliente: cli.payload.name.filter(Boolean).join(' ') || null,
+      contacto_nombre: nombreContacto.get(n.contacto_id ?? '') ?? null,
+      titular: {
+        tipo_documento: cli.payload.id_type,
+        numero: cli.payload.identification || null,
+        dv: cli.payload.check_digit || null,
+        nombre: cli.payload.name,
+        corregido: titularCorregido
+          ? { por: titularCorregido.por, at: titularCorregido.at, rut: titularCorregido.rut }
+          : null,
+      },
+      tercero_siigo:
+        ((n.metadata?.siigo_cliente ?? null) as { identificacion?: string } | null)?.identificacion ?? null,
+      recibos_emitidos: recibosPorNegocio.get(n.id) ?? [],
       // ⚠️ Del BORRADOR, no del contacto crudo: es lo que de verdad viajaría a
       // Siigo. Ver la nota de `CasoPorFacturar.email`.
       telefono: cli.payload.phones?.[0]?.number ?? null,
@@ -802,10 +868,14 @@ export async function emitirFacturaDeNegocio(
     justificacionDuplicado?: string
     /**
      * Lo que la financiera corrigió en la pantalla de revisión. Son los ÚNICOS
-     * campos que el cliente puede mandar además del id: datos de contacto y el
-     * concepto. El valor, la identificación y el saldo se siguen resolviendo aquí.
+     * campos que el cliente puede mandar además del id: datos de contacto, el
+     * concepto y el titular. El valor y el saldo se siguen resolviendo aquí.
+     *
+     * El titular llega como texto y se VALIDA aquí (`validarTitular`): una acción de
+     * servidor es una puerta pública, y un DV que no cuadra o un número con letras
+     * sería facturarle a otra persona.
      */
-    datos?: { email?: string; telefono?: string; productoCode?: string }
+    datos?: { email?: string; telefono?: string; productoCode?: string; titular?: TitularEditado }
   },
 ): Promise<ResultadoEmitir> {
   const ctx = await ctxFinanciero()
@@ -856,13 +926,24 @@ export async function emitirFacturaDeNegocio(
     }
   }
 
+  let titular: ReturnType<typeof validarTitular> | null = null
+  if (opciones?.datos?.titular) {
+    titular = validarTitular(opciones.datos.titular)
+    if (!titular.ok) return { ok: false, error: titular.mensaje }
+  }
+
   const r = await emitirFacturaNegocio(
     workspaceId,
     negocioId,
     nombre,
     {
       bloqueFacturaSlug,
-      datos: opciones?.datos,
+      datos: {
+        email: opciones?.datos?.email,
+        telefono: opciones?.datos?.telefono,
+        productoCode: opciones?.datos?.productoCode,
+        ...(titular?.ok ? { titular: titular.titular } : {}),
+      },
       // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
       // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
       // sin radicar existe para la primera prueba controlada con Diana.
@@ -885,7 +966,14 @@ export async function emitirFacturaDeNegocio(
       case 'faltan_datos':
         return { ok: false, error: `Faltan datos: ${r.faltantes.join(', ')}` }
       case 'ya_facturado_en_one':
-        return { ok: false, error: `Este negocio ya se facturó (${r.numero})` }
+        // Con una corrección del titular pendiente se dice que NO se aplicó: esa
+        // factura ya salió, y lo que venga después va al mismo tercero que ella.
+        return {
+          ok: false,
+          error: titular?.ok
+            ? `Este negocio ya se facturó (${r.numero}): la corrección del titular no se aplicó, esa factura ya salió.`
+            : `Este negocio ya se facturó (${r.numero})`,
+        }
       default:
         return { ok: false, error: r.mensaje }
     }

@@ -16,9 +16,17 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { siigoRequest, SiigoError } from './client'
-import { borradorCliente, emailPlausible, type BorradorCliente, type RutExtraido } from './mapeo'
+import { borradorCliente, emailPlausible, type BorradorCliente, type DatosContacto, type RutExtraido } from './mapeo'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
+import {
+  CLAVE_TITULAR_CORREGIDO,
+  leerTitularCorregido,
+  mismoTitular,
+  textoActividadTitular,
+  type TitularCorregido,
+  type TitularParaBorrador,
+} from './titular'
 
 /** Config opt-in por línea: `lineas_negocio.config_extra.siigo`. */
 export interface SiigoLineaConfig {
@@ -140,11 +148,29 @@ export interface MarcaCliente {
  * Mismo criterio que la cola de facturación: el email y el teléfono del contacto
  * ganan sobre los del RUT, porque el contacto lo mantiene vivo el comercial y el
  * RUT es una foto del documento.
+ *
+ * Con un titular corregido (`negocios.metadata.titular_corregido`), el documento y
+ * el nombre salen de la corrección y no del RUT. Es la ÚNICA puerta por la que el
+ * tercero se arma, así que la factura, el recibo de caja y el abono no pueden
+ * separarse en esto.
  */
 async function borradorDelNegocio(
   negocioId: string,
   contactoId: string | null,
+  titular: TitularParaBorrador | null,
 ): Promise<{ borrador: ReturnType<typeof borradorCliente> }> {
+  const { rut, contacto } = await leerRutYContacto(negocioId, contactoId)
+  return { borrador: borradorCliente(rut, contacto, titular) }
+}
+
+/**
+ * El RUT extraído y el contacto, crudos. LANZA si la consulta del RUT falla: un error
+ * de base no puede leerse como "no hay RUT".
+ */
+async function leerRutYContacto(
+  negocioId: string,
+  contactoId: string | null,
+): Promise<{ rut: RutExtraido; contacto: DatosContacto }> {
   const svc = createServiceClient()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,7 +200,7 @@ async function borradorDelNegocio(
     if (c) contacto = { email: c.email ?? null, telefono: c.telefono ?? null }
   }
 
-  return { borrador: borradorCliente(rut, contacto) }
+  return { rut, contacto }
 }
 
 /**
@@ -238,6 +264,11 @@ export async function asegurarClienteSiigo(
   const negocio = negRaw as NegocioParaCliente
 
   const yaMarcado = (negocio.metadata?.siigo_cliente ?? null) as MarcaCliente | null
+  // El titular corregido manda sobre el RUT. Con él, la marca se compara contra el
+  // documento CORREGIDO: si la marca es del titular anterior deja de valer, y el
+  // camino de abajo busca o crea el tercero del documento nuevo. Nunca se toca el
+  // tercero anterior (ver `empujarCorreccionesAlTercero`).
+  const titular = leerTitularCorregido(negocio.metadata)
 
   // `borradorDelNegocio` LANZA si la consulta del RUT falla (para no confundir un
   // error de base con "no hay RUT"). Se atrapa aquí y no más arriba: esta función
@@ -245,11 +276,15 @@ export async function asegurarClienteSiigo(
   // no tiene por qué envolverla en su propio try.
   let borrador: Awaited<ReturnType<typeof borradorDelNegocio>>
   try {
-    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id)
+    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id, titular)
   } catch (e) {
     // Un caso YA marcado no se convierte en error porque hoy no se pueda releer
     // su RUT: eso ya estaba resuelto y la marca sigue siendo la respuesta.
-    if (yaMarcado?.identificacion) {
+    //
+    // ⚠️ Salvo que la marca sea de OTRO titular que el corregido: devolverla ahí
+    // emitiría a nombre de quien la financiera ya dijo que no es.
+    const marcaDeOtroTitular = !!titular && yaMarcado?.identificacion !== titular.numero
+    if (yaMarcado?.identificacion && !marcaDeOtroTitular) {
       return {
         estado: 'ya_existia',
         identificacion: yaMarcado.identificacion,
@@ -266,9 +301,9 @@ export async function asegurarClienteSiigo(
   // apellidos de una persona natural), así que se une para mostrarlo.
   const nombreTercero = payload.name.filter(Boolean).join(' ').trim() || null
 
-  // La marca vale mientras siga coincidiendo con el RUT; si no, se rehace el
-  // camino completo (buscar en Siigo por la identificación buena, crear si no
-  // está, y re-marcar). Ver `marcaSigueValida`.
+  // La marca vale mientras siga coincidiendo con el titular (el RUT, o la corrección
+  // cuando la hay); si no, se rehace el camino completo (buscar en Siigo por la
+  // identificación buena, crear si no está, y re-marcar). Ver `marcaSigueValida`.
   if (yaMarcado && marcaSigueValida(yaMarcado.identificacion, payload.identification, yaMarcado.branch_office)) {
     return {
       estado: 'ya_existia',
@@ -433,10 +468,10 @@ async function anotar(
  * LISTAR lo que Siigo ya tiene (la adopción de una factura vieja) eso sobra y
  * además escribe donde no hay que escribir.
  *
- * Precedencia: gana el RUT del expediente, que es de donde sale la identificación
- * con la que se emitiría hoy; la marca es el respaldo para los casos cuyo RUT no
- * se puede releer. Cuando las dos existen y difieren, mandar la del RUT es lo
- * mismo que hace la emisión, así que las dos pantallas hablan del mismo tercero.
+ * Precedencia: el titular corregido, si lo hay; si no, el RUT del expediente, que es
+ * de donde sale la identificación con la que se emitiría hoy; la marca es el respaldo
+ * para los casos cuyo RUT no se puede releer. Es el mismo orden de la emisión, así que
+ * las dos pantallas hablan del mismo tercero.
  */
 export async function identificacionDelNegocio(
   workspaceId: string,
@@ -455,8 +490,13 @@ export async function identificacionDelNegocio(
   const negocio = negRaw as NegocioParaCliente
   const marca = (negocio.metadata?.siigo_cliente ?? null) as MarcaCliente | null
 
+  // El titular corregido gana: es a nombre de quien se va a emitir, así que la
+  // adopción tiene que listar SUS facturas y no las del RUT.
+  const titular = leerTitularCorregido(negocio.metadata)
+  if (titular) return { identificacion: titular.numero, marca }
+
   try {
-    const { borrador } = await borradorDelNegocio(negocioId, negocio.contacto_id)
+    const { borrador } = await borradorDelNegocio(negocioId, negocio.contacto_id, null)
     const delRut = borrador.payload.identification
     if (delRut) return { identificacion: delRut, marca }
   } catch {
@@ -466,20 +506,33 @@ export async function identificacionDelNegocio(
   return { identificacion: marca?.identificacion ?? null, marca }
 }
 
-/** Datos que la financiera puede corregir en la pantalla de revisión. */
-export interface ContactoEditado {
+/** Lo que la financiera puede corregir en la pantalla de revisión. */
+export interface CorreccionesDeFactura {
   email?: string
   telefono?: string
+  /**
+   * El titular YA VALIDADO (`validarTitular`). Ausente = el titular no se toca.
+   * Igual al del RUT = se quita la corrección que hubiera (no hay nada que corregir).
+   */
+  titular?: TitularParaBorrador
 }
 
+export type ResultadoCorrecciones =
+  | { ok: true; contactoCambiado: boolean; titularCambiado: boolean }
+  | { ok: false; mensaje: string }
+
 /**
- * Corrige el email y el teléfono del cliente ANTES de emitir la factura.
+ * Guarda EN ONE lo que la financiera corrigió antes de emitir. No llama a Siigo: el
+ * tercero se resuelve después, ya con la corrección puesta (`asegurarClienteSiigo`),
+ * y lo que haya que empujarle a Siigo se empuja al tercero RESUELTO
+ * (`empujarCorreccionesAlTercero`).
  *
+ * ── Correo y teléfono ──
  * Diana lo pidió con un caso concreto: el correo que ONE tiene guardado es el que
  * Siigo usa para mandar la factura electrónica, y si está mal la factura sale bien
  * y no llega a nadie. Corregirlo después no sirve: la factura ya se fue.
  *
- * Se escribe en el CONTACTO de ONE, no en una copia pegada al negocio. Es el mismo
+ * Se escriben en el CONTACTO de ONE, no en una copia pegada al negocio. Es el mismo
  * dato que el comercial mantiene vivo, y una corrección hecha aquí tiene que valer
  * también para el siguiente documento del mismo cliente. (Medido el 2026-08-21: los
  * 288 negocios de SOENA tienen contacto, así que no hay caso que se quede sin dónde
@@ -488,18 +541,29 @@ export interface ContactoEditado {
  * Un campo vacío es "no lo toques", nunca "bórralo": esta pantalla existe para
  * completar datos antes de facturar, y no es el lugar desde donde se vacía el CRM.
  *
- * Si el tercero YA existe en Siigo hay que empujarle el cambio: allá el correo vive
- * en su propia copia, y sin el PUT la factura seguiría saliendo al correo viejo.
+ * ── El titular (nombre y documento) ──
+ * Decisión de Mauricio (2026-09-22). NO pisa el RUT extraído: queda aparte, en
+ * `metadata.titular_corregido`, con quién y cuándo, y manda sobre el RUT. Volver a
+ * subir el RUT era la única salida, y el reproceso re-extrae todo el bloque y borra
+ * datos.
+ *
+ * ⚠️ Con factura ya emitida NO se corrige. Esa factura ya salió a nombre de su
+ * tercero, y el recibo y los abonos del negocio tienen que ir al MISMO: corregir
+ * después dejaría la factura a un nombre y el recibo a otro, y el abono ni siquiera
+ * se podría cruzar (Siigo solo abona a la factura de su propio tercero).
+ *
+ * Todo lo que puede rechazar se decide ANTES de escribir, para que un rechazo no deje
+ * medio cambio guardado.
  */
-export async function corregirContactoParaFactura(
+export async function guardarCorreccionesDeFactura(
   workspaceId: string,
   negocioId: string,
-  datos: ContactoEditado,
-  maxEspera429Ms = 0,
-): Promise<{ ok: true; cambiado: boolean } | { ok: false; mensaje: string }> {
+  datos: CorreccionesDeFactura,
+  autor: { nombre: string | null; staffId: string | null },
+): Promise<ResultadoCorrecciones> {
   const email = (datos.email ?? '').trim()
   const telefono = (datos.telefono ?? '').trim()
-  if (!email && !telefono) return { ok: true, cambiado: false }
+  if (!email && !telefono && !datos.titular) return { ok: true, contactoCambiado: false, titularCambiado: false }
   if (email && !emailPlausible(email)) {
     return { ok: false, mensaje: `"${email}" no parece un correo válido` }
   }
@@ -516,36 +580,176 @@ export async function corregirContactoParaFactura(
   if (errNeg || !negRaw) return { ok: false, mensaje: 'Negocio no encontrado' }
   const negocio = negRaw as NegocioParaCliente
 
-  if (!negocio.contacto_id) {
+  if ((email || telefono) && !negocio.contacto_id) {
     return { ok: false, mensaje: 'El negocio no tiene contacto: corrige el dato desde el negocio antes de facturar' }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: errCon } = await (svc as any)
-    .from('contactos')
-    .update({ ...(email ? { email } : {}), ...(telefono ? { telefono } : {}) })
-    .eq('id', negocio.contacto_id)
-    .eq('workspace_id', workspaceId)
-  if (errCon) return { ok: false, mensaje: `No se pudo guardar el contacto: ${errCon.message}` }
+  // ── El titular: se decide todo antes de escribir nada ──
+  /** `undefined` = no se toca; `null` = se quita la corrección; objeto = se guarda. */
+  let titularNuevo: TitularCorregido | null | undefined
+  let rutParaTexto: TitularCorregido['rut'] = { identificacion: null, nombre: null }
+  if (datos.titular) {
+    const factura = (negocio.metadata?.siigo_factura ?? null) as { numero?: string } | null
+    if (factura?.numero) {
+      return {
+        ok: false,
+        mensaje: `Este negocio ya tiene la factura ${factura.numero}: el titular no se corrige. `
+          + 'Esa factura ya salió, y el recibo y los abonos van al mismo tercero que ella.',
+      }
+    }
 
-  const marca = (negocio.metadata?.siigo_cliente ?? null) as MarcaCliente | null
-  if (!marca?.siigo_id) {
-    // El tercero todavía no existe en Siigo: lo creará `asegurarClienteSiigo`
-    // enseguida, y ya lo leerá corregido.
-    return { ok: true, cambiado: true }
+    let delRut: ReturnType<typeof borradorCliente>
+    try {
+      const { rut, contacto } = await leerRutYContacto(negocioId, negocio.contacto_id)
+      delRut = borradorCliente(rut, contacto, null)
+    } catch (e) {
+      return { ok: false, mensaje: (e as Error).message }
+    }
+    rutParaTexto = {
+      identificacion: delRut.payload.identification || null,
+      nombre: delRut.payload.name.filter(Boolean).join(' ') || null,
+    }
+
+    // Escribir exactamente lo que dice el RUT no es corregir: se quita la corrección
+    // que hubiera, y el negocio vuelve a leer el RUT como siempre.
+    const titularDelRut = {
+      tipo_documento: delRut.payload.id_type,
+      numero: delRut.payload.identification,
+      nombre: delRut.payload.name,
+    }
+    const destino = mismoTitular(datos.titular, titularDelRut) ? null : datos.titular
+    const vigente = leerTitularCorregido(negocio.metadata)
+    const sinCambio = destino ? mismoTitular(destino, vigente) : vigente === null
+    if (!sinCambio) {
+      titularNuevo = destino
+        ? {
+            ...destino,
+            por: autor.nombre,
+            por_staff_id: autor.staffId,
+            at: new Date().toISOString(),
+            rut: rutParaTexto,
+          }
+        : null
+    }
   }
 
-  try {
-    const { borrador } = await borradorDelNegocio(negocioId, negocio.contacto_id)
-    if (borrador.faltantes.length > 0) {
-      return { ok: false, mensaje: `Falta ${borrador.faltantes.join(', ')} para actualizar el tercero` }
+  // ── Escrituras ──
+  let contactoCambiado = false
+  if (email || telefono) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errCon } = await (svc as any)
+      .from('contactos')
+      .update({ ...(email ? { email } : {}), ...(telefono ? { telefono } : {}) })
+      .eq('id', negocio.contacto_id)
+      .eq('workspace_id', workspaceId)
+    if (errCon) return { ok: false, mensaje: `No se pudo guardar el contacto: ${errCon.message}` }
+    contactoCambiado = true
+  }
+
+  let titularCambiado = false
+  if (titularNuevo !== undefined) {
+    // Sobre el estado de AHORA, no sobre la copia leída arriba: `metadata` guarda
+    // varias marcas y un leer-modificar-escribir pisaría la que otro escribió.
+    const r = await guardarMarcaEnMetadata(
+      svc, workspaceId, negocioId, CLAVE_TITULAR_CORREGIDO, titularNuevo, negocio.metadata,
+    )
+    if (!r.ok) return { ok: false, mensaje: `No se pudo guardar la corrección del titular: ${r.mensaje}` }
+    titularCambiado = true
+    if (autor.staffId) {
+      // `autor_id` es FK a staff(id). `contenido` va recortado a 280 por el CHECK.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await registrarActividad((svc as any), {
+        workspace_id: workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio',
+        autor_id: autor.staffId,
+        contenido: textoActividadTitular(titularNuevo, rutParaTexto),
+      }, 'guardarCorreccionesDeFactura')
     }
-    await siigoRequest(workspaceId, `/v1/customers/${marca.siigo_id}`, {
+  }
+
+  return { ok: true, contactoCambiado, titularCambiado }
+}
+
+export type ResultadoEmpuje = { ok: true; empujado: boolean } | { ok: false; mensaje: string }
+
+/**
+ * Le lleva a Siigo lo que se corrigió, sobre el tercero que `asegurarClienteSiigo`
+ * YA RESOLVIÓ para este negocio. Va DESPUÉS de resolverlo, nunca antes.
+ *
+ * ⚠️ El orden es la protección. Hasta el 2026-09-22 el PUT salía ANTES de resolver el
+ * tercero, contra el `siigo_id` de la marca vieja. Con un titular corregido esa marca
+ * es la del titular ANTERIOR, y el PUT le habría cambiado el nombre y la cédula a un
+ * tercero que ya tiene documentos emitidos a su nombre. (El mismo hueco existía sin
+ * corrección: una marca con la cédula truncada de #394 recibía el PUT con la cédula
+ * buena.) Resuelto primero, el tercero es por construcción el del documento vigente.
+ *
+ * Solo se reescribe un tercero que el RUT DESCRIBE (mismo documento): la dirección y la
+ * ciudad que viajan en el PUT salen de ahí. Si la corrección cambió de documento, el
+ * RUT es de otra persona, y el tercero del documento nuevo:
+ *   - si ONE lo acaba de crear, ya nació con los datos corregidos (no hay nada que
+ *     empujar, y quien llama ni siquiera entra aquí);
+ *   - si ya existía en Siigo, se usa TAL COMO ESTÁ. Reescribirlo le pondría la
+ *     dirección de otra persona.
+ */
+export async function empujarCorreccionesAlTercero(
+  workspaceId: string,
+  negocioId: string,
+  tercero: { identificacion: string; siigo_id: string | null },
+  opciones: { contactoCambiado: boolean },
+  maxEspera429Ms = 0,
+): Promise<ResultadoEmpuje> {
+  if (!tercero.siigo_id) return { ok: true, empujado: false }
+
+  const svc = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: negRaw, error: errNeg } = await (svc as any)
+    .from('negocios')
+    .select('id, contacto_id, metadata')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .single()
+  if (errNeg || !negRaw) return { ok: false, mensaje: 'Negocio no encontrado' }
+  const negocio = negRaw as NegocioParaCliente
+
+  const titular = leerTitularCorregido(negocio.metadata)
+  // Sin nada corregido no hay nada que llevar: el tercero ya tiene lo que tenía.
+  if (!opciones.contactoCambiado && !titular) return { ok: true, empujado: false }
+
+  let rut: RutExtraido
+  let contacto: DatosContacto
+  try {
+    ({ rut, contacto } = await leerRutYContacto(negocioId, negocio.contacto_id))
+  } catch (e) {
+    return { ok: false, mensaje: (e as Error).message }
+  }
+  const vigente = borradorCliente(rut, contacto, titular)
+
+  // Invariante, no preferencia: el cuerpo del PUT lleva el documento del tercero al que
+  // se le escribe. Si no coinciden, escribirle sería cambiarle la identidad a otro.
+  if (vigente.payload.identification !== tercero.identificacion) {
+    return {
+      ok: false,
+      mensaje: `El tercero de Siigo (${tercero.identificacion}) no es el del titular `
+        + `(${vigente.payload.identification || 'sin documento'}): no se le escribe nada.`,
+    }
+  }
+
+  // Un tercero que el RUT no describe se usa como está (ver el encabezado).
+  const delRut = borradorCliente(rut, contacto, null)
+  if (delRut.payload.identification !== tercero.identificacion) return { ok: true, empujado: false }
+
+  if (vigente.faltantes.length > 0) {
+    return { ok: false, mensaje: `Falta ${vigente.faltantes.join(', ')} para actualizar el tercero` }
+  }
+  try {
+    await siigoRequest(workspaceId, `/v1/customers/${tercero.siigo_id}`, {
       method: 'PUT',
-      body: borrador.payload satisfies BorradorCliente,
+      body: vigente.payload satisfies BorradorCliente,
       maxEspera429Ms,
     })
-    return { ok: true, cambiado: true }
+    return { ok: true, empujado: true }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
     return { ok: false, mensaje: `El dato quedó en ONE, pero Siigo no aceptó el cambio del tercero: ${mensaje}` }

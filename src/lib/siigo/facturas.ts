@@ -25,7 +25,13 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './client'
 import { borradorFactura, SUCURSAL_POR_DEFECTO, type BorradorFactura } from './mapeo'
 import { resolverConceptoDeNegocio } from './concepto-negocio'
-import { asegurarClienteSiigo, corregirContactoParaFactura, identificacionDelNegocio } from './clientes'
+import {
+  asegurarClienteSiigo,
+  empujarCorreccionesAlTercero,
+  guardarCorreccionesDeFactura,
+  identificacionDelNegocio,
+} from './clientes'
+import type { TitularParaBorrador } from './titular'
 import { archivarPdfEnBloque } from './archivar-documento'
 import { abonarPagosDelNegocio, type ResultadoAbonosFactura } from './abonos-factura'
 import { leerFacturaDeUnNegocio } from '@/lib/facturacion/leer-factura-del-negocio'
@@ -259,11 +265,17 @@ export interface OpcionesEmision {
    * una factura electrónica no se corrige, se anula.
    *
    * `email` y `telefono` se guardan en el contacto de ONE y se empujan al tercero
-   * de Siigo; `productoCode` cambia el CONCEPTO que el cliente va a leer.
+   * de Siigo; `productoCode` cambia el CONCEPTO que el cliente va a leer; `titular`
+   * cambia a nombre de quién sale (y con él, el recibo y los abonos del negocio).
    */
   datos?: {
     email?: string
     telefono?: string
+    /**
+     * Titular corregido, YA VALIDADO por quien llama (`validarTitular`). Queda en
+     * `metadata.titular_corregido` y manda sobre el RUT. Ver `./titular.ts`.
+     */
+    titular?: TitularParaBorrador
     /**
      * Producto del catálogo de Siigo. Quien llama tiene que haberlo validado
      * contra el catálogo: aquí ya no se distingue un código bueno de un typo.
@@ -430,21 +442,42 @@ export async function emitirFacturaNegocio(
   // falte por pagar queda como saldo de la factura en Siigo, y lo cierran los abonos.
   const honorario = negocio.precio_aprobado == null ? 0 : Number(negocio.precio_aprobado)
 
-  // ── 2.bis. Las correcciones de la pantalla ────────────────────────────────
+  // ── 2.bis. Las correcciones de la pantalla, guardadas EN ONE ─────────────
   // Van ANTES de asegurar el tercero, y no después: si el tercero se crea primero,
-  // nace con el correo viejo y la factura se le manda ahí mismo. Si esto falla se
-  // corta aquí, con la factura todavía sin emitir, que es el único momento en que
-  // el error todavía se puede arreglar.
-  const correccion = await corregirContactoParaFactura(
-    workspaceId, negocioId, opciones.datos ?? {}, ESPERA_429_EMISION_MS,
+  // nace con el correo viejo (o con el titular del RUT) y la factura se le manda ahí
+  // mismo. Aquí NO se llama a Siigo: el tercero todavía no está resuelto, y con un
+  // titular corregido el que dice la marca vieja es el del titular ANTERIOR. Si esto
+  // falla se corta aquí, con la factura todavía sin emitir, que es el único momento
+  // en que el error todavía se puede arreglar.
+  const correccion = await guardarCorreccionesDeFactura(
+    workspaceId, negocioId,
+    {
+      email: opciones.datos?.email,
+      telefono: opciones.datos?.telefono,
+      titular: opciones.datos?.titular,
+    },
+    { nombre: staffNombre, staffId: contexto.staffId ?? null },
   )
   if (!correccion.ok) return { ok: false, motivo: 'error', mensaje: correccion.mensaje }
 
   // ── 3. El cliente tiene que existir (y con él, sus datos completos) ───────
+  // Con el titular corregido, el tercero es el del documento NUEVO: se busca por él
+  // y, si no existe, se crea. El del titular anterior no se toca.
   const cliente = await asegurarClienteSiigo(workspaceId, negocioId, 'manual', ESPERA_429_EMISION_MS)
   if (cliente.estado === 'incompleto') return { ok: false, motivo: 'faltan_datos', faltantes: cliente.faltantes }
   if (cliente.estado === 'error') return { ok: false, motivo: 'error', mensaje: cliente.mensaje }
   const identificacion = cliente.identificacion
+
+  // ── 3.a. Lo corregido, llevado al tercero YA RESUELTO ─────────────────────
+  // Un tercero que se acaba de crear nació con todo corregido. Uno que ya existía
+  // puede tener el correo o el nombre viejos: sin esto la factura saldría con ellos.
+  if (cliente.estado === 'ya_existia') {
+    const empuje = await empujarCorreccionesAlTercero(
+      workspaceId, negocioId, cliente,
+      { contactoCambiado: correccion.contactoCambiado }, ESPERA_429_EMISION_MS,
+    )
+    if (!empuje.ok) return { ok: false, motivo: 'error', mensaje: empuje.mensaje }
+  }
 
   try {
     const cfg = await getSiigoConfig(workspaceId)
@@ -548,7 +581,7 @@ export async function emitirFacturaNegocio(
 
     // ⚠️ La marca se fusiona sobre el estado de AHORA, no sobre `negocio.metadata`,
     // que se leyó al empezar esta función. En el medio corrieron
-    // `corregirContactoParaFactura` y `asegurarClienteSiigo`, y esta última
+    // `guardarCorreccionesDeFactura` y `asegurarClienteSiigo`, y esta última
     // REESCRIBE `siigo_cliente` cuando la marca vieja no coincide con el RUT.
     // Escribir sobre la copia vieja devolvía esa corrección a su valor anterior:
     // 12 negocios facturados de SOENA quedaron con la cédula truncada por eso

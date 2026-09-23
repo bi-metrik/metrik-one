@@ -33,6 +33,10 @@ export function casoFalso(p: Partial<CasoPorFacturar> = {}): CasoPorFacturar {
   return {
     negocio_id: 'x', codigo: null, nombre: null, etapa: null, etapa_numero: null,
     identificacion: null, cliente: null, telefono: null, email: null,
+    contacto_nombre: null,
+    titular: { tipo_documento: '13', numero: null, dv: null, nombre: [], corregido: null },
+    tercero_siigo: null,
+    recibos_emitidos: [],
     honorario: null, valor_upme: null,
     faltan_factura: [], faltan_cliente: [], sin_rut: false,
     ya_facturado: false, factura_numero: null, factura_sin_pdf: false,

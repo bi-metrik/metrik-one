@@ -147,7 +147,8 @@ vi.mock('./clientes', () => ({
     siigo_id: 'siigo-cli-1',
     branch_office: 0,
   }),
-  corregirContactoParaFactura: async () => ({ ok: true as const, cambiado: false }),
+  guardarCorreccionesDeFactura: async () => ({ ok: true as const, contactoCambiado: false, titularCambiado: false }),
+  empujarCorreccionesAlTercero: async () => ({ ok: true as const, empujado: false }),
   identificacionDelNegocio: async () => ({ identificacion: '11122233', marca: null }),
 }))
 

@@ -12,6 +12,7 @@
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { calcularDvNit } from '@/lib/dian/nit'
 import type { SiigoConfig } from './client'
+import type { TitularParaBorrador } from './titular'
 
 /** Campos del bloque `rut` tal como los deja la extracción con IA. */
 export interface RutExtraido {
@@ -151,9 +152,19 @@ function telefonoParaSiigo(telefono: string): { phones: Array<{ number: string }
   return { phones: [{ number: digitos }] }
 }
 
-export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borrador<BorradorCliente> {
+export function borradorCliente(
+  rut: RutExtraido,
+  contacto: DatosContacto,
+  /**
+   * El titular corregido por la financiera (`negocios.metadata.titular_corregido`).
+   * Cuando viene, MANDA sobre el RUT en lo único que corrige: tipo de documento,
+   * número, DV y nombre. Dirección, ciudad, correo y teléfono no cambian de fuente.
+   * Ver `./titular.ts`.
+   */
+  titular?: TitularParaBorrador | null,
+): Borrador<BorradorCliente> {
   const faltantes: string[] = []
-  const idType = codigoTipoDocumento(rut)
+  const idType = titular?.tipo_documento ?? codigoTipoDocumento(rut)
   const esEmpresa = idType === '31'
 
   // La identificacion se toma TAL CUAL viene del RUT, solo sin separadores. NO se
@@ -164,13 +175,18 @@ export function borradorCliente(rut: RutExtraido, contacto: DatosContacto): Borr
   // `calcularDvNit` devuelve null cuando el dato no sirve: se colapsa a cadena
   // vacia y se declara faltante, el payload debe seguir siendo mostrable en
   // pantalla para que lo corrijan, no romperse a medio armar.
-  const identification = soloDigitos(limpiar(rut.numero_identificacion) || limpiar(rut.nit))
+  const identification = titular
+    ? soloDigitos(titular.numero)
+    : soloDigitos(limpiar(rut.numero_identificacion) || limpiar(rut.nit))
   if (!identification) faltantes.push('identificación')
 
-  // El DV del RUT se respeta; si no vino, se calcula (módulo 11, determinista).
-  const check_digit = limpiar(rut.dv) || (identification ? calcularDvNit(identification) ?? '' : '')
+  // El DV del RUT se respeta; si no vino, se calcula (módulo 11, determinista). El
+  // de una corrección ya viene validado contra el NIT (`validarTitular`).
+  const check_digit = titular
+    ? (limpiar(titular.dv) || (identification ? calcularDvNit(identification) ?? '' : ''))
+    : (limpiar(rut.dv) || (identification ? calcularDvNit(identification) ?? '' : ''))
 
-  const name = nombreParaSiigo(rut, esEmpresa)
+  const name = titular ? titular.nombre.map(limpiar) : nombreParaSiigo(rut, esEmpresa)
   if (name.length === 0 || !name[0]) faltantes.push('nombre')
 
   const ciudad = ciudadParaSiigo(rut)

@@ -257,7 +257,8 @@ vi.mock('./clientes', () => ({
   asegurarClienteSiigo: async () => ({
     estado: 'ya_existia' as const, identificacion: CLIENTE, siigo_id: 'cli-1', branch_office: 0, nombre: 'CLIENTE PRUEBA',
   }),
-  corregirContactoParaFactura: async () => ({ ok: true as const, cambiado: false }),
+  guardarCorreccionesDeFactura: async () => ({ ok: true as const, contactoCambiado: false, titularCambiado: false }),
+  empujarCorreccionesAlTercero: async () => ({ ok: true as const, empujado: false }),
   identificacionDelNegocio: async () => ({ identificacion: CLIENTE }),
 }))
 vi.mock('./concepto-negocio', () => ({
