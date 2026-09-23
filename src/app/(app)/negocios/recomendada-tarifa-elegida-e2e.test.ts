@@ -479,6 +479,15 @@ describe('4 · al aprobar se escoge la tarifa', () => {
     expect(precioAprobado()).toBe(PRECIO.premium + ivaPremium)
   })
 
+  it('con el IVA ADENTRO del precio (#831), la Premium se aprueba por el precio de su cascada: el IVA ya viene en él', async () => {
+    sembrar({ configWorkspace: { iva_cotizacion: { ...IVA_INGRESO_PROPIO.iva_cotizacion, precio: 'iva_incluido' } } })
+    await recalcularTotales(COT)
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(texto(pdf)).toContain(cifra(PRECIO.premium))
+    await aceptarCotizacionNegocio(COT, NEG, 'it-pre')
+    expect(precioAprobado()).toBe(PRECIO.premium)
+  })
+
   it('la elegida pasa por el MISMO mínimo de #824: la Premium bajo el piso no se aprueba sin la firma del dueño', async () => {
     ;(tablas.items.find(i => i.id === 'vc') as Fila).subtotal = 1_990_000
     const res = await aceptarCotizacionNegocio(COT, NEG, 'it-pre')
@@ -527,18 +536,18 @@ function foto(cotizacionId: string) {
   return {
     cotizacion: (({ id: _i, consecutivo: _c, descripcion: _d, created_at: _ca, ...resto }) => resto)(cot(cotizacionId)),
     items: items
-      .map(({ id: _i, cotizacion_id: _c, created_at: _ca, opcion_de, ...resto }) => ({ ...resto, opcion_de: opcion_de ? nombreDe.get(opcion_de as string) : null }))
+      .map(({ id: _i, cotizacion_id: _c, created_at: _ca, opcion_de, ...resto }): Fila => ({ ...resto, opcion_de: opcion_de ? nombreDe.get(opcion_de as string) : null }))
       .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre))),
     rubros: tablas.rubros
       .filter(r => nombreDe.has(r.item_id as string))
-      .map(({ id: _i, item_id, created_at: _ca, ...resto }) => ({ ...resto, item: nombreDe.get(item_id as string) }))
+      .map(({ id: _i, item_id, created_at: _ca, ...resto }): Fila => ({ ...resto, item: nombreDe.get(item_id as string) }))
       .sort((a, b) => String(a.descripcion).localeCompare(String(b.descripcion))),
     adicionales: tablas.item_adicionales
       .filter(a => nombreDe.has(a.item_id as string))
-      .map(({ id: _i, item_id, created_at: _ca, ...resto }) => ({ ...resto, item: nombreDe.get(item_id as string) })),
+      .map(({ id: _i, item_id, created_at: _ca, ...resto }): Fila => ({ ...resto, item: nombreDe.get(item_id as string) })),
     tarifas: tablas.cotizacion_itinerarios
       .filter(t => t.cotizacion_id === cotizacionId)
-      .map(({ id, cotizacion_id: _c, created_at: _ca, ...resto }) => ({
+      .map(({ id, cotizacion_id: _c, created_at: _ca, ...resto }): Fila => ({
         ...resto,
         seleccion: tablas.itinerario_opciones.filter(o => o.itinerario_id === id).map(o => nombreDe.get(o.item_id as string)),
       }))
