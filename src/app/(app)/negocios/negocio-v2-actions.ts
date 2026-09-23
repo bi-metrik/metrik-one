@@ -18,6 +18,7 @@ import { bloqueTipoCode } from '@/components/workflow/types'
 import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
+import { valorSinIvaDeFactura } from '@/lib/upme/valor-factura'
 import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { revisarTarifaEnBloque } from '@/lib/upme/tarifa-confirmada'
@@ -1573,12 +1574,11 @@ async function getNegocioDetalle(id: string): Promise<{
           .select('data, bloque_configs!inner(slug)')
           .eq('negocio_id', id)
           .eq('bloque_configs.slug', facturaSlug)
-        let valorSinIva = 0
-        for (const fb of ((facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
-          const campos = (fb.data?.campos ?? {}) as Record<string, { value?: unknown }>
-          const v = Number(String(campos[valorField]?.value ?? '').replace(/[^\d.-]/g, ''))
-          if (Number.isFinite(v) && v > 0) { valorSinIva = v; break }
-        }
+        // El punto de miles se lee como miles («350.906» son 350.906 pesos, no 350,906).
+        const valorSinIva = valorSinIvaDeFactura(
+          (facturaBloques ?? []) as Array<{ data: Record<string, unknown> | null }>,
+          valorField,
+        )
         if (!(valorSinIva > 0)) continue // Factura sin valor aún → reintenta en próxima carga
         const tarifa = calcularTarifaUpmePorAnio(valorSinIva, tcfg.anio)
         const tarifaFmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(tarifa)

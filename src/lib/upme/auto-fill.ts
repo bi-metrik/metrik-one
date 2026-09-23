@@ -27,16 +27,7 @@
 import { calcularTarifaUpmePorAnio } from './tarifa'
 import { nitConGuion } from '@/lib/dian/nit'
 import { labelTipoDocumento } from '@/lib/dian/tipo-documento'
-
-/** Parsea un valor que puede venir como número o string con separadores COP. */
-function aNumero(raw: unknown): number | null {
-  if (raw === null || raw === undefined || raw === '') return null
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
-  // Limpia separadores de miles y símbolos ("$ 120.000.000" / "120,000,000")
-  const limpio = String(raw).replace(/[^\d.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '')
-  const n = Number(limpio)
-  return Number.isFinite(n) ? n : null
-}
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 /**
  * Aplica una transformación `computed` sobre el valor crudo del auto_fill.
@@ -50,7 +41,10 @@ export function aplicarComputedAutoFill(
 ): unknown {
   switch (computed) {
     case 'tarifa_upme': {
-      const valorSinIva = aNumero(rawVal)
+      // Normalizador único de montos. El parser propio que había aquí quitaba el
+      // punto de miles solo si lo seguían tres dígitos y un no-dígito, así que
+      // «350.906,00» (la coma decimal borrada antes) quedaba en 350,906 pesos.
+      const valorSinIva = parseMontoCop(rawVal)
       if (valorSinIva === null || valorSinIva <= 0) return undefined
       return calcularTarifaUpmePorAnio(valorSinIva, opts?.anio)
     }

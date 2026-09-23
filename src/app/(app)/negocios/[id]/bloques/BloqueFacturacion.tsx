@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Copy, Check, FileText, AlertTriangle } from 'lucide-react'
 import type { FacturaDraft } from '../../negocio-v2-actions'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 // Bloque de facturación Siigo-ready (OUTBOUND). Autopobla los datos del cliente
 // ya capturados en el expediente (RUT + contacto) + el valor (honorario), para
@@ -68,8 +69,8 @@ export default function BloqueFacturacion({ instancia, modo, draft, configExtra 
 
   const valorBruto = useMemo(() => {
     if (facturarATercero && override.valor_bruto != null && override.valor_bruto !== '') {
-      const n = Number(String(override.valor_bruto).replace(/[^\d.-]/g, ''))
-      return Number.isFinite(n) ? n : 0
+      // Lo escribe una persona: «350.906» son 350.906 pesos, no 350,906.
+      return parseMontoCop(override.valor_bruto) ?? 0
     }
     return draft?.valor_bruto ?? 0
   }, [facturarATercero, override.valor_bruto, draft?.valor_bruto])
