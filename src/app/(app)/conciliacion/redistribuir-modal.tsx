@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState, useTransition } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, Trash2, Loader2, AlertTriangle, Search } from 'lucide-react'
 import { toast } from 'sonner'
-import { redistribuirReferencia } from '@/lib/actions/conciliacion-actions'
-import { buscarNegociosParaValida } from '@/lib/actions/valida-consultas'
+import { redistribuirReferencia, buscarNegociosParaReparto } from '@/lib/actions/conciliacion-actions'
 import type { ReferenciaPago } from '@/lib/actions/conciliacion-actions'
+import { cuentasReparto, lineaSinNegocio, type CuentasReparto } from '@/lib/cobros/reparto-en-pantalla'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
@@ -77,18 +77,15 @@ export function RedistribuirModal({
     }
   }, [onCerrar, isPending])
 
-  const totalAsignado = useMemo(
-    () => lineas.filter(l => !l.porDevolver).reduce((s, l) => s + (l.monto || 0), 0),
-    [lineas],
+  const cuentas = useMemo(
+    () => cuentasReparto({ pagoOriginal, lineas, motivo }),
+    [pagoOriginal, lineas, motivo],
   )
-  const totalPorDevolver = useMemo(
-    () => lineas.filter(l => l.porDevolver).reduce((s, l) => s + (l.monto || 0), 0),
-    [lineas],
-  )
-  const sinAsignar = pagoOriginal - totalAsignado - totalPorDevolver
-  const sobrepasa = sinAsignar < -1
 
   const guardar = () => {
+    // La pantalla ya apaga el botón, pero una línea con plata y sin negocio no se
+    // descarta nunca en silencio: si llega aquí, se frena.
+    if (!cuentas.puedeGuardar) return
     startTransition(async () => {
       const res = await redistribuirReferencia({
         externalRef: referencia.external_ref,
@@ -101,6 +98,11 @@ export function RedistribuirModal({
 
       if (!res.ok) {
         toast.error(res.error)
+        return
+      }
+      if (res.sinCambios) {
+        toast.info('No hubo cambios: el reparto ya estaba así.')
+        onListo()
         return
       }
       toast.success(
@@ -173,27 +175,7 @@ export function RedistribuirModal({
           </button>
 
           {/* El descuadre se ve mientras se escribe, no al guardar. */}
-          <div className="mt-4 rounded-lg border p-3" style={{ borderColor: sobrepasa ? AMBAR : BORDE }}>
-            <Renglon label="Pago recibido" valor={fmt(pagoOriginal)} />
-            <Renglon label="Asignado a negocios" valor={fmt(totalAsignado)} />
-            {totalPorDevolver > 0 && (
-              <Renglon label="Por devolver al cliente" valor={fmt(totalPorDevolver)} />
-            )}
-            <div className="mt-2 border-t pt-2" style={{ borderColor: BORDE }}>
-              <Renglon
-                label={sinAsignar < 0 ? 'Te pasaste por' : 'Sin asignar'}
-                valor={fmt(Math.abs(sinAsignar))}
-                fuerte
-                color={sobrepasa ? AMBAR : sinAsignar > 1 ? GRIS : VERDE}
-              />
-            </div>
-            {sobrepasa && (
-              <p className="mt-2 flex items-start gap-1.5 text-[11px]" style={{ color: AMBAR }}>
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Estás repartiendo más plata de la que llegó. Ajusta los montos.
-              </p>
-            )}
-          </div>
+          <ResumenReparto pagoOriginal={pagoOriginal} cuentas={cuentas} />
 
           <label className="mt-4 block">
             <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: GRIS }}>
@@ -226,15 +208,7 @@ export function RedistribuirModal({
             >
               Cancelar
             </button>
-            <button
-              type="button"
-              onClick={guardar}
-              disabled={isPending || sobrepasa || motivo.trim().length < 10}
-              className="flex items-center justify-center gap-2 rounded-lg bg-acento px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
-            >
-              {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Guardar el reparto
-            </button>
+            <BotonGuardarReparto cuentas={cuentas} isPending={isPending} onGuardar={guardar} />
           </div>
         </div>
       </div>
@@ -243,6 +217,61 @@ export function RedistribuirModal({
 
   if (typeof document === 'undefined') return null
   return createPortal(contenido, document.body)
+}
+
+/** Lo que se ve mientras se escribe. Exportado para la prueba de render. */
+export function ResumenReparto({
+  pagoOriginal, cuentas,
+}: { pagoOriginal: number; cuentas: CuentasReparto }) {
+  const { totalAsignado, totalPorDevolver, sinAsignar, sobrepasa, lineasSinNegocio } = cuentas
+  return (
+    <div className="mt-4 rounded-lg border p-3" style={{ borderColor: sobrepasa || lineasSinNegocio > 0 ? AMBAR : BORDE }}>
+      <Renglon label="Pago recibido" valor={fmt(pagoOriginal)} />
+      <Renglon label="Asignado a negocios" valor={fmt(totalAsignado)} />
+      {totalPorDevolver > 0 && (
+        <Renglon label="Por devolver al cliente" valor={fmt(totalPorDevolver)} />
+      )}
+      <div className="mt-2 border-t pt-2" style={{ borderColor: BORDE }}>
+        <Renglon
+          label={sinAsignar < 0 ? 'Te pasaste por' : 'Sin asignar'}
+          valor={fmt(Math.abs(sinAsignar))}
+          fuerte
+          color={sobrepasa ? AMBAR : sinAsignar > 1 ? GRIS : VERDE}
+        />
+      </div>
+      {sobrepasa && (
+        <p className="mt-2 flex items-start gap-1.5 text-[11px]" style={{ color: AMBAR }}>
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Estás repartiendo más plata de la que llegó. Ajusta los montos.
+        </p>
+      )}
+      {lineasSinNegocio > 0 && (
+        <p className="mt-2 flex items-start gap-1.5 text-[11px]" style={{ color: AMBAR }}>
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {lineasSinNegocio === 1
+            ? 'Hay una línea con plata y sin negocio: no cuenta como asignada. Escoge el negocio o elimina la línea.'
+            : `Hay ${lineasSinNegocio} líneas con plata y sin negocio: no cuentan como asignadas. Escoge el negocio o elimina las líneas.`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** El botón se apaga con cualquier cosa que el servidor rechazaría o que se perdería. */
+export function BotonGuardarReparto({
+  cuentas, isPending, onGuardar,
+}: { cuentas: CuentasReparto; isPending: boolean; onGuardar: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onGuardar}
+      disabled={isPending || !cuentas.puedeGuardar}
+      className="flex items-center justify-center gap-2 rounded-lg bg-acento px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-acento-hover disabled:opacity-50"
+    >
+      {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+      Guardar el reparto
+    </button>
+  )
 }
 
 function Renglon({
@@ -261,7 +290,7 @@ function Renglon({
   )
 }
 
-function FilaLinea({
+export function FilaLinea({
   linea, onCambiar, onEliminar, deshabilitado,
 }: {
   linea: Linea
@@ -272,6 +301,11 @@ function FilaLinea({
   const [cambiando, setCambiando] = useState(false)
   const [q, setQ] = useState('')
   const [resultados, setResultados] = useState<Array<{ id: string; codigo: string | null; nombre: string | null }>>([])
+  // Lo que respondió la última búsqueda: el campo nunca se queda mudo. Sin esto, un
+  // error del servidor y «no hay coincidencias» se veían igual: nada.
+  const [busqueda, setBusqueda] = useState<
+    { estado: 'nada' } | { estado: 'vacia'; termino: string } | { estado: 'error'; mensaje: string }
+  >({ estado: 'nada' })
 
   // ⚠️ El buscador está a la vista cuando la línea todavía NO tiene negocio (recién
   // agregada) o cuando se pidió cambiar el que tenía. La búsqueda depende de ESO, no de
@@ -285,15 +319,32 @@ function FilaLinea({
     let vivo = true
     const termino = q.trim()
     const t = setTimeout(async () => {
-      if (!buscadorVisible || termino.length < 2) { if (vivo) setResultados([]); return }
-      const res = await buscarNegociosParaValida(termino)
-      if (vivo) setResultados(res.ok ? res.negocios.slice(0, 8) : [])
+      if (!buscadorVisible || termino.length < 2) {
+        if (vivo) { setResultados([]); setBusqueda({ estado: 'nada' }) }
+        return
+      }
+      try {
+        const res = await buscarNegociosParaReparto(termino)
+        if (!vivo) return
+        if (!res.ok) {
+          setResultados([])
+          setBusqueda({ estado: 'error', mensaje: res.error })
+          return
+        }
+        setResultados(res.negocios)
+        setBusqueda(res.negocios.length === 0 ? { estado: 'vacia', termino } : { estado: 'nada' })
+      } catch {
+        if (vivo) {
+          setResultados([])
+          setBusqueda({ estado: 'error', mensaje: 'No se pudo buscar. Revisa la conexión e intenta de nuevo.' })
+        }
+      }
     }, 250)
     return () => { vivo = false; clearTimeout(t) }
   }, [q, buscadorVisible])
 
   return (
-    <div className="rounded-lg border p-3" style={{ borderColor: BORDE }}>
+    <div className="rounded-lg border p-3" style={{ borderColor: lineaSinNegocio(linea) ? AMBAR : BORDE }}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           {!buscadorVisible ? (
@@ -341,6 +392,22 @@ function FilaLinea({
                     </li>
                   ))}
                 </ul>
+              )}
+              {busqueda.estado === 'error' && (
+                <p className="mt-1 flex items-start gap-1 text-[11px]" style={{ color: AMBAR }} role="alert">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  No se pudo buscar: {busqueda.mensaje}
+                </p>
+              )}
+              {busqueda.estado === 'vacia' && (
+                <p className="mt-1 text-[11px]" style={{ color: GRIS }}>
+                  Ningún negocio coincide con «{busqueda.termino}».
+                </p>
+              )}
+              {lineaSinNegocio(linea) && (
+                <p className="mt-1 text-[11px] font-semibold" style={{ color: AMBAR }}>
+                  Escoge el negocio: sin él, esta plata no queda asignada.
+                </p>
               )}
             </div>
           )}

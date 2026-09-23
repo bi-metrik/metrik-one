@@ -192,3 +192,41 @@ describe('redistribuirReferencia — dónde queda el aviso de recaudo cambiado',
     expect(CUENTA).toBeGreaterThan(700_000)
   })
 })
+
+describe('redistribuirReferencia — un reparto idéntico no se anuncia como cambio', () => {
+  // Soena, 2026-09-23: el modal descartaba la línea sin negocio, mandaba el reparto
+  // actual tal cual y el toast decía «Reparto actualizado». La respuesta tiene que
+  // dejar decir «No hubo cambios».
+  it('mandar el reparto que ya estaba responde sinCambios', async () => {
+    sembrarNegocio({ id: 'n-442', codigo: 'V0442' })
+    sembrarPorcion({ cobroId: 'cobro-442', negocioId: 'n-442', monto: PAGO, ref: REF })
+
+    const res = await redistribuirReferencia({
+      pagoOriginal: PAGO,
+      externalRef: REF,
+      motivo: MOTIVO,
+      lineas: [{ negocioId: 'n-442', monto: PAGO }],
+    })
+    expect(res.ok).toBe(true)
+    expect(res.ok && res.sinCambios).toBe(true)
+    expect(res.ok && res.negociosAfectados).toBe(0)
+  })
+
+  it('un reparto que sí mueve plata NO dice sinCambios', async () => {
+    sembrarNegocio({ id: 'n-442', codigo: 'V0442' })
+    sembrarNegocio({ id: 'n-443', codigo: 'V0443' })
+    sembrarPorcion({ cobroId: 'cobro-442', negocioId: 'n-442', monto: PAGO, ref: REF })
+
+    const res = await redistribuirReferencia({
+      pagoOriginal: PAGO,
+      externalRef: REF,
+      motivo: MOTIVO,
+      lineas: [
+        { negocioId: 'n-442', monto: PAGO / 2 },
+        { negocioId: 'n-443', monto: PAGO / 2 },
+      ],
+    })
+    expect(res.ok).toBe(true)
+    expect(res.ok && res.sinCambios).toBe(false)
+  })
+})

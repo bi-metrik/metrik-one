@@ -33,6 +33,7 @@ import {
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { valorSinIvaDeFactura } from '@/lib/upme/valor-factura'
 import { planearRedistribucion, requiereSplitId } from '@/lib/cobros/redistribucion'
+import { filtroBusquedaNegocio } from '@/lib/cobros/busqueda-negocio'
 import { evaluarAnulabilidad } from '@/lib/cobros/anulabilidad'
 import { porcionesPorConfirmar as contarPorcionesPorConfirmar } from '@/lib/cobros/confirmacion-por-referencia'
 import { esCobroAnulado, montoRegistrado } from '@/lib/cobros/anulacion'
@@ -2130,6 +2131,43 @@ async function cuentaDelNegocio(
 }
 
 /**
+ * Buscador de negocios del modal «Corregir el reparto».
+ *
+ * ⚠️ Antes el modal usaba `buscarNegociosParaValida`, que exige el módulo Valida y el
+ * contrato CDA. En un workspace sin Valida (Soena) devolvía `ok:false`, el modal lo
+ * convertía en `[]` y el campo quedaba mudo: se escribía «v0477» y no salía nada. El
+ * acceso aquí es el MISMO de `redistribuirReferencia` (`ctxFinanciero`): quien puede
+ * guardar el reparto puede buscar a qué negocio va.
+ */
+export async function buscarNegociosParaReparto(
+  termino: string,
+): Promise<
+  | { ok: true; negocios: Array<{ id: string; codigo: string | null; nombre: string | null }> }
+  | { ok: false; error: string }
+> {
+  const ctx = await ctxFinanciero()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId } = ctx
+
+  const filtro = filtroBusquedaNegocio(termino)
+  if (!filtro) return { ok: true, negocios: [] }
+
+  const { data, error } = await db(supabase)
+    .from('negocios')
+    .select('id, codigo, nombre')
+    .eq('workspace_id', workspaceId)
+    .or(filtro)
+    .order('created_at', { ascending: false })
+    .limit(8)
+
+  if (error) return { ok: false, error: (error as { message: string }).message }
+  return {
+    ok: true,
+    negocios: (data ?? []) as Array<{ id: string; codigo: string | null; nombre: string | null }>,
+  }
+}
+
+/**
  * El área financiera reescribe cómo se reparte una referencia entre negocios.
  *
  * Es UNA operación para los cuatro gestos que antes no existían: repartir, deshacer un
@@ -2153,7 +2191,7 @@ export async function redistribuirReferencia(input: {
   lineas: Array<{ negocioId: string; monto: number; porDevolver?: boolean }>
   motivo: string
 }): Promise<
-  | { ok: true; negociosAfectados: number; gatesReabiertos: number }
+  | { ok: true; negociosAfectados: number; gatesReabiertos: number; sinCambios: boolean }
   | { ok: false; error: string; errores?: string[] }
 > {
   const ctx = await ctxFinanciero()
@@ -2359,7 +2397,15 @@ export async function redistribuirReferencia(input: {
   revalidatePath('/conciliacion')
   for (const negocioId of plan.negociosAfectados) revalidatePath(`/negocios/${negocioId}`)
 
-  return { ok: true, negociosAfectados: plan.negociosAfectados.length, gatesReabiertos }
+  // Un reparto idéntico al actual no mueve plata en ningún negocio. Las escrituras de
+  // arriba sí corren (re-estampan la marca de reparto, que puede faltar en una
+  // referencia vieja), pero decir «Reparto actualizado» es mentirle a la persona.
+  return {
+    ok: true,
+    negociosAfectados: plan.negociosAfectados.length,
+    gatesReabiertos,
+    sinCambios: plan.negociosAfectados.length === 0,
+  }
 }
 
 // ── Retroceso financiero ──────────────────────────────────────────────────────
