@@ -16,7 +16,8 @@ export type Intent =
 
 export interface ParsedFields {
   amount?: number;
-  concept?: string;
+  concept?: string;            // Etiqueta corta para los mensajes del bot
+  descripcion?: string;        // Detalle completo del gasto: es lo que se guarda en gastos.descripcion
   entity_hint?: string;
   project_code?: string | number;  // Code: "KAE-2", "P-012", or numeric 12
   category_hint?: string;

@@ -160,10 +160,13 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
   }
 
   if (selected.id === 'empresa') {
+    // Los campos del gasto salen de la SESION: en este camino `ctx.parsed.fields`
+    // es el del mensaje de seleccion ("5"), no el del gasto, y leerlo de ahi
+    // borraba la descripcion y el mensaje original.
     await proceedEmpresaGasto(
       ctx,
       context.amount!,
-      context.parsed_fields?.concept || '',
+      context.parsed_fields ?? {},
       context.categoria || 'otros',
     );
     return;
@@ -193,7 +196,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
   if (negocio) {
     const entity = { ...negocio, proyecto_id: negocio.id, codigo: negocio.codigo ?? '' };
     await showGastoConfirmation(
-      ctx, entity, context.amount!, context.categoria || 'otros', context.parsed_fields?.concept, 'negocio',
+      ctx, entity, context.amount!, context.categoria || 'otros', context.parsed_fields ?? {}, 'negocio',
     );
     return;
   }
@@ -211,7 +214,7 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
   }
 
   await showGastoConfirmation(
-    ctx, project, context.amount!, context.categoria || 'otros', context.parsed_fields?.concept, 'proyecto',
+    ctx, project, context.amount!, context.categoria || 'otros', context.parsed_fields ?? {}, 'proyecto',
   );
 }
 

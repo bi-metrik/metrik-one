@@ -9,9 +9,11 @@
 // Sin matching contra gastos_fijos_borradores (legacy desconectado).
 // ============================================================
 
-import type { HandlerContext } from '../../types.ts';
+import type { HandlerContext, ParsedFields } from '../../types.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
-import { CONFIDENCE_THRESHOLD } from '../../wa-parse.ts';
+// Del modulo puro y no de `wa-parse.ts`, que lee `Deno.env` al cargarse: asi este
+// handler se puede importar en las pruebas.
+import { CONFIDENCE_THRESHOLD } from '../../wa-parse-reglas.ts';
 import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
 import {
   findDestinos,
@@ -23,6 +25,8 @@ import {
 } from '../../wa-lookup.ts';
 import { executeRegistro } from './execute.ts';
 import { proponerCentroCostosWA, type PropuestaCC } from '../../centro-costos.ts';
+import { categoriaConocida, detalleGasto, descripcionVisible } from '../../wa-gasto-descripcion.ts';
+import { MSG_PEDIR_MONTO } from './mensajes-gasto.ts';
 
 // Lo que este handler lee de un destino, venga de donde venga. Todo opcional
 // salvo el nombre: un negocio no trae `presupuesto_total` ni `costo_acumulado`,
@@ -51,12 +55,19 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
   const { amount, entity_hint, concept, category_hint, project_code } = parsed.fields;
 
   if (!amount || amount <= 0) {
-    await ctx.sendMessage('❌ El monto debe ser mayor a $0. ¿Cuánto fue el gasto?');
+    await ctx.sendMessage(MSG_PEDIR_MONTO);
     return;
   }
 
+  // Los campos que viajan con el gasto hasta el insert: el mensaje completo,
+  // la descripcion y el concepto. En este camino salen del mensaje que se esta
+  // procesando; en los que pasan por la sesion (resume.ts), de la sesion.
+  const fields = parsed.fields;
+
   // Resolve category — trust Gemini's category_hint first, matchCategory() as fallback
-  const categoria = category_hint || matchCategory(concept || '') || 'otros';
+  const categoria = categoriaConocida(category_hint)
+    || matchCategory([concept, fields.descripcion].filter(Boolean).join(' '))
+    || 'otros';
 
   const isHighConfidence = parsed.confidence >= CONFIDENCE_THRESHOLD;
 
@@ -65,9 +76,9 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
     const negocio = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
     if (negocio) {
       if (isHighConfidence) {
-        await autoRegisterGasto(ctx, negocio, amount, categoria, concept, 'negocio');
+        await autoRegisterGasto(ctx, negocio, amount, categoria, fields, 'negocio');
       } else {
-        await showGastoConfirmation(ctx, negocio, amount, categoria, concept, 'negocio');
+        await showGastoConfirmation(ctx, negocio, amount, categoria, fields, 'negocio');
       }
       return;
     }
@@ -75,9 +86,9 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
     const project = await findProjectByCode(supabase, user.workspace_id, String(project_code));
     if (project) {
       if (isHighConfidence) {
-        await autoRegisterGasto(ctx, project, amount, categoria, concept, 'proyecto');
+        await autoRegisterGasto(ctx, project, amount, categoria, fields, 'proyecto');
       } else {
-        await showGastoConfirmation(ctx, project, amount, categoria, concept, 'proyecto');
+        await showGastoConfirmation(ctx, project, amount, categoria, fields, 'proyecto');
       }
       return;
     }
@@ -89,7 +100,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
     const destinos = await findActiveDestinos(supabase, user.workspace_id);
     if (destinos.all.length === 0) {
       // Sin negocios activos → registrar como gasto de empresa
-      await proceedEmpresaGasto(ctx, amount, concept || '', categoria);
+      await proceedEmpresaGasto(ctx, amount, fields, categoria);
       return;
     }
 
@@ -118,7 +129,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
     // No match — show active destinos
     const allActive = await findActiveDestinos(supabase, user.workspace_id);
     if (allActive.all.length === 0) {
-      await proceedEmpresaGasto(ctx, amount, concept || '', categoria);
+      await proceedEmpresaGasto(ctx, amount, fields, categoria);
       return;
     }
 
@@ -144,9 +155,9 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
     const d = destinos.all[0];
     const tipo = d._tipo;
     if (isHighConfidence) {
-      await autoRegisterGasto(ctx, d, amount, categoria, concept, tipo);
+      await autoRegisterGasto(ctx, d, amount, categoria, fields, tipo);
     } else {
-      await showGastoConfirmation(ctx, d, amount, categoria, concept, tipo);
+      await showGastoConfirmation(ctx, d, amount, categoria, fields, tipo);
     }
     return;
   }
@@ -221,16 +232,18 @@ export async function showGastoConfirmation(
   entity: EntidadGasto,
   amount: number,
   categoria: string,
-  concept?: string,
+  fields: ParsedFields = {},
   tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
+  const detalle = detalleGasto(fields);
   const presupuesto = Number(entity.presupuesto_total) || 0;
   const costoActual = Number(entity.costo_acumulado) || 0;
   const costoNuevo = costoActual + amount;
   const pctNuevo = presupuesto > 0 ? (costoNuevo / presupuesto) * 100 : 0;
 
   let msg = `📁 ${bold(formatProject(entity))}\n💰 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}`;
-  if (concept) msg += `\n📝 ${concept}`;
+  // Lo que se va a guardar en la descripcion, para que el usuario lo vea antes de confirmar.
+  if (detalle) msg += `\n📝 ${descripcionVisible(detalle)}`;
 
   if (presupuesto > 0) {
     msg += `\n📊 Presupuesto: ${formatCOP(costoNuevo)} / ${formatCOP(presupuesto)} (${formatPct(pctNuevo)})`;
@@ -243,7 +256,7 @@ export async function showGastoConfirmation(
   const entityId = destinoId(entity);
   const negIdForCC = tipo === 'negocio' ? entityId : null;
   const cc = await resolverCentroCostos(ctx, {
-    descripcion: concept,
+    descripcion: detalle,
     negocio_id_destino: negIdForCC,
     tipo,
   });
@@ -272,7 +285,7 @@ export async function showGastoConfirmation(
     proyecto_nombre: entity.nombre,
     destino_tipo: tipo,
     amount, categoria,
-    parsed_fields: { ...ctx.parsed.fields, concept },
+    parsed_fields: fields,
     ...(cc.centro ? { centro_costos: cc.centro } : {}),
     ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
   });
@@ -284,13 +297,13 @@ async function autoRegisterGasto(
   entity: EntidadGasto,
   amount: number,
   categoria: string,
-  concept?: string,
+  fields: ParsedFields = {},
   tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
   const entityId = destinoId(entity);
   const negIdForCC = tipo === 'negocio' ? entityId : null;
   const cc = await resolverCentroCostos(ctx, {
-    descripcion: concept,
+    descripcion: detalleGasto(fields),
     negocio_id_destino: negIdForCC,
     tipo,
   });
@@ -302,7 +315,7 @@ async function autoRegisterGasto(
     proyecto_nombre: entity.nombre,
     destino_tipo: tipo,
     amount, categoria,
-    parsed_fields: { ...ctx.parsed.fields, concept },
+    parsed_fields: fields,
     ...(cc.centro ? { centro_costos: cc.centro } : {}),
     ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
   });
@@ -313,16 +326,19 @@ async function autoRegisterGasto(
 export async function proceedEmpresaGasto(
   ctx: HandlerContext,
   amount: number,
-  concept: string,
+  fields: ParsedFields,
   categoria: string,
 ): Promise<void> {
+  const detalle = detalleGasto(fields);
   const cc = await resolverCentroCostos(ctx, {
-    descripcion: concept,
+    descripcion: detalle,
     negocio_id_destino: null,
     tipo: 'empresa',
   });
 
-  let msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}\n📅 Hoy`;
+  let msg = `💰 Gasto de empresa:\n\n💵 ${formatCOP(amount)} — ${CATEGORIA_LABELS[categoria] || categoria}`;
+  if (detalle) msg += `\n📝 ${descripcionVisible(detalle)}`;
+  msg += `\n📅 Hoy`;
 
   if (cc.centro) {
     const ccLabel =
@@ -346,7 +362,7 @@ export async function proceedEmpresaGasto(
     intent: 'GASTO', pending_action: 'W01',
     amount, categoria,
     destino_tipo: 'empresa',
-    parsed_fields: { concept, mensaje_original: ctx.parsed.fields.mensaje_original },
+    parsed_fields: fields,
     ...(cc.centro ? { centro_costos: cc.centro } : {}),
     ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
   });
