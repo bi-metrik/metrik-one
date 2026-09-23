@@ -25,7 +25,8 @@
  * enlace que no pasa, o que ya venció, no se pinta: la tarjeta dice que el enlace llega, en vez de
  * ofrecer uno dudoso o muerto.
  *
- * El pago NO bloquea el módulo: la mora se maneja por la cláusula 11 de los términos.
+ * El pago NO bloquea el módulo antes de 30 días de mora (cláusula 11.1): esa regla vive en
+ * `plazos.ts` (`estadoMora`), y se mide sobre la cuota que devuelve `proximoPago`.
  */
 
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
@@ -41,6 +42,16 @@ export interface CuotaDeServicio {
   enlacePagoUrl: string | null
   /** ISO-8601: hasta cuándo sirve el enlace. `null` = sin fecha de vencimiento declarada. */
   enlacePagoExpira: string | null
+  /** `plan_cobro_cuotas.id`: por él se descarga la factura. */
+  cuotaId?: string | null
+  /** La factura electrónica que MeTRIK cargó para esta cuota, si existe. */
+  factura?: FacturaDeCuota | null
+}
+
+export interface FacturaDeCuota {
+  numero: string
+  pdf: boolean
+  xml: boolean
 }
 
 export interface CobroRecibido {
@@ -87,6 +98,82 @@ export function enlaceDePagoValido(url: string | null | undefined): string | nul
   return esDeLaPasarela ? u.toString() : null
 }
 
+export type EstadoCuota = 'pagada' | 'abonada' | 'pendiente' | 'vencida'
+
+/** Una cuota con lo que lo pagado le alcanzó a cubrir, para la pestaña Pagos. */
+export interface CuotaConEstado {
+  cuotaId: string | null
+  numero: number
+  concepto: string | null
+  fechaVencimiento: string
+  monto: number
+  abonado: number
+  saldo: number
+  estado: EstadoCuota
+  /** El enlace de Bold, solo si la cuota tiene saldo y el enlace es de Bold, https y vigente. */
+  enlacePago: string | null
+  factura: FacturaDeCuota | null
+}
+
+/** Las cuotas con monto, de la más vieja a la más nueva: el orden del reparto. */
+function cuotasEnOrden(cuotas: readonly CuotaDeServicio[]): CuotaDeServicio[] {
+  return [...cuotas]
+    .filter((c) => Number.isFinite(c.monto) && c.monto > 0)
+    .sort((a, b) => a.fechaVencimiento.localeCompare(b.fechaVencimiento) || a.numero - b.numero)
+}
+
+function totalRecibido(cobros: readonly CobroRecibido[]): number {
+  return cobros.filter((c) => c.estado === 'pagado').reduce((s, c) => s + (Number.isFinite(c.monto) ? c.monto : 0), 0)
+}
+
+/** El enlace que se puede pintar y si había uno ya vencido. */
+function enlaceDeCuota(cuota: CuotaDeServicio, ahoraISO: string): { enlace: string | null; vencido: boolean } {
+  const enlace = enlaceDePagoValido(cuota.enlacePagoUrl)
+  const expira = cuota.enlacePagoExpira ? Date.parse(cuota.enlacePagoExpira) : Number.NaN
+  // Un vencimiento ilegible no se lee como «vigente»: sin poder compararlo, el enlace no sale.
+  const vencido =
+    enlace !== null && cuota.enlacePagoExpira !== null && (Number.isNaN(expira) || expira < Date.parse(ahoraISO))
+  return { enlace: vencido ? null : enlace, vencido }
+}
+
+/**
+ * Todas las cuotas, con el mismo reparto de `proximoPago`: lo recibido cubre de la más vieja a la
+ * más nueva, y unos pesos de redondeo no dejan una cuota «abonada».
+ */
+export function cuotasConEstado(p: {
+  cuotas: readonly CuotaDeServicio[]
+  cobros: readonly CobroRecibido[]
+  hoy: string
+  ahoraISO: string
+}): CuotaConEstado[] {
+  let disponible = totalRecibido(p.cobros)
+  return cuotasEnOrden(p.cuotas).map((cuota) => {
+    const abonado = Math.max(0, Math.min(disponible, cuota.monto))
+    disponible -= cuota.monto
+    const saldo = cuota.monto - abonado
+    const pagada = saldo <= 0 || saldoCuadrado(saldo)
+    const estado: EstadoCuota = pagada
+      ? 'pagada'
+      : cuota.fechaVencimiento < p.hoy
+        ? 'vencida'
+        : abonado > 0
+          ? 'abonada'
+          : 'pendiente'
+    return {
+      cuotaId: cuota.cuotaId ?? null,
+      numero: cuota.numero,
+      concepto: cuota.concepto,
+      fechaVencimiento: cuota.fechaVencimiento,
+      monto: cuota.monto,
+      abonado: pagada ? cuota.monto : abonado,
+      saldo: pagada ? 0 : saldo,
+      estado,
+      enlacePago: pagada ? null : enlaceDeCuota(cuota, p.ahoraISO).enlace,
+      factura: cuota.factura ?? null,
+    }
+  })
+}
+
 export function proximoPago(p: {
   cuotas: readonly CuotaDeServicio[]
   cobros: readonly CobroRecibido[]
@@ -95,14 +182,10 @@ export function proximoPago(p: {
   /** El instante de ahora, ISO-8601, para comparar contra el vencimiento del enlace. */
   ahoraISO: string
 }): ProximoPago {
-  const cuotas = [...p.cuotas]
-    .filter((c) => Number.isFinite(c.monto) && c.monto > 0)
-    .sort((a, b) => a.fechaVencimiento.localeCompare(b.fechaVencimiento) || a.numero - b.numero)
+  const cuotas = cuotasEnOrden(p.cuotas)
   if (cuotas.length === 0) return { estado: 'sin_cuotas' }
 
-  let disponible = p.cobros
-    .filter((c) => c.estado === 'pagado')
-    .reduce((s, c) => s + (Number.isFinite(c.monto) ? c.monto : 0), 0)
+  let disponible = totalRecibido(p.cobros)
 
   for (let i = 0; i < cuotas.length; i++) {
     const cuota = cuotas[i]
@@ -113,11 +196,7 @@ export function proximoPago(p: {
       disponible -= cuota.monto
       continue
     }
-    const enlace = enlaceDePagoValido(cuota.enlacePagoUrl)
-    const expira = cuota.enlacePagoExpira ? Date.parse(cuota.enlacePagoExpira) : Number.NaN
-    // Un vencimiento ilegible no se lee como «vigente»: sin poder compararlo, el enlace no sale.
-    const enlaceVencido =
-      enlace !== null && cuota.enlacePagoExpira !== null && (Number.isNaN(expira) || expira < Date.parse(p.ahoraISO))
+    const { enlace, vencido: enlaceVencido } = enlaceDeCuota(cuota, p.ahoraISO)
     return {
       estado: 'pendiente',
       numero: cuota.numero,
@@ -127,7 +206,7 @@ export function proximoPago(p: {
       abonado,
       saldo,
       vencida: cuota.fechaVencimiento < p.hoy,
-      enlacePago: enlaceVencido ? null : enlace,
+      enlacePago: enlace,
       enlaceVencido,
     }
   }

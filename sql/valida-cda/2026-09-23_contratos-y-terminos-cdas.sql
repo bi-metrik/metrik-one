@@ -8,14 +8,19 @@
 -- ⚠️ ESTO NO ESTÁ APLICADO. Escribe datos de producción: lo corre la sesión principal, CDA por CDA,
 -- cuando la empresa haya nombrado a su persona designada. Los cuatro bloques son independientes.
 --
--- ⚠️ EFECTO INMEDIATO al cargar un CDA: desde ese momento `/valida` de ese espacio muestra los
--- términos y NADIE consulta hasta que la persona designada los acepte (los demás ven quién falta).
+-- ⚠️ EFECTO al cargar un CDA: cada contrato nace con plazo para aceptar hasta el 30-sep-2026
+-- (`c_plazo_terminos` → `servicios_contratados.terminos_plazo_hasta`, decisión de Mauricio del
+-- 2026-09-23). Hasta ese día el CDA sigue consultando y ve un aviso; la persona designada acepta
+-- desde el aviso. Desde el 1-oct, sin aceptación, `/valida` muestra solo los términos y NADIE
+-- consulta hasta que ella acepte (los demás ven quién falta). Cargar un bloque DESPUÉS del 30-sep
+-- es cerrar Valida de inmediato para ese CDA: correr el plazo antes, o dejarlo en null a propósito.
 -- Por eso el bloque no corre sin `c_designado`: un contrato sin designada deja el módulo cerrado
 -- sin nadie que pueda abrirlo.
 --
 -- ── Orden ───────────────────────────────────────────────────────────────────
---   0. La migración `20260923220000_terminos_cda_designado_y_enlace_pago.sql` aplicada (va ANTES
---      del merge del PR). El bloque lo comprueba.
+--   0. Las migraciones `20260923220000_terminos_cda_designado_y_enlace_pago.sql` y
+--      `20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql` aplicadas (van ANTES del
+--      merge de sus PR). El bloque comprueba las dos.
 --   1. Merge y deploy del PR (sin el código nuevo, el contrato no cierra nada: el CDA sigue igual).
 --   2. Subir los 4 PDF al bucket `aceptaciones-documentos`, cada uno en `<espacio>/terminos-suscripcion-valida-cda-v1.1.pdf`
 --      (sin upsert). Los archivos son los de
@@ -40,7 +45,7 @@
 --     electrónica) ni carga enlaces de pago.
 --
 -- ── Verificación después de cargar (solo lectura) ───────────────────────────
---   select w.slug, sc.estado, p.full_name as designada, sc.parametros
+--   select w.slug, sc.estado, p.full_name as designada, sc.terminos_plazo_hasta, sc.parametros
 --     from public.servicios_contratados sc
 --     join public.workspaces w on w.id = sc.workspace_pagador_id
 --     left join public.profiles p on p.id = sc.aceptante_designado_id
@@ -77,6 +82,8 @@ declare
   c_ensayo constant boolean := true;
   -- ⚠️ profiles.id de quien acepta por la empresa, EN el espacio de este CDA. Sin él, no corre.
   c_designado constant uuid := null;
+  -- Último día (inclusive) en que el CDA consulta sin la aceptación. null = se cierra al cargar.
+  c_plazo_terminos constant date := date '2026-09-30';
 
   c_ws_metrik      constant uuid := 'a21bfc88-1a60-48c3-afcd-144226aa2392';
   c_linea_valida   constant uuid := '7d9f8994-a843-4032-a632-a6286ec61d94';
@@ -247,6 +254,12 @@ begin
   ) then
     raise exception 'Falta la migración 20260923220000_terminos_cda_designado_y_enlace_pago.sql';
   end if;
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'servicios_contratados' and column_name = 'terminos_plazo_hasta'
+  ) then
+    raise exception 'Falta la migración 20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql';
+  end if;
 
   select p.id, p.full_name, p.workspace_id, coalesce(p.platform_admin, false) as platform_admin
     into v_perfil
@@ -305,7 +318,7 @@ begin
   insert into public.servicios_contratados (
     workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, parametros,
     workspace_pagador_id, correo_facturacion, estado, vigente_desde, vigente_hasta,
-    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id
+    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id, terminos_plazo_hasta
   ) values (
     c_ws_metrik, c_empresa, c_negocio, 'valida-cda-licencia', 1,
     jsonb_build_object('precio_mensual', 150000, 'licencias', 2),
@@ -318,7 +331,7 @@ begin
     --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
     --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
     null,
-    false, c_registrado_por, c_designado
+    false, c_registrado_por, c_designado, c_plazo_terminos
   )
   returning id into v_sc;
 
@@ -333,6 +346,7 @@ begin
       'workspace_pagador_id', c_ws_cda,
       'aceptante_designado_id', c_designado,
       'aceptante_designado_nombre', v_perfil.full_name,
+      'terminos_plazo_hasta', c_plazo_terminos,
       'comision', null
     ),
     'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
@@ -394,6 +408,8 @@ declare
   c_ensayo constant boolean := true;
   -- ⚠️ profiles.id de quien acepta por la empresa, EN el espacio de este CDA. Sin él, no corre.
   c_designado constant uuid := null;
+  -- Último día (inclusive) en que el CDA consulta sin la aceptación. null = se cierra al cargar.
+  c_plazo_terminos constant date := date '2026-09-30';
 
   c_ws_metrik      constant uuid := 'a21bfc88-1a60-48c3-afcd-144226aa2392';
   c_linea_valida   constant uuid := '7d9f8994-a843-4032-a632-a6286ec61d94';
@@ -564,6 +580,12 @@ begin
   ) then
     raise exception 'Falta la migración 20260923220000_terminos_cda_designado_y_enlace_pago.sql';
   end if;
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'servicios_contratados' and column_name = 'terminos_plazo_hasta'
+  ) then
+    raise exception 'Falta la migración 20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql';
+  end if;
 
   select p.id, p.full_name, p.workspace_id, coalesce(p.platform_admin, false) as platform_admin
     into v_perfil
@@ -622,7 +644,7 @@ begin
   insert into public.servicios_contratados (
     workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, parametros,
     workspace_pagador_id, correo_facturacion, estado, vigente_desde, vigente_hasta,
-    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id
+    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id, terminos_plazo_hasta
   ) values (
     c_ws_metrik, c_empresa, c_negocio, 'valida-cda-licencia', 1,
     jsonb_build_object('precio_mensual', 150000, 'licencias', 2),
@@ -635,7 +657,7 @@ begin
     --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
     --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
     null,
-    false, c_registrado_por, c_designado
+    false, c_registrado_por, c_designado, c_plazo_terminos
   )
   returning id into v_sc;
 
@@ -650,6 +672,7 @@ begin
       'workspace_pagador_id', c_ws_cda,
       'aceptante_designado_id', c_designado,
       'aceptante_designado_nombre', v_perfil.full_name,
+      'terminos_plazo_hasta', c_plazo_terminos,
       'comision', null
     ),
     'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
@@ -711,6 +734,8 @@ declare
   c_ensayo constant boolean := true;
   -- ⚠️ profiles.id de quien acepta por la empresa, EN el espacio de este CDA. Sin él, no corre.
   c_designado constant uuid := null;
+  -- Último día (inclusive) en que el CDA consulta sin la aceptación. null = se cierra al cargar.
+  c_plazo_terminos constant date := date '2026-09-30';
 
   c_ws_metrik      constant uuid := 'a21bfc88-1a60-48c3-afcd-144226aa2392';
   c_linea_valida   constant uuid := '7d9f8994-a843-4032-a632-a6286ec61d94';
@@ -881,6 +906,12 @@ begin
   ) then
     raise exception 'Falta la migración 20260923220000_terminos_cda_designado_y_enlace_pago.sql';
   end if;
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'servicios_contratados' and column_name = 'terminos_plazo_hasta'
+  ) then
+    raise exception 'Falta la migración 20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql';
+  end if;
 
   select p.id, p.full_name, p.workspace_id, coalesce(p.platform_admin, false) as platform_admin
     into v_perfil
@@ -939,7 +970,7 @@ begin
   insert into public.servicios_contratados (
     workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, parametros,
     workspace_pagador_id, correo_facturacion, estado, vigente_desde, vigente_hasta,
-    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id
+    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id, terminos_plazo_hasta
   ) values (
     c_ws_metrik, c_empresa, c_negocio, 'valida-cda-licencia', 1,
     jsonb_build_object('precio_mensual', 150000, 'licencias', 2),
@@ -952,7 +983,7 @@ begin
     --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
     --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
     null,
-    false, c_registrado_por, c_designado
+    false, c_registrado_por, c_designado, c_plazo_terminos
   )
   returning id into v_sc;
 
@@ -967,6 +998,7 @@ begin
       'workspace_pagador_id', c_ws_cda,
       'aceptante_designado_id', c_designado,
       'aceptante_designado_nombre', v_perfil.full_name,
+      'terminos_plazo_hasta', c_plazo_terminos,
       'comision', null
     ),
     'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
@@ -1028,6 +1060,8 @@ declare
   c_ensayo constant boolean := true;
   -- ⚠️ profiles.id de quien acepta por la empresa, EN el espacio de este CDA. Sin él, no corre.
   c_designado constant uuid := null;
+  -- Último día (inclusive) en que el CDA consulta sin la aceptación. null = se cierra al cargar.
+  c_plazo_terminos constant date := date '2026-09-30';
 
   c_ws_metrik      constant uuid := 'a21bfc88-1a60-48c3-afcd-144226aa2392';
   c_linea_valida   constant uuid := '7d9f8994-a843-4032-a632-a6286ec61d94';
@@ -1198,6 +1232,12 @@ begin
   ) then
     raise exception 'Falta la migración 20260923220000_terminos_cda_designado_y_enlace_pago.sql';
   end if;
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'servicios_contratados' and column_name = 'terminos_plazo_hasta'
+  ) then
+    raise exception 'Falta la migración 20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql';
+  end if;
 
   select p.id, p.full_name, p.workspace_id, coalesce(p.platform_admin, false) as platform_admin
     into v_perfil
@@ -1256,7 +1296,7 @@ begin
   insert into public.servicios_contratados (
     workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, parametros,
     workspace_pagador_id, correo_facturacion, estado, vigente_desde, vigente_hasta,
-    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id
+    comision, autorizacion_sin_poder_permitida, actualizado_por, aceptante_designado_id, terminos_plazo_hasta
   ) values (
     c_ws_metrik, c_empresa, c_negocio, 'valida-cda-licencia', 1,
     jsonb_build_object('precio_mensual', 150000, 'licencias', 2),
@@ -1269,7 +1309,7 @@ begin
     --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
     --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
     null,
-    false, c_registrado_por, c_designado
+    false, c_registrado_por, c_designado, c_plazo_terminos
   )
   returning id into v_sc;
 
@@ -1284,6 +1324,7 @@ begin
       'workspace_pagador_id', c_ws_cda,
       'aceptante_designado_id', c_designado,
       'aceptante_designado_nombre', v_perfil.full_name,
+      'terminos_plazo_hasta', c_plazo_terminos,
       'comision', null
     ),
     'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 21 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',

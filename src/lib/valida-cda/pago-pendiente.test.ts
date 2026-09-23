@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { enlaceDePagoValido, fechaCorta, proximoPago, type CobroRecibido, type CuotaDeServicio } from './pago-pendiente'
+import { cuotasConEstado, enlaceDePagoValido, fechaCorta, proximoPago, type CobroRecibido, type CuotaDeServicio } from './pago-pendiente'
 
 /**
  * El próximo pago de un CDA. Las cuotas son las reales de C1 26 1 (CDA del Caquetá), medidas en
@@ -145,5 +145,38 @@ describe('las fechas se leen como en el período de la cuota', () => {
   it('dd/mm/aaaa, sin correrse de día', () => {
     expect(fechaCorta('2026-09-30')).toBe('30/09/2026')
     expect(fechaCorta('2027-01-01')).toBe('01/01/2027')
+  })
+})
+
+describe('las cuotas de la pestaña Pagos', () => {
+  const ahora = '2026-10-05T15:00:00Z'
+  const estados = (cobros: CobroRecibido[], hoy: string) =>
+    cuotasConEstado({ cuotas: CUOTAS, cobros, hoy, ahoraISO: ahora }).map((c) => [c.numero, c.estado, c.abonado, c.saldo])
+
+  it('reparte lo pagado de la más vieja a la más nueva, igual que el próximo pago', () => {
+    expect(estados([pagado(150000), pagado(50000)], '2026-10-05')).toEqual([
+      [1, 'pagada', 150000, 0],
+      [2, 'abonada', 50000, 100000],
+      [3, 'pendiente', 0, 150000],
+      [4, 'pendiente', 0, 150000],
+    ])
+  })
+
+  it('una cuota impaga cuyo vencimiento pasó queda vencida, aunque tenga abono', () => {
+    expect(estados([pagado(100000)], '2026-10-01')[0]).toEqual([1, 'vencida', 100000, 50000])
+  })
+
+  it('unos pesos de redondeo no dejan una cuota abierta', () => {
+    expect(estados([pagado(149990)], '2026-10-01')[0]).toEqual([1, 'pagada', 150000, 0])
+  })
+
+  it('el botón de pago solo en una cuota con saldo, y la factura viaja con su cuota', () => {
+    const cuotas = [
+      { ...CUOTAS[0], enlacePagoExpira: '2026-12-31T23:59:00-05:00', cuotaId: 'c1', factura: { numero: 'FE-1', pdf: true, xml: true } },
+      { ...CUOTAS[1], enlacePagoUrl: LINK, enlacePagoExpira: '2026-12-31T23:59:00-05:00' },
+    ]
+    const r = cuotasConEstado({ cuotas, cobros: [pagado(150000)], hoy: '2026-10-05', ahoraISO: ahora })
+    expect(r[0]).toMatchObject({ estado: 'pagada', enlacePago: null, cuotaId: 'c1', factura: { numero: 'FE-1', pdf: true, xml: true } })
+    expect(r[1]).toMatchObject({ estado: 'pendiente', enlacePago: LINK, factura: null })
   })
 })

@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   FileText,
   History,
+  Receipt,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -108,7 +109,20 @@ type Props = {
    * licencia de un CDA (se pinta en el servidor). Sin él, la pantalla es la de siempre.
    */
   encabezado?: React.ReactNode;
+  /**
+   * Las secciones de un CDA con los términos aceptados, al lado de la consulta de listas (que sigue
+   * siendo la principal): Pagos (solo si quien entra puede ver la plata; `null` la oculta) y
+   * Términos. Sin esto, la pantalla es la de siempre (AFI, metrik, cualquier espacio sin contrato).
+   */
+  seccionesCda?: { pagos: React.ReactNode | null; terminos: React.ReactNode } | null;
+  /**
+   * Lo que se muestra EN LUGAR de las consultas cuando Valida está pausada (mora de más de 30 días).
+   * Las demás secciones siguen disponibles: desde Pagos se ve qué se debe y se paga.
+   */
+  consultasEnPausa?: React.ReactNode;
 };
+
+type SeccionCda = 'consultas' | 'pagos' | 'terminos';
 
 export default function ValidaClient({
   historialInicial,
@@ -117,8 +131,11 @@ export default function ValidaClient({
   negocioInicial = null,
   modoVitrina = false,
   encabezado = null,
+  seccionesCda = null,
+  consultasEnPausa = null,
 }: Props) {
   const [tab, setTab] = useState<TabKey>(negocioInicial ? 'historial' : 'puntual');
+  const [seccion, setSeccion] = useState<SeccionCda>('consultas');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
   const [tourTrigger, setTourTrigger] = useState(0);
@@ -135,6 +152,7 @@ export default function ValidaClient({
 
   function dispararTutorial() {
     setTourTrigger(t => t + 1);
+    setSeccion('consultas');
     setTab('puntual');
   }
 
@@ -155,6 +173,29 @@ export default function ValidaClient({
 
       {encabezado}
 
+      {seccionesCda && (
+        <div role="tablist" data-secciones-cda className="flex flex-wrap gap-1 border-b border-[#E5E7EB]">
+          <TabButton active={seccion === 'consultas'} onClick={() => setSeccion('consultas')} icon={<Search className="h-4 w-4" />}>
+            Consultas
+          </TabButton>
+          {seccionesCda.pagos && (
+            <TabButton active={seccion === 'pagos'} onClick={() => setSeccion('pagos')} icon={<Receipt className="h-4 w-4" />}>
+              Pagos
+            </TabButton>
+          )}
+          <TabButton active={seccion === 'terminos'} onClick={() => setSeccion('terminos')} icon={<FileText className="h-4 w-4" />}>
+            Términos
+          </TabButton>
+        </div>
+      )}
+
+      {seccionesCda && seccion === 'pagos' && seccionesCda.pagos}
+      {seccionesCda && seccion === 'terminos' && seccionesCda.terminos}
+
+      {/* Las consultas se ocultan, no se desmontan: una carga masiva a medio preparar no se pierde
+          por mirar los pagos. */}
+      <div hidden={seccion !== 'consultas'} className="space-y-6">
+      {consultasEnPausa ? consultasEnPausa : (<>
       {mostrarEmpty && (
         <TutorialEmptyState
           onStartDemo={dispararTutorial}
@@ -199,8 +240,10 @@ export default function ValidaClient({
           modoVitrina={modoVitrina}
         />
       )}
+      </>)}
+      </div>
 
-      {(tutorialNuncaVisto || tourTrigger > 0) && (
+      {!consultasEnPausa && (tutorialNuncaVisto || tourTrigger > 0) && (
         <TutorialTour slug="valida_standalone" forceStart={tourTrigger} />
       )}
     </div>

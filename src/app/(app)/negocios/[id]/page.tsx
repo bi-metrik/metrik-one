@@ -14,6 +14,8 @@ import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
+import { leerFacturasDeCuotas } from '@/lib/valida-cda/facturas-negocio-servidor'
+import { FacturasCuotas } from './facturas-cuotas'
 
 export const maxDuration = 60
 
@@ -155,7 +157,14 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
     )
     : null
 
-  const extras = validaActivo
+  // Facturas electrónicas de las cuotas: solo en un negocio que es un contrato de servicio cobrado
+  // por este espacio (hoy, metrik con los CDA de Valida), y solo para quien las puede cargar.
+  const facturasCuotas =
+    workspaceId && (role === 'owner' || role === 'admin')
+      ? await leerFacturasDeCuotas(workspaceId, id)
+      : null
+
+  const extrasValida = validaActivo
     ? (
       <div className="space-y-3">
         <BloqueRiesgoSarlaft
@@ -170,6 +179,18 @@ export default async function NegocioDetailPage({ params, searchParams }: Props)
             error={validaConsultas.ok ? null : validaConsultas.error}
           />
         )}
+      </div>
+    )
+    : null
+
+  const extras = extrasValida || facturasCuotas?.estado === 'ok' || facturasCuotas?.estado === 'no_disponible'
+    ? (
+      <div className="space-y-3">
+        {facturasCuotas?.estado === 'ok' && <FacturasCuotas cuotas={facturasCuotas.cuotas} />}
+        {facturasCuotas?.estado === 'no_disponible' && (
+          <p className="text-xs text-tinta-suave">No se pudieron cargar las facturas de las cuotas en este momento.</p>
+        )}
+        {extrasValida}
       </div>
     )
     : null

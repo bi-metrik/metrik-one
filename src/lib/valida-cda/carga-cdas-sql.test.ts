@@ -261,6 +261,7 @@ beforeAll(async () => {
   await db.exec(migracion('20260916213000_mis_documentos_de_servicio_por_negocio.sql'))
   await db.exec(migracion('20260917014500_aceptacion_terminos_en_modulo.sql'))
   await db.exec(migracion('20260923220000_terminos_cda_designado_y_enlace_pago.sql'))
+  await db.exec(migracion('20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql'))
   for (const b of BLOQUES) await db.exec(sembrarCda(b))
 }, 60_000)
 
@@ -409,6 +410,71 @@ describe('la carga', () => {
     }
     expect(await correr(aceptar(b.designada))).toBe('')
     expect(await contar('public.aceptaciones_terminos', `usuario_id = '${b.designada}' and canal = 'modulo'`)).toBe(1)
+  })
+})
+
+describe('plazo para aceptar y facturas de cada cuota (20260924010000)', () => {
+  it('cada contrato nace con plazo hasta el 30-sep y el CDA lo lee por mis_servicios', async () => {
+    const plazos = await db.query<{ plazo: string }>(
+      `select terminos_plazo_hasta::text as plazo from public.servicios_contratados order by id`,
+    )
+    expect(plazos.rows.map((r) => r.plazo)).toEqual(['2026-09-30', '2026-09-30', '2026-09-30', '2026-09-30'])
+    const b = BLOQUES[1]
+    const servicios = await comoCliente<{ modulo: string; terminos_plazo_hasta: string; es_pagador: boolean }>(
+      b.ws,
+      `select modulo, terminos_plazo_hasta::text as terminos_plazo_hasta, es_pagador from public.mis_servicios()`,
+    )
+    expect(servicios).toEqual([{ modulo: 'valida_consulta', terminos_plazo_hasta: '2026-09-30', es_pagador: true }])
+  })
+
+  it('la factura cargada sale con su cuota, solo al pagador y solo la del mismo cobrador', async () => {
+    const b = BLOQUES[1]
+    const sc = await db.query<{ id: string }>(`select id from public.servicios_contratados where workspace_pagador_id = '${b.ws}'`)
+    const cuota = await db.query<{ id: string }>(`select id from public.plan_cobro_cuotas where plan_cobro_id = '${b.plan}' and numero = 1`)
+    await db.exec(`
+      insert into public.facturas_cuota (workspace_id, plan_cobro_cuota_id, numero, pdf_path, pdf_sha256)
+      values ('${WS_METRIK}', '${cuota.rows[0].id}', 'FE-1', '${WS_METRIK}/facturas/${'b'.repeat(64)}.pdf', '${'b'.repeat(64)}')`)
+
+    const filas = await comoCliente<{ cuota_id: string; numero: number; factura_numero: string | null; factura_pdf_path: string | null; factura_xml_path: string | null }>(
+      b.ws,
+      `select cuota_id, numero, factura_numero, factura_pdf_path, factura_xml_path from public.mis_cuotas_de_servicio('${sc.rows[0].id}')`,
+    )
+    expect(filas).toEqual([
+      { cuota_id: cuota.rows[0].id, numero: 1, factura_numero: 'FE-1', factura_pdf_path: `${WS_METRIK}/facturas/${'b'.repeat(64)}.pdf`, factura_xml_path: null },
+      expect.objectContaining({ numero: 2, factura_numero: null }),
+    ])
+    // Otro espacio no ve las cuotas (ni la factura) de este contrato.
+    expect(await comoCliente(BLOQUES[0].ws, `select * from public.mis_cuotas_de_servicio('${sc.rows[0].id}')`)).toEqual([])
+  })
+
+  it('la factura exige un archivo, su huella con su ruta y un número limpio', async () => {
+    const cuota = await db.query<{ id: string }>(`select id from public.plan_cobro_cuotas where plan_cobro_id = '${BLOQUES[2].plan}' and numero = 1`)
+    const insertar = (cols: string, vals: string) =>
+      correr(`insert into public.facturas_cuota (workspace_id, plan_cobro_cuota_id, numero${cols}) values ('${WS_METRIK}', '${cuota.rows[0].id}'${vals})`)
+    expect(await insertar('', `, 'FE-2'`)).toContain('facturas_cuota_algun_archivo')
+    expect(await insertar(', pdf_path', `, 'FE-2', 'x.pdf'`)).toContain('facturas_cuota_pdf_completo')
+    expect(await insertar(', xml_path, xml_sha256', `, 'FE 2; drop', 'x.xml', '${'c'.repeat(64)}'`)).toContain('facturas_cuota_numero')
+  })
+
+  it('grants: las RPC solo para authenticated (ni anon ni PUBLIC) y la tabla para nadie', async () => {
+    const r = await db.query<{ f: string; anon: boolean; auth: boolean; publico: boolean }>(`
+      select p.oid::regprocedure::text as f,
+             has_function_privilege('anon', p.oid, 'execute') as anon,
+             has_function_privilege('authenticated', p.oid, 'execute') as auth,
+             coalesce(p.proacl::text like '%,=X/%' or p.proacl::text like '{=X/%', false) as publico
+        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname in ('mis_servicios', 'mis_cuotas_de_servicio')
+       order by 1`)
+    expect(r.rows).toEqual([
+      { f: 'mis_cuotas_de_servicio(uuid)', anon: false, auth: true, publico: false },
+      { f: 'mis_servicios()', anon: false, auth: true, publico: false },
+    ])
+    const t = await db.query<{ anon: boolean; auth: boolean; rls: boolean }>(`
+      select has_table_privilege('anon', 'public.facturas_cuota', 'select') as anon,
+             has_table_privilege('authenticated', 'public.facturas_cuota', 'select') as auth,
+             relrowsecurity as rls
+        from pg_class where oid = 'public.facturas_cuota'::regclass`)
+    expect(t.rows).toEqual([{ anon: false, auth: false, rls: true }])
   })
 })
 
