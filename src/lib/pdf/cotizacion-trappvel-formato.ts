@@ -438,6 +438,170 @@ export function absorberRedondeo(
   }
 }
 
+// ── Encuadre de una foto ──────────────────────────────────────────────────────
+
+/**
+ * Dónde anclar una foto recortada con `objectFit: 'cover'` para que el sujeto quede
+ * dentro del marco: el valor de `objectPosition` («30% 93%»).
+ *
+ * El foco es UNO por foto (lo fija quien la mira: `fotos-ciudad.ts`), y el marco cambia
+ * según dónde va (la portada es 2,7 veces más ancha que alta; una miniatura, 1,5). Con
+ * `cover`, la foto se escala hasta llenar el marco y sobra por un solo eje: el ancho, si
+ * la foto es más apaisada que el marco; el alto, si no. Por ese eje se ve una franja de
+ * la foto, y el ancla se elige para que el foco quede en el centro de esa franja:
+ *
+ *     visible = la fracción de la foto que cabe por el eje que sobra
+ *     ancla   = (foco − visible/2) / (1 − visible), entre 0 y 1
+ *
+ * react-pdf aplica el porcentaje igual que CSS: desplaza la foto `(marco − foto) × ancla`.
+ * Por eso la fórmula centra el foco. Cuando el foco está tan al borde que centrarlo
+ * dejaría un hueco, el ancla se queda en el borde: se ve todo lo que cabe hacia ese lado.
+ *
+ * Sin foco o sin proporción (una foto propia del cliente), el centro: como antes.
+ */
+export function encuadreDeFoto(
+  foco: { x: number; y: number } | null | undefined,
+  proporcionFoto: number | null | undefined,
+  proporcionMarco: number,
+): string {
+  const centro = '50% 50%'
+  if (!foco || !proporcionFoto || !(proporcionFoto > 0) || !(proporcionMarco > 0)) return centro
+  const acotar = (v: number) => Math.min(1, Math.max(0, v))
+  const pct = (v: number) => `${Math.round(v * 1000) / 10}%`
+  const ancla = (f: number, visible: number) => acotar((acotar(f) - visible / 2) / (1 - visible))
+  if (proporcionFoto > proporcionMarco) return `${pct(ancla(foco.x, proporcionMarco / proporcionFoto))} 50%`
+  if (proporcionFoto < proporcionMarco) return `50% ${pct(ancla(foco.y, proporcionFoto / proporcionMarco))}`
+  return centro
+}
+
+// ── Día a día ─────────────────────────────────────────────────────────────────
+
+/**
+ * ¿Imprimir el día a día? Solo si dice algo que la tabla de vuelos no diga ya.
+ *
+ * Los días de vuelo que entran al día a día son, por construcción, vuelos de la tabla de
+ * «Vuelos». En un viaje que es SOLO vuelos (COT-2026-0006: dos rutas, ida y regreso) el día
+ * a día repetía las cuatro filas de la tabla, una por tarjeta: media página de lo mismo.
+ * Con un solo día que no sea vuelo (un traslado, un tour), el día a día cuenta el viaje y
+ * los vuelos van en él, en su día.
+ */
+export function diaADiaSeImprime(entradas: { esVuelo: boolean }[]): boolean {
+  return entradas.some(e => !e.esVuelo)
+}
+
+/** Lo que la agrupación por día necesita de una entrada. */
+export interface EntradaConDia {
+  fecha: Fecha | null
+  /** El día relativo del viaje, cuando no hay fecha. */
+  dia: number | null
+}
+
+/**
+ * Las entradas del día a día agrupadas por día: seguidas y del MISMO día. Cada grupo se
+ * imprime sin partir, con su círculo una vez: el vuelo que llega y el traslado de esa tarde
+ * no se separan en dos páginas.
+ *
+ * Mismo día: las dos con fecha y la misma fecha, o las dos sin fecha y el mismo día
+ * relativo. Una entrada sin fecha ni día va sola.
+ */
+export function gruposPorDia<T extends EntradaConDia>(entradas: T[]): T[][] {
+  const grupos: T[][] = []
+  const mismoDia = (a: T, b: T) => {
+    if (a.fecha && b.fecha) {
+      const ka = claveDeFecha(a.fecha)
+      return ka !== null && ka === claveDeFecha(b.fecha)
+    }
+    return !a.fecha && !b.fecha && a.dia !== null && a.dia === b.dia
+  }
+  for (const e of entradas) {
+    const ultimo = grupos[grupos.length - 1]
+    if (ultimo && mismoDia(ultimo[ultimo.length - 1], e)) ultimo.push(e)
+    else grupos.push([e])
+  }
+  return grupos
+}
+
+// ── Incluido, a tener en cuenta y antes de viajar ─────────────────────────────
+
+export type ListaDelCierre = 'incluye' | 'noIncluye' | 'antes'
+
+/**
+ * Una fila del bloque de listas. Con UNA columna la lista va a todo el ancho y se puede
+ * partir entre páginas (entre ítems); con DOS, las columnas van lado a lado y la fila no se
+ * parte. Cada columna es una o varias listas, una debajo de la otra.
+ */
+export type FilaDeListas = ListaDelCierre[][]
+
+/** Lo que mide un título de sección con su aire (`Titulo`: 24 arriba, 26 de alto, 10 abajo). */
+const ALTO_TITULO = 60
+/** Un renglón de 9 pt con su interlineado. */
+const ALTO_RENGLON = 11.5
+/** El aire entre dos ítems de una lista. */
+const AIRE_ITEM = 4
+/** Lo que ocupa un carácter promedio de Helvetica a 9 pt. */
+const ANCHO_CARACTER = 4.5
+/** Lo que se come el marcador del ítem (chulo, equis o viñeta) y la franja ámbar. */
+const SANGRIA_ITEM = 16
+/** El aire entre las dos columnas. */
+export const CANAL_COLUMNAS = 20
+
+/**
+ * Hasta cuánto puede medir una columna para ir lado a lado con otra.
+ *
+ * Lado a lado la fila NO se parte (una fila de dos columnas partida en dos páginas se
+ * desarma), así que si no cabe baja entera y deja su alto en blanco arriba. Con este tope,
+ * lo más que puede dejar es un tercio de página; más larga, cada lista va a todo el ancho y
+ * se parte entre ítems como cualquier texto.
+ */
+export const ALTO_MAXIMO_COLUMNA = 260
+
+/** Cuánto mide una lista (título incluido) en una columna de este ancho. Estimado, no medido. */
+export function altoEstimadoDeLista(items: string[], anchoColumna: number): number {
+  if (items.length === 0) return 0
+  const porRenglon = Math.max(1, Math.floor((anchoColumna - SANGRIA_ITEM) / ANCHO_CARACTER))
+  const renglones = items.reduce((a, t) => a + Math.max(1, Math.ceil(t.length / porRenglon)), 0)
+  return ALTO_TITULO + renglones * ALTO_RENGLON + items.length * AIRE_ITEM
+}
+
+/**
+ * Cómo se reparten «Incluido en el plan», «A tener en cuenta» y «Antes de viajar».
+ *
+ * «Antes de viajar» va CON «Incluido», no al final: suelto al final era lo único que
+ * quedaba para la última página, y COT-2026-0006 terminaba en una hoja en blanco al 70 %
+ * con ese recuadro y la firma.
+ *
+ * 1. Si hay «Antes» y algo de lo otro, y las dos columnas son cortas: lado a lado. A la
+ *    izquierda lo que incluye y lo que no (una debajo de la otra: son la misma pregunta),
+ *    a la derecha «Antes de viajar».
+ * 2. Si alguna es larga: «Incluido» y «A tener en cuenta» lado a lado si las dos son
+ *    cortas (como siempre), y «Antes de viajar» debajo, a todo el ancho.
+ * 3. Lo que no cabe en una columna va solo, a todo el ancho.
+ *
+ * Una lista vacía no ocupa lugar. Sin ninguna, no hay filas.
+ */
+export function disposicionDeListas(
+  listas: Record<ListaDelCierre, string[]>,
+  anchoContenido: number,
+): FilaDeListas[] {
+  const hay = (l: ListaDelCierre) => listas[l].length > 0
+  const anchoColumna = (anchoContenido - CANAL_COLUMNAS) / 2
+  const alto = (ls: ListaDelCierre[]) => ls.reduce((a, l) => a + altoEstimadoDeLista(listas[l], anchoColumna), 0)
+  const cabe = (ls: ListaDelCierre[]) => alto(ls) <= ALTO_MAXIMO_COLUMNA
+
+  const izquierda = (['incluye', 'noIncluye'] as ListaDelCierre[]).filter(hay)
+  if (hay('antes') && izquierda.length > 0 && cabe(izquierda) && cabe(['antes'])) {
+    return [[izquierda, ['antes']]]
+  }
+  const filas: FilaDeListas[] = []
+  if (izquierda.length === 2 && cabe(['incluye']) && cabe(['noIncluye'])) {
+    filas.push([['incluye'], ['noIncluye']])
+  } else {
+    for (const l of izquierda) filas.push([[l]])
+  }
+  if (hay('antes')) filas.push([['antes']])
+  return filas
+}
+
 // ── Utilidades ────────────────────────────────────────────────────────────────
 
 export function sinTildes(s: string): string {

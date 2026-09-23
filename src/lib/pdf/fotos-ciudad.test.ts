@@ -5,6 +5,7 @@
  * que falte en el repo es justo el defecto que tienen que atrapar.
  */
 import fs from 'node:fs'
+import { inflateSync } from 'node:zlib'
 import { createElement } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +16,7 @@ import { claveDeCiudad, fotosDeCiudad, type FotoCiudad } from './fotos-ciudad'
 import { MAXIMO_FOTOS_POR_DOCUMENTO, ciudadesEnTexto, creditosDeFotos, fotosDelViaje } from './fotos-del-viaje'
 import { plantillaUsaFotosDeCiudad, slugsConPlantillaPropia } from './plantillas-cotizacion'
 import { textoDelPDF } from './texto-del-pdf'
+import { medirImagen } from '@/lib/og/medidas-tarjeta'
 
 describe('el banco provisional', () => {
   it('la clave no distingue tildes, mayúsculas ni espacios', () => {
@@ -52,6 +54,29 @@ describe('el banco provisional', () => {
     }
   })
 
+  it('toda foto declara sus medidas REALES y un foco dentro de la foto', () => {
+    // Las medidas se declaran para no leer el archivo en cada documento; si alguien cambia
+    // un archivo sin actualizar la entrada, el encuadre se calcularía con otra foto.
+    for (const c of ['Cancún', 'Ciudad de México', 'Madrid', 'Roma', 'París', 'Bogotá', 'San Andrés', 'Providencia']) {
+      for (const f of fotosDeCiudad(c)) {
+        const m = medirImagen(fs.readFileSync(f.ruta))
+        expect(m, f.ruta).not.toBeNull()
+        expect(f.proporcion, f.ruta).toBeCloseTo(m!.ancho / m!.alto, 6)
+        for (const v of [f.foco.x, f.foco.y]) {
+          expect(v, f.ruta).toBeGreaterThanOrEqual(0)
+          expect(v, f.ruta).toBeLessThanOrEqual(1)
+        }
+      }
+    }
+  })
+
+  it('el foco se fijó mirando: la cabaña del Acuario está abajo a la izquierda, no en el centro', () => {
+    const acuario = fotosDeCiudad('San Andrés')[1]
+    expect(acuario.rotulo).toBe('SAN ANDRÉS · EL ACUARIO')
+    expect(acuario.foco.x).toBeLessThan(0.5)
+    expect(acuario.foco.y).toBeGreaterThan(0.5)
+  })
+
   it('solo la plantilla de Trappvel imprime fotos (R6)', () => {
     expect(slugsConPlantillaPropia().filter(plantillaUsaFotosDeCiudad)).toEqual(['trappvel'])
     expect(plantillaUsaFotosDeCiudad('metrik')).toBe(false)
@@ -67,6 +92,8 @@ const foto = (ciudad: string, n: number): FotoCiudad => ({
   autor: `Autor ${ciudad}`,
   licencia: 'CC BY-SA 4.0',
   credito: `Autor ${ciudad} (Wikimedia Commons, CC BY-SA 4.0)`,
+  foco: { x: 0.5, y: 0.5 },
+  proporcion: 1.5,
 })
 const BANCO: Record<string, FotoCiudad[]> = {
   providencia: [foto('providencia', 1), foto('providencia', 2)],
@@ -175,6 +202,29 @@ const props = (v: ViajePDF): CotizacionPDFProps => ({
 // renderToBuffer tipa su argumento como el elemento <Document>; la plantilla lo devuelve.
 const render = async (v: ViajePDF) =>
   Buffer.from(await renderToBuffer(createElement(CotizacionTrappvelPDF, props(v)) as Parameters<typeof renderToBuffer>[0]))
+/** Los flujos de dibujo de las páginas (donde van las posiciones de las imágenes), descomprimidos. */
+const textoDeDibujo = (pdf: Buffer) => {
+  const salida: string[] = []
+  let desde = 0
+  for (;;) {
+    const ini = pdf.indexOf('stream', desde)
+    if (ini === -1) break
+    let inicio = ini + 'stream'.length
+    if (pdf[inicio] === 0x0d) inicio++
+    if (pdf[inicio] === 0x0a) inicio++
+    const fin = pdf.indexOf('endstream', inicio)
+    if (fin === -1) break
+    try {
+      const t = inflateSync(pdf.subarray(inicio, fin)).toString('latin1')
+      if (t.includes(' Do')) salida.push(t)
+    } catch {
+      // una imagen o una fuente: no es un flujo de dibujo
+    }
+    desde = fin + 'endstream'.length
+  }
+  return salida.join('\n')
+}
+
 /** Cuántas imágenes embebió el PDF. pdfkit escribe cada una como XObject de tipo Image. */
 const imagenes = (pdf: Buffer) => (pdf.toString('latin1').match(/\/Subtype \/Image/g) ?? []).length
 
@@ -188,6 +238,33 @@ describe('el PDF con las fotos del banco real', () => {
     expect(t).toContain('PROVIDENCIA · THE PEAK')
     // Las dos son del mismo autor y licencia: se nombra una vez.
     expect(t).toContain('Fotografías: Felviper (Wikimedia Commons, CC BY-SA 4.0)')
+  })
+
+  it('el foco y la proporción del banco llegan a la foto del documento', () => {
+    const f = fotosDelViaje({ destino: 'San Andrés', vuelos: [], hoteles: [] }, fotosDeCiudad)
+    expect(f.portada?.foco).toEqual(fotosDeCiudad('San Andrés')[0].foco)
+    expect(f.ciudades[0].foco).toEqual({ x: 0.3, y: 0.72 })
+    expect(f.ciudades[0].proporcion).toBeCloseTo(1600 / 1199, 6)
+  })
+
+  it('⚠️ la plantilla encuadra con el foco: moverlo mueve la foto en el PDF, en la portada y en la miniatura', async () => {
+    // Sin esto, el foco podría llegar hasta la plantilla y no usarse: el recorte volvería al
+    // centro sin que nada fallara. Se comparan los flujos de dibujo, que no llevan fechas.
+    const f = fotosDelViaje({ destino: 'San Andrés', vuelos: [], hoteles: [] }, fotosDeCiudad)
+    type Foco = { x: number; y: number } | undefined
+    const dibujo = async (portada: Foco, miniaturas: Foco) => textoDeDibujo(await render(viaje({
+      destino: 'San Andrés',
+      foto: f.portada && { ...f.portada, foco: portada },
+      fotosCiudades: f.ciudades.map(c => ({ ...c, foco: miniaturas })),
+    })))
+    const arriba = { x: 0.5, y: 0 }
+    const abajo = { x: 0.5, y: 1 }
+    const base = await dibujo(arriba, arriba)
+    expect(await dibujo(abajo, arriba)).not.toBe(base)
+    expect(await dibujo(arriba, abajo)).not.toBe(base)
+    // Y sin foco sale igual que centrado: una foto propia del cliente no cambia.
+    const centro = { x: 0.5, y: 0.5 }
+    expect(await dibujo(undefined, undefined)).toBe(await dibujo(centro, centro))
   })
 
   it('ciudad sin foto: cero imágenes, sin créditos, y la portada de marca de siempre', async () => {

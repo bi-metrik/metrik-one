@@ -5,11 +5,17 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ALTO_MAXIMO_COLUMNA,
   TOKENS,
   absorberRedondeo,
+  altoEstimadoDeLista,
   capitulosDelViaje,
   clienteDeLaPortada,
   colorDeTarifa,
+  diaADiaSeImprime,
+  disposicionDeListas,
+  encuadreDeFoto,
+  gruposPorDia,
   leerFecha,
   lugarLegible,
   numerosDeVuelo,
@@ -279,5 +285,134 @@ describe('los capítulos por ciudad', () => {
 
   it('sin hoteles hay un solo capítulo con el destino del negocio', () => {
     expect(capitulosDelViaje([], null, 'Providencia')).toEqual([{ ciudad: 'Providencia', hotel: null, alternativas: [] }])
+  })
+})
+
+describe('el encuadre de una foto (objectPosition)', () => {
+  /** El marco de la portada: todo el ancho de la página (515,28 pt) por 190 de alto. */
+  const PORTADA = 515.28 / 190
+
+  it('sin foco, o sin proporción, va al centro: como antes', () => {
+    expect(encuadreDeFoto(null, 1.5, PORTADA)).toBe('50% 50%')
+    expect(encuadreDeFoto({ x: 0.3, y: 0.7 }, null, PORTADA)).toBe('50% 50%')
+    expect(encuadreDeFoto({ x: 0.3, y: 0.7 }, 0, PORTADA)).toBe('50% 50%')
+  })
+
+  it('foto más alta que el marco: se recorta arriba y abajo y manda el foco vertical', () => {
+    // El Acuario (1600 × 1199) en la portada: la cabaña está al 72 % del alto.
+    // Se ve el 49,2 % del alto; centrar el 0,72 da ancla (0,72 − 0,246) / 0,508 = 93,3 %.
+    expect(encuadreDeFoto({ x: 0.3, y: 0.72 }, 1600 / 1199, PORTADA)).toBe('50% 93.3%')
+  })
+
+  it('foto más apaisada que el marco: se recorta a los lados y manda el foco horizontal', () => {
+    // McBean Lagoon (1600 × 352) en una miniatura 3:2: se ve un tercio del ancho, y las
+    // montañas están al 65 %.
+    expect(encuadreDeFoto({ x: 0.65, y: 0.5 }, 1600 / 352, 1.5)).toBe('72.4% 50%')
+  })
+
+  it('un foco pegado al borde deja el ancla en el borde, sin hueco', () => {
+    // En 3:2 el Acuario pierde solo el 11 % del alto: la cabaña no se puede centrar, se
+    // muestra todo lo de abajo.
+    expect(encuadreDeFoto({ x: 0.3, y: 0.72 }, 1600 / 1199, 1.5)).toBe('50% 100%')
+    expect(encuadreDeFoto({ x: 0.3, y: 0.02 }, 1600 / 1199, 1.5)).toBe('50% 0%')
+  })
+
+  it('con la misma proporción no hay nada que recortar', () => {
+    expect(encuadreDeFoto({ x: 0.1, y: 0.9 }, 1.5, 1.5)).toBe('50% 50%')
+  })
+
+  it('⚠️ el foco queda en el CENTRO de lo que se ve, en cualquier marco donde quepa', () => {
+    // react-pdf desplaza la foto (marco − foto) × ancla, igual que CSS. Se recalcula la
+    // franja visible con ese desplazamiento y su centro tiene que ser el foco.
+    for (const [foto, marco, f] of [[1.333, 2.71, 0.4], [1.589, 2.71, 0.45], [4.545, 1.5, 0.6], [2.947, 1.5, 0.35]] as const) {
+      const pos = encuadreDeFoto({ x: f, y: f }, foto, marco).split(' ').map(v => parseFloat(v) / 100)
+      const horizontal = foto > marco
+      const visible = horizontal ? marco / foto : foto / marco
+      const ancla = horizontal ? pos[0] : pos[1]
+      const inicio = ancla * (1 - visible)
+      expect(inicio + visible / 2).toBeCloseTo(f, 2)
+    }
+  })
+})
+
+describe('el día a día', () => {
+  const vuelo = { esVuelo: true }
+  const actividad = { esVuelo: false }
+
+  it('⚠️ si todo son vuelos no se imprime: repetiría la tabla de «Vuelos»', () => {
+    expect(diaADiaSeImprime([vuelo, vuelo, vuelo, vuelo])).toBe(false)
+    expect(diaADiaSeImprime([])).toBe(false)
+  })
+
+  it('con un solo día que no sea vuelo se imprime, con los vuelos en su día', () => {
+    expect(diaADiaSeImprime([vuelo, actividad, vuelo])).toBe(true)
+  })
+
+  const f = (dia: number) => ({ dia, mes: 4, anio: 2027 })
+  const e = (nombre: string, fecha: ReturnType<typeof f> | null, dia: number | null = null) => ({ nombre, fecha, dia })
+
+  it('el vuelo que llega y la actividad de esa tarde son UN día: un bloque, un círculo', () => {
+    const grupos = gruposPorDia([e('vuelo', f(13)), e('traslado', f(13)), e('coliseo', f(14))])
+    expect(grupos.map(g => g.map(x => x.nombre))).toEqual([['vuelo', 'traslado'], ['coliseo']])
+  })
+
+  it('sin fechas agrupa por el día relativo', () => {
+    const grupos = gruposPorDia([e('a', null, 1), e('b', null, 1), e('c', null, 3)])
+    expect(grupos.map(g => g.map(x => x.nombre))).toEqual([['a', 'b'], ['c']])
+  })
+
+  it('una entrada sin fecha ni día va sola, y una con fecha no se junta con una sin ella', () => {
+    const grupos = gruposPorDia([e('a', null), e('b', null), e('c', f(13), 1), e('d', null, 1)])
+    expect(grupos.map(g => g.map(x => x.nombre))).toEqual([['a'], ['b'], ['c'], ['d']])
+  })
+})
+
+describe('«Incluido», «A tener en cuenta» y «Antes de viajar»', () => {
+  const ANCHO = 515.28
+  // El texto de COT-2026-0006 tal como está en producción (2026-09-23).
+  const INCLUYE_0006 = [
+    'Tiquetes aéreos Bogotá – San Andrés – Bogotá con Avianca, con equipaje de mano y de bodega',
+    'Tiquetes aéreos San Andrés – Providencia – San Andrés con SATENA, con artículo personal y equipaje de bodega',
+  ]
+  const ANTES_0006 = [
+    'Asegúrese de llevar su documento de identidad original (cédula de ciudadanía o pasaporte) para todos los viajeros, incluyendo menores',
+    'Recuerde llegar con suficiente anticipación al aeropuerto para sus vuelos nacionales, especialmente en temporada alta',
+    'El clima en San Andrés y Providencia es tropical, con temperaturas cálidas y humedad. Empaque ropa ligera y cómoda, traje de baño y protector solar',
+    'Para ingresar a San Andrés es necesario adquirir la tarjeta de turismo Ocard, un impuesto que se paga directamente en el destino',
+  ]
+
+  it('COT-2026-0006: «Incluido» y «Antes de viajar» van lado a lado', () => {
+    expect(disposicionDeListas({ incluye: INCLUYE_0006, noIncluye: [], antes: ANTES_0006 }, ANCHO))
+      .toEqual([[['incluye'], ['antes']]])
+  })
+
+  it('con las tres cortas, lo que incluye y lo que no van juntos a la izquierda', () => {
+    expect(disposicionDeListas({ incluye: ['Vuelos'], noIncluye: ['Tasa turística'], antes: ['Pasaporte vigente'] }, ANCHO))
+      .toEqual([[['incluye', 'noIncluye'], ['antes']]])
+  })
+
+  it('si una columna es larga, «Antes de viajar» baja a todo el ancho', () => {
+    const larga = Array.from({ length: 12 }, (_, i) => `Consejo número ${i} con suficiente texto para ocupar un renglón entero en la columna`)
+    expect(disposicionDeListas({ incluye: INCLUYE_0006, noIncluye: [], antes: larga }, ANCHO))
+      .toEqual([[['incluye']], [['antes']]])
+    expect(disposicionDeListas({ incluye: INCLUYE_0006, noIncluye: ['Tasa turística'], antes: larga }, ANCHO))
+      .toEqual([[['incluye'], ['noIncluye']], [['antes']]])
+  })
+
+  it('sin «Antes de viajar», «Incluido» y «A tener en cuenta» lado a lado, como siempre', () => {
+    expect(disposicionDeListas({ incluye: ['Vuelos'], noIncluye: ['Tasa turística'], antes: [] }, ANCHO))
+      .toEqual([[['incluye'], ['noIncluye']]])
+  })
+
+  it('una lista sola va sola, y sin listas no hay filas', () => {
+    expect(disposicionDeListas({ incluye: [], noIncluye: [], antes: ['Pasaporte vigente'] }, ANCHO)).toEqual([[['antes']]])
+    expect(disposicionDeListas({ incluye: [], noIncluye: [], antes: [] }, ANCHO)).toEqual([])
+  })
+
+  it('el alto estimado crece con el texto y el tope cabe en un tercio de página', () => {
+    expect(altoEstimadoDeLista([], 250)).toBe(0)
+    expect(altoEstimadoDeLista(['corto'], 250)).toBeLessThan(altoEstimadoDeLista(['x'.repeat(200)], 250))
+    // A4 con los márgenes del documento deja ~736 pt de contenido por página.
+    expect(ALTO_MAXIMO_COLUMNA).toBeLessThanOrEqual(736 / 2.5)
   })
 })

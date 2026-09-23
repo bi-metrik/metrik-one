@@ -20,6 +20,8 @@ import type { CotizacionPDFProps, ViajePDF } from './cotizacion-props'
 import { vuelosDeItems } from '@/lib/cotizaciones/detalle-viaje'
 import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/documento-cliente'
+import { fotosDelViaje } from './fotos-del-viaje'
+import { fotosDeCiudad } from './fotos-ciudad'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -137,6 +139,23 @@ const props = (over: Partial<CotizacionPDFProps> = {}): CotizacionPDFProps => ({
   viaje: viaje(),
   ...over,
 })
+
+/**
+ * El texto de cada página, por su número. Cada página termina en el pie con el consecutivo
+ * y su «N de M»; `textoDelPDF` junta los flujos en el orden del binario, que no es el de
+ * las páginas, pero el texto de UNA página sale seguido.
+ */
+function porPagina(t: string, consecutivo: string): Map<number, string> {
+  const paginas = new Map<number, string>()
+  const re = new RegExp(`${consecutivo}\\s+(\\d+)\\s+de\\s+\\d+`, 'g')
+  let desde = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(t)) !== null) {
+    paginas.set(Number(m[1]), t.slice(desde, m.index + m[0].length))
+    desde = m.index + m[0].length
+  }
+  return paginas
+}
 
 async function texto(p: CotizacionPDFProps): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -654,6 +673,29 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     },
   ]
 
+  /** El texto para el cliente de COT-2026-0006 TAL COMO está en producción (2026-09-23). */
+  const DOC_0006: DocumentoCliente = {
+    titular: 'San Andrés y Providencia: el paraíso doble del Caribe colombiano',
+    intro: 'Descubra la magia de dos islas caribeñas en un solo viaje. Disfrute de 6 días y 5 noches explorando las aguas cristalinas y la cultura vibrante de San Andrés y la tranquilidad natural de Providencia.',
+    incluye: [
+      'Tiquetes aéreos Bogotá – San Andrés – Bogotá con Avianca, con equipaje de mano y de bodega',
+      'Tiquetes aéreos San Andrés – Providencia – San Andrés con SATENA, con artículo personal y equipaje de bodega',
+    ],
+    antes_de_viajar: [
+      'Asegúrese de llevar su documento de identidad original (cédula de ciudadanía o pasaporte) para todos los viajeros, incluyendo menores',
+      'Recuerde llegar con suficiente anticipación al aeropuerto para sus vuelos nacionales, especialmente en temporada alta',
+      'El clima en San Andrés y Providencia es tropical, con temperaturas cálidas y humedad. Empaque ropa ligera y cómoda, traje de baño y protector solar',
+      'Para ingresar a San Andrés es necesario adquirir la tarjeta de turismo Ocard, un impuesto que se paga directamente en el destino',
+    ],
+    origen: 'ia',
+    modelo: 'gemini-2.5-flash',
+    redactado_en: '2026-09-22T23:24:30.195Z',
+    fuente_hash: 'f27055324069028c',
+    revisado_por: 'staff-1',
+    revisado_por_nombre: 'Alejandra',
+    revisado_en: '2026-09-22T23:24:56.503Z',
+  }
+
   const cot0006 = (over: Partial<ViajePDF> = {}): CotizacionPDFProps => {
     const items = LINEAS.map(l => ({
       nombre: l.nombre, descripcion: null, precio_venta: l.precio_venta, descuento_porcentaje: 0, cantidad: 1, unidad: null,
@@ -681,15 +723,41 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     })
   }
 
-  it('1 · el vuelo de Avianca sale en la tabla de vuelos y en el día a día', async () => {
+  it('1 · ⚠️ un viaje que es SOLO vuelos no repite la tabla de vuelos en un «Día a día»', async () => {
     const t = await texto(cot0006())
+    // Hasta el 2026-09-23 el día a día eran las cuatro filas de la tabla otra vez, una por
+    // tarjeta: media página de lo mismo.
+    expect(t).not.toContain('Día a día')
+    expect(t).not.toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
     // ⚠️ El renderizador parte la corrida después del dígito del día («28  nov»): se busca
-    // con `\s+`. Día a día: el 23 abre con Avianca y el 28 es su regreso.
-    expect(t).toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
-    expect(t).toMatch(/28 NOV San Andrés Isla Bogotá Avianca/)
-    // Tabla de vuelos: las dos filas de Avianca, cada una con su fecha y su número.
+    // con `\s+`. Tabla de vuelos: las dos filas de Avianca, cada una con su fecha y su número.
     expect(t).toMatch(/Avianca Bogotá San Andrés Isla Vuelo directo 23\s+nov 2026 9782/)
     expect(t).toMatch(/Avianca San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+  })
+
+  it('1b · con un día que no es vuelo, el «Día a día» vuelve y cada vuelo va en su día', async () => {
+    const tour = { nombre: 'TOUR A JOHNNY CAY', descripcion: null, precio_venta: 0, descuento_porcentaje: 0, cantidad: 1, unidad: null }
+    const t = await texto({ ...cot0006(), dias: [{ dia: 2, items: [tour] }] })
+    expect(t).toContain('Día a día')
+    expect(t).toContain('TOUR A JOHNNY CAY')
+    // Día a día: el 23 abre con Avianca y el 28 es su regreso.
+    expect(t).toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
+    expect(t).toMatch(/28 NOV San Andrés Isla Bogotá Avianca/)
+  })
+
+  it('1c · ⚠️ con su texto real no termina en una hoja con solo «Antes de viajar» y la firma', async () => {
+    // El documento REAL: las fotos del banco y el texto revisado tal como está en producción.
+    // Antes del 2026-09-23 la tercera hoja quedaba al 70 % en blanco con esas dos cosas.
+    const base = cot0006()
+    const f = fotosDelViaje({ destino: base.viaje!.destino, vuelos: base.viaje!.vuelos, hoteles: [] }, fotosDeCiudad)
+    const t = await texto({ ...base, viaje: { ...base.viaje!, ...textoParaElViaje(DOC_0006), foto: f.portada, fotosCiudades: f.ciudades } })
+    const paginas = porPagina(t, 'COT-2026-0006')
+    const ultima = paginas.get(Math.max(...paginas.keys()))!
+    expect(ultima).toContain('Edgar Javier Alarcon S.')
+    expect(ultima).toContain('Antes de viajar')
+    // Con la firma viaja la inversión, no una hoja casi vacía.
+    expect(ultima).toContain('TOTAL')
+    expect(paginas.size).toBe(2)
   })
 
   it('2 · cada número de vuelo va en SU fila: 8832 a la ida, 8833 al regreso', async () => {
@@ -822,10 +890,21 @@ describe('el texto para el cliente', () => {
     expect(t).toContain('Tiquetes aereos con Avianca y articulo personal')
   })
 
-  it('revisado: «Antes de viajar» sale en su recuadro', async () => {
+  it('revisado: «Antes de viajar» sale como lista, un consejo por renglón', async () => {
     const t = await texto(conTexto(doc(true)))
-    expect(t).toContain('Antes de viajar:')
-    expect(t).toContain('Lleve pasaporte vigente')
+    expect(t).toContain('Antes de viajar Lleve pasaporte vigente Los impuestos del hotel se pagan alla')
+    // Ya no es un párrafo en un recuadro, con los consejos unidos por « · ».
+    expect(t).not.toContain('Antes de viajar:')
+    expect(t).not.toContain('Lleve pasaporte vigente · Los impuestos')
+  })
+
+  it('⚠️ «Antes de viajar» va con «Incluido», no suelto al final del documento', async () => {
+    // El orden del texto solo significa algo dentro de UNA página: se mira la suya.
+    const t = await texto(props({ dias: null, viaje: viaje({ ...textoParaElViaje(doc(true)), vuelos: [], hoteles: [], presentacion: null }) }))
+    const pagina = [...porPagina(t, 'COT-2026-0006').values()].find(p => p.includes('Antes de viajar'))!
+    expect(pagina).toContain('Incluido en el plan')
+    expect(pagina.indexOf('Incluido en el plan')).toBeLessThan(pagina.indexOf('Antes de viajar'))
+    expect(pagina.indexOf('Antes de viajar')).toBeLessThan(pagina.indexOf('Opcionales'))
   })
 
   it('⚠️⚠️ un borrador de ONE sin revisar no imprime NADA: el documento sale como sin texto', async () => {

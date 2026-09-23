@@ -47,7 +47,7 @@ export function ciudadesEnTexto(texto: string | null | undefined): string[] {
 }
 
 function aFotoPDF(f: FotoCiudad, lugares: string[] = []): FotoPDF {
-  return { url: f.ruta, rotulo: f.rotulo, credito: f.credito, lugares }
+  return { url: f.ruta, rotulo: f.rotulo, credito: f.credito, lugares, foco: f.foco, proporcion: f.proporcion }
 }
 
 export function fotosDelViaje(
