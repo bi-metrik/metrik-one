@@ -26,6 +26,14 @@
  * El caso "1.234" es genuinamente ambiguo (¿mil doscientos treinta y cuatro, o uno
  * con 234 milésimas?). Se resuelve como MILES: en pesos colombianos los decimales
  * de tres dígitos no existen en la práctica y el separador de miles sí.
+ *
+ * ⚠️ ES EL NORMALIZADOR ÚNICO DE MONTOS, también en la cotización de viaje. El lector de
+ * pantallazos (`lectura-pantallazo.ts`) y el documento del cliente (`detalle-viaje.ts`)
+ * hacían `Number(valor.replace(/[^\d.-]/g, ''))`, que CONSERVA el punto de miles:
+ * `Number('50.080')` es 50,08. Pasó el 2026-09-23 en el ensayo de Trappvel: el modelo
+ * devolvió «Impuestos en destino» como "50.080" en un hotel y como "64200" en otro, y el
+ * primero llegó al PDF del cliente como «50,08 COP». El prompt pide el número sin
+ * separadores, pero el modelo no lo cumple siempre: la regla tiene que vivir aquí.
  */
 
 /**

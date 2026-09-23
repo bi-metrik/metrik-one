@@ -8,6 +8,7 @@ import { guardarCostoManualEnMoneda } from '@/app/(app)/negocios/costo-manual-ac
 import { costoManualVigente, normalizarCostoManual } from '@/lib/cotizaciones/costo-manual'
 import { leerTarifaPax, MONEDAS_FRECUENTES } from '@/lib/cotizaciones/tarifa-pasajero'
 import { formatCOP } from '@/lib/contacts/constants'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 /**
  * El costo unitario escrito a mano en una línea de viaje, con su moneda (brief del
@@ -120,16 +121,12 @@ export default function CostoManualItem({
   )
 }
 
-/** Un número escrito con puntos de miles o coma decimal, como lo teclea quien cotiza. */
+/**
+ * Un número escrito con puntos de miles o coma decimal, como lo teclea quien cotiza: «1.200,50»,
+ * «4.980.000», «1200.50». Pasa por el normalizador único de montos (`parseMontoCop`), el mismo
+ * que lee los pantallazos, para que un monto no se lea de dos formas según dónde se escribió.
+ * Un negativo llega tal cual: lo rechaza el servidor con su motivo, no se voltea el signo aquí.
+ */
 function numero(texto: string): number {
-  const t = texto.trim()
-  if (t === '') return 0
-  // «1.200,50» (es-CO) y «1200.50» se leen igual; «4.980.000» también.
-  const normal = /,\d{1,2}$/.test(t)
-    ? t.replace(/\./g, '').replace(',', '.')
-    : (t.match(/\./g) ?? []).length > 1 || /\.\d{3}$/.test(t)
-      ? t.replace(/\./g, '')
-      : t
-  const n = Number(normal.replace(/[^\d.]/g, ''))
-  return Number.isFinite(n) ? n : 0
+  return parseMontoCop(texto) ?? 0
 }

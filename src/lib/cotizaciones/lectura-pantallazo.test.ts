@@ -306,6 +306,67 @@ describe('moneda e impuestos · los avisos que deciden plata', () => {
   })
 })
 
+describe('montos en formato colombiano · ensayo del 2026-09-23 (COT-2026-0009)', () => {
+  // Lo que el modelo devolvió de verdad en «Impuestos en destino»: el Riu «50.080», el Sunscape
+  // «64.200» y el Hyatt «64200». Con `Number()` sobre el texto limpio los dos primeros eran
+  // 50,08 y 64,2 COP, y el del Riu llegó así al PDF del cliente.
+  const conImpuestos = (valor: string, moneda = 'COP') =>
+    evaluarLectura(HOTEL, hotelOk({
+      moneda: v('COP'), precio_total: v('8258260'), base_precio: v('total'),
+      impuestos_incluidos: v('false'),
+      impuestos_destino_valor: v(valor), impuestos_destino_moneda: v(moneda),
+    }))
+
+  it('el punto de miles no se lee como decimal', () => {
+    for (const [leido, dicho] of [['50.080', '50.080 COP'], ['64.200', '64.200 COP'], ['64200', '64.200 COP']]) {
+      const r = conImpuestos(leido)
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.avisos.join(' ')).toContain(`Impuestos y tasas a pagar en destino: ${dicho}`)
+    }
+  })
+
+  it('un total con puntos de miles se costea entero, no en cero', () => {
+    // «5.439.880» con `Number()` era NaN: la línea quedaba sin costo.
+    const r = evaluarLectura(HOTEL, hotelOk({ moneda: v('COP'), precio_total: v('5.439.880'), base_precio: v('total') }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const [rubro] = rubrosPropuestos(HOTEL, r.campos, r.desglose)
+    expect(rubro.valorUnitario).toBe(5439880)
+  })
+
+  it('un monto en pesos menor a mil no pasa en silencio: «revisa esta cifra»', () => {
+    const r = conImpuestos('64,2')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avisos.some(a => a.startsWith('Revisa esta cifra: «Impuestos en destino» se leyó como 64,2 COP'))).toBe(true)
+  })
+
+  it('el piso es de PESOS: 329,44 MXN es un cargo real y no se marca', () => {
+    const r = conImpuestos('329,44', 'MXN')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avisos.some(a => a.startsWith('Revisa esta cifra'))).toBe(false)
+  })
+
+  it('los impuestos sin moneda propia se miden en la de la captura', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({
+      moneda: v('COP'), precio_total: v('8258260'), base_precio: v('total'),
+      impuestos_destino_valor: v('50,08'), impuestos_destino_moneda: v(null, 0),
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avisos.some(a => a.startsWith('Revisa esta cifra'))).toBe(true)
+  })
+
+  it('un precio en pesos bajo el piso también se marca, y uno real no', () => {
+    const bajo = evaluarLectura(HOTEL, hotelOk({ moneda: v('COP'), precio_total: v('825'), base_precio: v('total') }))
+    const real = evaluarLectura(HOTEL, hotelOk({ moneda: v('COP'), precio_total: v('825.000'), base_precio: v('total') }))
+    expect(bajo.ok && bajo.avisos.some(a => a.includes('«Precio'))).toBe(true)
+    expect(real.ok && real.avisos.some(a => a.startsWith('Revisa esta cifra'))).toBe(false)
+  })
+})
+
 describe('R-P2 · lo no leído queda vacío, nunca en cero', () => {
   it('un campo opcional ausente no aparece en la descripción', () => {
     const r = evaluarLectura(VUELO, vueloOk({ numero_vuelo: v(null, 0), familia_tarifa: v(null, 0) }))

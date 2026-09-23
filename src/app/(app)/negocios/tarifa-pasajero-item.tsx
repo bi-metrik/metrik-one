@@ -46,6 +46,8 @@ import {
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { Correcciones } from '@/lib/cotizaciones/correcciones'
+import { cifrasPorRevisar } from '@/lib/cotizaciones/ficha-linea'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 
 /**
@@ -218,7 +220,9 @@ export default function TarifaPasajeroItem({
 
   const monedaResuelta = estado?.estado === 'resuelta' ? estado.moneda : 'COP'
   const enCOP = monedaResuelta === 'COP'
-  const tasaNum = Number(tasa.replace(/[^\d.,]/g, '').replace(',', '.'))
+  // ⚠️ Por el normalizador único de montos: la tasa se escribe en formato colombiano. Con
+  // `Number()` sobre el texto limpio, «4.150» era 4,15 y el costo en pesos salía mil veces menor.
+  const tasaNum = parseMontoCop(tasa) ?? Number.NaN
   const tasaValida = enCOP || (Number.isFinite(tasaNum) && tasaNum > 0)
 
   // ¿Hay una lectura más nueva que la última confirmación, o la confirmación quedó vieja
@@ -810,6 +814,9 @@ function LecturaResumen({
   }
 }) {
   const corregidos = Object.keys(ficha?.correcciones ?? {}).length
+  // Montos en pesos por debajo del piso de verosimilitud: se cuentan aquí, con la ficha cerrada,
+  // porque «revisa esta cifra» no puede depender de que alguien abra el detalle para verlo.
+  const porRevisar = ficha ? cifrasPorRevisar(ficha.ranura, lectura.campos, ficha.correcciones, lectura.moneda).size : 0
   const obs = ocupacionObservada(lectura)
   const ocupacion = lectura.ocupacionDelItem
     ? 'ocupación no visible en la imagen'
@@ -835,6 +842,12 @@ function LecturaResumen({
                 {corregidos} {corregidos === 1 ? 'corregido' : 'corregidos'}
               </span>
             )}
+            {porRevisar > 0 && (
+              <span className="ml-0.5 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 text-[9px] font-medium text-amber-900">
+                <AlertTriangle className="h-2.5 w-2.5" />
+                {porRevisar === 1 ? 'revisa una cifra' : `revisa ${porRevisar} cifras`}
+              </span>
+            )}
           </button>
           <button type="button" disabled={deshabilitado} onClick={onQuitar} className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground hover:text-red-700 disabled:opacity-50">
             <X className="h-3 w-3" /> Quitar
@@ -856,6 +869,7 @@ function LecturaResumen({
           <FichaDeLinea
             ranura={ficha.ranura}
             campos={lectura.campos}
+            moneda={lectura.moneda}
             correcciones={ficha.correcciones}
             deshabilitado={deshabilitado}
             onGuardar={ficha.onGuardar}

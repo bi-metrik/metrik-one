@@ -30,6 +30,23 @@ describe('parseMontoCop — separador de miles vs decimal', () => {
     expect(parseMontoCop('1.234')).toBe(1234)
   })
 
+  // Ensayo de Trappvel, 2026-09-23 (COT-2026-0009): lo que el modelo devolvió en
+  // «Impuestos en destino». `Number()` sobre el texto limpio daba 50,08 y 64,2, y el
+  // primero llegó al PDF del cliente.
+  it('los montos del ensayo de Trappvel', () => {
+    expect(parseMontoCop('50.080')).toBe(50080)
+    expect(parseMontoCop('64.200')).toBe(64200)
+    expect(parseMontoCop('64200')).toBe(64200)
+    expect(parseMontoCop('5439880')).toBe(5439880)
+    expect(parseMontoCop('5.439.880')).toBe(5439880)
+    expect(parseMontoCop('1.234.567,89')).toBeCloseTo(1234567.89, 2)
+    // Coma con una cifra: es decimal. El piso de verosimilitud de la cotización
+    // (`cifraInverosimil`) es el que avisa que 64,2 pesos no es un cargo real.
+    expect(parseMontoCop('64,2')).toBeCloseTo(64.2, 5)
+    // El formato que el prompt pide (punto decimal, sin miles) sigue entrando igual.
+    expect(parseMontoCop('329.44')).toBeCloseTo(329.44, 5)
+  })
+
   it('limpia símbolos, texto y espacios', () => {
     expect(parseMontoCop('  $701.812 COP ')).toBe(701812)
     expect(parseMontoCop('COP$ 850.000')).toBe(850000)

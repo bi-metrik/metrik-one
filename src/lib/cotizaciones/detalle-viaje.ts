@@ -59,6 +59,7 @@ import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } fr
 import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 /** Lo mínimo de una línea para reconstruir su detalle. */
 export interface ItemConLectura {
@@ -392,11 +393,17 @@ function detalleDelItem(item: ItemConLectura): Record<string, string> {
 
 const texto = (d: Record<string, string>, slug: string): string | null => d[slug] ?? null
 
+/**
+ * ⚠️ Lee lo GUARDADO tal como lo devolvió el modelo, con o sin punto de miles: por eso pasa
+ * por el normalizador único (`parseMontoCop`). Con `Number()` sobre el texto limpio,
+ * «50.080» salía en la tabla de cargos en destino del PDF como «50,08 COP» (ensayo del
+ * 2026-09-23). Las lecturas viejas se corrigen solas al volver a generar el documento: el
+ * texto crudo sigue guardado.
+ */
 function numero(d: Record<string, string>, slug: string): number | null {
   const v = d[slug]
   if (v === undefined) return null
-  const n = Number(String(v).replace(/[^\d.-]/g, ''))
-  return Number.isFinite(n) ? n : null
+  return parseMontoCop(v)
 }
 
 function booleano(d: Record<string, string>, slug: string): boolean | null {
