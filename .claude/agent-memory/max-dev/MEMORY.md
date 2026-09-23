@@ -51,6 +51,7 @@
 - ⚠️⚠️ [Arreglos 1-5 del PDF Trappvel (#822)](project_arreglos_documento_trappvel_0006.md) — un grupo libre borraba un vuelo del documento
 - ⚠️ [Texto del cliente redactado por ONE (#826)](project_texto_cliente_trappvel.md) — mergeado; el PDF imprime solo lo revisado
 - ⚠️ [Fotos, franja y tabla de vuelos del documento Trappvel (#832, #838)](project_documento_trappvel_fotos_ritmo.md) — foto al lado aprobada; tabla corta va entera
+- ⚠️⚠️ [La Recomendada manda y el cliente escoge (#836)](project_recomendada_tarifa_elegida.md) — `es_principal` ya no decide; el gate de margen no mira la Recomendada
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
 - ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge
