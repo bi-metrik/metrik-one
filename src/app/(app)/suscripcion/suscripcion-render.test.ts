@@ -232,6 +232,25 @@ describe('la pestaña Usuarios', () => {
     expect(sinValor).toContain('2 de 2 licencias en uso')
     expect(sinValor).not.toMatch(/\$/)
   })
+
+  it('en «Ver como» (solo lectura) se ve la lista, sin «Agregar usuario»', () => {
+    const lectura = texto(
+      renderToStaticMarkup(
+        React.createElement(UsuariosPanel, {
+          datos: {
+            lista,
+            cupo: { licencias: 2, usados: 2, libres: 0 },
+            valorAdicional: 50000,
+            adicionalesVigentes: 0,
+            licenciasContrato: 2,
+            soloLectura: true,
+          },
+        }),
+      ),
+    )
+    expect(lectura).toContain('Beto Díaz')
+    expect(lectura).not.toContain('Agregar usuario')
+  })
 })
 
 describe('el Resumen', () => {

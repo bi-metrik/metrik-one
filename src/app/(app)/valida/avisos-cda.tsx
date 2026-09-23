@@ -8,9 +8,10 @@ import {
 } from '@/lib/valida-cda/plazos'
 
 /**
- * Los avisos de `/valida` de un CDA que ven TODOS los usuarios del espacio (sin montos: la plata la
- * ven solo el dueño, los administradores y la persona designada, en Suscripción), más la franja de
- * una línea que lleva a Suscripción a quien la maneja.
+ * Los avisos de `/valida` de un CDA. La pausa por mora (sin montos) la ven TODOS los usuarios del
+ * espacio; el plazo de los términos, la mora dentro de los 30 días y la franja de una línea que lleva
+ * a Suscripción, solo la persona designada del contrato (`puedeVerSuscripcion`), que es quien la
+ * maneja.
  *
  * Los textos salen de `plazos.ts`, los mismos que devuelven las acciones del servidor: la pantalla y
  * el rechazo no pueden decir fechas distintas.
@@ -91,7 +92,7 @@ export function PausaPorMora({
             </p>
           ) : (
             <p className="text-sm text-tinta-suave">
-              El dueño del espacio, los administradores y la persona designada por tu empresa pueden ver y pagar la cuota.
+              La persona designada por tu empresa puede ver y pagar la cuota.
             </p>
           )}
         </div>

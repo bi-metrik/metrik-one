@@ -5,10 +5,11 @@ import { designacionDelEspacio } from '@/lib/valida-api/terminos-servidor'
 import { entradaValidaCda, moraValidaCda, type EntradaValidaCda } from '@/lib/valida-cda/puerta'
 import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
 import type { EstadoMora } from '@/lib/valida-cda/plazos'
-import { puedeVerSuscripcion, resumenEstado, tonoDelPunto, type ResumenEstado, type TerminosDeEntrada } from './estado'
+import { puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunto, type ResumenEstado, type TerminosDeEntrada } from './estado'
 
 /**
- * El contexto de la sección Suscripción para la persona de la sesión: si la ve, el contrato que su
+ * El contexto de la sección Suscripción para la persona de la sesión: si la ve (solo la persona
+ * designada del contrato, `puedeVerSuscripcion`), el contrato que su
  * espacio paga y el estado. Una sola resolución por request (`cache`): la usan el layout (punto del
  * menú), `/suscripcion`, la franja de `/valida` y cada acción.
  *
@@ -45,9 +46,15 @@ export type ContextoSuscripcion =
       tipo: 'ok'
       entrada: Extract<EntradaValidaCda, { tipo: 'ok' }>
       workspaceId: string
+      /** La persona REAL de la sesión: la que actúa en las acciones. */
       usuarioId: string
       role: string
       designadoId: string | null
+      /**
+       * Un platform admin en «Ver como» mirando como la persona designada: ve la sección, no la opera.
+       * Las acciones lo rechazan (`puedeOperarSuscripcion`) y la pantalla esconde los botones.
+       */
+      soloLectura: boolean
       designadoNombre: string | null
       contrato: ContratoSuscripcion
       pago: LecturaPago | null
@@ -78,7 +85,8 @@ async function resolver(): Promise<ContextoSuscripcion> {
 
   const designacion = await designacionDelEspacio(entrada.workspaceId)
   if (designacion === 'error') return { tipo: 'no_disponible' }
-  if (!puedeVerSuscripcion({ role: entrada.role, usuarioId: entrada.usuarioId, designadoId: designacion.designadoId })) {
+  // La regla única: solo la persona designada del contrato (la efectiva, con «Ver como»).
+  if (!puedeVerSuscripcion({ usuarioId: entrada.usuarioEfectivoId, designadoId: designacion.designadoId })) {
     return { tipo: 'no_aplica' }
   }
 
@@ -117,6 +125,11 @@ async function resolver(): Promise<ContextoSuscripcion> {
     usuarioId: entrada.usuarioId,
     role: entrada.role,
     designadoId: designacion.designadoId,
+    soloLectura: !puedeOperarSuscripcion({
+      usuarioId: entrada.usuarioEfectivoId,
+      designadoId: designacion.designadoId,
+      impersonando: entrada.impersonando,
+    }),
     designadoNombre: designacion.designadoNombre,
     contrato: {
       id: fila.id,

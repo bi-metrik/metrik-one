@@ -123,8 +123,8 @@ export default async function ValidaPage({ searchParams }: Props) {
           ...(negocioInicial ? { negocio_id: negocioInicial.id } : {}),
         }),
     getTutorialProgress('valida_standalone'),
-    // La suscripción (pago, usuarios, términos) vive en /suscripcion. Aquí, a quien la maneja, solo
-    // una línea cuando hay algo que hacer; el operador ve únicamente los avisos obligatorios.
+    // La suscripción (pago, usuarios, términos) vive en /suscripcion. Aquí, a la persona designada,
+    // solo una línea cuando hay algo que hacer; los demás ven únicamente la pausa por mora.
     vePagos ? contextoSuscripcion() : Promise.resolve(null),
   ]);
 
@@ -135,11 +135,16 @@ export default async function ValidaPage({ searchParams }: Props) {
           suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
         )
       : null;
+  // Términos, cuota y plata son de la persona designada del contrato (la misma regla que
+  // `/suscripcion`, `puedeVerPagosCda`). A los demás solo les llega el aviso obligatorio de servicio
+  // pausado por mora, sin montos ni botones (`PausaPorMora`), y la puerta de términos sin plazo.
+  const avisoPlazoVisible = vePagos ? avisoPlazo : null;
+  const moraVisible = vePagos && estadoMora?.estado === 'en_mora' ? estadoMora : null;
   const encabezado =
-    avisoPlazo || franja || estadoMora?.estado === 'en_mora' ? (
+    avisoPlazoVisible || franja || moraVisible ? (
       <div className="space-y-3">
-        {avisoPlazo}
-        {estadoMora?.estado === 'en_mora' && <AvisoMora mora={estadoMora} />}
+        {avisoPlazoVisible}
+        {moraVisible && <AvisoMora mora={moraVisible} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
     ) : null;

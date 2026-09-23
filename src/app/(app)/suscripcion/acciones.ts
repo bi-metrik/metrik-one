@@ -22,8 +22,10 @@ import { cambiarRolUsuario, invitarUsuario, reenviarInvitacion, retirarUsuario }
 
 /**
  * Las acciones de `/suscripcion`. Cada una vuelve a resolver el contexto en el servidor: una acción
- * exportada es un endpoint alcanzable con cualquier argumento, así que quién puede (dueño,
- * administrador o persona designada del espacio que paga el contrato) no viaja del navegador.
+ * exportada es un endpoint alcanzable con cualquier argumento, así que quién puede no viaja del
+ * navegador. Puede SOLO la persona designada del contrato del espacio que lo paga, en su propia
+ * sesión (`puedeVerSuscripcion` + `puedeOperarSuscripcion`): un dueño o un administrador que no sea
+ * la persona designada recibe «sin acceso», y un platform admin en «Ver como» solo lee.
  *
  * Solo exporta funciones async: es un archivo `'use server'`.
  */
@@ -32,6 +34,7 @@ type Resultado<T = object> = ({ ok: true } & T) | { ok: false; error: string }
 
 const SIN_PERMISO = 'No tienes acceso a la suscripción de este espacio.'
 const NO_DISPONIBLE = 'No se pudo leer tu suscripción. Intenta de nuevo en un momento.'
+const SOLO_LECTURA = 'Estás viendo la suscripción como otra persona: es solo lectura.'
 
 type CtxOk = Extract<Awaited<ReturnType<typeof contextoSuscripcion>>, { tipo: 'ok' }>
 
@@ -40,6 +43,14 @@ async function ctxOk(): Promise<{ ok: true; ctx: CtxOk } | { ok: false; error: s
   if (ctx.tipo === 'no_disponible') return { ok: false, error: NO_DISPONIBLE }
   if (ctx.tipo !== 'ok') return { ok: false, error: SIN_PERMISO }
   return { ok: true, ctx }
+}
+
+/** Lo mismo, y además que la sesión pueda operar: todo lo que escribe o mide pasa por aquí. */
+async function ctxEscritura(): Promise<{ ok: true; ctx: CtxOk } | { ok: false; error: string }> {
+  const r = await ctxOk()
+  if (!r.ok) return r
+  if (r.ctx.soloLectura) return { ok: false, error: SOLO_LECTURA }
+  return r
 }
 
 async function nombreDe(usuarioId: string): Promise<string | null> {
@@ -89,7 +100,7 @@ export async function comprarUsuarioAdicional(p: { solicitudExpresa: boolean }):
   if (p.solicitudExpresa !== true) {
     return { ok: false, error: 'Para agregar un usuario marca la casilla de solicitud expresa.' }
   }
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   const equipo = await leerEquipo(r.ctx)
   if (equipo === 'error') return { ok: false, error: NO_DISPONIBLE }
@@ -110,7 +121,7 @@ export async function invitarAlEspacio(p: {
   nombre: string
   rol: string
 }): Promise<Resultado<{ correoEnviado: boolean }>> {
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   const equipo = await leerEquipo(r.ctx)
   if (equipo === 'error') return { ok: false, error: NO_DISPONIBLE }
@@ -138,7 +149,7 @@ export async function retirarDelEspacio(p: {
   /** Además de retirar, dejar de pagar una licencia adicional desde el periodo siguiente. */
   dejarDePagarAdicional: boolean
 }): Promise<Resultado<{ sesionCerrada: boolean; licenciaLiberada: boolean; desdeCuota: number | null }>> {
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   const ret = await retirarUsuario({
     workspaceId: r.ctx.workspaceId,
@@ -176,7 +187,7 @@ export async function retirarDelEspacio(p: {
 
 export async function cambiarRolEnEspacio(p: { usuarioId: string; rol: string }): Promise<Resultado> {
   if (!esRolAsignable(p.rol)) return { ok: false, error: MENSAJE_INVITACION.rol }
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   const res = await cambiarRolUsuario({
     workspaceId: r.ctx.workspaceId,
@@ -190,7 +201,7 @@ export async function cambiarRolEnEspacio(p: { usuarioId: string; rol: string })
 }
 
 export async function reenviarInvitacionEspacio(p: { usuarioId: string }): Promise<Resultado> {
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   return reenviarInvitacion({
     workspaceId: r.ctx.workspaceId,
@@ -202,7 +213,7 @@ export async function reenviarInvitacionEspacio(p: { usuarioId: string }): Promi
 // ── Sustenta ──────────────────────────────────────────────────────────────────────────────
 
 export async function descartarSustenta(): Promise<Resultado> {
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   const [res] = await Promise.all([
     descartarSugerencia({ usuarioId: r.ctx.usuarioId, ahora: new Date() }),
@@ -220,7 +231,7 @@ export async function descartarSustenta(): Promise<Resultado> {
 export async function pedirContactoDeSustenta(
   p: { origen?: string } = {},
 ): Promise<Resultado<{ yaExistia: boolean; nombre: string | null }>> {
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return r
   const [res] = await Promise.all([
     pedirContactoSustenta({
@@ -247,7 +258,7 @@ export async function pedirContactoDeSustenta(
 export async function registrarEventoSustenta(evento: string): Promise<void> {
   const e = eventoDelNavegador(evento)
   if (!e) return
-  const r = await ctxOk()
+  const r = await ctxEscritura()
   if (!r.ok) return
   await registrarEventoSugerencia({ workspaceId: r.ctx.workspaceId, usuarioId: r.ctx.usuarioId, evento: e })
 }
