@@ -23,6 +23,7 @@
 - ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada
 - ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el sync sigue sin correr
 - ⚠️⚠️ [Ventas por ciudad en Marketing](project_marketing_ventas_por_ciudad.md) — #689 sin mergear: migración ANTES del merge
+- ⚠️ [Rediseño cotización Trappvel](project_rediseno_cotizacion_trappvel.md) — #853 (P4) SIN mergear: migración ANTES
 - [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — 4 migraciones sin aplicar; tres definiciones de «venta»
 - ⚠️⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #721 SIN mergear: migración antes del merge
 - ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra: solo fixtures
