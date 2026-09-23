@@ -11,7 +11,8 @@ import {
   detectarCaptura,
   type RanuraConLugar,
 } from '@/app/(app)/negocios/ranura-actions'
-import { confirmarTarifaPorPasajero, leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { desenlaceDeAceptar, type RespuestaAceptar } from '@/lib/cotizaciones/aceptar-captura'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { leerCaptura, procesarCaptura, type DependenciasDeProceso, type EstadoDeProceso } from '@/lib/cotizaciones/proceso-captura'
 import {
@@ -66,6 +67,8 @@ import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 export type Estado =
   | EstadoDeProceso
   | { fase: 'aceptada' }
+  /** R1 · «Aceptar» en camino: la fila lo dice en el acto y no se puede tocar dos veces. */
+  | { fase: 'aceptando' }
   /**
    * Quitada por el asesor. `reanudar`: se quitó mientras se analizaba (P11), así que
    * «Deshacer» no devuelve un estado viejo: la vuelve a la cola y se analiza de nuevo.
@@ -113,7 +116,7 @@ const ESPERA_BORRADO_MS = 6000
  */
 export function enElAireCaptura(c: Pick<Captura, 'estado' | 'itemId'>): boolean {
   const f = c.estado.fase
-  return f === 'mirando' || f === 'ubicando' || f === 'leyendo'
+  return f === 'mirando' || f === 'ubicando' || f === 'leyendo' || f === 'aceptando'
     || ((f === 'eligiendo_opcion' || f === 'parecida') && c.itemId !== null)
 }
 
@@ -189,6 +192,8 @@ export default function BandejaCapturas({
   const forzadas = useRef(new Set<string>())
   // Repetidas en su ventana de «Deshacer», antes de quitarse solas.
   const ocultar = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  // Aceptaciones en camino: un segundo toque no manda otra (R1).
+  const aceptando = useRef(new Set<string>())
 
   const actualizar = useCallback((id: string, cambio: Partial<Captura>) => {
     setCapturas(cs => cs.map(c => (c.id === id ? { ...c, ...cambio } : c)))
@@ -433,18 +438,35 @@ export default function BandejaCapturas({
     router.refresh()
   }
 
+  /**
+   * «Aceptar» (R1 del 2026-09-23). Va por `fetch` y no por la server action: Next despacha
+   * las server actions en fila, así que un «Aceptar» esperaba detrás de todas las lecturas en
+   * curso y parecía no responder. La fila cambia en el acto, la opción se muestra en su bloque
+   * de una vez, y un faltante de la tarifa no impide aceptar: queda pendiente en el bloque.
+   */
   async function aceptar(c: Captura) {
-    if (!c.itemId) return
-    const r = await confirmarTarifaPorPasajero(c.itemId, null)
-    if (!r.success) {
-      // No se pudo confirmar solo (falta una captura, la moneda o la tasa): la opción se abre
-      // en su bloque, donde está lo que falta.
-      actualizar(c.id, { error: r.error ?? 'No se pudo confirmar' })
-      onOpcionCreada?.(c.itemId)
+    if (!c.itemId || aceptando.current.has(c.id)) return
+    aceptando.current.add(c.id)
+    const itemId = c.itemId
+    const antes = c.estado
+    actualizar(c.id, { estado: { fase: 'aceptando' }, error: null, abierta: false })
+    onOpcionCreada?.(itemId)
+    let respuesta: RespuestaAceptar | null = null
+    try {
+      const res = await fetch(`/api/cotizaciones/items/${encodeURIComponent(itemId)}/confirmar-tarifa`, { method: 'POST' })
+      respuesta = (await res.json()) as RespuestaAceptar
+    } catch {
+      respuesta = null
+    } finally {
+      aceptando.current.delete(c.id)
+    }
+    const d = desenlaceDeAceptar(respuesta)
+    if (d.tipo === 'error') {
+      actualizar(c.id, { estado: antes, error: d.mensaje })
       return
     }
-    actualizar(c.id, { estado: { fase: 'aceptada' }, error: null, abierta: false })
-    onOpcionCreada?.(c.itemId)
+    actualizar(c.id, { estado: { fase: 'aceptada' }, error: null })
+    if (d.tipo === 'pendiente') toast.warning(d.mensaje)
     router.refresh()
   }
 
@@ -494,8 +516,11 @@ export default function BandejaCapturas({
           }}
         />
 
+        {/* R2 (2026-09-23): la bandeja es fija arriba en el escritorio; con muchas filas tapaba
+            los bloques de abajo y no se veía dónde caían las opciones aceptadas. La lista de
+            filas tiene tope de alto y se desplaza por dentro; la zona de pegado no se mueve. */}
         {visibles.length > 0 && (
-          <ul className="mt-2 space-y-1.5" aria-label="Capturas pegadas">
+          <ul className="mt-2 space-y-1.5 sm:max-h-[40vh] sm:overflow-y-auto" aria-label="Capturas pegadas" data-lista-capturas>
             {visibles.map(c => (
               <FilaCaptura
                 key={c.id}
@@ -587,6 +612,7 @@ export function FilaCaptura({
   }
   const e = c.estado
   const trabajando = e.fase === 'mirando' || e.fase === 'ubicando' || e.fase === 'leyendo'
+  const enviandoAceptar = e.fase === 'aceptando'
   // Lo que devolvió la lectura manda sobre la lista de la página, que puede venir de antes de
   // la lectura (la opción recién creada, vacía).
   const opcion = c.leida ?? item
@@ -596,7 +622,8 @@ export function FilaCaptura({
   // Con la ficha vacía no se ofrece «Aceptar» como si todo estuviera bien: se manda al bloque.
   const confirmable = e.fase === 'lista' && ficha.length > 0
   const titulo = opcion?.nombre || c.etiqueta || (c.tipo ? definicionDeTipo(c.tipo).label : 'Pantallazo')
-  const linea = e.fase === 'mirando' ? 'Mirando qué es…'
+  const linea = e.fase === 'aceptando' ? 'Aceptando…'
+    : e.fase === 'mirando' ? 'Mirando qué es…'
     : e.fase === 'ubicando' ? 'Ubicándolo…'
       : e.fase === 'leyendo' ? `Leyendo${c.donde ? ` · ${c.donde}` : ''}…`
         : e.fase === 'lista' ? (preparando ? 'Preparando la ficha…' : (c.donde ?? 'Leído'))
@@ -617,7 +644,7 @@ export function FilaCaptura({
           <span className="min-w-0">
             <span className="block truncate text-xs font-medium text-[#1A1A1A]">{titulo}</span>
             <span className={`flex items-center gap-1 truncate text-[10px] ${e.fase === 'rechazada' ? 'text-red-700' : e.fase === 'parecida' || e.fase === 'otro_precio' ? 'font-medium text-amber-700' : 'text-[#6B7280]'}`}>
-              {trabajando && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+              {(trabajando || enviandoAceptar) && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
               {linea}
             </span>
           </span>
@@ -678,7 +705,7 @@ export function FilaCaptura({
             Aceptar
           </button>
         )}
-        <button
+        {!enviandoAceptar && <button
           type="button"
           onClick={onBorrar}
           aria-label={trabajando ? 'Quitar esta captura (se deja de analizar)' : 'Borrar esta captura'}
@@ -686,7 +713,7 @@ export function FilaCaptura({
           className="shrink-0 rounded p-1 text-[#6B7280] hover:bg-red-50 hover:text-red-600"
         >
           <X className="h-3.5 w-3.5" />
-        </button>
+        </button>}
       </div>
       {c.error && <p className="px-2.5 pb-1.5 text-[10px] font-medium text-amber-700">{c.error}</p>}
 

@@ -207,3 +207,16 @@ describe('la × mientras se analiza (P11)', () => {
     expect(html).toContain('Deshacer')
   })
 })
+
+describe('«Aceptar» responde al primer toque (R1)', () => {
+  it('mientras acepta: dice «Aceptando…» y no ofrece otro Aceptar ni la ×', () => {
+    const html = pintar(captura({ estado: { fase: 'aceptando' } }), null)
+    expect(html).toContain('Aceptando…')
+    expect(html).not.toMatch(/>\s*Aceptar\s*</)
+    expect(html).not.toContain('data-quitar-captura')
+  })
+
+  it('una aceptación en curso cuenta como trabajo en el aire', () => {
+    expect(enElAireCaptura({ estado: { fase: 'aceptando' }, itemId: 'i' })).toBe(true)
+  })
+})
