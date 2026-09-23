@@ -43,6 +43,14 @@ import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { etiquetaAntiguedad } from '@/lib/negocios/antiguedad'
 import type { ControlRecibos } from '@/lib/actions/recibos-control-actions'
 import TabRecibos from './tab-recibos'
+import { EditorTitular, ResumenTitular } from './editor-titular'
+import {
+  errorDelTitular,
+  titularCambio,
+  titularInicial,
+  titularParaEnviar,
+  type TitularEnPantalla,
+} from '@/lib/facturacion/titular-revision'
 import type { FiltroSaldo, PestanaConciliacion } from './destino-inicial'
 
 const fmtCOP = (n: number) =>
@@ -1209,6 +1217,13 @@ export function FilaPorFacturar({
   const [email, setEmail] = useState(caso.email ?? '')
   const [telefono, setTelefono] = useState(caso.telefono ?? '')
   const [productoCode, setProductoCode] = useState(caso.concepto.code)
+  // El titular: a nombre de quién salen la factura, el recibo y los abonos. El editor
+  // arranca cerrado y con el titular vigente; abrirlo no corrige nada por sí solo.
+  const [corrigiendoTitular, setCorrigiendoTitular] = useState(false)
+  const [titular, setTitular] = useState<TitularEnPantalla>(() => titularInicial(caso))
+  const titularEditado = corrigiendoTitular && titularCambio(caso, titular)
+  // Con la misma regla del servidor: un titular que no valida no deja confirmar.
+  const errorTitular = titularEditado ? errorDelTitular(titular) : null
 
   /**
    * Solo viaja lo que de verdad cambió. Mandar el valor original en cada emisión
@@ -1219,6 +1234,7 @@ export function FilaPorFacturar({
     ...(email.trim() && email.trim() !== (caso.email ?? '') ? { email: email.trim() } : {}),
     ...(telefono.trim() && telefono.trim() !== (caso.telefono ?? '') ? { telefono: telefono.trim() } : {}),
     ...(productoCode && productoCode !== caso.concepto.code ? { productoCode } : {}),
+    ...(titularEditado ? { titular: titularParaEnviar(titular) } : {}),
   })
 
   const emitir = (justificacionDuplicado?: string) => {
@@ -1250,6 +1266,7 @@ export function FilaPorFacturar({
         )
       }
       setRevisando(false); setConfirmando(false); setDuplicados(null); setHermanos([]); setJustificacion('')
+      setCorrigiendoTitular(false)
       onCambio()
     })
   }
@@ -1324,8 +1341,15 @@ export function FilaPorFacturar({
               )}
             </div>
           )}
+          {/* El titular (a su nombre sale la factura) y, si es otra persona, el contacto:
+              suele ser quien pagó o quien vendió, y la factura NO sale a su nombre. */}
           <div className="mt-0.5 text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
-            {[caso.cliente, caso.identificacion, caso.etapa].filter(Boolean).join(' · ')}
+            {[
+              caso.cliente,
+              caso.identificacion,
+              caso.contacto_nombre && caso.contacto_nombre !== caso.cliente ? `contacto: ${caso.contacto_nombre}` : null,
+              caso.etapa,
+            ].filter(Boolean).join(' · ')}
           </div>
           {/* El concepto es lo que el cliente lee en la factura: se ve ANTES de
               emitir, no después. Cuando sale del default se advierte, porque
@@ -1418,18 +1442,7 @@ export function FilaPorFacturar({
               </div>
 
               <dl className="mt-2 space-y-1 text-[12px]">
-                {[
-                  // Cliente e identificación NO se editan aquí: salen del RUT del
-                  // expediente y cambiarlos es facturarle a otro, que es una
-                  // decisión distinta y con su propio soporte documental.
-                  ['Cliente', caso.cliente ?? '—'],
-                  ['Identificación', caso.identificacion ?? '—'],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex justify-between gap-3">
-                    <dt style={{ color: 'var(--tinta-suave)' }}>{k}</dt>
-                    <dd className="text-right" style={{ color: 'var(--tinta)' }}>{v}</dd>
-                  </div>
-                ))}
+                <ResumenTitular caso={caso} />
                 <div className="flex justify-between gap-3 border-t pt-1" style={{ borderColor: 'var(--acento-borde)' }}>
                   <dt style={{ color: 'var(--tinta-suave)' }}>Base</dt>
                   <dd style={{ color: 'var(--tinta)' }}>{caso.base_gravable == null ? '—' : fmtCOP(caso.base_gravable)}</dd>
@@ -1458,6 +1471,33 @@ export function FilaPorFacturar({
               <div className="mt-3 space-y-1.5 border-t pt-2" style={{ borderColor: 'var(--acento-borde)' }}>
                 <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--acento)' }}>
                   Datos editables
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px]" style={{ color: 'var(--tinta-suave)' }}>
+                      Titular (nombre y documento)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Cerrar descarta lo escrito: una corrección a medio escribir no
+                        // puede quedar viajando escondida en la emisión.
+                        if (corrigiendoTitular) setTitular(titularInicial(caso))
+                        setCorrigiendoTitular(!corrigiendoTitular)
+                      }}
+                      disabled={isPending}
+                      className="text-[11px] font-medium underline disabled:opacity-50"
+                      style={{ color: 'var(--acento)' }}
+                    >
+                      {corrigiendoTitular ? 'Dejar el titular como está' : 'Corregir titular'}
+                    </button>
+                  </div>
+                  {corrigiendoTitular && (
+                    <div className="mt-1">
+                      <EditorTitular caso={caso} valor={titular} onCambio={setTitular} disabled={isPending} />
+                    </div>
+                  )}
                 </div>
 
                 <label className="block">
@@ -1602,6 +1642,7 @@ export function FilaPorFacturar({
                 {!confirmando && !duplicados && (
                   <button
                     onClick={() => setConfirmando(true)}
+                    disabled={errorTitular != null}
                     className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
                     style={{ backgroundColor: VERDE }}
                   >
@@ -1616,7 +1657,7 @@ export function FilaPorFacturar({
                     </span>
                     <button
                       onClick={() => emitir()}
-                      disabled={isPending}
+                      disabled={isPending || errorTitular != null}
                       className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
                       style={{ backgroundColor: '#B91C1C' }}
                     >
@@ -1629,7 +1670,7 @@ export function FilaPorFacturar({
                 {duplicados && (
                   <button
                     onClick={() => emitir(justificacion)}
-                    disabled={isPending || justificacion.trim().length === 0}
+                    disabled={isPending || justificacion.trim().length === 0 || errorTitular != null}
                     className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white transition disabled:opacity-50"
                     style={{ backgroundColor: '#B91C1C' }}
                   >
@@ -1643,6 +1684,7 @@ export function FilaPorFacturar({
                     setRevisando(false); setConfirmando(false); setDuplicados(null); setHermanos([])
                     setJustificacion('')
                     setEmail(caso.email ?? ''); setTelefono(caso.telefono ?? ''); setProductoCode(caso.concepto.code)
+                    setCorrigiendoTitular(false); setTitular(titularInicial(caso))
                   }}
                   disabled={isPending}
                   className="rounded-md border px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
