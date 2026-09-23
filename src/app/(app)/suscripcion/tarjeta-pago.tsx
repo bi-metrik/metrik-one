@@ -4,18 +4,18 @@ import { fechaCorta } from '@/lib/valida-cda/pago-pendiente'
 import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
 
 /**
- * El próximo pago de la licencia de Valida de un CDA, arriba de `/valida`.
+ * El próximo pago de la suscripción, arriba del Resumen de `/suscripcion`.
  *
- * Informa y ofrece pagar; NO bloquea nada (la mora se maneja por la cláusula 11 de los términos).
- * Lo ven quienes manejan la plata del espacio (dueño y administradores) y la persona designada por
- * la empresa; la decisión la toma la página.
+ * Informa y ofrece pagar; no bloquea nada (la mora se maneja por la cláusula 11 de los Términos).
+ * La página ya decidió que quien entra puede ver la plata (dueño, administrador o persona designada).
  *
- * Reglas, en `pago-pendiente.ts`: la cuota es la primera que lo recibido no cubre, y el botón sale
- * solo con un enlace de una pasarela conocida, https y vigente. Sin enlace, se dice que llega; nunca un botón muerto.
+ * El botón «Pagar en línea» sale solo con un enlace de pago vigente de la cuota
+ * (`cobros.enlace_pago_url`, validado en `pago-pendiente.ts`); sin enlace se dice cuándo llega,
+ * nunca un botón muerto. La tarjeta no nombra a ningún proveedor de pagos.
  *
  * Sin estado ni efectos: se pinta en el servidor.
  */
-export function PagoPendienteCard({ lectura }: { lectura: LecturaPago }) {
+export function TarjetaPago({ lectura }: { lectura: LecturaPago }) {
   if (lectura.estado === 'no_disponible') {
     return (
       <p data-pago-cda="no_disponible" className="text-xs text-tinta-suave">
@@ -30,8 +30,8 @@ export function PagoPendienteCard({ lectura }: { lectura: LecturaPago }) {
 
   if (pago.estado === 'al_dia') {
     return (
-      <p data-pago-cda="al_dia" className="text-sm text-tinta-suave">
-        Tu suscripción a Valida está al día.
+      <p data-pago-cda="al_dia" className="rounded-lg border border-border bg-white p-4 text-sm text-tinta">
+        Tu suscripción está al día. Las cuotas pagadas y sus facturas están en Pagos.
       </p>
     )
   }
@@ -79,7 +79,7 @@ export function PagoPendienteCard({ lectura }: { lectura: LecturaPago }) {
             <p className="max-w-xs text-sm text-tinta-suave" data-sin-enlace>
               {pago.enlaceVencido
                 ? 'El enlace de pago de esta cuota venció. MeTRIK te enviará uno nuevo.'
-                : 'MeTRIK te enviará el enlace de pago de esta cuota antes de su vencimiento.'}
+                : `El enlace de pago estará disponible antes del ${fechaCorta(pago.fechaVencimiento)}.`}
             </p>
           )}
         </div>

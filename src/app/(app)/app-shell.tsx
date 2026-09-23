@@ -37,6 +37,7 @@ import {
   Tags,
   FileText,
   KeyRound,
+  CreditCard,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -108,6 +109,29 @@ interface AppShellProps {
   hasLineas?: boolean
   notificationBell?: React.ReactNode
   platformAdminState?: PlatformAdminState | null
+  /**
+   * La sección Suscripción (`/suscripcion`), solo para el dueño, los administradores y la persona
+   * designada de un espacio que paga un contrato de Valida. `null` = no se ofrece (la ruta da 404).
+   * El tono pinta el punto de estado; `null` = sin punto.
+   */
+  suscripcion?: { tono: 'verde' | 'ambar' | 'rojo' | null } | null
+}
+
+const COLOR_PUNTO = { verde: '#10B981', ambar: '#D97706', rojo: '#DC2626' } as const
+const ETIQUETA_PUNTO = { verde: 'al día', ambar: 'requiere atención', rojo: 'en pausa' } as const
+
+/** El punto de estado de Suscripción, con su nombre para lectores de pantalla. */
+function PuntoEstado({ tono }: { tono: 'verde' | 'ambar' | 'rojo' | null }) {
+  if (!tono) return null
+  return (
+    <span
+      data-punto-suscripcion={tono}
+      className="ml-auto h-2 w-2 shrink-0 rounded-full"
+      style={{ backgroundColor: COLOR_PUNTO[tono] }}
+      role="img"
+      aria-label={`Suscripción ${ETIQUETA_PUNTO[tono]}`}
+    />
+  )
 }
 
 // ── Navigation items by module group ──
@@ -371,6 +395,7 @@ export default function AppShell({
   hasLineas,
   notificationBell,
   platformAdminState,
+  suscripcion = null,
 }: AppShellProps) {
   const pathname = usePathname()
 
@@ -385,6 +410,7 @@ export default function AppShell({
     (navRolesOverride?.[href] ?? defaultRoles).includes(role)
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
+  const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
 
   const handleSignOut = async () => {
     const supabase = createClient()
@@ -402,7 +428,9 @@ export default function AppShell({
   const mod = modules ?? { business: true }
   // ── Modo vitrina ──
   // En modo vitrina solo sobreviven 3 hrefs en TODO el nav: Valida (funcional)
-  // + Tableros + Números (vitrinas de upsell a ONE). Cualquier item con otro href
+  // + Tableros + Números (vitrinas de upsell a ONE). Números sale de un espacio que
+  // usa ONE solo con Valida (los CDA): lo quita `moduloGate`, que pregunta a
+  // `vitrinasDelEspacio` (lib/modulos/gate.ts), la misma regla del middleware. Cualquier item con otro href
   // se filtra. Aplica a cada grupo (incluidos los "siempre visibles" como
   // Directorio/Configuración). Helper único para no duplicar la lista.
   const VITRINA_HREFS = ['/valida', '/tableros', '/numeros'] as const
@@ -930,6 +958,32 @@ export default function AppShell({
               })}
             </div>
           )}
+
+          {/* Suscripción — al final, separada: lo que el espacio paga, no una herramienta. */}
+          {suscripcion && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }} data-nav-suscripcion>
+              {(() => {
+                const isActive = pathname === '/suscripcion' || pathname.startsWith('/suscripcion/')
+                return (
+                  <Link
+                    href="/suscripcion"
+                    title={!sidebarExpanded ? 'Suscripción' : undefined}
+                    className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
+                      sidebarExpanded ? '' : 'justify-center'
+                    } ${isActive ? 'shadow-sm' : 'hover:opacity-90'}`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--sidebar-primary)' : 'transparent',
+                      color: isActive ? 'var(--sidebar-primary-foreground)' : 'var(--sidebar-muted)',
+                    }}
+                  >
+                    <CreditCard className="h-4 w-4 shrink-0" />
+                    {sidebarExpanded && <span>Suscripción</span>}
+                    <PuntoEstado tono={suscripcion.tono} />
+                  </Link>
+                )
+              })()}
+            </div>
+          )}
         </nav>
 
         {/* Admin section — solo owner */}
@@ -1061,20 +1115,71 @@ export default function AppShell({
           </div>
           <div className="flex items-center gap-2">
             {notificationBell}
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold"
-              style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}
-            >
-              {initials}
-            </div>
-            <button
-              onClick={handleSignOut}
-              className="rounded-md p-1.5 transition-colors hover:opacity-80"
-              style={{ color: 'var(--sidebar-muted)' }}
-              title="Cerrar sesión"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            {suscripcion ? (
+              // Con Suscripción, el avatar abre el menú de perfil: Suscripción primero, luego salir.
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuPerfilAbierto((v) => !v)}
+                  aria-expanded={menuPerfilAbierto}
+                  aria-label="Menú de perfil"
+                  className="relative flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}
+                >
+                  {initials}
+                  {suscripcion.tono && suscripcion.tono !== 'verde' && (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-white"
+                      style={{ backgroundColor: COLOR_PUNTO[suscripcion.tono] }}
+                    />
+                  )}
+                </button>
+                {menuPerfilAbierto && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setMenuPerfilAbierto(false)} />
+                    <div
+                      data-menu-perfil
+                      className="absolute right-0 top-9 z-50 w-52 rounded-lg border border-border bg-card py-1 text-sm text-foreground shadow-lg"
+                    >
+                      <Link
+                        href="/suscripcion"
+                        onClick={() => setMenuPerfilAbierto(false)}
+                        className="flex items-center gap-2 px-3 py-2 hover:bg-muted"
+                      >
+                        <CreditCard className="h-4 w-4" />
+                        <span>Suscripción</span>
+                        <PuntoEstado tono={suscripcion.tono} />
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={handleSignOut}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Cerrar sesión
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <div
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--sidebar-primary)', color: 'var(--sidebar-primary-foreground)' }}
+                >
+                  {initials}
+                </div>
+                <button
+                  onClick={handleSignOut}
+                  className="rounded-md p-1.5 transition-colors hover:opacity-80"
+                  style={{ color: 'var(--sidebar-muted)' }}
+                  title="Cerrar sesión"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </>
+            )}
           </div>
         </header>
 

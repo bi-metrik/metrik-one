@@ -40,7 +40,8 @@
 --   · No crea usuarios. La designada tiene que tener perfil en el espacio del CDA. Cada espacio
 --     tiene hoy 2 licencias y 2 perfiles: un tercer usuario es un usuario adicional (cláusula 2.3),
 --     salvo que se designe a uno de los dos que ya existen.
---   · No pone comisión a AFI (ver la nota en el insert).
+--   · No pone comisión a AFI ni el valor del usuario adicional: eso va en
+--     `2026-09-23_comision-afi-y-usuario-adicional.sql`, que se corre después de este.
 --   · No enciende los planes de cobro (siguen `activo = false`: el emisor no emite sin factura
 --     electrónica) ni carga enlaces de pago.
 --
@@ -326,10 +327,9 @@ begin
     -- Sin fin: al vencer el plazo de la cláusula 12.1 (15 de enero de 2027) la suscripción se renueva mes a
     -- mes (cláusula 12.2).
     null,
-    -- ⚠️ Sin comisión: que AFI siga cobrando $50.000 por licencia después de la terminación no está
-    -- decidido. Si se decide que sí, va en esta columna, con el MISMO criterio de 4D SOFT:
-    --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
-    --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
+    -- Nace sin comisión; la de AFI ($50.000 fijos + 20 % de lo adicional, decidida el 2026-09-23) y
+    -- el valor del usuario adicional los pone después `2026-09-23_comision-afi-y-usuario-adicional.sql`,
+    -- con su fila en la bitácora.
     null,
     false, c_registrado_por, c_designado, c_plazo_terminos
   )
@@ -652,10 +652,9 @@ begin
     -- Sin fin: al vencer el plazo de la cláusula 12.1 (15 de enero de 2027) la suscripción se renueva mes a
     -- mes (cláusula 12.2).
     null,
-    -- ⚠️ Sin comisión: que AFI siga cobrando $50.000 por licencia después de la terminación no está
-    -- decidido. Si se decide que sí, va en esta columna, con el MISMO criterio de 4D SOFT:
-    --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
-    --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
+    -- Nace sin comisión; la de AFI ($50.000 fijos + 20 % de lo adicional, decidida el 2026-09-23) y
+    -- el valor del usuario adicional los pone después `2026-09-23_comision-afi-y-usuario-adicional.sql`,
+    -- con su fila en la bitácora.
     null,
     false, c_registrado_por, c_designado, c_plazo_terminos
   )
@@ -978,10 +977,9 @@ begin
     -- Sin fin: al vencer el plazo de la cláusula 12.1 (15 de enero de 2027) la suscripción se renueva mes a
     -- mes (cláusula 12.2).
     null,
-    -- ⚠️ Sin comisión: que AFI siga cobrando $50.000 por licencia después de la terminación no está
-    -- decidido. Si se decide que sí, va en esta columna, con el MISMO criterio de 4D SOFT:
-    --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
-    --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
+    -- Nace sin comisión; la de AFI ($50.000 fijos + 20 % de lo adicional, decidida el 2026-09-23) y
+    -- el valor del usuario adicional los pone después `2026-09-23_comision-afi-y-usuario-adicional.sql`,
+    -- con su fila en la bitácora.
     null,
     false, c_registrado_por, c_designado, c_plazo_terminos
   )
@@ -1304,10 +1302,9 @@ begin
     -- Sin fin: al vencer el plazo de la cláusula 12.1 (21 de diciembre de 2026) la suscripción se renueva mes a
     -- mes (cláusula 12.2).
     null,
-    -- ⚠️ Sin comisión: que AFI siga cobrando $50.000 por licencia después de la terminación no está
-    -- decidido. Si se decide que sí, va en esta columna, con el MISMO criterio de 4D SOFT:
-    --   jsonb_build_object('modo', 'monto_fijo', 'monto_fijo', 50000, 'base', 'cada_cobro',
-    --     'beneficiario_empresa_id', 'ecc378c7-10c4-4984-a31d-5533a598ad71', 'beneficiario_nit', '902003244-6')
+    -- Nace sin comisión; la de AFI ($50.000 fijos + 20 % de lo adicional, decidida el 2026-09-23) y
+    -- el valor del usuario adicional los pone después `2026-09-23_comision-afi-y-usuario-adicional.sql`,
+    -- con su fila en la bitácora.
     null,
     false, c_registrado_por, c_designado, c_plazo_terminos
   )

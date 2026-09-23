@@ -9,7 +9,8 @@ import {
 
 /**
  * Los avisos de `/valida` de un CDA que ven TODOS los usuarios del espacio (sin montos: la plata la
- * ven solo el dueño, los administradores y la persona designada, en la tarjeta y en Pagos).
+ * ven solo el dueño, los administradores y la persona designada, en Suscripción), más la franja de
+ * una línea que lleva a Suscripción a quien la maneja.
  *
  * Los textos salen de `plazos.ts`, los mismos que devuelven las acciones del servidor: la pantalla y
  * el rechazo no pueden decir fechas distintas.
@@ -80,13 +81,38 @@ export function PausaPorMora({
         <div className="space-y-2">
           <h2 className="text-base font-semibold text-tinta">Valida está pausada</h2>
           <p className="text-sm text-tinta">{mensajeSuspendidoPorMora(mora)}</p>
-          <p className="text-sm text-tinta-suave">
-            {vePagos
-              ? 'En la pestaña Pagos está la cuota vencida, con su enlace de pago cuando MeTRIK lo haya enviado.'
-              : 'El dueño del espacio, los administradores y la persona designada por tu empresa pueden ver y pagar la cuota.'}
-          </p>
+          {vePagos ? (
+            <p className="text-sm text-tinta-suave">
+              En{' '}
+              <Link href="/suscripcion?tab=pagos" className="font-semibold text-acento">
+                Suscripción
+              </Link>{' '}
+              está la cuota vencida, con su enlace de pago cuando MeTRIK lo haya enviado.
+            </p>
+          ) : (
+            <p className="text-sm text-tinta-suave">
+              El dueño del espacio, los administradores y la persona designada por tu empresa pueden ver y pagar la cuota.
+            </p>
+          )}
         </div>
       </div>
     </section>
+  )
+}
+
+/**
+ * Una línea para quien maneja la suscripción cuando hay algo que hacer («Tu cuota vence el 30-sep ·
+ * Pagar»). El pago y sus detalles viven en `/suscripcion`; aquí solo se avisa y se lleva allá.
+ */
+export function FranjaSuscripcion({ texto }: { texto: string }) {
+  return (
+    <Link
+      href="/suscripcion"
+      data-franja-suscripcion
+      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white px-4 py-2.5 text-sm text-tinta"
+    >
+      <span>{texto}</span>
+      <span className="shrink-0 font-semibold text-acento">Pagar</span>
+    </Link>
   )
 }

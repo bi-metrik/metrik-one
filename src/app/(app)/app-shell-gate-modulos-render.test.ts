@@ -94,8 +94,9 @@ describe('menú contra gate por módulo', () => {
     }
   })
 
-  it('guardia: un CDA en vitrina sigue viendo Valida, Números y Tableros', () => {
+  it('guardia: un CDA en vitrina sigue viendo Valida y Tableros, y ya no Números', () => {
     const hrefs = hrefsDelMenu('cda-caqueta', 'operator')
-    expect(hrefs).toEqual(expect.arrayContaining(['/valida', '/numeros', '/tableros']))
+    expect(hrefs).toEqual(expect.arrayContaining(['/valida', '/tableros']))
+    expect(hrefs).not.toContain('/numeros')
   })
 })

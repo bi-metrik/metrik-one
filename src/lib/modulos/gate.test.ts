@@ -90,13 +90,22 @@ describe('lo que no se puede cerrar', () => {
     }
   })
 
-  it('las vitrinas de un CDA siguen abriendo (/numeros, /tableros) y Valida también', () => {
-    expect(rutaPermitida('/numeros', ctx('cda-caqueta'))).toBe(true)
-    expect(rutaPermitida('/tableros', ctx('cda-caqueta'))).toBe(true)
-    expect(rutaPermitida('/valida', ctx('cda-caqueta'))).toBe(true)
+  it('la vitrina de un CDA abre Tableros y Valida; Números ya no (usa ONE solo con Valida)', () => {
+    for (const slug of ['cda-caqueta', 'cda-elcarmen', 'cda-puertotest', 'maxitec']) {
+      expect(rutaPermitida('/numeros', ctx(slug)), slug).toBe(false)
+      expect(rutaPermitida('/tableros', ctx(slug)), slug).toBe(true)
+      expect(rutaPermitida('/valida', ctx(slug)), slug).toBe(true)
+    }
     // Control: sin vitrina, las mismas rutas se cierran. Sin este caso no se distingue
     // "la vitrina abre" de "el gate nunca cierra".
-    expect(rutaPermitida('/numeros', ctx('cda-caqueta', { modoVitrina: false }))).toBe(false)
+    expect(rutaPermitida('/tableros', ctx('cda-caqueta', { modoVitrina: false }))).toBe(false)
+    // Control: una vitrina con otro módulo además de Valida conserva Números. Se razona por
+    // módulo encendido, no por el slug.
+    const conOtro = { modules: { valida_consulta: true, compliance: true }, modoVitrina: true, platformAdmin: false }
+    expect(rutaPermitida('/numeros', conOtro)).toBe(true)
+    // Una llave de función no es un módulo: no le devuelve Números a un CDA.
+    const conLlave = { modules: { valida_consulta: true, fab_registrar_pago: true }, modoVitrina: true, platformAdmin: false }
+    expect(rutaPermitida('/numeros', conLlave)).toBe(false)
   })
 
   it('una llave de función abre SOLO su ruta: comparativa en metrik, solicitudes con el bot', () => {

@@ -74,7 +74,9 @@ export const MODULOS = {
     nombre: 'Valida',
     clave: 'valida_consulta',
     inicio: '/valida',
-    rutas: ['/valida'],
+    // /suscripcion: la licencia que el CDA paga (pagos, usuarios, términos). La ruta misma exige
+    // además ser dueño, administrador o persona designada del espacio que paga el contrato.
+    rutas: ['/valida', '/suscripcion'],
     funciones: [],
   },
   // Clientes de API directa (4D SOFT). Es un módulo distinto de Valida: otro cliente, otra

@@ -98,11 +98,17 @@ describe('middleware: gate por módulo', () => {
     expect(await pedir(DOMINIO_BASE, '/negocios')).toBe('/valida')
   })
 
-  it('lo que el CDA sí tiene abre: Valida, las vitrinas y lo común', async () => {
+  it('lo que el CDA sí tiene abre: Valida, Suscripción, la vitrina de Tableros y lo común', async () => {
     perfil = { role: 'operator', slug: 'cda-caqueta' }
     expect(await pedir(TENANT, '/valida')).toBeNull()
-    expect(await pedir(TENANT, '/numeros')).toBeNull()
+    expect(await pedir(TENANT, '/suscripcion')).toBeNull()
+    expect(await pedir(TENANT, '/tableros')).toBeNull()
     expect(await pedir(TENANT, '/servicios')).toBeNull()
+  })
+
+  it('Números ya no abre en un CDA: usa ONE solo con Valida', async () => {
+    perfil = { role: 'operator', slug: 'cda-caqueta' }
+    expect(await pedir(TENANT, '/numeros')).not.toBeNull()
   })
 
   it('un workspace con Clarity abre /negocios igual que antes', async () => {
