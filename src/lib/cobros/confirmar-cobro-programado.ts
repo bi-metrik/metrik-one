@@ -28,6 +28,11 @@ export interface ConfirmacionPago {
   /** Monto recibido, si difiere del programado. */
   monto?: number | null
   notas?: string | null
+  /**
+   * El cliente pagó el total y no retuvo el IVA: se quita la retención que el enlace por el neto
+   * había dejado en «certificado pendiente» (`retencion-iva.ts`).
+   */
+  quitarRetencionIva?: boolean
 }
 
 export type ResultadoConfirmacion =
@@ -43,6 +48,7 @@ export async function confirmarPagoCobroProgramado(
   if (c.fuente) patch.fuente = c.fuente
   if (typeof c.monto === 'number' && Number.isFinite(c.monto) && c.monto > 0) patch.monto = c.monto
   if (c.notas) patch.notas = c.notas
+  if (c.quitarRetencionIva) Object.assign(patch, { retencion_iva: 0, retencion_iva_estado: null, retencion: 0 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (db as any)

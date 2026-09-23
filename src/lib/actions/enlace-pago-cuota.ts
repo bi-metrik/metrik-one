@@ -44,7 +44,7 @@ export async function generarEnlacePagoDeCuota(cuotaId: string): Promise<Resulta
         tipo: 'sistema',
         autor_id: staffId, // FK a staff(id), NO a profiles
         // `activity_log.contenido` tiene CHECK de 280 caracteres.
-        contenido: `Enlace de pago en línea generado manualmente para la cuota ${r.numero}${r.monto ? ` por $${r.monto.toLocaleString('es-CO')}` : ''}${r.pasarela ? ` (${r.pasarela})` : ''}.`.slice(0, 280),
+        contenido: `Enlace de pago en línea generado manualmente para la cuota ${r.numero}${r.monto ? ` por $${r.monto.toLocaleString('es-CO')}` : ''}${r.pasarela ? ` (${r.pasarela})` : ''}${r.retencionIva > 0 ? `, neto de $${r.retencionIva.toLocaleString('es-CO')} de retención de IVA (certificado pendiente)` : ''}.`.slice(0, 280),
       },
       'generarEnlacePagoDeCuota',
     )

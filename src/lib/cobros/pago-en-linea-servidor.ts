@@ -23,13 +23,14 @@ import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
-const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, monto, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
+const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
 
 type FilaCobro = {
   id: string
   workspace_id: string
   negocio_id: string | null
   monto: number | string | null
+  retencion_iva: number | string | null
   fecha: string | null
   anulado_at: string | null
   tipo_cobro: string | null
@@ -44,6 +45,7 @@ function aCobro(f: FilaCobro): CobroParaPago {
     workspaceId: f.workspace_id,
     negocioId: f.negocio_id,
     monto: Number(f.monto ?? 0),
+    retencionIva: Number(f.retencion_iva ?? 0),
     fecha: f.fecha,
     anuladoAt: f.anulado_at,
     tipoCobro: f.tipo_cobro,

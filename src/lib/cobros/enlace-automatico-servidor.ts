@@ -249,7 +249,7 @@ export async function generarEnlacesAutomaticos(
         tipo: 'sistema',
         autor_id: null,
         // `activity_log.contenido` tiene CHECK de 280 caracteres.
-        contenido: `Enlace de pago en línea generado automáticamente para la cuota ${r.numero}${r.monto ? ` por $${r.monto.toLocaleString('es-CO')}` : ''}${r.pasarela ? ` (${r.pasarela})` : ''}. Aviso por correo: ${TEXTO_AVISO[aviso.estado]}${aviso.motivo ? ` (${aviso.motivo})` : ''}.`.slice(0, 280),
+        contenido: `Enlace de pago en línea generado automáticamente para la cuota ${r.numero}${r.monto ? ` por $${r.monto.toLocaleString('es-CO')}` : ''}${r.pasarela ? ` (${r.pasarela})` : ''}${r.retencionIva > 0 ? `, neto de $${r.retencionIva.toLocaleString('es-CO')} de retención de IVA (certificado pendiente)` : ''}. Aviso por correo: ${TEXTO_AVISO[aviso.estado]}${aviso.motivo ? ` (${aviso.motivo})` : ''}.`.slice(0, 280),
       },
       'generarEnlacesAutomaticos',
     )

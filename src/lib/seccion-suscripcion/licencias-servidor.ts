@@ -77,6 +77,8 @@ interface FilaCobro {
   plan_cobro_id: string | null
   numero_cuota: number | null
   monto: number | string | null
+  /** Retención de IVA del cliente: cubre la cuota aunque no sea efectivo. */
+  retencion_iva: number | string | null
   fecha: string | null
   anulado_at: string | null
 }
@@ -116,7 +118,7 @@ async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
 
   const [cuotas, cobros] = await Promise.all([
     svc.from('plan_cobro_cuotas').select('id, plan_cobro_id, numero, tipo, monto, fecha_vencimiento, concepto_detalle').in('plan_cobro_id', ids),
-    svc.from('cobros').select('plan_cobro_id, numero_cuota, monto, fecha, anulado_at').eq('negocio_id', ctx.contrato.negocioId),
+    svc.from('cobros').select('plan_cobro_id, numero_cuota, monto, retencion_iva, fecha, anulado_at').eq('negocio_id', ctx.contrato.negocioId),
   ])
   if (cuotas.error || cobros.error) {
     console.error('[suscripcion] cuotas o cobros:', cuotas.error?.message ?? cobros.error?.message)
@@ -157,7 +159,7 @@ async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
     ),
     cobros: filasCobro
       .filter((c) => c.anulado_at === null && c.fecha !== null)
-      .map((c) => ({ monto: Number(c.monto ?? 0), estado: 'pagado' as const })),
+      .map((c) => ({ monto: Number(c.monto ?? 0), retencionIva: Number(c.retencion_iva ?? 0), estado: 'pagado' as const })),
     hoy,
     ahoraISO: new Date().toISOString(),
   })
