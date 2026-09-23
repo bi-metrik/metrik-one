@@ -74,7 +74,7 @@ import {
   precioPorPasajero,
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
-import { lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada'
+import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
@@ -746,9 +746,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
    *
    * El cambio que las deja viejas casi nunca pasa aquí: pasa en el negocio, cuando alguien
    * corrige los pasajeros del viaje. Por eso el aviso va arriba y nombra cada línea: con la
-   * lista cerrada, la alerta de cada una no se ve. Avisa, no bloquea — no hay un control de
-   * envío donde sumarlo (`captura-desactualizada.ts`); lo que sí se niega es confirmar el
-   * costo de cada línea mientras esté vieja.
+   * lista cerrada, la alerta de cada una no se ve.
+   *
+   * Y mientras haya alguna, «Enviar» se deshabilita con `motivoEnvio` (decisión de Mauricio
+   * del 2026-09-22). Es el MISMO texto con que el servidor rechaza el envío
+   * (`captura-desactualizada-datos.ts`): el botón es solo la puerta visible, el control es
+   * del servidor. El PDF no se frena.
    */
   const desactualizadas = lineasDesactualizadas(
     initialItems.map(i => ({
@@ -760,6 +763,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })),
     composicionViaje,
   )
+  const motivoEnvio = motivoParaNoEnviar(desactualizadas)
 
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
@@ -870,8 +874,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           {editable && (
             <button
               onClick={handleEnviar}
-              disabled={isPending}
-              className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              disabled={isPending || motivoEnvio !== null}
+              title={motivoEnvio ?? undefined}
+              aria-describedby={motivoEnvio ? 'aviso-captura-desactualizada' : undefined}
+              className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send className="h-3 w-3" />
               Enviar
@@ -948,9 +954,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               </li>
             ))}
           </ul>
-          <p className="mt-1.5 pl-5">
+          <p id="aviso-captura-desactualizada" className="mt-1.5 pl-5">
             {editable
-              ? 'Pega el pantallazo nuevo en cada una y vuelve a confirmar su costo antes de enviar la cotización.'
+              ? `${motivoEnvio} Hasta entonces no se puede enviar ni aprobar; el PDF sí se descarga.`
               : 'Esta cotización ya no se edita: duplícala para cotizar con los pasajeros de hoy.'}
           </p>
         </div>

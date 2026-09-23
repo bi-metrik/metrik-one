@@ -12,6 +12,7 @@ import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
 import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 import { motivoParaNoSalir } from '@/lib/cotizaciones/piso-salida-datos'
+import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { precioAprobadoDeCotizacion } from '@/lib/fiscal/iva-cotizacion-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -81,6 +82,11 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
+  // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
+  // 2026-09-22). Antes del margen: con el precio de otros pasajeros, el margen no dice nada.
+  const motivoCapturas = await motivoPorCapturasDesactualizadas(supabase, { cotizacionId, destino: 'enviada' })
+  if (motivoCapturas) return { success: false as const, error: motivoCapturas }
+
   // Bajo el margen mínimo, sin la autorización del dueño, no sale (decisión del
   // 2026-09-22). En el servidor: el botón es solo la puerta visible.
   const motivo = await motivoParaNoSalir(supabase, {
@@ -125,6 +131,12 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
 export async function aceptarCotizacionNegocio(cotizacionId: string, negocioId: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // Desde borrador, «Aprobar» se salta el envío (`skip_enviar`): la misma regla que
+  // «Enviar». Una que ya salió (`enviada`) se aprueba igual: registra lo que el cliente
+  // aceptó.
+  const motivoCapturas = await motivoPorCapturasDesactualizadas(supabase, { cotizacionId, destino: 'aceptada' })
+  if (motivoCapturas) return { success: false as const, error: motivoCapturas }
 
   // Aprobar fija `precio_aprobado` con el total de la cotización: bajo el mínimo, solo
   // con la autorización vigente del dueño.

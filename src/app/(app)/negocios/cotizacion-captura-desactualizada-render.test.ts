@@ -116,7 +116,10 @@ describe('parte 1 · el aviso de la cotización nombra las líneas con captura v
     expect(texto).toContain('Una línea tiene el pantallazo de otros pasajeros: su precio no corresponde al viaje de hoy.')
     // El nombre va en su propio nodo (negrita): sin etiquetas queda «» : con un espacio.
     expect(texto).toContain('«DECAMERON CARTAGENA» : Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos: pega uno nuevo.')
-    expect(texto).toContain('Pega el pantallazo nuevo en cada una y vuelve a confirmar su costo antes de enviar la cotización.')
+    expect(texto).toContain(
+      'Antes de enviar, pega el pantallazo nuevo en: «DECAMERON CARTAGENA». '
+      + 'Hasta entonces no se puede enviar ni aprobar; el PDF sí se descarga.',
+    )
     // La línea sin ranura (el seguro) no tiene capturas: no aparece.
     expect(texto).not.toContain('«SEGURO DE VIAJE»')
   })
@@ -130,7 +133,35 @@ describe('parte 1 · el aviso de la cotización nombra las líneas con captura v
     const texto = sinEtiquetas(pintar({ composicionViaje: { adultos: 3, ninos: 0, infantes: 0 }, estado: 'enviada' }))
     expect(texto).toContain('pantallazo de otros pasajeros')
     expect(texto).toContain('Esta cotización ya no se edita: duplícala para cotizar con los pasajeros de hoy.')
-    expect(texto).not.toContain('Pega el pantallazo nuevo en cada una')
+    expect(texto).not.toContain('Hasta entonces no se puede enviar')
+  })
+})
+
+/** El botón «Enviar» del encabezado, entero (atributos y contenido). */
+function botonEnviar(html: string): string | null {
+  return html.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?Enviar\s*<\/button>/)?.[0] ?? null
+}
+
+describe('decisión del 2026-09-22 · «Enviar» se deshabilita con el mismo motivo que da el servidor', () => {
+  it('con una captura de otros pasajeros: deshabilitado, y el motivo nombra la línea', () => {
+    const boton = botonEnviar(pintar({ composicionViaje: { adultos: 3, ninos: 0, infantes: 0 } }))
+    expect(boton).not.toBeNull()
+    expect(boton).toMatch(/<button[^>]* disabled=""/)
+    expect(boton).toContain('title="Antes de enviar, pega el pantallazo nuevo en: «DECAMERON CARTAGENA»."')
+    expect(boton).toContain('aria-describedby="aviso-captura-desactualizada"')
+  })
+
+  it('con los pasajeros con que se buscó: habilitado y sin motivo', () => {
+    const boton = botonEnviar(pintar({ composicionViaje: { adultos: 2, ninos: 0, infantes: 0 } }))
+    expect(boton).not.toBeNull()
+    expect(boton).not.toContain('disabled=""')
+    expect(boton).not.toContain('title=')
+  })
+
+  it('R6 · una cotización sin tarifa por pasajero: habilitado', () => {
+    const boton = botonEnviar(pintar({ composicionViaje: null, items: [SEGURO], lineasPorTipo: false }))
+    expect(boton).not.toBeNull()
+    expect(boton).not.toContain('disabled=""')
   })
 })
 
