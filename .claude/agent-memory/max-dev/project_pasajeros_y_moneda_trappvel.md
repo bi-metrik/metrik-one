@@ -55,17 +55,34 @@ que algo no existe.
 
 **How to apply:** el texto sale de `motivoParaNoEnviar` (puro) y es el mismo en el botón del
 editor, en el rechazo y en el aviso del PDF; no reescribir la regla en otra parte. **El PDF
-sale como BORRADOR** (PR siguiente, `feat/trappvel-pdf-borrador-marca-agua`): marca
-`ponerMarcaDeBorrador(pdf, 'pantallazos')` sobre los bytes (cubre @react-pdf y el servicio
-externo sin tocar la plantilla), sin guardar ni registrar la salida. Única vía del PDF:
-`generateCotizacionPDF` (botón «PDF» del editor); no hay correo, bot, link público ni cron que lo
-mande. No frena: aprobar una `enviada`, ni nada sin `tarifa_pax` (`hayTarifaPorPasajero`: ni lee
-el viaje). Los borradores por IVA reusan la marca «margen bajo el mínimo»: texto equivocado,
-no corregido. Si no puede leer
+sale como BORRADOR** (#835): marca `ponerMarcaDeBorrador(pdf, motivos)` sobre los bytes (cubre
+@react-pdf y el servicio externo sin tocar la plantilla), sin guardar ni registrar la salida.
+Única vía del PDF: `generateCotizacionPDF` (botón «PDF» del editor); no hay correo, bot, link
+público ni cron que lo mande. No frena: aprobar una `enviada`, ni nada sin `tarifa_pax`
+(`hayTarifaPorPasajero`: ni lee el viaje). Si no puede leer
 líneas o pasajeros, FRENA. El bloque `BloqueCotizacion` no deshabilita sus botones: solo el
 servidor lo frena y el toast trae el motivo. Instrumento de R6 en la prueba: registrar los
 SELECT por columnas (`negocio_bloques|adultos…`), no por tabla — aprobar también escribe en
 `negocio_bloques`.
+
+## La marca dice el motivo REAL (fix/pdf-borrador-motivo-real, 2026-09-23)
+
+Hasta #835 los borradores por IVA (sin calcular, o incluido sin plantilla) salían con la marca
+«margen bajo el mínimo»: `ponerMarcaDeBorrador` tenía `'margen'` por defecto y el PDF solo
+distinguía pantallazos. Ahora **una sola fuente**, `src/lib/cotizaciones/motivos-borrador.ts`
+(puro, sin pdf-lib, lo importan componentes de cliente), nombra los cuatro motivos y arma la
+línea de la marca, el aviso del PDF y las etiquetas de los avisos del editor y del panel de
+margen. Dos motivos se escriben enteros; tres o más, el principal y «y N más».
+
+**Why:** un parámetro con valor por defecto en algo que habla con el usuario acaba diciendo el
+valor por defecto: por eso la lista de motivos ahora es obligatoria (un borrador sin motivos
+lanza).
+
+**How to apply:** un motivo de borrador nuevo se agrega en `motivos-borrador.ts` (tipo, orden y
+etiqueta) y se pasa como condición; el módulo NO decide cuándo es borrador. La prueba de las 16
+combinaciones fija que «hay motivos» es exactamente el OR de las condiciones: agregar una
+condición exige ampliarla. La marca de un solo motivo conserva la geometría (0,55 de la
+diagonal); con dos o más, 0,7.
 
 ## Queda para Mauricio
 
