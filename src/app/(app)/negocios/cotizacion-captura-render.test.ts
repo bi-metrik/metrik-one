@@ -146,10 +146,11 @@ describe('Trappvel · la cotización se dibuja por ranuras', () => {
     expect(bloque(pintar(true), 'Hotel en Cancún')).toContain('pega el pantallazo')
   })
 
-  it('UNA zona de pegado para la cotización, con «Subir foto» para el celular', () => {
+  it('UNA bandeja de pegado para la cotización (P7), con «Pegar / Subir foto» flotante para el celular', () => {
     const html = pintar(true)
-    expect(html.match(/aria-label="Pegar un pantallazo para crear el componente"/g)).toHaveLength(1)
-    expect(html).toContain('aria-label="Subir un pantallazo para crear el componente"')
+    expect(html.match(/data-bandeja-capturas/g)).toHaveLength(1)
+    expect(html).toContain('aria-label="Subir pantallazos"')
+    expect(html).toContain('Pegar / Subir foto')
     expect(html).toContain('O agrégalo sin pantallazo')
   })
 })
@@ -158,7 +159,7 @@ describe('R6 · fuera del flujo de viaje la pantalla no cambia', () => {
   it('sin bloques de ranura ni zona de pegado', () => {
     const html = pintar(false)
     expect(html).not.toContain('aria-label="Ranura ')
-    expect(html).not.toContain('Pegar un pantallazo para crear el componente')
+    expect(html).not.toContain('data-bandeja-capturas')
     expect(html).not.toContain('O agrégalo sin pantallazo')
     // Las líneas siguen ahí, en su orden.
     const pos = ['CROWN PARADISE', 'SEGURO DE VIAJE', 'HYATT ZIVA'].map(n => html.indexOf(n))

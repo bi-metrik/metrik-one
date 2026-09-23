@@ -169,3 +169,27 @@ describe('P2 · la opción abierta', () => {
     expect(html).toContain('aria-haspopup="menu"')
   })
 })
+
+describe('P7 · cada opción y cada bloque dicen si están completos', () => {
+  const confirmada = {
+    confirmada: {
+      composicion: { adultos: 2, ninos: 0, infantes: 1 },
+      costos: [{ tipo: 'adulto', cantidad: 2, unitarioCOP: 500_000, totalCOP: 1_000_000 }],
+      costoTotalCOP: 1_000_000, moneda: 'COP', tasa: null, confirmadaEn: '2026-09-23T12:00:00Z',
+    },
+  }
+
+  it('sin confirmar: la opción y el bloque requieren atención, y el paso los cuenta', () => {
+    const t = sinEtiquetas(pintar([opcion()]))
+    expect(t).toContain('Requiere atención: falta confirmar lo leído')
+    expect(t).toContain('1 bloque · 0 completos · 1 requiere atención')
+    expect(t).toContain('Ir al primero que falta')
+  })
+
+  it('confirmada y con costo: completa', () => {
+    const t = sinEtiquetas(pintar([opcion({}, confirmada)]))
+    expect(t).toContain('Completa ✓')
+    expect(t).toContain('1 bloque · 1 completo')
+    expect(t).not.toContain('Ir al primero que falta')
+  })
+})

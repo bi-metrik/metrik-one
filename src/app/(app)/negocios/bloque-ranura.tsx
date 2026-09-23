@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { BedDouble, Car, Info, Package, Plane, Plus, Ticket } from 'lucide-react'
+import { AlertCircle, BedDouble, Car, Check, Info, Package, Plane, Plus, Ticket } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
@@ -49,6 +49,8 @@ export default function BloqueRanura({
   destinoViaje,
   onOpcionCreada,
   titulo,
+  estado,
+  id,
   children,
 }: {
   bloque: Pick<BloqueDeLineas<unknown>, 'grupo' | 'etiqueta' | 'tipo'> & { opciones: number }
@@ -60,6 +62,10 @@ export default function BloqueRanura({
   onOpcionCreada?: (itemId: string) => void
   /** «Vuelo 1 · BOG → ADZ». Ausente = el nombre de la ranura. */
   titulo?: string | null
+  /** P7 · completo, o qué le falta. Ausente = no se pinta. */
+  estado?: { completo: boolean; motivo: string | null } | null
+  /** Para saltar al bloque desde el resumen del paso Componentes. */
+  id?: string
   children: ReactNode
 }) {
   const router = useRouter()
@@ -114,6 +120,7 @@ export default function BloqueRanura({
 
   return (
     <section
+      id={id}
       aria-label={`Ranura ${bloque.etiqueta}`}
       data-tipo-bloque={clave}
       className="rounded-xl border border-[#E5E7EB] bg-[#F5F4F2]/60 p-2.5"
@@ -130,6 +137,19 @@ export default function BloqueRanura({
               {NOMBRE_TIPO_BLOQUE[clave]}
             </span>
             <h3 className="truncate text-sm font-semibold text-[#1A1A1A]">{titulo || bloque.etiqueta}</h3>
+            {estado && (estado.completo ? (
+              <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-[#10B981]">
+                <Check className="h-3 w-3" aria-hidden /> Completo
+              </span>
+            ) : (
+              <span
+                className="inline-flex min-w-0 items-center gap-0.5 truncate rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                title={estado.motivo ?? undefined}
+              >
+                <AlertCircle className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="truncate">Requiere atención{estado.motivo ? `: ${estado.motivo}` : ''}</span>
+              </span>
+            ))}
           </div>
           {/* El nombre largo, como subtítulo. Editarlo renombra la ranura entera. */}
           {editable && inst ? (
