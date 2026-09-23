@@ -410,7 +410,9 @@ describe('el nombre y la descripción de la línea', () => {
     if (!r.ok) return
     const { nombre, descripcion } = resumenDeLinea(VUELO, r.campos)
     expect(nombre).toBe('AVIANCA BOG–PUJ')
-    expect(descripcion).toContain('Salida: 2026-12-12')
+    // B3 · la descripción sale de los tramos: ida y regreso, cada uno con su fecha.
+    expect(descripcion).toContain('Ida: 2026-12-12')
+    expect(descripcion).toContain('Regreso: 2026-12-18')
     // Los dos campos de equipaje se redactan por separado: concatenarlos bajo un
     // «Incluye» imprimía «Incluye sin equipaje de bodega y equipaje de mano».
     expect(descripcion).toContain('Sin equipaje de bodega, con equipaje de mano')

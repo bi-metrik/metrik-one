@@ -858,7 +858,9 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
   })
 
   it('2b · un solo número para ida y regreso no se pega a ninguna fila: va bajo el vuelo', async () => {
-    const vuelos = cot0006().viaje!.vuelos.map(v => ({ ...v, numeroVuelo: v.aerolinea === 'SATENA' ? '8832' : null }))
+    // El reparto por tramo (`numeros`) lo trae el vuelo desde sus tramos: al cambiar el número
+    // leído hay que quitarlo, o la fila seguiría imprimiendo el de antes.
+    const vuelos = cot0006().viaje!.vuelos.map(v => ({ ...v, numeroVuelo: v.aerolinea === 'SATENA' ? '8832' : null, numeros: undefined }))
     const t = await texto(cot0006({ vuelos }))
     expect(t).toContain('Vuelo 8832')
     // Sin número asignable a un tramo no hay columna VUELO.
