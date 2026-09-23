@@ -16,7 +16,8 @@
  *
  * ## Qué no frena
  *
- *  · El PDF: descargarlo en borrador sale igual, con el aviso (`avisosCaptura`).
+ *  · La descarga del PDF: sale, pero como BORRADOR (marca de agua, sin guardar ni
+ *    registrar), con la misma regla, en `cotizacion-pdf-actions.ts`.
  *  · Aprobar una cotización que ya salió (`enviada`): registra lo que el cliente aceptó.
  *  · Nada de lo que no tenga tarifa por pasajero (R6): sin casillas ni costo confirmado no
  *    se leen los pasajeros del viaje, y la cotización sale como antes.

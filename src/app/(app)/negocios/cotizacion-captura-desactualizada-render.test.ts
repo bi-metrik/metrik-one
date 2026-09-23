@@ -118,7 +118,7 @@ describe('parte 1 · el aviso de la cotización nombra las líneas con captura v
     expect(texto).toContain('«DECAMERON CARTAGENA» : Este pantallazo es para 2 adultos y la línea ahora cubre 3 adultos: pega uno nuevo.')
     expect(texto).toContain(
       'Antes de enviar, pega el pantallazo nuevo en: «DECAMERON CARTAGENA». '
-      + 'Hasta entonces no se puede enviar ni aprobar; el PDF sí se descarga.',
+      + 'Hasta entonces no se puede enviar ni aprobar, y el PDF sale como borrador, con marca de agua.',
     )
     // La línea sin ranura (el seguro) no tiene capturas: no aparece.
     expect(texto).not.toContain('«SEGURO DE VIAJE»')

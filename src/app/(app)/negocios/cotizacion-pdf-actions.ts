@@ -36,7 +36,8 @@ import {
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
-import { hayTarifaPorPasajero, lineasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada'
+import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
+import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import {
   PLANTILLA_POR_DEFECTO,
   plantillaCotizacionPropia,
@@ -71,7 +72,7 @@ import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
-import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
+import { ponerMarcaDeBorrador, type MotivoDeBorrador } from '@/lib/pdf/marca-borrador'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -460,21 +461,29 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    *
    * Mismo criterio que el aviso de cobertura: quien imprime no siempre es quien cargó, y el
    * cambio que las dejó viejas suele ocurrir en el negocio (los pasajeros del viaje), no en
-   * la cotización. Aquí AVISA, NO BLOQUEA: descargar el PDF en borrador sigue saliendo
-   * (decisión de Mauricio del 2026-09-22); lo que se frena es sacar la cotización de
-   * borrador —«Enviar», «Aprobar»—, en `captura-desactualizada-datos.ts`. Lo que sí
-   * cambia en el documento es que el reparto por pasajero de una confirmación vieja ya no
-   * se imprime (`precioPorPasajeroDeItem`).
+   * la cotización.
+   *
+   * Con alguna línea así, el PDF es un BORRADOR (decisión de Mauricio del 2026-09-22): se
+   * descarga —hace falta verlo—, pero con marca de agua «pantallazos por actualizar» en
+   * cada página, y no se guarda ni se registra como salida al cliente. Es la MISMA regla
+   * (`lineasDesactualizadas` + `motivoParaNoEnviar`) que el aviso del editor y el freno de
+   * «Enviar»/«Aprobar» (`captura-desactualizada-datos.ts`): tres superficies, una fuente.
+   * Además el reparto por pasajero de una confirmación vieja no se imprime
+   * (`precioPorPasajeroDeItem`).
    *
    * Los pasajeros del viaje se leen UNA vez y solo si alguna línea tiene tarifa por
-   * pasajero: una cotización que no es de viaje no paga la consulta (R6).
+   * pasajero: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
+   * falla, borrador: sin los pasajeros no se puede saber si el precio es el de hoy, y un
+   * PDF limpio lo afirmaría.
    */
   const conTarifaPorPasajero = hayTarifaPorPasajero(items)
-  const viajeDelNegocio = negocioInfo && conTarifaPorPasajero
-    ? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
+  const lecturaDelViaje = negocioInfo && conTarifaPorPasajero
+    ? await leerViajeDelNegocio(supabase, negocioInfo.id)
     : null
+  const viajeDelNegocio = lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.viaje : null
+  const sinPasajerosDelViaje = lecturaDelViaje?.error != null
   const composicionViaje = viajeDelNegocio?.composicion ?? null
-  const avisosCaptura = conTarifaPorPasajero
+  const desactualizadas = conTarifaPorPasajero
     ? lineasDesactualizadas(
         items.filter(i => i.id).map(i => ({
           id: i.id as string,
@@ -484,8 +493,13 @@ export async function generateCotizacionPDF(cotizacionId: string) {
           tarifa_pax: i.tarifa_pax,
         })),
         composicionViaje,
-      ).map(l => `«${l.nombre}»: ${l.motivos.join(' ')}`)
+      )
     : []
+  const avisosCaptura = desactualizadas.map(l => `«${l.nombre}»: ${l.motivos.join(' ')}`)
+  /** El motivo de borrador por pantallazos, con el texto del freno de envío. */
+  const motivoPantallazos = sinPasajerosDelViaje
+    ? MENSAJE_SIN_PASAJEROS
+    : motivoParaNoEnviar(desactualizadas)
 
   // Calculate fiscal
   type Regimen = FiscalProfile['regimen_tributario']
@@ -543,10 +557,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   }
 
   /**
-   * Borrador: bajo el margen mínimo sin la autorización del dueño (hueco 1), o con una línea
-   * cuyo IVA no se pudo calcular porque tiene precio y no tiene costo. En los dos casos el
-   * PDF se descarga IGUAL —hace falta ver los borradores— pero con marca de agua, y no se
-   * guarda ni se registra: no es un documento del cliente. No se inventa una base de IVA.
+   * Borrador: bajo el margen mínimo sin la autorización del dueño (hueco 1), con una línea
+   * cuyo IVA no se pudo calcular porque tiene precio y no tiene costo, o con pantallazos de
+   * otros pasajeros (ver `motivoPantallazos`). En todos los casos el PDF se descarga IGUAL
+   * —hace falta ver los borradores— pero con marca de agua, y no se guarda ni se registra:
+   * no es un documento del cliente. No se inventa una base de IVA.
    */
   const ivaSinCalcular = ivaCot !== null && !ivaCot.calculable
   // Con el IVA DENTRO del precio, solo una plantilla que lo sepa imprimir dice la verdad: las
@@ -555,9 +570,13 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const ivaIncluidoSinPlantilla = ivaCot !== null
     && ivaIncluidoEnElPrecio(configIva)
     && !plantillaImprimePreciosConIva(ws?.cotizacion_template_slug ?? PLANTILLA_POR_DEFECTO)
-  const esBorrador = salidaBloquea || ivaSinCalcular || ivaIncluidoSinPlantilla
+  const esBorrador = salidaBloquea || ivaSinCalcular || ivaIncluidoSinPlantilla || motivoPantallazos !== null
+  // La marca dice el motivo. Los pantallazos van primero: con el precio de otros pasajeros,
+  // el margen tampoco dice nada.
+  const motivoDeMarca: MotivoDeBorrador = motivoPantallazos !== null ? 'pantallazos' : 'margen'
   const avisoBorrador = esBorrador
     ? `PDF de borrador, con marca de agua: no se puede enviar. ${[
+        motivoPantallazos,
         salidaBloquea ? salida!.mensaje : null,
         ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
         ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
@@ -657,10 +676,11 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     try {
       const renderizado = await renderViaService(templateSlug, payload)
 
-      // Borrador bajo el piso: marca de agua y fuera. Ni almacenamiento, ni Drive, ni
-      // registro de decisiones — no es un documento del cliente.
+      // Borrador (bajo el piso, IVA sin calcular o pantallazos de otros pasajeros): marca de
+      // agua y fuera. Ni almacenamiento, ni Drive, ni registro de decisiones — no es un
+      // documento del cliente.
       if (esBorrador) {
-        const conMarca = await ponerMarcaDeBorrador(renderizado)
+        const conMarca = await ponerMarcaDeBorrador(renderizado, motivoDeMarca)
         return {
           success: true,
           pdf: conMarca.toString('base64'),
@@ -1148,9 +1168,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer = await renderToBuffer(element as any)
 
-  // Borrador bajo el piso: marca de agua y fuera, sin guardar ni registrar (ver arriba).
+  // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {
-    const conMarca = await ponerMarcaDeBorrador(Buffer.from(buffer))
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(buffer), motivoDeMarca)
     return {
       success: true,
       pdf: conMarca.toString('base64'),

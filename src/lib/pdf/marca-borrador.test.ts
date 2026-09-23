@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { inflateSync } from 'node:zlib'
 import { PDFDocument } from 'pdf-lib'
 
-import { ponerMarcaDeBorrador } from './marca-borrador'
+import { TEXTO_MARCA_BORRADOR, TEXTO_MARCA_PANTALLAZOS, ponerMarcaDeBorrador } from './marca-borrador'
 
 /** El texto de cada flujo, inflado. pdf-lib escribe el texto de la marca en hexadecimal. */
 function flujos(pdf: Buffer): string[] {
@@ -51,5 +51,27 @@ describe('la marca de agua de borrador', () => {
     const opacidades = [...todo.matchAll(/\/ca\s+([\d.]+)/g)].map(m => Number(m[1]))
     expect(opacidades.length).toBeGreaterThan(0)
     for (const o of opacidades) expect(o).toBeLessThan(0.5)
+  })
+})
+
+describe('la marca por pantallazos de otros pasajeros (decisión del 2026-09-22)', () => {
+  it('dice el motivo en TODAS las páginas, y no el del margen', async () => {
+    const doc = await PDFDocument.create()
+    doc.addPage([595, 842])
+    doc.addPage([595, 842])
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()), 'pantallazos')
+    const conFrase = flujos(conMarca).filter(f => f.includes(`<${hex('pantallazos por actualizar · no enviar')}>`))
+    expect(conFrase).toHaveLength(2)
+    expect(flujos(conMarca).filter(f => f.includes(`<${hex('BORRADOR')}>`))).toHaveLength(2)
+    expect(flujos(conMarca).some(f => f.includes(`<${hex('margen bajo el mínimo · no enviar')}>`))).toBe(false)
+    expect((await PDFDocument.load(conMarca)).getTitle()).toBe(TEXTO_MARCA_PANTALLAZOS)
+  })
+
+  it('sin motivo, la del margen como siempre (el piso de #824 no cambia)', async () => {
+    const doc = await PDFDocument.create()
+    doc.addPage([595, 842])
+    const conMarca = await ponerMarcaDeBorrador(Buffer.from(await doc.save()))
+    expect((await PDFDocument.load(conMarca)).getTitle()).toBe(TEXTO_MARCA_BORRADOR)
+    expect(TEXTO_MARCA_PANTALLAZOS).toBe('BORRADOR · pantallazos por actualizar · no enviar')
   })
 })
