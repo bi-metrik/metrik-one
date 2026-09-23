@@ -224,7 +224,9 @@ describe('con itinerarios manda el PRINCIPAL, no la suma de las alternativas', (
       negocios: [{ id: NEG, linea_id: null }],
       lineas_negocio: [],
       cotizacion_itinerarios: [
-        { id: 'it', cotizacion_id: COT, nombre: null, orden: 1, va_en_propuesta: true, es_principal: true },
+        // La principal es la tarifa LLAMADA Recomendada que va en la propuesta (2026-09-22);
+        // `es_principal` ya no decide. Se deja en `true` para que la prueba no dependa de él.
+        { id: 'it', cotizacion_id: COT, nombre: 'Recomendada', orden: 1, va_en_propuesta: true, es_principal: true },
       ],
       itinerario_opciones: [
         { itinerario_id: 'it', item_id: principal === 'cara' ? 'avianca' : 'wingo' },

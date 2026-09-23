@@ -22,6 +22,7 @@ import {
   leerItinerarios,
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { lineaDeRecargo, politicaRecargoDeLinea } from '@/lib/cotizaciones/recargo-linea'
+import { esRecomendada } from '@/lib/cotizaciones/tarifas'
 import type { FiscalProfile } from '@/types/database'
 import {
   ivaIncluidoEnElPrecio,
@@ -48,6 +49,12 @@ export interface IvaDeCotizacion {
   porItem: Map<string, IvaDeLinea>
   /** El IVA de lo que la cotización cobra hoy: la cascada vigente (`valor_total`). */
   vigente: LiquidacionIva
+  /**
+   * El IVA de CADA tarifa marcada para la propuesta, por id de itinerario: lo que el
+   * cliente pagaría si escoge esa. Es la suma del IVA de sus líneas, la misma que el PDF
+   * le suma al precio de su tarjeta.
+   */
+  porTarifa: Map<string, LiquidacionIva>
   /**
    * `false` si alguna línea que el cliente puede comprar —la cascada vigente o una tarifa
    * marcada para la propuesta— tiene precio sin costo: su IVA no se calculó.
@@ -101,12 +108,14 @@ export async function ivaDeLaCotizacion(
   // Una línea sin costo solo importa si el cliente la puede comprar: la cotización de hoy
   // o una de las tarifas que salen en la propuesta. Una alternativa descartada no frena.
   const sinCosto = new Set(vigente.sinCosto)
+  const porTarifa = new Map<string, LiquidacionIva>()
   for (const fila of filas ?? []) {
     if (!fila.vaEnPropuesta) continue
     const tarifa = liquidarIva(
       lineasParaIva(cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).lineas, metaDe),
       opciones,
     )
+    porTarifa.set(fila.id, tarifa)
     for (const nombre of tarifa.sinCosto) sinCosto.add(nombre)
   }
 
@@ -115,6 +124,7 @@ export async function ivaDeLaCotizacion(
     perfil,
     porItem: new Map(todas.lineas.map(l => [l.id, l])),
     vigente,
+    porTarifa,
     calculable: sinCosto.size === 0,
     sinCosto: [...sinCosto],
   }
@@ -150,4 +160,85 @@ export async function precioAprobadoDeCotizacion(
   if (!iva.calculable) return { ok: false, error: motivoIvaSinCalcular(iva.sinCosto) }
   if (ivaIncluidoEnElPrecio(config)) return { ok: true, precio: args.valorTotal }
   return { ok: true, precio: (Number(args.valorTotal) || 0) + iva.vigente.iva }
+}
+
+/** Una tarifa de la propuesta con lo que costaría si el cliente la escoge. */
+export interface PrecioDeTarifa {
+  itinerarioId: string
+  nombre: string | null
+  orden: number
+  esRecomendada: boolean
+  /**
+   * El precio de su cascada: la misma cifra de la tabla de tarifas. Con el IVA encima
+   * (`iva_aparte`) no lo trae; con el IVA adentro (`iva_incluido`, #831) ya lo trae.
+   */
+  precioCascada: number
+  /**
+   * El IVA sobre el ingreso propio de SUS líneas: el que se SUMA con `iva_aparte` y el que
+   * va ADENTRO con `iva_incluido`. 0 con la base apagada.
+   */
+  iva: number
+  /**
+   * Lo que «Aprobar» escribe en `negocios.precio_aprobado` si el cliente la escoge. `null`
+   * si su IVA no se pudo calcular (una línea con precio y sin costo): no se inventa.
+   */
+  precio: number | null
+  /** Por qué `precio` es `null`, en lenguaje de operadora. */
+  motivo: string | null
+}
+
+/**
+ * Lo que costaría cada tarifa de la propuesta si el cliente la escoge: la pregunta de
+ * «Aprobar» cuando la cotización tiene tarifas (decisión del 2026-09-22).
+ *
+ * Es la MISMA regla que `precioAprobadoDeCotizacion`, aplicada a una tarifa en vez de a
+ * `valor_total`: con la base apagada, el precio de su cascada; con `ingreso_propio` y el
+ * IVA encima (#830), más el IVA de sus líneas; con el IVA adentro (#831), el precio de su
+ * cascada a secas, porque ya lo trae. Es la cifra de su tarjeta en el PDF. Para la
+ * Recomendada da exactamente lo de antes, porque su cascada ES `valor_total`
+ * (`totalDelPrincipal`).
+ *
+ * Solo las marcadas «va en propuesta»: son las que el cliente vio en el documento.
+ */
+export async function preciosDeLasTarifas(
+  supabase: Supabase,
+  args: { workspaceId: string; cotizacionId: string },
+): Promise<{ ok: true; tarifas: PrecioDeTarifa[] } | { ok: false; error: string }> {
+  const ctx = await contextoDeCotizacion(supabase, args.cotizacionId)
+  if (!ctx) return { ok: false, error: 'Cotización no encontrada' }
+  const filas = (await leerItinerarios(supabase, args.cotizacionId)) ?? []
+  const enPropuesta = [...filas].filter(f => f.vaEnPropuesta).sort((a, b) => a.orden - b.orden)
+  if (enPropuesta.length === 0) return { ok: true, tarifas: [] }
+
+  const { data: ws } = await supabase
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', args.workspaceId)
+    .maybeSingle()
+  const config = leerConfigIvaCotizacion((ws as { config_extra?: unknown } | null)?.config_extra)
+  let iva: IvaDeCotizacion | null = null
+  if (ivaSobreIngresoPropio(config)) {
+    iva = await ivaDeLaCotizacion(supabase, { ...args, config })
+    if (!iva) return { ok: false, error: 'No se pudo leer la cotización para calcular su IVA' }
+  }
+
+  return {
+    ok: true,
+    tarifas: enPropuesta.map(fila => {
+      const precioCascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).precioVenta
+      const liq = iva?.porTarifa.get(fila.id) ?? null
+      const calculable = !liq || liq.calculable
+      const encima = liq && !ivaIncluidoEnElPrecio(config) ? liq.iva : 0
+      return {
+        itinerarioId: fila.id,
+        nombre: fila.nombre,
+        orden: fila.orden,
+        esRecomendada: esRecomendada(fila.nombre),
+        precioCascada,
+        iva: liq?.iva ?? 0,
+        precio: calculable ? precioCascada + encima : null,
+        motivo: calculable ? null : motivoIvaSinCalcular(liq!.sinCosto),
+      }
+    }),
+  }
 }

@@ -1,12 +1,116 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  choqueDeNombreDeTarifa,
   claveTarifa,
+  esRecomendada,
+  idDelPrincipal,
+  motivoSinRecomendada,
+  recomendadaDe,
   renombreDeRanura,
   esTarifaConNombre,
   NOMBRES_TARIFA,
   tarifasQueFaltan,
 } from './tarifas'
+
+// ── La Recomendada manda el documento (2026-09-22) ───────────────────────────
+
+const tarifa = (id: string, nombre: string | null, orden: number, vaEnPropuesta = true) =>
+  ({ id, nombre, orden, vaEnPropuesta })
+
+const TRES = () => [
+  tarifa('eco', 'Económica', 1),
+  tarifa('rec', 'Recomendada', 2),
+  tarifa('pre', 'Premium', 3),
+]
+
+describe('esRecomendada', () => {
+  it('reconoce el nombre sin importar tildes ni mayúsculas', () => {
+    expect(esRecomendada('Recomendada')).toBe(true)
+    expect(esRecomendada('RECOMENDADA')).toBe(true)
+    expect(esRecomendada('  recomendáda ')).toBe(true)
+  })
+
+  it('«La recomendada» o «Recomendada 2» ya NO se llaman así', () => {
+    // La llave es la misma de `tarifasQueFaltan`: si aquí contara y allá no, el botón
+    // ofrecería crear una Recomendada que la regla ya daba por existente.
+    expect(esRecomendada('La recomendada')).toBe(false)
+    expect(esRecomendada('Recomendada 2')).toBe(false)
+    expect(esRecomendada(null)).toBe(false)
+  })
+})
+
+describe('idDelPrincipal — la principal NO se elige: es la Recomendada', () => {
+  it('con las tres en la propuesta, manda la Recomendada', () => {
+    expect(idDelPrincipal(TRES())).toBe('rec')
+  })
+
+  it('sin tarifas no hay principal (lista plana, R6)', () => {
+    expect(idDelPrincipal([])).toBeNull()
+  })
+
+  it('la Recomendada FUERA de la propuesta no manda: T5, un total que el cliente no ve', () => {
+    const filas = TRES().map(f => (f.id === 'rec' ? { ...f, vaEnPropuesta: false } : f))
+    expect(idDelPrincipal(filas)).toBeNull()
+  })
+
+  it('sin ninguna llamada Recomendada no manda nadie, ni «la primera»', () => {
+    expect(idDelPrincipal([tarifa('eco', 'Económica', 1), tarifa('pre', 'Premium', 2)])).toBeNull()
+  })
+
+  it('con DOS llamadas Recomendada no elige por su cuenta', () => {
+    const filas = [...TRES(), tarifa('rec2', 'recomendada', 4)]
+    expect(recomendadaDe(filas).repetida).toBe(true)
+    expect(idDelPrincipal(filas)).toBeNull()
+  })
+})
+
+describe('motivoSinRecomendada — sin la Recomendada no sale', () => {
+  it('sin tarifas no dice nada (la lista plana sigue como hoy)', () => {
+    expect(motivoSinRecomendada([])).toBeNull()
+  })
+
+  it('con la Recomendada en la propuesta, puede salir', () => {
+    expect(motivoSinRecomendada(TRES())).toBeNull()
+  })
+
+  it('con la Recomendada sin marcar, lo dice y dice qué hacer', () => {
+    const filas = TRES().map(f => (f.id === 'rec' ? { ...f, vaEnPropuesta: false } : f))
+    expect(motivoSinRecomendada(filas)).toContain('no está marcada «va en propuesta»')
+  })
+
+  it('con las tres armadas y NINGUNA marcada, también frena: el total sería un supuesto', () => {
+    expect(motivoSinRecomendada(TRES().map(f => ({ ...f, vaEnPropuesta: false })))).not.toBeNull()
+  })
+
+  it('sin ninguna llamada Recomendada, lo dice', () => {
+    expect(motivoSinRecomendada([tarifa('eco', 'Económica', 1)])).toContain('ninguna se llama «Recomendada»')
+  })
+
+  it('con dos, lo dice', () => {
+    expect(motivoSinRecomendada([...TRES(), tarifa('x', 'Recomendada', 9)])).toContain('más de una')
+  })
+})
+
+describe('choqueDeNombreDeTarifa', () => {
+  const filas = TRES()
+
+  it('no deja llamar «Recomendada» a otra tarifa: el documento no sabría de cuál sale el total', () => {
+    expect(choqueDeNombreDeTarifa('recomendada', 'pre', filas)).toContain('«Recomendada»')
+  })
+
+  it('renombrarse a sí misma con otra grafía no es un choque', () => {
+    expect(choqueDeNombreDeTarifa('RECOMENDADA', 'rec', filas)).toBeNull()
+  })
+
+  it('un nombre que no es de los tres es libre, aunque se repita', () => {
+    expect(choqueDeNombreDeTarifa('Plan familiar', 'pre', [...filas, tarifa('x', 'Plan familiar', 4)])).toBeNull()
+  })
+
+  it('tomar el nombre de una tarifa que ya no está es libre', () => {
+    expect(choqueDeNombreDeTarifa('Recomendada', 'pre', [tarifa('eco', 'Económica', 1), tarifa('pre', 'Premium', 2)])).toBeNull()
+  })
+})
 
 describe('NOMBRES_TARIFA', () => {
   it('son EXACTAMENTE los tres que ve el cliente, con tilde', () => {

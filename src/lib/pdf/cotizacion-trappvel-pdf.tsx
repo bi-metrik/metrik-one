@@ -1062,7 +1062,7 @@ export default function CotizacionTrappvelPDF({
     const ivaDelBloque = ivaIncluido?.nota ? ivaIncluido.porBloque[i] ?? 0 : 0
     return {
       titulo: t,
-      color: colorDeTarifa(t, it.esPrincipal),
+      color: colorDeTarifa(t),
       esPrincipal: it.esPrincipal,
       precio: it.precio,
       /** Solo con `linea_incluida`: cuánto IVA trae el precio de esta tarifa. */
@@ -1074,6 +1074,12 @@ export default function CotizacionTrappvelPDF({
   // Los chips solo existen con varias tarifas: con una, no hay nada que distinguir.
   const tarifas: TarifaDoc[] = porTarifas ? bloques : []
   const principal = porTarifas ? Math.max(0, bloques.findIndex(b => b.esPrincipal)) : null
+  /**
+   * ¿El TOTAL de abajo es el de una tarifa? Solo con la Recomendada en la propuesta
+   * (`idDelPrincipal`). Sin ella el total sale de un supuesto, el documento es un borrador
+   * (la acción lo marca) y NO puede decir «corresponde a la opción recomendada».
+   */
+  const totalEsDeLaRecomendada = porTarifas && bloques.some(b => b.esPrincipal)
 
   /**
    * Lo que la tabla por pasajero NO explica: la diferencia contra el TOTAL se imprime con
@@ -1484,10 +1490,12 @@ export default function CotizacionTrappvelPDF({
               </View>
               {/* Sin esta línea el cliente ve tres precios y un total, y no sabe cuál está
                   aceptando. El de abajo es el de la recomendada (R5). */}
-              <Text style={{ fontSize: 7.5, color: C.gris, marginTop: 6 }}>
-                El total de abajo corresponde a la opción recomendada. Las demás son alternativas
-                con el precio indicado en su encabezado.
-              </Text>
+              {totalEsDeLaRecomendada && (
+                <Text style={{ fontSize: 7.5, color: C.gris, marginTop: 6 }}>
+                  El total de abajo corresponde a la opción recomendada. Las demás son alternativas
+                  con el precio indicado en su encabezado.
+                </Text>
+              )}
               {totales()}
             </View>
           ) : !general && lineas.length > 0 && lineas.length <= LINEAS_EN_UN_BLOQUE ? (
@@ -1546,7 +1554,7 @@ export default function CotizacionTrappvelPDF({
               style={{ marginTop: 12, backgroundColor: C.tarjeta, borderRadius: 8, padding: 11 }}
             >
               <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.gris, letterSpacing: 1, marginBottom: 4 }}>
-                {porTarifas ? 'PRECIO POR PASAJERO · OPCIÓN RECOMENDADA' : 'PRECIO POR PASAJERO'}
+                {totalEsDeLaRecomendada ? 'PRECIO POR PASAJERO · OPCIÓN RECOMENDADA' : 'PRECIO POR PASAJERO'}
               </Text>
               {filasPorPasajero.map(f => (
                 <View key={`pax-${f.tipo}`} style={{ flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 1.5 }}>

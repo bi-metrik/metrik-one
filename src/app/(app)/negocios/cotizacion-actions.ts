@@ -7,7 +7,6 @@ import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
-import { nombreParaDuplicado } from '@/lib/cotizaciones/nombre-cotizacion'
 import {
   contextoDeCotizacion,
   desmarcarLosQueYaNoPueden,
@@ -16,7 +15,7 @@ import {
   totalDelPrincipal,
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { adjuntarAdicionales } from '@/lib/cotizaciones/adicionales'
-import { remapearOpcionDe, itinerariosParaLaCopia } from '@/lib/cotizaciones/duplicar-opciones'
+import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
@@ -142,6 +141,13 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
     const motivo = await motivoParaNoSalir(supabase, {
       servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
     })
+    if (motivo) return { success: false, error: motivo }
+  }
+  // Con tarifas, aprobar exige escoger cuál tomó el cliente: por aquí no hay cómo, y
+  // aprobar sin escoger dejaría el negocio con el precio de la Recomendada sin que nadie
+  // lo decidiera. Tampoco se escribe la elección a mano por este endpoint.
+  if (updates.estado === 'aceptada' || 'tarifa_aceptada_id' in updates) {
+    const motivo = await motivoParaAprobarSinEscoger(supabase, id)
     if (motivo) return { success: false, error: motivo }
   }
 
@@ -791,6 +797,8 @@ export async function aceptarCotizacion(id: string) {
     servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
   })
   if (motivo) return { success: false, error: motivo }
+  const sinEscoger = await motivoParaAprobarSinEscoger(supabase, id)
+  if (sinEscoger) return { success: false, error: sinEscoger }
 
   const { error: dbError } = await supabase
     .from('cotizaciones')
@@ -831,240 +839,39 @@ export async function rechazarCotizacion(id: string) {
   return { success: true }
 }
 
+/**
+ * «Duplicar» desde el editor. Es el MISMO camino que el del bloque del negocio
+ * (`duplicarCotizacionCompleta`, 2026-09-22): hasta ese día cada botón copiaba su propia
+ * lista, este no copiaba los adicionales y el del bloque ni siquiera los ítems.
+ *
+ * La copia nace en `borrador` y vuelve a medir su margen: se recalcula aquí mismo.
+ */
 export async function duplicarCotizacion(id: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  // Get original
-  const { data: original } = await supabase
-    .from('cotizaciones')
-    .select('oportunidad_id, modo, descripcion, valor_total, margen_porcentaje, costo_total')
-    .eq('id', id)
-    .single()
+  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId: id })
+  if (!res.ok) return { success: false, error: res.error }
 
-  if (!original) return { success: false, error: 'Cotizacion no encontrada' }
+  // Una cotización rápida no tiene líneas: su total es el que traía, y recalcular lo
+  // pondría en cero.
+  if (res.modo === 'detallada') await recalcularTotales(res.id)
 
-  // Get extra fields separately
-  const { data: discountData } = await supabase
-    .from('cotizaciones')
-    .select('*')
-    .eq('id', id)
-    .single()
-  const descPct = discountData?.descuento_porcentaje ?? 0
-  const descVal = discountData?.descuento_valor ?? 0
-  const negocioIdOrig = discountData?.negocio_id ?? null
-  // `convencion_margen` y `margen_default_pct` existen en la base pero no en los tipos
-  // generados; `piso_margen_pct` y `aviso_margen_pct` puede que ni existan todavía
-  // (migración `20260914160000`). El `select('*')` de arriba las trae si están.
-  const politicaOriginal = (discountData ?? {}) as Record<string, unknown>
+  if (res.oportunidadId) revalidatePath(`/pipeline/${res.oportunidadId}`)
+  if (res.negocioId) revalidatePath(`/negocios/${res.negocioId}`)
+  return { success: true, id: res.id }
+}
 
-  // Get new consecutivo
-  const { data: dupConsRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
-    p_workspace_id: workspaceId,
-  })
-  const dupCons = dupConsRaw ?? `COT-${bogotaYear()}-0000`
-
-  // El nombre NO se hereda tal cual: dos cotizaciones con la misma etiqueta son
-  // exactamente lo que la comercial no puede distinguir en la lista, que es el
-  // problema que esto viene a resolver. Se resuelve contra los hermanos del mismo
-  // contenedor — el negocio, o la oportunidad cuando la cotización cuelga de una.
-  let hermanos: { descripcion: string | null }[] = []
-  if (negocioIdOrig) {
-    const { data } = await supabase
-      .from('cotizaciones')
-      .select('descripcion')
-      .eq('negocio_id', negocioIdOrig)
-    hermanos = data ?? []
-  } else if (original.oportunidad_id) {
-    const { data } = await supabase
-      .from('cotizaciones')
-      .select('descripcion')
-      .eq('oportunidad_id', original.oportunidad_id)
-    hermanos = data ?? []
-  }
-  const descripcionCopia = nombreParaDuplicado(
-    original.descripcion,
-    hermanos.map(h => h.descripcion),
-  )
-
-  // ⚠️ Insert DIRECTO. Hasta el 2026-09-14 esto pasaba por `insertarCotizacionTolerante`,
-  // que reintentaba sin las columnas de umbral si la migración no estaba aplicada. La
-  // migración `20260914160000_cotizaciones_umbrales_margen.sql` YA está aplicada en
-  // producción (comprobado leyendo `piso_margen_pct` y `aviso_margen_pct` por PostgREST)
-  // y esta base es la única que el producto usa, así que la tolerancia solo servía para
-  // tragarse un `42703` real como «nació sin congelar» — el fallo mudo que ella misma
-  // decía combatir. La pieza se borró, como decía su propio comentario.
-  // Los tipos generados de `cotizaciones` todavia no declaran `piso_margen_pct` ni
-  // `aviso_margen_pct` (falta regenerar `database.ts`), asi que el cliente tipado
-  // rechaza el objeto entero.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: newCot, error: dbError } = await (supabase as any).from('cotizaciones').insert({
-      workspace_id: workspaceId,
-      oportunidad_id: original.oportunidad_id,
-      consecutivo: dupCons,
-      codigo: '',
-      modo: original.modo,
-      descripcion: descripcionCopia,
-      valor_total: original.valor_total,
-      margen_porcentaje: original.margen_porcentaje,
-      costo_total: original.costo_total,
-      estado: 'borrador',
-      duplicada_de: id,
-      descuento_porcentaje: descPct,
-      descuento_valor: descVal,
-      negocio_id: negocioIdOrig,
-      aiu_admin_pct: discountData?.aiu_admin_pct ?? null,
-      aiu_imprevistos_pct: discountData?.aiu_imprevistos_pct ?? null,
-      // ⚠️ La política de margen se COPIA, no se vuelve a resolver contra la línea:
-      // duplicar es corregir el mismo documento y tiene que cotizar con las mismas
-      // reglas. Sin esto la copia caía al default de la columna (`markup`) y, con
-      // una línea en `sobre_venta`, un costo de 1.000.000 al 15% pasaba de
-      // 1.176.471 a 1.150.000 sin que nada en pantalla lo explicara.
-      convencion_margen: politicaOriginal.convencion_margen ?? null,
-      margen_default_pct: politicaOriginal.margen_default_pct ?? null,
-      // Los umbrales congelados viajan igual. `discountData` sale de un `select('*')`,
-      // así que mientras la migración no esté aplicada estas dos claves valen `null`
-      // y la copia cae a la política de su línea, como hoy.
-      piso_margen_pct: politicaOriginal.piso_margen_pct ?? null,
-      aviso_margen_pct: politicaOriginal.aviso_margen_pct ?? null,
-  }).select('id').single()
-
-  if (dbError) return { success: false, error: dbError.message }
-
-  // If detallada, duplicate items + rubros
-  if (original.modo === 'detallada' && newCot) {
-    // `select('*')` y no una lista de columnas: `grupo`, `opcion_de` y `unidad` las
-    // agrega la migracion `20260914200000` y nombrarlas devolveria un 400 mientras no
-    // este aplicada — o sea que duplicar dejaria de funcionar. La migracion
-    // `20260914200000` SI esta aplicada hoy; el `select('*')` se queda porque es la
-    // forma barata de no depender de eso en cada entorno.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: items } = await (supabase as any)
-      .from('items')
-      .select('*, rubros(*)')
-      .eq('cotizacion_id', id)
-      .order('orden')
-
-    // Viejo id -> nuevo id. `items.opcion_de` es FK a la propia tabla y
-    // `itinerario_opciones.item_id` apunta aqui: sin este mapa la copia quedaria
-    // apuntando a los items del ORIGINAL, que no falla y mueve las combinaciones de
-    // la cotizacion de la que salio.
-    const mapaItems = new Map<string, string>()
-
-    for (const item of items ?? []) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: newItem } = await (supabase as any)
-        .from('items')
-        .insert({
-          cotizacion_id: newCot.id,
-          nombre: item.nombre,
-          descripcion: item.descripcion ?? null,
-          subtotal: item.subtotal,
-          orden: item.orden,
-          precio_venta: item.precio_venta ?? 0,
-          descuento_porcentaje: item.descuento_porcentaje ?? 0,
-          es_ajuste: item.es_ajuste ?? false,
-          cantidad: item.cantidad ?? 1,
-          // Sin heredar estas dos, la copia perderia el precio que alguien escribio:
-          // nace con precio_manual = false y el primer recalculo la baja al costo.
-          //
-          // ⚠️ `?? null`, NUNCA `?? 0`. `margen_porcentaje` es NULLABLE y `null`
-          // significa "usa el de la cotización"; 0 significa "esta línea va a costo".
-          // Con `?? 0` toda línea que heredaba el margen se duplicaba marcada como
-          // excepción al 0%, así que la copia salía vendida al costo y subir el
-          // margen de la cotización ya no movía ninguna línea.
-          margen_porcentaje: item.margen_porcentaje ?? null,
-          precio_manual: item.precio_manual ?? false,
-          // La ranura viaja con la linea. Sin `grupo` la copia perderia las
-          // alternativas: tres vuelos pasarian de competir entre si a sumarse los
-          // tres. `opcion_de` se repone en la segunda pasada, cuando el mapa este
-          // completo: el titular puede venir DESPUES de su opcion en el orden.
-          grupo: item.grupo ?? null,
-          unidad: item.unidad ?? null,
-          // El día, el check de la sugerencia y el segundo interruptor viajan con la
-          // línea. Sin `entra_al_precio`, una sugerencia fuera del precio nacería
-          // cobrando en la copia y su total saldría más alto que el del original.
-          // Solo se nombran si la lectura los trajo: con `select('*')` una columna sin
-          // aplicar llega `undefined`, y nombrarla en el insert tumbaría el duplicado.
-          ...(item.dia_relativo !== undefined ? { dia_relativo: item.dia_relativo } : {}),
-          ...(item.mostrar_en_sugeridos !== undefined ? { mostrar_en_sugeridos: item.mostrar_en_sugeridos } : {}),
-          ...(item.entra_al_precio !== undefined ? { entra_al_precio: item.entra_al_precio } : {}),
-          // La tarifa por pasajero viaja con la línea: sin ella la copia conservaría los
-          // rubros por adulto y niño pero perdería el reparto que imprime el PDF, y las
-          // lecturas de donde salió cada número.
-          ...(item.tarifa_pax !== undefined ? { tarifa_pax: item.tarifa_pax } : {}),
-          // La base del IVA de la línea viaja con ella: sin esto la copia de una línea
-          // comisionable volvería a cobrarle IVA al viajero.
-          ...(item.base_iva !== undefined ? { base_iva: item.base_iva } : {}),
-        })
-        .select('id')
-        .single()
-
-      if (newItem) mapaItems.set(item.id as string, newItem.id as string)
-
-      if (newItem && item.rubros) {
-        // Solo los CONFIRMADOS. Una propuesta de pantallazo sin confirmar es una
-        // pregunta abierta sobre ESA cotizacion; llevarla a la copia le mete a
-        // alguien una decision que nunca pidio, y ademas nacería sin la captura que
-        // la origino.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rubrosToInsert = ((item.rubros ?? []) as any[]).filter(esConfirmado).map(r => ({
-          item_id: newItem.id,
-          tipo: r.tipo,
-          descripcion: r.descripcion,
-          cantidad: r.cantidad,
-          unidad: r.unidad,
-          valor_unitario: r.valor_unitario,
-        }))
-        if (rubrosToInsert.length > 0) {
-          await supabase.from('rubros').insert(rubrosToInsert)
-        }
-      }
-    }
-
-    // Segunda pasada: el vinculo entre opcion y titular, ya en el mundo de la copia.
-    for (const patch of remapearOpcionDe((items ?? []) as { id: string; opcion_de?: string | null }[], mapaItems)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (supabase as any).from('items').update({ opcion_de: patch.opcionDe }).eq('id', patch.nuevoId)
-    }
-
-    // Los itinerarios. Si la migracion no esta aplicada, `leerItinerarios` devuelve
-    // `null` y no hay nada que copiar: la copia queda como hoy.
-    const itinerariosOriginales = await leerItinerarios(supabase, id)
-    if (itinerariosOriginales && itinerariosOriginales.length > 0) {
-      const copias = itinerariosParaLaCopia(
-        itinerariosOriginales.map(it => ({
-          id: it.id,
-          nombre: it.nombre,
-          orden: it.orden,
-          va_en_propuesta: it.vaEnPropuesta,
-          es_principal: it.esPrincipal,
-          seleccion: it.seleccion,
-        })),
-        mapaItems,
-        newCot.id,
-        workspaceId,
-      )
-      for (const copia of copias) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: nuevoItin } = await (supabase as any)
-          .from('cotizacion_itinerarios')
-          .insert(copia.cabecera)
-          .select('id')
-          .single()
-        if (nuevoItin && copia.seleccion.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (supabase as any)
-            .from('itinerario_opciones')
-            .insert(copia.seleccion.map(itemId => ({ itinerario_id: nuevoItin.id, item_id: itemId })))
-        }
-      }
-    }
-  }
-
-  if (original.oportunidad_id) revalidatePath(`/pipeline/${original.oportunidad_id}`)
-  if (negocioIdOrig) revalidatePath(`/negocios/${negocioIdOrig}`)
-  return { success: true, id: newCot?.id }
+/**
+ * Las puertas que aprueban SIN preguntar la tarifa (la aprobación vieja y el `estado` por
+ * el endpoint genérico) quedan cerradas para una cotización con tarifas: ahí la única
+ * forma es `aceptarCotizacionNegocio` con la tarifa escogida. Sin tarifas, `null` (R6).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function motivoParaAprobarSinEscoger(supabase: any, cotizacionId: string): Promise<string | null> {
+  const filas = await leerItinerarios(supabase, cotizacionId)
+  if (!filas || filas.length === 0) return null
+  return 'Esta cotización tiene tarifas: se aprueba desde el bloque «Cotización», escogiendo cuál tomó el cliente.'
 }
 
 // ── Reconciliación automática de ajuste ────────────────────────

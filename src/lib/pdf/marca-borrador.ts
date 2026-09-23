@@ -1,9 +1,10 @@
 /**
  * La marca de agua de un PDF que NO puede salir al cliente.
  *
- * Una cotización que no puede salir (pantallazos de otros pasajeros, margen bajo el mínimo
- * sin la firma del dueño, IVA sin calcular, IVA incluido sin plantilla) se descarga igual
- * —Edgar y las operadoras necesitan ver los borradores— pero cada página lleva «BORRADOR» y
+ * Una cotización que no puede salir (pantallazos de otros pasajeros, sin la tarifa
+ * Recomendada, margen bajo el mínimo sin la firma del dueño, IVA sin calcular, IVA incluido
+ * sin plantilla) se descarga igual —Edgar y las operadoras necesitan ver los borradores—
+ * pero cada página lleva «BORRADOR» y
  * sus motivos REALES («IVA sin calcular · no enviar», etc., ver `motivos-borrador.ts`), en
  * diagonal de esquina a esquina, grande y semitransparente: imposible de pasar por alto,
  * sin tapar el documento y sin una franja que se pueda recortar.
@@ -23,6 +24,7 @@ const ROJO = rgb(0.75, 0.11, 0.11)
 
 export const TEXTO_MARCA_BORRADOR = textoDeMarca(['margen'])
 export const TEXTO_MARCA_PANTALLAZOS = textoDeMarca(['pantallazos'])
+export const TEXTO_MARCA_RECOMENDADA = textoDeMarca(['recomendada'])
 
 /**
  * Pone la marca en cada página. La segunda línea dice los motivos REALES
