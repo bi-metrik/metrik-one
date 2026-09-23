@@ -14,7 +14,7 @@ import {
   leerItinerarios,
   totalDelPrincipal,
 } from '@/lib/cotizaciones/itinerarios-datos'
-import { adjuntarAdicionales } from '@/lib/cotizaciones/adicionales'
+import { adjuntarAdicionales, preciosPorResincronizar } from '@/lib/cotizaciones/adicionales'
 import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
 import { retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
@@ -1014,6 +1014,24 @@ export async function recalcularTotales(cotizacionId: string) {
     supabase,
     filas.map(f => f.id as string),
   )
+  // P4 · los adicionales sin precio a mano siguen al margen global: si cambió el margen (o
+  // su costo), su precio se reescribe AQUÍ, antes de la cascada, para que el PDF, la
+  // pantalla y la huella lean la misma cifra. Los de precio a mano no se tocan.
+  const margenGlobal = cot?.margen_porcentaje ?? cot?.margen_default_pct ?? null
+  const resincronizar = preciosPorResincronizar(filasAdicionales, {
+    margenPct: margenGlobal === null ? null : Number(margenGlobal),
+    convencion: cot?.convencion_margen ?? null,
+  })
+  for (const { id, precio } of resincronizar) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errPrecio } = await (supabase as any).from('item_adicionales').update({ precio }).eq('id', id)
+    if (errPrecio) {
+      console.error('[recalcularTotales] no se pudo actualizar el precio de un adicional:', errPrecio.message)
+      continue
+    }
+    const fila = filasAdicionales.find(f => f.id === id)
+    if (fila) fila.precio = precio
+  }
   const paraCascadaSinAdic = filas.map(item => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
     const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(item.rubros)

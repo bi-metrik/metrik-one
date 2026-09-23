@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
+  actualizarAdicional,
   agregarAdicional,
   eliminarAdicional,
 } from '@/app/(app)/negocios/adicional-actions'
@@ -14,9 +15,13 @@ import {
   aAdicional,
   etiquetaDeAdicional,
   margenDeAdicional,
+  precioDerivadoDeAdicional,
   TIPOS_ADICIONAL,
   totalesDeAdicionales,
+  type Adicional,
+  type EntradaAdicional,
   type FilaAdicional,
+  type MargenDeCotizacion,
 } from '@/lib/cotizaciones/adicionales'
 import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -41,6 +46,13 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
  *  · **El total de los adicionales se declara aparte del precio base.** Así se puede leer
  *    de dónde sale la diferencia entre dos variantes del mismo tramo.
  *
+ * ## El precio sale del margen (P4 del ensayo del 2026-09-23, decisión de Mauricio)
+ *
+ * Se pide solo el COSTO. El precio se calcula con el margen global de la cotización, igual
+ * que en la línea, y se muestra al lado con un lápiz para cambiarlo. Hasta ese día un precio
+ * vacío se guardaba en 0: el costo entraba al viaje y al cliente no se le cobraba nada. Un
+ * precio a mano en 0 o por debajo del costo pide confirmación antes de guardarse.
+ *
  * ## R6 en la pantalla
  *
  * Sin la tabla en la base no se ofrece nada: un control que devuelve `42P01` al primer
@@ -48,11 +60,15 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
  * no monta este componente en absoluto — el editor solo lo pinta donde ya pinta el cargue
  * de pantallazo, o sea en las líneas con ranura del catálogo.
  */
+/** Sin margen conocido el precio propuesto es el costo: el lápiz sigue a mano. */
+const SIN_MARGEN: MargenDeCotizacion = { margenPct: null, convencion: null }
+
 export default function AdicionalesItem({
   itemId,
   filas,
   disponible,
   editable,
+  margen = SIN_MARGEN,
 }: {
   itemId: string
   /** Las filas crudas de `item_adicionales` de ESTA variante. */
@@ -60,6 +76,8 @@ export default function AdicionalesItem({
   /** `false` mientras la migración esté pendiente: no se ofrece el control. */
   disponible: boolean
   editable: boolean
+  /** El margen global de la cotización: de él sale el precio que se propone (P4). */
+  margen?: MargenDeCotizacion
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -68,9 +86,13 @@ export default function AdicionalesItem({
   const [nombre, setNombre] = useState('')
   const [cantidad, setCantidad] = useState('1')
   const [costo, setCosto] = useState('')
+  // Vacío = el precio sale del margen. Solo se escribe al tocar el lápiz.
   const [precio, setPrecio] = useState('')
+  const [precioAMano, setPrecioAMano] = useState(false)
   const [moneda, setMoneda] = useState('COP')
   const [tasa, setTasa] = useState('')
+  // El adicional ya cargado cuyo precio se está cambiando con el lápiz.
+  const [editandoPrecio, setEditandoPrecio] = useState<{ id: string; valor: string } | null>(null)
 
   const adicionales = filas.map(aAdicional)
   const totales = totalesDeAdicionales(adicionales)
@@ -85,22 +107,40 @@ export default function AdicionalesItem({
     setCantidad('1')
     setCosto('')
     setPrecio('')
+    setPrecioAMano(false)
     setMoneda('COP')
     setTasa('')
   }
 
+  /**
+   * Guarda con la confirmación de «precio en 0 o por debajo del costo» cuando hace falta: el
+   * servidor lo rechaza con `requiereConfirmacion` y aquí se pregunta una vez.
+   */
+  async function conConfirmacion(
+    enviar: (extra: Partial<EntradaAdicional>) => Promise<ResultadoAdicional>,
+  ): Promise<ResultadoAdicional> {
+    let r = await enviar({})
+    if (!r.success && r.requiereConfirmacion && window.confirm(r.error ?? '¿Guardar este precio?')) {
+      r = await enviar({ confirmarPrecioBajo: true })
+    }
+    return r
+  }
+
   function guardar() {
     startTransition(async () => {
-      const r = await agregarAdicional(itemId, {
+      const r = await conConfirmacion(extra => agregarAdicional(itemId, {
         codigo: codigo === '' ? null : codigo,
         nombre,
         cantidad: Number(cantidad.replace(/\D/g, '')) || 1,
         costo: numero(costo),
-        precio: numero(precio),
+        // Sin tocar el lápiz, el precio sale del margen: nunca un cero silencioso.
+        precio: precioAMano ? numeroONulo(precio) : null,
         moneda,
         tasaCop: numero(tasa) || null,
-      })
+        ...extra,
+      }))
       if (!r.success) {
+        if (r.requiereConfirmacion) return
         // El motivo del servidor se muestra ENTERO: resumirlo a «no se pudo» deja al
         // usuario sin saber si le falta la tasa de cambio o el nombre del cargo.
         toast.error(r.error ?? 'No se pudo agregar el adicional')
@@ -111,6 +151,28 @@ export default function AdicionalesItem({
       }
       limpiar()
       setAbierto(false)
+      router.refresh()
+    })
+  }
+
+  /** El lápiz de un adicional ya cargado: un precio a mano, o vuelta al margen (`null`). */
+  function cambiarPrecio(ad: Adicional, nuevo: number | null) {
+    startTransition(async () => {
+      const r = await conConfirmacion(extra => actualizarAdicional(ad.id, {
+        codigo: ad.codigo,
+        nombre: ad.nombre,
+        cantidad: ad.cantidad,
+        costo: ad.costo,
+        precio: nuevo,
+        moneda: ad.moneda,
+        tasaCop: ad.tasaCop,
+        ...extra,
+      }))
+      if (!r.success) {
+        if (!r.requiereConfirmacion) toast.error(r.error ?? 'No se pudo cambiar el precio')
+        return
+      }
+      setEditandoPrecio(null)
       router.refresh()
     })
   }
@@ -183,7 +245,41 @@ export default function AdicionalesItem({
                     <span className="shrink-0 tabular-nums text-muted-foreground">
                       costo {formatCOP(suyo.costo)}
                     </span>
-                    <span className="shrink-0 tabular-nums font-medium">{formatCOP(suyo.precio)}</span>
+                    {editandoPrecio?.id === ad.id ? (
+                      <span className="flex shrink-0 items-center gap-1">
+                        <input
+                          autoFocus
+                          value={editandoPrecio.valor}
+                          onChange={e => setEditandoPrecio({ id: ad.id, valor: e.target.value })}
+                          aria-label={`Precio unitario de ${etiquetaDeAdicional(ad)}`}
+                          className="w-24 rounded border bg-background px-1 py-0.5 text-[11px] tabular-nums"
+                        />
+                        <button type="button" disabled={isPending} onClick={() => cambiarPrecio(ad, numeroONulo(editandoPrecio.valor))} className="rounded px-1 text-[10px] font-medium text-primary hover:bg-accent">
+                          Guardar
+                        </button>
+                        {ad.precioManual && (
+                          <button type="button" disabled={isPending} onClick={() => cambiarPrecio(ad, null)} className="rounded px-1 text-[10px] text-muted-foreground hover:bg-accent">
+                            Usar el margen
+                          </button>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="flex shrink-0 items-center gap-1 tabular-nums font-medium">
+                        {formatCOP(suyo.precio)}
+                        {!ad.precioManual && <span className="text-[9px] font-normal text-muted-foreground">(margen)</span>}
+                        {editable && disponible && (
+                          <button
+                            type="button"
+                            title="Cambiar el precio"
+                            aria-label={`Cambiar el precio de ${etiquetaDeAdicional(ad)}`}
+                            onClick={() => setEditandoPrecio({ id: ad.id, valor: String(ad.precio) })}
+                            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        )}
+                      </span>
+                    )}
                     <span className="w-12 shrink-0 text-right tabular-nums text-muted-foreground">
                       {formatMargenPct(margen) ?? '—'}
                     </span>
@@ -241,7 +337,28 @@ export default function AdicionalesItem({
           <div className="flex flex-wrap items-end gap-2">
             <Campo etiqueta="Cantidad" valor={cantidad} onChange={setCantidad} ancho="w-16" />
             <Campo etiqueta={`Costo unit. (${moneda})`} valor={costo} onChange={setCosto} ancho="w-28" />
-            <Campo etiqueta={`Precio unit. (${moneda})`} valor={precio} onChange={setPrecio} ancho="w-28" />
+            {precioAMano ? (
+              <Campo etiqueta={`Precio unit. (${moneda})`} valor={precio} onChange={setPrecio} ancho="w-28" />
+            ) : (
+              // P4 · el precio se calcula con el margen global, como en la línea. El lápiz lo abre.
+              <div>
+                <span className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Precio unit. (margen)</span>
+                <span className="flex items-center gap-1 py-1 text-[11px] tabular-nums">
+                  {numeroONulo(costo) !== null
+                    ? formatCOP(precioDerivadoDeAdicional(numeroONulo(costo) as number, moneda, margen))
+                    : '—'}
+                  <button
+                    type="button"
+                    title="Escribir el precio a mano"
+                    aria-label="Escribir el precio a mano"
+                    onClick={() => setPrecioAMano(true)}
+                    className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </span>
+              </div>
+            )}
             <Campo etiqueta="Moneda" valor={moneda} onChange={v => setMoneda(v.toUpperCase())} ancho="w-16" />
             {moneda !== 'COP' && (
               <Campo etiqueta="Tasa a COP" valor={tasa} onChange={setTasa} ancho="w-24" />
@@ -310,4 +427,17 @@ function Campo({
  */
 function numero(texto: string): number {
   return parseMontoCop(texto) ?? 0
+}
+
+/** Lo mismo, pero vacío es `null`: un precio que nadie escribió no es un precio de 0. */
+function numeroONulo(texto: string): number | null {
+  if (texto.trim() === '') return null
+  return parseMontoCop(texto)
+}
+
+type ResultadoAdicional = {
+  success: boolean
+  error?: string
+  requiereConfirmacion?: boolean
+  desmarcados?: { nombre: string | null; motivo: string }[]
 }

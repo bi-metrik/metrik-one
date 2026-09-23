@@ -48,6 +48,7 @@
  */
 
 import { aPesos } from './tarifa-pasajero'
+import { precioConMargen, type ConvencionMargen } from './precio-item'
 
 // ── El catálogo (§1.3) ───────────────────────────────────────────────────────
 
@@ -122,6 +123,19 @@ export interface Adicional {
    */
   origen: OrigenAdicional
   orden: number
+  /**
+   * El precio lo escribió una persona. `false` = sale del margen global de la cotización
+   * y se recalcula cuando ese margen cambia (P4 del ensayo del 2026-09-23, decisión de
+   * Mauricio). Sin la columna en la base (migración pendiente) vale `true`: el precio
+   * guardado manda, que es exactamente lo de antes.
+   */
+  precioManual: boolean
+}
+
+/** El margen global de la cotización: de él sale el precio de un adicional sin precio a mano. */
+export interface MargenDeCotizacion {
+  margenPct: number | null
+  convencion: ConvencionMargen | null
 }
 
 /** Lo que se puede escribir de un adicional: todo menos su identidad y su origen. */
@@ -130,15 +144,39 @@ export interface EntradaAdicional {
   nombre?: string | null
   cantidad?: number | null
   costo?: number | null
+  /**
+   * `null`/ausente = el precio sale del margen global (P4). Un número = escrito a mano.
+   * Hasta el 2026-09-23 un precio vacío se guardaba en 0: el costo entraba al viaje y al
+   * cliente no se le cobraba nada.
+   */
   precio?: number | null
   moneda?: string | null
   tasaCop?: number | null
+  /**
+   * La persona ya vio el aviso de un precio a mano en 0 o por debajo del costo y lo quiere
+   * así. Sin esto, ese precio se rechaza con `requiereConfirmacion`.
+   */
+  confirmarPrecioBajo?: boolean
 }
 
 /** Un adicional limpio, o por qué no se puede guardar. */
 export type Normalizacion =
   | { ok: true; valor: Omit<Adicional, 'id' | 'itemId' | 'origen' | 'orden'> }
-  | { ok: false; motivo: string }
+  | { ok: false; motivo: string; requiereConfirmacion?: boolean }
+
+/**
+ * El precio UNITARIO de un adicional sin precio a mano: su costo con el margen global, con
+ * la MISMA aritmética de la línea (`precioConMargen`: `costo / (1 − margen)` sobre venta).
+ * Al peso en pesos; a dos decimales en otra moneda, que es la unidad en que se guarda.
+ */
+export function precioDerivadoDeAdicional(
+  costoUnitario: number,
+  moneda: string,
+  margen: MargenDeCotizacion,
+): number {
+  const bruto = precioConMargen(Number(costoUnitario) || 0, margen.margenPct ?? 0, margen.convencion ?? undefined)
+  return moneda.toUpperCase() === 'COP' ? Math.round(bruto) : Math.round(bruto * 100) / 100
+}
 
 /**
  * El adicional, limpio, tal como se guarda.
@@ -158,7 +196,7 @@ export type Normalizacion =
  *    aportaría cero al total mientras se imprime como incluido — plata que se regala sin
  *    que nada falle. Rechazar al escribir es la única forma de que esa fila no exista.
  */
-export function normalizarAdicional(entrada: EntradaAdicional): Normalizacion {
+export function normalizarAdicional(entrada: EntradaAdicional, margen: MargenDeCotizacion | null = null): Normalizacion {
   const codigo = esTipoConocido(entrada.codigo) ? (entrada.codigo as string) : null
   const nombre = limpiar(entrada.nombre)
   if (codigo === null && nombre === null) {
@@ -171,12 +209,29 @@ export function normalizarAdicional(entrada: EntradaAdicional): Normalizacion {
   }
 
   const costo = Number(entrada.costo ?? 0)
-  const precio = Number(entrada.precio ?? 0)
-  if (!Number.isFinite(costo) || costo < 0 || !Number.isFinite(precio) || precio < 0) {
+  const precioEscrito = entrada.precio === null || entrada.precio === undefined ? null : Number(entrada.precio)
+  if (!Number.isFinite(costo) || costo < 0 || (precioEscrito !== null && (!Number.isFinite(precioEscrito) || precioEscrito < 0))) {
     return { ok: false, motivo: 'El costo y el precio no pueden ser negativos.' }
   }
 
   const moneda = (limpiar(entrada.moneda) ?? 'COP').toUpperCase()
+
+  // P4 · sin precio escrito, el precio sale del margen global. Nunca un cero silencioso.
+  if (precioEscrito === null && margen === null) {
+    return { ok: false, motivo: 'Escribe el precio del adicional: no se pudo leer el margen de la cotización.' }
+  }
+  const precioManual = precioEscrito !== null
+  const precio = precioEscrito ?? precioDerivadoDeAdicional(costo, moneda, margen as MargenDeCotizacion)
+  // Un precio a mano en 0 o por debajo del costo es plata que se regala: se pregunta antes.
+  if (precioManual && (precio === 0 || precio < costo) && entrada.confirmarPrecioBajo !== true) {
+    return {
+      ok: false,
+      requiereConfirmacion: true,
+      motivo: precio === 0
+        ? 'El precio al cliente es 0: el costo entra al viaje y no se cobra. ¿Lo guardas así?'
+        : 'El precio al cliente está por debajo del costo: se vende a pérdida. ¿Lo guardas así?',
+    }
+  }
   const tasaBruta = Number(entrada.tasaCop)
   const tasaCop = Number.isFinite(tasaBruta) && tasaBruta > 0 ? tasaBruta : null
   if (moneda !== 'COP' && tasaCop === null) {
@@ -190,7 +245,7 @@ export function normalizarAdicional(entrada: EntradaAdicional): Normalizacion {
 
   return {
     ok: true,
-    valor: { codigo, nombre, cantidad, costo, precio, moneda, tasaCop: moneda === 'COP' ? null : tasaCop },
+    valor: { codigo, nombre, cantidad, costo, precio, moneda, tasaCop: moneda === 'COP' ? null : tasaCop, precioManual },
   }
 }
 
@@ -304,6 +359,8 @@ export interface FilaAdicional {
   tasa_cop?: number | null
   origen?: string | null
   orden?: number | null
+  /** Ausente mientras la migración de `precio_manual` no esté aplicada: vale `true`. */
+  precio_manual?: boolean | null
 }
 
 /** Una fila cruda, con la forma que usa el resto del código. */
@@ -320,7 +377,31 @@ export function aAdicional(fila: FilaAdicional): Adicional {
     tasaCop: Number.isFinite(Number(fila.tasa_cop)) && Number(fila.tasa_cop) > 0 ? Number(fila.tasa_cop) : null,
     origen: fila.origen === 'pantallazo' ? 'pantallazo' : 'manual',
     orden: Number(fila.orden) || 0,
+    precioManual: fila.precio_manual !== false,
   }
+}
+
+/**
+ * Los adicionales sin precio a mano cuyo precio guardado ya no corresponde al margen global
+ * (P4): cambió el margen, o el costo. Devuelve lo que hay que reescribir; los de precio a
+ * mano NUNCA salen aquí.
+ *
+ * Se reescribe el precio guardado en vez de derivarlo en cada lectura para que el PDF, la
+ * pantalla, la cascada y la huella de la autorización lean la MISMA cifra sin tener que
+ * saber del margen: el precio se decide en un solo sitio, al recalcular.
+ */
+export function preciosPorResincronizar(
+  filas: readonly FilaAdicional[],
+  margen: MargenDeCotizacion,
+): { id: string; precio: number }[] {
+  const out: { id: string; precio: number }[] = []
+  for (const fila of filas) {
+    if (fila.precio_manual !== false || !fila.id) continue
+    const ad = aAdicional(fila)
+    const precio = precioDerivadoDeAdicional(ad.costo, ad.moneda, margen)
+    if (precio !== ad.precio) out.push({ id: fila.id, precio })
+  }
+  return out
 }
 
 /**
