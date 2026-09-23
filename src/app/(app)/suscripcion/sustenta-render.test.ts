@@ -50,12 +50,12 @@ describe('la tarjeta de Sustenta', () => {
 
   it('dice el copy aprobado, con los dos CTAs y el descarte', () => {
     expect(t).toContain('Recomendado para tu CDA')
-    expect(t).toContain('¿Quieres más control sobre tu SARLAFT?')
+    expect(t).toContain('¿Tu SARLAFT está listo para la próxima auditoría?')
     expect(t).toContain('Valida revisa las listas. Sustenta sostiene todo tu SARLAFT.')
     expect(t).toContain('conectados a las consultas que tu equipo ya hace en Valida')
     expect(t).toContain('Matriz de riesgos y controles al día, sin hojas de cálculo sueltas.')
     expect(t).toContain('Cada contraparte vinculada con su consulta de listas y su soporte.')
-    expect(t).toContain('Evidencia organizada y trazable para el oficial de cumplimiento y la revisión.')
+    expect(t).toContain('Llega a la auditoría con cada soporte en su lugar y sin buscar a última hora.')
     expect(t).toContain('Quiero una demostración')
     expect(t).toContain('Ver cómo funciona')
     expect(t).toContain('Ahora no')
@@ -81,7 +81,7 @@ describe('la tarjeta de Sustenta', () => {
   })
 
   it('el orden: distintivo, lockup, gancho y titular, que sigue siendo un encabezado nombrado', () => {
-    const orden = ['Recomendado para tu CDA', 'MéTRIK sustenta', '¿Quieres más control sobre tu SARLAFT?', 'Valida revisa las listas.']
+    const orden = ['Recomendado para tu CDA', 'MéTRIK sustenta', '¿Tu SARLAFT está listo para la próxima auditoría?', 'Valida revisa las listas.']
     const pos = orden.map((o) => t.indexOf(o))
     expect(pos.every((p) => p >= 0)).toBe(true)
     expect([...pos].sort((a, b) => a - b)).toEqual(pos)
