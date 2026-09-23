@@ -69,7 +69,7 @@ export function primerNombre(nombreCompleto: string | null | undefined): string 
 export function textoConfirmacion(p: { tipo: 'recien'; nombre: string | null } | { tipo: 'previa' }): string {
   if (p.tipo === 'previa') return 'Ya recibimos tu solicitud. Te escribiremos para agendar la demostración.'
   const saludo = p.nombre ? `Listo, ${p.nombre}.` : 'Listo.'
-  return `${saludo} Mauricio Moreno, de MeTRIK, te escribirá para agendar la demostración.`
+  return `${saludo} Mauricio Moreno, de MéTRIK, te escribirá para agendar la demostración.`
 }
 
 // ── Medición ──────────────────────────────────────────────────────────────────────────────

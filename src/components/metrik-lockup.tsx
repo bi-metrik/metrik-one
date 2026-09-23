@@ -21,17 +21,22 @@ const SIZES = {
   },
 } as const
 
+/** Productos con lockup propio: el wordmark MéTRIK con el nombre del producto en minúscula. */
+export type ProductoLockup = 'one' | 'sustenta'
+
 interface MetrikLockupProps {
   size?: 'lg' | 'md' | 'sm'
   linkTo?: string
+  /** Por defecto «one». Mismo wordmark, mismo peso y misma línea de acento para todo producto. */
+  producto?: ProductoLockup
 }
 
-export default function MetrikLockup({ size = 'md', linkTo }: MetrikLockupProps) {
+export default function MetrikLockup({ size = 'md', linkTo, producto = 'one' }: MetrikLockupProps) {
   const s = SIZES[size]
   const font = 'var(--font-schibsted), sans-serif'
 
   const lockup = (
-    <div className="inline-flex flex-col">
+    <div data-metrik-lockup={producto} className="inline-flex flex-col">
       <div className="flex items-baseline" style={{ fontFamily: font, fontSize: s.fontSize }}>
         <span style={{ fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--foreground)' }}>
           MéTRIK
@@ -40,7 +45,7 @@ export default function MetrikLockup({ size = 'md', linkTo }: MetrikLockupProps)
             contraste con el wordmark lo da el peso (700 contra 400). Es uno de
             los tres cambios de spec de la decision de marca del 2026-09-07. */}
         <span style={{ fontWeight: 400, letterSpacing: '-0.01em', color: 'var(--foreground)', marginLeft: s.gap }}>
-          one
+          {producto}
         </span>
       </div>
       <div

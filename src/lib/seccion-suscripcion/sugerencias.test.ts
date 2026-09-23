@@ -43,10 +43,10 @@ describe('el bloque de Sustenta', () => {
 describe('la confirmación de la demostración', () => {
   it('recién pedida lleva el primer nombre; sin nombre, no inventa uno', () => {
     expect(textoConfirmacion({ tipo: 'recien', nombre: 'Ana' })).toBe(
-      'Listo, Ana. Mauricio Moreno, de MeTRIK, te escribirá para agendar la demostración.',
+      'Listo, Ana. Mauricio Moreno, de MéTRIK, te escribirá para agendar la demostración.',
     )
     expect(textoConfirmacion({ tipo: 'recien', nombre: null })).toBe(
-      'Listo. Mauricio Moreno, de MeTRIK, te escribirá para agendar la demostración.',
+      'Listo. Mauricio Moreno, de MéTRIK, te escribirá para agendar la demostración.',
     )
   })
 
