@@ -260,7 +260,10 @@ export default async function CotizacionNegocioPage({
   return (
     <CotizacionEditor
       oportunidadId={id}
-      cotizacion={cotizacion}
+      // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
+      // editor la declara como la unión de sus dos valores (el CHECK de la columna). El cast
+      // es el mismo de `initialItems`: no cambia lo que llega, solo lo que el tipo afirma.
+      cotizacion={cotizacion as Parameters<typeof CotizacionEditor>[0]['cotizacion']}
       initialItems={items as Parameters<typeof CotizacionEditor>[0]['initialItems']}
       fiscalProfile={fiscalProfile}
       clientFiscal={clientFiscal}
