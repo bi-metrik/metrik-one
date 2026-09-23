@@ -103,6 +103,11 @@ type Props = {
    * negocio_codigo. Default false → comportamiento íntegro (AFI conserva el picker).
    */
   modoVitrina?: boolean;
+  /**
+   * Lo que va debajo del título, antes de las pestañas. Hoy, la tarjeta del próximo pago de la
+   * licencia de un CDA (se pinta en el servidor). Sin él, la pantalla es la de siempre.
+   */
+  encabezado?: React.ReactNode;
 };
 
 export default function ValidaClient({
@@ -111,6 +116,7 @@ export default function ValidaClient({
   tutorialNuncaVisto = false,
   negocioInicial = null,
   modoVitrina = false,
+  encabezado = null,
 }: Props) {
   const [tab, setTab] = useState<TabKey>(negocioInicial ? 'historial' : 'puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
@@ -146,6 +152,8 @@ export default function ValidaClient({
         </div>
         <TutorialButton onClick={dispararTutorial} />
       </div>
+
+      {encabezado}
 
       {mostrarEmpty && (
         <TutorialEmptyState

@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
 import { resolverNombresUsuarios } from './_usuarios';
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
+import { terminosValidaPermitenOperar } from '@/lib/valida-cda/puerta';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
@@ -108,8 +109,13 @@ export type FilaLotePreparada = {
  */
 async function accesoValida(): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
   const r = await exigirModulo(REQUISITO.validaConsulta);
-  if (r.ok) return r;
-  return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
+  if (!r.ok) return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
+  // Los CDA con contrato directo con METRIK IA S.A.S. no operan hasta que la persona designada
+  // acepte sus términos (cláusula 16.3). Un espacio sin contrato de Valida (AFI, metrik) pasa igual
+  // que antes: la puerta no le aplica. Ver `src/lib/valida-cda/puerta.ts`.
+  const terminos = await terminosValidaPermitenOperar();
+  if (!terminos.ok) return terminos;
+  return r;
 }
 
 async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {

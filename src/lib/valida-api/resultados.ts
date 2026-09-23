@@ -88,7 +88,13 @@ export interface DocumentoEntradaPagina {
 export type ContratoEntradaPagina =
   | { estado: 'aceptado' }
   | { estado: 'pendiente'; puede: true; empresas: string[]; porFirmar: DocumentoPorAceptar[] }
-  | { estado: 'pendiente'; puede: false; razon: RazonNoAcepta }
+  | {
+      estado: 'pendiente'
+      puede: false
+      razon: RazonNoAcepta
+      /** A quién se espera, cuando el contrato designó a alguien. Solo el nombre: nada de contacto. */
+      designadoNombre?: string | null
+    }
 
 /** Lo que la página necesita para decidir si abre el módulo o pinta la entrada. */
 export type EstadoEntradaPagina =

@@ -98,6 +98,17 @@ vi.mock('@/lib/secretos/workspace', () => ({
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
+// La puerta de términos de los CDA (`valida-cda/puerta.ts`). Su lógica se prueba aparte; aquí se fija
+// que TODA acción del módulo la consulta y que su «no» corta antes de la red y de la base.
+const puertaTerminos: { resultado: { ok: true } | { ok: false; error: string } } = { resultado: { ok: true } }
+const consultasPuerta = vi.fn()
+vi.mock('@/lib/valida-cda/puerta', () => ({
+  terminosValidaPermitenOperar: async () => {
+    consultasPuerta()
+    return puertaTerminos.resultado
+  },
+}))
+
 vi.mock('@/lib/actions/_usuarios', () => ({
   resolverNombresUsuarios: async () => new Map(),
 }))
@@ -192,6 +203,43 @@ beforeEach(() => {
   reiniciarModulo('ws-1', { ...MODULES.afi })
   llave.delWorkspace = 'llave-de-prueba'
   process.env.VALIDA_API_KEY = 'llave-global-de-metrik'
+  puertaTerminos.resultado = { ok: true }
+  consultasPuerta.mockClear()
+})
+
+describe('un CDA con los términos sin aceptar no opera Valida (2026-09-23)', () => {
+  const PENDIENTE = { ok: false as const, error: 'Antes de usar Valida, la persona designada por tu empresa tiene que aceptar los términos de suscripción en la plataforma.' }
+  beforeEach(() => {
+    reiniciarModulo('ws-1', { ...MODULES.cda })
+    puertaTerminos.resultado = PENDIENTE
+  })
+
+  it('ninguna acción llega a Valida ni a la base, y todas dicen por qué', async () => {
+    const resultados = [
+      await consultarValida(PERSONA),
+      await descargarPDFConsultaValida('val-1'),
+      await generarPDFLoteValida('lote-1'),
+      await listarConsultasValida(),
+      await prepararLoteValida(loteSinCodigo()),
+      await buscarNegociosParaValida('P'),
+    ]
+    expect(resultados).toEqual(resultados.map(() => PENDIENTE))
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+    expect(consultasPuerta).toHaveBeenCalledTimes(6)
+  })
+
+  it('CONTROL — con los términos aceptados, el mismo CDA consulta', async () => {
+    puertaTerminos.resultado = { ok: true }
+    expect((await consultarValida(PERSONA)).ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
+  })
+
+  it('un espacio sin el módulo ni siquiera llega a la puerta de términos', async () => {
+    reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft })
+    expect(await consultarValida(PERSONA)).toEqual({ ok: false, error: 'modulo_no_activo' })
+    expect(consultasPuerta).not.toHaveBeenCalled()
+  })
 })
 
 describe('el módulo Valida, no la sesión, abre estas acciones (tercera ronda)', () => {

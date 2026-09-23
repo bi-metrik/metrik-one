@@ -53,6 +53,76 @@ export async function perfilReal(usuarioId: string): Promise<PerfilReal | null> 
   return { role: fila.role, workspaceId: fila.workspace_id, platformAdmin: fila.platform_admin === true }
 }
 
+export interface DesignacionContrato {
+  designadoId: string | null
+  designadoNombre: string | null
+}
+
+interface FilaContratoDesignado {
+  id: string
+  estado: string
+  vigente_desde: string
+  aceptante_designado_id: string | null
+}
+
+/**
+ * Quién firma los términos por la empresa, según el contrato que cubre al espacio de la sesión: la
+ * persona designada (`servicios_contratados.aceptante_designado_id`) y su nombre, para decirle al
+ * resto del equipo a quién esperan.
+ *
+ * El contrato se elige con el MISMO orden que `versionContratada` y que la guarda de la base (el
+ * activo primero, luego el de vigencia más reciente), así que la pantalla, el servidor y la base
+ * hablan de la misma persona. Límite conocido: si un espacio tuviera contratos de dos empresas con
+ * designados distintos, esto toma el primero; hoy ningún espacio tiene dos (medido 2026-09-23).
+ *
+ * Se lee con el cliente de servicio, ACOTADO al espacio de la sesión (pagador o beneficiario): la
+ * tabla es server-only. `'error'` si alguna lectura falla, nunca «sin designado»: esa respuesta
+ * dejaría firmar al dueño en un contrato que designó a otra persona.
+ */
+export async function designacionDelEspacio(workspaceId: string): Promise<DesignacionContrato | 'error'> {
+  // `aceptante_designado_id` nace en 20260923220000 y no está en `database.ts`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any
+  const campos = 'id, estado, vigente_desde, aceptante_designado_id'
+
+  const [pagados, beneficiario] = await Promise.all([
+    svc.from('servicios_contratados').select(campos).eq('workspace_pagador_id', workspaceId),
+    svc.from('servicio_contratado_beneficiarios').select('servicio_contratado_id').eq('workspace_id', workspaceId),
+  ])
+  if (pagados.error || beneficiario.error) {
+    console.error('[terminos] contratos del espacio:', pagados.error?.message ?? beneficiario.error?.message)
+    return 'error'
+  }
+
+  const contratos: FilaContratoDesignado[] = [...((pagados.data ?? []) as FilaContratoDesignado[])]
+  const idsBeneficiario = ((beneficiario.data ?? []) as { servicio_contratado_id: string }[])
+    .map((b) => b.servicio_contratado_id)
+    .filter((id) => !contratos.some((c) => c.id === id))
+  if (idsBeneficiario.length > 0) {
+    const cubiertos = await svc.from('servicios_contratados').select(campos).in('id', idsBeneficiario)
+    if (cubiertos.error) {
+      console.error('[terminos] contratos como beneficiario:', cubiertos.error.message)
+      return 'error'
+    }
+    contratos.push(...((cubiertos.data ?? []) as FilaContratoDesignado[]))
+  }
+
+  contratos.sort(
+    (a, b) =>
+      Number(b.estado === 'activo') - Number(a.estado === 'activo') || b.vigente_desde.localeCompare(a.vigente_desde),
+  )
+  const designadoId = contratos[0]?.aceptante_designado_id ?? null
+  if (!designadoId) return { designadoId: null, designadoNombre: null }
+
+  const perfil = await svc.from('profiles').select('full_name').eq('id', designadoId).maybeSingle()
+  if (perfil.error) {
+    console.error('[terminos] nombre de la persona designada:', perfil.error.message)
+    return 'error'
+  }
+  const nombre = ((perfil.data as { full_name: string | null } | null)?.full_name ?? '').trim()
+  return { designadoId, designadoNombre: nombre || null }
+}
+
 interface FilaVersion {
   id: string
   workspace_id: string
