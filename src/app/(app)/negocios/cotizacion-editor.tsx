@@ -50,6 +50,7 @@ import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
 import DocumentoClientePanel from '@/app/(app)/negocios/documento-cliente-panel'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { estadoDelTexto, type PanelTextoCliente } from '@/lib/cotizaciones/documento-cliente'
+import { terminosAlAbrir } from '@/lib/cotizaciones/terminos-cotizacion'
 
 /**
  * Sin adicionales y sin poder guardarlos: lo que recibe toda cotización que no es de
@@ -290,9 +291,16 @@ interface Props {
    * Ausente = IVA sobre el total, lo de siempre.
    */
   configIva?: ConfigIvaCotizacion | null
+  /**
+   * ¿Se pinta el resumen fiscal del final («El cliente te factura y paga / De eso, no todo
+   * es tuyo / Te queda en caja»)? Lo decide la plantilla del workspace
+   * (`plantillaMuestraResumenFiscal`). Ausente = sí, lo de siempre; hoy solo Trappvel lo
+   * oculta (hallazgo 33 del ensayo del 2026-09-23).
+   */
+  mostrarResumenFiscal?: boolean
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -307,6 +315,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Discount state
   // Terminos y condiciones al final de la cotizacion
   const [terminos, setTerminos] = useState(cotizacion.terminos_condiciones ?? '')
+  // Con el panel «Texto para el cliente» (Trappvel), los términos viven ahí y se guardan con
+  // el resto del bloque: el cuadro de abajo no se pinta, para que no haya dos que guarden lo
+  // mismo por caminos distintos. Sin la columna del panel, el cuadro de siempre.
+  const terminosEnPanel = textoCliente?.columnaPresente === true
+  // Un borrador sin términos cuya línea tiene condiciones de siempre: el panel las propone,
+  // pero no están guardadas y el PDF sale sin ellas hasta que alguien guarde.
+  const terminosPorProponer = terminosEnPanel && textoCliente !== null
+    && terminosAlAbrir({ terminos: textoCliente.terminos, terminosBase: textoCliente.terminosBase, editable: textoCliente.editable }).propuesto
 
   // Detallada mode state
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(initialItems.map(i => i.id)))
@@ -902,9 +918,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             >
               <FileText className="h-3 w-3" />
               Texto
-              {estadoDelTexto(textoCliente.documento) === 'borrador' && (
+              {estadoDelTexto(textoCliente.documento) === 'borrador' ? (
                 <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-500" aria-label="Borrador sin revisar" />
-              )}
+              ) : terminosPorProponer ? (
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-500" aria-label="Términos sin guardar" />
+              ) : null}
             </button>
           )}
           <button
@@ -2503,7 +2521,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           <RastroMargen cotizacionId={cotizacion.id} />
 
           {/* Terminos y condiciones (van al final de la cotizacion) */}
-          {(editable || terminos.trim()) && (
+          {!terminosEnPanel && (editable || terminos.trim()) && (
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 Términos y condiciones
@@ -2535,8 +2553,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           )}
 
+          {/* Sin el resumen fiscal (Trappvel), el aviso de un IVA incompleto no se pierde con él:
+              es lo único de ese bloque que cambia lo que sale en el PDF. */}
+          {!mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 && (
+            <p className="rounded-lg bg-amber-50 p-3 text-center text-[10px] font-medium text-amber-700">
+              {motivoIvaSinCalcular(ivaVigente.sinCosto)} El PDF sale como borrador, con la marca «{etiquetaDeMotivo('iva_sin_calcular')}», hasta entonces.
+            </p>
+          )}
+
           {/* Fiscal result */}
-          {(() => {
+          {mostrarResumenFiscal && (() => {
             // `precioVenta` ya trae el descuento comercial aplicado: restarlo otra vez
             // aquí le bajaba el neto al vendedor sin que nada lo explicara.
             //

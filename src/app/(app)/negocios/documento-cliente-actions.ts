@@ -5,8 +5,10 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { redactarTextoCliente } from '@/lib/ai/redactar-documento-cliente'
 import {
+  conAlertas,
   hayViajeQueRedactar,
   normalizarTexto,
+  revisarEstilo,
   textoDesactualizado,
   textoVacio,
   type DocumentoCliente,
@@ -14,6 +16,7 @@ import {
   type TextoCliente,
 } from '@/lib/cotizaciones/documento-cliente'
 import { leerContextoTextoCliente, type ContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
+import { normalizarTerminos } from '@/lib/cotizaciones/terminos-cotizacion'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import { PLANTILLA_POR_DEFECTO, plantillaUsaTextoDelCliente } from '@/lib/pdf/plantillas-cotizacion'
 import { getServerKey } from '@/lib/server-keys'
@@ -30,6 +33,11 @@ import { getServerKey } from '@/lib/server-keys'
  *   existe: ni panel, ni redacción, ni columna leída.
  * · Que la cotización sea un borrador, igual que sus líneas.
  * · La huella y la revisión: el navegador no manda ni la una ni la otra.
+ *
+ * Los términos y condiciones de la cotización viven en el mismo panel y se guardan con el
+ * mismo botón (brief del 2026-09-23, C1 y C2), pero en su columna de siempre,
+ * `terminos_condiciones`. «Redactar con ONE» no los toca: son reglas de la reserva, no
+ * texto comercial.
  */
 
 type Fallo = { success: false; error: string; requiereConfirmacion?: boolean }
@@ -41,13 +49,19 @@ const ROLES_SIN_ESCRITURA = new Set(['read_only', 'contador'])
 const MENSAJE_SIN_COLUMNA =
   'El texto para el cliente todavía no está disponible: falta aplicar la migración de la base.'
 
-function panelDe(ctx: ContextoTextoCliente, documento: DocumentoCliente | null): PanelTextoCliente {
+function panelDe(
+  ctx: ContextoTextoCliente,
+  documento: DocumentoCliente | null,
+  terminos: string | null = ctx.terminos,
+): PanelTextoCliente {
   return {
     columnaPresente: ctx.columnaPresente,
     documento,
     desactualizado: textoDesactualizado(documento, ctx.huella),
     hayViaje: hayViajeQueRedactar(ctx.viaje),
     editable: isEditable((ctx.estado ?? '') as EstadoCotizacion),
+    terminos,
+    terminosBase: ctx.configLinea.terminosBase,
   }
 }
 
@@ -146,12 +160,13 @@ export async function redactarDocumentoCliente(
 
   let redactado: { texto: TextoCliente; modelo: string }
   try {
-    redactado = await redactarTextoCliente(ctx.viaje, apiKey)
+    redactado = await redactarTextoCliente(ctx.viaje, apiKey, { ejemplos: ctx.configLinea.ejemplos })
   } catch (e) {
     console.error('[redactarDocumentoCliente]', e)
     return { success: false, error: 'ONE no pudo redactar el texto esta vez. Inténtalo de nuevo.' }
   }
 
+  // El validador de estilo MARCA el borrador; no lo corrige. Quien revisa ve qué mirar.
   const documento: DocumentoCliente = {
     ...redactado.texto,
     origen: 'ia',
@@ -161,6 +176,7 @@ export async function redactarDocumentoCliente(
     revisado_por: null,
     revisado_por_nombre: null,
     revisado_en: null,
+    ...conAlertas(revisarEstilo(redactado.texto)),
   }
 
   let q = supabase
@@ -192,8 +208,16 @@ export async function redactarDocumentoCliente(
  *
  * Un texto vaciado del todo borra la columna: sin texto, el documento vuelve a ser el de
  * siempre.
+ *
+ * `terminos`, si llega, se guarda en el MISMO update, en `terminos_condiciones`: un solo
+ * botón para todo el bloque. Es la copia de ESTA cotización; si el texto base de la línea
+ * cambia después, lo guardado aquí no cambia. Sin el parámetro, la columna no se toca.
  */
-export async function guardarDocumentoCliente(cotizacionId: string, texto: TextoCliente): Promise<Exito | Fallo> {
+export async function guardarDocumentoCliente(
+  cotizacionId: string,
+  texto: TextoCliente,
+  terminos?: string | null,
+): Promise<Exito | Fallo> {
   const r = await contextoParaEscribir(cotizacionId)
   if ('fallo' in r) return r.fallo as Fallo
   const { supabase, workspaceId, staffId, ctx } = r
@@ -218,12 +242,19 @@ export async function guardarDocumentoCliente(cotizacionId: string, texto: Texto
       revisado_por: staffId ?? null,
       revisado_por_nombre: nombre,
       revisado_en: new Date().toISOString(),
+      // Lo que la persona decidió dejar, para que quede dicho; nunca se corrige solo.
+      ...conAlertas(revisarEstilo(limpio)),
     }
   }
 
+  const cambios: Record<string, unknown> = { documento_cliente: documento }
+  const conTerminos = terminos !== undefined
+  const terminosLimpios = conTerminos ? normalizarTerminos(terminos) : ctx.terminos
+  if (conTerminos) cambios.terminos_condiciones = terminosLimpios
+
   const { data, error } = await supabase
     .from('cotizaciones')
-    .update({ documento_cliente: documento })
+    .update(cambios)
     .eq('id', cotizacionId)
     .eq('workspace_id', workspaceId)
     .select('id')
@@ -234,5 +265,5 @@ export async function guardarDocumentoCliente(cotizacionId: string, texto: Texto
   if (!data || data.length === 0) return { success: false, error: 'No se pudo guardar el texto.' }
 
   revalidar(ctx)
-  return { success: true, panel: panelDe(ctx, documento) }
+  return { success: true, panel: panelDe(ctx, documento, terminosLimpios) }
 }

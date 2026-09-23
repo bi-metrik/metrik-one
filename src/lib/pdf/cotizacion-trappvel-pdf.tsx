@@ -103,6 +103,7 @@ import {
   type ListaDelCierre,
 } from './cotizacion-trappvel-formato'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
+import { estructurarTerminos, type BloqueDeTerminos } from '@/lib/cotizaciones/terminos-cotizacion'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
@@ -1010,6 +1011,48 @@ function ListaEnColumna({ lista, items }: { lista: ListaDelCierre; items: string
   )
 }
 
+// ── Términos y condiciones (brief del 2026-09-23, C2) ────────────────────────
+
+/**
+ * Los términos en piezas que no se parten: un subtítulo va con su primer renglón, para que
+ * «Medios de pago» nunca quede solo al pie de una página. Lo demás, un renglón por pieza.
+ */
+function piezasDeTerminos(bloques: BloqueDeTerminos[]): BloqueDeTerminos[][] {
+  const piezas: BloqueDeTerminos[][] = []
+  for (const b of bloques) {
+    const ultima = piezas[piezas.length - 1]
+    if (ultima && ultima.length === 1 && ultima[0].tipo === 'subtitulo') ultima.push(b)
+    else piezas.push([b])
+  }
+  return piezas
+}
+
+/** Un bloque de los términos: letra chica, porque es lo que se consulta, no lo que se lee primero. */
+function BloqueTerminos({ b, primero }: { b: BloqueDeTerminos; primero: boolean }) {
+  if (b.tipo === 'subtitulo') {
+    return (
+      <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: primero ? 0 : 8, marginBottom: 3 }}>
+        {b.texto}
+      </Text>
+    )
+  }
+  if (b.tipo === 'vineta') {
+    return (
+      <View style={{ flexDirection: 'row', paddingLeft: b.nivel === 2 ? 14 : 0, paddingBottom: 2.5 }}>
+        <View style={{ width: 10, paddingTop: 3.5 }}>
+          <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: b.nivel === 2 ? C.gris : C.magenta }} />
+        </View>
+        <Text hyphenationCallback={SIN_GUION} style={{ flex: 1, fontSize: 8, color: C.texto, lineHeight: 1.35 }}>{b.texto}</Text>
+      </View>
+    )
+  }
+  return (
+    <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, lineHeight: 1.35, paddingBottom: 2.5 }}>
+      {b.texto}
+    </Text>
+  )
+}
+
 // ── Documento ─────────────────────────────────────────────────────────────────
 
 export default function CotizacionTrappvelPDF({
@@ -1267,6 +1310,10 @@ export default function CotizacionTrappvelPDF({
   // documento son las secciones que de verdad son largas.
   const listas: Record<ListaDelCierre, string[]> = { incluye, noIncluye, antes: antesDeViajar }
   const filasDeListas = disposicionDeListas(listas, ANCHO_CONTENIDO)
+  // Los términos de ESTA cotización (`terminos_condiciones`), al cierre y antes de la firma.
+  // Es la copia guardada: el texto base de la línea no se lee aquí, así que un documento ya
+  // enviado no cambia si ese texto cambia después.
+  const piezasTerminos = piezasDeTerminos(estructurarTerminos(cotizacion.terminos_condiciones))
   const seccionesFinales = [
     'inversion',
     hayPorPasajero && 'porPasajero',
@@ -1274,6 +1321,7 @@ export default function CotizacionTrappvelPDF({
     opcionales.length > 0 && 'opcionales',
     v.cargosEnDestino.length > 0 && 'cargos',
     cotizacion.notas && 'notas',
+    piezasTerminos.length > 0 && 'terminos',
   ].filter((x): x is string => Boolean(x))
   const ultimaSeccion = firma ? seccionesFinales[seccionesFinales.length - 1] : undefined
   const conCierre = (seccion: string) => (seccion === ultimaSeccion ? ALTO_CIERRE : undefined)
@@ -1728,6 +1776,27 @@ export default function CotizacionTrappvelPDF({
                 {cotizacion.notas}
               </Text>
             </View>
+          )}
+
+          {/* ── Términos y condiciones: al cierre, antes de la firma ──────────────
+              Fragmento, no caja, por la misma razón que en «Opcionales»: se parten entre
+              piezas, el título va pegado a la primera y la última pide el cierre debajo. */}
+          {piezasTerminos.length > 0 && (
+            <>
+              <View wrap={false} minPresenceAhead={piezasTerminos.length === 1 ? conCierre('terminos') : undefined}>
+                <Titulo texto="Términos y condiciones" icono="info" />
+                {piezasTerminos[0].map((b, j) => <BloqueTerminos key={`terminos-0-${j}`} b={b} primero={j === 0} />)}
+              </View>
+              {piezasTerminos.slice(1).map((pieza, i) => (
+                <View
+                  key={`terminos-${i + 1}`}
+                  wrap={false}
+                  minPresenceAhead={i === piezasTerminos.length - 2 ? conCierre('terminos') : undefined}
+                >
+                  {pieza.map((b, j) => <BloqueTerminos key={`terminos-${i + 1}-${j}`} b={b} primero={false} />)}
+                </View>
+              ))}
+            </>
           )}
 
           {/* ── Cierre: los créditos de las fotos (§4.10) AL LADO de la firma ─────

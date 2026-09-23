@@ -23,6 +23,7 @@ import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotiz
 import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/documento-cliente'
 import { fotosDelViaje } from './fotos-del-viaje'
 import { fotosDeCiudad } from './fotos-ciudad'
+import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -1074,4 +1075,67 @@ describe('una tabla de vuelos que no cabe en una hoja', () => {
       for (const h of paginas.filter(h => !/QA\d{3}/.test(h))) expect(veces(h, 'AEROLÍNEA RUTA FECHA'), `presentación de ${k} líneas`).toBe(0)
     }
   }, 120_000)
+})
+
+/**
+ * Los términos y condiciones de la cotización (brief del 2026-09-23, C2). Hasta ese día
+ * solo los imprimía la plantilla de Termotech: lo que el asesor de Trappvel escribía en el
+ * cuadro se perdía (hallazgo 34 del ensayo).
+ */
+describe('los términos y condiciones', () => {
+  const conTerminos = (terminos: string | null, over: Partial<CotizacionPDFProps> = {}) =>
+    props({ cotizacion: { ...props().cotizacion, terminos_condiciones: terminos }, ...over })
+
+  it('⚠️⚠️ imprime los de la cotización: los dos subtítulos, las viñetas y la sub-lista de cuentas', async () => {
+    const t = await texto(conTerminos(TERMINOS_BASE_TRAPPVEL))
+    expect(t).toContain('rminos y condiciones')
+    expect(t).toContain('Condiciones generales')
+    expect(t).toContain('Medios de pago')
+    expect(t).toContain('Los servicios que no se tomen no son reembolsables.')
+    expect(t).toContain('Banco de Bogot')
+    expect(t).toContain('cuenta de ahorros 708030895')
+    expect(t).toContain('cuenta de ahorros 469500014383')
+    // El marcador que se escribe en el cuadro no se imprime: la viñeta va dibujada.
+    expect(t).not.toMatch(/-\s+Banco de Bogot/)
+    expect(t).not.toContain('- Las cancelaciones')
+  })
+
+  it('⚠️ van al cierre: después de «Información importante» y antes de la firma, en la misma hoja', async () => {
+    const buf = await pdfDe(conTerminos(TERMINOS_BASE_TRAPPVEL, {
+      cotizacion: { ...props().cotizacion, terminos_condiciones: TERMINOS_BASE_TRAPPVEL, notas: 'Precios sujetos a la tasa de cambio del dia.' },
+    }))
+    const t = textoDelPDF(buf)
+    const paginas = porPagina(t, 'COT-2026-0006')
+    const ultima = paginas.get(Math.max(...paginas.keys()))!
+    expect(ultima).toContain('Edgar Javier Alarcon S.')
+    // El último renglón de los términos comparte hoja con la firma, y va antes que ella.
+    const pse = ultima.indexOf('PSE, tarjeta de cr')
+    expect(pse).toBeGreaterThan(-1)
+    expect(pse).toBeLessThan(ultima.indexOf('Edgar Javier Alarcon S.'))
+    // «Información importante» va antes que los términos: en una hoja anterior, o más arriba
+    // en la misma.
+    const dondeEsta = (frag: string): [number, number] => {
+      for (const [n, texto] of [...paginas.entries()].sort((a, b) => a[0] - b[0])) {
+        const i = texto.indexOf(frag)
+        if (i >= 0) return [n, i]
+      }
+      return [Infinity, Infinity]
+    }
+    const [pInfo, iInfo] = dondeEsta('Informaci')
+    const [pTerm, iTerm] = dondeEsta('rminos y condiciones')
+    expect(pTerm).not.toBe(Infinity)
+    expect(pInfo < pTerm || (pInfo === pTerm && iInfo < iTerm)).toBe(true)
+  })
+
+  it('sin términos no hay sección: el documento sale como antes', async () => {
+    const t = await texto(conTerminos(null))
+    expect(t).not.toContain('rminos y condiciones')
+    expect(await texto(conTerminos('   \n  '))).not.toContain('rminos y condiciones')
+  })
+
+  it('un texto sin viñetas se imprime en párrafos, tal cual', async () => {
+    const t = await texto(conTerminos('Tarifas sujetas a disponibilidad al momento de reservar.\nNo reembolsable.'))
+    expect(t).toContain('Tarifas sujetas a disponibilidad al momento de reservar.')
+    expect(t).toContain('No reembolsable.')
+  })
 })

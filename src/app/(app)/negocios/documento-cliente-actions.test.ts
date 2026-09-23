@@ -99,6 +99,8 @@ const ctx = (over: Record<string, unknown> = {}) => ({
   documento: null,
   viaje: VIAJE,
   huella: 'huella-actual',
+  terminos: null,
+  configLinea: { terminosBase: null, ejemplos: [] },
   ...over,
 })
 
@@ -143,8 +145,9 @@ describe('redactarDocumentoCliente', () => {
     expect(d.modelo).toBe('gemini-2.5-flash')
     expect(d.fuente_hash).toBe('huella-actual')
     expect(d.titular).toBe(TEXTO.titular)
-    // El modelo recibe SOLO el viaje ya armado, nunca la cotización ni el negocio.
-    expect(redactarTextoCliente).toHaveBeenCalledWith(VIAJE, 'clave')
+    // El modelo recibe SOLO el viaje ya armado (y la voz de la línea), nunca la cotización
+    // ni el negocio.
+    expect(redactarTextoCliente).toHaveBeenCalledWith(VIAJE, 'clave', { ejemplos: [] })
   })
 
   it('escribe acotado al workspace y sin pisar un texto revisado que llegue en el camino', async () => {
@@ -238,5 +241,89 @@ describe('guardarDocumentoCliente', () => {
     const r = await guardarDocumentoCliente('cot-1', TEXTO)
     expect((r as { error: string }).error).toContain('migración')
     expect(estado.escrituras).toHaveLength(0)
+  })
+})
+
+// ── Brief del 2026-09-23: términos en el mismo guardar, voz de la línea, estilo ──────
+
+const TERMINOS = 'Condiciones generales\n- Las tarifas están sujetas a cambios.\n  - Sub-renglón con sangría'
+
+describe('los términos, en el mismo panel (C1 y C2)', () => {
+  it('el panel trae los términos guardados y el texto base de la línea', async () => {
+    estado.ctx = ctx({ terminos: 'Guardados.', configLinea: { terminosBase: TERMINOS, ejemplos: [] } })
+    const p = await getTextoCliente('cot-1')
+    expect(p).toMatchObject({ terminos: 'Guardados.', terminosBase: TERMINOS })
+  })
+
+  it('⚠️⚠️ un solo guardar: texto y términos van en el MISMO update, acotado al workspace', async () => {
+    const r = await guardarDocumentoCliente('cot-1', TEXTO, `${TERMINOS}   \n\n\n`)
+    expect(r.success).toBe(true)
+    expect(estado.escrituras).toHaveLength(1)
+    const w = estado.escrituras[0]
+    expect(w.valores.documento_cliente).toMatchObject({ titular: TEXTO.titular })
+    // Se guarda normalizado, con la sangría de la sub-lista intacta.
+    expect(w.valores.terminos_condiciones).toBe(TERMINOS)
+    expect(w.filtros).toContainEqual(['eq', 'workspace_id', 'ws-1'])
+    if (r.success) expect(r.panel.terminos).toBe(TERMINOS)
+  })
+
+  it('términos vaciados se guardan como null: el PDF sale sin la sección', async () => {
+    await guardarDocumentoCliente('cot-1', TEXTO, '   ')
+    expect(estado.escrituras[0].valores).toHaveProperty('terminos_condiciones', null)
+  })
+
+  it('sin el parámetro de términos, la columna no se toca', async () => {
+    await guardarDocumentoCliente('cot-1', TEXTO)
+    expect(estado.escrituras[0].valores).not.toHaveProperty('terminos_condiciones')
+  })
+
+  it('una cotización que ya no es borrador no guarda términos', async () => {
+    estado.ctx = ctx({ estado: 'enviada' })
+    const r = await guardarDocumentoCliente('cot-1', TEXTO, TERMINOS)
+    expect(r.success).toBe(false)
+    expect(estado.escrituras).toHaveLength(0)
+  })
+
+  it('⚠️ «Redactar con ONE» no toca los términos', async () => {
+    estado.ctx = ctx({ terminos: 'Guardados.', configLinea: { terminosBase: TERMINOS, ejemplos: [] } })
+    const r = await redactarDocumentoCliente('cot-1')
+    expect(r.success).toBe(true)
+    expect(estado.escrituras[0].valores).not.toHaveProperty('terminos_condiciones')
+    if (r.success) expect(r.panel.terminos).toBe('Guardados.')
+  })
+})
+
+describe('la voz de la línea y el validador de estilo (C4)', () => {
+  it('los ejemplos de la línea viajan al redactor', async () => {
+    const ejemplos = [{ titular: null, intro: 'Cinco noches en Cancún, frente al mar.', incluye: [], antes_de_viajar: [] }]
+    estado.ctx = ctx({ configLinea: { terminosBase: null, ejemplos } })
+    await redactarDocumentoCliente('cot-1')
+    expect(redactarTextoCliente).toHaveBeenCalledWith(VIAJE, 'clave', { ejemplos })
+  })
+
+  it('⚠️⚠️ una fórmula vetada MARCA el borrador y no lo reescribe', async () => {
+    redactarTextoCliente.mockResolvedValue({
+      texto: { ...TEXTO, titular: 'Descubra San Andrés — el paraíso' },
+      modelo: 'gemini-2.5-flash',
+    })
+    await redactarDocumentoCliente('cot-1')
+    const d = escrito()!
+    expect(d.titular).toBe('Descubra San Andrés — el paraíso')
+    expect(d.revisado_en).toBeNull()
+    expect(d.estilo_por_revisar).toEqual(expect.arrayContaining([
+      { motivo: 'vetada', texto: 'Descubra', campo: 'titular' },
+      { motivo: 'vetada', texto: 'paraíso', campo: 'titular' },
+      { motivo: 'guion_largo', texto: '—', campo: 'titular' },
+    ]))
+  })
+
+  it('un borrador limpio no lleva marca', async () => {
+    await redactarDocumentoCliente('cot-1')
+    expect(escrito()).not.toHaveProperty('estilo_por_revisar')
+  })
+
+  it('al guardar queda dicho lo que la persona decidió dejar', async () => {
+    await guardarDocumentoCliente('cot-1', { ...TEXTO, intro: 'Un rincón del Caribe.' })
+    expect(escrito()!.estilo_por_revisar).toEqual([{ motivo: 'vetada', texto: 'rincón', campo: 'intro' }])
   })
 })

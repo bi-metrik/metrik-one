@@ -75,6 +75,19 @@ describe('redactarTextoCliente', () => {
     for (const cifra of ['6208296', '350.000', '350000']) expect(init.body).not.toContain(cifra)
   })
 
+  it('los ejemplos de la voz van en las instrucciones, nunca en la entrada del viaje', async () => {
+    const fetchFalso = vi.fn(async () => respuestaGemini(JSON.stringify(RESPUESTA)))
+    vi.stubGlobal('fetch', fetchFalso)
+
+    const ejemplos = [{ titular: null, intro: 'Glaciares, cataratas y buenos vinos: Argentina tiene de todo.', incluye: [], antes_de_viajar: [] }]
+    await redactarTextoCliente(VIAJE, 'clave-de-prueba', { ejemplos })
+    const [, init] = fetchFalso.mock.calls[0] as unknown as [string, { body: string }]
+    const body = JSON.parse(init.body)
+    expect(body.system_instruction.parts[0].text).toContain('EJEMPLOS DE LA VOZ DE TRAPPVEL')
+    expect(body.system_instruction.parts[0].text).toContain('Argentina tiene de todo.')
+    expect(body.contents[0].parts[0].text).not.toContain('Argentina')
+  })
+
   it('sin clave no llama a nadie', async () => {
     const fetchFalso = vi.fn()
     vi.stubGlobal('fetch', fetchFalso)

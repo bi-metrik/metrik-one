@@ -16,12 +16,15 @@ import { lineasQueDescribeElDocumento } from './lineas-del-documento'
 import { leerViajeDelNegocio } from './viaje-negocio'
 import {
   huellaDeViaje,
+  leerConfigTextoDeLinea,
   leerDocumentoCliente,
   viajeParaRedactar,
+  type ConfigTextoDeLinea,
   type DocumentoCliente,
   type ItemParaRedactar,
   type ViajeParaRedactar,
 } from './documento-cliente'
+import { normalizarTerminos } from './terminos-cotizacion'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Supabase = any
@@ -40,6 +43,13 @@ export interface ContextoTextoCliente {
   viaje: ViajeParaRedactar
   /** La huella de `viaje`, la entrada tal como la vería el modelo hoy. */
   huella: string
+  /** Los términos guardados en la cotización (`terminos_condiciones`). */
+  terminos: string | null
+  /**
+   * Lo que la línea del negocio declara para el texto: las condiciones de siempre y la voz
+   * de la agencia (`config_extra.terminos_base` y `config_extra.ejemplos_texto`).
+   */
+  configLinea: ConfigTextoDeLinea
 }
 
 interface FilaItem {
@@ -116,16 +126,21 @@ export async function leerContextoTextoCliente(
   const { viaje: delNegocio } = await leerViajeDelNegocio(supabase, negocioId)
 
   // Los nombres del cliente NO van al modelo: se usan para borrarlos del texto libre.
+  // La línea del negocio trae los términos base y la voz de la agencia.
   let nombres: string[] = []
+  let configExtraLinea: unknown = null
   if (negocioId) {
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('empresas(nombre, contacto_nombre), contactos(nombre)')
+      .select('empresas(nombre, contacto_nombre), contactos(nombre), lineas_negocio(config_extra)')
       .eq('id', negocioId)
       .maybeSingle()
     const empresa = (negocio?.empresas ?? null) as { nombre?: string | null; contacto_nombre?: string | null } | null
     const contacto = (negocio?.contactos ?? null) as { nombre?: string | null } | null
     nombres = nombresUnicos([empresa?.nombre, empresa?.contacto_nombre, contacto?.nombre])
+    const linea = negocio?.lineas_negocio ?? null
+    const filaLinea = Array.isArray(linea) ? linea[0] : linea
+    configExtraLinea = (filaLinea as { config_extra?: unknown } | null)?.config_extra ?? null
   }
 
   const viaje = viajeParaRedactar({
@@ -144,5 +159,7 @@ export async function leerContextoTextoCliente(
     documento: leerDocumentoCliente(fila.documento_cliente),
     viaje,
     huella: huellaDeViaje(viaje),
+    terminos: normalizarTerminos(fila.terminos_condiciones),
+    configLinea: leerConfigTextoDeLinea(configExtraLinea),
   }
 }
