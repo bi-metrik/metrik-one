@@ -85,7 +85,7 @@ import {
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
-import { estadoDePasos, resumenDelViaje } from '@/lib/cotizaciones/estado-pasos'
+import { encabezadoDelViaje, estadoDePasos } from '@/lib/cotizaciones/estado-pasos'
 import { fichaDeOpcion, notaDeLaLinea, ordenarComoElViaje, resumenDeOpcion, tituloDeBloque } from '@/lib/cotizaciones/opcion-viaje'
 import PasosCotizacion from '@/app/(app)/negocios/pasos-cotizacion'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
@@ -3212,7 +3212,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     </>
   )
 
-  // ── Los cinco pasos del flujo de viaje (Trappvel) ───────────────────────────
+  // ── Los cuatro pasos del flujo de viaje (Trappvel) ───────────────────────────
   const conCosto = (i: ItemRow) => (lineaPorItem.get(i.id)?.costoLinea ?? 0) > 0
   const estadoPasos = estadoDePasos({
     viaje: { destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje },
@@ -3229,26 +3229,33 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     estadoCotizacion: cotizacion.estado,
   })
   const enPropuesta = (itinerarios?.itinerarios ?? []).filter(i => i.vaEnPropuesta)
+  // P9 · el viaje no es un paso: es el encabezado fijo de la cotización. Sale del negocio
+  // y aquí no se edita; en ámbar si al negocio le faltan fechas o pasajeros.
+  const viaje = encabezadoDelViaje({ destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje })
+  const jsxEncabezadoViaje = lineasPorTipo ? (
+    <div
+      data-encabezado-viaje
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 ${viaje.motivo ? 'border-amber-200 bg-amber-50' : 'bg-muted/20'}`}
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-semibold uppercase tracking-wide text-[#1A1A1A]">
+          {viaje.resumen || 'El negocio todavía no dice a dónde, cuándo ni quiénes viajan'}
+        </p>
+        {viaje.motivo && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-amber-800">
+            <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+            {viaje.motivo}
+          </p>
+        )}
+      </div>
+      <a href={backUrl ?? `/negocios/${oportunidadId}`} className="shrink-0 text-xs text-primary underline underline-offset-2">
+        Cambiar en el negocio
+      </a>
+    </div>
+  ) : null
   const pasosDelViaje = lineasPorTipo ? (
     <PasosCotizacion
       pasos={[
-        {
-          id: 'viaje',
-          titulo: 'Viaje',
-          ...estadoPasos.viaje,
-          contenido: (
-            // Sale de las condiciones del viaje (DA1) y aquí no se edita.
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-[#1A1A1A]">
-                {resumenDelViaje({ destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje })
-                  || 'El negocio todavía no dice a dónde, cuándo ni quiénes viajan.'}
-              </p>
-              <a href={backUrl ?? `/negocios/${oportunidadId}`} className="text-xs text-primary underline underline-offset-2">
-                Cambiar en el negocio
-              </a>
-            </div>
-          ),
-        },
         {
           id: 'componentes',
           titulo: 'Componentes',
@@ -3345,6 +3352,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   </ul>
                 )}
               </div>
+              {viaje.motivo && (
+                <p data-pendiente-viaje className="flex items-center gap-1 text-[11px] font-medium text-amber-800">
+                  <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                  Pendiente: {viaje.motivo}.
+                </p>
+              )}
               {jsxAvisoDesactualizadas}
               {jsxPanelMargen}
               {jsxIvaNota}
@@ -3376,6 +3389,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {jsxAvisoCongelada}
       {jsxAvisoNoEditable}
       {!lineasPorTipo && jsxAvisoDesactualizadas}
+      {jsxEncabezadoViaje}
       {lineasPorTipo ? pasosDelViaje : (
         <div className="space-y-3">
           {jsxExpandir}
