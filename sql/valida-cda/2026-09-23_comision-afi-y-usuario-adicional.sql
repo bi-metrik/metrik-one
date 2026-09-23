@@ -22,6 +22,8 @@
 --      sin ella el CHECK `comision_coherente` rechaza el modo `fijo_mas_porcentaje`.
 --   1. Los contratos de los CDA cargados. El bloque actualiza los que encuentre de los cuatro y dice
 --      cuántos; un CDA sin contrato todavía se salta (correr el bloque otra vez después de cargarlo).
+--      Los contratos cancelados (la carga revertida del 2026-09-23) no cuentan ni se tocan: solo los
+--      vivos. Un contrato vivo que no esté `activo` (borrador, pausado) detiene el bloque.
 --   2. Correr tal cual (ENSAYO: tiene que terminar en «ENSAYO OK … Nada quedó escrito»), cambiar
 --      `c_ensayo` a false y correrlo de nuevo. Es UN statement: el ensayo deshace todo.
 --   3. Idempotente: un contrato que ya tiene los dos valores no se toca ni deja otra fila.
@@ -73,6 +75,8 @@ begin
       join public.workspaces w on w.id = sc.workspace_pagador_id
      where sc.servicio_slug = 'valida-cda-licencia'
        and w.slug = any (c_espacios)
+       -- Los contratos cancelados de la carga revertida del 2026-09-23 quedan como historia: no se tocan.
+       and sc.estado not in ('cancelado', 'terminado')
      order by w.slug
        for update of sc
   loop
@@ -114,6 +118,7 @@ begin
       join public.workspaces w on w.id = sc.workspace_pagador_id
      where sc.servicio_slug = 'valida-cda-licencia'
        and w.slug = any (c_espacios)
+       and sc.estado not in ('cancelado', 'terminado')
        and ((sc.parametros->>'valor_usuario_adicional')::numeric is distinct from c_valor_adicional
             or sc.comision is distinct from c_comision)
   ) then

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
@@ -8,10 +8,12 @@ import { PGlite } from '@electric-sql/pglite'
  * La carga de datos de los CDA (`sql/valida-cda/`), EJECUTADA contra las migraciones reales.
  *
  * Esos dos archivos no los corre ningún check y los aplica una persona sobre producción, así que lo
- * que prometen se prueba aquí: el bloque de cada CDA no corre sin persona designada, el ensayo no
- * deja nada escrito, la carga deja contrato + módulo + términos con la huella correcta, una segunda
- * corrida no duplica, y al final la persona designada (y solo ella) puede aceptar esos términos por
- * la guarda real de la base. La plantilla de enlaces deja el botón «Pagar» donde lo lee
+ * que prometen se prueba aquí, sobre el estado que dejó la carga revertida del 2026-09-23 (un
+ * contrato cancelado y su activación de módulo abierta en cada espacio): el bloque de cada CDA no
+ * corre sin persona designada, el ensayo no deja nada escrito, la carga deja términos + contrato +
+ * módulo con la huella correcta y cierra la activación vieja sin hueco, una segunda corrida no
+ * duplica, y al final la persona designada (y solo ella) puede aceptar esos términos por la guarda
+ * real de la base. La plantilla de enlaces deja el botón «Pagar» donde lo lee
  * `mis_cuotas_de_servicio`, y se niega a cargar un enlace ajeno a Bold o sobre una cuota pagada.
  *
  * Las constantes de cada CDA (espacios, empresas, negocios) se leen DEL ARCHIVO y se siembran con
@@ -67,14 +69,37 @@ const BLOQUES: Bloque[] = [...CARGA.matchAll(/do \$bloque\$[\s\S]*?\$bloque\$;/g
   }
 })
 
-/** El bloque con la designada puesta y, si se pide, fuera de ensayo. Cada reemplazo, una vez. */
+/** La designada por defecto de cada bloque: el dueño del espacio en producción (decisión del 2026-09-23). */
+const DUENO_POR_DEFECTO: Record<string, string> = {
+  'cda-caqueta': '6c2362ba-7a90-4892-aa33-ce0f5cc9042d',
+  'cda-elcarmen': '1aeb196c-e5d2-4a0d-9b41-dc77ea1d1ed7',
+  'cda-puertotest': '1cca5920-efb9-4a6f-92e3-1e68ad4419a5',
+  maxitec: 'c66b9846-b3ba-4ee6-807c-9978bb70186b',
+}
+
+/**
+ * El contrato cancelado que dejó en cada espacio la carga revertida del 2026-09-23, con su activación
+ * de `valida_consulta` todavía ABIERTA. Es el estado de producción sobre el que corre la carga.
+ */
+const CANCELADO: Record<string, string> = {
+  'cda-caqueta': 'd0f67ee1-b69c-4f0a-be95-0f76ace42cc6',
+  'cda-elcarmen': '14b2465d-65c0-47f5-92fb-36072cb43454',
+  'cda-puertotest': '35d99337-a07e-4d9b-8596-d65e54607eb0',
+  maxitec: 'c0c4f268-f9f1-40f4-a9e2-69c7eabf1374',
+}
+
+/**
+ * El bloque con la designada de la prueba (el perfil del archivo no existe aquí) y, si se pide,
+ * fuera de ensayo. Cada reemplazo, una vez.
+ */
 function preparar(b: Bloque, o: { designada?: string | null; ensayo: boolean }): string {
   let sql = b.sql
   const reemplazar = (de: string, a: string) => {
     expect(sql.split(de).length - 1).toBe(1)
     sql = sql.replace(de, a)
   }
-  if (o.designada !== null) reemplazar('c_designado constant uuid := null;', `c_designado constant uuid := '${o.designada ?? b.designada}';`)
+  const porDefecto = `c_designado constant uuid := '${DUENO_POR_DEFECTO[b.slug]}';`
+  reemplazar(porDefecto, o.designada === null ? 'c_designado constant uuid := null;' : `c_designado constant uuid := '${o.designada ?? b.designada}';`)
   if (!o.ensayo) reemplazar('c_ensayo constant boolean := true;', 'c_ensayo constant boolean := false;')
   return sql
 }
@@ -263,7 +288,30 @@ beforeAll(async () => {
   await db.exec(migracion('20260923220000_terminos_cda_designado_y_enlace_pago.sql'))
   await db.exec(migracion('20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql'))
   for (const b of BLOQUES) await db.exec(sembrarCda(b))
+  for (const b of BLOQUES) await db.exec(sembrarCargaRevertida(b))
 }, 60_000)
+
+/** El estado de producción que deja la carga revertida: contrato cancelado + activación abierta a él. */
+function sembrarCargaRevertida(b: Bloque): string {
+  return `
+    insert into public.servicios_contratados (
+      id, workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, parametros,
+      workspace_pagador_id, estado, vigente_desde, actualizado_por, aceptante_designado_id, terminos_plazo_hasta
+    ) values (
+      '${CANCELADO[b.slug]}', '${WS_METRIK}', '${b.empresa}', '${b.negocio}', 'valida-cda-licencia', 1,
+      '{"precio_mensual": 150000, "licencias": 2}', '${b.ws}', 'cancelado', date '2026-09-23', '${MAURICIO}',
+      '${b.owner}', date '2026-09-30'
+    );
+    insert into public.servicio_contratado_beneficiarios (servicio_contratado_id, workspace_id)
+      values ('${CANCELADO[b.slug]}', '${b.ws}');
+    insert into public.workspace_modulos (workspace_id, modulo, origen, servicio_contratado_id, activo_desde, motivo, registrado_por)
+      values ('${b.ws}', 'valida_consulta', 'servicio', '${CANCELADO[b.slug]}', now() - interval '2 hours',
+              'Carga revertida del 2026-09-23', '${MAURICIO}');
+  `
+}
+
+const VIVO = "estado not in ('cancelado', 'terminado')"
+const ABIERTA = "modulo = 'valida_consulta' and activo_hasta is null"
 
 afterAll(async () => {
   await db?.close()
@@ -276,10 +324,36 @@ describe('el archivo de carga', () => {
     expect(new Set(BLOQUES.map((b) => b.negocio)).size).toBe(4)
   })
 
-  it('nace en ensayo y sin persona designada', () => {
+  it('nace en ensayo, con el dueño del espacio como designada por defecto y plazo hasta el 27-sep', () => {
     for (const b of BLOQUES) {
       expect(b.sql).toContain('c_ensayo constant boolean := true;')
-      expect(b.sql).toContain('c_designado constant uuid := null;')
+      expect(b.sql).toContain(`c_designado constant uuid := '${DUENO_POR_DEFECTO[b.slug]}';`)
+      expect(b.sql).toContain("c_plazo_terminos constant date := date '2026-09-27';")
+      expect(b.sql).not.toContain('2026-09-30')
+    }
+  })
+
+  // Los PDF y textos entregados viven fuera del repo: esta comprobación solo corre en la torre.
+  const LEGAL = '/home/mauricio/Developer/metrik/proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.1'
+  it.skipIf(!existsSync(LEGAL))('las huellas del archivo son las del texto y el PDF entregados', () => {
+    for (const b of BLOQUES) {
+      const texto = readFileSync(join(LEGAL, b.slug, 'terminos-suscripcion-valida-cda-v1.1.md'))
+      const pdf = readFileSync(join(LEGAL, b.slug, 'terminos-suscripcion-valida-cda-v1.1.pdf'))
+      expect(constante(b.sql, 'c_texto_sha256')).toBe(createHash('sha256').update(texto).digest('hex'))
+      expect(constante(b.sql, 'c_pdf_sha256')).toBe(createHash('sha256').update(pdf).digest('hex'))
+    }
+  })
+
+  it('los términos se registran antes que el contrato, y el módulo al final', () => {
+    for (const b of BLOQUES) {
+      const terminos = b.sql.indexOf('insert into public.documentos_contractuales_versiones')
+      const contrato = b.sql.indexOf('insert into public.servicios_contratados (')
+      const cierre = b.sql.indexOf('update public.workspace_modulos')
+      const modulo = b.sql.indexOf('insert into public.workspace_modulos')
+      expect(terminos).toBeGreaterThan(0)
+      expect(terminos).toBeLessThan(contrato)
+      expect(contrato).toBeLessThan(cierre)
+      expect(cierre).toBeLessThan(modulo)
     }
   })
 })
@@ -290,7 +364,7 @@ describe('sin persona designada no carga nada', () => {
       const error = await correr(preparar(b, { designada: null, ensayo: false }))
       expect(error).toContain('falta la persona designada')
     }
-    expect(await contar('public.servicios_contratados')).toBe(0)
+    expect(await contar('public.servicios_contratados', VIVO)).toBe(0)
     expect(await contar('public.documentos_contractuales_versiones')).toBe(0)
   })
 
@@ -298,26 +372,61 @@ describe('sin persona designada no carga nada', () => {
     const [caqueta, elcarmen] = BLOQUES
     const error = await correr(preparar(caqueta, { designada: elcarmen.designada, ensayo: false }))
     expect(error).toContain('no está en el espacio del CDA')
-    expect(await contar('public.servicios_contratados')).toBe(0)
+    expect(await contar('public.servicios_contratados', VIVO)).toBe(0)
   })
 
   it('ni el soporte de MeTRIK', async () => {
     const error = await correr(preparar(BLOQUES[0], { designada: MAURICIO, ensayo: false }))
     expect(error).toContain('no está en el espacio del CDA')
   })
+
+  it('el dueño por defecto del archivo tiene que existir en el espacio: aquí no existe, y no corre', async () => {
+    const b = BLOQUES[0]
+    const sql = b.sql.replace('c_ensayo constant boolean := true;', 'c_ensayo constant boolean := false;')
+    expect(await correr(sql)).toContain(`el perfil designado ${DUENO_POR_DEFECTO[b.slug]} no existe`)
+    expect(await contar('public.servicios_contratados', VIVO)).toBe(0)
+  })
+})
+
+describe('otra activación abierta de valida_consulta detiene el bloque', () => {
+  it('una activación que no es la del contrato cancelado: no escribe nada', async () => {
+    const b = BLOQUES[3]
+    await db.exec(`
+      insert into public.workspace_modulos (workspace_id, modulo, origen, activo_desde, motivo, registrado_por)
+      values ('${b.ws}', 'valida_consulta', 'cortesia', now() - interval '1 hour', 'Prueba: activación ajena', '${MAURICIO}')`)
+    try {
+      const error = await correr(preparar(b, { ensayo: false }))
+      expect(error).toContain('no es la del contrato cancelado')
+      expect(await contar('public.servicios_contratados', VIVO)).toBe(0)
+      expect(await contar('public.documentos_contractuales_versiones')).toBe(0)
+      expect(await contar('public.workspace_modulos', `workspace_id = '${b.ws}' and ${ABIERTA}`)).toBe(2)
+    } finally {
+      // Se cierra como se cierra en producción (no se puede borrar): deja de contar como abierta.
+      await db.exec(`update public.workspace_modulos set activo_hasta = now()
+                      where workspace_id = '${b.ws}' and origen = 'cortesia' and activo_hasta is null`)
+    }
+  })
 })
 
 describe('el ensayo', () => {
-  it('llega al final y no deja nada escrito', async () => {
+  it('llega al final, dice que cerraría la activación vieja, y no deja nada escrito', async () => {
     for (const b of BLOQUES) {
       const error = await correr(preparar(b, { ensayo: true }))
       expect(error).toContain(`ENSAYO OK ${b.slug}`)
+      expect(error).toContain('plazo 2026-09-27')
+      expect(error).toContain('activaciones de módulo cerradas: 1')
       expect(error).toContain('Nada quedó escrito')
     }
-    expect(await contar('public.servicios_contratados')).toBe(0)
+    expect(await contar('public.servicios_contratados', VIVO)).toBe(0)
     expect(await contar('public.servicios_contratados_cambios')).toBe(0)
-    expect(await contar('public.workspace_modulos')).toBe(0)
     expect(await contar('public.documentos_contractuales_versiones')).toBe(0)
+    // La activación del contrato cancelado sigue abierta: el ensayo no la cerró.
+    for (const b of BLOQUES) {
+      const r = await db.query<{ contrato: string }>(
+        `select servicio_contratado_id as contrato from public.workspace_modulos where workspace_id = '${b.ws}' and ${ABIERTA}`,
+      )
+      expect(r.rows).toEqual([{ contrato: CANCELADO[b.slug] }])
+    }
   })
 })
 
@@ -334,15 +443,47 @@ describe('la carga', () => {
       select w.slug, sc.workspace_pagador_id as pagador, sc.aceptante_designado_id as designado, sc.estado,
              (sc.parametros->>'precio_mensual')::int as precio
         from public.servicios_contratados sc join public.workspaces w on w.id = sc.workspace_pagador_id
+       where sc.${VIVO}
        order by w.slug`)
     expect(filas.rows).toEqual(
       BLOQUES.map((b) => ({ slug: b.slug, pagador: b.ws, designado: b.designada, estado: 'activo', precio: 150000 })),
     )
     expect(await contar('public.servicios_contratados_cambios', "campo = 'alta'")).toBe(4)
+    // El cancelado queda como historia, intacto, y el alta nuevo lo nombra.
+    expect(await contar('public.servicios_contratados', "estado = 'cancelado'")).toBe(4)
+    for (const b of BLOQUES) {
+      const alta = await db.query<{ reemplaza: string[]; cierra: string[] }>(`
+        select c.valor_nuevo->'reemplaza_contratos_cancelados' as reemplaza, c.valor_nuevo->'cierra_activaciones_modulo' as cierra
+          from public.servicios_contratados_cambios c
+          join public.servicios_contratados sc on sc.id = c.servicio_contratado_id
+         where c.campo = 'alta' and sc.workspace_pagador_id = '${b.ws}'`)
+      expect(alta.rows[0].reemplaza).toEqual([CANCELADO[b.slug]])
+      expect(alta.rows[0].cierra).toHaveLength(1)
+    }
+  })
+
+  it('la activación del contrato cancelado queda cerrada y hay UNA abierta, la del contrato nuevo', async () => {
+    for (const b of BLOQUES) {
+      const r = await db.query<{ estado: string; abierta: boolean; contrato: string }>(`
+        select sc.estado, m.activo_hasta is null as abierta, m.servicio_contratado_id as contrato
+          from public.workspace_modulos m join public.servicios_contratados sc on sc.id = m.servicio_contratado_id
+         where m.workspace_id = '${b.ws}' and m.modulo = 'valida_consulta' and m.origen = 'servicio'
+         order by m.activo_desde`)
+      expect(r.rows).toEqual([
+        { estado: 'cancelado', abierta: false, contrato: CANCELADO[b.slug] },
+        expect.objectContaining({ estado: 'activo', abierta: true }),
+      ])
+      // Sin hueco: la vieja cierra en el mismo instante en que la nueva empieza.
+      const hueco = await db.query<{ igual: boolean }>(`
+        select (select activo_hasta from public.workspace_modulos where servicio_contratado_id = '${CANCELADO[b.slug]}')
+             = (select activo_desde from public.workspace_modulos m join public.servicios_contratados sc on sc.id = m.servicio_contratado_id
+                 where m.workspace_id = '${b.ws}' and sc.estado = 'activo') as igual`)
+      expect(hueco.rows[0].igual).toBe(true)
+    }
   })
 
   it('el módulo queda con su contrato y la proyección no cambia ningún espacio', async () => {
-    expect(await contar('public.workspace_modulos', "modulo = 'valida_consulta' and origen = 'servicio' and servicio_contratado_id is not null")).toBe(4)
+    expect(await contar('public.workspace_modulos', `${ABIERTA} and origen = 'servicio' and servicio_contratado_id is not null`)).toBe(4)
     for (const b of BLOQUES) {
       const r = await db.query<{ cambios: unknown[] }>(`select public.proyectar_modulos('${b.ws}')->'cambios' as cambios`)
       expect(r.rows[0].cambios).toEqual([])
@@ -365,15 +506,23 @@ describe('la carga', () => {
       expect(d.texto_md).toContain(`NIT ${nitConPuntos}`)
       expect(d.texto_md).toContain(`${b.slug}.metrikone.co`)
       expect(d.texto_md).not.toMatch(/\{\{|\}\}|⚠|`|> \*\*Estado/)
+      // Sin las notas internas «(Cambio frente al contrato de AFI…)» de las cláusulas 2.2 y 12.2.
+      expect(d.texto_md).not.toContain('Cambio frente')
+      expect(d.texto_md).toContain('las Partes ajustarán el precio para incorporar el tributo.\n\n')
+      expect(d.texto_md).toContain('con **quince (15) días** de anticipación.\n\n')
       // Párrafos en una línea: el lector de ONE pinta cada salto de línea.
       expect(d.texto_md.split('\n\n').every((p) => !p.includes('\n'))).toBe(true)
     }
   })
 
-  it('una segunda corrida no duplica: se detiene', async () => {
-    const error = await correr(preparar(BLOQUES[0], { ensayo: false }))
-    expect(error).toContain('ya tiene contrato')
-    expect(await contar('public.servicios_contratados')).toBe(4)
+  it('una segunda corrida no duplica ni cierra nada más: se detiene', async () => {
+    for (const b of BLOQUES) {
+      const error = await correr(preparar(b, { ensayo: false }))
+      expect(error).toContain('ya tiene un contrato valida-cda-licencia vivo')
+    }
+    expect(await contar('public.servicios_contratados', VIVO)).toBe(4)
+    expect(await contar('public.workspace_modulos', ABIERTA)).toBe(4)
+    expect(await contar('public.documentos_contractuales_versiones')).toBe(4)
   })
 
   it('el CDA ve sus términos y solo la persona designada puede aceptarlos', async () => {
@@ -414,22 +563,26 @@ describe('la carga', () => {
 })
 
 describe('plazo para aceptar y facturas de cada cuota (20260924010000)', () => {
-  it('cada contrato nace con plazo hasta el 30-sep y el CDA lo lee por mis_servicios', async () => {
+  it('cada contrato nace con plazo hasta el 27-sep (el 28 se bloquea) y el CDA lo lee por mis_servicios', async () => {
     const plazos = await db.query<{ plazo: string }>(
-      `select terminos_plazo_hasta::text as plazo from public.servicios_contratados order by id`,
+      `select terminos_plazo_hasta::text as plazo from public.servicios_contratados where ${VIVO} order by id`,
     )
-    expect(plazos.rows.map((r) => r.plazo)).toEqual(['2026-09-30', '2026-09-30', '2026-09-30', '2026-09-30'])
+    expect(plazos.rows.map((r) => r.plazo)).toEqual(['2026-09-27', '2026-09-27', '2026-09-27', '2026-09-27'])
     const b = BLOQUES[1]
-    const servicios = await comoCliente<{ modulo: string; terminos_plazo_hasta: string; es_pagador: boolean }>(
+    const servicios = await comoCliente<{ modulo: string; estado: string; terminos_plazo_hasta: string; es_pagador: boolean }>(
       b.ws,
-      `select modulo, terminos_plazo_hasta::text as terminos_plazo_hasta, es_pagador from public.mis_servicios()`,
+      `select modulo, estado, terminos_plazo_hasta::text as terminos_plazo_hasta, es_pagador from public.mis_servicios() order by estado`,
     )
-    expect(servicios).toEqual([{ modulo: 'valida_consulta', terminos_plazo_hasta: '2026-09-30', es_pagador: true }])
+    // El cancelado sigue saliendo como historia; la puerta de Valida solo mira el activo (puerta.ts).
+    expect(servicios).toEqual([
+      { modulo: 'valida_consulta', estado: 'activo', terminos_plazo_hasta: '2026-09-27', es_pagador: true },
+      { modulo: 'valida_consulta', estado: 'cancelado', terminos_plazo_hasta: '2026-09-30', es_pagador: true },
+    ])
   })
 
   it('la factura cargada sale con su cuota, solo al pagador y solo la del mismo cobrador', async () => {
     const b = BLOQUES[1]
-    const sc = await db.query<{ id: string }>(`select id from public.servicios_contratados where workspace_pagador_id = '${b.ws}'`)
+    const sc = await db.query<{ id: string }>(`select id from public.servicios_contratados where workspace_pagador_id = '${b.ws}' and estado = 'activo'`)
     const cuota = await db.query<{ id: string }>(`select id from public.plan_cobro_cuotas where plan_cobro_id = '${b.plan}' and numero = 1`)
     await db.exec(`
       insert into public.facturas_cuota (workspace_id, plan_cobro_cuota_id, numero, pdf_path, pdf_sha256)
@@ -500,7 +653,7 @@ describe('la plantilla de enlaces de pago', () => {
     )
     expect(cobro.rows).toEqual([{ monto: '150000.00', fecha_esperada: '2026-09-30', tipo_cobro: 'programado', fecha: null }])
 
-    const sc = await db.query<{ id: string }>(`select id from public.servicios_contratados where workspace_pagador_id = '${b.ws}'`)
+    const sc = await db.query<{ id: string }>(`select id from public.servicios_contratados where workspace_pagador_id = '${b.ws}' and estado = 'activo'`)
     const cuotas = await comoCliente<{ numero: number; enlace_pago_url: string | null }>(
       b.ws,
       `select numero, enlace_pago_url from public.mis_cuotas_de_servicio('${sc.rows[0].id}')`,
@@ -565,8 +718,10 @@ describe('comisión de AFI y valor del usuario adicional (2026-09-23)', () => {
     expect(await correr(real())).toBe('')
     const filas = await db.query<{ valor: number; licencias: number; comision: Record<string, unknown> }>(`
       select (parametros->>'valor_usuario_adicional')::int as valor, (parametros->>'licencias')::int as licencias, comision
-        from public.servicios_contratados`)
+        from public.servicios_contratados where estado = 'activo'`)
     expect(filas.rows).toHaveLength(4)
+    // Los cancelados de la carga revertida no se tocan.
+    expect(await contar('public.servicios_contratados', `estado = 'cancelado' and (comision is not null or parametros ? 'valor_usuario_adicional')`)).toBe(0)
     for (const f of filas.rows) {
       expect(f.valor).toBe(50000)
       expect(f.licencias).toBe(2) // no toca lo demás de los parámetros
