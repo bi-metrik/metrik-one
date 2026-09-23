@@ -1,6 +1,6 @@
 ---
 name: documento-trappvel-fotos-ritmo
-description: "#832 — foco por foto en el banco y reglas de ritmo del documento de Trappvel; la plantilla está ENCENDIDA en producción, y dos decisiones se apartan del sistema visual de Ren"
+description: "#832 y #838 — foco por foto, franja que llena el ancho y tabla de vuelos que no se parte sin encabezado en el documento de Trappvel; plantilla ENCENDIDA en producción"
 metadata:
   type: project
 ---
@@ -15,10 +15,9 @@ en la siguiente cotización que se genere, sin ningún otro paso.
 ## Dos decisiones que se apartan del sistema visual de Ren (§4.3 y §4.2)
 
 1. **La foto de un capítulo ya no es una banda de 150 pt a todo el ancho**: con una sola foto va
-   en miniatura 3:2 al lado del encabezado y del hotel. Fue mía, para cumplir «miniaturas 3:2» y
-   «menos disperso»; las reglas del coordinador solo decían que mandaban sobre §4.6 y §4.9.
-   **Why:** la banda gastaba un tercio de página por ciudad. **How to apply:** si Ren o Mauricio
-   la quieren de vuelta, es `fotoAlLado` en la plantilla; el foco sirve igual para la banda.
+   en miniatura 3:2 al lado del encabezado y del hotel. **Mauricio la aprobó el 2026-09-23**
+   (antes del #838). **Why:** la banda gastaba un tercio de página por ciudad. **How to apply:**
+   es `fotoAlLado` en la plantilla; no se toca sin que él lo pida.
 2. **«Día a día» es título de sección a 22 pt con ícono** (regla 5 del coordinador), una vez
    por capítulo. En viajes de varias ciudades pesa; es lo que se pidió.
 
@@ -38,3 +37,19 @@ en la siguiente cotización que se genere, sin ningún otro paso.
   `proyectos/trappvel/clarity/qa/2026-09-23_dispersion/`.
 - Para contar páginas o saber en qué página cae algo: `porPagina` del render test parte el
   texto por el pie (`<consecutivo> N de M`); el orden de `textoDelPDF` no es el de las páginas.
+
+## #838 (2026-09-23): franja que llena el ancho y tabla de vuelos entera o con encabezado repetido
+
+- **Franja** (`renglonesDeFotos`): cada renglón reparte el ancho entre SUS fotos (2 → mitades,
+  1 → todo el ancho) y todo renglón conserva el alto del de tres (3:2 a un tercio, ~111 pt).
+  Elegido así para no sumar alto al documento (COT-0006 siguió en 2 hojas) y para que 3+2 no
+  quede con renglones desparejos. ⚠️ Una foto sola sale en tira 4,6:1: se vio bien con el foco
+  (Palacio Real, Coliseo), pero es justo la forma que el #832 quitó por «solo cielo»; si una
+  foto nueva sale mal en tira, el arreglo es su foco o un alto propio para el renglón de una.
+- **Tabla de vuelos**: corta (título + encabezado + aerolíneas ≤ `ALTO_MAXIMO_COLUMNA`, el tope
+  de las listas) va entera; larga se parte entre aerolíneas con el encabezado `fixed` DENTRO del
+  contenedor, que react-pdf repite en cada trozo de ese View. El alto de cada aerolínea es
+  ESTIMADO (`altoEstimadoDeGrupoDeVuelos`, piso de 14 pt por la píldora de la sigla): una ruta
+  que parta renglón mide más de lo estimado.
+- QA en `proyectos/trappvel/clarity/qa/2026-09-23_dispersion/*-v2-p*.png` (COT-0006 2 hojas,
+  Europa 5, vuelos-largos 6, una-foto). Arnés `_qa-v2.test.ts` en el scratchpad de la sesión.
