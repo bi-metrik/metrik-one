@@ -810,7 +810,20 @@ export function etiquetaDeRanura(grupo: string | null | undefined): string {
   if (instancia === null) return (grupo ?? '').trim()
   const { definicion, numero, nombre } = instancia
   const cabeza = numero === null ? definicion.label : `${definicion.label} ${numero}`
-  return nombre === null ? cabeza : `${cabeza} · ${nombre}`
+  if (nombre === null) return cabeza
+  // Un nombre que YA dice el tipo («Hotel en Cancún», el que pone la ranura al nacer) no se
+  // repite detrás de él: «Hotel · Hotel en Cancún» no dice nada más. Solo si también lleva
+  // su ordinal («Hotel 2 en Cancún»): sin él, dos ranuras del mismo tipo se leerían iguales.
+  if (nombreDiceElTipo(nombre, definicion.label, numero)) return nombre
+  return `${cabeza} · ${nombre}`
+}
+
+/** ¿El nombre libre empieza por el tipo (y su ordinal, si lo tiene)? */
+function nombreDiceElTipo(nombre: string, label: string, numero: number | null): boolean {
+  const n = clave(nombre)
+  const tipo = clave(label)
+  if (numero === null) return n === tipo || n.startsWith(`${tipo} `)
+  return n === `${tipo} ${numero}` || n.startsWith(`${tipo} ${numero} `)
 }
 
 /**

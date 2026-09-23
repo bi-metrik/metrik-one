@@ -652,14 +652,25 @@ interface FilaVuelo {
  * la línea gris: pegados a la ida afirmarían que el regreso no tiene vuelo.
  */
 function numerosSinTramo(v: VueloPDF): string | null {
-  const { sinAsignar } = numerosDeVuelo(v.numeroVuelo, tieneRegreso(v))
+  const { sinAsignar } = numerosDelVuelo(v)
   if (!sinAsignar) return null
   return `${sinAsignar.includes('·') ? 'Vuelos' : 'Vuelo'} ${sinAsignar}`
 }
 
+/**
+ * Los números de cada fila: los de los tramos del vuelo (B3) cuando vienen repartidos, y si
+ * no, el reparto del número leído. ⚠️ Un número de regreso sin fila de regreso (la captura
+ * leyó una hora que no se entiende) se perdería: ahí manda el reparto de siempre.
+ */
+function numerosDelVuelo(v: VueloPDF): { ida: string | null; regreso: string | null; sinAsignar: string | null } {
+  const regreso = tieneRegreso(v)
+  if (v.numeros && (regreso || !v.numeros.regreso)) return v.numeros
+  return numerosDeVuelo(v.numeroVuelo, regreso)
+}
+
 function filasDelVuelo(v: VueloPDF): FilaVuelo[] {
   const regreso = tieneRegreso(v)
-  const numeros = numerosDeVuelo(v.numeroVuelo, regreso)
+  const numeros = numerosDelVuelo(v)
   // `escalas === 0` es la ÚNICA forma de afirmar «directo»: un `escalaIda` vacío puede ser
   // un vuelo directo o una pantalla que no mostró el recorrido, y son cosas distintas.
   const escala = (e: string | null) => (e ? `Escala en ${lugarLegible(e)}` : v.escalas === 0 ? 'Vuelo directo' : null)
@@ -1163,8 +1174,10 @@ export default function CotizacionTrappvelPDF({
    * tiene —los cargos en destino y la existencia de opcionales—, no de una lista genérica
    * de exclusiones: afirmarla en nombre de la agencia sería inventar una condición.
    */
+  // Con varias tarifas hay un cargo por hotel, y tres hoteles de la misma ciudad dirían tres
+  // veces lo mismo: la línea se escribe una vez.
   const noIncluye = [
-    ...v.cargosEnDestino.map(c => `${c.concepto}${c.ciudad ? ` (${c.ciudad})` : ''}, que se pagan en destino`),
+    ...new Set(v.cargosEnDestino.map(c => `${c.concepto}${c.ciudad ? ` (${c.ciudad})` : ''}, que se pagan en destino`)),
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]
 
@@ -1759,7 +1772,15 @@ export default function CotizacionTrappvelPDF({
                   wrap={false}
                   style={{ flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 8, backgroundColor: i % 2 === 1 ? C.tarjeta : C.blanco }}
                 >
-                  <Text style={{ fontSize: 8.5, color: C.tinta, width: '22%' }}>{c.ciudad ?? ''}</Text>
+                  {/* B2 · el cargo es de UNA opción: con varias tarifas, dice de qué hotel y
+                      de qué tarifa, igual que su tarjeta de hotel. */}
+                  <View style={{ width: '22%', paddingRight: 4 }}>
+                    <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.tinta }}>{c.ciudad ?? ''}</Text>
+                    {c.hotel && (
+                      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris, marginTop: 1 }}>{c.hotel}</Text>
+                    )}
+                    <ChipsDeTarifa tarifas={tarifas} de={c} />
+                  </View>
                   <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.tinta, width: '33%' }}>{c.concepto}</Text>
                   <Text style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, width: '20%' }}>{c.monto}</Text>
                   <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, width: '25%' }}>{c.observacion}</Text>

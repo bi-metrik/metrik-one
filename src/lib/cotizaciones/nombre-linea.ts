@@ -16,6 +16,8 @@
  * «Vuelo» a secas, sin saber el grupo, sigue contando como escrito por alguien.
  */
 
+import { esNombreDeOpcion } from './ranuras-cotizacion'
+
 /**
  * Lo que `agregarOpcionAItem` le pega al nombre del titular cuando la alternativa nace
  * sin nombre. Vive aquí para que el relleno y su detección no se desincronicen.
@@ -55,6 +57,9 @@ export function esNombreDeRelleno(nombre: string | null | undefined, etiquetaGru
   if (!n) return true
   if (n === SIN_NOMBRE) return true
   if (etiquetaGrupo && n === normalizar(nombreProvisionalDeGrupo(etiquetaGrupo))) return true
+  // «Opción 2»: el nombre con que nace una opción hermana de una ranura
+  // (`ranuras-cotizacion.ts`). Es relleno en cualquier línea, sepa o no su grupo.
+  if (esNombreDeOpcion(nombre)) return true
   return n.endsWith(SUFIJO_ALTERNATIVA)
 }
 

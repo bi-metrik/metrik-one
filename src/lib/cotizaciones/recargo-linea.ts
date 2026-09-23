@@ -54,6 +54,16 @@ import { alcanceDelVuelo } from './vuelo-internacional'
 /** A qué vuelos aplica el recargo. */
 export type VuelosDelRecargo = 'todos' | 'internacionales'
 
+/**
+ * Sobre qué se cobra el valor (B4 del brief del 2026-09-23, hallazgo 19): una vez por la
+ * reserva, o una vez por cada pasajero.
+ *
+ * ⚠️ `por_reserva` es lo de siempre y sigue siendo el valor por defecto: Edgar no ha dicho
+ * cuál es el de Trappvel, y cambiarlo solo le subiría el precio a toda cotización nueva
+ * sin que nadie lo haya decidido. Se escoge en Mi Negocio → Margen y recargo.
+ */
+export type BaseDelRecargo = 'por_reserva' | 'por_pasajero'
+
 /** Lo que la línea declara sobre el recargo, ya resuelto. */
 export interface PoliticaRecargo {
   /** `false` = no se ofrece en ninguna cotización de esta línea. */
@@ -69,6 +79,8 @@ export interface PoliticaRecargo {
    * opción, y por eso es lo que vale cuando la línea no dice nada.
    */
   vuelos: VuelosDelRecargo
+  /** Ver `BaseDelRecargo`. `valor` es por reserva o por pasajero según esto. */
+  base: BaseDelRecargo
 }
 
 /**
@@ -84,6 +96,7 @@ export const RECARGO_POR_DEFECTO: PoliticaRecargo = {
   valor: 0,
   aplicaA: ['vuelo_detalle'],
   vuelos: 'todos',
+  base: 'por_reserva',
 }
 
 type ConfigExtra = {
@@ -93,6 +106,7 @@ type ConfigExtra = {
     valor?: unknown
     aplica_a?: unknown
     vuelos?: unknown
+    base?: unknown
   } | null
 } | null
 
@@ -132,7 +146,36 @@ export function politicaRecargoDeLinea(configExtra: unknown): PoliticaRecargo {
     // Solo el valor exacto enciende el filtro. Cualquier otra cosa es lo de antes
     // (todos): un jsonb mal escrito no puede quitarle el recargo a un vuelo.
     vuelos: recargo.vuelos === 'internacionales' ? 'internacionales' : 'todos',
+    // Igual: solo el valor exacto cobra por pasajero. Un jsonb mal escrito no puede
+    // multiplicar el recargo por el número de viajeros.
+    base: recargo.base === 'por_pasajero' ? 'por_pasajero' : 'por_reserva',
   }
+}
+
+/**
+ * Cuántos pasajeros cuentan para un recargo por pasajero: los que viajan según el negocio.
+ * `null` = el negocio no lo dice.
+ *
+ * ⚠️ Cuentan TODOS, infantes incluidos: el recargo es por tiquete emitido y un infante
+ * también lleva el suyo. Si Trappvel no se lo cobra al infante, es una decisión suya y se
+ * escribe aquí con su nombre.
+ */
+export function pasajerosDelViaje(
+  composicion: { adultos: number; ninos: number; infantes: number } | null | undefined,
+): number | null {
+  if (!composicion) return null
+  const n = (Number(composicion.adultos) || 0) + (Number(composicion.ninos) || 0) + (Number(composicion.infantes) || 0)
+  return n > 0 ? n : null
+}
+
+/**
+ * Cuántas veces se cobra el valor en ESTA cotización: 1 por la reserva, o los pasajeros del
+ * viaje. `null` = va por pasajero y no se sabe cuántos viajan: nadie puede decir cuánto es.
+ */
+export function vecesDelRecargo(politica: PoliticaRecargo, pasajeros: number | null | undefined): number | null {
+  if (politica.base === 'por_reserva') return 1
+  const n = Number(pasajeros)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null
 }
 
 // ── Cuándo se ofrece y cómo se ve ────────────────────────────────────────────
@@ -237,7 +280,18 @@ export type EstadoRecargo =
    * Corresponde y NO está puesto: se ofrece. `dudosos` nombra los vuelos que se
    * contaron como internacionales sin reconocer su origen o destino.
    */
-  | { estado: 'falta'; valor: number; etiqueta: string; dudosos: string[] }
+  | {
+      estado: 'falta'
+      /** Lo que se sumaría: por la reserva, o el valor por pasajero por los que viajan. */
+      valor: number
+      etiqueta: string
+      dudosos: string[]
+      /**
+       * Solo cuando va por pasajero: el valor de cada uno y cuántos viajan (`null` = el
+       * negocio no lo dice, y entonces `valor` es el de UN pasajero).
+       */
+      porPasajero?: { valor: number; pasajeros: number | null }
+    }
   /** Está puesto por el valor vigente. */
   | { estado: 'puesto'; valor: number; etiqueta: string; itemId: string }
   /** Está puesto por OTRO valor: alguien lo cambió, o el vigente se movió después. */
@@ -255,23 +309,39 @@ export type EstadoRecargo =
 export function estadoDelRecargo(
   items: ItemParaRecargo[],
   politica: PoliticaRecargo,
+  /** Cuántos viajan (composición del negocio). Solo importa si el recargo va por pasajero. */
+  pasajeros?: number | null,
 ): EstadoRecargo {
   const correspondencia = aQuienLeCorresponde(items, politica)
   if (!correspondencia.corresponde) return { estado: 'no_aplica' }
 
+  // Por pasajero sin saber cuántos viajan, la única cifra cierta es la de UNO: con ella se
+  // ofrece y con ella se compara (el precio unitario de la línea).
+  const veces = vecesDelRecargo(politica, pasajeros)
+  const vigente = politica.valor * (veces ?? 1)
+
   const linea = lineaDeRecargo(items, politica)
   if (!linea) {
-    return { estado: 'falta', valor: politica.valor, etiqueta: politica.etiqueta, dudosos: correspondencia.dudosos }
+    return {
+      estado: 'falta',
+      valor: vigente,
+      etiqueta: politica.etiqueta,
+      dudosos: correspondencia.dudosos,
+      ...(politica.base === 'por_pasajero' ? { porPasajero: { valor: politica.valor, pasajeros: veces } } : {}),
+    }
   }
 
-  const enLaLinea = Math.round((Number(linea.precio_venta) || 0) * (Number(linea.cantidad) || 1))
-  if (enLaLinea === politica.valor) {
+  const unitario = Number(linea.precio_venta) || 0
+  const enLaLinea = veces === null
+    ? Math.round(unitario)
+    : Math.round(unitario * (Number(linea.cantidad) || 1))
+  if (enLaLinea === vigente) {
     return { estado: 'puesto', valor: enLaLinea, etiqueta: politica.etiqueta, itemId: linea.id }
   }
   return {
     estado: 'distinto',
     valorEnLaLinea: enLaLinea,
-    valorVigente: politica.valor,
+    valorVigente: vigente,
     etiqueta: politica.etiqueta,
     itemId: linea.id,
   }

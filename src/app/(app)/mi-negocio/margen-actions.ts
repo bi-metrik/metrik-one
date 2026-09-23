@@ -12,7 +12,7 @@ import {
   motivoUmbralesInvalidos,
   type CambioDePolitica,
 } from '@/lib/cotizaciones/politica-de-linea'
-import { politicaRecargoDeLinea, type VuelosDelRecargo } from '@/lib/cotizaciones/recargo-linea'
+import { politicaRecargoDeLinea, type BaseDelRecargo, type VuelosDelRecargo } from '@/lib/cotizaciones/recargo-linea'
 import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -52,7 +52,7 @@ export interface LineaConMargen {
   /** Los valores del margen los puso MeTRIK y el dueño todavía no los revisó. */
   margenProvisional: boolean
   /** El recargo que se le ofrece a quien cotiza. */
-  recargo: { activo: boolean; etiqueta: string; valor: number; vuelos: VuelosDelRecargo }
+  recargo: { activo: boolean; etiqueta: string; valor: number; vuelos: VuelosDelRecargo; base: BaseDelRecargo }
   recargoProvisional: boolean
 }
 
@@ -112,7 +112,7 @@ export async function getMargenPorLinea(): Promise<{ error: string } | MargenPor
       sinConfigurar: !margen || typeof margen !== 'object' || margen.piso_pct == null || margen.aviso_pct == null,
       frenaAvance: frenan === null ? null : frenan.has(f.id),
       margenProvisional: bloqueProvisional(cfg, 'margen'),
-      recargo: { activo: recargo.activo, etiqueta: recargo.etiqueta, valor: recargo.valor, vuelos: recargo.vuelos },
+      recargo: { activo: recargo.activo, etiqueta: recargo.etiqueta, valor: recargo.valor, vuelos: recargo.vuelos, base: recargo.base },
       recargoProvisional: bloqueProvisional(cfg, 'recargo'),
     }
   })
@@ -227,7 +227,7 @@ export async function guardarUmbralesMargen(
  */
 export async function guardarRecargo(
   lineaId: string,
-  recargo: { activo: boolean; etiqueta: string; valor: number; vuelos: VuelosDelRecargo },
+  recargo: { activo: boolean; etiqueta: string; valor: number; vuelos: VuelosDelRecargo; base?: BaseDelRecargo },
 ): Promise<{ error: string } | { ok: true }> {
   const ctx = await contextoDeEdicion('el recargo')
   if ('error' in ctx) return ctx
@@ -244,7 +244,13 @@ export async function guardarRecargo(
   if (recargo.vuelos !== 'todos' && recargo.vuelos !== 'internacionales') {
     return { error: 'Elige a qué vuelos aplica el recargo: todos o solo internacionales.' }
   }
-  const nuevo = { activo: recargo.activo, etiqueta, valor: Math.round(recargo.valor), vuelos: recargo.vuelos }
+  // B4 · ausente = por reserva, lo de siempre. Cualquier otro valor se rechaza: el que
+  // decide cuántas veces se cobra no puede llegar mal escrito.
+  const base = recargo.base ?? 'por_reserva'
+  if (base !== 'por_reserva' && base !== 'por_pasajero') {
+    return { error: 'Elige cómo se cobra el recargo: una vez por reserva o por cada pasajero.' }
+  }
+  const nuevo = { activo: recargo.activo, etiqueta, valor: Math.round(recargo.valor), vuelos: recargo.vuelos, base }
 
   const linea = await leerLinea(ctx.supabase, ctx.workspaceId, lineaId)
   if ('error' in linea) return linea

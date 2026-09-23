@@ -5,13 +5,16 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import {
   lineaDeRecargo,
+  pasajerosDelViaje,
   politicaRecargoDeLinea,
   recargoCorresponde,
   RECARGO_POR_DEFECTO,
+  vecesDelRecargo,
   type ItemParaRecargo,
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 
 /**
  * El recargo fijo, del lado del servidor.
@@ -99,6 +102,22 @@ export async function aplicarRecargo(cotizacionId: string) {
     }
   }
 
+  // B4 · por reserva es UNA vez; por pasajero, el valor por cada uno de los que viajan. Los
+  // pasajeros salen del negocio, no del navegador, igual que el valor.
+  let cantidad = 1
+  if (politica.base === 'por_pasajero') {
+    const { viaje, error: errViaje } = await leerViajeDelNegocio(supabase, cot.negocio_id as string)
+    if (errViaje) return { success: false as const, error: `No se pudo leer quiénes viajan: ${errViaje}` }
+    const veces = vecesDelRecargo(politica, pasajerosDelViaje(viaje.composicion))
+    if (veces === null) {
+      return {
+        success: false as const,
+        error: 'El recargo va por pasajero y el negocio todavía no dice quiénes viajan. Complétalo en la etapa del viaje.',
+      }
+    }
+    cantidad = veces
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: ultimo } = await (supabase as any)
     .from('items')
@@ -117,8 +136,9 @@ export async function aplicarRecargo(cotizacionId: string) {
     // Sin grupo es un componente fijo: entra en todos los itinerarios y suma siempre.
     grupo: null,
     opcion_de: null,
-    unidad: 'servicio',
-    cantidad: 1,
+    // Por pasajero, la línea lo dice: el valor de uno por los que viajan («× 4 pax»).
+    unidad: politica.base === 'por_pasajero' ? 'pax' : 'servicio',
+    cantidad,
     // Sin costo: es ingreso, no algo que se pague.
     subtotal: 0,
     precio_venta: politica.valor,
@@ -135,5 +155,5 @@ export async function aplicarRecargo(cotizacionId: string) {
 
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
   if (cot.oportunidad_id) revalidatePath(`/pipeline/${cot.oportunidad_id}`)
-  return { success: true as const, valor: politica.valor, etiqueta: politica.etiqueta }
+  return { success: true as const, valor: politica.valor * cantidad, etiqueta: politica.etiqueta }
 }

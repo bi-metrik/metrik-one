@@ -35,6 +35,7 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
 import { estrellasDesdeTexto } from './estrellas'
+import { tramosDeCampos, textoDeTramo } from './tramos-vuelo'
 
 // ── Lo que devuelve el modelo, antes de juzgarlo ─────────────────────────────
 
@@ -740,14 +741,16 @@ export function resumenDeLinea(
   if (ranura.slug === 'vuelo_detalle') {
     const ruta = [v('origen'), v('destino')].filter(Boolean).join('–')
     const nombre = [v('aerolinea'), ruta].filter(Boolean).join(' ') || ranura.label
+    // La descripción se arma DESDE LOS TRAMOS (B3 del brief del 2026-09-23), que es lo mismo
+    // que se guarda en `items.tramos` e imprime la tabla del documento: cada trayecto con su
+    // número, su fecha y sus horas de salida y llegada («Ida AV264: 2026-11-12 13:10–17:00»).
+    // Antes decía «Salida: fecha hora» y dejaba fuera la llegada y a qué trayecto iba cada
+    // número. Un número que no se puede repartir entre ida y regreso va aparte, sin pegarlo
+    // a un tramo.
+    const { tramos, numerosSinTramo } = tramosDeCampos(v)
     partes.push(
-      // La hora va PEGADA a su fecha, no como entrada aparte: «Salida: 2026-10-23 05:50»
-      // se lee de un golpe, y quien cotiza tiene que poder confirmar la lectura ANTES de
-      // que el documento salga al cliente. Sin hora leída, esto imprime exactamente lo
-      // que imprimía antes.
-      etiqueta('Salida', conHora(v('fecha_salida'), v('hora_salida'))),
-      etiqueta('Regreso', conHora(v('fecha_regreso'), v('hora_salida_regreso'))),
-      etiqueta('Vuelo', v('numero_vuelo')),
+      ...tramos.map(textoDeTramo),
+      etiqueta(numerosSinTramo?.includes('·') ? 'Vuelos' : 'Vuelo', numerosSinTramo),
       etiqueta('Tarifa', v('familia_tarifa')),
       escalasTexto(v('escalas'), v('escala_ida'), v('escala_regreso')),
       equipajeTexto(v('equipaje_bodega'), v('equipaje_mano'), v('equipaje_personal')),
@@ -786,15 +789,6 @@ export function resumenDeLinea(
     etiqueta('Proveedor', v('proveedor')),
   )
   return { nombre, descripcion: unir(partes) }
-}
-
-/**
- * La fecha con su hora, si la hay. Sin fecha no hay nada que decir: una hora suelta
- * («Salida: 05:50») no dice de qué día, y el campo se omite entero.
- */
-function conHora(fecha: string | null, hora: string | null): string | null {
-  if (!fecha) return null
-  return hora ? `${fecha} ${hora}` : fecha
 }
 
 function etiqueta(nombre: string, valor: string | null): string | null {

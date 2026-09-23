@@ -23,6 +23,7 @@
 import { bogotaYear } from '@/lib/dates/bogota'
 import { nombreParaDuplicado } from './nombre-cotizacion'
 import { leerAdicionalesDeItems, leerItinerarios } from './itinerarios-datos'
+import { copiarRanuras } from './ranuras-datos'
 import {
   adicionalParaLaCopia,
   cotizacionParaLaCopia,
@@ -127,6 +128,17 @@ async function copiarContenido(
   if (errItems) return errItems.message
   const items = (itemsRaw ?? []) as Record<string, unknown>[]
 
+  // Las ranuras van ANTES que las líneas: cada línea copia cuelga de la ranura copia, nunca
+  // de la de la original (renombrar una movería las dos). `null` = la tabla no existe
+  // todavía, y la copia agrupa por `grupo`, que viaja intacto.
+  const ranuras = await copiarRanuras(supabase, {
+    workspaceId: args.workspaceId,
+    originalId: args.originalId,
+    nuevaId: args.nuevaId,
+  })
+  if (ranuras && 'error' in ranuras) return ranuras.error
+  const mapaRanuras = ranuras?.mapa
+
   // Viejo id → nuevo id. Sin este mapa la copia quedaría apuntando a los ítems del
   // ORIGINAL (`opcion_de`, la selección de cada tarifa, los adicionales), que no falla y
   // mueve las combinaciones de la cotización de la que salió.
@@ -134,7 +146,7 @@ async function copiarContenido(
   for (const item of items) {
     const { data: nuevoItem, error } = await supabase
       .from('items')
-      .insert(itemParaLaCopia(item, args.nuevaId))
+      .insert(itemParaLaCopia(item, args.nuevaId, mapaRanuras))
       .select('id')
       .single()
     if (error || !nuevoItem) return error?.message ?? 'No se pudo copiar una línea'

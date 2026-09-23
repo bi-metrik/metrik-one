@@ -34,6 +34,15 @@ import {
   type ItinerarioCalculado,
 } from '@/lib/cotizaciones/itinerarios-datos'
 import { nombreDeAlternativa } from '@/lib/cotizaciones/nombre-linea'
+import { calcularCascada } from '@/lib/cotizaciones/totales'
+import { nombreAutomaticoDeRanura, repartoPorPrecio, tipoDeDefinicion } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import {
+  asignarRanura,
+  ranuraDelGrupo,
+  renombrarRanurasDeLineas,
+  retirarRanuraSiQuedoVacia,
+} from '@/lib/cotizaciones/ranuras-datos'
 import { revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -76,6 +85,12 @@ export interface EstadoItinerarios {
     nombre: string
     /** `true` si el grupo resuelve a una ranura del catálogo y se le puede poner nombre. */
     renombrable: boolean
+    /**
+     * El nombre que se le sugiere a una ranura que todavía no tiene uno: el tipo y el destino
+     * del negocio («Hotel en Cancún»). Antes el encabezado decía «ponle nombre…» y nadie sabía
+     * qué nombre poner (hallazgo 23 del ensayo del 2026-09-23).
+     */
+    sugerencia?: string
     candidatos: { id: string; nombre: string | null }[]
   }[]
   /**
@@ -145,10 +160,16 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
   if (!ctx) return vacio
 
   const nombreDe = (id: string) => ctx.items.find(i => i.id === id)?.nombre ?? null
+  // El destino solo sirve para sugerir nombres: si no se puede leer, la sugerencia es el tipo.
+  const { viaje } = ctx.negocioId
+    ? await leerViajeDelNegocio(supabase, ctx.negocioId)
+    : { viaje: { destino: null as string | null } }
 
   const ranuras = ranurasCombinables(ctx.items).map(r => {
     const inst = resolverRanura(r.grupo)
+    const tipo = tipoDeDefinicion(inst?.definicion)
     return {
+      sugerencia: tipo ? nombreAutomaticoDeRanura({ tipo, lugar: viaje.destino, destino: viaje.destino }) : '',
       grupo: r.grupo,
       etiqueta: etiquetaDeRanura(r.grupo),
       // El prefijo se arma con el MISMO criterio que `etiquetaDeRanura`: la instancia sin
@@ -192,23 +213,31 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
 // ── Escritura ────────────────────────────────────────────────────────────────
 
 /**
- * Crea las TRES tarifas con nombre: Económica, Recomendada, Premium.
+ * Crea las TRES tarifas con nombre —Económica, Recomendada, Premium—, las reparte por precio
+ * y deja en la propuesta las que ya están completas (pasos 4 y 5 del flujo de Noor,
+ * aprobado por Mauricio el 2026-09-23).
  *
  * Reemplaza al generador del producto cartesiano (ver la nota en `itinerarios.ts`). Con
  * el viaje a Providencia —dos vuelos y un hotel, dos opciones cada uno— el producto eran
  * ocho filas y lo que se le manda al cliente son tres.
  *
- * ⚠️ **Nacen VACÍAS de selección, y es el hueco del motor (§3 del diseño).** Las tres se
- * arman a mano eligiendo una variante por ranura; cuando exista la propuesta automática,
- * es aquí donde escribirá la elección inicial. Nacer con una elección por defecto sería
- * peor que nacer vacías: una combinación que aparece elegida sin que nadie la eligiera es
- * indistinguible de una revisada.
+ * ## El reparto (paso 4)
  *
- * T2 · **nacen con `va_en_propuesta = false`.** Ninguna llega al cliente por omisión.
+ * En cada ranura que se cruza, la opción más barata va a la Económica, la del medio a la
+ * Recomendada y la más cara a la Premium (`repartoPorPrecio`). Antes nacían vacías y había
+ * que elegir el hotel de cada una a mano: cinco pasos por tarifa. Se puede cambiar celda
+ * por celda, como siempre. ⚠️ Una opción sin precio (sin captura todavía) no se reparte: la
+ * tarifa queda incompleta y lo dice, en vez de elegir por ella la opción que nadie costeó.
  *
- * No borra ni renombra lo que ya está. Una cotización que venía del enumerado cartesiano
- * conserva sus filas: quitarlas para dejar la tabla prolija perdería en silencio el
- * nombre y la marca de algo que alguien ya revisó.
+ * ## Nacen marcadas las completas (paso 5)
+ *
+ * Una tarifa completa y sin bloqueo nace «va en propuesta»; se desmarca la que no va. La que
+ * no puede ir (incompleta, o bajo el piso donde el piso se exige al marcar) nace sin marcar y
+ * el porqué se devuelve con su nombre. ⚠️ Pasa por el MISMO candado que marcar a mano
+ * (`calcularItinerario`): nacer marcada no es una puerta trasera al piso.
+ *
+ * No borra ni renombra lo que ya está, y el reparto y la marca solo tocan las tarifas que
+ * ESTA llamada crea: una tarifa que alguien ya armó conserva su elección.
  */
 export async function armarTarifas(cotizacionId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
@@ -235,12 +264,20 @@ export async function armarTarifas(cotizacionId: string) {
 
   const faltan = tarifasQueFaltan(existentes.map(i => i.nombre))
 
+  // El precio de cada opción, con la MISMA cascada que pinta la línea en el editor.
+  const precioPorItem = new Map(
+    calcularCascada(ctx.items, ctx.params).lineas
+      .filter(l => typeof l.id === 'string')
+      .map(l => [l.id as string, l.precioConAdicionales]),
+  )
+  const reparto = repartoPorPrecio(ranuras, id => precioPorItem.get(id) ?? null)
+
   let orden = existentes.reduce((m, i) => Math.max(m, i.orden), 0)
-  let creadas = 0
+  const creadas: { id: string; nombre: string }[] = []
   for (const nombre of faltan) {
     orden += 1
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: errIns } = await (supabase as any)
+    const { data: fila, error: errIns } = await (supabase as any)
       .from('cotizacion_itinerarios')
       .insert({
         workspace_id: workspaceId,
@@ -250,12 +287,61 @@ export async function armarTarifas(cotizacionId: string) {
         va_en_propuesta: false,
         es_principal: false,
       })
-    if (errIns) return { success: false, error: errIns.message }
-    creadas += 1
+      .select('id')
+      .single()
+    if (errIns || !fila) return { success: false, error: errIns?.message ?? 'No se pudo crear la tarifa' }
+    creadas.push({ id: (fila as { id: string }).id, nombre })
+
+    const elegidas = reparto[nombre as keyof typeof reparto] ?? []
+    if (elegidas.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: errSel } = await (supabase as any)
+        .from('itinerario_opciones')
+        .insert(elegidas.map(itemId => ({ itinerario_id: (fila as { id: string }).id, item_id: itemId })))
+      if (errSel) return { success: false, error: errSel.message }
+    }
+  }
+
+  // Paso 5: las completas y sin bloqueo nacen en la propuesta. Se decide con lo que quedó
+  // guardado, releído, y con el mismo cálculo que el candado de marcar a mano.
+  const marcadas: string[] = []
+  const sinMarcar: { nombre: string; motivo: string }[] = []
+  if (creadas.length > 0) {
+    const filas = (await leerItinerarios(supabase, cotizacionId)) ?? []
+    for (const c of creadas) {
+      const fila = filas.find(f => f.id === c.id)
+      if (!fila) continue
+      const calculado = calcularItinerario(ctx, fila)
+      if (calculado.bloqueo) {
+        sinMarcar.push({ nombre: c.nombre, motivo: calculado.bloqueo })
+        continue
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: errMarca } = await (supabase as any)
+        .from('cotizacion_itinerarios')
+        .update({ va_en_propuesta: true })
+        .eq('id', c.id)
+      if (errMarca) {
+        sinMarcar.push({ nombre: c.nombre, motivo: errMarca.message })
+        continue
+      }
+      marcadas.push(c.nombre)
+    }
+    if (marcadas.length > 0) {
+      await revisarExcepcionDelDueno(supabase, cotizacionId)
+      // La Recomendada en la propuesta es la principal: el total del documento se rehace.
+      await recalcularTotales(cotizacionId)
+    }
   }
 
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
-  return { success: true, creadas, yaExistian: 3 - faltan.length }
+  return {
+    success: true,
+    creadas: creadas.length,
+    yaExistian: 3 - faltan.length,
+    marcadas,
+    sinMarcar,
+  }
 }
 
 /**
@@ -297,11 +383,16 @@ export async function renombrarRanura(cotizacionId: string, grupo: string, nombr
   if (decision.grupo === actual) return { success: true, grupo: actual, sinCambio: true }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: errUpd } = await (supabase as any)
+  const { data: movidas, error: errUpd } = await (supabase as any)
     .from('items')
     .update({ grupo: decision.grupo })
     .in('id', afectadas)
+    .select('*')
   if (errUpd) return { success: false, error: errUpd.message }
+
+  // La ranura (la entidad) queda con el mismo nombre que su grupo. Si la tabla no existe
+  // todavía no hay nada que renombrar: el grupo, que es lo que agrupa, ya quedó escrito.
+  await renombrarRanurasDeLineas(supabase, (movidas ?? []) as Record<string, unknown>[], decision.grupo)
 
   revalidarCotizacion(ctx.negocioId, ctx.oportunidadId)
   return { success: true, grupo: decision.grupo, lineas: afectadas.length }
@@ -649,6 +740,14 @@ export async function agregarOpcionAItem(itemId: string, nombre: string) {
     .single()
   if (errIns) return { success: false, error: errIns.message }
 
+  // La opción cuelga de la ranura de su grupo (la del titular). Sin ranura en la base, o con
+  // un grupo propio que no es ranura del catálogo, queda como hoy: agrupada por el grupo.
+  const { workspaceId } = await getWorkspace()
+  if (creado?.id && workspaceId) {
+    const ranuraId = await ranuraDelGrupo(supabase, { workspaceId, cotizacionId: titular.cotizacion_id, grupo })
+    if (ranuraId) await asignarRanura(supabase, creado.id as string, ranuraId)
+  }
+
   return { success: true, id: creado?.id as string | undefined, grupo }
 }
 
@@ -671,13 +770,16 @@ export async function actualizarRanuraDeItem(
   // Una sugerencia FUERA DEL PRECIO deja de serlo si su grupo pasa a vuelo, a hotel o
   // a nada: `fueraDelPrecio` la ignoraría y la línea volvería a sumar sin que nadie
   // recalcule. Se pide primero devolverla al precio, que sí recalcula.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let actual: any = null
   if (updates.grupo !== undefined) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: actual } = await (supabase as any)
+    const { data } = await (supabase as any)
       .from('items')
       .select('*')
       .eq('id', itemId)
       .maybeSingle()
+    actual = data
     if (
       actual?.entra_al_precio === false &&
       !puedeSerSugerido({ id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual.es_ajuste ?? false })
@@ -692,6 +794,22 @@ export async function actualizarRanuraDeItem(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: errUpd } = await (supabase as any).from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message }
+
+  // MOVER LA LÍNEA A OTRA RANURA: cuelga de la ranura de su grupo nuevo (la de las líneas que
+  // ya lo llevan, o una nueva) y la vieja se retira si quedó sin opciones. El grupo, que es lo
+  // que agrupa, ya quedó escrito arriba; esto mantiene la entidad al día.
+  if (updates.grupo !== undefined && actual) {
+    const { workspaceId } = await getWorkspace()
+    const cotizacionId = actual.cotizacion_id as string
+    const nueva = workspaceId
+      ? await ranuraDelGrupo(supabase, { workspaceId, cotizacionId, grupo: patch.grupo as string | null, excluirItemId: itemId })
+      : null
+    const vieja = (actual.ranura_id ?? null) as string | null
+    if (nueva !== vieja && (nueva !== null || vieja !== null)) {
+      await asignarRanura(supabase, itemId, nueva)
+      await retirarRanuraSiQuedoVacia(supabase, vieja)
+    }
+  }
   return { success: true }
 }
 

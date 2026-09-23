@@ -204,11 +204,14 @@ export default async function CotizacionNegocioPage({
   // Quiénes viajan (etapa 1), para la tarifa por pasajero. Si no se puede leer, las líneas
   // piden escribir su composición: preferible a inventar un grupo que no es el del viaje.
   let composicionViaje: Composicion | null = null
+  // El destino nombra las ranuras que todavía no tienen nombre («Hotel en Cancún»).
+  let destinoViaje: string | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
     const { viaje, error: errViaje } = await leerViajeDelNegocio(sbViaje, id)
     if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
     composicionViaje = viaje.composicion
+    destinoViaje = viaje.destino
   } catch {
     // Sin composición del viaje la pantalla la pide por línea.
   }
@@ -289,6 +292,7 @@ export default async function CotizacionNegocioPage({
       textoCliente={textoCliente}
       configIva={configIva}
       mostrarResumenFiscal={mostrarResumenFiscal}
+      destinoViaje={destinoViaje}
     />
   )
 }

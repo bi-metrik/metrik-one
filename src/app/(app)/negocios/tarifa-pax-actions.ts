@@ -39,6 +39,7 @@ import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
 import { esCorregible } from '@/lib/cotizaciones/correcciones'
 import { descripcionDeLinea, descripcionReescribible, validarCorreccion } from '@/lib/cotizaciones/ficha-linea'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 
@@ -167,7 +168,13 @@ async function guardarTarifa(
   if (error) return { error: error.message }
   if (!data) return { error: 'Ítem no encontrado' }
   const siguiente: TarifaPax = { ...muta(leerTarifaPax(data.tarifa_pax)), actualizadaEn: new Date().toISOString() }
-  const { error: errUpd } = await sb.from('items').update({ tarifa_pax: siguiente }).eq('id', itemId)
+  // B2/B3 · el cargo en destino y los tramos del vuelo viajan en el MISMO update: son la
+  // lectura puesta en su sitio y no pueden quedar diciendo otra cosa. Sin la migración, la
+  // fila no los trae y no se nombran (`campos-de-lectura.ts`).
+  const { error: errUpd } = await sb
+    .from('items')
+    .update({ tarifa_pax: siguiente, ...camposDeLectura(data, siguiente) })
+    .eq('id', itemId)
   if (errUpd) {
     return {
       error: errUpd.code === '42703'

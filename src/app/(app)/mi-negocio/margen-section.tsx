@@ -11,8 +11,8 @@ import {
   type LineaConMargen,
 } from './margen-actions'
 import { nombreDelMargen } from '@/lib/cotizaciones/convencion-margen'
-import { ETIQUETA, motivoUmbralesInvalidos, vuelosEnPalabras } from '@/lib/cotizaciones/politica-de-linea'
-import type { VuelosDelRecargo } from '@/lib/cotizaciones/recargo-linea'
+import { baseEnPalabras, ETIQUETA, motivoUmbralesInvalidos, vuelosEnPalabras } from '@/lib/cotizaciones/politica-de-linea'
+import type { BaseDelRecargo, VuelosDelRecargo } from '@/lib/cotizaciones/recargo-linea'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 
 /**
@@ -222,13 +222,15 @@ function BloqueRecargo({
   const [etiqueta, setEtiqueta] = useState(linea.recargo.etiqueta)
   const [valor, setValor] = useState(String(linea.recargo.valor))
   const [vuelos, setVuelos] = useState<VuelosDelRecargo>(linea.recargo.vuelos)
+  const [base, setBase] = useState<BaseDelRecargo>(linea.recargo.base)
   const [guardando, startGuardar] = useTransition()
 
   const sucio =
     activo !== linea.recargo.activo ||
     etiqueta.trim() !== linea.recargo.etiqueta ||
     Number(valor) !== linea.recargo.valor ||
-    vuelos !== linea.recargo.vuelos
+    vuelos !== linea.recargo.vuelos ||
+    base !== linea.recargo.base
 
   const motivo = etiqueta.trim() === ''
     ? 'El recargo necesita un nombre: es el que sale impreso en la cotización.'
@@ -240,7 +242,7 @@ function BloqueRecargo({
 
   const guardar = () =>
     startGuardar(async () => {
-      const res = await guardarRecargo(linea.id, { activo, etiqueta: etiqueta.trim(), valor: Number(valor), vuelos })
+      const res = await guardarRecargo(linea.id, { activo, etiqueta: etiqueta.trim(), valor: Number(valor), vuelos, base })
       if ('error' in res) { toast.error(res.error); return }
       toast.success(sucio ? `Recargo de "${linea.nombre}" guardado` : `Recargo de "${linea.nombre}" confirmado`)
       await onGuardado()
@@ -264,7 +266,7 @@ function BloqueRecargo({
       </label>
       <p className="mt-0.5 text-[10px] text-muted-foreground">
         Cuando la cotización lleva un vuelo al que le corresponde, aparece un botón para
-        agregarlo. Se suma una vez, como una línea más que <strong>se puede cambiar a mano</strong>,
+        agregarlo. Entra como una línea más que <strong>se puede cambiar a mano</strong>,
         y suma al precio, no al costo.
       </p>
 
@@ -297,6 +299,32 @@ function BloqueRecargo({
           />
         </div>
       </div>
+
+      {/* B4 · una vez por la reserva (lo de siempre) o por cada pasajero del viaje. */}
+      <fieldset className="mt-3" disabled={bloqueado}>
+        <legend className="mb-1 text-[10px] font-medium text-muted-foreground">{ETIQUETA.recargoBase}</legend>
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:gap-4">
+          {(['por_reserva', 'por_pasajero'] as const).map((op) => (
+            <label key={op} className="flex items-center gap-1.5 text-xs">
+              <input
+                type="radio"
+                name={`base-${linea.id}`}
+                value={op}
+                checked={base === op}
+                onChange={() => setBase(op)}
+                className="h-3.5 w-3.5"
+              />
+              {baseEnPalabras(op).replace(/^./, c => c.toUpperCase())}
+            </label>
+          ))}
+        </div>
+        {base === 'por_pasajero' && (
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            El valor se cobra por cada persona que viaja, infantes incluidos, según los
+            pasajeros del negocio. Sin pasajeros declarados, la cotización no deja agregarlo.
+          </p>
+        )}
+      </fieldset>
 
       <fieldset className="mt-3" disabled={bloqueado}>
         <legend className="mb-1 text-[10px] font-medium text-muted-foreground">{ETIQUETA.recargoVuelos}</legend>

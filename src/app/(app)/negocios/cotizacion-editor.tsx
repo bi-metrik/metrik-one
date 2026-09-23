@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
@@ -45,6 +45,10 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
+import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
+import CapturaCotizacion from '@/app/(app)/negocios/captura-cotizacion'
+import { crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
+import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
 import CostoManualItem from '@/app/(app)/negocios/costo-manual-item'
 import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
 import DocumentoClientePanel from '@/app/(app)/negocios/documento-cliente-panel'
@@ -81,6 +85,7 @@ import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
   lineaDeRecargo,
+  pasajerosDelViaje,
   RECARGO_POR_DEFECTO,
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
@@ -298,9 +303,14 @@ interface Props {
    * oculta (hallazgo 33 del ensayo del 2026-09-23).
    */
   mostrarResumenFiscal?: boolean
+  /**
+   * A dónde va el viaje (etapa 1 del negocio). Sugiere el nombre de una ranura que todavía no
+   * tiene uno («Hotel en Cancún»). Ausente = la ranura se sugiere con su tipo a secas.
+   */
+  destinoViaje?: string | null
 }
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -389,6 +399,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // cuenta para decidir si "todos" estan abiertos: si contara, el boton se quedaria
   // diciendo "Expandir todo" con todo ya abierto.
   const itemsVisibles = initialItems.filter(i => !i.es_ajuste)
+  // EN EL FLUJO DE VIAJE las líneas se pintan por RANURA: «Hotel en Cancún» y adentro sus
+  // opciones (hallazgo 11 del ensayo). Fuera de él, un solo grupo con todas, sin envoltura:
+  // Termotech, Arca y WMC ven exactamente los mismos nodos que antes (R6).
+  const bloquesDeLineas: BloqueDeLineas<ItemRow>[] = lineasPorTipo
+    ? bloquesPorRanura(itemsVisibles)
+    : [{ grupo: null, etiqueta: null, tipo: null, lineas: itemsVisibles }]
+  const abrirLinea = (itemId: string) => setExpandedItems(prev => new Set(prev).add(itemId))
   const todosExpandidos = itemsVisibles.length > 0 && itemsVisibles.every(i => expandedItems.has(i.id))
   const toggleTodos = () => {
     setExpandedItems(todosExpandidos ? new Set() : new Set(itemsVisibles.map(i => i.id)))
@@ -506,6 +523,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const handleAddItemDeGrupo = (g: { grupo: string; label: string; ranura: string }) => {
     startTransition(async () => {
       const def = ranuraPorSlug(g.ranura)
+      // EN EL FLUJO DE VIAJE el botón crea una RANURA con su nombre («Hotel en Cancún») y su
+      // primera opción, igual que la zona de pegado. Es la puerta para costear a mano algo
+      // que no tiene pantallazo; la de siempre es pegar la captura.
+      const tipo = tipoDeDefinicion(def)
+      if (lineasPorTipo && tipo) {
+        const r = await crearRanuraConOpcion(cotizacion.id, tipo)
+        if (!r.success) { toast.error(r.error); return }
+        setExpandedItems(prev => new Set(prev).add(r.itemId))
+        router.refresh()
+        return
+      }
       // El grupo se calcula con lo que hay EN PANTALLA porque es lo mismo que el servidor
       // vería: `addItem` no puede resolverlo por su cuenta sin releer la cotización, y el
       // peor caso de una carrera (dos «+ Vuelo» a la vez) es que las dos caigan en la
@@ -704,6 +732,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       tarifa_pax: i.tarifa_pax,
     })),
     politicaRecargo,
+    // B4 · solo cuenta si el recargo va por pasajero: los que viajan según el negocio.
+    pasajerosDelViaje(composicionViaje),
   )
 
   /**
@@ -1003,7 +1033,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           )}
           {/* Items */}
-          {initialItems.filter(i => !i.es_ajuste).map(item => {
+          {bloquesDeLineas.map((bloque, indiceBloque) => {
+            const enBloqueDeRanura = bloque.grupo !== null
+            const lineasDelBloque = bloque.lineas.map(item => {
             const itemCantidad = Number(item.cantidad) || 1
             const itemPrecio = Number(item.precio_venta) || 0
             const itemDescPct = Number(item.descuento_porcentaje) || 0
@@ -1159,10 +1191,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           vuelos, «vuelo» y «vuelo 2: san andrés a providencia» se leen
                           como dos cosas sin relación, y el chip existe justo para que se
                           vea de un vistazo cuáles son del mismo tipo y cuáles compiten. */}
-                      {!isAjuste && item.grupo && (
+                      {/* Dentro del bloque de su ranura el chip sobra: el encabezado ya la nombra. */}
+                      {!isAjuste && item.grupo && !enBloqueDeRanura && (
                         <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                           {etiquetaDeRanura(item.grupo)}{item.opcion_de ? ' · opción' : ''}
                         </span>
+                      )}
+                      {/* «Opción 2» es un relleno hasta que se lea su pantallazo, y lo dice. */}
+                      {!isAjuste && lineasPorTipo && esNombreDeOpcion(item.nombre) && !leerTarifaPax(item.tarifa_pax).casillas?.grupo_completo && (
+                        <span className="text-[10px] text-muted-foreground">· pega el pantallazo</span>
                       )}
                       {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
                           líneas en pantalla, en qué sección del documento sale cada una
@@ -1995,7 +2032,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           agrega algo va después de lo que agrega: arriba, entre el nombre
                           y el contenido, se leía como si aplicara a lo que venía abajo.
                           Solo en el flujo de viaje: fuera de él el bloque queda como hoy. */}
-                      {lineasPorTipo && <div className="border-t pt-2">{botonOtraOpcion}</div>}
+                      {/* En un bloque de ranura el botón vive al pie del bloque, una sola vez. */}
+                      {lineasPorTipo && !enBloqueDeRanura && <div className="border-t pt-2">{botonOtraOpcion}</div>}
                     </div>
                   )}
                   {/* Rubros table (internal costs).
@@ -2173,11 +2211,39 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
               )}
             </div>
-          )})}
+          )})
+            if (!enBloqueDeRanura) {
+              return <Fragment key={`sueltas-${bloque.lineas[0]?.id ?? indiceBloque}`}>{lineasDelBloque}</Fragment>
+            }
+            return (
+              <BloqueRanura
+                key={bloque.grupo}
+                bloque={{ grupo: bloque.grupo, etiqueta: bloque.etiqueta, tipo: bloque.tipo, opciones: bloque.lineas.length }}
+                cotizacionId={cotizacion.id}
+                editable={editable}
+                destinoViaje={destinoViaje}
+                onOpcionCreada={abrirLinea}
+              >
+                {lineasDelBloque}
+              </BloqueRanura>
+            )
+          })}
 
           {/* Add item actions */}
           {editable && (
             <div className="space-y-2">
+              {/* PASO 1 DEL FLUJO DE NOOR · una sola zona de pegado para la cotización: ONE ve si
+                  es hotel o vuelo, crea la ranura con su nombre y lee el precio. Los botones de
+                  abajo quedan para costear a mano lo que no tiene pantallazo. Solo en el flujo
+                  de viaje: fuera de él no hay pantallazos que leer (R6). */}
+              {lineasPorTipo && (
+                <CapturaCotizacion cotizacionId={cotizacion.id} onOpcionCreada={abrirLinea} />
+              )}
+              {lineasPorTipo && (
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  O agrégalo sin pantallazo
+                </p>
+              )}
               {/* Single row: input + add button + catalog button. Con líneas por tipo, los
                   botones de tipo reemplazan al input; «+ Otro» lo abre debajo. */}
               <div className={lineasPorTipo ? 'relative flex flex-wrap gap-2' : 'relative flex gap-2'}>
@@ -2294,8 +2360,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
                   vuelo, el nuevo es «Vuelo 2» y los dos van en el viaje (un segundo tramo va así).
                   {' '}Para una <span className="font-medium">alternativa</span> del mismo componente —otra
-                  aerolínea, otro horario— se usa «Agregar otra opción de…» dentro de la línea: esas
-                  compiten y solo una entra al precio.
+                  aerolínea, otro horario— se usa «Agregar otra opción de…» al pie de su bloque (o se
+                  pega su pantallazo arriba y se responde «sí, otra opción»): esas compiten y solo una
+                  entra al precio.
                   {' '}<span className="font-medium text-foreground">Otro componente del viaje</span> es
                   una línea sin ranura: suma siempre y no compite con nadie.
                 </p>
@@ -2355,10 +2422,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               <div>
                 <p>
                   <span className="font-medium">{recargo.etiqueta}</span> de{' '}
-                  <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>: esta
+                  <span className="font-medium tabular-nums">{formatCOP(recargo.valor)}</span>
+                  {/* B4 · por pasajero se dice la cuenta, no solo el total. */}
+                  {recargo.porPasajero && (recargo.porPasajero.pasajeros !== null
+                    ? ` (${formatCOP(recargo.porPasajero.valor)} por pasajero × ${recargo.porPasajero.pasajeros})`
+                    : ' por pasajero')}
+                  : esta
                   {' '}cotización {politicaRecargo.vuelos === 'internacionales' ? 'lleva un vuelo internacional' : 'tiene un componente al que le corresponde'}
                   {' '}y todavía no lo lleva.
                 </p>
+                {recargo.porPasajero && recargo.porPasajero.pasajeros === null && (
+                  <p className="mt-1 text-amber-800">
+                    Va por pasajero y el negocio todavía no dice quiénes viajan: complétalo en la etapa del viaje para poder agregarlo.
+                  </p>
+                )}
                 {/* Un origen o destino que no se reconoce cuenta como internacional: se
                     ofrece el recargo, pero se dice por qué, para que alguien lo mire. */}
                 {recargo.dudosos.length > 0 && (
@@ -2370,7 +2447,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               </div>
               <button
                 type="button"
-                disabled={isPending}
+                disabled={isPending || recargo.porPasajero?.pasajeros === null}
                 onClick={() =>
                   startTransition(async () => {
                     const r = await aplicarRecargo(cotizacion.id)

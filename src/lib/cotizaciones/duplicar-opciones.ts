@@ -182,9 +182,23 @@ export function documentoClienteSinRevisar(raw: unknown): unknown {
  * vínculo `opcion_de`, que se repone en una segunda pasada (`remapearOpcionDe`): el
  * titular puede venir DESPUÉS de su opción.
  */
-export function itemParaLaCopia(item: Record<string, unknown>, nuevaCotizacionId: string): Record<string, unknown> {
-  const { id: _id, cotizacion_id: _c, created_at: _ca, updated_at: _ua, rubros: _r, opcion_de: _o, ...resto } = item
-  return { ...resto, cotizacion_id: nuevaCotizacionId }
+export function itemParaLaCopia(
+  item: Record<string, unknown>,
+  nuevaCotizacionId: string,
+  /**
+   * Ranura original → ranura copia (`copiarRanuras`). La ranura es de la COTIZACIÓN: la
+   * copia no puede colgar de la de la original, que al renombrarse movería las dos. Sin
+   * mapa, o con una ranura que no está en él, la línea copia nace sin ranura y la sigue
+   * agrupando su `grupo`, que viaja intacto.
+   */
+  mapaRanuras?: ReadonlyMap<string, string>,
+): Record<string, unknown> {
+  const {
+    id: _id, cotizacion_id: _c, created_at: _ca, updated_at: _ua, rubros: _r, opcion_de: _o, ranura_id: ranuraId,
+    ...resto
+  } = item
+  const ranuraCopia = typeof ranuraId === 'string' ? mapaRanuras?.get(ranuraId) : undefined
+  return { ...resto, cotizacion_id: nuevaCotizacionId, ...(ranuraCopia ? { ranura_id: ranuraCopia } : {}) }
 }
 
 /**

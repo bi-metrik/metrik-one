@@ -9,6 +9,7 @@ import {
   valorLegible,
 } from './ficha-linea'
 import { ranuraPorSlug } from './ranuras-pantallazo'
+import { cargoLeidoDelItem } from './detalle-viaje'
 import type { LecturaCasilla } from './tarifa-pasajero'
 
 const HOTEL = ranuraPorSlug('hotel_detalle')!
@@ -92,7 +93,9 @@ describe('la descripción de la línea', () => {
     { label: 'Hora de salida (ida)', valor: '05:50' },
     { label: 'Escalas', valor: '0' },
   ]
-  const leida = 'Salida: 2026-10-23 05:50 · Directo'
+  // La del vuelo se arma desde sus tramos (B3 del brief del 2026-09-23): la hora va pegada a
+  // la fecha del tramo que la tiene.
+  const leida = 'Ida: 2026-10-23 05:50 · Directo'
 
   it('sin correcciones es EXACTAMENTE la de antes: la de la casilla 1 y las notas', () => {
     const c = { grupo_completo: casilla(campos, leida, ['Nota A']), sin_infantes: casilla([], '', ['Nota A', 'Nota B']) }
@@ -110,15 +113,27 @@ describe('la descripción de la línea', () => {
   it('con una hora corregida, la descripción dice la hora nueva', () => {
     const c = { grupo_completo: casilla(campos, leida) }
     const d = descripcionDeLinea(VUELO, c, { hora_salida: { valor: '07:45', por: 'D', porId: 'p', en: 'x' } })
-    expect(d).toBe('Salida: 2026-10-23 07:45 · Directo')
+    expect(d).toBe('Ida: 2026-10-23 07:45 · Directo')
   })
 
-  it('los impuestos en destino corregidos cambian la nota al cliente', () => {
+  it('B2 · el cargo en destino ya no se copia a la descripción: vive en su campo', () => {
+    // Antes la nota de la lectura se pegaba a la descripción y la corrección la reescribía:
+    // el mismo dato en dos sitios, y el del texto se quedaba viejo (así llegó «50,08 COP»).
     const notaVieja = 'Impuestos y tasas a pagar en destino: 329,44 MXN, no incluidos en el precio.'
-    const c = { grupo_completo: casilla([{ label: 'Hotel', valor: 'Crown' }, { label: 'Impuestos en destino', valor: '329.44' }], 'x', [notaVieja]) }
-    const d = descripcionDeLinea(HOTEL, c, { impuestos_destino_valor: { valor: '400', por: null, porId: null, en: 'x' } })
-    expect(d).toContain('Impuestos y tasas a pagar en destino: 400 COP')
-    expect(d).not.toContain('329,44')
+    const campos = [
+      { label: 'Hotel', valor: 'Crown' },
+      { label: 'Impuestos en destino', valor: '329.44' },
+      { label: 'Moneda de los impuestos en destino', valor: 'MXN' },
+    ]
+    const c = { grupo_completo: casilla(campos, 'x', [notaVieja, 'Desayuno para dos']) }
+    const correcciones = { impuestos_destino_valor: { valor: '400', por: null, porId: null, en: 'x' } }
+    const d = descripcionDeLinea(HOTEL, c, correcciones)
+    expect(d).not.toContain('Impuestos y tasas a pagar en destino')
+    // Las demás notas de la lectura siguen.
+    expect(d).toContain('Desayuno para dos')
+    // Y el cargo corregido es el que queda en el campo propio de la opción.
+    const item = { nombre: 'CROWN', grupo: 'hotel', tarifa_pax: { casillas: c, correcciones } }
+    expect(cargoLeidoDelItem(item)).toEqual({ valor: 400, moneda: 'MXN' })
   })
 })
 

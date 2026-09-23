@@ -60,6 +60,7 @@ import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
 
 /** Lo mínimo de una línea para reconstruir su detalle. */
 export interface ItemConLectura {
@@ -74,6 +75,15 @@ export interface ItemConLectura {
    * línea. Ausente o vacío = la ficha no los menciona, que es todo lo que existe hoy.
    */
   adicionales?: string[]
+  /**
+   * El cargo en destino guardado como campo propio de la opción (B2 del brief del
+   * 2026-09-23). Manda sobre lo leído; ausente o `null` (línea anterior a la columna, o la
+   * migración sin aplicar) = se toma de la lectura, como hasta hoy.
+   */
+  cargo_destino_valor?: number | string | null
+  cargo_destino_moneda?: string | null
+  /** Los tramos guardados del vuelo (B3). Ausente o ilegible = se derivan de la lectura. */
+  tramos?: unknown
 }
 
 export interface VueloPDF {
@@ -111,6 +121,11 @@ export interface VueloPDF {
    * Mauricio decidió imprimirlo **solo si hay dato**. Opcional: ausente = no se leyó.
    */
   numeroVuelo?: string | null
+  /**
+   * El número de cada tramo, ya repartido (B3): sale de los tramos guardados del vuelo, o de
+   * la lectura con la misma regla. Ausente = quien imprime reparte `numeroVuelo` él mismo.
+   */
+  numeros?: { ida: string | null; regreso: string | null; sinAsignar: string | null }
   /**
    * Las tarifas de la propuesta a las que pertenece, como índices de `itinerarios`.
    * Ausente = cotización de una sola opción: pertenece a la única que hay.
@@ -158,9 +173,16 @@ export interface HotelPDF {
  */
 export interface CargoEnDestinoPDF {
   ciudad: string | null
+  /**
+   * El hotel que lo cobra. Con varias tarifas cada una puede dormir en un hotel distinto de
+   * la misma ciudad, y «Cancún» a secas no le dice al cliente cuál de los cargos es el suyo.
+   */
+  hotel?: string | null
   concepto: string
   monto: string
   observacion: string
+  /** Ver `VueloPDF.tarifas`: las tarifas de la propuesta que duermen en ese hotel. */
+  tarifas?: number[]
 }
 
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
@@ -421,9 +443,15 @@ function booleano(d: Record<string, string>, slug: string): boolean | null {
  * los deja vacíos cuando el cruce de evidencia no cuadra (#792).
  */
 export function equipajeEnPalabras(d: Record<string, string>): string | null {
-  const personal = booleano(d, 'equipaje_personal')
-  const mano = booleano(d, 'equipaje_mano')
-  const bodega = booleano(d, 'equipaje_bodega')
+  return equipajeDeTramo({
+    personal: booleano(d, 'equipaje_personal'),
+    mano: booleano(d, 'equipaje_mano'),
+    bodega: booleano(d, 'equipaje_bodega'),
+  })
+}
+
+/** El mismo criterio, sobre el equipaje de un tramo guardado. */
+export function equipajeDeTramo({ personal, mano, bodega }: EquipajeTramo): string | null {
   if (personal === null && mano === null && bodega === null) return null
   const lleva: string[] = []
   if (personal) lleva.push('artículo personal')
@@ -453,28 +481,72 @@ export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
       || (ranura === null && delNombre.aerolinea !== null && delNombre.origen !== null && delNombre.destino !== null)
     if (!esVuelo) continue
     const d = detalleDelItem(item)
-    const rutaLeida = texto(d, 'origen') !== null || texto(d, 'destino') !== null
+    // B3 · fechas, horas, escalas, números y equipaje salen de los TRAMOS: los guardados, o
+    // los que da la lectura con la misma función. Así la descripción de la línea y el
+    // documento leen lo mismo.
+    const { tramos, numerosSinTramo } = tramosDelItem(item, d)
+    const ida = tramos[0] ?? null
+    const regreso = tramos.find(t => t.sentido === 'regreso') ?? null
+    const rutaLeida = (ida?.origen ?? null) !== null || (ida?.destino ?? null) !== null
     out.push({
       linea: (item.nombre ?? '').trim(),
       aerolinea: texto(d, 'aerolinea') ?? delNombre.aerolinea,
-      origen: rutaLeida ? texto(d, 'origen') : delNombre.origen,
-      destino: rutaLeida ? texto(d, 'destino') : delNombre.destino,
-      fechaSalida: fechaCorta(texto(d, 'fecha_salida')),
-      fechaRegreso: fechaCorta(texto(d, 'fecha_regreso')),
-      horaSalida: horaCorta(texto(d, 'hora_salida')),
-      horaLlegada: horaCorta(texto(d, 'hora_llegada')),
-      horaSalidaRegreso: horaCorta(texto(d, 'hora_salida_regreso')),
-      horaLlegadaRegreso: horaCorta(texto(d, 'hora_llegada_regreso')),
-      escalaIda: texto(d, 'escala_ida'),
-      escalaRegreso: texto(d, 'escala_regreso'),
-      escalas: numero(d, 'escalas'),
+      origen: rutaLeida ? ida?.origen ?? null : delNombre.origen,
+      destino: rutaLeida ? ida?.destino ?? null : delNombre.destino,
+      fechaSalida: fechaCorta(ida?.fecha),
+      fechaRegreso: fechaCorta(regreso?.fecha),
+      horaSalida: horaCorta(ida?.salida),
+      horaLlegada: horaCorta(ida?.llegada),
+      horaSalidaRegreso: horaCorta(regreso?.salida),
+      horaLlegadaRegreso: horaCorta(regreso?.llegada),
+      escalaIda: ida?.escala ?? null,
+      escalaRegreso: regreso?.escala ?? null,
+      escalas: ida?.directo === true ? 0 : numero(d, 'escalas'),
       tarifa: texto(d, 'familia_tarifa'),
-      equipaje: equipajeEnPalabras(d),
+      equipaje: ida ? equipajeDeTramo(ida.equipaje) : equipajeEnPalabras(d),
       adicionales: item.adicionales ?? [],
       numeroVuelo: texto(d, 'numero_vuelo'),
+      numeros: { ida: ida?.numero ?? null, regreso: regreso?.numero ?? null, sinAsignar: numerosSinTramo },
     })
   }
   return out
+}
+
+/**
+ * Los tramos de un vuelo: los guardados en `items.tramos` si los hay, y si no, los que da la
+ * lectura (con lo corregido encima). Los dos salen de `tramosDeCampos`: la columna es la
+ * lectura puesta en su sitio, no otra versión del vuelo.
+ *
+ * ⚠️ Los números que no se pudieron repartir entre ida y regreso NO se guardan en ningún
+ * tramo (pegarlos a la ida afirmaría que el regreso no tiene vuelo): siempre salen de la
+ * lectura, y solo cuando ningún tramo guardado trae el suyo.
+ */
+export function tramosDelItem(
+  item: ItemConLectura,
+  detalle: Record<string, string> = detalleDelItem(item),
+): { tramos: TramoVuelo[]; numerosSinTramo: string | null } {
+  const derivados = tramosDeCampos(slug => detalle[slug])
+  const guardados = leerTramos(item.tramos)
+  if (!guardados) return derivados
+  return {
+    tramos: guardados,
+    numerosSinTramo: guardados.some(t => t.numero) ? null : derivados.numerosSinTramo,
+  }
+}
+
+/**
+ * Los tramos que se GUARDAN: los de la lectura, con lo corregido encima. `null` = la línea
+ * no es un vuelo, o la captura no dejó nada del trayecto (no se guarda un arreglo vacío).
+ */
+export function tramosLeidosDelItem(item: ItemConLectura): TramoVuelo[] | null {
+  if (ranuraDelItem(item)?.slug !== 'vuelo_detalle') return null
+  const d = detalleDelItem(item)
+  const { tramos } = tramosDeCampos(slug => d[slug])
+  const conAlgo = tramos.some(t =>
+    [t.origen, t.destino, t.fecha, t.salida, t.llegada, t.numero, t.escala].some(v => v !== null)
+    || t.directo !== null
+    || [t.equipaje.personal, t.equipaje.mano, t.equipaje.bodega].some(v => v !== null))
+  return conAlgo ? tramos : null
 }
 
 /** Las noches: las que dijo la captura, y si no las dijo, las que dan las dos fechas. */
@@ -555,18 +627,57 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
   return out
 }
 
-/** Los cargos que se pagan en destino, en su moneda local. */
+/** Un cargo en destino: el valor y su moneda local (ISO de tres letras, o `null`). */
+export interface CargoDeOpcion {
+  valor: number
+  moneda: string | null
+}
+
+/**
+ * El cargo en destino que dice la LECTURA (con lo corregido encima). Es lo que se guarda en
+ * `items.cargo_destino_*` al leer o corregir. `null` = la captura no mostró ninguno.
+ */
+export function cargoLeidoDelItem(item: ItemConLectura): CargoDeOpcion | null {
+  const d = detalleDelItem(item)
+  const valor = numero(d, 'impuestos_destino_valor')
+  if (valor === null || valor <= 0) return null
+  const moneda = (texto(d, 'impuestos_destino_moneda') ?? '').trim().toUpperCase()
+  return { valor, moneda: /^[A-Z]{3}$/.test(moneda) ? moneda : null }
+}
+
+/**
+ * El cargo en destino de la opción (B2): el campo propio si lo tiene, y si no, la lectura.
+ *
+ * ⚠️ El campo manda solo cuando trae un valor: `null` es «todavía no se guardó» (línea
+ * anterior a la columna, o migración pendiente), no «no hay cargo». Por eso quien guarda
+ * escribe también el `null` cuando la lectura se queda sin cargo: la lectura y el campo
+ * nunca dicen cosas distintas.
+ */
+export function cargoDeItem(item: ItemConLectura): CargoDeOpcion | null {
+  const crudo = item.cargo_destino_valor
+  const guardado = crudo === null || crudo === undefined ? null : Number(crudo)
+  if (guardado !== null && Number.isFinite(guardado) && guardado > 0) {
+    const moneda = (item.cargo_destino_moneda ?? '').trim().toUpperCase()
+    return { valor: guardado, moneda: /^[A-Z]{3}$/.test(moneda) ? moneda : null }
+  }
+  return cargoLeidoDelItem(item)
+}
+
+/**
+ * Los cargos que se pagan en destino, en su moneda local: uno por opción que lo tenga, con
+ * el hotel que lo cobra.
+ */
 export function cargosEnDestinoDeItems(items: ItemConLectura[]): CargoEnDestinoPDF[] {
   const out: CargoEnDestinoPDF[] = []
   for (const item of items) {
+    const cargo = cargoDeItem(item)
+    if (!cargo) continue
     const d = detalleDelItem(item)
-    const valor = numero(d, 'impuestos_destino_valor')
-    if (valor === null || valor <= 0) continue
-    const moneda = (texto(d, 'impuestos_destino_moneda') ?? '').toUpperCase()
     out.push({
       ciudad: texto(d, 'ciudad'),
+      hotel: texto(d, 'hotel'),
       concepto: 'Impuestos y tasas de hospedaje',
-      monto: `${valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${moneda ? ` ${moneda}` : ''}`,
+      monto: `${cargo.valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${cargo.moneda ? ` ${cargo.moneda}` : ''}`,
       observacion: 'Se paga en el hotel. No está incluido en el precio.',
     })
   }

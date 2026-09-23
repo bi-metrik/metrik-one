@@ -8,7 +8,7 @@ metadata:
 PR [#839](https://github.com/bi-metrik/metrik-one/pull/839). Parte A del brief
 `proyectos/trappvel/clarity/docs/diseno/brief-max-captura-cotizacion-2026-09-23.md`.
 **Sin migración.** La Parte B (ranura como entidad, cargos por opción, tramos del vuelo,
-recargo configurable) NO se tocó: espera aprobación de Mauricio.
+recargo configurable) va en #847: ver [[captura-cotizacion-parte-b]].
 
 ## A1 · el modelo a veces deja el punto de miles
 

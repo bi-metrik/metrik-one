@@ -392,6 +392,10 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     entra_al_precio?: boolean | null
     /** `20260916231500`. Ausente = la línea se cobra por el grupo, como antes. */
     tarifa_pax?: unknown
+    /** `20260923233000` (B2/B3). Ausentes = se derivan de la lectura, como antes. */
+    cargo_destino_valor?: number | string | null
+    cargo_destino_moneda?: string | null
+    tramos?: unknown
     rubros?: { valor_total: number | null; sugerido?: boolean | null }[] | null
   }
 
@@ -1042,6 +1046,10 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       // §1.2 · el adicional se ve DENTRO del vuelo. Es la misma lista que va en
       // «Inversión»: escrita dos veces, la ficha y el precio dirían cosas distintas.
       adicionales: adicionalesDe(i).adicionales ?? [],
+      // B2/B3 · los campos propios de la opción mandan sobre la lectura cuando existen.
+      cargo_destino_valor: i.cargo_destino_valor ?? null,
+      cargo_destino_moneda: i.cargo_destino_moneda ?? null,
+      tramos: i.tramos ?? null,
     })
     const paraLectura = itemsImpresos.map(paraLecturaDe)
     const vuelos = vuelosDeItems(paraLectura)
@@ -1053,15 +1061,20 @@ export async function generateCotizacionPDF(cotizacionId: string) {
      * `itinerariosPDF`, mismo orden de `bloques`). Es lo que deja al documento pintar cada
      * opción con su color de punta a punta (§3 del sistema visual).
      *
-     * ⚠️ Solo cambia lo que se DESCRIBE. El destino, las fotos y los cargos en destino
-     * siguen saliendo de la principal: son del viaje que el documento recomienda, y una
-     * alternativa no puede cambiar la portada. El dinero no se toca.
+     * ⚠️ Solo cambia lo que se DESCRIBE. El destino y las fotos siguen saliendo de la
+     * principal: son del viaje que el documento recomienda, y una alternativa no puede
+     * cambiar la portada. El dinero no se toca.
+     *
+     * Los cargos en destino SÍ son de cada tarifa (B2 del brief del 2026-09-23): cada una
+     * duerme en su hotel y paga su tasa. Con solo los de la principal, el cliente que escogía
+     * Sunscape o Hyatt no veía el cargo del suyo (hallazgo 29 del ensayo).
      *
      * Con una sola tarifa, o sin itinerarios, no se marca nada y el documento describe lo
      * que imprime, como hasta hoy.
      */
     let vuelosDelDocumento = vuelos
     let hotelesDelDocumento = hoteles
+    let cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
     if (bloques && bloques.length > 1) {
       const tarifasDe = new Map<string, number[]>()
       bloques.forEach((b, idx) => {
@@ -1073,8 +1086,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       const marcar = <T,>(lista: T[], i: ItemRow) => lista.map(x => ({ ...x, tarifas: tarifasDe.get(i.id as string) ?? [] }))
       vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDeItems([paraLecturaDe(i)]), i))
       hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
+      cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
-    const cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
     const config = leerConfigDocumentoViaje(ws?.config_extra)
     const destino = delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles)
     const fotos = plantillaUsaFotosDeCiudad(templateSlug)

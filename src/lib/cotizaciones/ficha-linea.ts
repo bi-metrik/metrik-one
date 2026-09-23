@@ -193,7 +193,13 @@ export function descripcionDeLinea(
 ): string {
   const primera = casillas.grupo_completo
   const hayCorrecciones = Object.keys(correcciones ?? {}).length > 0
+  // ⚠️ El cargo que se paga en destino YA NO se copia a la descripción (B2 del brief del
+  // 2026-09-23): vive en su propio campo de la opción (`items.cargo_destino_*`) y el documento
+  // lo imprime en su tabla, con el de cada tarifa. Tenerlo también como texto era el mismo dato
+  // en dos sitios, y el del texto se quedaba viejo al corregir la cifra (así llegó «50,08 COP»
+  // al cliente). Las demás notas de la lectura siguen.
   const notasLeidas = [...new Set(Object.values(casillas).flatMap(l => l?.notasCliente ?? []))]
+    .filter(n => !ES_NOTA_DE_CARGO_EN_DESTINO.test(n))
 
   if (!primera || !hayCorrecciones) {
     const base = (primera?.descripcion ?? '').trim() || (respaldo ?? '').trim()
@@ -209,25 +215,11 @@ export function descripcionDeLinea(
     alertaRevision: false,
   }))
   const base = resumenDeLinea(ranura, campos).descripcion.trim() || (respaldo ?? '').trim()
-  // La nota de impuestos en destino sale de la lectura; si alguien los corrigió, la nota se
-  // rearma con lo corregido. Las demás notas se conservan.
-  const tocaImpuestos = !!correcciones?.impuestos_destino_valor || !!correcciones?.impuestos_destino_moneda
-  const notas = tocaImpuestos
-    ? [...notasLeidas.filter(n => !/impuestos y tasas a pagar en destino/i.test(n)), ...notaImpuestosDestino(vigentes, primera.moneda)]
-    : notasLeidas
-  return [base, ...notas.filter(n => !base.includes(n))].filter(Boolean).join(' · ')
+  return [base, ...notasLeidas.filter(n => !base.includes(n))].filter(Boolean).join(' · ')
 }
 
-/** La misma nota que arma la lectura (`lectura-casilla.ts`), con los valores vigentes. */
-function notaImpuestosDestino(d: Record<string, string>, monedaCaptura: string): string[] {
-  const valor = numeroLeido(d.impuestos_destino_valor ?? null)
-  if (valor === null || valor <= 0) return []
-  const moneda = (d.impuestos_destino_moneda ?? monedaCaptura ?? '').toUpperCase()
-  return [
-    `Impuestos y tasas a pagar en destino: ${valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })} ` +
-    `${moneda}, no incluidos en el precio.`,
-  ]
-}
+/** La nota del cargo en destino que arma la lectura (`lectura-casilla.ts`). */
+const ES_NOTA_DE_CARGO_EN_DESTINO = /impuestos y tasas a pagar en destino/i
 
 /**
  * ¿La descripción que tiene hoy la línea la puede reescribir el sistema?
