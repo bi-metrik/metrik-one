@@ -37,6 +37,15 @@ export interface SalidaVista {
   /** A quién pedírselo, dicho con su nombre. */
   dueno: string | null
   excepcionesDisponibles: boolean
+  /**
+   * Cuántas líneas se miden y a cuántas les falta costo y precio (P1 del ensayo del
+   * 2026-09-23). Con cero líneas no hay nota: una cotización vacía no está «bajo el
+   * mínimo», todavía no tiene nada. Opcionales para que una vista vieja no reviente.
+   */
+  lineas?: number
+  lineasSinCosto?: number
+  /** Lo que frena, con su margen real (`null` = no se puede medir). */
+  bajoMinimo?: { nombre: string | null; margenPct: number | null }[]
 }
 
 const SIN_REGLA: SalidaVista = {
@@ -96,6 +105,9 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
     puedeAutorizar: esDueno && salida.bloquea && salida.excepcionesDisponibles,
     dueno: salida.dueno,
     excepcionesDisponibles: salida.excepcionesDisponibles,
+    lineas: salida.medicion?.conteo.lineas,
+    lineasSinCosto: salida.medicion?.conteo.sinCosto,
+    bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({ nombre: s.nombre, margenPct: s.margenRealPct })),
   }
 }
 

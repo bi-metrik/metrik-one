@@ -125,7 +125,7 @@ export default function TarifaPasajeroItem({
 
   const [leyendo, setLeyendo] = useState<ClaveCasilla | null>(null)
   const [previews, setPreviews] = useState<Partial<Record<ClaveCasilla, string>>>({})
-  const [rechazos, setRechazos] = useState<Partial<Record<ClaveCasilla, { mensaje: string; detalle?: string }>>>({})
+  const [rechazos, setRechazos] = useState<Partial<Record<ClaveCasilla, RechazoDeCasilla>>>({})
   const [ultimoMensaje, setUltimoMensaje] = useState<string | null>(null)
   const [detalleAbierto, setDetalleAbierto] = useState<Partial<Record<ClaveCasilla | 'resultado', boolean>>>({})
   const [editandoComposicion, setEditandoComposicion] = useState(false)
@@ -162,7 +162,7 @@ export default function TarifaPasajeroItem({
   const pedirComposicion = !composicion && !!primera
   const mostrarComposicion = !!composicion && (!!primera || !!tarifa.composicion)
 
-  function leer(clave: ClaveCasilla, dataUrl: string) {
+  function leer(clave: ClaveCasilla, dataUrl: string, enfoque: OpcionParaElegir | null = null) {
     setPreviews(p => ({ ...p, [clave]: dataUrl }))
     setRechazos(r => ({ ...r, [clave]: undefined }))
     setUltimoMensaje(null)
@@ -171,14 +171,16 @@ export default function TarifaPasajeroItem({
       try {
         // Sin moneda visible ya no hay rechazo que resolver aquí: la lectura se guarda con
         // COP supuesta y la pregunta sale DESPUÉS, persistente (`MonedaDeLaTarifa`).
-        const r = await leerCasillaDeItem(itemId, clave, dataUrl)
+        const r = await leerCasillaDeItem(itemId, clave, dataUrl, null, enfoque)
         if (r.ok) {
           setGuardada(r.tarifa)
           setUltimoMensaje(r.mensaje)
           setPreviews(p => ({ ...p, [clave]: undefined }))
           onCambio()
         } else {
-          setRechazos(x => ({ ...x, [clave]: { mensaje: r.mensaje, detalle: r.detalle } }))
+          // P8 · con opciones legibles se guarda la imagen para volver a leerla sobre la que
+          // toque la persona, sin pedirle que la pegue otra vez.
+          setRechazos(x => ({ ...x, [clave]: { mensaje: r.mensaje, detalle: r.detalle, opciones: r.opciones, dataUrl } }))
         }
       } finally {
         setLeyendo(null)
@@ -281,6 +283,10 @@ export default function TarifaPasajeroItem({
         onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, grupo_completo: !x.grupo_completo }))}
         onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), 'Pantallazo quitado.')}
         onPegar={e => pegar('grupo_completo', e)}
+        onElegir={o => {
+          const url = rechazos.grupo_completo?.dataUrl
+          if (url) leer('grupo_completo', url, o)
+        }}
       />
 
       {/* ── La moneda de la tarifa (parte 2): editable, COP por defecto, nunca callada ──
@@ -336,6 +342,10 @@ export default function TarifaPasajeroItem({
               onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, [d.clave]: !x[d.clave] }))}
               onQuitar={() => accion(() => quitarCasillaDeItem(itemId, d.clave), `Pantallazo ${d.numero} quitado.`)}
               onPegar={e => pegar(d.clave, e)}
+              onElegir={o => {
+                const url = rechazos[d.clave]?.dataUrl
+                if (url) leer(d.clave, url, o)
+              }}
             />
           ))}
 
@@ -505,6 +515,49 @@ const DEF_SIN_COMPOSICION: CasillaDef = {
   razonCondicional: null,
 }
 
+/** Una opción leída de una captura con varias (P8). */
+type OpcionParaElegir = { nombre: string; precio: string | null }
+
+/** Por qué no se guardó un pantallazo, y lo necesario para elegir sin volver a pegarlo. */
+type RechazoDeCasilla = {
+  mensaje: string
+  detalle?: string
+  opciones?: OpcionParaElegir[]
+  dataUrl?: string
+}
+
+/**
+ * «¿Cuál de estas?» (P8 del ensayo del 2026-09-23). La captura traía varias opciones y
+ * ninguna marcada: en vez de mandar a la persona de vuelta al proveedor, se le muestran las
+ * que se leyeron y toca la que va a cotizar.
+ */
+export function ElegirOpcion({
+  opciones,
+  onElegir,
+  deshabilitado,
+}: {
+  opciones: OpcionParaElegir[]
+  onElegir: (o: OpcionParaElegir) => void
+  deshabilitado: boolean
+}) {
+  return (
+    <div className="mt-1.5 space-y-1 pl-5" role="group" aria-label="¿Cuál de estas?">
+      {opciones.map(o => (
+        <button
+          key={`${o.nombre}|${o.precio ?? ''}`}
+          type="button"
+          disabled={deshabilitado}
+          onClick={() => onElegir(o)}
+          className="flex w-full items-center justify-between gap-2 rounded border border-red-200 bg-white px-2 py-1 text-left text-[11px] text-foreground hover:bg-red-100 disabled:opacity-50"
+        >
+          <span className="min-w-0 flex-1 truncate">{o.nombre}</span>
+          {o.precio && <span className="shrink-0 tabular-nums font-medium">{o.precio}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /**
  * Una casilla: su instrucción, lo que se leyó en ella y dónde pegar.
  *
@@ -527,6 +580,7 @@ function Casilla({
   onQuitar,
   onPegar,
   ficha,
+  onElegir,
 }: {
   def: CasillaDef
   numerada: boolean
@@ -540,7 +594,9 @@ function Casilla({
     correcciones: Correcciones | undefined
     onGuardar: (slug: string, valor: string | null) => Promise<boolean>
   }
-  rechazo?: { mensaje: string; detalle?: string }
+  rechazo?: RechazoDeCasilla
+  /** P8 · la persona tocó una de las opciones leídas: se relee la misma imagen sobre ella. */
+  onElegir?: (opcion: OpcionParaElegir) => void
   /**
    * La captura se buscó para otros pasajeros (`capturasDesactualizadas`). La alerta vive
    * DENTRO de la casilla, pegada a lo que hay que reemplazar, y se va sola al pegar la nueva.
@@ -621,8 +677,14 @@ function Casilla({
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 {rechazo.mensaje}
               </p>
-              {rechazo.detalle && <p className="mt-0.5 pl-5 text-[10px] text-red-800">{rechazo.detalle}</p>}
-              <p className="mt-0.5 pl-5 text-[10px] text-red-700">Este pantallazo no se guardó.</p>
+              {(rechazo.opciones ?? []).length > 0 && onElegir ? (
+                <ElegirOpcion opciones={rechazo.opciones ?? []} onElegir={onElegir} deshabilitado={leyendo || deshabilitado} />
+              ) : (
+                <>
+                  {rechazo.detalle && <p className="mt-0.5 pl-5 text-[10px] text-red-800">{rechazo.detalle}</p>}
+                  <p className="mt-0.5 pl-5 text-[10px] text-red-700">Este pantallazo no se guardó.</p>
+                </>
+              )}
             </div>
           )}
         </div>

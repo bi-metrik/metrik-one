@@ -451,10 +451,47 @@ function equipaje(slug: string, label: string, cual: string): CampoRanura {
   }
 }
 
+/**
+ * Cuántas piezas y de cuántos kilos (P3 del ensayo del 2026-09-23).
+ *
+ * La captura de Avianca decía «1 de 10 kg» y «1 de 23 kg» y se guardaba «Sí». Para el
+ * cliente el peso es lo que importa. Van aparte del booleano, que sigue diciendo si va
+ * incluido: una pantalla con iconos y sin texto da el uno sin el otro.
+ *
+ * ⚠️ «No incluido» es un CERO dicho por la pantalla, no un hueco: la tarifa Básica de Wingo
+ * lo escribe en la tabla, y ese cero es lo que el asesor le dice al cliente.
+ */
+function piezas(tipo: 'personal' | 'mano' | 'bodega', nombre: string): CampoRanura[] {
+  return [
+    {
+      slug: `equipaje_${tipo}_cantidad`,
+      label: `${nombre}: piezas`,
+      tipo: 'numero',
+      min: false,
+      descripcion_ai:
+        `Cuántas piezas de ${nombre.toLowerCase()} incluye la tarifa por pasajero adulto, tal como lo ` +
+        'escribe la pantalla (ej. «1 de 23 kg» → 1, «1 incluido» → 1). 0 si la pantalla dice «No incluido». ' +
+        'null si la pantalla no lo escribe: NO lo deduzcas de los iconos ni del nombre de la tarifa.',
+    },
+    {
+      slug: `equipaje_${tipo}_kg`,
+      label: `${nombre}: kg`,
+      tipo: 'numero',
+      min: false,
+      descripcion_ai:
+        `Peso máximo en kilos de cada pieza de ${nombre.toLowerCase()}, solo el número (ej. «1 de 23 kg» → 23). ` +
+        'null si la pantalla no escribe el peso o si no va incluido.',
+    },
+  ]
+}
+
 const EQUIPAJE: CampoRanura[] = [
   equipaje('equipaje_personal', 'Artículo personal', 'el icono del artículo personal (el bolso o mochila, el primero)'),
   equipaje('equipaje_mano', 'Equipaje de mano', 'el icono de la maleta de cabina (el segundo)'),
   equipaje('equipaje_bodega', 'Equipaje de bodega', 'el icono de la maleta grande de bodega (el tercero)'),
+  ...piezas('personal', 'Artículo personal'),
+  ...piezas('mano', 'Equipaje de mano'),
+  ...piezas('bodega', 'Equipaje de bodega'),
 ]
 
 /** El enum que decide si el número leído se multiplica o no (R-P6). */

@@ -26,7 +26,7 @@ describe('los tramos de un vuelo', () => {
     expect(tramos).toHaveLength(2)
     expect(tramos[0]).toMatchObject({ sentido: 'ida', origen: 'Bogotá', destino: 'Cancún', numero: 'AV264', directo: true })
     expect(tramos[1]).toMatchObject({ sentido: 'regreso', origen: 'Cancún', destino: 'Bogotá', numero: 'AV265', directo: null })
-    expect(tramos[0].equipaje).toEqual({ personal: true, mano: true, bodega: true })
+    expect(tramos[0].equipaje).toMatchObject({ personal: true, mano: true, bodega: true })
   })
 
   it('un solo número con regreso no se pega a la ida: queda sin tramo', () => {

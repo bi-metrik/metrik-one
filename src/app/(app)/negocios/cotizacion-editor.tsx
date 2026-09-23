@@ -81,6 +81,7 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
+import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
   estadoDelRecargo,
@@ -812,6 +813,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     composicionViaje,
   )
   const motivoEnvio = motivoParaNoEnviar(desactualizadas)
+  // P1 del ensayo del 2026-09-23 · el margen mínimo en la salida dicho por su causa real.
+  // Solo donde la línea lo exige (`salida.aplica`); en el resto `notaDeMargen` es 'nada'.
+  // El servidor frena igual: el botón apagado es la puerta visible, no el control.
+  const notaMargen = notaDeMargen(salida)
+  const motivoMargen = 'motivoBoton' in notaMargen ? notaMargen.motivoBoton : null
+  const motivoBotonEnviar = motivoEnvio ?? motivoMargen
 
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
@@ -922,8 +929,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           {editable && (
             <button
               onClick={handleEnviar}
-              disabled={isPending || motivoEnvio !== null}
-              title={motivoEnvio ?? undefined}
+              disabled={isPending || motivoBotonEnviar !== null}
+              title={motivoBotonEnviar ?? undefined}
               aria-describedby={motivoEnvio ? 'aviso-captura-desactualizada' : undefined}
               className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >

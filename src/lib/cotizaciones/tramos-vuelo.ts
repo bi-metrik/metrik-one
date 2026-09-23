@@ -32,10 +32,69 @@ import { numerosDeVuelo } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 export type SentidoTramo = 'ida' | 'regreso'
 
+/**
+ * Cuántas piezas y de cuántos kilos, por pasajero adulto (P3 del ensayo del 2026-09-23).
+ *
+ * *«Para el cliente el peso es lo que importa»*: la captura decía «1 de 10 kg» y «1 de 23 kg»
+ * y se guardaba «Sí». `cantidad: 0` es «No incluido» dicho EXPLÍCITO por la captura, que es
+ * otra cosa que `null` (no se leyó).
+ */
+export interface PiezaEquipaje {
+  cantidad: number | null
+  pesoKg: number | null
+}
+
+export type TipoEquipaje = 'personal' | 'mano' | 'bodega'
+
 export interface EquipajeTramo {
   personal: boolean | null
   mano: boolean | null
   bodega: boolean | null
+  /**
+   * Cantidad y peso por tipo. Ausente en los tramos guardados antes del 2026-09-23: quien
+   * lee cae a los tres booleanos, que siguen siendo la respuesta a «¿va incluido?».
+   */
+  piezas?: Record<TipoEquipaje, PiezaEquipaje>
+}
+
+export const TIPOS_EQUIPAJE: readonly TipoEquipaje[] = ['personal', 'mano', 'bodega']
+
+function entero(v: string | null | undefined): number | null {
+  const t = (v ?? '').trim().replace(',', '.')
+  if (t === '') return null
+  const n = Number(t)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+/**
+ * El equipaje de un vuelo a partir de sus campos leídos. Lo que decide si va incluido es el
+ * booleano (el icono resaltado, o el texto); la cantidad y el peso lo acompañan.
+ *
+ * ⚠️ «No incluido» se guarda explícito: un booleano en `false` lleva `cantidad: 0`, aunque la
+ * captura no haya escrito el cero. Y una cantidad leída en 0 vuelve `false` un booleano que
+ * no se leyó. Si los dos se contradicen (incluido con 0 piezas), la cantidad queda vacía:
+ * hueco antes que mentira.
+ */
+export function equipajeDeCampos(valor: (slug: string) => string | null | undefined): EquipajeTramo {
+  const piezas = {} as Record<TipoEquipaje, PiezaEquipaje>
+  const incluido = {} as Record<TipoEquipaje, boolean | null>
+  for (const tipo of TIPOS_EQUIPAJE) {
+    let va = booleano(valor(`equipaje_${tipo}`))
+    let cantidad = entero(valor(`equipaje_${tipo}_cantidad`))
+    let pesoKg = entero(valor(`equipaje_${tipo}_kg`))
+    if (cantidad !== null && !Number.isInteger(cantidad)) cantidad = null
+    if (va === null && cantidad !== null) va = cantidad > 0
+    if (va === false) {
+      cantidad = 0
+      pesoKg = null
+    } else if (va === true && cantidad === 0) {
+      cantidad = null
+    }
+    if (pesoKg === 0) pesoKg = null
+    incluido[tipo] = va
+    piezas[tipo] = { cantidad, pesoKg }
+  }
+  return { personal: incluido.personal, mano: incluido.mano, bodega: incluido.bodega, piezas }
 }
 
 export interface TramoVuelo {
@@ -80,11 +139,7 @@ export function tramosDeCampos(valor: (slug: string) => string | null | undefine
 } {
   const origen = texto(valor('origen'))
   const destino = texto(valor('destino'))
-  const equipaje: EquipajeTramo = {
-    personal: booleano(valor('equipaje_personal')),
-    mano: booleano(valor('equipaje_mano')),
-    bodega: booleano(valor('equipaje_bodega')),
-  }
+  const equipaje = equipajeDeCampos(valor)
   const hayRegreso = [valor('fecha_regreso'), valor('hora_salida_regreso'), valor('hora_llegada_regreso')]
     .some(v => texto(v) !== null)
   const numeros = numerosDeVuelo(texto(valor('numero_vuelo')), hayRegreso)
@@ -126,6 +181,26 @@ function esTextoONulo(v: unknown): v is string | null {
   return v === null || typeof v === 'string'
 }
 
+function esNumeroONulo(v: unknown): v is number | null {
+  return v === null || (typeof v === 'number' && Number.isFinite(v) && v >= 0)
+}
+
+/**
+ * Las piezas guardadas, validadas. `undefined` = el tramo es anterior a las piezas (se lee
+ * con los booleanos). Una forma rota invalida el tramo entero, igual que el resto.
+ */
+function leerPiezas(raw: unknown): Record<TipoEquipaje, PiezaEquipaje> | undefined | 'rota' {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object') return 'rota'
+  const out = {} as Record<TipoEquipaje, PiezaEquipaje>
+  for (const tipo of TIPOS_EQUIPAJE) {
+    const p = ((raw as Record<string, unknown>)[tipo] ?? {}) as Record<string, unknown>
+    if (typeof p !== 'object' || !esNumeroONulo(p.cantidad ?? null) || !esNumeroONulo(p.pesoKg ?? null)) return 'rota'
+    out[tipo] = { cantidad: (p.cantidad ?? null) as number | null, pesoKg: (p.pesoKg ?? null) as number | null }
+  }
+  return out
+}
+
 /**
  * Los tramos guardados en `items.tramos`, validados. `null` = no hay (columna ausente, vacía
  * o con una forma que no se reconoce): quien lee cae a derivarlos de la lectura.
@@ -145,6 +220,8 @@ export function leerTramos(raw: unknown): TramoVuelo[] | null {
     if (!esBooleanoONulo(r.directo ?? null)) return null
     const e = (r.equipaje && typeof r.equipaje === 'object' ? r.equipaje : {}) as Record<string, unknown>
     if (![e.personal, e.mano, e.bodega].every(x => esBooleanoONulo(x ?? null))) return null
+    const piezas = leerPiezas(e.piezas)
+    if (piezas === 'rota') return null
     out.push({
       sentido: r.sentido,
       origen: (r.origen ?? null) as string | null,
@@ -159,6 +236,7 @@ export function leerTramos(raw: unknown): TramoVuelo[] | null {
         personal: (e.personal ?? null) as boolean | null,
         mano: (e.mano ?? null) as boolean | null,
         bodega: (e.bodega ?? null) as boolean | null,
+        ...(piezas ? { piezas } : {}),
       },
     })
   }
