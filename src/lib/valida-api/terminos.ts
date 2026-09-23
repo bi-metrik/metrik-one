@@ -17,11 +17,16 @@
  *
  * ## Quién acepta
  *
- * El dueño del espacio (owner), que es quien puede obligar a la empresa, y nunca el soporte de
- * MeTRIK (platform_admin), ni visitando el espacio. La base lo vuelve a exigir en
- * `aceptaciones_terminos_modulo()` (migración 20260917014500).
+ * La persona que el contrato designó (`servicios_contratados.aceptante_designado_id`, desde el
+ * 2026-09-23 para los CDA) o, si no designó a nadie, el dueño del espacio (owner). Nunca el soporte
+ * de MeTRIK (platform_admin), ni visitando el espacio. La base lo vuelve a exigir en
+ * `aceptaciones_terminos_modulo()` (migraciones 20260917014500 y 20260923220000).
+ *
+ * Este archivo sirve a los dos productos con entrada de términos (Valida API y Valida de los CDA);
+ * lo que cambia entre ellos está declarado en `producto.ts`.
  */
 
+import { PRODUCTOS_ENTRADA, type ProductoEntrada } from './producto'
 import type { DocumentoContractual } from './resultados'
 
 export const CALIDADES_ACEPTANTE = {
@@ -81,18 +86,44 @@ export function estadoTerminos(documentos: readonly DocumentoContractual[], hoy:
   return pendientes.length === 0 ? { estado: 'aceptados' } : { estado: 'pendientes', pendientes }
 }
 
-export type RazonNoAcepta = 'no_owner' | 'soporte' | 'otro_espacio'
+export type RazonNoAcepta = 'no_owner' | 'soporte' | 'otro_espacio' | 'no_designado' | 'sin_designado'
+
+/**
+ * Quién firma por la empresa según el contrato (`servicios_contratados.aceptante_designado_id`).
+ *
+ *   - `designadoId`: la persona designada, o `null` si el contrato no designó a nadie.
+ *   - `exigida`: el producto no admite la regla del dueño (los CDA). Sin designado, nadie firma.
+ *   - `usuarioId`: la persona REAL de la sesión, para compararla con la designada.
+ */
+export interface Designacion {
+  designadoId: string | null
+  exigida: boolean
+  usuarioId: string | null
+}
 
 /**
  * ¿La persona de la sesión REAL puede aceptar? Se decide con su perfil, no con el rol de
- * getWorkspace (que puede venir de «Ver como»).
+ * getWorkspace (que puede venir de «Ver como»). Espejo de `aceptaciones_terminos_modulo()` paso (3):
+ *
+ *   1. el soporte de MeTRIK nunca, aunque figure como dueño o como designado;
+ *   2. desde el espacio del cliente, no desde otro;
+ *   3. si el contrato designó a alguien, solo esa persona, tenga el rol que tenga;
+ *   4. si no designó a nadie y el producto lo exige, nadie;
+ *   5. si no, el dueño del espacio (la regla de 4D SOFT).
  */
 export function puedeAceptarTerminos(
   perfil: { role: string | null; workspaceId: string | null; platformAdmin: boolean },
   workspaceId: string,
+  designacion?: Designacion | null,
 ): { puede: true } | { puede: false; razon: RazonNoAcepta } {
   if (perfil.platformAdmin) return { puede: false, razon: 'soporte' }
   if (perfil.workspaceId !== workspaceId) return { puede: false, razon: 'otro_espacio' }
+  if (designacion?.designadoId) {
+    // Un usuario sin identificar nunca coincide: `null === null` no es una designación.
+    const esLaDesignada = Boolean(designacion.usuarioId) && designacion.usuarioId === designacion.designadoId
+    return esLaDesignada ? { puede: true } : { puede: false, razon: 'no_designado' }
+  }
+  if (designacion?.exigida) return { puede: false, razon: 'sin_designado' }
   if (perfil.role !== 'owner') return { puede: false, razon: 'no_owner' }
   return { puede: true }
 }
@@ -152,19 +183,23 @@ export interface DocumentoPorAceptar {
  * El texto EXACTO que se firma. Sigue la declaración de la cláusula 16.2 de los términos v1.0
  * (la del WhatsApp), con dos datos que por WhatsApp constaban en el registro y aquí van en el
  * texto: la cédula de quien acepta y la huella del PDF leído.
+ *
+ * Nombra el módulo en el que se leyó. Con el producto por defecto el texto es el de Valida API,
+ * carácter por carácter: la base guarda su huella y la compara con la que firmó 4D SOFT.
  */
 export function textoDeclaracionTerminos(
   doc: Pick<DocumentoPorAceptar, 'titulo' | 'version' | 'pdfSha256' | 'empresaNombre' | 'empresaNit'>,
   datos: DatosAceptante,
+  producto: ProductoEntrada = 'valida_api',
 ): string {
   const calidad = CALIDADES_ACEPTANTE[datos.calidad].toUpperCase()
   return (
     `Yo, ${datos.nombre}, identificado(a) con cédula ${datos.cedula}, actúo como ${calidad} de ` +
     `${doc.empresaNombre} (NIT ${doc.empresaNit}). Declaro bajo la gravedad de juramento que tengo ` +
     `facultades para obligarla y, en su nombre, ACEPTO los ${doc.titulo} ${doc.version} que leí en el ` +
-    `módulo Valida API de MeTRIK ONE (huella SHA-256 del PDF: ${doc.pdfSha256}). ${doc.empresaNombre} ` +
-    `conoce y ratifica esta actuación. Si no tuviera esas facultades, respondo personalmente. Esta ` +
-    `aceptación vale como firma (Ley 527 de 1999).`
+    `módulo ${PRODUCTOS_ENTRADA[producto].nombre} de MeTRIK ONE (huella SHA-256 del PDF: ${doc.pdfSha256}). ` +
+    `${doc.empresaNombre} conoce y ratifica esta actuación. Si no tuviera esas facultades, respondo ` +
+    `personalmente. Esta aceptación vale como firma (Ley 527 de 1999).`
   )
 }
 
@@ -233,6 +268,8 @@ export function prepararAceptacion(p: {
   workspaceClienteId: string
   ip: string | null
   userAgent: string | null
+  /** En qué módulo se acepta: nombra el producto en la declaración. */
+  producto?: ProductoEntrada
 }): PreparacionAceptacion {
   const filas = p.documentos.filter((d) => d.documentoId === p.documentoId)
   if (filas.length === 0) {
@@ -249,7 +286,7 @@ export function prepararAceptacion(p: {
   const validos = validarDatosAceptante(p.input)
   if (!validos.ok) return { tipo: 'error', error: validos.error }
 
-  const texto = textoDeclaracionTerminos(p.version, validos.datos)
+  const texto = textoDeclaracionTerminos(p.version, validos.datos, p.producto)
   if (texto.length > LARGO_MAXIMO_DECLARACION) {
     return { tipo: 'error', error: 'La declaración supera el largo permitido. Escríbenos para registrarla.' }
   }

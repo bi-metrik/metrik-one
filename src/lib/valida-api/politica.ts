@@ -31,6 +31,8 @@
 // Sin `node:crypto` aquí: la pantalla importa este archivo para mostrar el aviso. La huella la
 // calcula el servidor en `politica-huella.ts`.
 
+import { PRODUCTOS_ENTRADA, type ProductoEntrada } from './producto'
+
 export const POLITICA_DATOS_VALIDA = {
   slug: 'politica-datos-valida',
   version: '1.5',
@@ -38,11 +40,16 @@ export const POLITICA_DATOS_VALIDA = {
   url: 'https://valida.metrik.com.co/recursos/privacidad',
 } as const
 
-/** El aviso que se lee junto a la casilla. Cambiarlo exige subir `version` o cambia la huella. */
-export function textoAvisoPolitica(): string {
+/**
+ * El aviso que se lee junto a la casilla. Cambiarlo exige subir `version` o cambia la huella.
+ *
+ * Nombra el módulo en el que se acepta (Valida API o Valida de los CDA). Con el producto por defecto
+ * el texto es, carácter por carácter, el que ya aceptaron los usuarios de 4D SOFT.
+ */
+export function textoAvisoPolitica(producto: ProductoEntrada = 'valida_api'): string {
   return (
     'Al continuar, autoriza a METRIK IA S.A.S. a tratar su correo, dirección IP y navegador para darle ' +
-    'acceso al módulo Valida API y proteger la cuenta, conforme a la ' +
+    `acceso al módulo ${PRODUCTOS_ENTRADA[producto].nombre} y proteger la cuenta, conforme a la ` +
     `${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}.`
   )
 }

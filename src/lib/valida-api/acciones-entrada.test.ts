@@ -74,7 +74,17 @@ const escenario: {
   perfil: { role: string | null; workspaceId: string | null; platformAdmin: boolean } | null
   errorContrato: { code: string; message: string } | null
   errorUsuario: { code: string; message: string } | null
-} = { documentos: [DOC_ACEPTADO], aceptaciones: [], versiones: [VERSION_REGISTRADA], perfil: null, errorContrato: null, errorUsuario: null }
+  designacion: { designadoId: string | null; designadoNombre: string | null } | 'error'
+} = {
+  documentos: [DOC_ACEPTADO],
+  aceptaciones: [],
+  versiones: [VERSION_REGISTRADA],
+  perfil: null,
+  errorContrato: null,
+  errorUsuario: null,
+  designacion: { designadoId: null, designadoNombre: null },
+}
+const designacionLeida = vi.fn()
 
 const llamarValida = vi.fn()
 const rpc = vi.fn()
@@ -101,6 +111,10 @@ vi.mock('./terminos-servidor', () => ({
     escenario.documentos ? { ok: true, documentos: escenario.documentos } : { ok: false, motivo: 'base' },
   perfilReal: async () => escenario.perfil,
   versionContratada: async () => VERSION,
+  designacionDelEspacio: async (ws: string) => {
+    designacionLeida(ws)
+    return escenario.designacion
+  },
 }))
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
@@ -152,6 +166,8 @@ beforeEach(() => {
   escenario.perfil = DUENO
   escenario.errorContrato = null
   escenario.errorUsuario = null
+  escenario.designacion = { designadoId: null, designadoNombre: null }
+  designacionLeida.mockReset()
   escrituras.length = 0
   llamarValida.mockReset()
   llamarValida.mockResolvedValue({ tipo: 'ok', datos: { llaves: [], limite_vigentes: 3 } })
@@ -446,5 +462,42 @@ describe('aprobar la entrada: el contrato está pendiente', () => {
     escenario.perfil = { role: 'operator', workspaceId: WS, platformAdmin: false }
     expect((await aprobar()).ok).toBe(false)
     expect(escrituras).toHaveLength(0)
+  })
+})
+
+describe('la persona que el contrato designa', () => {
+  beforeEach(() => {
+    escenario.documentos = [DOC]
+  })
+
+  it('con el contrato ya aceptado, ni siquiera se lee quién firma', async () => {
+    escenario.documentos = [DOC_ACEPTADO]
+    escenario.aceptaciones = [POLITICA, LEYO]
+    await estadoEntradaValidaApi()
+    expect(designacionLeida).not.toHaveBeenCalled()
+  })
+
+  it('si el contrato designó a otra persona, el dueño ya no firma y sabe a quién espera', async () => {
+    escenario.designacion = { designadoId: 'otra-persona', designadoNombre: 'Alba Yurany Rosas' }
+    const e = await estadoEntradaValidaApi()
+    expect(e.estado === 'pendiente' && e.contrato).toEqual({
+      estado: 'pendiente',
+      puede: false,
+      razon: 'no_designado',
+      designadoNombre: 'Alba Yurany Rosas',
+    })
+    expect(designacionLeida).toHaveBeenCalledWith(WS)
+  })
+
+  it('la persona designada firma aunque no sea la dueña del espacio', async () => {
+    escenario.designacion = { designadoId: USUARIO, designadoNombre: 'Johann Manuel Valbuena Alfonso' }
+    escenario.perfil = { role: 'operator', workspaceId: WS, platformAdmin: false }
+    const e = await estadoEntradaValidaApi()
+    expect(e.estado === 'pendiente' && e.contrato && 'puede' in e.contrato && e.contrato.puede).toBe(true)
+  })
+
+  it('si no se puede leer quién firma, la entrada no se abre: no se asume que firma el dueño', async () => {
+    escenario.designacion = 'error'
+    expect(await estadoEntradaValidaApi()).toEqual({ estado: 'no_disponible' })
   })
 })

@@ -393,13 +393,26 @@ describe('ciclo con un adaptador que cobra', () => {
     const sus = suscripcion({ pasarela: 'bold' })
     const { db, tablas } = fakeDb(tablasBase(sus))
     const { adapter, llamadas } = adapterFijo([
-      { estado: 'pendiente', externalRef: 'LNK_abc', linkPago: 'https://checkout.bold.co/payment/LNK_abc' },
+      {
+        estado: 'pendiente',
+        externalRef: 'LNK_abc',
+        linkPago: 'https://checkout.bold.co/payment/LNK_abc',
+        expira: '2026-09-12T04:59:00Z',
+      },
       { estado: 'aprobado', externalRef: 'LNK_abc', fecha: '2026-09-06', monto: 150_000 },
     ])
 
     const r1 = await correrCicloSuscripcion(sus, plan, deps(db, { adapter }))
     expect(r1).toMatchObject({ accion: 'cargo_pendiente', estadoDespues: 'activa' })
-    expect(tablas.cobros[0]).toMatchObject({ external_ref: 'LNK_abc', fuente: 'epayco', fecha: null })
+    // El enlace queda en las columnas que lee el botón «Pagar» de los CDA (`mis_cuotas_de_servicio`),
+    // las mismas donde hoy se carga a mano: el botón no cambia al pasar a bold-link.
+    expect(tablas.cobros[0]).toMatchObject({
+      external_ref: 'LNK_abc',
+      fuente: 'epayco',
+      fecha: null,
+      enlace_pago_url: 'https://checkout.bold.co/payment/LNK_abc',
+      enlace_pago_expira: '2026-09-12T04:59:00Z',
+    })
     expect(llamadas).toEqual({ cobrar: [expect.any(Object)], consultar: [] })
 
     const r2 = await correrCicloSuscripcion(sus, plan, deps(db, { adapter, hoy: '2026-09-06' }))

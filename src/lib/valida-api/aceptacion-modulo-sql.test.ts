@@ -18,6 +18,10 @@ import { PGlite } from '@electric-sql/pglite'
  *   - lo aceptado por WhatsApp no se acepta otra vez;
  *   - la hora y la huella de la declaración las pone la base;
  *   - `mis_documentos_de_servicio` la muestra con canal 'modulo'.
+ *
+ * Desde `20260923220000` (los CDA) todo lo anterior corre contra el cuerpo NUEVO de la guarda, que
+ * además aprende la persona designada por el contrato, y se prueba `mis_cuotas_de_servicio`. Que
+ * los casos viejos sigan pasando es la prueba de que 4D SOFT (sin designación) no cambia.
  */
 
 const MIGRACIONES = join(process.cwd(), 'supabase/migrations')
@@ -36,6 +40,8 @@ const OWNER = '00000000-0000-4000-8000-0000000000d1'
 const OPERADOR = '00000000-0000-4000-8000-0000000000d2'
 const SOPORTE = '00000000-0000-4000-8000-0000000000d3'
 const OWNER_AJENO = '00000000-0000-4000-8000-0000000000d4'
+const DESIGNADA = '00000000-0000-4000-8000-0000000000d5'
+const PLAN = '00000000-0000-4000-8000-0000000000f1'
 const DOC_V10 = '00000000-0000-4000-8000-0000000000e1'
 const DOC_V11 = '00000000-0000-4000-8000-0000000000e2'
 const DOC_FUTURA = '00000000-0000-4000-8000-0000000000e3'
@@ -96,6 +102,9 @@ const ESQUEMA_BASE = `
     anulado_at timestamptz,
     notas text,
     siigo_recibo jsonb,
+    plan_cobro_id uuid,
+    numero_cuota integer,
+    tipo_cobro text,
     created_at timestamptz not null default now()
   );
   create table public.catalogo_servicios (
@@ -129,6 +138,23 @@ const ESQUEMA_BASE = `
     message_preview text,
     created_at timestamptz default now()
   );
+  create table public.planes_cobro (
+    id uuid primary key,
+    workspace_id uuid not null references public.workspaces(id),
+    negocio_id uuid not null references public.negocios(id),
+    activo boolean not null default true,
+    notas text
+  );
+  create table public.plan_cobro_cuotas (
+    id uuid primary key default gen_random_uuid(),
+    workspace_id uuid not null references public.workspaces(id),
+    plan_cobro_id uuid not null references public.planes_cobro(id),
+    numero integer not null,
+    tipo text not null default 'cuota',
+    monto numeric not null,
+    fecha_vencimiento date not null,
+    concepto_detalle text
+  );
   create table public.bot_sessions (
     id uuid primary key default gen_random_uuid(),
     workspace_id uuid not null references public.workspaces(id),
@@ -147,7 +173,9 @@ const ESQUEMA_BASE = `
     ('${OPERADOR}', '${WS_CLIENTE}', 'operator', false),
     -- El soporte de MeTRIK visitando el espacio del cliente: owner ahí, y platform_admin.
     ('${SOPORTE}', '${WS_CLIENTE}', 'owner', true),
-    ('${OWNER_AJENO}', '${WS_AJENO}', 'owner', false);
+    ('${OWNER_AJENO}', '${WS_AJENO}', 'owner', false),
+    -- La representante legal que la empresa designa: en el espacio del cliente, sin ser dueña.
+    ('${DESIGNADA}', '${WS_CLIENTE}', 'operator', false);
   insert into public.empresas (id, nombre) values ('${EMP_CLIENTE}', '4D SOFT S.A.S.'), ('${EMP_AJENA}', 'Ajena SAS');
   insert into public.negocios (id, workspace_id, nombre) values
     ('${NEG_CLIENTE}', '${WS_METRIK}', 'X1 26 1 Paquete Valida API'),
@@ -253,6 +281,7 @@ beforeAll(async () => {
   await db.exec(leer('20260916213000_mis_documentos_de_servicio_por_negocio.sql'))
   await db.exec(VERSIONES)
   await db.exec(leer('20260917014500_aceptacion_terminos_en_modulo.sql'))
+  await db.exec(leer('20260923220000_terminos_cda_designado_y_enlace_pago.sql'))
 }, 60_000)
 
 afterAll(async () => {
@@ -415,6 +444,122 @@ describe('aceptar desde el módulo', () => {
       update public.aceptaciones_terminos set canal = 'whatsapp' where canal = 'modulo';
     `)
     expect(canal).toMatch(/no se modifica|el canal no cambia/)
+  })
+})
+
+describe('la persona que el contrato designa (CDA)', () => {
+  const designar = (perfil: string) =>
+    `update public.servicios_contratados set aceptante_designado_id = '${perfil}' where id = '${SC_CLIENTE}';`
+
+  it('ella acepta aunque no sea la dueña del espacio', async () => {
+    expect(await ensayo(`${designar(DESIGNADA)} ${insertModulo({ usuario_id: `'${DESIGNADA}'` })};`)).toBe('')
+  })
+
+  it('con alguien designado, el dueño ya no acepta', async () => {
+    expect(await ensayo(`${designar(DESIGNADA)} ${insertModulo()};`)).toMatch(/la empresa designó/)
+  })
+
+  it('con alguien designado, un operador cualquiera tampoco', async () => {
+    expect(await ensayo(`${designar(DESIGNADA)} ${insertModulo({ usuario_id: `'${OPERADOR}'` })};`)).toMatch(
+      /la empresa designó/,
+    )
+  })
+
+  it('la persona designada acepta desde el espacio del cliente, no desde otro', async () => {
+    // Designada, pero su perfil vive en otro espacio: la constancia diría que aceptó desde aquí.
+    expect(await ensayo(`${designar(OWNER_AJENO)} ${insertModulo({ usuario_id: `'${OWNER_AJENO}'` })};`)).toMatch(
+      /la empresa designó/,
+    )
+  })
+
+  it('designar al soporte de MeTRIK no lo habilita', async () => {
+    expect(await ensayo(`${designar(SOPORTE)} ${insertModulo({ usuario_id: `'${SOPORTE}'` })};`)).toMatch(
+      /soporte de MeTRIK/,
+    )
+  })
+
+  it('sin designación sigue la regla del dueño (4D SOFT no cambia)', async () => {
+    expect(await ensayo(`${insertModulo({ usuario_id: `'${DESIGNADA}'` })};`)).toMatch(/solo el dueño/)
+    expect(await ensayo(`${insertModulo()};`)).toBe('')
+  })
+})
+
+describe('mis_cuotas_de_servicio: las cuotas y su enlace, solo para quien paga', () => {
+  // El enlace vive en el cobro programado de la cuota (donde el ciclo de suscripciones anota el
+  // intento de la pasarela). La cuota 2 tiene uno ANULADO: no ofrece enlace. La 3, uno sin enlace.
+  const SEMBRAR = `
+    insert into public.planes_cobro (id, workspace_id, negocio_id, activo, notas)
+    values ('${PLAN}', '${WS_METRIK}', '${NEG_CLIENTE}', false, 'nota interna que el cliente no ve');
+    insert into public.plan_cobro_cuotas (workspace_id, plan_cobro_id, numero, monto, fecha_vencimiento, concepto_detalle)
+    values
+      ('${WS_METRIK}', '${PLAN}', 3, 150000, date '2026-11-27', 'Licencia VALIDA · Starter, periodo del 23/11/2026 al 22/12/2026'),
+      ('${WS_METRIK}', '${PLAN}', 2, 150000, date '2026-10-27', 'Licencia VALIDA · Starter, periodo del 23/10/2026 al 22/11/2026'),
+      ('${WS_METRIK}', '${PLAN}', 1, 150000, date '2026-09-30', 'Licencia VALIDA · Starter, periodo del 23/09/2026 al 22/10/2026');
+    insert into public.cobros (id, workspace_id, negocio_id, plan_cobro_id, numero_cuota, tipo_cobro, monto, notas, enlace_pago_url, enlace_pago_expira, anulado_at)
+    values
+      (gen_random_uuid(), '${WS_METRIK}', '${NEG_CLIENTE}', '${PLAN}', 1, 'programado', 150000, 'nota interna',
+       'https://checkout.bold.co/payment/LNK_PRUEBA', '2026-09-30T23:59:00-05:00', null),
+      (gen_random_uuid(), '${WS_METRIK}', '${NEG_CLIENTE}', '${PLAN}', 2, 'programado', 0, 'anulado',
+       'https://checkout.bold.co/payment/LNK_VIEJO', null, now()),
+      (gen_random_uuid(), '${WS_METRIK}', '${NEG_CLIENTE}', '${PLAN}', 3, 'programado', 150000, null, null, null, null);
+  `
+
+  async function cuotasComo(ws: string | null, extra = '') {
+    await db.exec('begin')
+    try {
+      await db.exec(SEMBRAR + extra)
+      await db.exec(`set prueba.ws = '${ws ?? ''}'`)
+      const r = await db.query<Record<string, unknown>>(
+        `select * from public.mis_cuotas_de_servicio('${SC_CLIENTE}')`,
+      )
+      return r.rows
+    } finally {
+      await db.exec('rollback')
+      await db.exec(`set prueba.ws = ''`)
+    }
+  }
+
+  it('el espacio que paga ve sus cuotas en orden de vencimiento, con lista cerrada de campos', async () => {
+    const filas = await cuotasComo(WS_CLIENTE)
+    const campos = ['concepto', 'enlace_pago_expira', 'enlace_pago_url', 'fecha_vencimiento', 'monto', 'numero', 'tipo']
+    expect(filas.map((f) => Object.keys(f).sort())).toEqual([campos, campos, campos])
+    expect(filas.map((f) => [f.numero, f.enlace_pago_url])).toEqual([
+      [1, 'https://checkout.bold.co/payment/LNK_PRUEBA'],
+      [2, null],
+      [3, null],
+    ])
+    expect(filas[0].enlace_pago_expira).not.toBeNull()
+  })
+
+  it('otro espacio, con el id del contrato ajeno, no ve nada', async () => {
+    expect(await cuotasComo(WS_AJENO)).toEqual([])
+  })
+
+  it('un beneficiario que no paga no ve la plata', async () => {
+    const extra = `insert into public.servicio_contratado_beneficiarios values ('${SC_CLIENTE}', '${WS_AJENO}');`
+    expect(await cuotasComo(WS_AJENO, extra)).toEqual([])
+  })
+
+  it('sin sesión no devuelve nada', async () => {
+    expect(await cuotasComo(null)).toEqual([])
+  })
+
+  it('el enlace tiene que ser https y sin espacios', async () => {
+    const cuota = (url: string) => `
+      insert into public.cobros (id, workspace_id, negocio_id, tipo_cobro, monto, enlace_pago_url)
+      values (gen_random_uuid(), '${WS_METRIK}', '${NEG_CLIENTE}', 'programado', 150000, '${url}');`
+    expect(await ensayo(cuota('http://checkout.bold.co/payment/LNK_1'))).toMatch(/enlace_pago_https/)
+    expect(await ensayo(cuota('https://checkout.bold.co/pay ment'))).toMatch(/enlace_pago_https/)
+    expect(await ensayo(cuota('javascript:alert(1)'))).toMatch(/enlace_pago_https/)
+    expect(await ensayo(cuota('https://checkout.bold.co/payment/LNK_1'))).toBe('')
+  })
+
+  it('la ejecuta authenticated y no anon', async () => {
+    const r = await db.query<{ anon: boolean; auth: boolean }>(
+      `select has_function_privilege('anon', 'public.mis_cuotas_de_servicio(uuid)', 'execute') as anon,
+              has_function_privilege('authenticated', 'public.mis_cuotas_de_servicio(uuid)', 'execute') as auth`,
+    )
+    expect(r.rows[0]).toEqual({ anon: false, auth: true })
   })
 })
 

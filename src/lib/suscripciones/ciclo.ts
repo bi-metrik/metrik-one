@@ -234,10 +234,28 @@ async function marcarCobroPagado(db: SupabaseClient, cobroId: string, r: Extract
   if (error) throw new Error(`marcar cobro pagado: ${error.message}`)
 }
 
-async function anotarIntentoEnCobro(db: SupabaseClient, cobroId: string, externalRef: string, fuente: string): Promise<void> {
+/**
+ * Anota en el cobro de la cuota el intento que dejó la pasarela. Si la pasarela entregó un enlace
+ * de pago (bold-link), queda en `enlace_pago_url` y `enlace_pago_expira`: las mismas columnas donde
+ * hoy MeTRIK carga a mano el enlace de Bold de cada cuota de los CDA, y las que lee su botón
+ * «Pagar» (`mis_cuotas_de_servicio`). Así ese botón no cambia cuando el enlace pase de manual a
+ * automático. Sin enlace, las columnas no se tocan: un enlace cargado a mano no se borra.
+ */
+async function anotarIntentoEnCobro(
+  db: SupabaseClient,
+  cobroId: string,
+  intento: { externalRef: string; linkPago?: string; expira?: string },
+  fuente: string,
+): Promise<void> {
   const { error } = await q(db)
     .from('cobros')
-    .update({ external_ref: externalRef, fuente })
+    .update({
+      external_ref: intento.externalRef,
+      fuente,
+      ...(intento.linkPago
+        ? { enlace_pago_url: intento.linkPago, enlace_pago_expira: intento.expira ?? null }
+        : {}),
+    })
     .eq('id', cobroId)
   if (error) throw new Error(`anotar intento en cobro: ${error.message}`)
 }
@@ -352,7 +370,12 @@ export async function correrCicloSuscripcion(
 
       case 'pendiente': {
         if (r.externalRef && !cobro.external_ref) {
-          await anotarIntentoEnCobro(deps.db, cobro.id, r.externalRef, deps.adapter.nombre)
+          await anotarIntentoEnCobro(
+            deps.db,
+            cobro.id,
+            { externalRef: r.externalRef, linkPago: r.linkPago, expira: r.expira },
+            deps.adapter.nombre,
+          )
         }
         // La cuota vence: pasado el plazo de gracia sin plata, el estado lo dice.
         // Suspender es otro paso, y solo si la política lo permite.

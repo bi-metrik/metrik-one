@@ -4,7 +4,7 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { contextoValidaApi, type ContextoValidaApi } from './contexto'
 import { evaluarEntrada, type AceptacionUsuarioRegistrada, type EstadoEntrada } from './entrada'
-import { documentosDelCliente, perfilReal } from './terminos-servidor'
+import { designacionDelEspacio, documentosDelCliente, perfilReal } from './terminos-servidor'
 
 /**
  * La puerta del módulo Valida API, del lado del servidor. Las reglas viven en `entrada.ts`; aquí
@@ -46,14 +46,34 @@ async function resolverEntrada(): Promise<EntradaServidor> {
     perfilReal(usuarioId),
   ])
   const hoy = todayBogotaISO()
-  const estado = evaluarEntrada({
+  const estado = await evaluarConDesignacion({
     documentos: docs.ok ? docs.documentos : null,
     hoy,
     aceptacionesUsuario: aceptaciones,
     perfil,
     workspaceId: ctx.workspaceId,
+    producto: 'valida_api',
+    usuarioId,
   })
   return { tipo: 'ok', ctx, estado, hoy }
+}
+
+/**
+ * Evalúa la entrada y, SOLO si el contrato está pendiente, lee quién lo firma y vuelve a evaluar.
+ *
+ * La designación decide una sola cosa (quién puede firmar), y esa pregunta solo existe con el
+ * contrato pendiente. Leerla siempre costaría una consulta por acción del módulo sin decidir nada, y
+ * un espacio con el contrato ya aceptado no debe depender de poder leerla. Si la lectura falla, la
+ * entrada queda `no_disponible`: «no sé quién firma» nunca se convierte en «firma el dueño».
+ */
+export async function evaluarConDesignacion(
+  p: Parameters<typeof evaluarEntrada>[0] & { designacion?: never },
+): Promise<EstadoEntrada> {
+  const estado = evaluarEntrada(p)
+  if (estado.estado !== 'pendiente' || estado.contratoPendiente.length === 0) return estado
+  const designacion = await designacionDelEspacio(p.workspaceId)
+  if (designacion === 'error') return { estado: 'no_disponible' }
+  return evaluarEntrada({ ...p, designacion })
 }
 
 /** Una sola evaluación por request aunque la pidan la página y varias acciones. */

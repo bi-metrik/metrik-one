@@ -22,6 +22,12 @@
  * La tercera no la puede dar cualquiera: la da el dueño real del espacio, nunca el soporte de
  * MeTRIK. Por eso un usuario puede tener hechas la 1 y la 2 y seguir sin entrar.
  *
+ * ## Valida de los CDA (2026-09-23): solo la tercera
+ *
+ * En el producto `valida_cda` (ver `producto.ts`) lo que abre el módulo es la aceptación del
+ * contrato, que firma la persona designada por la empresa. Esa persona hace también su 1 y su 2 en
+ * el mismo clic, pero a los operadores no se les pide nada propio: esperan a que ella acepte.
+ *
  * ## Fail-closed
  *
  * No poder leer algo NO es haberlo aceptado. Un fallo de lectura devuelve `no_disponible` y un
@@ -32,6 +38,7 @@
  */
 
 import { POLITICA_DATOS_VALIDA, requiereAceptacion } from './politica'
+import { PRODUCTOS_ENTRADA, type ProductoEntrada } from './producto'
 import type { DocumentoContractual } from './resultados'
 import { estadoTerminos, puedeAceptarTerminos, vigentesConAceptacion, type RazonNoAcepta } from './terminos'
 
@@ -63,6 +70,8 @@ export type EstadoEntrada =
       contratoPendiente: DocumentoContractual[]
       /** Solo cuando el contrato está pendiente: si la persona de la sesión real puede firmarlo. */
       aceptante: { puede: true } | { puede: false; razon: RazonNoAcepta } | null
+      /** Nombre de la persona designada por el contrato, para decirle al resto a quién esperan. */
+      designadoNombre: string | null
       /**
        * Documentos vigentes para los que el usuario YA tiene una fila con el mismo slug y versión
        * pero OTRA huella. El UNIQUE (usuario, slug, versión) de la tabla impide registrar la nueva,
@@ -98,8 +107,18 @@ export function evaluarEntrada(p: {
   /** El perfil REAL de la sesión (no el de «Ver como»); `null` si la lectura falló. */
   perfil: { role: string | null; workspaceId: string | null; platformAdmin: boolean } | null
   workspaceId: string
+  /** Qué producto: decide si cada usuario aprueba y si hace falta designado. Por defecto, Valida API. */
+  producto?: ProductoEntrada
+  /** La persona REAL de la sesión, para compararla con la designada. */
+  usuarioId?: string | null
+  /**
+   * Quién firma según el contrato. `undefined` = no se leyó: el servidor la lee solo si el contrato
+   * está pendiente, que es el único caso en que decide algo.
+   */
+  designacion?: { designadoId: string | null; designadoNombre: string | null } | null
 }): EstadoEntrada {
   if (p.documentos === null || p.aceptacionesUsuario === null) return { estado: 'no_disponible' }
+  const producto = PRODUCTOS_ENTRADA[p.producto ?? 'valida_api']
 
   const contrato = estadoTerminos(p.documentos, p.hoy)
   if (contrato.estado === 'sin_documentos') return { estado: 'sin_documentos' }
@@ -113,7 +132,8 @@ export function evaluarEntrada(p: {
   }))
   const contratoPendiente = contrato.estado === 'pendientes' ? contrato.pendientes : []
 
-  if (politicaAceptada && contratoPendiente.length === 0 && documentos.every((d) => d.leidoPorUsuario)) {
+  const usuarioAlDia = politicaAceptada && documentos.every((d) => d.leidoPorUsuario)
+  if (contratoPendiente.length === 0 && (usuarioAlDia || !producto.exigeAprobacionPorUsuario)) {
     return { estado: 'aprobada' }
   }
 
@@ -121,7 +141,11 @@ export function evaluarEntrada(p: {
   if (contratoPendiente.length > 0) {
     // Sin el perfil real no se puede decidir quién firma: no se adivina.
     if (!p.perfil) return { estado: 'no_disponible' }
-    aceptante = puedeAceptarTerminos(p.perfil, p.workspaceId)
+    aceptante = puedeAceptarTerminos(p.perfil, p.workspaceId, {
+      designadoId: p.designacion?.designadoId ?? null,
+      exigida: producto.exigeDesignado,
+      usuarioId: p.usuarioId ?? null,
+    })
   }
 
   return {
@@ -130,7 +154,12 @@ export function evaluarEntrada(p: {
     politicaAceptada,
     contratoPendiente,
     aceptante,
-    conflictos: documentos.filter((d) => !d.leidoPorUsuario && enConflicto(d.doc, filas)).map((d) => d.doc),
+    designadoNombre: p.designacion?.designadoNombre ?? null,
+    // Un conflicto solo impide completar la aprobación PROPIA del usuario. Donde esa aprobación no
+    // se exige (los CDA), no puede frenar la firma del contrato: el upsert la omite sin error.
+    conflictos: producto.exigeAprobacionPorUsuario
+      ? documentos.filter((d) => !d.leidoPorUsuario && enConflicto(d.doc, filas)).map((d) => d.doc)
+      : [],
   }
 }
 
@@ -156,10 +185,12 @@ export function textoCasillaEntrada(p: {
   documentos: readonly Pick<DocumentoContractual, 'titulo' | 'version'>[]
   /** Nombre(s) de la empresa que se obliga, o `null` si esta aprobación no firma el contrato. */
   firmaPor: readonly string[] | null
+  /** En qué módulo se acepta. Por defecto Valida API: su texto ya está firmado y no cambia. */
+  producto?: ProductoEntrada
 }): string {
   const docs = enumerar(p.documentos.map((d) => `«${d.titulo}» (${d.version})`))
   const base =
-    `Leí hasta el final ${docs} y los acepto para mi uso de Valida API. ` +
+    `Leí hasta el final ${docs} y los acepto para mi uso de ${PRODUCTOS_ENTRADA[p.producto ?? 'valida_api'].nombre}. ` +
     `Autorizo a METRIK IA S.A.S. a tratar mis datos conforme a la ` +
     `${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}.`
   if (!p.firmaPor || p.firmaPor.length === 0) return base
