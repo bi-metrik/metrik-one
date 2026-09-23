@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertCircle, BedDouble, Car, Check, Info, Package, Plane, Plus, Ticket } from 'lucide-react'
+import { AlertCircle, BedDouble, Car, Check, Info, MoreHorizontal, Package, Plane, Plus, Ticket, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
@@ -51,6 +51,7 @@ export default function BloqueRanura({
   titulo,
   estado,
   id,
+  onEliminar,
   children,
 }: {
   bloque: Pick<BloqueDeLineas<unknown>, 'grupo' | 'etiqueta' | 'tipo'> & { opciones: number }
@@ -66,6 +67,11 @@ export default function BloqueRanura({
   estado?: { completo: boolean; motivo: string | null } | null
   /** Para saltar al bloque desde el resumen del paso Componentes. */
   id?: string
+  /**
+   * P12 · borra la ranura entera con sus opciones. Lo decide y lo avisa el editor (cuántas
+   * opciones, cuántas con costo, «Deshacer»). Ausente = el menú no se pinta.
+   */
+  onEliminar?: () => void
   children: ReactNode
 }) {
   const router = useRouter()
@@ -74,6 +80,7 @@ export default function BloqueRanura({
   const nombreGuardado = inst?.nombre ?? ''
   const [nombre, setNombre] = useState(nombreGuardado)
   const [nombreVisto, setNombreVisto] = useState(nombreGuardado)
+  const [menuAbierto, setMenuAbierto] = useState(false)
   // El nombre que llega del servidor manda cuando cambia (otro renombre, un refresco): se
   // ajusta al pintar, no en un efecto, para no pintar un cuadro con el dato viejo.
   if (nombreVisto !== nombreGuardado) {
@@ -181,16 +188,46 @@ export default function BloqueRanura({
           </p>
         </div>
         {editable && (
-          <button
-            type="button"
-            onClick={agregarOpcion}
-            disabled={isPending}
-            title={`Agregar otra opción de ${etiquetaTipo}`}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium text-[#1A1A1A] hover:bg-accent disabled:opacity-50"
-          >
-            <Plus className="h-3 w-3" />
-            Opción
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={agregarOpcion}
+              disabled={isPending}
+              title={`Agregar otra opción de ${etiquetaTipo}`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium text-[#1A1A1A] hover:bg-accent disabled:opacity-50"
+            >
+              <Plus className="h-3 w-3" />
+              Opción
+            </button>
+            {onEliminar && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label={`Más acciones del bloque ${bloque.etiqueta}`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuAbierto}
+                  onClick={() => setMenuAbierto(m => !m)}
+                  className="rounded p-1 text-[#6B7280] hover:bg-accent hover:text-[#1A1A1A]"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+                {menuAbierto && (
+                  <div role="menu" className="absolute right-0 z-10 mt-1 w-44 rounded-md border bg-background p-1 text-xs shadow-md">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={isPending}
+                      onClick={() => { setMenuAbierto(false); onEliminar() }}
+                      className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Eliminar bloque
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </header>
 

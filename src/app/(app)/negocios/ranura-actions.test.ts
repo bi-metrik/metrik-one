@@ -111,7 +111,7 @@ vi.mock('@/lib/cotizaciones/itinerarios-datos', async (original) => ({
   contextoDeCotizacion: async () => ctxActual,
 }))
 
-const { crearRanuraConOpcion, agregarOpcionARanura } = await import('./ranura-actions')
+const { crearRanuraConOpcion, agregarOpcionARanura, eliminarRanura } = await import('./ranura-actions')
 const { armarTarifas } = await import('./itinerario-actions')
 const { aplicarRecargo } = await import('./recargo-actions')
 
@@ -337,5 +337,39 @@ describe('B4 · aplicar el recargo', () => {
     expect(r).toMatchObject({ success: false })
     expect((r as { error: string }).error).toContain('quiénes viajan')
     expect(linea()).toBeUndefined()
+  })
+})
+
+describe('eliminar un bloque entero (P12)', () => {
+  it('borra todas sus opciones y la fila de la ranura; el otro bloque y el ajuste quedan', async () => {
+    await crearRanuraConOpcion(COT, 'hotel', { lugar: 'Cancún' })
+    const [primera] = items()
+    await agregarOpcionARanura(COT, primera.grupo as string)
+    await crearRanuraConOpcion(COT, 'vuelo', { origen: 'Bogotá', destino: 'Cancún' })
+    tablas.items.push({ id: 'ajuste', cotizacion_id: COT, grupo: primera.grupo, es_ajuste: true, orden: 99 })
+    expect(ranuras()).toHaveLength(2)
+
+    const r = await eliminarRanura(COT, primera.grupo as string)
+    expect(r).toMatchObject({ success: true, borradas: 2 })
+    expect(items().filter(i => i.es_ajuste !== true).map(i => String(i.grupo))).toEqual([expect.stringMatching(/^vuelo/)])
+    expect(items().some(i => i.id === 'ajuste')).toBe(true)
+    expect(ranuras()).toHaveLength(1)
+    expect(ranuras()[0]).toMatchObject({ tipo: 'vuelo' })
+  })
+
+  it('no toca las líneas de otra cotización con el mismo grupo', async () => {
+    await crearRanuraConOpcion(COT, 'hotel', { lugar: 'Cancún' })
+    const [primera] = items()
+    tablas.items.push({ id: 'ajena', cotizacion_id: 'otra', grupo: primera.grupo, orden: 1 })
+    await eliminarRanura(COT, primera.grupo as string)
+    expect(tablas.items.map(i => i.id)).toEqual(['ajena'])
+  })
+
+  it('una cotización ya enviada no pierde bloques', async () => {
+    await crearRanuraConOpcion(COT, 'hotel', { lugar: 'Cancún' })
+    tablas.cotizaciones[0].estado = 'enviada'
+    const r = await eliminarRanura(COT, items()[0].grupo as string)
+    expect(r).toMatchObject({ success: false })
+    expect(items()).toHaveLength(1)
   })
 })
