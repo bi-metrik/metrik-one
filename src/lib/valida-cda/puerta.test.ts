@@ -49,6 +49,9 @@ const escenario: {
   documentos: DocumentoContractual[] | null
   perfil: { role: string; workspaceId: string; platformAdmin: boolean } | null
   designacion: { designadoId: string | null; designadoNombre: string | null } | 'error'
+  hoy: string
+  cuotas: { data: unknown[] | null; error: { message: string; code?: string } | null }
+  cobros: { data: unknown[] | null; error: { message: string; code?: string } | null }
 } = {
   modulo: { ok: true, workspaceId: WS },
   usuario: OPERADOR,
@@ -56,9 +59,27 @@ const escenario: {
   documentos: [DOC],
   perfil: null,
   designacion: { designadoId: DESIGNADA, designadoNombre: 'Alba Yurany Rosas Escandón' },
+  hoy: '2026-09-23',
+  cuotas: { data: [], error: null },
+  cobros: { data: [], error: null },
 }
 
-vi.mock('@/lib/dates/bogota', () => ({ todayBogotaISO: () => '2026-09-23' }))
+/** La primera cuota real de los CDA: $150.000, vence el 30-sep. */
+const CUOTA_1 = {
+  cuota_id: '55555555-5555-4555-8555-555555555555',
+  numero: 1,
+  tipo: 'cuota',
+  monto: '150000',
+  fecha_vencimiento: '2026-09-30',
+  concepto: 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
+  enlace_pago_url: null,
+  enlace_pago_expira: null,
+  factura_numero: null,
+  factura_pdf_path: null,
+  factura_xml_path: null,
+}
+
+vi.mock('@/lib/dates/bogota', () => ({ todayBogotaISO: () => escenario.hoy }))
 vi.mock('@/lib/modulos/exigir-modulo', () => ({
   REQUISITO: { validaConsulta: { modulos: ['valida'] } },
   exigirModulo: async () => escenario.modulo,
@@ -67,7 +88,13 @@ vi.mock('@/lib/supabase/auth-user', () => ({
   getCachedUser: async () => ({ user: escenario.usuario ? { id: escenario.usuario, email: 'x@y.co' } : null }),
 }))
 vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => ({ role: 'operator', supabase: { rpc: async () => escenario.servicios } }),
+  getWorkspace: async () => ({
+    role: 'operator',
+    supabase: {
+      rpc: async (nombre: string) =>
+        nombre === 'mis_servicios' ? escenario.servicios : nombre === 'mis_cuotas_de_servicio' ? escenario.cuotas : escenario.cobros,
+    },
+  }),
 }))
 vi.mock('next/headers', () => ({ headers: async () => new Headers() }))
 vi.mock('@/lib/valida-api/terminos-servidor', () => ({
@@ -89,7 +116,8 @@ vi.mock('@/lib/supabase/server', () => ({
 // `cache()` de React deduplica por request; en la prueba cada caso es un request nuevo.
 vi.mock('react', async (original) => ({ ...(await original<typeof import('react')>()), cache: <T,>(f: T) => f }))
 
-const { entradaValidaCda, terminosValidaPermitenOperar, MENSAJE_TERMINOS_PENDIENTES } = await import('./puerta')
+const { entradaValidaCda, terminosValidaPermitenOperar, validaCdaPermiteOperar, MENSAJE_TERMINOS_PENDIENTES } =
+  await import('./puerta')
 
 beforeEach(() => {
   escenario.modulo = { ok: true, workspaceId: WS }
@@ -98,6 +126,9 @@ beforeEach(() => {
   escenario.documentos = [DOC]
   escenario.perfil = { role: 'operator', workspaceId: WS, platformAdmin: false }
   escenario.designacion = { designadoId: DESIGNADA, designadoNombre: 'Alba Yurany Rosas Escandón' }
+  escenario.hoy = '2026-09-23'
+  escenario.cuotas = { data: [CUOTA_1], error: null }
+  escenario.cobros = { data: [], error: null }
 })
 
 describe('a quién aplica', () => {
@@ -183,5 +214,95 @@ describe('no poder leer cierra, nunca abre', () => {
     const e = await entradaValidaCda()
     expect(e.tipo === 'ok' && e.estado).toEqual({ estado: 'no_disponible' })
     expect((await terminosValidaPermitenOperar()).ok).toBe(false)
+  })
+})
+
+describe('plazo para aceptar (terminos_plazo_hasta)', () => {
+  const conPlazo = (plazo: string | null) => {
+    escenario.servicios = { data: [{ ...CONTRATO_CDA, terminos_plazo_hasta: plazo }], error: null }
+  }
+
+  it('el 30-sep, con plazo hasta el 30-sep y términos pendientes, todos operan (con aviso)', async () => {
+    conPlazo('2026-09-30')
+    escenario.hoy = '2026-09-30'
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.enPlazo).toBe(true)
+    expect(e.tipo === 'ok' && e.plazoTerminos).toBe('2026-09-30')
+    expect(await terminosValidaPermitenOperar()).toEqual({ ok: true })
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('el 1-oct, sin la aceptación, se pausa como hoy', async () => {
+    conPlazo('2026-09-30')
+    escenario.hoy = '2026-10-01'
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.enPlazo).toBe(false)
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: false, error: MENSAJE_TERMINOS_PENDIENTES })
+  })
+
+  it('sin plazo (null) se pausa de inmediato', async () => {
+    conPlazo(null)
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: false, error: MENSAJE_TERMINOS_PENDIENTES })
+  })
+
+  it('el plazo no abre lo que no se pudo verificar: fail-closed intacto', async () => {
+    conPlazo('2026-09-30')
+    escenario.designacion = 'error'
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+    escenario.designacion = { designadoId: DESIGNADA, designadoNombre: null }
+    escenario.documentos = null
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+
+  it('el plazo no abre unos términos sin registrar', async () => {
+    conPlazo('2026-09-30')
+    escenario.documentos = []
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.estado.estado).toBe('sin_documentos')
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+})
+
+describe('mora de más de 30 días (cláusula 11.1)', () => {
+  beforeEach(() => {
+    escenario.documentos = [DOC_ACEPTADO]
+  })
+
+  it('30-oct: cuota del 30-sep vencida, todavía opera', async () => {
+    escenario.hoy = '2026-10-30'
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('31-oct: se pausa, y el mensaje dice desde cuándo', async () => {
+    escenario.hoy = '2026-10-31'
+    const r = await validaCdaPermiteOperar()
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('pausada desde el 31-oct')
+  })
+
+  it('31-oct con la cuota pagada: opera', async () => {
+    escenario.hoy = '2026-10-31'
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }], error: null }
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('sin poder leer las cuotas NO se pausa: pausar exige la prueba de la deuda', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    escenario.hoy = '2026-12-31'
+    escenario.cuotas = { data: null, error: { message: 'caída' } }
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    log.mockRestore()
+  })
+
+  it('un espacio que no paga el contrato (beneficiario) no tiene mora que medir', async () => {
+    escenario.hoy = '2026-12-31'
+    escenario.servicios = { data: [{ ...CONTRATO_CDA, es_pagador: false }], error: null }
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('sin contrato de Valida (AFI, metrik) nada cambia', async () => {
+    escenario.hoy = '2026-12-31'
+    escenario.servicios = { data: [], error: null }
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
   })
 })

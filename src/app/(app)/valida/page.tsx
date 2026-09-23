@@ -6,17 +6,19 @@ import { listarConsultasValida } from '@/lib/actions/valida-consultas';
 import { getTutorialProgress } from '@/lib/actions/tutorial-progress';
 import { armarEstadoEntradaPagina } from '@/lib/valida-api/entrada-aprobacion';
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica';
-import { designacionDelEspacio } from '@/lib/valida-api/terminos-servidor';
-import { entradaValidaCda, type EntradaValidaCda } from '@/lib/valida-cda/puerta';
-import { leerProximoPagoCda, type LecturaPago } from '@/lib/valida-cda/pago-servidor';
+import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor';
+import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
+import { PestanaTerminos } from '@/components/terminos/pestana-terminos';
 import ValidaClient from './valida-client';
+import { AvisoMora, AvisoPlazoTerminos, PausaPorMora } from './avisos-cda';
 import { PagoPendienteCard } from './pago-pendiente-card';
+import { PestanaPagosCda } from './pestana-pagos-cda';
 import { TerminosCda } from './terminos-cda';
 
 export const dynamic = 'force-dynamic';
 
 interface Props {
-  searchParams: Promise<{ negocio_id?: string }>;
+  searchParams: Promise<{ negocio_id?: string; terminos?: string }>;
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
@@ -54,6 +56,12 @@ export default async function ValidaPage({ searchParams }: Props) {
       />
     );
   }
+  const { negocio_id: negocioId, terminos: verTerminos } = await searchParams;
+
+  // Términos pendientes: sin plazo (o vencido) se muestran los términos y Valida no opera; dentro
+  // del plazo Valida opera con un aviso, y la persona designada abre los términos desde ese aviso
+  // (`?terminos=1`). Al aceptar, la entrada queda aprobada y el parámetro deja de importar.
+  let avisoPlazo: React.ReactNode = null;
   if (entrada.tipo === 'ok' && entrada.estado.estado === 'pendiente') {
     const pagina = await armarEstadoEntradaPagina({ workspaceId: entrada.workspaceId }, entrada.estado);
     if (pagina.estado !== 'pendiente') {
@@ -64,15 +72,30 @@ export default async function ValidaPage({ searchParams }: Props) {
         />
       );
     }
-    return (
-      <TerminosCda
-        entrada={pagina}
-        aviso={textoAvisoPolitica('valida_cda')}
-        politicaUrl={POLITICA_DATOS_VALIDA.url}
-        politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+    const puedeAceptar = pagina.contrato.estado === 'pendiente' && pagina.contrato.puede;
+    if (!entrada.enPlazo || (verTerminos === '1' && puedeAceptar)) {
+      return (
+        <TerminosCda
+          entrada={pagina}
+          aviso={textoAvisoPolitica('valida_cda')}
+          politicaUrl={POLITICA_DATOS_VALIDA.url}
+          politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+        />
+      );
+    }
+    avisoPlazo = entrada.plazoTerminos ? (
+      <AvisoPlazoTerminos
+        plazoHasta={entrada.plazoTerminos}
+        puedeAceptar={puedeAceptar}
+        designadoNombre={entrada.estado.designadoNombre}
       />
-    );
+    ) : null;
   }
+
+  // La mora (cláusula 11.1) y quién ve la plata. Una sola lectura de cuotas y pagos por request.
+  const [mora, vePagos] = await Promise.all([moraValidaCda(), puedeVerPagosCda(entrada)]);
+  const estadoMora = mora.tipo === 'ok' ? mora.mora : null;
+  const enPausa = estadoMora?.estado === 'suspendido' ? estadoMora : null;
 
   // Modo vitrina (workspaces Valida-only): oculta la asociación a negocio en
   // consulta puntual / carga masiva / historial y quita la columna negocio_codigo
@@ -80,8 +103,6 @@ export default async function ValidaPage({ searchParams }: Props) {
   // el picker — ellos atan consultas a negocios=CDAs).
   const modoVitrina =
     (wsRow?.config_extra as { modo_vitrina?: boolean } | null)?.modo_vitrina === true;
-
-  const { negocio_id: negocioId } = await searchParams;
 
   // Resolver negocio si viene en query (para preset del filtro)
   let negocioInicial: { id: string; codigo: string; nombre: string; estado: string } | null = null;
@@ -95,39 +116,51 @@ export default async function ValidaPage({ searchParams }: Props) {
     if (neg) negocioInicial = neg;
   }
 
-  const [historial, tutorialProgress, pago] = await Promise.all([
-    listarConsultasValida({
-      limite: 100,
-      ...(negocioInicial ? { negocio_id: negocioInicial.id } : {}),
-    }),
+  // Las pestañas Pagos y Términos, una vez aceptados los términos (el mismo patrón de Valida API).
+  const aprobada = entrada.tipo === 'ok' && entrada.estado.estado === 'aprobada';
+
+  const [historial, tutorialProgress, pagos, terminos] = await Promise.all([
+    // En pausa las consultas no se muestran, y su lectura la negaría la misma puerta.
+    enPausa
+      ? Promise.resolve(null)
+      : listarConsultasValida({
+          limite: 100,
+          ...(negocioInicial ? { negocio_id: negocioInicial.id } : {}),
+        }),
     getTutorialProgress('valida_standalone'),
-    pagoVisible(entrada),
+    aprobada && vePagos ? leerPagosCda(entrada) : Promise.resolve(null),
+    aprobada ? leerTerminosEmpresaCda(entrada) : Promise.resolve(null),
   ]);
+
+  // El próximo pago de la licencia: solo a quienes manejan la plata del espacio o a la persona
+  // designada. Los demás no ven montos; el aviso de mora (sin montos) sí lo ven todos.
+  const pago = vePagos && mora.tipo === 'ok' ? mora.lectura : null;
+  const encabezado =
+    avisoPlazo || pago || estadoMora?.estado === 'en_mora' ? (
+      <div className="space-y-3">
+        {avisoPlazo}
+        {estadoMora?.estado === 'en_mora' && <AvisoMora mora={estadoMora} />}
+        {pago && <PagoPendienteCard lectura={pago} />}
+      </div>
+    ) : null;
 
   return (
     <ValidaClient
-      historialInicial={historial.ok ? historial.consultas : []}
-      errorHistorial={historial.ok ? null : historial.error}
-      tutorialNuncaVisto={tutorialProgress === null}
+      historialInicial={historial?.ok ? historial.consultas : []}
+      errorHistorial={historial && !historial.ok ? historial.error : null}
+      tutorialNuncaVisto={!enPausa && tutorialProgress === null}
       negocioInicial={modoVitrina ? null : negocioInicial}
       modoVitrina={modoVitrina}
-      encabezado={pago ? <PagoPendienteCard lectura={pago} /> : null}
+      encabezado={encabezado}
+      consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
+      seccionesCda={
+        aprobada && terminos
+          ? {
+              pagos: pagos ? <PestanaPagosCda carga={pagos} /> : null,
+              terminos: <PestanaTerminos carga={terminos} alcance="empresa" />,
+            }
+          : null
+      }
     />
   );
-}
-
-/**
- * El próximo pago de la licencia, solo para un CDA que PAGA su contrato y solo a quienes manejan
- * la plata del espacio (dueño y administradores) o a la persona designada por la empresa. Los
- * demás no ven montos. Cualquier falla aquí oculta la tarjeta: el pago no bloquea el módulo.
- */
-async function pagoVisible(entrada: EntradaValidaCda): Promise<LecturaPago | null> {
-  if (entrada.tipo !== 'ok' || !entrada.servicioContratadoId) return null;
-  let puedeVer = entrada.role === 'owner' || entrada.role === 'admin';
-  if (!puedeVer) {
-    const designacion = await designacionDelEspacio(entrada.workspaceId);
-    puedeVer = designacion !== 'error' && designacion.designadoId === entrada.usuarioId;
-  }
-  if (!puedeVer) return null;
-  return leerProximoPagoCda(entrada.servicioContratadoId, entrada.hoy);
 }

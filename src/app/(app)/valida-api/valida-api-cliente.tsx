@@ -4,9 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
-  AlertTriangle,
   BarChart3,
-  BadgeCheck,
   Check,
   Copy,
   CreditCard,
@@ -16,10 +14,10 @@ import {
   Receipt,
 } from 'lucide-react'
 import { EntradaTerminos, TextoDocumento } from '@/components/terminos/entrada-terminos'
+import { AvisoCarga, PestanaTerminos } from '@/components/terminos/pestana-terminos'
 import { generarLlaveValidaApi, revocarLlaveValidaApi } from '@/lib/valida-api/acciones'
 import { vistaConsumo } from '@/lib/valida-api/consumo-vista'
 import type {
-  Carga,
   LlaveRecienEmitida,
   ResultadoLlaves,
   ResultadoPagos,
@@ -35,6 +33,9 @@ import { formatCOP } from '@/lib/cobros/format'
 // Vive en `@/components/terminos/entrada-terminos` desde el 2026-09-23: la comparte Valida de los
 // CDA. Estos nombres se conservan para quien ya los importa desde aquí.
 export { EntradaTerminos as EntradaValidaApi, TextoDocumento }
+// La pestaña Términos y el aviso de carga viven en `@/components/terminos/pestana-terminos` desde el
+// 2026-09-23: los comparte la pestaña Términos de Valida de los CDA.
+export { PestanaTerminos }
 
 // ── Pestañas ───────────────────────────────────────────────────────────────
 
@@ -94,29 +95,6 @@ export function ValidaApiCliente({
       {pestana === 'terminos' && <PestanaTerminos carga={terminos} />}
       {pestana === 'pagos' && pagos && <PestanaPagos carga={pagos} />}
       {pestana === 'ayuda' && <PestanaAyuda />}
-    </div>
-  )
-}
-
-/** Lo que se dice cuando una pestaña no cargó. Nunca una lista vacía en su lugar. */
-function AvisoCarga({ carga }: { carga: Exclude<Carga<unknown>, { estado: 'ok' }> }) {
-  if (carga.estado === 'sin_acceso') {
-    return <p className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">{carga.razon}</p>
-  }
-  const titulo = carga.estado === 'rechazada' ? 'Valida rechazó la consulta' : 'No disponible en este momento'
-  const detalle =
-    carga.estado === 'rechazada'
-      ? carga.mensaje
-      : carga.motivo === 'sin_migracion'
-        ? 'Esta sección todavía no está habilitada en este entorno.'
-        : 'No pudimos conectar con Valida. El resto del módulo funciona; intenta de nuevo en unos minutos.'
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-      <div>
-        <p className="font-semibold">{titulo}</p>
-        <p className="mt-1">{detalle}</p>
-      </div>
     </div>
   )
 }
@@ -362,78 +340,6 @@ function PestanaSuscripcion() {
         Tus paquetes de consultas se recargan hoy por solicitud a MeTRIK. La renovación automática con tarjeta llega más adelante y
         vas a poder activarla desde aquí, después de aceptar los términos que la regulan.
       </p>
-    </div>
-  )
-}
-
-// ── Términos: lo que el usuario aprobó, para releerlo ──────────────────────
-
-/**
- * Los términos que la persona aprobó en la entrada, con el mismo texto y el mismo render, y un sello
- * «Aprobado». Solo lectura: sin casilla, sin botón y con el scroll normal de la página. El texto
- * llega únicamente si el servidor comprobó que es el de la versión aprobada (`terminos-aprobados.ts`);
- * si no, se dice, y no se pinta ningún otro.
- */
-export function PestanaTerminos({ carga }: { carga: ResultadoTerminosAprobados }) {
-  if (carga.estado !== 'ok') return <AvisoCarga carga={carga} />
-  if (carga.datos.length === 0) {
-    return (
-      <p className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">
-        No encontramos términos aprobados por ti en este espacio. Escríbenos si esperabas verlos.
-      </p>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {carga.datos.map((t) =>
-        t.estado === 'verificado' ? (
-          <article key={t.documentoId} data-termino-aprobado className="rounded-lg border border-border bg-white p-4 sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-tinta-suave">
-                {t.titulo} · {t.version}
-              </p>
-              <span
-                data-sello-aprobado
-                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800"
-              >
-                <BadgeCheck className="h-4 w-4" />
-                Aprobado
-              </span>
-            </div>
-            <div className="mt-2 space-y-0.5 text-xs text-tinta-suave">
-              <p>Aprobado por ti el {formatBogotaFechaHora(t.aprobadoAt)} (hora Colombia).</p>
-              {t.contrato && (
-                <p>
-                  Contrato aceptado el {formatBogotaFechaHora(t.contrato.aceptadoAt)}
-                  {t.contrato.aceptadoPor && ` por ${t.contrato.aceptadoPor}`}
-                  {t.contrato.canal === 'whatsapp' ? ', por WhatsApp.' : ', en este módulo.'}
-                </p>
-              )}
-            </div>
-            <div className="mt-4 rounded-md border border-border bg-papel p-4 text-sm leading-relaxed text-tinta [overflow-wrap:anywhere]">
-              <TextoDocumento md={t.textoMd} />
-            </div>
-          </article>
-        ) : (
-          <div
-            key={`${t.titulo ?? 'documento'}-${t.version}`}
-            data-termino-no-verificado
-            className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
-          >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p className="font-semibold">
-                No podemos mostrar el texto que aprobaste{t.titulo ? ` de «${t.titulo}»` : ''} ({t.version})
-              </p>
-              <p className="mt-1">
-                Tu aprobación es del {formatBogotaFechaHora(t.aprobadoAt)} (hora Colombia), pero no pudimos comprobar que el
-                texto guardado sea el mismo que aprobaste, así que no mostramos ninguno. Escríbenos para revisarlo.
-              </p>
-            </div>
-          </div>
-        ),
-      )}
     </div>
   )
 }

@@ -24,6 +24,9 @@ vi.mock('@/lib/valida-cda/acciones', () => ({ aprobarEntradaValidaCda: async () 
 
 const { TerminosCda } = await import('./terminos-cda')
 const { PagoPendienteCard } = await import('./pago-pendiente-card')
+const { AvisoMora, AvisoPlazoTerminos, PausaPorMora } = await import('./avisos-cda')
+const { PestanaPagosCda } = await import('./pestana-pagos-cda')
+const { PestanaTerminos } = await import('@/components/terminos/pestana-terminos')
 
 function texto(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -182,5 +185,124 @@ describe('el próximo pago', () => {
       React.createElement(PagoPendienteCard, { lectura: { estado: 'no_disponible', motivo: 'base' } }),
     )
     expect(texto(caida)).toContain('No se pudo cargar tu próximo pago')
+  })
+})
+
+describe('los avisos que ven todos (plazo y mora)', () => {
+  it('el plazo dice hasta cuándo y, a la designada, le ofrece aceptar', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(AvisoPlazoTerminos, { plazoHasta: '2026-09-30', puedeAceptar: true, designadoNombre: 'Alba' }),
+    )
+    expect(texto(html)).toContain('a más tardar el 30-sep; desde el 1-oct, sin esa aceptación, Valida se pausa.')
+    expect(html).toContain('href="/valida?terminos=1"')
+  })
+
+  it('a un operador le nombra a la designada y no le ofrece aceptar', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(AvisoPlazoTerminos, { plazoHasta: '2026-09-30', puedeAceptar: false, designadoNombre: 'Alba' }),
+    )
+    expect(texto(html)).toContain('La persona designada es Alba.')
+    expect(html).not.toContain('terminos=1')
+  })
+
+  it('la mora dice la fecha de corte y no dice montos', () => {
+    const t = texto(
+      renderToStaticMarkup(
+        React.createElement(AvisoMora, { mora: { estado: 'en_mora', vencio: '2026-09-30', corteDesde: '2026-10-31' } }),
+      ),
+    )
+    expect(t).toContain('vencido desde el 30-sep')
+    expect(t).toContain('Valida se pausa desde el 31-oct')
+    expect(t).not.toMatch(/\$/)
+  })
+
+  it('la pausa manda a Pagos a quien puede pagar', () => {
+    const mora = { estado: 'suspendido' as const, vencio: '2026-09-30', corteDesde: '2026-10-31' }
+    expect(texto(renderToStaticMarkup(React.createElement(PausaPorMora, { mora, vePagos: true })))).toContain('En la pestaña Pagos')
+    expect(texto(renderToStaticMarkup(React.createElement(PausaPorMora, { mora, vePagos: false })))).toContain(
+      'la persona designada por tu empresa pueden ver y pagar',
+    )
+  })
+})
+
+describe('la pestaña Pagos del CDA', () => {
+  const cuota = {
+    cuotaId: '55555555-5555-4555-8555-555555555555',
+    numero: 1,
+    concepto: 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
+    fechaVencimiento: '2026-09-30',
+    monto: 150000,
+    abonado: 0,
+    saldo: 150000,
+    estado: 'vencida' as const,
+    enlacePago: 'https://checkout.bold.co/payment/LNK_1',
+    factura: { numero: 'FE-123', pdf: true, xml: true },
+  }
+  const html = renderToStaticMarkup(
+    React.createElement(PestanaPagosCda, {
+      carga: {
+        estado: 'ok',
+        cuotas: [cuota, { ...cuota, cuotaId: null, numero: 2, estado: 'pendiente', enlacePago: null, factura: null }],
+        pagos: [
+          { cobroId: 'b91b4a14-cce1-4cfa-88d5-f235aa9e1060', fecha: '2026-09-25', monto: 150000, fuente: 'bold', estado: 'pagado', reciboNumero: 'RC-1', reciboDescargable: true },
+        ],
+      },
+    }),
+  )
+  const t = texto(html)
+
+  it('cada cuota con su período, valor, vencimiento y estado', () => {
+    expect(t).toContain('Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026')
+    expect(t).toContain('30/09/2026')
+    expect(t).toContain('Vencida')
+    expect(t).toContain('Pendiente')
+  })
+
+  it('Pagar abre Bold en otra pestaña; la factura baja por la ruta autorizada, nunca por el bucket', () => {
+    expect(html).toContain('href="https://checkout.bold.co/payment/LNK_1"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('href="/api/valida/archivo/factura_pdf/55555555-5555-4555-8555-555555555555"')
+    expect(html).toContain('href="/api/valida/archivo/factura_xml/55555555-5555-4555-8555-555555555555"')
+    expect(html).not.toContain('facturas/')
+  })
+
+  it('el recibo del pago baja por la misma ruta', () => {
+    expect(html).toContain('href="/api/valida/archivo/recibo/b91b4a14-cce1-4cfa-88d5-f235aa9e1060"')
+    expect(t).toContain('RC-1')
+  })
+
+  it('sin acceso lo dice, en vez de una lista vacía', () => {
+    const sin = texto(renderToStaticMarkup(React.createElement(PestanaPagosCda, { carga: { estado: 'sin_acceso', razon: 'Los pagos los ven el dueño.' } })))
+    expect(sin).toBe('Los pagos los ven el dueño.')
+  })
+})
+
+describe('la pestaña Términos del CDA habla de la empresa, no de «ti»', () => {
+  it('dice quién aceptó en nombre de la empresa', () => {
+    const t = texto(
+      renderToStaticMarkup(
+        React.createElement(PestanaTerminos, {
+          alcance: 'empresa',
+          carga: {
+            estado: 'ok',
+            datos: [
+              {
+                estado: 'verificado',
+                documentoId: DOCUMENTO.documentoId,
+                titulo: DOCUMENTO.titulo,
+                version: 'v1.1',
+                textoMd: DOCUMENTO.textoMd,
+                aprobadoAt: '2026-09-25T14:00:00Z',
+                contrato: { aceptadoAt: '2026-09-25T14:00:00Z', aceptadoPor: 'Alba Yurany Rosas Escandón', canal: 'modulo' },
+              },
+            ],
+          },
+        }),
+      ),
+    )
+    expect(t).toContain('Aceptados en nombre de tu empresa el')
+    expect(t).toContain('por Alba Yurany Rosas Escandón')
+    expect(t).not.toContain('Aprobado por ti')
+    expect(t).toContain('CIENTO CINCUENTA MIL PESOS')
   })
 })

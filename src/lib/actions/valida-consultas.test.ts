@@ -103,7 +103,7 @@ vi.mock('@/lib/modulos/exigir-modulo', async () =>
 const puertaTerminos: { resultado: { ok: true } | { ok: false; error: string } } = { resultado: { ok: true } }
 const consultasPuerta = vi.fn()
 vi.mock('@/lib/valida-cda/puerta', () => ({
-  terminosValidaPermitenOperar: async () => {
+  validaCdaPermiteOperar: async () => {
     consultasPuerta()
     return puertaTerminos.resultado
   },
