@@ -3,9 +3,11 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { FileCheck2, Upload } from 'lucide-react'
+import { Copy, FileCheck2, Link2, Upload } from 'lucide-react'
 import { cargarFacturaCuota } from '@/lib/actions/factura-cuota-carga'
+import { generarEnlacePagoDeCuota } from '@/lib/actions/enlace-pago-cuota'
 import { formatCOP } from '@/lib/cobros/format'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechaCorta } from '@/lib/valida-cda/pago-pendiente'
 import type { CuotaConFactura } from '@/lib/valida-cda/facturas-negocio-servidor'
 
@@ -23,9 +25,10 @@ export function FacturasCuotas({ cuotas }: { cuotas: CuotaConFactura[] }) {
       <div className="flex items-start gap-2">
         <FileCheck2 className="mt-0.5 h-4 w-4 text-acento" />
         <div>
-          <p className="text-sm font-semibold text-tinta">Facturas de las cuotas</p>
+          <p className="text-sm font-semibold text-tinta">Cuotas: facturas y enlaces de pago</p>
           <p className="text-xs text-tinta-suave">
-            El PDF y el XML de cada cuota. El cliente los descarga en la pestaña Pagos de su Valida.
+            El PDF y el XML de cada cuota, y su enlace de pago en línea. El cliente ve las dos cosas en la pestaña
+            Pagos de su Valida.
           </p>
         </div>
       </div>
@@ -88,6 +91,7 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConFactura }) {
           </button>
         </div>
       </div>
+      <EnlacePagoCuota cuota={c} />
       {abierta && (
         <form action={enviar} className="mt-2 grid gap-2 rounded-md border border-border bg-papel p-3 sm:grid-cols-4">
           <label className="flex flex-col gap-1 sm:col-span-1">
@@ -121,5 +125,80 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConFactura }) {
         </form>
       )}
     </li>
+  )
+}
+
+/** ¿El enlace sirve todavía? Sin fecha de vencimiento se trata como vigente (igual que la pantalla del cliente). */
+function enlaceVigente(expira: string | null, ahora: number): boolean {
+  if (!expira) return true
+  const t = Date.parse(expira)
+  return !Number.isNaN(t) && t > ahora
+}
+
+/**
+ * El enlace de pago en línea de la cuota: el vigente, con su vencimiento y para copiar; o el botón que lo
+ * genera (también cuando el que había venció). Una cuota pagada o con el cobro anulado no ofrece enlace.
+ */
+function EnlacePagoCuota({ cuota: c }: { cuota: CuotaConFactura }) {
+  const router = useRouter()
+  const [pendiente, iniciar] = useTransition()
+  // Se fija al montar, no en cada render: el render tiene que ser puro.
+  const [ahora] = useState(() => Date.now())
+
+  if (c.cobro?.pagado) return <p className="mt-1 text-emerald-700">Pagada</p>
+  if (c.cobro?.anulado) return <p className="mt-1 text-tinta-suave">Cobro anulado: sin enlace de pago.</p>
+
+  const url = c.cobro?.enlaceUrl ?? null
+  const vigente = url !== null && enlaceVigente(c.cobro?.enlaceExpira ?? null, ahora)
+
+  function generar() {
+    iniciar(async () => {
+      const r = await generarEnlacePagoDeCuota(c.cuotaId)
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      toast.success(r.estado === 'vigente' ? 'La cuota ya tenía un enlace vigente.' : 'Enlace de pago generado.')
+      router.refresh()
+    })
+  }
+
+  async function copiar(u: string) {
+    try {
+      await navigator.clipboard.writeText(u)
+      toast.success('Enlace copiado.')
+    } catch {
+      toast.error('No se pudo copiar el enlace.')
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2" data-enlace-pago>
+      <Link2 className="h-3.5 w-3.5 text-tinta-suave" />
+      {vigente && url ? (
+        <>
+          <a href={url} target="_blank" rel="noreferrer" className="max-w-[16rem] truncate text-acento underline">
+            {url}
+          </a>
+          {c.cobro?.enlaceExpira && <span className="text-tinta-suave">vence {fechaCorta(todayBogotaISO(new Date(c.cobro.enlaceExpira)))}</span>}
+          <button type="button" onClick={() => copiar(url)} className="inline-flex items-center gap-1 font-semibold text-acento">
+            <Copy className="h-3.5 w-3.5" />
+            Copiar
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="text-tinta-suave">{url ? 'El enlace venció.' : 'Sin enlace de pago.'}</span>
+          <button
+            type="button"
+            onClick={generar}
+            disabled={pendiente}
+            className="inline-flex items-center gap-1 font-semibold text-acento disabled:opacity-50"
+          >
+            {pendiente ? 'Generando…' : 'Generar enlace de pago'}
+          </button>
+        </>
+      )}
+    </div>
   )
 }

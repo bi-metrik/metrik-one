@@ -11,7 +11,7 @@ import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
  * la empresa; la decisión la toma la página.
  *
  * Reglas, en `pago-pendiente.ts`: la cuota es la primera que lo recibido no cubre, y el botón sale
- * solo con un enlace de Bold, https y vigente. Sin enlace, se dice que llega; nunca un botón muerto.
+ * solo con un enlace de una pasarela conocida, https y vigente. Sin enlace, se dice que llega; nunca un botón muerto.
  *
  * Sin estado ni efectos: se pinta en el servidor.
  */
@@ -73,7 +73,7 @@ export function PagoPendienteCard({ lectura }: { lectura: LecturaPago }) {
               rel="noopener noreferrer"
               className="inline-flex w-full items-center justify-center rounded-md bg-acento px-5 py-2.5 text-sm font-semibold text-white sm:w-auto"
             >
-              Pagar
+              Pagar en línea
             </a>
           ) : (
             <p className="max-w-xs text-sm text-tinta-suave" data-sin-enlace>

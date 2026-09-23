@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { confirmarPagoCobroProgramado } from '@/lib/cobros/confirmar-cobro-programado'
 
 export interface CrearPlanInput {
   negocioId: string
@@ -132,23 +133,9 @@ export async function confirmarCobroProgramado(cobroId: string, fecha?: string):
 
   const fechaConfirma = fecha ?? todayBogotaISO()
 
-  const { error: updErr } = await supabase
-    .from('cobros')
-    .update({
-      fecha: fechaConfirma,
-      vencido: false,
-    })
-    .eq('id', cobroId)
-
-  if (updErr) return { success: false, error: updErr.message }
-
-  // Marcar notificaciones cobro_vencido relacionadas como completadas
-  await supabase
-    .from('notificaciones')
-    .update({ estado: 'completada', updated_at: new Date().toISOString() })
-    .eq('entidad_tipo', 'cobro')
-    .eq('entidad_id', cobroId)
-    .eq('estado', 'pendiente')
+  // Misma escritura que el pago en línea (webhook de la pasarela): `confirmarPagoCobroProgramado`.
+  const r = await confirmarPagoCobroProgramado(supabase, { cobroId, workspaceId, fecha: fechaConfirma })
+  if (!r.ok) return { success: false, error: r.motivo === 'ya_confirmado' ? 'Cobro ya confirmado' : r.error }
 
   revalidatePath(`/negocios/${cobro.negocio_id}`)
   revalidatePath('/movimientos')
