@@ -58,6 +58,7 @@ import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
+import { notaDeLaLinea } from './nota-linea'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -84,6 +85,11 @@ export interface ItemConLectura {
   cargo_destino_moneda?: string | null
   /** Los tramos guardados del vuelo (B3). Ausente o ilegible = se derivan de la lectura. */
   tramos?: unknown
+  /**
+   * La descripción de la línea. Solo se imprime si la escribió una PERSONA (`notaDeLaLinea`):
+   * es la nota para el cliente (P2 del 2026-09-23). Ausente = sin nota.
+   */
+  descripcion?: string | null
 }
 
 export interface VueloPDF {
@@ -131,6 +137,11 @@ export interface VueloPDF {
    * Ausente = cotización de una sola opción: pertenece a la única que hay.
    */
   tarifas?: number[]
+  /**
+   * La nota para el cliente que escribió una persona en la opción (P2 del 2026-09-23). Se
+   * imprime debajo de la tarjeta. `null` o ausente = sin nota.
+   */
+  nota?: string | null
 }
 
 export interface HotelPDF {
@@ -155,6 +166,8 @@ export interface HotelPDF {
   adicionales: string[]
   /** Ver `VueloPDF.tarifas`. */
   tarifas?: number[]
+  /** Ver `VueloPDF.nota`. */
+  nota?: string | null
   /**
    * La foto del hotel (camino B de la §5 de `propuesta-visual.md`). ⚠️ SIN CONSTRUIR: nadie
    * la llena todavía. La plantilla ya le reserva la miniatura y, sin foto, la tarjeta
@@ -506,6 +519,7 @@ export function vuelosDeItems(items: ItemConLectura[]): VueloPDF[] {
       adicionales: item.adicionales ?? [],
       numeroVuelo: texto(d, 'numero_vuelo'),
       numeros: { ida: ida?.numero ?? null, regreso: regreso?.numero ?? null, sinAsignar: numerosSinTramo },
+      nota: notaDeLaLinea(item),
     })
   }
   return out
@@ -581,6 +595,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,
       adicionales: item.adicionales ?? [],
+      nota: notaDeLaLinea(item),
     })
   }
   return out

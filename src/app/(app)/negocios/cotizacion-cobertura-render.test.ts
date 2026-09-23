@@ -155,13 +155,18 @@ const texto = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' 
 // ── §4.2 · los botones dicen lo que hacen ────────────────────────────────────
 
 describe('el botón de opción nombra su ranura', () => {
-  it('en una línea de vuelo: «Agregar otra opción de vuelo»', () => {
-    expect(botones(pintar([AVIANCA]))).toContain('Agregar otra opción de vuelo')
+  // P6 del caso Providencia (2026-09-23): en el flujo de viaje el botón sube al encabezado del
+  // bloque como «+ Opción» y el nombre de la ranura queda en su título (lo que se lee al pasar
+  // el puntero y lo que lee un lector de pantalla).
+  it('en una línea de vuelo: «+ Opción», titulada «Agregar otra opción de vuelo»', () => {
+    const html = pintar([AVIANCA])
+    expect(botones(html)).toContain('Opción')
+    expect(html).toContain('title="Agregar otra opción de vuelo"')
   })
 
-  it('en una línea de hotel: «Agregar otra opción de hotel»', () => {
-    expect(botones(pintar([item({ grupo: 'hotel', nombre: 'DECAMERON' })]))).toContain(
-      'Agregar otra opción de hotel',
+  it('en una línea de hotel: titulada «Agregar otra opción de hotel»', () => {
+    expect(pintar([item({ grupo: 'hotel', nombre: 'DECAMERON' })])).toContain(
+      'title="Agregar otra opción de hotel"',
     )
   })
 
@@ -171,12 +176,14 @@ describe('el botón de opción nombra su ranura', () => {
     expect(html).not.toContain('Agregar alternativa')
   })
 
-  it('debajo dice qué pasa con el precio y dónde va un tramo de más', () => {
-    const t = texto(pintar([AVIANCA]))
-    expect(t).toContain('Solo una opción entra al precio final')
-    expect(t).toContain('Las demás quedan para comparar')
+  it('la ayuda (qué pasa con el precio y dónde va un tramo de más) vive en el (i) del bloque', () => {
+    const html = pintar([AVIANCA])
+    // Es la etiqueta del botón (i): el texto ya no ocupa el pie del bloque.
+    expect(html).toContain('Solo una opción entra al precio final')
+    expect(html).toContain('Las demás quedan para comparar')
     // El apaño de la §6, que es la única salida correcta mientras 4.1 no exista.
-    expect(t).toContain('Un tramo adicional del mismo viaje no es una opción: va como componente aparte')
+    expect(html).toContain('Un tramo adicional del mismo viaje no es una opción: va como componente aparte')
+    expect(texto(html)).not.toContain('Solo una opción entra al precio final')
   })
 })
 

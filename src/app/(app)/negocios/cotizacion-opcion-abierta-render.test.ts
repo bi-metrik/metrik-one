@@ -1,0 +1,171 @@
+/**
+ * La opción de un bloque en el editor de Trappvel (P2 y P6 del ensayo del 2026-09-23, caso
+ * Providencia), con la lectura REAL de la captura de Avianca.
+ *
+ *  · P6: la fila contraída dice lo que sirve para comparar, no el costo unitario ni la
+ *    descripción larga, y nace contraída si ya está confirmada.
+ *  · P2: abierta, en orden: nombre con lápiz, ficha, nota para el cliente, precio en una
+ *    línea con «Ajustar», adicionales, «Corregir datos» y el menú ⋯.
+ *  · R6: fuera del flujo de viaje la línea no cambia (lo prueba además el golden de R6).
+ *
+ * Se queda en `.ts`: el `include` de vitest es `src/**\/*.test.ts`.
+ */
+import { describe, expect, it, vi } from 'vitest'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {}, refresh: () => {}, back: () => {} }),
+}))
+vi.mock('sonner', () => ({ toast: { success: () => {}, error: () => {} } }))
+vi.mock('@/app/(app)/negocios/cotizacion-actions', () => ({
+  updateCotizacion: async () => ({ success: true }),
+  enviarCotizacion: async () => ({ success: true }),
+  duplicarCotizacion: async () => ({ success: true }),
+  addItem: async () => ({ success: true }),
+  updateItem: async () => ({ success: true }),
+  deleteItem: async () => ({ success: true }),
+  addRubro: async () => ({ success: true }),
+  updateRubro: async () => ({ success: true }),
+  deleteRubro: async () => ({ success: true }),
+  recalcularTotales: async () => ({ success: true }),
+  addItemFromServicio: async () => ({ success: true }),
+  aplicarAIU: async () => ({ success: true }),
+  getRastroDeMargen: async () => ({ ok: true, entradas: [], alcance: 'negocio' }),
+}))
+vi.mock('@/app/(app)/config/servicios-actions', () => ({ getServiciosActivos: async () => [] }))
+vi.mock('@/app/(app)/negocios/cotizacion-pdf-actions', () => ({
+  generateCotizacionPDF: async () => ({ success: true }),
+}))
+vi.mock('@/app/(app)/negocios/pantallazo-actions', () => ({
+  leerPantallazoDeItem: async () => ({ ok: false, codigo: 'RX1', motivo: '', instruccion: '' }),
+  confirmarLecturaDePantallazo: async () => ({ success: true }),
+  descartarPropuestaDePantallazo: async () => ({ success: true }),
+}))
+vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({
+  leerCasillaDeItem: async () => ({ ok: true, mensaje: '', alertas: [] }),
+  quitarCasillaDeItem: async () => ({ success: true }),
+  confirmarMenorNoPaga: async () => ({ success: true }),
+  actualizarComposicionDeItem: async () => ({ success: true }),
+  confirmarTarifaPorPasajero: async () => ({ success: true }),
+}))
+
+const { default: CotizacionEditor } = await import('./cotizacion-editor')
+
+import fixture from '@/lib/cotizaciones/providencia-equipaje.fixture.json'
+import { ranuraPorSlug } from '@/lib/cotizaciones/ranuras-pantallazo'
+
+const LECTURA = (fixture as unknown as Record<string, Record<string, string | null>>)['01-vuelo1-bog-adz-avianca.png']
+const CAMPOS = ranuraPorSlug('vuelo_detalle')!.campos
+  .filter(c => LECTURA[c.slug] !== null && LECTURA[c.slug] !== undefined)
+  .map(c => ({ label: c.label, valor: LECTURA[c.slug] as string }))
+
+function opcion(extra: Record<string, unknown> = {}, tarifa: Record<string, unknown> = {}) {
+  return {
+    id: 'item-1', nombre: 'AVIANCA', subtotal: 1_000_000, orden: 1, precio_venta: 0,
+    descuento_porcentaje: 0, descripcion: 'DESCRIPCIÓN LARGA QUE ESCRIBIÓ ONE', es_ajuste: false,
+    cantidad: 1, margen_porcentaje: null, precio_manual: false, rubros: [], grupo: 'vuelo',
+    opcion_de: null, unidad: null,
+    tarifa_pax: {
+      casillas: { grupo_completo: { moneda: 'COP', total: 1_000_000, campos: CAMPOS, alertas: [] } },
+      descripcionDelSistema: 'DESCRIPCIÓN LARGA QUE ESCRIBIÓ ONE',
+      ...tarifa,
+    },
+    ...extra,
+  }
+}
+
+function pintar(items: unknown[], lineasPorTipo = true) {
+  return renderToStaticMarkup(
+    React.createElement(CotizacionEditor, {
+      oportunidadId: 'neg-1',
+      cotizacion: {
+        id: 'cot-1', codigo: 'COT-2026-0002', consecutivo: 'COT-2026-0002', modo: 'detallada',
+        estado: 'borrador', descripcion: null, valor_total: 0, margen_porcentaje: 15,
+        costo_total: 0, fecha_envio: null, fecha_validez: null, descuento_porcentaje: 0,
+        convencion_margen: 'sobre_venta',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      initialItems: items as any,
+      umbrales: { pisoPct: 5, avisoPct: 10 },
+      lineasPorTipo,
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 1 },
+    }),
+  )
+}
+
+const sinEtiquetas = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+
+describe('P6 · la fila contraída de una opción', () => {
+  it('dice número, horas y bodega; no el costo unitario ni la descripción larga', () => {
+    const t = sinEtiquetas(pintar([opcion()]))
+    expect(t).toContain('AV8520 · ida 06:05 → 08:20 · regreso 17:40 · bodega 23 kg')
+    expect(t).not.toContain('Costo unit.')
+    expect(t).not.toContain('DESCRIPCIÓN LARGA QUE ESCRIBIÓ ONE')
+  })
+
+  it('una opción ya confirmada nace contraída; una sin confirmar, abierta', () => {
+    const confirmada = {
+      confirmada: {
+        composicion: { adultos: 2, ninos: 0, infantes: 1 },
+        costos: [{ tipo: 'adulto', cantidad: 2, unitarioCOP: 500_000, totalCOP: 1_000_000 }],
+        costoTotalCOP: 1_000_000, moneda: 'COP', tasa: null, confirmadaEn: '2026-09-23T12:00:00Z',
+      },
+    }
+    expect(pintar([opcion({}, confirmada)])).not.toContain('data-opcion-abierta')
+    expect(pintar([opcion()])).toContain('data-opcion-abierta="item-1"')
+  })
+
+  it('R6: fuera del flujo de viaje la fila sigue diciendo el costo unitario', () => {
+    expect(sinEtiquetas(pintar([opcion()], false))).toContain('Costo unit.')
+  })
+})
+
+describe('P2 · la opción abierta', () => {
+  it('va en orden: nombre, ficha, nota, precio, corregir', () => {
+    const html = pintar([opcion()])
+    const t = sinEtiquetas(html)
+    const posiciones = [
+      html.indexOf('aria-label="Nombre de la opción"'),
+      html.indexOf('Ida lun 9 nov · BOG 06:05 → ADZ 08:20 · directo'),
+      html.indexOf('Nota para el cliente'),
+      html.indexOf('Ajustar'),
+      html.indexOf('aria-label="Más acciones de la opción"'),
+    ]
+    expect(posiciones.every(p => p > 0)).toBe(true)
+    expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones)
+    expect(t).toContain('2 adultos, 1 infante')
+  })
+
+  it('la descripción que escribió ONE no es nota; la de una persona sí', () => {
+    const deOne = pintar([opcion()])
+    expect(deOne).not.toContain('>DESCRIPCIÓN LARGA QUE ESCRIBIÓ ONE<')
+    const dePersona = pintar([opcion({ descripcion: 'INCLUYE TRASLADO AL HOTEL' })])
+    expect(dePersona).toContain('>INCLUYE TRASLADO AL HOTEL</textarea>')
+  })
+
+  it('el precio va en una línea y los ajustes quedan cerrados en una opción con pantallazo', () => {
+    const t = sinEtiquetas(pintar([opcion()]))
+    expect(t).toMatch(/Costo \$ 1\.000\.000 Precio \$ 1\.176\.471 margen 15,0% Ajustar/)
+    // Cantidad y descuento viven detrás de «Ajustar».
+    expect(t).not.toContain('Desc. compra %')
+    expect(t).not.toContain('Descripción (visible al cliente)')
+  })
+
+  it('sin confirmar, «Corregir datos» se abre solo; confirmada, queda detrás del botón', () => {
+    expect(sinEtiquetas(pintar([opcion()]))).toContain('Cerrar corrección')
+  })
+
+  it('una alerta de lo leído se dice al lado de «Corregir datos»', () => {
+    const conAlerta = opcion({}, {
+      casillas: { grupo_completo: { moneda: 'COP', total: 1_000_000, campos: CAMPOS, alertas: ['La fecha de regreso no se ve'] } },
+    })
+    expect(sinEtiquetas(pintar([conAlerta]))).toContain('Revisar: La fecha de regreso no se ve')
+  })
+
+  it('sin papelera suelta: borrar vive en el menú ⋯', () => {
+    const html = pintar([opcion()])
+    expect(html).toContain('aria-haspopup="menu"')
+  })
+})

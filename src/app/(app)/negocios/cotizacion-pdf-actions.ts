@@ -1050,6 +1050,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       cargo_destino_valor: i.cargo_destino_valor ?? null,
       cargo_destino_moneda: i.cargo_destino_moneda ?? null,
       tramos: i.tramos ?? null,
+      // P2 · la nota que escribió una persona sale debajo de la tarjeta del vuelo o del hotel.
+      descripcion: i.descripcion ?? null,
     })
     const paraLectura = itemsImpresos.map(paraLecturaDe)
     const vuelos = vuelosDeItems(paraLectura)

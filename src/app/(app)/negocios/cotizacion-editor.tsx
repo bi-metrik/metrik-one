@@ -4,7 +4,7 @@ import { Fragment, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
-  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText,
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, MoreHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -83,7 +83,7 @@ import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/ca
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
 import { estadoDePasos, resumenDelViaje } from '@/lib/cotizaciones/estado-pasos'
-import { ordenarComoElViaje } from '@/lib/cotizaciones/opcion-viaje'
+import { fichaDeOpcion, notaDeLaLinea, ordenarComoElViaje, resumenDeOpcion, tituloDeBloque } from '@/lib/cotizaciones/opcion-viaje'
 import PasosCotizacion from '@/app/(app)/negocios/pasos-cotizacion'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
@@ -349,7 +349,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     && terminosAlAbrir({ terminos: textoCliente.terminos, terminosBase: textoCliente.terminosBase, editable: textoCliente.editable }).propuesto
 
   // Detallada mode state
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(initialItems.map(i => i.id)))
+  // En el flujo de viaje (P6) una opción ya confirmada de un bloque nace CONTRAÍDA: su fila
+  // ya dice lo que sirve para comparar, y con tres opciones abiertas el bloque no se lee. Lo
+  // que todavía pide trabajo (sin pantallazo, sin confirmar, o sin bloque) nace abierto.
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(() => new Set(
+    (lineasPorTipo
+      ? initialItems.filter(i => !i.grupo || !leerTarifaPax(i.tarifa_pax).confirmada)
+      : initialItems
+    ).map(i => i.id),
+  ))
+  // La opción abierta de un bloque (P2): «Ajustar» y «Corregir datos» se abren a pedido. Cada
+  // uno tiene un estado automático (abierto cuando hace falta) y el clic lo invierte.
+  const [ajustarInvertido, setAjustarInvertido] = useState<Set<string>>(new Set())
+  const [corregirInvertido, setCorregirInvertido] = useState<Set<string>>(new Set())
+  const [menuOpcionDe, setMenuOpcionDe] = useState<string | null>(null)
+  const invertir = (set: Set<string>, id: string) => {
+    const nuevo = new Set(set)
+    if (nuevo.has(id)) nuevo.delete(id)
+    else nuevo.add(id)
+    return nuevo
+  }
 
   // New item
   const [newItemName, setNewItemName] = useState('')
@@ -1166,6 +1185,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         // y frecuente: el método día a día y los componentes propios no tienen
         // contrato de pantallazo y se costean a mano, como hoy.
         const ranuraDeItem = ranuraDeGrupo(item.grupo)
+        // P2 y P6 · una opción dentro del bloque de su ranura, en el flujo de viaje (Trappvel).
+        // Fuera de ese caso la línea se pinta exactamente como antes (R6).
+        const vistaDeOpcion = lineasPorTipo && enBloqueDeRanura && !isAjuste
+        const lecturaOpcion = { ...item, nombre: item.nombre ?? null, grupo: item.grupo ?? null }
         // El precio por pasajero de la línea (P6): el precio que ya calculó la
         // cascada, repartido en proporción al costo confirmado de cada tipo. Solo si
         // ese costo sigue siendo el de la línea: si alguien editó los rubros después,
@@ -1219,374 +1242,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </>
         )
 
-        return (
-        <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
-          <div
-            className={`flex ${isAjuste ? '' : 'cursor-pointer'} items-center justify-between px-4 py-3`}
-            onClick={() => !isAjuste && toggleItem(item.id)}
-          >
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              {!isAjuste && (expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />)}
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium truncate">{item.nombre || 'Item sin nombre'}</span>
-                  {isAjuste && (
-                    <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
-                  )}
-                  {/* La ranura, visible sin abrir la linea: con nueve lineas en
-                      pantalla, saber cuales compiten entre si es la unica forma de
-                      leer la lista. «opción» se dice aparte porque una opcion
-                      no se suma al total salvo que un itinerario la elija.
-                      ⚠️ Se pinta la ETIQUETA de la ranura, no el grupo crudo: con dos
-                      vuelos, «vuelo» y «vuelo 2: san andrés a providencia» se leen
-                      como dos cosas sin relación, y el chip existe justo para que se
-                      vea de un vistazo cuáles son del mismo tipo y cuáles compiten. */}
-                  {/* Dentro del bloque de su ranura el chip sobra: el encabezado ya la nombra. */}
-                  {!isAjuste && item.grupo && !enBloqueDeRanura && (
-                    <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      {etiquetaDeRanura(item.grupo)}{item.opcion_de ? ' · opción' : ''}
-                    </span>
-                  )}
-                  {/* «Opción 2» es un relleno hasta que se lea su pantallazo, y lo dice. */}
-                  {!isAjuste && lineasPorTipo && esNombreDeOpcion(item.nombre) && !leerTarifaPax(item.tarifa_pax).casillas?.grupo_completo && (
-                    <span className="text-[10px] text-muted-foreground">· pega el pantallazo</span>
-                  )}
-                  {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
-                      líneas en pantalla, en qué sección del documento sale cada una
-                      es justo lo que hay que poder leer de un vistazo. Solo se
-                      pintan cuando la cotización ya usa días, para no meterle ruido
-                      a una cotización que no es un viaje. */}
-                  {!isAjuste && porDias && item.dia_relativo != null && (
-                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
-                      Día {item.dia_relativo}
-                    </span>
-                  )}
-                  {!isAjuste && idsSugeridos.has(item.id) && (
-                    <span
-                      title={
-                        esFueraDelPrecio
-                          ? 'Se imprime al final como actividad adicional no incluida, con su precio a la vista. No suma al total.'
-                          : 'Sin día: se imprime al final como actividad adicional no incluida'
-                      }
-                      className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                    >
-                      Sugerida{esFueraDelPrecio ? ' · fuera del precio' : ''}{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
-                    </span>
-                  )}
-                  {!isAjuste && costoDelItem === 0 && (
-                    <span
-                      title="Este item no tiene costo, así que no suma al costo total ni deja medir margen"
-                      className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                    >
-                      Sin costo
-                    </span>
-                  )}
-                </div>
-                {!isAjuste && (item.descripcion || costoDelItem > 0) && (
-                  <span className="text-[10px] text-muted-foreground truncate block">
-                    {costoDelItem > 0 && <span>Costo unit. {formatCOP(costoDelItem)}</span>}
-                    {costoDelItem > 0 && item.descripcion && <span> · </span>}
-                    {item.descripcion}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="text-right">
-                {itemCantidad > 1 && (
-                  <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
-                )}
-                <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''} ${esFueraDelPrecio ? 'text-muted-foreground' : ''}`}>{formatCOP(precioLinea)}</span>
-                {/* Fuera del precio la cifra sigue a la vista (es la que el cliente
-                    lee en el documento), pero se dice que no suma: una columna de
-                    precios donde una no cuenta, sin decirlo, se lee mal. */}
-                {esFueraDelPrecio && (
-                  <span className="block text-[10px] text-muted-foreground">No suma al total</span>
-                )}
-                {/* El descuento del ítem ya está dentro del costo: repetirlo aquí
-                    como rebaja del precio lo contaría dos veces. */}
-                {!isAjuste && costoLinea > 0 && (
-                  <span className="block text-[10px] text-muted-foreground">Costo {formatCOP(costoLinea)}</span>
-                )}
-                {/* El margen de la línea, SIEMPRE que se pueda medir — también
-                    cuando lo hereda de la cotización. Antes solo aparecía en las
-                    líneas con excepción propia, así que armar un viaje entero sin
-                    una sola excepción dejaba la pantalla sin un solo margen a la
-                    vista: exactamente lo que hay que poder ver mientras se arma. */}
-                {!isAjuste && margenTexto && (
-                  <span
-                    className={`block text-[10px] font-medium tabular-nums ${claseNivelMargen(nivelMargen)}`}
-                    title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
-                  >
-                    Margen {margenTexto}
-                  </span>
-                )}
-                {/* Precio sin costo con el IVA sobre el ingreso propio: no se inventa
-                    una base. Se dice en la línea, que es donde se arregla. */}
-                {!isAjuste && !esFueraDelPrecio && ivaPorLinea?.get(item.id)?.sinCosto && (
-                  <span className="block text-[10px] font-medium text-amber-700">{TEXTO_IVA_SIN_CALCULAR}</span>
-                )}
-              </div>
-              {editable && !isAjuste && (
-                <button
-                  onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
-                  className="rounded p-1 text-red-500 hover:bg-red-50"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {!isAjuste && expandedItems.has(item.id) && (
-            <div className="border-t px-4 pb-3 pt-2">
-              {/* La FICHA de la línea: cómo se llama, en qué ranura compite y en
-                  qué unidad se vende.
-
-                  · El NOMBRE no tenía input en ninguna parte: se pintaba como
-                    texto en el encabezado. Una alternativa nace llamándose
-                    «Vuelo BOG-PUJ (alternativa)» y no había forma de renombrarla a
-                    «WINGO», que es justo lo que distingue una opción de otra en la
-                    tabla de combinaciones y en el PDF. Va aquí y no en el
-                    encabezado porque ese renglón alterna la línea al hacer clic.
-                  · El GRUPO pasa de texto libre a lista: ver `SelectorRanura`. */}
-              {editable && (
-                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="col-span-2">
-                    <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                      Nombre de la línea
-                    </label>
-                    <input
-                      type="text"
-                      defaultValue={item.nombre ?? ''}
-                      placeholder="AVIANCA BOG–PUJ, Hard Rock Punta Cana…"
-                      maxLength={200}
-                      aria-label="Nombre de la línea"
-                      className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-                      onBlur={e => {
-                        const val = comoSeGuarda(e.target.value.trim())
-                        // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
-                        e.target.value = val
-                        if (val === (item.nombre ?? '')) return
-                        startTransition(async () => {
-                          const res = await updateItem(item.id, { nombre: val })
-                          if (!res.success) { toast.error(res.error); return }
-                          router.refresh()
-                        })
-                      }}
-                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                    />
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">
-                      Es lo que distingue una alternativa de otra y lo que imprime el PDF
-                    </p>
-                  </div>
-                  {/* EL GRUPO ya lo fijó el botón que se apretó («+ Vuelo») y el chip
-                      del encabezado lo repite. En el flujo de viaje deja la primera
-                      fila y pasa a una acción secundaria: volver a preguntarlo en cada
-                      línea es preguntar lo que el sistema ya sabe. Fuera de ese flujo
-                      (Termotech, Arca, WMC) el campo se queda donde estaba. */}
-                  {!lineasPorTipo && (
-                    <SelectorRanura
-                      valor={item.grupo ?? null}
-                      gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
-                      disabled={isPending}
-                      onCambio={val => {
-                        startTransition(async () => {
-                          const res = await actualizarRanuraDeItem(item.id, { grupo: val })
-                          if (!res.success) { toast.error(res.error); return }
-                          router.refresh()
-                        })
-                      }}
-                    />
-                  )}
-                  {/* LA UNIDAD no se teclea en el flujo de viaje.
-                      La escribe la propia ranura al leer el pantallazo
-                      (`ranura.unidadPorDefecto`), y al confirmar la tarifa por
-                      pasajero el servidor la deja en `null` a propósito: la línea es
-                      el grupo y el reparto lo dicen los rubros. Teclear «pax» aquí
-                      era pedir a mano un dato que el flujo escribe solo y que
-                      además borra un minuto después. */}
-                  {!lineasPorTipo && (
-                    <div>
-                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                        Unidad
-                      </label>
-                      <input
-                        type="text"
-                        defaultValue={item.unidad ?? ''}
-                        placeholder="pax, noches, trayectos…"
-                        className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-                        onBlur={e => {
-                          const val = e.target.value.trim()
-                          if (val === (item.unidad ?? '')) return
-                          startTransition(async () => {
-                            const res = await actualizarRanuraDeItem(item.id, { unidad: val })
-                            if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
-                          })
-                        }}
-                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                      />
-                      {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
-                          pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
-                          morfología del español sobre texto libre acierta a veces. Por eso
-                          el marcador sugiere la forma en plural, que es la del caso común. */}
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        Se imprime tal cual al cliente
-                      </p>
-                    </div>
-                  )}
-                  {/* EL DÍA. Un solo interruptor: con día la línea imprime en el
-                      itinerario día por día; sin día, y si declara un grupo que no
-                      se combina, cae al paquete de «actividades adicionales no
-                      incluidas». No hay un segundo desplegable de sección.
-
-                      Los vuelos y hoteles no lo muestran: se comparan en la tabla
-                      de combinaciones y su sitio lo decide el itinerario elegido.
-                      Ofrecer un campo que el servidor va a rechazar es peor que no
-                      ofrecerlo. */}
-                  {puedeLlevarDia({ id: item.id, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false }) && (
-                    <div>
-                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
-                        Día del viaje
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        step={1}
-                        defaultValue={item.dia_relativo ?? ''}
-                        placeholder="Sin día"
-                        aria-label="Día del viaje"
-                        // Fuera del precio no lleva día: con día entraría al
-                        // itinerario, o sea incluida. El servidor lo rechaza, así
-                        // que la pantalla no lo ofrece.
-                        disabled={esFueraDelPrecio}
-                        className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
-                        onBlur={e => {
-                          const txt = e.target.value.trim()
-                          const val = txt === '' ? null : Number(txt)
-                          if (val === (item.dia_relativo ?? null)) return
-                          startTransition(async () => {
-                            const res = await actualizarDiaDeItem(item.id, { dia_relativo: val })
-                            if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
-                          })
-                        }}
-                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                      />
-                      {/* El día es RELATIVO: el itinerario se arma antes de que la
-                          salida tenga fecha. */}
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {esFueraDelPrecio
-                          ? 'Fuera del precio: márcala para que entre al precio antes de darle un día'
-                          : idsSugeridos.has(item.id)
-                            ? 'Sin día: sale como actividad adicional no incluida'
-                            : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
-                      </p>
-                    </div>
-                  )}
-                  {/* EL SEGUNDO INTERRUPTOR: ¿entra al precio? Separa MOSTRAR el
-                      precio de COBRARLO. Solo se ofrece en una sugerencia (grupo que
-                      no se combina, sin día): en cualquier otra línea sacarla del
-                      precio la haría desaparecer del documento sin sumar, y el
-                      servidor lo rechaza. No es el check de mostrar: aquel es
-                      visibilidad, este es plata, y por eso recalcula el total. */}
-                  {puedeSalirDelPrecio && (
-                    <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
-                      <input
-                        type="checkbox"
-                        defaultChecked={!esFueraDelPrecio}
-                        disabled={isPending}
-                        aria-label="Entra al precio de la cotización"
-                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                        onChange={e => {
-                          const val = e.target.checked
-                          startTransition(async () => {
-                            const res = await actualizarDiaDeItem(item.id, { entra_al_precio: val })
-                            if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
-                          })
-                        }}
-                      />
-                      <span className="text-[11px] text-muted-foreground">
-                        <span className="font-medium text-foreground">Entra al precio de la cotización.</span>{' '}
-                        {esFueraDelPrecio
-                          ? 'Fuera del precio: se ofrece con su valor a la vista y no suma ni al total, ni al costo, ni al margen.'
-                          : 'Desmárcala para ofrecerla como actividad adicional: el cliente ve su precio y no suma al total.'}
-                      </span>
-                    </label>
-                  )}
-                  {/* El check de la sugerencia. Solo aparece cuando la línea ES una
-                      sugerencia: un interruptor que no aplica confunde más que
-                      ayudar, y aquí «no aplica» se sabe con certeza. */}
-                  {idsSugeridos.has(item.id) && (
-                    <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
-                      <input
-                        type="checkbox"
-                        defaultChecked={item.mostrar_en_sugeridos !== false}
-                        disabled={isPending}
-                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                        onChange={e => {
-                          const val = e.target.checked
-                          startTransition(async () => {
-                            const res = await actualizarDiaDeItem(item.id, { mostrar_en_sugeridos: val })
-                            if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
-                          })
-                        }}
-                      />
-                      <span className="text-[11px] text-muted-foreground">
-                        Mostrarla al cliente entre las actividades sugeridas.{' '}
-                        {esFueraDelPrecio ? (
-                          <span>Fuera del precio: oculta, ni se ve ni se cobra.</span>
-                        ) : (
-                          <span className="text-amber-700">
-                            Ocultarla NO la saca del total: para eso, desmarca «Entra al precio».
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  )}
-                  {/* Fuera del flujo de viaje el botón se queda donde estaba: el
-                      bloque de Termotech, Arca y WMC no cambia. */}
-                  {!lineasPorTipo && <div className="col-span-2 sm:col-span-4">{botonOtraOpcion}</div>}
-                  {/* MOVER LA LÍNEA A OTRA OPCIÓN. El grupo decide con quién compite:
-                      es el caso raro de querer que dos líneas se comparen entre sí, y
-                      por eso vive detrás de un clic en vez de en la primera fila. */}
-                  {lineasPorTipo && (
-                    <div className="col-span-2 sm:col-span-4">
-                      {moverGrupoDe === item.id ? (
-                        <SelectorRanura
-                          valor={item.grupo ?? null}
-                          gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
-                          disabled={isPending}
-                          onCambio={val => {
-                            startTransition(async () => {
-                              const res = await actualizarRanuraDeItem(item.id, { grupo: val })
-                              if (!res.success) { toast.error(res.error); return }
-                              setMoverGrupoDe(null)
-                              router.refresh()
-                            })
-                          }}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setMoverGrupoDe(item.id)}
-                          className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
-                        >
-                          Mover a otra opción
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* El cargue de pantallazo SOLO existe si la ranura de la línea tiene
-                  contrato de captura (§3.1). Un ítem sin grupo, o con un grupo propio
-                  como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
-                  parezca y ese número acaba dentro de un costo. */}
+        const jsxTarifaPax = (
+          <>
               {editable && ranuraDeItem && (
                 <TarifaPasajeroItem
                   itemId={item.id}
@@ -1598,12 +1255,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   onCambio={() => router.refresh()}
                 />
               )}
-              {/* Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Se ofrecen donde
-                  se ofrece el cargue de pantallazo —líneas con ranura del catálogo—
-                  porque es donde la pregunta significa algo: una línea de Termotech no
-                  gana una sección al abrir su cotización, que es R6 en la pantalla.
-                  ⚠️ NO se condiciona a `editable`: una cotización ya enviada tiene que
-                  poder MOSTRAR sus adicionales; lo que se apaga es escribirlos. */}
+          </>
+        )
+        const jsxAdicionales = (
+          <>
               {ranuraDeItem && (
                 <AdicionalesItem
                   itemId={item.id}
@@ -1612,7 +1267,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   editable={editable}
                 />
               )}
-              {/* Item sale fields */}
+          </>
+        )
+        const jsxCamposVenta = (
+          <>
               {editable && (
                 <div className="mb-3 space-y-2">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -2060,6 +1718,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     </div>
                   </div>
 
+                  {!vistaDeOpcion && (
                   <div>
                     <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Descripción (visible al cliente)</label>
                     <input
@@ -2077,6 +1736,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                       }}
                     />
                   </div>
+                  )}
 
                   {/* AL PIE, DESPUÉS DEL COSTO Y LA DESCRIPCIÓN (§2.2). Un botón que
                       agrega algo va después de lo que agrega: arriba, entre el nombre
@@ -2086,12 +1746,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   {lineasPorTipo && !enBloqueDeRanura && <div className="border-t pt-2">{botonOtraOpcion}</div>}
                 </div>
               )}
-              {/* Rubros table (internal costs).
-                  ⚠️ Solo los CONFIRMADOS. Los sugeridos por un pantallazo se
-                  revisan en su propio panel, con la captura al lado: mezclarlos
-                  aquí los haría ver como costo ya aceptado, que es lo que R-P1
-                  prohíbe, y ademas el total de la tabla no cuadraría con el
-                  costo del item. */}
+          </>
+        )
+        const jsxRubros = (
+          <>
               {rubrosConfirmados.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
@@ -2258,8 +1916,598 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   Agregar rubro
                 </button>
               ) : null}
+          </>
+        )
+        // ── P2 · la opción abierta de un bloque (solo Trappvel) ─────────────────────
+        // En este orden: el nombre, la ficha de lo que va a la cotización, la nota para el
+        // cliente, el precio, los adicionales y, detrás de un clic, corregir lo leído. Siete
+        // campos para decir una sola cosa era lo que Mauricio no podía leer.
+        const fichaOpcion = vistaDeOpcion ? fichaDeOpcion(lecturaOpcion, composicionDeLinea(tarifaDelItem, composicionViaje)) : []
+        const notaOpcion = vistaDeOpcion ? notaDeLaLinea(item) : null
+        const conCaptura = !!tarifaDelItem.casillas?.grupo_completo || !!tarifaDelItem.confirmada
+        const alertasCaptura = tarifaDelItem.casillas?.grupo_completo?.alertas ?? []
+        // «Corregir datos» se abre SOLO cuando lo leído pide mirada: sin pantallazo, sin
+        // confirmar o con algo que revisar. «Ajustar» se abre solo en la opción costeada a mano,
+        // donde cantidad y descuento son el trabajo y no una excepción.
+        const corregirAuto = !conCaptura || !tarifaDelItem.confirmada || alertasCaptura.length > 0
+        const corregirAbierto = corregirAuto !== corregirInvertido.has(item.id)
+        const ajustarAuto = !ranuraDeItem
+        const ajustarAbierto = ajustarAuto !== ajustarInvertido.has(item.id)
+        const jsxOpcionAbierta = (
+          <div className="space-y-2.5 border-t px-4 pb-3 pt-2" data-opcion-abierta={item.id}>
+            {/* El nombre, con su lápiz: es lo que distingue una opción de otra en la tabla
+                de tarifas y en el documento. */}
+            {editable && (
+              <label className="flex items-center gap-1.5">
+                <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                <input
+                  type="text"
+                  defaultValue={item.nombre ?? ''}
+                  maxLength={200}
+                  aria-label="Nombre de la opción"
+                  className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold hover:border-[#E5E7EB] focus:border-[#E5E7EB] focus:bg-background"
+                  onBlur={e => {
+                    const val = comoSeGuarda(e.target.value.trim())
+                    e.target.value = val
+                    if (val === (item.nombre ?? '')) return
+                    startTransition(async () => {
+                      const res = await updateItem(item.id, { nombre: val })
+                      if (!res.success) { toast.error(res.error); return }
+                      router.refresh()
+                    })
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                />
+              </label>
+            )}
+
+            {/* La ficha: lo leído, en palabras. Lo que no se leyó no sale. */}
+            {fichaOpcion.length > 0 ? (
+              <ul className="space-y-0.5 text-xs text-[#1A1A1A]">
+                {fichaOpcion.map((renglon, i) => <li key={i}>{renglon}</li>)}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {conCaptura
+                  ? 'El pantallazo no dejó datos para la ficha: revísalo en «Corregir datos».'
+                  : 'Todavía no hay pantallazo leído de esta opción: pégalo abajo.'}
+              </p>
+            )}
+
+            {/* La nota para el cliente. Es la descripción de la línea cuando la escribió una
+                persona; la que armó ONE no es nota (repite la ficha) y no se muestra aquí. */}
+            {editable ? (
+              <div>
+                <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Nota para el cliente</label>
+                <textarea
+                  defaultValue={notaOpcion ?? ''}
+                  rows={2}
+                  maxLength={500}
+                  placeholder="Algo que el cliente deba saber de esta opción (opcional)"
+                  aria-label="Nota para el cliente"
+                  className="w-full resize-y rounded border bg-background px-2 py-1.5 text-xs"
+                  onBlur={e => {
+                    const val = comoSeGuarda(e.target.value.trim())
+                    e.target.value = val
+                    if (val === (notaOpcion ?? '')) return
+                    startTransition(async () => {
+                      const res = await updateItem(item.id, { descripcion: val })
+                      if (!res.success) { toast.error(res.error); return }
+                      router.refresh()
+                    })
+                  }}
+                />
+                <p className="mt-0.5 text-[10px] text-muted-foreground">Sale en el documento debajo de la ficha.</p>
+              </div>
+            ) : notaOpcion ? (
+              <p className="text-xs italic text-[#1A1A1A]">{notaOpcion}</p>
+            ) : null}
+
+            {/* P5 · el precio en una línea: costo, precio y margen. Cantidad, descuento, IVA
+                y marginar distinto viven detrás de «Ajustar». */}
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs tabular-nums">
+                <span><span className="text-muted-foreground">Costo </span>{costoLinea > 0 ? formatCOP(costoLinea) : '—'}</span>
+                <span><span className="text-muted-foreground">Precio </span><span className="font-semibold">{formatCOP(precioLinea)}</span></span>
+                {margenTexto && (
+                  <span
+                    className={`font-medium ${claseNivelMargen(nivelMargen)}`}
+                    title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
+                  >
+                    margen {margenTexto}
+                  </span>
+                )}
+                {editable && (
+                  <button
+                    type="button"
+                    onClick={() => setAjustarInvertido(s => invertir(s, item.id))}
+                    aria-expanded={ajustarAbierto}
+                    className="ml-auto text-[11px] text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    {ajustarAbierto ? 'Cerrar ajustes' : 'Ajustar'}
+                  </button>
+                )}
+              </div>
+              {precioPorPax && precioPorPax.length > 0 && (
+                <p className="mt-0.5 text-[11px] tabular-nums">
+                  <span className="text-muted-foreground">Por pasajero: </span>
+                  <span className="font-medium">
+                    {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
+                  </span>
+                </p>
+              )}
             </div>
-          )}
+            {ajustarAbierto && jsxCamposVenta}
+
+            {jsxAdicionales}
+
+            {/* Corregir lo leído o cambiar el pantallazo, y el menú de la opción. */}
+            <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+              {editable && ranuraDeItem && (
+                <button
+                  type="button"
+                  onClick={() => setCorregirInvertido(s => invertir(s, item.id))}
+                  aria-expanded={corregirAbierto}
+                  className="rounded-md border bg-background px-2 py-1 text-[11px] font-medium hover:bg-accent"
+                >
+                  {corregirAbierto ? 'Cerrar corrección' : 'Corregir datos o cambiar pantallazo'}
+                </button>
+              )}
+              {alertasCaptura.length > 0 && (
+                <span className="text-[10px] font-medium text-amber-700">Revisar: {alertasCaptura[0]}</span>
+              )}
+              {editable && (
+                <div className="relative ml-auto">
+                  <button
+                    type="button"
+                    aria-label="Más acciones de la opción"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpcionDe === item.id}
+                    onClick={() => setMenuOpcionDe(m => (m === item.id ? null : item.id))}
+                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {menuOpcionDe === item.id && (
+                    <div role="menu" className="absolute right-0 z-10 mt-1 w-48 rounded-md border bg-background p-1 text-xs shadow-md">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => { setMoverGrupoDe(item.id); setMenuOpcionDe(null) }}
+                        className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                      >
+                        Pasar a otra ranura…
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={isPending}
+                        onClick={() => { setMenuOpcionDe(null); handleDeleteItem(item.id) }}
+                        className="block w-full rounded px-2 py-1.5 text-left text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        Borrar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {editable && moverGrupoDe === item.id && (
+              <SelectorRanura
+                valor={item.grupo ?? null}
+                gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                disabled={isPending}
+                onCambio={val => {
+                  startTransition(async () => {
+                    const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                    if (!res.success) { toast.error(res.error); return }
+                    setMoverGrupoDe(null)
+                    router.refresh()
+                  })
+                }}
+              />
+            )}
+            {corregirAbierto && (
+              <div className="space-y-2">
+                {jsxTarifaPax}
+                {jsxRubros}
+              </div>
+            )}
+          </div>
+        )
+        return (
+        <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
+          <div
+            className={`flex ${isAjuste ? '' : 'cursor-pointer'} items-center justify-between px-4 py-3`}
+            onClick={() => !isAjuste && toggleItem(item.id)}
+          >
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              {!isAjuste && (expandedItems.has(item.id) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />)}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium truncate">{item.nombre || 'Item sin nombre'}</span>
+                  {isAjuste && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Auto</span>
+                  )}
+                  {/* La ranura, visible sin abrir la linea: con nueve lineas en
+                      pantalla, saber cuales compiten entre si es la unica forma de
+                      leer la lista. «opción» se dice aparte porque una opcion
+                      no se suma al total salvo que un itinerario la elija.
+                      ⚠️ Se pinta la ETIQUETA de la ranura, no el grupo crudo: con dos
+                      vuelos, «vuelo» y «vuelo 2: san andrés a providencia» se leen
+                      como dos cosas sin relación, y el chip existe justo para que se
+                      vea de un vistazo cuáles son del mismo tipo y cuáles compiten. */}
+                  {/* Dentro del bloque de su ranura el chip sobra: el encabezado ya la nombra. */}
+                  {!isAjuste && item.grupo && !enBloqueDeRanura && (
+                    <span className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {etiquetaDeRanura(item.grupo)}{item.opcion_de ? ' · opción' : ''}
+                    </span>
+                  )}
+                  {/* «Opción 2» es un relleno hasta que se lea su pantallazo, y lo dice. */}
+                  {!isAjuste && lineasPorTipo && esNombreDeOpcion(item.nombre) && !leerTarifaPax(item.tarifa_pax).casillas?.grupo_completo && (
+                    <span className="text-[10px] text-muted-foreground">· pega el pantallazo</span>
+                  )}
+                  {/* El día y la sugerencia, visibles SIN abrir la línea: con nueve
+                      líneas en pantalla, en qué sección del documento sale cada una
+                      es justo lo que hay que poder leer de un vistazo. Solo se
+                      pintan cuando la cotización ya usa días, para no meterle ruido
+                      a una cotización que no es un viaje. */}
+                  {!isAjuste && porDias && item.dia_relativo != null && (
+                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                      Día {item.dia_relativo}
+                    </span>
+                  )}
+                  {!isAjuste && idsSugeridos.has(item.id) && (
+                    <span
+                      title={
+                        esFueraDelPrecio
+                          ? 'Se imprime al final como actividad adicional no incluida, con su precio a la vista. No suma al total.'
+                          : 'Sin día: se imprime al final como actividad adicional no incluida'
+                      }
+                      className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                    >
+                      Sugerida{esFueraDelPrecio ? ' · fuera del precio' : ''}{item.mostrar_en_sugeridos === false ? ' · oculta' : ''}
+                    </span>
+                  )}
+                  {!isAjuste && costoDelItem === 0 && (
+                    <span
+                      title="Este item no tiene costo, así que no suma al costo total ni deja medir margen"
+                      className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                    >
+                      Sin costo
+                    </span>
+                  )}
+                </div>
+                {/* P6 · en la opción de un bloque la fila dice lo que sirve para COMPARAR
+                    («AV8520 · ida 06:05 → 08:20 · bodega 23 kg»; en el hotel habitación,
+                    régimen y cancelación), no el costo unitario ni la descripción larga. */}
+                {vistaDeOpcion && resumenDeOpcion(lecturaOpcion) && (
+                  <span className="block truncate text-[11px] text-muted-foreground">{resumenDeOpcion(lecturaOpcion)}</span>
+                )}
+                {!isAjuste && !vistaDeOpcion && (item.descripcion || costoDelItem > 0) && (
+                  <span className="text-[10px] text-muted-foreground truncate block">
+                    {costoDelItem > 0 && <span>Costo unit. {formatCOP(costoDelItem)}</span>}
+                    {costoDelItem > 0 && item.descripcion && <span> · </span>}
+                    {item.descripcion}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="text-right">
+                {itemCantidad > 1 && (
+                  <span className="text-[10px] text-muted-foreground mr-1">{itemCantidad} x</span>
+                )}
+                <span className={`text-xs font-medium ${isNegativo ? 'text-red-600' : ''} ${esFueraDelPrecio ? 'text-muted-foreground' : ''}`}>{formatCOP(precioLinea)}</span>
+                {/* Fuera del precio la cifra sigue a la vista (es la que el cliente
+                    lee en el documento), pero se dice que no suma: una columna de
+                    precios donde una no cuenta, sin decirlo, se lee mal. */}
+                {esFueraDelPrecio && (
+                  <span className="block text-[10px] text-muted-foreground">No suma al total</span>
+                )}
+                {/* El descuento del ítem ya está dentro del costo: repetirlo aquí
+                    como rebaja del precio lo contaría dos veces. */}
+                {!isAjuste && costoLinea > 0 && (
+                  <span className="block text-[10px] text-muted-foreground">Costo {formatCOP(costoLinea)}</span>
+                )}
+                {/* El margen de la línea, SIEMPRE que se pueda medir — también
+                    cuando lo hereda de la cotización. Antes solo aparecía en las
+                    líneas con excepción propia, así que armar un viaje entero sin
+                    una sola excepción dejaba la pantalla sin un solo margen a la
+                    vista: exactamente lo que hay que poder ver mientras se arma. */}
+                {!isAjuste && margenTexto && (
+                  <span
+                    className={`block text-[10px] font-medium tabular-nums ${claseNivelMargen(nivelMargen)}`}
+                    title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
+                  >
+                    Margen {margenTexto}
+                  </span>
+                )}
+                {/* Precio sin costo con el IVA sobre el ingreso propio: no se inventa
+                    una base. Se dice en la línea, que es donde se arregla. */}
+                {!isAjuste && !esFueraDelPrecio && ivaPorLinea?.get(item.id)?.sinCosto && (
+                  <span className="block text-[10px] font-medium text-amber-700">{TEXTO_IVA_SIN_CALCULAR}</span>
+                )}
+              </div>
+              {editable && !isAjuste && !vistaDeOpcion && (
+                <button
+                  onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
+                  className="rounded p-1 text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!isAjuste && expandedItems.has(item.id) && (vistaDeOpcion ? jsxOpcionAbierta : (
+            <div className="border-t px-4 pb-3 pt-2">
+              {/* La FICHA de la línea: cómo se llama, en qué ranura compite y en
+                  qué unidad se vende.
+
+                  · El NOMBRE no tenía input en ninguna parte: se pintaba como
+                    texto en el encabezado. Una alternativa nace llamándose
+                    «Vuelo BOG-PUJ (alternativa)» y no había forma de renombrarla a
+                    «WINGO», que es justo lo que distingue una opción de otra en la
+                    tabla de combinaciones y en el PDF. Va aquí y no en el
+                    encabezado porque ese renglón alterna la línea al hacer clic.
+                  · El GRUPO pasa de texto libre a lista: ver `SelectorRanura`. */}
+              {editable && (
+                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="col-span-2">
+                    <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                      Nombre de la línea
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue={item.nombre ?? ''}
+                      placeholder="AVIANCA BOG–PUJ, Hard Rock Punta Cana…"
+                      maxLength={200}
+                      aria-label="Nombre de la línea"
+                      className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                      onBlur={e => {
+                        const val = comoSeGuarda(e.target.value.trim())
+                        // La casilla pinta lo que se guardó (ver `comoSeGuarda`).
+                        e.target.value = val
+                        if (val === (item.nombre ?? '')) return
+                        startTransition(async () => {
+                          const res = await updateItem(item.id, { nombre: val })
+                          if (!res.success) { toast.error(res.error); return }
+                          router.refresh()
+                        })
+                      }}
+                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                    />
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      Es lo que distingue una alternativa de otra y lo que imprime el PDF
+                    </p>
+                  </div>
+                  {/* EL GRUPO ya lo fijó el botón que se apretó («+ Vuelo») y el chip
+                      del encabezado lo repite. En el flujo de viaje deja la primera
+                      fila y pasa a una acción secundaria: volver a preguntarlo en cada
+                      línea es preguntar lo que el sistema ya sabe. Fuera de ese flujo
+                      (Termotech, Arca, WMC) el campo se queda donde estaba. */}
+                  {!lineasPorTipo && (
+                    <SelectorRanura
+                      valor={item.grupo ?? null}
+                      gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                      disabled={isPending}
+                      onCambio={val => {
+                        startTransition(async () => {
+                          const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                          if (!res.success) { toast.error(res.error); return }
+                          router.refresh()
+                        })
+                      }}
+                    />
+                  )}
+                  {/* LA UNIDAD no se teclea en el flujo de viaje.
+                      La escribe la propia ranura al leer el pantallazo
+                      (`ranura.unidadPorDefecto`), y al confirmar la tarifa por
+                      pasajero el servidor la deja en `null` a propósito: la línea es
+                      el grupo y el reparto lo dicen los rubros. Teclear «pax» aquí
+                      era pedir a mano un dato que el flujo escribe solo y que
+                      además borra un minuto después. */}
+                  {!lineasPorTipo && (
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                        Unidad
+                      </label>
+                      <input
+                        type="text"
+                        defaultValue={item.unidad ?? ''}
+                        placeholder="pax, noches, trayectos…"
+                        className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                        onBlur={e => {
+                          const val = e.target.value.trim()
+                          if (val === (item.unidad ?? '')) return
+                          startTransition(async () => {
+                            const res = await actualizarRanuraDeItem(item.id, { unidad: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                      />
+                      {/* La unidad se imprime TAL CUAL en la cotización: el sistema no
+                          pluraliza. «5 noche» se ve mal y «1 noches» también, y adivinar
+                          morfología del español sobre texto libre acierta a veces. Por eso
+                          el marcador sugiere la forma en plural, que es la del caso común. */}
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Se imprime tal cual al cliente
+                      </p>
+                    </div>
+                  )}
+                  {/* EL DÍA. Un solo interruptor: con día la línea imprime en el
+                      itinerario día por día; sin día, y si declara un grupo que no
+                      se combina, cae al paquete de «actividades adicionales no
+                      incluidas». No hay un segundo desplegable de sección.
+
+                      Los vuelos y hoteles no lo muestran: se comparan en la tabla
+                      de combinaciones y su sitio lo decide el itinerario elegido.
+                      Ofrecer un campo que el servidor va a rechazar es peor que no
+                      ofrecerlo. */}
+                  {puedeLlevarDia({ id: item.id, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false }) && (
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium text-muted-foreground">
+                        Día del viaje
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        defaultValue={item.dia_relativo ?? ''}
+                        placeholder="Sin día"
+                        aria-label="Día del viaje"
+                        // Fuera del precio no lleva día: con día entraría al
+                        // itinerario, o sea incluida. El servidor lo rechaza, así
+                        // que la pantalla no lo ofrece.
+                        disabled={esFueraDelPrecio}
+                        className="w-full rounded border bg-background px-2 py-1.5 text-sm disabled:opacity-60"
+                        onBlur={e => {
+                          const txt = e.target.value.trim()
+                          const val = txt === '' ? null : Number(txt)
+                          if (val === (item.dia_relativo ?? null)) return
+                          startTransition(async () => {
+                            const res = await actualizarDiaDeItem(item.id, { dia_relativo: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                      />
+                      {/* El día es RELATIVO: el itinerario se arma antes de que la
+                          salida tenga fecha. */}
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        {esFueraDelPrecio
+                          ? 'Fuera del precio: márcala para que entre al precio antes de darle un día'
+                          : idsSugeridos.has(item.id)
+                            ? 'Sin día: sale como actividad adicional no incluida'
+                            : 'Relativo a la salida (1 = primer día). Vacío = sugerida'}
+                      </p>
+                    </div>
+                  )}
+                  {/* EL SEGUNDO INTERRUPTOR: ¿entra al precio? Separa MOSTRAR el
+                      precio de COBRARLO. Solo se ofrece en una sugerencia (grupo que
+                      no se combina, sin día): en cualquier otra línea sacarla del
+                      precio la haría desaparecer del documento sin sumar, y el
+                      servidor lo rechaza. No es el check de mostrar: aquel es
+                      visibilidad, este es plata, y por eso recalcula el total. */}
+                  {puedeSalirDelPrecio && (
+                    <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
+                      <input
+                        type="checkbox"
+                        defaultChecked={!esFueraDelPrecio}
+                        disabled={isPending}
+                        aria-label="Entra al precio de la cotización"
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        onChange={e => {
+                          const val = e.target.checked
+                          startTransition(async () => {
+                            const res = await actualizarDiaDeItem(item.id, { entra_al_precio: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                      />
+                      <span className="text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground">Entra al precio de la cotización.</span>{' '}
+                        {esFueraDelPrecio
+                          ? 'Fuera del precio: se ofrece con su valor a la vista y no suma ni al total, ni al costo, ni al margen.'
+                          : 'Desmárcala para ofrecerla como actividad adicional: el cliente ve su precio y no suma al total.'}
+                      </span>
+                    </label>
+                  )}
+                  {/* El check de la sugerencia. Solo aparece cuando la línea ES una
+                      sugerencia: un interruptor que no aplica confunde más que
+                      ayudar, y aquí «no aplica» se sabe con certeza. */}
+                  {idsSugeridos.has(item.id) && (
+                    <label className="col-span-2 flex items-start gap-2 sm:col-span-4">
+                      <input
+                        type="checkbox"
+                        defaultChecked={item.mostrar_en_sugeridos !== false}
+                        disabled={isPending}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        onChange={e => {
+                          const val = e.target.checked
+                          startTransition(async () => {
+                            const res = await actualizarDiaDeItem(item.id, { mostrar_en_sugeridos: val })
+                            if (!res.success) { toast.error(res.error); return }
+                            router.refresh()
+                          })
+                        }}
+                      />
+                      <span className="text-[11px] text-muted-foreground">
+                        Mostrarla al cliente entre las actividades sugeridas.{' '}
+                        {esFueraDelPrecio ? (
+                          <span>Fuera del precio: oculta, ni se ve ni se cobra.</span>
+                        ) : (
+                          <span className="text-amber-700">
+                            Ocultarla NO la saca del total: para eso, desmarca «Entra al precio».
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  )}
+                  {/* Fuera del flujo de viaje el botón se queda donde estaba: el
+                      bloque de Termotech, Arca y WMC no cambia. */}
+                  {!lineasPorTipo && <div className="col-span-2 sm:col-span-4">{botonOtraOpcion}</div>}
+                  {/* MOVER LA LÍNEA A OTRA OPCIÓN. El grupo decide con quién compite:
+                      es el caso raro de querer que dos líneas se comparen entre sí, y
+                      por eso vive detrás de un clic en vez de en la primera fila. */}
+                  {lineasPorTipo && (
+                    <div className="col-span-2 sm:col-span-4">
+                      {moverGrupoDe === item.id ? (
+                        <SelectorRanura
+                          valor={item.grupo ?? null}
+                          gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                          disabled={isPending}
+                          onCambio={val => {
+                            startTransition(async () => {
+                              const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                              if (!res.success) { toast.error(res.error); return }
+                              setMoverGrupoDe(null)
+                              router.refresh()
+                            })
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setMoverGrupoDe(item.id)}
+                          className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
+                        >
+                          Mover a otra opción
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* El cargue de pantallazo SOLO existe si la ranura de la línea tiene
+                  contrato de captura (§3.1). Un ítem sin grupo, o con un grupo propio
+                  como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
+                  parezca y ese número acaba dentro de un costo. */}
+              {jsxTarifaPax}
+              {/* Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Se ofrecen donde
+                  se ofrece el cargue de pantallazo —líneas con ranura del catálogo—
+                  porque es donde la pregunta significa algo: una línea de Termotech no
+                  gana una sección al abrir su cotización, que es R6 en la pantalla.
+                  ⚠️ NO se condiciona a `editable`: una cotización ya enviada tiene que
+                  poder MOSTRAR sus adicionales; lo que se apaga es escribirlos. */}
+              {jsxAdicionales}
+              {/* Item sale fields */}
+              {jsxCamposVenta}
+              {/* Rubros table (internal costs).
+                  ⚠️ Solo los CONFIRMADOS. Los sugeridos por un pantallazo se
+                  revisan en su propio panel, con la captura al lado: mezclarlos
+                  aquí los haría ver como costo ya aceptado, que es lo que R-P1
+                  prohíbe, y ademas el total de la tabla no cuadraría con el
+                  costo del item. */}
+              {jsxRubros}
+            </div>
+          ))}
         </div>
       )})
         if (!enBloqueDeRanura) {
@@ -2273,6 +2521,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             editable={editable}
             destinoViaje={destinoViaje}
             onOpcionCreada={abrirLinea}
+            titulo={tituloDeBloque(bloque, numeroDeVuelo.get(bloque.grupo ?? '') ?? null).titulo}
           >
             {lineasDelBloque}
           </BloqueRanura>
@@ -2413,7 +2662,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
               vuelo, el nuevo es «Vuelo 2» y los dos van en el viaje (un segundo tramo va así).
               {' '}Para una <span className="font-medium">alternativa</span> del mismo componente —otra
-              aerolínea, otro horario— se usa «Agregar otra opción de…» al pie de su bloque (o se
+              aerolínea, otro horario— se usa «+ Opción» en el encabezado de su bloque (o se
               pega su pantallazo arriba y se responde «sí, otra opción»): esas compiten y solo una
               entra al precio.
               {' '}<span className="font-medium text-foreground">Otro componente del viaje</span> es

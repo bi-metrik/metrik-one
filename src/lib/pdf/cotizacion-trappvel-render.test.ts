@@ -1168,3 +1168,23 @@ describe('los términos y condiciones', () => {
     expect(t).toContain('No reembolsable.')
   })
 })
+
+// P2 del caso Providencia (2026-09-23): la nota que escribe una persona en la opción sale
+// debajo de su tarjeta. Sin nota, la tarjeta no cambia.
+describe('la nota para el cliente de una opción', () => {
+  it('sale debajo del vuelo y del hotel', async () => {
+    const t = await texto(props({
+      viaje: viaje({
+        vuelos: [{ ...VUELO, nota: 'INCLUYE ASISTENCIA EN EL AEROPUERTO' }],
+        hoteles: [{ ...HOTEL, nota: 'HABITACION CON VISTA AL MAR' }],
+      }),
+    }))
+    expect(t).toContain('INCLUYE ASISTENCIA EN EL AEROPUERTO')
+    expect(t).toContain('HABITACION CON VISTA AL MAR')
+  })
+
+  it('sin nota no aparece nada', async () => {
+    const t = await texto(props())
+    expect(t).not.toContain('INCLUYE ASISTENCIA EN EL AEROPUERTO')
+  })
+})

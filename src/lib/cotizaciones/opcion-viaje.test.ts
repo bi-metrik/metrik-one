@@ -16,6 +16,7 @@ import {
   tituloDeBloque,
 } from './opcion-viaje'
 import { ranuraPorSlug } from './ranuras-pantallazo'
+import { hotelesDeItems, vuelosDeItems } from './detalle-viaje'
 import type { TipoRanura } from './ranuras-cotizacion'
 
 const LECTURAS = fixture as unknown as Record<string, Record<string, string | null>>
@@ -116,5 +117,23 @@ describe('P2 · la nota para el cliente es lo que escribió una persona', () => 
 
   it('el equipaje corto sin nada leído es null', () => {
     expect(equipajeCorto({ personal: null, mano: null, bodega: null })).toBeNull()
+  })
+})
+
+describe('P2 · la nota de la persona llega al documento; la de ONE no', () => {
+  const conDescripcion = (descripcion: string) => ({
+    ...AVIANCA,
+    descripcion,
+    tarifa_pax: { ...AVIANCA.tarifa_pax, descripcionDelSistema: 'LO QUE ESCRIBIO ONE' },
+  })
+
+  it('el vuelo lleva la nota de una persona y deja fuera la descripción de sistema', () => {
+    expect(vuelosDeItems([conDescripcion('LO QUE ESCRIBIO ONE')])[0].nota).toBeNull()
+    expect(vuelosDeItems([conDescripcion('INCLUYE ASISTENCIA')])[0].nota).toBe('INCLUYE ASISTENCIA')
+  })
+
+  it('el hotel sin pantallazo: lo escrito es de una persona', () => {
+    const [h] = hotelesDeItems([{ nombre: 'HOTEL', grupo: 'hotel', descripcion: 'VISTA AL MAR' }])
+    expect(h.nota).toBe('VISTA AL MAR')
   })
 })
