@@ -109,7 +109,17 @@ export type ResultadoCasilla =
       opciones?: { nombre: string; precio: string | null }[]
     }
 
-export type ResultadoTarifa = { success: boolean; error?: string; tarifa?: TarifaPax }
+export type ResultadoTarifa = {
+  success: boolean
+  error?: string
+  tarifa?: TarifaPax
+  /**
+   * Por qué no se confirmó (solo `confirmarTarifaPorPasajero`). `PENDIENTE` = falta un dato de
+   * la tarifa (una captura, la moneda, la tasa): la bandeja acepta la opción igual y el
+   * faltante queda en su bloque (R1, reunión del 2026-09-23). `CONTEXTO` y `ERROR` sí frenan.
+   */
+  codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
+}
 
 interface ItemLeido {
   grupo: string | null
@@ -583,9 +593,9 @@ export async function confirmarTarifaPorPasajero(
   tasaCambio: number | null,
 ): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
-  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  if ('error' in ctx) return { success: false, error: ctx.error as string, codigo: 'CONTEXTO' }
   const { supabase, item, ranura, tarifa, composicion } = ctx
-  if (!composicion) return { success: false, error: 'La línea no tiene composición' }
+  if (!composicion) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.', codigo: 'PENDIENTE' }
 
   const casillas = tarifa.casillas ?? {}
   // La moneda con que se costea: la elegida por una persona, o la que mostró la captura.
@@ -593,9 +603,9 @@ export async function confirmarTarifaPorPasajero(
   // Una captura buscada para otros pasajeros sale aquí como `desactualizada`: no hay costo
   // que confirmar, y el motivo dice cuál reemplazar (brief del 2026-09-22, parte 1).
   const estado = resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda })
-  if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje }
+  if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje, codigo: 'PENDIENTE' }
   // «$» sin moneda: COP está preseleccionada pero nadie la ha dicho. No pasa callada.
-  if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA }
+  if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }
 
   const moneda = estado.moneda
   const costos: TarifaConfirmada['costos'] = []
@@ -605,6 +615,7 @@ export async function confirmarTarifaPorPasajero(
       return {
         success: false,
         error: `El precio está en ${moneda} y falta la tasa de cambio a pesos. Escríbela para poder guardar el costo.`,
+        codigo: 'PENDIENTE',
       }
     }
     costos.push({
@@ -622,7 +633,7 @@ export async function confirmarTarifaPorPasajero(
   // Reemplaza los rubros de la línea, confirmados y sugeridos: volver a leer una tarifa es
   // el caso normal, y acumular dejaría el costo al doble sin que nada lo señale.
   const { error: errBorrar } = await sb.from('rubros').delete().eq('item_id', itemId)
-  if (errBorrar) return { success: false, error: errBorrar.message }
+  if (errBorrar) return { success: false, error: errBorrar.message, codigo: 'ERROR' }
 
   const { error: errInsertar } = await sb.from('rubros').insert(
     costos.map((c, i) => ({
@@ -637,7 +648,7 @@ export async function confirmarTarifaPorPasajero(
       sugerido: false,
     })),
   )
-  if (errInsertar) return { success: false, error: errInsertar.message }
+  if (errInsertar) return { success: false, error: errInsertar.message, codigo: 'ERROR' }
 
   // El NOMBRE de la casilla 1 solo entra si la línea no tiene uno propio: el que escribió
   // quien cotiza no se toca (`nombre-linea.ts`).
@@ -718,7 +729,7 @@ export async function confirmarTarifaPorPasajero(
       ...patchMargen,
     })
     .eq('id', itemId)
-  if (errItem) return { success: false, error: errItem.message }
+  if (errItem) return { success: false, error: errItem.message, codigo: 'ERROR' }
 
   const confirmada: TarifaConfirmada = {
     composicion,
@@ -748,7 +759,7 @@ export async function confirmarTarifaPorPasajero(
     delete siguiente.costoManual
     return siguiente
   })
-  if ('error' in guardado) return { success: false, error: guardado.error }
+  if ('error' in guardado) return { success: false, error: guardado.error, codigo: 'ERROR' }
 
   await recalcularTotales(item.cotizacionId)
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)

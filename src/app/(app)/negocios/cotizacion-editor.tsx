@@ -461,6 +461,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   }
   const idDeBloque = (grupo: string) => `bloque-${grupo.replace(/[^a-z0-9]+/gi, '-')}`
   const abrirLinea = (itemId: string) => setExpandedItems(prev => new Set(prev).add(itemId))
+  // R2 (2026-09-23): la opción que se acepta en la bandeja se abre Y se trae a la vista, al
+  // centro, para que la bandeja fija de arriba no la tape. Una opción recién creada puede
+  // llegar a la página con el refresco: se la espera un momento antes de rendirse.
+  const mostrarOpcion = (itemId: string) => {
+    abrirLinea(itemId)
+    let intentos = 0
+    const buscar = () => {
+      const el = document.querySelector(`[data-linea-id="${CSS.escape(itemId)}"]`)
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+      if (++intentos < 20) setTimeout(buscar, 250)
+    }
+    requestAnimationFrame(buscar)
+  }
   const todosExpandidos = itemsVisibles.length > 0 && itemsVisibles.every(i => expandedItems.has(i.id))
   const toggleTodos = () => {
     setExpandedItems(todosExpandidos ? new Set() : new Set(itemsVisibles.map(i => i.id)))
@@ -2229,7 +2242,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </div>
         )
         return (
-        <div key={item.id} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
+        <div key={item.id} data-linea-id={lineasPorTipo ? item.id : undefined} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
           <div
             className={`flex ${isAjuste ? '' : 'cursor-pointer'} items-center justify-between px-4 py-3`}
             onClick={() => !isAjuste && toggleItem(item.id)}
@@ -2684,7 +2697,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               cotizacionId={cotizacion.id}
               items={initialItems}
               composicion={composicionViaje}
-              onOpcionCreada={abrirLinea}
+              onOpcionCreada={mostrarOpcion}
               ubicaciones={ubicacionesDeOpciones}
             />
           )}
