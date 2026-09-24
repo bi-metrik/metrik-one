@@ -16,10 +16,17 @@
  *
  * Aplica a toda plantilla: el número de un titular no se imprime con el prefijo en ningún
  * documento. Puro: quien llama resuelve los valores con `resolverCamposFuente`.
+ *
+ * Tampoco se imprime si una de las dos casillas es la otra con uno o dos dígitos de más,
+ * sea o no el DV lo que sobra (la casilla 26 nunca lleva DV): V0326 520238523 / 52023852, V0354 168394259 / 16839425,
+ * V0361 397853081 / 39785308. No se sabe cuál de las dos está mal leída sin mirar el PDF,
+ * así que se niega igual si lo que se imprime es la corta: el documento sale para la DIAN
+ * con un número que el mismo RUT contradice. Números del todo distintos (una cédula de
+ * extranjería, un NIT asignado antes de la cédula) no se parecen y no frenan nada.
  */
 
 import type { CampoFuenteMinimo } from './guarda-nit-formulario'
-import { sinPrefijoDeTipo } from './prefijo-tipo-documento'
+import { conDigitosDeMas, sinPrefijoDeTipo } from './prefijo-tipo-documento'
 
 const PREFIJO_SONDA = '__contraparte_de__'
 
@@ -72,13 +79,23 @@ export function identificacionConPrefijoEnFormulario(
   datosFinal: Record<string, string | null>,
   sondas: Record<string, string | null>,
 ): string | null {
+  const d = (v: unknown) => String(v ?? '').replace(/\D/g, '')
   for (const c of casillasConIdentificacion(campos)) {
     const impreso = datosFinal[c.slug]
-    const limpio = sinPrefijoDeTipo(impreso, sondas[PREFIJO_SONDA + c.slug])
+    const testigo = sondas[PREFIJO_SONDA + c.slug]
+    const limpio = sinPrefijoDeTipo(impreso, testigo)
     if (limpio) {
       return (
-        `El número de identificación ${String(impreso).replace(/\D/g, '')} trae pegado delante el código del ` +
+        `El número de identificación ${d(impreso)} trae pegado delante el código del ` +
         `tipo de documento (13 = cédula de ciudadanía): el número es ${limpio}. Corrígelo en el RUT antes de generar.`
+      )
+    }
+    const [i, t] = [d(impreso), d(testigo)]
+    if (conDigitosDeMas(i, t) || conDigitosDeMas(t, i)) {
+      const [casilla, otra] = c.source?.campo_slug === 'nit' ? ['5', '26'] : ['26', '5']
+      return (
+        `El RUT no cuadra: la casilla ${casilla} dice ${i} y la casilla ${otra} dice ${t}. Una de las dos tiene ` +
+        `dígitos de más o de menos. Mira el PDF del RUT y corrige la que esté mal leída antes de generar.`
       )
     }
   }

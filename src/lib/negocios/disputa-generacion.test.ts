@@ -10,6 +10,7 @@ const VOTO = {
   fuentes: [],
   bloquea: false,
   niega_generacion: true,
+  avisos: [],
   mensaje: 'Documento del titular: lectura dudosa en RUT (casilla 26) (1022424289). Factura y Certificado UPME dicen 1022424269.',
 } satisfies ResultadoVoto
 

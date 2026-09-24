@@ -154,6 +154,14 @@ function ConcordanciaBadge({ voto, fuente }: { voto: ResultadoVoto; fuente: Lect
       </span>
     )
   }
+  if (fuente.estado === 'distinta') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-amber-700" title="No frena el avance. Si no es un NIT asignado antes de la cédula, revisa la lectura.">
+        <AlertTriangle className="h-3 w-3" />
+        No es el número de los otros documentos{voto.valor ? ` (${voto.valor})` : ''} · no frena
+      </span>
+    )
+  }
   if (fuente.estado === 'confirmada') {
     return (
       <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">

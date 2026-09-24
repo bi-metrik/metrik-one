@@ -39,6 +39,8 @@ export default function PanelDatosClave({
   ) return null
   const enDisputa = lecturas.filter(l => l.estado === 'dudosa' || l.estado === 'manual')
   const resueltas = lecturas.filter(l => l.estado === 'acuerdo' || l.estado === 'sin_contraste')
+  // Avisos que no frenan (un NIT del todo distinto de la cédula): se ven, en ámbar, aparte.
+  const avisos = lecturas.flatMap(l => (l.avisos ?? []).map((texto, i) => ({ clave: `${l.slug}:${i}`, texto })))
 
   return (
     <section className="rounded-lg border border-border bg-card p-3" aria-label={vista.titulo}>
@@ -68,6 +70,20 @@ export default function PanelDatosClave({
         <ul className="mb-2 space-y-1.5">
           {enDisputa.map(v => (
             <LecturaEnDisputa key={v.slug} voto={v} corregirLectura={corregirLectura} />
+          ))}
+        </ul>
+      )}
+
+      {avisos.length > 0 && (
+        <ul className="mb-2 space-y-1.5">
+          {avisos.map(a => (
+            <li
+              key={a.clave}
+              className="flex gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden />
+              <span>{a.texto}</span>
+            </li>
           ))}
         </ul>
       )}
@@ -186,7 +202,16 @@ function LecturaEnDisputa({ voto, corregirLectura }: { voto: ResultadoVoto; corr
                 Lectura dudosa
                 {f.forma === 'prefijo' || f.forma === 'prefijo_y_dv'
                   ? ' · trae el código del tipo de documento'
-                  : f.dv_invalido ? ' · no valida con su DV' : ''}
+                  : f.forma === 'digitos_de_mas'
+                    ? ' · trae dígitos de más'
+                    : f.forma === 'digitos_de_menos'
+                      ? ' · le faltan dígitos'
+                      : f.dv_invalido ? ' · no valida con su DV' : ''}
+              </span>
+            )}
+            {f.estado === 'distinta' && (
+              <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+                Número distinto · no vota
               </span>
             )}
             {f.estado === 'en_disputa' && (
