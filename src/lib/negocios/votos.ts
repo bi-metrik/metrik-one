@@ -36,6 +36,16 @@
  * - En una lista de personas (los compradores de la factura, los beneficiarios del
  *   certificado) se toma la persona del titular por NOMBRE. Si no se reconoce a nadie, la
  *   fuente no vota: adivinar a quién corresponde un número es peor que callar.
+ * - Uno o dos dígitos de más (o de menos) NO son el mismo número, salvo que lo que sobra
+ *   sea el DV de verdad (módulo 11). `mismoDocumento` los tolera para comparar personas,
+ *   pero en el voto son justo la lectura mala: V0326 leyó la casilla 26 como 520238523
+ *   con el NIT de la casilla 5 en 52023852, V0354 168394259 por 16839425, V0361 397853081
+ *   por 39785308 (el «1» de la fecha de expedición de la casilla 27). Ver `mismoValor`.
+ * - Una fuente TESTIGO (`testigo`, el NIT de la casilla 5 contra la cédula de la 26) no
+ *   es una lectura independiente: vota solo si su número es el de otra fuente o lo
+ *   contiene con uno o dos dígitos de más, y en ese caso desempata a su favor. Si es un
+ *   número completamente distinto (V0012: NIT 700004389 asignado antes de la cédula
+ *   1015442918) no vota y queda un aviso que NO frena. Ver `separarTestigos`.
  *
  * Configuración: `lineas_negocio.config_extra.votos` (lista). Sin la clave, nada cambia.
  * Se evalúa en cada lectura del negocio, como los cruces: un veredicto guardado vuelve a
@@ -43,10 +53,17 @@
  */
 
 import { calcularDvNit } from '@/lib/dian/nit'
-import { formaLimpia } from '@/lib/dian/prefijo-tipo-documento'
+import {
+  conDigitosDeMas,
+  conDvPegado,
+  difierenEnDigitosDeMas,
+  formaLimpia,
+} from '@/lib/dian/prefijo-tipo-documento'
 import { parsearPersonas } from '@/lib/documentos/personas'
 import { valorCumpleCondicion } from './condicion-bloque'
 import { mismoDocumento, valorDe, type ContextoFuentes } from './fuentes-negocio'
+
+export { conDigitosDeMas, difierenEnDigitosDeMas }
 
 /** Comparación contra un campo del MISMO bloque de la fuente (misma semántica que `condition`). */
 export interface CondicionLocal {
@@ -77,6 +94,14 @@ export interface FuenteVoto {
   dv?: string
   /** El número de esta fuente sale impreso en documentos que genera ONE. */
   alimenta_generacion?: boolean
+  /**
+   * La fuente es un testigo de las demás y no una lectura independiente (el NIT de la
+   * casilla 5 frente a la cédula de la casilla 26 del mismo RUT). Vota solo si dice el
+   * mismo número que otra fuente o si uno contiene al otro con uno o dos dígitos de más;
+   * entonces gana un empate. Si dice un número del todo distinto, no vota: queda un aviso
+   * que no frena.
+   */
+  testigo?: boolean
 }
 
 export interface Voto {
@@ -100,8 +125,9 @@ export interface Voto {
  * - `confirmada`: está en minoría pero una persona lo editó a mano.
  * - `en_disputa`: no hay mayoría; nadie sabe cuál es el bueno.
  * - `sin_contraste`: es la única fuente con dato y su DV (si lo hay) no la contradice.
+ * - `distinta`: un testigo con un número del todo distinto. No vota; es solo un aviso.
  */
-export type EstadoLectura = 'coincide' | 'dudosa' | 'confirmada' | 'en_disputa' | 'sin_contraste'
+export type EstadoLectura = 'coincide' | 'dudosa' | 'confirmada' | 'en_disputa' | 'sin_contraste' | 'distinta'
 
 export interface LecturaFuente {
   /** Identifica la fuente dentro del voto: `slug.campo` (y `#n` si es una persona de una lista). */
@@ -120,14 +146,19 @@ export interface LecturaFuente {
   /** Enlace al documento de donde sale (para mirarlo al lado). */
   archivo: string | null
   alimenta_generacion: boolean
+  /** Es un testigo (ver `FuenteVoto.testigo`). */
+  testigo: boolean
   estado: EstadoLectura
   /**
    * La lectura dice el mismo documento que la mayoría, pero con algo pegado: el código del
    * tipo de documento delante (`prefijo`, `prefijo_y_dv`: es lectura dudosa) o el dígito de
    * verificación detrás (`dv_pegado`: coincide, es la forma en que la factura lo imprime).
    * Ausente si la lectura es el número limpio. Ver `formaLimpia`.
+   *
+   * En una lectura dudosa, `digitos_de_mas` / `digitos_de_menos`: es el número de la
+   * mayoría con uno o dos dígitos que sobran (o que faltan), y lo que sobra no es el DV.
    */
-  forma?: 'prefijo' | 'dv_pegado' | 'prefijo_y_dv'
+  forma?: 'prefijo' | 'dv_pegado' | 'prefijo_y_dv' | 'digitos_de_mas' | 'digitos_de_menos'
 }
 
 export type EstadoVoto = 'acuerdo' | 'dudosa' | 'manual' | 'sin_contraste'
@@ -145,6 +176,8 @@ export interface ResultadoVoto {
   niega_generacion: boolean
   /** Una frase para el equipo, o `null` si no hay nada que decir. */
   mensaje: string | null
+  /** Avisos que NO frenan ni niegan nada (un testigo con un número del todo distinto). */
+  avisos: string[]
 }
 
 // ── Lectura de la configuración ─────────────────────────────────────────────────
@@ -215,10 +248,20 @@ export function mismaPersona(a: unknown, b: unknown): boolean {
   return comun >= 2 && (comun === x.size || comun === y.size || comun >= 3)
 }
 
-/** ¿Dos lecturas del documento son el mismo? Igualdad exacta, o `mismoDocumento`. */
+/**
+ * ¿Dos lecturas del documento son el mismo? Igualdad exacta, o `mismoDocumento` sin su
+ * tolerancia a los dígitos que sobran al final: en un voto, uno empieza por el otro solo
+ * vale si lo que sobra es el DV de verdad (la factura imprime el NIT con su DV). Un dígito
+ * de más que no es el DV es una lectura mala (V0326, V0354, V0361), no el mismo número.
+ */
 export function mismoValor(a: string, b: string): boolean {
-  return a === b || mismoDocumento(a, b)
+  if (a === b) return true
+  if (!mismoDocumento(a, b)) return false
+  const [largo, corto] = a.length >= b.length ? [a, b] : [b, a]
+  if (largo.length > corto.length && largo.startsWith(corto)) return conDvPegado(largo, corto)
+  return true
 }
+
 
 /**
  * ¿El número valida con el dígito de verificación? Tolera las mismas formas que
@@ -310,6 +353,7 @@ async function leerFuente(
       dv_invalido: testigo !== null && !validaConDv(valor, testigo),
       archivo: typeof datos.drive_url === 'string' && datos.drive_url ? datos.drive_url : null,
       alimenta_generacion: f.alimenta_generacion === true,
+      testigo: f.testigo === true,
     }
   }
   return null
@@ -359,6 +403,8 @@ export function decidirVoto(
 ): ResultadoVoto | null {
   if (lecturas.length === 0) return null
   const frenaAqui = etapaOrden !== null && (voto.bloquea_en_etapas ?? []).includes(etapaOrden)
+  const { votan, distintas, avisos } = separarTestigos(voto.label, lecturas)
+  lecturas = votan
   const cerrar = (estado: EstadoVoto, valor: string | null, fuentes: LecturaFuente[], mensaje: string | null): ResultadoVoto => {
     const enDisputa = estado === 'dudosa' || estado === 'manual'
     return {
@@ -366,12 +412,13 @@ export function decidirVoto(
       label: voto.label,
       estado,
       valor,
-      fuentes,
+      fuentes: [...fuentes, ...distintas],
       bloquea: enDisputa && frenaAqui,
       niega_generacion:
         voto.niega_generacion === true &&
         (estado === 'manual' || fuentes.some(f => f.estado === 'dudosa' && f.alimenta_generacion)),
       mensaje,
+      avisos,
     }
   }
 
@@ -394,8 +441,16 @@ export function decidirVoto(
   }
   const verificadas = (g: Leida[]) => g.filter(l => l.verificada).length
   const orden = [...grupos].sort((a, b) => b.length - a.length || verificadas(b) - verificadas(a))
-  const [primero, segundo] = orden
-  const hayMayoria = !segundo || primero.length > segundo.length || verificadas(primero) > verificadas(segundo)
+  let [primero] = orden
+  const segundo = orden[1]
+  let hayMayoria = !segundo || primero.length > segundo.length || verificadas(primero) > verificadas(segundo)
+  if (!hayMayoria) {
+    const ganador = desempateDelTestigo(orden)
+    if (ganador) {
+      primero = ganador
+      hayMayoria = true
+    }
+  }
 
   if (!hayMayoria) {
     const fuentes = lecturas.map(l => ({ ...l, estado: 'en_disputa' as const }))
@@ -410,7 +465,11 @@ export function decidirVoto(
   const limpio = (l: Leida) => formas.get(l)?.limpio ?? l.valor
   const valor = valorDeLaMayoria(primero, limpio)
   const fuentes: LecturaFuente[] = lecturas.map(l => {
-    if (!primero.includes(l)) return { ...l, estado: l.verificada ? 'confirmada' : 'dudosa' }
+    if (!primero.includes(l)) {
+      if (l.verificada) return { ...l, estado: 'confirmada' }
+      const f = formaDeMas(l.valor, valor)
+      return f ? { ...l, estado: 'dudosa', forma: f } : { ...l, estado: 'dudosa' }
+    }
     const forma = formas.get(l)?.forma ?? 'limpio'
     if (forma === 'limpio') return { ...l, estado: 'coincide' }
     // El «13» pegado es una lectura mala aunque diga el mismo documento: es la que salió
@@ -421,13 +480,74 @@ export function decidirVoto(
   const dudosas = fuentes.filter(f => f.estado === 'dudosa')
   if (dudosas.length === 0) return cerrar('acuerdo', valor, fuentes, null)
   const mayoria = fuentes.filter(f => f.estado === 'coincide')
-  const detalle = (d: LecturaFuente) =>
-    d.forma === 'prefijo' || d.forma === 'prefijo_y_dv'
-      ? `${d.etiqueta} (${d.valor}: trae pegado delante el código del tipo de documento)`
-      : `${d.etiqueta} (${d.valor})`
+  const detalle = (d: LecturaFuente) => {
+    if (d.forma === 'prefijo' || d.forma === 'prefijo_y_dv') {
+      return `${d.etiqueta} (${d.valor}: trae pegado delante el código del tipo de documento)`
+    }
+    const n = Math.abs(d.valor.length - valor.length)
+    if (d.forma === 'digitos_de_mas') return `${d.etiqueta} (${d.valor}: ${n === 1 ? 'un dígito' : 'dos dígitos'} de más)`
+    if (d.forma === 'digitos_de_menos') return `${d.etiqueta} (${d.valor}: ${n === 1 ? 'le falta un dígito' : 'le faltan dos dígitos'})`
+    return `${d.etiqueta} (${d.valor})`
+  }
   return cerrar('dudosa', valor, fuentes,
     `${voto.label}: lectura dudosa en ${dudosas.map(detalle).join(' y ')}. ` +
     `${listaEtiquetas(mayoria)} ${mayoria.length === 1 ? 'dice' : 'dicen'} ${valor}.`)
+}
+
+/** La forma de una lectura minoritaria frente al valor de la mayoría, si sobra o falta algo. */
+function formaDeMas(v: string, mayoria: string): 'digitos_de_mas' | 'digitos_de_menos' | null {
+  if (conDigitosDeMas(v, mayoria)) return 'digitos_de_mas'
+  if (conDigitosDeMas(mayoria, v)) return 'digitos_de_menos'
+  return null
+}
+
+/**
+ * Aparta los testigos que dicen un número del todo distinto: ni el mismo que otra fuente
+ * ni uno que lo contenga con uno o dos dígitos de más. Esos no votan (V0012: el NIT se
+ * asignó antes que la cédula), quedan como `distinta` y dejan un aviso que no frena. Un
+ * testigo sin otra fuente con qué compararse vota solo (`sin_contraste`), como cualquiera.
+ */
+function separarTestigos(
+  label: string,
+  lecturas: Leida[],
+): { votan: Leida[]; distintas: LecturaFuente[]; avisos: string[] } {
+  const votan: Leida[] = []
+  const distintas: LecturaFuente[] = []
+  const avisos: string[] = []
+  for (const l of lecturas) {
+    const otras = lecturas.filter(o => o !== l && !o.testigo)
+    const seParece = otras.some(o => mismoValor(o.valor, l.valor) || difierenEnDigitosDeMas(o.valor, l.valor))
+    if (!l.testigo || otras.length === 0 || seParece) {
+      votan.push(l)
+      continue
+    }
+    distintas.push({ ...l, estado: 'distinta' })
+    avisos.push(
+      `${label}: ${l.etiqueta} dice ${l.valor} y ${otras.map(o => `${o.etiqueta} ${o.valor}`).join(', ')}. ` +
+      'Son números distintos: puede ser un NIT asignado antes de la cédula. No frena el avance; revisa el documento si no es así.',
+    )
+  }
+  return { votan, distintas, avisos }
+}
+
+/**
+ * En un empate entre exactamente dos grupos, gana el del testigo si el otro grupo trae su
+ * mismo número con uno o dos dígitos de más o de menos: la casilla 26 con un dígito de
+ * más frente a la casilla 5 (V0326, V0354, V0361, que tenían bien leído el NIT). Con
+ * cualquier otra diferencia el empate sigue siendo revisión manual.
+ */
+function desempateDelTestigo(orden: Leida[][]): Leida[] | null {
+  const [a, b, c] = orden
+  if (!a || !b || a.length !== b.length) return null
+  const verif = (g: Leida[]) => g.filter(l => l.verificada).length
+  if (verif(a) !== verif(b)) return null
+  if (c && c.length === a.length && verif(c) === verif(a)) return null
+  const conTestigo = [a, b].filter(g => g.some(l => l.testigo))
+  if (conTestigo.length !== 1) return null
+  const suyo = conTestigo[0]
+  const otro = suyo === a ? b : a
+  const parecidos = suyo.some(t => t.testigo && otro.some(o => difierenEnDigitosDeMas(t.valor, o.valor)))
+  return parecidos ? suyo : null
 }
 
 /** Los votos de un negocio contra sus datos de HOY. */

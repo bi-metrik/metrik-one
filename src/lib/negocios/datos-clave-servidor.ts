@@ -112,7 +112,10 @@ export async function datosClaveDelNegocio(supabase: unknown, args: Args): Promi
   const reprocesos = await reprocesosP
   if (!vista) {
     // Sin tarjeta declarada, lo que haya que ver igual se muestra.
-    const hayAlgo = contradicciones.length > 0 || lecturas.some(votoEnDisputa) || reprocesos.length > 0
+    const hayAlgo =
+      contradicciones.length > 0 ||
+      lecturas.some(l => votoEnDisputa(l) || (l.avisos ?? []).length > 0) ||
+      reprocesos.length > 0
     if (!hayAlgo) return null
     vista = { titulo: 'Datos clave', campos: [], contradicciones }
   }

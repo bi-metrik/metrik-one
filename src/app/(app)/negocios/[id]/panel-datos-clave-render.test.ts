@@ -14,7 +14,7 @@ import type { LecturaFuente, ResultadoVoto } from '@/lib/negocios/votos'
 
 const fuente = (f: Partial<LecturaFuente>): LecturaFuente => ({
   clave: 'k', etiqueta: 'X', bloque_slug: 'rut', field: 'x', persona: null, valor: '1',
-  verificada: false, editada_por: null, dv_invalido: false, archivo: null, alimenta_generacion: false,
+  verificada: false, editada_por: null, dv_invalido: false, archivo: null, alimenta_generacion: false, testigo: false,
   estado: 'coincide', ...f,
 })
 
@@ -26,6 +26,7 @@ const V0142: ResultadoVoto = {
   valor: '1022424269',
   bloquea: true,
   niega_generacion: true,
+  avisos: [],
   mensaje: 'Documento del titular: lectura dudosa en RUT (casilla 26) (1022424289). Factura y Certificado UPME dicen 1022424269.',
   fuentes: [
     fuente({ clave: '0:rut.numero_identificacion', etiqueta: 'RUT (casilla 26)', valor: '1022424289', estado: 'dudosa', archivo: 'https://drive.google.com/file/d/abc/view' }),
@@ -107,6 +108,42 @@ describe('PanelDatosClave', () => {
     expect(h).not.toMatch(/bg-red-50/)
     expect(h).toContain('Documento del titular: 3556837')
     expect(h).toContain('coincide en RUT (casilla 26), Factura y Certificado UPME')
+  })
+
+  it('la casilla 26 con dígitos de más dice qué le sobra y ofrece el valor de la casilla 5', () => {
+    const v0326: ResultadoVoto = {
+      ...V0142,
+      valor: '52023852',
+      mensaje: 'Documento del titular: lectura dudosa en RUT (casilla 26) (520238523: un dígito de más). RUT (casilla 5) dice 52023852.',
+      fuentes: [
+        fuente({ etiqueta: 'RUT (casilla 26)', valor: '520238523', estado: 'dudosa', forma: 'digitos_de_mas' }),
+        fuente({ clave: 'k5', etiqueta: 'RUT (casilla 5)', valor: '52023852', testigo: true }),
+      ],
+    }
+    const h = renderToStaticMarkup(React.createElement(PanelDatosClave, {
+      vista: { ...VISTA, contradicciones: [], lecturas: [v0326] },
+      corregirLectura: async () => ({ success: true }),
+    }))
+    expect(h).toContain('trae dígitos de más')
+    expect(h).toContain('Corregir a 52023852')
+    expect(h).toContain('No se generan documentos para la DIAN')
+  })
+
+  it('V0012: el aviso de un NIT distinto sale en ámbar, sin frenar ni negar', () => {
+    const v0012: ResultadoVoto = {
+      ...V0286,
+      valor: '1015442918',
+      avisos: ['Documento del titular: RUT (casilla 5) dice 700004389 y RUT (casilla 26) 1015442918. Son números distintos: puede ser un NIT asignado antes de la cédula. No frena el avance; revisa el documento si no es así.'],
+      fuentes: [
+        fuente({ etiqueta: 'RUT (casilla 26)', valor: '1015442918' }),
+        fuente({ clave: 'k5', etiqueta: 'RUT (casilla 5)', valor: '700004389', estado: 'distinta', testigo: true }),
+      ],
+    }
+    const h = html({ ...VISTA, contradicciones: [], lecturas: [v0012] })
+    expect(h).toMatch(/bg-amber-50[^>]*>[\s\S]*700004389/)
+    expect(h).not.toMatch(/bg-red-50/)
+    expect(h).not.toContain('Frena el avance')
+    expect(h).not.toContain('No se generan documentos')
   })
 
   it('los reprocesos cerrados se ven, y la tarjeta aparece aunque sea lo único', () => {

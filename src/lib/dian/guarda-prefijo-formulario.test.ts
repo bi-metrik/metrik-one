@@ -68,3 +68,33 @@ describe('la declaración y la relación no salen con el «13» pegado', () => {
     expect(identificacionConPrefijoEnFormulario(F010, datos, sondas)).not.toBeNull()
   })
 })
+
+describe('ni con la casilla 26 y la 5 descuadradas por dígitos de más', () => {
+  it('V0361: la declaración imprime 397853081 con la casilla 5 en 39785308 → se niega', () => {
+    const { datos, sondas } = resolver(DECLARACION, { rut: { numero_identificacion: '397853081', nit: '39785308' } })
+    const msg = identificacionConPrefijoEnFormulario(DECLARACION, datos, sondas)
+    expect(msg).toContain('397853081')
+    expect(msg).toContain('39785308')
+  })
+
+  it('el 010 (imprime la 5) también se niega: el mismo RUT se contradice', () => {
+    const { datos, sondas } = resolver(F010, { rut: { nit: '52023852', numero_identificacion: '520238523' } })
+    expect(identificacionConPrefijoEnFormulario(F010, datos, sondas)).toContain('casilla 5')
+  })
+
+  it('la 26 con el DV pegado tampoco se imprime (la casilla 26 no lleva DV)', () => {
+    const { datos, sondas } = resolver(DECLARACION, { rut: { numero_identificacion: '520238527', nit: '52023852' } })
+    expect(identificacionConPrefijoEnFormulario(DECLARACION, datos, sondas)).not.toBeNull()
+  })
+
+  it('V0012 (NIT asignado antes de la cédula): números del todo distintos, se genera', () => {
+    const { datos, sondas } = resolver(DECLARACION, { rut: { numero_identificacion: '1015442918', nit: '700004389' } })
+    expect(identificacionConPrefijoEnFormulario(DECLARACION, datos, sondas)).toBeNull()
+  })
+
+  it('un override que corrige la 26 al valor de la 5 deja generar', () => {
+    const { datos, sondas } = resolver(DECLARACION, { rut: { numero_identificacion: '520238523', nit: '52023852' } })
+    datos.numero_identificacion = '52023852'
+    expect(identificacionConPrefijoEnFormulario(DECLARACION, datos, sondas)).toBeNull()
+  })
+})

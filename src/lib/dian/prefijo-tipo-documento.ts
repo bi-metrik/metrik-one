@@ -53,6 +53,24 @@ export function conDvPegado(valor: unknown, base: unknown): boolean {
 }
 
 /**
+ * ¿`largo` es `corto` con uno o dos dígitos de más, en cualquier lugar? La casilla 26 del
+ * RUT a veces se lee con un dígito de la casilla vecina pegado detrás (V0326 520238523 por
+ * 52023852, V0361 397853081 por 39785308: el «1» de la fecha de expedición). El número
+ * corto tiene al menos seis dígitos. NO mira si lo que sobra es el DV: eso es `conDvPegado`.
+ */
+export function conDigitosDeMas(largo: unknown, corto: unknown): boolean {
+  const l = soloDigitos(largo)
+  const c = soloDigitos(corto)
+  const extra = l.length - c.length
+  return c.length >= 6 && extra >= 1 && extra <= 2 && l.includes(c)
+}
+
+/** ¿Uno de los dos números contiene al otro con uno o dos dígitos de más? */
+export function difierenEnDigitosDeMas(a: unknown, b: unknown): boolean {
+  return conDigitosDeMas(a, b) || conDigitosDeMas(b, a)
+}
+
+/**
  * El número limpio de `valor` según las demás lecturas del mismo dato: sin el código de
  * tipo delante (`forma: 'prefijo'`) o sin el DV pegado detrás (`forma: 'dv_pegado'`).
  * Las dos a la vez también (`13` + X + DV de X), siempre con otra lectura igual a X.
