@@ -33,7 +33,7 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
  *
  * Diseño: `reunion-edgar-alejandra-2026-09-23.md`, «R8 resuelto», regla 5: el bloque dice
  * cuántos lugares del grupo quedan cubiertos («6/6 adultos · 1/1 niño · 0/1 infante») y lo
- * que falta; cada captura dice si es «Habitación N» o «Solo para restar». El papel lo decide el
+ * que falta; cada captura dice si es «Habitación N»; la que solo sirve para restar no lleva título. El papel lo decide el
  * reparto: desde la tarjeta del 2026-09-24 ya no se cambia con un toque.
  *
  * Nada de lo que se pinta se decide aquí: el reparto, los cupos y el costo salen de
@@ -269,7 +269,8 @@ export function FilaHabitacion({
     <li className="flex items-start gap-2 rounded-md border bg-background px-2 py-1.5" data-habitacion={h.id}>
       <div className="min-w-0 flex-1">
         <p className="text-[11px] font-semibold">
-          {esHabitacion ? `Habitación ${h.numero}` : 'Solo para restar'}
+          {/* La captura que solo sirve para restar no lleva título: la explica su nota. */}
+          {esHabitacion ? `Habitación ${h.numero}` : null}
           {h.manual && <span className="ml-1 font-normal text-muted-foreground">(fijado a mano)</span>}
         </p>
         <p className="text-[11px] text-[#1A1A1A]">

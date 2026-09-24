@@ -59,6 +59,8 @@ import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } fr
 import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
+import { habitacionesDeTarifa, repartirHabitaciones } from './habitaciones'
+import { acomodacionDeHabitaciones } from './tarjeta-opcion'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -581,6 +583,11 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
   for (const item of items) {
     if (ranuraDelItem(item)?.slug !== 'hotel_detalle') continue
     const d = detalleDelItem(item)
+    // Con varias habitaciones, la acomodación es la de TODAS (el cliente ve el reparto
+    // entero); la ocupación del primer pantallazo solo describe su habitación.
+    const tarifa = leerTarifaPax(item.tarifa_pax)
+    const habs = habitacionesDeTarifa(tarifa)
+    const acomodacion = habs.length > 1 ? acomodacionDeHabitaciones(repartirHabitaciones(habs, tarifa.composicion ?? null)) : null
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: texto(d, 'hotel'),
@@ -590,7 +597,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       checkIn: fechaCorta(texto(d, 'check_in')),
       checkOut: fechaCorta(texto(d, 'check_out')),
       noches: nochesDe(d),
-      ocupacion: texto(d, 'ocupacion'),
+      ocupacion: acomodacion ?? texto(d, 'ocupacion'),
       cancelacion: texto(d, 'politica_cancelacion'),
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,

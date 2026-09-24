@@ -491,6 +491,8 @@ function avisosDeLectura(
   }
 
   // 7.3 · impuestos que se pagan en destino, en otra moneda: nota al cliente, no costo.
+  // ⚠️ Informa lo que ONE ya hizo (va a «Se paga en el destino»), no pide nada: por eso NO
+  // marca la opción como pendiente (`esAvisoSoloInformativo`).
   const impuestosDestino = numero(porSlug.get('impuestos_destino_valor')?.valor)
   const monedaDestino = (porSlug.get('impuestos_destino_moneda')?.valor ?? moneda ?? '').toUpperCase()
   if (ranura.slug === 'hotel_detalle' && impuestosDestino !== null && impuestosDestino > 0) {

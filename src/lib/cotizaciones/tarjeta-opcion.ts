@@ -329,16 +329,33 @@ export function notaDeEdad(texto: string | null | undefined): string | null {
 }
 
 /**
+ * La acomodación de una opción con varias habitaciones, como la lee el cliente en el documento:
+ * «3 habitaciones: 2 adultos + 1 niño; 2 adultos + 1 infante; 2 adultos». Solo las que cuentan
+ * como habitación (la captura que solo sirve para restar no la ocupa nadie). `null` con una
+ * sola: entonces manda lo que dijo el pantallazo.
+ */
+export function acomodacionDeHabitaciones(r: RepartoHabitaciones): string | null {
+  const habs = r.habitaciones.filter(h => h.rol === 'habitacion' && h.ocupacion)
+  if (habs.length < 2) return null
+  return `${habs.length} habitaciones: ${habs.map(h => ocupacionCorta(h.ocupacion!)).join('; ')}`
+}
+
+/**
  * La nota de la habitación de solo adultos que ONE usa para restar: «ONE también la usa para
  * sacar el precio del niño (151.400) y del infante (22.000).» `null` si no sirve para restar.
  */
-export function notaDeReferencia(sirveParaRestar: boolean, porTipo: readonly CostoPorTipo[] | null): string | null {
+export function notaDeReferencia(
+  sirveParaRestar: boolean,
+  porTipo: readonly CostoPorTipo[] | null,
+  /** `false` = la captura NO es una habitación del grupo: solo sirve para restar. */
+  esHabitacion = true,
+): string | null {
   if (!sirveParaRestar || !porTipo) return null
   const partes = porTipo
     .filter(c => c.tipo !== 'adulto')
     .map(c => `del ${PALABRAS[c.tipo][0]} (${mil(c.unitario)})`)
   if (partes.length === 0) return null
-  return `ONE también la usa para sacar el precio ${partes.join(' y ')}.`
+  return `ONE ${esHabitacion ? 'también ' : ''}la usa para sacar el precio ${partes.join(' y ')}.`
 }
 
 // ── La ficha ─────────────────────────────────────────────────────────────────

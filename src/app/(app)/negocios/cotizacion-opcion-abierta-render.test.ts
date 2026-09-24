@@ -180,6 +180,20 @@ describe('P7 · cada bloque dice si está completo', () => {
     expect(t).toContain('Ir al primero que falta')
   })
 
+  it('el aviso de impuestos en destino solo informa: no deja el bloque por atender', () => {
+    const IMPUESTOS = 'Impuestos y tasas a pagar en destino: 82,31 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo.'
+    const conNota = opcion({}, {
+      ...confirmada,
+      casillas: { grupo_completo: { moneda: 'COP', total: 1_000_000, campos: CAMPOS, alertas: [IMPUESTOS] } },
+    })
+    expect(sinEtiquetas(pintar([conNota]))).toContain('1 bloque · 1 completo')
+    const conOtra = opcion({}, {
+      ...confirmada,
+      casillas: { grupo_completo: { moneda: 'COP', total: 1_000_000, campos: CAMPOS, alertas: [IMPUESTOS, 'La fecha de regreso no se ve'] } },
+    })
+    expect(sinEtiquetas(pintar([conOtra]))).toContain('1 requiere atención')
+  })
+
   it('confirmada y con costo: completo, y la tabla trae una fila por pasajero sin respaldo a mano', () => {
     const html = pintar([opcion({}, confirmada)])
     const t = sinEtiquetas(html)

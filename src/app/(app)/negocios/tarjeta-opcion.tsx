@@ -554,7 +554,7 @@ function Alojamiento({
               key={h.id}
               itemId={itemId}
               h={h}
-              notaReferencia={notaDeReferencia(h.sirveParaRestar, porTipo)}
+              notaReferencia={notaDeReferencia(h.sirveParaRestar, porTipo, h.rol === 'habitacion')}
               editable={editable}
               ampliar={ampliar}
               onQuitar={() => quitar(h, ix)}
@@ -593,9 +593,9 @@ function FilaHabitacionTarjeta({
   const textoOcupacion = h.lectura.campos.find(x => /ocupaci/i.test(x.label))?.valor ?? null
   const ocupacion = h.ocupacion ? ocupacionConEdades(h.ocupacion, textoOcupacion) : null
   const notaEdad = notaDeEdad(textoOcupacion)
-  // «Solo para restar» es el papel que el reparto le da a una captura que no cuenta como
-  // habitación del grupo; no se cambia desde aquí (el papel manual vive solo en los datos).
-  const titulo = h.numero ? `Habitación ${h.numero}` : 'Solo para restar'
+  // La captura que el reparto usa solo para restar no es una habitación del grupo: no lleva
+  // título propio, la explica su nota («ONE la usa para sacar el precio…»).
+  const titulo = h.numero ? `Habitación ${h.numero}` : null
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
 
@@ -614,9 +614,9 @@ function FilaHabitacionTarjeta({
       className="grid grid-cols-[120px_1fr_auto_auto] items-center gap-3 border-t border-[#E2DED5] py-2.5 pl-2.5 pr-2 first:border-t-0 max-sm:grid-cols-[84px_1fr_auto] max-sm:gap-2.5 max-sm:pl-2 max-sm:pr-1.5"
       data-habitacion={h.id}
     >
-      <Miniatura src={src} caption={`${titulo}${ocupacion ? ` · ${ocupacion}` : ''}`} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
+      <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
       <div className="min-w-0">
-        <b className="block font-semibold">{titulo}</b>
+        {titulo && <b className="block font-semibold">{titulo}</b>}
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
         {notaReferencia && (
           <div className="mt-[3px] flex items-start gap-[5px] text-xs text-[#6E6A62]">

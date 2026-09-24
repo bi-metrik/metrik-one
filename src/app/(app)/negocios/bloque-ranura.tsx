@@ -2,12 +2,14 @@
 
 import { useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertCircle, BedDouble, Car, Check, Info, MoreHorizontal, Package, Plane, Plus, Ticket, Trash2 } from 'lucide-react'
+import { BedDouble, Car, Check, Info, MoreHorizontal, Package, Plane, Plus, Ticket, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
 import { renombrarRanura } from '@/app/(app)/negocios/itinerario-actions'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
+import { AlertaDecision } from '@/components/viaje/alerta-decision'
+import { BTN } from '@/components/viaje/estilo'
 import { resolverRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { NOMBRE_TIPO_BLOQUE } from '@/lib/cotizaciones/opcion-viaje'
 import { nombreAutomaticoDeRanura, type BloqueDeLineas, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -52,6 +54,7 @@ export default function BloqueRanura({
   estado,
   id,
   onEliminar,
+  onVerOpcion,
   children,
 }: {
   bloque: Pick<BloqueDeLineas<unknown>, 'grupo' | 'etiqueta' | 'tipo'> & { opciones: number }
@@ -63,8 +66,13 @@ export default function BloqueRanura({
   onOpcionCreada?: (itemId: string) => void
   /** «Vuelo 1 · BOG → ADZ». Ausente = el nombre de la ranura. */
   titulo?: string | null
-  /** P7 · completo, o qué le falta. Ausente = no se pinta. */
-  estado?: { completo: boolean; motivo: string | null } | null
+  /**
+   * P7 · completo, o qué le falta. Ausente = no se pinta. Lo que falta va solo como ⚠ (H5):
+   * `aviso` al pasar el mouse, `explicacion` al tocarlo, y «Ver la opción» si es una sola.
+   */
+  estado?: { completo: boolean; motivo: string | null; aviso?: string | null; explicacion?: string | null; opcionId?: string | null } | null
+  /** «Ver la opción»: abre la opción que hay que arreglar y la trae a la vista. */
+  onVerOpcion?: (itemId: string) => void
   /** Para saltar al bloque desde el resumen del paso Componentes. */
   id?: string
   /**
@@ -149,12 +157,15 @@ export default function BloqueRanura({
                 <Check className="h-3 w-3" aria-hidden /> Completo
               </span>
             ) : (
-              <span
-                className="inline-flex min-w-0 items-center gap-0.5 truncate rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
-                title={estado.motivo ?? undefined}
-              >
-                <AlertCircle className="h-3 w-3 shrink-0" aria-hidden />
-                <span className="truncate">Requiere atención{estado.motivo ? `: ${estado.motivo}` : ''}</span>
+              <span data-estado-bloque>
+                <AlertaDecision tip={estado.aviso ?? 'Necesita tu decisión'} izquierda>
+                  <p className="m-0">{estado.explicacion ?? estado.motivo}</p>
+                  {estado.opcionId && onVerOpcion && (
+                    <span className="flex flex-wrap gap-2">
+                      <button type="button" className={BTN} onClick={() => onVerOpcion(estado.opcionId as string)}>Ver la opción</button>
+                    </span>
+                  )}
+                </AlertaDecision>
               </span>
             ))}
           </div>
