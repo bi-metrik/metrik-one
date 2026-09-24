@@ -50,6 +50,7 @@ export interface RubroPresupuestoEjecutado extends RubroPresupuesto {
 import { soloConfirmados } from '@/lib/cotizaciones/rubros-sugeridos'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 import { fueraDelPrecio } from '@/lib/cotizaciones/dia-relativo'
+import { itemsDelItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itinerarios'
 
 export const TIPO_RUBRO_SIN_DETALLE = 'otro'
 
@@ -527,4 +528,39 @@ export function presupuestoDeCosto(
   if (rubros.length > 0) return totalPresupuestado(rubros)
   const total = costoTotalCotizacion ?? 0
   return total > 0 ? total : undefined
+}
+
+// ── La tarifa que escogió el cliente (Trappvel, 2026-09-24) ───────────────────
+//
+// Una cotización con tarifas trae las opciones de TODAS (Económica, Recomendada, Premium):
+// sus ítems suman el costo de tres viajes. Al aprobar, el cliente escoge una
+// (`cotizaciones.tarifa_aceptada_id`) y `negocios.precio_aprobado` queda con su precio.
+// `costo_total` y `valor_total` siguen siendo los de la Recomendada. Estas funciones son la
+// ÚNICA regla con la que Ejecución, Resultado y Resumen se ajustan a la escogida.
+//
+// ⚠️ R6: sin `tarifa_aceptada_id` (toda cotización sin tarifas) todo sale igual que antes.
+
+/**
+ * Los ítems que cuentan para el presupuesto: los de la tarifa escogida, o todos si la
+ * cotización no tiene tarifa escogida (`seleccion === null`).
+ */
+export function itemsDeLaTarifaAceptada<T extends ItemConGrupo>(items: T[], seleccion: string[] | null): T[] {
+  if (seleccion === null) return items
+  const incluidos = new Set(itemsDelItinerario(items, seleccion))
+  return items.filter(i => incluidos.has(i.id))
+}
+
+/**
+ * El precio contra el que se mide lo cobrado («Cotizado», «Por cobrar»): el que se aprobó
+ * al escoger la tarifa. Sin tarifa escogida, `valor_total` de la cotización, como siempre.
+ */
+export function precioDeLaCotizacionAceptada(a: {
+  valorTotal: number | null | undefined
+  conTarifaAceptada: boolean
+  precioAprobadoNegocio: number | null | undefined
+}): number | undefined {
+  if (a.conTarifaAceptada && a.precioAprobadoNegocio != null && a.precioAprobadoNegocio > 0) {
+    return a.precioAprobadoNegocio
+  }
+  return a.valorTotal ?? undefined
 }

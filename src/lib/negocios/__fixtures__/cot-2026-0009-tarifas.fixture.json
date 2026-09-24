@@ -1,0 +1,118 @@
+{
+  "_fuente": "COT-2026-0009 (Trappvel), leída por SELECT el 2026-09-24. Solo lo que usa el presupuesto.",
+  "costo_total": 13984180,
+  "items": [
+    {
+      "id": "b7e7abed-96dd-454c-bfbc-a19a365949de",
+      "nombre": "SUNSCAPE CANCUN ALL-INCLUSIVE RESORT & SPA BY HYATT · CANCÚN, MÉXICO",
+      "grupo": "hotel",
+      "opcion_de": null,
+      "orden": 1,
+      "cantidad": 1,
+      "subtotal": 5439880,
+      "es_ajuste": false,
+      "entra_al_precio": true,
+      "dia_relativo": null,
+      "rubros": [
+        {
+          "tipo": "tarifa",
+          "sugerido": false,
+          "valor_total": 5439880
+        }
+      ]
+    },
+    {
+      "id": "e651dd73-fea1-4e37-9fdf-62d31debb700",
+      "nombre": "RIU CARIBE - ALL INCLUSIVE · CANCÚN, MÉXICO",
+      "grupo": "hotel",
+      "opcion_de": null,
+      "orden": 2,
+      "cantidad": 1,
+      "subtotal": 8258260,
+      "es_ajuste": false,
+      "entra_al_precio": true,
+      "dia_relativo": null,
+      "rubros": [
+        {
+          "tipo": "tarifa",
+          "sugerido": false,
+          "valor_total": 8258260
+        }
+      ]
+    },
+    {
+      "id": "f0c8e1a0-2eab-4c50-a8ef-d660278839b2",
+      "nombre": "HYATT ZILARA CANCUN - ALL INCLUSIVE - ADULTS ONLY · CANCÚN, MÉXICO",
+      "grupo": "hotel",
+      "opcion_de": null,
+      "orden": 3,
+      "cantidad": 1,
+      "subtotal": 11963080,
+      "es_ajuste": false,
+      "entra_al_precio": true,
+      "dia_relativo": null,
+      "rubros": [
+        {
+          "tipo": "tarifa",
+          "sugerido": false,
+          "valor_total": 11963080
+        }
+      ]
+    },
+    {
+      "id": "5e3988fe-6885-4f3f-8dd6-fcb93990a0ac",
+      "nombre": "AVIANCA BOGOTÁ–CANCÚN",
+      "grupo": "vuelo",
+      "opcion_de": null,
+      "orden": 4,
+      "cantidad": 1,
+      "subtotal": 5725920,
+      "es_ajuste": false,
+      "entra_al_precio": true,
+      "dia_relativo": null,
+      "rubros": [
+        {
+          "tipo": "tarifa",
+          "sugerido": false,
+          "valor_total": 5725920
+        }
+      ]
+    },
+    {
+      "id": "0bdf60c2-2d72-49a1-b19b-142808323be6",
+      "nombre": "Recargo de emision",
+      "grupo": null,
+      "opcion_de": null,
+      "orden": 5,
+      "cantidad": 1,
+      "subtotal": 0,
+      "es_ajuste": false,
+      "entra_al_precio": true,
+      "dia_relativo": null,
+      "rubros": []
+    }
+  ],
+  "tarifas": [
+    {
+      "id": "bf252c4e-6980-4a47-ac91-c00830f09cd6",
+      "nombre": "Económica",
+      "seleccion": [
+        "b7e7abed-96dd-454c-bfbc-a19a365949de"
+      ]
+    },
+    {
+      "id": "34e42984-ef08-444a-a674-77afe0add139",
+      "nombre": "Recomendada",
+      "seleccion": [
+        "e651dd73-fea1-4e37-9fdf-62d31debb700"
+      ]
+    },
+    {
+      "id": "47f99689-a636-4fed-b230-3aac1d61395d",
+      "nombre": "Premium",
+      "seleccion": [
+        "f0c8e1a0-2eab-4c50-a8ef-d660278839b2"
+      ]
+    }
+  ]
+}
