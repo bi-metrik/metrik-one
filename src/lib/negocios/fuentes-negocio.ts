@@ -21,7 +21,19 @@
  * tienen slug y su `data` puede ser vieja.
  */
 
-export type EvaluadorCondicion = (condicion: Record<string, unknown>) => Promise<boolean>
+/**
+ * El CONTACTO del negocio como si fuera un bloque más: `{ nombre, telefono, email }` de
+ * `contactos`, por `negocios.contacto_id`. Sirve donde la configuración pide un
+ * `source_bloque_slug` (los cruces, los votos, la tarjeta de datos clave): el celular y el
+ * correo del cliente no viven en ningún bloque, viven en su contacto.
+ *
+ * Empieza por `@` para que nunca choque con el slug de un bloque real (son snake_case).
+ * Le aplica a todo negocio que tenga contacto. ⚠️ No sirve como `source_bloque_slug` de
+ * una `condition`: esa la resuelve `condicion_cumplida` en SQL, que solo lee bloques.
+ */
+export const SLUG_CONTACTO = '@contacto'
+
+export type EvaluadorCondicion =(condicion: Record<string, unknown>) => Promise<boolean>
 
 export interface ContextoFuentes {
   /** Datos aplanados del bloque origen, por slug. Un slug ausente = el negocio no lo tiene. */

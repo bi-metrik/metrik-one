@@ -5,6 +5,7 @@
 - ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
 - ⚠️⚠️ [Módulo Ferretería dimpro (#905)](project_modulo_ferreteria_dimpro.md) — migración SIN aplicar (escribe datos); tokens sin emitir
 - ⚠️⚠️ [Voto entre fuentes (#895, #896)](project_voto_entre_fuentes.md) — #896 SIN mergear (migración); plantillas NO unificadas a propósito; V0012 frena
+- ⚠️ [Certificado UPME por correo, sin VIN](project_certificado_correo_contacto.md) — migración SIN aplicar; solo avisa; @contacto como fuente; sin celular
 - ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
 - ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — backfill de 21 SIN aplicar; se mide por FLUJO, no por `orden`
 - ⚠️⚠️ [El bloque declara qué documento espera](project_documento_esperado_bloque.md) — config SOENA SIN aplicar; veredicto ASIMÉTRICO a propósito

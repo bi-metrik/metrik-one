@@ -10,12 +10,14 @@
  * - «¿Le aplica?» lo decide `condicion_cumplida`, la función SQL de los gates y el
  *   routing, más `desactivado`. Nunca una lectura propia de la `condition`.
  * - Cada condición se resuelve una sola vez por lectura (memo por su JSON).
+ * - `SLUG_CONTACTO` (`@contacto`) trae el contacto del negocio como un bloque más, solo
+ *   si alguien lo pide.
  *
  * No es un archivo `'use server'`: exportar esto desde uno lo volvería un endpoint.
  */
 
 import { aplanarDataBloque } from './referencias-fuente'
-import { memoizar, type ContextoFuentes } from './fuentes-negocio'
+import { memoizar, SLUG_CONTACTO, type ContextoFuentes } from './fuentes-negocio'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any { return client }
@@ -36,10 +38,12 @@ export async function contextoFuentesDelNegocio(
   }
   if (args.slugs.length === 0) return vacio
 
-  // Configuraciones y datos en PARALELO: son dos lecturas independientes. Los bloques de
+  const quiereContacto = args.slugs.includes(SLUG_CONTACTO)
+
+  // Configuraciones y datos en PARALELO: son lecturas independientes. Los bloques de
   // los que depende la `condition` de cada uno (el tipo de persona, el servicio) no hace
   // falta traerlos: esa condición la resuelve `condicion_cumplida` en la base.
-  const [cfgRes, dataRes] = await Promise.all([
+  const [cfgRes, dataRes, contactoRes] = await Promise.all([
     db(supabase)
       .from('bloque_configs')
       .select('slug, config_extra, etapas_negocio!inner(linea_id)')
@@ -51,9 +55,13 @@ export async function contextoFuentesDelNegocio(
       .eq('negocio_id', negocioId)
       .eq('bloque_configs.etapas_negocio.linea_id', lineaId)
       .in('bloque_configs.slug', args.slugs),
+    quiereContacto
+      ? db(supabase).from('negocios').select('contactos(nombre, telefono, email)').eq('id', negocioId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ])
   if (cfgRes.error) console.error('[fuentes-negocio] configs por slug:', cfgRes.error)
   if (dataRes.error) console.error('[fuentes-negocio] datos por slug:', dataRes.error)
+  if (contactoRes.error) console.error('[fuentes-negocio] contacto del negocio:', contactoRes.error)
   const configPorSlug: Record<string, Record<string, unknown>> = {}
   for (const c of (cfgRes.data ?? []) as Array<{ slug: string | null; config_extra: Record<string, unknown> | null }>) {
     if (c.slug) configPorSlug[c.slug] = c.config_extra ?? {}
@@ -63,6 +71,10 @@ export async function contextoFuentesDelNegocio(
     const slug = f.bloque_configs?.slug
     if (slug) porSlug[slug] = aplanarDataBloque(f.data)
   }
+  // El contacto entra como un bloque más. Un negocio sin contacto no lo trae, y todo lo
+  // que lo lea calla (igual que un bloque que el negocio no tiene).
+  const contacto = (contactoRes.data as { contactos?: Record<string, unknown> | null } | null)?.contactos
+  if (quiereContacto && contacto) porSlug[SLUG_CONTACTO] = { ...contacto }
 
   const evaluarJson = memoizar(async (json: string) => {
     const { data: cumple, error } = await db(supabase).rpc('condicion_cumplida', {
@@ -79,6 +91,7 @@ export async function contextoFuentesDelNegocio(
   const evaluar = (cond: Record<string, unknown>) => evaluarJson(JSON.stringify(cond))
 
   const aplica = async (slug: string) => {
+    if (slug === SLUG_CONTACTO) return !!porSlug[SLUG_CONTACTO]
     const ce = configPorSlug[slug]
     // Un slug sin configuración en la línea no es un bloque de este proceso.
     if (!ce) return false
