@@ -8,7 +8,7 @@ import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor
 import { PLAN_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
 import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
-import { accionesSobreUsuario } from '@/lib/usuarios-espacio/reglas'
+import { accionesSobreUsuario, esAdministradorSinCosto } from '@/lib/usuarios-espacio/reglas'
 import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor'
 import { PestanaPagos } from './pestana-pagos'
 import SuscripcionClient, { type PestanaSuscripcion } from './suscripcion-client'
@@ -107,6 +107,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
       : equipo.usuarios.map((u) => ({
           ...u,
           ultimoIngresoTexto: u.ultimoIngreso ? (formatBogotaFechaCortaAno(u.ultimoIngreso) ?? null) : null,
+          sinCosto: esAdministradorSinCosto(u.id, ctx.designadoId),
           acciones: soloLectura
             ? { puedeRetirar: false, puedeCambiarRol: false, puedeReenviar: false, nota: null }
             : accionesSobreUsuario({ actorId: ctx.usuarioId, objetivo: u, designadoId: ctx.designadoId }),
@@ -151,7 +152,11 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         licencias={
           equipo === 'error' || !equipo.cupo
             ? null
-            : { usados: equipo.cupo.usados, total: equipo.cupo.licencias }
+            : {
+                usados: equipo.cupo.usados,
+                total: equipo.cupo.licencias,
+                operativos: equipo.usuarios.some((u) => esAdministradorSinCosto(u.id, ctx.designadoId)),
+              }
         }
         terminosResumen={terminosResumen}
         sustenta={soloLectura ? null : sugerencia.yaSolicitado ? 'solicitada' : sugerencia.mostrar ? 'oferta' : null}

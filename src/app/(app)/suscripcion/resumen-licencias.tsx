@@ -25,16 +25,20 @@ const CIRCULO = 'grid size-7 shrink-0 place-items-center rounded-full ring-2 rin
  *
  * Sin barra de progreso ni color de advertencia: estar lleno está bien. Las personas son las
  * mismas que lista la pestaña Usuarios (`usados` = esa lista), así que no hay consulta propia.
+ * Con `operativos`, el administrador sin costo (la persona designada) no está en `personas` ni en
+ * `usados`: la cuenta es de los usuarios operativos, y el texto lo dice.
  */
 export function ResumenLicencias({
   usados,
   total,
   personas,
+  operativos = false,
   onVerUsuarios,
 }: {
   usados: number
   total: number
   personas: PersonaLicencia[]
+  operativos?: boolean
   onVerUsuarios: () => void
 }) {
   const visibles = personas.slice(0, MAX_VISIBLES)
@@ -63,7 +67,8 @@ export function ResumenLicencias({
         <div className="min-w-0">
           <h2 className="text-base font-semibold leading-5">Usuarios</h2>
           <p className="text-sm leading-[18px] text-muted-foreground" data-licencias-texto>
-            <span className="font-mono">{usados}</span> de <span className="font-mono">{total}</span> en uso
+            <span className="font-mono">{usados}</span> de <span className="font-mono">{total}</span>
+            {operativos ? ' operativos en uso · administrador sin costo' : ' en uso'}
           </p>
         </div>
       </div>
@@ -73,7 +78,7 @@ export function ResumenLicencias({
 
       <div
         role="img"
-        aria-label={`${usados} de ${total} usuarios en uso`}
+        aria-label={`${usados} de ${total} usuarios${operativos ? ' operativos' : ''} en uso`}
         data-pila-licencias
         className="col-span-2 flex items-center -space-x-1 sm:col-span-1 sm:col-start-2 sm:row-start-1"
       >

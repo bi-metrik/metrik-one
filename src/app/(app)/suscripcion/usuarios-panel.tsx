@@ -26,6 +26,8 @@ export interface FilaUsuario extends UsuarioDelEspacio {
   acciones: AccionesUsuario
   /** El último ingreso ya formateado en el servidor (Bogotá); `null` = invitación pendiente. */
   ultimoIngresoTexto: string | null
+  /** La persona designada del contrato: administrador sin costo, no ocupa cupo. */
+  sinCosto?: boolean
 }
 
 export interface DatosUsuarios {
@@ -71,9 +73,12 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
   }
 
   const lista = datos.lista
+  // Con administrador sin costo, el cupo cuenta solo a los operativos, y el contador lo dice.
+  const operativos = lista.some((u) => u.sinCosto)
   const contador = datos.cupo
-    ? `${datos.cupo.usados} de ${datos.cupo.licencias} usuarios en uso`
+    ? `${datos.cupo.usados} de ${datos.cupo.licencias} usuarios${operativos ? ' operativos' : ''} en uso`
     : `${lista.length} usuarios con acceso`
+  const usadosAhora = datos.cupo?.usados ?? lista.length
   const precio = datos.valorAdicional !== null ? ` · ${formatCOP(datos.valorAdicional)} por usuario adicional al mes` : ''
 
   return (
@@ -124,7 +129,7 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
               datos.licenciasContrato !== null &&
               licenciaAdicionalLiberable({
                 licencias: datos.licenciasContrato,
-                usadosDespues: lista.length - 1,
+                usadosDespues: usadosAhora - 1,
                 adicionalesVigentes: datos.adicionalesVigentes,
               })
             }
@@ -358,7 +363,9 @@ function FilaDeUsuario({ usuario: u, liberable }: { usuario: FilaUsuario; libera
               <option value="admin">Administrador</option>
             </select>
           ) : (
-            <span className="rounded-full bg-papel px-2 py-0.5 text-xs text-tinta">{etiquetaRol(u.role)}</span>
+            <span className="rounded-full bg-papel px-2 py-0.5 text-xs text-tinta" data-rol-usuario>
+              {u.sinCosto ? 'Administrador · sin costo' : etiquetaRol(u.role)}
+            </span>
           )}
           {u.acciones.puedeReenviar && (
             <button type="button" onClick={reenviar} disabled={pendiente} className="text-sm font-semibold text-acento">
