@@ -1,6 +1,6 @@
 ---
 name: modulo-ferreteria-dimpro
-description: Módulo Ferretería (piloto Marketplace dimpro, PR #905) — migración 20260924235500 SIN aplicar y con escritura de datos; tokens del endpoint sin emitir; una llave de módulo nueva toca TRES listas SQL
+description: Módulo Ferretería (piloto Marketplace dimpro) — #917 ventas→negocio con migración SIN aplicar (escribe datos); liquidación mensual 50/50; una llave de módulo nueva toca TRES listas SQL
 metadata:
   type: project
 ---
@@ -31,6 +31,16 @@ LISTA de métodos: un recurso puede tener GET y POST. Gotcha de bootstrap: el wo
 resuelven igual por el `node_modules` del padre, el symlink no hace falta para vitest/tsc/next build.
 
 **2026-09-24, margen y foto (sin migración):** `margenPorVenta(ganancia, precio)` y `formatoMargen` en
-`reglas.ts` (margen = ganancia / precio, fracción). La tabla NO ordena columnas. Gotcha del React Compiler:
-calcular algo con `vigente` ANTES del `useMemo` que lo tiene de dependencia rompe el lint
-(`preserve-manual-memoization`); va DESPUÉS.
+`reglas.ts` (margen = ganancia / precio, fracción). Gotcha del React Compiler: calcular algo con `vigente`
+ANTES del `useMemo` que lo tiene de dependencia rompe el lint (`preserve-manual-memoization`); va DESPUÉS.
+Orden por columna llegó en #916 (`orden.ts` + `orden-tabla.tsx`).
+
+**2026-09-24, PR #917 (SIN mergear, migración `20260925120000` SIN aplicar, escribe datos):** cada venta
+es un negocio de ONE en la línea Ferretería de dimpro (Vendido→Entregado→Pagado, etapas marcadas por
+`config_extra.ferreteria_paso`). El negocio sale por las acciones de la app vía `negocios-puerto.ts`
+(crearNegocio, cambiarEtapaNegocioConGate, completarNegocio, registrarPagoEnNegocio, agregarResponsable).
+La parte de MeTRIK es MENSUAL, no por venta (Mauricio: 50/50 con signo, sin piso, sin arrastre; negativa =
+MeTRIK aporta a Dimpro) — `liquidacion.ts`. Abierto con Mauricio: el mes sale de `fecha_venta`, no del pago.
+- dimpro tiene `business` (= Clarity) pero no `clarity` como llave: `REQUISITO.clarity` mira `business`.
+- `cambiarEtapaNegocioConGate` solo escribe `activity_log` si hay `staffId`; el soporte de MeTRIK en dimpro
+  no tiene staff activo, así que sus avances no dejan fila (un UPDATE por SQL tampoco: no hay trigger).
