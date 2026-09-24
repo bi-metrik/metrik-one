@@ -878,6 +878,15 @@ export function codigoDeMoneda(texto: string | null | undefined): string | null 
 
 // ── La confirmación desactualizada ───────────────────────────────────────────
 
+/**
+ * R8 · la huella de las habitaciones de una opción: cuáles son, cuánto cuesta cada una y el
+ * papel que una persona les fijó. Sale solo de lo guardado, para poder decir si la
+ * confirmación sigue describiendo la opción.
+ */
+export function firmaDeHabitaciones(habitaciones: readonly Habitacion[]): string {
+  return habitaciones.map(h => `${h.id}:${h.rolManual?.valor ?? 'auto'}:${h.lectura.total}`).join('|')
+}
+
 export interface ConfirmacionDesactualizada {
   motivo: 'composicion' | 'moneda'
   mensaje: string
@@ -907,6 +916,14 @@ export function confirmacionDesactualizada(
 ): ConfirmacionDesactualizada | null {
   const c = tarifa.confirmada
   if (!c) return null
+  // R8 · con habitaciones, cualquier habitación nueva, quitada o cambiada de papel después de
+  // confirmar cambia el costo: la confirmación queda vieja aunque la ocupación coincida.
+  if (tarifa.habitaciones && tarifa.habitaciones.length > 0 && (c.firmaHabitaciones ?? null) !== firmaDeHabitaciones(tarifa.habitaciones)) {
+    return {
+      motivo: 'composicion',
+      mensaje: 'Cambiaron las habitaciones después de confirmar el costo: vuelve a confirmarlo.',
+    }
+  }
   // Normalizada: un jsonb escrito a mano sin `ninos` o `infantes` no puede leerse como otra
   // composición solo por la forma.
   const cargada = normalizarComposicion(c.composicion)
@@ -957,9 +974,21 @@ export type EstadoTarifa =
       costos: CostoPorTipo[]
       moneda: string
       costoTotal: number
-      origen: 'desglose' | 'resta' | 'solo_adultos'
+      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones'
       mensaje: string
+      /**
+       * Con habitaciones (R8) y sin un par del mismo tipo de habitación para cada menor, el
+       * costo no se parte por pasajero: va por habitación y `costos` queda vacío.
+       */
+      porHabitacion?: CostoDeHabitacion[]
     }
+
+/** El costo de una habitación que cuenta para el precio (R8). */
+export interface CostoDeHabitacion {
+  numero: number
+  ocupacion: Composicion
+  total: number
+}
 
 const dosDecimales = (v: number) => Math.round(v * 100) / 100
 
@@ -1225,6 +1254,27 @@ export interface TarifaConfirmada {
    * nuevo.
    */
   margenProveedor?: MargenProveedor | null
+  /**
+   * R8 · el costo por habitación, cuando no hay cómo partirlo por pasajero (`costos` vacío).
+   * El PDF imprime entonces el precio de cada habitación en vez del de cada pasajero.
+   */
+  porHabitacion?: { numero: number; ocupacion: Composicion; totalCOP: number }[]
+  /** R8 · qué habitaciones y con qué papel se confirmaron (`firmaDeHabitaciones`). */
+  firmaHabitaciones?: string
+}
+
+/** R8 · qué hace una captura dentro de una opción de hotel. */
+export type RolHabitacion = 'habitacion' | 'referencia'
+
+/**
+ * R8 · una captura dentro de una opción de hotel (hotel + entrada + salida). El papel
+ * (habitación o solo para restar) se calcula al leer (`habitaciones.ts`); aquí solo se
+ * guarda lo que una persona decidió con un toque.
+ */
+export interface Habitacion {
+  id: string
+  lectura: LecturaCasilla
+  rolManual?: { valor: RolHabitacion; por: string | null; porId: string | null; en: string } | null
 }
 
 export interface TarifaPax {
@@ -1272,6 +1322,11 @@ export interface TarifaPax {
    * pesos.
    */
   costoManual?: CostoManualEnMoneda | null
+  /**
+   * R8 · las habitaciones de una opción de hotel. Ausente = la opción es UNA habitación, la
+   * del pantallazo 1 (todas las opciones anteriores al 2026-09-24).
+   */
+  habitaciones?: Habitacion[]
 }
 
 /** Un costo escrito a mano en otra moneda, con la tasa con que se pasó a pesos. */
@@ -1317,6 +1372,52 @@ function leerCostoManual(raw: unknown): CostoManualEnMoneda | null {
   }
 }
 
+/** Una lectura guardada, sin confiar en su forma. `null` si no es una lectura. */
+function leerLectura(raw: unknown): LecturaCasilla | null {
+  const l = raw as LecturaCasilla | undefined
+  if (!l || typeof l !== 'object' || typeof l.total !== 'number' || typeof l.moneda !== 'string') return null
+  const out: LecturaCasilla = {
+    ...l,
+    porTipo: Array.isArray(l.porTipo) ? l.porTipo : [],
+    // El aviso de «año completado con el del viaje» de las lecturas anteriores al 2026-09-23
+    // ya no se muestra: hoy el año se deduce sin preguntar (`anio-fecha.ts`).
+    alertas: Array.isArray(l.alertas) ? l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a)) : [],
+    notasCliente: Array.isArray(l.notasCliente) ? l.notasCliente : [],
+    campos: Array.isArray(l.campos) ? l.campos : [],
+    identidad: l.identidad && typeof l.identidad === 'object' ? l.identidad : {},
+    ocupacion: l.ocupacion ?? { adultos: null, ninos: null, infantes: null, total: null },
+    aPagarAgencia: typeof l.aPagarAgencia === 'number' ? l.aPagarAgencia : null,
+    costoAgenciaOrigen: l.costoAgenciaOrigen === 'neto_leido' || l.costoAgenciaOrigen === 'derivado_comision'
+      ? l.costoAgenciaOrigen
+      : null,
+    paraComposicion: normalizarComposicion(l.paraComposicion),
+    monedaAsumida: l.monedaAsumida === true,
+  }
+  // Sin la marca, las llaves no aparecen: una lectura anterior al 2026-09-22 se lee
+  // exactamente como antes.
+  if (!out.paraComposicion) delete out.paraComposicion
+  if (!out.monedaAsumida) delete out.monedaAsumida
+  return out
+}
+
+/** R8 · las habitaciones guardadas; las que no se pueden leer se descartan. */
+function leerHabitaciones(raw: unknown): Habitacion[] | null {
+  if (!Array.isArray(raw)) return null
+  const out: Habitacion[] = []
+  for (const h of raw) {
+    if (!h || typeof h !== 'object') continue
+    const r = h as Record<string, unknown>
+    const lectura = leerLectura(r.lectura)
+    if (typeof r.id !== 'string' || !lectura) continue
+    const m = r.rolManual as Record<string, unknown> | null | undefined
+    const rolManual = m && (m.valor === 'habitacion' || m.valor === 'referencia') && typeof m.en === 'string'
+      ? { valor: m.valor as RolHabitacion, por: typeof m.por === 'string' ? m.por : null, porId: typeof m.porId === 'string' ? m.porId : null, en: m.en }
+      : null
+    out.push({ id: r.id, lectura, ...(rolManual ? { rolManual } : {}) })
+  }
+  return out
+}
+
 /** Lee `items.tarifa_pax` sin confiar en su forma: un jsonb viejo o roto no rompe la pantalla. */
 export function leerTarifaPax(raw: unknown): TarifaPax {
   if (!raw || typeof raw !== 'object') return {}
@@ -1324,30 +1425,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const casillas: CasillasLeidas = {}
   const crudas = (r.casillas && typeof r.casillas === 'object' ? r.casillas : {}) as Record<string, unknown>
   for (const clave of ['grupo_completo', 'sin_infantes', 'solo_adultos'] as ClaveCasilla[]) {
-    const l = crudas[clave] as LecturaCasilla | undefined
-    if (l && typeof l === 'object' && typeof l.total === 'number' && typeof l.moneda === 'string') {
-      casillas[clave] = {
-        ...l,
-        porTipo: Array.isArray(l.porTipo) ? l.porTipo : [],
-        // El aviso de «año completado con el del viaje» de las lecturas anteriores al 2026-09-23
-        // ya no se muestra: hoy el año se deduce sin preguntar (`anio-fecha.ts`).
-        alertas: Array.isArray(l.alertas) ? l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a)) : [],
-        notasCliente: Array.isArray(l.notasCliente) ? l.notasCliente : [],
-        campos: Array.isArray(l.campos) ? l.campos : [],
-        identidad: l.identidad && typeof l.identidad === 'object' ? l.identidad : {},
-        ocupacion: l.ocupacion ?? { adultos: null, ninos: null, infantes: null, total: null },
-        aPagarAgencia: typeof l.aPagarAgencia === 'number' ? l.aPagarAgencia : null,
-        costoAgenciaOrigen: l.costoAgenciaOrigen === 'neto_leido' || l.costoAgenciaOrigen === 'derivado_comision'
-          ? l.costoAgenciaOrigen
-          : null,
-        paraComposicion: normalizarComposicion(l.paraComposicion),
-        monedaAsumida: l.monedaAsumida === true,
-      }
-      // Sin la marca, las llaves no aparecen: una lectura anterior al 2026-09-22 se lee
-      // exactamente como antes.
-      if (!casillas[clave]!.paraComposicion) delete casillas[clave]!.paraComposicion
-      if (!casillas[clave]!.monedaAsumida) delete casillas[clave]!.monedaAsumida
-    }
+    const l = leerLectura(crudas[clave])
+    if (l) casillas[clave] = l
   }
   const conf = r.confirmada as TarifaConfirmada | null | undefined
   const confirmada = conf && typeof conf === 'object' && Array.isArray(conf.costos)
@@ -1361,6 +1440,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const correcciones = leerCorrecciones(r.correcciones)
   const moneda = leerDecisionMoneda(r.moneda)
   const costoManual = leerCostoManual(r.costoManual)
+  const habitaciones = leerHabitaciones(r.habitaciones)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -1373,6 +1453,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     // Igual que las correcciones: sin decisión, la llave no aparece.
     ...(moneda ? { moneda } : {}),
     ...(costoManual ? { costoManual } : {}),
+    // Sin habitaciones la llave no aparece: una opción de siempre se lee igual que antes.
+    ...(habitaciones ? { habitaciones } : {}),
   }
 }
 

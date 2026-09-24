@@ -23,6 +23,7 @@ import {
   type TipoPasajero,
 } from './tarifa-pasajero'
 import { resolverCostoAgencia } from './costo-agencia'
+import { menoresDeDosAnios } from './habitaciones'
 
 function entero(valor: string | null | undefined): number | null {
   const n = numeroLeido(valor ?? null)
@@ -105,6 +106,13 @@ export function construirLecturaCasilla(
     ocupacion.ninos = null
     ocupacion.infantes = null
     ocupacion.total = null
+  }
+  // R8 · menos de 2 años es infante, aunque la pantalla lo llame niño: «1 niño (0 años)».
+  // El modelo tiene la misma regla en su prompt; esto la cumple cuando no la siguió.
+  const bebes = Math.min(ocupacion.ninos ?? 0, menoresDeDosAnios(valor('ocupacion')))
+  if (bebes > 0) {
+    ocupacion.ninos = (ocupacion.ninos ?? 0) - bebes
+    ocupacion.infantes = (ocupacion.infantes ?? 0) + bebes
   }
   // Si la pantalla solo dice adultos y deja niños/infantes en null, esos null son «no se
   // ve», no «cero». Pero si dice adultos y al menos uno de los menores, lo que falta es 0.

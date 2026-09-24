@@ -14,6 +14,8 @@ import {
   quitarCasillaDeItem,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import FichaDeLinea from '@/app/(app)/negocios/ficha-linea-item'
+import HabitacionesDeOpcion, { PegarOtraHabitacion } from '@/app/(app)/negocios/habitaciones-opcion'
+import { conHabitaciones, recibeHabitaciones } from '@/lib/cotizaciones/habitaciones'
 import { descartarPropuestaDePantallazo } from '@/app/(app)/negocios/pantallazo-actions'
 import { margenDelProveedor, type MargenProveedor } from '@/lib/cotizaciones/margen-proveedor'
 import { formatMargenPct } from '@/lib/cotizaciones/margen-vista'
@@ -131,6 +133,30 @@ export default function TarifaPasajeroItem({
   const [editandoComposicion, setEditandoComposicion] = useState(false)
   const [tasa, setTasa] = useState('')
   const [isPending, startTransition] = useTransition()
+
+  // R8 · una opción de hotel con varias habitaciones se cotiza por sus habitaciones, contra
+  // el grupo del negocio. Su bloque es otro: cupos, papel de cada captura y costo por
+  // habitación (`habitaciones-opcion.tsx`).
+  if (conHabitaciones(tarifa)) {
+    return (
+      <HabitacionesDeOpcion
+        itemId={itemId}
+        tarifa={tarifa}
+        composicionViaje={composicionViaje}
+        onGuardada={setGuardada}
+        onCambio={onCambio}
+        monedaSlot={(
+          <MonedaDeLaTarifa
+            itemId={itemId}
+            info={monedaDeTarifa(tarifa)}
+            deshabilitado={isPending}
+            onGuardada={setGuardada}
+            onCambio={onCambio}
+          />
+        )}
+      />
+    )
+  }
 
   // La moneda con que se costea (la elegida, la leída o COP supuesta) y lo que quedó viejo.
   // Salen del MISMO módulo que usa el servidor: la pantalla no puede dar por vigente lo que
@@ -296,6 +322,16 @@ export default function TarifaPasajeroItem({
         <MonedaDeLaTarifa
           itemId={itemId}
           info={monedaTarifa}
+          deshabilitado={isPending || leyendo !== null}
+          onGuardada={setGuardada}
+          onCambio={onCambio}
+        />
+      )}
+
+      {/* R8 · el grupo en más de una habitación del mismo hotel. */}
+      {primera && ranura.slug === 'hotel_detalle' && recibeHabitaciones(tarifa) && (
+        <PegarOtraHabitacion
+          itemId={itemId}
           deshabilitado={isPending || leyendo !== null}
           onGuardada={setGuardada}
           onCambio={onCambio}

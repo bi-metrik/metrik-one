@@ -61,9 +61,13 @@ function lecturaPrincipal(o: OpcionComparable): LecturaCasilla | null {
 export function opcionConLaMismaImagen(huella: string | null, opciones: readonly OpcionComparable[]): OpcionComparable | null {
   if (!huella) return null
   for (const o of opciones) {
-    const casillas = leerTarifaPax(o.tarifa_pax).casillas ?? {}
-    for (const l of Object.values(casillas)) {
+    const tarifa = leerTarifaPax(o.tarifa_pax)
+    for (const l of Object.values(tarifa.casillas ?? {})) {
       if (l?.huellaImagen === huella) return o
+    }
+    // R8 · también las habitaciones de una opción de hotel (regla 6).
+    for (const h of tarifa.habitaciones ?? []) {
+      if (h.lectura.huellaImagen === huella) return o
     }
   }
   return null
@@ -121,6 +125,10 @@ export type Repeticion =
  * «otro precio»: si ya hay una idéntica, esa es la que importa.
  */
 export function compararConExistentes(nueva: OpcionComparable, existentes: readonly OpcionComparable[]): Repeticion | null {
+  // R8 · regla 6: en hotel, dos capturas iguales son dos habitaciones iguales (un grupo de 4
+  // adultos son dos dobles), no una repetida. Lo repetido de un hotel lo deciden la misma
+  // imagen o los cupos del grupo ya cubiertos (`unirHotelComoHabitacion`).
+  if (ranuraDelItem({ nombre: nueva.nombre ?? null, grupo: nueva.grupo ?? null, tarifa_pax: nueva.tarifa_pax })?.slug === 'hotel_detalle') return null
   let otroPrecio: OpcionComparable | null = null
   for (const o of existentes) {
     if (o.id === nueva.id || !mismoServicio(nueva, o)) continue

@@ -162,6 +162,24 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'Airtable lleva dos años al 0% de llenado»), que explica por qué la autorización se ' +
       'registra donde se consulta. No hay plazo de conservación en este archivo.',
   },
+  'src/lib/cotizaciones/habitaciones.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un pasajero: un menor de menos de 2 años cuenta como infante en una habitación ' +
+      'de hotel (R8, regla 7 de Trappvel). No hay plazo de conservación en este archivo.',
+  },
+  'src/lib/cotizaciones/lectura-casilla.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un pasajero leída del pantallazo («1 niño (0 años)» es un infante, R8 regla 7). ' +
+      'No hay plazo de conservación en este archivo.',
+  },
+  'src/lib/cotizaciones/ranuras-pantallazo.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'instrucción al lector de pantallazos: un menor de MENOS DE 2 AÑOS de edad es infante ' +
+      '(R8, regla 7). No hay plazo de conservación en este archivo.',
+  },
 };
 
 const NUMEROS_EN_LETRAS: Record<string, number> = {

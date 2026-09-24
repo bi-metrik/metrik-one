@@ -1,0 +1,702 @@
+{
+ "nota": "COT-2026-0013 (Trappvel): copia de tarifa_pax.casillas.grupo_completo de las 6 opciones de hotel, leida el 2026-09-24. Solo lectura: las pruebas no consultan la base.",
+ "grupo": {
+  "adultos": 6,
+  "ninos": 1,
+  "infantes": 1
+ },
+ "hoteles": [
+  {
+   "item": "efb0a3c3",
+   "grupo": "hotel: Hotel en Providencia Island",
+   "lectura": {
+    "total": 1419369.47,
+    "campos": [
+     {
+      "label": "Hotel",
+      "valor": "Cabañas Agua Dulce"
+     },
+     {
+      "label": "Estrellas",
+      "valor": "3"
+     },
+     {
+      "label": "Ciudad",
+      "valor": "Providencia Island / Providencia Island"
+     },
+     {
+      "label": "Habitación",
+      "valor": "Triple Basic"
+     },
+     {
+      "label": "Régimen",
+      "valor": "Alojamiento y desayuno"
+     },
+     {
+      "label": "Check-in",
+      "valor": "2026-11-23"
+     },
+     {
+      "label": "Check-out",
+      "valor": "2026-11-25"
+     },
+     {
+      "label": "Noches",
+      "valor": "2"
+     },
+     {
+      "label": "Ocupación",
+      "valor": "2 adultos, 1 niño (5 años), 1 habitación"
+     },
+     {
+      "label": "Cancelación",
+      "valor": "Cancelación gratuita hasta 18/11/2026"
+     },
+     {
+      "label": "Impuestos incluidos",
+      "valor": "false"
+     },
+     {
+      "label": "Impuestos en destino",
+      "valor": "82.31"
+     },
+     {
+      "label": "Moneda de los impuestos en destino",
+      "valor": "USD"
+     },
+     {
+      "label": "Adultos en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Niños en la captura",
+      "valor": "1"
+     },
+     {
+      "label": "Moneda",
+      "valor": "COP"
+     },
+     {
+      "label": "Precio",
+      "valor": "1419369.47"
+     },
+     {
+      "label": "El precio mostrado es",
+      "valor": "total"
+     }
+    ],
+    "moneda": "COP",
+    "nombre": "Cabañas Agua Dulce · Providencia Island / Providencia Island",
+    "alertas": [
+     "Impuestos y tasas a pagar en destino: 82,31 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo."
+    ],
+    "leidaEn": "2026-09-23T22:38:49.566Z",
+    "porTipo": [],
+    "identidad": {
+     "hotel": "Cabañas Agua Dulce",
+     "regimen": "Alojamiento y desayuno",
+     "check_in": "2026-11-23",
+     "check_out": "2026-11-25",
+     "tipo_habitacion": "Triple Basic"
+    },
+    "ocupacion": {
+     "ninos": 1,
+     "total": null,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "descripcion": "Habitación: Triple Basic · Régimen: Alojamiento y desayuno · 2026-11-23 a 2026-11-25 · Ocupación: 2 adultos, 1 niño (5 años), 1 habitación · Cancelación: Cancelación gratuita hasta 18/11/2026",
+    "huellaImagen": "bd96beb6c6929eddfbfc57a4a748f5af52847798ff048c2e3568c7d55bac639e",
+    "notasCliente": [
+     "Impuestos y tasas a pagar en destino: 82,31 USD, no incluidos en el precio."
+    ],
+    "aPagarAgencia": null,
+    "paraComposicion": {
+     "ninos": 1,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "ocupacionDelItem": false,
+    "costoAgenciaOrigen": null
+   }
+  },
+  {
+   "item": "f9fbc4d5",
+   "grupo": "hotel 2: Hotel 2 en Providencia Island",
+   "lectura": {
+    "total": 1419369.47,
+    "campos": [
+     {
+      "label": "Hotel",
+      "valor": "Cabañas Agua Dulce"
+     },
+     {
+      "label": "Estrellas",
+      "valor": "3"
+     },
+     {
+      "label": "Ciudad",
+      "valor": "Providencia Island"
+     },
+     {
+      "label": "Habitación",
+      "valor": "Triple Basic"
+     },
+     {
+      "label": "Régimen",
+      "valor": "Alojamiento y desayuno"
+     },
+     {
+      "label": "Check-in",
+      "valor": "2026-11-23"
+     },
+     {
+      "label": "Check-out",
+      "valor": "2026-11-25"
+     },
+     {
+      "label": "Noches",
+      "valor": "2"
+     },
+     {
+      "label": "Ocupación",
+      "valor": "2 Adultos - 1 Niño"
+     },
+     {
+      "label": "Cancelación",
+      "valor": "Cancelación gratuita hasta 18/11/2026"
+     },
+     {
+      "label": "Impuestos incluidos",
+      "valor": "false"
+     },
+     {
+      "label": "Impuestos en destino",
+      "valor": "82.31"
+     },
+     {
+      "label": "Moneda de los impuestos en destino",
+      "valor": "USD"
+     },
+     {
+      "label": "Adultos en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Niños en la captura",
+      "valor": "1"
+     },
+     {
+      "label": "Infantes en la captura",
+      "valor": "0"
+     },
+     {
+      "label": "Personas en la captura",
+      "valor": "3"
+     },
+     {
+      "label": "Moneda",
+      "valor": "COP"
+     },
+     {
+      "label": "Precio",
+      "valor": "1419369.47"
+     },
+     {
+      "label": "El precio mostrado es",
+      "valor": "total"
+     }
+    ],
+    "moneda": "COP",
+    "nombre": "Cabañas Agua Dulce · Providencia Island",
+    "alertas": [
+     "Impuestos y tasas a pagar en destino: 82,31 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo."
+    ],
+    "leidaEn": "2026-09-23T22:39:09.420Z",
+    "porTipo": [],
+    "identidad": {
+     "hotel": "Cabañas Agua Dulce",
+     "regimen": "Alojamiento y desayuno",
+     "check_in": "2026-11-23",
+     "check_out": "2026-11-25",
+     "tipo_habitacion": "Triple Basic"
+    },
+    "ocupacion": {
+     "ninos": 1,
+     "total": 3,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "descripcion": "Habitación: Triple Basic · Régimen: Alojamiento y desayuno · 2026-11-23 a 2026-11-25 · Ocupación: 2 Adultos - 1 Niño · Cancelación: Cancelación gratuita hasta 18/11/2026",
+    "huellaImagen": "4022abb01367efb6defe2c54c1a59b462954f615beaff55a6fbedcd35b056d44",
+    "notasCliente": [
+     "Impuestos y tasas a pagar en destino: 82,31 USD, no incluidos en el precio."
+    ],
+    "aPagarAgencia": null,
+    "paraComposicion": {
+     "ninos": 1,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "ocupacionDelItem": false,
+    "costoAgenciaOrigen": null
+   }
+  },
+  {
+   "item": "5542356a",
+   "grupo": "hotel 2: Hotel 2 en Providencia Island",
+   "lectura": {
+    "total": 1419369.47,
+    "campos": [
+     {
+      "label": "Hotel",
+      "valor": "Cabañas Agua Dulce"
+     },
+     {
+      "label": "Ciudad",
+      "valor": "Providencia Island"
+     },
+     {
+      "label": "Habitación",
+      "valor": "Triple Basic"
+     },
+     {
+      "label": "Régimen",
+      "valor": "Alojamiento y desayuno"
+     },
+     {
+      "label": "Check-in",
+      "valor": "2026-11-23"
+     },
+     {
+      "label": "Check-out",
+      "valor": "2026-11-25"
+     },
+     {
+      "label": "Noches",
+      "valor": "2"
+     },
+     {
+      "label": "Ocupación",
+      "valor": "2 adultos, 1 habitación"
+     },
+     {
+      "label": "Cancelación",
+      "valor": "Cancelación gratuita hasta 18/11/2026"
+     },
+     {
+      "label": "Impuestos incluidos",
+      "valor": "false"
+     },
+     {
+      "label": "Impuestos en destino",
+      "valor": "82.31"
+     },
+     {
+      "label": "Moneda de los impuestos en destino",
+      "valor": "USD"
+     },
+     {
+      "label": "Adultos en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Moneda",
+      "valor": "COP"
+     },
+     {
+      "label": "Precio",
+      "valor": "1419369.47"
+     },
+     {
+      "label": "El precio mostrado es",
+      "valor": "total"
+     }
+    ],
+    "moneda": "COP",
+    "nombre": "Cabañas Agua Dulce · Providencia Island",
+    "alertas": [
+     "Impuestos y tasas a pagar en destino: 82,31 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo."
+    ],
+    "leidaEn": "2026-09-23T22:39:32.216Z",
+    "porTipo": [],
+    "identidad": {
+     "hotel": "Cabañas Agua Dulce",
+     "regimen": "Alojamiento y desayuno",
+     "check_in": "2026-11-23",
+     "check_out": "2026-11-25",
+     "tipo_habitacion": "Triple Basic"
+    },
+    "ocupacion": {
+     "ninos": null,
+     "total": null,
+     "adultos": 2,
+     "infantes": null
+    },
+    "descripcion": "Habitación: Triple Basic · Régimen: Alojamiento y desayuno · 2026-11-23 a 2026-11-25 · Ocupación: 2 adultos, 1 habitación · Cancelación: Cancelación gratuita hasta 18/11/2026",
+    "huellaImagen": "405741d5b267ab63d827ea2efe403a2c9f73028edc0347cfafd43321bafa18c2",
+    "notasCliente": [
+     "Impuestos y tasas a pagar en destino: 82,31 USD, no incluidos en el precio."
+    ],
+    "aPagarAgencia": null,
+    "paraComposicion": {
+     "ninos": 0,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "ocupacionDelItem": false,
+    "costoAgenciaOrigen": null
+   }
+  },
+  {
+   "item": "2164b941",
+   "grupo": "hotel 2: Hotel 2 en Providencia Island",
+   "lectura": {
+    "total": 403718.34,
+    "campos": [
+     {
+      "label": "Hotel",
+      "valor": "Posada Enilda"
+     },
+     {
+      "label": "Ciudad",
+      "valor": "Providencia Island"
+     },
+     {
+      "label": "Habitación",
+      "valor": "Habitación 2 Cam..."
+     },
+     {
+      "label": "Régimen",
+      "valor": "AD"
+     },
+     {
+      "label": "Check-in",
+      "valor": "2026-11-23"
+     },
+     {
+      "label": "Check-out",
+      "valor": "2026-11-25"
+     },
+     {
+      "label": "Noches",
+      "valor": "2"
+     },
+     {
+      "label": "Ocupación",
+      "valor": "2 adultos, 1 habitación"
+     },
+     {
+      "label": "Cancelación",
+      "valor": "Cancelación gratuita hasta 21/11/2026"
+     },
+     {
+      "label": "Impuestos incluidos",
+      "valor": "false"
+     },
+     {
+      "label": "Impuestos en destino",
+      "valor": "23.41"
+     },
+     {
+      "label": "Moneda de los impuestos en destino",
+      "valor": "USD"
+     },
+     {
+      "label": "Adultos en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Personas en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Moneda",
+      "valor": "COP"
+     },
+     {
+      "label": "Precio",
+      "valor": "403718.34"
+     },
+     {
+      "label": "El precio mostrado es",
+      "valor": "total"
+     }
+    ],
+    "moneda": "COP",
+    "nombre": "Posada Enilda · Providencia Island",
+    "alertas": [
+     "Impuestos y tasas a pagar en destino: 23,41 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo."
+    ],
+    "leidaEn": "2026-09-23T22:40:10.520Z",
+    "porTipo": [],
+    "identidad": {
+     "hotel": "Posada Enilda",
+     "regimen": "AD",
+     "check_in": "2026-11-23",
+     "check_out": "2026-11-25",
+     "tipo_habitacion": "Habitación 2 Cam..."
+    },
+    "ocupacion": {
+     "ninos": null,
+     "total": 2,
+     "adultos": 2,
+     "infantes": null
+    },
+    "descripcion": "Habitación: Habitación 2 Cam... · Régimen: AD · 2026-11-23 a 2026-11-25 · Ocupación: 2 adultos, 1 habitación · Cancelación: Cancelación gratuita hasta 21/11/2026",
+    "huellaImagen": "20bba7eca4e6698482a73a5b9fbed244d8b24a4f03908765a67997723cb120e0",
+    "notasCliente": [
+     "Impuestos y tasas a pagar en destino: 23,41 USD, no incluidos en el precio."
+    ],
+    "aPagarAgencia": null,
+    "paraComposicion": {
+     "ninos": 0,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "ocupacionDelItem": false,
+    "costoAgenciaOrigen": null
+   }
+  },
+  {
+   "item": "68d431db",
+   "grupo": "hotel 2: Hotel 2 en Providencia Island",
+   "lectura": {
+    "total": 412689.86,
+    "campos": [
+     {
+      "label": "Hotel",
+      "valor": "Posada Enilda"
+     },
+     {
+      "label": "Estrellas",
+      "valor": "3"
+     },
+     {
+      "label": "Ciudad",
+      "valor": "Providencia Island"
+     },
+     {
+      "label": "Habitación",
+      "valor": "Doble Standard"
+     },
+     {
+      "label": "Régimen",
+      "valor": "AD"
+     },
+     {
+      "label": "Check-in",
+      "valor": "2026-11-23"
+     },
+     {
+      "label": "Check-out",
+      "valor": "2026-11-25"
+     },
+     {
+      "label": "Noches",
+      "valor": "2"
+     },
+     {
+      "label": "Ocupación",
+      "valor": "2 adultos, 1 niño (0 años), 1 habitación"
+     },
+     {
+      "label": "Cancelación",
+      "valor": "Cancelación gratuita hasta 21/11/2026"
+     },
+     {
+      "label": "Impuestos incluidos",
+      "valor": "false"
+     },
+     {
+      "label": "Impuestos en destino",
+      "valor": "23.93"
+     },
+     {
+      "label": "Moneda de los impuestos en destino",
+      "valor": "USD"
+     },
+     {
+      "label": "Adultos en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Niños en la captura",
+      "valor": "1"
+     },
+     {
+      "label": "Infantes en la captura",
+      "valor": "0"
+     },
+     {
+      "label": "Personas en la captura",
+      "valor": "3"
+     },
+     {
+      "label": "Moneda",
+      "valor": "COP"
+     },
+     {
+      "label": "Precio",
+      "valor": "412689.86"
+     },
+     {
+      "label": "El precio mostrado es",
+      "valor": "total"
+     }
+    ],
+    "moneda": "COP",
+    "nombre": "Posada Enilda · Providencia Island",
+    "alertas": [
+     "Impuestos y tasas a pagar en destino: 23,93 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo."
+    ],
+    "leidaEn": "2026-09-23T22:40:22.926Z",
+    "porTipo": [],
+    "identidad": {
+     "hotel": "Posada Enilda",
+     "regimen": "AD",
+     "check_in": "2026-11-23",
+     "check_out": "2026-11-25",
+     "tipo_habitacion": "Doble Standard"
+    },
+    "ocupacion": {
+     "ninos": 1,
+     "total": 3,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "descripcion": "Habitación: Doble Standard · Régimen: AD · 2026-11-23 a 2026-11-25 · Ocupación: 2 adultos, 1 niño (0 años), 1 habitación · Cancelación: Cancelación gratuita hasta 21/11/2026",
+    "huellaImagen": "4c0b706878e57d7cc2ebc63250ca06e10944e59023f68cfd2cc174d7417b90f4",
+    "notasCliente": [
+     "Impuestos y tasas a pagar en destino: 23,93 USD, no incluidos en el precio."
+    ],
+    "aPagarAgencia": null,
+    "paraComposicion": {
+     "ninos": 1,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "ocupacionDelItem": false,
+    "costoAgenciaOrigen": null
+   }
+  },
+  {
+   "item": "7944d5cc",
+   "grupo": "hotel: Hotel en Providencia Island",
+   "lectura": {
+    "total": 412689.86,
+    "campos": [
+     {
+      "label": "Hotel",
+      "valor": "Posada Enilda"
+     },
+     {
+      "label": "Ciudad",
+      "valor": "Providencia Island"
+     },
+     {
+      "label": "Habitación",
+      "valor": "Doble Standard"
+     },
+     {
+      "label": "Régimen",
+      "valor": "Alojamiento y desayuno"
+     },
+     {
+      "label": "Check-in",
+      "valor": "2026-11-23"
+     },
+     {
+      "label": "Check-out",
+      "valor": "2026-11-25"
+     },
+     {
+      "label": "Noches",
+      "valor": "2"
+     },
+     {
+      "label": "Ocupación",
+      "valor": "2 adultos, 1 niño (5 años), 1 habitación"
+     },
+     {
+      "label": "Cancelación",
+      "valor": "Cancelación gratuita hasta 21/11/2026"
+     },
+     {
+      "label": "Impuestos incluidos",
+      "valor": "false"
+     },
+     {
+      "label": "Impuestos en destino",
+      "valor": "23.93"
+     },
+     {
+      "label": "Moneda de los impuestos en destino",
+      "valor": "USD"
+     },
+     {
+      "label": "Adultos en la captura",
+      "valor": "2"
+     },
+     {
+      "label": "Niños en la captura",
+      "valor": "1"
+     },
+     {
+      "label": "Infantes en la captura",
+      "valor": "0"
+     },
+     {
+      "label": "Personas en la captura",
+      "valor": "3"
+     },
+     {
+      "label": "Moneda",
+      "valor": "COP"
+     },
+     {
+      "label": "Precio",
+      "valor": "412689.86"
+     },
+     {
+      "label": "El precio mostrado es",
+      "valor": "total"
+     }
+    ],
+    "moneda": "COP",
+    "nombre": "Posada Enilda · Providencia Island",
+    "alertas": [
+     "Impuestos y tasas a pagar en destino: 23,93 USD. Los paga el pasajero en el hotel: van al cliente como nota, no al costo."
+    ],
+    "leidaEn": "2026-09-23T22:40:40.903Z",
+    "porTipo": [],
+    "identidad": {
+     "hotel": "Posada Enilda",
+     "regimen": "Alojamiento y desayuno",
+     "check_in": "2026-11-23",
+     "check_out": "2026-11-25",
+     "tipo_habitacion": "Doble Standard"
+    },
+    "ocupacion": {
+     "ninos": 1,
+     "total": 3,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "descripcion": "Habitación: Doble Standard · Régimen: Alojamiento y desayuno · 2026-11-23 a 2026-11-25 · Ocupación: 2 adultos, 1 niño (5 años), 1 habitación · Cancelación: Cancelación gratuita hasta 21/11/2026",
+    "huellaImagen": "f5d2802d1ca0cba32db179d45fb5b11687503cc9729d62822357f5bcf02b286a",
+    "notasCliente": [
+     "Impuestos y tasas a pagar en destino: 23,93 USD, no incluidos en el precio."
+    ],
+    "aPagarAgencia": null,
+    "paraComposicion": {
+     "ninos": 1,
+     "adultos": 2,
+     "infantes": 0
+    },
+    "ocupacionDelItem": false,
+    "costoAgenciaOrigen": null
+   }
+  }
+ ]
+}

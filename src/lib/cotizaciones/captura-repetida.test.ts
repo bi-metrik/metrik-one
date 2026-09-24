@@ -116,7 +116,29 @@ describe('mismo contenido, otra imagen', () => {
   it('un hotel no se parece a un vuelo, y dos hoteles distintos tampoco', () => {
     expect(compararConExistentes(hotel('n', 'Deep Blue'), [vuelo('v')])).toBeNull()
     expect(compararConExistentes(hotel('n', 'Deep Blue'), [hotel('v', 'Sirius')])).toBeNull()
-    expect(compararConExistentes(hotel('n', 'Deep Blue'), [hotel('v', 'Deep Blue')])?.tipo).toBe('parecida')
+  })
+
+  it('R8 · regla 6: dos capturas iguales de hotel son dos habitaciones, no una repetida', () => {
+    // Un grupo de 4 adultos son dos dobles iguales. Lo repetido de un hotel lo deciden la misma
+    // imagen o los cupos del grupo ya cubiertos, en el servidor (`unirHotelComoHabitacion`).
+    expect(compararConExistentes(hotel('n', 'Deep Blue'), [hotel('v', 'Deep Blue')])).toBeNull()
+    expect(compararConExistentes(hotel('n', 'Deep Blue', 1), [hotel('v', 'Deep Blue', 2)])).toBeNull()
+  })
+
+  it('R8 · la misma imagen se reconoce también entre las habitaciones de una opción', () => {
+    const conHabitaciones: OpcionComparable = {
+      id: 'h',
+      grupo: 'hotel',
+      tarifa_pax: {
+        casillas: { grupo_completo: { moneda: 'COP', total: 1, identidad: {}, campos: [], huellaImagen: 'h-1' } },
+        habitaciones: [
+          { id: 'a', lectura: { moneda: 'COP', total: 1, identidad: {}, campos: [], huellaImagen: 'h-1' } },
+          { id: 'b', lectura: { moneda: 'COP', total: 1, identidad: {}, campos: [], huellaImagen: 'h-2' } },
+        ],
+      },
+    }
+    expect(opcionConLaMismaImagen('h-2', [conHabitaciones])?.id).toBe('h')
+    expect(opcionConLaMismaImagen('h-3', [conHabitaciones])).toBeNull()
   })
 
   it('no se compara consigo misma', () => {

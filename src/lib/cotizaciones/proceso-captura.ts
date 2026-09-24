@@ -37,8 +37,12 @@ export type EstadoDeProceso =
   | { fase: 'eligiendo_tipo'; motivo: string }
   | { fase: 'eligiendo_opcion'; mensaje: string; opciones: OpcionDeLectura[] }
   | { fase: 'rechazada'; mensaje: string; detalle?: string }
-  /** P10 · otra imagen con el mismo servicio y el mismo precio que una opción que ya estaba. */
-  | { fase: 'parecida'; conItemId: string; donde: string; alertas: string[] }
+  /**
+   * P10 · otra imagen con el mismo servicio y el mismo precio que una opción que ya estaba.
+   * `habitacion`: R8, regla 6 — una habitación más de un hotel cuyo grupo ya está cubierto;
+   * «Agregar igual» la suma como habitación de esa opción.
+   */
+  | { fase: 'parecida'; conItemId: string; donde: string; alertas: string[]; habitacion?: boolean }
   /** P10 · el mismo servicio con otro precio: no es repetido, se pregunta qué hacer. */
   | { fase: 'otro_precio'; conItemId: string; donde: string; corta: string; alertas: string[] }
 
@@ -50,6 +54,8 @@ export type Parecido =
 export interface CambioDeCaptura {
   estado?: EstadoDeProceso
   itemId?: string | null
+  /** R8 · la captura quedó como esta habitación de `itemId` (su propia opción se retiró). */
+  habitacionId?: string | null
   etiqueta?: string | null
   donde?: string | null
   tipo?: TipoRanura | null
@@ -66,6 +72,15 @@ export type Lectura =
   | { ok: true; alertas: string[]; opcion?: OpcionLeida | null }
   | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[] }
 
+/**
+ * R8 · qué pasó al buscarle a una captura de hotel la opción del mismo hotel y las mismas
+ * fechas (`unirHotelComoHabitacion`).
+ */
+export type Union =
+  | { tipo: 'sola' }
+  | { tipo: 'unida'; itemId: string; habitacionId: string; donde: string; opcion: OpcionLeida | null }
+  | { tipo: 'sobra'; conItemId: string; donde: string }
+
 export interface DependenciasDeProceso {
   detectar: () => Promise<Deteccion>
   ubicar: (captura: CapturaDetectada, ranuras: readonly RanuraExistente[]) => Promise<Ubicada>
@@ -81,6 +96,13 @@ export interface DependenciasDeProceso {
    * procesarla igual), la fila queda lista como siempre.
    */
   comparar?: (leida: OpcionLeida) => Parecido | null
+  /**
+   * R8 · regla 1: una captura de hotel se une como habitación a la opción del mismo hotel y
+   * las mismas fechas. Sin ella (o si falla), la captura se queda en su opción, como siempre.
+   */
+  unir?: (itemId: string, leida: OpcionLeida) => Promise<Union>
+  /** R8 · quita la habitación que dejó una captura que el asesor quitó a mitad de camino. */
+  quitarHabitacion?: (itemId: string, habitacionId: string) => Promise<boolean>
 }
 
 const LECTURA_CAIDA = 'No se pudo leer el pantallazo. Vuelve a pegarlo.'
@@ -122,6 +144,44 @@ export async function leerCaptura(deps: DependenciasDeProceso, itemId: string, e
       itemId: retirada ? null : itemId,
       leida: null,
       error: retirada ? null : 'No se pudo retirar la opción vacía: bórrala en su bloque.',
+    })
+    deps.refrescar()
+    return
+  }
+  // R8 · una captura de hotel del mismo hotel y fechas que otra opción es una habitación de
+  // ella: la opción que nació para esta captura se retira y la fila pasa a apuntar a esa.
+  let union: Union = { tipo: 'sola' }
+  if (lectura.opcion && deps.unir) {
+    try {
+      union = await deps.unir(itemId, lectura.opcion)
+    } catch {
+      // Unir es una mejora: si falla, la captura se queda en su propia opción, visible.
+      union = { tipo: 'sola' }
+    }
+    if (!deps.vigente()) {
+      // La quitaron mientras se unía: lo que dejó se va.
+      if (union.tipo === 'unida') await deps.quitarHabitacion?.(union.itemId, union.habitacionId)
+      else await deps.descartar(itemId)
+      deps.refrescar()
+      return
+    }
+  }
+  if (union.tipo === 'unida') {
+    deps.informar({
+      estado: { fase: 'lista', alertas: lectura.alertas },
+      itemId: union.itemId,
+      habitacionId: union.habitacionId,
+      donde: union.donde,
+      leida: union.opcion,
+    })
+    deps.refrescar()
+    return
+  }
+  if (union.tipo === 'sobra') {
+    deps.informar({
+      estado: { fase: 'parecida', conItemId: union.conItemId, donde: union.donde, alertas: lectura.alertas, habitacion: true },
+      leida: lectura.opcion ?? null,
+      abierta: true,
     })
     deps.refrescar()
     return

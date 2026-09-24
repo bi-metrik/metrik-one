@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from './precio-pasajero-pdf'
+import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from './precio-pasajero-pdf'
 import { viajeDesdeFilas } from './viaje-negocio'
 
 const confirmadaLatam = {
@@ -132,5 +132,42 @@ describe('quiénes viajan, desde los bloques del negocio', () => {
 
   it('sin adultos no hay composición: la línea la pide', () => {
     expect(viajeDesdeFilas([{ adultos: '', ninos: 2 }]).composicion).toBeNull()
+  })
+})
+
+describe('R8 · regla 8: una opción de hotel cobrada por habitación', () => {
+  // Posada Enilda (COT-2026-0013): sin una de solo adultos del mismo tipo para restar.
+  const porHabitacion = [
+    { numero: 1, ocupacion: { adultos: 2, ninos: 0, infantes: 0 }, totalCOP: 403718.34 },
+    { numero: 2, ocupacion: { adultos: 2, ninos: 0, infantes: 1 }, totalCOP: 412689.86 },
+    { numero: 3, ocupacion: { adultos: 2, ninos: 1, infantes: 0 }, totalCOP: 412689.86 },
+  ]
+  const confirmada = {
+    composicion: { adultos: 6, ninos: 1, infantes: 1 },
+    costos: [],
+    costoTotalCOP: 1229098.06,
+    moneda: 'COP',
+    tasa: null,
+    confirmadaEn: '2026-09-24T12:00:00Z',
+    porHabitacion,
+  }
+  const rubros = porHabitacion.map(h => ({ valor_total: h.totalCOP, sugerido: false }))
+  const item = { precio_venta: 1_450_000, tarifa_pax: { composicion: confirmada.composicion, confirmada }, rubros }
+
+  it('imprime el precio de cada habitación, y suma el precio de la línea', () => {
+    const p = precioPorHabitacionDeItem(item)
+    expect(p?.map(h => h.numero)).toEqual([1, 2, 3])
+    expect(p?.map(h => h.ocupacionTexto)).toEqual(['2 adultos', '2 adultos y 1 infante', '2 adultos y 1 niño'])
+    expect((p ?? []).reduce((a, h) => a + h.precio, 0)).toBe(1_450_000)
+    // El precio por pasajero no se inventa: la línea no tiene reparto por tipo.
+    expect(precioPorPasajeroDeItem(item)).toEqual([])
+  })
+
+  it('con rubros editados después de confirmar, no se imprime', () => {
+    expect(precioPorHabitacionDeItem({ ...item, rubros: [...rubros, { valor_total: 1000, sugerido: false }] })).toBeNull()
+  })
+
+  it('una línea con precio por pasajero no trae precio por habitación', () => {
+    expect(precioPorHabitacionDeItem({ precio_venta: 13301621, tarifa_pax: { confirmada: confirmadaLatam }, rubros: rubrosLatam })).toBeNull()
   })
 })
