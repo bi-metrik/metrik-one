@@ -198,3 +198,31 @@ describe('el panel «Ver cómo funciona»', () => {
     expect(t).not.toMatch(VETADAS)
   })
 })
+
+describe('el enlace a la página pública de Sustenta', () => {
+  const URL = 'https://sustenta.metrik.com.co/?utm_source=one&utm_medium=suscripcion&utm_campaign=sustenta_cda'
+  const pie = React.createElement('button', { 'data-cta-pie': true }, 'Quiero una demostración')
+  const panel = renderToStaticMarkup(React.createElement(PanelSustenta, { onCerrar: () => {}, pie }))
+
+  it('va en el pie del panel, después del CTA, en pestaña nueva y con sus UTM', () => {
+    const enlace = panel.match(/<a [^>]*data-enlace-sustenta[^>]*>[\s\S]*?<\/a>/)?.[0] ?? ''
+    expect(enlace).toContain(`href="${URL.replace(/&/g, '&amp;')}"`)
+    expect(enlace).toContain('target="_blank"')
+    expect(enlace).toContain('rel="noopener noreferrer"')
+    expect(texto(enlace)).toBe('Conoce más en sustenta.metrik.com.co')
+    expect(enlace).toContain('lucide-external-link')
+    expect(panel.indexOf('data-cta-pie')).toBeLessThan(panel.indexOf('data-enlace-sustenta'))
+  })
+
+  it('es texto, no botón: sin fondo de acento ni borde', () => {
+    const enlace = panel.match(/<a [^>]*data-enlace-sustenta[^>]*>/)?.[0] ?? ''
+    expect(enlace).not.toMatch(/bg-acento|border/)
+  })
+
+  it('no aparece en la tarjeta', () => {
+    const tarjeta = renderToStaticMarkup(
+      React.createElement(TarjetaSustenta, { pendiente: false, onDemostracion: nada, onVerComoFunciona: nada, onAhoraNo: nada }),
+    )
+    expect(tarjeta).not.toContain('sustenta.metrik.com.co')
+  })
+})
