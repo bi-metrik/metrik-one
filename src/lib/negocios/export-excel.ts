@@ -29,6 +29,7 @@ import { bogotaParts } from '@/lib/dates/bogota'
 import { etiquetaStage } from '@/lib/negocios/stage-label'
 import { marcaCondicionLabel, type MarcaCondicion } from '@/lib/negocios/constants'
 import { motivoCierreDeEstado, type MotivoCierre } from '@/lib/negocios/motivo-cierre'
+import { columnasExtra, type CampoExtraCard, type ExtraCard } from '@/lib/negocios/card-extras'
 
 // ── Entradas ────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,8 @@ export type NegocioExportable = {
   pausado: boolean
   pausado_hasta: string | null
   motivo_pausa: string | null
+  /** Campos extra de la tarjeta (`negocio_card.campos_extra`). Ausente = ninguno. */
+  extras?: ExtraCard[]
 }
 
 /** `v_negocio_valor`: base, IVA, plan y techo de tarifa. */
@@ -145,6 +148,11 @@ export type EntradaExcel = {
   staff: StaffNombre[]
   /** `https://{slug}.metrikone.co`, sin barra final. */
   baseUrl: string
+  /**
+   * Los campos extra que declara el workspace. Van DESPUÉS de las columnas fijas; sin
+   * ellos (el caso de todo workspace que no los configura) el libro es el de siempre.
+   */
+  camposExtra?: CampoExtraCard[]
 }
 
 // ── Encabezados (en el orden del spec) ──────────────────────────────────────
@@ -211,7 +219,16 @@ export type Encabezado = (typeof ENCABEZADOS)[number]
 
 export type CeldaExcel = string | number | Date | null
 
-export type FilaExcel = Record<Encabezado, CeldaExcel>
+/** Las columnas fijas, más las extra que declare el workspace (ver `encabezadosExcel`). */
+export type FilaExcel = Record<Encabezado, CeldaExcel> & { [extra: string]: CeldaExcel }
+
+/**
+ * Los encabezados del libro: los fijos y, después, uno por campo extra y otro por su
+ * detalle. Sin campos extra devuelve exactamente `ENCABEZADOS`.
+ */
+export function encabezadosExcel(camposExtra: readonly CampoExtraCard[] = []): string[] {
+  return [...ENCABEZADOS, ...columnasExtra(camposExtra, ENCABEZADOS).map((c) => c.encabezado)]
+}
 
 /** Columnas que llevan solo día (formato `yyyy-mm-dd`). */
 export const COLUMNAS_FECHA: readonly Encabezado[] = [
@@ -375,6 +392,7 @@ export function armarFilasExcel(entrada: EntradaExcel): FilaExcel[] {
   const cobrosPor = agruparPor(entrada.cobros, (c) => c.negocio_id)
   const operacionesPor = agruparPor(entrada.operaciones, (o) => o.negocio_id)
   const base = entrada.baseUrl.replace(/\/+$/, '')
+  const colsExtra = columnasExtra(entrada.camposExtra ?? [], ENCABEZADOS)
 
   return entrada.negocios.map((n) => {
     const valor = valorPor.get(n.id)
@@ -399,7 +417,7 @@ export function armarFilasExcel(entrada: EntradaExcel): FilaExcel[] {
     const [p1, p2] = pagos
     const otros = pagos.slice(2).reduce((s, c) => s + (numero(c.monto) ?? 0), 0)
 
-    return {
+    const fila: FilaExcel = {
       'Codigo': texto(n.codigo),
       'Negocio': texto(n.nombre),
       'Cliente': texto(n.empresa_nombre) ?? texto(n.contacto_nombre),
@@ -457,5 +475,16 @@ export function armarFilasExcel(entrada: EntradaExcel): FilaExcel[] {
       'Motivo pausa': texto(n.motivo_pausa),
       'Link ONE': `${base}/negocios/${n.id}`,
     }
+    for (const col of colsExtra) {
+      const extra = (n.extras ?? []).find((e) => e.indice === col.campo)
+      fila[col.encabezado] = !extra
+        ? null
+        : col.parte === 'valor'
+          ? texto(extra.valor)
+          : extra.detalle.length
+            ? extra.detalle.join(', ')
+            : null
+    }
+    return fila
   })
 }

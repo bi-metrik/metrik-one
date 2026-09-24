@@ -157,6 +157,7 @@ import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
 import { indexarValoresDeBloques, leerCampo, paresDeCampos, type FilaValores, type IndiceCampos } from '@/lib/negocios/campos-de-bloques'
+import { leerCamposExtra, paresDeCamposExtra, resolverExtras, slugsDeCamposExtra, type ExtraCard } from '@/lib/negocios/card-extras'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { diaDeFechaHora, horasHastaFechaHora } from '@/lib/negocios/fecha-hora-campo'
 import {
@@ -463,6 +464,12 @@ export type NegocioResumen = {
   servicio_label: string | null
   // Responsables asignados (negocio_responsables N:M) — para tarjeta + filtro de lista
   responsables: Array<{ id: string; full_name: string }>
+  /**
+   * Campos extra que el workspace declara para la tarjeta y el Excel
+   * (`negocio_card.campos_extra`, ver `lib/negocios/card-extras`). Vacio en todo
+   * workspace que no los configura, y sin el campo cuando el negocio no tiene el dato.
+   */
+  extras: ExtraCard[]
   // Origen: true si el negocio llegó por la integración Meta Lead Ads (metadata.fuente_cargue)
   es_meta_lead: boolean
   /** El workspace guarda sus archivos fuera de Drive: la tarjeta no ofrece "abrir carpeta". */
@@ -815,6 +822,25 @@ export async function getNegociosV2(
   // Seguimiento de citas (config_extra.seguimiento_citas). null en todo workspace
   // que no lo configure, y entonces ni se consulta la base ni se calcula nada.
   const citasCfg = leerSeguimientoCitas((wsRes.data as { config_extra?: unknown } | null)?.config_extra)
+  // Campos extra de la tarjeta (`negocio_card.campos_extra`, p. ej. la titularidad). Se
+  // declaran por el SLUG del bloque, como `datos_clave`, pero la RPC indexa por el NOMBRE:
+  // una sola lectura de `bloque_configs` traduce el uno al otro para toda la lista.
+  const camposExtra = leerCamposExtra(cardCfg)
+  const nombresPorSlug = new Map<string, string[]>()
+  if (camposExtra.length > 0) {
+    const { data: cfgsExtra } = await db(supabase)
+      .from('bloque_configs')
+      .select('slug, nombre')
+      .eq('workspace_id', workspaceId)
+      .in('slug', slugsDeCamposExtra(camposExtra))
+    for (const c of (cfgsExtra ?? []) as Array<{ slug: string | null; nombre: string | null }>) {
+      if (!c.slug || !c.nombre) continue
+      const nombres = nombresPorSlug.get(c.slug) ?? []
+      if (!nombres.includes(c.nombre)) nombres.push(c.nombre)
+      nombresPorSlug.set(c.slug, nombres)
+    }
+  }
+  const extrasPorNeg: Record<string, ExtraCard[]> = {}
   const vehiculoPorNeg: Record<string, { label: string | null; ciudad: string | null }> = {}
   // Cédula del solicitante (bloque RUT, config-driven). Para tarjeta + búsqueda.
   const cedulaPorNeg: Record<string, string | null> = {}
@@ -847,6 +873,8 @@ export async function getNegociosV2(
     ...(citasCfg?.docs_requeridos ?? [])
       .filter((d) => d.solo_si)
       .map((d) => ({ bloque: d.solo_si!.bloque, campos: [d.solo_si!.campo] })),
+    // Los campos extra viajan en la MISMA llamada: sin consultas por negocio.
+    ...paresDeCamposExtra(camposExtra, nombresPorSlug).map((p) => ({ bloque: p.bloque, campos: [p.campo] })),
   ])
   if (cardPares.length > 0 && negocioIds.length > 0) {
     // La extraccion vive en Postgres (`negocio_bloques_campos_json`). Antes esto se
@@ -889,6 +917,17 @@ export async function getNegociosV2(
       // «la primera con valor gana», que es lo correcto aquí (las copias vacías de las
       // etapas por las que el caso aún no pasó no deben tapar la que sí tiene fecha).
       citaPorNeg[negId] = val(negId, cardCfg?.cita_bloque, cardCfg?.cita_campo)
+      if (camposExtra.length > 0) {
+        // Un slug puede nombrar a mas de un bloque (una linea por cada flujo del
+        // workspace): gana el primero con valor, la misma regla del indice.
+        extrasPorNeg[negId] = resolverExtras(camposExtra, (slug, field) => {
+          for (const nombre of nombresPorSlug.get(slug) ?? []) {
+            const v = val(negId, nombre, field)
+            if (v !== null) return v
+          }
+          return null
+        })
+      }
     }
   }
 
@@ -1024,6 +1063,7 @@ export async function getNegociosV2(
         return cardCfg?.servicio_labels?.[v] ?? v
       })(),
       responsables: responsablesPorNeg[id] ?? [],
+      extras: extrasPorNeg[id] ?? [],
       es_meta_lead: ((row.metadata as Record<string, unknown> | null)?.fuente_cargue === 'meta_lead'),
       almacenamiento_externo: almacenamientoExterno,
       reproceso: (() => {

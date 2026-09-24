@@ -19,8 +19,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { getNegociosV2 } from '@/app/(app)/negocios/negocio-v2-actions'
 import { construirLibroNegocios } from '@/lib/negocios/export-excel-libro'
+import { leerCamposExtra } from '@/lib/negocios/card-extras'
 import {
   armarFilasExcel,
+  encabezadosExcel,
   type BonificableNegocio,
   type CobroExportable,
   type ComercialNegocio,
@@ -79,12 +81,18 @@ export async function construirExportNegocios(
   const [abiertos, cerrados, wsRes] = await Promise.all([
     getNegociosV2('abierto'),
     getNegociosV2('cerrado'),
-    supabase.from('workspaces').select('slug').eq('id', workspaceId).single(),
+    // `config_extra` trae los campos extra de la tarjeta: sus columnas van en el libro aunque
+    // ningun negocio pedido tenga el dato (una columna que aparece y desaparece segun los
+    // filtros rompe a quien lee el archivo con una formula o una tabla dinamica).
+    supabase.from('workspaces').select('slug, config_extra').eq('id', workspaceId).single(),
   ])
   if (wsRes.error || !wsRes.data?.slug) {
     throw new Error(`workspace: ${wsRes.error?.message ?? 'sin slug'}`)
   }
   const slug = wsRes.data.slug as string
+  const camposExtra = leerCamposExtra(
+    (wsRes.data.config_extra as Record<string, unknown> | null)?.negocio_card,
+  )
 
   const porId = new Map([...abiertos, ...cerrados].map((n) => [n.id, n]))
   // En el orden en que el cliente los mando, que es el orden de la pantalla.
@@ -221,9 +229,14 @@ export async function construirExportNegocios(
     operaciones,
     staff,
     baseUrl: baseUrlDelWorkspace(slug),
+    camposExtra,
   })
 
-  return { buffer: construirLibroNegocios(filas), slug, filas: filas.length }
+  return {
+    buffer: construirLibroNegocios(filas, encabezadosExcel(camposExtra)),
+    slug,
+    filas: filas.length,
+  }
 }
 
 export function baseUrlDelWorkspace(slug: string): string {

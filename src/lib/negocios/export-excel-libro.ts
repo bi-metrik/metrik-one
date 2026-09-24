@@ -41,9 +41,13 @@ export const NOMBRE_HOJA = 'Negocios'
  * `type: 'buffer'` devuelve un Buffer de node. Sin declararlo, `NextResponse` lo recibia
  * como `any` y nadie comprobaba nada.
  */
-export function construirLibroNegocios(filas: FilaExcel[]): Buffer<ArrayBuffer> {
-  const ws = XLSX.utils.json_to_sheet(filas, { header: [...ENCABEZADOS], cellDates: true })
-  const colDe = (h: Encabezado) => ENCABEZADOS.indexOf(h)
+export function construirLibroNegocios(
+  filas: FilaExcel[],
+  /** Los de `encabezadosExcel`: los fijos más los extra del workspace. */
+  encabezados: readonly string[] = ENCABEZADOS,
+): Buffer<ArrayBuffer> {
+  const ws = XLSX.utils.json_to_sheet(filas, { header: [...encabezados], cellDates: true })
+  const colDe = (h: Encabezado) => encabezados.indexOf(h)
   const colLink = colDe(COLUMNA_LINK)
   const colsFecha = COLUMNAS_FECHA.map(colDe)
   const colsFechaHora = COLUMNAS_FECHA_HORA.map(colDe)
