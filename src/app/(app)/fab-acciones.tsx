@@ -1,4 +1,4 @@
-import { Flame, Receipt, Clock, Landmark, Banknote, Wallet } from 'lucide-react'
+import { Flame, Receipt, Clock, Landmark, Banknote, Wallet, ShoppingBag } from 'lucide-react'
 import { FEATURES } from '@/lib/feature-flags'
 
 /**
@@ -71,6 +71,16 @@ export const FAB_ACTIONS: AccionFab[] = [
     roles: ['owner', 'admin'],
     action: 'saldo',
     feature: 'CONCILIACION',
+  },
+  {
+    // Una venta de Marketplace: crea la venta en Ferretería y su negocio en la línea
+    // Ferretería. Mismos roles que editan Ferretería (`ROLES_EDITORES`). No alimenta al
+    // negocio del contexto: crea uno nuevo, así que no se apaga sobre un negocio cerrado.
+    label: 'Registrar venta',
+    icon: ShoppingBag,
+    roles: ['owner', 'admin', 'supervisor'],
+    action: 'venta',
+    modulo: 'ferreteria',
   },
 ]
 

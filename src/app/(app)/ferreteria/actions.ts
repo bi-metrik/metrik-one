@@ -1,12 +1,17 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
-import { agregarNota, cambiarPublicacion, registrarVenta } from '@/lib/ferreteria/nucleo'
+import { agregarNota, cambiarPublicacion } from '@/lib/ferreteria/nucleo'
+import { puertoNegocios } from '@/lib/ferreteria/negocios-puerto'
+import { compararValores } from '@/lib/ferreteria/orden'
 import { repoSupabase } from '@/lib/ferreteria/repo-supabase'
-import { esEstado, esLinea, puedeEditarFerreteria, RUTAS_VENTA } from '@/lib/ferreteria/reglas'
+import { esEstado, esLinea, puedeEditarFerreteria } from '@/lib/ferreteria/reglas'
 import type { Autor, CambiosPublicacion } from '@/lib/ferreteria/tipos'
+import { alinearNegocio, marcarVentaEntregada, registrarPagoDeVenta, registrarVenta } from '@/lib/ferreteria/ventas'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 type Resultado = { ok: true; mensaje?: string } | { ok: false; error: string }
 
@@ -73,27 +78,134 @@ export async function guardarPublicacionAction(codigo: string, edicion: EdicionP
   }
 }
 
-export async function registrarVentaAction(
-  codigo: string,
-  venta: { fecha_primer_pago: string; precio_final: number; ruta: string },
-): Promise<Resultado> {
+export interface VentaNueva {
+  /** Código de la publicación (MP-01). */
+  codigo: string
+  fecha_venta: string
+  precio_final: number
+  ruta: string
+  forma_pago: string
+  comprador_nombre?: string | null
+  conversacion_id?: string | null
+}
+
+/**
+ * Registra una venta y crea su negocio en la línea Ferretería. La usan el detalle de la
+ * publicación y la acción "Registrar venta" del botón flotante: un solo formulario, una sola
+ * acción.
+ */
+export async function registrarVentaAction(venta: VentaNueva): Promise<Resultado & { negocioId?: string }> {
   const p = await puerta()
   if (!p.ok) return p
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(venta.fecha_primer_pago)) return { ok: false, error: 'Fecha inválida.' }
-  if (!(RUTAS_VENTA as readonly string[]).includes(venta.ruta)) return { ok: false, error: 'Ruta inválida.' }
   const repo = repoSupabase()
-  const pub = await repo.publicacionPorCodigo(p.ws, codigo)
+  const pub = await repo.publicacionPorCodigo(p.ws, venta.codigo)
   if (!pub) return { ok: false, error: 'La publicación no existe.' }
+  const negocios = await puertoNegocios()
+  if ('error' in negocios) return { ok: false, error: negocios.error }
   const r = await registrarVenta(
     repo,
+    negocios,
     p.ws,
     pub,
-    { fecha_primer_pago: venta.fecha_primer_pago, precio_final: Number(venta.precio_final), ruta: venta.ruta as 'recoge' | 'despacho' },
+    {
+      fecha_venta: venta.fecha_venta,
+      precio_final: Number(venta.precio_final),
+      ruta: venta.ruta,
+      forma_pago: venta.forma_pago,
+      comprador_nombre: venta.comprador_nombre ?? null,
+      conversacion_id: venta.conversacion_id ?? null,
+    },
     p.autor,
+    todayBogotaISO(),
   )
   if (!r.ok) return { ok: false, error: r.mensaje }
   revalidatePath('/ferreteria')
-  return { ok: true, mensaje: 'Venta registrada.' }
+  revalidatePath('/negocios')
+  return {
+    ok: true,
+    negocioId: r.negocioId,
+    mensaje: r.avisos.length > 0 ? `Venta registrada. ${r.avisos.join(' ')}` : 'Venta registrada y su negocio creado.',
+  }
+}
+
+export async function marcarVentaEntregadaAction(ventaId: string): Promise<Resultado> {
+  const p = await puerta()
+  if (!p.ok) return p
+  const negocios = await puertoNegocios()
+  if ('error' in negocios) return { ok: false, error: negocios.error }
+  const r = await marcarVentaEntregada(repoSupabase(), negocios, p.ws, ventaId, new Date().toISOString())
+  if (!r.ok) return { ok: false, error: r.mensaje }
+  revalidatePath('/ferreteria')
+  return { ok: true, mensaje: r.aviso ?? (r.cerrado ? 'Entregada. El negocio quedó pagado y cerrado.' : 'Entregada.') }
+}
+
+export async function registrarPagoVentaAction(ventaId: string, fecha: string): Promise<Resultado> {
+  const p = await puerta()
+  if (!p.ok) return p
+  const negocios = await puertoNegocios()
+  if ('error' in negocios) return { ok: false, error: negocios.error }
+  const r = await registrarPagoDeVenta(repoSupabase(), negocios, p.ws, ventaId, fecha, todayBogotaISO())
+  if (!r.ok) return { ok: false, error: r.mensaje }
+  revalidatePath('/ferreteria')
+  return { ok: true, mensaje: r.aviso ?? 'Pago registrado. El negocio quedó pagado y cerrado.' }
+}
+
+/** Vuelve a llevar el negocio al paso de la venta cuando un avance anterior quedó a medias. */
+export async function alinearNegocioVentaAction(ventaId: string): Promise<Resultado> {
+  const p = await puerta()
+  if (!p.ok) return p
+  const negocios = await puertoNegocios()
+  if ('error' in negocios) return { ok: false, error: negocios.error }
+  const venta = await repoSupabase().ventaPorId(p.ws, ventaId)
+  if (!venta) return { ok: false, error: 'La venta no existe.' }
+  const r = await alinearNegocio(negocios, venta)
+  if (!r.ok) return { ok: false, error: r.mensaje }
+  revalidatePath('/ferreteria')
+  return { ok: true, mensaje: 'El negocio quedó al día.' }
+}
+
+export interface OpcionPublicacion {
+  codigo: string
+  titulo: string
+  precio: number | null
+}
+
+/** Publicaciones para elegir en el formulario de venta del botón flotante. */
+export async function publicacionesParaVentaAction(): Promise<{ ok: true; publicaciones: OpcionPublicacion[] } | { ok: false; error: string }> {
+  const p = await puerta()
+  if (!p.ok) return p
+  const catalogo = await repoSupabase().catalogoPublicaciones(p.ws)
+  return {
+    ok: true,
+    publicaciones: catalogo
+      .map((c) => ({ codigo: c.codigo, titulo: c.titulo, precio: c.precio }))
+      .sort((a, b) => compararValores(a.codigo, b.codigo, 'asc')),
+  }
+}
+
+export interface OpcionConversacion {
+  id: string
+  fecha: string
+  interesado: string
+  resultado: string
+}
+
+/** Conversaciones de una publicación, para marcar de cuál salió la venta. */
+export async function conversacionesParaVentaAction(codigo: string): Promise<OpcionConversacion[]> {
+  const p = await puerta()
+  if (!p.ok) return []
+  const { supabase } = await getWorkspace()
+  const repo = repoSupabase()
+  const pub = await repo.publicacionPorCodigo(p.ws, codigo)
+  if (!pub) return []
+  const { data } = await (supabase as unknown as SupabaseClient)
+    .from('ferreteria_conversaciones')
+    .select('id, fecha, interesado, resultado')
+    .eq('workspace_id', p.ws)
+    .eq('publicacion_id', pub.id)
+    .order('fecha', { ascending: false })
+    .limit(50)
+  return ((data ?? []) as OpcionConversacion[])
 }
 
 export async function agregarNotaAction(codigo: string, texto: string): Promise<Resultado> {

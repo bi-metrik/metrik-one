@@ -5,6 +5,7 @@ import {
   formatoMargen,
   gananciaPorVenta,
   margenPorVenta,
+  pasoDeVenta,
   precioPiso,
   precioRegla,
   semaforoPendiente,
@@ -132,5 +133,16 @@ describe('semáforo de pendientes', () => {
     expect(
       semaforoPendiente({ pendiente_en_canal: true, pendiente_desde: '2026-10-03T08:00:00Z', intentos_fallidos: 0 }, ahora),
     ).toBe('rojo')
+  })
+})
+
+describe('paso de la venta', () => {
+  it('sin entrega es Vendido aunque esté pagada: el negocio cierra al entregar', () => {
+    expect(pasoDeVenta({ entregada_at: null, fecha_primer_pago: null })).toBe('vendido')
+    expect(pasoDeVenta({ entregada_at: null, fecha_primer_pago: '2026-10-03' })).toBe('vendido')
+  })
+  it('entregada sin pago es Entregado; entregada y pagada es Pagado', () => {
+    expect(pasoDeVenta({ entregada_at: '2026-10-04T10:00:00Z', fecha_primer_pago: null })).toBe('entregado')
+    expect(pasoDeVenta({ entregada_at: '2026-10-04T10:00:00Z', fecha_primer_pago: '2026-10-04' })).toBe('pagado')
   })
 })

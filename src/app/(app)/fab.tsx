@@ -12,6 +12,7 @@ import { negocioDeContextoCerrado } from '@/lib/actions/negocio-estado-actions'
 // El formulario de pago vive aparte: lo comparten el FAB global y el bloque de
 // Movimientos de la ficha (allí con el negocio ya fijado).
 import RegistrarPagoModal from '@/components/registrar-pago-modal'
+import RegistrarVentaModal from './ferreteria/registrar-venta-modal'
 
 
 // ── Types ─────────────────────────────────────────────
@@ -46,6 +47,7 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
   const [open, setOpen] = useState(false)
   const [timerPanel, setTimerPanel] = useState(false)
   const [pagoModal, setPagoModal] = useState(false)
+  const [ventaModal, setVentaModal] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
   const negocioContextMatch = pathname.match(/^\/negocios\/([a-f0-9-]{36})/)
@@ -151,6 +153,8 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
     setOpen(false)
     if (action.action === 'pago') {
       setPagoModal(true)
+    } else if (action.action === 'venta') {
+      setVentaModal(true)
     } else if (action.action === 'saldo') {
       router.push('/numeros?saldo=1')
     } else if (action.action === 'factura' && contextNegocioId) {
@@ -360,6 +364,9 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
           onDone={() => { setPagoModal(false); router.refresh() }}
         />
       )}
+
+      {/* ── Modal Registrar venta (Ferretería; mismo formulario que el detalle) ── */}
+      {ventaModal && <RegistrarVentaModal onClose={() => setVentaModal(false)} />}
 
     </>
   )

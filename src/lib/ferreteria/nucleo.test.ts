@@ -6,7 +6,6 @@ import {
   guardarPublicacion,
   listarPendientes,
   registrarLote,
-  registrarVenta,
 } from './nucleo'
 import { repoEnMemoria } from './repo-memoria'
 import type { Autor, RepoFerreteria } from './tipos'
@@ -197,16 +196,5 @@ describe('lote diario', () => {
     expect(repo.estado.mediciones).toHaveLength(1)
     expect(repo.estado.conversaciones).toHaveLength(1)
     expect(repo.estado.conversaciones[0].resultado).toBe('cotizo')
-  })
-})
-
-describe('venta', () => {
-  it('congela el costo F vigente en la fecha del primer pago y calcula la ganancia', async () => {
-    await guardarProducto(repo, WS, { sku: 'EKM80', costo: { fecha_lista: '2026-10-15', costo_f: 90_000 } }, reloj)
-    const r = await registrarVenta(repo, WS, await pub(), { fecha_primer_pago: '2026-10-03', precio_final: 120_000, ruta: 'despacho' }, DIETMAR)
-    expect(r).toMatchObject({ ok: true })
-    // Costo del 23-sep (80.000), no el del 15-oct.
-    expect(repo.estado.ventas[0]).toMatchObject({ costo_dia: 80_000, ganancia: Math.round(120_000 * 0.777933 - 80_000 * 0.840336) })
-    expect(repo.estado.eventos.at(-1)).toMatchObject({ tipo: 'venta' })
   })
 })

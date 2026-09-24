@@ -3,7 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
-- ⚠️⚠️ [Módulo Ferretería dimpro (#905)](project_modulo_ferreteria_dimpro.md) — migración SIN aplicar (escribe datos); tokens sin emitir
+- ⚠️⚠️ [Módulo Ferretería dimpro (#905, #917)](project_modulo_ferreteria_dimpro.md) — #917 ventas→negocio: migración SIN aplicar (escribe datos); comisión es mensual
 - ⚠️ [«13» pegado a la casilla 26 del RUT (#908, #909)](project_rut_prefijo_tipo_documento.md) — tolerar ≠ proponer; #909 migración SIN aplicar
 - ⚠️⚠️ [Casilla 5 testigo de la 26 (#918)](project_casilla26_testigo_casilla5.md) — migración SIN aplicar; dígitos de más ≠ mismo número; V0012 solo avisa
 - ⚠️⚠️ [Voto entre fuentes (#895, #896)](project_voto_entre_fuentes.md) — #896 SIN mergear (migración); plantillas NO unificadas a propósito; V0012 frena

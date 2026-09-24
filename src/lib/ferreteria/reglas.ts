@@ -202,3 +202,44 @@ export const ROLES_EDITORES = ['owner', 'admin', 'supervisor'] as const
 export function puedeEditarFerreteria(role: string | null | undefined): boolean {
   return !!role && (ROLES_EDITORES as readonly string[]).includes(role)
 }
+
+// ── Venta como negocio ────────────────────────────────────────────────────────
+
+/**
+ * Cómo paga el comprador. `anticipado`: el pago entra el día de la venta, antes de entregar.
+ * `contra_entrega`: se paga al recibir, así que la venta nace sin pago.
+ */
+export const FORMAS_PAGO = ['anticipado', 'contra_entrega'] as const
+export type FormaPago = (typeof FORMAS_PAGO)[number]
+
+export const ETIQUETA_FORMA_PAGO: Record<FormaPago, string> = {
+  anticipado: 'Pago anticipado',
+  contra_entrega: 'Contra entrega',
+}
+
+export function esFormaPago(v: unknown): v is FormaPago {
+  return typeof v === 'string' && (FORMAS_PAGO as readonly string[]).includes(v)
+}
+
+/**
+ * Las tres etapas de la línea Ferretería en ONE. En la base se reconocen por
+ * `etapas_negocio.config_extra.ferreteria_paso`, no por el nombre: el nombre se puede editar.
+ */
+export const PASOS_VENTA = ['vendido', 'entregado', 'pagado'] as const
+export type PasoVenta = (typeof PASOS_VENTA)[number]
+
+export const ETIQUETA_PASO: Record<PasoVenta, string> = {
+  vendido: 'Vendido',
+  entregado: 'Entregado',
+  pagado: 'Pagado',
+}
+
+/**
+ * En qué etapa tiene que estar el negocio de una venta, derivado de los dos hechos que la
+ * venta guarda. Una anticipada pagada y aún sin entregar sigue en `vendido`: el negocio se
+ * cierra cuando se entrega, no cuando se paga.
+ */
+export function pasoDeVenta(v: { entregada_at: string | null; fecha_primer_pago: string | null }): PasoVenta {
+  if (!v.entregada_at) return 'vendido'
+  return v.fecha_primer_pago ? 'pagado' : 'entregado'
+}

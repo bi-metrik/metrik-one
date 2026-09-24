@@ -18,10 +18,15 @@ import {
   margenPorVenta,
   semaforoPendiente,
   validarPiso,
+  ETIQUETA_FORMA_PAGO,
+  PASOS_VENTA,
+  pasoDeVenta,
   type EstadoPublicacion,
   type Linea,
 } from '@/lib/ferreteria/reglas'
-import { agregarNotaAction, guardarPublicacionAction, registrarVentaAction } from '../actions'
+import { agregarNotaAction, guardarPublicacionAction } from '../actions'
+import { RegistrarVentaForm } from '../registrar-venta-form'
+import { AccionesVenta, EstadoVenta } from './acciones-venta'
 import { PuntoPendiente } from '../ferreteria-cliente'
 import { Th, aplicarOrden, useOrden } from '../orden-tabla'
 import { fechaComoNumero, type ValorOrden } from '@/lib/ferreteria/orden'
@@ -64,11 +69,13 @@ const COLUMNAS_CONVERSACION = {
 } satisfies Record<string, (c: Conversacion) => ValorOrden>
 
 const COLUMNAS_VENTA = {
-  fecha: (v: Venta) => fechaComoNumero(v.fecha_primer_pago),
+  fecha: (v: Venta) => fechaComoNumero(v.fecha_venta),
   precio: (v: Venta) => v.precio_final,
   costo: (v: Venta) => v.costo_dia,
   ganancia: (v: Venta) => v.ganancia,
   ruta: (v: Venta) => v.ruta,
+  pago: (v: Venta) => ETIQUETA_FORMA_PAGO[v.forma_pago],
+  estado: (v: Venta) => PASOS_VENTA.indexOf(v.negocio?.paso ?? pasoDeVenta(v)),
 } satisfies Record<string, (v: Venta) => ValorOrden>
 
 function fechaHora(iso: string): string {
@@ -180,21 +187,8 @@ export function PublicacionCliente({
     })
   }
 
-  // ── Venta y nota ──
-  const [ventaFecha, setVentaFecha] = useState(hoy)
-  const [ventaPrecio, setVentaPrecio] = useState(pub.precio != null ? String(pub.precio) : '')
-  const [ventaRuta, setVentaRuta] = useState<'recoge' | 'despacho'>('recoge')
+  // ── Nota ──
   const [nota, setNota] = useState('')
-
-  function vender() {
-    iniciar(async () => {
-      const r = await registrarVentaAction(pub.codigo, { fecha_primer_pago: ventaFecha, precio_final: Number(ventaPrecio), ruta: ventaRuta })
-      if (r.ok) {
-        toast.success(r.mensaje ?? 'Venta registrada.')
-        router.refresh()
-      } else toast.error(r.error)
-    })
-  }
 
   function anotar() {
     iniciar(async () => {
@@ -464,37 +458,47 @@ export function PublicacionCliente({
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted-foreground">
                   <tr>
-                    <Th orden={ordenVentas} clave="fecha">Primer pago</Th>
+                    <Th orden={ordenVentas} clave="fecha">Venta</Th>
                     <Th orden={ordenVentas} clave="precio" derecha>Precio</Th>
                     <Th orden={ordenVentas} clave="costo" derecha>Costo</Th>
                     <Th orden={ordenVentas} clave="ganancia" derecha>Ganancia</Th>
                     <Th orden={ordenVentas} clave="ruta" className="pl-2">Ruta</Th>
+                    <Th orden={ordenVentas} clave="pago" className="pl-2">Pago</Th>
+                    <Th orden={ordenVentas} clave="estado" className="pl-2">Negocio</Th>
+                    {puedeEditar && <th className="py-1" />}
                   </tr>
                 </thead>
                 <tbody>
                   {aplicarOrden(ventas, ordenVentas, COLUMNAS_VENTA).map((v) => (
                     <tr key={v.id} className="border-t">
-                      <td className="whitespace-nowrap py-1">{v.fecha_primer_pago}</td>
+                      <td className="whitespace-nowrap py-1">
+                        {v.fecha_venta}
+                        {v.comprador_nombre && <div className="text-xs text-muted-foreground">{v.comprador_nombre}</div>}
+                      </td>
                       <td className="py-1 text-right tabular-nums">{formatoPesos(v.precio_final)}</td>
                       <td className="py-1 text-right tabular-nums">{formatoPesos(v.costo_dia)}</td>
                       <td className="py-1 text-right tabular-nums">{formatoPesos(v.ganancia)}</td>
                       <td className="py-1 pl-2 text-xs">{v.ruta}</td>
+                      <td className="py-1 pl-2 text-xs">
+                        {ETIQUETA_FORMA_PAGO[v.forma_pago]}
+                        {v.fecha_primer_pago && <div className="text-muted-foreground">pagó {v.fecha_primer_pago}</div>}
+                      </td>
+                      <td className="py-1 pl-2"><EstadoVenta venta={v} /></td>
+                      {puedeEditar && (
+                        <td className="py-1 pl-2 text-right"><AccionesVenta venta={v} hoy={hoy} /></td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
             {puedeEditar && (
-              <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-                <input type="date" className={entrada} value={ventaFecha} onChange={(e) => setVentaFecha(e.target.value)} aria-label="Fecha del primer pago" />
-                <input className={entrada} inputMode="numeric" value={ventaPrecio} onChange={(e) => setVentaPrecio(e.target.value)} aria-label="Precio final" placeholder="Precio final" />
-                <select className={entrada} value={ventaRuta} onChange={(e) => setVentaRuta(e.target.value as 'recoge' | 'despacho')} aria-label="Ruta">
-                  <option value="recoge">Recoge en punto</option>
-                  <option value="despacho">Despacho</option>
-                </select>
-                <button type="button" onClick={vender} disabled={pendiente || !ventaPrecio} className="h-9 rounded-md border px-3 text-sm disabled:opacity-50">
-                  Registrar venta
-                </button>
+              <div className="mt-4 border-t pt-3">
+                <RegistrarVentaForm
+                  hoy={hoy}
+                  publicacionFija={{ codigo: pub.codigo, titulo: pub.titulo, precio: pub.precio }}
+                  conversacionesFijas={conversaciones.map((c) => ({ id: c.id, fecha: c.fecha, interesado: c.interesado, resultado: c.resultado }))}
+                />
               </div>
             )}
           </Seccion>

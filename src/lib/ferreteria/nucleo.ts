@@ -6,15 +6,12 @@
  * Recibe el repositorio por parámetro (Supabase en producción, memoria en las pruebas).
  */
 import {
-  costoEnFecha,
   costoVigente,
   esEstado,
   esLinea,
-  gananciaPorVenta,
   validarPiso,
   type CanalConversacion,
   type ResultadoConversacion,
-  type RutaVenta,
 } from './reglas'
 import type {
   Autor,
@@ -161,7 +158,7 @@ export function planearCambio(
   return { tipo: 'cambios', patch, eventos, quedaPendiente, ganancia }
 }
 
-function conAutor(
+export function conAutor(
   ws: string,
   pubId: string,
   autor: Autor,
@@ -646,37 +643,5 @@ export async function agregarNota(
   return { ok: true }
 }
 
-export async function registrarVenta(
-  repo: RepoFerreteria,
-  ws: string,
-  pub: PublicacionFila,
-  venta: { fecha_primer_pago: string; precio_final: number; ruta: RutaVenta; conversacion_id?: string | null },
-  autor: Autor,
-): Promise<{ ok: true; ganancia: number } | { ok: false; mensaje: string }> {
-  if (!Number.isFinite(venta.precio_final) || venta.precio_final <= 0) return { ok: false, mensaje: 'El precio final tiene que ser mayor que cero.' }
-  const costos = (await repo.costos(ws, pub.producto_id)).map((c) => ({ ...c, costo_f: Number(c.costo_f) }))
-  const costo = costoEnFecha(costos, venta.fecha_primer_pago)
-  if (!costo) return { ok: false, mensaje: 'No hay una lista de costos vigente en la fecha del pago.' }
-  const ganancia = gananciaPorVenta(venta.precio_final, costo.costo_f)
-  await repo.insertarVenta({
-    workspace_id: ws,
-    publicacion_id: pub.id,
-    conversacion_id: venta.conversacion_id ?? null,
-    fecha_primer_pago: venta.fecha_primer_pago,
-    precio_final: venta.precio_final,
-    costo_dia: costo.costo_f,
-    ganancia,
-    ruta: venta.ruta,
-    registrado_por: autor.tipo === 'persona' ? autor.id : null,
-  })
-  await repo.insertarEventos([
-    conAutor(ws, pub.id, autor, {
-      tipo: 'venta',
-      campo: null,
-      valor_anterior: null,
-      valor_nuevo: `precio ${venta.precio_final} · ganancia ${ganancia} · ${venta.ruta}`,
-      motivo: null,
-    }),
-  ])
-  return { ok: true, ganancia }
-}
+// Registrar una venta, entregarla y cobrarla vive en `ventas.ts`: desde que cada venta es un
+// negocio de ONE, esas escrituras también mueven el negocio.

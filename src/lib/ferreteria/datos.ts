@@ -2,7 +2,8 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { calcularIndicadores, type Indicadores } from './indicadores'
-import { costoVigente, gananciaPorVenta, margenPorVenta } from './reglas'
+import { liquidacionMensual, porCobrar, type MesLiquidacion } from './liquidacion'
+import { costoVigente, gananciaPorVenta, margenPorVenta, PASOS_VENTA, type PasoVenta } from './reglas'
 import type {
   ConversacionFila,
   CostoFila,
@@ -138,6 +139,12 @@ export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tabl
   return { filas, indicadores, marcas }
 }
 
+/** Una venta con el estado REAL de su negocio en ONE (para ver si quedó atrasado). */
+export type VentaDetalle = VentaFila & {
+  id: string
+  negocio: { id: string; codigo: string | null; paso: PasoVenta | null; abierto: boolean } | null
+}
+
 export interface Detalle {
   publicacion: PublicacionFila
   producto: ProductoFila
@@ -145,7 +152,67 @@ export interface Detalle {
   eventos: EventoFila[]
   mediciones: MedicionFila[]
   conversaciones: (ConversacionFila & { id: string; created_at: string })[]
-  ventas: VentaFila[]
+  ventas: VentaDetalle[]
+}
+
+/**
+ * El negocio de cada venta: código, si sigue abierto y en qué paso está. Dos lecturas planas
+ * (negocios y sus etapas) en vez de un embed por FK, cuyo nombre no es estable.
+ */
+async function negociosDeVentas(db: Db, ws: string, ids: string[]): Promise<Map<string, NonNullable<VentaDetalle['negocio']>>> {
+  const out = new Map<string, NonNullable<VentaDetalle['negocio']>>()
+  if (ids.length === 0) return out
+  const { data: negs, error } = await db
+    .from('negocios')
+    .select('id, codigo, estado, etapa_actual_id')
+    .eq('workspace_id', ws)
+    .in('id', ids)
+  lanzar('negocios de las ventas', error)
+  const filas = (negs ?? []) as { id: string; codigo: string | null; estado: string | null; etapa_actual_id: string | null }[]
+  const etapaIds = [...new Set(filas.map((n) => n.etapa_actual_id).filter((x): x is string => !!x))]
+  const pasos = new Map<string, PasoVenta>()
+  if (etapaIds.length > 0) {
+    const { data: etapas, error: errE } = await db.from('etapas_negocio').select('id, config_extra').in('id', etapaIds)
+    lanzar('etapas de las ventas', errE)
+    for (const e of (etapas ?? []) as { id: string; config_extra: Record<string, unknown> | null }[]) {
+      const paso = e.config_extra?.ferreteria_paso
+      if (typeof paso === 'string' && (PASOS_VENTA as readonly string[]).includes(paso)) pasos.set(e.id, paso as PasoVenta)
+    }
+  }
+  for (const n of filas) {
+    out.set(n.id, {
+      id: n.id,
+      codigo: n.codigo,
+      paso: n.etapa_actual_id ? (pasos.get(n.etapa_actual_id) ?? null) : null,
+      abierto: n.estado === 'abierto',
+    })
+  }
+  return out
+}
+
+export interface Liquidacion {
+  /** Por mes del PAGO. Las ventas sin pagar no están aquí. */
+  meses: MesLiquidacion[]
+  /** Contra entrega aún sin pagar: fuera de toda liquidación. */
+  porCobrar: { ventas: number; valor: number }
+}
+
+/**
+ * Todas las ventas del espacio, para la liquidación mensual. Crecen sin techo: `traerTodo`.
+ */
+export async function leerLiquidacion(db: Db, ws: string, hoy: string): Promise<Liquidacion> {
+  const ventas = await traerTodo<{ fecha_primer_pago: string | null; precio_final: number; costo_dia: number; ganancia: number }>(
+    (desde, hasta) =>
+      db
+        .from('ferreteria_ventas')
+        .select('fecha_primer_pago, precio_final, costo_dia, ganancia')
+        .eq('workspace_id', ws)
+        .order('id')
+        .range(desde, hasta),
+    { etiqueta: 'ferreteria_ventas (liquidación)' },
+  )
+  const filas = ventas.map((v) => ({ ...v, precio_final: Number(v.precio_final), costo_dia: Number(v.costo_dia), ganancia: Number(v.ganancia) }))
+  return { meses: liquidacionMensual(filas, hoy), porCobrar: porCobrar(filas) }
 }
 
 export async function leerDetalle(db: Db, ws: string, codigo: string): Promise<Detalle | null> {
@@ -165,7 +232,7 @@ export async function leerDetalle(db: Db, ws: string, codigo: string): Promise<D
     db.from('ferreteria_eventos').select('*').eq('workspace_id', ws).eq('publicacion_id', p.id).order('created_at', { ascending: false }).limit(500),
     db.from('ferreteria_mediciones').select('*').eq('workspace_id', ws).eq('publicacion_id', p.id).order('fecha', { ascending: false }).limit(400),
     db.from('ferreteria_conversaciones').select('*').eq('workspace_id', ws).eq('publicacion_id', p.id).order('fecha', { ascending: false }).limit(500),
-    db.from('ferreteria_ventas').select('*').eq('workspace_id', ws).eq('publicacion_id', p.id).order('fecha_primer_pago', { ascending: false }),
+    db.from('ferreteria_ventas').select('*').eq('workspace_id', ws).eq('publicacion_id', p.id).order('fecha_venta', { ascending: false }),
   ])
   lanzar('producto', prodR.error)
   lanzar('costos', costosR.error)
@@ -174,6 +241,14 @@ export async function leerDetalle(db: Db, ws: string, codigo: string): Promise<D
   lanzar('conversaciones', convsR.error)
   lanzar('ventas', ventasR.error)
 
+  const ventasCrudas = ((ventasR.data ?? []) as (VentaFila & { id: string })[]).map((v) => ({
+    ...v,
+    precio_final: Number(v.precio_final),
+    costo_dia: Number(v.costo_dia),
+    ganancia: Number(v.ganancia),
+  }))
+  const negocios = await negociosDeVentas(db, ws, ventasCrudas.map((v) => v.negocio_id).filter((x): x is string => !!x))
+
   return {
     publicacion: p,
     producto: prodR.data as ProductoFila,
@@ -181,6 +256,6 @@ export async function leerDetalle(db: Db, ws: string, codigo: string): Promise<D
     eventos: (eventosR.data ?? []) as EventoFila[],
     mediciones: (medsR.data ?? []) as MedicionFila[],
     conversaciones: (convsR.data ?? []) as Detalle['conversaciones'],
-    ventas: ((ventasR.data ?? []) as VentaFila[]).map((v) => ({ ...v, precio_final: Number(v.precio_final), costo_dia: Number(v.costo_dia), ganancia: Number(v.ganancia) })),
+    ventas: ventasCrudas.map((v) => ({ ...v, negocio: v.negocio_id ? (negocios.get(v.negocio_id) ?? null) : null })),
   }
 }

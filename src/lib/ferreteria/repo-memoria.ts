@@ -147,7 +147,40 @@ export function repoEnMemoria(estado: EstadoMemoria = estadoVacio(), reloj: () =
       }
     },
     async insertarVenta(fila) {
-      estado.ventas.push({ ...copia(fila), id: nuevoId('venta') })
+      comprobarVenta(fila)
+      const nueva = { ...copia(fila), id: nuevoId('venta') }
+      estado.ventas.push(nueva)
+      return copia(nueva)
     },
+    async ventaPorId(ws, id) {
+      const v = estado.ventas.find((x) => x.workspace_id === ws && x.id === id)
+      return v ? (copia(v) as VentaFila & { id: string }) : null
+    },
+    async actualizarVenta(ws, id, cambios) {
+      const v = estado.ventas.find((x) => x.workspace_id === ws && x.id === id)
+      if (!v) return
+      const nueva = { ...v, ...copia(cambios) }
+      comprobarVenta(nueva)
+      if (nueva.negocio_id && estado.ventas.some((x) => x.id !== id && x.negocio_id === nueva.negocio_id)) {
+        throw new Error('duplicate key: ferreteria_ventas_negocio_unico')
+      }
+      Object.assign(v, nueva)
+    },
+    async borrarVenta(ws, id) {
+      estado.ventas = estado.ventas.filter((x) => !(x.workspace_id === ws && x.id === id))
+    },
+    async conversacionPorId(ws, id) {
+      const c = estado.conversaciones.find((x) => x.workspace_id === ws && x.id === id)
+      return c ? (copia(c) as ConversacionFila & { id: string }) : null
+    },
+  }
+}
+
+/** Los CHECK de `ferreteria_ventas` que el núcleo da por hechos (ver la migración). */
+function comprobarVenta(v: VentaFila): void {
+  if (!(v.precio_final > 0)) throw new Error('check: precio_final > 0')
+  if (!(v.costo_dia > 0)) throw new Error('check: costo_dia > 0')
+  if (v.forma_pago === 'anticipado' && !v.fecha_primer_pago) {
+    throw new Error('check: ferreteria_ventas_pago_coherente')
   }
 }
