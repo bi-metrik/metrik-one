@@ -1,5 +1,7 @@
 'use server'
 
+import { randomUUID } from 'crypto'
+
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -18,16 +20,20 @@ import {
   composicionDeLectura,
   composicionDeLinea,
   confirmacionDesactualizada,
+  firmaDeHabitaciones,
   leerTarifaPax,
   MENSAJE_MONEDA_ASUMIDA,
   mismaComposicion,
   monedaDeTarifa,
   NOMBRE_TIPO,
+  describirOcupacion,
   normalizarComposicion,
   resolverTarifa,
   validarLecturaEnCasilla,
   type CasillasLeidas,
   type ClaveCasilla,
+  type LecturaCasilla,
+  type RolHabitacion,
   type TarifaConfirmada,
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -41,7 +47,20 @@ import { descripcionDeLinea, descripcionReescribible, validarCorreccion } from '
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
-import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
+import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
+import {
+  agregarHabitacion,
+  conHabitaciones,
+  habitacionesDeTarifa,
+  mismaImagenEnHabitaciones,
+  mismaOpcionHotel,
+  opcionDelMismoHotel,
+  recibeHabitaciones,
+  repartirHabitaciones,
+  resolverHabitaciones,
+  sobraLaCaptura,
+  tarifaConHabitaciones,
+} from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import { huellaDeImagen } from '@/lib/cotizaciones/captura-repetida'
 
@@ -265,6 +284,11 @@ export async function leerCasillaDeItem(
   monedaIndicada?: string | null,
   /** La opción que la persona tocó en «¿Cuál de estas?» (P8 del ensayo del 2026-09-23). */
   enfoque?: { nombre: string; precio: string | null } | null,
+  /**
+   * R8 · `comoHabitacion`: la captura es OTRA habitación de esta opción de hotel («Pega otra
+   * habitación» en su bloque). Tiene que ser el mismo hotel con las mismas fechas.
+   */
+  modo?: { comoHabitacion?: boolean } | null,
 ): Promise<ResultadoCasilla> {
   if (!CLAVES.includes(clave)) return { ok: false, codigo: 'CASILLA', mensaje: 'Casilla desconocida.' }
   // Lee con la llave de Gemini de MeTRIK: la puerta de Clarity va antes de tocar el ítem,
@@ -332,6 +356,10 @@ export async function leerCasillaDeItem(
   // La huella del archivo, para que la bandeja no procese dos veces el mismo pantallazo (P10).
   const huella = await huellaDeImagen(dataUrl)
   if (huella) leida.huellaImagen = huella
+
+  if (modo?.comoHabitacion) {
+    return agregarHabitacionLeida({ supabase, item, itemId, ranura, viaje, tarifa, leida })
+  }
 
   // ── Quién decide a cuántos cubre la línea (§2.4) ──────────────────────────
   //
@@ -454,6 +482,273 @@ export async function quitarCasillaDeItem(
     delete casillas[clave]
     return { ...actual, casillas }
   })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: guardado.tarifa }
+}
+
+// ── R8 · Habitaciones de una opción de hotel ─────────────────────────────────
+//
+// Diseño: `reunion-edgar-alejandra-2026-09-23.md`, «R8 resuelto». Las reglas viven en
+// `habitaciones.ts` (puro); aquí solo se lee, se escribe y se verifica lo escrito.
+
+const RANURA_HOTEL = 'hotel_detalle'
+
+type ContextoDeItem = Exclude<Awaited<ReturnType<typeof contexto>>, { error: string }>
+
+/**
+ * Una habitación se valida contra SU ocupación, no contra la de la opción: una habitación de
+ * 2 adultos dentro de una opción de 6 es justamente el caso. Solo queda la coherencia de la
+ * captura consigo misma (TP2).
+ */
+function validarHabitacion(ranuraSlug: string, leida: LecturaCasilla): { ok: true } | { ok: false; codigo: string; mensaje: string } {
+  const propia = composicionDeLectura(leida)
+  if (propia) leida.paraComposicion = propia
+  const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: null, casillas: {}, ranuraSlug })
+  if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
+  leida.alertas = [...leida.alertas, ...v.alertas]
+  return { ok: true }
+}
+
+/**
+ * Escribe y comprueba que la habitación quedó. Dos capturas del mismo hotel que llegan juntas
+ * escriben la misma fila: `guardarTarifa` relee antes de escribir, pero entre su lectura y su
+ * escritura cabe otra. Si al releer no quedó, se vuelve a escribir.
+ */
+async function guardarConHabitacion(
+  supabase: unknown,
+  itemId: string,
+  muta: (actual: TarifaPax) => TarifaPax,
+  debeQuedar: (t: TarifaPax) => boolean,
+): Promise<{ error: string } | { tarifa: TarifaPax }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  for (let intento = 0; intento < 3; intento++) {
+    const g = await guardarTarifa(supabase, itemId, muta)
+    if ('error' in g) return g
+    const { data, error } = await sb.from('items').select('tarifa_pax').eq('id', itemId).maybeSingle()
+    if (error) return { error: error.message }
+    const quedo = leerTarifaPax(data?.tarifa_pax)
+    if (debeQuedar(quedo)) return { tarifa: quedo }
+  }
+  return { error: 'Otra persona estaba cambiando esta opción al mismo tiempo. Vuelve a intentarlo.' }
+}
+
+/** «Habitación 2 de CABAÑAS AGUA DULCE», o «Solo para restar en …». */
+function dondeQuedo(
+  tarifa: TarifaPax,
+  habitacionId: string,
+  grupo: TarifaConfirmada['composicion'] | null,
+  nombre: string | null,
+): { numero: number | null; donde: string } {
+  const fila = repartirHabitaciones(habitacionesDeTarifa(tarifa), grupo).habitaciones.find(h => h.id === habitacionId)
+  const de = nombre ? ` de ${nombre}` : ''
+  if (!fila) return { numero: null, donde: `Habitación${de}` }
+  return fila.numero
+    ? { numero: fila.numero, donde: `Habitación ${fila.numero}${de}` }
+    : { numero: null, donde: `Solo para restar${nombre ? ` en ${nombre}` : ''}` }
+}
+
+async function agregarHabitacionLeida(a: {
+  supabase: ContextoDeItem['supabase']
+  item: ItemLeido
+  itemId: string
+  ranura: ContextoDeItem['ranura']
+  viaje: ContextoDeItem['viaje']
+  tarifa: TarifaPax
+  leida: LecturaCasilla
+}): Promise<ResultadoCasilla> {
+  if (a.ranura.slug !== RANURA_HOTEL) {
+    return { ok: false, codigo: 'HABITACION', mensaje: 'Solo una opción de hotel lleva habitaciones.' }
+  }
+  const habs = habitacionesDeTarifa(a.tarifa)
+  if (habs.length === 0) {
+    return { ok: false, codigo: 'HABITACION', mensaje: 'Pega primero el pantallazo del proveedor en esta opción.' }
+  }
+  if (!recibeHabitaciones(a.tarifa)) {
+    return {
+      ok: false,
+      codigo: 'HABITACION',
+      mensaje: 'Esta opción se cotiza restando capturas: quita la de «sin el infante» o «solo adultos» antes de sumarle habitaciones.',
+    }
+  }
+  if (!mismaOpcionHotel(habs[0].lectura, a.leida)) {
+    return {
+      ok: false,
+      codigo: 'OTRO_HOTEL',
+      mensaje: 'Esta captura es de otro hotel o de otras fechas: pégala en la bandeja para que quede como otra opción.',
+    }
+  }
+  if (mismaImagenEnHabitaciones(habs, a.leida.huellaImagen)) {
+    return { ok: false, codigo: 'REPETIDA', mensaje: 'Esa misma imagen ya es una habitación de esta opción.' }
+  }
+  const v = validarHabitacion(a.ranura.slug, a.leida)
+  if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
+
+  const habitacionId = randomUUID()
+  const grupo = a.viaje.composicion
+  const guardado = await guardarConHabitacion(
+    a.supabase,
+    a.itemId,
+    actual => agregarHabitacion(actual, { id: habitacionId, lectura: a.leida }, grupo),
+    t => (t.habitaciones ?? []).some(h => h.id === habitacionId),
+  )
+  if ('error' in guardado) return { ok: false, codigo: 'GUARDAR', mensaje: guardado.error }
+  if (a.item.negocioId) revalidatePath(`/negocios/${a.item.negocioId}`)
+  const opcion = await fotoDeOpcion(a.supabase, a.itemId)
+  const estado = resolverHabitaciones(guardado.tarifa, grupo, { moneda: monedaDeTarifa(guardado.tarifa).moneda })
+  return { ok: true, mensaje: estado.mensaje, alertas: a.leida.alertas, tarifa: guardado.tarifa, opcion }
+}
+
+export type ResultadoUnion =
+  | { ok: true; tipo: 'sola' }
+  | {
+      ok: true
+      tipo: 'unida'
+      /** La opción que la recibió: desde ahora la fila de la bandeja apunta a ella. */
+      itemId: string
+      habitacionId: string
+      numero: number | null
+      donde: string
+      opcion: OpcionLeida | null
+      tarifa: TarifaPax
+    }
+  /** Regla 6: los cupos del grupo ya están completos. La captura queda como su propia opción. */
+  | { ok: true; tipo: 'sobra'; conItemId: string }
+  | { ok: false; mensaje: string }
+
+/**
+ * R8 · regla 1. Una captura de hotel recién leída en su propia opción se vuelve habitación de
+ * la opción del MISMO hotel con las MISMAS fechas, si la hay, y su opción se retira. La
+ * bandeja lo llama en fila, una captura a la vez, después de leer.
+ *
+ *  · `sola`: no hay opción del mismo hotel (o no es hotel): se queda como está.
+ *  · `sobra`: el grupo ya está cubierto y la captura no sirve para restar, o es la misma
+ *    imagen (regla 6). Se queda como su propia opción y la bandeja pregunta.
+ *  · `forzar` + `destinoId`: el «Agregar igual» de esa pregunta.
+ *
+ * Nunca mueve lo que una persona ya armó: una opción con capturas para restar, o esta misma
+ * con habitaciones propias, se quedan donde están.
+ */
+export async function unirHotelComoHabitacion(
+  itemId: string,
+  opciones: { forzar?: boolean; destinoId?: string } = {},
+): Promise<ResultadoUnion> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { ok: false, mensaje: ctx.error as string }
+  const { supabase, item, ranura, viaje, tarifa } = ctx
+  if (ranura.slug !== RANURA_HOTEL || conHabitaciones(tarifa) || !recibeHabitaciones(tarifa)) return { ok: true, tipo: 'sola' }
+  const propia = tarifa.casillas?.grupo_completo
+  if (!propia) return { ok: true, tipo: 'sola' }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  const { data: filas, error } = await sb.from('items').select('*').eq('cotizacion_id', item.cotizacionId)
+  if (error) return { ok: false, mensaje: error.message }
+  const hoteles = ((filas ?? []) as Record<string, unknown>[])
+    .filter(f => f.id !== itemId && ranuraDeGrupo((f.grupo ?? null) as string | null)?.slug === RANURA_HOTEL)
+    .filter(f => !opciones.destinoId || f.id === opciones.destinoId)
+    // El orden de la cotización: la opción más vieja gana un empate.
+    .sort((x, y) => String(x.created_at ?? '').localeCompare(String(y.created_at ?? '')) || String(x.id).localeCompare(String(y.id)))
+    .map(f => ({ id: f.id as string, tarifa: leerTarifaPax(f.tarifa_pax) }))
+  const destino = opcionDelMismoHotel(propia, hoteles)
+  if (!destino) {
+    return opciones.destinoId
+      ? { ok: false, mensaje: 'Esa opción ya no es del mismo hotel con las mismas fechas. Recarga la cotización.' }
+      : { ok: true, tipo: 'sola' }
+  }
+
+  const grupo = viaje.composicion
+  const suyas = habitacionesDeTarifa(destino.tarifa)
+  if (!opciones.forzar && (mismaImagenEnHabitaciones(suyas, propia.huellaImagen) || sobraLaCaptura(suyas, propia, grupo))) {
+    return { ok: true, tipo: 'sobra', conItemId: destino.id }
+  }
+
+  // La captura entra con SU ocupación (para quiénes se buscó), no con la de su opción.
+  const lectura: LecturaCasilla = { ...propia }
+  const suOcupacion = composicionDeLectura(lectura)
+  if (suOcupacion) lectura.paraComposicion = suOcupacion
+  const habitacionId = randomUUID()
+  const guardado = await guardarConHabitacion(
+    supabase,
+    destino.id,
+    actual => agregarHabitacion(actual, { id: habitacionId, lectura }, grupo),
+    t => (t.habitaciones ?? []).some(h => h.id === habitacionId),
+  )
+  if ('error' in guardado) return { ok: false, mensaje: guardado.error }
+
+  // Su opción se va: la captura ya vive como habitación. Si no se puede borrar, la habitación
+  // se deshace para no contar el mismo precio dos veces.
+  const borrado = await deleteItem(itemId)
+  if (!borrado.success) {
+    await guardarTarifa(supabase, destino.id, actual =>
+      tarifaConHabitaciones(actual, habitacionesDeTarifa(actual).filter(h => h.id !== habitacionId), grupo))
+    return { ok: false, mensaje: borrado.error ?? 'No se pudo unir la captura a su opción.' }
+  }
+  await recalcularTotales(item.cotizacionId)
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  const opcion = await fotoDeOpcion(supabase, destino.id)
+  const { numero, donde } = dondeQuedo(guardado.tarifa, habitacionId, grupo, opcion?.nombre ?? null)
+  return { ok: true, tipo: 'unida', itemId: destino.id, habitacionId, numero, donde, opcion, tarifa: guardado.tarifa }
+}
+
+/**
+ * Fija con un toque el papel de una captura: habitación o solo para restar (regla 5). `null`
+ * vuelve a lo que decide el reparto. Queda anotado quién y cuándo.
+ */
+export async function cambiarRolHabitacion(
+  itemId: string,
+  habitacionId: string,
+  rol: RolHabitacion | null,
+): Promise<ResultadoTarifa> {
+  if (rol !== null && rol !== 'habitacion' && rol !== 'referencia') return { success: false, error: 'Papel desconocido' }
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const { por, porId } = rol ? await quienEscribe(ctx.supabase) : { por: null, porId: null }
+  const grupo = ctx.viaje.composicion
+  let existia = false
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    const habs = habitacionesDeTarifa(actual).map(h => {
+      if (h.id !== habitacionId) return h
+      existia = true
+      const { rolManual: _fuera, ...resto } = h
+      void _fuera
+      return rol ? { ...resto, rolManual: { valor: rol, por, porId, en: new Date().toISOString() } } : resto
+    })
+    return existia ? tarifaConHabitaciones(actual, habs, grupo) : actual
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  if (!existia) return { success: false, error: 'Esa habitación ya no está en la opción. Recarga la cotización.' }
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: guardado.tarifa }
+}
+
+/**
+ * Quita una habitación. Si era la última, la opción se va entera: una opción de hotel sin
+ * ninguna captura no dice nada.
+ */
+export async function quitarHabitacion(
+  itemId: string,
+  habitacionId: string,
+): Promise<ResultadoTarifa & { opcionRetirada?: boolean }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const grupo = ctx.viaje.composicion
+  const actuales = habitacionesDeTarifa(ctx.tarifa)
+  if (!actuales.some(h => h.id === habitacionId)) return { success: true, tarifa: ctx.tarifa }
+  if (actuales.length === 1) {
+    const r = await deleteItem(itemId)
+    if (!r.success) return { success: false, error: r.error ?? 'No se pudo quitar la opción.' }
+    await recalcularTotales(ctx.item.cotizacionId)
+    if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+    return { success: true, opcionRetirada: true }
+  }
+  const guardado = await guardarConHabitacion(
+    ctx.supabase,
+    itemId,
+    actual => tarifaConHabitaciones(actual, habitacionesDeTarifa(actual).filter(h => h.id !== habitacionId), grupo),
+    t => !(t.habitaciones ?? []).some(h => h.id === habitacionId),
+  )
   if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
@@ -602,7 +897,12 @@ export async function confirmarTarifaPorPasajero(
   const monedaTarifa = monedaDeTarifa(tarifa)
   // Una captura buscada para otros pasajeros sale aquí como `desactualizada`: no hay costo
   // que confirmar, y el motivo dice cuál reemplazar (brief del 2026-09-22, parte 1).
-  const estado = resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda })
+  // R8 · una opción de hotel con habitaciones se costea por sus habitaciones, contra el grupo
+  // del negocio (`resolverHabitaciones`); las demás, como siempre.
+  const porHabitaciones = conHabitaciones(tarifa)
+  const estado = porHabitaciones
+    ? resolverHabitaciones(tarifa, ctx.viaje.composicion ?? composicion, { moneda: monedaTarifa.moneda })
+    : resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda })
   if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje, codigo: 'PENDIENTE' }
   // «$» sin moneda: COP está preseleccionada pero nadie la ha dicho. No pasa callada.
   if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }
@@ -625,7 +925,23 @@ export async function confirmarTarifaPorPasajero(
       totalCOP: Math.round(unitarioCOP * c.cantidad * 100) / 100,
     })
   }
-  const costoTotalCOP = Math.round(costos.reduce((a, c) => a + c.totalCOP, 0) * 100) / 100
+  // R8 · regla 8: sin un par del mismo tipo de habitación para restar, el costo va por
+  // habitación. `costos` queda vacío y el PDF imprime el precio de cada habitación.
+  const porHabitacion: NonNullable<TarifaConfirmada['porHabitacion']> = []
+  for (const h of estado.porHabitacion ?? []) {
+    const totalCOP = aPesos(h.total, moneda, tasaCambio)
+    if (totalCOP === null) {
+      return {
+        success: false,
+        error: `El precio está en ${moneda} y falta la tasa de cambio a pesos. Escríbela para poder guardar el costo.`,
+        codigo: 'PENDIENTE',
+      }
+    }
+    porHabitacion.push({ numero: h.numero, ocupacion: h.ocupacion, totalCOP })
+  }
+  const costoTotalCOP = Math.round(
+    (costos.length > 0 ? costos.reduce((a, c) => a + c.totalCOP, 0) : porHabitacion.reduce((a, h) => a + h.totalCOP, 0)) * 100,
+  ) / 100
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
@@ -636,17 +952,28 @@ export async function confirmarTarifaPorPasajero(
   if (errBorrar) return { success: false, error: errBorrar.message, codigo: 'ERROR' }
 
   const { error: errInsertar } = await sb.from('rubros').insert(
-    costos.map((c, i) => ({
-      item_id: itemId,
-      // El tipo es el concepto (tarifa del proveedor); el tipo de pasajero va en la descripción.
-      tipo: TIPO_RUBRO_POR_PASAJERO,
-      descripcion: NOMBRE_TIPO[c.tipo],
-      cantidad: c.cantidad,
-      unidad: 'pax',
-      valor_unitario: c.unitarioCOP,
-      orden: i,
-      sugerido: false,
-    })),
+    costos.length > 0 || porHabitacion.length === 0
+      ? costos.map((c, i) => ({
+          item_id: itemId,
+          // El tipo es el concepto (tarifa del proveedor); el tipo de pasajero va en la descripción.
+          tipo: TIPO_RUBRO_POR_PASAJERO,
+          descripcion: NOMBRE_TIPO[c.tipo],
+          cantidad: c.cantidad,
+          unidad: 'pax',
+          valor_unitario: c.unitarioCOP,
+          orden: i,
+          sugerido: false,
+        }))
+      : porHabitacion.map((h, i) => ({
+          item_id: itemId,
+          tipo: TIPO_RUBRO_POR_PASAJERO,
+          descripcion: `Habitación ${h.numero} · ${describirOcupacion(h.ocupacion, 'y')}`,
+          cantidad: 1,
+          unidad: 'habitación',
+          valor_unitario: h.totalCOP,
+          orden: i,
+          sugerido: false,
+        })),
   )
   if (errInsertar) return { success: false, error: errInsertar.message, codigo: 'ERROR' }
 
@@ -745,6 +1072,9 @@ export async function confirmarTarifaPorPasajero(
     // daba»: quien revisa veía un precio a mano y ningún punto de comparación. Que se
     // APLIQUE sigue decidiéndolo `patchMargen` de arriba; esto solo lo deja anotado.
     margenProveedor,
+    // R8 · qué habitaciones se confirmaron: cambiar una después deja la confirmación vieja.
+    ...(porHabitaciones && tarifa.habitaciones ? { firmaHabitaciones: firmaDeHabitaciones(tarifa.habitaciones) } : {}),
+    ...(porHabitacion.length > 0 && costos.length === 0 ? { porHabitacion } : {}),
   }
   const guardado = await guardarTarifa(supabase, itemId, actual => {
     const siguiente: TarifaPax = {

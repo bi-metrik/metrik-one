@@ -7,10 +7,15 @@ import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
   menoresDeDosAnios,
+  mismaImagenEnHabitaciones,
   mismaOpcionHotel,
   mismasFechasHotel,
+  opcionDelMismoHotel,
+  precioPorHabitacion,
+  recibeHabitaciones,
   repartirHabitaciones,
   resolverHabitaciones,
+  resolverTarifaDeOpcion,
   sobraLaCaptura,
   tarifaConHabitaciones,
   textoDeCupos,
@@ -23,6 +28,7 @@ import {
   type Composicion,
   type Habitacion,
   type LecturaCasilla,
+  type TarifaPax,
 } from './tarifa-pasajero'
 
 // ── El caso real: COT-2026-0013 (copiado, no leído de la base) ────────────────
@@ -240,21 +246,116 @@ describe('R8 · lo guardado', () => {
   it('una confirmación con otra lista de habitaciones queda vieja', () => {
     const habs = habitacionesDe(ENILDA)
     const t = tarifaConHabitaciones({}, habs.slice(0, 2), GRUPO)
-    const confirmada = {
+    const confirmada: TarifaPax = {
       ...t,
       confirmada: {
         composicion: t.composicion!,
         costos: [],
+        costoTotalCOP: 0,
         moneda: 'COP',
         tasa: null,
-        por: 'x',
-        porId: 'x',
-        en: '2026-09-24',
+        confirmadaEn: '2026-09-24',
         firmaHabitaciones: firmaDeHabitaciones(t.habitaciones!),
       },
     }
-    expect(confirmacionDesactualizada(confirmada as never, t.composicion)).toBeNull()
+    expect(confirmacionDesactualizada(confirmada, t.composicion ?? null)).toBeNull()
     const con3 = { ...confirmada, ...tarifaConHabitaciones(confirmada, habs, GRUPO) }
-    expect(confirmacionDesactualizada(con3 as never, con3.composicion)?.motivo).toBe('composicion')
+    expect(confirmacionDesactualizada(con3, con3.composicion ?? null)?.motivo).toBe('composicion')
+  })
+})
+
+describe('R8 · la bandeja une las seis capturas de COT-2026-0013 en dos opciones', () => {
+  /**
+   * Lo que hace `unirHotelComoHabitacion`, en fila, con la tarifa en memoria: cada captura nace
+   * en su propia opción y, si hay otra del mismo hotel y fechas, se vuelve habitación de ella.
+   */
+  function pegarEnLaBandeja(orden: string[]) {
+    let opciones: { id: string; tarifa: TarifaPax }[] = []
+    const sobrantes: string[] = []
+    for (const id of orden) {
+      const propia = porItem(id)
+      const destino = opcionDelMismoHotel(propia, opciones)
+      if (!destino) {
+        opciones = [...opciones, { id, tarifa: { casillas: { grupo_completo: propia } } }]
+        continue
+      }
+      const suyas = habitacionesDeTarifa(destino.tarifa)
+      if (mismaImagenEnHabitaciones(suyas, propia.huellaImagen) || sobraLaCaptura(suyas, propia, GRUPO)) {
+        sobrantes.push(id)
+        continue
+      }
+      opciones = opciones.map(o => (o.id === destino.id
+        ? { ...o, tarifa: agregarHabitacion(o.tarifa, { id, lectura: propia }, GRUPO) }
+        : o))
+    }
+    return { opciones, sobrantes }
+  }
+
+  it('pegadas intercaladas: dos opciones de tres habitaciones, ninguna sobra', () => {
+    const { opciones, sobrantes } = pegarEnLaBandeja(['2164b941', 'efb0a3c3', '68d431db', 'f9fbc4d5', '7944d5cc', '5542356a'])
+    expect(sobrantes).toEqual([])
+    expect(opciones.map(o => habitacionesDeTarifa(o.tarifa).length)).toEqual([3, 3])
+    expect(opciones.map(o => claveOpcionHotel(habitacionesDeTarifa(o.tarifa)[0].lectura)!.hotel)).toEqual(['Posada Enilda', 'Cabañas Agua Dulce'])
+    const enilda = opciones[0].tarifa
+    expect(textoDeCupos(repartirHabitaciones(habitacionesDeTarifa(enilda), GRUPO))).toBe('6/6 adultos · 1/1 niño · 1/1 infante')
+    // La opción queda cubriendo lo que cubren sus habitaciones: nada compara contra una
+    // composición vieja.
+    expect(enilda.composicion).toEqual({ adultos: 6, ninos: 1, infantes: 1 })
+  })
+
+  it('una séptima captura de Enilda, con el grupo ya cubierto, sobra (regla 6)', () => {
+    const otra = { ...porItem('2164b941'), huellaImagen: 'otra-imagen' }
+    const destino = opcionDelMismoHotel(otra, pegarEnLaBandeja(ENILDA).opciones)!
+    expect(sobraLaCaptura(habitacionesDeTarifa(destino.tarifa), otra, GRUPO)).toBe(true)
+  })
+
+  it('la misma imagen dos veces no es otra habitación', () => {
+    const conHuella = { ...porItem('2164b941'), huellaImagen: 'h-1' }
+    const tarifa = tarifaConHabitaciones({}, [{ id: 'a', lectura: conHuella }], GRUPO)
+    expect(mismaImagenEnHabitaciones(habitacionesDeTarifa(tarifa), 'h-1')).toBe(true)
+    expect(mismaImagenEnHabitaciones(habitacionesDeTarifa(tarifa), 'h-2')).toBe(false)
+  })
+
+  it('una opción que se cotiza restando capturas no recibe habitaciones', () => {
+    const l = porItem('2164b941')
+    expect(recibeHabitaciones({ casillas: { grupo_completo: l } })).toBe(true)
+    expect(recibeHabitaciones({ casillas: { grupo_completo: l, solo_adultos: l } })).toBe(false)
+    expect(opcionDelMismoHotel(l, [{ id: 'x', tarifa: { casillas: { grupo_completo: l, sin_infantes: l } } }])).toBeNull()
+  })
+
+  it('sin hotel o sin fechas en la captura no se une a nada', () => {
+    const sinFechas = { ...porItem('2164b941'), identidad: { ...porItem('2164b941').identidad, check_in: null } }
+    expect(opcionDelMismoHotel(sinFechas as LecturaCasilla, [{ id: 'x', tarifa: { casillas: { grupo_completo: porItem('68d431db') } } }])).toBeNull()
+  })
+})
+
+describe('R8 · una sola puerta para el estado de la tarifa, y el precio por habitación', () => {
+  it('con habitaciones manda el reparto contra el grupo; sin ellas, el camino de siempre', () => {
+    const conHabs = tarifaConHabitaciones({}, habitacionesDe(ENILDA), GRUPO)
+    expect(resolverTarifaDeOpcion(conHabs, conHabs.composicion ?? null, GRUPO, 'hotel_detalle')).toMatchObject({ estado: 'resuelta', origen: 'habitaciones' })
+    const deSiempre: TarifaPax = { casillas: { grupo_completo: porItem('2164b941') } }
+    const e = resolverTarifaDeOpcion(deSiempre, { adultos: 2, ninos: 0, infantes: 0 }, GRUPO, 'hotel_detalle')
+    expect(e?.estado === 'resuelta' && e.origen).not.toBe('habitaciones')
+    expect(resolverTarifaDeOpcion({}, null, GRUPO, 'hotel_detalle')).toBeNull()
+  })
+
+  it('lo que falta del grupo se dice en el mensaje, sin frenar la confirmación', () => {
+    const e = resolverHabitaciones(tarifaConHabitaciones({}, habitacionesDe(AGUA_DULCE), GRUPO), GRUPO)
+    expect(e.estado).toBe('resuelta')
+    expect(e.mensaje).toMatch(/^Falta cotizar 1 infante/)
+  })
+
+  it('el precio de la línea se reparte entre habitaciones y suma exacto', () => {
+    const filas = [
+      { numero: 1, ocupacion: { adultos: 2, ninos: 0, infantes: 0 }, totalCOP: 403718.34 },
+      { numero: 2, ocupacion: { adultos: 2, ninos: 0, infantes: 1 }, totalCOP: 412689.86 },
+      { numero: 3, ocupacion: { adultos: 2, ninos: 1, infantes: 0 }, totalCOP: 412689.86 },
+    ]
+    const precios = precioPorHabitacion(filas, 1_500_000)
+    expect(precios.map(p => p.numero)).toEqual([1, 2, 3])
+    expect(precios.reduce((a, p) => a + p.precio, 0)).toBe(1_500_000)
+    // Dos habitaciones del mismo costo quedan iguales, o a un peso por el redondeo.
+    expect(Math.abs(precios[1].precio - precios[2].precio)).toBeLessThanOrEqual(1)
+    expect(precioPorHabitacion([], 1_000)).toEqual([])
   })
 })

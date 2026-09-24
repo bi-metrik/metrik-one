@@ -25,6 +25,8 @@ import {
   montoDeCosto,
   mismoTexto,
   normalizarComposicion,
+  repartirProporcional,
+  resolverTarifa,
   totalPasajeros,
   TIPOS_PASAJERO,
   cantidadDeTipo,
@@ -320,15 +322,19 @@ export function resolverHabitaciones(
   const moneda = (opciones.moneda || [...monedas][0] || 'COP').toUpperCase()
   const porTipo = costoPorTipoDeHabitaciones(r)
   const porHabitacion: CostoDeHabitacion[] = cuentan.map(h => ({ numero: h.numero!, ocupacion: h.ocupacion!, total: h.total }))
+  const cuantas = cuentan.length === 1 ? '1 habitación' : `${cuentan.length} habitaciones`
+  // Lo que falta del grupo se dice, pero no frena: el lector puede leer mal una edad y la
+  // opción quedaría sin poderse confirmar nunca. La pantalla lo pone en rojo arriba.
+  const faltantes = textoDeFaltantes(r)
   return {
     estado: 'resuelta',
     costos: porTipo ?? [],
     moneda,
     costoTotal: Math.round(r.costoTotal * 100) / 100,
     origen: 'habitaciones',
-    mensaje: porTipo
-      ? `${cuentan.length} habitaciones: el precio de cada menor sale de restar la de solo adultos del mismo tipo.`
-      : `${cuentan.length} habitaciones. Sin una de solo adultos del mismo tipo para restar, el precio va por habitación.`,
+    mensaje: (faltantes ? `${faltantes} ` : '') + (porTipo
+      ? `${cuantas}: el precio de cada menor sale de restar la de solo adultos del mismo tipo.`
+      : `${cuantas}. Sin una de solo adultos del mismo tipo para restar, el precio va por habitación.`),
     ...(porTipo ? {} : { porHabitacion }),
   }
 }
@@ -391,6 +397,105 @@ export function sobraLaCaptura(
   const prueba = repartirHabitaciones([...habitaciones, { id: '__nueva__', lectura: nueva }], grupo)
   const fila = prueba.habitaciones.find(h => h.id === '__nueva__')
   return !fila?.sirveParaRestar
+}
+
+// ── A qué opción se une una captura ─────────────────────────────────────────
+
+export interface CandidataHotel {
+  id: string
+  tarifa: TarifaPax
+}
+
+/**
+ * ¿Esta opción puede recibir habitaciones? Las que ya las tienen, y las de siempre que solo
+ * traen el pantallazo 1: una opción vieja con capturas para restar (`sin_infantes`,
+ * `solo_adultos`) se cotiza por su camino y no se mezcla.
+ */
+export function recibeHabitaciones(tarifa: TarifaPax): boolean {
+  if (conHabitaciones(tarifa)) return true
+  const c = tarifa.casillas ?? {}
+  return !!c.grupo_completo && !c.sin_infantes && !c.solo_adultos
+}
+
+/**
+ * La opción del mismo hotel y las mismas fechas a la que se une la captura (regla 1), o `null`.
+ * Con varias, la que más habitaciones tiene; empatadas, la primera de la lista (el orden de la
+ * cotización). Sin hotel o sin fechas en la captura no se afirma nada.
+ */
+export function opcionDelMismoHotel(
+  propia: LecturaCasilla,
+  candidatas: readonly CandidataHotel[],
+): CandidataHotel | null {
+  if (!claveOpcionHotel(propia)) return null
+  let mejor: CandidataHotel | null = null
+  let mejorN = 0
+  for (const c of candidatas) {
+    if (!recibeHabitaciones(c.tarifa)) continue
+    const habs = habitacionesDeTarifa(c.tarifa)
+    if (habs.length === 0 || !mismaOpcionHotel(habs[0].lectura, propia)) continue
+    if (habs.length > mejorN) {
+      mejor = c
+      mejorN = habs.length
+    }
+  }
+  return mejor
+}
+
+/** ¿Alguna habitación de la opción salió de esta misma imagen? (P10, regla 6) */
+export function mismaImagenEnHabitaciones(habitaciones: readonly Habitacion[], huella: string | null | undefined): boolean {
+  return !!huella && habitaciones.some(h => h.lectura.huellaImagen === huella)
+}
+
+/**
+ * El estado de la tarifa de CUALQUIER opción: con habitaciones, contra el grupo del negocio;
+ * sin ellas, como siempre. Es la única puerta: la pantalla, la lectura y la confirmación
+ * preguntan aquí para no decidir por su cuenta qué camino toma una opción.
+ */
+export function resolverTarifaDeOpcion(
+  tarifa: TarifaPax,
+  composicionLinea: Composicion | null,
+  grupo: Composicion | null,
+  ranuraSlug: string,
+  opciones: { moneda?: string | null } = {},
+): EstadoTarifa | null {
+  if (conHabitaciones(tarifa)) return resolverHabitaciones(tarifa, grupo ?? composicionLinea, opciones)
+  if (!composicionLinea) return null
+  return resolverTarifa(composicionLinea, tarifa.casillas ?? {}, ranuraSlug, opciones)
+}
+
+// ── El precio por habitación (regla 8) ───────────────────────────────────────
+
+export interface PrecioPorHabitacion {
+  numero: number
+  ocupacion: Composicion
+  /** Precio de venta de la habitación, en pesos, redondeado al peso. */
+  precio: number
+}
+
+/**
+ * Reparte el precio de la línea entre sus habitaciones, en proporción a su costo (el mismo
+ * criterio que el precio por pasajero). Al peso y SUMANDO EXACTO el precio de la línea: los
+ * pesos que deja el redondeo van a las de mayor fracción, así el documento no dice un total
+ * y unas habitaciones que suman otro.
+ */
+export function precioPorHabitacion(
+  porHabitacion: readonly { numero: number; ocupacion: Composicion; totalCOP: number }[],
+  precioLinea: number,
+): PrecioPorHabitacion[] {
+  if (porHabitacion.length === 0) return []
+  const total = Math.round(Number(precioLinea) || 0)
+  const repartido = repartirProporcional(total, porHabitacion.map(h => h.totalCOP))
+  const pisos = repartido.map(v => Math.floor(v))
+  let faltan = total - pisos.reduce((a, v) => a + v, 0)
+  const porFraccion = repartido
+    .map((v, i) => ({ i, fraccion: v - Math.floor(v) }))
+    .sort((a, b) => b.fraccion - a.fraccion || a.i - b.i)
+  for (const { i } of porFraccion) {
+    if (faltan <= 0) break
+    pisos[i]++
+    faltan--
+  }
+  return porHabitacion.map((h, i) => ({ numero: h.numero, ocupacion: h.ocupacion, precio: pisos[i] }))
 }
 
 // ── La edad ──────────────────────────────────────────────────────────────────

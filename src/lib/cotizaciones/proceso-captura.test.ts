@@ -175,3 +175,64 @@ describe('la × mientras se analiza (P11)', () => {
     expect(t.informados.some(c => c.estado?.fase === 'rechazada')).toBe(false)
   })
 })
+
+describe('R8 · una captura de hotel del mismo hotel y fechas es una habitación', () => {
+  const OPCION_DESTINO = { id: 'item-0', nombre: 'CABAÑAS AGUA DULCE', grupo: 'g1', tarifa_pax: null, tramos: null, cargo_destino_valor: null, cargo_destino_moneda: null }
+
+  it('unida: la fila pasa a apuntar a la opción destino y a su habitación, sin descartar nada', async () => {
+    const t = armar()
+    t.deps.unir = async () => ({ tipo: 'unida', itemId: 'item-0', habitacionId: 'hab-2', donde: 'Habitación 2 de CABAÑAS AGUA DULCE', opcion: OPCION_DESTINO })
+    t.deps.comparar = () => { throw new Error('una habitación unida no se compara') }
+    await procesarCaptura(t.deps)
+    const ultimo = t.informados.at(-1)!
+    expect(ultimo.estado?.fase).toBe('lista')
+    expect(ultimo.itemId).toBe('item-0')
+    expect(ultimo.habitacionId).toBe('hab-2')
+    expect(ultimo.donde).toBe('Habitación 2 de CABAÑAS AGUA DULCE')
+    expect(ultimo.leida?.id).toBe('item-0')
+    // La opción propia la retira el servidor al unir: la bandeja no la vuelve a borrar.
+    expect(t.descartados).toEqual([])
+  })
+
+  it('sobra (grupo ya cubierto): pregunta como «parecida», con la marca de habitación', async () => {
+    const t = armar()
+    t.deps.unir = async () => ({ tipo: 'sobra', conItemId: 'item-0', donde: 'Opción 1 de Hotel 1' })
+    await procesarCaptura(t.deps)
+    const ultimo = t.informados.at(-1)!
+    expect(ultimo.estado).toEqual({ fase: 'parecida', conItemId: 'item-0', donde: 'Opción 1 de Hotel 1', alertas: [], habitacion: true })
+    expect(ultimo.abierta).toBe(true)
+    expect(t.descartados).toEqual([])
+  })
+
+  it('sola (u otro servicio): sigue al camino de siempre', async () => {
+    const t = armar()
+    t.deps.unir = async () => ({ tipo: 'sola' })
+    t.deps.comparar = () => null
+    await procesarCaptura(t.deps)
+    expect(t.fases().at(-1)).toBe('lista')
+    expect(t.informados.at(-1)!.habitacionId).toBeUndefined()
+  })
+
+  it('si unir falla, la captura se queda en su opción: no se pierde', async () => {
+    const t = armar()
+    t.deps.unir = async () => { throw new Error('red') }
+    await procesarCaptura(t.deps)
+    expect(t.fases().at(-1)).toBe('lista')
+    expect(t.descartados).toEqual([])
+  })
+
+  it('quitada mientras se unía: se quita SOLO la habitación que dejó, no la opción destino', async () => {
+    const union = diferida<{ tipo: 'unida'; itemId: string; habitacionId: string; donde: string; opcion: null }>()
+    const t = armar()
+    const quitadas: string[] = []
+    t.deps.unir = () => union.promesa
+    t.deps.quitarHabitacion = async (itemId, habitacionId) => { quitadas.push(`${itemId}/${habitacionId}`); return true }
+    const pasada = procesarCaptura(t.deps)
+    await new Promise(r => setTimeout(r, 0))
+    t.quitar()
+    union.resolver({ tipo: 'unida', itemId: 'item-0', habitacionId: 'hab-2', donde: 'x', opcion: null })
+    await pasada
+    expect(quitadas).toEqual(['item-0/hab-2'])
+    expect(t.descartados).toEqual([])
+  })
+})

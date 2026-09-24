@@ -11,10 +11,11 @@ import {
   detectarCaptura,
   type RanuraConLugar,
 } from '@/app/(app)/negocios/ranura-actions'
-import { leerCasillaDeItem } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { leerCasillaDeItem, quitarHabitacion, unirHotelComoHabitacion, type ResultadoUnion } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { desenlaceDeAceptar, type RespuestaAceptar } from '@/lib/cotizaciones/aceptar-captura'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
-import { leerCaptura, procesarCaptura, type DependenciasDeProceso, type EstadoDeProceso } from '@/lib/cotizaciones/proceso-captura'
+import { leerCaptura, procesarCaptura, type DependenciasDeProceso, type EstadoDeProceso, type Union } from '@/lib/cotizaciones/proceso-captura'
+import { ranuraDelItem } from '@/lib/cotizaciones/detalle-viaje'
 import {
   compararConExistentes,
   huellaDeImagen,
@@ -87,6 +88,11 @@ export interface Captura {
   dataUrl: string
   estado: Estado
   itemId: string | null
+  /**
+   * R8 · la captura quedó como esta habitación de `itemId` (una opción de hotel con varias).
+   * Borrarla quita la habitación, no la opción entera.
+   */
+  habitacionId?: string | null
   donde: string | null
   tipo: TipoRanura | null
   /** El nombre visible de la ranura donde quedó («Vuelo San Andrés–Providencia»). */
@@ -203,6 +209,9 @@ export default function BandejaCapturas({
   const ocultar = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   // Aceptaciones en camino: un segundo toque no manda otra (R1).
   const aceptando = useRef(new Set<string>())
+  // R8 · las uniones de hotel van en fila: dos capturas del mismo hotel que terminan de leerse
+  // a la vez no pueden quedar cada una como la opción «de destino» de la otra.
+  const colaUnion = useRef<Promise<unknown>>(Promise.resolve())
 
   const actualizar = useCallback((id: string, cambio: Partial<Captura>) => {
     setCapturas(cs => cs.map(c => (c.id === id ? { ...c, ...cambio } : c)))
@@ -223,6 +232,40 @@ export default function BandejaCapturas({
       return false
     }
   }, [cotizacionId, ubicador])
+
+  /** R8 · quita la habitación que dejó una captura. Nunca lanza. */
+  const descartarHabitacion = useCallback(async (itemId: string, habitacionId: string) => {
+    try {
+      const r = await quitarHabitacion(itemId, habitacionId)
+      if (r.opcionRetirada) ubicador().olvidarOpcion(itemId)
+      await recalcularTotales(cotizacionId)
+      return r.success
+    } catch {
+      return false
+    }
+  }, [cotizacionId, ubicador])
+
+  /** R8 · la respuesta del servidor, en el idioma de la fila. */
+  const traducirUnion = useCallback((itemPropio: string, r: ResultadoUnion): Union => {
+    if (!r.ok) return { tipo: 'sola' }
+    if (r.tipo === 'unida') {
+      // Su opción se retiró en el servidor: la fila de ubicación ya no la ofrece.
+      ubicador().olvidarOpcion(itemPropio)
+      return { tipo: 'unida', itemId: r.itemId, habitacionId: r.habitacionId, donde: r.donde, opcion: r.opcion }
+    }
+    if (r.tipo === 'sobra') {
+      const otra = vigentes.current.find(x => x.itemId === r.conItemId)
+      return { tipo: 'sobra', conItemId: r.conItemId, donde: nombreDeOpcion(r.conItemId, ubicacionesVivas.current, otra?.etiqueta) }
+    }
+    return { tipo: 'sola' }
+  }, [ubicador])
+
+  /** R8 · en fila, una a la vez (ver `colaUnion`). */
+  const unirEnFila = useCallback((itemId: string, opciones?: { forzar?: boolean; destinoId?: string }) => {
+    const turno = colaUnion.current.then(() => unirHotelComoHabitacion(itemId, opciones ?? {}))
+    colaUnion.current = turno.catch(() => undefined)
+    return turno
+  }, [])
 
   /**
    * Cada pasada de una captura lleva un turno. Quitarla (o volverla a la cola) cambia el
@@ -252,6 +295,14 @@ export default function BandejaCapturas({
         }
       },
       descartar: descartarOpcion,
+      // R8 · solo los hoteles buscan la opción del mismo hotel y fechas.
+      unir: async (itemId, leida) => {
+        if (ranuraDelItem({ nombre: leida.nombre ?? null, grupo: leida.grupo ?? null, tarifa_pax: leida.tarifa_pax })?.slug !== 'hotel_detalle') {
+          return { tipo: 'sola' }
+        }
+        return traducirUnion(itemId, await unirEnFila(itemId))
+      },
+      quitarHabitacion: descartarHabitacion,
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
       refrescar: () => router.refresh(),
@@ -265,7 +316,7 @@ export default function BandejaCapturas({
           : { fase: 'otro_precio', conItemId: r.con.id, donde, corta: opcionCorta(r.con.id, ubicacionesVivas.current) }
       },
     }
-  }, [actualizar, cotizacionId, descartarOpcion, nuevoTurno, router, ubicador])
+  }, [actualizar, cotizacionId, descartarHabitacion, descartarOpcion, nuevoTurno, router, traducirUnion, ubicador, unirEnFila])
 
   const procesar = useCallback(async (id: string, dataUrl: string, tipoElegido?: TipoRanura) => {
     await procesarCaptura(dependencias(id, dataUrl), tipoElegido)
@@ -411,9 +462,12 @@ export default function BandejaCapturas({
     actualizar(c.id, { estado: { fase: 'borrada', antes: c.estado }, abierta: false })
     if (!c.itemId) return
     const itemId = c.itemId
+    const habitacionId = c.habitacionId ?? null
     const ejecutar = () => {
       borrados.current.delete(c.id)
-      void descartarOpcion(itemId).then(() => router.refresh())
+      // R8 · una captura que quedó como habitación se lleva SOLO su habitación: la opción
+      // tiene las demás.
+      void (habitacionId ? descartarHabitacion(itemId, habitacionId) : descartarOpcion(itemId)).then(() => router.refresh())
     }
     borrados.current.set(c.id, { reloj: setTimeout(ejecutar, ESPERA_BORRADO_MS), ejecutar })
   }
@@ -447,7 +501,42 @@ export default function BandejaCapturas({
   /** «Agregar igual» / «Agregar como otra opción»: queda como una opción más, lista para aceptar. */
   function agregarIgual(c: Captura) {
     if (c.estado.fase !== 'parecida' && c.estado.fase !== 'otro_precio') return
+    if (c.estado.fase === 'parecida' && c.estado.habitacion && c.itemId) {
+      void agregarComoHabitacion(c, c.estado)
+      return
+    }
     actualizar(c.id, { estado: { fase: 'lista', alertas: c.estado.alertas } })
+  }
+
+  /**
+   * R8 · «Agregar igual» sobre un hotel con el grupo ya cubierto: la captura entra como otra
+   * habitación de esa opción, no como otra opción.
+   */
+  async function agregarComoHabitacion(c: Captura, antes: Extract<Estado, { fase: 'parecida' }>) {
+    if (!c.itemId) return
+    const propia = c.itemId
+    const turno = nuevoTurno(c.id)
+    actualizar(c.id, { estado: { fase: 'leyendo' }, donde: `Agregando como habitación de ${antes.donde}`, error: null, abierta: false })
+    let r: ResultadoUnion
+    try {
+      r = await unirEnFila(propia, { forzar: true, destinoId: antes.conItemId })
+    } catch {
+      r = { ok: false, mensaje: 'No se pudo agregar la habitación. Inténtalo otra vez.' }
+    }
+    if (turnos.current.get(c.id) !== turno) { router.refresh(); return }
+    const u = traducirUnion(propia, r)
+    if (u.tipo !== 'unida') {
+      actualizar(c.id, { estado: antes, donde: c.donde, error: r.ok ? 'No se pudo agregar la habitación. Inténtalo otra vez.' : r.mensaje, abierta: true })
+      return
+    }
+    actualizar(c.id, {
+      estado: { fase: 'lista', alertas: antes.alertas },
+      itemId: u.itemId,
+      habitacionId: u.habitacionId,
+      donde: u.donde,
+      leida: u.opcion,
+    })
+    router.refresh()
   }
 
   /**
@@ -741,7 +830,7 @@ export function FilaCaptura({
           : e.fase === 'eligiendo_tipo' ? 'No se reconoce qué es'
             : e.fase === 'eligiendo_opcion' ? '¿Cuál de estas?'
               : e.fase === 'rechazada' ? e.mensaje
-                : e.fase === 'parecida' ? `Parece igual a ${e.donde}`
+                : e.fase === 'parecida' ? (e.habitacion ? `El grupo ya está cubierto en ${e.donde}` : `Parece igual a ${e.donde}`)
                   : e.fase === 'otro_precio' ? `El mismo servicio que ${e.donde}, con otro precio`
                     : ''
 
@@ -784,7 +873,7 @@ export function FilaCaptura({
               onClick={onAgregarIgual}
               className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
             >
-              Agregar igual
+              {e.habitacion ? 'Agregar como habitación' : 'Agregar igual'}
             </button>
           </>
         )}
@@ -885,7 +974,9 @@ export function FilaCaptura({
           {(e.fase === 'parecida' || e.fase === 'otro_precio') && (
             <>
               <p className="mb-1 text-[11px] text-amber-900">
-                {e.fase === 'parecida'
+                {e.fase === 'parecida' && e.habitacion
+                  ? `Las habitaciones de ${e.donde} ya cubren a todo el grupo, o esta misma imagen ya está ahí. Descártala si la pegaste de más, o agrégala como otra habitación.`
+                  : e.fase === 'parecida'
                   ? `Mismo servicio, mismas fechas y mismo precio que ${e.donde}. Descártala si la pegaste dos veces.`
                   : `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`}
               </p>
