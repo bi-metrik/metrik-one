@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { ExternalLink, Wrench } from 'lucide-react'
-import type { Tablero } from '@/lib/ferreteria/datos'
+import type { FilaTablero, Tablero } from '@/lib/ferreteria/datos'
 import {
   ESTADOS_PUBLICACION,
   ETIQUETA_ESTADO,
@@ -15,6 +15,7 @@ import {
   type EstadoPublicacion,
   type Linea,
 } from '@/lib/ferreteria/reglas'
+import { Th, aplicarOrden, useOrden } from './orden-tabla'
 
 function pct(n: number | null): string {
   return n == null ? '—' : `${(n * 100).toLocaleString('es-CO', { maximumFractionDigits: 1 })}%`
@@ -23,6 +24,41 @@ function pct(n: number | null): string {
 function etiquetaLinea(l: string | null): string {
   if (!l || l === 'sin_linea') return 'Sin línea'
   return ETIQUETA_LINEA[l as Linea] ?? l
+}
+
+type ColPub = 'codigo' | 'producto' | 'precio' | 'ganancia' | 'margen' | 'estado' | 'clics' | 'conversaciones' | 'dias' | 'aviso'
+
+/** Qué se compara en cada columna de Publicaciones. Los «—» llegan como null y van al final. */
+const COLUMNAS_PUB: Record<ColPub, (f: FilaTablero) => string | number | null> = {
+  codigo: (f) => f.codigo,
+  producto: (f) => f.producto,
+  precio: (f) => f.precio,
+  ganancia: (f) => f.ganancia,
+  margen: (f) => f.margen,
+  estado: (f) => ETIQUETA_ESTADO[f.estado],
+  clics: (f) => f.clics,
+  conversaciones: (f) => f.conversaciones,
+  dias: (f) => f.diasDesdeUltimoClic,
+  aviso: (f) => (f.link ? 'Ver' : null),
+}
+
+type ColConv = 'codigo' | 'clics' | 'conversaciones' | 'tasa'
+const COLUMNAS_CONV: Record<ColConv, (f: FilaTablero) => string | number | null> = {
+  codigo: (f) => f.codigo,
+  clics: (f) => f.clics,
+  conversaciones: (f) => f.conversaciones,
+  tasa: (f) => (f.clics ? f.conversaciones / f.clics : null),
+}
+
+type Agrupado = { clave: string; publicaciones: number; clics: number; conversaciones: number; ventas: number; ganancia: number }
+type ColGrupo = keyof Agrupado
+const COLUMNAS_GRUPO: Record<ColGrupo, (g: Agrupado) => string | number | null> = {
+  clave: (g) => g.clave,
+  publicaciones: (g) => g.publicaciones,
+  clics: (g) => g.clics,
+  conversaciones: (g) => g.conversaciones,
+  ventas: (g) => g.ventas,
+  ganancia: (g) => g.ganancia,
 }
 
 export function PuntoPendiente({ tono, titulo }: { tono: 'rojo' | 'ambar' | null; titulo: string }) {
@@ -54,6 +90,9 @@ export function FerreteriaCliente({
   const [marca, setMarca] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const ahora = useMemo(() => new Date(ahoraIso), [ahoraIso])
+  const orden = useOrden<ColPub>({ clave: 'codigo', dir: 'asc' })
+  // Conversaciones por publicación: arranca como estaba, de más a menos conversaciones.
+  const ordenConv = useOrden<ColConv>({ clave: 'conversaciones', dir: 'desc' })
 
   const filas = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
@@ -65,6 +104,8 @@ export function FerreteriaCliente({
         (!q || `${f.codigo} ${f.sku} ${f.producto}`.toLowerCase().includes(q)),
     )
   }, [tablero.filas, estado, linea, marca, busqueda])
+  // El orden va después de los filtros: ordena solo lo que se ve.
+  const filasVistas = aplicarOrden(filas, orden, COLUMNAS_PUB)
 
   const pendientes = tablero.filas.filter((f) => f.pendiente_en_canal)
   const enRojo = pendientes.filter((f) => semaforoPendiente(f, ahora) === 'rojo')
@@ -137,24 +178,24 @@ export function FerreteriaCliente({
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-3 py-2">Código</th>
-                    <th className="px-3 py-2">Producto</th>
-                    <th className="px-3 py-2 text-right">Precio</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right">Ganancia / venta</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right">Margen</th>
-                    <th className="px-3 py-2">Estado</th>
-                    <th className="px-3 py-2 text-right">Clics</th>
-                    <th className="px-3 py-2 text-right">Conv.</th>
-                    <th className="px-3 py-2 text-right">Días sin clic</th>
-                    <th className="px-3 py-2">Aviso</th>
+                    <Th orden={orden} clave="codigo" className="px-3 py-2">Código</Th>
+                    <Th orden={orden} clave="producto" className="px-3 py-2">Producto</Th>
+                    <Th orden={orden} clave="precio" derecha className="px-3 py-2">Precio</Th>
+                    <Th orden={orden} clave="ganancia" derecha className="px-3 py-2">Ganancia / venta</Th>
+                    <Th orden={orden} clave="margen" derecha className="px-3 py-2">Margen</Th>
+                    <Th orden={orden} clave="estado" className="px-3 py-2">Estado</Th>
+                    <Th orden={orden} clave="clics" derecha className="px-3 py-2">Clics</Th>
+                    <Th orden={orden} clave="conversaciones" derecha className="px-3 py-2">Conv.</Th>
+                    <Th orden={orden} clave="dias" derecha className="px-3 py-2">Días sin clic</Th>
+                    <Th orden={orden} clave="aviso" className="px-3 py-2">Aviso</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filas.map((f) => {
+                  {filasVistas.map((f) => {
                     const tono = semaforoPendiente(f, ahora)
                     return (
                       <tr key={f.id} className="border-t hover:bg-muted/30">
-                        <td className="px-3 py-2 font-medium">
+                        <td className="whitespace-nowrap px-3 py-2 font-medium">
                           <div className="flex items-center gap-1.5">
                             <PuntoPendiente
                               tono={tono}
@@ -177,7 +218,7 @@ export function FerreteriaCliente({
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{f.precio != null ? formatoPesos(f.precio) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{f.precio != null ? formatoPesos(f.precio) : '—'}</td>
                         <td className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${f.ganancia != null && f.ganancia < 0 ? 'text-red-600' : ''}`}>
                           {f.ganancia != null ? formatoPesos(f.ganancia) : f.costoF == null ? 'sin costo' : '—'}
                         </td>
@@ -233,7 +274,7 @@ export function FerreteriaCliente({
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {ind.sinClics7d.map((c) => (
-                  <Link key={c} href={`/ferreteria/${encodeURIComponent(c)}`} className="rounded border px-2 py-0.5 text-xs hover:bg-muted">{c}</Link>
+                  <Link key={c} href={`/ferreteria/${encodeURIComponent(c)}`} className="whitespace-nowrap rounded border px-2 py-0.5 text-xs hover:bg-muted">{c}</Link>
                 ))}
               </div>
             )}
@@ -250,19 +291,20 @@ export function FerreteriaCliente({
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-3 py-2">Código</th>
-                    <th className="px-3 py-2 text-right">Clics</th>
-                    <th className="px-3 py-2 text-right">Conversaciones</th>
-                    <th className="px-3 py-2 text-right">Conv. / clic</th>
+                    <Th orden={ordenConv} clave="codigo" className="px-3 py-2">Código</Th>
+                    <Th orden={ordenConv} clave="clics" derecha className="px-3 py-2">Clics</Th>
+                    <Th orden={ordenConv} clave="conversaciones" derecha className="px-3 py-2">Conversaciones</Th>
+                    <Th orden={ordenConv} clave="tasa" derecha className="px-3 py-2">Conv. / clic</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {tablero.filas
-                    .filter((f) => f.conversaciones > 0)
-                    .sort((a, b) => b.conversaciones - a.conversaciones)
-                    .map((f) => (
+                  {aplicarOrden(
+                    tablero.filas.filter((f) => f.conversaciones > 0),
+                    ordenConv,
+                    COLUMNAS_CONV,
+                  ).map((f) => (
                       <tr key={f.id} className="border-t">
-                        <td className="px-3 py-1.5">{f.codigo}</td>
+                        <td className="whitespace-nowrap px-3 py-1.5">{f.codigo}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{f.clics ?? '—'}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{f.conversaciones}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{f.clics ? pct(f.conversaciones / f.clics) : '—'}</td>
@@ -307,8 +349,9 @@ function TablaAgrupada({
   filas,
 }: {
   titulo: string
-  filas: { clave: string; publicaciones: number; clics: number; conversaciones: number; ventas: number; ganancia: number }[]
+  filas: Agrupado[]
 }) {
+  const orden = useOrden<ColGrupo>()
   return (
     <section>
       <h2 className="mb-2 text-sm font-semibold">{titulo}</h2>
@@ -316,23 +359,23 @@ function TablaAgrupada({
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
             <tr>
-              <th className="px-3 py-2" />
-              <th className="px-3 py-2 text-right">Pub.</th>
-              <th className="px-3 py-2 text-right">Clics</th>
-              <th className="px-3 py-2 text-right">Conv.</th>
-              <th className="px-3 py-2 text-right">Ventas</th>
-              <th className="px-3 py-2 text-right">Ganancia</th>
+              <Th orden={orden} clave="clave" className="px-3 py-2">{titulo.replace(/^Por /, '').replace(/^./, (c) => c.toUpperCase())}</Th>
+              <Th orden={orden} clave="publicaciones" derecha className="px-3 py-2">Pub.</Th>
+              <Th orden={orden} clave="clics" derecha className="px-3 py-2">Clics</Th>
+              <Th orden={orden} clave="conversaciones" derecha className="px-3 py-2">Conv.</Th>
+              <Th orden={orden} clave="ventas" derecha className="px-3 py-2">Ventas</Th>
+              <Th orden={orden} clave="ganancia" derecha className="px-3 py-2">Ganancia</Th>
             </tr>
           </thead>
           <tbody>
-            {filas.map((g) => (
+            {aplicarOrden(filas, orden, COLUMNAS_GRUPO).map((g) => (
               <tr key={g.clave} className="border-t">
                 <td className="px-3 py-1.5">{g.clave}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{g.publicaciones}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{g.clics}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{g.conversaciones}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{g.ventas}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{formatoPesos(g.ganancia)}</td>
+                <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{formatoPesos(g.ganancia)}</td>
               </tr>
             ))}
           </tbody>
