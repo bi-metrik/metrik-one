@@ -252,10 +252,10 @@ function cuotasNuevas(
 
 /** Traduce el error de la función de la base a algo que se le puede decir a la persona. */
 function mensajeDeBase(msg: string): string {
-  if (/licencias_cambiaron/.test(msg)) return 'Las licencias de tu contrato acaban de cambiar. Recarga la página y revisa antes de seguir.'
+  if (/licencias_cambiaron/.test(msg)) return 'Los usuarios de tu contrato acaban de cambiar. Recarga la página y revisa antes de seguir.'
   if (/cuota_con_cobro|cuota_cambio/.test(msg)) return 'Tu plan de pagos acaba de cambiar. Recarga la página y vuelve a intentarlo.'
   if (/valor_distinto/.test(msg)) return 'El valor del usuario adicional de tu contrato cambió. Recarga la página.'
-  if (/licencia_ya_retirada/.test(msg)) return 'Esa licencia ya se había dejado de pagar.'
+  if (/licencia_ya_retirada/.test(msg)) return 'Ese usuario adicional ya se había dejado de pagar.'
   return 'No se pudo registrar el cambio. Intenta de nuevo en un momento.'
 }
 
@@ -313,9 +313,9 @@ export async function liberarLicencia(
   licenciasAntes: number,
 ): Promise<{ ok: true; desdeCuota: number | null } | { ok: false; error: string }> {
   const estado = await leerLicencias(ctx)
-  if (estado === 'error') return { ok: false, error: 'No se pudieron leer tus licencias. Intenta de nuevo.' }
+  if (estado === 'error') return { ok: false, error: 'No se pudieron leer los usuarios de tu contrato. Intenta de nuevo.' }
   const licencia = estado.adicionalesVigentes[0]
-  if (!licencia) return { ok: false, error: 'No tienes licencias adicionales para dejar de pagar.' }
+  if (!licencia) return { ok: false, error: 'No tienes usuarios adicionales para dejar de pagar.' }
   const plan = await leerPlan(ctx, hoy)
   if (plan === 'error') return { ok: false, error: 'No se pudo leer tu plan de pagos. Intenta de nuevo en un momento.' }
 

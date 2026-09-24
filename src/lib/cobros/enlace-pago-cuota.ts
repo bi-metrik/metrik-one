@@ -16,6 +16,7 @@
  */
 
 import { cuotasConEstado, fechaCorta, type CobroRecibido, type CuotaDeServicio } from '@/lib/valida-cda/pago-pendiente'
+import { leerPeriodoEnConcepto } from './periodo-en-concepto'
 
 export interface CuotaParaEnlace {
   cuotaId: string
@@ -113,18 +114,23 @@ export function decidirEnlaceCuota(p: {
   return { accion: 'generar', monto, descripcion: descripcionCuota(cuota), retencionIva }
 }
 
-const RE_PERIODO = /periodo del \d{2}\/\d{2}\/\d{4} al \d{2}\/\d{2}\/\d{4}/i
-
 /**
  * El texto que ve el cliente en la pantalla de pago de la pasarela (máximo 100). El concepto de la cuota
- * ya trae el período («Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026»); si no
- * cabe, se queda el período; sin concepto, el número y el vencimiento.
+ * ya trae el período («Suscripción VALIDA · Plan CDA — servicio de computación en la nube (SaaS) ·
+ * periodo del 23-sep al 22-oct», 104 caracteres); si no cabe, se deja el nombre corto del plan (lo que
+ * va antes de « — ») con el período, y si ni eso cabe, el número de cuota con el período; sin
+ * concepto, el número y el vencimiento.
  */
 export function descripcionCuota(c: Pick<CuotaParaEnlace, 'numero' | 'concepto' | 'fechaVencimiento' | 'totalCuotas'>): string {
   const concepto = (c.concepto ?? '').replace(/\s+/g, ' ').trim()
   if (concepto && concepto.length <= 100) return concepto
-  const periodo = RE_PERIODO.exec(concepto)?.[0]
-  if (periodo) return `Cuota ${c.numero} · ${periodo}`
+  const periodo = leerPeriodoEnConcepto(concepto)?.texto
+  if (periodo) {
+    const i = concepto.indexOf(' — ')
+    const corto = i > 0 && i < concepto.indexOf(periodo) ? `${concepto.slice(0, i)} · ${periodo}` : null
+    if (corto && corto.length <= 100) return corto
+    return `Cuota ${c.numero} · ${periodo}`
+  }
   const de = c.totalCuotas ? ` de ${c.totalCuotas}` : ''
   return `Cuota ${c.numero}${de} · vence ${fechaCorta(c.fechaVencimiento)}`
 }

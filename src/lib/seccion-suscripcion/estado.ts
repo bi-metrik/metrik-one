@@ -30,6 +30,7 @@
  * lugar al botón «Revisar y aceptar».
  */
 
+import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
 import type { ProximoPago } from '@/lib/valida-cda/pago-pendiente'
 import { fechaDiaMes, sumarDias, type EstadoMora } from '@/lib/valida-cda/plazos'
 
@@ -87,9 +88,7 @@ export function fechaConAnio(iso: string): string {
 
 /** El periodo de una cuota dicho corto: del concepto si lo trae, si no el mes del vencimiento. */
 export function periodoCorto(concepto: string | null, fechaVencimiento: string): string {
-  const m = concepto ? /periodo del (\d{2})\/(\d{2})\/\d{4} al (\d{2})\/(\d{2})\/\d{4}/i.exec(concepto) : null
-  if (m) return `${Number(m[1])}-${MESES_LARGOS[Number(m[2]) - 1]} al ${Number(m[3])}-${MESES_LARGOS[Number(m[4]) - 1]}`
-  return fechaDiaMes(fechaVencimiento)
+  return leerPeriodoEnConcepto(concepto)?.corto ?? fechaDiaMes(fechaVencimiento)
 }
 
 export function resumenEstado(p: {

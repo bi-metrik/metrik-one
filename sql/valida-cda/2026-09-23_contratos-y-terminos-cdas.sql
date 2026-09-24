@@ -2,8 +2,8 @@
 -- Valida · los 4 CDA pasan a ser clientes directos de METRIK IA S.A.S.
 -- Preparado el 2026-09-23 para cargarse el viernes 2026-09-25 (lo corre la sesión principal).
 --
--- Por cada CDA, en UNA transacción: los Términos de Suscripción VALIDA · Licencia CDA v1.1 de ESA
--- empresa (texto, huella del texto y huella del PDF), su contrato `valida-cda-licencia` v1 (pagador =
+-- Por cada CDA, en UNA transacción: los Términos de Suscripción al Servicio VALIDA · Plan CDA v1.2 de
+-- ESA empresa (texto, huella del texto y huella del PDF), su contrato `valida-cda-licencia` v1 (pagador =
 -- el espacio del CDA, con la persona designada para aceptar y el plazo para hacerlo) y el módulo
 -- `valida_consulta` apuntando a ese contrato. Los cuatro bloques son independientes.
 --
@@ -35,12 +35,12 @@
 --      `20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql` aplicadas. El bloque comprueba
 --      las dos.
 --   1. Subir los 4 PDF al bucket `aceptaciones-documentos`, cada uno en
---      `<espacio>/terminos-suscripcion-valida-cda-v1.1.pdf`, SIN upsert (si ya hay un objeto con ese
+--      `<espacio>/terminos-suscripcion-valida-cda-v1.2.pdf`, SIN upsert (si ya hay un objeto con ese
 --      nombre, parar y avisar: no se pisa evidencia). Los archivos son los de
---      `proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.1/<espacio>/`, y antes de subirlos
+--      `proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.2/<espacio>/`, y antes de subirlos
 --      `sha256sum` tiene que dar exactamente la huella de `c_pdf_sha256` (tabla de abajo). WeasyPrint no
 --      genera bytes idénticos dos veces: regenerar los PDF obliga a regenerar también este archivo.
---        curl -X POST "$URL/storage/v1/object/aceptaciones-documentos/<espacio>/terminos-suscripcion-valida-cda-v1.1.pdf" \
+--        curl -X POST "$URL/storage/v1/object/aceptaciones-documentos/<espacio>/terminos-suscripcion-valida-cda-v1.2.pdf" \
 --          -H "Authorization: Bearer $SERVICE_ROLE" -H "Content-Type: application/pdf" \
 --          --data-binary @<ruta del PDF>
 --      El PDF es la evidencia: la declaración que firma la persona designada nombra su huella.
@@ -58,7 +58,7 @@
 --
 -- ── Qué NO hace ─────────────────────────────────────────────────────────────
 --   · No crea usuarios. La designada tiene que tener perfil en el espacio del CDA. Cada espacio tiene
---     hoy 2 licencias y 2 perfiles: un tercer usuario es un usuario adicional (cláusula 2.3), salvo que
+--     hoy 2 usuarios incluidos y 2 perfiles: un tercer usuario es un usuario adicional (cláusula 2.3), salvo que
 --     se designe a uno de los dos que ya existen.
 --   · No pone comisión a AFI ni el valor del usuario adicional: eso va en
 --     `2026-09-23_comision-afi-y-usuario-adicional.sql`, que se corre después de este.
@@ -84,18 +84,20 @@
 --     join public.empresas e on e.id = d.empresa_id
 --    where d.slug = 'terminos-suscripcion-valida-cda';              -- una fila por CDA cargado
 --   select name from storage.objects
---    where bucket_id = 'aceptaciones-documentos' and name like '%/terminos-suscripcion-valida-cda-v1.1.pdf';  -- los 4 PDF
+--    where bucket_id = 'aceptaciones-documentos' and name like '%/terminos-suscripcion-valida-cda-v1.2.pdf';  -- los 4 PDF
 --
--- Huellas (regeneradas el 2026-09-23 sin las notas internas de las cláusulas 2.2 y 12.2; generador en
--- proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.1/_generador/generar_v2.py):
---   cda-caqueta     texto a8cf0d8a8e325de1b82fb138c9f3480b5e11e779e30c4696bbd60ee940c05986
---                   PDF   591032e9614e1418fd3caf651fdc6f226deaeb78cec9c72f2ff3840c63031084
---   cda-elcarmen    texto db8f21db186a32bde5500bda1b8ebdd2f1d4ef7578ae63578ef7259d6120ad8d
---                   PDF   716f4c89b32185d648ec44dace4fda4c46869c98354bb48b941c9c87578fbc71
---   cda-puertotest  texto 5597e7c6aa52b618481b20344fd6580754ecf8d57f31e6cb962fcb5d3f86ce19
---                   PDF   d98629050ea03d687d61a5b7be119debc58cd5671a58fdd1b7e48c85eff0d48a
---   maxitec         texto 2a122b74083377edcd02c2f5ebbd1c799fa3ddb14a9feac61363711e72c09f5c
---                   PDF   0e1e34ca256378d5d99be3ec6fb5a9fc99f1dd3c20132c62d86affc85ca40959
+-- Huellas de la v1.2 (2026-09-24: la v1.1 sin las notas internas de 2.2 y 12.2, más la redacción
+-- fiscal de Felipe: suscripción a un servicio de computación en la nube, nunca «licencia»). Generador
+-- en proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.2/_generador/generar.py; huellas
+-- verificadas con sha256sum sobre los archivos entregados:
+--   cda-caqueta     texto 65afb4d445581574fe64d3db2e70eca69a86881bd286ea3b0409b0153d0db7ec
+--                   PDF   e974cbab88084174c9f8e7e420b061916a291e4de459ccf5326c991af43ef69b
+--   cda-elcarmen    texto a3599c23a14647b17325e811646658be425d5f0d0dc2c793d30a09c8a20ade08
+--                   PDF   213e98a7c9e4621e5d2d7a4ca519719067dc23106833a0981adfc676e1c045ef
+--   cda-puertotest  texto 6d98395e1769f4b7f9935a4d4701a2492278101d877908ea5e75377ea68f09dd
+--                   PDF   53056ae7fe1c12d21c278fdb3af73b510d175dd68146a4e3051078faecc2f050
+--   maxitec         texto 644218aa4c247ed22fcb60d190471f7c552c6761f5e86c178d1a93aeda5dd38d
+--                   PDF   515e5093837c06f73681c6dc1c1e95b3177adba9ceaa185e5c8816e3452e890a
 -- ============================================================================
 
 
@@ -132,10 +134,10 @@ declare
   c_negocio        constant uuid := '8db0ced7-2ef9-4b18-9e57-de8db0d3fb58';
   c_codigo         constant text := 'C1 26 1';
   c_correo         constant text := 'tesoreriacdadelcaqueta@gmail.com';
-  c_texto_sha256   constant text := 'a8cf0d8a8e325de1b82fb138c9f3480b5e11e779e30c4696bbd60ee940c05986';
-  c_pdf_sha256     constant text := '591032e9614e1418fd3caf651fdc6f226deaeb78cec9c72f2ff3840c63031084';
-  c_pdf_path       constant text := 'cda-caqueta/terminos-suscripcion-valida-cda-v1.1.pdf';
-  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN VALIDA · LICENCIA CDA v1.1
+  c_texto_sha256   constant text := '65afb4d445581574fe64d3db2e70eca69a86881bd286ea3b0409b0153d0db7ec';
+  c_pdf_sha256     constant text := 'e974cbab88084174c9f8e7e420b061916a291e4de459ccf5326c991af43ef69b';
+  c_pdf_path       constant text := 'cda-caqueta/terminos-suscripcion-valida-cda-v1.2.pdf';
+  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN AL SERVICIO VALIDA · PLAN CDA v1.2
 
 **METRIK**: METRIK IA S.A.S., NIT 902.079.601-9, domiciliada en la Calle 24A Bis 100-71, Bogotá D.C., representada legalmente por Brallan Mauricio Moreno Guzmán. Correo: mauricio.moreno@metrik.com.co.
 
@@ -179,9 +181,9 @@ Estos Términos rigen desde su aceptación en la forma prevista en la cláusula 
 
 3.3. METRIK podrá rotar, suspender o revocar credenciales ante indicios de compromiso, uso indebido o incumplimiento de estos Términos.
 
-## 4. Licencia, uso permitido y prohibido
+## 4. Acceso al servicio, uso permitido y prohibido
 
-4.1. **Exclusividad de la licencia.** La licencia es exclusiva para CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA y no se extiende a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
+4.1. **Exclusividad del acceso.** La suscripción y el acceso al servicio son exclusivos para CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA y no se extienden a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
 
 4.2. **Uso permitido.** El Servicio se usa exclusivamente para la prevención y gestión del riesgo de LA/FT/FP en la operación propia del Cliente.
 
@@ -346,9 +348,18 @@ begin
   end if;
   if exists (
     select 1 from public.documentos_contractuales_versiones d
-     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.1'
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.2'
   ) then
-    raise exception '%: los términos v1.1 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+    raise exception '%: los términos v1.2 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+  end if;
+  -- Ninguna OTRA versión de estos términos puede seguir vigente para la empresa: la v1.2 no convive
+  -- con una v1.1 que alguien haya dejado registrada (la persona designada no sabría cuál acepta).
+  if exists (
+    select 1 from public.documentos_contractuales_versiones d
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version <> 'v1.2'
+       and (d.vigente_hasta is null or d.vigente_hasta >= current_date)
+  ) then
+    raise exception '%: hay otra versión vigente de los términos de esta empresa. La v1.2 no se superpone: revisar antes de cargar.', c_slug_ws;
   end if;
 
   -- El texto que se firma es exactamente el generado: su huella lo prueba.
@@ -384,7 +395,7 @@ begin
     raise exception '%: el espacio tiene una activación abierta de valida_consulta que no es la del contrato cancelado. Revisar workspace_modulos antes de cargar.', c_slug_ws;
   end if;
 
-  -- ── 1. Los términos v1.1 de esta empresa ───────────────────────────────────
+  -- ── 1. Los términos v1.2 de esta empresa ───────────────────────────────────
   -- Van primero y en la MISMA transacción que el contrato: nunca existe un contrato vivo sin sus
   -- términos registrados, que cierra Valida aun dentro del plazo (`puerta.ts`).
   insert into public.documentos_contractuales_versiones (
@@ -392,7 +403,7 @@ begin
     texto_md, texto_sha256, pdf_bucket, pdf_path, pdf_sha256, vigente_desde, vigente_hasta, registrado_por
   ) values (
     c_ws_metrik, c_linea_valida, 'terminos-suscripcion-valida-cda', 'cliente', c_empresa,
-    'Términos de Suscripción VALIDA · Licencia CDA', 'v1.1',
+    'Términos de Suscripción al Servicio VALIDA · Plan CDA', 'v1.2',
     c_texto, c_texto_sha256, 'aceptaciones-documentos', c_pdf_path, c_pdf_sha256, date '2026-09-23', null, c_registrado_por
   )
   returning id into v_doc;
@@ -434,7 +445,7 @@ begin
       'reemplaza_contratos_cancelados', to_jsonb(v_cancelados),
       'cierra_activaciones_modulo', to_jsonb(v_modulos_viejos)
     ),
-    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
+    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción al Servicio VALIDA · Plan CDA v1.2; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
     c_registrado_por
   );
 
@@ -447,7 +458,7 @@ begin
   get diagnostics v_cerrados = row_count;
 
   insert into public.workspace_modulos (workspace_id, modulo, origen, servicio_contratado_id, activo_desde, motivo, registrado_por)
-  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA (negocio C1 26 1): licencia directa con METRIK desde el 2026-09-23.', c_registrado_por);
+  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA (negocio C1 26 1): suscripción directa con METRIK desde el 2026-09-23.', c_registrado_por);
 
   -- ── Comprobaciones antes de soltar la transacción ──────────────────────────
   v_cambios := public.proyectar_modulos(c_ws_cda) -> 'cambios';
@@ -514,10 +525,10 @@ declare
   c_negocio        constant uuid := '72e182e9-4864-41ff-b77b-2b79edbfd81d';
   c_codigo         constant text := 'C2 26 1';
   c_correo         constant text := 'cdaelcarmensas@gmail.com';
-  c_texto_sha256   constant text := 'db8f21db186a32bde5500bda1b8ebdd2f1d4ef7578ae63578ef7259d6120ad8d';
-  c_pdf_sha256     constant text := '716f4c89b32185d648ec44dace4fda4c46869c98354bb48b941c9c87578fbc71';
-  c_pdf_path       constant text := 'cda-elcarmen/terminos-suscripcion-valida-cda-v1.1.pdf';
-  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN VALIDA · LICENCIA CDA v1.1
+  c_texto_sha256   constant text := 'a3599c23a14647b17325e811646658be425d5f0d0dc2c793d30a09c8a20ade08';
+  c_pdf_sha256     constant text := '213e98a7c9e4621e5d2d7a4ca519719067dc23106833a0981adfc676e1c045ef';
+  c_pdf_path       constant text := 'cda-elcarmen/terminos-suscripcion-valida-cda-v1.2.pdf';
+  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN AL SERVICIO VALIDA · PLAN CDA v1.2
 
 **METRIK**: METRIK IA S.A.S., NIT 902.079.601-9, domiciliada en la Calle 24A Bis 100-71, Bogotá D.C., representada legalmente por Brallan Mauricio Moreno Guzmán. Correo: mauricio.moreno@metrik.com.co.
 
@@ -561,9 +572,9 @@ Estos Términos rigen desde su aceptación en la forma prevista en la cláusula 
 
 3.3. METRIK podrá rotar, suspender o revocar credenciales ante indicios de compromiso, uso indebido o incumplimiento de estos Términos.
 
-## 4. Licencia, uso permitido y prohibido
+## 4. Acceso al servicio, uso permitido y prohibido
 
-4.1. **Exclusividad de la licencia.** La licencia es exclusiva para CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS y no se extiende a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
+4.1. **Exclusividad del acceso.** La suscripción y el acceso al servicio son exclusivos para CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS y no se extienden a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
 
 4.2. **Uso permitido.** El Servicio se usa exclusivamente para la prevención y gestión del riesgo de LA/FT/FP en la operación propia del Cliente.
 
@@ -728,9 +739,18 @@ begin
   end if;
   if exists (
     select 1 from public.documentos_contractuales_versiones d
-     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.1'
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.2'
   ) then
-    raise exception '%: los términos v1.1 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+    raise exception '%: los términos v1.2 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+  end if;
+  -- Ninguna OTRA versión de estos términos puede seguir vigente para la empresa: la v1.2 no convive
+  -- con una v1.1 que alguien haya dejado registrada (la persona designada no sabría cuál acepta).
+  if exists (
+    select 1 from public.documentos_contractuales_versiones d
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version <> 'v1.2'
+       and (d.vigente_hasta is null or d.vigente_hasta >= current_date)
+  ) then
+    raise exception '%: hay otra versión vigente de los términos de esta empresa. La v1.2 no se superpone: revisar antes de cargar.', c_slug_ws;
   end if;
 
   -- El texto que se firma es exactamente el generado: su huella lo prueba.
@@ -766,7 +786,7 @@ begin
     raise exception '%: el espacio tiene una activación abierta de valida_consulta que no es la del contrato cancelado. Revisar workspace_modulos antes de cargar.', c_slug_ws;
   end if;
 
-  -- ── 1. Los términos v1.1 de esta empresa ───────────────────────────────────
+  -- ── 1. Los términos v1.2 de esta empresa ───────────────────────────────────
   -- Van primero y en la MISMA transacción que el contrato: nunca existe un contrato vivo sin sus
   -- términos registrados, que cierra Valida aun dentro del plazo (`puerta.ts`).
   insert into public.documentos_contractuales_versiones (
@@ -774,7 +794,7 @@ begin
     texto_md, texto_sha256, pdf_bucket, pdf_path, pdf_sha256, vigente_desde, vigente_hasta, registrado_por
   ) values (
     c_ws_metrik, c_linea_valida, 'terminos-suscripcion-valida-cda', 'cliente', c_empresa,
-    'Términos de Suscripción VALIDA · Licencia CDA', 'v1.1',
+    'Términos de Suscripción al Servicio VALIDA · Plan CDA', 'v1.2',
     c_texto, c_texto_sha256, 'aceptaciones-documentos', c_pdf_path, c_pdf_sha256, date '2026-09-23', null, c_registrado_por
   )
   returning id into v_doc;
@@ -816,7 +836,7 @@ begin
       'reemplaza_contratos_cancelados', to_jsonb(v_cancelados),
       'cierra_activaciones_modulo', to_jsonb(v_modulos_viejos)
     ),
-    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
+    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción al Servicio VALIDA · Plan CDA v1.2; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
     c_registrado_por
   );
 
@@ -829,7 +849,7 @@ begin
   get diagnostics v_cerrados = row_count;
 
   insert into public.workspace_modulos (workspace_id, modulo, origen, servicio_contratado_id, activo_desde, motivo, registrado_por)
-  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS (negocio C2 26 1): licencia directa con METRIK desde el 2026-09-23.', c_registrado_por);
+  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR EL CARMEN SAS (negocio C2 26 1): suscripción directa con METRIK desde el 2026-09-23.', c_registrado_por);
 
   -- ── Comprobaciones antes de soltar la transacción ──────────────────────────
   v_cambios := public.proyectar_modulos(c_ws_cda) -> 'cambios';
@@ -896,10 +916,10 @@ declare
   c_negocio        constant uuid := '72d35ffc-cd38-47f1-8a8d-f23488052d39';
   c_codigo         constant text := 'C3 26 1';
   c_correo         constant text := 'cdapuertotest@gmail.com';
-  c_texto_sha256   constant text := '5597e7c6aa52b618481b20344fd6580754ecf8d57f31e6cb962fcb5d3f86ce19';
-  c_pdf_sha256     constant text := 'd98629050ea03d687d61a5b7be119debc58cd5671a58fdd1b7e48c85eff0d48a';
-  c_pdf_path       constant text := 'cda-puertotest/terminos-suscripcion-valida-cda-v1.1.pdf';
-  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN VALIDA · LICENCIA CDA v1.1
+  c_texto_sha256   constant text := '6d98395e1769f4b7f9935a4d4701a2492278101d877908ea5e75377ea68f09dd';
+  c_pdf_sha256     constant text := '53056ae7fe1c12d21c278fdb3af73b510d175dd68146a4e3051078faecc2f050';
+  c_pdf_path       constant text := 'cda-puertotest/terminos-suscripcion-valida-cda-v1.2.pdf';
+  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN AL SERVICIO VALIDA · PLAN CDA v1.2
 
 **METRIK**: METRIK IA S.A.S., NIT 902.079.601-9, domiciliada en la Calle 24A Bis 100-71, Bogotá D.C., representada legalmente por Brallan Mauricio Moreno Guzmán. Correo: mauricio.moreno@metrik.com.co.
 
@@ -943,9 +963,9 @@ Estos Términos rigen desde su aceptación en la forma prevista en la cláusula 
 
 3.3. METRIK podrá rotar, suspender o revocar credenciales ante indicios de compromiso, uso indebido o incumplimiento de estos Términos.
 
-## 4. Licencia, uso permitido y prohibido
+## 4. Acceso al servicio, uso permitido y prohibido
 
-4.1. **Exclusividad de la licencia.** La licencia es exclusiva para CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC y no se extiende a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
+4.1. **Exclusividad del acceso.** La suscripción y el acceso al servicio son exclusivos para CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC y no se extienden a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
 
 4.2. **Uso permitido.** El Servicio se usa exclusivamente para la prevención y gestión del riesgo de LA/FT/FP en la operación propia del Cliente.
 
@@ -1110,9 +1130,18 @@ begin
   end if;
   if exists (
     select 1 from public.documentos_contractuales_versiones d
-     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.1'
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.2'
   ) then
-    raise exception '%: los términos v1.1 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+    raise exception '%: los términos v1.2 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+  end if;
+  -- Ninguna OTRA versión de estos términos puede seguir vigente para la empresa: la v1.2 no convive
+  -- con una v1.1 que alguien haya dejado registrada (la persona designada no sabría cuál acepta).
+  if exists (
+    select 1 from public.documentos_contractuales_versiones d
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version <> 'v1.2'
+       and (d.vigente_hasta is null or d.vigente_hasta >= current_date)
+  ) then
+    raise exception '%: hay otra versión vigente de los términos de esta empresa. La v1.2 no se superpone: revisar antes de cargar.', c_slug_ws;
   end if;
 
   -- El texto que se firma es exactamente el generado: su huella lo prueba.
@@ -1148,7 +1177,7 @@ begin
     raise exception '%: el espacio tiene una activación abierta de valida_consulta que no es la del contrato cancelado. Revisar workspace_modulos antes de cargar.', c_slug_ws;
   end if;
 
-  -- ── 1. Los términos v1.1 de esta empresa ───────────────────────────────────
+  -- ── 1. Los términos v1.2 de esta empresa ───────────────────────────────────
   -- Van primero y en la MISMA transacción que el contrato: nunca existe un contrato vivo sin sus
   -- términos registrados, que cierra Valida aun dentro del plazo (`puerta.ts`).
   insert into public.documentos_contractuales_versiones (
@@ -1156,7 +1185,7 @@ begin
     texto_md, texto_sha256, pdf_bucket, pdf_path, pdf_sha256, vigente_desde, vigente_hasta, registrado_por
   ) values (
     c_ws_metrik, c_linea_valida, 'terminos-suscripcion-valida-cda', 'cliente', c_empresa,
-    'Términos de Suscripción VALIDA · Licencia CDA', 'v1.1',
+    'Términos de Suscripción al Servicio VALIDA · Plan CDA', 'v1.2',
     c_texto, c_texto_sha256, 'aceptaciones-documentos', c_pdf_path, c_pdf_sha256, date '2026-09-23', null, c_registrado_por
   )
   returning id into v_doc;
@@ -1198,7 +1227,7 @@ begin
       'reemplaza_contratos_cancelados', to_jsonb(v_cancelados),
       'cierra_activaciones_modulo', to_jsonb(v_modulos_viejos)
     ),
-    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
+    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 15 de septiembre de 2026). Términos de Suscripción al Servicio VALIDA · Plan CDA v1.2; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
     c_registrado_por
   );
 
@@ -1211,7 +1240,7 @@ begin
   get diagnostics v_cerrados = row_count;
 
   insert into public.workspace_modulos (workspace_id, modulo, origen, servicio_contratado_id, activo_desde, motivo, registrado_por)
-  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC (negocio C3 26 1): licencia directa con METRIK desde el 2026-09-23.', c_registrado_por);
+  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC (negocio C3 26 1): suscripción directa con METRIK desde el 2026-09-23.', c_registrado_por);
 
   -- ── Comprobaciones antes de soltar la transacción ──────────────────────────
   v_cambios := public.proyectar_modulos(c_ws_cda) -> 'cambios';
@@ -1278,10 +1307,10 @@ declare
   c_negocio        constant uuid := '717b2c2c-c265-4cb3-a483-3383b104a412';
   c_codigo         constant text := 'M2 26 1';
   c_correo         constant text := 'maxitec.ingeniero@gmail.com';
-  c_texto_sha256   constant text := '2a122b74083377edcd02c2f5ebbd1c799fa3ddb14a9feac61363711e72c09f5c';
-  c_pdf_sha256     constant text := '0e1e34ca256378d5d99be3ec6fb5a9fc99f1dd3c20132c62d86affc85ca40959';
-  c_pdf_path       constant text := 'maxitec/terminos-suscripcion-valida-cda-v1.1.pdf';
-  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN VALIDA · LICENCIA CDA v1.1
+  c_texto_sha256   constant text := '644218aa4c247ed22fcb60d190471f7c552c6761f5e86c178d1a93aeda5dd38d';
+  c_pdf_sha256     constant text := '515e5093837c06f73681c6dc1c1e95b3177adba9ceaa185e5c8816e3452e890a';
+  c_pdf_path       constant text := 'maxitec/terminos-suscripcion-valida-cda-v1.2.pdf';
+  c_texto constant text := $texto$# TÉRMINOS DE SUSCRIPCIÓN AL SERVICIO VALIDA · PLAN CDA v1.2
 
 **METRIK**: METRIK IA S.A.S., NIT 902.079.601-9, domiciliada en la Calle 24A Bis 100-71, Bogotá D.C., representada legalmente por Brallan Mauricio Moreno Guzmán. Correo: mauricio.moreno@metrik.com.co.
 
@@ -1325,9 +1354,9 @@ Estos Términos rigen desde su aceptación en la forma prevista en la cláusula 
 
 3.3. METRIK podrá rotar, suspender o revocar credenciales ante indicios de compromiso, uso indebido o incumplimiento de estos Términos.
 
-## 4. Licencia, uso permitido y prohibido
+## 4. Acceso al servicio, uso permitido y prohibido
 
-4.1. **Exclusividad de la licencia.** La licencia es exclusiva para CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. y no se extiende a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
+4.1. **Exclusividad del acceso.** La suscripción y el acceso al servicio son exclusivos para CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. y no se extienden a empresas vinculadas, filiales, subordinadas, matrices, aliados ni terceros. Los usuarios habilitados deben pertenecer al Cliente.
 
 4.2. **Uso permitido.** El Servicio se usa exclusivamente para la prevención y gestión del riesgo de LA/FT/FP en la operación propia del Cliente.
 
@@ -1492,9 +1521,18 @@ begin
   end if;
   if exists (
     select 1 from public.documentos_contractuales_versiones d
-     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.1'
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version = 'v1.2'
   ) then
-    raise exception '%: los términos v1.1 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+    raise exception '%: los términos v1.2 de esta empresa ya están registrados. Nada que hacer.', c_slug_ws;
+  end if;
+  -- Ninguna OTRA versión de estos términos puede seguir vigente para la empresa: la v1.2 no convive
+  -- con una v1.1 que alguien haya dejado registrada (la persona designada no sabría cuál acepta).
+  if exists (
+    select 1 from public.documentos_contractuales_versiones d
+     where d.empresa_id = c_empresa and d.slug = 'terminos-suscripcion-valida-cda' and d.version <> 'v1.2'
+       and (d.vigente_hasta is null or d.vigente_hasta >= current_date)
+  ) then
+    raise exception '%: hay otra versión vigente de los términos de esta empresa. La v1.2 no se superpone: revisar antes de cargar.', c_slug_ws;
   end if;
 
   -- El texto que se firma es exactamente el generado: su huella lo prueba.
@@ -1530,7 +1568,7 @@ begin
     raise exception '%: el espacio tiene una activación abierta de valida_consulta que no es la del contrato cancelado. Revisar workspace_modulos antes de cargar.', c_slug_ws;
   end if;
 
-  -- ── 1. Los términos v1.1 de esta empresa ───────────────────────────────────
+  -- ── 1. Los términos v1.2 de esta empresa ───────────────────────────────────
   -- Van primero y en la MISMA transacción que el contrato: nunca existe un contrato vivo sin sus
   -- términos registrados, que cierra Valida aun dentro del plazo (`puerta.ts`).
   insert into public.documentos_contractuales_versiones (
@@ -1538,7 +1576,7 @@ begin
     texto_md, texto_sha256, pdf_bucket, pdf_path, pdf_sha256, vigente_desde, vigente_hasta, registrado_por
   ) values (
     c_ws_metrik, c_linea_valida, 'terminos-suscripcion-valida-cda', 'cliente', c_empresa,
-    'Términos de Suscripción VALIDA · Licencia CDA', 'v1.1',
+    'Términos de Suscripción al Servicio VALIDA · Plan CDA', 'v1.2',
     c_texto, c_texto_sha256, 'aceptaciones-documentos', c_pdf_path, c_pdf_sha256, date '2026-09-23', null, c_registrado_por
   )
   returning id into v_doc;
@@ -1580,7 +1618,7 @@ begin
       'reemplaza_contratos_cancelados', to_jsonb(v_cancelados),
       'cierra_activaciones_modulo', to_jsonb(v_modulos_viejos)
     ),
-    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 21 de septiembre de 2026). Términos de Suscripción VALIDA · Licencia CDA v1.1; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
+    'Alta del contrato directo de CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. con METRIK IA S.A.S. al terminar el contrato AFI-CDA (efectos al 21 de septiembre de 2026). Términos de Suscripción al Servicio VALIDA · Plan CDA v1.2; $150.000 mensuales sin IVA (art. 476 num. 21 ET), ciclo del 23 al 22.',
     c_registrado_por
   );
 
@@ -1593,7 +1631,7 @@ begin
   get diagnostics v_cerrados = row_count;
 
   insert into public.workspace_modulos (workspace_id, modulo, origen, servicio_contratado_id, activo_desde, motivo, registrado_por)
-  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. (negocio M2 26 1): licencia directa con METRIK desde el 2026-09-23.', c_registrado_por);
+  values (c_ws_cda, 'valida_consulta', 'servicio', v_sc, now(), 'Contrato valida-cda-licencia v1 de CENTRO DE DIAGNOSTICO AUTOMOTOR MAXITEC S.A.S. (negocio M2 26 1): suscripción directa con METRIK desde el 2026-09-23.', c_registrado_por);
 
   -- ── Comprobaciones antes de soltar la transacción ──────────────────────────
   v_cambios := public.proyectar_modulos(c_ws_cda) -> 'cambios';

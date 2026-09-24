@@ -5,6 +5,7 @@ import { PestanaTerminos } from '@/components/terminos/pestana-terminos'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
+import { PLAN_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
 import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
 import { accionesSobreUsuario } from '@/lib/usuarios-espacio/reglas'
@@ -30,7 +31,7 @@ interface Props {
 }
 
 /**
- * `/suscripcion`: la suscripción del espacio a un servicio de MeTRIK, hoy la licencia de Valida de
+ * `/suscripcion`: la suscripción del espacio a un servicio de MeTRIK, hoy la suscripción a Valida de
  * los CDA. Solo la ve la persona designada del contrato del espacio que lo PAGA; a cualquier otro
  * (dueño o administrador que no sea la persona designada, operador, espacio sin contrato, AFI,
  * metrik) la ruta no existe (404), igual que el ítem del menú. Un platform admin en «Ver como» la ve
@@ -62,7 +63,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   ])
 
   const { contrato, resumen } = ctx
-  const plan = contrato.servicioNombre ? `Licencia VALIDA · ${contrato.servicioNombre}` : 'Licencia VALIDA'
+  // El nombre fiscal del plan (Felipe, 2026-09-24), no el del catálogo, que todavía dice «Licencia».
+  const plan = PLAN_CDA
   const vigencia = contrato.vigenteHasta
     ? `Vigente hasta el ${fechaConAnio(contrato.vigenteHasta)} · renovación mensual`
     : `Vigente desde el ${fechaConAnio(contrato.vigenteDesde)} · renovación mensual`
@@ -133,7 +135,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
             className="rounded-md border border-border bg-papel px-3 py-2 text-xs text-tinta-suave"
           >
             Estás viendo como la persona designada del contrato: solo lectura, sin aceptar términos ni tocar
-            licencias o usuarios.
+            usuarios.
           </p>
         )}
         {resumen.estado !== 'terminos_pendientes' && resumen.mensaje && (

@@ -104,7 +104,7 @@ export const MENSAJE_INVITACION: Record<ProblemaInvitacion, string> = {
   correo: 'Escribe un correo válido.',
   nombre: 'Escribe el nombre de la persona.',
   rol: 'Elige Administrador u Operador.',
-  sin_cupo: 'No hay licencias libres. Agrega una licencia para invitar a otra persona.',
+  sin_cupo: 'No hay cupos de usuario libres. Agrega un usuario adicional para invitar a otra persona.',
 }
 
 /**

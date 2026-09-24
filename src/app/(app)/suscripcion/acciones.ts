@@ -106,7 +106,7 @@ export async function comprarUsuarioAdicional(p: { solicitudExpresa: boolean }):
   if (equipo === 'error') return { ok: false, error: NO_DISPONIBLE }
   const antes = equipo.licencias.licencias
   if (antes === null) {
-    return { ok: false, error: 'Tu contrato no tiene registradas sus licencias. Escríbenos y lo resolvemos.' }
+    return { ok: false, error: 'Tu contrato no tiene registrados sus usuarios incluidos. Escríbenos y lo resolvemos.' }
   }
   const c = await comprarLicencia(r.ctx, r.ctx.entrada.hoy, antes)
   if (!c.ok) return c
@@ -125,7 +125,7 @@ export async function invitarAlEspacio(p: {
   if (!r.ok) return r
   const equipo = await leerEquipo(r.ctx)
   if (equipo === 'error') return { ok: false, error: NO_DISPONIBLE }
-  if (!equipo.cupo) return { ok: false, error: 'Tu espacio no tiene registradas sus licencias. Escríbenos y lo resolvemos.' }
+  if (!equipo.cupo) return { ok: false, error: 'Tu espacio no tiene registrados sus usuarios incluidos. Escríbenos y lo resolvemos.' }
   const problema = validarInvitacion({ correo: p.correo, nombre: p.nombre, rol: p.rol, cupo: equipo.cupo })
   if (problema) return { ok: false, error: MENSAJE_INVITACION[problema] }
   if (!esRolAsignable(p.rol)) return { ok: false, error: MENSAJE_INVITACION.rol }
@@ -175,7 +175,7 @@ export async function retirarDelEspacio(p: {
       const lib = await liberarLicencia(r.ctx, r.ctx.entrada.hoy, equipo.licencias.licencias)
       if (!lib.ok) {
         refrescar()
-        return { ok: false, error: `La persona quedó retirada, pero la licencia no se pudo dejar de pagar: ${lib.error}` }
+        return { ok: false, error: `La persona quedó retirada, pero el usuario adicional no se pudo dejar de pagar: ${lib.error}` }
       }
       licenciaLiberada = true
       desdeCuota = lib.desdeCuota

@@ -273,7 +273,7 @@ export async function invitarUsuario(p: {
       // Era un retirado que se iba a reincorporar: vuelve a quedar retirado.
       await retirarSinReglas(svc, p.workspaceId, usuarioId, p.actorId)
     }
-    return { ok: false, error: 'No hay licencias libres. Agrega una licencia para invitar a otra persona.' }
+    return { ok: false, error: 'No hay cupos de usuario libres. Agrega un usuario adicional para invitar a otra persona.' }
   }
 
   const envio = await enviarCorreo({

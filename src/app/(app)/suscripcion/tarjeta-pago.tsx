@@ -1,5 +1,6 @@
 import { CalendarClock, CreditCard } from 'lucide-react'
 import { formatCOP } from '@/lib/cobros/format'
+import { NOTA_IVA_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaCorta } from '@/lib/valida-cda/pago-pendiente'
 import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
 
@@ -54,10 +55,7 @@ export function TarjetaPago({ lectura }: { lectura: LecturaPago }) {
                 Ya abonaste {formatCOP(pago.abonado)} de {formatCOP(pago.monto)}.
               </p>
             )}
-            <p className="text-xs text-tinta-suave">
-              Sin IVA: servicio de computación en la nube excluido del impuesto (numeral 21 del artículo 476 del
-              Estatuto Tributario).
-            </p>
+            <p className="text-xs text-tinta-suave">{NOTA_IVA_CDA}</p>
             <p className={`flex items-center gap-1.5 text-sm ${pago.vencida ? 'font-semibold text-amber-800' : 'text-tinta'}`}>
               <CalendarClock className="h-4 w-4 shrink-0" />
               {pago.vencida ? 'Venció el' : 'Vence el'} {fechaCorta(pago.fechaVencimiento)}

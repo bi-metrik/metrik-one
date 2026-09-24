@@ -1,5 +1,6 @@
 import { AvisoCarga } from '@/components/terminos/pestana-terminos'
 import { formatCOP } from '@/lib/cobros/format'
+import { NOTA_IVA_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { etiquetaFuentePago } from '@/lib/suscripciones/pasarela/dominios'
 import { fechaCorta, type CuotaConEstado, type EstadoCuota } from '@/lib/valida-cda/pago-pendiente'
 import type { PagoRecibidoCda } from '@/lib/valida-cda/pago-servidor'
@@ -43,10 +44,7 @@ export function PestanaPagos({ carga }: { carga: ResultadoPagosCda }) {
     <div className="space-y-5">
       <section data-cuotas-cda className="rounded-lg border border-border bg-white p-4">
         <p className="text-sm font-semibold text-tinta">Cuotas de tu suscripción</p>
-        <p className="mt-1 text-xs text-tinta-suave">
-          Sin IVA: servicio de computación en la nube excluido del impuesto (numeral 21 del artículo 476 del Estatuto
-          Tributario).
-        </p>
+        <p className="mt-1 text-xs text-tinta-suave">{NOTA_IVA_CDA}</p>
         {carga.cuotas.length === 0 ? (
           <p className="mt-3 text-sm text-tinta-suave" data-sin-cuotas>
             Aquí vas a ver cada cuota con su factura electrónica.
