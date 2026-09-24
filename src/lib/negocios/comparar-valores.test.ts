@@ -47,6 +47,9 @@ describe('coinciden', () => {
     expect(coinciden('mailto:a.b@x.co', 'a.b@x.co', 'correo')).toBe(true)
     // V0210 medido: el certificado dice «hotmaiol.com».
     expect(coinciden('lady.barrueto@hotmaiol.com', 'lady.barrueto@hotmail.com', 'correo')).toBe(false)
+    // V0208 medido: la IA leyó «l» donde el PDF dice «1». Esa confusión se tolera; otra letra no.
+    expect(coinciden('diegotamayol@gmail.com', 'diegotamayo1@gmail.com', 'correo')).toBe(true)
+    expect(coinciden('jrporrasg1@yahoo.com', 'jprrorasg1@yahoo.com', 'correo')).toBe(false)
     // Dos textos iguales que no son un correo no «coinciden».
     expect(coinciden('no aplica', 'no aplica', 'correo')).toBe(false)
   })

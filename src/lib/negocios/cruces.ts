@@ -296,7 +296,7 @@ export async function evaluarCruces(
       out.push({
         slug: c.slug,
         bloquea,
-        mensaje: redactar(c.mensaje, { a_valor: String(a), b_valor: bs.map(String).join(' / ') }),
+        mensaje: redactar(c.mensaje, { a_valor: String(a), b_valor: [...new Set(bs.map(String))].join(' / ') }),
       })
       continue
     }

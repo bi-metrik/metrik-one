@@ -22,12 +22,19 @@ import { TOLERANCIA_SALDO_COP } from './tolerancia-saldo'
  * - `palabra_comun`: comparten al menos una palabra con letras (marca, línea).
  * - `compacto`: iguales sin espacios ni signos (VIN, placas, series).
  * - `monto`: el mismo número de pesos, con tolerancia.
- * - `correo`: la misma dirección, sin mayúsculas ni espacios. Un solo carácter distinto
- *   es otra dirección (el certificado de V0210 dice «hotmaiol.com»): no se tolera nada.
+ * - `correo`: la misma dirección, sin mayúsculas ni espacios. Una letra distinta es otra
+ *   dirección (el certificado de V0210 dice «hotmaiol.com»). Lo único que se tolera son los
+ *   pares que la lectura de un PDF confunde: «1» con «l» y «0» con «o». Medido el 24-sep
+ *   en 315 certificados: la IA leyó «diegotamayol» donde el PDF dice «diegotamayo1» (V0208).
  */
 export type ModoComparacion = 'tokens' | 'contenido' | 'palabra_comun' | 'compacto' | 'monto' | 'correo'
 
 export const MODOS_COMPARACION: ModoComparacion[] = ['tokens', 'contenido', 'palabra_comun', 'compacto', 'monto', 'correo']
+
+/** «1»→«l» y «0»→«o»: los caracteres que una lectura por imagen confunde en un correo. */
+function plegarConfusiones(correo: string): string {
+  return correo.replace(/1/g, 'l').replace(/0/g, 'o')
+}
 
 /** Un correo para comparar: minúsculas, sin espacios (la extracción los parte) ni `mailto:`. */
 export function normalizarCorreo(v: unknown): string {
@@ -76,7 +83,7 @@ export function coinciden(a: unknown, b: unknown, modo: ModoComparacion, opts: O
   if (modo === 'monto') return montosCoinciden(a, b, opts.tolerancia_cop ?? TOLERANCIA_SALDO_COP)
   if (modo === 'correo') {
     const x = normalizarCorreo(a)
-    return x.includes('@') && x === normalizarCorreo(b)
+    return x.includes('@') && plegarConfusiones(x) === plegarConfusiones(normalizarCorreo(b))
   }
   if (modo === 'compacto') {
     const x = normalizar(a).replace(/\s/g, '')
