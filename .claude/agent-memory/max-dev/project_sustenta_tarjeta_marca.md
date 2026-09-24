@@ -32,3 +32,8 @@ producto: `MetrikLockup` acepta `producto="sustenta"` (default `one`, los usos v
   Es de todos los lockups, no de Sustenta; si se toca, cambia login y demás.
 - Marca en texto corrido: la app mezcla `MéTRIK` y `MeTRIK` (~69 vs ~41 visibles); en
   /suscripcion quedó todo en `MéTRIK` (tarjeta de pago + confirmación de Sustenta).
+
+**Enlace público (#887, mergeado 2026-09-24):** «Conoce más en sustenta.metrik.com.co» (UTM
+one/suscripcion/sustenta_cda) solo en el pie del panel, no en la tarjeta. Su clic NO se mide:
+el CHECK de `sugerencias_eventos.evento` es lista cerrada; medirlo = migración que amplíe el CHECK
++ `eventoDelNavegador` en `acciones.ts`.

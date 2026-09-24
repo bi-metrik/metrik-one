@@ -22,6 +22,7 @@
 - ⚠️⚠️ [Carga de los 4 CDA sobre la carga revertida](project_carga_cdas_estado_revertido.md) — plazo 27-sep; cierra la activación del contrato cancelado
 - ⚠️⚠️ [«Licencia» → «suscripción» en los CDA (#885)](project_licencia_a_suscripcion.md) — Términos v1.2; SQL de cuotas SIN aplicar; periodo sin año
 - ⚠️⚠️ [Sección Suscripción de los CDA](project_seccion_suscripcion_cda.md) — #851: migración 20260924060000 ANTES del merge; sin valor_usuario_adicional no vende
+- [Administrador designado sin costo (#906)](project_admin_designado_sin_cupo.md) — el cupo cuenta solo operativos en /suscripcion, /config y /mi-negocio
 - ⚠️ [Suscripción solo para la designada (#857)](project_suscripcion_solo_designado.md) — «Ver como» compara la persona EFECTIVA; CDA sin vitrinas
 - ⚠️⚠️ [Pago en línea de cuotas (Bold temporal)](project_pago_en_linea_bold.md) — #850: migración SIN aplicar; la pasarela sale de un dato
 - ⚠️⚠️ [Enlace de pago automático de cuotas CDA](project_enlace_pago_automatico.md) — cron paso 6; ignora `planes_cobro.activo` a propósito
