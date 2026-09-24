@@ -21,6 +21,12 @@
  *
  * Cuenta a quien tiene acceso al espacio: invitaciones pendientes incluidas (ya ocupan su cupo:
  * el usuario existe y puede entrar), retirados y soporte de MeTRIK (platform admin) excluidos.
+ *
+ * La persona designada del contrato tampoco ocupa licencia: es el administrador sin costo del
+ * espacio, y las licencias del contrato son para los usuarios operativos (decisión de Mauricio,
+ * 2026-09-24: un CDA con 2 licencias tiene al administrador designado MÁS dos usuarios; el usuario
+ * adicional de la cláusula 2.3 empieza en el tercero operativo). Sin persona designada, cuentan
+ * todos, como antes.
  */
 
 export const ROLES_ASIGNABLES = ['admin', 'operator'] as const
@@ -81,6 +87,21 @@ export interface Cupo {
 export function cupo(licencias: number, usados: number): Cupo {
   const l = Number.isInteger(licencias) && licencias > 0 ? licencias : 0
   return { licencias: l, usados, libres: Math.max(0, l - usados) }
+}
+
+/** ¿Es el administrador sin costo del espacio? Solo la persona designada del contrato. */
+export function esAdministradorSinCosto(usuarioId: string, designadoId: string | null): boolean {
+  return designadoId !== null && usuarioId === designadoId
+}
+
+/** Los usuarios que ocupan licencia: todos menos la persona designada del contrato. */
+export function usuariosOperativos<T extends { id: string }>(usuarios: T[], designadoId: string | null): T[] {
+  return usuarios.filter((u) => !esAdministradorSinCosto(u.id, designadoId))
+}
+
+/** El cupo del espacio contando solo a los usuarios operativos. */
+export function cupoDelEspacio(p: { licencias: number; usuarios: { id: string }[]; designadoId: string | null }): Cupo {
+  return cupo(p.licencias, usuariosOperativos(p.usuarios, p.designadoId).length)
 }
 
 const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/

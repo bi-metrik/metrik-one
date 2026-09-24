@@ -138,6 +138,7 @@ export async function invitarAlEspacio(p: {
     nombre: p.nombre,
     rol: p.rol,
     licencias: equipo.cupo.licencias,
+    designadoId: r.ctx.designadoId,
   })
   if (!res.ok) return res
   refrescar()
@@ -166,9 +167,11 @@ export async function retirarDelEspacio(p: {
     if (
       equipo !== 'error' &&
       equipo.licencias.licencias !== null &&
+      equipo.cupo !== null &&
       licenciaAdicionalLiberable({
         licencias: equipo.licencias.licencias,
-        usadosDespues: equipo.usuarios.length,
+        // Solo los operativos: la persona designada no ocupa licencia.
+        usadosDespues: equipo.cupo.usados,
         adicionalesVigentes: equipo.licencias.adicionalesVigentes.length,
       })
     ) {

@@ -12,7 +12,8 @@ interface Props {
   tabInicial: PestanaSuscripcion
   /** La tarjeta de pago, o la aceptación de los Términos si están pendientes. Se pinta en el servidor. */
   principal: React.ReactNode
-  licencias: { usados: number; total: number } | null
+  /** `operativos`: el espacio tiene administrador sin costo y la cuenta es solo de los operativos. */
+  licencias: { usados: number; total: number; operativos?: boolean } | null
   terminosResumen: string | null
   /** `oferta`: la tarjeta; `solicitada`: la confirmación que se queda; `null`: nada («Ahora no» vigente). */
   sustenta: EstadoSustenta | null
@@ -75,7 +76,8 @@ export default function SuscripcionClient(p: Props) {
             <ResumenLicencias
               usados={p.licencias.usados}
               total={p.licencias.total}
-              personas={p.usuarios.lista ?? []}
+              operativos={p.licencias.operativos}
+              personas={(p.usuarios.lista ?? []).filter((u) => !u.sinCosto)}
               onVerUsuarios={() => ir('usuarios')}
             />
           )}

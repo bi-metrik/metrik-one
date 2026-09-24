@@ -1,6 +1,6 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
-import { cupo, type Cupo, type UsuarioDelEspacio } from '@/lib/usuarios-espacio/reglas'
+import { cupoDelEspacio, type Cupo, type UsuarioDelEspacio } from '@/lib/usuarios-espacio/reglas'
 import { listarUsuarios } from '@/lib/usuarios-espacio/servidor'
 import type { ContextoSuscripcion } from './contexto-servidor'
 import { leerLicencias, type EstadoLicencias } from './licencias-servidor'
@@ -23,14 +23,17 @@ export async function licenciasTotales(ctx: Ctx, estado?: EstadoLicencias | 'err
 export interface EquipoDelEspacio {
   usuarios: UsuarioDelEspacio[]
   licencias: EstadoLicencias
-  /** `null` si ni el contrato ni el espacio declaran licencias: no se invita hasta resolverlo. */
+  /**
+   * `null` si ni el contrato ni el espacio declaran licencias: no se invita hasta resolverlo. Cuenta
+   * solo a los usuarios operativos: la persona designada es el administrador sin costo.
+   */
   cupo: Cupo | null
 }
 
-/** Usuarios, licencias y cupo, en una sola lectura por request. */
+/** Usuarios (todos, la persona designada incluida), licencias y cupo, en una sola lectura por request. */
 export async function leerEquipo(ctx: Ctx): Promise<EquipoDelEspacio | 'error'> {
   const [usuarios, licencias] = await Promise.all([listarUsuarios(ctx.workspaceId), leerLicencias(ctx)])
   if (usuarios === 'error' || licencias === 'error') return 'error'
   const total = await licenciasTotales(ctx, licencias)
-  return { usuarios, licencias, cupo: total === null ? null : cupo(total, usuarios.length) }
+  return { usuarios, licencias, cupo: total === null ? null : cupoDelEspacio({ licencias: total, usuarios, designadoId: ctx.designadoId }) }
 }

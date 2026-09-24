@@ -281,6 +281,55 @@ describe('la pestaña Usuarios', () => {
   })
 })
 
+describe('la pestaña Usuarios con administrador sin costo', () => {
+  const base = { correo: 'a@cda.co', ultimoIngreso: '2026-09-20T12:00:00Z', ultimoIngresoTexto: '20 sept 2026' }
+  const nada = { puedeRetirar: false, puedeCambiarRol: false, puedeReenviar: false }
+  const operativo = (id: string, nombre: string) => ({
+    ...base,
+    id,
+    nombre,
+    role: 'operator',
+    acciones: { puedeRetirar: true, puedeCambiarRol: true, puedeReenviar: false, nota: null },
+  })
+  const lista = [
+    { ...base, id: 'd', nombre: 'Alba Rosas', role: 'owner', sinCosto: true, acciones: { ...nada, nota: 'Eres tú' } },
+    operativo('u2', 'Beto Díaz'),
+    operativo('u3', 'Carla Gómez'),
+  ]
+  const pintar = (cupo: { licencias: number; usados: number; libres: number }, l = lista) =>
+    renderToStaticMarkup(
+      React.createElement(UsuariosPanel, {
+        datos: { lista: l, cupo, valorAdicional: 50000, adicionalesVigentes: 0, licenciasContrato: 2 },
+      }),
+    )
+
+  it('el contador cuenta los operativos y la designada sale como administrador sin costo', () => {
+    const h = pintar({ licencias: 2, usados: 2, libres: 0 })
+    const t = texto(h)
+    expect(t).toContain('2 de 2 usuarios operativos en uso · $50.000 por usuario adicional al mes')
+    expect(t).toContain('Administrador · sin costo')
+    expect(h.match(/Administrador · sin costo/g)?.length).toBe(1)
+    // La designada no se retira ni cambia de rol desde aquí; los dos operativos sí.
+    expect(h.match(/Retirar usuario/g)?.length).toBe(2)
+    expect(h.match(/aria-label="Rol de/g)?.length).toBe(2)
+    expect(t).not.toMatch(/[!¡]/)
+  })
+
+  it('con cupo libre, «Agregar usuario» invita sin ofrecer el adicional', () => {
+    const t = texto(pintar({ licencias: 2, usados: 1, libres: 1 }, lista.slice(0, 2)))
+    expect(t).toContain('1 de 2 usuarios operativos en uso')
+    expect(t).toContain('Agregar usuario')
+    expect(t).not.toContain('No hay cupos de usuario libres')
+  })
+
+  it('sin persona designada en la lista, el contador es el de siempre', () => {
+    const t = texto(pintar({ licencias: 2, usados: 2, libres: 0 }, lista.slice(1)))
+    expect(t).toContain('2 de 2 usuarios en uso')
+    expect(t).not.toContain('operativos')
+    expect(t).not.toContain('sin costo')
+  })
+})
+
 describe('el Resumen', () => {
   const pintar = (extra: Record<string, unknown> = {}) =>
     texto(
@@ -360,6 +409,22 @@ describe('el bloque de licencias del Resumen', () => {
     expect(cuenta(h, 'data-avatar-licencia')).toBe(4)
     expect(h).toContain('data-avatar-mas')
     expect(texto(h)).toContain('+2')
+  })
+
+  it('con administrador sin costo: el texto dice operativos y la designada no ocupa avatar', () => {
+    const h = renderToStaticMarkup(
+      React.createElement(ResumenLicencias, {
+        usados: 1,
+        total: 2,
+        personas: [persona(1)],
+        operativos: true,
+        onVerUsuarios: () => {},
+      }),
+    )
+    expect(texto(h)).toContain('Usuarios 1 de 2 operativos en uso · administrador sin costo')
+    expect(h).toContain('aria-label="1 de 2 usuarios operativos en uso"')
+    expect(cuenta(h, 'data-avatar-licencia')).toBe(1)
+    expect(cuenta(h, 'data-licencia-libre')).toBe(1)
   })
 
   it('las iniciales salen del nombre, o del correo si no hay nombre', () => {

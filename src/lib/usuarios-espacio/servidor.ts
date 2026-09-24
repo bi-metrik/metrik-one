@@ -6,6 +6,7 @@ import {
   accionesSobreUsuario,
   etiquetaRol,
   normalizarCorreo,
+  usuariosOperativos,
   type RolAsignable,
   type UsuarioDelEspacio,
 } from './reglas'
@@ -157,8 +158,10 @@ export async function invitarUsuario(p: {
   correo: string
   nombre: string
   rol: RolAsignable
-  /** Cuántas personas puede tener el espacio. Se vuelve a contar después de crear. */
+  /** Cuántos usuarios operativos puede tener el espacio. Se vuelve a contar después de crear. */
   licencias: number
+  /** La persona designada del contrato: administrador sin costo, no ocupa licencia. */
+  designadoId: string | null
 }): Promise<ResultadoInvitar> {
   const svc: Svc = createServiceClient()
   const correo = normalizarCorreo(p.correo)
@@ -263,7 +266,7 @@ export async function invitarUsuario(p: {
 
   // 4. Dos personas invitando a la vez no pasan el límite: se vuelve a contar.
   const despues = await listarUsuarios(p.workspaceId)
-  if (despues !== 'error' && despues.length > p.licencias) {
+  if (despues !== 'error' && usuariosOperativos(despues, p.designadoId).length > p.licencias) {
     if (perfilNuevo) {
       // Recién creado: se borra entero, como si no hubiera pasado.
       await svc.from('staff').delete().eq('profile_id', usuarioId)
