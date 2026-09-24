@@ -17,7 +17,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import fixture from '@/lib/cotizaciones/__fixtures__/cot-2026-0013-hoteles.fixture.json'
 import { tarifaConHabitaciones } from '@/lib/cotizaciones/habitaciones'
-import type { Habitacion, LecturaCasilla, TarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import type { Habitacion, LecturaCasilla, TarifaConfirmada, TarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 
 vi.mock('sonner', () => ({ toast: Object.assign(() => {}, { success: () => {}, error: () => {}, warning: () => {} }) }))
 vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({}))
@@ -118,5 +118,37 @@ describe('la tarjeta de una opción de hotel', () => {
     const html = pintar(tarifaConHabitaciones({}, habs(POSADA.slice(0, 2)), GRUPO), { abierta: false })
     expect(html).not.toContain('data-opcion-abierta')
     expect(texto(html)).toMatch(/2 habitaciones · faltan? /)
+  })
+})
+
+describe('costo y precio: las alertas del prototipo', () => {
+  const CONFIRMADA = {
+    composicion: GRUPO,
+    costos: [
+      { tipo: 'adulto', cantidad: 6, unitarioCOP: 634000, totalCOP: 3804000 },
+      { tipo: 'nino', cantidad: 1, unitarioCOP: 151400, totalCOP: 151400 },
+      { tipo: 'infante', cantidad: 1, unitarioCOP: 22000, totalCOP: 22000 },
+    ],
+    costoTotalCOP: 3977400, moneda: 'COP', tasa: null, confirmadaEn: '2026-09-24T00:00:00Z',
+  } as unknown as TarifaConfirmada
+
+  it('un precio a mano bajo el costo: «a mano», ⚠ en la fila y ⚠ del margen aunque sea negativo', () => {
+    const tarifa = {
+      ...tarifaConHabitaciones({}, habs(POSADA), GRUPO),
+      preciosAMano: { adulto: { precio: 600000, por: 'Alejandra', porId: 'p1', en: '2026-09-24T00:00:00Z' } },
+    }
+    // Lo que calcula el servidor: 6 × 600.000 + (151.400 + 22.000) / 0,85.
+    const html = pintar(tarifa, { confirmada: CONFIRMADA, precioLinea: 3804000, precioOpcion: 3804000, costoLinea: 3977400 })
+    const t = texto(html)
+    expect(t).toContain('a mano')
+    expect(t).toContain('Este precio queda por debajo del costo')
+    expect(t).toContain('Con este margen necesitas autorización para enviar')
+    expect(t).toMatch(/Margen -4,6 %/)
+  })
+
+  it('con el margen sobre el piso no hay ⚠', () => {
+    const html = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, precioLinea: 4679294, costoLinea: 3977400 })
+    expect(texto(html)).not.toContain('Con este margen necesitas autorización para enviar')
+    expect(texto(html)).toMatch(/Margen 15 %/)
   })
 })

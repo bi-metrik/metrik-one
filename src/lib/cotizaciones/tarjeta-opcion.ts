@@ -33,6 +33,46 @@ import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 /** «2.360.000»: la cifra al peso, sin signo. */
 export const mil = (n: number) => Math.round(Number(n) || 0).toLocaleString('es-CO')
+/**
+ * Reparte `total` pesos en proporción a `pesos`, al peso y sin perder ninguno (mayor resto).
+ * Es lo que hace que las filas de la tabla sumen exactamente el precio de la línea.
+ */
+export function repartirAlPeso(total: number, pesos: readonly number[]): number[] {
+  const t = Math.round(Number(total) || 0)
+  const suma = pesos.reduce((a, p) => a + Math.max(0, p), 0)
+  if (suma <= 0) return pesos.map(() => 0)
+  const exactos = pesos.map(p => (t * Math.max(0, p)) / suma)
+  const bases = exactos.map(e => Math.floor(e))
+  let resto = t - bases.reduce((a, b) => a + b, 0)
+  const orden = exactos.map((e, i) => ({ i, frac: e - Math.floor(e) })).sort((x, y) => y.frac - x.frac)
+  for (const { i } of orden) {
+    if (resto <= 0) break
+    bases[i] += 1
+    resto -= 1
+  }
+  return bases
+}
+
+/**
+ * El «Precio total» de cada fila: la que tiene precio a mano, su precio por la cantidad; las
+ * demás se reparten lo que queda del precio de la línea en proporción a su costo, al peso.
+ * Multiplicar el precio unitario redondeado por la cantidad descuadraba la tabla contra el
+ * precio de la opción (dos pesos en el caso del prototipo).
+ */
+function totalesDeLaLinea(filas: { aMano: boolean; unitario: number; cantidad: number; costo: number }[], precioLinea: number): number[] {
+  const fijo = filas.reduce((a, f) => a + (f.aMano ? Math.round(f.unitario) * f.cantidad : 0), 0)
+  const libres = filas.map((f, i) => ({ f, i })).filter(x => !x.f.aMano)
+  const out = filas.map(f => (f.aMano ? Math.round(f.unitario) * f.cantidad : 0))
+  const resto = Math.round(Number(precioLinea) || 0) - fijo
+  if (libres.length === 0 || resto <= 0) {
+    for (const { f, i } of libres) out[i] = Math.round(f.unitario) * f.cantidad
+    return out
+  }
+  const repartido = repartirAlPeso(resto, libres.map(x => x.f.costo))
+  libres.forEach((x, k) => { out[x.i] = repartido[k] })
+  return out
+}
+
 /** «$2.360.000». */
 export const pesos = (n: number) => `$${mil(n)}`
 /** «15 %», «14,8 %». */
@@ -92,7 +132,12 @@ export function filasDeCosto(a: {
   const c = a.confirmada
   if (c && c.costos.length > 0) {
     const precios = precioPorPasajero(c, a.precioLinea, a.preciosAMano)
-    for (const costo of c.costos.filter(x => x.cantidad > 0)) {
+    const costos = c.costos.filter(x => x.cantidad > 0)
+    const totales = totalesDeLaLinea(costos.map(costo => {
+      const p = precios.find(x => x.tipo === costo.tipo)
+      return { aMano: !!p?.aMano, unitario: p?.precioUnitario ?? 0, cantidad: costo.cantidad, costo: costo.totalCOP }
+    }), a.precioLinea)
+    costos.forEach((costo, k) => {
       const p = precios.find(x => x.tipo === costo.tipo)
       const precioUnitario = p?.precioUnitario ?? 0
       filas.push({
@@ -104,14 +149,18 @@ export function filasDeCosto(a: {
         cantidad: costo.cantidad,
         costoUnitario: costo.unitarioCOP,
         precioUnitario,
-        precioTotal: precioUnitario * costo.cantidad,
+        precioTotal: totales[k],
         aMano: !!p?.aMano,
         bajoCosto: precioUnitario < costo.unitarioCOP,
       })
-    }
+    })
   } else if (c && (c.porHabitacion?.length ?? 0) > 0) {
     const precios = precioPorHabitacion(c.porHabitacion!, a.precioLinea, a.preciosAMano)
-    for (const h of c.porHabitacion!) {
+    const totales = totalesDeLaLinea(c.porHabitacion!.map(h => {
+      const p = precios.find(x => x.numero === h.numero)
+      return { aMano: !!p?.aMano, unitario: p?.precio ?? 0, cantidad: 1, costo: h.totalCOP }
+    }), a.precioLinea)
+    c.porHabitacion!.forEach((h, k) => {
       const p = precios.find(x => x.numero === h.numero)
       const precioUnitario = p?.precio ?? 0
       filas.push({
@@ -123,11 +172,11 @@ export function filasDeCosto(a: {
         cantidad: 1,
         costoUnitario: h.totalCOP,
         precioUnitario,
-        precioTotal: precioUnitario,
+        precioTotal: totales[k],
         aMano: !!p?.aMano,
         bajoCosto: precioUnitario < h.totalCOP,
       })
-    }
+    })
   }
   for (const fila of a.adicionales ?? []) {
     const ad = aAdicional(fila)

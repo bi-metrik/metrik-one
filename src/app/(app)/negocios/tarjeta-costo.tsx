@@ -9,7 +9,7 @@ import { agregarAdicional, actualizarAdicional, eliminarAdicional } from '@/app/
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, LINK } from '@/components/viaje/estilo'
 import { precioDerivadoDeAdicional, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
-import { margenParaPrecio, precioConMargen, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { precioConMargen, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { MENSAJE_MONEDA_ASUMIDA, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   filasDeCosto,
@@ -119,7 +119,11 @@ export default function TarjetaCosto({
   const T = totalesDeFilas(filas)
   const costoTotal = filas.length > 0 ? T.costo : costoLinea
   const precioTotal = filas.length > 0 ? T.precio : precioVivo
-  const margenReal = margenParaPrecio(costoTotal, precioTotal, convencion)
+  // El margen de verdad, también cuando es negativo: `margenParaPrecio` devuelve `null` con el
+  // precio por debajo del costo, que es justo cuando más hace falta verlo.
+  const margenReal = costoTotal > 0 && precioTotal > 0
+    ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
+    : null
   const bajo = margenReal !== null && margenReal < pisoPct
 
   function guardar(fn: () => Promise<{ success: boolean; error?: string }>, limpiar: () => void) {
@@ -194,7 +198,8 @@ export default function TarjetaCosto({
     }, () => {})
   }
 
-  const fila = 'grid grid-cols-[minmax(0,1.6fr)_60px_repeat(3,minmax(0,1fr))] items-center gap-2 border-t border-[#E2DED5] px-3 py-[9px] max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2.5 max-sm:gap-y-0.5'
+  // En el celular el encabezado se esconde: la primera fila de datos no lleva borde arriba.
+  const fila = 'grid grid-cols-[minmax(0,1.6fr)_60px_repeat(3,minmax(0,1fr))] items-center gap-2 border-t border-[#E2DED5] px-3 py-[9px] max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2.5 max-sm:gap-y-0.5 max-sm:[&:nth-child(2)]:border-t-0'
   const num = 'text-right tabular-nums max-sm:hidden'
 
   return (
@@ -202,8 +207,9 @@ export default function TarjetaCosto({
       <p className="m-0 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">
         Costo y precio<span className="h-px flex-1 bg-[#E2DED5]" />
       </p>
-      <div role="table" className="overflow-hidden rounded-lg border border-[#E2DED5]">
-        <div role="row" className={`${fila} border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] max-sm:hidden`}>
+      {/* Sin `overflow-hidden`: el ⚠ de una fila abre su detalle por encima de la tabla. */}
+      <div role="table" className="rounded-lg border border-[#E2DED5]">
+        <div role="row" className={`${fila} rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] max-sm:hidden`}>
           <span>Pasajero</span><span className="text-right">Cant.</span><span className="text-right">Costo c/u</span><span className="text-right">Precio c/u</span><span className="text-right">Precio total</span>
         </div>
         {filas.map(f => (
@@ -214,7 +220,7 @@ export default function TarjetaCosto({
               {f.extra && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">Adicional</span>}
               {f.aMano && <span className="shrink-0 rounded bg-[#FBF1E2] px-[5px] py-px text-[11px] font-semibold text-[#9A5F0C]">a mano</span>}
               {f.bajoCosto && (
-                <AlertaDecision tip="Este precio queda por debajo del costo">
+                <AlertaDecision tip="Este precio queda por debajo del costo" izquierda>
                   <p className="m-0">Con {pesos(f.precioUnitario)} por {f.nombre.toLowerCase()}, esta fila vende por debajo de lo que cuesta. Súbelo o confirma que es a propósito.</p>
                   {editable && f.aMano && (
                     <span className="mt-1 flex flex-wrap gap-2">
@@ -243,7 +249,7 @@ export default function TarjetaCosto({
             </span>
           </div>
         ))}
-        <div role="row" className={`${fila} bg-[#F8F7F3] font-bold`} data-fila-total>
+        <div role="row" className={`${fila} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
           <span>Total</span>
           <span className="max-sm:hidden" />
           <span className={num}>{mil(costoTotal)}</span>
@@ -313,7 +319,7 @@ export default function TarjetaCosto({
             <input
               type="text"
               inputMode="decimal"
-              className={`${INPUT} w-[70px] tabular-nums`}
+              className={`${INPUT.replace('w-full ', '')} w-[70px] tabular-nums`}
               value={margenEscrito ?? String(margenAplicado).replace('.', ',')}
               onChange={e => setMargenEscrito(e.target.value)}
               onBlur={guardarMargen}
@@ -332,7 +338,7 @@ export default function TarjetaCosto({
                   <input
                     type="text"
                     inputMode="numeric"
-                    className={`${INPUT} tabular-nums`}
+                    className={`${INPUT} tabular-nums read-only:bg-[#F8F7F3] read-only:text-[#6E6A62]`}
                     value={cantidadesEscritas[f.clave] ?? String(f.cantidad)}
                     readOnly={!f.adicionalId}
                     onChange={e => setCantidadesEscritas(p => ({ ...p, [f.clave]: e.target.value }))}

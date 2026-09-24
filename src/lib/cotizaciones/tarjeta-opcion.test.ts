@@ -44,6 +44,12 @@ describe('la tabla de costo y precio', () => {
     expect(filas.every(f => !f.aMano && !f.bajoCosto)).toBe(true)
   })
 
+  it('las filas suman exactamente el precio de la línea (los totales del prototipo, al peso)', () => {
+    const filas = filasDeCosto({ confirmada: CONFIRMADA, precioLinea: PRECIO_LINEA })
+    expect(filas.map(f => f.precioTotal)).toEqual([4475294, 178118, 25882])
+    expect(totalesDeFilas(filas).precio).toBe(PRECIO_LINEA)
+  })
+
   it('un precio a mano se queda; las demás filas se reparten lo que queda', () => {
     const filas = filasDeCosto({ confirmada: CONFIRMADA, precioLinea: 4404000, preciosAMano: aMano({ adulto: 700000 }) })
     const adulto = filas.find(f => f.clave === 'adulto')!
