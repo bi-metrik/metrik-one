@@ -72,7 +72,7 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
 
   const lista = datos.lista
   const contador = datos.cupo
-    ? `${datos.cupo.usados} de ${datos.cupo.licencias} licencias en uso`
+    ? `${datos.cupo.usados} de ${datos.cupo.licencias} usuarios en uso`
     : `${lista.length} usuarios con acceso`
   const precio = datos.valorAdicional !== null ? ` · ${formatCOP(datos.valorAdicional)} por usuario adicional al mes` : ''
 
@@ -97,7 +97,7 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
 
       {!datos.cupo && (
         <p className="rounded-lg border border-border bg-papel p-3 text-sm text-tinta-suave">
-          Tu espacio no tiene registradas sus licencias. Escríbenos y lo resolvemos.
+          Tu espacio no tiene registrados sus usuarios incluidos. Escríbenos y lo resolvemos.
         </p>
       )}
 
@@ -236,16 +236,16 @@ function AgregarLicencia({
         toast.error(r.error)
         return
       }
-      toast.success('Listo. Tienes una licencia más: ya puedes dar acceso a otra persona.')
+      toast.success('Listo. Tienes un usuario adicional: ya puedes dar acceso a otra persona.')
       router.refresh()
     })
   }
 
   return (
     <section data-agregar-licencia className="space-y-3 rounded-lg border border-border bg-white p-4">
-      <p className="text-sm font-semibold text-tinta">No hay licencias libres</p>
+      <p className="text-sm font-semibold text-tinta">No hay cupos de usuario libres</p>
       <p className="text-sm text-tinta">
-        Para dar acceso a otra persona, agrega una licencia
+        Para dar acceso a otra persona, agrega un usuario adicional
         {valorAdicional !== null ? ` de ${formatCOP(valorAdicional)} al mes` : ''}. El acceso es inmediato.
       </p>
       {cotizando && <p className="text-sm text-tinta-suave">Calculando el cobro…</p>}
@@ -277,7 +277,7 @@ function AgregarLicencia({
               disabled={!acepta || pendiente}
               className="rounded-md bg-acento px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
-              Agregar una licencia
+              Agregar un usuario adicional
             </button>
             <button type="button" onClick={onCerrar} className="rounded-md border border-border px-4 py-2 text-sm text-tinta">
               Cancelar
@@ -309,8 +309,8 @@ function FilaDeUsuario({ usuario: u, liberable }: { usuario: FilaUsuario; libera
       }
       const cobro = r.licenciaLiberada
         ? r.desdeCuota !== null
-          ? ` La licencia adicional deja de cobrarse desde la cuota ${r.desdeCuota}.`
-          : ' La licencia adicional deja de cobrarse desde el periodo siguiente.'
+          ? ` El usuario adicional deja de cobrarse desde la cuota ${r.desdeCuota}.`
+          : ' El usuario adicional deja de cobrarse desde el periodo siguiente.'
         : ''
       toast.success(`${u.nombre} ya no tiene acceso.${cobro}`)
       setConfirmando(false)
@@ -375,12 +375,12 @@ function FilaDeUsuario({ usuario: u, liberable }: { usuario: FilaUsuario; libera
       {confirmando && (
         <div className="mt-3 space-y-2 rounded-md bg-papel p-3" data-confirmar-retiro>
           <p className="text-tinta">
-            {u.nombre} pierde el acceso ahora y su licencia queda libre para otra persona.
+            {u.nombre} pierde el acceso ahora y su cupo queda libre para otra persona.
           </p>
           {liberable && (
             <label className="flex items-start gap-2 text-tinta">
               <input type="checkbox" checked={dejarDePagar} onChange={(e) => setDejarDePagar(e.target.checked)} className="mt-0.5" />
-              Dejar de pagar la licencia adicional desde el periodo siguiente.
+              Dejar de pagar el usuario adicional desde el periodo siguiente.
             </label>
           )}
           <div className="flex flex-col gap-2 sm:flex-row">

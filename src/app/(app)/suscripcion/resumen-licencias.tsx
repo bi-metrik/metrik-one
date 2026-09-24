@@ -73,7 +73,7 @@ export function ResumenLicencias({
 
       <div
         role="img"
-        aria-label={`${usados} de ${total} licencias en uso`}
+        aria-label={`${usados} de ${total} usuarios en uso`}
         data-pila-licencias
         className="col-span-2 flex items-center -space-x-1 sm:col-span-1 sm:col-start-2 sm:row-start-1"
       >

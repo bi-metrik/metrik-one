@@ -14,7 +14,7 @@ import { enPlazoParaAceptar, estadoMora, mensajeSuspendidoPorMora, type EstadoMo
 
 /**
  * La puerta de Valida para los CDA: antes de consultar listas, la persona designada por la empresa
- * acepta los Términos de Suscripción VALIDA · Licencia CDA (cláusula 16.3: «el acceso al Servicio
+ * acepta los Términos de Suscripción al Servicio VALIDA · Plan CDA (cláusula 16.3: «el acceso al Servicio
  * queda habilitado una vez registrada la aceptación»).
  *
  * ## A quién aplica, y a quién NO

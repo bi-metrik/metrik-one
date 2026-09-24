@@ -37,7 +37,7 @@ export function TerminosCda({
         <div>
           <h1 className="text-xl font-bold text-tinta">Valida</h1>
           <p className="text-sm text-tinta-suave">
-            Tu licencia de Valida ahora la presta directamente METRIK IA S.A.S.
+            Tu suscripción al servicio Valida es ahora directamente con METRIK IA S.A.S.
           </p>
         </div>
       </div>

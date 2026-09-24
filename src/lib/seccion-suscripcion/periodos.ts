@@ -31,6 +31,8 @@
  * contiene la fecha del retiro, solo en cuotas modificables. Los de cuotas ya cobradas se quedan.
  */
 
+import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
+
 const FECHA = /^(\d{4})-(\d{2})-(\d{2})$/
 
 function partes(iso: string): [number, number, number] {
@@ -121,24 +123,19 @@ export function prorrata(fecha: string, diaInicio: number, valorMensual: number)
 
 // ── El periodo de una cuota ─────────────────────────────────────────────────────────────
 
-const PERIODO_EN_CONCEPTO = /periodo del (\d{2})\/(\d{2})\/(\d{4}) al (\d{2})\/(\d{2})\/(\d{4})/i
-
 /**
- * El periodo que paga una cuota. Lo dice su concepto («… periodo del 23/09/2026 al 22/10/2026») y,
- * sin él, el periodo que contiene su vencimiento (las cuotas de los CDA vencen dentro del periodo
- * que pagan: la del 23-sep al 22-oct vence el 30-sep).
+ * El periodo que paga una cuota. Lo dice su concepto («… periodo del 23/09/2026 al 22/10/2026», o
+ * «… periodo del 23-sep al 22-oct» anclado en el vencimiento) y, sin él, el periodo que contiene su
+ * vencimiento (las cuotas de los CDA vencen dentro del periodo que pagan: la del 23-sep al 22-oct
+ * vence el 30-sep).
  */
 export function periodoDeCuota(
   cuota: { concepto: string | null; fechaVencimiento: string },
   diaInicio: number,
 ): Periodo {
-  const m = cuota.concepto ? PERIODO_EN_CONCEPTO.exec(cuota.concepto) : null
-  if (m) {
-    const desde = `${m[3]}-${m[2]}-${m[1]}`
-    const hasta = `${m[6]}-${m[5]}-${m[4]}`
-    if (FECHA.test(desde) && FECHA.test(hasta) && desde <= hasta) {
-      return { desde, hasta, dias: diasEntre(desde, hasta) }
-    }
+  const p = leerPeriodoEnConcepto(cuota.concepto, cuota.fechaVencimiento)
+  if (p?.desde && p.hasta && FECHA.test(p.desde) && FECHA.test(p.hasta) && p.desde <= p.hasta) {
+    return { desde: p.desde, hasta: p.hasta, dias: diasEntre(p.desde, p.hasta) }
   }
   return periodoDe(cuota.fechaVencimiento, diaInicio)
 }

@@ -10,6 +10,7 @@
 import { PALETA } from '@/lib/marca/paleta'
 import { escaparHtml } from '@/lib/usuarios-espacio/correo'
 import { formatCOP, formatFechaLetras } from './format'
+import { leerPeriodoEnConcepto, quitarPeriodo } from './periodo-en-concepto'
 
 export interface DatosAvisoEnlace {
   /** Nombre completo de la persona designada; se saluda por el primero. */
@@ -30,22 +31,23 @@ export interface DatosAvisoEnlace {
   urlSuscripcion: string
 }
 
-const RE_PERIODO = /periodo del (\d{2})\/(\d{2})\/(\d{4}) al (\d{2})\/(\d{2})\/(\d{4})/i
-
-/** «Licencia VALIDA · Starter — periodo del ...» → «Licencia VALIDA · Starter». */
+/** «Suscripción VALIDA · Plan CDA — … · periodo del ...» → «Suscripción VALIDA · Plan CDA — …». */
 export function conceptoSinPeriodo(concepto: string | null, numeroCuota: number): string {
-  const limpio = (concepto ?? '').replace(RE_PERIODO, '').replace(/[\s—–-]+$/u, '').replace(/\s+/g, ' ').trim()
+  const limpio = quitarPeriodo(concepto ?? '').replace(/[\s—–·,-]+$/u, '').replace(/\s+/g, ' ').trim()
   return limpio || `Cuota ${numeroCuota}`
 }
 
-/** «periodo del 23/10/2026 al 22/11/2026» → «del 23 de octubre al 22 de noviembre de 2026». */
-export function periodoEnLetras(concepto: string | null): string | null {
-  const m = concepto ? RE_PERIODO.exec(concepto) : null
-  if (!m) return null
-  const desde = formatFechaLetras(`${m[3]}-${m[2]}-${m[1]}`)
-  const hasta = formatFechaLetras(`${m[6]}-${m[5]}-${m[4]}`)
+/**
+ * «periodo del 23/10/2026 al 22/11/2026» (o «periodo del 23-oct al 22-nov», anclado en el vencimiento)
+ * → «del 23 de octubre al 22 de noviembre de 2026».
+ */
+export function periodoEnLetras(concepto: string | null, fechaVencimiento?: string | null): string | null {
+  const p = leerPeriodoEnConcepto(concepto, fechaVencimiento)
+  if (!p || !p.desde || !p.hasta) return null
+  const desde = formatFechaLetras(p.desde)
+  const hasta = formatFechaLetras(p.hasta)
   // Mismo año: se dice una sola vez.
-  const desdeCorto = m[3] === m[6] ? desde.replace(/ de \d{4}$/, '') : desde
+  const desdeCorto = p.desde.slice(0, 4) === p.hasta.slice(0, 4) ? desde.replace(/ de \d{4}$/, '') : desde
   return `del ${desdeCorto} al ${hasta}`
 }
 
@@ -74,7 +76,7 @@ interface Renglon {
 }
 
 function renglones(d: DatosAvisoEnlace): Renglon[] {
-  const periodo = periodoEnLetras(d.concepto)
+  const periodo = periodoEnLetras(d.concepto, d.fechaVencimiento)
   const vencida = d.fechaVencimiento < d.hoy
   const filas: Renglon[] = [{ etiqueta: 'Concepto', valor: conceptoSinPeriodo(d.concepto, d.numeroCuota) }]
   if (periodo) filas.push({ etiqueta: 'Periodo', valor: periodo })

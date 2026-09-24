@@ -54,7 +54,7 @@ describe('la tarjeta de pago', () => {
           pago: {
             estado: 'pendiente',
             numero: 1,
-            concepto: 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
+            concepto: 'Suscripción VALIDA · Plan CDA — servicio de computación en la nube (SaaS) · periodo del 23-sep al 22-oct',
             fechaVencimiento: '2026-09-30',
             monto: 150000,
             abonado: 0,
@@ -71,10 +71,14 @@ describe('la tarjeta de pago', () => {
   it('monto, periodo, vencimiento y que no lleva IVA', () => {
     const t = texto(pendiente())
     expect(t).toContain('$150.000')
-    expect(t).toContain('periodo del 23/09/2026 al 22/10/2026')
+    expect(t).toContain('periodo del 23-sep al 22-oct')
     expect(t).toContain('Vence el 30/09/2026')
-    expect(t).toContain('Sin IVA')
-    expect(t).toContain('numeral 21 del artículo 476')
+    // Redacción de Felipe (2026-09-24), literal.
+    expect(t).toContain('Servicio excluido de IVA (art. 476 num. 21 ET, computación en la nube)')
+  })
+
+  it('ningún texto del CDA llama «licencia» al servicio', () => {
+    expect(texto(pendiente())).not.toMatch(/licencia/i)
   })
 
   it('«Pagar en línea» abre el enlace en otra pestaña, sin pasar la página de origen', () => {
@@ -164,6 +168,10 @@ describe('la pestaña Pagos', () => {
   )
   const t = texto(html)
 
+  it('la nota de IVA es la de Felipe, literal', () => {
+    expect(t).toContain('Servicio excluido de IVA (art. 476 num. 21 ET, computación en la nube)')
+  })
+
   it('cada cuota con su periodo, valor, vencimiento y estado, en tabla y en tarjetas del teléfono', () => {
     expect(t).toContain('Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026')
     expect(t).toContain('30/09/2026')
@@ -227,8 +235,9 @@ describe('la pestaña Usuarios', () => {
   )
   const t = texto(html)
 
-  it('el contador dice las licencias en uso y el valor del usuario adicional del contrato', () => {
-    expect(t).toContain('2 de 2 licencias en uso · $50.000 por usuario adicional al mes')
+  it('el contador dice los usuarios en uso y el valor del usuario adicional del contrato', () => {
+    expect(t).toContain('2 de 2 usuarios en uso · $50.000 por usuario adicional al mes')
+    expect(t).not.toMatch(/licencia/i)
   })
 
   it('cada fila dice lo que se puede hacer; la propia no se retira', () => {
@@ -248,7 +257,7 @@ describe('la pestaña Usuarios', () => {
         }),
       ),
     )
-    expect(sinValor).toContain('2 de 2 licencias en uso')
+    expect(sinValor).toContain('2 de 2 usuarios en uso')
     expect(sinValor).not.toMatch(/\$/)
   })
 
@@ -330,7 +339,7 @@ describe('el bloque de licencias del Resumen', () => {
     expect(h).not.toContain('bg-papel')
     expect(cuenta(h, 'data-avatar-licencia')).toBe(2)
     expect(cuenta(h, 'data-licencia-libre')).toBe(0)
-    expect(h).toContain('aria-label="2 de 2 licencias en uso"')
+    expect(h).toContain('aria-label="2 de 2 usuarios en uso"')
     expect(texto(h)).toContain('Usuarios 2 de 2 en uso')
     expect(texto(h)).toContain('PN')
     expect(texto(h)).toContain('Ver usuarios')

@@ -39,7 +39,7 @@ export interface CuotaDeServicio {
   monto: number
   /** 'YYYY-MM-DD' */
   fechaVencimiento: string
-  /** El detalle de la cuota, con su período («Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026»). */
+  /** El detalle de la cuota, con su período («Suscripción VALIDA · Plan CDA — … · periodo del 23-sep al 22-oct»). */
   concepto: string | null
   enlacePagoUrl: string | null
   /** ISO-8601: hasta cuándo sirve el enlace. `null` = sin fecha de vencimiento declarada. */

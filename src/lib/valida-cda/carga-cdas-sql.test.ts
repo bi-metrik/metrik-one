@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
+import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
+import { PLAN_CDA } from './redaccion-fiscal'
 
 /**
  * La carga de datos de los CDA (`sql/valida-cda/`), EJECUTADA contra las migraciones reales.
@@ -334,11 +336,11 @@ describe('el archivo de carga', () => {
   })
 
   // Los PDF y textos entregados viven fuera del repo: esta comprobación solo corre en la torre.
-  const LEGAL = '/home/mauricio/Developer/metrik/proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.1'
+  const LEGAL = '/home/mauricio/Developer/metrik/proyectos/metrik/valida/docs/entrega/legal/terminos-cda-v1.2'
   it.skipIf(!existsSync(LEGAL))('las huellas del archivo son las del texto y el PDF entregados', () => {
     for (const b of BLOQUES) {
-      const texto = readFileSync(join(LEGAL, b.slug, 'terminos-suscripcion-valida-cda-v1.1.md'))
-      const pdf = readFileSync(join(LEGAL, b.slug, 'terminos-suscripcion-valida-cda-v1.1.pdf'))
+      const texto = readFileSync(join(LEGAL, b.slug, 'terminos-suscripcion-valida-cda-v1.2.md'))
+      const pdf = readFileSync(join(LEGAL, b.slug, 'terminos-suscripcion-valida-cda-v1.2.pdf'))
       expect(constante(b.sql, 'c_texto_sha256')).toBe(createHash('sha256').update(texto).digest('hex'))
       expect(constante(b.sql, 'c_pdf_sha256')).toBe(createHash('sha256').update(pdf).digest('hex'))
     }
@@ -405,6 +407,38 @@ describe('otra activación abierta de valida_consulta detiene el bloque', () => 
       await db.exec(`update public.workspace_modulos set activo_hasta = now()
                       where workspace_id = '${b.ws}' and origen = 'cortesia' and activo_hasta is null`)
     }
+  })
+})
+
+describe('una versión anterior de los términos todavía vigente detiene el bloque', () => {
+  it('la v1.2 no se superpone a una v1.1 vigente de la misma empresa; retirada, ya no estorba', async () => {
+    const b = BLOQUES[2]
+    const v11 = (hasta: string) => `
+      insert into public.documentos_contractuales_versiones (
+        workspace_id, linea_id, slug, alcance, empresa_id, titulo, version,
+        texto_md, texto_sha256, pdf_path, pdf_sha256, vigente_desde, vigente_hasta
+      ) values (
+        '${WS_METRIK}', '${LINEA_VALIDA}', 'terminos-suscripcion-valida-cda', 'cliente', '${b.empresa}',
+        'Términos de Suscripción VALIDA · Licencia CDA', 'v1.1', 'x', '${'e'.repeat(64)}',
+        '${b.slug}/terminos-suscripcion-valida-cda-v1.1.pdf', '${'f'.repeat(64)}', date '2026-01-01', ${hasta})`
+    // Dentro de una transacción que se deshace: la tabla es inmutable y no se puede limpiar después.
+    await db.exec('begin')
+    try {
+      await db.exec(v11('null'))
+      const error = await correr(preparar(b, { ensayo: true }))
+      expect(error).toContain('hay otra versión vigente de los términos de esta empresa')
+    } finally {
+      await db.exec('rollback')
+    }
+    await db.exec('begin')
+    try {
+      // Retirada de circulación (vigente_hasta en el pasado), ya no estorba.
+      await db.exec(v11("date '2026-01-31'"))
+      expect(await correr(preparar(b, { ensayo: true }))).toContain(`ENSAYO OK ${b.slug}`)
+    } finally {
+      await db.exec('rollback')
+    }
+    expect(await contar('public.documentos_contractuales_versiones')).toBe(0)
   })
 })
 
@@ -497,10 +531,10 @@ describe('la carga', () => {
     expect(docs.rows).toHaveLength(4)
     for (const b of BLOQUES) {
       const d = docs.rows.find((x) => x.empresa_id === b.empresa)!
-      expect(d.version).toBe('v1.1')
-      expect(d.pdf_path).toBe(`${b.slug}/terminos-suscripcion-valida-cda-v1.1.pdf`)
+      expect(d.version).toBe('v1.2')
+      expect(d.pdf_path).toBe(`${b.slug}/terminos-suscripcion-valida-cda-v1.2.pdf`)
       expect(sha256(d.texto_md)).toBe(d.texto_sha256)
-      expect(d.texto_md.startsWith('# TÉRMINOS DE SUSCRIPCIÓN VALIDA · LICENCIA CDA v1.1\n\n')).toBe(true)
+      expect(d.texto_md.startsWith('# TÉRMINOS DE SUSCRIPCIÓN AL SERVICIO VALIDA · PLAN CDA v1.2\n\n')).toBe(true)
       // Cada CDA con SUS datos, sin campos por llenar ni marcas internas de redacción.
       const nitConPuntos = b.nit.replace(/^(\d{3})(\d{3})(\d{3})-(\d)$/, '$1.$2.$3-$4')
       expect(d.texto_md).toContain(`NIT ${nitConPuntos}`)
@@ -510,6 +544,11 @@ describe('la carga', () => {
       expect(d.texto_md).not.toContain('Cambio frente')
       expect(d.texto_md).toContain('las Partes ajustarán el precio para incorporar el tributo.\n\n')
       expect(d.texto_md).toContain('con **quince (15) días** de anticipación.\n\n')
+      // Redacción fiscal de Felipe (v1.2): el servicio es una suscripción, nunca una «licencia».
+      // Solo la propiedad intelectual conserva la palabra (4.3 «sublicenciar», 8.1 «licenciantes»).
+      expect(d.texto_md).toContain('## 4. Acceso al servicio, uso permitido y prohibido')
+      expect(d.texto_md).toContain('4.1. **Exclusividad del acceso.** La suscripción y el acceso al servicio son exclusivos para ')
+      expect((d.texto_md.match(/\w*licenci\w*/gi) ?? []).sort()).toEqual(['licenciantes', 'sublicenciar'])
       // Párrafos en una línea: el lector de ONE pinta cada salto de línea.
       expect(d.texto_md.split('\n\n').every((p) => !p.includes('\n'))).toBe(true)
     }
@@ -531,7 +570,7 @@ describe('la carga', () => {
       b.ws,
       `select documento_id, pdf_sha256, titulo, version from public.mis_documentos_de_servicio()`,
     )
-    expect(doc.version).toBe('v1.1')
+    expect(doc.version).toBe('v1.2')
     const texto = await db.query<{ texto_sha256: string }>(
       `select texto_sha256 from public.documentos_contractuales_versiones where id = '${doc.documento_id}'`,
     )
@@ -545,7 +584,7 @@ describe('la carga', () => {
       ) values (
         '${WS_METRIK}', '${b.negocio}', 'modulo', 'aceptado', 'Alba Yurany Rosas Escandón', '40123456',
         'representante_legal', 'RAZON ${b.slug}', '${b.nit}', '${usuario}', '${b.ws}', '${doc.documento_id}',
-        '${doc.titulo}', 'v1.1', '${doc.pdf_sha256}', '${texto.rows[0].texto_sha256}',
+        '${doc.titulo}', 'v1.2', '${doc.pdf_sha256}', '${texto.rows[0].texto_sha256}',
         'Yo, Alba Yurany Rosas Escandón, identificado(a) con cédula 40123456, ACEPTO (huella SHA-256 del PDF: ${doc.pdf_sha256}).',
         '190.24.1.10', 'Mozilla/5.0'
       )`
@@ -742,5 +781,81 @@ describe('comisión de AFI y valor del usuario adicional (2026-09-23)', () => {
   it('una segunda corrida no cambia nada ni deja otra fila', async () => {
     expect(await correr(real())).toBe('')
     expect(await cambios()).toBe(8)
+  })
+})
+
+describe('los cobros de los CDA dejan de decir «licencia» (2026-09-24)', () => {
+  const LICENCIA_A_SUSCRIPCION = leer('sql/valida-cda/2026-09-24_licencia-a-suscripcion.sql')
+  const real = () => {
+    const de = 'c_ensayo constant boolean := true;'
+    expect(LICENCIA_A_SUSCRIPCION.split(de).length - 1).toBe(1)
+    return LICENCIA_A_SUSCRIPCION.replace(de, 'c_ensayo constant boolean := false;')
+  }
+  const conceptos = async (b: Bloque) =>
+    (
+      await db.query<{ numero: number; concepto: string }>(
+        `select numero, concepto_detalle as concepto from public.plan_cobro_cuotas where plan_cobro_id = '${b.plan}' order by numero`,
+      )
+    ).rows.map((r) => r.concepto)
+  const PERIODO_2 = ' · periodo del 23-oct al 22-nov'
+  const DESGLOSE = ' · Incluye: 1 usuario adicional, periodo del 23/10/2026 al 22/11/2026 $50.000'
+
+  beforeAll(async () => {
+    // El esquema de prueba no trae la plantilla del plan (en producción existe desde el 2026-05-18).
+    await db.exec(`alter table public.planes_cobro add column if not exists concepto_detalle_template text`)
+    await db.exec(`update public.planes_cobro set concepto_detalle_template = 'Licencia VALIDA · Starter'`)
+    // El Carmen compró un usuario adicional: su cuota 2 trae el desglose, que se conserva.
+    await db.exec(`update public.plan_cobro_cuotas set concepto_detalle = concepto_detalle || '${DESGLOSE}'
+                    where plan_cobro_id = '${BLOQUES[1].plan}' and numero = 2`)
+    // Puerto Test ya tiene la factura de su cuota 2 cargada: dice lo que dice y no se toca.
+    await db.exec(`insert into public.facturas_cuota (workspace_id, plan_cobro_cuota_id, numero, pdf_path, pdf_sha256)
+      select '${WS_METRIK}', id, 'FE-9', 'x/f.pdf', '${'c'.repeat(64)}' from public.plan_cobro_cuotas
+       where plan_cobro_id = '${BLOQUES[2].plan}' and numero = 2`)
+  })
+
+  it('el nombre del plan es la constante que usa la pantalla, literal', () => {
+    expect(LICENCIA_A_SUSCRIPCION).toContain(`c_plan      constant text := '${PLAN_CDA}';`)
+  })
+
+  it('el ensayo lo reporta todo y no deja nada', async () => {
+    const error = await correr(LICENCIA_A_SUSCRIPCION)
+    // 4 planes; cuotas: 8 menos la de Caquetá ya pagada (plantilla de enlaces), la 1 de El Carmen
+    // (su factura FE-1 la cargó la prueba de facturas) y la 2 de Puerto Test, facturada arriba.
+    expect(error).toContain('ENSAYO OK: 4 planes y 5 cuotas cambiarían')
+    expect(error).toContain('No encontrados: {"CP 26 1"}')
+    expect(error).toContain('pagada_o_abonada')
+    expect(error).toContain('facturada')
+    expect(error).toContain('Nada quedó escrito')
+    expect((await conceptos(BLOQUES[3]))[0]).toBe('Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026')
+    expect(await contar('public.planes_cobro', `concepto_detalle_template = 'Licencia VALIDA · Starter'`)).toBe(4)
+  })
+
+  it('aplicado: redacción de Felipe con el periodo, sin tocar lo pagado, lo facturado ni el desglose', async () => {
+    expect(await correr(real())).toBe('')
+    const [caqueta, elcarmen, puertotest, maxitec] = await Promise.all(BLOQUES.map(conceptos))
+    // Caquetá: la cuota 1 ya se pagó (la plantilla de enlaces le puso fecha a su cobro).
+    expect(caqueta).toEqual([
+      'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
+      `${PLAN_CDA}${PERIODO_2}`,
+    ])
+    expect(elcarmen).toEqual([
+      'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026',
+      `${PLAN_CDA}${PERIODO_2}${DESGLOSE}`,
+    ])
+    expect(puertotest).toEqual([
+      `${PLAN_CDA} · periodo del 23-sep al 22-oct`,
+      'Licencia VALIDA · Starter — periodo del 23/10/2026 al 22/11/2026',
+    ])
+    expect(maxitec).toEqual([`${PLAN_CDA} · periodo del 23-sep al 22-oct`, `${PLAN_CDA}${PERIODO_2}`])
+    expect(await contar('public.planes_cobro', `concepto_detalle_template = '${PLAN_CDA}'`)).toBe(4)
+    // La pantalla lee el periodo del concepto nuevo.
+    expect(leerPeriodoEnConcepto(maxitec[1], '2026-10-27')).toMatchObject({ desde: '2026-10-23', hasta: '2026-11-22' })
+  })
+
+  it('una segunda corrida no cambia nada', async () => {
+    const antes = await Promise.all(BLOQUES.map(conceptos))
+    const error = await correr(LICENCIA_A_SUSCRIPCION)
+    expect(error).toContain('ENSAYO OK: 0 planes y 0 cuotas cambiarían')
+    expect(await Promise.all(BLOQUES.map(conceptos))).toEqual(antes)
   })
 })
