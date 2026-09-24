@@ -11,11 +11,14 @@ import { AreaBadge } from '@/components/areas/area-badge'
 import { createStaffMember, updateStaffMember, deleteStaffMember, inviteStaffToPlataform } from './staff-actions'
 import { updateStaffAreas } from '@/lib/actions/equipo-areas'
 import { PhoneInput } from '@/components/phone-input'
+import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 interface StaffSectionProps {
   initialData: Staff[]
   licenseUsed: number
   licenseMax: number
+  /** La persona designada del contrato (CDA): administrador sin costo, no ocupa licencia. */
+  licenseAdminSinCostoId?: string | null
   currentUserRole: string
   /** Mapa staff.id -> areas asignadas (staff_areas, fuente unica). */
   staffAreas?: Record<string, Area[]>
@@ -68,7 +71,7 @@ const ROL_COLORS: Record<string, string> = {
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-export default function StaffSection({ initialData, licenseUsed, licenseMax, currentUserRole, staffAreas = {}, negociosCount = {} }: StaffSectionProps) {
+export default function StaffSection({ initialData, licenseUsed, licenseMax, licenseAdminSinCostoId = null, currentUserRole, staffAreas = {}, negociosCount = {} }: StaffSectionProps) {
   const router = useRouter()
   const [staff, setStaff] = useState<Staff[]>(initialData)
   const [showForm, setShowForm] = useState(false)
@@ -228,7 +231,9 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
             {activeStaff.length} miembro{activeStaff.length !== 1 ? 's' : ''} activo{activeStaff.length !== 1 ? 's' : ''}
             {' · '}
             <span className={licenseUsed >= licenseMax ? 'text-red-500 font-medium' : 'text-primary font-medium'}>
-              {licenseUsed}/{licenseMax} licencia{licenseMax !== 1 ? 's' : ''}
+              {licenseAdminSinCostoId
+                ? `${textoCupo({ usados: licenseUsed, licencias: licenseMax, operativos: true })} · administrador sin costo`
+                : `${licenseUsed}/${licenseMax} licencia${licenseMax !== 1 ? 's' : ''}`}
             </span>
           </p>
         </div>
@@ -420,6 +425,11 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, cur
                     <span className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${rolColor}`}>
                       {ROL_DISPLAY[rol] || rol}
                     </span>
+                    {licenseAdminSinCostoId && s.profile_id === licenseAdminSinCostoId && (
+                      <span className="inline-flex shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        Administrador · sin costo
+                      </span>
+                    )}
                     {(staffAreas[s.id] ?? []).map(a => (
                       <AreaBadge key={a} area={a} size="sm" />
                     ))}

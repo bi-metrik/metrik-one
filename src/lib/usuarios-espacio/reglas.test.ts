@@ -6,7 +6,9 @@ import {
   esAdministradorSinCosto,
   etiquetaRol,
   licenciaAdicionalLiberable,
+  licenciasDelEspacio,
   normalizarCorreo,
+  textoCupo,
   usuariosOperativos,
   validarInvitacion,
 } from './reglas'
@@ -147,5 +149,46 @@ describe('el administrador designado no ocupa licencia (decisión 2026-09-24)', 
     // 3 licencias (1 adicional), designado + 3 operativos; al retirar uno quedan 2 operativos.
     const despues = cupoDelEspacio({ licencias: 3, usuarios: personas('d', 'a', 'b'), designadoId: 'd' })
     expect(licenciaAdicionalLiberable({ licencias: 3, usadosDespues: despues.usados, adicionalesVigentes: 1 })).toBe(true)
+  })
+})
+
+describe('licencias de /config y /mi-negocio (max_seats)', () => {
+  const perfiles = (...ids: string[]) => ids.map((id) => ({ id }))
+
+  it('CDA con max_seats 2, designado + 1 operativo: 1 de 2, cabe el segundo operativo', () => {
+    const l = licenciasDelEspacio({ perfiles: perfiles('d', 'a'), maxSeats: 2, designadoId: 'd' })
+    expect(l).toEqual({ usados: 1, max: 2, adminSinCostoId: 'd' })
+    expect(l.usados < l.max).toBe(true)
+  })
+
+  it('CDA con designado + 2 operativos: lleno, el tercer operativo ya no cabe', () => {
+    const l = licenciasDelEspacio({ perfiles: perfiles('d', 'a', 'b'), maxSeats: 2, designadoId: 'd' })
+    expect(l.usados).toBe(2)
+    expect(l.usados >= l.max).toBe(true)
+  })
+
+  it('sin persona designada cuentan todos los perfiles, como antes', () => {
+    expect(licenciasDelEspacio({ perfiles: perfiles('a', 'b'), maxSeats: 2, designadoId: null })).toEqual({
+      usados: 2,
+      max: 2,
+      adminSinCostoId: null,
+    })
+  })
+
+  it('un designado sin perfil en el espacio no descuenta ni cambia los textos', () => {
+    expect(licenciasDelEspacio({ perfiles: perfiles('a', 'b'), maxSeats: 2, designadoId: 'x' })).toEqual({
+      usados: 2,
+      max: 2,
+      adminSinCostoId: null,
+    })
+  })
+
+  it('max_seats ausente vale 1, como antes', () => {
+    expect(licenciasDelEspacio({ perfiles: [], maxSeats: null, designadoId: null }).max).toBe(1)
+  })
+
+  it('el contador se dice igual en las tres pantallas', () => {
+    expect(textoCupo({ usados: 1, licencias: 2, operativos: true })).toBe('1 de 2 usuarios operativos en uso')
+    expect(textoCupo({ usados: 3, licencias: 5, operativos: false })).toBe('3 de 5 usuarios en uso')
   })
 })

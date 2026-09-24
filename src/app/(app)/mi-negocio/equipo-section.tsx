@@ -21,6 +21,7 @@ interface Props {
   staffMembers: Staff[]
   licenseUsed: number
   licenseMax: number
+  licenseAdminSinCostoId?: string | null
   currentUserRole: string
   /** Staff con sus areas + conteo de negocios (staff_areas, fuente unica). */
   equipoConAreas: StaffConAreas[]
@@ -36,6 +37,7 @@ export default function EquipoSection({
   staffMembers,
   licenseUsed,
   licenseMax,
+  licenseAdminSinCostoId = null,
   currentUserRole,
   equipoConAreas,
   equipoDefaults,
@@ -131,6 +133,7 @@ export default function EquipoSection({
           initialData={staffMembers}
           licenseUsed={licenseUsed}
           licenseMax={licenseMax}
+          licenseAdminSinCostoId={licenseAdminSinCostoId}
           currentUserRole={currentUserRole}
           staffAreas={staffAreas}
           negociosCount={negociosCount}
