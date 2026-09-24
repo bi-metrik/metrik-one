@@ -18,6 +18,11 @@ import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import {
+  identificacionConPrefijoEnFormulario,
+  separarSondasDeContraparte,
+  sondasDeContraparte,
+} from '@/lib/dian/guarda-prefijo-formulario'
+import {
   CLAVE_CONFIRMACION_NIT,
   MENSAJE_NIT_AMBIGUO,
   MENSAJE_NO_COINCIDE,
@@ -558,9 +563,11 @@ export async function generarFormularioCore(
     // Las sondas leen la identificación del mismo bloque de cada NIT, para la guarda de
     // abajo. Se resuelven en la misma consulta y se retiran antes de armar el PDF.
     const { datos, faltantes } = await resolverCamposFuente(
-      supabase, negocioId, lineaId, [...camposFuente, ...sondasDeIdentificacion(template, camposFuente)],
+      supabase, negocioId, lineaId,
+      [...camposFuente, ...sondasDeIdentificacion(template, camposFuente), ...sondasDeContraparte(camposFuente)],
     )
     const sondas = separarSondas(datos)
+    const sondasContraparte = separarSondasDeContraparte(datos)
 
     // Capa editable: el operador puede sobreescribir/llenar cualquier casilla desde
     // la plataforma (data.campos_override). Los overrides tienen prioridad sobre el
@@ -577,6 +584,12 @@ export async function generarFormularioCore(
     // Se mira DESPUÉS de los overrides, porque lo que cuenta es lo que se va a imprimir.
     const nitPegado = nitConDvPegadoEnFormulario(template, camposFuente, datosFinal, sondas)
     if (nitPegado) return { success: false, error: nitPegado }
+
+    // Ni el código del tipo de documento pegado delante (casilla 25 leída junto con la 26):
+    // V0177 salió ante la DIAN con 132747706 por 32747706. Mismo criterio: sobre lo que se
+    // va a imprimir, con la otra casilla del mismo RUT como testigo.
+    const conPrefijo = identificacionConPrefijoEnFormulario(camposFuente, datosFinal, sondasContraparte)
+    if (conPrefijo) return { success: false, error: conPrefijo }
 
     // El negocio se lee ACÁ y no en el paso 3 porque la guarda de abajo necesita su
     // `metadata`: las confirmaciones del NIT viven en el negocio, no en el bloque.
