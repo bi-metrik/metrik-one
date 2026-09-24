@@ -36,6 +36,8 @@ import { EtapasNoAplican } from './etapas-no-aplican'
 import { AvisoNoAplicaPanel } from './aviso-no-aplica'
 import type { AvisoNoAplica } from '@/lib/negocios/no-aplica'
 import PanelContacto from './panel-contacto'
+import PanelDatosClave from './panel-datos-clave'
+import type { VistaDatosClave } from '@/lib/negocios/datos-clave'
 import { encabezadoDelMarco, type MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
 import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '../marco-cotizacion-contexto'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
@@ -2150,6 +2152,8 @@ interface Props {
   etapasNoAplican?: EtapaNoAplica[]
   /** El caso entero no le aplica a este proceso, y por que. Ver `lib/negocios/no-aplica`. */
   noAplica?: AvisoNoAplica | null
+  /** Tarjeta «Datos clave» de la línea con sus contradicciones. Ver `lib/negocios/datos-clave`. */
+  datosClave?: VistaDatosClave | null
   profiles: Array<{ id: string; full_name: string | null; email: string | null; role: string | null; activo: boolean }>
   currentUserId: string | null
   currentUserEsResponsable: boolean
@@ -2250,6 +2254,7 @@ export default function NegocioDetailClient({
   etapasLinea,
   etapasNoAplican,
   noAplica = null,
+  datosClave = null,
   profiles,
   currentUserId,
   currentUserEsResponsable,
@@ -2606,7 +2611,8 @@ export default function NegocioDetailClient({
             El nombre y el teléfono se ven sin abrir nada —el nombre es
             obligatorio ahí desde que el header dejó de pintarlo—; el resto va
             detrás del toggle. */}
-        <div className="lg:hidden">
+        <div className="space-y-3 lg:hidden">
+          <PanelDatosClave vista={datosClave} />
           <PanelContacto
             variant="movil"
             contacto={negocio.contactos}
@@ -2722,7 +2728,10 @@ export default function NegocioDetailClient({
             atrapa ningún containing block. */}
         {/* `lg:items-start` en el grid es lo que hace que `sticky` funcione: sin
             eso el item se estira a la altura de la fila y nunca se despega. */}
-        <aside className="hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <aside className="hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:space-y-3">
+          {/* Datos clave ARRIBA del contacto: es lo que cambia el trámite, y en esta
+              columna es lo primero que se lee sin bajar. */}
+          <PanelDatosClave vista={datosClave} />
           <PanelContacto
             variant="rail"
             contacto={negocio.contactos}

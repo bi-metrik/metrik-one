@@ -214,6 +214,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     etapasLinea: data.etapasLinea,
     etapasNoAplican: data.etapasNoAplican,
     noAplica: data.noAplica,
+    datosClave: data.datosClave,
     profiles: data.profiles,
     currentUserId: data.currentUserId,
     currentUserEsResponsable: data.currentUserEsResponsable,
