@@ -44,3 +44,11 @@ MeTRIK aporta a Dimpro) — `liquidacion.ts`. El mes sale del PAGO (`fecha_prime
 - dimpro tiene `business` (= Clarity) pero no `clarity` como llave: `REQUISITO.clarity` mira `business`.
 - `cambiarEtapaNegocioConGate` solo escribe `activity_log` si hay `staffId`; el soporte de MeTRIK en dimpro
   no tiene staff activo, así que sus avances no dejan fila (un UPDATE por SQL tampoco: no hay trigger).
+
+**2026-09-24, PR #920 (mergeado `6fcb5d64`, sin migración):** pestaña «Marketplace» en `/tableros`, solo con
+`modules.ferreteria`. Cálculo puro en `src/lib/tableros/ferreteria.ts`; metas en código en
+`src/lib/ferreteria/metas.ts` (se recalibran al cierre de octubre editando ese archivo, no la base).
+- Clics = diferencia de acumulados por aviso: la primera medición es línea base, un salto negativo es
+  reinicio (cuenta lo nuevo), los días sin medición no se reparten, se marcan.
+- Ferretería NO entra en `tieneTablerosPropios`: dimpro conserva las pestañas genéricas.
+- Sin QA en pantalla con datos reales al cerrar; las metas solo se ven desde octubre.
