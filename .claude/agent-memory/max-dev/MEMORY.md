@@ -65,6 +65,7 @@
 - ⚠️⚠️ [La Recomendada manda y el cliente escoge (#836)](project_recomendada_tarifa_elegida.md) — `es_principal` ya no decide; el gate de margen no mira la Recomendada
 - ⚠️ [Cotización con el negocio adentro (Trappvel)](project_cotizacion_con_negocio_trappvel.md) — #872 y #874; el marco de #874 lo reemplazó #882
 - [Año deducido y marco idéntico (#880, #882)](project_anio_inferido_y_marco_identico.md) — sufijo `/lun` verificado en vivo; 5 ítems del encabezado sin decidir
+- ⚠️ [Habitaciones por opción de hotel (R8)](project_habitaciones_hotel_r8.md) — unión en fila tras leer; sin QA en pantalla (prod se escribe al abrir)
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`
 - ⚠️⚠️ [Captura de cotización, Parte B (#847)](project_captura_cotizacion_parte_b.md) — SIN mergear: migración de ranuras ANTES del merge
 - ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
