@@ -183,7 +183,10 @@ function LecturaEnDisputa({ voto, corregirLectura }: { voto: ResultadoVoto; corr
             </span>
             {f.estado === 'dudosa' && (
               <span className="rounded bg-red-100 px-1 py-px text-[10px] font-semibold uppercase tracking-wide dark:bg-red-900/50">
-                Lectura dudosa{f.dv_invalido ? ' · no valida con su DV' : ''}
+                Lectura dudosa
+                {f.forma === 'prefijo' || f.forma === 'prefijo_y_dv'
+                  ? ' · trae el código del tipo de documento'
+                  : f.dv_invalido ? ' · no valida con su DV' : ''}
               </span>
             )}
             {f.estado === 'en_disputa' && (

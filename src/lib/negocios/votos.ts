@@ -19,6 +19,11 @@
  * - «Lo mismo» es `mismoDocumento` (tolera el DV pegado, el «13» del tipo de documento y
  *   el celular leído como documento), o la igualdad exacta. Un dígito distinto NO se
  *   tolera: es justo el error que el voto existe para ver.
+ * - Tolerar al comparar no es dar por buena la lectura. El valor que se propone es siempre
+ *   el LIMPIO (sin el «13» delante ni el DV detrás), y una lectura con el código del tipo
+ *   de documento pegado es dudosa aunque diga el mismo documento: V0521 guardó 1380180688
+ *   en la casilla 26 y la tarjeta decía que «coincidía» con la casilla 5 y la factura.
+ *   El DV pegado de la factura sí coincide: así lo imprime la factura. Ver `formaLimpia`.
  * - Una fuente que falta, o cuyo bloque no le aplica al caso, no vota. Con menos de dos
  *   fuentes no hay voto; solo cuenta el dígito de verificación (abajo).
  * - Una lectura que una PERSONA editó (`edicion` en el campo) está verificada: si queda en
@@ -38,6 +43,7 @@
  */
 
 import { calcularDvNit } from '@/lib/dian/nit'
+import { formaLimpia } from '@/lib/dian/prefijo-tipo-documento'
 import { parsearPersonas } from '@/lib/documentos/personas'
 import { valorCumpleCondicion } from './condicion-bloque'
 import { mismoDocumento, valorDe, type ContextoFuentes } from './fuentes-negocio'
@@ -115,6 +121,13 @@ export interface LecturaFuente {
   archivo: string | null
   alimenta_generacion: boolean
   estado: EstadoLectura
+  /**
+   * La lectura dice el mismo documento que la mayoría, pero con algo pegado: el código del
+   * tipo de documento delante (`prefijo`, `prefijo_y_dv`: es lectura dudosa) o el dígito de
+   * verificación detrás (`dv_pegado`: coincide, es la forma en que la factura lo imprime).
+   * Ausente si la lectura es el número limpio. Ver `formaLimpia`.
+   */
+  forma?: 'prefijo' | 'dv_pegado' | 'prefijo_y_dv'
 }
 
 export type EstadoVoto = 'acuerdo' | 'dudosa' | 'manual' | 'sin_contraste'
@@ -242,7 +255,7 @@ function testigoDv(ctx: ContextoFuentes, slug: string, field: string): string | 
   return v || null
 }
 
-type Leida = Omit<LecturaFuente, 'estado'>
+type Leida = Omit<LecturaFuente, 'estado' | 'forma'>
 
 async function leerFuente(
   f: FuenteVoto,
@@ -317,13 +330,19 @@ function elegirPersona(filas: Array<{ nombre: unknown; documento: string }>, nom
 
 // ── El voto ─────────────────────────────────────────────────────────────────────
 
-function valorDeLaMayoria(grupo: Leida[]): string {
+/**
+ * El valor que se propone: el de la mayoría, en su forma LIMPIA. Una lectura con el «13»
+ * del tipo de documento o con el DV pegado cuenta para la mayoría (dice el mismo documento)
+ * pero nunca es el valor propuesto: ese es el que se escribe al corregir y el que se
+ * imprime en los documentos para la DIAN.
+ */
+function valorDeLaMayoria(grupo: Leida[], limpio: (l: Leida) => string): string {
   const verificada = grupo.find(l => l.verificada)
-  if (verificada) return verificada.valor
+  if (verificada) return limpio(verificada)
   const cuenta = new Map<string, number>()
-  for (const l of grupo) cuenta.set(l.valor, (cuenta.get(l.valor) ?? 0) + 1)
-  let mejor = grupo[0].valor
-  for (const l of grupo) if ((cuenta.get(l.valor) ?? 0) > (cuenta.get(mejor) ?? 0)) mejor = l.valor
+  for (const l of grupo) cuenta.set(limpio(l), (cuenta.get(limpio(l)) ?? 0) + 1)
+  let mejor = limpio(grupo[0])
+  for (const l of grupo) if ((cuenta.get(limpio(l)) ?? 0) > (cuenta.get(mejor) ?? 0)) mejor = limpio(l)
   return mejor
 }
 
@@ -384,16 +403,30 @@ export function decidirVoto(
       `${voto.label}: las fuentes no coinciden (${fuentes.map(f => `${f.etiqueta} ${f.valor}`).join(', ')}). Hay que revisarlo a mano.`)
   }
 
-  const valor = valorDeLaMayoria(primero)
+  // La forma de cada lectura de la mayoría, contra las demás de la mayoría (el testigo es
+  // siempre otra fuente, nunca la forma del número sola).
+  const formas = new Map<Leida, ReturnType<typeof formaLimpia>>()
+  for (const l of primero) formas.set(l, formaLimpia(l.valor, primero.filter(o => o !== l).map(o => o.valor)))
+  const limpio = (l: Leida) => formas.get(l)?.limpio ?? l.valor
+  const valor = valorDeLaMayoria(primero, limpio)
   const fuentes: LecturaFuente[] = lecturas.map(l => {
-    if (primero.includes(l)) return { ...l, estado: 'coincide' }
-    return { ...l, estado: l.verificada ? 'confirmada' : 'dudosa' }
+    if (!primero.includes(l)) return { ...l, estado: l.verificada ? 'confirmada' : 'dudosa' }
+    const forma = formas.get(l)?.forma ?? 'limpio'
+    if (forma === 'limpio') return { ...l, estado: 'coincide' }
+    // El «13» pegado es una lectura mala aunque diga el mismo documento: es la que salió
+    // impresa ante la DIAN en V0177. Ni una edición a mano la deja pasar.
+    if (forma === 'prefijo' || forma === 'prefijo_y_dv') return { ...l, estado: 'dudosa', forma }
+    return { ...l, estado: 'coincide', forma }
   })
   const dudosas = fuentes.filter(f => f.estado === 'dudosa')
   if (dudosas.length === 0) return cerrar('acuerdo', valor, fuentes, null)
   const mayoria = fuentes.filter(f => f.estado === 'coincide')
+  const detalle = (d: LecturaFuente) =>
+    d.forma === 'prefijo' || d.forma === 'prefijo_y_dv'
+      ? `${d.etiqueta} (${d.valor}: trae pegado delante el código del tipo de documento)`
+      : `${d.etiqueta} (${d.valor})`
   return cerrar('dudosa', valor, fuentes,
-    `${voto.label}: lectura dudosa en ${dudosas.map(d => `${d.etiqueta} (${d.valor})`).join(' y ')}. ` +
+    `${voto.label}: lectura dudosa en ${dudosas.map(detalle).join(' y ')}. ` +
     `${listaEtiquetas(mayoria)} ${mayoria.length === 1 ? 'dice' : 'dicen'} ${valor}.`)
 }
 

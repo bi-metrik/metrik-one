@@ -140,12 +140,100 @@ describe('voto entre fuentes: los casos del 24-sep', () => {
   })
 })
 
+// Los cinco casos con el «13» (o el «1») de la casilla 25 pegado a la casilla 26, con las
+// lecturas que la base guardaba el 2026-09-24 antes de corregirlas.
+function casoPrefijo(nombreRut: string, ni: string, nit: string, dv: string, compradores: string, cert?: string) {
+  const c: Record<string, Record<string, unknown>> = {
+    rut: doc({ razon_social: nombreRut, nit, dv, numero_identificacion: ni, tipo_documento: 'Cédula de Ciudadanía' }),
+    factura_venta_vehiculo: doc({ compradores }),
+  }
+  if (cert) c.concepto_upme = doc({ nombre_certificado: nombreRut, numero_identificacion_certificado: cert })
+  return c
+}
+const PREFIJO = {
+  V0521: casoPrefijo('ALARCON CARRASQUILLA WILSON ALEXANDER', '1380180688', '80180688', '9',
+    'WILSON ALEXANDER ALARCON CARRASQUILLA (801806889)'),
+  V0254: casoPrefijo('GARCIA GIRALDO NELSON ARIEL', '1379907467', '79907467', '7',
+    'NELSON ARIEL GARCIA GIRALDO (79907467)', '79907467'),
+  V0110: casoPrefijo('GARMENDIA FERNANDEZ ANDER', '1379485203', '79485203', '7',
+    'Ander Garmendia Fernández (79485203)', '79485203'),
+  V0395: casoPrefijo('GONZALEZ ARDILA GERARDO', '137556326', '7556326', '8',
+    'GERARDO GONZALEZ ARDILA (7556326)', '7556326'),
+  V0177: casoPrefijo('RAMIREZ SANCHEZ MARGARITA MARIA', '132747706', '32747706', '4',
+    'RAMIREZ SANCHEZ MARGARITA MARIA (32747706)', '32747706'),
+}
+
+describe('la casilla 26 con el código del tipo de documento pegado', () => {
+  it.each([
+    ['V0521', '80180688'],
+    ['V0254', '79907467'],
+    ['V0110', '79485203'],
+    ['V0395', '7556326'],
+    ['V0177', '32747706'],
+  ] as const)('%s: la casilla 26 es la lectura dudosa, se propone %s y no se genera', async (cod, limpio) => {
+    const r = await votar(PREFIJO[cod], 6)
+    expect(r.estado).toBe('dudosa')
+    expect(r.valor).toBe(limpio)
+    const dudosas = r.fuentes.filter(f => f.estado === 'dudosa')
+    expect(dudosas.map(f => f.etiqueta)).toEqual(['RUT (casilla 26)'])
+    expect(dudosas[0].forma).toBe('prefijo')
+    // La casilla 26 alimenta la declaración y la relación: con ella dudosa no se generan.
+    expect(r.niega_generacion).toBe(true)
+    expect(r.bloquea).toBe(true)
+    expect(r.mensaje).toContain('código del tipo de documento')
+    expect(r.mensaje).toContain(limpio)
+  })
+
+  it('V0521: la tarjeta ya no dice que 1380180688 «coincide»; la factura con el DV pegado sí coincide', async () => {
+    const r = await votar(PREFIJO.V0521, 6)
+    const porEtiqueta = Object.fromEntries(r.fuentes.map(f => [f.etiqueta, f]))
+    expect(porEtiqueta['RUT (casilla 26)'].estado).toBe('dudosa')
+    expect(porEtiqueta['RUT (casilla 5)'].estado).toBe('coincide')
+    expect(porEtiqueta['Factura'].estado).toBe('coincide')
+    expect(porEtiqueta['Factura'].forma).toBe('dv_pegado')
+    expect(r.valor).toBe('80180688')
+  })
+
+  it('V0521 corregido: acuerdo, se propone el NIT limpio, sin aviso', async () => {
+    const corregido = { ...PREFIJO.V0521, rut: doc({
+      razon_social: 'ALARCON CARRASQUILLA WILSON ALEXANDER', nit: '80180688', dv: '9',
+      numero_identificacion: '80180688', tipo_documento: 'Cédula de Ciudadanía',
+    }) }
+    const r = await votar(corregido, 6)
+    expect(r.estado).toBe('acuerdo')
+    expect(r.valor).toBe('80180688')
+    expect(r.niega_generacion).toBe(false)
+    expect(r.bloquea).toBe(false)
+  })
+
+  it('el prefijo se marca aunque una persona haya editado el campo: el número no se imprime así', async () => {
+    const editado = { ...PREFIJO.V0395, rut: doc({
+      razon_social: 'GONZALEZ ARDILA GERARDO', nit: '7556326', dv: '8', tipo_documento: 'Cédula de Ciudadanía',
+      numero_identificacion: { value: '137556326', edicion: { editado_por_nombre: 'Deisy' } },
+    }) }
+    const r = await votar(editado, 6)
+    expect(r.estado).toBe('dudosa')
+    expect(r.valor).toBe('7556326')
+  })
+})
+
 describe('las reglas del voto', () => {
-  it('un dígito distinto NO se tolera, pero el DV pegado y el «13» sí', async () => {
-    for (const leido of ['133556837', '35568371']) {
-      const pegado = { ...V0286, rut: doc({ razon_social: 'CASTRILLON CASTAÑO ARLEY GIOVANNI', numero_identificacion: leido }) }
-      expect((await votar(pegado)).estado, leido).toBe('acuerdo')
-    }
+  it('un dígito distinto NO se tolera; el DV pegado coincide y el «13» pegado es lectura dudosa', async () => {
+    // El DV pegado es la forma en que un papel imprime el mismo documento: coincide, y el
+    // valor que se propone es el limpio.
+    const conDv = { ...V0286, rut: doc({ razon_social: 'CASTRILLON CASTAÑO ARLEY GIOVANNI', numero_identificacion: '35568375' }) }
+    const rDv = await votar(conDv)
+    expect(rDv.estado).toBe('acuerdo')
+    expect(rDv.valor).toBe('3556837')
+    expect(rDv.fuentes.find(f => f.etiqueta === 'RUT (casilla 26)')?.forma).toBe('dv_pegado')
+    // El «13» del tipo de documento pegado delante se tolera para AGRUPAR (no es otra
+    // persona), pero es una lectura mala: se marca dudosa y se propone el número limpio.
+    const conTipo = { ...V0286, rut: doc({ razon_social: 'CASTRILLON CASTAÑO ARLEY GIOVANNI', numero_identificacion: '133556837' }) }
+    const rTipo = await votar(conTipo)
+    expect(rTipo.estado).toBe('dudosa')
+    expect(rTipo.valor).toBe('3556837')
+    expect(rTipo.fuentes.find(f => f.estado === 'dudosa')?.forma).toBe('prefijo')
+
     const unDigito = { ...V0286, rut: doc({ razon_social: 'CASTRILLON CASTAÑO ARLEY GIOVANNI', numero_identificacion: '3556887' }) }
     expect((await votar(unDigito)).estado).toBe('dudosa')
   })

@@ -10,6 +10,8 @@
  *  1. `nit_sin_dv` (opt-in por campo) — deja el NIT base sin el DV pegado.
  *  2. NIT y DV del RUT (GENÉRICA, sin opt-in) — cualquier bloque cuyos campos incluyan
  *     `nit`. Ver `normalizarNitYDv`.
+ *  2b. Casilla 26 sin el código del tipo de documento pegado delante, y `nit_completo`
+ *     sin el DV repetido (GENÉRICA). Ver `normalizarIdentificacionRut`.
  *  3. `dv_desde_nit` (opt-in por campo) — recalcula el DV sobre el NIT ya limpio.
  *  4. `divipola_desde_nombres` (opt-in por campo) — códigos de ubicación desde nombres.
  *
@@ -23,6 +25,12 @@
 import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
 import { calcularDvNit, diagnosticarNitDv, nitSinDv } from '@/lib/dian/nit'
 import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
+import {
+  esCedulaDeCiudadania,
+  esOtroTipoDeDocumento,
+  nitCompletoSinDvDoble,
+  sinPrefijoDeTipo,
+} from '@/lib/dian/prefijo-tipo-documento'
 
 /**
  * Confianza de un campo que una persona tiene que mirar.
@@ -126,6 +134,70 @@ export function normalizarNitYDv(
   return cambios
 }
 
+export interface CambioIdentificacion {
+  campo: 'numero_identificacion' | 'nit' | 'nit_completo'
+  antes: string | null
+  despues: string | null
+  motivo: 'prefijo_tipo_documento' | 'cc_casillas_distintas' | 'nit_completo_dv_doble'
+}
+
+/**
+ * La casilla 26 del RUT (`numero_identificacion`) sin el código de la casilla 25 pegado
+ * delante, y `nit_completo` sin el DV repetido. Corre DESPUÉS de `normalizarNitYDv`: el
+ * testigo es el NIT de la casilla 5 ya limpio.
+ *
+ * - Si la casilla 26 es «13» + NIT (o «1» + NIT, ver `sinPrefijoDeTipo`), se guarda el
+ *   NIT y lo leído queda en `leido`. El testigo es otra casilla del mismo papel: no se
+ *   adivina por la forma del número.
+ * - Con cédula de ciudadanía la casilla 26 tiene que ser la 5. Si después de limpiar no
+ *   lo es, las dos bajan a «Verificar»: no se sabe cuál se leyó mal.
+ * - Con otro tipo de documento legible (extranjería, pasaporte, NIT) no se toca nada:
+ *   ahí las dos casillas difieren por diseño.
+ * - `nit_completo` con el DV dos veces («799074677-7») queda «79907467-7».
+ */
+export function normalizarIdentificacionRut(
+  campos: CampoExtraccion[],
+  resultado: Record<string, CampoResultado>,
+): CambioIdentificacion[] {
+  const slugs = new Set(campos.map((c) => c.slug))
+  if (!slugs.has('nit')) return []
+  const cambios: CambioIdentificacion[] = []
+  const nit = resultado.nit?.value ?? null
+  if (!nit) return cambios
+
+  const ncC = slugs.has('nit_completo') ? resultado.nit_completo : undefined
+  if (ncC?.value && !campoProtegido(ncC)) {
+    const bueno = nitCompletoSinDvDoble(ncC.value, nit)
+    if (bueno) {
+      cambios.push({ campo: 'nit_completo', antes: ncC.value, despues: bueno, motivo: 'nit_completo_dv_doble' })
+      ncC.value = bueno
+    }
+  }
+
+  if (!slugs.has('numero_identificacion')) return cambios
+  const tipo = resultado.tipo_documento?.value ?? null
+  if (esOtroTipoDeDocumento(tipo)) return cambios
+  const idC = resultado.numero_identificacion
+  if (!idC?.value || campoProtegido(idC)) return cambios
+
+  const limpio = sinPrefijoDeTipo(idC.value, nit)
+  if (limpio) {
+    cambios.push({ campo: 'numero_identificacion', antes: idC.value, despues: limpio, motivo: 'prefijo_tipo_documento' })
+    idC.leido = idC.value
+    idC.value = limpio
+    return cambios
+  }
+
+  const d = (v: unknown) => String(v ?? '').replace(/\D/g, '')
+  if (esCedulaDeCiudadania(tipo) && d(idC.value) !== d(nit)) {
+    cambios.push({ campo: 'numero_identificacion', antes: idC.value, despues: idC.value, motivo: 'cc_casillas_distintas' })
+    bajarConfianza(idC)
+    const nitC = resultado.nit
+    if (nitC && !campoProtegido(nitC)) bajarConfianza(nitC)
+  }
+  return cambios
+}
+
 /**
  * Todas las normalizaciones, en orden. Ver el encabezado.
  */
@@ -156,6 +228,11 @@ export function aplicarNormalizaciones(
   // Pasada 2: NIT y DV (genérica). Con testigo, a diferencia de la pasada 1.
   for (const c of normalizarNitYDv(campos, resultado)) {
     console.warn(`[documento] nit/dv ${c.campo}: "${c.antes}" → "${c.despues}" (${c.motivo})`)
+  }
+  // Pasada 2b: casilla 26 sin el código del tipo de documento (testigo: la casilla 5
+  // ya limpia) y `nit_completo` sin el DV repetido.
+  for (const c of normalizarIdentificacionRut(campos, resultado)) {
+    console.warn(`[documento] identificación ${c.campo}: "${c.antes}" → "${c.despues}" (${c.motivo})`)
   }
   // Pasada 3: dv_desde_nit (recalcula el DV desde el NIT base ya normalizado).
   for (const campo of campos) {
