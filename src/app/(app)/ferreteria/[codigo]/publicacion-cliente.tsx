@@ -23,6 +23,8 @@ import {
 } from '@/lib/ferreteria/reglas'
 import { agregarNotaAction, guardarPublicacionAction, registrarVentaAction } from '../actions'
 import { PuntoPendiente } from '../ferreteria-cliente'
+import { Th, aplicarOrden, useOrden } from '../orden-tabla'
+import { fechaComoNumero, type ValorOrden } from '@/lib/ferreteria/orden'
 
 const ETIQUETA_EVENTO: Record<string, string> = {
   creada: 'Creada',
@@ -35,6 +37,39 @@ const ETIQUETA_EVENTO: Record<string, string> = {
   aplicado_en_canal: 'Aplicado en Marketplace',
   error_en_canal: 'Error al aplicar en Marketplace',
 }
+
+type Costo = Detalle['costos'][number]
+type Medicion = Detalle['mediciones'][number]
+type Conversacion = Detalle['conversaciones'][number]
+type Venta = Detalle['ventas'][number]
+
+const COLUMNAS_COSTO = {
+  lista: (c: Costo) => fechaComoNumero(c.fecha_lista),
+  f: (c: Costo) => c.costo_f,
+  d: (c: Costo) => c.costo_d,
+} satisfies Record<string, (c: Costo) => ValorOrden>
+
+const COLUMNAS_MEDICION = {
+  fecha: (m: Medicion) => fechaComoNumero(m.fecha),
+  clics: (m: Medicion) => (m.clics_acumulados == null ? null : Number(m.clics_acumulados)),
+  guardados: (m: Medicion) => (m.guardados == null ? null : Number(m.guardados)),
+  estado: (m: Medicion) => m.estado_visto,
+} satisfies Record<string, (m: Medicion) => ValorOrden>
+
+const COLUMNAS_CONVERSACION = {
+  fecha: (c: Conversacion) => fechaComoNumero(c.fecha),
+  interesado: (c: Conversacion) => c.interesado,
+  canal: (c: Conversacion) => c.canal,
+  resultado: (c: Conversacion) => c.resultado,
+} satisfies Record<string, (c: Conversacion) => ValorOrden>
+
+const COLUMNAS_VENTA = {
+  fecha: (v: Venta) => fechaComoNumero(v.fecha_primer_pago),
+  precio: (v: Venta) => v.precio_final,
+  costo: (v: Venta) => v.costo_dia,
+  ganancia: (v: Venta) => v.ganancia,
+  ruta: (v: Venta) => v.ruta,
+} satisfies Record<string, (v: Venta) => ValorOrden>
 
 function fechaHora(iso: string): string {
   return new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' })
@@ -100,6 +135,10 @@ export function PublicacionCliente({
   const [pendiente, iniciar] = useTransition()
   const vigente = costoVigente(costos)
   const tono = semaforoPendiente(pub, new Date(ahoraIso))
+  const ordenCostos = useOrden<keyof typeof COLUMNAS_COSTO>()
+  const ordenMediciones = useOrden<keyof typeof COLUMNAS_MEDICION>()
+  const ordenConversaciones = useOrden<keyof typeof COLUMNAS_CONVERSACION>()
+  const ordenVentas = useOrden<keyof typeof COLUMNAS_VENTA>()
   const fotos = Array.isArray(producto.fotos) ? producto.fotos.filter((u): u is string => typeof u === 'string' && u.length > 0) : []
 
   // ── Edición ──
@@ -178,7 +217,7 @@ export function PublicacionCliente({
       <header className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <PuntoPendiente tono={tono} titulo={tono === 'rojo' ? 'Sin aplicar tras dos corridas' : 'Pendiente de aplicar en Marketplace'} />
-          <h1 className="text-xl font-semibold">{pub.codigo} · {producto.nombre}</h1>
+          <h1 className="text-xl font-semibold"><span className="whitespace-nowrap">{pub.codigo}</span> · {producto.nombre}</h1>
           <span className="rounded border px-2 py-0.5 text-xs">{ETIQUETA_ESTADO[pub.estado]}</span>
           {pub.link && (
             <a href={pub.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
@@ -222,12 +261,16 @@ export function PublicacionCliente({
           {costos.length > 1 && (
             <table className="mt-3 w-full text-xs">
               <thead className="text-left text-muted-foreground">
-                <tr><th>Lista</th><th className="text-right">F</th><th className="text-right">D</th></tr>
+                <tr>
+                  <Th orden={ordenCostos} clave="lista">Lista</Th>
+                  <Th orden={ordenCostos} clave="f" derecha>F</Th>
+                  <Th orden={ordenCostos} clave="d" derecha>D</Th>
+                </tr>
               </thead>
               <tbody>
-                {costos.map((c) => (
+                {aplicarOrden(costos, ordenCostos, COLUMNAS_COSTO).map((c) => (
                   <tr key={c.fecha_lista} className="border-t">
-                    <td className="py-1">{c.fecha_lista}</td>
+                    <td className="whitespace-nowrap py-1">{c.fecha_lista}</td>
                     <td className="py-1 text-right tabular-nums">{formatoPesos(c.costo_f)}</td>
                     <td className="py-1 text-right tabular-nums">{c.costo_d != null ? formatoPesos(c.costo_d) : '—'}</td>
                   </tr>
@@ -365,12 +408,18 @@ export function PublicacionCliente({
             ) : (
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted-foreground">
-                  <tr><th>Fecha</th><th className="text-right">Clics acum.</th><th className="text-right">Guardados</th><th>Estado visto</th></tr>
+                  <tr>
+                    <Th orden={ordenMediciones} clave="fecha">Fecha</Th>
+                    <Th orden={ordenMediciones} clave="clics" derecha>Clics acum.</Th>
+                    <Th orden={ordenMediciones} clave="guardados" derecha>Guardados</Th>
+                    <Th orden={ordenMediciones} clave="estado" className="pl-2">Estado visto</Th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {mediciones.slice(0, 30).map((m) => (
+                  {/* Las 30 mediciones más recientes (así llegan del servidor); el orden se aplica sobre esas. */}
+                  {aplicarOrden(mediciones.slice(0, 30), ordenMediciones, COLUMNAS_MEDICION).map((m) => (
                     <tr key={m.fecha} className="border-t">
-                      <td className="py-1">{m.fecha}</td>
+                      <td className="whitespace-nowrap py-1">{m.fecha}</td>
                       <td className="py-1 text-right tabular-nums">{m.clics_acumulados}</td>
                       <td className="py-1 text-right tabular-nums">{m.guardados ?? '—'}</td>
                       <td className="py-1 pl-2 text-xs">{m.estado_visto ?? ''}</td>
@@ -385,14 +434,26 @@ export function PublicacionCliente({
             {conversaciones.length === 0 ? (
               <p className="text-sm text-muted-foreground">Sin conversaciones.</p>
             ) : (
-              <ul className="space-y-1 text-sm">
-                {conversaciones.map((c) => (
-                  <li key={c.id} className="flex justify-between gap-2 border-t pt-1 first:border-t-0">
-                    <span>{c.interesado} <span className="text-xs text-muted-foreground">· {c.canal} · {c.fecha}</span></span>
-                    <span className="text-xs">{c.resultado}{c.motivo_perdida ? ` (${c.motivo_perdida})` : ''}</span>
-                  </li>
-                ))}
-              </ul>
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs text-muted-foreground">
+                  <tr>
+                    <Th orden={ordenConversaciones} clave="fecha">Fecha</Th>
+                    <Th orden={ordenConversaciones} clave="interesado" className="pl-2">Interesado</Th>
+                    <Th orden={ordenConversaciones} clave="canal" className="pl-2">Canal</Th>
+                    <Th orden={ordenConversaciones} clave="resultado" className="pl-2">Resultado</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aplicarOrden(conversaciones, ordenConversaciones, COLUMNAS_CONVERSACION).map((c) => (
+                    <tr key={c.id} className="border-t">
+                      <td className="whitespace-nowrap py-1">{c.fecha}</td>
+                      <td className="py-1 pl-2">{c.interesado}</td>
+                      <td className="py-1 pl-2 text-xs">{c.canal}</td>
+                      <td className="py-1 pl-2 text-xs">{c.resultado}{c.motivo_perdida ? ` (${c.motivo_perdida})` : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </Seccion>
 
@@ -402,12 +463,18 @@ export function PublicacionCliente({
             ) : (
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted-foreground">
-                  <tr><th>Primer pago</th><th className="text-right">Precio</th><th className="text-right">Costo</th><th className="text-right">Ganancia</th><th>Ruta</th></tr>
+                  <tr>
+                    <Th orden={ordenVentas} clave="fecha">Primer pago</Th>
+                    <Th orden={ordenVentas} clave="precio" derecha>Precio</Th>
+                    <Th orden={ordenVentas} clave="costo" derecha>Costo</Th>
+                    <Th orden={ordenVentas} clave="ganancia" derecha>Ganancia</Th>
+                    <Th orden={ordenVentas} clave="ruta" className="pl-2">Ruta</Th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {ventas.map((v) => (
+                  {aplicarOrden(ventas, ordenVentas, COLUMNAS_VENTA).map((v) => (
                     <tr key={v.id} className="border-t">
-                      <td className="py-1">{v.fecha_primer_pago}</td>
+                      <td className="whitespace-nowrap py-1">{v.fecha_primer_pago}</td>
                       <td className="py-1 text-right tabular-nums">{formatoPesos(v.precio_final)}</td>
                       <td className="py-1 text-right tabular-nums">{formatoPesos(v.costo_dia)}</td>
                       <td className="py-1 text-right tabular-nums">{formatoPesos(v.ganancia)}</td>
