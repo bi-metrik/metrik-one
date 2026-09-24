@@ -116,7 +116,8 @@ describe('los avisos que ven todos (plazo y mora)', () => {
     const html = renderToStaticMarkup(
       React.createElement(AvisoPlazoTerminos, { plazoHasta: '2026-09-30', puedeAceptar: true, designadoNombre: 'Alba' }),
     )
-    expect(texto(html)).toContain('a más tardar el 30-sep; desde el 1-oct, sin esa aceptación, Valida se pausa.')
+    expect(texto(html)).toContain('El servicio de Valida se suspenderá al terminar el 30-sep')
+    expect(texto(html)).not.toContain('Pídele')
     expect(html).toContain('href="/valida?terminos=1"')
   })
 
@@ -124,7 +125,16 @@ describe('los avisos que ven todos (plazo y mora)', () => {
     const html = renderToStaticMarkup(
       React.createElement(AvisoPlazoTerminos, { plazoHasta: '2026-09-30', puedeAceptar: false, designadoNombre: 'Alba' }),
     )
-    expect(texto(html)).toContain('La persona designada es Alba.')
+    expect(texto(html)).toContain('El servicio de Valida se suspenderá al terminar el 30-sep')
+    expect(texto(html)).toContain('La persona designada es Alba. Pídele que ingrese a Valida y los acepte.')
+    expect(html).not.toContain('terminos=1')
+  })
+
+  it('sin nombre de la designada, igual le pide al operador que la busque', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(AvisoPlazoTerminos, { plazoHasta: '2026-09-30', puedeAceptar: false, designadoNombre: null }),
+    )
+    expect(texto(html)).toContain('Pídele a la persona designada que ingrese a Valida y los acepte.')
     expect(html).not.toContain('terminos=1')
   })
 

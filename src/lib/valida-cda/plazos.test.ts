@@ -55,10 +55,13 @@ describe('plazo para aceptar los términos', () => {
     expect(enPlazoParaAceptar('', '2026-09-23')).toBe(false)
   })
 
-  it('el aviso dice el último día y desde cuándo se pausa', () => {
-    expect(textoAvisoPlazo('2026-09-30')).toBe(
-      'La persona designada por tu empresa debe aceptar los Términos a más tardar el 30-sep; desde el 1-oct, sin esa aceptación, Valida se pausa.',
+  it('el aviso dice que el servicio se suspende al terminar el último día del plazo', () => {
+    expect(textoAvisoPlazo('2026-09-27')).toBe(
+      'El servicio de Valida se suspenderá al terminar el 27-sep si la persona designada por tu empresa no ha aceptado los Términos.',
     )
+    // El último día del aviso es el mismo que todavía opera: el 27 abre, el 28 no.
+    expect(enPlazoParaAceptar('2026-09-27', '2026-09-27')).toBe(true)
+    expect(enPlazoParaAceptar('2026-09-27', '2026-09-28')).toBe(false)
   })
 })
 
