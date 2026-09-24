@@ -416,7 +416,7 @@ export default function BandejaCapturas({
     aceptando.current.add(c.id)
     const antes = c.estado
     actualizar(c.id, { estado: { fase: 'aceptando' }, error: null, abierta: false })
-    const cuerpo: BorradorParaAceptar = { tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision, destinoId: destinoId ?? null }
+    const cuerpo: BorradorParaAceptar = { tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision, destinoId: destinoId ?? null, imagen: c.dataUrl || null }
     const turno = colaAceptar.current.then(async () => {
       try {
         const res = await fetch(`/api/cotizaciones/${encodeURIComponent(cotizacionId)}/aceptar-captura`, {

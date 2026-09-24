@@ -65,6 +65,7 @@ import { definicionDeTipo, esTipoRanura, type TipoRanura } from '@/lib/cotizacio
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
+import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -316,10 +317,17 @@ export async function leerCasillaDeItem(
   if (!leidaR.ok) return leidaR
   const leida = leidaR.leida
 
-  if (modo?.comoHabitacion) {
-    return agregarHabitacionLeida({ supabase, item, itemId, ranura, viaje, tarifa, leida })
-  }
-  return guardarLecturaEnItem(ctx, itemId, clave, leida)
+  // El pantallazo se guarda con la opción que lo usa (`imagen-captura.ts`). Si la lectura no
+  // entra, la imagen tampoco se queda.
+  const { workspaceId } = await getWorkspace()
+  leida.imagenRef = await guardarImagenDeCaptura({
+    workspaceId, negocioId: item.negocioId, cotizacionId: item.cotizacionId, dataUrl, lectura: leida,
+  })
+  const r = modo?.comoHabitacion
+    ? await agregarHabitacionLeida({ supabase, item, itemId, ranura, viaje, tarifa, leida })
+    : await guardarLecturaEnItem(ctx, itemId, clave, leida)
+  if (!r.ok && leida.imagenRef) await borrarImagenesDeCaptura(workspaceId, [leida.imagenRef])
+  return r
 }
 
 /**
@@ -364,7 +372,10 @@ async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: 
   }
   leida.alertas = [...leida.alertas, ...validacion.alertas]
 
+  // El pantallazo que esta lectura reemplaza: su imagen ya no la usa nadie.
+  let imagenAnterior: string | null = null
   const guardado = await guardarTarifa(supabase, itemId, actual => {
+    imagenAnterior = actual.casillas?.[clave]?.imagenRef ?? null
     // ⚠️ Las otras casillas NO se borran aunque la ocupación de la línea cambie (hasta el
     // 2026-09-22 se borraban). Quedan marcadas como desactualizadas y `resolverTarifa` no
     // resta sobre ellas: la persona ve cuál hay que reemplazar en vez de encontrarlas
@@ -389,6 +400,10 @@ async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: 
     return siguiente
   })
   if ('error' in guardado) return { ok: false, codigo: 'GUARDAR', mensaje: guardado.error }
+  if (imagenAnterior && imagenAnterior !== leida.imagenRef) {
+    const { workspaceId } = await getWorkspace()
+    await borrarImagenesDeCaptura(workspaceId, [imagenAnterior])
+  }
 
   // El NOMBRE nace lleno desde la lectura (§2.3), no al confirmar. Una línea creada con
   // «+ Vuelo» se llama «Vuelo» hasta que alguien la renombra, y con tres opciones en
@@ -535,6 +550,11 @@ export interface BorradorParaAceptar {
    */
   decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar'
   destinoId?: string | null
+  /**
+   * El pantallazo leído (data URL), para guardarlo con la opción. Solo se guarda si su huella
+   * es la de la lectura firmada (`imagen-captura.ts`); si falta, la captura entra sin imagen.
+   */
+  imagen?: string | null
 }
 
 export type ResultadoAceptarCaptura =
@@ -575,6 +595,27 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     origen: typeof b.pistas?.origen === 'string' ? b.pistas.origen.slice(0, 120) : null,
     destino: typeof b.pistas?.destino === 'string' ? b.pistas.destino.slice(0, 120) : null,
   }
+  // El pantallazo se sube ahora, al aceptar: mientras estuvo en la bandeja no se guardó. Una
+  // lectura que ya trae su imagen (volvió a la bandeja desde una opción eliminada) no la sube
+  // otra vez. Si la aceptación no termina, la imagen recién subida se borra.
+  const { workspaceId } = await getWorkspace()
+  const subida = lectura.imagenRef
+    ? null
+    : await guardarImagenDeCaptura({ workspaceId, negocioId: ctx.negocioId, cotizacionId, dataUrl: b.imagen, lectura })
+  if (subida) lectura.imagenRef = subida
+  const r = await aceptarLectura(cotizacionId, b, lectura, pistas, ctx, lineas)
+  if (!r.ok && subida) await borrarImagenesDeCaptura(workspaceId, [subida])
+  return r
+}
+
+async function aceptarLectura(
+  cotizacionId: string,
+  b: BorradorParaAceptar,
+  lectura: LecturaCasilla,
+  pistas: { lugar: string | null; origen: string | null; destino: string | null },
+  ctx: Exclude<Awaited<ReturnType<typeof contextoDeCotizacion>>, { error: string }>,
+  lineas: Record<string, unknown>[],
+): Promise<ResultadoAceptarCaptura> {
   const delaCotizacion = (id: string | null | undefined) => !!id && lineas.some(l => l.id === id)
 
   // ── Reemplazar el precio de una opción que ya estaba ──
@@ -900,6 +941,12 @@ export async function quitarHabitacion(
     t => !(t.habitaciones ?? []).some(h => h.id === habitacionId),
   )
   if ('error' in guardado) return { success: false, error: guardado.error }
+  // Su pantallazo se va con ella, salvo que otra captura de la opción use la misma imagen.
+  const suImagen = actuales.find(h => h.id === habitacionId)?.lectura.imagenRef ?? null
+  if (suImagen && !imagenesDeTarifa(guardado.tarifa).includes(suImagen)) {
+    const { workspaceId } = await getWorkspace()
+    await borrarImagenesDeCaptura(workspaceId, [suImagen])
+  }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
 }

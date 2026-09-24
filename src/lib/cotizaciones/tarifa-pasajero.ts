@@ -289,6 +289,13 @@ export interface LecturaCasilla {
    * Ausente en las lecturas anteriores al 2026-09-23.
    */
   huellaImagen?: string
+  /**
+   * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
+   * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
+   * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
+   * workspaces que no guardan fuera de Drive.
+   */
+  imagenRef?: string | null
 }
 
 /**
