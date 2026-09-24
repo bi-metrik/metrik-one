@@ -14,6 +14,7 @@
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
 import { normalizarMontoExtraido } from './monto-extraido'
+import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -22,7 +23,13 @@ const GEMINI_MODEL = 'gemini-2.5-flash'
 export interface CampoExtraccion {
   slug: string
   label: string
-  tipo: 'texto' | 'numero' | 'currency' | 'fecha' | 'boolean'
+  /**
+   * `personas`: una LISTA de personas con nombre y documento (ej. los compradores de una
+   * factura). El modelo la devuelve como arreglo y se guarda como texto en la forma
+   * canónica de `@/lib/documentos/personas`, para que la pantalla la muestre y la
+   * corrija igual que cualquier otro campo.
+   */
+  tipo: 'texto' | 'numero' | 'currency' | 'fecha' | 'boolean' | 'personas'
   required: boolean
   descripcion_ai: string  // le dice a Gemini qué buscar
   /** Si true, la UI muestra una alerta "Revisar" junto al campo: la IA no es
@@ -125,10 +132,13 @@ REGLAS:
 - Números de identificación de personas o empresas (NIT, cédula): solo dígitos, sin puntos, guiones ni espacios. NO apliques esta regla a números de factura, radicados u otros códigos que legítimamente incluyen un prefijo o serie con letras: esos se devuelven COMPLETOS, con su prefijo y tal como aparecen (ej. si el documento muestra "FVM 3903", devuelve "FVM 3903", NUNCA solo "3903")
 - MONEDA COLOMBIANA (campos tipo currency): los valores monetarios están en pesos colombianos (COP). El separador de miles es el punto (.) y el separador decimal es la coma (,). Ejemplo: $1.500.000 = un millón quinientos mil. Devuelve SOLO el valor numérico entero sin puntos, comas ni símbolo $. Ejemplo: si ves "$1.500.000" o "1.500.000,00", devuelve "1500000"
 - Campos tipo numero (no currency): devuelve el número tal cual, sin formato de moneda
+- Campos tipo personas: "value" es una LISTA de objetos { "nombre": ..., "documento": ... }, una entrada por persona, en el orden en que aparecen. El documento va solo con dígitos. Si no hay ninguna persona, devuelve la lista vacía []
 
 FORMATO DE RESPUESTA (JSON con los slugs como keys):
 {
-${campos.map(c => `  "${c.slug}": { "value": "...", "confidence": 0.95 }`).join(',\n')}
+${campos.map(c => c.tipo === 'personas'
+    ? `  "${c.slug}": { "value": [{ "nombre": "...", "documento": "..." }], "confidence": 0.95 }`
+    : `  "${c.slug}": { "value": "...", "confidence": 0.95 }`).join(',\n')}
 }`
 }
 
@@ -168,7 +178,19 @@ export async function extractFieldsFromDocument(
     type: 'OBJECT',
     properties: Object.fromEntries(campos.map(c => [c.slug, {
       type: 'OBJECT',
-      properties: { value: { type: 'STRING' }, confidence: { type: 'NUMBER' } },
+      properties: {
+        value: c.tipo === 'personas'
+          ? {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: { nombre: { type: 'STRING' }, documento: { type: 'STRING' } },
+                required: ['nombre', 'documento'],
+              },
+            }
+          : { type: 'STRING' },
+        confidence: { type: 'NUMBER' },
+      },
       required: ['value', 'confidence'],
     }])),
     required: campos.map(c => c.slug),
@@ -241,7 +263,7 @@ export async function extractFieldsFromDocument(
     }
 
     // Parse JSON with repair fallback
-    let raw: Record<string, { value: string | null; confidence: number }>
+    let raw: Record<string, { value: unknown; confidence: number }>
     try {
       raw = JSON.parse(debugRaw)
     } catch {
@@ -264,7 +286,11 @@ export async function extractFieldsFromDocument(
         continue
       }
 
-      let value = field.value !== null ? String(field.value).trim() || null : null
+      // Una lista de personas se guarda como texto canónico (ver `personas.ts`). Si el
+      // modelo igual devolvió texto, se respeta tal cual: la lectura es tolerante.
+      let value = campo.tipo === 'personas' && Array.isArray(field.value)
+        ? serializarPersonas(field.value as Array<Partial<Persona>>) || null
+        : field.value !== null ? String(field.value).trim() || null : null
       const confidence = field.confidence ?? 0
 
       // Campos currency: pesos enteros como texto. La regla (y por qué los miles con
