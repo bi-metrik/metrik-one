@@ -137,3 +137,28 @@ describe('lo que paga la agencia, leído de la captura', () => {
     expect(l.alertas).toEqual([])
   })
 })
+
+describe('R8 · regla 7: el lector cuenta a un menor de 2 años como infante', () => {
+  const base = { hotel: 'Posada Enilda', moneda: 'COP', precio_total: '412689.86', base_precio: 'total' }
+
+  it('«2 adultos, 1 niño (0 años)» → 2 adultos y 1 infante (COT-2026-0013)', () => {
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      ...base, ocupacion: '2 adultos, 1 niño (0 años), 1 habitación', ocupacion_adultos: '2', ocupacion_ninos: '1', ocupacion_infantes: '0',
+    }), '2026-09-24T00:00:00Z')
+    expect(l.ocupacion).toMatchObject({ adultos: 2, ninos: 0, infantes: 1 })
+  })
+
+  it('«1 niño (1 año)» también es infante', () => {
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      ...base, ocupacion: '2 adultos, 1 niño (1 año)', ocupacion_adultos: '2', ocupacion_ninos: '1',
+    }), '2026-09-24T00:00:00Z')
+    expect(l.ocupacion).toMatchObject({ adultos: 2, ninos: 0, infantes: 1 })
+  })
+
+  it('«1 niño (5 años)» sigue siendo niño', () => {
+    const l = construirLecturaCasilla(HOTEL, aceptacion(HOTEL, {
+      ...base, ocupacion: '2 adultos, 1 niño (5 años)', ocupacion_adultos: '2', ocupacion_ninos: '1',
+    }), '2026-09-24T00:00:00Z')
+    expect(l.ocupacion).toMatchObject({ adultos: 2, ninos: 1, infantes: 0 })
+  })
+})

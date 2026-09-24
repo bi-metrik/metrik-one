@@ -234,7 +234,7 @@ export function textoDeCupos(r: RepartoHabitaciones): string {
       const cubre = cantidadDeTipo(r.cubiertos, t)
       if (!g) return `${cubre} ${PALABRAS[t][cubre === 1 ? 0 : 1]}`
       const total = cantidadDeTipo(g, t)
-      return `${cubre}/${total} ${PALABRAS[t][total === 1 ? 0 : 1]}`
+      return `${cubre}/${total} ${PALABRAS[t][Math.max(cubre, total) === 1 ? 0 : 1]}`
     })
     .join(' · ')
 }
