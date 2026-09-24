@@ -73,6 +73,7 @@
 - ⚠️ [Cotización con el negocio adentro (Trappvel)](project_cotizacion_con_negocio_trappvel.md) — #872 y #874; el marco de #874 lo reemplazó #882
 - [Año deducido y marco idéntico (#880, #882)](project_anio_inferido_y_marco_identico.md) — sufijo `/lun` verificado en vivo; 5 ítems del encabezado sin decidir
 - ⚠️ [Tarjeta de la opción Trappvel (#900, #901)](project_tarjeta_opcion_trappvel.md) — la hoja del cliente usa los textos del PDF, no los del prototipo
+- ⚠️ [Foto del hotel y fila de acciones (#907, #910)](project_foto_hotel_y_fila_de_acciones.md) — server action larga bloquea router.refresh; la foto reemplaza la de ciudad
 - ⚠️ [Bandeja con borrador firmado (#889)](project_bandeja_borrador_firmado.md) — leer no escribe; H4 corrige fuera del JSON firmado
 - ⚠️ [Habitaciones por opción de hotel (R8)](project_habitaciones_hotel_r8.md) — unión en fila tras leer; sin QA en pantalla (prod se escribe al abrir)
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`
