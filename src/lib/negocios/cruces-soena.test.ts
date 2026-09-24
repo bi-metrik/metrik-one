@@ -213,6 +213,43 @@ describe('cruces de SOENA contra casos reales', () => {
     expect(r).toEqual([])
   })
 
+  // V0321 medido: único, persona natural, certificado 2024 con la sociedad del proyecto.
+  const V0321 = {
+    ...NATURAL,
+    titularidad: { modalidad_solicitante: 'unico' },
+    servicio_contratado: { servicio: 'solo_iva' },
+    concepto_upme: {
+      nombre_certificado: 'ELMY LUCELLY ESCOBAR JIMENEZ',
+      numero_identificacion_certificado: '31965359',
+      nombre_certificado_2: 'INNVENTOR ELECTRONICS SAS',
+      numero_identificacion_certificado_2: '901045219',
+    },
+  }
+
+  it('V0321: la sociedad del proyecto en el certificado no cuenta como 2º titular', async () => {
+    expect(await evaluarCruces(CRUCES, ctx(V0321), CITA)).toEqual([])
+  })
+
+  it('la sociedad se reconoce por el NIT aunque el nombre no traiga sigla, y por la sigla sin NIT', async () => {
+    const porNit = { ...V0321, concepto_upme: { ...V0321.concepto_upme, nombre_certificado_2: 'INNVENTOR ELECTRONICS' } }
+    const porSigla = { ...V0321, concepto_upme: { ...V0321.concepto_upme, numero_identificacion_certificado_2: undefined } }
+    expect(await evaluarCruces(CRUCES, ctx(porNit), CITA)).toEqual([])
+    expect(await evaluarCruces(CRUCES, ctx(porSigla), CITA)).toEqual([])
+  })
+
+  it('en copropiedad, persona natural + sociedad sigue siendo UN titular: frena', async () => {
+    const r = await evaluarCruces(CRUCES, ctx({ ...V0321, titularidad: { modalidad_solicitante: 'copropiedad' } }), CITA)
+    expect(r.map(c => c.slug)).toEqual(['certificado_personas_vs_titularidad'])
+    expect(r[0].mensaje).toMatch(/^El certificado UPME trae 1 solicitante/)
+  })
+
+  it('sin titularidad respondida el cruce no se evalúa (la tarjeta ya la muestra «Sin definir»)', async () => {
+    const { titularidad: _t, ...sinTitularidad } = V0151
+    void _t
+    expect(await evaluarCruces(CRUCES, ctx(sinTitularidad), CITA)).toEqual([])
+    expect(await evaluarCruces(CRUCES, ctx({ ...V0151, titularidad: { modalidad_solicitante: '' } }), CITA)).toEqual([])
+  })
+
   it('el certificado de Anexos solo cuenta cuando el caso va por solo IVA', async () => {
     // Caso completo: Anexos no le aplica, se mira el de Certificación (una persona).
     const r = await evaluarCruces(CRUCES, ctx({

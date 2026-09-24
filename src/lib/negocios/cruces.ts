@@ -26,7 +26,7 @@
  * Configuración: `lineas_negocio.config_extra.cruces` (lista). Sin la clave, nada cambia.
  */
 
-import { parsearPersonas } from '@/lib/documentos/personas'
+import { esPersonaJuridica, parsearPersonas } from '@/lib/documentos/personas'
 import {
   mismoDocumento,
   normalizarClave,
@@ -46,8 +46,18 @@ export interface LadoCantidad {
   field?: string
   /** Traduce el valor del campo a número: `{ "unico": 1, "copropiedad": 2 }`. */
   mapeo?: Record<string, number>
-  /** Cuenta cuántos de estos campos traen valor (personas de un certificado). */
+  /** Cuenta cuántos de estos campos traen valor. */
   contar_campos?: string[]
+  /**
+   * Cuenta PERSONAS por pares nombre/documento (las filas de beneficiarios de un
+   * certificado). Una fila cuenta si trae nombre o documento.
+   */
+  contar_personas?: Array<{ nombre: string; documento?: string }>
+  /**
+   * Si esta condición se cumple (misma forma que `condition`), `contar_personas` cuenta
+   * solo personas NATURALES: una razón social o un NIT de sociedad no es un titular.
+   */
+  solo_naturales_si?: Record<string, unknown>
   /** Unidad para el mensaje: `["comprador", "compradores"]` → «2 compradores». */
   unidad?: [string, string]
 }
@@ -93,7 +103,7 @@ function esLado(v: unknown): v is LadoCantidad {
   if (typeof v !== 'object' || v === null) return false
   const l = v as Record<string, unknown>
   if (typeof l.source_bloque_slug !== 'string' || !l.source_bloque_slug) return false
-  return typeof l.field === 'string' || Array.isArray(l.contar_campos)
+  return typeof l.field === 'string' || Array.isArray(l.contar_campos) || Array.isArray(l.contar_personas)
 }
 
 function esFuente(v: unknown): v is { source_bloque_slug: string; field: string } {
@@ -130,6 +140,7 @@ export function slugsDeCruces(cruces: Cruce[]): string[] {
     if (c.tipo === 'cantidad') {
       for (const l of [c.a, c.b]) {
         s.add(l.source_bloque_slug)
+        cond(l.solo_naturales_si)
         for (const alt of l.alternativas ?? []) s.add(alt)
       }
     } else {
@@ -148,6 +159,19 @@ async function resolverLado(lado: LadoCantidad, ctx: ContextoFuentes): Promise<L
     if (!ctx.porSlug[slug]) continue
     if (!(await ctx.aplica(slug))) continue
 
+    if (lado.contar_personas && lado.contar_personas.length > 0) {
+      const filas = lado.contar_personas
+        .map(f => ({
+          nombre: valorDe(ctx, slug, f.nombre),
+          documento: f.documento ? valorDe(ctx, slug, f.documento) : undefined,
+        }))
+        .filter(p => p.nombre !== undefined || p.documento !== undefined)
+      // Un documento sin ninguna fila todavía no dice cuántas personas trae.
+      if (filas.length === 0) continue
+      const soloNaturales = lado.solo_naturales_si ? await ctx.evaluar(lado.solo_naturales_si) : false
+      const n = soloNaturales ? filas.filter(p => !esPersonaJuridica(p)).length : filas.length
+      return { n, valor: String(n) }
+    }
     if (lado.contar_campos && lado.contar_campos.length > 0) {
       const n = lado.contar_campos.filter(f => valorDe(ctx, slug, f) !== undefined).length
       // Un documento sin ninguno de los campos todavía no dice cuántas personas trae.

@@ -29,6 +29,27 @@ export function serializarPersonas(personas: ReadonlyArray<Partial<Persona> | nu
     .join('; ')
 }
 
+/**
+ * ¿Es una persona JURÍDICA? Por el documento o por el nombre.
+ *
+ * - Documento: el NIT de una sociedad tiene 9 dígitos y empieza por 8 o 9 (10 si trae el
+ *   dígito de verificación pegado). Las cédulas colombianas tienen hasta 8 dígitos, o 10
+ *   empezando por 1, así que no se confunden.
+ * - Nombre: termina en una sigla societaria (S.A.S., S.A., LTDA, E.U., S.C.A., S. en C.).
+ *
+ * Caso que lo motivó (SOENA, V0321 y V0323): los certificados UPME de 2024 salían a la
+ * persona natural Y a la sociedad del proyecto (INNVENTOR ELECTRONICS SAS, NIT
+ * 901045219). La sociedad no es un segundo titular.
+ */
+export function esPersonaJuridica(p: { nombre?: unknown; documento?: unknown }): boolean {
+  const doc = String(p.documento ?? '').replace(/\D/g, '')
+  if ((doc.length === 9 || doc.length === 10) && /^[89]/.test(doc)) return true
+  const nombre = ` ${String(p.nombre ?? '').toUpperCase().replace(/\./g, '').replace(/\s+/g, ' ').trim()} `
+    .replace(/ S A S $/, ' SAS ')
+    .replace(/ S A $/, ' SA ')
+  return /\s(SAS|SA|LTDA|EU|SCA|S EN C|SAS BIC)\s$/.test(nombre)
+}
+
 /** La lista de vuelta desde el texto guardado (o corregido a mano). */
 export function parsearPersonas(texto: unknown): Persona[] {
   const s = String(texto ?? '').trim()

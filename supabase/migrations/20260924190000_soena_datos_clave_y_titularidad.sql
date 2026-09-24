@@ -39,11 +39,13 @@
 --
 -- ── Medido contra producción antes de escribir esto (2026-09-24, solo lectura) ─
 -- · 438 negocios abiertos en la línea. Certificado vs titularidad: 306 coinciden,
---   126 no se pueden comprobar todavía (sin certificado o sin titularidad) y 6 se
+--   los que no se pueden comprobar (sin certificado o sin titularidad) callan, y 4 se
 --   contradicen: V0151, V0165, V0198 (Cita) y V0141 (Seguimiento), copropiedad con
---   certificado a una persona; V0321 (Cita) y V0323 (Seguimiento), «único» con un
---   certificado que trae a INNVENTOR ELECTRONICS SAS como 2º beneficiario. Esos 6
---   quedan frenados al intentar avanzar hasta que alguien lo resuelva u omita con motivo.
+--   certificado a una persona. Quedan frenados al intentar avanzar hasta que alguien lo
+--   resuelva u omita con motivo.
+-- · En persona natural el certificado cuenta SOLO personas naturales: los certificados
+--   de 2024 (formato viejo UPME) salían a la persona y a la sociedad del proyecto
+--   (V0321 y V0323: INNVENTOR ELECTRONICS SAS, NIT 901045219). La sociedad no es titular.
 -- · Los cruces de la factura no frenan a nadie el día que esto se aplica: ninguna
 --   factura existente tiene `compradores` hasta que corra el backfill.
 -- · Extracción de compradores sobre el banco de 28 facturas de la auditoría: 28 de 28
@@ -143,7 +145,11 @@ $datos_clave$::jsonb;
     "a": {
       "source_bloque_slug": "concepto_upme_anexos",
       "alternativas": ["concepto_upme"],
-      "contar_campos": ["nombre_certificado", "nombre_certificado_2"],
+      "contar_personas": [
+        { "nombre": "nombre_certificado", "documento": "numero_identificacion_certificado" },
+        { "nombre": "nombre_certificado_2", "documento": "numero_identificacion_certificado_2" }
+      ],
+      "solo_naturales_si": { "source_bloque_slug": "tipo_de_solicitante", "field": "tipo_persona", "value": "natural" },
       "unidad": ["solicitante", "solicitantes"]
     },
     "b": { "source_bloque_slug": "titularidad", "field": "modalidad_solicitante", "mapeo": { "unico": 1, "copropiedad": 2 } },
