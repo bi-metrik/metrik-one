@@ -75,6 +75,7 @@ import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
+import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -1095,6 +1096,16 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDeItems([paraLecturaDe(i)]), i))
       hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
+    }
+    // La foto del hotel que puso el asesor (`foto-hotel.ts`): se baja del almacenamiento del
+    // workspace para imprimirla. Solo en la plantilla que imprime fotos; si no se puede leer,
+    // el capítulo sale con la foto de la ciudad, como antes.
+    if (plantillaUsaFotosDeCiudad(templateSlug) && hotelesDelDocumento.some(h => h.fotoRef)) {
+      hotelesDelDocumento = await Promise.all(hotelesDelDocumento.map(async h => {
+        if (!h.fotoRef) return h
+        const url = await imagenComoDataUrl(workspaceId, h.fotoRef)
+        return url ? { ...h, foto: { url, proporcion: h.fotoProporcion ?? null } } : h
+      }))
     }
     const config = leerConfigDocumentoViaje(ws?.config_extra)
     const destino = delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles)

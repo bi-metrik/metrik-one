@@ -1377,6 +1377,29 @@ export interface TarifaPax {
   habitaciones?: Habitacion[]
   /** Los precios de fila escritos a mano en la tarjeta. Ausente = todos salen del margen. */
   preciosAMano?: PreciosAMano
+  /**
+   * La foto del hotel que puso el asesor en «Así lo ve el cliente» (2026-09-24,
+   * `foto-hotel.ts`). Sale en el documento en el lugar de la foto provisional de la ciudad.
+   * Ausente = sin foto: el documento sale como antes.
+   */
+  fotoHotel?: FotoDelHotel
+}
+
+/** Una foto de hotel guardada en el almacenamiento propio del workspace. */
+export interface FotoDelHotel {
+  /** `sbext://…`: se abre por `/api/archivos/abrir`, que firma un enlace de 5 minutos. */
+  ref: string
+  /** Ancho entre alto del archivo, para encuadrar el recorte del documento. */
+  proporcion: number | null
+}
+
+/** La foto del hotel de una tarifa guardada, o `null` si no hay una válida. */
+export function leerFotoDelHotel(raw: unknown): FotoDelHotel | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.ref !== 'string' || !r.ref.startsWith('sbext://')) return null
+  const p = typeof r.proporcion === 'number' && Number.isFinite(r.proporcion) && r.proporcion > 0 ? r.proporcion : null
+  return { ref: r.ref, proporcion: p }
 }
 
 /** Un costo escrito a mano en otra moneda, con la tasa con que se pasó a pesos. */
@@ -1529,6 +1552,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const costoManual = leerCostoManual(r.costoManual)
   const habitaciones = leerHabitaciones(r.habitaciones)
   const preciosAMano = leerPreciosAMano(r.preciosAMano)
+  const fotoHotel = leerFotoDelHotel(r.fotoHotel)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -1545,6 +1569,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(habitaciones ? { habitaciones } : {}),
     // Igual: sin precios a mano la llave no aparece.
     ...(Object.keys(preciosAMano).length > 0 ? { preciosAMano } : {}),
+    // Igual: sin foto del hotel la llave no aparece.
+    ...(fotoHotel ? { fotoHotel } : {}),
   }
 }
 

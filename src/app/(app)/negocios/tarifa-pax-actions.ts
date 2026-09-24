@@ -70,6 +70,7 @@ import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
+import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -1265,6 +1266,55 @@ export async function devolverOpcionABandeja(itemId: string): Promise<{ ok: true
   await recalcularTotales(ctx.item.cotizacionId)
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { ok: true, devueltas }
+}
+
+// ── La foto del hotel («Así lo ve el cliente», 2026-09-24) ─────────────────────
+//
+// Reglas en `foto-hotel.ts`. Solo en opciones de hotel; la foto llega ya comprimida en JPEG.
+
+/** Pone o cambia la foto del hotel de la opción. La anterior se borra al quedar la nueva. */
+export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo una opción de hotel lleva foto del hotel.' }
+  const { workspaceId } = await getWorkspace()
+  const g = await guardarFotoHotel({
+    workspaceId, negocioId: ctx.item.negocioId, cotizacionId: ctx.item.cotizacionId, itemId, dataUrl,
+  })
+  if (!g.ok) return { success: false, error: g.mensaje }
+  const p = typeof proporcion === 'number' && Number.isFinite(proporcion) && proporcion > 0 ? proporcion : null
+  let anterior: string | null = null
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    anterior = actual.fotoHotel?.ref ?? null
+    return { ...actual, fotoHotel: { ref: g.ref, proporcion: p } }
+  })
+  if ('error' in guardado) {
+    await borrarImagenesDeCaptura(workspaceId, [g.ref])
+    return { success: false, error: guardado.error }
+  }
+  if (anterior && anterior !== g.ref) await borrarImagenesDeCaptura(workspaceId, [anterior])
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: guardado.tarifa }
+}
+
+/** Quita la foto del hotel: el documento vuelve a la foto de la ciudad, si la hay. */
+export async function quitarFotoDelHotel(itemId: string): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  let anterior: string | null = null
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    anterior = actual.fotoHotel?.ref ?? null
+    const { fotoHotel: _foto, ...resto } = actual
+    void _foto
+    return resto
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  if (anterior) {
+    const { workspaceId } = await getWorkspace()
+    await borrarImagenesDeCaptura(workspaceId, [anterior])
+  }
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: guardado.tarifa }
 }
 
 // ── CC2: el menor no paga ────────────────────────────────────────────────────

@@ -120,3 +120,12 @@ export function imagenesDeTarifa(t: TarifaPax): string[] {
   for (const h of t.habitaciones ?? []) if (h.lectura?.imagenRef) refs.add(h.lectura.imagenRef)
   return [...refs]
 }
+
+/**
+ * Lo que se borra del almacenamiento al borrar una opción. Los pantallazos se conservan cuando
+ * vuelven a la bandeja (`conservarImagenes`); la foto del hotel se va SIEMPRE: no es una
+ * captura y no vuelve con ellas (`foto-hotel.ts`).
+ */
+export function imagenesAlBorrarOpcion(t: TarifaPax, opciones?: { conservarImagenes?: boolean }): string[] {
+  return [...(opciones?.conservarImagenes ? [] : imagenesDeTarifa(t)), ...(t.fotoHotel ? [t.fotoHotel.ref] : [])]
+}

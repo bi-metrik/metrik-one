@@ -23,7 +23,7 @@ import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizacione
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
-import { borrarImagenesDeCaptura, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
+import { borrarImagenesDeCaptura, imagenesAlBorrarOpcion } from '@/lib/cotizaciones/imagen-captura'
 import { confirmadaVigente, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { precioDeLineaConManuales } from '@/lib/cotizaciones/tarjeta-opcion'
 
@@ -542,8 +542,10 @@ export async function deleteItem(
 
   if (dbError) return { success: false, error: dbError.message }
 
-  if (!opciones?.conservarImagenes && item.tarifa_pax) {
-    await borrarImagenesDeCaptura(workspaceId, imagenesDeTarifa(leerTarifaPax(item.tarifa_pax)))
+  if (item.tarifa_pax) {
+    // La foto del hotel se va SIEMPRE con la opción: no es una captura, no vuelve a la bandeja.
+    const refs = imagenesAlBorrarOpcion(leerTarifaPax(item.tarifa_pax), opciones)
+    if (refs.length > 0) await borrarImagenesDeCaptura(workspaceId, refs)
   }
 
   if (hayAjuste) {

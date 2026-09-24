@@ -7,9 +7,12 @@ import {
   cambiarPantallazoDeHabitacion,
   corregirCampoDeFicha,
   corregirHabitacion,
+  ponerFotoDelHotel,
+  quitarFotoDelHotel,
   quitarHabitacionDeOpcion,
   sumarHabitacionAOpcion,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
@@ -222,6 +225,49 @@ export default function TarjetaOpcion({
   // «Opción 2» es un relleno hasta que se lea su pantallazo, y lo dice.
   const sinPantallazo = !tarifa.casillas?.grupo_completo && habitaciones.length === 0 && esNombreDeOpcion(item.nombre)
 
+  // La foto del hotel (`foto-hotel.ts`). Lo que el servidor acaba de confirmar se pinta sin
+  // esperar el refresco; vale solo mientras la página siga mostrando la foto de antes.
+  const fotoDeLaPagina = tarifa.fotoHotel?.ref ?? null
+  const [fotoConfirmada, setFotoConfirmada] = useState<{ antes: string | null; ahora: string | null } | null>(null)
+  const fotoRef = fotoConfirmada && fotoConfirmada.antes === fotoDeLaPagina ? fotoConfirmada.ahora : fotoDeLaPagina
+  const [subiendoFoto, setSubiendoFoto] = useState(false)
+
+  function ponerFoto(archivo: File) {
+    if (subiendoFoto) return
+    setSubiendoFoto(true)
+    void (async () => {
+      try {
+        const foto = await comprimirFotoHotel(archivo)
+        if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
+        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion)
+        if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la foto. Vuelve a intentarlo.'); return }
+        setFotoConfirmada({ antes: fotoDeLaPagina, ahora: r.tarifa?.fotoHotel?.ref ?? null })
+        onCambio()
+      } catch {
+        toast.error('No se pudo guardar la foto. Vuelve a intentarlo.')
+      } finally {
+        setSubiendoFoto(false)
+      }
+    })()
+  }
+
+  function quitarFoto() {
+    if (subiendoFoto) return
+    setSubiendoFoto(true)
+    void (async () => {
+      try {
+        const r = await quitarFotoDelHotel(itemId)
+        if (!r.success) { toast.error(r.error ?? 'No se pudo quitar la foto. Vuelve a intentarlo.'); return }
+        setFotoConfirmada({ antes: fotoDeLaPagina, ahora: null })
+        onCambio()
+      } catch {
+        toast.error('No se pudo quitar la foto. Vuelve a intentarlo.')
+      } finally {
+        setSubiendoFoto(false)
+      }
+    })()
+  }
+
   function cambiarPantallazo(archivo: File) {
     startTransition(async () => {
       const dataUrl = await leerArchivo(archivo)
@@ -373,6 +419,10 @@ export default function TarjetaOpcion({
               precioOpcion={precioOpcion}
               editable={editable}
               onGuardarNota={onGuardarNota}
+              fotoRef={fotoRef}
+              subiendoFoto={subiendoFoto}
+              onPonerFoto={ponerFoto}
+              onQuitarFoto={quitarFoto}
             />
           ) : nota}
         </div>
