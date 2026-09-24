@@ -44,6 +44,8 @@ export function landingForWorkspace(
     // Cliente de API directa (4D SOFT): su unica pantalla es el modulo. Sin esta rama caeria a
     // /mi-negocio, que no le dice nada de sus llaves ni de su consumo (spec 2026-09-15 §2.4).
     if (mods.valida_api) return '/valida-api';
+    // Catálogo publicado (piloto Marketplace): su pantalla es la del módulo.
+    if (mods.ferreteria) return '/ferreteria';
     return '/mi-negocio';
   }
 
