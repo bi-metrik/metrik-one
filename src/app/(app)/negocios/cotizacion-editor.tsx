@@ -135,6 +135,7 @@ import {
 } from '@/lib/fiscal/iva-cotizacion'
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
 import type { FiscalProfile, Client } from '@/types/database'
+import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 
 interface RubroRow {
   id: string
@@ -331,12 +332,14 @@ interface Props {
    * Trappvel. Ausente = el renglón no las dice.
    */
   fechasViaje?: { inicio: string | null; fin: string | null } | null
+  /** El nivel de detalle del documento del viaje: la hoja del cliente de cada opción lo respeta. */
+  nivelDetalle?: NivelDetalle | null
 }
 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -2172,6 +2175,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
               ) : null}
               nota={jsxNotaOpcion}
+              bloqueTitulo={ubicacionesDeOpciones[item.id]?.bloque ?? ''}
+              general={nivelDetalle === 'general'}
+              onGuardarNota={texto => {
+                const val = comoSeGuarda(texto)
+                startTransition(async () => {
+                  const res = await updateItem(item.id, { descripcion: val })
+                  if (!res.success) { toast.error(res.error); return }
+                  router.refresh()
+                })
+              }}
               onCambio={() => router.refresh()}
             />
           )

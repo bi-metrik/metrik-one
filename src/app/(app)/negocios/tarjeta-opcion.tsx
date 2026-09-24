@@ -10,6 +10,7 @@ import {
   quitarHabitacionDeOpcion,
   sumarHabitacionAOpcion,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
+import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
@@ -141,6 +142,9 @@ export default function TarjetaOpcion({
   mover,
   respaldo,
   nota,
+  bloqueTitulo,
+  general = false,
+  onGuardarNota,
   onCambio,
 }: {
   itemId: string
@@ -176,8 +180,13 @@ export default function TarjetaOpcion({
   mover: ReactNode
   /** Lo que la opción todavía necesita a mano (sin costo confirmado). */
   respaldo: ReactNode
-  /** La nota para el cliente (hasta que exista «Así lo ve el cliente»). */
+  /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
   nota: ReactNode
+  /** «Hotel en Providencia»: el bloque, como lo nombra la hoja del cliente. */
+  bloqueTitulo: string
+  /** El nivel de detalle del documento: «general» no nombra habitación ni régimen. */
+  general?: boolean
+  onGuardarNota: (texto: string) => void
   onCambio: () => void
 }) {
   const ranura = ranuraDeGrupo(item.grupo)
@@ -351,7 +360,21 @@ export default function TarjetaOpcion({
 
           {!confirmada && respaldo}
 
-          {nota}
+          {esHotel ? (
+            <HojaCliente
+              item={item}
+              numero={numero}
+              bloqueTitulo={bloqueTitulo}
+              general={general}
+              adicionales={adicionales}
+              confirmada={confirmada}
+              preciosAMano={tarifa.preciosAMano}
+              precioLinea={precioLinea}
+              precioOpcion={precioOpcion}
+              editable={editable}
+              onGuardarNota={onGuardarNota}
+            />
+          ) : nota}
         </div>
       )}
       {isPending && <span className="sr-only" role="status">Guardando…</span>}

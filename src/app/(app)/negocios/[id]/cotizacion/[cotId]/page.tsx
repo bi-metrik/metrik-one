@@ -12,6 +12,7 @@ import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
 import NegocioDetailClient from '@/app/(app)/negocios/[id]/negocio-detail-client'
 import { cargarVistaNegocio } from '@/app/(app)/negocios/[id]/vista-negocio'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
@@ -210,6 +211,8 @@ export default async function CotizacionNegocioPage({
   let destinoViaje: string | null = null
   // Las fechas del viaje, para el renglón del paso «Viaje» (brief del 2026-09-23).
   let fechasViaje: { inicio: string | null; fin: string | null } | null = null
+  // El nivel de detalle del documento: la hoja del cliente de cada opción lo respeta.
+  let nivelDetalle: NivelDetalle | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
     const { viaje, error: errViaje } = await leerViajeDelNegocio(sbViaje, id)
@@ -217,6 +220,7 @@ export default async function CotizacionNegocioPage({
     composicionViaje = viaje.composicion
     destinoViaje = viaje.destino
     fechasViaje = viaje.fechas
+    nivelDetalle = viaje.nivelDetalle
   } catch {
     // Sin composición del viaje la pantalla la pide por línea.
   }
@@ -291,6 +295,7 @@ export default async function CotizacionNegocioPage({
       politicaRecargo={politicaRecargo}
       itinerarios={itinerarios}
       composicionViaje={composicionViaje}
+      nivelDetalle={nivelDetalle}
       lineasPorTipo={lineasPorTipo}
       adicionales={adicionales as Parameters<typeof CotizacionEditor>[0]['adicionales']}
       salida={salida}

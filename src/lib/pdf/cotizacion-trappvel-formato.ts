@@ -308,6 +308,49 @@ export function rangoCompacto(desde: string | null, hasta: string | null): strin
   return desde ?? hasta ?? null
 }
 
+// ── La tarjeta de un hotel (§4.3) ─────────────────────────────────────────────
+
+/**
+ * Lo que dice la tarjeta de un hotel en el documento, en palabras: el nombre, el renglón de
+ * la estadía, las condiciones, los adicionales y la nota. `general` = el nivel de detalle que
+ * no nombra habitación ni régimen.
+ *
+ * Es la ÚNICA fuente de esos textos: la pinta el PDF (`TarjetaHotel`) y la pinta «Así lo ve el
+ * cliente» en la tarjeta de la opción. Escritos dos veces, la vista previa y el documento
+ * dirían cosas distintas.
+ *
+ * ⚠️ La política de cancelación sale en «normal»: una tarifa no reembolsable es una condición
+ * que el cliente tiene que conocer ANTES de pagar, no letra chica.
+ */
+export function textosDeTarjetaHotel(h: HotelPDF, general: boolean): {
+  nombre: string
+  estrellas: number | null
+  resumen: string
+  condiciones: string
+  adicionales: string | null
+  nota: string | null
+} {
+  const resumen = [
+    rangoCompacto(h.checkIn, h.checkOut),
+    h.noches ? `${h.noches} ${h.noches === 1 ? 'noche' : 'noches'}` : null,
+    !general ? h.regimen : null,
+    !general ? h.habitacion : null,
+  ].filter(Boolean).join(' · ')
+  const condiciones = [
+    !general && h.ocupacion ? `Acomodación: ${h.ocupacion}` : null,
+    !general && h.cancelacion ? `Cancelación: ${h.cancelacion}` : null,
+    h.localizador ? `Localizador: ${h.localizador}` : null,
+  ].filter(Boolean).join(' · ')
+  return {
+    nombre: h.hotel ?? h.linea,
+    estrellas: h.estrellas ?? null,
+    resumen,
+    condiciones,
+    adicionales: h.adicionales.length > 0 ? `Adicionales: ${h.adicionales.join(' · ')}` : null,
+    nota: h.nota ? h.nota : null,
+  }
+}
+
 // ── Tarifas de un vuelo o un hotel ────────────────────────────────────────────
 
 /**

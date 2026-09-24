@@ -19,7 +19,7 @@ import {
 import { leerAdicionalesDeItems } from '@/lib/cotizaciones/itinerarios-datos'
 import {
   adicionalesPorItem,
-  etiquetaDeAdicional,
+  adicionalEnLaFicha,
   totalesDeAdicionales,
 } from '@/lib/cotizaciones/adicionales'
 import { aportaAlTotal, lineasQueDescribeElDocumento } from '@/lib/cotizaciones/lineas-del-documento'
@@ -828,9 +828,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const lista = i.id ? adicionalesPorId.get(i.id) ?? [] : []
     if (lista.length === 0) return { adicionales: undefined, valorAdicionales: undefined }
     return {
-      adicionales: lista.map(ad =>
-        ad.cantidad > 1 ? `${etiquetaDeAdicional(ad)} ×${ad.cantidad}` : etiquetaDeAdicional(ad),
-      ),
+      adicionales: lista.map(adicionalEnLaFicha),
       valorAdicionales: totalesDeAdicionales(lista).precio,
     }
   }
