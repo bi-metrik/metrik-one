@@ -46,6 +46,8 @@ export const REQUISITO = {
   llamadas: { modulos: ['llamadas'] },
   /** Cuentas de cobro recurrentes y su planilla PILA (Drive con las credenciales de MeTRIK). */
   cobrosRecurrentes: { modulos: ['clarity'], funcion: 'cobros_recurrentes' },
+  /** `/ferreteria`: catálogo publicado, bitácora y ventas del piloto Marketplace. */
+  ferreteria: { modulos: ['ferreteria'] },
 } as const satisfies Record<string, RequisitoModulo>
 
 export function cumpleRequisitoModulo(req: RequisitoModulo, ctx: ContextoGate): boolean {

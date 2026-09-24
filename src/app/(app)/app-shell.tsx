@@ -38,6 +38,7 @@ import {
   FileText,
   KeyRound,
   CreditCard,
+  Wrench,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -64,6 +65,8 @@ interface WorkspaceModules {
   valida_api?: boolean
   cobros_recurrentes?: boolean
   cert_qr?: boolean
+  /** Catálogo publicado del piloto Marketplace (/ferreteria). Ver `src/lib/ferreteria/`. */
+  ferreteria?: boolean
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
   fab_registrar_pago?: boolean
@@ -293,6 +296,12 @@ const CERT_NAV_ITEMS = [
   { href: '/certificaciones', label: 'Certificaciones', icon: QrCode, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
+// Ferretería: catálogo publicado del piloto Marketplace (extra inferior, activable por flag).
+// Todos los roles ven; la pantalla decide por dentro quién edita.
+const FERRETERIA_NAV_ITEMS = [
+  { href: '/ferreteria', label: 'Ferretería', icon: Wrench, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+]
+
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor'] },
@@ -517,8 +526,9 @@ export default function AppShell({
   const validaItems = moduloGate((modoVitrina || mod.valida_consulta) ? filterByRole(VALIDA_NAV_ITEMS, role) : [])
   const validaApiItems = moduloGate(vitrinaGate(mod.valida_api ? filterByRole(VALIDA_API_NAV_ITEMS, role) : []))
   const certItems = moduloGate(vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []))
+  const ferreteriaItems = moduloGate(vitrinaGate(mod.ferreteria ? filterByRole(FERRETERIA_NAV_ITEMS, role) : []))
   const solicitudesItems = moduloGate(vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : []))
-  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems]
+  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = moduloGate(vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -535,10 +545,10 @@ export default function AppShell({
       ? '/numeros'
       : (mod.compliance
         ? '/riesgos'
-        : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : '/mi-negocio'))))
+        : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : (mod.ferreteria ? '/ferreteria' : '/mi-negocio')))))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     // Valida más las vitrinas que abre ESTE espacio (un CDA, ninguna): la misma regla del menú.
     ? ['/valida', ...vitrinasDelEspacio(mod)]
@@ -547,6 +557,9 @@ export default function AppShell({
     // Cliente de API directa: una sola pantalla, que es su primaria.
     : (!mod.business && mod.valida_api)
     ? ['/valida-api']
+    // Workspace cuyo único módulo es el catálogo publicado.
+    : (!mod.business && mod.ferreteria)
+    ? ['/ferreteria']
     // Workspace de solo calidad (call center): sus tres rutas son las primarias.
     // Son las mismas del sidebar — la operacion, las personas y los indicadores.
     : (!mod.business && mod.calidad_llamadas)

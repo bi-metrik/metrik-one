@@ -119,6 +119,16 @@ export const MODULOS = {
     rutas: ['/certificaciones'],
     funciones: [],
   },
+  // Catálogo publicado de un cliente que vende en canales digitales (Facebook Marketplace):
+  // productos por SKU, publicaciones, bitácora, mediciones del cron y ventas. Primer cliente:
+  // dimpro (piloto Marketplace, alianza Dimpro x MeTRIK, 2026-09-24).
+  ferreteria: {
+    nombre: 'Ferretería',
+    clave: 'ferreteria',
+    inicio: '/ferreteria',
+    rutas: ['/ferreteria'],
+    funciones: [],
+  },
 } as const satisfies Record<string, Modulo>
 
 export type IdModulo = keyof typeof MODULOS
