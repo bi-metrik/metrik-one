@@ -11,7 +11,7 @@ PR #886 (`feat/soena-datos-clave-titularidad`): tarjeta «Datos clave» (`lineas
 
 **How to apply:**
 - ⚠️ Orden: migración `20260924190000_soena_datos_clave_y_titularidad.sql` ANTES del merge (inerte con código viejo); `scripts/backfill-compradores-factura.ts soena` DESPUÉS del deploy (simulación, luego `--commit`). Hasta el backfill los cruces de factura callan.
-- ⚠️ El día que se aplique frenan 6 casos por certificado vs titularidad: V0151, V0165, V0198, V0141 (copropiedad, cert a 1) y V0321, V0323 («único» con INNVENTOR ELECTRONICS SAS de 2º beneficiario — revisar PDF).
+- ⚠️ El día que se aplique frenan 4 casos por certificado vs titularidad: V0151, V0165, V0198, V0141 (copropiedad, cert a 1). V0321/V0323 NO: certificados UPME 2024 salían a la persona Y a la sociedad del proyecto (INNVENTOR, NIT 901045219); con `tipo_persona = natural` el cruce cuenta solo naturales (`esPersonaJuridica`: NIT 9-10 dígitos que empieza por 8/9, o sigla societaria). Un certificado con una sociedad no es necesariamente un error.
 - Hallazgos que la auditoría manual no vio: **V0465** (factura con corregistrante 50 %, cert a uno) y **V0142** (RUT `numero_identificacion` 1022424289 vs `nit`/cert/factura 1022424269: el RUT está mal leído).
 - Los cruces y la tarjeta resuelven «¿aplica?» con `condicion_cumplida` (RPC), precalentado en paralelo. Un cruce calla si falta un lado o su bloque no aplica.
 - Un dato GUARDADO se muestra en la tarjeta aunque su bloque no aplique; el detalle sí exige que aplique salvo `mostrar_aunque_no_aplique` (la fecha de cita la escribe una copia `compartido_con_origen`).

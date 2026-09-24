@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 6 casos
+- ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
 - ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
 - ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — backfill de 21 SIN aplicar; se mide por FLUJO, no por `orden`
 - ⚠️⚠️ [El bloque declara qué documento espera](project_documento_esperado_bloque.md) — config SOENA SIN aplicar; veredicto ASIMÉTRICO a propósito
