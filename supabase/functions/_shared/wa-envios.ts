@@ -59,7 +59,9 @@ export async function registrarEnvio(
   ctx: EnvioCtx = {},
 ): Promise<void> {
   try {
-    await clienteDeEnvios().from('wa_envios').insert({
+    // supabase-js no lanza cuando la base rechaza la fila (un CHECK, una columna): devuelve
+    // `error`. Sin leerlo, un origen o un status fuera de la lista se pierde sin rastro.
+    const { error } = await clienteDeEnvios().from('wa_envios').insert({
       wa_message_id: waMessageId,
       phone,
       workspace_id: ctx.workspaceId ?? null,
@@ -70,6 +72,7 @@ export async function registrarEnvio(
       status: waMessageId ? 'aceptado' : 'rechazado',
       status_at: waMessageId ? null : new Date().toISOString(),
     });
+    if (error) console.error('[wa-envios] no se pudo registrar el envio:', error.message);
   } catch (err) {
     console.error('[wa-envios] no se pudo registrar el envio:', err);
   }

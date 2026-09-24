@@ -7,6 +7,7 @@
 
 import { getServiceClient } from "../_shared/supabase-client.ts";
 import { sendTextMessage } from "../_shared/wa-respond.ts";
+import { ctxCardumen } from "../_shared/cardumen/telemetria.ts";
 
 const REMINDER =
   "🐟 ¿Seguimos? Te quedaste a mitad de tu historia sobre hacer negocios en La Araucanía. " +
@@ -44,7 +45,8 @@ Deno.serve(async (req) => {
     // en todas las demas y un `neq` contra NULL las excluiria a todas.
     if ((r.state as { motor?: string } | null)?.motor === "navigate") continue;
     try {
-      await sendTextMessage(r.phone, REMINDER);
+      const estudio = (r.state as { study_id?: string } | null)?.study_id ?? null;
+      await sendTextMessage(r.phone, REMINDER, ctxCardumen(estudio, REMINDER));
       await supabase
         .from("cardumen_chat_sessions")
         .update({ reminded_at: new Date().toISOString() })

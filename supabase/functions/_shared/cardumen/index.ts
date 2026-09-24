@@ -10,7 +10,8 @@ import { serialize } from "./r2.ts";
 import { resolverEstudioChatPorTrigger, specDeSesion, cargarEstudioChat, type EstudioChat } from "./estudios.ts";
 import { sendCtaUrl, sendTextWithRhythm, sendTypingIndicator, enBackground } from "../wa-respond.ts";
 import { esEstadoNavigate, startNavigate, continueNavigate } from "./navigate/index.ts";
-import type { ConversationState, StudySpec, Encuadre } from "./types.ts";
+import type { ConversationState, StudySpec, Encuadre, ModelAdapter } from "./types.ts";
+import { conTelemetria, ctxCardumen, registrarLlamadaModelo } from "./telemetria.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
@@ -42,13 +43,26 @@ export function isCardumenChatTrigger(text: string): boolean {
 }
 
 export async function hasOpenCardumenChat(supabase: Supa, phone: string): Promise<boolean> {
+  return (await chatCardumenAbierto(supabase, phone)) !== null;
+}
+
+/**
+ * La conversacion abierta de este telefono con su estudio, o null si no hay. Lo usa el
+ * webhook para marcar con el estudio los mensajes que manda por su cuenta dentro de una
+ * conversacion de Cardumen (audio no entendido, mensaje vacio).
+ */
+export async function chatCardumenAbierto(
+  supabase: Supa,
+  phone: string,
+): Promise<{ estudio: string | null } | null> {
   const { data } = await supabase
     .from("cardumen_chat_sessions")
-    .select("phone")
+    .select("state")
     .eq("phone", phone)
     .eq("closed", false)
     .maybeSingle();
-  return !!data;
+  if (!data) return null;
+  return { estudio: (data.state as { study_id?: string } | null)?.study_id ?? null };
 }
 
 export async function startCardumenChat(
@@ -82,7 +96,7 @@ export async function startCardumenChat(
     });
     // En background: son cuatro mensajes con pausas, y hacerlos antes de responderle a Meta
     // arriesga un reintento (que duplicaria el encuadre completo).
-    enBackground(enviarEncuadre(phone, enc, waMessageId));
+    enBackground(enviarEncuadre(phone, enc, slug, waMessageId));
     console.log(`[cardumen-chat] encuadre en camino (${enc.version}), esperando autorizacion de ${phone}`);
     return;
   }
@@ -95,10 +109,9 @@ export async function startCardumenChat(
     reminded_at: null,
     updated_at: new Date().toISOString(),
   });
-  await sendTextWithRhythm(
-    phone,
-    (enc?.saludo ? enc.saludo + "\n\n" : "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras.\n\n⏳ *Tienes 24 horas para completarla; si no, se pierde el avance.* Lo ideal es terminarla hoy mismo. Escribe *salir* si quieres terminar antes.\n\n") + opening,
-  );
+  const bienvenida =
+    (enc?.saludo ? enc.saludo + "\n\n" : "🐟 *Cardumen*\nGracias por sumar tu historia. Conversemos un momento — responde con tus propias palabras.\n\n⏳ *Tienes 24 horas para completarla; si no, se pierde el avance.* Lo ideal es terminarla hoy mismo. Escribe *salir* si quieres terminar antes.\n\n") + opening;
+  await sendTextWithRhythm(phone, bienvenida, {}, ctxCardumen(slug, bienvenida));
   console.log(`[cardumen-chat] iniciada para ${phone}`);
 }
 
@@ -107,23 +120,23 @@ export async function startCardumenChat(
  * navegador INTERNO de WhatsApp: un link de texto plano saca a la persona al navegador
  * externo, y a mitad de un ejercicio de confianza eso es perderla.
  */
-async function enviarEncuadre(phone: string, enc: Encuadre, waMessageId?: string): Promise<void> {
+async function enviarEncuadre(phone: string, enc: Encuadre, estudio: string, waMessageId?: string): Promise<void> {
   // Con ritmo: el encuadre son cuatro mensajes seguidos y de corrido se lee como un volcado
   // automatico. El primero lleva el "escribiendo..." (el unico message_id que tenemos es el
   // del mensaje que abrio la conversacion).
-  if (enc.saludo) await sendTextWithRhythm(phone, enc.saludo, { waMessageId });
-  if (enc.rubrica) await sendTextWithRhythm(phone, enc.rubrica);
+  if (enc.saludo) await sendTextWithRhythm(phone, enc.saludo, { waMessageId }, ctxCardumen(estudio, enc.saludo));
+  if (enc.rubrica) await sendTextWithRhythm(phone, enc.rubrica, {}, ctxCardumen(estudio, enc.rubrica));
   if (enc.datos) {
     if (enc.url_politica) {
       // El CTA no pasa por sendTextWithRhythm (es interactivo), asi que la pausa va aparte.
       await new Promise((r) => setTimeout(r, 1200));
       // display_text se recorta a 20 caracteres en wa-respond.ts
-      await sendCtaUrl(phone, enc.datos, (enc.boton_politica ?? "Politica de datos").slice(0, 20), enc.url_politica);
+      await sendCtaUrl(phone, enc.datos, (enc.boton_politica ?? "Politica de datos").slice(0, 20), enc.url_politica, ctxCardumen(estudio, enc.datos));
     } else {
-      await sendTextWithRhythm(phone, enc.datos);
+      await sendTextWithRhythm(phone, enc.datos, {}, ctxCardumen(estudio, enc.datos));
     }
   }
-  if (enc.cierre_consentimiento) await sendTextWithRhythm(phone, enc.cierre_consentimiento);
+  if (enc.cierre_consentimiento) await sendTextWithRhythm(phone, enc.cierre_consentimiento, {}, ctxCardumen(estudio, enc.cierre_consentimiento));
 }
 
 /** Elimina lo ya guardado de esta persona en este estudio. Lo promete el encuadre. */
@@ -153,6 +166,10 @@ export async function continueCardumenChat(
     .maybeSingle();
   if (!row) return; // no hay sesion abierta (carrera) → no hace nada
 
+  // Todo lo que sale de aqui queda marcado con el estudio de la sesion (ver telemetria.ts).
+  const estudio = (row.state as { study_id?: string } | null)?.study_id ?? null;
+  const enviarTexto = (t: string) => sendTextMessage(phone, t, ctxCardumen(estudio, t));
+
   // Sesion de Navigate: la atiende su motor (expiracion, borrado y cierre incluidos).
   if (esEstadoNavigate(row.state)) {
     await continueNavigate(supabase, phone, row.state, row.updated_at, text, waMessageId, botonId);
@@ -162,7 +179,7 @@ export async function continueCardumenChat(
   // Expiracion: si pasaron mas de 24h sin actividad, el avance se pierde (la sesion se cierra).
   if (Date.now() - new Date(row.updated_at).getTime() > 24 * 60 * 60 * 1000) {
     await supabase.from("cardumen_chat_sessions").update({ closed: true }).eq("phone", phone);
-    await sendTextMessage(phone, "Tu conversación anterior se venció (pasaron más de 24 horas) y el avance se perdió. Escribe *cardumenchat* para empezar de nuevo cuando quieras.");
+    await enviarTexto("Tu conversación anterior se venció (pasaron más de 24 horas) y el avance se perdió. Escribe *cardumenchat* para empezar de nuevo cuando quieras.");
     return;
   }
 
@@ -175,8 +192,7 @@ export async function continueCardumenChat(
   if (ERASE_WORDS.includes(exit)) {
     const est = await cargarEstudioChat(supabase, state.study_id);
     await borrarDatosDeParticipante(supabase, phone, state.study_id);
-    await sendTextMessage(
-      phone,
+    await enviarTexto(
       est?.encuadre?.al_borrar ?? "Hecho: borré lo que habías compartido y cerré la conversación.",
     );
     console.log(`[cardumen-chat] BORRADO a peticion de ${phone} (estudio ${state.study_id})`);
@@ -204,7 +220,7 @@ export async function continueCardumenChat(
         .from("cardumen_chat_sessions")
         .update({ state, updated_at: new Date().toISOString() })
         .eq("phone", phone);
-      await sendTextWithRhythm(phone, apertura);
+      await sendTextWithRhythm(phone, apertura, {}, ctxCardumen(estudio, apertura));
       console.log(`[cardumen-chat] autorizacion ${state.consent.version} registrada para ${phone}`);
       return;
     }
@@ -212,7 +228,7 @@ export async function continueCardumenChat(
     if (exit === no || EXIT_WORDS.includes(exit)) {
       // Sin autorizacion no se guarda NADA: la sesion se borra, no se cierra con datos dentro.
       await supabase.from("cardumen_chat_sessions").delete().eq("phone", phone);
-      await sendTextMessage(phone, enc?.al_rechazar ?? "Listo, no hay problema. No guardamos nada.");
+      await enviarTexto(enc?.al_rechazar ?? "Listo, no hay problema. No guardamos nada.");
       console.log(`[cardumen-chat] autorizacion rechazada por ${phone}`);
       return;
     }
@@ -225,8 +241,7 @@ export async function continueCardumenChat(
       .from("cardumen_chat_sessions")
       .update({ state, updated_at: new Date().toISOString() })
       .eq("phone", phone);
-    await sendTextMessage(
-      phone,
+    await enviarTexto(
       reintentos >= 2
         ? `Te dejo el ejercicio por aquí. Cuando quieras empezar, responde *${(enc?.palabra_si ?? "LISTO")}*.`
         : `Para empezar responde *${(enc?.palabra_si ?? "LISTO")}*, o *${(enc?.palabra_no ?? "NO")}* si prefieres no participar.`,
@@ -234,7 +249,11 @@ export async function continueCardumenChat(
     return;
   }
 
-  const model = claudeHaiku();
+  // Cada llamada al modelo deja su fila de tokens en wa_message_log. En background: la
+  // bitacora no puede alargar el turno de la persona.
+  const model = conTelemetria(claudeHaiku(), (uso) =>
+    enBackground(registrarLlamadaModelo(supabase, state.study_id, uso)),
+  );
   // El spec sale del estudio de ESTA sesion, no de un import global: es lo que permite que
   // dos estudios corran a la vez sin pisarse.
   const spec = await specDeSesion(supabase, state.study_id);
@@ -251,7 +270,7 @@ export async function continueCardumenChat(
       // No enviamos otra pregunta al cerrar — solo el agradecimiento/cierre (evita "pregunta + cerramos").
       await closeAndSerialize(supabase, phone, state, model, false, spec);
     } else {
-      await sendTextWithRhythm(phone, output.message_to_user);
+      await sendTextWithRhythm(phone, output.message_to_user, {}, ctxCardumen(estudio, output.message_to_user));
       await supabase
         .from("cardumen_chat_sessions")
         .update({ state, updated_at: new Date().toISOString() })
@@ -263,8 +282,7 @@ export async function continueCardumenChat(
     const errMsg = (e as Error).message ?? "";
     console.error("[cardumen-chat] error en turno:", errMsg);
     const overloaded = /\b(429|500|502|503|504|529)\b/.test(errMsg) || /overloaded|high demand|rate.?limit|timeout/i.test(errMsg);
-    await sendTextMessage(
-      phone,
+    await enviarTexto(
       overloaded
         ? "Estoy recibiendo muchas historias en este momento 🙏. Tu conversación quedó guardada — dame un par de minutos y reenvíame tu última respuesta; seguimos justo donde quedamos."
         : "Ups, no te alcancé a escuchar bien. ¿Me lo repites, por favor? Seguimos justo donde quedamos.",
@@ -276,7 +294,7 @@ async function closeAndSerialize(
   supabase: Supa,
   phone: string,
   state: ConversationState,
-  model: ReturnType<typeof claudeHaiku>,
+  model: ModelAdapter,
   userExit: boolean,
   specSesion?: StudySpec,
 ): Promise<void> {
@@ -321,11 +339,9 @@ async function closeAndSerialize(
     .update({ state, closed: true, updated_at: new Date().toISOString() })
     .eq("phone", phone);
 
-  await sendTextMessage(
-    phone,
-    userExit
-      ? "🐟 Gracias por lo que alcanzaste a compartir. Tu historia ya forma parte del cardumen."
-      : "🐟 ¡Gracias! Cerramos aquí. Tu historia ya forma parte del cardumen.",
-  );
+  const cierre = userExit
+    ? "🐟 Gracias por lo que alcanzaste a compartir. Tu historia ya forma parte del cardumen."
+    : "🐟 ¡Gracias! Cerramos aquí. Tu historia ya forma parte del cardumen.";
+  await sendTextMessage(phone, cierre, ctxCardumen(state.study_id, cierre));
   console.log(`[cardumen-chat] cerrada para ${phone} (userExit=${userExit}, turnos=${state.turn})`);
 }
