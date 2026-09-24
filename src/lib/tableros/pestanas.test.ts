@@ -16,6 +16,7 @@ const CON_DATOS: DatosTableros = {
   procesoSeccional: true,
   operacionesBono: true,
   calidad: true,
+  ferreteria: true,
 }
 
 const SIN_DATOS: DatosTableros = {
@@ -25,6 +26,7 @@ const SIN_DATOS: DatosTableros = {
   procesoSeccional: false,
   operacionesBono: false,
   calidad: false,
+  ferreteria: false,
 }
 
 /** `modules` real de SOENA, medido en la base. */
@@ -153,6 +155,28 @@ describe('vistasDeOperaciones', () => {
   it('sin datos no hay vista, y por eso tampoco pestana', () => {
     expect(vistasDeOperaciones(SOENA, SIN_DATOS)).toEqual([])
     expect(claves(SOENA, SIN_DATOS)).not.toContain('operaciones')
+  })
+})
+
+/** `modules` real de dimpro, medido en la base. */
+const DIMPRO: ModulosWorkspace = { business: true, causacion: true, ferreteria: true }
+
+describe('pestana Marketplace (ferreteria)', () => {
+  it('dimpro ve Marketplace y conserva las tres genericas', () => {
+    expect(claves(DIMPRO)).toEqual(['ferreteria', 'financiero', 'comercial', 'operativo'])
+  })
+
+  it('sin el modulo no aparece aunque haya dato', () => {
+    expect(claves(BUSINESS_PELADO)).not.toContain('ferreteria')
+  })
+
+  it('con el modulo pero sin dato (lectura fallida) no se pinta en blanco', () => {
+    expect(claves(DIMPRO, { ...CON_DATOS, ferreteria: false })).not.toContain('ferreteria')
+  })
+
+  it('el modulo no apaga las genericas', () => {
+    expect(tieneTablerosPropios(DIMPRO)).toBe(false)
+    expect(necesitaDatosGenericos(DIMPRO)).toBe(true)
   })
 })
 

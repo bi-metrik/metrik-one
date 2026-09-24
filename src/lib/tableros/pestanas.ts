@@ -12,6 +12,7 @@ export type TableroKey =
   | 'rentabilidad_comercial'
   | 'comercial_negocios'
   | 'marketing'
+  | 'ferreteria'
   | 'operaciones'
   | 'financiero'
   | 'comercial'
@@ -44,6 +45,8 @@ export interface DatosTableros {
   procesoSeccional: boolean
   operacionesBono: boolean
   calidad: boolean
+  /** Pestana Marketplace: totales del piloto de Ferreteria. Falso si la lectura no llego. */
+  ferreteria: boolean
 }
 
 /** Las dos vistas de la pestana Operaciones. */
@@ -63,6 +66,9 @@ const MARKETING_TAB: PestanaTablero = { key: 'marketing', label: 'Marketing' }
 // Operaciones reune las dos preguntas del area: donde estan atascados los casos
 // (vista Casos) y como le fue a cada persona (vista Personas).
 const OPERACIONES_TAB: PestanaTablero = { key: 'operaciones', label: 'Operaciones' }
+// Los totales del piloto Marketplace (Ferreteria). NO entra en `tieneTablerosPropios`:
+// en dimpro convive con las tres genericas, que miden el resto del negocio.
+const FERRETERIA_TAB: PestanaTablero = { key: 'ferreteria', label: 'Marketplace' }
 const COMPLIANCE_TAB: PestanaTablero = { key: 'cumplimiento', label: 'Cumplimiento' }
 const CALIDAD_TAB: PestanaTablero = { key: 'calidad', label: 'Recaudo y riesgo' }
 
@@ -140,6 +146,7 @@ export function pestanasDeTableros(
   // tener el tablero comercial, y colgarlos juntos obliga a encender los dos.
   if (mod.marketing_campanas && datos.marketing) tabs.push(MARKETING_TAB)
   if (vistasDeOperaciones(mod, datos).length > 0) tabs.push(OPERACIONES_TAB)
+  if (mod.ferreteria && datos.ferreteria) tabs.push(FERRETERIA_TAB)
   if (mod.business && !tieneTablerosPropios(mod)) tabs.push(...GENERICAS)
   if (mod.compliance) tabs.push(COMPLIANCE_TAB)
   if (mod.calidad_llamadas && datos.calidad) tabs.push(CALIDAD_TAB)
