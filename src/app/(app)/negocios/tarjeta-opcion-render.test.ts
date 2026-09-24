@@ -17,6 +17,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import fixture from '@/lib/cotizaciones/__fixtures__/cot-2026-0013-hoteles.fixture.json'
 import { tarifaConHabitaciones } from '@/lib/cotizaciones/habitaciones'
+import { hotelesDeItems } from '@/lib/cotizaciones/detalle-viaje'
+import { textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
 import type { Habitacion, LecturaCasilla, TarifaConfirmada, TarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 
 vi.mock('sonner', () => ({ toast: Object.assign(() => {}, { success: () => {}, error: () => {}, warning: () => {} }) }))
@@ -57,6 +59,8 @@ function pintar(tarifa: TarifaPax, extra: Record<string, unknown> = {}) {
     mover: null,
     respaldo: null,
     nota: null,
+    bloqueTitulo: 'Hotel en Providencia',
+    onGuardarNota: () => {},
     onCambio: () => {},
     ...extra,
   }))
@@ -150,5 +154,49 @@ describe('costo y precio: las alertas del prototipo', () => {
     const html = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, precioLinea: 4679294, costoLinea: 3977400 })
     expect(texto(html)).not.toContain('Con este margen necesitas autorización para enviar')
     expect(texto(html)).toMatch(/Margen 15 %/)
+  })
+})
+
+describe('así lo ve el cliente', () => {
+  const tarifa = () => tarifaConHabitaciones({}, habs(POSADA), GRUPO)
+
+  it('va después de «Costo y precio», con el bloque en magenta, «OPCIÓN N» y la inversión', () => {
+    const html = pintar(tarifa())
+    expect(html.indexOf('data-hoja-cliente')).toBeGreaterThan(html.indexOf('aria-label="Costo y precio"'))
+    const t = texto(html)
+    expect(t).toContain('HOTEL EN PROVIDENCIA')
+    expect(t).toContain('OPCIÓN 2')
+    expect(t).toContain('INVERSIÓN')
+    expect(t).toContain('Así sale esta opción en la cotización que recibe el cliente.')
+    expect(t).toContain('Agrega una nota para el cliente…')
+  })
+
+  it('los textos de la hoja son los del PDF (`textosDeTarjetaHotel`), no una copia', () => {
+    const t = tarifa()
+    const doc = textosDeTarjetaHotel(hotelesDeItems([{ nombre: 'POSADA ENILDA', grupo: 'hotel', tarifa_pax: t, adicionales: [] }])[0], false)
+    const html = pintar(t)
+    expect(doc.resumen).not.toBe('')
+    expect(html).toContain(`>${doc.resumen}<`)
+    if (doc.condiciones) expect(html).toContain(`>${doc.condiciones}<`)
+  })
+
+  it('en el nivel «general» la hoja no nombra habitación ni régimen, igual que el PDF', () => {
+    const t = tarifa()
+    const doc = textosDeTarjetaHotel(hotelesDeItems([{ nombre: 'POSADA ENILDA', grupo: 'hotel', tarifa_pax: t, adicionales: [] }])[0], true)
+    const html = pintar(t, { general: true })
+    expect(html).toContain(`>${doc.resumen}<`)
+    expect(html).not.toContain('Acomodación:')
+  })
+
+  it('la nota escrita por una persona se imprime en la hoja y se edita tocándola', () => {
+    const html = pintar(tarifa(), { item: { nombre: 'POSADA ENILDA', grupo: 'hotel', tarifa_pax: tarifa(), descripcion: 'INCLUYE TRASLADO' } })
+    expect(html).toContain('aria-label="Editar la nota para el cliente"')
+    expect(texto(html)).toContain('INCLUYE TRASLADO')
+  })
+
+  it('un vuelo no tiene hoja: su nota sigue donde estaba', () => {
+    const html = pintar(tarifa(), { item: { nombre: 'AVIANCA', grupo: 'vuelo', tarifa_pax: tarifa() }, nota: 'NOTA-DE-VUELO' })
+    expect(html).not.toContain('data-hoja-cliente')
+    expect(html).toContain('NOTA-DE-VUELO')
   })
 })

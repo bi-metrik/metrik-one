@@ -264,6 +264,14 @@ export function etiquetaDeAdicional(ad: Pick<Adicional, 'codigo' | 'nombre'>): s
   return ad.codigo ?? 'Adicional'
 }
 
+/**
+ * El adicional como lo dice la ficha del documento, sin cifra: «Maleta 23 kg ×2». Lo usan el
+ * PDF y «Así lo ve el cliente», para que la vista previa y el documento digan lo mismo.
+ */
+export function adicionalEnLaFicha(ad: Pick<Adicional, 'codigo' | 'nombre' | 'cantidad'>): string {
+  return ad.cantidad > 1 ? `${etiquetaDeAdicional(ad)} ×${ad.cantidad}` : etiquetaDeAdicional(ad)
+}
+
 // ── El dinero ────────────────────────────────────────────────────────────────
 
 /** Lo mínimo para sumar un adicional. `Adicional` lo cumple por forma. */

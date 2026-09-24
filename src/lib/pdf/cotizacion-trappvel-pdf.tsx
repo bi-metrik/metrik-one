@@ -95,6 +95,7 @@ import {
   siglaAerolinea,
   sinTildes,
   tablaDeVuelosVaEntera,
+  textosDeTarjetaHotel,
   tieneRegreso,
   tituloConAcento,
   yaLoDiceLaPortada,
@@ -459,19 +460,9 @@ function ChipsDeTarifa({ tarifas, de }: { tarifas: TarifaDoc[]; de: { tarifas?: 
 // ── Hotel (§4.3) ──────────────────────────────────────────────────────────────
 
 function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; arriba?: boolean }) {
-  const resumen = [
-    rangoCompacto(h.checkIn, h.checkOut),
-    h.noches ? `${h.noches} ${h.noches === 1 ? 'noche' : 'noches'}` : null,
-    !general ? h.regimen : null,
-    !general ? h.habitacion : null,
-  ].filter(Boolean).join(' · ')
-  // ⚠️ La política de cancelación sale en «normal»: una tarifa no reembolsable es una
-  // condición que el cliente tiene que conocer ANTES de pagar, no letra chica.
-  const condiciones = [
-    !general && h.ocupacion ? `Acomodación: ${h.ocupacion}` : null,
-    !general && h.cancelacion ? `Cancelación: ${h.cancelacion}` : null,
-    h.localizador ? `Localizador: ${h.localizador}` : null,
-  ].filter(Boolean).join(' · ')
+  // Los textos salen de `textosDeTarjetaHotel`, la misma función que pinta «Así lo ve el
+  // cliente» en la tarjeta de la opción del editor.
+  const t = textosDeTarjetaHotel(h, general)
   return (
     <View wrap={false} style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: 11, marginTop: arriba ? 0 : 12 }}>
       {h.foto && (
@@ -481,26 +472,26 @@ function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; ge
         <ChipsDeTarifa tarifas={tarifas} de={h} />
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 13, fontFamily: 'Helvetica-Bold', color: C.tinta }}>
-            {h.hotel ?? h.linea}
+            {t.nombre}
           </Text>
-          {h.estrellas ? <Estrellas n={h.estrellas} /> : null}
+          {t.estrellas ? <Estrellas n={t.estrellas} /> : null}
         </View>
-        {resumen !== '' && (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, color: C.texto, marginTop: 3 }}>{resumen}</Text>
+        {t.resumen !== '' && (
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, color: C.texto, marginTop: 3 }}>{t.resumen}</Text>
         )}
-        {condiciones !== '' && (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 3 }}>{condiciones}</Text>
+        {t.condiciones !== '' && (
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 3 }}>{t.condiciones}</Text>
         )}
         {/* El adicional vive dentro de su bloque, en los tres niveles: es plata que el
             cliente paga. Sin cifra: el dinero va en «Inversión». */}
-        {h.adicionales.length > 0 && (
+        {t.adicionales && (
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 2 }}>
-            {`Adicionales: ${h.adicionales.join(' · ')}`}
+            {t.adicionales}
           </Text>
         )}
         {/* P2 · la nota que escribió una persona para el cliente, debajo de la tarjeta. */}
-        {h.nota ? (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.texto, marginTop: 3 }}>{h.nota}</Text>
+        {t.nota ? (
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.texto, marginTop: 3 }}>{t.nota}</Text>
         ) : null}
       </View>
     </View>
