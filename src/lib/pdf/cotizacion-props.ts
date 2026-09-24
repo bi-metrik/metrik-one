@@ -30,6 +30,17 @@ export type PrecioPorPasajeroPDF = {
 }[] | null
 
 /**
+ * R8 · regla 8: el precio de cada habitación de una opción de hotel, cuando no hay una de
+ * solo adultos del mismo tipo para sacar el precio de cada pasajero. `ocupacion` ya viene en
+ * palabras («2 adultos y 1 infante»). Solo lo traen esas líneas.
+ */
+export type PrecioPorHabitacionPDF = {
+  numero: number
+  ocupacion: string
+  precio: number
+}[] | null
+
+/**
  * La foto de una sección del documento (portada, ciudad).
  *
  * Desde el 2026-09-22 la llena un banco PROVISIONAL (`src/lib/pdf/fotos-ciudad.ts`): el
@@ -192,6 +203,8 @@ export interface CotizacionPDFProps {
     unidad?: string | null
     /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
     precioPorPasajero?: PrecioPorPasajeroPDF
+    /** R8 · precio de cada habitación, cuando la línea se cobra por habitación. */
+    precioPorHabitacion?: PrecioPorHabitacionPDF
     /**
      * Los adicionales de ESTA variante, en palabras: «Equipaje de bodega adicional ×2».
      *
@@ -240,6 +253,8 @@ export interface CotizacionPDFProps {
       unidad?: string | null
       /** Precio por pasajero de la línea. Ausente = se cobra por el grupo. */
       precioPorPasajero?: PrecioPorPasajeroPDF
+      /** Ver `items[].precioPorHabitacion`. */
+      precioPorHabitacion?: PrecioPorHabitacionPDF
       /** Ver `items[].adicionales`: van dentro de la línea, en palabras. */
       adicionales?: string[]
       /** Ver `items[].valorAdicionales`: TIENE que entrar en el total impreso. */

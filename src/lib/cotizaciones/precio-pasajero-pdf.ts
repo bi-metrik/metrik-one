@@ -5,8 +5,10 @@
  * cada uno se prueba sin base y sin renderizar.
  */
 
+import { precioPorHabitacion, type PrecioPorHabitacion } from './habitaciones'
 import {
   composicionDeLinea,
+  describirOcupacion,
   confirmacionDesactualizada,
   confirmadaVigente,
   leerTarifaPax,
@@ -51,6 +53,29 @@ export function precioPorPasajeroDeItem(
   if (!confirmadaVigente(confirmada, costoUnitario)) return null
   if (confirmacionDesactualizada(tarifa, composicionDeLinea(tarifa, composicionViaje ?? null))) return null
   return precioPorPasajero(confirmada, Number(item.precio_venta) || 0)
+}
+
+/**
+ * R8 · regla 8: el precio de cada habitación de una opción de hotel que se cobra por
+ * habitación (su confirmación no trae costo por pasajero, sí por habitación). `null` en
+ * cualquier otra línea, y con las mismas salvaguardas que el precio por pasajero: una
+ * confirmación vieja o unos rubros editados después no se imprimen.
+ */
+export function precioPorHabitacionDeItem(
+  item: ItemConTarifa,
+  composicionViaje?: Composicion | null,
+): (PrecioPorHabitacion & { ocupacionTexto: string })[] | null {
+  if (item.es_ajuste) return null
+  const tarifa = leerTarifaPax(item.tarifa_pax)
+  const { confirmada } = tarifa
+  if (!confirmada || confirmada.costos.length > 0 || !confirmada.porHabitacion?.length) return null
+  const costoUnitario = (item.rubros ?? [])
+    .filter(r => r.sugerido !== true)
+    .reduce((a, r) => a + (Number(r.valor_total) || 0), 0)
+  if (!confirmadaVigente(confirmada, costoUnitario)) return null
+  if (confirmacionDesactualizada(tarifa, composicionDeLinea(tarifa, composicionViaje ?? null))) return null
+  return precioPorHabitacion(confirmada.porHabitacion, Number(item.precio_venta) || 0)
+    .map(h => ({ ...h, ocupacionTexto: describirOcupacion(h.ocupacion, 'y') }))
 }
 
 export interface LineaParaTotal {

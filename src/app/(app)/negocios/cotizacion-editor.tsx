@@ -79,10 +79,13 @@ import {
   confirmacionDesactualizada,
   confirmadaVigente,
   leerTarifaPax,
+  describirOcupacion,
+  formatoMonto,
   lineaPorPasajero,
   precioPorPasajero,
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
+import { precioPorHabitacion } from '@/lib/cotizaciones/habitaciones'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
@@ -1332,6 +1335,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
           ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
           : null
+        // R8 · regla 8: una opción de hotel cobrada por habitación (no hubo par para sacar
+        // el precio de cada pasajero) dice el precio de cada habitación, con las mismas
+        // salvaguardas que el de cada pasajero.
+        const precioPorHab = precioPorPax && precioPorPax.length === 0 && tarifaDelItem.confirmada?.porHabitacion?.length
+          ? precioPorHabitacion(tarifaDelItem.confirmada.porHabitacion, precioLinea / itemCantidad)
+          : null
+        const textoPorHabitacion = precioPorHab && precioPorHab.length > 0
+          ? precioPorHab.map(h => `Habitación ${h.numero} (${describirOcupacion(h.ocupacion, 'y')}) ${formatoMonto(h.precio, 'COP')}`).join(' · ')
+          : null
 
         // EL BOTÓN DICE LO QUE HACE (§4.2). Se llamaba «Agregar alternativa a esta
         // línea», y «alternativa» no dice ninguna de las dos cosas que importan: que
@@ -1644,6 +1656,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         <span className="font-medium">
                           {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
                         </span>
+                      </p>
+                    )}
+                    {textoPorHabitacion && (
+                      <p className="mt-0.5 text-[11px] tabular-nums">
+                        <span className="text-muted-foreground">Precio por habitación: </span>
+                        <span className="font-medium">{textoPorHabitacion}</span>
                       </p>
                     )}
 
@@ -2166,6 +2184,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <span className="font-medium">
                     {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
                   </span>
+                </p>
+              )}
+              {textoPorHabitacion && (
+                <p className="mt-0.5 text-[11px] tabular-nums">
+                  <span className="text-muted-foreground">Por habitación: </span>
+                  <span className="font-medium">{textoPorHabitacion}</span>
                 </p>
               )}
             </div>

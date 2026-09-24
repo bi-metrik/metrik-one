@@ -63,7 +63,7 @@ import {
   View,
 } from '@react-pdf/renderer'
 
-import type { CotizacionPDFProps, FotoPDF, PrecioPorPasajeroPDF, ViajePDF } from './cotizacion-props'
+import type { CotizacionPDFProps, FotoPDF, PrecioPorHabitacionPDF, PrecioPorPasajeroPDF, ViajePDF } from './cotizacion-props'
 import { creditosDeFotos } from './fotos-del-viaje'
 import {
   ALTO_ENCABEZADO_VUELOS,
@@ -850,7 +850,15 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
 // ── Inversión (§4.5) ──────────────────────────────────────────────────────────
 
 /** El precio de un pasajero de cada tipo, en una línea. */
-function PorPasajero({ precios, color }: { precios: PrecioPorPasajeroPDF; color: string }) {
+function PorPasajero({ precios, habitaciones, color }: { precios: PrecioPorPasajeroPDF; habitaciones?: PrecioPorHabitacionPDF; color: string }) {
+  // R8 · regla 8: sin precio por pasajero, el de cada habitación.
+  if ((!precios || precios.length === 0) && habitaciones && habitaciones.length > 0) {
+    return (
+      <Text style={{ fontSize: 7, color, marginTop: 2 }}>
+        {habitaciones.map(h => `Habitación ${h.numero} (${h.ocupacion}) ${pesos(h.precio)}`).join('  ·  ')}
+      </Text>
+    )
+  }
   if (!precios || precios.length === 0) return null
   return (
     <Text style={{ fontSize: 7, color, marginTop: 2 }}>
@@ -866,6 +874,7 @@ interface LineaImpresa {
   unidad?: string | null
   adicionales?: string[]
   precioPorPasajero?: PrecioPorPasajeroPDF
+  precioPorHabitacion?: PrecioPorHabitacionPDF
   total: number
 }
 
@@ -877,7 +886,7 @@ interface LineaImpresa {
  * TOTAL, que sí los incluye. Ausente vale 0.
  */
 function lineasImpresas(
-  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number; precioPorPasajero?: PrecioPorPasajeroPDF }[],
+  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number; precioPorPasajero?: PrecioPorPasajeroPDF; precioPorHabitacion?: PrecioPorHabitacionPDF }[],
 ): LineaImpresa[] {
   return items.map(i => {
     const cantidad = i.cantidad ?? 1
@@ -888,6 +897,7 @@ function lineasImpresas(
       unidad: i.unidad,
       adicionales: i.adicionales,
       precioPorPasajero: i.precioPorPasajero,
+      ...(i.precioPorHabitacion ? { precioPorHabitacion: i.precioPorHabitacion } : {}),
       total: base + (i.valorAdicionales ?? 0),
     }
   })
@@ -948,7 +958,7 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
             {`Incluye: ${l.adicionales!.join(' · ')}`}
           </Text>
         )}
-        {detallada && <PorPasajero precios={l.precioPorPasajero ?? null} color={C.gris} />}
+        {detallada && <PorPasajero precios={l.precioPorPasajero ?? null} habitaciones={l.precioPorHabitacion ?? null} color={C.gris} />}
       </View>
       <Text style={{ fontSize: tam, color: C.tinta }}>{pesos(l.total)}</Text>
     </View>

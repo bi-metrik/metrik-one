@@ -49,7 +49,7 @@ import { avisoDelTextoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/li
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
-import { precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
+import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
   MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA,
@@ -882,6 +882,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const i = conIva(original)
     const adicionales = adicionalesDe(original)
     const ivaAdicionales = sumaIvaAlPrecio ? ivaDe(original)?.ivaAdicionales ?? 0 : 0
+    // R8 · la llave solo aparece en una opción de hotel cobrada por habitación: las demás
+    // líneas (y las otras plantillas) llegan idénticas.
+    const porHabitacion = precioPorHabitacionDeItem(i, composicionViaje)
     return {
       nombre: i.nombre ?? '',
       descripcion: i.descripcion ?? null,
@@ -890,6 +893,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       cantidad: Number(i.cantidad) || 1,
       unidad: i.unidad ?? null,
       precioPorPasajero: precioPorPasajeroDeItem(i, composicionViaje),
+      ...(porHabitacion
+        ? { precioPorHabitacion: porHabitacion.map(h => ({ numero: h.numero, ocupacion: h.ocupacionTexto, precio: h.precio })) }
+        : {}),
       ...adicionales,
       ...(adicionales.valorAdicionales !== undefined && ivaAdicionales > 0
         ? { valorAdicionales: adicionales.valorAdicionales + ivaAdicionales }
