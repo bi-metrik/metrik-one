@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import { costoPorTipoDeHabitaciones, precioPorHabitacion, repartirHabitaciones } from './habitaciones'
 import { precioPorPasajero, type Habitacion, type LecturaCasilla, type PreciosAMano, type TarifaConfirmada } from './tarifa-pasajero'
+import { hotelesDeItems } from './detalle-viaje'
+import { tarifaConHabitaciones } from './habitaciones'
 import {
+  acomodacionDeHabitaciones,
   fechasDeEstadia,
   filasDeCosto,
   notaDeEdad,
@@ -186,5 +189,32 @@ describe('las fechas de la ficha', () => {
     expect(fechasDeEstadia('2026-11-28', '2026-12-02')).toBe('28 nov al 2 dic 2026')
     expect(fechasDeEstadia('2026-12-30', '2027-01-02')).toBe('30 dic 2026 al 2 ene 2027')
     expect(fechasDeEstadia(null, null)).toBeNull()
+  })
+})
+
+describe('la acomodación de todas las habitaciones (documento y vista previa)', () => {
+  it('«3 habitaciones: …» con la ocupación de cada una, en su orden', () => {
+    expect(acomodacionDeHabitaciones(repartirHabitaciones(ROOMS, GRUPO)))
+      .toBe('3 habitaciones: 2 adultos + 1 niño; 2 adultos + 1 infante; 2 adultos')
+  })
+
+  it('con una sola habitación no dice nada: manda lo que leyó el pantallazo', () => {
+    expect(acomodacionDeHabitaciones(repartirHabitaciones([ROOMS[2]], GRUPO))).toBeNull()
+  })
+
+  it('el hotel del documento lleva la acomodación de TODAS las habitaciones', () => {
+    const lecturaHotel = (l: LecturaCasilla) => ({ ...l, campos: [...l.campos, { label: 'Hotel', valor: 'Cabañas Agua Dulce' }] })
+    const tarifa = tarifaConHabitaciones({}, ROOMS.map(h => ({ ...h, lectura: lecturaHotel(h.lectura) })), GRUPO)
+    const [h] = hotelesDeItems([{ nombre: 'CABAÑAS AGUA DULCE', grupo: 'hotel', tarifa_pax: tarifa }])
+    expect(h.ocupacion).toBe('3 habitaciones: 2 adultos + 1 niño; 2 adultos + 1 infante; 2 adultos')
+  })
+
+  it('la captura que solo sirve para restar no queda en la acomodación ni lleva «también»', () => {
+    const extra: Habitacion = { id: 'h4', lectura: lectura('Cabaña Triple', '2 Adultos', 2, 0, 0, 1268000) }
+    const r = repartirHabitaciones([...ROOMS, extra], GRUPO)
+    const ref = r.habitaciones.find(h => h.rol !== 'habitacion')
+    expect(ref).toBeDefined()
+    expect(acomodacionDeHabitaciones(r)).toBe('3 habitaciones: 2 adultos + 1 niño; 2 adultos + 1 infante; 2 adultos')
+    expect(notaDeReferencia(true, costoPorTipoDeHabitaciones(r), false)).toMatch(/^ONE la usa para sacar el precio del niño \(/)
   })
 })

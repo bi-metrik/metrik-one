@@ -51,7 +51,7 @@ import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/ba
 import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
-import { estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
+import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -92,7 +92,7 @@ import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/ca
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
 import { encabezadoDelViaje, estadoDePasos } from '@/lib/cotizaciones/estado-pasos'
-import { notaDeLaLinea, ordenarComoElViaje, resumenDeOpcion, tituloDeBloque } from '@/lib/cotizaciones/opcion-viaje'
+import { notaDeLaLinea, ordenarComoElViaje, tituloDeBloque } from '@/lib/cotizaciones/opcion-viaje'
 import PasosCotizacion from '@/app/(app)/negocios/pasos-cotizacion'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
@@ -950,10 +950,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const estadoDeOpcion = (i: ItemRow) => {
     const t = leerTarifaPax(i.tarifa_pax)
     return {
+      id: i.id,
       nombre: i.nombre || 'Opción',
       conCosto: (lineaPorItem.get(i.id)?.costoLinea ?? 0) > 0,
       sinConfirmar: !!t.casillas?.grupo_completo && !t.confirmada,
-      alerta: t.casillas?.grupo_completo?.alertas?.[0] ?? null,
+      // Un aviso que solo informa (los impuestos en destino ya van al cliente) no pide nada.
+      alerta: (t.casillas?.grupo_completo?.alertas ?? []).find(a => !esAvisoSoloInformativo(a)) ?? null,
     }
   }
   // P12 · borrar una opción o un bloque entero: sin diálogo y con «Deshacer». Lo borrado se
@@ -2252,23 +2254,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     </span>
                   )}
                 </div>
-                {/* P6 · en la opción de un bloque la fila dice lo que sirve para COMPARAR
-                    («AV8520 · ida 06:05 → 08:20 · bodega 23 kg»; en el hotel habitación,
-                    régimen y cancelación), no el costo unitario ni la descripción larga. */}
-                {vistaDeOpcion && resumenDeOpcion(lecturaOpcion) && (
-                  <span className="block truncate text-[11px] text-muted-foreground">{resumenDeOpcion(lecturaOpcion)}</span>
-                )}
-                {/* P7 · la opción dice si está completa o qué le falta. */}
-                {vistaDeOpcion && (() => {
-                  const e = estadoDeBloque({ grupo: item.id, etiqueta: '' }, [estadoDeOpcion(item)])
-                  return e.completo ? (
-                    <span className="block text-[10px] font-medium text-[#10B981]">Completa ✓</span>
-                  ) : (
-                    <span className="block truncate text-[10px] font-medium text-amber-700">
-                      Requiere atención: {e.motivo?.replace(/^[^:]*: /, '')}
-                    </span>
-                  )
-                })()}
                 {!isAjuste && !vistaDeOpcion && (item.descripcion || costoDelItem > 0) && (
                   <span className="text-[10px] text-muted-foreground truncate block">
                     {costoDelItem > 0 && <span>Costo unit. {formatCOP(costoDelItem)}</span>}
@@ -2623,6 +2608,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             titulo={tituloDeBloque(bloque, numeroDeVuelo.get(bloque.grupo ?? '') ?? null).titulo}
             estado={estadosDeBloque.find(e => e.grupo === bloque.grupo) ?? null}
             id={idDeBloque(bloque.grupo ?? '')}
+            onVerOpcion={mostrarOpcion}
             onEliminar={editable ? () => eliminarBloque(bloque) : undefined}
           >
             {lineasDelBloque}

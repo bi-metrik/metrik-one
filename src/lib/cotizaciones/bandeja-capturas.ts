@@ -121,16 +121,34 @@ export type EstadoCaptura =
  * requiere atención». Un bloque está completo cuando todas sus opciones tienen costo; el que
  * no, requiere atención con su motivo.
  */
+/**
+ * ¿El aviso de la lectura solo informa lo que ONE ya hizo, sin pedir nada? Hoy, el de los
+ * impuestos que se pagan en destino (`lectura-pantallazo.ts`, 7.3): queda en «Se paga en el
+ * destino» y en el documento. Un aviso así no deja la opción ni el bloque por atender (H5).
+ */
+export function esAvisoSoloInformativo(aviso: string | null | undefined): boolean {
+  return !!aviso && aviso.startsWith('Impuestos y tasas a pagar en destino:') && aviso.includes('van al cliente como nota, no al costo')
+}
+
 export interface EstadoDeBloque {
   grupo: string
   etiqueta: string
   completo: boolean
   motivo: string | null
+  /**
+   * Lo que dice el ⚠ del bloque al pasar el mouse (H5): de qué se trata, en pocas palabras.
+   * `null` si el bloque está completo.
+   */
+  aviso: string | null
+  /** El detalle que abre el ⚠: qué pasa y qué hacer, en palabras llanas. */
+  explicacion: string | null
+  /** La opción que hay que abrir para arreglarlo («Ver la opción»). `null` si son varias. */
+  opcionId: string | null
 }
 
 export function estadoDeBloque(
   bloque: { grupo: string; etiqueta: string },
-  opciones: readonly { nombre: string; conCosto: boolean; sinConfirmar: boolean; alerta: string | null }[],
+  opciones: readonly { id?: string; nombre: string; conCosto: boolean; sinConfirmar: boolean; alerta: string | null }[],
 ): EstadoDeBloque {
   const sinCosto = opciones.filter(o => !o.conCosto)
   const sinConfirmar = opciones.filter(o => o.sinConfirmar)
@@ -144,7 +162,27 @@ export function estadoDeBloque(
       : conAlerta
         ? `${conAlerta.nombre}: ${conAlerta.alerta}`
         : null
-  return { grupo: bloque.grupo, etiqueta: bloque.etiqueta, completo: motivo === null, motivo }
+  let aviso: string | null = null
+  let explicacion: string | null = null
+  let opcionId: string | null = null
+  if (sinConfirmar.length > 0) {
+    aviso = 'Falta confirmar el costo'
+    explicacion = sinConfirmar.length === 1
+      ? `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. Ábrela y termina lo que le falta.`
+      : `${sinConfirmar.length} opciones tienen el pantallazo leído y el costo sin confirmar. Ábrelas y termina lo que les falta.`
+    opcionId = sinConfirmar.length === 1 ? sinConfirmar[0].id ?? null : null
+  } else if (sinCosto.length > 0) {
+    aviso = 'Falta el costo'
+    explicacion = sinCosto.length === 1
+      ? `${sinCosto[0].nombre} no tiene costo: pega su pantallazo o escríbelo a mano.`
+      : `${sinCosto.length} opciones no tienen costo: pega su pantallazo o escríbelo a mano.`
+    opcionId = sinCosto.length === 1 ? sinCosto[0].id ?? null : null
+  } else if (conAlerta) {
+    aviso = 'Hay algo por revisar'
+    explicacion = `${conAlerta.nombre}: ${conAlerta.alerta}`
+    opcionId = conAlerta.id ?? null
+  }
+  return { grupo: bloque.grupo, etiqueta: bloque.etiqueta, completo: motivo === null, motivo, aviso, explicacion, opcionId }
 }
 
 /** «3 bloques · 2 completos · 1 requiere atención». */

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { AlertCircle, Check, ChevronDown, ChevronRight, Circle } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle } from 'lucide-react'
 
 /**
  * El editor de la cotización como CINCO pasos en acordeón (brief del 2026-09-23, PR 2).
@@ -124,9 +124,14 @@ function MarcaEstado({ estado, problemas, activo }: { estado: EstadoPaso; proble
   }
   if (estado === 'error') {
     return (
-      <span className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 text-[10px] font-semibold text-red-700" title="Requiere atención">
-        <AlertCircle className="h-3 w-3" aria-hidden />
-        {problemas ?? '!'}
+      // H5 · solo el ícono ⚠ (con cuántos bloques piden algo) y un tooltip al pasar el mouse.
+      // El detalle vive en el ⚠ de cada bloque, que se abre al entrar al paso.
+      <span className="group relative inline-flex items-center gap-0.5 text-[10px] font-semibold text-[#9A5F0C]" aria-label="Necesita tu decisión" data-marca-error>
+        <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+        {problemas ? <span className="tabular-nums">{problemas}</span> : null}
+        <span role="tooltip" className="pointer-events-none absolute bottom-[calc(100%+6px)] left-0 z-40 hidden w-max max-w-[240px] rounded-md bg-[#191713] px-2 py-1.5 text-xs font-medium text-[#F3F1EC] [@media(hover:hover)]:group-hover:block">
+          Necesita tu decisión
+        </span>
       </span>
     )
   }

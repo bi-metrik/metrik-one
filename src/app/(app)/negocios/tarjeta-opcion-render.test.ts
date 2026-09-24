@@ -200,3 +200,12 @@ describe('así lo ve el cliente', () => {
     expect(html).toContain('NOTA-DE-VUELO')
   })
 })
+
+describe('la captura que solo sirve para restar', () => {
+  it('no lleva título propio: la explica «ONE la usa para sacar el precio…»', () => {
+    const extra: Habitacion = { id: 'extra', lectura: { ...lectura('7944d5cc'), imagenRef: null } as unknown as LecturaCasilla }
+    const html = pintar(tarifaConHabitaciones({}, [...habs(POSADA), extra], GRUPO))
+    expect(texto(html)).not.toContain('Solo para restar')
+    expect(html).toContain('data-habitacion="extra"')
+  })
+})
