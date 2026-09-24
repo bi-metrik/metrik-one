@@ -193,3 +193,29 @@ export function opcionLeidaDeFila(fila: Record<string, unknown> | null | undefin
     cargo_destino_moneda: typeof fila.cargo_destino_moneda === 'string' ? fila.cargo_destino_moneda : null,
   }
 }
+
+// ── El pie de la bandeja: los pantallazos que ya están en la cotización ──────
+
+/**
+ * Una llave por pantallazo que ya vive en Componentes: cada habitación de una opción, o su
+ * casilla si no tiene habitaciones (con habitaciones, la casilla del grupo ES la primera
+ * habitación y no se cuenta dos veces). La llave es la huella de la imagen cuando la lectura
+ * la trae; una lectura anterior a las huellas cuenta igual, con una llave propia.
+ *
+ * El pie de la bandeja dice cuántos hay, sin contar los que la bandeja ya muestra aceptados.
+ */
+export function pantallazosEnCotizacion(items: readonly { id: string; tarifa_pax?: unknown; es_ajuste?: boolean | null }[]): string[] {
+  const llaves: string[] = []
+  for (const it of items) {
+    if (it.es_ajuste === true || !it.tarifa_pax || typeof it.tarifa_pax !== 'object') continue
+    const t = it.tarifa_pax as { casillas?: Record<string, unknown>; habitaciones?: { lectura?: unknown }[] }
+    const habs = Array.isArray(t.habitaciones) ? t.habitaciones : []
+    const lecturas: unknown[] = habs.length > 0 ? habs.map(h => h?.lectura) : Object.values(t.casillas ?? {})
+    lecturas.forEach((l, i) => {
+      if (!l || typeof l !== 'object') return
+      const huella = (l as { huellaImagen?: unknown }).huellaImagen
+      llaves.push(typeof huella === 'string' && huella ? huella : `${it.id}:${i}`)
+    })
+  }
+  return [...new Set(llaves)]
+}

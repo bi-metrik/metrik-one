@@ -81,24 +81,26 @@ export function revisarBorrador(a: {
   })
   const leida = opcionDeBorrador(capId, borrador.tipo, borrador.lectura, destino.como === 'nueva' ? null : destino.grupo)
   const donde = textoDeDestino(destino, borrador.tipo, borrador.pistas, ubicaciones)
+  const como = destino.como
 
   // R8, regla 6: el grupo ya está cubierto en la opción de ese hotel. Se pregunta.
   if (destino.como === 'habitacion' && destino.sobra) {
     return {
       leida,
       donde,
+      como,
       pregunta: { fase: 'parecida', conItemId: destino.itemId, donde: nombreDeOpcion(destino.itemId, ubicaciones, etiquetaDeRanura(destino.grupo)), habitacion: true },
     }
   }
-  if (!a.comparar) return { leida, donde }
+  if (!a.comparar) return { leida, donde, como }
   const r = compararConExistentes(leida, a.comparables)
-  if (!r) return { leida, donde }
+  if (!r) return { leida, donde, como }
   const conBorrador = esIdDeBorrador(r.con.id)
   // «Reemplazar el precio» necesita una opción que YA esté en Componentes: contra otra captura
   // de la bandeja no hay nada que reemplazar todavía.
-  if (r.tipo === 'otro_precio' && conBorrador) return { leida, donde }
+  if (r.tipo === 'otro_precio' && conBorrador) return { leida, donde, como }
   const dondeCon = conBorrador ? 'otra captura de esta bandeja' : nombreDeOpcion(r.con.id, ubicaciones)
   return r.tipo === 'parecida'
-    ? { leida, donde, pregunta: { fase: 'parecida', conItemId: r.con.id, donde: dondeCon } }
-    : { leida, donde, pregunta: { fase: 'otro_precio', conItemId: r.con.id, donde: dondeCon, corta: opcionCorta(r.con.id, ubicaciones) } }
+    ? { leida, donde, como, pregunta: { fase: 'parecida', conItemId: r.con.id, donde: dondeCon } }
+    : { leida, donde, como, pregunta: { fase: 'otro_precio', conItemId: r.con.id, donde: dondeCon, corta: opcionCorta(r.con.id, ubicaciones) } }
 }

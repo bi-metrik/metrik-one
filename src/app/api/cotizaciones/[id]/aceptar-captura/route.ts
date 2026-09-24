@@ -45,6 +45,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     decision: cuerpo.decision as BorradorParaAceptar['decision'],
     destinoId: typeof cuerpo.destinoId === 'string' ? cuerpo.destinoId : null,
     imagen: typeof cuerpo.imagen === 'string' ? cuerpo.imagen : null,
+    correcciones: Array.isArray(cuerpo.correcciones)
+      ? cuerpo.correcciones.filter(c => !!c && typeof c.slug === 'string' && typeof c.valor === 'string')
+      : null,
   })
   return NextResponse.json(r)
 }
