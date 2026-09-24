@@ -17,7 +17,8 @@ import {
   variablesAvisoSinTelefono,
 } from '../_shared/wa-sin-telefono.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
-import { resolverEstudioChat, hasOpenCardumenChat, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
+import { resolverEstudioChat, chatCardumenAbierto, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
+import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
@@ -274,7 +275,8 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   // 0a. Cardumen — Flow completado: guardar la respuesta y agradecer. Va PRIMERO (participantes ≠ usuarios ONE).
   if (message.type === 'flow_response') {
     await storeCardumenFlowResponse(supabase, message.phone, message.flow_response || '');
-    await sendTextMessage(message.phone, '🐟 ¡Gracias! Tu historia ya forma parte del cardumen.');
+    const gracias = '🐟 ¡Gracias! Tu historia ya forma parte del cardumen.';
+    await sendTextMessage(message.phone, gracias, ctxCardumen(estudioFlow(), gracias));
     return;
   }
 
@@ -314,18 +316,21 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   // 0b. CardumenChat — AISLAMIENTO TOTAL. Si hay una conversacion Cardumen ABIERTA para este telefono,
   //     TODO mensaje (texto o audio) va al entrevistador y retorna ANTES de cualquier logica de ONE.
   //     Un audio (u otro mensaje) en medio de Cardumen NUNCA debe caer en el flujo de gastos/intents.
-  if (await hasOpenCardumenChat(supabase, message.phone)) {
+  const chatCardumen = await chatCardumenAbierto(supabase, message.phone);
+  if (chatCardumen) {
+    // Lo que el webhook contesta aqui tambien es Cardumen: va marcado con el estudio.
+    const avisarCardumen = (t: string) => sendTextMessage(message.phone, t, ctxCardumen(chatCardumen.estudio, t));
     let texto = message.text || '';
     if (message.type === 'audio' && message.audio_id) {
       const result = await transcribeAudio(message.audio_id);
       if (!result.text) {
-        await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Me lo puedes escribir o repetir?');
+        await avisarCardumen('No alcancé a entender el audio. ¿Me lo puedes escribir o repetir?');
         return;
       }
       texto = result.text;
     }
     if (!texto.trim()) {
-      await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
+      await avisarCardumen('Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
       return;
     }
     // El id del boton viaja aparte del titulo: Navigate decide por id y acepta el texto
@@ -538,6 +543,11 @@ const CARDUMEN_KEYWORDS = ['cardumen'];
 const CARDUMEN_APP_URL = 'https://cardumen-app-delta.vercel.app';
 const CARDUMEN_ESTUDIO = 'fede';
 
+/** Estudio con el que se guardan las respuestas del Flow (el mismo criterio de storeCardumenFlowResponse). */
+function estudioFlow(): string {
+  return Deno.env.get('CARDUMEN_ESTUDIO') || 'fede';
+}
+
 function isCardumenTrigger(text: string): boolean {
   const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
   return CARDUMEN_KEYWORDS.includes(t);
@@ -553,7 +563,8 @@ function isCardumenFlowTrigger(text: string): boolean {
 async function sendCardumenFlow(phone: string): Promise<void> {
   const flowId = Deno.env.get('CARDUMEN_FLOW_ID');
   if (!flowId) {
-    await sendTextMessage(phone, 'El cuestionario por Flow todavía no está publicado. Vuelve a intentar en un momento.');
+    const noPublicado = 'El cuestionario por Flow todavía no está publicado. Vuelve a intentar en un momento.';
+    await sendTextMessage(phone, noPublicado, ctxCardumen(estudioFlow(), noPublicado));
     console.warn('[wa-webhook] CARDUMEN_FLOW_ID no configurado');
     return;
   }
@@ -567,6 +578,7 @@ async function sendCardumenFlow(phone: string): Promise<void> {
     `wa:${phone}`,
     'CONSENT',
     mode,
+    ctxCardumen(estudioFlow()),
   );
   console.log(`[wa-webhook] Cardumen Flow (${mode}) enviado a ${phone}`);
 }
@@ -581,7 +593,7 @@ async function storeCardumenFlowResponse(
   // Guardamos el payload crudo del Flow; el mapeo fino al schema FEDE (regiones→percentX/Y) lo hace el pipeline.
   const payload = { source: 'flow', collection_mode: 'event_live', raw: data };
   const { error } = await supabase.from('cardumen_respuestas').insert({
-    estudio: Deno.env.get('CARDUMEN_ESTUDIO') || 'fede',
+    estudio: estudioFlow(),
     token: phone,
     lang: 'es',
     payload,
@@ -603,6 +615,7 @@ async function sendTurismoLink(phone: string): Promise<void> {
     '🐟 *La Araucanía*\n\nGracias por sumar tu historia sobre hacer negocios en la región. Toca el botón para compartirla — toma unos minutos y es confidencial.',
     'Compartir historia',
     url,
+    ctxCardumen('turismo'),
   );
   console.log(`[wa-webhook] Turismo link enviado a ${phone}`);
 }
@@ -618,6 +631,7 @@ async function sendCardumenLink(phone: string): Promise<void> {
     '🐟 *Cardumen*\n\nGracias por sumar tu historia. Toca el botón para compartirla — toma pocos minutos y es confidencial.',
     'Abrir cuestionario',
     url,
+    ctxCardumen(CARDUMEN_ESTUDIO),
   );
   console.log(`[wa-webhook] Cardumen CTA enviado a ${phone}`);
 }
