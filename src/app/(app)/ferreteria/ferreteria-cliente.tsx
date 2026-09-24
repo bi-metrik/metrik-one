@@ -140,8 +140,8 @@ export function FerreteriaCliente({
                     <th className="px-3 py-2">Código</th>
                     <th className="px-3 py-2">Producto</th>
                     <th className="px-3 py-2 text-right">Precio</th>
-                    <th className="px-3 py-2 text-right">Ganancia / venta</th>
-                    <th className="px-3 py-2 text-right">Margen</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right">Ganancia / venta</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right">Margen</th>
                     <th className="px-3 py-2">Estado</th>
                     <th className="px-3 py-2 text-right">Clics</th>
                     <th className="px-3 py-2 text-right">Conv.</th>
@@ -178,10 +178,10 @@ export function FerreteriaCliente({
                           </div>
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">{f.precio != null ? formatoPesos(f.precio) : '—'}</td>
-                        <td className={`px-3 py-2 text-right tabular-nums ${f.ganancia != null && f.ganancia < 0 ? 'text-red-600' : ''}`}>
+                        <td className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${f.ganancia != null && f.ganancia < 0 ? 'text-red-600' : ''}`}>
                           {f.ganancia != null ? formatoPesos(f.ganancia) : f.costoF == null ? 'sin costo' : '—'}
                         </td>
-                        <td className={`px-3 py-2 text-right tabular-nums ${f.margen != null && f.margen < 0 ? 'text-red-600' : ''}`}>
+                        <td className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${f.margen != null && f.margen < 0 ? 'text-red-600' : ''}`}>
                           {formatoMargen(f.margen)}
                         </td>
                         <td className="px-3 py-2">{ETIQUETA_ESTADO[f.estado]}</td>
