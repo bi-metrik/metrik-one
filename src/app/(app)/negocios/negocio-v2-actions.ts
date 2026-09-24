@@ -107,6 +107,9 @@ import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
+import { bloqueOcultoEnHistorial } from '@/lib/negocios/bloque-oculto-historial'
+import { datosClaveDelNegocio, contradiccionesQueBloquean } from '@/lib/negocios/datos-clave-servidor'
+import type { VistaDatosClave } from '@/lib/negocios/datos-clave'
 import { resolverDestinoCompartido } from '@/lib/negocios/casilla-compartida'
 import { sanearDataDelNavegador } from '@/lib/negocios/data-escribible'
 import { mayusculasDeBloqueDeViaje } from '@/lib/negocios/mayusculas'
@@ -3656,6 +3659,7 @@ export async function cambiarEtapaNegocioConGate(
   // La línea sobrevive al bloque de validación de orden: los gates de más abajo la
   // necesitan para resolver una etapa fuente por `orden` (que es único por línea).
   let etapaActualLineaId: string | null = null
+  let etapaActualOrden: number | null = null
   if (negocio.etapa_actual_id) {
     const [etapaActualRes, nuevaEtapaRes] = await Promise.all([
       db(supabase)
@@ -3677,6 +3681,7 @@ export async function cambiarEtapaNegocioConGate(
     etapaActualNombre = etapaActualData.nombre ?? null
     etapaActualConfigExtra = etapaActualData.config_extra ?? {}
     etapaActualLineaId = etapaActualData.linea_id
+    etapaActualOrden = etapaActualData.orden
     if (etapaActualData.linea_id !== nuevaEtapaData.linea_id) return { error: 'Etapas de líneas distintas' }
 
     // Evaluar routing condicional (si existe) ANTES de validar orden
@@ -4322,6 +4327,33 @@ export async function cambiarEtapaNegocioConGate(
             es_gate: true,
           }],
         }
+      }
+    }
+  }
+
+  // ── Cruces de la línea: dos datos del negocio que se contradicen ──
+  //
+  // La línea declara en `config_extra.cruces` qué pares de datos tienen que coincidir
+  // (la factura trae dos compradores y la titularidad dice «único»; el certificado UPME
+  // trae una persona en una copropiedad) y en qué etapas la contradicción FRENA. En las
+  // demás solo se ve en rojo en la tarjeta de datos clave. Se evalúa con los datos de
+  // HOY, no con lo que se guardó al cargar cada documento. Omitible con el permiso de
+  // omitir gates y el motivo escrito, como los demás (`motivoOverride`). Ver
+  // `src/lib/negocios/cruces.ts`.
+  if (!motivoOverride && negocio.etapa_actual_id && etapaActualLineaId) {
+    const { data: lineaCruces } = await db(supabase)
+      .from('lineas_negocio').select('config_extra').eq('id', etapaActualLineaId).maybeSingle()
+    const bloqueantes = await contradiccionesQueBloquean(supabase, {
+      negocioId,
+      lineaId: etapaActualLineaId,
+      etapaActualId: negocio.etapa_actual_id,
+      etapaOrden: etapaActualOrden,
+      configLinea: (lineaCruces as { config_extra?: Record<string, unknown> | null } | null)?.config_extra ?? null,
+    })
+    if (bloqueantes.length > 0) {
+      return {
+        error: 'gate_bloqueado',
+        bloquesPendientes: bloqueantes.map(c => ({ nombre: c.mensaje, es_gate: true })),
       }
     }
   }
@@ -6825,6 +6857,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
    * Ver `src/lib/negocios/no-aplica.ts`: avisa, no cierra.
    */
   noAplica: AvisoNoAplica | null
+  /**
+   * Tarjeta «Datos clave» de la línea (`config_extra.datos_clave`) con las
+   * contradicciones vigentes (`config_extra.cruces`). `null` si la línea no declara
+   * ninguna de las dos. Ver `src/lib/negocios/datos-clave.ts` y `cruces.ts`.
+   */
+  datosClave: VistaDatosClave | null
 } | null> {
   const { supabase, workspaceId, role, areas, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -7003,6 +7041,23 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     const ids = ((respRes.data ?? []) as { staff_id: string }[]).map((r) => r.staff_id)
     if (!staffId || !ids.includes(staffId)) return null
   }
+
+  // ── Datos clave + contradicciones ─────────────────────────────────────────
+  // Se resuelven contra los datos de HOY y no se guardan: un veredicto congelado queda
+  // viejo en cuanto alguien corrige la titularidad o carga el certificado. Un fallo
+  // aquí no tumba la ficha: la tarjeta simplemente no se pinta.
+  const datosClave = base.negocio.linea_id
+    ? await datosClaveDelNegocio(supabase, {
+        negocioId: id,
+        lineaId: base.negocio.linea_id,
+        etapaActualId: base.negocio.etapa_actual_id,
+        etapaOrden: base.etapasLinea.find(e => e.id === base.negocio.etapa_actual_id)?.orden ?? null,
+        configLinea: lineaConfigExtra,
+      }).catch(e => {
+        console.error('[getNegocioDetalleCompleto] datos clave:', e)
+        return null
+      })
+    : null
 
   // Feature flag pausa_enabled
   const wsRow = wsRes.data
@@ -7695,6 +7750,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           const ce = ceMap.get(cfg.id as string) ?? {}
           const def = cfg.bloque_definitions as BloqueHistorialFull['bloque_definitions']
           if (def && HIDDEN_TYPES.has(def.tipo)) continue
+          if (bloqueOcultoEnHistorial(ce)) continue
           // Un bloque declarado `visible` es de solo lectura POR DISEÑO; que su
           // condición se cumpla hoy no lo vuelve capturable.
           if (cfg.estado === 'visible') continue
@@ -7730,6 +7786,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         const ce = ceMap.get(cfg.id as string) ?? {}
         // Filtrar readonly heredados: la version origen ya esta en la lista
         if (typeof (ce as { source_etapa_orden?: unknown }).source_etapa_orden === 'number') continue
+        // Una pregunta RETIRADA no se vuelve a mostrar, tampoco en el historial. Ver
+        // `bloqueOcultoEnHistorial`: el dato se conserva, la pantalla deja de ofrecerlo.
+        if (bloqueOcultoEnHistorial(ce)) continue
         const def = cfg.bloque_definitions as BloqueHistorialFull['bloque_definitions']
         if (def && HIDDEN_TYPES.has(def.tipo)) continue
         const etapaInfo = etapaInfoById.get(cfg.etapa_id as string)
@@ -8226,6 +8285,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   return {
     negocio: base.negocio,
     noAplica,
+    datosClave,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
     etapasNoAplican: base.etapasNoAplican,
