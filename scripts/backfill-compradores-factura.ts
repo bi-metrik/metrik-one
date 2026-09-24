@@ -1,9 +1,13 @@
 /**
- * Lee los COMPRADORES de las facturas ya cargadas, sin re-extraer nada más.
+ * Lee los COMPRADORES de las facturas ya cargadas, sin re-extraer nada más. Con `--bloque`
+ * y `--campos` sirve para cualquier campo nuevo de cualquier documento (p. ej. el correo
+ * del certificado UPME, migración 20260925010000).
  *
  *   npx tsx scripts/backfill-compradores-factura.ts <workspace_slug>                 # simulación
  *   npx tsx scripts/backfill-compradores-factura.ts <workspace_slug> --commit        # escribe
  *   npx tsx scripts/backfill-compradores-factura.ts soena --solo V0207,V0151         # unos casos
+ *   npx tsx scripts/backfill-compradores-factura.ts soena --bloque concepto_upme \
+ *       --campos correo_certificado,correo_certificado_2                           # certificado
  *
  * Opciones:
  *   --bloque <slug>        bloque de la factura (default `factura_venta_vehiculo`)
@@ -87,6 +91,8 @@ type Resultado = {
   estado: 'escrito' | 'simulado' | 'ya_tenia' | 'sin_archivo' | 'no_drive' | 'error'
   compradores?: string | null
   cantidad?: string | null
+  /** Todo lo leído, campo por campo (el reporte de cualquier `--campos`). */
+  leido?: Record<string, string | null>
   titularidad?: string | null
   error?: string
 }
@@ -167,9 +173,14 @@ async function main() {
       const mime = mimeEfectivo(buffer, nombre.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg')
       const r = await extractFieldsFromDocument(buffer, mime, camposPorConfig.get(f.bloque_config_id)!, GEMINI!)
       if (!r.data) return { ...base, estado: 'error', error: r.error ?? 'extracción vacía' }
+      const valor = (c: string) => {
+        const v = r.data?.[c]?.value
+        return v === null || v === undefined ? null : String(v)
+      }
       const leido = {
-        compradores: r.data.compradores?.value ?? null,
-        cantidad: r.data.cantidad_compradores?.value ?? null,
+        compradores: valor('compradores'),
+        cantidad: valor('cantidad_compradores'),
+        leido: Object.fromEntries(CAMPOS.map(c => [c, valor(c)])),
       }
       if (!COMMIT) return { ...base, ...leido, estado: 'simulado' }
 
@@ -212,22 +223,26 @@ async function main() {
     const lote = await Promise.all(objetivo.slice(i, i + CONCURRENCIA).map(procesar))
     for (const r of lote) {
       resultados.push(r)
-      console.log(`${r.codigo ?? r.negocio_id}\t${r.estado}\t${r.cantidad ?? ''}\t${r.compradores ?? r.error ?? ''}`)
+      const vistos = r.leido ? CAMPOS.map(c => r.leido?.[c] ?? '').join('\t') : ''
+      console.log(`${r.codigo ?? r.negocio_id}\t${r.estado}\t${vistos || r.error || ''}`)
     }
   }
 
   const MAPEO: Record<string, number> = { unico: 1, copropiedad: 2 }
-  const contradicen = resultados.filter(r => {
+  // Solo con los compradores de la factura: los demás campos no se cotejan aquí.
+  const contradicen = !CAMPOS.includes('compradores') ? [] : resultados.filter(r => {
     const esperado = r.titularidad ? MAPEO[r.titularidad] : undefined
     const n = r.cantidad ? Number(r.cantidad) : parsearPersonas(r.compradores).length || undefined
     return esperado !== undefined && n !== undefined && n !== esperado
   })
   const conteo = resultados.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.estado]: (acc[r.estado] ?? 0) + 1 }), {})
-  const archivo = `backfill-compradores-${SLUG}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+  const archivo = `backfill-${BLOQUE}-${SLUG}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
   writeFileSync(archivo, JSON.stringify({ commit: COMMIT, conteo, contradicen, resultados }, null, 2))
   console.log('\nResumen:', conteo)
-  console.log(`Cantidad de compradores distinta de la titularidad: ${contradicen.length}`)
-  for (const r of contradicen) console.log(`  ${r.codigo}\t${r.titularidad}\t${r.cantidad}\t${r.compradores}`)
+  if (CAMPOS.includes('compradores')) {
+    console.log(`Cantidad de compradores distinta de la titularidad: ${contradicen.length}`)
+    for (const r of contradicen) console.log(`  ${r.codigo}\t${r.titularidad}\t${r.cantidad}\t${r.compradores}`)
+  }
   console.log(`Detalle en ${archivo}`)
 }
 

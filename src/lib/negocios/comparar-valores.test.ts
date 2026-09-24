@@ -41,6 +41,16 @@ describe('coinciden', () => {
     expect(coinciden('130530973', '143800000', 'monto')).toBe(false)
   })
 
+  it('correo: sin mayúsculas ni espacios, y una letra distinta es otra dirección', () => {
+    expect(coinciden('CaroSalazarC@Gmail.com', ' carosalazarc@gmail.com ', 'correo')).toBe(true)
+    expect(coinciden('carosalazarc@ gmail.com', 'carosalazarc@gmail.com', 'correo')).toBe(true)
+    expect(coinciden('mailto:a.b@x.co', 'a.b@x.co', 'correo')).toBe(true)
+    // V0210 medido: el certificado dice «hotmaiol.com».
+    expect(coinciden('lady.barrueto@hotmaiol.com', 'lady.barrueto@hotmail.com', 'correo')).toBe(false)
+    // Dos textos iguales que no son un correo no «coinciden».
+    expect(coinciden('no aplica', 'no aplica', 'correo')).toBe(false)
+  })
+
   it('falta un lado: no coinciden (quien llama decide que calla)', () => {
     expect(coinciden('', 'X', 'tokens')).toBe(false)
     expect(coinciden('X', null, 'compacto')).toBe(false)

@@ -22,10 +22,20 @@ import { TOLERANCIA_SALDO_COP } from './tolerancia-saldo'
  * - `palabra_comun`: comparten al menos una palabra con letras (marca, línea).
  * - `compacto`: iguales sin espacios ni signos (VIN, placas, series).
  * - `monto`: el mismo número de pesos, con tolerancia.
+ * - `correo`: la misma dirección, sin mayúsculas ni espacios. Un solo carácter distinto
+ *   es otra dirección (el certificado de V0210 dice «hotmaiol.com»): no se tolera nada.
  */
-export type ModoComparacion = 'tokens' | 'contenido' | 'palabra_comun' | 'compacto' | 'monto'
+export type ModoComparacion = 'tokens' | 'contenido' | 'palabra_comun' | 'compacto' | 'monto' | 'correo'
 
-export const MODOS_COMPARACION: ModoComparacion[] = ['tokens', 'contenido', 'palabra_comun', 'compacto', 'monto']
+export const MODOS_COMPARACION: ModoComparacion[] = ['tokens', 'contenido', 'palabra_comun', 'compacto', 'monto', 'correo']
+
+/** Un correo para comparar: minúsculas, sin espacios (la extracción los parte) ni `mailto:`. */
+export function normalizarCorreo(v: unknown): string {
+  return String(v ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/^mailto:/, '')
+}
 
 export interface OpcionesComparacion {
   /** Solo `monto`. Por defecto el piso de materialidad ($1.000). */
@@ -64,6 +74,10 @@ function palabras(v: unknown, equivalencias: string[][] = []): Set<string> {
 /** ¿Coinciden? `false` también cuando falta uno de los dos: quien llama decide si calla. */
 export function coinciden(a: unknown, b: unknown, modo: ModoComparacion, opts: OpcionesComparacion = {}): boolean {
   if (modo === 'monto') return montosCoinciden(a, b, opts.tolerancia_cop ?? TOLERANCIA_SALDO_COP)
+  if (modo === 'correo') {
+    const x = normalizarCorreo(a)
+    return x.includes('@') && x === normalizarCorreo(b)
+  }
   if (modo === 'compacto') {
     const x = normalizar(a).replace(/\s/g, '')
     const y = normalizar(b).replace(/\s/g, '')
