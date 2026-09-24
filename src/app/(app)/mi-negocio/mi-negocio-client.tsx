@@ -22,6 +22,7 @@ import ReglasValidacionSection from './reglas-validacion-section'
 import PilaSection from './pila-section'
 import TerminosSection from './terminos-section'
 import MargenSection from './margen-section'
+import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 // ── Types ──────────────────────────────────────────
 
@@ -47,6 +48,8 @@ interface MiNegocioClientProps {
   currentUserRole: string
   licenseUsed: number
   licenseMax: number
+  /** La persona designada del contrato (CDA): administrador sin costo, fuera del cupo. */
+  licenseAdminSinCostoId?: string | null
   workspaceFeatures: WorkspaceFeature[]
   equipoConAreas: StaffConAreas[]
   equipoDefaults: DefaultResponsableMap
@@ -115,6 +118,7 @@ export default function MiNegocioClient({
   currentUserRole,
   licenseUsed,
   licenseMax,
+  licenseAdminSinCostoId = null,
   workspaceFeatures,
   equipoConAreas,
   equipoDefaults,
@@ -138,7 +142,9 @@ export default function MiNegocioClient({
   const getMainValue = (key: string): string => {
     switch (key) {
       case 'mi-plan':
-        return `${licenseUsed}/${licenseMax} licencias`
+        return licenseAdminSinCostoId
+          ? textoCupo({ usados: licenseUsed, licencias: licenseMax, operativos: true })
+          : `${licenseUsed}/${licenseMax} licencias`
       case 'mi-flujo': {
         const activa = lineasDisponibles.find(l => l.id === lineaActivaId)
         return activa ? activa.nombre : 'Sin configurar'
@@ -269,7 +275,7 @@ export default function MiNegocioClient({
                   {renderSection(section.key, {
                     workspace, fiscalProfile, staffMembers, monthlyTargets,
                     fixedExpenses, categories, servicios, staffNomina,
-                    totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                    totalFixed, currentUserRole, licenseUsed, licenseMax, licenseAdminSinCostoId, workspaceFeatures,
                     equipoConAreas, equipoDefaults,
                     lineasDisponibles, lineaActivaId,
                     onClose: () => setActiveSection(null),
@@ -335,7 +341,7 @@ export default function MiNegocioClient({
               {renderSection(activeSection, {
                 workspace, fiscalProfile, staffMembers, monthlyTargets,
                 fixedExpenses, categories, servicios, staffNomina,
-                totalFixed, currentUserRole, licenseUsed, licenseMax, workspaceFeatures,
+                totalFixed, currentUserRole, licenseUsed, licenseMax, licenseAdminSinCostoId, workspaceFeatures,
                 equipoConAreas, equipoDefaults,
                 lineasDisponibles, lineaActivaId,
                 onClose: () => setActiveSection(null),
@@ -369,6 +375,7 @@ function renderSection(
     currentUserRole: string
     licenseUsed: number
     licenseMax: number
+    licenseAdminSinCostoId: string | null
     workspaceFeatures: WorkspaceFeature[]
     equipoConAreas: StaffConAreas[]
     equipoDefaults: DefaultResponsableMap
@@ -384,6 +391,7 @@ function renderSection(
           workspaceFeatures={props.workspaceFeatures}
           licenseUsed={props.licenseUsed}
           licenseMax={props.licenseMax}
+          licenseAdminSinCostoId={props.licenseAdminSinCostoId}
         />
       )
 
@@ -442,6 +450,7 @@ function renderSection(
           staffMembers={props.staffMembers}
           licenseUsed={props.licenseUsed}
           licenseMax={props.licenseMax}
+          licenseAdminSinCostoId={props.licenseAdminSinCostoId}
           currentUserRole={props.currentUserRole}
           equipoConAreas={props.equipoConAreas}
           equipoDefaults={props.equipoDefaults}

@@ -3,6 +3,8 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerLicenciasDelEspacio } from '@/lib/usuarios-espacio/licencias-servidor'
+import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 export async function getStaff() {
   const supabase = await createClient()
@@ -143,35 +145,24 @@ export async function deleteStaffMember(id: string) {
   return { success: true }
 }
 
-/** Get license usage: used seats vs max_seats */
-export async function getLicenseInfo() {
+/**
+ * Get license usage: used seats vs max_seats. La persona designada del contrato (CDA con Valida) es
+ * administrador sin costo y no ocupa licencia (`leerLicenciasDelEspacio`, la regla de /suscripcion).
+ */
+export async function getLicenseInfo(): Promise<{ used: number; max: number; adminSinCostoId: string | null }> {
   const supabase = await createClient()
   const { user } = await getCachedUser()
-  if (!user) return { used: 0, max: 1 }
+  if (!user) return { used: 0, max: 1, adminSinCostoId: null }
 
   const { data: profile } = await supabase
     .from('profiles')
     .select('workspace_id')
     .eq('id', user.id)
     .single()
-  if (!profile) return { used: 0, max: 1 }
+  if (!profile) return { used: 0, max: 1, adminSinCostoId: null }
 
-  const [{ count }, { data: ws }] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('workspace_id', profile.workspace_id),
-    supabase
-      .from('workspaces')
-      .select('max_seats')
-      .eq('id', profile.workspace_id)
-      .single(),
-  ])
-
-  return {
-    used: count ?? 0,
-    max: ws?.max_seats ?? 1,
-  }
+  const l = await leerLicenciasDelEspacio(supabase, profile.workspace_id)
+  return { used: l.usados, max: l.max, adminSinCostoId: l.adminSinCostoId }
 }
 
 /** Invite a staff member to the platform via Supabase magic link */
@@ -207,9 +198,10 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
     // Check seat availability — contador es ilimitado (no cuenta en el plan)
     const isContador = (staffMember.rol_plataforma === 'contador')
     if (!isContador) {
-      const { used, max } = await getLicenseInfo()
+      const { used, max, adminSinCostoId } = await getLicenseInfo()
       if (used >= max) {
-        return { error: `Sin licencias disponibles (${used}/${max}). Contacta soporte para ampliar tu plan.` }
+        const enUso = adminSinCostoId ? textoCupo({ usados: used, licencias: max, operativos: true }) : `${used}/${max}`
+        return { error: `Sin licencias disponibles (${enUso}). Contacta soporte para ampliar tu plan.` }
       }
     }
 

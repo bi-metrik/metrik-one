@@ -3,17 +3,20 @@
 import { CreditCard, Check, MessageCircle, Users } from 'lucide-react'
 import type { WorkspaceFeature } from '@/types/database'
 import { PRICING, FEATURE_CATALOG } from '@/lib/pricing'
+import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 interface Props {
   licenseUsed: number
   licenseMax: number
+  /** La persona designada del contrato (CDA): administrador sin costo, no ocupa licencia. */
+  licenseAdminSinCostoId?: string | null
   workspaceFeatures: WorkspaceFeature[]
 }
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-export default function PlanSection({ licenseUsed, licenseMax, workspaceFeatures }: Props) {
+export default function PlanSection({ licenseUsed, licenseMax, licenseAdminSinCostoId = null, workspaceFeatures }: Props) {
   const activeFeatures = workspaceFeatures.filter(f => f.is_active)
   const extraUsers = Math.max(0, licenseMax - 1)
   const featuresTotal = activeFeatures.reduce((sum, f) => sum + (f.price_cop ?? 0), 0)
@@ -44,7 +47,9 @@ export default function PlanSection({ licenseUsed, licenseMax, workspaceFeatures
             <Users className="h-4 w-4" /> Licencias
           </span>
           <span className="font-medium">
-            {licenseUsed} de {licenseMax} usada{licenseMax !== 1 ? 's' : ''}
+            {licenseAdminSinCostoId
+              ? `${textoCupo({ usados: licenseUsed, licencias: licenseMax, operativos: true })} · administrador sin costo`
+              : `${licenseUsed} de ${licenseMax} usada${licenseMax !== 1 ? 's' : ''}`}
           </span>
         </div>
         <div className="h-2 w-full rounded-full bg-muted">

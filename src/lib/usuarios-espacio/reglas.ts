@@ -104,6 +104,32 @@ export function cupoDelEspacio(p: { licencias: number; usuarios: { id: string }[
   return cupo(p.licencias, usuariosOperativos(p.usuarios, p.designadoId).length)
 }
 
+/** El contador de cupo, dicho igual en `/suscripcion`, `/config` y `/mi-negocio`. */
+export function textoCupo(p: { usados: number; licencias: number; operativos: boolean }): string {
+  return `${p.usados} de ${p.licencias} usuarios${p.operativos ? ' operativos' : ''} en uso`
+}
+
+export interface LicenciasDelEspacio {
+  usados: number
+  max: number
+  /** La persona designada si tiene perfil en el espacio: el cupo cuenta solo a los operativos. */
+  adminSinCostoId: string | null
+}
+
+/**
+ * Las licencias según `workspaces.max_seats` (la regla genérica de ONE: `/config`, `/mi-negocio`),
+ * con la misma excepción que `/suscripcion`: la persona designada del contrato no ocupa licencia.
+ * Sin persona designada (todo espacio sin contrato Valida), cuentan todos los perfiles, como antes.
+ */
+export function licenciasDelEspacio(p: {
+  perfiles: { id: string }[]
+  maxSeats: number | null | undefined
+  designadoId: string | null
+}): LicenciasDelEspacio {
+  const adminSinCostoId = p.perfiles.some((u) => esAdministradorSinCosto(u.id, p.designadoId)) ? p.designadoId : null
+  return { usados: usuariosOperativos(p.perfiles, adminSinCostoId).length, max: p.maxSeats ?? 1, adminSinCostoId }
+}
+
 const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 export function normalizarCorreo(correo: string): string {

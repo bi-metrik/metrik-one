@@ -8,6 +8,7 @@ import { formatCOP } from '@/lib/cobros/format'
 import {
   etiquetaRol,
   licenciaAdicionalLiberable,
+  textoCupo,
   type AccionesUsuario,
   type Cupo,
   type UsuarioDelEspacio,
@@ -76,7 +77,7 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
   // Con administrador sin costo, el cupo cuenta solo a los operativos, y el contador lo dice.
   const operativos = lista.some((u) => u.sinCosto)
   const contador = datos.cupo
-    ? `${datos.cupo.usados} de ${datos.cupo.licencias} usuarios${operativos ? ' operativos' : ''} en uso`
+    ? textoCupo({ usados: datos.cupo.usados, licencias: datos.cupo.licencias, operativos })
     : `${lista.length} usuarios con acceso`
   const usadosAhora = datos.cupo?.usados ?? lista.length
   const precio = datos.valorAdicional !== null ? ` · ${formatCOP(datos.valorAdicional)} por usuario adicional al mes` : ''

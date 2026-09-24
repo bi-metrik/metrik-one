@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { leerLicenciasDelEspacio } from '@/lib/usuarios-espacio/licencias-servidor'
 import { redirect } from 'next/navigation'
 import MiNegocioClient from './mi-negocio-client'
 import { getLineasDisponibles } from './actions'
@@ -143,13 +144,11 @@ export default async function MiNegocioPage() {
   const fiscalProfile = fiscalResult.data
   const staffMembers = staffResult.data || []
 
-  // License info: count profiles in workspace vs max_seats
-  const { count: profileCount } = await supabase
-    .from('profiles')
-    .select('id', { count: 'exact', head: true })
-    .eq('workspace_id', workspaceId)
-  const licenseUsed = profileCount ?? 0
-  const licenseMax = workspace?.max_seats ?? 1
+  // Licencias: perfiles vs max_seats, sin la persona designada del contrato (administrador sin costo).
+  const licencias = await leerLicenciasDelEspacio(supabase, workspaceId)
+  const licenseUsed = licencias.usados
+  const licenseMax = licencias.max
+  const licenseAdminSinCostoId = licencias.adminSinCostoId
   const monthlyTargets = monthlyTargetsResult.data || []
   const fixedExpenses = fixedResult.data || []
   const categories = categoriesResult.data || []
@@ -209,6 +208,7 @@ export default async function MiNegocioPage() {
       currentUserRole={profile.role}
       licenseUsed={licenseUsed}
       licenseMax={licenseMax}
+      licenseAdminSinCostoId={licenseAdminSinCostoId}
       workspaceFeatures={workspaceFeatures}
       equipoConAreas={equipoConAreas}
       equipoDefaults={equipoDefaults}
