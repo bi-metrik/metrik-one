@@ -18,6 +18,7 @@ import { fechaHoraEnLetras, partesFechaHora } from '@/lib/negocios/fecha-hora-ca
 import { textoAtencionCita } from '@/lib/negocios/seguimiento-citas'
 import { textoChipDesenlace, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { motivoCierreDeEstado } from '@/lib/negocios/motivo-cierre'
+import { textoExtra } from '@/lib/negocios/card-extras'
 
 export type StaffAsignable = { id: string; full_name: string }
 
@@ -699,6 +700,20 @@ export default function NegocioCard({
               {negocio.empresa_nombre ?? negocio.contacto_nombre ?? '—'}
             </p>
           )}
+          {/* Campos extra (config `negocio_card.campos_extra`, ej. SOENA: la titularidad con
+              sus titulares). Una línea por campo, truncada: en celular un nombre largo no
+              puede empujar la tarjeta; el texto entero queda en el `title`. */}
+          {(negocio.extras ?? []).map((e) => (
+            <p
+              key={e.indice}
+              className="mt-0.5 min-w-0 truncate text-[11px] text-tinta-suave"
+              title={`${e.label}: ${textoExtra(e)}`}
+              data-extra={e.label}
+            >
+              <span className="font-medium text-tinta">{e.valor}</span>
+              {e.detalle.length > 0 && <span>{' · '}{e.detalle.join(', ')}</span>}
+            </p>
+          ))}
           {/* Radicado de certificación (config-driven, ej. SOENA) + copiar al portapapeles */}
           {negocio.radicado && (
             <div className="mt-0.5 flex items-center gap-1">
