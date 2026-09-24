@@ -25,6 +25,7 @@ import type {
   ItemFicha,
   MedicionFila,
   ProductoFila,
+  PublicacionCatalogo,
   PublicacionFila,
   RepoFerreteria,
   TipoEvento,
@@ -348,6 +349,27 @@ export async function listarPendientes(repo: RepoFerreteria, ws: string): Promis
     })
   }
   return salida
+}
+
+/** Catálogo completo del workspace, ordenado por código: lo que el cron tiene que medir. */
+export async function listarPublicaciones(repo: RepoFerreteria, ws: string): Promise<PublicacionCatalogo[]> {
+  const pubs = await repo.catalogoPublicaciones(ws)
+  // Campo a campo, en el orden del contrato: que ninguna columna extra del repo se cuele.
+  return pubs
+    .map((p) => ({
+      codigo: p.codigo,
+      sku: p.sku,
+      canal: p.canal,
+      titulo: p.titulo,
+      precio: p.precio == null ? null : Number(p.precio),
+      estado: p.estado,
+      linea: p.linea,
+      link: p.link,
+      id_aviso: p.id_aviso,
+      fecha_publicacion: p.fecha_publicacion,
+      pendiente_en_canal: p.pendiente_en_canal,
+    }))
+    .sort((a, b) => a.codigo.localeCompare(b.codigo))
 }
 
 export interface ConfirmacionEntrada {

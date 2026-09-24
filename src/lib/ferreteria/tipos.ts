@@ -152,6 +152,25 @@ export interface TokenFila {
   revocado_at: string | null
 }
 
+/**
+ * Una publicación del catálogo tal como la lee el cron para saber QUÉ medir en el canal. Sin
+ * descripción ni etiquetas: no las necesita y son lo que más pesa.
+ */
+export interface PublicacionCatalogo {
+  codigo: string
+  /** SKU del producto. Null solo si el producto desapareció (no debería: hay FK). */
+  sku: string | null
+  canal: Canal
+  titulo: string
+  precio: number | null
+  estado: EstadoPublicacion
+  linea: Linea | null
+  link: string | null
+  id_aviso: string | null
+  fecha_publicacion: string | null
+  pendiente_en_canal: boolean
+}
+
 /** Campos de una publicación que se pueden cambiar. `undefined` = no se toca. */
 export interface CambiosPublicacion {
   precio?: number | null
@@ -186,6 +205,8 @@ export interface RepoFerreteria {
   publicacionPorId(ws: string, id: string): Promise<PublicacionFila | null>
   publicacionesPorCodigos(ws: string, codigos: string[]): Promise<PublicacionFila[]>
   publicacionesPendientes(ws: string): Promise<PublicacionFila[]>
+  /** TODAS las publicaciones del workspace, con el SKU de su producto. Sin orden garantizado. */
+  catalogoPublicaciones(ws: string): Promise<PublicacionCatalogo[]>
   insertarPublicacion(fila: Omit<PublicacionFila, 'id'>): Promise<PublicacionFila>
   /**
    * Actualiza solo si `version_canal` sigue siendo `versionEsperada`. `false` = otra escritura

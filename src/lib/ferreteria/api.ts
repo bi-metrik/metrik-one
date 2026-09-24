@@ -5,6 +5,7 @@
  * Contrato completo en `docs/specs/2026-09-24_modulo-ferreteria-dimpro.md`, §5.
  *
  *   GET  pendientes      → cambios hechos en ONE que el cron tiene que aplicar en el canal.
+ *   GET  publicaciones   → el catálogo completo (qué medir en el canal), ordenado por código.
  *   POST confirmaciones  → el cron confirma cada cambio como aplicado (con lo que vio) o con error.
  *   POST lote            → mediciones del día y conversaciones nuevas.
  *   POST productos       → upsert por SKU (con su costo de lista, opcional).
@@ -25,6 +26,7 @@ import {
   guardarProducto,
   guardarPublicacion,
   listarPendientes,
+  listarPublicaciones,
   registrarLote,
 } from './nucleo'
 import {
@@ -175,20 +177,23 @@ function validar<T>(esquema: z.ZodType<T>, cuerpo: unknown): { ok: true; datos: 
   return { ok: false, respuesta: error(400, 'cuerpo_invalido', 'El cuerpo de la petición no cumple el contrato.', detalle) }
 }
 
-const RECURSOS: Record<string, 'GET' | 'POST'> = {
-  pendientes: 'GET',
-  confirmaciones: 'POST',
-  lote: 'POST',
-  productos: 'POST',
-  publicaciones: 'POST',
-  eventos: 'POST',
+type Metodo = 'GET' | 'POST'
+
+const RECURSOS: Record<string, readonly Metodo[]> = {
+  pendientes: ['GET'],
+  confirmaciones: ['POST'],
+  lote: ['POST'],
+  productos: ['POST'],
+  publicaciones: ['GET', 'POST'],
+  eventos: ['POST'],
 }
 
 export async function atenderPeticion(repo: RepoFerreteria, pet: PeticionApi): Promise<RespuestaApi> {
-  const metodoEsperado = RECURSOS[pet.recurso]
-  if (!metodoEsperado) return error(404, 'recurso_desconocido', `No existe /api/ferreteria/${pet.recurso}.`)
-  if (pet.metodo.toUpperCase() !== metodoEsperado) {
-    return error(405, 'metodo_no_permitido', `${pet.recurso} se usa con ${metodoEsperado}.`)
+  const metodos = Object.hasOwn(RECURSOS, pet.recurso) ? RECURSOS[pet.recurso] : undefined
+  if (!metodos) return error(404, 'recurso_desconocido', `No existe /api/ferreteria/${pet.recurso}.`)
+  const metodo = pet.metodo.toUpperCase() as Metodo
+  if (!metodos.includes(metodo)) {
+    return error(405, 'metodo_no_permitido', `${pet.recurso} se usa con ${metodos.join(' o ')}.`)
   }
 
   // ── Autenticación: un valor ausente nunca autoriza ──
@@ -240,6 +245,11 @@ export async function atenderPeticion(repo: RepoFerreteria, pet: PeticionApi): P
     }
 
     case 'publicaciones': {
+      // Solo lectura. Los dos escritores (cron y agente) pueden leer el catálogo de su workspace.
+      if (metodo === 'GET') {
+        const publicaciones = await listarPublicaciones(repo, ws)
+        return { status: 200, cuerpo: { generado_at: pet.ahora, publicaciones } }
+      }
       const v = validar(esquemaPublicaciones, pet.cuerpo)
       if (!v.ok) return v.respuesta
       const resultados = []
