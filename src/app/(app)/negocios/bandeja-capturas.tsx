@@ -1,32 +1,23 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, Camera, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { detectarCaptura } from '@/app/(app)/negocios/ranura-actions'
+import { leerCapturaEnBorrador, type BorradorParaAceptar, type ResultadoAceptarCaptura } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { leerCaptura, procesarCaptura, type Borrador, type DependenciasDeProceso, type EstadoDeProceso, type Pistas } from '@/lib/cotizaciones/proceso-captura'
+import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
+import type { OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import {
-  agregarOpcionARanura,
-  crearRanuraConOpcion,
-  detectarCaptura,
-  type RanuraConLugar,
-} from '@/app/(app)/negocios/ranura-actions'
-import { leerCasillaDeItem, quitarHabitacion, unirHotelComoHabitacion, type ResultadoUnion } from '@/app/(app)/negocios/tarifa-pax-actions'
-import { desenlaceDeAceptar, type RespuestaAceptar } from '@/lib/cotizaciones/aceptar-captura'
-import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
-import { leerCaptura, procesarCaptura, type DependenciasDeProceso, type EstadoDeProceso, type Union } from '@/lib/cotizaciones/proceso-captura'
-import { ranuraDelItem } from '@/lib/cotizaciones/detalle-viaje'
-import {
-  compararConExistentes,
   huellaDeImagen,
   mensajeMismaImagen,
   nombreDeOpcion,
   opcionConLaMismaImagen,
-  opcionCorta,
   type OpcionComparable,
   type Ubicacion,
 } from '@/lib/cotizaciones/captura-repetida'
-import { crearUbicador, type Ubicador } from '@/lib/cotizaciones/ubicador-capturas'
 import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -37,32 +28,31 @@ import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-s
  * La bandeja de capturas (P7 del caso Providencia, versión de Mauricio del 2026-09-23):
  * primero se capturan todos los pantallazos, los detalles después.
  *
- *  · Se pegan uno tras otro, los que hagan falta, y cada uno se procesa en segundo plano: no
- *    hay que esperar a que termine uno para pegar el siguiente. Ctrl/Cmd+V funciona en
- *    cualquier parte de la cotización; en el escritorio la zona queda fija arriba y en el
- *    celular es un botón flotante «Pegar / Subir foto».
- *  · ONE decide dónde va cada uno (`ubicarCaptura`): mismo tipo y misma ruta (o lugar) →
- *    opción hermana; cualquier otra cosa → ranura nueva, que suma aparte.
- *  · Cada captura queda como una fila contraída con «Aceptar» y una × directa («Borrada ·
- *    Deshacer»). Abierta antes de aceptar muestra SOLO lo que se confirma; al aceptar se abre
- *    la opción en su bloque, con la nota, los adicionales y el precio.
+ *  · Se pegan uno tras otro, los que hagan falta, y cada uno se lee en segundo plano: no hay
+ *    que esperar a que termine uno para pegar el siguiente. Ctrl/Cmd+V funciona en cualquier
+ *    parte de la cotización; en el escritorio la zona queda fija arriba y en el celular es un
+ *    botón flotante «Pegar / Subir foto».
  *
- * ⚠️ Detectar y leer van en paralelo, pero UBICAR va en fila (`ubicador-capturas.ts`): dos
- * capturas del mismo vuelo nuevo pegadas a la vez crearían dos ranuras si las dos preguntaran
- * al mismo tiempo. La fila recuerda las ranuras que ella misma creó, y las OLVIDA cuando su
- * última opción se borra: si no, un hotel pegado después iba a una ranura muerta.
+ * ## Lo que sigue en la bandeja no toca Componentes (H2, prueba del 2026-09-24)
  *
- * ⚠️ La ficha de cada fila sale de lo que devolvió la lectura (`OpcionLeida`), no de las líneas
- * de la página: el refresco que las trae puede llegar tarde, y la fila decía «La lectura no
- * dejó datos» sobre una lectura completa (COT-2026-0011).
+ * Mirar y leer NO crean ranura, opción ni habitación: la lectura vuelve como BORRADOR firmado
+ * y vive en la fila. Solo «Aceptar» la lleva a Componentes, y es el servidor el que decide,
+ * contra la cotización de ese momento, a dónde (`ubicarLectura`): la ranura del mismo destino
+ * y fechas como otra opción (H1), una habitación del mismo hotel, o una ranura nueva. Quitar
+ * una fila es solo quitarla: no hay nada que borrar en Componentes.
+ *
+ * ## «Aceptar» no salta a Componentes (H3)
+ *
+ * Confirma con un aviso discreto («Agregada a Hotel en Providencia · Opción 2») con un «Ver»
+ * que abre la opción solo si se toca. Las aceptaciones van en fila: dos hoteles con las mismas
+ * fechas aceptados seguidos no pueden abrir cada uno su ranura.
  *
  * ## El pantallazo repetido (P10)
  *
  * La misma imagen (misma huella) no se procesa: la fila dice dónde está ya y se quita sola;
  * «Deshacer» la procesa igual. Otra imagen con el mismo servicio y precio se lee y pregunta
- * («Descartar» por defecto, o «Agregar igual»). El mismo servicio con otro precio no es
- * repetido: se ofrece reemplazar el precio de la opción que ya estaba o dejarla como otra.
- * Nunca se decide en silencio (`captura-repetida.ts`).
+ * («Descartar» por defecto, o «Agregar igual»). El mismo servicio con otro precio se ofrece
+ * reemplazar o dejar como otra opción. Nunca se decide en silencio (`captura-repetida.ts`).
  *
  * Solo el flujo de viaje (Trappvel) la monta. La imagen no se guarda; su huella, sí.
  */
@@ -87,22 +77,23 @@ export interface Captura {
   preview: string
   dataUrl: string
   estado: Estado
-  itemId: string | null
-  /**
-   * R8 · la captura quedó como esta habitación de `itemId` (una opción de hotel con varias).
-   * Borrarla quita la habitación, no la opción entera.
-   */
-  habitacionId?: string | null
-  donde: string | null
   tipo: TipoRanura | null
-  /** El nombre visible de la ranura donde quedó («Vuelo San Andrés–Providencia»). */
-  etiqueta: string | null
-  /** La opción como la dejó la lectura: la ficha se pinta con esto, sin esperar el refresco. */
-  leida: ItemDeBandeja | null
+  /** Lo que dijo el detector: la segunda lectura («¿Cuál de estas?») lo necesita. */
+  pistas: Pistas | null
+  /** La lectura firmada, todavía fuera de Componentes. Solo «Aceptar» la lleva. */
+  borrador: Borrador | null
+  /** La opción donde quedó, una vez aceptada. Antes, `null`: nada existe en Componentes. */
+  itemId: string | null
+  /** A dónde va a ir («Otra opción de Hotel en Providencia»); aceptada, dónde quedó. */
+  donde: string | null
+  /** La opción como quedaría: la ficha se pinta con esto. */
+  leida: OpcionLeida | null
   abierta: boolean
   error: string | null
   /** Huella del archivo (`huellaDeImagen`), para reconocer la misma imagen pegada otra vez. */
   huella?: string | null
+  /** El nombre visible de la ranura donde quedó. */
+  etiqueta?: string | null
 }
 
 export interface ItemDeBandeja {
@@ -113,40 +104,60 @@ export interface ItemDeBandeja {
   tramos?: unknown
   cargo_destino_valor?: number | string | null
   cargo_destino_moneda?: string | null
+  es_ajuste?: boolean | null
 }
 
-/** Cuánto espera una captura borrada antes de borrar su opción: la ventana de «Deshacer». */
-const ESPERA_BORRADO_MS = 6000
+/** Cuánto se queda a la vista una repetida antes de quitarse sola: la ventana de «Deshacer». */
+const ESPERA_REPETIDA_MS = 6000
+
+const FASES_CON_BORRADOR = new Set(['lista', 'parecida', 'otro_precio'])
 
 /**
- * ¿Hay trabajo de esta captura que se perdería al recargar? Lo que se está procesando, y la
- * opción que espera a que se elija cuál leer (existe en su bloque y todavía está vacía).
+ * ¿Hay trabajo de esta captura que se perdería al recargar? Lo que se está procesando o
+ * aceptando, lo que espera a que se elija cuál leer, y toda lectura que todavía no se aceptó:
+ * el borrador vive solo en esta pestaña.
  */
-export function enElAireCaptura(c: Pick<Captura, 'estado' | 'itemId'>): boolean {
+export function enElAireCaptura(c: Pick<Captura, 'estado' | 'borrador'>): boolean {
   const f = c.estado.fase
-  return f === 'mirando' || f === 'ubicando' || f === 'leyendo' || f === 'aceptando'
-    || ((f === 'eligiendo_opcion' || f === 'parecida') && c.itemId !== null)
+  return f === 'mirando' || f === 'leyendo' || f === 'aceptando' || f === 'eligiendo_opcion'
+    || (FASES_CON_BORRADOR.has(f) && !!c.borrador)
 }
 
 /**
- * Las opciones contra las que se compara una captura: las de la página y las que dejaron las
- * otras capturas de la bandeja que todavía no llegaron a ella. La lectura de la bandeja manda
- * sobre la de la página, que puede venir de antes.
+ * Las opciones contra las que se compara una captura (P10): las de la página y las que dejaron
+ * las otras capturas de la bandeja. Una aceptada se compara con su id real (se puede reemplazar
+ * su precio); una todavía en borrador, con su id de borrador (`revisarBorrador` no ofrece
+ * reemplazar lo que aún no está en Componentes).
  */
 export function opcionesParaComparar(items: readonly ItemDeBandeja[], capturas: readonly Captura[], excepto: string): OpcionComparable[] {
   const porId = new Map<string, OpcionComparable>()
-  for (const i of items) porId.set(i.id, i)
+  for (const i of items) if (i.es_ajuste !== true) porId.set(i.id, i)
   for (const c of capturas) {
-    if (c.id === excepto || !c.leida || !c.itemId) continue
-    if (c.estado.fase === 'borrada' || c.estado.fase === 'rechazada' || c.estado.fase === 'descartada') continue
-    porId.set(c.leida.id, c.leida)
+    if (c.id === excepto || !c.leida) continue
+    const f = c.estado.fase
+    if (f === 'aceptada' && c.itemId) {
+      porId.set(c.itemId, { ...c.leida, id: c.itemId })
+    } else if ((FASES_CON_BORRADOR.has(f) || f === 'aceptando') && c.borrador) {
+      porId.set(c.leida.id, c.leida)
+    }
   }
   return [...porId.values()]
 }
 
 /** ¿Se está analizando? La × también vale aquí (P11): la lectura en vuelo se descarta. */
 export function enProceso(e: Estado): boolean {
-  return e.fase === 'mirando' || e.fase === 'ubicando' || e.fase === 'leyendo'
+  return e.fase === 'mirando' || e.fase === 'leyendo'
+}
+
+/** Lo que dice el servidor al aceptar, en el idioma de la fila. */
+export function desenlaceDeAceptacion(r: ResultadoAceptarCaptura | null):
+  | { tipo: 'aceptada'; itemId: string; donde: string; pendiente: string | null }
+  | { tipo: 'sobra'; conItemId: string; mensaje: string }
+  | { tipo: 'error'; mensaje: string } {
+  if (!r) return { tipo: 'error', mensaje: 'No se pudo agregar la captura. Inténtalo otra vez.' }
+  if (r.ok) return { tipo: 'aceptada', itemId: r.itemId, donde: r.donde, pendiente: r.pendiente }
+  if (r.codigo === 'SOBRA' && 'conItemId' in r) return { tipo: 'sobra', conItemId: r.conItemId, mensaje: r.mensaje }
+  return { tipo: 'error', mensaje: r.mensaje || 'No se pudo agregar la captura. Inténtalo otra vez.' }
 }
 
 let contador = 0
@@ -162,10 +173,10 @@ export default function BandejaCapturas({
   fija = false,
 }: {
   cotizacionId: string
-  /** Las líneas de la cotización, para mostrar lo leído de cada captura antes de aceptarla. */
+  /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
   items: ItemDeBandeja[]
   composicion: Composicion | null
-  /** La opción aceptada, para abrirla en su bloque. */
+  /** Abre la opción en su bloque: solo cuando el asesor toca «Ver» (H3). */
   onOpcionCreada?: (itemId: string) => void
   /** Dónde vive cada opción de la página, para nombrarla («Opción 2 de Vuelo 1»). */
   ubicaciones?: Record<string, Ubicacion>
@@ -179,27 +190,18 @@ export default function BandejaCapturas({
   const router = useRouter()
   const [capturas, setCapturas] = useState<Captura[]>([])
   const entrada = useRef<HTMLInputElement>(null)
-  // La fila de ubicación (ver la cabecera). Se crea al primer uso: una sola por bandeja.
-  const ubicadorRef = useRef<Ubicador | null>(null)
-  const ubicador = useCallback((): Ubicador => {
-    if (!ubicadorRef.current) {
-      ubicadorRef.current = crearUbicador({
-        agregar: grupo => agregarOpcionARanura(cotizacionId, grupo),
-        crear: captura => crearRanuraConOpcion(cotizacionId, captura.tipo, { lugar: captura.lugar, origen: captura.origen, destino: captura.destino }),
-      })
-    }
-    return ubicadorRef.current
-  }, [cotizacionId])
-  // Borrados en su ventana de «Deshacer»: el reloj y lo que hay que ejecutar si nadie deshace.
-  const borrados = useRef(new Map<string, { reloj: ReturnType<typeof setTimeout>; ejecutar: () => void }>())
-  // Las capturas vigentes, para la limpieza al salir (el efecto no ve el estado de ese momento).
+  // Las capturas vigentes: la pasada asíncrona tiene que ver las de ESE momento.
   const vigentes = useRef<Captura[]>([])
   useEffect(() => { vigentes.current = capturas }, [capturas])
-  // Lo mismo para las líneas de la página y sus nombres: la comparación (P10) corre dentro de
-  // una pasada asíncrona y tiene que ver lo de ESE momento, no lo del render que la lanzó.
+  // Lo mismo para las líneas de la página, sus nombres y el grupo del viaje.
   const itemsVivos = useRef(items)
   const ubicacionesVivas = useRef(ubicaciones)
-  useEffect(() => { itemsVivos.current = items; ubicacionesVivas.current = ubicaciones }, [items, ubicaciones])
+  const composicionViva = useRef(composicion)
+  useEffect(() => {
+    itemsVivos.current = items
+    ubicacionesVivas.current = ubicaciones
+    composicionViva.current = composicion
+  }, [items, ubicaciones, composicion])
   // Qué captura trajo cada huella primero. Se escribe al pegar, sin esperar al render: dos
   // pegadas seguidas de la misma imagen se reconocen aunque la primera no se haya pintado.
   const huellas = useRef(new Map<string, string>())
@@ -207,64 +209,12 @@ export default function BandejaCapturas({
   const forzadas = useRef(new Set<string>())
   // Repetidas en su ventana de «Deshacer», antes de quitarse solas.
   const ocultar = useRef(new Map<string, ReturnType<typeof setTimeout>>())
-  // Aceptaciones en camino: un segundo toque no manda otra (R1).
+  // Aceptaciones: una a la vez (H1), y un segundo toque no manda otra (R1).
   const aceptando = useRef(new Set<string>())
-  // R8 · las uniones de hotel van en fila: dos capturas del mismo hotel que terminan de leerse
-  // a la vez no pueden quedar cada una como la opción «de destino» de la otra.
-  const colaUnion = useRef<Promise<unknown>>(Promise.resolve())
+  const colaAceptar = useRef<Promise<unknown>>(Promise.resolve())
 
   const actualizar = useCallback((id: string, cambio: Partial<Captura>) => {
     setCapturas(cs => cs.map(c => (c.id === id ? { ...c, ...cambio } : c)))
-  }, [])
-
-  /**
-   * Retira la opción que nació para una captura que no sirvió. Si era la última de su ranura,
-   * `deleteItem` retira también la ranura y la fila deja de ofrecerla. Nunca lanza: un fallo aquí
-   * no puede dejar la fila colgada.
-   */
-  const descartarOpcion = useCallback(async (itemId: string) => {
-    try {
-      await deleteItem(itemId)
-      ubicador().olvidarOpcion(itemId)
-      await recalcularTotales(cotizacionId)
-      return true
-    } catch {
-      return false
-    }
-  }, [cotizacionId, ubicador])
-
-  /** R8 · quita la habitación que dejó una captura. Nunca lanza. */
-  const descartarHabitacion = useCallback(async (itemId: string, habitacionId: string) => {
-    try {
-      const r = await quitarHabitacion(itemId, habitacionId)
-      if (r.opcionRetirada) ubicador().olvidarOpcion(itemId)
-      await recalcularTotales(cotizacionId)
-      return r.success
-    } catch {
-      return false
-    }
-  }, [cotizacionId, ubicador])
-
-  /** R8 · la respuesta del servidor, en el idioma de la fila. */
-  const traducirUnion = useCallback((itemPropio: string, r: ResultadoUnion): Union => {
-    if (!r.ok) return { tipo: 'sola' }
-    if (r.tipo === 'unida') {
-      // Su opción se retiró en el servidor: la fila de ubicación ya no la ofrece.
-      ubicador().olvidarOpcion(itemPropio)
-      return { tipo: 'unida', itemId: r.itemId, habitacionId: r.habitacionId, donde: r.donde, opcion: r.opcion }
-    }
-    if (r.tipo === 'sobra') {
-      const otra = vigentes.current.find(x => x.itemId === r.conItemId)
-      return { tipo: 'sobra', conItemId: r.conItemId, donde: nombreDeOpcion(r.conItemId, ubicacionesVivas.current, otra?.etiqueta) }
-    }
-    return { tipo: 'sola' }
-  }, [ubicador])
-
-  /** R8 · en fila, una a la vez (ver `colaUnion`). */
-  const unirEnFila = useCallback((itemId: string, opciones?: { forzar?: boolean; destinoId?: string }) => {
-    const turno = colaUnion.current.then(() => unirHotelComoHabitacion(itemId, opciones ?? {}))
-    colaUnion.current = turno.catch(() => undefined)
-    return turno
   }, [])
 
   /**
@@ -283,47 +233,23 @@ export default function BandejaCapturas({
     const turno = turnos.current.get(id) ?? nuevoTurno(id)
     return {
       detectar: () => detectarCaptura(cotizacionId, dataUrl),
-      // `RanuraConLugar` y `RanuraExistente` son la misma forma vista desde dos módulos.
-      ubicar: (captura, ranuras) => ubicador().ubicar(captura, ranuras as RanuraConLugar[]),
-      leer: async (itemId, enfoque) => {
-        try {
-          return await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, enfoque)
-        } catch {
-          // La acción se cayó (tiempo agotado, red). Antes la fila quedaba en «Leyendo…» para
-          // siempre, sin poder borrarse, y la opción vacía se quedaba en su bloque (COT-2026-0011).
-          return { ok: false, mensaje: 'No se pudo leer el pantallazo. Vuelve a pegarlo.' }
-        }
-      },
-      descartar: descartarOpcion,
-      // R8 · solo los hoteles buscan la opción del mismo hotel y fechas.
-      unir: async (itemId, leida) => {
-        if (ranuraDelItem({ nombre: leida.nombre ?? null, grupo: leida.grupo ?? null, tarifa_pax: leida.tarifa_pax })?.slug !== 'hotel_detalle') {
-          return { tipo: 'sola' }
-        }
-        return traducirUnion(itemId, await unirEnFila(itemId))
-      },
-      quitarHabitacion: descartarHabitacion,
+      leer: (tipo, enfoque) => leerCapturaEnBorrador(cotizacionId, tipo, dataUrl, enfoque),
+      revisar: borrador => revisarBorrador({
+        capId: id,
+        borrador,
+        lineas: itemsVivos.current,
+        comparables: opcionesParaComparar(itemsVivos.current, vigentes.current, id),
+        composicion: composicionViva.current,
+        ubicaciones: ubicacionesVivas.current,
+        comparar: !forzadas.current.has(id),
+      }),
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
-      refrescar: () => router.refresh(),
-      comparar: forzadas.current.has(id) ? undefined : leida => {
-        const r = compararConExistentes(leida, opcionesParaComparar(itemsVivos.current, vigentes.current, id))
-        if (!r) return null
-        const otra = vigentes.current.find(x => x.itemId === r.con.id)
-        const donde = nombreDeOpcion(r.con.id, ubicacionesVivas.current, otra?.etiqueta)
-        return r.tipo === 'parecida'
-          ? { fase: 'parecida', conItemId: r.con.id, donde }
-          : { fase: 'otro_precio', conItemId: r.con.id, donde, corta: opcionCorta(r.con.id, ubicacionesVivas.current) }
-      },
     }
-  }, [actualizar, cotizacionId, descartarHabitacion, descartarOpcion, nuevoTurno, router, traducirUnion, ubicador, unirEnFila])
+  }, [actualizar, cotizacionId, nuevoTurno])
 
   const procesar = useCallback(async (id: string, dataUrl: string, tipoElegido?: TipoRanura) => {
     await procesarCaptura(dependencias(id, dataUrl), tipoElegido)
-  }, [dependencias])
-
-  const leer = useCallback(async (id: string, itemId: string, dataUrl: string, enfoque: { nombre: string; precio: string | null } | null) => {
-    await leerCaptura(dependencias(id, dataUrl), itemId, enfoque)
   }, [dependencias])
 
   const agregar = useCallback((archivo: File) => {
@@ -337,7 +263,8 @@ export default function BandejaCapturas({
       const id = nuevoId()
       const huella = await huellaDeImagen(dataUrl)
       const base: Captura = {
-        id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, itemId: null, donde: null, tipo: null, etiqueta: null, leida: null, abierta: false, error: null, huella,
+        id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, tipo: null, pistas: null, borrador: null,
+        itemId: null, donde: null, leida: null, abierta: false, error: null, huella,
       }
       // P10 · ¿esta imagen ya se pegó? En la página (la huella quedó con su lectura) o en esta
       // misma bandeja, mientras esa captura siga viva.
@@ -353,7 +280,7 @@ export default function BandejaCapturas({
         ocultar.current.set(id, setTimeout(() => {
           ocultar.current.delete(id)
           actualizar(id, { estado: { fase: 'descartada' } })
-        }, ESPERA_BORRADO_MS))
+        }, ESPERA_REPETIDA_MS))
         return
       }
       if (huella) huellas.current.set(huella, id)
@@ -382,27 +309,17 @@ export default function BandejaCapturas({
     return () => window.removeEventListener('paste', alPegar)
   }, [agregar])
 
-  // Al salir de la cotización (navegar dentro de la app) nada se queda a medias: los borrados en
-  // su ventana de «Deshacer» se ejecutan ya, y la opción que esperaba a que se eligiera cuál
-  // leer se retira. Antes el reloj se cancelaba y la opción se quedaba vacía en su bloque.
+  // Al salir no hay nada que limpiar en Componentes (H2): solo los relojes de las repetidas.
   useEffect(() => {
-    const pendientes = borrados.current
-    const actuales = vigentes
     const repetidas = ocultar.current
     return () => {
-      for (const { reloj, ejecutar } of pendientes.values()) { clearTimeout(reloj); ejecutar() }
-      pendientes.clear()
       for (const reloj of repetidas.values()) clearTimeout(reloj)
       repetidas.clear()
-      // «Parece igual» sin respuesta se resuelve con su opción por defecto: Descartar.
-      for (const c of actuales.current) {
-        if (c.itemId && (c.estado.fase === 'eligiendo_opcion' || c.estado.fase === 'parecida')) void descartarOpcion(c.itemId)
-      }
     }
-  }, [descartarOpcion])
+  }, [])
 
-  // Recargar o cerrar la pestaña corta todo lo que está en el aire: el navegador pregunta antes.
-  const enElAire = capturas.some(c => enElAireCaptura(c)) || capturas.some(c => c.estado.fase === 'borrada' && c.itemId)
+  // Recargar o cerrar la pestaña pierde lo que no se ha aceptado: el navegador pregunta antes.
+  const enElAire = capturas.some(c => enElAireCaptura(c))
   useEffect(() => {
     if (!enElAire) return
     function alSalir(e: BeforeUnloadEvent) { e.preventDefault(); e.returnValue = '' }
@@ -412,8 +329,7 @@ export default function BandejaCapturas({
 
   // Dentro del marco del negocio, la MISMA condición pregunta antes de salir por un enlace
   // (otra cotización del panel, el encabezado, el menú). Escucha en captura sobre el
-  // documento: corre antes que el `Link`, que respeta `defaultPrevented`. Así el aviso vive
-  // en la cotización y el encabezado y el panel del negocio no cambian.
+  // documento: corre antes que el `Link`, que respeta `defaultPrevented`.
   useEffect(() => {
     if (!fija || !enElAire) return
     function alTocar(e: MouseEvent) {
@@ -447,29 +363,19 @@ export default function BandejaCapturas({
     },
   }
 
+  /** Quitar una fila es solo quitarla: nada de ella está en Componentes (H2). */
   function borrar(c: Captura) {
     if (enProceso(c.estado)) {
-      // Se quita a mitad del análisis (P11): la pasada en vuelo deja de ser vigente y, si ya
-      // había creado la opción, la borra ella misma al llegar. «Deshacer» la vuelve a la cola.
+      // Se quita a mitad del análisis (P11): lo que devuelva la pasada en vuelo se descarta.
+      // «Deshacer» la vuelve a la cola.
       nuevoTurno(c.id)
       actualizar(c.id, {
         estado: { fase: 'borrada', antes: { fase: 'mirando' }, reanudar: true },
-        itemId: null, leida: null, donde: null, error: null, abierta: false,
+        borrador: null, leida: null, donde: null, error: null, abierta: false,
       })
-      if (c.itemId) void descartarOpcion(c.itemId).then(() => router.refresh())
       return
     }
     actualizar(c.id, { estado: { fase: 'borrada', antes: c.estado }, abierta: false })
-    if (!c.itemId) return
-    const itemId = c.itemId
-    const habitacionId = c.habitacionId ?? null
-    const ejecutar = () => {
-      borrados.current.delete(c.id)
-      // R8 · una captura que quedó como habitación se lleva SOLO su habitación: la opción
-      // tiene las demás.
-      void (habitacionId ? descartarHabitacion(itemId, habitacionId) : descartarOpcion(itemId)).then(() => router.refresh())
-    }
-    borrados.current.set(c.id, { reloj: setTimeout(ejecutar, ESPERA_BORRADO_MS), ejecutar })
   }
 
   function deshacer(c: Captura) {
@@ -484,12 +390,8 @@ export default function BandejaCapturas({
       void procesar(c.id, c.dataUrl)
       return
     }
-    const b = borrados.current.get(c.id)
-    if (b) clearTimeout(b.reloj)
-    borrados.current.delete(c.id)
     if (c.estado.fase !== 'borrada') return
     if (c.estado.reanudar) {
-      // Vuelve a la cola: se analiza de nuevo desde cero, con un turno propio.
       nuevoTurno(c.id)
       actualizar(c.id, { estado: { fase: 'mirando' } })
       void procesar(c.id, c.dataUrl)
@@ -498,115 +400,88 @@ export default function BandejaCapturas({
     actualizar(c.id, { estado: c.estado.antes })
   }
 
-  /** «Agregar igual» / «Agregar como otra opción»: queda como una opción más, lista para aceptar. */
-  function agregarIgual(c: Captura) {
-    if (c.estado.fase !== 'parecida' && c.estado.fase !== 'otro_precio') return
-    if (c.estado.fase === 'parecida' && c.estado.habitacion && c.itemId) {
-      void agregarComoHabitacion(c, c.estado)
-      return
-    }
-    actualizar(c.id, { estado: { fase: 'lista', alertas: c.estado.alertas } })
+  /** «¿Cuál de estas?»: la segunda lectura, con el tipo y el lugar que ya se sabían. */
+  function elegirOpcion(c: Captura, o: { nombre: string; precio: string | null }) {
+    if (!c.tipo) return
+    void leerCaptura(dependencias(c.id, c.dataUrl), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, o)
   }
 
   /**
-   * R8 · «Agregar igual» sobre un hotel con el grupo ya cubierto: la captura entra como otra
-   * habitación de esa opción, no como otra opción.
+   * «Aceptar» (H2/H3). Va por `fetch` y no por la server action (ver la ruta), en fila con las
+   * demás aceptaciones. La fila cambia en el acto; al volver, un aviso dice dónde quedó.
    */
-  async function agregarComoHabitacion(c: Captura, antes: Extract<Estado, { fase: 'parecida' }>) {
-    if (!c.itemId) return
-    const propia = c.itemId
-    const turno = nuevoTurno(c.id)
-    actualizar(c.id, { estado: { fase: 'leyendo' }, donde: `Agregando como habitación de ${antes.donde}`, error: null, abierta: false })
-    let r: ResultadoUnion
-    try {
-      r = await unirEnFila(propia, { forzar: true, destinoId: antes.conItemId })
-    } catch {
-      r = { ok: false, mensaje: 'No se pudo agregar la habitación. Inténtalo otra vez.' }
-    }
-    if (turnos.current.get(c.id) !== turno) { router.refresh(); return }
-    const u = traducirUnion(propia, r)
-    if (u.tipo !== 'unida') {
-      actualizar(c.id, { estado: antes, donde: c.donde, error: r.ok ? 'No se pudo agregar la habitación. Inténtalo otra vez.' : r.mensaje, abierta: true })
-      return
-    }
-    actualizar(c.id, {
-      estado: { fase: 'lista', alertas: antes.alertas },
-      itemId: u.itemId,
-      habitacionId: u.habitacionId,
-      donde: u.donde,
-      leida: u.opcion,
-    })
-    router.refresh()
-  }
-
-  /**
-   * «Reemplazar el precio de Opción 2»: el pantallazo nuevo se lee sobre la opción que ya
-   * estaba (su precio queda al día) y la opción que nació para esta captura se retira.
-   */
-  async function reemplazarPrecio(c: Captura) {
-    if (c.estado.fase !== 'otro_precio' || !c.itemId) return
-    const antes = c.estado
-    const nuevaId = c.itemId
-    const turno = nuevoTurno(c.id)
-    const vigente = () => turnos.current.get(c.id) === turno
-    actualizar(c.id, { estado: { fase: 'leyendo' }, donde: `Reemplazando el precio de ${antes.donde}`, error: null })
-    let r: Awaited<ReturnType<typeof leerCasillaDeItem>>
-    try {
-      r = await leerCasillaDeItem(antes.conItemId, 'grupo_completo', c.dataUrl, null, null)
-    } catch {
-      r = { ok: false, codigo: 'RED', mensaje: 'No se pudo reemplazar el precio. Inténtalo otra vez.' }
-    }
-    // Quitada mientras se reemplazaba: la × ya se llevó la opción nueva (P11).
-    if (!vigente()) { router.refresh(); return }
-    if (!r.ok) {
-      actualizar(c.id, { estado: antes, donde: c.donde, error: r.mensaje })
-      return
-    }
-    await descartarOpcion(nuevaId)
-    actualizar(c.id, {
-      estado: { fase: 'lista', alertas: r.alertas },
-      itemId: antes.conItemId,
-      leida: r.opcion ?? null,
-      donde: `Precio reemplazado en ${antes.donde}`,
-      abierta: false,
-    })
-    router.refresh()
-  }
-
-  /**
-   * «Aceptar» (R1 del 2026-09-23). Va por `fetch` y no por la server action: Next despacha
-   * las server actions en fila, así que un «Aceptar» esperaba detrás de todas las lecturas en
-   * curso y parecía no responder. La fila cambia en el acto, la opción se muestra en su bloque
-   * de una vez, y un faltante de la tarifa no impide aceptar: queda pendiente en el bloque.
-   */
-  async function aceptar(c: Captura) {
-    if (!c.itemId || aceptando.current.has(c.id)) return
+  async function aceptar(c: Captura, decision: BorradorParaAceptar['decision'], destinoId?: string | null) {
+    const b = c.borrador
+    if (!b || aceptando.current.has(c.id)) return
     aceptando.current.add(c.id)
-    const itemId = c.itemId
     const antes = c.estado
     actualizar(c.id, { estado: { fase: 'aceptando' }, error: null, abierta: false })
-    onOpcionCreada?.(itemId)
-    let respuesta: RespuestaAceptar | null = null
-    try {
-      const res = await fetch(`/api/cotizaciones/items/${encodeURIComponent(itemId)}/confirmar-tarifa`, { method: 'POST' })
-      respuesta = (await res.json()) as RespuestaAceptar
-    } catch {
-      respuesta = null
-    } finally {
-      aceptando.current.delete(c.id)
-    }
-    const d = desenlaceDeAceptar(respuesta)
+    const cuerpo: BorradorParaAceptar = { tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision, destinoId: destinoId ?? null }
+    const turno = colaAceptar.current.then(async () => {
+      try {
+        const res = await fetch(`/api/cotizaciones/${encodeURIComponent(cotizacionId)}/aceptar-captura`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cuerpo),
+        })
+        return (await res.json()) as ResultadoAceptarCaptura
+      } catch {
+        return null
+      }
+    })
+    colaAceptar.current = turno.catch(() => undefined)
+    const d = desenlaceDeAceptacion(await turno)
+    aceptando.current.delete(c.id)
     if (d.tipo === 'error') {
       actualizar(c.id, { estado: antes, error: d.mensaje })
       return
     }
-    actualizar(c.id, { estado: { fase: 'aceptada' }, error: null })
-    if (d.tipo === 'pendiente') toast.warning(d.mensaje)
+    if (d.tipo === 'sobra') {
+      // R8, regla 6: al llegar, el grupo ya estaba cubierto. Se pregunta, nunca se decide solo.
+      const alertas = 'alertas' in antes ? antes.alertas : []
+      actualizar(c.id, {
+        estado: { fase: 'parecida', conItemId: d.conItemId, donde: nombreDeOpcion(d.conItemId, ubicacionesVivas.current), alertas, habitacion: true },
+        abierta: true,
+      })
+      router.refresh()
+      return
+    }
+    actualizar(c.id, { estado: { fase: 'aceptada' }, itemId: d.itemId, donde: d.donde, error: null })
+    const ver = onOpcionCreada ? { label: 'Ver', onClick: () => onOpcionCreada(d.itemId) } : undefined
+    // H3 · se queda donde está: un aviso discreto, y la opción solo se abre si se toca «Ver».
+    toast.success(`Agregada a ${d.donde}`, ver ? { action: ver } : undefined)
+    if (d.pendiente) toast.warning(`Quedó un pendiente en ${d.donde}: ${d.pendiente}`, ver ? { action: ver } : undefined)
     router.refresh()
   }
 
+  /** «Agregar igual» / «Agregar como otra opción» / «Agregar como habitación». */
+  function agregarIgual(c: Captura) {
+    const e = c.estado
+    if (e.fase === 'parecida' && e.habitacion) return void aceptar(c, 'habitacion', e.conItemId)
+    if (e.fase === 'parecida' || e.fase === 'otro_precio') return void aceptar(c, 'opcion')
+  }
+
+  /** «Reemplazar el precio de Opción 2»: la lectura nueva queda sobre la opción que ya estaba. */
+  function reemplazarPrecio(c: Captura) {
+    if (c.estado.fase !== 'otro_precio' || esIdDeBorrador(c.estado.conItemId)) return
+    void aceptar(c, 'reemplazar', c.estado.conItemId)
+  }
+
+  // A dónde irá cada captura lista, contra la cotización que se ve AHORA: aceptar otra puede
+  // cambiarlo («Hotel en Providencia · nuevo» pasa a «Otra opción de Hotel en Providencia»).
+  const dondeVivo = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of capturas) {
+      if (c.estado.fase !== 'lista' || !c.borrador) continue
+      m.set(c.id, revisarBorrador({
+        capId: c.id, borrador: c.borrador, lineas: items, comparables: [], composicion, ubicaciones, comparar: false,
+      }).donde)
+    }
+    return m
+  }, [capturas, items, composicion, ubicaciones])
+
   const visibles = capturas.filter(c => c.estado.fase !== 'aceptada' && c.estado.fase !== 'descartada')
-  const enCurso = capturas.filter(c => ['mirando', 'ubicando', 'leyendo'].includes(c.estado.fase)).length
+  const enCurso = capturas.filter(c => enProceso(c.estado)).length
 
   const entradaArchivos = (
     <input
@@ -624,26 +499,23 @@ export default function BandejaCapturas({
     />
   )
 
-  // R2 (2026-09-23): con muchas filas la lista tapaba los bloques de abajo y no se veía dónde
-  // caían las opciones aceptadas. Tiene tope de alto y se desplaza por dentro. Con el marco
-  // (`fija`) va en el flujo de la página, debajo de la franja fija.
+  // R2 (2026-09-23): con muchas filas la lista tapaba los bloques de abajo. Tiene tope de alto
+  // y se desplaza por dentro. Con el marco (`fija`) va en el flujo de la página.
   const listaCapturas = visibles.length > 0 ? (
     <ul className={fija ? 'space-y-1.5 rounded-xl border bg-[#F5F4F2] p-2 sm:max-h-[40vh] sm:overflow-y-auto' : 'mt-2 space-y-1.5 sm:max-h-[40vh] sm:overflow-y-auto'} aria-label="Capturas pegadas" data-lista-capturas>
       {visibles.map(c => (
         <FilaCaptura
           key={c.id}
-          captura={c}
-          item={items.find(i => i.id === c.itemId) ?? null}
+          captura={dondeVivo.has(c.id) ? { ...c, donde: dondeVivo.get(c.id) ?? c.donde } : c}
           composicion={composicion}
           onAlternar={() => actualizar(c.id, { abierta: !c.abierta })}
-          onAceptar={() => void aceptar(c)}
-          onRevisar={() => { if (c.itemId) onOpcionCreada?.(c.itemId) }}
+          onAceptar={() => void aceptar(c, 'auto')}
           onBorrar={() => borrar(c)}
           onDeshacer={() => deshacer(c)}
           onElegirTipo={t => { actualizar(c.id, { abierta: false }); void procesar(c.id, c.dataUrl, t) }}
-          onElegirOpcion={o => { if (c.itemId) void leer(c.id, c.itemId, c.dataUrl, o) }}
+          onElegirOpcion={o => elegirOpcion(c, o)}
           onAgregarIgual={() => agregarIgual(c)}
-          onReemplazarPrecio={() => void reemplazarPrecio(c)}
+          onReemplazarPrecio={() => reemplazarPrecio(c)}
         />
       ))}
     </ul>
@@ -716,7 +588,7 @@ export default function BandejaCapturas({
             <p className="text-xs font-semibold text-[#1A1A1A]">Pantallazos del proveedor</p>
             <p className="text-[11px] text-[#6B7280]">
               Pega los que tengas, uno tras otro (Ctrl+V / Cmd+V en cualquier parte). ONE ve qué es cada
-              uno y lo agrupa: mismo tipo y misma ruta es otra opción; lo demás, otro componente.
+              uno y lo lee; al aceptarlo lo agrupa: mismo destino y fechas es otra opción; lo demás, otro componente.
             </p>
           </div>
           <button
@@ -758,11 +630,9 @@ export default function BandejaCapturas({
 /** Exportada para la prueba de render: es donde vive la ficha. */
 export function FilaCaptura({
   captura: c,
-  item,
   composicion,
   onAlternar,
   onAceptar,
-  onRevisar,
   onBorrar,
   onDeshacer,
   onElegirTipo,
@@ -771,17 +641,14 @@ export function FilaCaptura({
   onReemplazarPrecio,
 }: {
   captura: Captura
-  item: ItemDeBandeja | null
   composicion: Composicion | null
   onAlternar: () => void
   onAceptar: () => void
-  /** Abre la opción en su bloque: la salida cuando la ficha no tiene nada que confirmar. */
-  onRevisar?: () => void
   onBorrar: () => void
   onDeshacer: () => void
   onElegirTipo: (t: TipoRanura) => void
   onElegirOpcion: (o: { nombre: string; precio: string | null }) => void
-  /** P10 · «Agregar igual» / «Agregar como otra opción». */
+  /** P10 · «Agregar igual» / «Agregar como otra opción» / «Agregar como habitación». */
   onAgregarIgual?: () => void
   /** P10 · «Reemplazar el precio de Opción N». */
   onReemplazarPrecio?: () => void
@@ -789,7 +656,7 @@ export function FilaCaptura({
   if (c.estado.fase === 'borrada') {
     return (
       <li className="flex items-center justify-between gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[11px] text-[#6B7280]">
-        <span>{c.estado.reanudar ? 'Quitada · se dejó de analizar' : 'Borrada'}</span>
+        <span>{c.estado.reanudar ? 'Quitada · se dejó de analizar' : 'Quitada de la bandeja'}</span>
         <button type="button" onClick={onDeshacer} className="font-medium text-primary underline underline-offset-2">
           Deshacer
         </button>
@@ -811,28 +678,25 @@ export function FilaCaptura({
     )
   }
   const e = c.estado
-  const trabajando = e.fase === 'mirando' || e.fase === 'ubicando' || e.fase === 'leyendo'
+  const trabajando = enProceso(e)
   const enviandoAceptar = e.fase === 'aceptando'
-  // Lo que devolvió la lectura manda sobre la lista de la página, que puede venir de antes de
-  // la lectura (la opción recién creada, vacía).
-  const opcion = c.leida ?? item
+  const opcion = c.leida
   const ficha = opcion ? fichaDeOpcion({ ...opcion, nombre: opcion.nombre ?? null, grupo: opcion.grupo ?? null }, composicion) : []
-  // La ficha todavía no llega: ni la lectura la trajo ni la página la tiene.
-  const preparando = e.fase === 'lista' && !opcion
-  // Con la ficha vacía no se ofrece «Aceptar» como si todo estuviera bien: se manda al bloque.
-  const confirmable = e.fase === 'lista' && ficha.length > 0
+  // Solo lo que tiene lectura firmada se puede aceptar: nada sin leer llega a Componentes.
+  const confirmable = e.fase === 'lista' && !!c.borrador
   const titulo = opcion?.nombre || c.etiqueta || (c.tipo ? definicionDeTipo(c.tipo).label : 'Pantallazo')
-  const linea = e.fase === 'aceptando' ? 'Aceptando…'
+  const linea = e.fase === 'aceptando' ? `Agregando${c.donde ? ` · ${c.donde}` : ''}…`
     : e.fase === 'mirando' ? 'Mirando qué es…'
-    : e.fase === 'ubicando' ? 'Ubicándolo…'
-      : e.fase === 'leyendo' ? `Leyendo${c.donde ? ` · ${c.donde}` : ''}…`
-        : e.fase === 'lista' ? (preparando ? 'Preparando la ficha…' : (c.donde ?? 'Leído'))
+      : e.fase === 'leyendo' ? 'Leyendo…'
+        : e.fase === 'lista' ? (c.donde ? `Va a: ${c.donde}` : 'Leído')
           : e.fase === 'eligiendo_tipo' ? 'No se reconoce qué es'
             : e.fase === 'eligiendo_opcion' ? '¿Cuál de estas?'
               : e.fase === 'rechazada' ? e.mensaje
                 : e.fase === 'parecida' ? (e.habitacion ? `El grupo ya está cubierto en ${e.donde}` : `Parece igual a ${e.donde}`)
                   : e.fase === 'otro_precio' ? `El mismo servicio que ${e.donde}, con otro precio`
                     : ''
+  // «Reemplazar el precio» necesita una opción que ya esté en Componentes.
+  const puedeReemplazar = e.fase === 'otro_precio' && !esIdDeBorrador(e.conItemId)
 
   return (
     <li className="rounded-lg border bg-background" data-captura={c.id}>
@@ -849,18 +713,9 @@ export function FilaCaptura({
             </span>
           </span>
         </button>
-        {e.fase === 'lista' && !confirmable && !preparando && onRevisar && (
-          <button
-            type="button"
-            onClick={onRevisar}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
-          >
-            Revisar en su bloque
-          </button>
-        )}
         {e.fase === 'parecida' && (
           <>
-            {/* «Descartar» es la opción por defecto: la opción repetida se va (con Deshacer). */}
+            {/* «Descartar» es la opción por defecto: la captura sale de la bandeja (con Deshacer). */}
             <button
               type="button"
               onClick={onBorrar}
@@ -879,13 +734,15 @@ export function FilaCaptura({
         )}
         {e.fase === 'otro_precio' && (
           <>
-            <button
-              type="button"
-              onClick={onReemplazarPrecio}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
-            >
-              Reemplazar el precio de {e.corta}
-            </button>
+            {puedeReemplazar && (
+              <button
+                type="button"
+                onClick={onReemplazarPrecio}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
+              >
+                Reemplazar el precio de {e.corta}
+              </button>
+            )}
             <button
               type="button"
               onClick={onAgregarIgual}
@@ -908,7 +765,7 @@ export function FilaCaptura({
         {!enviandoAceptar && <button
           type="button"
           onClick={onBorrar}
-          aria-label={trabajando ? 'Quitar esta captura (se deja de analizar)' : 'Borrar esta captura'}
+          aria-label={trabajando ? 'Quitar esta captura (se deja de analizar)' : 'Quitar esta captura'}
           data-quitar-captura
           className="shrink-0 rounded p-1 text-[#6B7280] hover:bg-red-50 hover:text-red-600"
         >
@@ -922,15 +779,10 @@ export function FilaCaptura({
         <div className="border-t px-2.5 py-2 text-xs">
           {e.fase === 'lista' && (
             <>
-              {preparando ? (
-                <p className="flex items-center gap-1 text-[11px] text-[#6B7280]">
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                  Preparando la ficha…
-                </p>
-              ) : ficha.length > 0 ? (
+              {ficha.length > 0 ? (
                 <ul className="space-y-0.5 text-[#1A1A1A]">{ficha.map((r, i) => <li key={i}>{r}</li>)}</ul>
               ) : (
-                <p className="text-[11px] text-[#6B7280]">La lectura no dejó datos para la ficha: revísala en su bloque.</p>
+                <p className="text-[11px] text-[#6B7280]">La lectura no dejó datos para la ficha: al aceptarla, revísala en su bloque.</p>
               )}
               {e.alertas.map(a => (
                 <p key={a} className="mt-1 flex items-start gap-1 text-[11px] font-medium text-amber-700">
@@ -978,7 +830,9 @@ export function FilaCaptura({
                   ? `Las habitaciones de ${e.donde} ya cubren a todo el grupo, o esta misma imagen ya está ahí. Descártala si la pegaste de más, o agrégala como otra habitación.`
                   : e.fase === 'parecida'
                   ? `Mismo servicio, mismas fechas y mismo precio que ${e.donde}. Descártala si la pegaste dos veces.`
-                  : `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`}
+                  : puedeReemplazar
+                    ? `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`
+                    : `Mismo servicio que ${e.donde}, con otro precio. Acepta primero esa, o agrega esta como otra opción.`}
               </p>
               {ficha.length > 0 && <ul className="space-y-0.5 text-[#1A1A1A]">{ficha.map((r, i) => <li key={i}>{r}</li>)}</ul>}
             </>
