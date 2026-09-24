@@ -303,8 +303,10 @@ final, responsable con `agregarResponsable` (quien registra o el dueño), cobro 
 (fuente Marketplace, referencia `FER-<codigo>-<id8>`), avance con `cambiarEtapaNegocioConGate` y cierre con
 `completarNegocio`. `ferreteria_ventas.negocio_id` enlaza los dos.
 
-**Liquidacion mensual.** La parte de MeTRIK NO es un costo del negocio. Por mes de la fecha de la venta
-(Bogota) se suma la ganancia de todas las ventas, perdidas incluidas, y se reparte 50/50
-(`PARTE_METRIK` en `src/lib/ferreteria/liquidacion.ts`). Positiva: "MeTRIK cobra a Dimpro". Negativa:
+**Liquidacion mensual.** La parte de MeTRIK NO es un costo del negocio. Por mes del PAGO
+(`fecha_primer_pago`, Bogota; decision de Mauricio) se suma la ganancia de todas las ventas pagadas,
+perdidas incluidas, y se reparte 50/50 (`PARTE_METRIK` en `src/lib/ferreteria/liquidacion.ts`). Una venta
+del 29-sep pagada el 2-oct cuenta en octubre. Una contra entrega sin pagar no entra en ningun mes: se
+muestra aparte como "Por cobrar" (cuantas y su valor). Positiva: "MeTRIK cobra a Dimpro". Negativa:
 "MeTRIK aporta a Dimpro" el valor absoluto. Cada mes se liquida solo; el mes en curso sale abierto.
 Pestaña "Liquidacion mensual" en `/ferreteria`.

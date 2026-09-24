@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { ExternalLink, Wrench } from 'lucide-react'
-import type { FilaTablero, Tablero } from '@/lib/ferreteria/datos'
+import type { FilaTablero, Liquidacion, Tablero } from '@/lib/ferreteria/datos'
 import {
   ESTADOS_PUBLICACION,
   ETIQUETA_ESTADO,
@@ -15,7 +15,6 @@ import {
   type EstadoPublicacion,
   type Linea,
 } from '@/lib/ferreteria/reglas'
-import type { MesLiquidacion } from '@/lib/ferreteria/liquidacion'
 import { LiquidacionTabla } from './liquidacion-tabla'
 import { Th, aplicarOrden, useOrden } from './orden-tabla'
 
@@ -82,7 +81,7 @@ export function FerreteriaCliente({
   puedeEditar,
 }: {
   tablero: Tablero
-  liquidacion: MesLiquidacion[]
+  liquidacion: Liquidacion
   hoy: string
   /** Lo fija el servidor: el semáforo no llama al reloj durante el render. */
   ahoraIso: string
@@ -145,7 +144,7 @@ export function FerreteriaCliente({
       </div>
 
       {pestana === 'liquidacion' ? (
-        <LiquidacionTabla meses={liquidacion} />
+        <LiquidacionTabla meses={liquidacion.meses} porCobrar={liquidacion.porCobrar} />
       ) : pestana === 'publicaciones' ? (
         <>
           <div className="flex flex-wrap gap-2">

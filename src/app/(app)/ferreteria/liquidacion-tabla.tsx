@@ -1,21 +1,34 @@
+import { formatoPesos } from '@/lib/ferreteria/reglas'
 import { formatoPesosConSigno, nombreMes, PARTE_METRIK, sentidoLiquidacion, type MesLiquidacion } from '@/lib/ferreteria/liquidacion'
 
 /**
  * Liquidación mensual de la alianza: por mes de la venta, la ganancia de TODAS las ventas del
  * mes (pérdidas incluidas) se reparte 50/50. Cada mes se liquida solo: nada pasa al siguiente.
  */
-export function LiquidacionTabla({ meses }: { meses: MesLiquidacion[] }) {
+export function LiquidacionTabla({
+  meses,
+  porCobrar,
+}: {
+  meses: MesLiquidacion[]
+  porCobrar: { ventas: number; valor: number }
+}) {
   const pctMetrik = `${Math.round(PARTE_METRIK * 100)} %`
   const pctDimpro = `${Math.round((1 - PARTE_METRIK) * 100)} %`
   return (
     <section className="space-y-2">
       <p className="text-xs text-muted-foreground">
         La ganancia de todas las ventas del mes, pérdidas incluidas, se reparte {pctDimpro} Dimpro y {pctMetrik} MeTRIK. Si el mes da
-        pérdida, MeTRIK le aporta a Dimpro su parte. Cada mes se liquida solo. El mes es el de la fecha de la venta; el mes en curso
-        sigue abierto.
+        pérdida, MeTRIK le aporta a Dimpro su parte. Cada mes se liquida solo. Una venta cuenta en el mes en que se PAGA; el mes en
+        curso sigue abierto.
       </p>
+      <div className="rounded-md border px-3 py-2 text-sm">
+        <span className="font-medium">Por cobrar:</span>{' '}
+        {porCobrar.ventas === 0
+          ? 'ninguna venta contra entrega pendiente de pago.'
+          : `${porCobrar.ventas} venta(s) contra entrega sin pagar por ${formatoPesos(porCobrar.valor)}. No entran en ninguna liquidación hasta que se paguen.`}
+      </div>
       {meses.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Todavía no hay ventas.</p>
+        <p className="text-sm text-muted-foreground">Todavía no hay ventas pagadas.</p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">

@@ -4,12 +4,14 @@ import {
   formatoPesosConSigno,
   liquidacionMensual,
   nombreMes,
+  porCobrar,
   repartirGanancia,
   sentidoLiquidacion,
 } from './liquidacion'
 
-const v = (fecha_venta: string, precio_final: number, costo_dia: number, ganancia: number) => ({
-  fecha_venta,
+/** El primer argumento es el día del PAGO: es el que decide el mes. */
+const v = (fecha_primer_pago: string | null, precio_final: number, costo_dia: number, ganancia: number) => ({
+  fecha_primer_pago,
   precio_final,
   costo_dia,
   ganancia,
@@ -67,13 +69,24 @@ describe('liquidación mensual', () => {
     ])
   })
 
-  it('el mes sale de la fecha de la venta, no de cuándo se registró', () => {
-    const meses = liquidacionMensual([v('2026-09-30', 10_000, 5_000, 3_578), v('2026-10-01', 10_000, 5_000, 3_578)], '2026-10-01')
-    expect(meses.map((m) => m.mes)).toEqual(['2026-10', '2026-09'])
+  it('el mes sale del día del pago: vendida el 29-sep y pagada el 2-oct cuenta en octubre', () => {
+    const vendida29sepPagada2oct = { ...v('2026-10-02', 120_000, 80_000, 26_125), fecha_venta: '2026-09-29' }
+    const meses = liquidacionMensual([vendida29sepPagada2oct], '2026-10-05')
+    expect(meses.map((m) => [m.mes, m.ventas, m.ganancia])).toEqual([['2026-10', 1, 26_125]])
+  })
+
+  it('una contra entrega sin pagar no cuenta en ningún mes y sale como por cobrar', () => {
+    const ventas = [v('2026-10-02', 120_000, 80_000, 26_125), v(null, 60_000, 40_000, 13_063), v(null, 50_000, 70_000, -19_927)]
+    const meses = liquidacionMensual(ventas, '2026-10-05')
+    expect(meses).toHaveLength(1)
+    expect(meses[0]).toMatchObject({ mes: '2026-10', ventas: 1, ganancia: 26_125, parteMetrik: 13_062.5 })
+    expect(porCobrar(ventas)).toEqual({ ventas: 2, valor: 110_000 })
+    expect(liquidacionMensual([v(null, 60_000, 40_000, 13_063)], '2026-10-05')).toEqual([])
   })
 
   it('sin ventas no hay meses', () => {
     expect(liquidacionMensual([], '2026-10-01')).toEqual([])
+    expect(porCobrar([])).toEqual({ ventas: 0, valor: 0 })
   })
 
   it('las dos partes suman exacto aun con centavos impares', () => {

@@ -137,9 +137,9 @@ export interface VentaFila {
   workspace_id: string
   publicacion_id: string
   conversacion_id: string | null
-  /** Día de la venta en Bogotá. De él salen el costo del día y el mes de la liquidación. */
+  /** Día de la venta en Bogotá. De él sale el costo del día (el mes de la liquidación sale del pago). */
   fecha_venta: string
-  /** Día en que entró el pago. Null mientras una venta contra entrega no se paga. */
+  /** Día en que entró el pago; decide el mes de la liquidación. Null mientras una contra entrega no se paga. */
   fecha_primer_pago: string | null
   precio_final: number
   costo_dia: number

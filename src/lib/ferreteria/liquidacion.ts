@@ -9,16 +9,20 @@
  * Por eso la parte de MeTRIK NO es un costo de cada negocio: por venta no existe (una venta con
  * pérdida daría una "comisión" negativa, que rompería los gastos), solo existe por mes.
  *
- * Puro: lo usan la pantalla y las pruebas. El mes sale de `fecha_venta`, que es una fecha de
- * calendario escrita en Colombia (sin hora), así que no hay zona horaria que convertir.
+ * Mes de la venta = mes en que se PAGA (decisión de Mauricio, 24-sep): sale de
+ * `fecha_primer_pago`, una fecha de calendario escrita en Colombia (sin hora), así que no hay zona
+ * horaria que convertir. Una venta contra entrega que todavía no se paga no entra en NINGÚN mes:
+ * se cuenta aparte como "por cobrar" (`porCobrar`), para que se vea sin liquidarse.
+ *
+ * Puro: lo usan la pantalla y las pruebas.
  */
 
 /** Fracción de la ganancia del mes que le corresponde a MeTRIK. Una sola constante. */
 export const PARTE_METRIK = 0.5
 
 export interface VentaLiquidable {
-  /** `YYYY-MM-DD`, fecha de la venta en Bogotá. */
-  fecha_venta: string
+  /** `YYYY-MM-DD`, día del pago en Bogotá. Null = contra entrega aún sin pagar. */
+  fecha_primer_pago: string | null
   precio_final: number
   costo_dia: number
   /** Con signo: una venta bajo costo trae ganancia negativa. */
@@ -53,12 +57,13 @@ export function repartirGanancia(ganancia: number): { dimpro: number; metrik: nu
   return { dimpro: dimpro === 0 ? 0 : dimpro, metrik: metrik === 0 ? 0 : metrik }
 }
 
-/** Meses con ventas, del más reciente al más viejo. */
+/** Meses con ventas PAGADAS, del más reciente al más viejo. Las no pagadas no entran. */
 export function liquidacionMensual(ventas: VentaLiquidable[], hoyISO: string): MesLiquidacion[] {
   const mesActual = hoyISO.slice(0, 7)
   const porMes = new Map<string, { ventas: number; ingreso: number; costo: number; ganancia: number }>()
   for (const v of ventas) {
-    const mes = v.fecha_venta.slice(0, 7)
+    if (!v.fecha_primer_pago) continue
+    const mes = v.fecha_primer_pago.slice(0, 7)
     const acc = porMes.get(mes) ?? { ventas: 0, ingreso: 0, costo: 0, ganancia: 0 }
     acc.ventas += 1
     acc.ingreso += Number(v.precio_final)
@@ -84,6 +89,12 @@ export function liquidacionMensual(ventas: VentaLiquidable[], hoyISO: string): M
         parteMetrik: metrik,
       }
     })
+}
+
+/** Ventas contra entrega aún sin pagar: fuera de toda liquidación hasta que entre el pago. */
+export function porCobrar(ventas: VentaLiquidable[]): { ventas: number; valor: number } {
+  const pendientes = ventas.filter((v) => !v.fecha_primer_pago)
+  return { ventas: pendientes.length, valor: aCentavos(pendientes.reduce((s, v) => s + Number(v.precio_final), 0)) }
 }
 
 /**

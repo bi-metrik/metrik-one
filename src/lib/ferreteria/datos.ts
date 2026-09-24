@@ -2,7 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { calcularIndicadores, type Indicadores } from './indicadores'
-import { liquidacionMensual, type MesLiquidacion } from './liquidacion'
+import { liquidacionMensual, porCobrar, type MesLiquidacion } from './liquidacion'
 import { costoVigente, gananciaPorVenta, margenPorVenta, PASOS_VENTA, type PasoVenta } from './reglas'
 import type {
   ConversacionFila,
@@ -190,24 +190,29 @@ async function negociosDeVentas(db: Db, ws: string, ids: string[]): Promise<Map<
   return out
 }
 
+export interface Liquidacion {
+  /** Por mes del PAGO. Las ventas sin pagar no están aquí. */
+  meses: MesLiquidacion[]
+  /** Contra entrega aún sin pagar: fuera de toda liquidación. */
+  porCobrar: { ventas: number; valor: number }
+}
+
 /**
  * Todas las ventas del espacio, para la liquidación mensual. Crecen sin techo: `traerTodo`.
  */
-export async function leerLiquidacion(db: Db, ws: string, hoy: string): Promise<MesLiquidacion[]> {
-  const ventas = await traerTodo<{ fecha_venta: string; precio_final: number; costo_dia: number; ganancia: number }>(
+export async function leerLiquidacion(db: Db, ws: string, hoy: string): Promise<Liquidacion> {
+  const ventas = await traerTodo<{ fecha_primer_pago: string | null; precio_final: number; costo_dia: number; ganancia: number }>(
     (desde, hasta) =>
       db
         .from('ferreteria_ventas')
-        .select('fecha_venta, precio_final, costo_dia, ganancia')
+        .select('fecha_primer_pago, precio_final, costo_dia, ganancia')
         .eq('workspace_id', ws)
         .order('id')
         .range(desde, hasta),
     { etiqueta: 'ferreteria_ventas (liquidación)' },
   )
-  return liquidacionMensual(
-    ventas.map((v) => ({ ...v, precio_final: Number(v.precio_final), costo_dia: Number(v.costo_dia), ganancia: Number(v.ganancia) })),
-    hoy,
-  )
+  const filas = ventas.map((v) => ({ ...v, precio_final: Number(v.precio_final), costo_dia: Number(v.costo_dia), ganancia: Number(v.ganancia) }))
+  return { meses: liquidacionMensual(filas, hoy), porCobrar: porCobrar(filas) }
 }
 
 export async function leerDetalle(db: Db, ws: string, codigo: string): Promise<Detalle | null> {
