@@ -229,6 +229,23 @@ Respuesta: `{ "resultados": [ { "codigo": "MP-01", "estado": "creada" | "actuali
 { "eventos": [ { "codigo": "MP-01", "tipo": "nota", "texto": "Meta lo mando a revision" } ] }
 ```
 
+**7. `GET publicaciones`** (solo lectura; el catalogo completo del workspace del token, para que el cron sepa QUE
+medir en el canal. Lo leen los dos escritores, `cron` y `agente`)
+
+```json
+{ "generado_at": "2026-10-02T11:00:00Z",
+  "publicaciones": [
+    { "codigo": "MP-01", "sku": "DCPB358EM", "canal": "marketplace", "titulo": "...", "precio": 547900,
+      "estado": "activa", "linea": "impulso", "link": null, "id_aviso": null,
+      "fecha_publicacion": "2026-09-23", "pendiente_en_canal": false } ] }
+```
+
+Ordenado por `codigo`. Trae TODAS las publicaciones, en cualquier estado (el cron filtra: una `eliminada` o `vendida`
+no se mide). Sin `descripcion` ni `etiquetas` (el cron no las necesita y son lo que mas pesa; el texto deseado de un
+cambio pendiente sale en `GET pendientes`). `precio` y `link` pueden ser `null`; `sku` solo seria `null` si el producto
+desaparecio. No escribe nada (ni bitacora); solo marca el ultimo uso del token, como toda peticion. Lee con paginacion
+completa: no se recorta en 1.000 filas.
+
 ### Emision de tokens
 
 No hay token emitido. Se emiten con `scripts/emitir-token-ferreteria.ts` (simulacion por defecto; con `--apply`

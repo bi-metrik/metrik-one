@@ -1,10 +1,12 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/server'
+import { traerTodo } from '@/lib/supabase/paginar'
 import type {
   CostoFila,
   EventoFila,
   ProductoFila,
+  PublicacionCatalogo,
   PublicacionFila,
   RepoFerreteria,
   TokenFila,
@@ -119,6 +121,31 @@ export function repoSupabase(db: SupabaseClient = createServiceClient() as unkno
         .order('codigo')
       lanzar('pendientes', error)
       return ((data ?? []) as Record<string, unknown>[]).map(aPublicacion)
+    },
+    async catalogoPublicaciones(ws) {
+      // Dos lecturas con `traerTodo` (o todo o lanza): el catálogo no debe llegar recortado por
+      // el techo de 1.000 filas de PostgREST. El SKU se cruza aquí y no con un embed.
+      const [pubs, prods] = await Promise.all([
+        traerTodo<Record<string, unknown>>(
+          (desde, hasta) =>
+            db
+              .from('ferreteria_publicaciones')
+              .select('codigo, producto_id, canal, titulo, precio, estado, linea, link, id_aviso, fecha_publicacion, pendiente_en_canal')
+              .eq('workspace_id', ws)
+              .order('codigo')
+              .range(desde, hasta),
+          { etiqueta: 'ferreteria_publicaciones (catálogo)' },
+        ),
+        traerTodo<{ id: string; sku: string }>(
+          (desde, hasta) => db.from('ferreteria_productos').select('id, sku').eq('workspace_id', ws).order('id').range(desde, hasta),
+          { etiqueta: 'ferreteria_productos (sku)' },
+        ),
+      ])
+      const skus = new Map(prods.map((p) => [p.id, p.sku]))
+      return pubs.map((f) => {
+        const { producto_id, ...resto } = f as unknown as PublicacionCatalogo & { producto_id: string }
+        return { ...resto, sku: skus.get(producto_id) ?? null, precio: num(f.precio) }
+      })
     },
     async insertarPublicacion(fila) {
       const { data, error } = await db.from('ferreteria_publicaciones').insert(fila).select('*').single()

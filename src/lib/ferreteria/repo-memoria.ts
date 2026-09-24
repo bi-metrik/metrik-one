@@ -91,6 +91,23 @@ export function repoEnMemoria(estado: EstadoMemoria = estadoVacio(), reloj: () =
     async publicacionesPendientes(ws) {
       return copia(estado.publicaciones.filter((x) => x.workspace_id === ws && x.pendiente_en_canal))
     },
+    async catalogoPublicaciones(ws) {
+      return estado.publicaciones
+        .filter((x) => x.workspace_id === ws)
+        .map((x) => ({
+          codigo: x.codigo,
+          sku: estado.productos.find((p) => p.workspace_id === ws && p.id === x.producto_id)?.sku ?? null,
+          canal: x.canal,
+          titulo: x.titulo,
+          precio: x.precio,
+          estado: x.estado,
+          linea: x.linea,
+          link: x.link,
+          id_aviso: x.id_aviso,
+          fecha_publicacion: x.fecha_publicacion,
+          pendiente_en_canal: x.pendiente_en_canal,
+        }))
+    },
     async insertarPublicacion(fila) {
       if (estado.publicaciones.some((x) => x.workspace_id === fila.workspace_id && x.codigo === fila.codigo)) {
         throw new Error(`duplicate key: ${fila.codigo}`)

@@ -96,6 +96,8 @@ describe('contrato de rutas', () => {
   it('recurso desconocido 404 y método equivocado 405', async () => {
     expect((await pedir({ recurso: 'otra' })).status).toBe(404)
     expect((await pedir({ recurso: 'pendientes', metodo: 'POST' })).status).toBe(405)
+    expect((await pedir({ recurso: 'lote', metodo: 'GET' })).status).toBe(405)
+    expect((await pedir({ recurso: 'constructor', metodo: 'GET' })).status).toBe(404)
   })
 
   it('cuerpo inválido responde 400 con el detalle', async () => {
@@ -106,6 +108,68 @@ describe('contrato de rutas', () => {
   it('«aplicado» sin lo visto al releer se rechaza', async () => {
     const r = await pedir({ recurso: 'confirmaciones', cuerpo: { confirmaciones: [{ codigo: 'MP-01', version: 0, resultado: 'aplicado' }] } })
     expect(r.status).toBe(400)
+  })
+})
+
+describe('GET publicaciones', () => {
+  it('devuelve el catálogo del workspace ordenado por código, sin descripción ni etiquetas', async () => {
+    await pedir(
+      {
+        recurso: 'publicaciones',
+        cuerpo: {
+          publicaciones: [
+            { codigo: 'MP-03', sku: 'EKM80', titulo: 'Esmeril 3', precio: 130_000, estado: 'activa', linea: 'impulso', descripcion: 'larga', etiquetas: ['a'] },
+            { codigo: 'MP-02', sku: 'EKM80', titulo: 'Esmeril 2', precio: 125_000, estado: 'pausada', link: 'https://www.facebook.com/marketplace/item/123', id_aviso: '123', fecha_publicacion: '2026-09-23' },
+          ],
+        },
+      },
+      tokenAgente,
+    )
+    // Una publicación de otro workspace no se cuela.
+    repo.estado.publicaciones.push({ ...repo.estado.publicaciones[0], id: 'pub-ajena', workspace_id: OTRO_WS, codigo: 'MP-00' })
+
+    const r = await pedir({ recurso: 'publicaciones', metodo: 'GET' })
+    expect(r.status).toBe(200)
+    expect(r.cuerpo).toEqual({
+      generado_at: AHORA,
+      publicaciones: [
+        { codigo: 'MP-01', sku: 'EKM80', canal: 'marketplace', titulo: 'Esmeril', precio: 120_000, estado: 'activa', linea: null, link: null, id_aviso: null, fecha_publicacion: null, pendiente_en_canal: false },
+        { codigo: 'MP-02', sku: 'EKM80', canal: 'marketplace', titulo: 'Esmeril 2', precio: 125_000, estado: 'pausada', linea: null, link: 'https://www.facebook.com/marketplace/item/123', id_aviso: '123', fecha_publicacion: '2026-09-23', pendiente_en_canal: false },
+        { codigo: 'MP-03', sku: 'EKM80', canal: 'marketplace', titulo: 'Esmeril 3', precio: 130_000, estado: 'activa', linea: 'impulso', link: null, id_aviso: null, fecha_publicacion: null, pendiente_en_canal: false },
+      ],
+    })
+    // El orden de las claves es el del contrato.
+    const primera = (r.cuerpo as { publicaciones: Record<string, unknown>[] }).publicaciones[0]
+    expect(Object.keys(primera)).toEqual(['codigo', 'sku', 'canal', 'titulo', 'precio', 'estado', 'linea', 'link', 'id_aviso', 'fecha_publicacion', 'pendiente_en_canal'])
+  })
+
+  it('refleja lo pendiente de aplicar en el canal', async () => {
+    const p = (await repo.publicacionPorCodigo(WS, 'MP-01'))!
+    await cambiarPublicacion(repo, WS, p, { precio: 110_000 }, {
+      origen: 'one',
+      autor: { tipo: 'persona', id: 'perfil-dietmar', nombre: 'Dietmar' },
+      ahora: '2026-10-01T15:00:00.000Z',
+    })
+    const r = await pedir({ recurso: 'publicaciones', metodo: 'GET' })
+    expect(r.cuerpo).toMatchObject({ publicaciones: [{ codigo: 'MP-01', precio: 110_000, pendiente_en_canal: true }] })
+  })
+
+  it('lo leen el cron y el agente; sin token es 401', async () => {
+    expect((await pedir({ recurso: 'publicaciones', metodo: 'GET' }, tokenCron)).status).toBe(200)
+    expect((await pedir({ recurso: 'publicaciones', metodo: 'GET' }, tokenAgente)).status).toBe(200)
+    expect((await pedir({ recurso: 'publicaciones', metodo: 'GET' }, null)).status).toBe(401)
+  })
+
+  it('leer no escribe nada', async () => {
+    const antes = structuredClone({ p: repo.estado.publicaciones, e: repo.estado.eventos })
+    await pedir({ recurso: 'publicaciones', metodo: 'GET' })
+    expect({ p: repo.estado.publicaciones, e: repo.estado.eventos }).toEqual(antes)
+  })
+
+  it('un workspace sin publicaciones devuelve la lista vacía', async () => {
+    repo.estado.publicaciones = []
+    const r = await pedir({ recurso: 'publicaciones', metodo: 'GET' })
+    expect(r).toMatchObject({ status: 200, cuerpo: { publicaciones: [] } })
   })
 })
 
