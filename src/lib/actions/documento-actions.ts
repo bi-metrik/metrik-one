@@ -30,6 +30,8 @@ import { resolverDestino } from '@/lib/negocios/casilla-compartida'
 import { esReemplazoHaciaAtras } from '@/lib/documentos/reemplazo-hacia-atras'
 import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
+import { checkSeSalta } from '@/lib/documentos/check-opcional'
+import type { CondicionBloque } from '@/lib/negocios/condicion-bloque'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
@@ -162,6 +164,12 @@ export type CrossCheckSpec = CrossCheckSource & {
   // Ej.: el 2º beneficiario del Concepto UPME — solo se valida si el certificado
   // lista un segundo solicitante.
   optional?: boolean
+  // Cuándo `optional` deja de valer: misma forma que el `condition` de un bloque
+  // (`field`, `value`/`value_in`, `source_bloque_slug`). Si se cumple, el check es
+  // OBLIGATORIO y un valor extraído vacío es una falla. Caso que lo motivó (SOENA,
+  // 2026-09-24): el 2º solicitante del certificado UPME era opcional siempre, así que un
+  // certificado a nombre de una sola persona en una copropiedad pasaba sin aviso.
+  required_when?: CondicionBloque
 }
 
 /**
@@ -399,6 +407,10 @@ async function runCrossCheck(
     return { expected: '', estado: 'falla' }
   }
 
+  // `required_when` se resuelve con el MISMO criterio que el `condition` de un bloque en
+  // pantalla (`cumpleCondicion`), contra los datos por slug que ya se cargaron arriba.
+  const fuentesCondicion = { porSlug: Object.fromEntries(dataPorSlug), porEtapaOrden: {} }
+
   // UNA marca de tiempo para todo el lote: dos checks del mismo documento no pueden
   // salir con veredictos distintos por haber cruzado la medianoche entre uno y otro.
   // Bogotá y no UTC: Vercel corre en UTC y a partir de las 19:00 en Colombia el día
@@ -411,8 +423,9 @@ async function runCrossCheck(
     const mode: CrossCheckMatchMode = check.match_mode ?? 'exact'
 
     // Check opcional sin valor extraído (ej. 2º beneficiario ausente en el
-    // certificado) → no aplica, pasa sin comparar.
-    if (check.optional && !extractedRaw) {
+    // certificado) → no aplica, pasa sin comparar. Salvo que su `required_when` se
+    // cumpla: entonces el dato es obligatorio y su ausencia se compara (y falla).
+    if (checkSeSalta(check, extractedRaw, fuentesCondicion)) {
       results.push({ slug: check.slug, label: check.label, expected: '', extracted: '', ok: true, estado: 'ok', mode })
       continue
     }
