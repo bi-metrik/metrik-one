@@ -15,6 +15,8 @@ import { getComercialData, getOperativoData, getFinancieroData } from './actions
 import { pestanasDeTableros, type TableroKey } from '@/lib/tableros/pestanas'
 import TabDireccion from './components/tab-direccion'
 import TabMarketing from './components/tab-marketing'
+import TabFerreteria from './components/tab-ferreteria'
+import type { PilotoMarketplaceData } from './ferreteria-actions'
 import type { DirectivoData } from './directivo-actions'
 import type { MarketingData } from './marketing-actions'
 import { ShieldCheck, LayoutDashboard } from 'lucide-react'
@@ -80,6 +82,8 @@ interface TablerosClientProps {
   initialOperaciones?: OperacionesBonoData | null
   /** Null si el workspace no tiene el modulo o si el rol no ve dinero. */
   initialCalidad?: DuenoData | null
+  /** Null si el workspace no tiene el modulo Ferreteria o si la lectura no llego. */
+  initialFerreteria?: PilotoMarketplaceData | null
   modules?: Record<string, boolean>
 }
 
@@ -94,6 +98,7 @@ export default function TablerosClient({
   initialMarketing,
   initialOperaciones,
   initialCalidad,
+  initialFerreteria,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
@@ -106,6 +111,7 @@ export default function TablerosClient({
     procesoSeccional: Boolean(initialProcesoSeccional),
     operacionesBono: Boolean(initialOperaciones),
     calidad: Boolean(initialCalidad),
+    ferreteria: Boolean(initialFerreteria),
   })
 
   // Sin `?? 'cumplimiento'`: cuando no hay ninguna pestaña, caer en la de
@@ -220,6 +226,7 @@ export default function TablerosClient({
             personas={initialOperaciones ?? null}
           />
         )}
+        {activeTab === 'ferreteria' && initialFerreteria && <TabFerreteria inicial={initialFerreteria} />}
         {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
         {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
         {activeTab === 'operativo' && operativo && <TabOperativo data={operativo} />}

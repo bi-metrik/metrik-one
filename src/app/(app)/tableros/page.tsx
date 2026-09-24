@@ -4,6 +4,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import { getDirectivo } from './directivo-actions'
 import { getMarketingData } from './marketing-actions'
+import { getPilotoMarketplace } from './ferreteria-actions'
 import {
   getComercialResumen, getComercialMes, getComercialSerie, getComercialSerieSeccional,
   getComercialSerieVendedor,
@@ -70,6 +71,7 @@ export default async function TablerosPage() {
     calidad,
     procesoSeccional,
     operaciones,
+    ferreteria,
   ] = await Promise.all([
     // Las tres genericas (Financiero/Comercial/Operativo) solo se consultan cuando
     // se van a pintar: son tres rondas de consultas y un workspace con tableros
@@ -133,6 +135,18 @@ export default async function TablerosPage() {
           Number(bogotaYearMonth().split('-')[1]),
         )
       : null,
+
+    // Pestana Marketplace: los totales del piloto de Ferreteria (dimpro). Gate propio y
+    // DENTRO de este mismo `Promise.all`: una espera en fila nueva devuelve la pagina al
+    // problema que se arreglo el 2026-08-31.
+    // Si la lectura falla, la pestana no se pinta (nunca una pestana en blanco) y el resto
+    // de Tableros sigue en pie.
+    modules.ferreteria
+      ? getPilotoMarketplace().catch((e) => {
+          console.error('[tableros] piloto Marketplace:', e)
+          return null
+        })
+      : null,
   ])
 
   const [comercial, operativo, financiero] = genericas
@@ -149,6 +163,7 @@ export default async function TablerosPage() {
       initialRentabilidad={rentabilidad}
       initialComercialNegocios={comercialNegocios}
       initialCalidad={calidad}
+      initialFerreteria={ferreteria}
       modules={modules}
     />
   )
