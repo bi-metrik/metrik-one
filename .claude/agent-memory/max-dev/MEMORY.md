@@ -16,6 +16,7 @@
 - ⚠️⚠️ [Factura por cobro en /valida-api (#876)](project_factura_cobro_servicio.md) — migración SIN aplicar; CUFE de la FE-1 mal copiado (90/96)
 - ⚠️⚠️ [Retención de IVA: enlace por el neto](project_retencion_iva_cobro_neto.md) — migración SIN aplicar; inerte sin 3 datos; `null` en el RUT no retiene
 - ⚠️⚠️ [Carga de los 4 CDA sobre la carga revertida](project_carga_cdas_estado_revertido.md) — plazo 27-sep; cierra la activación del contrato cancelado
+- ⚠️⚠️ [«Licencia» → «suscripción» en los CDA (#885)](project_licencia_a_suscripcion.md) — Términos v1.2; SQL de cuotas SIN aplicar; periodo sin año
 - ⚠️⚠️ [Sección Suscripción de los CDA](project_seccion_suscripcion_cda.md) — #851: migración 20260924060000 ANTES del merge; sin valor_usuario_adicional no vende
 - ⚠️ [Suscripción solo para la designada (#857)](project_suscripcion_solo_designado.md) — «Ver como» compara la persona EFECTIVA; CDA sin vitrinas
 - ⚠️⚠️ [Pago en línea de cuotas (Bold temporal)](project_pago_en_linea_bold.md) — #850: migración SIN aplicar; la pasarela sale de un dato

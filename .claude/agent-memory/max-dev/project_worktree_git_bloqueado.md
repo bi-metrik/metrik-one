@@ -107,6 +107,10 @@ ya existe, `ls -la` y mirar los mtime: si son de antes de mi primer comando, es 
 
 ## Herramientas dentro del worktree
 
+- ⚠️ **2026-09-24: el `node_modules` del repo principal puede estar ATRASADO** frente al `package.json`
+  de `origin/main` (faltaba `@electric-sql/pglite`: `tsc` y las pruebas PGlite fallaban por módulo
+  ausente). `npm ci` dentro del worktree tarda ~13 s y lo resuelve; borrar ese `node_modules` al cerrar.
+
 - **⚠️ El symlink de `node_modules` NO siempre hace falta, y suele sobrar.** El worktree
   cuelga de `metrik-one/.claude/worktrees/<x>`, o sea que está DENTRO del repo principal:
   la resolución de Node sube y encuentra `metrik-one/node_modules` sola. Medido el
