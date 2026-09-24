@@ -45,12 +45,13 @@ describe('margen por venta', () => {
     expect(margenPorVenta(-5_000, 100_000)).toBeCloseTo(-0.05, 10)
   })
 
-  it('se escribe con un decimal fijo y coma', () => {
-    expect(formatoMargen(0.10625)).toBe('10,6 %')
-    expect(formatoMargen(0.27373)).toBe('27,4 %')
-    expect(formatoMargen(0.2)).toBe('20,0 %')
-    expect(formatoMargen(-0.052)).toBe('-5,2 %')
-    expect(formatoMargen(-0.0004)).toBe('0,0 %')
+  it('se escribe con un decimal fijo, coma y espacio duro antes del %', () => {
+    expect(formatoMargen(0.139)).not.toMatch(/ /) // ningún espacio partible
+    expect(formatoMargen(0.10625)).toBe('10,6\u00A0%')
+    expect(formatoMargen(0.27373)).toBe('27,4\u00A0%')
+    expect(formatoMargen(0.2)).toBe('20,0\u00A0%')
+    expect(formatoMargen(-0.052)).toBe('-5,2\u00A0%')
+    expect(formatoMargen(-0.0004)).toBe('0,0\u00A0%')
     expect(formatoMargen(null)).toBe('—')
   })
 })

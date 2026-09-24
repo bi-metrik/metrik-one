@@ -85,12 +85,13 @@ export function margenPorVenta(ganancia: number | null | undefined, precio: numb
   return ganancia / precio
 }
 
-/** Margen en porcentaje con un decimal fijo, estilo colombiano: 0,1062 → «10,6 %». `null` → «—». */
+/** Margen en porcentaje con un decimal fijo, estilo colombiano: 0,1062 → «10,6 %» (espacio duro). `null` → «—». */
 export function formatoMargen(margen: number | null): string {
   if (margen == null) return '—'
   const texto = (margen * 100).toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
   // -0,04 % redondea a «-0,0»: se pinta «0,0 %» para no sugerir una pérdida que no se ve.
-  return `${texto === '-0,0' ? '0,0' : texto} %`
+  // Espacio duro (U+00A0) entre número y «%»: en una celda angosta no se parten en dos líneas.
+  return `${texto === '-0,0' ? '0,0' : texto}\u00A0%`
 }
 
 /** Precio al que la ganancia es cero (redondeado hacia arriba a peso). */

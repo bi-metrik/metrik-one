@@ -211,11 +211,11 @@ export function PublicacionCliente({
             <dt className="text-muted-foreground">Costo D (sin revista)</dt>
             <dd className="text-right tabular-nums">{vigente?.costo_d != null ? formatoPesos(vigente.costo_d) : '—'}</dd>
             <dt className="text-muted-foreground">Ganancia por venta</dt>
-            <dd className={`text-right font-medium tabular-nums ${gananciaActual != null && gananciaActual < 0 ? 'text-red-600' : ''}`}>
+            <dd className={`whitespace-nowrap text-right font-medium tabular-nums ${gananciaActual != null && gananciaActual < 0 ? 'text-red-600' : ''}`}>
               {gananciaActual != null ? formatoPesos(gananciaActual) : '—'}
             </dd>
             <dt className="text-muted-foreground">Margen</dt>
-            <dd className={`text-right font-medium tabular-nums ${gananciaActual != null && gananciaActual < 0 ? 'text-red-600' : ''}`}>
+            <dd className={`whitespace-nowrap text-right font-medium tabular-nums ${gananciaActual != null && gananciaActual < 0 ? 'text-red-600' : ''}`}>
               {formatoMargen(margenPorVenta(gananciaActual, pub.precio))}
             </dd>
           </dl>
