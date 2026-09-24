@@ -24,10 +24,11 @@
  */
 
 import { formatCOP } from '@/lib/cobros/format'
-import { formatBogotaFechaCortaAno, formatBogotaFechaHora } from '@/lib/dates/bogota'
+import { formatBogotaFechaCortaAno, formatBogotaFechaHora, todayBogotaISO } from '@/lib/dates/bogota'
 import { parsearPersonas } from '@/lib/documentos/personas'
 import { valorDe, type ContextoFuentes } from './fuentes-negocio'
 import type { Contradiccion } from './cruces'
+import type { ResultadoVoto } from './votos'
 
 export type FormatoDatoClave = 'texto' | 'moneda' | 'fecha' | 'fecha_hora' | 'personas'
 
@@ -73,11 +74,75 @@ export interface CampoDatoClaveVista {
   detalle: string[]
 }
 
+/** Un reproceso del caso, abierto o cerrado, en una línea para la tarjeta. */
+export interface ReprocesoResumen {
+  ciclo: number
+  tipo: string
+  activo: boolean
+  abierto_at: string
+  cerrado_at: string | null
+  texto: string
+}
+
 export interface VistaDatosClave {
   titulo: string
   campos: CampoDatoClaveVista[]
   /** Contradicciones vigentes entre datos del negocio (los cruces de la línea). */
   contradicciones: Contradiccion[]
+  /**
+   * Los votos entre fuentes (el documento de cada titular leído en el RUT, la factura y
+   * el certificado). Opcional para no romper a quien arme la vista sin ellos.
+   */
+  lecturas?: ResultadoVoto[]
+  /** Los reprocesos del caso, cerrados incluidos. Opcional por la misma razón. */
+  reprocesos?: ReprocesoResumen[]
+}
+
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+/**
+ * «22-sep», en Bogotá. Armado a mano y no con `toLocaleString`: el literal de `es-CO`
+ * cambia entre versiones de ICU («22 sept», «22 de sept») y la tarjeta tiene que decir
+ * lo mismo en el servidor y en cualquier navegador.
+ */
+function diaMes(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const [, m, dia] = todayBogotaISO(d).split('-')
+  return `${Number(dia)}-${MESES[Number(m) - 1]}`
+}
+
+const ETIQUETA_TIPO_REPROCESO: Record<string, string> = {
+  certificacion_upme: 'Certificación UPME',
+  devolucion_dian: 'Devolución DIAN',
+}
+
+/**
+ * Los reprocesos del caso en el orden en que ocurrieron. La ficha solo pintaba la marca
+ * VIGENTE (`metadata.reproceso.activo`), así que un reproceso ya cerrado desaparecía y el
+ * caso «salía como que no tuvo reproceso» (V0457: certificado a una sola persona en una
+ * copropiedad, reproceso 1 abierto el 21-sep y cerrado solo el 22-sep). El historial
+ * vive en `reproceso_eventos`, que nunca se borra: de ahí sale esta lista.
+ *
+ * El ciclo 0 es el error que se registró sin devolver el caso: no fue un reproceso
+ * rehecho, pero es un error del proceso y se muestra con su nombre.
+ */
+export function resumirReprocesos(
+  eventos: ReadonlyArray<{ ciclo: number; tipo: string; abierto_at: string; cerrado_at: string | null }>,
+): ReprocesoResumen[] {
+  return [...eventos]
+    .sort((a, b) => a.abierto_at.localeCompare(b.abierto_at))
+    .map(e => {
+      const tipo = ETIQUETA_TIPO_REPROCESO[e.tipo] ?? e.tipo
+      const abierto = diaMes(e.abierto_at)
+      const cerrado = e.cerrado_at ? diaMes(e.cerrado_at) : null
+      const activo = !e.cerrado_at
+      let texto: string
+      if (e.ciclo === 0) texto = `Error registrado sin devolver el caso · ${tipo} · ${abierto}`
+      else if (activo) texto = `Reproceso ${e.ciclo} · ${tipo} · abierto desde ${abierto}`
+      else texto = `Reproceso ${e.ciclo} · ${tipo} · cerrado ${cerrado}`
+      return { ciclo: e.ciclo, tipo: e.tipo, activo, abierto_at: e.abierto_at, cerrado_at: e.cerrado_at, texto }
+    })
 }
 
 function esFuente(v: unknown): v is FuenteDatoClave {

@@ -37,6 +37,7 @@ import { resolverCodigosUbicacion } from '@/lib/dian/divipola'
 import { telefonoCasilla25 } from '@/lib/dian/telefono-casilla-25'
 import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
+import { generacionNegadaPorDisputa } from '@/lib/negocios/disputa-generacion'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -509,6 +510,13 @@ export async function generarFormularioCore(
     const constantes = (configExtra.campos_constantes ?? {}) as Record<string, string>
 
     if (!template) return { success: false, error: 'Template no configurado' }
+
+    // 1a. Lecturas en disputa: si el documento de un titular no coincide entre el RUT, la
+    // factura y el certificado (votos de la línea con `niega_generacion`), no se genera.
+    // Va antes de todo lo demás: ningún override arregla un número que dos documentos
+    // contradicen. Ver `@/lib/negocios/disputa-generacion`.
+    const disputa = await generacionNegadaPorDisputa(supabase, { negocioId, lineaId })
+    if (disputa) return { success: false, error: disputa }
 
     // 1b. Prerrequisitos: documentos que deben existir ANTES de poder generar.
     // Sin esto el PDF sale con los placeholders puestos y alguien lo manda al

@@ -27,6 +27,7 @@
  */
 
 import { esPersonaJuridica, parsearPersonas } from '@/lib/documentos/personas'
+import { coinciden, MODOS_COMPARACION, type ModoComparacion } from './comparar-valores'
 import {
   mismoDocumento,
   normalizarClave,
@@ -90,7 +91,29 @@ export interface CruceDocumentoEnLista extends CruceBase {
   lista: { source_bloque_slug: string; field: string }
 }
 
-export type Cruce = CruceCantidad | CruceDocumentoEnLista
+/** Un valor de un bloque (con alternativas, igual que un lado de `cantidad`). */
+export interface FuenteValor {
+  source_bloque_slug: string
+  alternativas?: string[]
+  field: string
+}
+
+/**
+ * Un dato de un documento tiene que coincidir con ALGUNO de otros (el nombre del
+ * certificado contra el RUT del titular o el del segundo, el valor de la inversión
+ * contra la factura sin IVA). Calla si falta el dato o si ningún valor de comparación
+ * existe todavía: un lado ausente no es una contradicción.
+ */
+export interface CruceCoincide extends CruceBase {
+  tipo: 'coincide'
+  a: FuenteValor
+  b: FuenteValor[]
+  modo: ModoComparacion
+  tolerancia_cop?: number
+  equivalencias?: string[][]
+}
+
+export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide
 
 export interface Contradiccion {
   slug: string
@@ -112,6 +135,10 @@ function esFuente(v: unknown): v is { source_bloque_slug: string; field: string 
   return typeof f.source_bloque_slug === 'string' && !!f.source_bloque_slug && typeof f.field === 'string' && !!f.field
 }
 
+function esFuenteValor(v: unknown): v is FuenteValor {
+  return esFuente(v)
+}
+
 function esCruce(v: unknown): v is Cruce {
   if (typeof v !== 'object' || v === null) return false
   const c = v as Record<string, unknown>
@@ -119,6 +146,10 @@ function esCruce(v: unknown): v is Cruce {
   if (typeof c.mensaje !== 'string' || !c.mensaje.trim()) return false
   if (c.tipo === 'cantidad') return esLado(c.a) && esLado(c.b)
   if (c.tipo === 'documento_en_lista') return esFuente(c.documento) && esFuente(c.lista)
+  if (c.tipo === 'coincide') {
+    return esFuenteValor(c.a) && Array.isArray(c.b) && c.b.some(esFuenteValor) &&
+      (MODOS_COMPARACION as unknown[]).includes(c.modo)
+  }
   return false
 }
 
@@ -143,9 +174,14 @@ export function slugsDeCruces(cruces: Cruce[]): string[] {
         cond(l.solo_naturales_si)
         for (const alt of l.alternativas ?? []) s.add(alt)
       }
-    } else {
+    } else if (c.tipo === 'documento_en_lista') {
       s.add(c.documento.source_bloque_slug)
       s.add(c.lista.source_bloque_slug)
+    } else {
+      for (const f of [c.a, ...c.b.filter(esFuenteValor)]) {
+        s.add(f.source_bloque_slug)
+        for (const alt of f.alternativas ?? []) s.add(alt)
+      }
     }
   }
   return [...s]
@@ -196,6 +232,17 @@ async function resolverLado(lado: LadoCantidad, ctx: ContextoFuentes): Promise<L
   return null
 }
 
+/** El valor de una fuente: el primer bloque que le aplique al caso y traiga el campo. */
+async function resolverValor(f: FuenteValor, ctx: ContextoFuentes): Promise<unknown> {
+  for (const slug of [f.source_bloque_slug, ...(f.alternativas ?? [])]) {
+    if (!ctx.porSlug[slug]) continue
+    if (!(await ctx.aplica(slug))) continue
+    const v = valorDe(ctx, slug, f.field)
+    if (v !== undefined) return v
+  }
+  return undefined
+}
+
 function conUnidad(n: number, unidad?: [string, string]): string {
   if (!unidad) return String(n)
   return `${n} ${n === 1 ? unidad[0] : unidad[1]}`
@@ -231,6 +278,25 @@ export async function evaluarCruces(
           a_valor: a.valor,
           b_valor: b.valor,
         }),
+      })
+      continue
+    }
+
+    if (c.tipo === 'coincide') {
+      const a = await resolverValor(c.a, ctx)
+      if (a === undefined) continue
+      const bs: unknown[] = []
+      for (const f of c.b.filter(esFuenteValor)) {
+        const v = await resolverValor(f, ctx)
+        if (v !== undefined) bs.push(v)
+      }
+      if (bs.length === 0) continue
+      const opts = { tolerancia_cop: c.tolerancia_cop, equivalencias: c.equivalencias }
+      if (bs.some(b => coinciden(a, b, c.modo, opts))) continue
+      out.push({
+        slug: c.slug,
+        bloquea,
+        mensaje: redactar(c.mensaje, { a_valor: String(a), b_valor: bs.map(String).join(' / ') }),
       })
       continue
     }
