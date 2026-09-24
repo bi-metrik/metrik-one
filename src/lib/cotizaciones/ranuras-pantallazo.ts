@@ -185,6 +185,7 @@ const OCUPACION: CampoRanura[] = [
     min: false,
     descripcion_ai:
       'Cuántos NIÑOS muestra la pantalla (niño, child, CHD). 0 si la pantalla muestra la ocupación y no hay niños. ' +
+      'Un menor de MENOS DE 2 AÑOS (0 o 1 año) NO es niño: cuéntalo en infantes aunque la pantalla diga «niño (0 años)». ' +
       'null si no se ve la ocupación. ' + NO_ES_OCUPACION,
   },
   {
@@ -193,7 +194,7 @@ const OCUPACION: CampoRanura[] = [
     tipo: 'numero',
     min: false,
     descripcion_ai:
-      'Cuántos INFANTES muestra la pantalla (infante, bebé, INF). 0 si la pantalla muestra la ocupación y no hay ' +
+      'Cuántos INFANTES muestra la pantalla (infante, bebé, INF, y todo menor de menos de 2 años aunque diga «niño (1 año)»). 0 si la pantalla muestra la ocupación y no hay ' +
       'infantes. null si no se ve la ocupación. ' + NO_ES_OCUPACION,
   },
   {
@@ -593,7 +594,7 @@ const HOTEL: DefinicionRanura = {
     { slug: 'check_in', label: 'Check-in', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de entrada en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año. Si también muestra el día de la semana, agrégalo tras una barra: --10-23/vie.' },
     { slug: 'check_out', label: 'Check-out', tipo: 'fecha', min: true, descripcion_ai: 'Fecha de salida en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año. Si también muestra el día de la semana, agrégalo tras una barra: --10-23/vie.' },
     { slug: 'noches', label: 'Noches', tipo: 'numero', min: false, descripcion_ai: 'Número de noches si la pantalla lo dice. Si no, devuelve null: se deriva de las fechas.' },
-    { slug: 'ocupacion', label: 'Ocupación', tipo: 'texto', min: false, descripcion_ai: 'El texto literal donde la pantalla dice cuántas PERSONAS se alojan (ej. «2 Adultos - 1 Niño», «3 Huéspedes»), copiado tal cual. Si no hay texto de personas, devuelve null. ' + NO_ES_OCUPACION },
+    { slug: 'ocupacion', label: 'Ocupación', tipo: 'texto', min: false, descripcion_ai: 'El texto literal donde la pantalla dice cuántas PERSONAS se alojan (ej. «2 Adultos - 1 Niño», «3 Huéspedes»), copiado tal cual, CON la edad de cada menor si la muestra («2 adultos, 1 niño (0 años)»). Si no hay texto de personas, devuelve null. ' + NO_ES_OCUPACION },
     { slug: 'politica_cancelacion', label: 'Cancelación', tipo: 'texto', min: false, alerta_revision: true, descripcion_ai: 'Política de cancelación en una línea: no reembolsable, gratis hasta tal fecha...' },
     {
       // ⚠️ NO es mínimo desde la tarifa por pasajero (2026-09-16). La tarjeta de hotel del
