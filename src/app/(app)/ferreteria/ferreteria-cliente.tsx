@@ -15,6 +15,8 @@ import {
   type EstadoPublicacion,
   type Linea,
 } from '@/lib/ferreteria/reglas'
+import type { MesLiquidacion } from '@/lib/ferreteria/liquidacion'
+import { LiquidacionTabla } from './liquidacion-tabla'
 import { Th, aplicarOrden, useOrden } from './orden-tabla'
 
 function pct(n: number | null): string {
@@ -74,17 +76,19 @@ export function PuntoPendiente({ tono, titulo }: { tono: 'rojo' | 'ambar' | null
 
 export function FerreteriaCliente({
   tablero,
+  liquidacion,
   hoy,
   ahoraIso,
   puedeEditar,
 }: {
   tablero: Tablero
+  liquidacion: MesLiquidacion[]
   hoy: string
   /** Lo fija el servidor: el semáforo no llama al reloj durante el render. */
   ahoraIso: string
   puedeEditar: boolean
 }) {
-  const [pestana, setPestana] = useState<'publicaciones' | 'indicadores'>('publicaciones')
+  const [pestana, setPestana] = useState<'publicaciones' | 'indicadores' | 'liquidacion'>('publicaciones')
   const [estado, setEstado] = useState<'' | EstadoPublicacion>('')
   const [linea, setLinea] = useState<'' | Linea>('')
   const [marca, setMarca] = useState('')
@@ -128,19 +132,21 @@ export function FerreteriaCliente({
       </header>
 
       <div className="flex gap-1 border-b">
-        {(['publicaciones', 'indicadores'] as const).map((p) => (
+        {(['publicaciones', 'indicadores', 'liquidacion'] as const).map((p) => (
           <button
             key={p}
             type="button"
             onClick={() => setPestana(p)}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${pestana === p ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
           >
-            {p === 'publicaciones' ? 'Publicaciones' : 'Indicadores'}
+            {p === 'publicaciones' ? 'Publicaciones' : p === 'indicadores' ? 'Indicadores' : 'Liquidación mensual'}
           </button>
         ))}
       </div>
 
-      {pestana === 'publicaciones' ? (
+      {pestana === 'liquidacion' ? (
+        <LiquidacionTabla meses={liquidacion} />
+      ) : pestana === 'publicaciones' ? (
         <>
           <div className="flex flex-wrap gap-2">
             <input

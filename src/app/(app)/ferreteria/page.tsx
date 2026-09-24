@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
-import { leerTablero } from '@/lib/ferreteria/datos'
+import { leerLiquidacion, leerTablero } from '@/lib/ferreteria/datos'
 import { puedeEditarFerreteria } from '@/lib/ferreteria/reglas'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { FerreteriaCliente } from './ferreteria-cliente'
@@ -22,6 +22,15 @@ export default async function FerreteriaPage() {
   if (!(await exigirModulo(REQUISITO.ferreteria)).ok) redirect('/')
 
   const hoy = todayBogotaISO()
-  const tablero = await leerTablero(supabase as unknown as SupabaseClient, workspaceId, hoy)
-  return <FerreteriaCliente tablero={tablero} hoy={hoy} ahoraIso={new Date().toISOString()} puedeEditar={puedeEditarFerreteria(role)} />
+  const db = supabase as unknown as SupabaseClient
+  const [tablero, liquidacion] = await Promise.all([leerTablero(db, workspaceId, hoy), leerLiquidacion(db, workspaceId, hoy)])
+  return (
+    <FerreteriaCliente
+      tablero={tablero}
+      liquidacion={liquidacion}
+      hoy={hoy}
+      ahoraIso={new Date().toISOString()}
+      puedeEditar={puedeEditarFerreteria(role)}
+    />
+  )
 }

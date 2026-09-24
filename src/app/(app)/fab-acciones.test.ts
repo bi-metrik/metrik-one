@@ -156,6 +156,25 @@ describe('acciones que el workspace tiene que declarar', () => {
     expect(soloHoras.acciones.map((a) => a.label)).not.toContain('Registrar cobro')
   })
 
+  it('"Registrar venta" solo sale con el módulo Ferretería y para quien edita Ferretería', () => {
+    const sin = pintar({ role: 'owner', contextoCerrado: false, modules: {} })
+    expect(sin.acciones.map((a) => a.label)).not.toContain('Registrar venta')
+
+    for (const role of ['owner', 'admin', 'supervisor']) {
+      const con = pintar({ role, contextoCerrado: false, modules: { ferreteria: true } })
+      expect(con.acciones.map((a) => a.label)).toContain('Registrar venta')
+    }
+    const operador = pintar({ role: 'operator', contextoCerrado: false, modules: { ferreteria: true } })
+    expect(operador.acciones.map((a) => a.label)).not.toContain('Registrar venta')
+  })
+
+  it('"Registrar venta" crea un negocio nuevo: no se apaga sobre uno cerrado', () => {
+    const { html } = pintar({ role: 'owner', contextoCerrado: true, modules: { ferreteria: true } })
+    const boton = html.split('<button').find((b) => b.includes('Registrar venta'))
+    expect(boton).toBeDefined()
+    expect(boton).not.toContain('disabled')
+  })
+
   it('"Programar cobro" ya no existe: su destino (?action=factura) no lo leía nadie', () => {
     const { acciones } = pintar({
       role: 'owner', contextoCerrado: false,

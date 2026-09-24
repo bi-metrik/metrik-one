@@ -7,7 +7,9 @@ import type {
   Canal,
   CanalConversacion,
   EstadoPublicacion,
+  FormaPago,
   Linea,
+  PasoVenta,
   ResultadoConversacion,
   RutaVenta,
 } from './reglas'
@@ -135,13 +137,54 @@ export interface VentaFila {
   workspace_id: string
   publicacion_id: string
   conversacion_id: string | null
-  fecha_primer_pago: string
+  /** Día de la venta en Bogotá. De él salen el costo del día y el mes de la liquidación. */
+  fecha_venta: string
+  /** Día en que entró el pago. Null mientras una venta contra entrega no se paga. */
+  fecha_primer_pago: string | null
   precio_final: number
   costo_dia: number
   ganancia: number
   ruta: RutaVenta
+  forma_pago: FormaPago
+  comprador_nombre: string | null
+  /** El negocio de ONE que representa esta venta (línea Ferretería). */
+  negocio_id: string | null
+  entregada_at: string | null
   registrado_por: string | null
   created_at?: string
+}
+
+/** Lo que se puede cambiar de una venta ya registrada. */
+export type CambiosVenta = Partial<Pick<VentaFila, 'negocio_id' | 'entregada_at' | 'fecha_primer_pago'>>
+
+/**
+ * Lo que Ferretería necesita de los negocios de ONE. La implementación real
+ * (`negocios-puerto.ts`) usa las MISMAS acciones que la pantalla de negocios (crear, avanzar de
+ * etapa, completar, registrar pago), para que una venta deje código, historial y cobro como
+ * cualquier negocio. Las pruebas usan un doble que registra lo que se le pidió.
+ */
+export interface PuertoNegocios {
+  crear(input: {
+    nombre: string
+    precio: number
+    compradorNombre: string | null
+  }): Promise<{ ok: true; negocioId: string } | { ok: false; error: string }>
+  /** El precio final de la venta queda como precio aprobado del negocio. */
+  fijarPrecioAprobado(negocioId: string, precio: number): Promise<string | null>
+  registrarPago(negocioId: string, pago: { monto: number; fecha: string; referencia: string }): Promise<string | null>
+  /**
+   * Dónde está el negocio: el paso de su etapa (null si no está en una etapa de la línea
+   * Ferretería) y si sigue abierto. Null si el negocio no existe en el espacio.
+   */
+  estado(negocioId: string): Promise<{ paso: PasoVenta | null; abierto: boolean } | null>
+  /** Mueve el negocio a la etapa de la línea Ferretería que corresponde al paso. */
+  moverA(negocioId: string, paso: 'entregado' | 'pagado'): Promise<string | null>
+  /** Cierra el negocio como completado (el cierre normal de ONE). */
+  completar(negocioId: string): Promise<string | null>
+  /** Asigna el responsable del negocio (quien registra, o el dueño del espacio). */
+  asignarResponsable(negocioId: string): Promise<string | null>
+  /** Deja una línea en el historial del negocio. No falla: el historial no frena la venta. */
+  anotar(negocioId: string, texto: string): Promise<void>
 }
 
 export interface TokenFila {
@@ -224,5 +267,11 @@ export interface RepoFerreteria {
 
   guardarMediciones(filas: MedicionFila[]): Promise<void>
   guardarConversaciones(filas: ConversacionFila[]): Promise<void>
-  insertarVenta(fila: VentaFila): Promise<void>
+  /** Devuelve la fila con su `id`. */
+  insertarVenta(fila: VentaFila): Promise<VentaFila & { id: string }>
+  ventaPorId(ws: string, id: string): Promise<(VentaFila & { id: string }) | null>
+  actualizarVenta(ws: string, id: string, cambios: CambiosVenta): Promise<void>
+  /** Solo para deshacer una venta cuyo negocio no se pudo crear. */
+  borrarVenta(ws: string, id: string): Promise<void>
+  conversacionPorId(ws: string, id: string): Promise<(ConversacionFila & { id: string }) | null>
 }

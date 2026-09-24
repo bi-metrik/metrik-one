@@ -3,8 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/server'
 import { traerTodo } from '@/lib/supabase/paginar'
 import type {
+  ConversacionFila,
   CostoFila,
   EventoFila,
+  VentaFila,
   ProductoFila,
   PublicacionCatalogo,
   PublicacionFila,
@@ -192,8 +194,36 @@ export function repoSupabase(db: SupabaseClient = createServiceClient() as unkno
       lanzar('guardar conversaciones', error)
     },
     async insertarVenta(fila) {
-      const { error } = await db.from('ferreteria_ventas').insert(fila)
+      const { data, error } = await db.from('ferreteria_ventas').insert(fila).select('*').single()
       lanzar('insertar venta', error)
+      return aVenta(data as Record<string, unknown>)
     },
+    async ventaPorId(ws, id) {
+      const { data, error } = await db.from('ferreteria_ventas').select('*').eq('workspace_id', ws).eq('id', id).maybeSingle()
+      lanzar('venta por id', error)
+      return data ? aVenta(data as Record<string, unknown>) : null
+    },
+    async actualizarVenta(ws, id, cambios) {
+      const { error } = await db.from('ferreteria_ventas').update(cambios).eq('workspace_id', ws).eq('id', id)
+      lanzar('actualizar venta', error)
+    },
+    async borrarVenta(ws, id) {
+      const { error } = await db.from('ferreteria_ventas').delete().eq('workspace_id', ws).eq('id', id)
+      lanzar('borrar venta', error)
+    },
+    async conversacionPorId(ws, id) {
+      const { data, error } = await db.from('ferreteria_conversaciones').select('*').eq('workspace_id', ws).eq('id', id).maybeSingle()
+      lanzar('conversación por id', error)
+      return (data as (ConversacionFila & { id: string }) | null) ?? null
+    },
+  }
+}
+
+function aVenta(f: Record<string, unknown>): VentaFila & { id: string } {
+  return {
+    ...(f as unknown as VentaFila & { id: string }),
+    precio_final: Number(f.precio_final),
+    costo_dia: Number(f.costo_dia),
+    ganancia: Number(f.ganancia),
   }
 }

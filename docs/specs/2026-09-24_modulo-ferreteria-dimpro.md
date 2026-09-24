@@ -276,3 +276,35 @@ a `.credentials.md` (Kaori), nunca al repo. Revocar = `revocado_at`; el endpoint
 8. **Ventas solo desde la pantalla** (la spec §5 no las pide al endpoint). Congelan el costo F vigente en la fecha del
    primer pago.
 9. **Origen `interno`** en `workspace_modulos`: el piloto es una alianza sin venta (`negocios_one: exento`).
+
+---
+
+## Cada venta es un negocio de ONE (Max, 2026-09-24, segundo encargo)
+
+Pedido de Mauricio: toda venta queda como negocio en ONE, en una linea **Ferreteria** propia de Dimpro.
+Migracion `20260925120000_ferreteria_ventas_negocio.sql` (escribe DATOS: la linea y sus etapas, solo en dimpro).
+
+**Registro.** Solo a mano (Dietmar o MeTRIK), por dos puertas con el mismo formulario y la misma accion:
+el detalle de la publicacion y "Registrar venta" del boton flotante (solo con `modules.ferreteria`, roles
+owner/admin/supervisor). Campos: publicacion (codigo MP o titulo), precio final, fecha de la venta, ruta,
+forma de pago (anticipado / contra entrega), comprador (opcional) y conversacion de origen (opcional). El
+cron no crea ventas.
+
+**Linea y etapas.** `Vendido` (stage ejecucion) → `Entregado` (cobro) → `Pagado` (cobro, `etapa_cierre`).
+Se reconocen por `config_extra.ferreteria_paso`, no por nombre. Ninguna declara avisos; las tres llevan
+`saltar_si_saldo_cero: false`.
+- Contra entrega: nace en Vendido; "Marcar entregada" la pasa a Entregado; "Registrar pago" registra el
+  cobro, la pasa a Pagado y la cierra.
+- Anticipado: el cobro se registra al crearla; "Marcar entregada" la lleva por Entregado a Pagado y la cierra.
+
+**El negocio sale por el camino de la app** (`src/lib/ferreteria/negocios-puerto.ts`): `crearNegocio`
+(codigo por trigger, historial, carpeta si el espacio tiene Drive; origen `meta`), precio aprobado = precio
+final, responsable con `agregarResponsable` (quien registra o el dueño), cobro con `registrarPagoEnNegocio`
+(fuente Marketplace, referencia `FER-<codigo>-<id8>`), avance con `cambiarEtapaNegocioConGate` y cierre con
+`completarNegocio`. `ferreteria_ventas.negocio_id` enlaza los dos.
+
+**Liquidacion mensual.** La parte de MeTRIK NO es un costo del negocio. Por mes de la fecha de la venta
+(Bogota) se suma la ganancia de todas las ventas, perdidas incluidas, y se reparte 50/50
+(`PARTE_METRIK` en `src/lib/ferreteria/liquidacion.ts`). Positiva: "MeTRIK cobra a Dimpro". Negativa:
+"MeTRIK aporta a Dimpro" el valor absoluto. Cada mes se liquida solo; el mes en curso sale abierto.
+Pestaña "Liquidacion mensual" en `/ferreteria`.
