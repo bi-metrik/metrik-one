@@ -146,11 +146,12 @@ describe('Trappvel · la cotización se dibuja por ranuras', () => {
     expect(bloque(pintar(true), 'Hotel en Cancún')).toContain('pega el pantallazo')
   })
 
-  it('UNA bandeja de pegado para la cotización (P7), con «Pegar / Subir foto» flotante para el celular', () => {
+  it('UNA bandeja de pantallazos para la cotización (P7), con «Subir foto» dentro de la zona de pegado', () => {
     const html = pintar(true)
     expect(html.match(/data-bandeja-capturas/g)).toHaveLength(1)
-    expect(html).toContain('aria-label="Subir pantallazos"')
-    expect(html).toContain('Pegar / Subir foto')
+    expect(html).toContain('Pega aquí tus pantallazos con Ctrl+V o arrástralos')
+    expect(html).toContain('Subir foto')
+    expect(html).toMatch(/<input[^>]*type="file"[^>]*multiple/)
     expect(html).toContain('O agrégalo sin pantallazo')
   })
 })

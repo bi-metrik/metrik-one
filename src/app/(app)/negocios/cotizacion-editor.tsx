@@ -3437,7 +3437,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   ) : null
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 px-4 py-6">
+    // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
+    <div className={`mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
       {jsxEncabezado}
       {!lineasPorTipo && jsxPanelMargen}
       {!lineasPorTipo && jsxPanelTexto}
@@ -3445,11 +3446,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {jsxAvisoNoEditable}
       {!lineasPorTipo && jsxAvisoDesactualizadas}
       {jsxEncabezadoViaje}
-      {/* R3 · con el marco, la zona de pegado es hija directa de este contenedor: así queda
-          fija bajo el encabezado del negocio mientras se recorre TODA la cotización. */}
+      {/* Con el marco, la bandeja de pantallazos va antes de «Componentes», como en el
+          prototipo de la tarjeta (2026-09-24): una sección de la página, no una franja fija. */}
       {conMarco && editable && (
         <BandejaCapturas
-          fija
+          enMarco
           cotizacionId={cotizacion.id}
           items={initialItems}
           composicion={composicionViaje}

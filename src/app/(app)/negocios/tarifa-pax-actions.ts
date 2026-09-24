@@ -555,29 +555,47 @@ export interface BorradorParaAceptar {
    * es la de la lectura firmada (`imagen-captura.ts`); si falta, la captura entra sin imagen.
    */
   imagen?: string | null
+  /**
+   * H4 · lo que la persona corrigió en la fila antes de aceptar («Aceptar con cambios»). Se
+   * escribe como corrección de la opción (`corregirCampoDeFicha`, que vuelve a validar cada
+   * campo): lo leído queda intacto en la casilla. Una habitación no lleva correcciones: sus
+   * datos son los de la opción a la que se suma.
+   */
+  correcciones?: { slug: string; valor: string }[] | null
 }
+
+/** Cómo entró la captura: otra opción, una ranura nueva, una habitación o sobre una opción. */
+export type ComoEntro = 'hermana' | 'nueva' | 'habitacion' | 'reemplazo'
 
 export type ResultadoAceptarCaptura =
   | {
       ok: true
       itemId: string
-      /** «Hotel en Providencia · Opción 2» (· «Habitación 3»). */
+      /** «Hotel en Providencia · Opción 2» (« como habitación 3»). */
       donde: string
       /** Faltante de la tarifa que queda en su bloque (moneda, tasa…): se acepta igual. */
       pendiente: string | null
+      como: ComoEntro
+      /** La ranura y la opción donde quedó, por si la página todavía no la tiene. */
+      bloque: string
+      opcion: number | null
+      /** La habitación que se sumó (para «Deshacer») y su número. */
+      habitacionId?: string | null
+      habitacionNumero?: number | null
+      /** Correcciones que no se pudieron escribir: la captura entró igual. */
+      correccionesFallidas?: string[]
     }
   /** El grupo ya estaba cubierto al aceptar (regla 6): la bandeja pregunta. */
   | { ok: false; codigo: 'SOBRA'; mensaje: string; conItemId: string }
   | { ok: false; codigo: string; mensaje: string }
 
-/** «Hotel en Providencia · Opción 2»: dónde quedó una opción, como se ve en Componentes. */
-function nombreDeUbicacion(lineas: Record<string, unknown>[], itemId: string): string {
+/** «Hotel en Providencia» y «2»: dónde quedó una opción, como se ve en Componentes. */
+function ubicacionDeOpcion(lineas: Record<string, unknown>[], itemId: string): { bloque: string; opcion: number | null } {
   const linea = lineas.find(l => l.id === itemId)
   const grupo = normalizarGrupo((linea?.grupo ?? null) as string | null)
-  if (!linea || !grupo) return 'Componentes'
+  if (!linea || !grupo) return { bloque: 'Componentes', opcion: null }
   const hermanas = lineas.filter(l => l.es_ajuste !== true && normalizarGrupo((l.grupo ?? null) as string | null) === grupo)
-  const n = hermanas.findIndex(l => l.id === itemId) + 1
-  return `${etiquetaDeRanura(grupo)} · Opción ${n}`
+  return { bloque: etiquetaDeRanura(grupo), opcion: hermanas.findIndex(l => l.id === itemId) + 1 }
 }
 
 export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorParaAceptar): Promise<ResultadoAceptarCaptura> {
@@ -605,7 +623,30 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   if (subida) lectura.imagenRef = subida
   const r = await aceptarLectura(cotizacionId, b, lectura, pistas, ctx, lineas)
   if (!r.ok && subida) await borrarImagenesDeCaptura(workspaceId, [subida])
-  return r
+  if (!r.ok || r.como === 'habitacion') return r
+  const fallidas = await aplicarCorreccionesDeBandeja(r.itemId, b.correcciones)
+  return fallidas.length > 0 ? { ...r, correccionesFallidas: fallidas } : r
+}
+
+/** Tope de correcciones por captura: la fila tiene seis campos. */
+const MAX_CORRECCIONES_BANDEJA = 12
+
+/**
+ * H4 · escribe lo que la persona corrigió en la fila. Cada campo pasa por
+ * `corregirCampoDeFicha`, que decide si se corrige ahí (el costo no), lo valida con la misma
+ * regla de la tarjeta y rearma la descripción si todavía es la del sistema. Devuelve los
+ * errores de lo que no se pudo escribir; la captura ya entró.
+ */
+async function aplicarCorreccionesDeBandeja(itemId: string, correcciones: BorradorParaAceptar['correcciones']): Promise<string[]> {
+  if (!Array.isArray(correcciones)) return []
+  const errores: string[] = []
+  for (const c of correcciones.slice(0, MAX_CORRECCIONES_BANDEJA)) {
+    if (!c || typeof c.slug !== 'string' || typeof c.valor !== 'string') continue
+    // `''` = la persona vació el campo a propósito: se guarda como corrección vacía.
+    const r = await corregirCampoDeFicha(itemId, c.slug.slice(0, 60), c.valor.slice(0, 300))
+    if (!r.success) errores.push(r.error ?? 'No se pudo guardar un campo corregido.')
+  }
+  return errores
 }
 
 async function aceptarLectura(
@@ -625,7 +666,7 @@ async function aceptarLectura(
     if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
     const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura)
     if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
-    return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, null)
+    return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, { como: 'reemplazo' })
   }
 
   // ── Dónde va, contra la cotización de ESTE momento ──
@@ -644,7 +685,7 @@ async function aceptarLectura(
     if (!r.ok) return { ok: false, codigo: r.codigo, mensaje: r.mensaje }
     const habitacionId = r.tarifa.habitaciones?.at(-1)?.id ?? null
     const { numero } = habitacionId ? dondeQuedo(r.tarifa, habitacionId, ctx.viaje.composicion, null) : { numero: null }
-    return terminarAceptacion(ctx.supabase, cotizacionId, destino.itemId, numero ? `Habitación ${numero}` : 'Solo para restar')
+    return terminarAceptacion(ctx.supabase, cotizacionId, destino.itemId, { como: 'habitacion', habitacionId, habitacionNumero: numero })
   }
 
   // ── Opción nueva: en la ranura que ya estaba o en una ranura nueva ──
@@ -661,7 +702,7 @@ async function aceptarLectura(
     await deleteItem(creada.itemId)
     return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
   }
-  return terminarAceptacion(ctx.supabase, cotizacionId, creada.itemId, null)
+  return terminarAceptacion(ctx.supabase, cotizacionId, creada.itemId, { como: destino.como })
 }
 
 /** Confirma el costo (un faltante queda pendiente en su bloque, R1) y dice dónde quedó. */
@@ -669,13 +710,27 @@ async function terminarAceptacion(
   supabase: unknown,
   cotizacionId: string,
   itemId: string,
-  sufijo: string | null,
+  entrada: { como: ComoEntro; habitacionId?: string | null; habitacionNumero?: number | null },
 ): Promise<ResultadoAceptarCaptura> {
   const c = await confirmarTarifaPorPasajero(itemId, null)
   const pendiente = c.success ? null : (c.error ?? 'falta un dato de la tarifa')
   const lineas = await lineasDeCotizacion(supabase, cotizacionId)
-  const lugar = 'error' in lineas ? 'Componentes' : nombreDeUbicacion(lineas, itemId)
-  return { ok: true, itemId, donde: sufijo ? `${lugar} · ${sufijo}` : lugar, pendiente }
+  const { bloque, opcion } = 'error' in lineas ? { bloque: 'Componentes', opcion: null } : ubicacionDeOpcion(lineas, itemId)
+  const lugar = opcion ? `${bloque} · Opción ${opcion}` : bloque
+  const habitacion = entrada.como === 'habitacion'
+    ? ` como habitación${entrada.habitacionNumero ? ` ${entrada.habitacionNumero}` : ''}`
+    : ''
+  return {
+    ok: true,
+    itemId,
+    donde: `${lugar}${habitacion}`,
+    pendiente,
+    como: entrada.como,
+    bloque,
+    opcion,
+    habitacionId: entrada.habitacionId ?? null,
+    habitacionNumero: entrada.habitacionNumero ?? null,
+  }
 }
 
 // ── R8 · Habitaciones de una opción de hotel ─────────────────────────────────

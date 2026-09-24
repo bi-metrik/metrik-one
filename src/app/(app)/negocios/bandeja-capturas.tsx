@@ -1,15 +1,29 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, Camera, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { detectarCaptura } from '@/app/(app)/negocios/ranura-actions'
-import { leerCapturaEnBorrador, type BorradorParaAceptar, type ResultadoAceptarCaptura } from '@/app/(app)/negocios/tarifa-pax-actions'
-import { leerCaptura, procesarCaptura, type Borrador, type DependenciasDeProceso, type EstadoDeProceso, type Pistas } from '@/lib/cotizaciones/proceso-captura'
+import {
+  leerCapturaEnBorrador,
+  quitarHabitacion,
+  type BorradorParaAceptar,
+  type ComoEntro,
+  type ResultadoAceptarCaptura,
+} from '@/app/(app)/negocios/tarifa-pax-actions'
+import {
+  leerCaptura,
+  procesarCaptura,
+  type Borrador,
+  type ComoQueda,
+  type DependenciasDeProceso,
+  type EstadoDeProceso,
+  type Pistas,
+} from '@/lib/cotizaciones/proceso-captura'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
-import type { OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
+import { pantallazosEnCotizacion, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import {
   huellaDeImagen,
   mensajeMismaImagen,
@@ -18,44 +32,65 @@ import {
   type OpcionComparable,
   type Ubicacion,
 } from '@/lib/cotizaciones/captura-repetida'
-import { fichaDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
+import {
+  camposDeRevision,
+  correccionesDeRevision,
+  preguntaDeRevision,
+  tituloDeCaptura,
+  type CorreccionDeBandeja,
+} from '@/lib/cotizaciones/revision-captura'
+import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
-import { VAR_ALTO_ENCABEZADO } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
+import { AlertaDecision } from '@/components/viaje/alerta-decision'
+import { BTN, BTN_PRIM, BTN_X, INPUT, INPUT_DUDOSO, LINK, SPIN } from '@/components/viaje/estilo'
+import { Miniatura, useVistaAmpliada } from '@/components/viaje/pantallazo'
 
 /**
- * La bandeja de capturas (P7 del caso Providencia, versión de Mauricio del 2026-09-23):
- * primero se capturan todos los pantallazos, los detalles después.
+ * La bandeja de pantallazos (P7 del caso Providencia; forma y textos del prototipo de la
+ * tarjeta aprobado por Mauricio el 2026-09-24,
+ * `proyectos/trappvel/clarity/docs/diseno/prototipo-tarjeta-2026-09-24/`).
  *
- *  · Se pegan uno tras otro, los que hagan falta, y cada uno se lee en segundo plano: no hay
- *    que esperar a que termine uno para pegar el siguiente. Ctrl/Cmd+V funciona en cualquier
- *    parte de la cotización; en el escritorio la zona queda fija arriba y en el celular es un
- *    botón flotante «Pegar / Subir foto».
+ *  · Se pegan uno tras otro, los que hagan falta (Ctrl+V en cualquier parte de la cotización,
+ *    arrastrar, o «Subir foto»), y cada uno se lee en segundo plano. Lo más nuevo va arriba.
  *
- * ## Lo que sigue en la bandeja no toca Componentes (H2, prueba del 2026-09-24)
+ * ## Lo que está en la bandeja todavía no entra a la cotización (H2)
  *
  * Mirar y leer NO crean ranura, opción ni habitación: la lectura vuelve como BORRADOR firmado
  * y vive en la fila. Solo «Aceptar» la lleva a Componentes, y es el servidor el que decide,
- * contra la cotización de ese momento, a dónde (`ubicarLectura`): la ranura del mismo destino
- * y fechas como otra opción (H1), una habitación del mismo hotel, o una ranura nueva. Quitar
- * una fila es solo quitarla: no hay nada que borrar en Componentes.
+ * contra la cotización de ese momento, a dónde (`ubicarLectura`).
  *
- * ## «Aceptar» no salta a Componentes (H3)
+ * ## La fila se revisa antes de aceptar (H4)
  *
- * Confirma con un aviso discreto («Agregada a Hotel en Providencia · Opción 2») con un «Ver»
- * que abre la opción solo si se toca. Las aceptaciones van en fila: dos hoteles con las mismas
- * fechas aceptados seguidos no pueden abrir cada uno su ranura.
+ * Los campos leídos se ven y se corrigen en la misma fila; con un cambio el botón pasa a
+ * «Aceptar con cambios» y lo corregido viaja como corrección de la opción
+ * (`revision-captura.ts`). El costo se ve y no se toca aquí.
  *
- * ## El pantallazo repetido (P10)
+ * ## Lo aceptado se queda a la vista (H3)
  *
- * La misma imagen (misma huella) no se procesa: la fila dice dónde está ya y se quita sola;
- * «Deshacer» la procesa igual. Otra imagen con el mismo servicio y precio se lee y pregunta
- * («Descartar» por defecto, o «Agregar igual»). El mismo servicio con otro precio se ofrece
- * reemplazar o dejar como otra opción. Nunca se decide en silencio (`captura-repetida.ts`).
+ * «Agregada a Hotel en Providencia · Opción 1 · Ver»: la fila dice dónde quedó y «Ver» abre la
+ * opción. Una habitación sumada se puede deshacer desde su fila.
  *
- * Solo el flujo de viaje (Trappvel) la monta. La imagen no se guarda; su huella, sí.
+ * ## El pantallazo repetido (P10) y la habitación que sobra (R8, regla 6)
+ *
+ * La misma imagen no se procesa. Otra imagen con el mismo servicio y precio se pregunta; la
+ * habitación de un hotel cuyo grupo ya está cubierto también («Esta habitación sobra… ¿La
+ * descarto?»). Nunca se decide en silencio (`captura-repetida.ts`).
+ *
+ * Solo el flujo de viaje (Trappvel) la monta.
  */
+
+/** Cómo quedó una captura aceptada: con eso la fila dice dónde está y si se puede deshacer. */
+export interface Aceptacion {
+  como: ComoEntro
+  bloque: string
+  opcion: number | null
+  habitacionId: string | null
+  habitacionNumero: number | null
+  /** El estado de antes de aceptar: «Deshacer» una habitación vuelve a él. */
+  antes: Estado
+}
 
 export type Estado =
   | EstadoDeProceso
@@ -64,9 +99,10 @@ export type Estado =
   | { fase: 'aceptando' }
   /**
    * Quitada por el asesor. `reanudar`: se quitó mientras se analizaba (P11), así que
-   * «Deshacer» no devuelve un estado viejo: la vuelve a la cola y se analiza de nuevo.
+   * «Deshacer» la vuelve a la cola. `motivo: 'descartada'`: la descartó al responder una
+   * pregunta («Esta habitación sobra… ¿La descarto?»).
    */
-  | { fase: 'borrada'; antes: Estado; reanudar?: boolean }
+  | { fase: 'borrada'; antes: Estado; reanudar?: boolean; motivo?: 'descartada' }
   /** P10 · la misma imagen ya se había pegado: no se procesa. */
   | { fase: 'repetida'; mensaje: string }
   /** La repetida se quitó sola: no se pinta. */
@@ -84,16 +120,21 @@ export interface Captura {
   borrador: Borrador | null
   /** La opción donde quedó, una vez aceptada. Antes, `null`: nada existe en Componentes. */
   itemId: string | null
-  /** A dónde va a ir («Otra opción de Hotel en Providencia»); aceptada, dónde quedó. */
+  /** A dónde va a ir («Otra opción de Hotel en Providencia»). */
   donde: string | null
-  /** La opción como quedaría: la ficha se pinta con esto. */
+  /** Cómo va a entrar (pronóstico): una habitación no se revisa campo por campo. */
+  como?: ComoQueda | null
+  /** La opción como quedaría: con ella se compara (P10). */
   leida: OpcionLeida | null
-  abierta: boolean
+  /** Heredado del recorrido (`proceso-captura`): la fila ya no se pliega. */
+  abierta?: boolean
   error: string | null
   /** Huella del archivo (`huellaDeImagen`), para reconocer la misma imagen pegada otra vez. */
   huella?: string | null
   /** El nombre visible de la ranura donde quedó. */
   etiqueta?: string | null
+  /** Dónde y cómo quedó al aceptarse. */
+  aceptada?: Aceptacion | null
 }
 
 export interface ItemDeBandeja {
@@ -151,13 +192,61 @@ export function enProceso(e: Estado): boolean {
 
 /** Lo que dice el servidor al aceptar, en el idioma de la fila. */
 export function desenlaceDeAceptacion(r: ResultadoAceptarCaptura | null):
-  | { tipo: 'aceptada'; itemId: string; donde: string; pendiente: string | null }
+  | {
+      tipo: 'aceptada'
+      itemId: string
+      donde: string
+      pendiente: string | null
+      como: ComoEntro
+      bloque: string
+      opcion: number | null
+      habitacionId: string | null
+      habitacionNumero: number | null
+      correccionesFallidas: string[]
+    }
   | { tipo: 'sobra'; conItemId: string; mensaje: string }
   | { tipo: 'error'; mensaje: string } {
   if (!r) return { tipo: 'error', mensaje: 'No se pudo agregar la captura. Inténtalo otra vez.' }
-  if (r.ok) return { tipo: 'aceptada', itemId: r.itemId, donde: r.donde, pendiente: r.pendiente }
+  if (r.ok) {
+    return {
+      tipo: 'aceptada',
+      itemId: r.itemId,
+      donde: r.donde,
+      pendiente: r.pendiente,
+      como: r.como ?? 'hermana',
+      bloque: r.bloque ?? r.donde,
+      opcion: r.opcion ?? null,
+      habitacionId: r.habitacionId ?? null,
+      habitacionNumero: r.habitacionNumero ?? null,
+      correccionesFallidas: r.correccionesFallidas ?? [],
+    }
+  }
   if (r.codigo === 'SOBRA' && 'conItemId' in r) return { tipo: 'sobra', conItemId: r.conItemId, mensaje: r.mensaje }
   return { tipo: 'error', mensaje: r.mensaje || 'No se pudo agregar la captura. Inténtalo otra vez.' }
+}
+
+/**
+ * «Agregada a Hotel en Providencia · Opción 1», «Agregada a un bloque nuevo: Vuelo 2 · San
+ * Andrés → Providencia», «Agregada a Hotel en Providencia · Opción 2 como habitación 4».
+ *
+ * Con el nombre que la opción tiene AHORA en la página (`ubicaciones`); si la página todavía
+ * no la trae, con el que dijo el servidor al aceptar.
+ */
+export function textoDeAceptada(c: Pick<Captura, 'itemId' | 'aceptada'>, ubicaciones: Readonly<Record<string, Ubicacion>>): string {
+  const a = c.aceptada
+  const u = c.itemId ? ubicaciones[c.itemId] : undefined
+  const bloque = u?.bloque ?? a?.bloque ?? 'Componentes'
+  const opcion = u?.opcion ?? a?.opcion ?? null
+  if (a?.como === 'nueva') return `Agregada a un bloque nuevo: ${bloque}`
+  const lugar = opcion ? `${bloque} · Opción ${opcion}` : bloque
+  if (a?.como === 'habitacion') return `Agregada a ${lugar} como habitación${a.habitacionNumero ? ` ${a.habitacionNumero}` : ''}`
+  return `Agregada a ${lugar}`
+}
+
+/** «Otros 5 pantallazos ya están en la cotización.» `null` si no hay otros. */
+export function textoDelPie(otros: number): string | null {
+  if (otros <= 0) return null
+  return otros === 1 ? 'Otro pantallazo ya está en la cotización.' : `Otros ${otros} pantallazos ya están en la cotización.`
 }
 
 let contador = 0
@@ -170,7 +259,7 @@ export default function BandejaCapturas({
   composicion,
   onOpcionCreada,
   ubicaciones = SIN_UBICACIONES,
-  fija = false,
+  enMarco = false,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -180,16 +269,13 @@ export default function BandejaCapturas({
   onOpcionCreada?: (itemId: string) => void
   /** Dónde vive cada opción de la página, para nombrarla («Opción 2 de Vuelo 1»). */
   ubicaciones?: Record<string, Ubicacion>
-  /**
-   * R3 (layout del 2026-09-23): dentro del marco del negocio la zona de pegado es una
-   * franja de una línea, fija bajo el encabezado, y la lista de capturas queda en el flujo
-   * de la página debajo de ella: se desplaza con la página y nunca tapa un bloque (R2).
-   */
-  fija?: boolean
+  /** Dentro del marco del negocio: salir por un enlace con trabajo sin aceptar pregunta antes. */
+  enMarco?: boolean
 }) {
   const router = useRouter()
+  const idEntrada = useId()
   const [capturas, setCapturas] = useState<Captura[]>([])
-  const entrada = useRef<HTMLInputElement>(null)
+  const { ampliar, vista } = useVistaAmpliada()
   // Las capturas vigentes: la pasada asíncrona tiene que ver las de ESE momento.
   const vigentes = useRef<Captura[]>([])
   useEffect(() => { vigentes.current = capturas }, [capturas])
@@ -264,7 +350,7 @@ export default function BandejaCapturas({
       const huella = await huellaDeImagen(dataUrl)
       const base: Captura = {
         id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, tipo: null, pistas: null, borrador: null,
-        itemId: null, donde: null, leida: null, abierta: false, error: null, huella,
+        itemId: null, donde: null, leida: null, error: null, huella,
       }
       // P10 · ¿esta imagen ya se pegó? En la página (la huella quedó con su lectura) o en esta
       // misma bandeja, mientras esa captura siga viva.
@@ -275,7 +361,7 @@ export default function BandejaCapturas({
       if (enPagina || previaViva) {
         const itemId = enPagina?.id ?? previa?.itemId ?? null
         const mensaje = mensajeMismaImagen(itemId, ubicacionesVivas.current, previa?.etiqueta)
-        setCapturas(cs => [...cs, { ...base, estado: { fase: 'repetida', mensaje } }])
+        setCapturas(cs => [{ ...base, estado: { fase: 'repetida', mensaje } }, ...cs])
         // Se quita sola; mientras tanto «Deshacer» la procesa igual.
         ocultar.current.set(id, setTimeout(() => {
           ocultar.current.delete(id)
@@ -284,7 +370,7 @@ export default function BandejaCapturas({
         return
       }
       if (huella) huellas.current.set(huella, id)
-      setCapturas(cs => [...cs, base])
+      setCapturas(cs => [base, ...cs])
       void procesar(id, dataUrl)
     })()
     lector.readAsDataURL(archivo)
@@ -331,7 +417,7 @@ export default function BandejaCapturas({
   // (otra cotización del panel, el encabezado, el menú). Escucha en captura sobre el
   // documento: corre antes que el `Link`, que respeta `defaultPrevented`.
   useEffect(() => {
-    if (!fija || !enElAire) return
+    if (!enMarco || !enElAire) return
     function alTocar(e: MouseEvent) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
       const enlace = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
@@ -340,7 +426,7 @@ export default function BandejaCapturas({
     }
     document.addEventListener('click', alTocar, true)
     return () => document.removeEventListener('click', alTocar, true)
-  }, [fija, enElAire])
+  }, [enMarco, enElAire])
 
   // Arrastrar y soltar: las imágenes entran por el mismo camino que el pegado.
   const [arrastrando, setArrastrando] = useState(false)
@@ -363,22 +449,22 @@ export default function BandejaCapturas({
     },
   }
 
-  /** Quitar una fila es solo quitarla: nada de ella está en Componentes (H2). */
-  function borrar(c: Captura) {
+  /** «×» y «Descartar» de una fila que se revisa: quitarla es solo quitarla (H2). */
+  function borrar(c: Captura, motivo?: 'descartada') {
     if (enProceso(c.estado)) {
       // Se quita a mitad del análisis (P11): lo que devuelva la pasada en vuelo se descarta.
       // «Deshacer» la vuelve a la cola.
       nuevoTurno(c.id)
       actualizar(c.id, {
         estado: { fase: 'borrada', antes: { fase: 'mirando' }, reanudar: true },
-        borrador: null, leida: null, donde: null, error: null, abierta: false,
+        borrador: null, leida: null, donde: null, error: null,
       })
       return
     }
-    actualizar(c.id, { estado: { fase: 'borrada', antes: c.estado }, abierta: false })
+    actualizar(c.id, { estado: { fase: 'borrada', antes: c.estado, ...(motivo ? { motivo } : {}) }, error: null })
   }
 
-  function deshacer(c: Captura) {
+  async function deshacer(c: Captura) {
     if (c.estado.fase === 'repetida') {
       // Procesarla igual: el asesor ya vio que se repetía, no se le vuelve a preguntar.
       const reloj = ocultar.current.get(c.id)
@@ -388,6 +474,20 @@ export default function BandejaCapturas({
       nuevoTurno(c.id)
       actualizar(c.id, { estado: { fase: 'mirando' } })
       void procesar(c.id, c.dataUrl)
+      return
+    }
+    if (c.estado.fase === 'aceptada') {
+      // Solo una habitación sumada se deshace desde la fila: sale de su opción y la captura
+      // vuelve a la pregunta (o a la revisión) de antes.
+      const a = c.aceptada
+      if (a?.como !== 'habitacion' || !a.habitacionId || !c.itemId) return
+      const r = await quitarHabitacion(c.itemId, a.habitacionId)
+      if (!r.success) {
+        actualizar(c.id, { error: r.error ?? null })
+        return
+      }
+      actualizar(c.id, { estado: a.antes, aceptada: null, itemId: null, error: null })
+      router.refresh()
       return
     }
     if (c.estado.fase !== 'borrada') return
@@ -407,16 +507,25 @@ export default function BandejaCapturas({
   }
 
   /**
-   * «Aceptar» (H2/H3). Va por `fetch` y no por la server action (ver la ruta), en fila con las
-   * demás aceptaciones. La fila cambia en el acto; al volver, un aviso dice dónde quedó.
+   * «Aceptar» (H2/H3/H4). Va por `fetch` y no por la server action (ver la ruta), en fila con
+   * las demás aceptaciones. La fila cambia en el acto; al volver dice dónde quedó.
    */
-  async function aceptar(c: Captura, decision: BorradorParaAceptar['decision'], destinoId?: string | null) {
+  async function aceptar(
+    c: Captura,
+    decision: BorradorParaAceptar['decision'],
+    destinoId?: string | null,
+    correcciones: CorreccionDeBandeja[] = [],
+  ) {
     const b = c.borrador
     if (!b || aceptando.current.has(c.id)) return
     aceptando.current.add(c.id)
     const antes = c.estado
-    actualizar(c.id, { estado: { fase: 'aceptando' }, error: null, abierta: false })
-    const cuerpo: BorradorParaAceptar = { tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision, destinoId: destinoId ?? null, imagen: c.dataUrl || null }
+    actualizar(c.id, { estado: { fase: 'aceptando' }, error: null })
+    const cuerpo: BorradorParaAceptar = {
+      tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision,
+      destinoId: destinoId ?? null, imagen: c.dataUrl || null,
+      correcciones: correcciones.length > 0 ? correcciones : null,
+    }
     const turno = colaAceptar.current.then(async () => {
       try {
         const res = await fetch(`/api/cotizaciones/${encodeURIComponent(cotizacionId)}/aceptar-captura`, {
@@ -441,20 +550,27 @@ export default function BandejaCapturas({
       const alertas = 'alertas' in antes ? antes.alertas : []
       actualizar(c.id, {
         estado: { fase: 'parecida', conItemId: d.conItemId, donde: nombreDeOpcion(d.conItemId, ubicacionesVivas.current), alertas, habitacion: true },
-        abierta: true,
       })
       router.refresh()
       return
     }
-    actualizar(c.id, { estado: { fase: 'aceptada' }, itemId: d.itemId, donde: d.donde, error: null })
+    actualizar(c.id, {
+      estado: { fase: 'aceptada' },
+      itemId: d.itemId,
+      donde: d.donde,
+      error: d.correccionesFallidas[0] ?? null,
+      aceptada: {
+        como: d.como, bloque: d.bloque, opcion: d.opcion,
+        habitacionId: d.habitacionId, habitacionNumero: d.habitacionNumero, antes,
+      },
+    })
+    // H3 · la fila dice dónde quedó; un faltante de la tarifa se avisa aparte.
     const ver = onOpcionCreada ? { label: 'Ver', onClick: () => onOpcionCreada(d.itemId) } : undefined
-    // H3 · se queda donde está: un aviso discreto, y la opción solo se abre si se toca «Ver».
-    toast.success(`Agregada a ${d.donde}`, ver ? { action: ver } : undefined)
     if (d.pendiente) toast.warning(`Quedó un pendiente en ${d.donde}: ${d.pendiente}`, ver ? { action: ver } : undefined)
     router.refresh()
   }
 
-  /** «Agregar igual» / «Agregar como otra opción» / «Agregar como habitación». */
+  /** «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   function agregarIgual(c: Captura) {
     const e = c.estado
     if (e.fase === 'parecida' && e.habitacion) return void aceptar(c, 'habitacion', e.conItemId)
@@ -468,378 +584,339 @@ export default function BandejaCapturas({
   }
 
   // A dónde irá cada captura lista, contra la cotización que se ve AHORA: aceptar otra puede
-  // cambiarlo («Hotel en Providencia · nuevo» pasa a «Otra opción de Hotel en Providencia»).
-  const dondeVivo = useMemo(() => {
-    const m = new Map<string, string>()
+  // cambiarlo (de ranura nueva a otra opción, o a habitación).
+  const pronostico = useMemo(() => {
+    const m = new Map<string, { donde: string; como: ComoQueda | null }>()
     for (const c of capturas) {
       if (c.estado.fase !== 'lista' || !c.borrador) continue
-      m.set(c.id, revisarBorrador({
+      const r = revisarBorrador({
         capId: c.id, borrador: c.borrador, lineas: items, comparables: [], composicion, ubicaciones, comparar: false,
-      }).donde)
+      })
+      m.set(c.id, { donde: r.donde, como: r.como ?? null })
     }
     return m
   }, [capturas, items, composicion, ubicaciones])
 
-  const visibles = capturas.filter(c => c.estado.fase !== 'aceptada' && c.estado.fase !== 'descartada')
-  const enCurso = capturas.filter(c => enProceso(c.estado)).length
+  const visibles = capturas.filter(c => c.estado.fase !== 'descartada')
 
-  const entradaArchivos = (
-    <input
-      ref={entrada}
-      type="file"
-      accept="image/*"
-      multiple
-      className="hidden"
-      aria-label="Subir pantallazos"
-      onChange={e => {
-        const archivos = Array.from(e.target.files ?? [])
-        e.target.value = ''
-        for (const a of archivos) agregar(a)
-      }}
-    />
-  )
-
-  // R2 (2026-09-23): con muchas filas la lista tapaba los bloques de abajo. Tiene tope de alto
-  // y se desplaza por dentro. Con el marco (`fija`) va en el flujo de la página.
-  const listaCapturas = visibles.length > 0 ? (
-    <ul className={fija ? 'space-y-1.5 rounded-xl border bg-[#F5F4F2] p-2 sm:max-h-[40vh] sm:overflow-y-auto' : 'mt-2 space-y-1.5 sm:max-h-[40vh] sm:overflow-y-auto'} aria-label="Capturas pegadas" data-lista-capturas>
-      {visibles.map(c => (
-        <FilaCaptura
-          key={c.id}
-          captura={dondeVivo.has(c.id) ? { ...c, donde: dondeVivo.get(c.id) ?? c.donde } : c}
-          composicion={composicion}
-          onAlternar={() => actualizar(c.id, { abierta: !c.abierta })}
-          onAceptar={() => void aceptar(c, 'auto')}
-          onBorrar={() => borrar(c)}
-          onDeshacer={() => deshacer(c)}
-          onElegirTipo={t => { actualizar(c.id, { abierta: false }); void procesar(c.id, c.dataUrl, t) }}
-          onElegirOpcion={o => elegirOpcion(c, o)}
-          onAgregarIgual={() => agregarIgual(c)}
-          onReemplazarPrecio={() => reemplazarPrecio(c)}
-        />
-      ))}
-    </ul>
-  ) : null
-
-  if (fija) {
-    return (
-      <>
-        <div
-          data-bandeja-capturas
-          data-bandeja-fija
-          {...alArrastrar}
-          className="sticky z-10 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur"
-          style={{ top: `var(${VAR_ALTO_ENCABEZADO}, 0px)` }}
-        >
-          <div className="flex items-center gap-2">
-            <div
-              tabIndex={0}
-              role="button"
-              aria-label="Pegar pantallazos"
-              className={`hidden min-h-[40px] min-w-0 flex-1 items-center gap-1.5 rounded-lg border-2 border-dashed px-3 text-[11px] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30 sm:flex ${arrastrando ? 'border-[#10B981] bg-[#10B981]/10 text-[#1A1A1A]' : 'border-[#10B981]/40 bg-[#F5F4F2] text-[#6B7280]'}`}
-            >
-              <ImageIcon className="h-4 w-4 shrink-0" aria-hidden />
-              <span className="truncate">
-                {arrastrando
-                  ? 'Suelta aquí los pantallazos'
-                  : enCurso > 0
-                    ? `Procesando ${enCurso}… puedes seguir pegando`
-                    : 'Pantallazos del proveedor: pega (Ctrl+V / Cmd+V), arrástralos aquí o súbelos'}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => entrada.current?.click()}
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#10B981] px-3 py-2 text-xs font-medium text-white sm:hidden"
-            >
-              <Camera className="h-4 w-4" aria-hidden />
-              {enCurso > 0 ? `Procesando ${enCurso}… · Subir otra` : 'Pegar / Subir foto'}
-            </button>
-            <button
-              type="button"
-              onClick={() => entrada.current?.click()}
-              className="hidden shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-[#1A1A1A] hover:bg-accent sm:inline-flex"
-            >
-              <Camera className="h-3.5 w-3.5" aria-hidden />
-              Subir foto
-            </button>
-            {visibles.length > 0 && (
-              <button
-                type="button"
-                onClick={() => document.querySelector('[data-lista-capturas]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
-                className="shrink-0 rounded-md px-2 py-1.5 text-xs font-medium text-primary hover:underline"
-              >
-                {visibles.length} en la bandeja
-              </button>
-            )}
-          </div>
-          {entradaArchivos}
-        </div>
-        {listaCapturas}
-      </>
-    )
-  }
+  // El pie: los pantallazos que ya están en la cotización y la bandeja no muestra aceptados.
+  const otros = useMemo(() => {
+    const aceptadas = new Set(capturas.filter(c => c.estado.fase === 'aceptada' && c.huella).map(c => c.huella as string))
+    return pantallazosEnCotizacion(items).filter(k => !aceptadas.has(k)).length
+  }, [capturas, items])
+  const pie = textoDelPie(otros)
 
   return (
-    <>
-      <div className="rounded-xl border-2 border-dashed border-[#10B981]/40 bg-[#F5F4F2] p-3 sm:sticky sm:top-2 sm:z-10" data-bandeja-capturas {...alArrastrar}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-[#1A1A1A]">Pantallazos del proveedor</p>
-            <p className="text-[11px] text-[#6B7280]">
-              Pega los que tengas, uno tras otro (Ctrl+V / Cmd+V en cualquier parte). ONE ve qué es cada
-              uno y lo lee; al aceptarlo lo agrupa: mismo destino y fechas es otra opción; lo demás, otro componente.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => entrada.current?.click()}
-            className="hidden items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-[#1A1A1A] hover:bg-accent sm:inline-flex"
-          >
-            <Camera className="h-3.5 w-3.5" />
-            Subir foto
-          </button>
-        </div>
-        <div
-          tabIndex={0}
-          role="button"
-          aria-label="Pegar pantallazos"
-          className="mt-2 hidden min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-dashed bg-background p-2 text-[11px] text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30 sm:flex"
-        >
-          <ImageIcon className="h-4 w-4" />
-          {enCurso > 0 ? `Procesando ${enCurso}… puedes seguir pegando` : 'Pega aquí con Ctrl+V / Cmd+V'}
-        </div>
-        {entradaArchivos}
-
-        {listaCapturas}
+    <section
+      className="flex flex-col gap-3 rounded-xl border border-[#E2DED5] bg-white p-3.5 text-sm text-[#191713]"
+      aria-labelledby={`${idEntrada}-titulo`}
+      data-bandeja-capturas
+      {...(enMarco ? { 'data-bandeja-marco': '' } : {})}
+      {...alArrastrar}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id={`${idEntrada}-titulo`} className="m-0 text-base font-bold">Pantallazos</h2>
+        <p className="m-0 text-[13px] text-[#6E6A62]">Lo que está aquí todavía no entra a la cotización. Pasa a los bloques cuando lo aceptas.</p>
       </div>
-
-      {/* En el celular pegar es difícil: un botón flotante abre la galería o la cámara. */}
-      <button
-        type="button"
-        onClick={() => entrada.current?.click()}
-        className="fixed bottom-20 right-4 z-30 inline-flex items-center gap-1.5 rounded-full bg-[#10B981] px-4 py-2.5 text-sm font-medium text-white shadow-lg sm:hidden"
+      <label
+        htmlFor={idEntrada}
+        className={`flex cursor-pointer flex-wrap items-center gap-3 rounded-[10px] border-[1.5px] border-dashed px-3.5 py-3 ${arrastrando ? 'border-[#0E5C43] bg-[#EAF1EE]' : 'border-[#CFCAC0] bg-[#F8F7F3]'}`}
+        data-zona-pegar
       >
-        <Camera className="h-4 w-4" />
-        Pegar / Subir foto
-      </button>
-    </>
+        <svg className="shrink-0 text-[#6E6A62]" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="8" y="3" width="8" height="4" rx="1" />
+          <path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+          <path d="M12 11v6M9 14l3-3 3 3" />
+        </svg>
+        <p className="m-0 min-w-[180px] flex-1">
+          Pega aquí tus pantallazos con Ctrl+V o arrástralos
+          <small className="block text-xs text-[#6E6A62]">Vuelos y hoteles. ONE los lee y te dice dónde van.</small>
+        </p>
+        <span className={BTN}>Subir foto</span>
+        <input
+          id={idEntrada}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={e => {
+            const archivos = Array.from(e.target.files ?? [])
+            e.target.value = ''
+            for (const a of archivos) agregar(a)
+          }}
+        />
+      </label>
+      {visibles.length > 0 && (
+        <ul className="m-0 flex list-none flex-col p-0" aria-label="Pantallazos pegados" data-lista-capturas>
+          {visibles.map(c => {
+            const p = pronostico.get(c.id)
+            return (
+              <FilaCaptura
+                key={c.id}
+                captura={p ? { ...c, donde: p.donde, como: p.como } : c}
+                ubicaciones={ubicaciones}
+                onAceptar={correcciones => void aceptar(c, 'auto', null, correcciones)}
+                onBorrar={() => borrar(c)}
+                onDescartar={() => borrar(c, 'descartada')}
+                onDeshacer={() => void deshacer(c)}
+                onElegirTipo={t => void procesar(c.id, c.dataUrl, t)}
+                onElegirOpcion={o => elegirOpcion(c, o)}
+                onAgregarIgual={() => agregarIgual(c)}
+                onReemplazarPrecio={() => reemplazarPrecio(c)}
+                onVer={onOpcionCreada}
+                onAmpliar={ampliar}
+              />
+            )
+          })}
+        </ul>
+      )}
+      {pie && <p className="m-0 text-xs text-[#6E6A62]" data-bandeja-pie>{pie}</p>}
+      {vista}
+    </section>
   )
 }
 
-/** Exportada para la prueba de render: es donde vive la ficha. */
+const NADA = () => {}
+
+/** Exportada para la prueba de render. */
 export function FilaCaptura({
   captura: c,
-  composicion,
-  onAlternar,
-  onAceptar,
-  onBorrar,
-  onDeshacer,
-  onElegirTipo,
-  onElegirOpcion,
-  onAgregarIgual,
-  onReemplazarPrecio,
+  ubicaciones = SIN_UBICACIONES,
+  onAceptar = NADA,
+  onBorrar = NADA,
+  onDescartar = NADA,
+  onDeshacer = NADA,
+  onElegirTipo = NADA,
+  onElegirOpcion = NADA,
+  onAgregarIgual = NADA,
+  onReemplazarPrecio = NADA,
+  onVer,
+  onAmpliar,
 }: {
   captura: Captura
-  composicion: Composicion | null
-  onAlternar: () => void
-  onAceptar: () => void
-  onBorrar: () => void
-  onDeshacer: () => void
-  onElegirTipo: (t: TipoRanura) => void
-  onElegirOpcion: (o: { nombre: string; precio: string | null }) => void
-  /** P10 · «Agregar igual» / «Agregar como otra opción» / «Agregar como habitación». */
+  ubicaciones?: Readonly<Record<string, Ubicacion>>
+  /** Con lo que la persona corrigió en la fila (H4). */
+  onAceptar?: (correcciones: CorreccionDeBandeja[]) => void
+  /** «×» o «Descartar» de una fila que se revisa: «Quitaste este pantallazo». */
+  onBorrar?: () => void
+  /** «Descartar» al responder una pregunta: «Descartada». */
+  onDescartar?: () => void
+  onDeshacer?: () => void
+  onElegirTipo?: (t: TipoRanura) => void
+  onElegirOpcion?: (o: { nombre: string; precio: string | null }) => void
+  /** P10 · «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   onAgregarIgual?: () => void
   /** P10 · «Reemplazar el precio de Opción N». */
   onReemplazarPrecio?: () => void
+  onVer?: (itemId: string) => void
+  onAmpliar?: (src: string, caption: string) => void
 }) {
-  if (c.estado.fase === 'borrada') {
-    return (
-      <li className="flex items-center justify-between gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[11px] text-[#6B7280]">
-        <span>{c.estado.reanudar ? 'Quitada · se dejó de analizar' : 'Quitada de la bandeja'}</span>
-        <button type="button" onClick={onDeshacer} className="font-medium text-primary underline underline-offset-2">
-          Deshacer
-        </button>
-      </li>
-    )
-  }
-  if (c.estado.fase === 'repetida') {
-    return (
-      <li className="flex items-center justify-between gap-2 rounded-lg border bg-background px-2.5 py-1.5 text-[11px] text-[#6B7280]" data-captura-repetida>
-        <span className="flex min-w-0 items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- data URL del portapapeles */}
-          <img src={c.preview} alt="" className="h-6 w-9 shrink-0 rounded object-cover" />
-          <span className="truncate">{c.estado.mensaje} · no se volvió a procesar</span>
-        </span>
-        <button type="button" onClick={onDeshacer} className="shrink-0 font-medium text-primary underline underline-offset-2">
-          Deshacer
-        </button>
-      </li>
-    )
-  }
+  // Lo que la persona escribió en los campos de la fila. Lo que no tocó sigue siendo lo leído.
+  const [escritos, setEscritos] = useState<Record<string, string>>({})
+  const [errores, setErrores] = useState<Record<string, string>>({})
+
   const e = c.estado
-  const trabajando = enProceso(e)
-  const enviandoAceptar = e.fase === 'aceptando'
-  const opcion = c.leida
-  const ficha = opcion ? fichaDeOpcion({ ...opcion, nombre: opcion.nombre ?? null, grupo: opcion.grupo ?? null }, composicion) : []
-  // Solo lo que tiene lectura firmada se puede aceptar: nada sin leer llega a Componentes.
-  const confirmable = e.fase === 'lista' && !!c.borrador
-  const titulo = opcion?.nombre || c.etiqueta || (c.tipo ? definicionDeTipo(c.tipo).label : 'Pantallazo')
-  const linea = e.fase === 'aceptando' ? `Agregando${c.donde ? ` · ${c.donde}` : ''}…`
-    : e.fase === 'mirando' ? 'Mirando qué es…'
-      : e.fase === 'leyendo' ? 'Leyendo…'
-        : e.fase === 'lista' ? (c.donde ? `Va a: ${c.donde}` : 'Leído')
-          : e.fase === 'eligiendo_tipo' ? 'No se reconoce qué es'
-            : e.fase === 'eligiendo_opcion' ? '¿Cuál de estas?'
-              : e.fase === 'rechazada' ? e.mensaje
-                : e.fase === 'parecida' ? (e.habitacion ? `El grupo ya está cubierto en ${e.donde}` : `Parece igual a ${e.donde}`)
-                  : e.fase === 'otro_precio' ? `El mismo servicio que ${e.donde}, con otro precio`
-                    : ''
-  // «Reemplazar el precio» necesita una opción que ya esté en Componentes.
-  const puedeReemplazar = e.fase === 'otro_precio' && !esIdDeBorrador(e.conItemId)
+  const lectura = c.borrador?.lectura ?? null
+  const tipo = c.borrador?.tipo ?? c.tipo
+  const sobra = e.fase === 'parecida' && e.habitacion === true
+  const titulo = (tipo && tituloDeCaptura(tipo, lectura, sobra)) || c.etiqueta || 'Pantallazo pegado'
+  const caption = titulo === 'Pantallazo pegado' ? titulo : `Pantallazo · ${titulo}`
+  const miniatura = <Miniatura src={c.preview} caption={caption} onAmpliar={onAmpliar} />
+  const vacia = <Miniatura src={null} caption="" />
+  const quitar = (
+    <button type="button" onClick={onBorrar} aria-label="Quitar este pantallazo" className={BTN_X} data-quitar-captura>
+      <X className="h-4 w-4" aria-hidden />
+    </button>
+  )
+  const alertas = 'alertas' in e ? e.alertas : []
+  const alerta = alertas.length > 0 ? (
+    <AlertaDecision tip={alertas[0]}>
+      {alertas.map(a => <p key={a} className="m-0">{a}</p>)}
+    </AlertaDecision>
+  ) : null
+  const errorFila = c.error ? <span className="text-xs font-medium text-[#9A5F0C]">{c.error}</span> : null
 
-  return (
-    <li className="rounded-lg border bg-background" data-captura={c.id}>
-      <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <button type="button" onClick={onAlternar} aria-expanded={c.abierta} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          {c.abierta ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
-          {/* eslint-disable-next-line @next/next/no-img-element -- data URL del portapapeles */}
-          <img src={c.preview} alt="" className="h-8 w-12 shrink-0 rounded object-cover" />
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-medium text-[#1A1A1A]">{titulo}</span>
-            <span className={`flex items-center gap-1 truncate text-[10px] ${e.fase === 'rechazada' ? 'text-red-700' : e.fase === 'parecida' || e.fase === 'otro_precio' ? 'font-medium text-amber-700' : 'text-[#6B7280]'}`}>
-              {(trabajando || enviandoAceptar) && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
-              {linea}
-            </span>
-          </span>
-        </button>
-        {e.fase === 'parecida' && (
-          <>
-            {/* «Descartar» es la opción por defecto: la captura sale de la bandeja (con Deshacer). */}
-            <button
-              type="button"
-              onClick={onBorrar}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
-            >
-              Descartar
-            </button>
-            <button
-              type="button"
-              onClick={onAgregarIgual}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
-            >
-              {e.habitacion ? 'Agregar como habitación' : 'Agregar igual'}
-            </button>
-          </>
-        )}
-        {e.fase === 'otro_precio' && (
-          <>
-            {puedeReemplazar && (
-              <button
-                type="button"
-                onClick={onReemplazarPrecio}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
-              >
-                Reemplazar el precio de {e.corta}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onAgregarIgual}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium text-[#1A1A1A] hover:bg-accent"
-            >
-              Agregar como otra opción
-            </button>
-          </>
-        )}
-        {confirmable && (
-          <button
-            type="button"
-            onClick={onAceptar}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#10B981] px-2 py-1 text-[11px] font-medium text-white hover:bg-[#059669]"
-          >
-            <Check className="h-3 w-3" />
-            Aceptar
-          </button>
-        )}
-        {!enviandoAceptar && <button
-          type="button"
-          onClick={onBorrar}
-          aria-label={trabajando ? 'Quitar esta captura (se deja de analizar)' : 'Quitar esta captura'}
-          data-quitar-captura
-          className="shrink-0 rounded p-1 text-[#6B7280] hover:bg-red-50 hover:text-red-600"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>}
-      </div>
-      {c.error && <p className="px-2.5 pb-1.5 text-[10px] font-medium text-amber-700">{c.error}</p>}
+  const fila = (izq: ReactNode, cuerpo: ReactNode, der: ReactNode, extra: Record<string, string> = {}) => (
+    <li
+      className="grid grid-cols-[76px_minmax(0,1fr)_auto] items-start gap-3 border-t border-[#E2DED5] py-3 first:border-t-0 first:pt-1 max-sm:grid-cols-[64px_minmax(0,1fr)_auto] max-sm:gap-2.5"
+      data-captura={c.id}
+      {...extra}
+    >
+      {izq}
+      <div className="flex min-w-0 flex-col gap-1">{cuerpo}</div>
+      <div className="flex items-start gap-0.5">{der}</div>
+    </li>
+  )
+  const tituloFila = <span className="font-semibold">{titulo}</span>
+  const estado = (texto: ReactNode, clase = 'text-[#6E6A62]') => <span className={`text-[13px] ${clase}`}>{texto}</span>
+  const deshacer = <button type="button" onClick={onDeshacer} className={LINK}>Deshacer</button>
 
-      {/* Abierta antes de aceptar: SOLO lo que se confirma. */}
-      {c.abierta && (
-        <div className="border-t px-2.5 py-2 text-xs">
-          {e.fase === 'lista' && (
+  if (e.fase === 'borrada') {
+    if (e.motivo === 'descartada') {
+      return fila(miniatura, <>{tituloFila}{estado('Descartada. No entró a la cotización.')}</>, deshacer)
+    }
+    return fila(vacia, estado('Quitaste este pantallazo. No entró a la cotización.'), deshacer)
+  }
+  if (e.fase === 'repetida') {
+    return fila(miniatura, estado(`${e.mensaje} · no se volvió a procesar`), deshacer, { 'data-captura-repetida': '' })
+  }
+  if (e.fase === 'mirando' || e.fase === 'leyendo') {
+    return fila(miniatura, <>{tituloFila}{estado(<><span className={SPIN} aria-hidden />Leyendo…</>)}</>, quitar)
+  }
+  if (e.fase === 'aceptando') {
+    return fila(miniatura, <>{tituloFila}{estado(<><span className={SPIN} aria-hidden />{`Agregando${c.donde ? ` · ${c.donde}` : ''}…`}</>)}</>, null)
+  }
+  if (e.fase === 'aceptada') {
+    const itemId = c.itemId
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        {estado(
+          <>
+            {textoDeAceptada(c, ubicaciones)}
+            {itemId && onVer && <> · <button type="button" onClick={() => onVer(itemId)} className={LINK}>Ver</button></>}
+          </>,
+          'text-[#0E5C43]',
+        )}
+        {errorFila}
+      </>,
+      c.aceptada?.como === 'habitacion' && c.aceptada.habitacionId ? deshacer : null,
+    )
+  }
+  if (e.fase === 'eligiendo_tipo') {
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        {estado('No se reconoce qué es')}
+        <span className="text-[13px] text-[#6E6A62]">{e.motivo}</span>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {TIPOS_RANURA.map(t => (
+            <button key={t} type="button" onClick={() => onElegirTipo(t)} className={BTN}>
+              Es {definicionDeTipo(t).label.toLowerCase()}
+            </button>
+          ))}
+        </div>
+      </>,
+      quitar,
+    )
+  }
+  if (e.fase === 'eligiendo_opcion') {
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        {estado('¿Cuál de estas?')}
+        <span className="text-[13px] text-[#6E6A62]">{e.mensaje}</span>
+        <div className="mt-1 flex flex-col gap-1.5">
+          {e.opciones.map(o => (
+            <button key={`${o.nombre}|${o.precio ?? ''}`} type="button" onClick={() => onElegirOpcion(o)} className={`${BTN} justify-between text-left`}>
+              <span className="min-w-0 flex-1 truncate">{o.nombre}</span>
+              {o.precio && <span className="shrink-0 tabular-nums">{o.precio}</span>}
+            </button>
+          ))}
+        </div>
+      </>,
+      quitar,
+    )
+  }
+  if (e.fase === 'rechazada') {
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        {estado(e.mensaje, 'text-[#B3382C]')}
+        {e.detalle && <span className="text-xs text-[#6E6A62]">{e.detalle}</span>}
+      </>,
+      quitar,
+    )
+  }
+  if (e.fase === 'parecida' || e.fase === 'otro_precio') {
+    const hotel = sobra && lectura && tipo ? (leidosPorSlug(definicionDeTipo(tipo), lectura.campos).hotel ?? null) : null
+    const puedeReemplazar = e.fase === 'otro_precio' && !esIdDeBorrador(e.conItemId)
+    const pregunta = sobra
+      ? `Esta habitación sobra: el grupo ya está cubierto en ${hotel ?? e.donde}. ¿La descarto?`
+      : e.fase === 'parecida'
+        ? `Mismo servicio, mismas fechas y mismo precio que ${e.donde}. Descártala si la pegaste dos veces.`
+        : puedeReemplazar
+          ? `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`
+          : `Mismo servicio que ${e.donde}, con otro precio. Acepta primero esa, o agrega esta como otra opción.`
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        <span className="text-sm">{pregunta}</span>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {e.fase === 'parecida' ? (
             <>
-              {ficha.length > 0 ? (
-                <ul className="space-y-0.5 text-[#1A1A1A]">{ficha.map((r, i) => <li key={i}>{r}</li>)}</ul>
-              ) : (
-                <p className="text-[11px] text-[#6B7280]">La lectura no dejó datos para la ficha: al aceptarla, revísala en su bloque.</p>
+              <button type="button" onClick={onDescartar} className={BTN_PRIM}>Descartar</button>
+              <button type="button" onClick={onAgregarIgual} className={BTN}>{sobra ? 'Es una habitación más' : 'Agregar igual'}</button>
+            </>
+          ) : (
+            <>
+              {puedeReemplazar && (
+                <button type="button" onClick={onReemplazarPrecio} className={BTN_PRIM}>Reemplazar el precio de {e.corta}</button>
               )}
-              {e.alertas.map(a => (
-                <p key={a} className="mt-1 flex items-start gap-1 text-[11px] font-medium text-amber-700">
-                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                  {a}
-                </p>
-              ))}
+              <button type="button" onClick={onAgregarIgual} className={puedeReemplazar ? BTN : BTN_PRIM}>Agregar como otra opción</button>
             </>
           )}
-          {e.fase === 'eligiendo_tipo' && (
-            <>
-              <p className="text-[11px] text-amber-900">{e.motivo}</p>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {TIPOS_RANURA.map(t => (
-                  <button key={t} type="button" onClick={() => onElegirTipo(t)} className="rounded-md border px-2 py-1 text-[11px] font-medium hover:bg-accent">
-                    Es {definicionDeTipo(t).label.toLowerCase()}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          {e.fase === 'eligiendo_opcion' && (
-            <>
-              <p className="text-[11px] text-amber-900">{e.mensaje}</p>
-              <div className="mt-1.5 space-y-1">
-                {e.opciones.map(o => (
-                  <button
-                    key={`${o.nombre}|${o.precio ?? ''}`}
-                    type="button"
-                    onClick={() => onElegirOpcion(o)}
-                    className="flex w-full items-center justify-between gap-2 rounded border px-2 py-1 text-left text-[11px] hover:bg-accent"
-                  >
-                    <span className="min-w-0 flex-1 truncate">{o.nombre}</span>
-                    {o.precio && <span className="shrink-0 tabular-nums font-medium">{o.precio}</span>}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          {e.fase === 'rechazada' && e.detalle && <p className="text-[11px] text-red-800">{e.detalle}</p>}
-          {(e.fase === 'parecida' || e.fase === 'otro_precio') && (
-            <>
-              <p className="mb-1 text-[11px] text-amber-900">
-                {e.fase === 'parecida' && e.habitacion
-                  ? `Las habitaciones de ${e.donde} ya cubren a todo el grupo, o esta misma imagen ya está ahí. Descártala si la pegaste de más, o agrégala como otra habitación.`
-                  : e.fase === 'parecida'
-                  ? `Mismo servicio, mismas fechas y mismo precio que ${e.donde}. Descártala si la pegaste dos veces.`
-                  : puedeReemplazar
-                    ? `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`
-                    : `Mismo servicio que ${e.donde}, con otro precio. Acepta primero esa, o agrega esta como otra opción.`}
-              </p>
-              {ficha.length > 0 && <ul className="space-y-0.5 text-[#1A1A1A]">{ficha.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-            </>
-          )}
-          {trabajando && <p className="text-[11px] text-[#6B7280]">Todavía se está procesando.</p>}
+        </div>
+        {errorFila}
+      </>,
+      <>{alerta}</>,
+      sobra ? { 'data-habitacion-sobra': '' } : {},
+    )
+  }
+
+  // ── Lista para aceptar: se revisa en la fila (H4) ──
+  const confirmable = !!c.borrador
+  const campos = lectura && tipo && c.como !== 'habitacion' ? camposDeRevision(tipo, lectura) : []
+  const pregunta = tipo ? preguntaDeRevision(tipo, campos) : null
+  const valorDe = (slug: string, leido: string) => (slug in escritos ? escritos[slug] : leido)
+  const conCambios = campos.some(f => f.editable && valorDe(f.slug, f.valor).trim() !== f.valor.trim())
+  const sinDatos = campos.length > 0 && campos.every(f => !f.editable || f.valor === '')
+
+  function aceptarFila() {
+    if (!tipo) return
+    const r = correccionesDeRevision(tipo, campos, escritos)
+    if (!r.ok) { setErrores(r.errores); return }
+    setErrores({})
+    onAceptar(r.correcciones)
+  }
+
+  return fila(
+    miniatura,
+    <>
+      {tituloFila}
+      {pregunta && <span className="text-sm">{pregunta}</span>}
+      {sinDatos && <span className="text-[13px] text-[#6E6A62]">La lectura no dejó datos para la ficha: al aceptarla, revísala en su bloque.</span>}
+      {campos.length > 0 && (
+        <div className="mt-1 grid grid-cols-3 gap-2 max-sm:grid-cols-2">
+          {campos.map(f => (
+            <label key={f.slug} className={`flex flex-col gap-0.5 text-xs ${f.dudoso ? 'text-[#9A5F0C]' : 'text-[#6E6A62]'}`}>
+              <span>{f.label}</span>
+              <input
+                value={valorDe(f.slug, f.valor)}
+                readOnly={!f.editable}
+                placeholder={f.placeholder ?? undefined}
+                onChange={ev => setEscritos(prev => ({ ...prev, [f.slug]: ev.target.value }))}
+                className={f.dudoso ? INPUT_DUDOSO : `${INPUT} read-only:bg-[#F8F7F3]`}
+                data-campo-revision={f.slug}
+              />
+              {errores[f.slug] && <span className="text-xs text-[#B3382C]">{errores[f.slug]}</span>}
+            </label>
+          ))}
         </div>
       )}
-    </li>
+      {confirmable && (
+        <div className="mt-1 flex flex-wrap gap-2">
+          <button type="button" onClick={aceptarFila} className={BTN_PRIM}>{conCambios ? 'Aceptar con cambios' : 'Aceptar'}</button>
+          <button type="button" onClick={onBorrar} className={BTN}>Descartar</button>
+        </div>
+      )}
+      {errorFila}
+    </>,
+    <>{alerta}{!confirmable && quitar}</>,
   )
 }

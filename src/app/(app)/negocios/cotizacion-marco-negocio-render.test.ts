@@ -100,22 +100,23 @@ const conContexto = (hijo: React.ReactElement) =>
   React.createElement(MarcoCotizacionContexto.Provider, { value: { activo: true } }, hijo)
 
 describe('el editor dentro del marco del negocio', () => {
-  it('no repite el encabezado P9 y la zona de pegado es una franja fija fuera del paso «Componentes»', () => {
+  it('no repite el encabezado P9 y la bandeja de pantallazos es una sección antes de «Componentes» (prototipo)', () => {
     const html = renderToStaticMarkup(conContexto(editor(true)))
     expect(html).not.toContain('Cambiar en el negocio')
     expect(html).not.toContain('data-encabezado-viaje')
-    expect(html).toContain('data-bandeja-fija')
+    expect(html).toContain('data-bandeja-marco')
     expect(html.match(/data-bandeja-capturas/g)?.length).toBe(1)
-    expect(html.indexOf('data-bandeja-fija')).toBeLessThan(html.indexOf('Componentes'))
-    expect(html).toContain('top:var(--alto-encabezado-negocio, 0px)')
-    // En el celular la franja trae el botón: sin botón flotante duplicado.
+    expect(html.indexOf('data-bandeja-marco')).toBeLessThan(html.indexOf('Componentes'))
+    expect(html).toContain('Lo que está aquí todavía no entra a la cotización. Pasa a los bloques cuando lo aceptas.')
+    // Ya no es una franja fija ni un botón flotante: una sola sección, como en el prototipo.
+    expect(html).not.toContain('top:var(--alto-encabezado-negocio, 0px)')
     expect(html).not.toContain('fixed bottom-20')
   })
 
   it('sin marco, el viaje sigue como hoy: encabezado P9 y la bandeja dentro del paso', () => {
     const html = renderToStaticMarkup(editor(true))
     expect(html).toContain('Cambiar en el negocio')
-    expect(html).not.toContain('data-bandeja-fija')
+    expect(html).not.toContain('data-bandeja-marco')
     expect(html).toContain('data-bandeja-capturas')
   })
 

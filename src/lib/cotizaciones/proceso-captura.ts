@@ -67,6 +67,8 @@ export interface CambioDeCaptura {
   borrador?: Borrador | null
   /** Dónde va a quedar al aceptar: «Otra opción de Hotel en Providencia». */
   donde?: string | null
+  /** Cómo va a quedar al aceptar: una habitación no se revisa campo por campo en la fila. */
+  como?: ComoQueda | null
   leida?: OpcionLeida | null
   abierta?: boolean
   error?: string | null
@@ -80,10 +82,14 @@ export type LecturaDeBorrador =
   | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
   | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[] }
 
+/** Cómo entra una captura a Componentes: habitación de una opción, otra opción o ranura nueva. */
+export type ComoQueda = 'habitacion' | 'hermana' | 'nueva'
+
 /** Lo que la bandeja sabe decir de un borrador contra lo que Componentes ya tiene. */
 export interface Revision {
   leida: OpcionLeida
   donde: string
+  como?: ComoQueda
   /** P10 / regla 6: se pregunta antes de ofrecer «Aceptar». */
   pregunta?:
     | { fase: 'parecida'; conItemId: string; donde: string; habitacion?: boolean }
@@ -142,6 +148,7 @@ export async function leerCaptura(
     borrador,
     leida: r.leida,
     donde: r.donde,
+    como: r.como ?? null,
     // Lo que se pregunta se muestra abierto: nunca se decide en silencio.
     ...(r.pregunta ? { abierta: true } : {}),
   })

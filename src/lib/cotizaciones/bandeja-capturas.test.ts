@@ -10,6 +10,7 @@ import {
   estadoDeBloque,
   lugarComparable,
   mismoLugar,
+  pantallazosEnCotizacion,
   resumenDeBloques,
   ubicarCaptura,
   type CapturaDetectada,
@@ -107,5 +108,29 @@ describe('el estado de los bloques', () => {
   it('todos completos no dice «atención»', () => {
     const e = [estadoDeBloque({ grupo: 'v1', etiqueta: 'Vuelo 1' }, [{ nombre: 'A', conCosto: true, sinConfirmar: false, alerta: null }])]
     expect(resumenDeBloques(e)).toBe('1 bloque · 1 completo')
+  })
+})
+
+describe('el pie de la bandeja: los pantallazos que ya están en la cotización', () => {
+  it('una llave por habitación, o por casilla si la opción no tiene habitaciones; sin ajustes', () => {
+    const items = [
+      { id: 'o1', tarifa_pax: { casillas: { grupo_completo: { huellaImagen: 'h1' } }, habitaciones: [
+        { id: 'grupo_completo', lectura: { huellaImagen: 'h1' } },
+        { id: 'r2', lectura: { huellaImagen: 'h2' } },
+        { id: 'r3', lectura: {} },
+      ] } },
+      { id: 'v1', tarifa_pax: { casillas: { grupo_completo: { huellaImagen: 'h9' }, sin_infantes: { huellaImagen: 'h8' } } } },
+      { id: 'aj', es_ajuste: true, tarifa_pax: { casillas: { grupo_completo: { huellaImagen: 'hx' } } } },
+      { id: 'sin', tarifa_pax: null },
+    ]
+    expect(pantallazosEnCotizacion(items).sort()).toEqual(['h1', 'h2', 'h8', 'h9', 'o1:2'])
+  })
+
+  it('la misma imagen en dos opciones cuenta una vez', () => {
+    const items = [
+      { id: 'a', tarifa_pax: { casillas: { grupo_completo: { huellaImagen: 'h1' } } } },
+      { id: 'b', tarifa_pax: { casillas: { grupo_completo: { huellaImagen: 'h1' } } } },
+    ]
+    expect(pantallazosEnCotizacion(items)).toEqual(['h1'])
   })
 })
