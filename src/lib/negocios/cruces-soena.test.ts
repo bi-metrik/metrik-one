@@ -187,6 +187,41 @@ describe('cruces de SOENA contra casos reales', () => {
     }])
   })
 
+  // Simulación del 24-sep contra 364 facturas: 9 de los 16 avisos falsos venían de estas dos formas.
+  const conRutYFactura = (rut: string, factura: string) => ctx({
+    ...V0142,
+    rut: { numero_identificacion: rut },
+    factura_venta_vehiculo: { cantidad_compradores: '1', compradores: `COMPRADOR (${factura})` },
+  })
+
+  it('celular leído como documento del comprador: no avisa (V0027, V0148, V0348, V0372, V0134)', async () => {
+    for (const [rut, factura] of [
+      ['43495367', '3173706682'],
+      ['8161174', '3148328022'],
+      ['75092978', '3155455677'],
+      ['1032445129', '3246207564'],
+      ['94552806', '3188831886'],
+    ]) {
+      expect(await evaluarCruces(CRUCES, conRutYFactura(rut, factura), DOCUMENTACION), rut).toEqual([])
+    }
+  })
+
+  it('RUT con el «13» o el «1» del tipo de documento pegado: no avisa (V0395, V0254, V0177, V0110)', async () => {
+    for (const [rut, factura] of [
+      ['137556326', '7556326'],
+      ['1379907467', '79907467'],
+      ['132747706', '32747706'],
+      ['1379485203', '79485203'],
+    ]) {
+      expect(await evaluarCruces(CRUCES, conRutYFactura(rut, factura), DOCUMENTACION), rut).toEqual([])
+    }
+  })
+
+  it('V0142 real: el RUT mal leído (1022424289 contra 1022424269) sigue avisando', async () => {
+    const r = await evaluarCruces(CRUCES, conRutYFactura('1022424289', '1022424269'), DOCUMENTACION)
+    expect(r.map(c => c.slug)).toEqual(['rut_entre_compradores'])
+  })
+
   it('en copropiedad también exige el RUT del segundo titular entre los compradores', async () => {
     const r = await evaluarCruces(CRUCES, ctx({
       ...V0286,

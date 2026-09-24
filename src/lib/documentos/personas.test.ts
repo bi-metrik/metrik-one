@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { esPersonaJuridica, parsearPersonas, serializarPersonas } from './personas'
+import { esCelularColombiano, esPersonaJuridica, parsearPersonas, serializarPersonas } from './personas'
 
 describe('serializarPersonas', () => {
   it('arma la forma canónica NOMBRE (documento); NOMBRE (documento)', () => {
@@ -55,5 +55,30 @@ describe('parsearPersonas', () => {
     expect(parsearPersonas('')).toEqual([])
     expect(parsearPersonas(null)).toEqual([])
     expect(parsearPersonas(' ; ')).toEqual([])
+  })
+})
+
+describe('documento con forma de celular', () => {
+  it('10 dígitos que empiezan por 3 es un celular; una cédula o un NIT no', () => {
+    expect(esCelularColombiano('3173706682')).toBe(true)
+    expect(esCelularColombiano('317 370 6682')).toBe(true)
+    expect(esCelularColombiano('43495367')).toBe(false)
+    expect(esCelularColombiano('1032445129')).toBe(false)
+    expect(esCelularColombiano('32747706')).toBe(false) // cédula de 8 dígitos que empieza por 3
+    expect(esCelularColombiano('327477061')).toBe(false) // esa cédula con el DV
+    expect(esCelularColombiano('31737066821')).toBe(false)
+  })
+
+  it('al leer, el celular no cuenta como documento: la persona queda sin él', () => {
+    // V0027: la extracción puso el teléfono del comprador en el documento.
+    expect(parsearPersonas('MARIA PEREZ (3173706682)')).toEqual([{ nombre: 'MARIA PEREZ', documento: '' }])
+    expect(parsearPersonas('Maria Perez 317 370 6682; JUAN GOMEZ (8161174)')).toEqual([
+      { nombre: 'Maria Perez', documento: '' },
+      { nombre: 'JUAN GOMEZ', documento: '8161174' },
+    ])
+  })
+
+  it('al guardar tampoco se escribe como documento', () => {
+    expect(serializarPersonas([{ nombre: 'MARIA PEREZ', documento: '3173706682' }])).toBe('MARIA PEREZ')
   })
 })
