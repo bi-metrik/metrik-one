@@ -23,3 +23,14 @@ así que va ANTES del merge. Ningún token emitido: `scripts/emitir-token-ferret
   `!user` lo mandaría a `/login` con un 307.
 - Las pruebas PGlite no corren con el `node_modules` del repo principal (le falta pglite): se corren con
   un config de vitest en el scratchpad que alias-a pglite instalado aparte. Ver [[indice-referencias]].
+
+**2026-09-24, PR #911 (mergeado):** `GET publicaciones` agregado (catálogo para el cron, cron y agente,
+ordenado por código, sin descripción/etiquetas, sin migración). `RECURSOS` en `api.ts` ahora mapea a una
+LISTA de métodos: un recurso puede tener GET y POST. Gotcha de bootstrap: el worktree trae
+`node_modules/.vite`, así que `rmdir node_modules` falla y `ln -s` crea el symlink ADENTRO; los binarios
+resuelven igual por el `node_modules` del padre, el symlink no hace falta para vitest/tsc/next build.
+
+**2026-09-24, margen y foto (sin migración):** `margenPorVenta(ganancia, precio)` y `formatoMargen` en
+`reglas.ts` (margen = ganancia / precio, fracción). La tabla NO ordena columnas. Gotcha del React Compiler:
+calcular algo con `vigente` ANTES del `useMemo` que lo tiene de dependencia rompe el lint
+(`preserve-manual-memoization`); va DESPUÉS.

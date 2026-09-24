@@ -9,6 +9,7 @@ import {
   ETIQUETA_ESTADO,
   ETIQUETA_LINEA,
   LINEAS,
+  formatoMargen,
   formatoPesos,
   semaforoPendiente,
   type EstadoPublicacion,
@@ -140,6 +141,7 @@ export function FerreteriaCliente({
                     <th className="px-3 py-2">Producto</th>
                     <th className="px-3 py-2 text-right">Precio</th>
                     <th className="px-3 py-2 text-right">Ganancia / venta</th>
+                    <th className="px-3 py-2 text-right">Margen</th>
                     <th className="px-3 py-2">Estado</th>
                     <th className="px-3 py-2 text-right">Clics</th>
                     <th className="px-3 py-2 text-right">Conv.</th>
@@ -162,12 +164,25 @@ export function FerreteriaCliente({
                           </div>
                         </td>
                         <td className="px-3 py-2">
-                          <div>{f.producto}</div>
-                          <div className="text-xs text-muted-foreground">{f.sku}{f.marca ? ` · ${f.marca}` : ''}{f.linea ? ` · ${etiquetaLinea(f.linea)}` : ''}</div>
+                          <div className="flex items-center gap-2">
+                            {f.foto ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={f.foto} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded border bg-muted object-contain" />
+                            ) : (
+                              <div className="h-10 w-10 shrink-0 rounded border bg-muted" aria-hidden />
+                            )}
+                            <div className="min-w-0">
+                              <div>{f.producto}</div>
+                              <div className="text-xs text-muted-foreground">{f.sku}{f.marca ? ` · ${f.marca}` : ''}{f.linea ? ` · ${etiquetaLinea(f.linea)}` : ''}</div>
+                            </div>
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">{f.precio != null ? formatoPesos(f.precio) : '—'}</td>
                         <td className={`px-3 py-2 text-right tabular-nums ${f.ganancia != null && f.ganancia < 0 ? 'text-red-600' : ''}`}>
                           {f.ganancia != null ? formatoPesos(f.ganancia) : f.costoF == null ? 'sin costo' : '—'}
+                        </td>
+                        <td className={`px-3 py-2 text-right tabular-nums ${f.margen != null && f.margen < 0 ? 'text-red-600' : ''}`}>
+                          {formatoMargen(f.margen)}
                         </td>
                         <td className="px-3 py-2">{ETIQUETA_ESTADO[f.estado]}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{f.clics ?? '—'}</td>

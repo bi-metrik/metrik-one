@@ -12,8 +12,10 @@ import {
   ETIQUETA_LINEA,
   LINEAS,
   costoVigente,
+  formatoMargen,
   formatoPesos,
   gananciaPorVenta,
+  margenPorVenta,
   semaforoPendiente,
   validarPiso,
   type EstadoPublicacion,
@@ -47,6 +49,41 @@ function Seccion({ titulo, children }: { titulo: string; children: React.ReactNo
   )
 }
 
+/**
+ * La foto publicada, grande, y las demás como miniaturas que la reemplazan al hacer clic.
+ * `<img>` plano: las URLs son del bucket público de Storage, no pasan por el optimizador de Next.
+ */
+function Galeria({ fotos, nombre }: { fotos: string[]; nombre: string }) {
+  const [elegida, setElegida] = useState(0)
+  if (fotos.length === 0) return null
+  const actual = fotos[Math.min(elegida, fotos.length - 1)]
+  return (
+    <div className="space-y-2">
+      <a href={actual} target="_blank" rel="noopener noreferrer" className="block w-full max-w-[360px] overflow-hidden rounded-md border bg-muted">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={actual} alt={nombre} className="aspect-square w-full object-contain" />
+      </a>
+      {fotos.length > 1 && (
+        <div className="flex max-w-[360px] flex-wrap gap-2">
+          {fotos.map((url, i) => (
+            <button
+              key={`${url}-${i}`}
+              type="button"
+              onClick={() => setElegida(i)}
+              aria-label={`Ver foto ${i + 1}`}
+              aria-pressed={i === elegida}
+              className={`h-14 w-14 overflow-hidden rounded border bg-muted ${i === elegida ? 'ring-2 ring-primary' : 'opacity-80 hover:opacity-100'}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="" loading="lazy" className="h-full w-full object-contain" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function PublicacionCliente({
   detalle,
   hoy,
@@ -63,6 +100,7 @@ export function PublicacionCliente({
   const [pendiente, iniciar] = useTransition()
   const vigente = costoVigente(costos)
   const tono = semaforoPendiente(pub, new Date(ahoraIso))
+  const fotos = Array.isArray(producto.fotos) ? producto.fotos.filter((u): u is string => typeof u === 'string' && u.length > 0) : []
 
   // ── Edición ──
   const [precio, setPrecio] = useState(pub.precio != null ? String(pub.precio) : '')
@@ -80,6 +118,7 @@ export function PublicacionCliente({
     () => (cambiaPrecio && precioNum != null ? validarPiso(precioNum, vigente?.costo_f ?? null, motivo) : null),
     [cambiaPrecio, precioNum, vigente, motivo],
   )
+  const gananciaActual = pub.precio != null && vigente ? gananciaPorVenta(pub.precio, vigente.costo_f) : null
   const pideMotivo = veredicto != null && (veredicto.ok ? veredicto.bajoRegla : veredicto.codigo === 'falta_motivo')
 
   function guardar() {
@@ -160,6 +199,8 @@ export function PublicacionCliente({
         )}
       </header>
 
+      <Galeria fotos={fotos} nombre={producto.nombre} />
+
       <div className="grid gap-4 md:grid-cols-2">
         <Seccion titulo="Precio y costo">
           <dl className="grid grid-cols-2 gap-y-1 text-sm">
@@ -170,8 +211,12 @@ export function PublicacionCliente({
             <dt className="text-muted-foreground">Costo D (sin revista)</dt>
             <dd className="text-right tabular-nums">{vigente?.costo_d != null ? formatoPesos(vigente.costo_d) : '—'}</dd>
             <dt className="text-muted-foreground">Ganancia por venta</dt>
-            <dd className="text-right font-medium tabular-nums">
-              {pub.precio != null && vigente ? formatoPesos(gananciaPorVenta(pub.precio, vigente.costo_f)) : '—'}
+            <dd className={`text-right font-medium tabular-nums ${gananciaActual != null && gananciaActual < 0 ? 'text-red-600' : ''}`}>
+              {gananciaActual != null ? formatoPesos(gananciaActual) : '—'}
+            </dd>
+            <dt className="text-muted-foreground">Margen</dt>
+            <dd className={`text-right font-medium tabular-nums ${gananciaActual != null && gananciaActual < 0 ? 'text-red-600' : ''}`}>
+              {formatoMargen(margenPorVenta(gananciaActual, pub.precio))}
             </dd>
           </dl>
           {costos.length > 1 && (
@@ -211,16 +256,6 @@ export function PublicacionCliente({
             </table>
           )}
           {producto.observaciones && <p className="mt-2 text-xs text-muted-foreground">{producto.observaciones}</p>}
-          {producto.fotos.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {producto.fotos.map((url) => (
-                <a key={url} href={url} target="_blank" rel="noopener noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt={producto.nombre} className="h-20 w-20 rounded border object-cover" />
-                </a>
-              ))}
-            </div>
-          )}
         </Seccion>
       </div>
 
@@ -268,7 +303,7 @@ export function PublicacionCliente({
           {veredicto && (
             <div className={`mt-3 rounded-md border p-3 text-sm ${!veredicto.ok && veredicto.codigo !== 'falta_motivo' ? 'border-red-300 bg-red-50 text-red-800' : pideMotivo ? 'border-amber-300 bg-amber-50 text-amber-900' : 'bg-muted/40'}`}>
               {veredicto.ok
-                ? `Ganancia por venta con este precio: ${formatoPesos(veredicto.ganancia)}.${veredicto.bajoRegla ? ` Queda bajo 1,25 x costo (${formatoPesos(veredicto.regla)}): el motivo es obligatorio.` : ''}`
+                ? `Ganancia por venta con este precio: ${formatoPesos(veredicto.ganancia)} (margen ${formatoMargen(margenPorVenta(veredicto.ganancia, precioNum))}).${veredicto.bajoRegla ? ` Queda bajo 1,25 x costo (${formatoPesos(veredicto.regla)}): el motivo es obligatorio.` : ''}`
                 : veredicto.mensaje}
             </div>
           )}
