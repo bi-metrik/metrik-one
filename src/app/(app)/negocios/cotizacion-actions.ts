@@ -23,6 +23,8 @@ import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizacione
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
+import { borrarImagenesDeCaptura, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -479,8 +481,16 @@ type RastroMargenFila = {
   autor: { full_name: string | null } | { full_name: string | null }[] | null
 }
 
-export async function deleteItem(id: string) {
-  const { supabase, error } = await getWorkspace()
+export async function deleteItem(
+  id: string,
+  /**
+   * `conservarImagenes`: los pantallazos guardados de la opción NO se borran porque vuelven a
+   * la bandeja («Eliminar opción», tarjeta de Trappvel). Por defecto se borran con la línea:
+   * son datos personales de viajeros y no se guardan sin una opción que los use.
+   */
+  opciones?: { conservarImagenes?: boolean },
+) {
+  const { supabase, error, workspaceId } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
   // Fetch item details before deleting. `select('*')`: `ranura_id` la agrega
@@ -530,6 +540,10 @@ export async function deleteItem(id: string) {
     .eq('id', id)
 
   if (dbError) return { success: false, error: dbError.message }
+
+  if (!opciones?.conservarImagenes && item.tarifa_pax) {
+    await borrarImagenesDeCaptura(workspaceId, imagenesDeTarifa(leerTarifaPax(item.tarifa_pax)))
+  }
 
   if (hayAjuste) {
     // Re-reconcile: recalcularTotales will update the adjustment item
