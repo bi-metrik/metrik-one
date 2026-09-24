@@ -25,6 +25,8 @@ import {
   montoDeCosto,
   mismoTexto,
   normalizarComposicion,
+  claveDeHabitacion,
+  repartirConManuales,
   repartirProporcional,
   resolverTarifa,
   totalPasajeros,
@@ -36,6 +38,7 @@ import {
   type EstadoTarifa,
   type Habitacion,
   type LecturaCasilla,
+  type PreciosAMano,
   type RolHabitacion,
   type TarifaPax,
   type TipoPasajero,
@@ -163,9 +166,10 @@ export function repartirHabitaciones(
     rol: h.rolManual?.valor ?? 'habitacion',
     manual: !!h.rolManual,
     sirveParaRestar: false,
-    ocupacion: ocupacionDeHabitacion(h.lectura),
+    // Lo que corrigió una persona manda sobre lo leído (`Habitacion.correccion`).
+    ocupacion: h.correccion?.ocupacion ?? ocupacionDeHabitacion(h.lectura),
     tipoHabitacion: (h.lectura.identidad.tipo_habitacion ?? '').trim() || null,
-    total: montoDeCosto(h.lectura),
+    total: h.correccion?.total ?? montoDeCosto(h.lectura),
     moneda: (h.lectura.moneda || 'COP').toUpperCase(),
     lectura: h.lectura,
   }))
@@ -467,6 +471,8 @@ export function resolverTarifaDeOpcion(
 
 export interface PrecioPorHabitacion {
   numero: number
+  /** El precio lo escribió una persona en la tarjeta. */
+  aMano?: boolean
   ocupacion: Composicion
   /** Precio de venta de la habitación, en pesos, redondeado al peso. */
   precio: number
@@ -481,8 +487,23 @@ export interface PrecioPorHabitacion {
 export function precioPorHabitacion(
   porHabitacion: readonly { numero: number; ocupacion: Composicion; totalCOP: number }[],
   precioLinea: number,
+  /** Los precios escritos a mano en la tarjeta (`hab:N`): esas habitaciones se quedan con el suyo. */
+  aMano?: PreciosAMano | null,
 ): PrecioPorHabitacion[] {
   if (porHabitacion.length === 0) return []
+  if (porHabitacion.some(h => aMano?.[claveDeHabitacion(h.numero)])) {
+    const unitarios = repartirConManuales(
+      porHabitacion.map(h => ({ clave: claveDeHabitacion(h.numero), cantidad: 1, peso: h.totalCOP })),
+      Number(precioLinea) || 0,
+      aMano ?? {},
+    )
+    return porHabitacion.map(h => ({
+      numero: h.numero,
+      ocupacion: h.ocupacion,
+      precio: unitarios.get(claveDeHabitacion(h.numero)) ?? 0,
+      ...(aMano?.[claveDeHabitacion(h.numero)] ? { aMano: true } : {}),
+    }))
+  }
   const total = Math.round(Number(precioLinea) || 0)
   const repartido = repartirProporcional(total, porHabitacion.map(h => h.totalCOP))
   const pisos = repartido.map(v => Math.floor(v))

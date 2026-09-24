@@ -16,8 +16,10 @@ import {
   composicionDeLectura,
   composicionDeLinea,
   confirmacionDesactualizada,
+  claveDeHabitacion,
   firmaDeHabitaciones,
   leerTarifaPax,
+  montoDeCosto,
   MENSAJE_MONEDA_ASUMIDA,
   mismaComposicion,
   monedaDeTarifa,
@@ -50,6 +52,7 @@ import {
   habitacionesDeTarifa,
   mismaImagenEnHabitaciones,
   mismaOpcionHotel,
+  ocupacionDeHabitacion,
   opcionDelMismoHotel,
   recibeHabitaciones,
   repartirHabitaciones,
@@ -61,11 +64,12 @@ import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
-import { definicionDeTipo, esTipoRanura, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
-import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
+import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -1004,6 +1008,263 @@ export async function quitarHabitacion(
   }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
+}
+
+// ── La tarjeta de la opción (prototipo del 2026-09-24) ──────────────────────
+//
+// Lo que la tarjeta hace sobre una opción ya aceptada: ajustar margen y precios de fila,
+// corregir o cambiar el pantallazo de una habitación, y devolver la opción a la bandeja. Lo que
+// cambia el costo termina confirmándolo otra vez: la tarjeta nunca muestra un costo viejo.
+
+/** Confirma el costo después de un cambio. Si falta algo (la tasa, la moneda), lo dice. */
+async function reconfirmar(itemId: string): Promise<{ tarifa: TarifaPax | null; pendiente: string | null }> {
+  const c = await confirmarTarifaPorPasajero(itemId, null)
+  return c.success ? { tarifa: c.tarifa ?? null, pendiente: null } : { tarifa: null, pendiente: c.error ?? null }
+}
+
+/**
+ * «Quitar habitación» de la tarjeta: la quita y confirma el costo otra vez con las que quedan,
+ * para que la tabla de costo y precio no siga contando la que se fue.
+ */
+export async function quitarHabitacionDeOpcion(
+  itemId: string,
+  habitacionId: string,
+): Promise<ResultadoTarifa & { opcionRetirada?: boolean; pendiente?: string | null }> {
+  const r = await quitarHabitacion(itemId, habitacionId)
+  if (!r.success || r.opcionRetirada) return r
+  const c = await reconfirmar(itemId)
+  return { ...r, tarifa: c.tarifa ?? r.tarifa, pendiente: c.pendiente }
+}
+
+/**
+ * «Falta 1 infante: pega su habitación.»: la captura pegada en la tarjeta se lee como otra
+ * habitación de ESTA opción (mismo hotel, mismas fechas) y el costo se confirma otra vez.
+ */
+export async function sumarHabitacionAOpcion(
+  itemId: string,
+  dataUrl: string,
+): Promise<ResultadoCasilla & { pendiente?: string | null }> {
+  const r = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, null, { comoHabitacion: true })
+  if (!r.ok) return r
+  const c = await reconfirmar(itemId)
+  return { ...r, tarifa: c.tarifa ?? r.tarifa, pendiente: c.pendiente }
+}
+
+export interface CambiosDeAjuste {
+  /** El margen de la opción. `undefined` = no se toca; `null` = hereda el de la cotización. */
+  margenPct?: number | null
+  /** Precio unitario a mano por fila (`adulto`, `nino`, `infante`, `hab:N`). `null` = vuelve al del margen. */
+  precios?: Record<string, number | null>
+  /** «Volver a lo que calculó ONE»: sin precios a mano y con el margen que ONE puso. */
+  volverACalculado?: boolean
+}
+
+/**
+ * «Ajustar» de la tarjeta: el margen de la opción y el precio de cada fila. El precio de la
+ * línea lo recalcula `recalcularTotales` con los precios a mano (`precioDeLineaConManuales`):
+ * así la tarjeta, el total y el documento dicen lo mismo.
+ */
+export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const { supabase, item, tarifa } = ctx
+  const conf = tarifa.confirmada ?? null
+  const claves = new Set<string>(conf
+    ? (conf.costos.length > 0 ? conf.costos.map(c => c.tipo as string) : (conf.porHabitacion ?? []).map(h => claveDeHabitacion(h.numero)))
+    : [])
+
+  let margen: number | null | undefined
+  if (cambios.volverACalculado) {
+    margen = conf?.margenProveedor
+      ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
+      : null
+  } else if (cambios.margenPct !== undefined) {
+    const m = cambios.margenPct
+    if (m !== null && (!Number.isFinite(m) || m < 0 || m >= 100)) return { success: false, error: 'El margen va de 0 a 99,9 %.' }
+    margen = m === null ? null : Math.round(m * 100) / 100
+  }
+  for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
+    if (!claves.has(clave)) return { success: false, error: 'Esa fila ya no está en la opción. Recarga la página.' }
+    if (v !== null && (!Number.isFinite(v) || v < 0 || v > 100_000_000_000)) return { success: false, error: 'Escribe el precio sin puntos ni símbolo.' }
+  }
+
+  const { por, porId } = await quienEscribe(supabase)
+  const en = new Date().toISOString()
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
+    const precios = cambios.volverACalculado ? {} : { ...(actual.preciosAMano ?? {}) }
+    for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
+      if (v === null) delete precios[clave]
+      else precios[clave] = { precio: Math.round(v), por, porId, en }
+    }
+    const siguiente: TarifaPax = { ...actual, preciosAMano: precios }
+    if (Object.keys(precios).length === 0) delete siguiente.preciosAMano
+    return siguiente
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+
+  // Con precios a mano la línea lleva precio fijo (lo calcula `recalcularTotales`); sin ellos
+  // vuelve a salir del margen, también si traía un precio a mano de línea de antes.
+  const patch: Record<string, unknown> = { precio_manual: Object.keys(guardado.tarifa.preciosAMano ?? {}).length > 0 }
+  if (margen !== undefined) patch.margen_porcentaje = margen
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: errItem } = await (supabase as any).from('items').update(patch).eq('id', itemId)
+  if (errItem) return { success: false, error: errItem.message }
+  await recalcularTotales(item.cotizacionId)
+  if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return { success: true, tarifa: guardado.tarifa }
+}
+
+/**
+ * «Corregir datos» de una habitación: a cuántos cubre y cuánto cuesta. Lo leído queda intacto
+ * en la lectura; la corrección manda encima (`Habitacion.correccion`) y el costo se confirma
+ * otra vez. Corregir la habitación de una opción de una sola captura la vuelve una opción con
+ * habitaciones (la misma, con su pantallazo 1 como habitación).
+ */
+export async function corregirHabitacion(
+  itemId: string,
+  habitacionId: string,
+  entrada: { adultos: number; ninos: number; infantes: number; total: number },
+): Promise<ResultadoTarifa & { pendiente?: string | null }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  if (ctx.ranura.slug !== RANURA_HOTEL) return { success: false, error: 'Solo una opción de hotel lleva habitaciones.' }
+  const entero = (n: number) => Number.isInteger(n) && n >= 0 && n <= 99
+  if (![entrada.adultos, entrada.ninos, entrada.infantes].every(entero) || entrada.adultos < 1) {
+    return { success: false, error: 'Escribe cuántos adultos, niños e infantes cubre la habitación.' }
+  }
+  if (!Number.isFinite(entrada.total) || entrada.total < 0) return { success: false, error: 'Escribe el precio sin puntos ni símbolo.' }
+  if (!habitacionesDeTarifa(ctx.tarifa).some(h => h.id === habitacionId)) return { success: false, error: 'Esa habitación ya no está en la opción. Recarga la página.' }
+
+  const { por, porId } = await quienEscribe(ctx.supabase)
+  const en = new Date().toISOString()
+  const grupo = ctx.viaje.composicion
+  const ocupacion = { adultos: entrada.adultos, ninos: entrada.ninos, infantes: entrada.infantes }
+  const guardado = await guardarConHabitacion(
+    ctx.supabase,
+    itemId,
+    actual => tarifaConHabitaciones(actual, habitacionesDeTarifa(actual).map(h => {
+      if (h.id !== habitacionId) return h
+      const leida = ocupacionDeHabitacion(h.lectura)
+      const cambiaOcupacion = !leida || !mismaComposicion(leida, ocupacion)
+      const cambiaTotal = Math.abs(entrada.total - montoDeCosto(h.lectura)) > 0.005
+      const { correccion: _vieja, ...resto } = h
+      void _vieja
+      if (!cambiaOcupacion && !cambiaTotal) return resto
+      return { ...resto, correccion: { ocupacion: cambiaOcupacion ? ocupacion : null, total: cambiaTotal ? entrada.total : null, por, porId, en } }
+    }), grupo),
+    t => (t.habitaciones ?? []).some(h => h.id === habitacionId),
+  )
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  const r = await reconfirmar(itemId)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: r.tarifa ?? guardado.tarifa, pendiente: r.pendiente }
+}
+
+/**
+ * «Cambiar pantallazo» de una habitación (o de la opción de una sola captura): lee el nuevo,
+ * lo pone en el lugar del viejo y confirma el costo otra vez. La corrección que tenía la
+ * habitación se va con el pantallazo viejo: describía otra captura.
+ */
+export async function cambiarPantallazoDeHabitacion(
+  itemId: string,
+  habitacionId: string,
+  dataUrl: string,
+): Promise<ResultadoCasilla & { pendiente?: string | null }> {
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) {
+    return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
+  }
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // Una opción de una sola captura cambia su pantallazo 1: el camino de siempre.
+  if (!conHabitaciones(ctx.tarifa)) {
+    const r = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl)
+    if (!r.ok) return r
+    const c = await reconfirmar(itemId)
+    return { ...r, tarifa: c.tarifa ?? r.tarifa, pendiente: c.pendiente }
+  }
+  const habs = habitacionesDeTarifa(ctx.tarifa)
+  const vieja = habs.find(h => h.id === habitacionId)
+  if (!vieja) return { ok: false, codigo: 'HABITACION', mensaje: 'Esa habitación ya no está en la opción. Recarga la página.' }
+  const leidaR = await leerImagenDeCaptura({ ranura: ctx.ranura, dataUrl, viaje: ctx.viaje })
+  if (!leidaR.ok) return leidaR
+  const leida = leidaR.leida
+  const otra = habs.find(h => h.id !== habitacionId)
+  if (otra && !mismaOpcionHotel(otra.lectura, leida)) {
+    return { ok: false, codigo: 'OTRO_HOTEL', mensaje: 'Esta captura es de otro hotel o de otras fechas: pégala en la bandeja para que quede como otra opción.' }
+  }
+  const v = validarHabitacion(ctx.ranura.slug, leida)
+  if (!v.ok) return v
+  const { workspaceId } = await getWorkspace()
+  leida.imagenRef = await guardarImagenDeCaptura({
+    workspaceId, negocioId: ctx.item.negocioId, cotizacionId: ctx.item.cotizacionId, dataUrl, lectura: leida,
+  })
+  const grupo = ctx.viaje.composicion
+  const guardado = await guardarConHabitacion(
+    ctx.supabase,
+    itemId,
+    actual => tarifaConHabitaciones(actual, habitacionesDeTarifa(actual).map(h => {
+      if (h.id !== habitacionId) return h
+      const { correccion: _vieja, ...resto } = h
+      void _vieja
+      return { ...resto, lectura: leida }
+    }), grupo),
+    t => (t.habitaciones ?? []).some(h => h.id === habitacionId && h.lectura.leidaEn === leida.leidaEn),
+  )
+  if ('error' in guardado) {
+    if (leida.imagenRef) await borrarImagenesDeCaptura(workspaceId, [leida.imagenRef])
+    return { ok: false, codigo: 'GUARDAR', mensaje: guardado.error }
+  }
+  const anterior = vieja.lectura.imagenRef ?? null
+  if (anterior && anterior !== leida.imagenRef && !imagenesDeTarifa(guardado.tarifa).includes(anterior)) {
+    await borrarImagenesDeCaptura(workspaceId, [anterior])
+  }
+  const c = await reconfirmar(itemId)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { ok: true, mensaje: '', alertas: leida.alertas, tarifa: c.tarifa ?? guardado.tarifa, pendiente: c.pendiente }
+}
+
+/** Una lectura que vuelve a la bandeja: firmada otra vez y con su imagen, como recién pegada. */
+export interface LecturaDevuelta {
+  tipo: TipoRanura
+  lecturaJson: string
+  firma: string
+  pistas: { lugar: string | null; origen: string | null; destino: string | null }
+  /** El pantallazo, para verlo y para volver a guardarlo al aceptar. `null` si no se guardó. */
+  imagen: string | null
+  huella: string | null
+}
+
+/**
+ * «Eliminar opción» de la tarjeta: la opción se va y sus pantallazos vuelven a la bandeja
+ * («Sus habitaciones vuelven a la bandeja»). Cada lectura sale firmada otra vez —es la que ya
+ * estaba en la cotización, no una nueva— y con su imagen en la mano, así que aceptarla la vuelve
+ * a guardar. La opción se borra con sus imágenes: en la bandeja viven solo en la pestaña.
+ */
+export async function devolverOpcionABandeja(itemId: string): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { ok: false, mensaje: ctx.error as string }
+  const tipo = tipoDeDefinicion(ctx.ranura)
+  if (!tipo) return { ok: false, mensaje: 'Tipo de componente desconocido.' }
+  const lecturas = conHabitaciones(ctx.tarifa)
+    ? (ctx.tarifa.habitaciones ?? []).map(h => h.lectura)
+    : [ctx.tarifa.casillas?.grupo_completo].filter((l): l is LecturaCasilla => !!l)
+  const { workspaceId } = await getWorkspace()
+  const devueltas: LecturaDevuelta[] = []
+  for (const l of lecturas) {
+    const imagen = l.imagenRef ? await imagenComoDataUrl(workspaceId, l.imagenRef) : null
+    const { imagenRef: _ref, ...limpia } = l
+    void _ref
+    const lecturaJson = JSON.stringify(limpia)
+    const firma = firmarBorrador(ctx.item.cotizacionId, tipo, lecturaJson)
+    if (!firma) return { ok: false, mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
+    const pistas = lugarDeOpcion({ nombre: ctx.item.nombre, grupo: ctx.item.grupo, tarifa_pax: { casillas: { grupo_completo: l } } })
+    devueltas.push({ tipo, lecturaJson, firma, pistas, imagen, huella: l.huellaImagen ?? null })
+  }
+  const r = await deleteItem(itemId)
+  if (!r.success) return { ok: false, mensaje: r.error ?? 'No se pudo eliminar la opción.' }
+  await recalcularTotales(ctx.item.cotizacionId)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { ok: true, devueltas }
 }
 
 // ── CC2: el menor no paga ────────────────────────────────────────────────────

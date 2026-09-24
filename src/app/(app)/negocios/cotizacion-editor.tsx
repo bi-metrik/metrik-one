@@ -4,7 +4,7 @@ import { Fragment, useContext, useEffect, useRef, useState, useTransition } from
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
-  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, MoreHorizontal, X,
+  ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -47,7 +47,9 @@ import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
 import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
-import BandejaCapturas from '@/app/(app)/negocios/bandeja-capturas'
+import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/bandeja-capturas'
+import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
+import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
@@ -90,7 +92,7 @@ import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/ca
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
 import { notaDeMargen } from '@/lib/cotizaciones/nota-margen'
 import { encabezadoDelViaje, estadoDePasos } from '@/lib/cotizaciones/estado-pasos'
-import { fichaDeOpcion, notaDeLaLinea, ordenarComoElViaje, resumenDeOpcion, tituloDeBloque } from '@/lib/cotizaciones/opcion-viaje'
+import { notaDeLaLinea, ordenarComoElViaje, resumenDeOpcion, tituloDeBloque } from '@/lib/cotizaciones/opcion-viaje'
 import PasosCotizacion from '@/app/(app)/negocios/pasos-cotizacion'
 import { aplicarRecargo } from '@/app/(app)/negocios/recargo-actions'
 import {
@@ -373,17 +375,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       : initialItems
     ).map(i => i.id),
   ))
-  // La opción abierta de un bloque (P2): «Ajustar» y «Corregir datos» se abren a pedido. Cada
-  // uno tiene un estado automático (abierto cuando hace falta) y el clic lo invierte.
-  const [ajustarInvertido, setAjustarInvertido] = useState<Set<string>>(new Set())
-  const [corregirInvertido, setCorregirInvertido] = useState<Set<string>>(new Set())
-  const [menuOpcionDe, setMenuOpcionDe] = useState<string | null>(null)
-  const invertir = (set: Set<string>, id: string) => {
-    const nuevo = new Set(set)
-    if (nuevo.has(id)) nuevo.delete(id)
-    else nuevo.add(id)
-    return nuevo
-  }
 
   // New item
   const [newItemName, setNewItemName] = useState('')
@@ -391,6 +382,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const [mostrarOtro, setMostrarOtro] = useState(false)
   // La línea cuyo grupo se está cambiando desde «Mover a otra opción» (flujo de viaje).
   const [moverGrupoDe, setMoverGrupoDe] = useState<string | null>(null)
+  // La tarjeta de la opción (prototipo del 2026-09-24): lo que una opción eliminada devuelve a
+  // la bandeja y qué opciones de hotel tienen un pantallazo esperando decisión en ella.
+  const receptorBandeja = useRef<ReceptorDeBandeja>(null)
+  const [pendientesEnBandeja, setPendientesEnBandeja] = useState<Record<string, string>>({})
 
   // Catalog
   const [showCatalog, setShowCatalog] = useState(false)
@@ -1019,6 +1014,23 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       return { ok: true }
     })
   }
+  // «Eliminar opción» desde la tarjeta: la opción se va y sus pantallazos vuelven a la bandeja
+  // («Sus habitaciones vuelven a la bandeja»), con la misma ventana de «Deshacer».
+  const eliminarOpcionDevolviendo = (item: ItemRow, nombre: string) => {
+    const marcadas = tarifasMarcadasCon(tarifasDeLaCotizacion, [item.id])
+    if (marcadas.length > 0 && !window.confirm(preguntaTarifaMarcada(marcadas, 'opcion'))) return
+    programarBorrado(`item:${item.id}`, [item.id], `Eliminaste ${nombre}.`, async () => {
+      const r = await devolverOpcionABandeja(item.id)
+      if (!r.ok) return { ok: false, error: r.mensaje }
+      if (r.devueltas.length > 0) {
+        receptorBandeja.current?.recibir({ clave: `${item.id}:${Date.now()}`, itemId: item.id, lecturas: r.devueltas })
+      }
+      return { ok: true }
+    })
+  }
+  const irABandeja = (capturaId: string) => {
+    document.querySelector(`[data-captura="${CSS.escape(capturaId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
   const eliminarBloque = (bloque: { grupo: string | null; lineas: ItemRow[] }) => {
     const grupo = bloque.grupo
     if (!grupo) return
@@ -1333,13 +1345,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         const precioPorPax = tarifaDelItem.confirmada
           && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
           && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
-          ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
+          ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad, tarifaDelItem.preciosAMano)
           : null
         // R8 · regla 8: una opción de hotel cobrada por habitación (no hubo par para sacar
         // el precio de cada pasajero) dice el precio de cada habitación, con las mismas
         // salvaguardas que el de cada pasajero.
         const precioPorHab = precioPorPax && precioPorPax.length === 0 && tarifaDelItem.confirmada?.porHabitacion?.length
-          ? precioPorHabitacion(tarifaDelItem.confirmada.porHabitacion, precioLinea / itemCantidad)
+          ? precioPorHabitacion(tarifaDelItem.confirmada.porHabitacion, precioLinea / itemCantidad, tarifaDelItem.preciosAMano)
           : null
         const textoPorHabitacion = precioPorHab && precioPorHab.length > 0
           ? precioPorHab.map(h => `Habitación ${h.numero} (${describirOcupacion(h.ocupacion, 'y')}) ${formatoMonto(h.precio, 'COP')}`).join(' · ')
@@ -2068,62 +2080,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               ) : null}
           </>
         )
-        // ── P2 · la opción abierta de un bloque (solo Trappvel) ─────────────────────
-        // En este orden: el nombre, la ficha de lo que va a la cotización, la nota para el
-        // cliente, el precio, los adicionales y, detrás de un clic, corregir lo leído. Siete
-        // campos para decir una sola cosa era lo que Mauricio no podía leer.
-        const fichaOpcion = vistaDeOpcion ? fichaDeOpcion(lecturaOpcion, composicionDeLinea(tarifaDelItem, composicionViaje)) : []
         const notaOpcion = vistaDeOpcion ? notaDeLaLinea(item) : null
-        const conCaptura = !!tarifaDelItem.casillas?.grupo_completo || !!tarifaDelItem.confirmada
-        const alertasCaptura = tarifaDelItem.casillas?.grupo_completo?.alertas ?? []
-        // «Corregir datos» se abre SOLO cuando lo leído pide mirada: sin pantallazo, sin
-        // confirmar o con algo que revisar. «Ajustar» se abre solo en la opción costeada a mano,
-        // donde cantidad y descuento son el trabajo y no una excepción.
-        const corregirAuto = !conCaptura || !tarifaDelItem.confirmada || alertasCaptura.length > 0
-        const corregirAbierto = corregirAuto !== corregirInvertido.has(item.id)
-        const ajustarAuto = !ranuraDeItem
-        const ajustarAbierto = ajustarAuto !== ajustarInvertido.has(item.id)
-        const jsxOpcionAbierta = (
-          <div className="space-y-2.5 border-t px-4 pb-3 pt-2" data-opcion-abierta={item.id}>
-            {/* El nombre, con su lápiz: es lo que distingue una opción de otra en la tabla
-                de tarifas y en el documento. */}
-            {editable && (
-              <label className="flex items-center gap-1.5">
-                <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                <input
-                  type="text"
-                  defaultValue={item.nombre ?? ''}
-                  maxLength={200}
-                  aria-label="Nombre de la opción"
-                  className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold hover:border-[#E5E7EB] focus:border-[#E5E7EB] focus:bg-background"
-                  onBlur={e => {
-                    const val = comoSeGuarda(e.target.value.trim())
-                    e.target.value = val
-                    if (val === (item.nombre ?? '')) return
-                    startTransition(async () => {
-                      const res = await updateItem(item.id, { nombre: val })
-                      if (!res.success) { toast.error(res.error); return }
-                      router.refresh()
-                    })
-                  }}
-                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                />
-              </label>
-            )}
-
-            {/* La ficha: lo leído, en palabras. Lo que no se leyó no sale. */}
-            {fichaOpcion.length > 0 ? (
-              <ul className="space-y-0.5 text-xs text-[#1A1A1A]">
-                {fichaOpcion.map((renglon, i) => <li key={i}>{renglon}</li>)}
-              </ul>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                {conCaptura
-                  ? 'El pantallazo no dejó datos para la ficha: revísalo en «Corregir datos».'
-                  : 'Todavía no hay pantallazo leído de esta opción: pégalo abajo.'}
-              </p>
-            )}
-
+        const jsxNotaOpcion = (
+          <>
             {/* La nota para el cliente. Es la descripción de la línea cuando la escribió una
                 persona; la que armó ONE no es nota (repite la ficha) y no se muestra aquí. */}
             {editable ? (
@@ -2152,125 +2111,71 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             ) : notaOpcion ? (
               <p className="text-xs italic text-[#1A1A1A]">{notaOpcion}</p>
             ) : null}
-
-            {/* P5 · el precio en una línea: costo, precio y margen. Cantidad, descuento, IVA
-                y marginar distinto viven detrás de «Ajustar». */}
-            <div className="rounded-md border bg-muted/20 px-3 py-2">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs tabular-nums">
-                <span><span className="text-muted-foreground">Costo </span>{costoLinea > 0 ? formatCOP(costoLinea) : '—'}</span>
-                <span><span className="text-muted-foreground">Precio </span><span className="font-semibold">{formatCOP(precioLinea)}</span></span>
-                {margenTexto && (
-                  <span
-                    className={`font-medium ${claseNivelMargen(nivelMargen)}`}
-                    title={tituloNivelMargen(nivelMargen, umbrales, origenMargen, pisoBloqueaAvance)}
-                  >
-                    margen {margenTexto}
-                  </span>
-                )}
-                {editable && (
-                  <button
-                    type="button"
-                    onClick={() => setAjustarInvertido(s => invertir(s, item.id))}
-                    aria-expanded={ajustarAbierto}
-                    className="ml-auto text-[11px] text-primary underline underline-offset-2 hover:opacity-80"
-                  >
-                    {ajustarAbierto ? 'Cerrar ajustes' : 'Ajustar'}
-                  </button>
-                )}
-              </div>
-              {precioPorPax && precioPorPax.length > 0 && (
-                <p className="mt-0.5 text-[11px] tabular-nums">
-                  <span className="text-muted-foreground">Por pasajero: </span>
-                  <span className="font-medium">
-                    {lineaPorPasajero(precioPorPax.map(p => ({ tipo: p.tipo, unitario: p.precioUnitario })), 'COP')}
-                  </span>
-                </p>
-              )}
-              {textoPorHabitacion && (
-                <p className="mt-0.5 text-[11px] tabular-nums">
-                  <span className="text-muted-foreground">Por habitación: </span>
-                  <span className="font-medium">{textoPorHabitacion}</span>
-                </p>
-              )}
-            </div>
-            {ajustarAbierto && jsxCamposVenta}
-
-            {jsxAdicionales}
-
-            {/* Corregir lo leído o cambiar el pantallazo, y el menú de la opción. */}
-            <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-              {editable && ranuraDeItem && (
-                <button
-                  type="button"
-                  onClick={() => setCorregirInvertido(s => invertir(s, item.id))}
-                  aria-expanded={corregirAbierto}
-                  className="rounded-md border bg-background px-2 py-1 text-[11px] font-medium hover:bg-accent"
-                >
-                  {corregirAbierto ? 'Cerrar corrección' : 'Corregir datos o cambiar pantallazo'}
-                </button>
-              )}
-              {alertasCaptura.length > 0 && (
-                <span className="text-[10px] font-medium text-amber-700">Revisar: {alertasCaptura[0]}</span>
-              )}
-              {editable && (
-                <div className="relative ml-auto">
-                  <button
-                    type="button"
-                    aria-label="Más acciones de la opción"
-                    aria-haspopup="menu"
-                    aria-expanded={menuOpcionDe === item.id}
-                    onClick={() => setMenuOpcionDe(m => (m === item.id ? null : item.id))}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                  {menuOpcionDe === item.id && (
-                    <div role="menu" className="absolute right-0 z-10 mt-1 w-48 rounded-md border bg-background p-1 text-xs shadow-md">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => { setMoverGrupoDe(item.id); setMenuOpcionDe(null) }}
-                        className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
-                      >
-                        Pasar a otra ranura…
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={isPending}
-                        onClick={() => { setMenuOpcionDe(null); eliminarOpcion(item) }}
-                        className="block w-full rounded px-2 py-1.5 text-left text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        Borrar
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            {editable && moverGrupoDe === item.id && (
-              <SelectorRanura
-                valor={item.grupo ?? null}
-                gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
-                disabled={isPending}
-                onCambio={val => {
-                  startTransition(async () => {
-                    const res = await actualizarRanuraDeItem(item.id, { grupo: val })
-                    if (!res.success) { toast.error(res.error); return }
-                    setMoverGrupoDe(null)
-                    router.refresh()
-                  })
-                }}
-              />
-            )}
-            {corregirAbierto && (
-              <div className="space-y-2">
-                {jsxTarifaPax}
-                {jsxRubros}
-              </div>
-            )}
-          </div>
+          </>
         )
+        // La tarjeta de la opción (prototipo del 2026-09-24): en el flujo de viaje, cada opción de
+        // un bloque es su tarjeta. Fuera de ese caso la línea se pinta como siempre (R6).
+        if (vistaDeOpcion) {
+          const confirmadaVista = tarifaDelItem.confirmada
+            && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
+            && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
+            ? tarifaDelItem.confirmada
+            : null
+          return (
+            <TarjetaOpcion
+              key={item.id}
+              itemId={item.id}
+              numero={ubicacionesDeOpciones[item.id]?.opcion ?? 1}
+              item={lecturaOpcion}
+              tarifa={tarifaDelItem}
+              composicionViaje={composicionViaje}
+              editable={editable}
+              abierta={expandedItems.has(item.id)}
+              onAlternar={() => toggleItem(item.id)}
+              precioOpcion={linea?.precioConAdicionales ?? precioLinea}
+              precioLinea={precioLinea}
+              costoLinea={costoLinea}
+              confirmada={confirmadaVista}
+              margenAplicado={Number(itemMargen) || 0}
+              convencion={convencionMargen}
+              administrativosPct={(Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0)}
+              pisoPct={umbrales.pisoPct}
+              adicionales={adicionales.porItem[item.id] ?? []}
+              adicionalesDisponible={adicionales.disponible}
+              margenCotizacion={{ margenPct: margenCotizacion, convencion: convencionMargen }}
+              pendiente={pendientesEnBandeja[item.id] ? { capturaId: pendientesEnBandeja[item.id] } : null}
+              onIrABandeja={irABandeja}
+              onEliminar={nombre => eliminarOpcionDevolviendo(item, nombre)}
+              onMover={() => setMoverGrupoDe(item.id)}
+              mover={editable && moverGrupoDe === item.id ? (
+                <div className="px-3 pb-2">
+                  <SelectorRanura
+                    valor={item.grupo ?? null}
+                    gruposEnUso={initialItems.map(i => i.grupo ?? '').filter(Boolean)}
+                    disabled={isPending}
+                    onCambio={val => {
+                      startTransition(async () => {
+                        const res = await actualizarRanuraDeItem(item.id, { grupo: val })
+                        if (!res.success) { toast.error(res.error); return }
+                        setMoverGrupoDe(null)
+                        router.refresh()
+                      })
+                    }}
+                  />
+                </div>
+              ) : null}
+              respaldo={editable ? (
+                <div className="space-y-2" data-respaldo-opcion>
+                  {jsxTarifaPax}
+                  {jsxRubros}
+                  {jsxCamposVenta}
+                </div>
+              ) : null}
+              nota={jsxNotaOpcion}
+              onCambio={() => router.refresh()}
+            />
+          )
+        }
         return (
         <div key={item.id} data-linea-id={lineasPorTipo ? item.id : undefined} className={`rounded-lg border ${isAjuste ? 'border-amber-200 bg-amber-50/30' : ''}`}>
           <div
@@ -2421,7 +2326,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           </div>
 
-          {!isAjuste && expandedItems.has(item.id) && (vistaDeOpcion ? jsxOpcionAbierta : (
+          {!isAjuste && expandedItems.has(item.id) && (vistaDeOpcion ? null : (
             <div className="border-t px-4 pb-3 pt-2">
               {/* La FICHA de la línea: cómo se llama, en qué ranura compite y en
                   qué unidad se vende.
@@ -2729,6 +2634,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               composicion={composicionViaje}
               onOpcionCreada={mostrarOpcion}
               ubicaciones={ubicacionesDeOpciones}
+              receptor={receptorBandeja}
+              onPendientes={setPendientesEnBandeja}
             />
           )}
           {lineasPorTipo && (
@@ -3456,6 +3363,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           composicion={composicionViaje}
           onOpcionCreada={mostrarOpcion}
           ubicaciones={ubicacionesDeOpciones}
+          receptor={receptorBandeja}
+          onPendientes={setPendientesEnBandeja}
         />
       )}
       {lineasPorTipo ? pasosDelViaje : (

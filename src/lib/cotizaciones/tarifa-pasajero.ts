@@ -891,7 +891,15 @@ export function codigoDeMoneda(texto: string | null | undefined): string | null 
  * confirmación sigue describiendo la opción.
  */
 export function firmaDeHabitaciones(habitaciones: readonly Habitacion[]): string {
-  return habitaciones.map(h => `${h.id}:${h.rolManual?.valor ?? 'auto'}:${h.lectura.total}`).join('|')
+  // Una corrección de la habitación también deja vieja la confirmación. Sin corrección la
+  // huella es la de siempre: las confirmaciones anteriores siguen vigentes.
+  return habitaciones.map(h => {
+    const base = `${h.id}:${h.rolManual?.valor ?? 'auto'}:${h.lectura.total}`
+    const c = h.correccion
+    if (!c) return base
+    const o = c.ocupacion ? `${c.ocupacion.adultos}-${c.ocupacion.ninos}-${c.ocupacion.infantes}` : '-'
+    return `${base}:c${c.total ?? '-'}/${o}`
+  }).join('|')
 }
 
 export interface ConfirmacionDesactualizada {
@@ -1282,7 +1290,40 @@ export interface Habitacion {
   id: string
   lectura: LecturaCasilla
   rolManual?: { valor: RolHabitacion; por: string | null; porId: string | null; en: string } | null
+  /**
+   * Lo que una persona corrigió de la habitación en la tarjeta («Corregir datos»): a cuántos
+   * cubre y cuánto cuesta. Vive FUERA de la lectura, igual que las correcciones de la ficha:
+   * lo que leyó la IA queda intacto y esto manda encima (`repartirHabitaciones`).
+   */
+  correccion?: CorreccionHabitacion | null
 }
+
+/** La corrección de una habitación. `null` en un campo = ese campo sigue siendo el leído. */
+export interface CorreccionHabitacion {
+  ocupacion: Composicion | null
+  total: number | null
+  por: string | null
+  porId: string | null
+  en: string
+}
+
+/**
+ * El precio de UNA fila de la tarjeta escrito a mano («Ajustar», prototipo del 2026-09-24):
+ * un tipo de pasajero (`adulto`, `nino`, `infante`) o una habitación (`hab:N`). El precio
+ * unitario en pesos. Las filas sin precio a mano se reparten lo que queda del precio de la
+ * línea, en proporción a su costo (`repartirConManuales`).
+ */
+export interface PrecioAMano {
+  precio: number
+  por: string | null
+  porId: string | null
+  en: string
+}
+
+export type PreciosAMano = Record<string, PrecioAMano>
+
+/** La clave de una habitación en los precios a mano. */
+export const claveDeHabitacion = (numero: number) => `hab:${numero}`
 
 export interface TarifaPax {
   /** La composición propia del ítem (CC4b). Ausente = la del viaje. */
@@ -1334,6 +1375,8 @@ export interface TarifaPax {
    * del pantallazo 1 (todas las opciones anteriores al 2026-09-24).
    */
   habitaciones?: Habitacion[]
+  /** Los precios de fila escritos a mano en la tarjeta. Ausente = todos salen del margen. */
+  preciosAMano?: PreciosAMano
 }
 
 /** Un costo escrito a mano en otra moneda, con la tasa con que se pasó a pesos. */
@@ -1420,7 +1463,44 @@ function leerHabitaciones(raw: unknown): Habitacion[] | null {
     const rolManual = m && (m.valor === 'habitacion' || m.valor === 'referencia') && typeof m.en === 'string'
       ? { valor: m.valor as RolHabitacion, por: typeof m.por === 'string' ? m.por : null, porId: typeof m.porId === 'string' ? m.porId : null, en: m.en }
       : null
-    out.push({ id: r.id, lectura, ...(rolManual ? { rolManual } : {}) })
+    const correccion = leerCorreccionHabitacion(r.correccion)
+    out.push({ id: r.id, lectura, ...(rolManual ? { rolManual } : {}), ...(correccion ? { correccion } : {}) })
+  }
+  return out
+}
+
+function leerCorreccionHabitacion(raw: unknown): CorreccionHabitacion | null {
+  if (!raw || typeof raw !== 'object') return null
+  const c = raw as Record<string, unknown>
+  if (typeof c.en !== 'string') return null
+  const total = c.total === null || c.total === undefined ? null : Number(c.total)
+  const ocupacion = c.ocupacion === null || c.ocupacion === undefined ? null : normalizarComposicion(c.ocupacion)
+  if (total !== null && (!Number.isFinite(total) || total < 0)) return null
+  if (total === null && ocupacion === null) return null
+  return {
+    ocupacion,
+    total,
+    por: typeof c.por === 'string' ? c.por : null,
+    porId: typeof c.porId === 'string' ? c.porId : null,
+    en: c.en,
+  }
+}
+
+/** Lee los precios a mano sin confiar en su forma: lo que no se entiende se descarta. */
+export function leerPreciosAMano(raw: unknown): PreciosAMano {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: PreciosAMano = {}
+  for (const [clave, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!v || typeof v !== 'object') continue
+    const d = v as Record<string, unknown>
+    const precio = Number(d.precio)
+    if (!Number.isFinite(precio) || precio < 0 || typeof d.en !== 'string') continue
+    out[clave] = {
+      precio,
+      por: typeof d.por === 'string' ? d.por : null,
+      porId: typeof d.porId === 'string' ? d.porId : null,
+      en: d.en,
+    }
   }
   return out
 }
@@ -1448,6 +1528,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const moneda = leerDecisionMoneda(r.moneda)
   const costoManual = leerCostoManual(r.costoManual)
   const habitaciones = leerHabitaciones(r.habitaciones)
+  const preciosAMano = leerPreciosAMano(r.preciosAMano)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -1462,6 +1543,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(costoManual ? { costoManual } : {}),
     // Sin habitaciones la llave no aparece: una opción de siempre se lee igual que antes.
     ...(habitaciones ? { habitaciones } : {}),
+    // Igual: sin precios a mano la llave no aparece.
+    ...(Object.keys(preciosAMano).length > 0 ? { preciosAMano } : {}),
   }
 }
 
@@ -1506,6 +1589,34 @@ export interface PrecioPorPasajero {
   cantidad: number
   /** Precio de venta de UN pasajero de este tipo, en pesos, redondeado al peso. */
   precioUnitario: number
+  /** El precio lo escribió una persona en la tarjeta. */
+  aMano?: boolean
+}
+
+/**
+ * El precio unitario de cada fila cuando alguna lo tiene escrito a mano: esas se quedan con
+ * el suyo, y las demás se reparten lo que queda del precio de la línea en proporción a su
+ * costo (el mismo criterio de siempre). Al peso. Si lo escrito a mano ya cubre el precio de
+ * la línea, a las demás no les queda nada: cero, nunca negativo.
+ */
+export function repartirConManuales(
+  filas: readonly { clave: string; cantidad: number; peso: number }[],
+  precioLinea: number,
+  aMano: PreciosAMano,
+): Map<string, number> {
+  const out = new Map<string, number>()
+  let fijo = 0
+  for (const f of filas) {
+    const m = aMano[f.clave]
+    if (!m) continue
+    out.set(f.clave, Math.round(m.precio))
+    fijo += Math.round(m.precio) * f.cantidad
+  }
+  const libres = filas.filter(f => !aMano[f.clave] && f.cantidad > 0)
+  const resto = Math.max(0, Math.round(Number(precioLinea) || 0) - fijo)
+  const repartido = repartirProporcional(resto, libres.map(f => f.peso))
+  libres.forEach((f, i) => out.set(f.clave, Math.round(repartido[i] / f.cantidad)))
+  return out
 }
 
 /**
@@ -1527,9 +1638,27 @@ export function confirmadaVigente(confirmada: TarifaConfirmada, costoUnitarioLin
  * lo decide Edgar. Repartir el precio en proporción al costo es lo único que no inventa esa
  * decisión, y garantiza que la suma de los precios por pasajero sea el precio de la línea.
  */
-export function precioPorPasajero(confirmada: TarifaConfirmada, precioLinea: number): PrecioPorPasajero[] {
+export function precioPorPasajero(
+  confirmada: TarifaConfirmada,
+  precioLinea: number,
+  /** Los precios de fila escritos a mano en la tarjeta (`tarifa_pax.preciosAMano`). */
+  aMano?: PreciosAMano | null,
+): PrecioPorPasajero[] {
   const total = confirmada.costos.reduce((a, c) => a + c.totalCOP, 0)
   const filas = confirmada.costos.filter(c => c.cantidad > 0)
+  if (filas.some(c => aMano?.[c.tipo])) {
+    const unitarios = repartirConManuales(
+      filas.map(c => ({ clave: c.tipo, cantidad: c.cantidad, peso: c.totalCOP })),
+      Number(precioLinea) || 0,
+      aMano ?? {},
+    )
+    return filas.map(c => ({
+      tipo: c.tipo,
+      cantidad: c.cantidad,
+      precioUnitario: unitarios.get(c.tipo) ?? 0,
+      ...(aMano?.[c.tipo] ? { aMano: true } : {}),
+    }))
+  }
   if (total <= 0) {
     return filas.map(c => ({ tipo: c.tipo, cantidad: c.cantidad, precioUnitario: 0 }))
   }
