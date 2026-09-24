@@ -16,6 +16,8 @@ interface CotizacionResumen {
   valor_total: number | null
   descripcion: string | null
   created_at: string | null
+  /** El precio de la tarifa que escogió el cliente, si la hay. Manda sobre `valor_total`. */
+  precio_aceptado?: number | null
 }
 
 interface BloqueCotizacionProps {
@@ -264,8 +266,8 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
                       {nombreMostrable(cot.descripcion)
                         ?? (cot.modo === 'flash' ? 'Cotización rápida' : 'Cotización detallada')}
                     </p>
-                    {cot.valor_total !== null && (
-                      <p className="text-[10px] text-tinta-suave tabular-nums">{fmt(cot.valor_total)}</p>
+                    {(cot.precio_aceptado ?? cot.valor_total) !== null && (
+                      <p className="text-[10px] text-tinta-suave tabular-nums">{fmt((cot.precio_aceptado ?? cot.valor_total) as number)}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">

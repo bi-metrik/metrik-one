@@ -32,6 +32,8 @@ import {
   calcularCostoHoras,
   resolverLineaBase,
   presupuestoDeCosto,
+  itemsDeLaTarifaAceptada,
+  precioDeLaCotizacionAceptada,
   type ItemPresupuesto,
   type RubroPresupuesto,
   type RubroPresupuestoEjecutado,
@@ -39,6 +41,8 @@ import {
   type HorasSinTarifa,
   type LineaBase,
 } from '@/lib/negocios/presupuesto-ejecucion'
+import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
+import { cascadaDeItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itinerarios'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import {
   modoCierre,
@@ -6708,6 +6712,13 @@ export type CotizacionResumen = {
   costo_total: number | null
   descripcion: string | null
   created_at: string | null
+  /** La tarifa que escogió el cliente al aprobar. `null` = sin tarifas. */
+  tarifa_aceptada_id?: string | null
+  /**
+   * El precio de la tarifa escogida (`negocios.precio_aprobado`), solo en la cotización
+   * aceptada que la tiene. Ausente = se muestra `valor_total`, como siempre.
+   */
+  precio_aceptado?: number | null
 }
 
 export async function getNegocioDetalleCompleto(id: string): Promise<{
@@ -6947,7 +6958,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .order('fecha', { ascending: false }),
     supabase
       .from('cotizaciones')
-      .select('id, consecutivo, modo, estado, valor_total, costo_total, descripcion, created_at')
+      .select('id, consecutivo, modo, estado, valor_total, costo_total, descripcion, created_at, tarifa_aceptada_id')
       .eq('negocio_id' as never, id)
       .order('created_at', { ascending: false }),
     supabase
@@ -7181,6 +7192,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     costo_total: c.costo_total as number | null,
     descripcion: c.descripcion as string | null,
     created_at: c.created_at as string | null,
+    tarifa_aceptada_id: (c.tarifa_aceptada_id ?? null) as string | null,
   }))
 
   // Cuál cotización fija el presupuesto, o por qué no hay línea base. La elección es
@@ -7190,6 +7202,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // presupuesto dependía de un detalle de otra parte del archivo.
   const lineaBase = resolverLineaBase(cotizacionesNegocio)
   const cotizacionAceptada = lineaBase.estado === 'aprobada' ? lineaBase.cotizacion : undefined
+  // La tarifa que escogió el cliente (`presupuesto-ejecucion.ts`): con ella, el presupuesto,
+  // «Cotizado», «Por cobrar» y la tarjeta de la cotización son los de ESA tarifa, no los de
+  // todas las opciones ni los de la Recomendada. Sin ella, todo como antes (R6).
+  const conTarifaAceptada = !!cotizacionAceptada?.tarifa_aceptada_id
+  if (cotizacionAceptada && conTarifaAceptada && (base.negocio.precio_aprobado ?? 0) > 0) {
+    cotizacionAceptada.precio_aceptado = base.negocio.precio_aprobado
+  }
 
   // ¿Se le puede ofrecer "Corregir" a esa cotización aceptada? Cuatro condiciones, y la
   // tercera es la que hace que esto sea genérico: el bloque de cotización de la etapa
@@ -7216,8 +7235,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   let presupuestoPorRubro: RubroPresupuesto[] = []
   let precioAprobado: number | undefined = undefined
 
+  // El costo de la tarifa escogida, para cuando la cotización no trae rubros (lo que era
+  // `costo_total`, que es el de la Recomendada).
+  let costoRespaldo: number | null | undefined = cotizacionAceptada?.costo_total
   if (cotizacionAceptada) {
-    precioAprobado = cotizacionAceptada.valor_total ?? undefined
+    precioAprobado = precioDeLaCotizacionAceptada({
+      valorTotal: cotizacionAceptada.valor_total,
+      conTarifaAceptada,
+      precioAprobadoNegocio: base.negocio.precio_aprobado,
+    })
     const { data: itemsConRubros } = await supabase
       .from('items')
       // `rubros(*)`: `sugerido` lo agrega `20260914230000` y nombrarlo devolveria un
@@ -7228,8 +7254,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .eq('cotizacion_id', cotizacionAceptada.id)
       .order('orden')
 
+    let seleccion: string[] | null = null
+    if (conTarifaAceptada) {
+      const filas = await leerItinerarios(supabase, cotizacionAceptada.id)
+      const fila = filas?.find(f => f.id === cotizacionAceptada.tarifa_aceptada_id) ?? null
+      if (fila) {
+        seleccion = fila.seleccion
+        const ctx = await contextoDeCotizacion(supabase, cotizacionAceptada.id)
+        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).costoDirecto : costoRespaldo
+      }
+    }
     presupuestoPorRubro = calcularPresupuestoPorRubro(
-      (itemsConRubros ?? []) as ItemPresupuesto[],
+      itemsDeLaTarifaAceptada((itemsConRubros ?? []) as (ItemPresupuesto & ItemConGrupo)[], seleccion),
     )
   }
 
@@ -8394,7 +8430,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         // Contra esto se mide el sobrecosto. Cuadra con `cotizaciones.costo_total`.
         // Sin rubros el presupuesto no desaparece: cae al costo total de la cotización.
         // Ver `presupuestoDeCosto`.
-        presupuestoCosto: presupuestoDeCosto(presupuestoPorRubro, cotizacionAceptada?.costo_total),
+        presupuestoCosto: presupuestoDeCosto(presupuestoPorRubro, costoRespaldo),
         precioAprobado,
         sinPresupuesto:
           reparto.sinPresupuesto.total > 0 ? reparto.sinPresupuesto : undefined,
