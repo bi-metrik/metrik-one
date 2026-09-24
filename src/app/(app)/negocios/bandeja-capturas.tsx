@@ -5,9 +5,7 @@ import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { detectarCaptura } from '@/app/(app)/negocios/ranura-actions'
 import {
-  leerCapturaEnBorrador,
   quitarHabitacion,
   type BorradorParaAceptar,
   type LecturaDevuelta,
@@ -23,6 +21,7 @@ import {
   type EstadoDeProceso,
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
+import { aceptarPorRuta, detectarPorRuta, leerPorRuta } from '@/lib/cotizaciones/bandeja-red'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
 import { pantallazosEnCotizacion, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import {
@@ -355,8 +354,9 @@ export default function BandejaCapturas({
   const dependencias = useCallback((id: string, dataUrl: string): DependenciasDeProceso => {
     const turno = turnos.current.get(id) ?? nuevoTurno(id)
     return {
-      detectar: () => detectarCaptura(cotizacionId, dataUrl),
-      leer: (tipo, enfoque) => leerCapturaEnBorrador(cotizacionId, tipo, dataUrl, enfoque),
+      // Por fetch y no por server action: ver `bandeja-red.ts` (la fila de acciones de Next).
+      detectar: () => detectarPorRuta(cotizacionId, dataUrl),
+      leer: (tipo, enfoque) => leerPorRuta(cotizacionId, tipo, dataUrl, enfoque),
       revisar: borrador => revisarBorrador({
         capId: id,
         borrador,
@@ -612,18 +612,7 @@ export default function BandejaCapturas({
       destinoId: destinoId ?? null, imagen: c.dataUrl || null,
       correcciones: correcciones.length > 0 ? correcciones : null,
     }
-    const turno = colaAceptar.current.then(async () => {
-      try {
-        const res = await fetch(`/api/cotizaciones/${encodeURIComponent(cotizacionId)}/aceptar-captura`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cuerpo),
-        })
-        return (await res.json()) as ResultadoAceptarCaptura
-      } catch {
-        return null
-      }
-    })
+    const turno = colaAceptar.current.then(() => aceptarPorRuta(cotizacionId, cuerpo))
     colaAceptar.current = turno.catch(() => undefined)
     const d = desenlaceDeAceptacion(await turno)
     aceptando.current.delete(c.id)
