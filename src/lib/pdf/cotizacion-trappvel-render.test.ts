@@ -592,6 +592,31 @@ describe('el hueco de la foto', () => {
   })
 })
 
+describe('la foto del hotel ocupa el lugar de la foto de la ciudad (2026-09-24)', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const DE_LA_CIUDAD = {
+    url: PNG,
+    rotulo: 'Cancun · punta nizuc',
+    credito: 'Autor de la ciudad (Wikimedia Commons, CC BY 4.0)',
+    lugares: ['Cancun'],
+  }
+
+  it('sin foto del hotel, el capítulo lleva la foto provisional de la ciudad con su crédito', async () => {
+    const t = await texto(props({ viaje: viaje({ fotosCiudades: [DE_LA_CIUDAD] }) }))
+    expect(t).toContain('PUNTA NIZUC')
+    expect(t).toContain('Fotografías: Autor de la ciudad')
+  })
+
+  it('con foto del hotel, la de la ciudad no se imprime ni se acredita, y el hotel sigue ahí', async () => {
+    const t = await texto(props({
+      viaje: viaje({ fotosCiudades: [DE_LA_CIUDAD], hoteles: [{ ...HOTEL, foto: { url: PNG, proporcion: 1.5 } }] }),
+    }))
+    expect(t).not.toContain('PUNTA NIZUC')
+    expect(t).not.toContain('Fotografías')
+    expect(t).toContain('Crown Paradise')
+  })
+})
+
 describe('los tres niveles de detalle', () => {
   it('«muy detallada» agrega la descripción del día y el precio por pasajero de cada línea', async () => {
     const t = await texto(props({ viaje: viaje({ nivelDetalle: 'muy_detallada' }) }))

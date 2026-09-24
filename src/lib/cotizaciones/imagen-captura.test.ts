@@ -18,7 +18,7 @@ vi.mock('@/lib/almacenamiento/supabase-externo', () => ({
   },
 }))
 
-const { borrarImagenesDeCaptura, bytesDeDataUrl, guardarImagenDeCaptura, imagenesDeTarifa } = await import('./imagen-captura')
+const { borrarImagenesDeCaptura, bytesDeDataUrl, guardarImagenDeCaptura, imagenesAlBorrarOpcion, imagenesDeTarifa } = await import('./imagen-captura')
 const { huellaDeImagen } = await import('./captura-repetida')
 
 const DATA_URL = `data:image/png;base64,${Buffer.from('pantallazo de prueba').toString('base64')}`
@@ -82,5 +82,18 @@ describe('bytes y referencias', () => {
   it('borrar solo toca referencias del almacenamiento externo', async () => {
     await borrarImagenesDeCaptura('ws', ['sbext://a', 'https://drive.google.com/x', null])
     expect(borradas).toEqual(['sbext://a'])
+  })
+})
+
+describe('al borrar una opción, la foto del hotel se va siempre', () => {
+  const FOTO = 'sbext://one-documentos/negocios/n/fotos-hotel/c/i-1.jpg'
+  const CAPTURA = 'sbext://one-documentos/negocios/n/capturas/c/h.png'
+  const tarifa = { casillas: { grupo_completo: { imagenRef: CAPTURA } }, fotoHotel: { ref: FOTO, proporcion: 1.5 } } as never
+
+  it('borrada del todo: pantallazos y foto', () => {
+    expect(imagenesAlBorrarOpcion(tarifa)).toEqual([CAPTURA, FOTO])
+  })
+  it('devuelta a la bandeja: los pantallazos se quedan, la foto no', () => {
+    expect(imagenesAlBorrarOpcion(tarifa, { conservarImagenes: true })).toEqual([FOTO])
   })
 })

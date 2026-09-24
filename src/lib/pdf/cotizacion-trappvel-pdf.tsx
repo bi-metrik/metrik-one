@@ -14,8 +14,8 @@
  * **1 · Lo que no existe no se pinta, y el documento no se ve roto por eso.** No hay
  * placeholders, ni rayas, ni «—» en una ficha vacía: la ficha no aparece. Sin foto de
  * portada la banda no existe y el bloque sube; sin párrafo de destino, sin cargos, sin
- * opcionales, la sección no se imprime. Lo que todavía no tiene campo (foto del hotel,
- * «Antes de viajar», «Incluido en el plan») está dibujado y espera el dato: no se inventa
+ * opcionales, la sección no se imprime. Lo que todavía no tiene campo («Antes de viajar»,
+ * «Incluido en el plan») está dibujado y espera el dato: no se inventa
  * contenido, y tampoco se rellena con lo que ya está dicho en otra sección.
  *
  * **2 · El dinero se imprime en «Inversión».** Los vuelos, los hoteles y la línea de tiempo
@@ -465,9 +465,6 @@ function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; ge
   const t = textosDeTarjetaHotel(h, general)
   return (
     <View wrap={false} style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: 11, marginTop: arriba ? 0 : 12 }}>
-      {h.foto && (
-        <PdfImage src={h.foto.url} style={{ width: 80, height: 60, objectFit: 'cover', borderRadius: 8, marginRight: 11 }} />
-      )}
       <View style={{ flex: 1 }}>
         <ChipsDeTarifa tarifas={tarifas} de={h} />
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
@@ -1218,6 +1215,15 @@ export default function CotizacionTrappvelPDF({
     if (i === -1) fotosSueltas.push(f)
     else fotoDeCapitulo.set(i, [...(fotoDeCapitulo.get(i) ?? []), f])
   }
+  // La foto del hotel que puso el asesor ocupa el MISMO lugar que la foto provisional de su
+  // ciudad y la reemplaza (`foto-hotel.ts`): no hay un segundo lugar para fotos.
+  const reemplazadas = new Set<FotoPDF>()
+  capitulos.forEach((c, i) => {
+    const f = c.hotel?.foto
+    if (!f) return
+    for (const vieja of fotoDeCapitulo.get(i) ?? []) reemplazadas.add(vieja)
+    fotoDeCapitulo.set(i, [{ url: f.url, rotulo: null, credito: null, proporcion: f.proporcion ?? undefined }])
+  })
 
   // La línea de tiempo: los días del itinerario y los días de vuelo (solo los de la
   // tarifa principal: los de las alternativas se ven en la tabla con su chip).
@@ -1300,7 +1306,9 @@ export default function CotizacionTrappvelPDF({
     entradasDe.set(i, [...(entradasDe.get(i) ?? []), e])
   }
 
-  const creditos = creditosDeFotos([v.foto, ...fotosCiudades])
+  // Los créditos de las fotos que se IMPRIMEN: una foto de ciudad que reemplazó la del hotel
+  // no se nombra.
+  const creditos = creditosDeFotos([v.foto, ...fotosCiudades.filter(f => !reemplazadas.has(f))])
   const antesDeViajar = v.antesDeViajar ?? []
 
   /**

@@ -171,11 +171,15 @@ export interface HotelPDF {
   /** Ver `VueloPDF.nota`. */
   nota?: string | null
   /**
-   * La foto del hotel (camino B de la §5 de `propuesta-visual.md`). ⚠️ SIN CONSTRUIR: nadie
-   * la llena todavía. La plantilla ya le reserva la miniatura y, sin foto, la tarjeta
-   * arranca en el texto.
+   * La foto del hotel que puso el asesor (`foto-hotel.ts`), ya lista para imprimir: la acción
+   * del PDF la descarga del almacenamiento a partir de `fotoRef`. La plantilla la pone en el
+   * lugar de la foto provisional de la ciudad; sin foto, el documento sale como antes.
    */
-  foto?: { url: string } | null
+  foto?: { url: string; proporcion?: number | null } | null
+  /** Dónde está guardada la foto del hotel (`sbext://…`). Ausente = sin foto. */
+  fotoRef?: string
+  /** Ancho entre alto de la foto guardada. */
+  fotoProporcion?: number | null
 }
 
 /**
@@ -603,6 +607,8 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       localizador: null,
       adicionales: item.adicionales ?? [],
       nota: notaDeLaLinea(item),
+      // Sin foto del hotel la llave no aparece: la ficha de siempre se arma igual que antes.
+      ...(tarifa.fotoHotel ? { fotoRef: tarifa.fotoHotel.ref, fotoProporcion: tarifa.fotoHotel.proporcion } : {}),
     })
   }
   return out
