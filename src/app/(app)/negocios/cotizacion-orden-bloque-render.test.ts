@@ -101,9 +101,9 @@ describe('§2.5 · en un viaje no se ofrecen rubros', () => {
 })
 
 describe('§2.3 · el grupo sale de la primera fila', () => {
-  it('con líneas por tipo, el desplegable vive detrás del menú ⋯ de la opción («Pasar a otra ranura…»)', () => {
+  it('con líneas por tipo, el desplegable vive detrás del menú ⋯ de la opción («Mover a otro bloque»)', () => {
     const html = pintar(true)
-    expect(html).toContain('aria-label="Más acciones de la opción"')
+    expect(html).toContain('aria-label="Más acciones"')
     expect(html).not.toContain('aria-label="Grupo de la línea"')
   })
 
@@ -169,7 +169,9 @@ describe('adicionales: el editor los monta donde corresponde', () => {
     )
   }
 
-  const ROTULO = 'Adicionales de esta opcion'.replace('opcion', 'opción')
+  // En la tarjeta (2026-09-24) los adicionales son filas de «Costo y precio» y se agregan con
+  // «+ Adicional», que solo aparece donde la sección existe.
+  const ROTULO = '+ Adicional'
 
   it('en una linea de VUELO la seccion existe', () => {
     const t = sinEtiquetas(pintarCon(ITEM, { disponible: true, porItem: {} }))

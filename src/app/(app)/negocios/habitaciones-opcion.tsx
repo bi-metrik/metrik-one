@@ -5,7 +5,6 @@ import { AlertTriangle, BedDouble, Check, Image as ImageIcon, Loader2, X } from 
 import { toast } from 'sonner'
 
 import {
-  cambiarRolHabitacion,
   confirmarTarifaPorPasajero,
   leerCasillaDeItem,
   quitarHabitacion,
@@ -34,8 +33,8 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
  *
  * Diseño: `reunion-edgar-alejandra-2026-09-23.md`, «R8 resuelto», regla 5: el bloque dice
  * cuántos lugares del grupo quedan cubiertos («6/6 adultos · 1/1 niño · 0/1 infante») y lo
- * que falta; cada captura dice si es «Habitación N» o «Solo para restar», y un toque cambia su
- * papel.
+ * que falta; cada captura dice si es «Habitación N» o «Solo para restar». El papel lo decide el
+ * reparto: desde la tarjeta del 2026-09-24 ya no se cambia con un toque.
  *
  * Nada de lo que se pinta se decide aquí: el reparto, los cupos y el costo salen de
  * `habitaciones.ts`, el mismo módulo que usa la confirmación en el servidor.
@@ -149,10 +148,6 @@ export default function HabitacionesDeOpcion({
             key={h.id}
             h={h}
             deshabilitado={ocupado}
-            onCambiarRol={rol => accion(
-              () => cambiarRolHabitacion(itemId, h.id, rol),
-              rol === 'referencia' ? 'Queda solo para restar.' : rol === 'habitacion' ? 'Queda como habitación.' : 'El papel vuelve a decidirse solo.',
-            )}
             onQuitar={() => accion(() => quitarHabitacion(itemId, h.id), 'Habitación quitada.')}
           />
         ))}
@@ -261,14 +256,14 @@ export default function HabitacionesDeOpcion({
 export function FilaHabitacion({
   h,
   deshabilitado,
-  onCambiarRol,
   onQuitar,
 }: {
   h: HabitacionRepartida
   deshabilitado: boolean
-  onCambiarRol: (rol: 'habitacion' | 'referencia' | null) => void
   onQuitar: () => void
 }) {
+  // El papel de la captura lo decide el reparto. El que una persona fijó antes (`rolManual`)
+  // sigue en los datos, pero ya no se cambia desde la pantalla (tarjeta del 2026-09-24).
   const esHabitacion = h.rol === 'habitacion'
   return (
     <li className="flex items-start gap-2 rounded-md border bg-background px-2 py-1.5" data-habitacion={h.id}>
@@ -285,26 +280,6 @@ export function FilaHabitacion({
         </p>
         {h.sirveParaRestar && (
           <p className="text-[10px] text-muted-foreground">Sirve para restar el precio del menor de su mismo tipo de habitación.</p>
-        )}
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-0.5">
-        <button
-          type="button"
-          disabled={deshabilitado}
-          onClick={() => onCambiarRol(esHabitacion ? 'referencia' : 'habitacion')}
-          className="rounded-md border px-1.5 py-0.5 text-[10px] font-medium hover:bg-accent disabled:opacity-50"
-        >
-          {esHabitacion ? 'Usar solo para restar' : 'Usar como habitación'}
-        </button>
-        {h.manual && (
-          <button
-            type="button"
-            disabled={deshabilitado}
-            onClick={() => onCambiarRol(null)}
-            className="text-[10px] text-muted-foreground underline underline-offset-2 disabled:opacity-50"
-          >
-            Que lo decida el reparto
-          </button>
         )}
       </div>
       <button

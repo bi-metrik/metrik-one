@@ -168,6 +168,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'EDAD de un pasajero: un menor de menos de 2 años cuenta como infante en una habitación ' +
       'de hotel (R8, regla 7 de Trappvel). No hay plazo de conservación en este archivo.',
   },
+  'src/lib/cotizaciones/tarjeta-opcion.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un pasajero en la tarjeta de la opción de hotel («2 adultos + 1 niño (5 años)»). ' +
+      'No hay plazo de conservación en este archivo.',
+  },
   'src/lib/cotizaciones/lectura-casilla.ts': {
     tipo: 'no-es-plazo',
     razon:

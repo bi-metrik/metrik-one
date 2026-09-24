@@ -114,11 +114,22 @@ const pintar = (lineasPorTipo: boolean, items = LINEAS) =>
   )
 
 /** El trozo del HTML que va dentro del bloque de una ranura. */
+/**
+ * El HTML del bloque de esa ranura, hasta SU `</section>`: la tarjeta de cada opción trae
+ * secciones propias («Alojamiento», «Costo y precio»), así que se cuentan las anidadas.
+ */
 function bloque(html: string, etiqueta: string): string {
-  const inicio = html.indexOf(`aria-label="Ranura ${etiqueta}"`)
-  if (inicio < 0) return ''
-  const fin = html.indexOf('</section>', inicio)
-  return html.slice(inicio, fin)
+  const marca = html.indexOf(`aria-label="Ranura ${etiqueta}"`)
+  if (marca < 0) return ''
+  const inicio = html.lastIndexOf('<section', marca)
+  const tags = /<section\b|<\/section>/g
+  tags.lastIndex = inicio
+  let profundidad = 0
+  for (let m = tags.exec(html); m; m = tags.exec(html)) {
+    profundidad += m[0] === '</section>' ? -1 : 1
+    if (profundidad === 0) return html.slice(inicio, m.index)
+  }
+  return html.slice(inicio)
 }
 
 describe('Trappvel · la cotización se dibuja por ranuras', () => {

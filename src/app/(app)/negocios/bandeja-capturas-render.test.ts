@@ -33,7 +33,7 @@ vi.mock('@/app/(app)/negocios/ranura-actions', () => ({
   detectarCaptura: async () => ({ ok: false, codigo: 'SIN_TIPO', mensaje: '' }),
 }))
 
-const { FilaCaptura, enElAireCaptura, opcionesParaComparar, desenlaceDeAceptacion, textoDeAceptada, textoDelPie } = await import('./bandeja-capturas')
+const { FilaCaptura, enElAireCaptura, opcionesParaComparar, desenlaceDeAceptacion, textoDeAceptada, textoDelPie, pendientesPorOpcion } = await import('./bandeja-capturas')
 type Captura = Parameters<typeof FilaCaptura>[0]['captura']
 
 const LECTURAS = fixture as unknown as Record<string, Record<string, string | null>>
@@ -291,5 +291,20 @@ describe('las opciones contra las que se compara (P10)', () => {
     const r = opcionesParaComparar(items, cs, 'c-propia')
     expect(r.map(o => o.id).sort()).toEqual(['borrador:c-borrador', 'item-1', 'p1'])
     expect(r.find(o => o.id === 'item-1')?.nombre).toBe('fresca')
+  })
+})
+
+describe('el ⚠ de la tarjeta: qué opción tiene un pantallazo esperando (R8, regla 6)', () => {
+  const sobra = (id: string, conItemId: string, habitacion = true) =>
+    ({ id, estado: { fase: 'parecida' as const, conItemId, donde: 'Opción 2', alertas: [], habitacion } })
+
+  it('la habitación que sobra señala su opción; la primera captura gana', () => {
+    expect(pendientesPorOpcion([sobra('c1', 'o2'), sobra('c2', 'o2'), sobra('c3', 'o1')])).toEqual({ o2: 'c1', o1: 'c3' })
+  })
+
+  it('una parecida que no es habitación, o contra un borrador, no es de ninguna tarjeta', () => {
+    expect(pendientesPorOpcion([sobra('c1', 'o2', false)])).toEqual({})
+    expect(pendientesPorOpcion([sobra('c1', 'borrador:cap-9')])).toEqual({})
+    expect(pendientesPorOpcion([{ id: 'c1', estado: { fase: 'lista' as const, alertas: [] } }])).toEqual({})
   })
 })

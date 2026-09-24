@@ -1022,6 +1022,34 @@ async function reconfirmar(itemId: string): Promise<{ tarifa: TarifaPax | null; 
   return c.success ? { tarifa: c.tarifa ?? null, pendiente: null } : { tarifa: null, pendiente: c.error ?? null }
 }
 
+/**
+ * «Quitar habitación» de la tarjeta: la quita y confirma el costo otra vez con las que quedan,
+ * para que la tabla de costo y precio no siga contando la que se fue.
+ */
+export async function quitarHabitacionDeOpcion(
+  itemId: string,
+  habitacionId: string,
+): Promise<ResultadoTarifa & { opcionRetirada?: boolean; pendiente?: string | null }> {
+  const r = await quitarHabitacion(itemId, habitacionId)
+  if (!r.success || r.opcionRetirada) return r
+  const c = await reconfirmar(itemId)
+  return { ...r, tarifa: c.tarifa ?? r.tarifa, pendiente: c.pendiente }
+}
+
+/**
+ * «Falta 1 infante: pega su habitación.»: la captura pegada en la tarjeta se lee como otra
+ * habitación de ESTA opción (mismo hotel, mismas fechas) y el costo se confirma otra vez.
+ */
+export async function sumarHabitacionAOpcion(
+  itemId: string,
+  dataUrl: string,
+): Promise<ResultadoCasilla & { pendiente?: string | null }> {
+  const r = await leerCasillaDeItem(itemId, 'grupo_completo', dataUrl, null, null, { comoHabitacion: true })
+  if (!r.ok) return r
+  const c = await reconfirmar(itemId)
+  return { ...r, tarifa: c.tarifa ?? r.tarifa, pendiente: c.pendiente }
+}
+
 export interface CambiosDeAjuste {
   /** El margen de la opción. `undefined` = no se toca; `null` = hereda el de la cotización. */
   margenPct?: number | null

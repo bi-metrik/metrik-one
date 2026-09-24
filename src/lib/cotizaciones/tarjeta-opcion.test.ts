@@ -123,6 +123,18 @@ const ROOMS: Habitacion[] = [
 ]
 
 describe('el alojamiento', () => {
+  it('lo que una persona corrigió de una habitación manda sobre lo leído', () => {
+    const corregida: Habitacion = {
+      ...ROOMS[2],
+      correccion: { ocupacion: { adultos: 1, ninos: 0, infantes: 0 }, total: 900000, por: 'Alejandra', porId: 'p1', en: AHORA },
+    }
+    const r = repartirHabitaciones([ROOMS[0], ROOMS[1], corregida], GRUPO)
+    const h3 = r.habitaciones.find(h => h.id === 'h3')!
+    expect(h3.ocupacion).toEqual({ adultos: 1, ninos: 0, infantes: 0 })
+    expect(h3.total).toBe(900000)
+    expect(resumenDeAlojamiento(r).titulo).toBe('3 habitaciones · falta 1 adulto')
+  })
+
   it('«3 habitaciones · cubre a los 8 viajeros» y los cupos completos', () => {
     const r = resumenDeAlojamiento(repartirHabitaciones(ROOMS, GRUPO))
     expect(r.titulo).toBe('3 habitaciones · cubre a los 8 viajeros')

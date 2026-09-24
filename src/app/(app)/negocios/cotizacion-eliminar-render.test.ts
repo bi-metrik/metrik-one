@@ -112,17 +112,34 @@ const pintar = (lineasPorTipo: boolean, extra: Record<string, unknown> = {}) =>
     }),
   )
 
+/**
+ * El HTML del bloque de esa ranura, hasta SU `</section>`: la tarjeta de cada opción trae
+ * secciones propias («Alojamiento», «Costo y precio»), así que se cuentan las anidadas.
+ */
 function bloque(html: string, etiqueta: string): string {
-  const inicio = html.indexOf(`aria-label="Ranura ${etiqueta}"`)
-  if (inicio < 0) return ''
-  return html.slice(inicio, html.indexOf('</section>', inicio))
+  const marca = html.indexOf(`aria-label="Ranura ${etiqueta}"`)
+  if (marca < 0) return ''
+  const inicio = html.lastIndexOf('<section', marca)
+  const tags = /<section\b|<\/section>/g
+  tags.lastIndex = inicio
+  let profundidad = 0
+  for (let m = tags.exec(html); m; m = tags.exec(html)) {
+    profundidad += m[0] === '</section>' ? -1 : 1
+    if (profundidad === 0) return html.slice(inicio, m.index)
+  }
+  return html.slice(inicio)
 }
 
 describe('P12 · eliminar una opción y un bloque (Trappvel)', () => {
-  it('cada opción del bloque se elimina desde su fila, sin abrirla', () => {
+  it('cada opción del bloque se elimina desde el menú ⋯ de su tarjeta, sin abrirla', () => {
+    // Prototipo de la tarjeta (2026-09-24): «Eliminar opción» vive en el ⋯ y se confirma ahí.
     const dentro = bloque(pintar(true), 'Vuelo 3 · Vuelo a Providencia')
-    expect(dentro).toContain('data-eliminar-opcion="op1"')
-    expect(dentro).toContain('data-eliminar-opcion="op2"')
+    for (const id of ['op1', 'op2']) {
+      const desde = dentro.indexOf(`data-tarjeta-opcion="${id}"`)
+      expect(desde).toBeGreaterThan(-1)
+      expect(dentro.indexOf('aria-label="Más acciones"', desde)).toBeGreaterThan(desde)
+    }
+    expect(dentro).not.toContain('data-eliminar-opcion')
   })
 
   it('el encabezado del bloque tiene el menú ⋯ junto a «+ Opción»', () => {

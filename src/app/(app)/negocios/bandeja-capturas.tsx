@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type DragEvent, type ReactNode, type Ref } from 'react'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -10,6 +10,7 @@ import {
   leerCapturaEnBorrador,
   quitarHabitacion,
   type BorradorParaAceptar,
+  type LecturaDevuelta,
   type ComoEntro,
   type ResultadoAceptarCaptura,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
@@ -41,7 +42,7 @@ import {
 } from '@/lib/cotizaciones/revision-captura'
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
-import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, INPUT_DUDOSO, LINK, SPIN } from '@/components/viaje/estilo'
@@ -146,6 +147,36 @@ export interface ItemDeBandeja {
   cargo_destino_valor?: number | string | null
   cargo_destino_moneda?: string | null
   es_ajuste?: boolean | null
+}
+
+/**
+ * Los pantallazos de una opción eliminada desde su tarjeta («Sus habitaciones vuelven a la
+ * bandeja»). `clave` identifica la devolución: la bandeja la recibe una sola vez. `itemId` es la
+ * opción que se fue: mientras la página no se refresque sigue en `items`, y compararse contra
+ * ella las haría ver repetidas.
+ */
+export interface DevolucionABandeja {
+  clave: string
+  itemId: string
+  lecturas: LecturaDevuelta[]
+}
+
+/** Lo que la bandeja expone para recibir los pantallazos de una opción eliminada. */
+export interface ReceptorDeBandeja {
+  recibir: (d: DevolucionABandeja) => void
+}
+
+/**
+ * Las opciones de hotel con un pantallazo esperando la decisión de si sobra (R8, regla 6):
+ * `itemId → id de la captura`. La tarjeta pinta su ⚠ con esto y «Ir a la bandeja» va a la fila.
+ */
+export function pendientesPorOpcion(capturas: readonly Pick<Captura, 'id' | 'estado'>[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const c of capturas) {
+    const e = c.estado
+    if (e.fase === 'parecida' && e.habitacion && !esIdDeBorrador(e.conItemId) && !(e.conItemId in out)) out[e.conItemId] = c.id
+  }
+  return out
 }
 
 /** Cuánto se queda a la vista una repetida antes de quitarse sola: la ventana de «Deshacer». */
@@ -260,6 +291,8 @@ export default function BandejaCapturas({
   onOpcionCreada,
   ubicaciones = SIN_UBICACIONES,
   enMarco = false,
+  receptor,
+  onPendientes,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -271,6 +304,10 @@ export default function BandejaCapturas({
   ubicaciones?: Record<string, Ubicacion>
   /** Dentro del marco del negocio: salir por un enlace con trabajo sin aceptar pregunta antes. */
   enMarco?: boolean
+  /** Por aquí la tarjeta devuelve los pantallazos de una opción eliminada. */
+  receptor?: Ref<ReceptorDeBandeja>
+  /** Qué opciones de hotel tienen un pantallazo esperando decisión (`pendientesPorOpcion`). */
+  onPendientes?: (porOpcion: Record<string, string>) => void
 }) {
   const router = useRouter()
   const idEntrada = useId()
@@ -375,6 +412,55 @@ export default function BandejaCapturas({
     })()
     lector.readAsDataURL(archivo)
   }, [actualizar, procesar])
+
+  // Lo que devuelve una opción eliminada entra como recién leído: con su borrador firmado, y se
+  // revisa contra la cotización de ahora (sin la opción que se fue).
+  const recibidas = useRef(new Set<string>())
+  const recibirDevolucion = useCallback((d: DevolucionABandeja) => {
+    {
+      if (recibidas.current.has(d.clave)) return
+      recibidas.current.add(d.clave)
+      const lineas = itemsVivos.current.filter(i => i.id !== d.itemId)
+      const nuevas: Captura[] = []
+      for (const l of d.lecturas) {
+        let lectura: LecturaCasilla
+        try { lectura = JSON.parse(l.lecturaJson) as LecturaCasilla } catch { continue }
+        const id = nuevoId()
+        const borrador: Borrador = { tipo: l.tipo, lectura, lecturaJson: l.lecturaJson, firma: l.firma, pistas: l.pistas }
+        const r = revisarBorrador({
+          capId: id,
+          borrador,
+          lineas,
+          comparables: opcionesParaComparar(lineas, [...nuevas, ...vigentes.current], id),
+          composicion: composicionViva.current,
+          ubicaciones: ubicacionesVivas.current,
+          comparar: true,
+        })
+        const alertas = lectura.alertas ?? []
+        if (l.huella) huellas.current.set(l.huella, id)
+        const dataUrl = l.imagen ?? ''
+        nuevas.push({
+          id, preview: dataUrl, dataUrl,
+          estado: r.pregunta ? { ...r.pregunta, alertas } : { fase: 'lista', alertas },
+          tipo: l.tipo, pistas: l.pistas, borrador, itemId: null, donde: r.donde, como: r.como ?? null,
+          leida: r.leida, error: null, huella: l.huella, ...(r.pregunta ? { abierta: true } : {}),
+        })
+      }
+      if (nuevas.length > 0) setCapturas(cs => [...nuevas, ...cs])
+    }
+  }, [])
+  useImperativeHandle(receptor, () => ({ recibir: recibirDevolucion }), [recibirDevolucion])
+
+  // La tarjeta de cada opción de hotel pinta su ⚠ cuando aquí hay una habitación que sobra.
+  const ultimosPendientes = useRef('')
+  useEffect(() => {
+    if (!onPendientes) return
+    const porOpcion = pendientesPorOpcion(capturas)
+    const firma = JSON.stringify(porOpcion)
+    if (firma === ultimosPendientes.current) return
+    ultimosPendientes.current = firma
+    onPendientes(porOpcion)
+  }, [capturas, onPendientes])
 
   // Ctrl/Cmd+V en cualquier parte de la cotización. Lo que pegue una zona propia (la lectura
   // de una línea) ya viene con `defaultPrevented`, y en un campo de texto se pega texto.

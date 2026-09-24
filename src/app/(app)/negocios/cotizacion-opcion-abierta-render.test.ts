@@ -4,8 +4,9 @@
  *
  *  · P6: la fila contraída dice lo que sirve para comparar, no el costo unitario ni la
  *    descripción larga, y nace contraída si ya está confirmada.
- *  · P2: abierta, en orden: nombre con lápiz, ficha, nota para el cliente, precio en una
- *    línea con «Ajustar», adicionales, «Corregir datos» y el menú ⋯.
+ *  · La tarjeta (prototipo aprobado el 2026-09-24): cabecera con «Opción N», el nombre, el
+ *    precio y el menú ⋯; abierta, en orden: ficha, «Costo y precio» y la nota para el cliente.
+ *    Sin costo confirmado, debajo queda lo que la opción todavía necesita a mano.
  *  · R6: fuera del flujo de viaje la línea no cambia (lo prueba además el golden de R6).
  *
  * Se queda en `.ts`: el `include` de vitest es `src/**\/*.test.ts`.
@@ -122,20 +123,20 @@ describe('P6 · la fila contraída de una opción', () => {
   })
 })
 
-describe('P2 · la opción abierta', () => {
-  it('va en orden: nombre, ficha, nota, precio, corregir', () => {
+describe('la tarjeta de la opción abierta', () => {
+  it('va en orden: cabecera con su menú, ficha, costo y precio, nota', () => {
     const html = pintar([opcion()])
-    const t = sinEtiquetas(html)
     const posiciones = [
-      html.indexOf('aria-label="Nombre de la opción"'),
+      html.indexOf('data-tarjeta-opcion="item-1"'),
+      html.indexOf('>Opción 1<'),
+      html.indexOf('aria-label="Más acciones"'),
       html.indexOf('Ida lun 9 nov · BOG 06:05 → ADZ 08:20 · directo'),
+      html.indexOf('data-costo-precio'),
       html.indexOf('Nota para el cliente'),
-      html.indexOf('Ajustar'),
-      html.indexOf('aria-label="Más acciones de la opción"'),
     ]
     expect(posiciones.every(p => p > 0)).toBe(true)
     expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones)
-    expect(t).toContain('2 adultos, 1 infante')
+    expect(sinEtiquetas(html)).toContain('2 adultos, 1 infante')
   })
 
   it('la descripción que escribió ONE no es nota; la de una persona sí', () => {
@@ -145,32 +146,26 @@ describe('P2 · la opción abierta', () => {
     expect(dePersona).toContain('>INCLUYE TRASLADO AL HOTEL</textarea>')
   })
 
-  it('el precio va en una línea y los ajustes quedan cerrados en una opción con pantallazo', () => {
-    const t = sinEtiquetas(pintar([opcion()]))
-    expect(t).toMatch(/Costo \$ 1\.000\.000 Precio \$ 1\.176\.471 margen 15,0% Ajustar/)
-    // Cantidad y descuento viven detrás de «Ajustar».
-    expect(t).not.toContain('Desc. compra %')
-    expect(t).not.toContain('Descripción (visible al cliente)')
+  it('sin costo confirmado, la tabla dice el total y debajo queda lo que falta hacer a mano', () => {
+    const html = pintar([opcion()])
+    const t = sinEtiquetas(html)
+    expect(t).toMatch(/Total 1\.000\.000 \$1\.176\.471/)
+    expect(t).toMatch(/Margen 15 %/)
+    expect(html).toContain('data-respaldo-opcion')
   })
 
-  it('sin confirmar, «Corregir datos» se abre solo; confirmada, queda detrás del botón', () => {
-    expect(sinEtiquetas(pintar([opcion()]))).toContain('Cerrar corrección')
-  })
-
-  it('una alerta de lo leído se dice al lado de «Corregir datos»', () => {
-    const conAlerta = opcion({}, {
-      casillas: { grupo_completo: { moneda: 'COP', total: 1_000_000, campos: CAMPOS, alertas: ['La fecha de regreso no se ve'] } },
-    })
-    expect(sinEtiquetas(pintar([conAlerta]))).toContain('Revisar: La fecha de regreso no se ve')
+  it('el botón «Usar solo para restar» ya no existe', () => {
+    expect(pintar([opcion()])).not.toContain('Usar solo para restar')
   })
 
   it('sin papelera suelta: borrar vive en el menú ⋯', () => {
     const html = pintar([opcion()])
-    expect(html).toContain('aria-haspopup="menu"')
+    expect(html).toContain('aria-label="Más acciones"')
+    expect(html).not.toContain('data-eliminar-opcion')
   })
 })
 
-describe('P7 · cada opción y cada bloque dicen si están completos', () => {
+describe('P7 · cada bloque dice si está completo', () => {
   const confirmada = {
     confirmada: {
       composicion: { adultos: 2, ninos: 0, infantes: 1 },
@@ -179,17 +174,17 @@ describe('P7 · cada opción y cada bloque dicen si están completos', () => {
     },
   }
 
-  it('sin confirmar: la opción y el bloque requieren atención, y el paso los cuenta', () => {
+  it('sin confirmar: el bloque requiere atención y el paso lo cuenta', () => {
     const t = sinEtiquetas(pintar([opcion()]))
-    expect(t).toContain('Requiere atención: falta confirmar lo leído')
     expect(t).toContain('1 bloque · 0 completos · 1 requiere atención')
     expect(t).toContain('Ir al primero que falta')
   })
 
-  it('confirmada y con costo: completa', () => {
-    const t = sinEtiquetas(pintar([opcion({}, confirmada)]))
-    expect(t).toContain('Completa ✓')
+  it('confirmada y con costo: completo, y la tabla trae una fila por pasajero sin respaldo a mano', () => {
+    const html = pintar([opcion({}, confirmada)])
+    const t = sinEtiquetas(html)
     expect(t).toContain('1 bloque · 1 completo')
     expect(t).not.toContain('Ir al primero que falta')
+    expect(html).not.toContain('data-respaldo-opcion')
   })
 })
