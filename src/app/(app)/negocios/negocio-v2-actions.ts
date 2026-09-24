@@ -7045,8 +7045,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // ── Datos clave + contradicciones ─────────────────────────────────────────
   // Se resuelven contra los datos de HOY y no se guardan: un veredicto congelado queda
   // viejo en cuanto alguien corrige la titularidad o carga el certificado. Un fallo
-  // aquí no tumba la ficha: la tarjeta simplemente no se pinta.
-  const datosClave = base.negocio.linea_id
+  // aquí no tumba la ficha: la tarjeta simplemente no se pinta. Se lanza AQUÍ y se
+  // espera al final: corre en paralelo con el resto del detalle en vez de sumarle
+  // sus idas y vueltas a la base.
+  const datosClavePromesa = base.negocio.linea_id
     ? await datosClaveDelNegocio(supabase, {
         negocioId: id,
         lineaId: base.negocio.linea_id,
@@ -8285,7 +8287,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   return {
     negocio: base.negocio,
     noAplica,
-    datosClave,
+    datosClave: await datosClavePromesa,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
     etapasNoAplican: base.etapasNoAplican,

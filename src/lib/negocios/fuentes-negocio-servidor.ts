@@ -36,33 +36,30 @@ export async function contextoFuentesDelNegocio(
   }
   if (args.slugs.length === 0) return vacio
 
-  // Primero las configuraciones: la `condition` de cada bloque puede depender de otro
-  // bloque (la titularidad aplica según el tipo de persona), y ese también hay que leerlo.
-  const { data: cfgs, error: errCfg } = await db(supabase)
-    .from('bloque_configs')
-    .select('slug, config_extra, etapas_negocio!inner(linea_id)')
-    .eq('etapas_negocio.linea_id', lineaId)
-    .in('slug', args.slugs)
-  if (errCfg) console.error('[fuentes-negocio] configs por slug:', errCfg)
+  // Configuraciones y datos en PARALELO: son dos lecturas independientes. Los bloques de
+  // los que depende la `condition` de cada uno (el tipo de persona, el servicio) no hace
+  // falta traerlos: esa condición la resuelve `condicion_cumplida` en la base.
+  const [cfgRes, dataRes] = await Promise.all([
+    db(supabase)
+      .from('bloque_configs')
+      .select('slug, config_extra, etapas_negocio!inner(linea_id)')
+      .eq('etapas_negocio.linea_id', lineaId)
+      .in('slug', args.slugs),
+    db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug, etapas_negocio!inner(linea_id))')
+      .eq('negocio_id', negocioId)
+      .eq('bloque_configs.etapas_negocio.linea_id', lineaId)
+      .in('bloque_configs.slug', args.slugs),
+  ])
+  if (cfgRes.error) console.error('[fuentes-negocio] configs por slug:', cfgRes.error)
+  if (dataRes.error) console.error('[fuentes-negocio] datos por slug:', dataRes.error)
   const configPorSlug: Record<string, Record<string, unknown>> = {}
-  for (const c of (cfgs ?? []) as Array<{ slug: string | null; config_extra: Record<string, unknown> | null }>) {
+  for (const c of (cfgRes.data ?? []) as Array<{ slug: string | null; config_extra: Record<string, unknown> | null }>) {
     if (c.slug) configPorSlug[c.slug] = c.config_extra ?? {}
   }
-  const slugs = new Set(args.slugs)
-  for (const ce of Object.values(configPorSlug)) {
-    const s = (ce.condition as { source_bloque_slug?: unknown } | undefined)?.source_bloque_slug
-    if (typeof s === 'string' && s) slugs.add(s)
-  }
-
-  const { data: filas, error: errData } = await db(supabase)
-    .from('negocio_bloques')
-    .select('data, bloque_configs!inner(slug, etapas_negocio!inner(linea_id))')
-    .eq('negocio_id', negocioId)
-    .eq('bloque_configs.etapas_negocio.linea_id', lineaId)
-    .in('bloque_configs.slug', [...slugs])
-  if (errData) console.error('[fuentes-negocio] datos por slug:', errData)
   const porSlug: Record<string, Record<string, unknown>> = {}
-  for (const f of (filas ?? []) as Array<{ data: Record<string, unknown> | null; bloque_configs: { slug?: string | null } | null }>) {
+  for (const f of (dataRes.data ?? []) as Array<{ data: Record<string, unknown> | null; bloque_configs: { slug?: string | null } | null }>) {
     const slug = f.bloque_configs?.slug
     if (slug) porSlug[slug] = aplanarDataBloque(f.data)
   }
