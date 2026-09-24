@@ -16,12 +16,34 @@ export type Persona = { nombre: string; documento: string }
 
 const soloDigitos = (s: unknown) => String(s ?? '').replace(/\D/g, '')
 
+/**
+ * ¿Tiene forma de celular colombiano? 10 dígitos que empiezan por 3.
+ *
+ * Ningún documento de identidad de una persona tiene esa forma: la cédula tiene hasta 8
+ * dígitos o 10 empezando por 1, el NIT de una sociedad empieza por 8 o 9, y el de una
+ * persona natural es su cédula (con el DV pegado da 9 dígitos, no 10).
+ *
+ * Caso que lo motivó (SOENA, 24-sep): en 5 facturas la extracción puso el TELÉFONO del
+ * comprador en el documento (V0027: 3173706682, V0148: 3148328022, …) y el cruce «el RUT
+ * está entre los compradores» avisaba en falso. Esos compradores ya están guardados y no
+ * se re-extraen, así que se corrige al LEER, no solo al extraer.
+ */
+export function esCelularColombiano(doc: unknown): boolean {
+  return /^3\d{9}$/.test(soloDigitos(doc))
+}
+
+/** Los dígitos del documento, o '' si lo que hay es un celular. */
+const documentoDe = (s: unknown) => {
+  const d = soloDigitos(s)
+  return esCelularColombiano(d) ? '' : d
+}
+
 /** La lista, en la forma canónica que se guarda. Cadena vacía si no hay nadie. */
 export function serializarPersonas(personas: ReadonlyArray<Partial<Persona> | null | undefined>): string {
   return personas
     .map(p => {
       const nombre = String(p?.nombre ?? '').replace(/\s+/g, ' ').trim()
-      const documento = soloDigitos(p?.documento)
+      const documento = documentoDe(p?.documento)
       if (!nombre && !documento) return null
       return documento ? `${nombre} (${documento})`.trim() : nombre
     })
@@ -50,7 +72,10 @@ export function esPersonaJuridica(p: { nombre?: unknown; documento?: unknown }):
   return /\s(SAS|SA|LTDA|EU|SCA|S EN C|SAS BIC)\s$/.test(nombre)
 }
 
-/** La lista de vuelta desde el texto guardado (o corregido a mano). */
+/**
+ * La lista de vuelta desde el texto guardado (o corregido a mano). Un documento con forma
+ * de celular se descarta: la persona queda, sin documento.
+ */
 export function parsearPersonas(texto: unknown): Persona[] {
   const s = String(texto ?? '').trim()
   if (!s) return []
@@ -63,7 +88,7 @@ export function parsearPersonas(texto: unknown): Persona[] {
       if (entreParentesis) {
         return {
           nombre: parte.replace(entreParentesis[0], '').replace(/\s+/g, ' ').trim(),
-          documento: soloDigitos(entreParentesis[1]),
+          documento: documentoDe(entreParentesis[1]),
         }
       }
       // Sin paréntesis: el documento es la última tira de dígitos (con puntos o sin ellos).
@@ -71,7 +96,7 @@ export function parsearPersonas(texto: unknown): Persona[] {
       if (final && soloDigitos(final[1]).length >= 5) {
         return {
           nombre: parte.slice(0, final.index).replace(/[,:\-–]+\s*$/, '').replace(/\s+/g, ' ').trim(),
-          documento: soloDigitos(final[1]),
+          documento: documentoDe(final[1]),
         }
       }
       return { nombre: parte.replace(/\s+/g, ' ').trim(), documento: '' }

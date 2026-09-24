@@ -68,7 +68,27 @@ export function mismoDocumento(a: unknown, b: unknown): boolean {
   const x = String(a ?? '').replace(/\D/g, '')
   const y = String(b ?? '').replace(/\D/g, '')
   if (x.length < 6 || y.length < 6) return false
-  return x === y || x.startsWith(y) || y.startsWith(x)
+  return x === y || x.startsWith(y) || y.startsWith(x) || conPrefijoDeTipo(x, y) || conPrefijoDeTipo(y, x)
+}
+
+/**
+ * ¿`largo` es `corto` con el código del tipo de documento pegado delante?
+ *
+ * En el formulario del RUT de la DIAN la casilla del tipo de documento («13» = cédula de
+ * ciudadanía) va junto al número, y la extracción a veces la lee como parte de él: el RUT
+ * de V0395 quedó 137556326 y la factura dice 7556326; el de V0177 quedó 132747706 contra
+ * 32747706 (ahí solo se coló el «1»).
+ *
+ * Criterio, estrecho a propósito:
+ * - Igualdad EXACTA después de quitar el prefijo: no se combina con la tolerancia del DV
+ *   de arriba. Combinarlas abría coincidencias falsas: 1122456789 (una cédula de 10
+ *   dígitos) sin su «1» empieza por 12245678, que es otra cédula.
+ * - El resto tiene al menos 6 dígitos y NO empieza por 0: las cédulas de 10 dígitos son
+ *   10xxxxxxxx, y sin el «1» quedarían empezando por 0, que no es un documento.
+ */
+function conPrefijoDeTipo(largo: string, corto: string): boolean {
+  if (corto.startsWith('0')) return false
+  return ['13', '1'].some(p => largo.length === corto.length + p.length && largo === p + corto)
 }
 
 /** Recuerda cada respuesta asíncrona por su clave: una condición se resuelve una vez por lectura. */
