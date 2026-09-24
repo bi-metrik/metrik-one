@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { CircleCheck, FileText, FolderCheck, Grid3x3, SearchCheck, ShieldCheck, UserCheck, X } from 'lucide-react'
+import { CircleCheck, ExternalLink, FileText, FolderCheck, Grid3x3, SearchCheck, ShieldCheck, UserCheck, X } from 'lucide-react'
 import MetrikLockup from '@/components/metrik-lockup'
 import { textoConfirmacion } from '@/lib/seccion-suscripcion/sugerencias'
 import { descartarSustenta, pedirContactoDeSustenta, registrarEventoSustenta } from './acciones'
@@ -135,6 +135,11 @@ const BENEFICIOS = [
 ] as const
 export const CTA_PRIMARIO = 'Quiero una demostración'
 export const CTA_SECUNDARIO = 'Ver cómo funciona'
+
+/** La página pública de Sustenta, con UTM para distinguir el tráfico que sale de ONE. */
+export const URL_SUSTENTA =
+  'https://sustenta.metrik.com.co/?utm_source=one&utm_medium=suscripcion&utm_campaign=sustenta_cda'
+export const TEXTO_ENLACE_SUSTENTA = 'Conoce más en sustenta.metrik.com.co'
 
 const BOTON_PRIMARIO =
   'inline-flex w-full items-center justify-center rounded-md bg-acento px-4 py-2.5 text-sm font-semibold text-white hover:bg-acento-hover disabled:opacity-60 dark:bg-acento-claro dark:text-tinta dark:hover:bg-acento-claro/90 sm:w-auto'
@@ -387,9 +392,33 @@ export function PanelSustenta({ onCerrar, pie }: { onCerrar: () => void; pie: Re
           </div>
           <PanelContenido />
         </div>
-        <div className="border-t border-border bg-card p-4 sm:p-5">{pie}</div>
+        <div className="space-y-3 border-t border-border bg-card p-4 sm:p-5">
+          {pie}
+          <EnlaceSustenta />
+        </div>
       </aside>
     </div>
+  )
+}
+
+/**
+ * Enlace secundario a la página pública, debajo del CTA del pie. Va solo en el panel: en la tarjeta
+ * sería un cuarto elemento junto a dos botones y «Ahora no», y en el teléfono se apilaría como uno
+ * más. El clic no se mide: `sugerencias_eventos.evento` es una lista cerrada por CHECK y un tipo
+ * nuevo exige migración.
+ */
+export function EnlaceSustenta() {
+  return (
+    <a
+      href={URL_SUSTENTA}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-enlace-sustenta
+      className="mx-auto flex w-fit max-w-full items-center gap-1.5 text-sm font-medium text-acento underline-offset-4 hover:underline dark:text-acento-claro"
+    >
+      <span className="min-w-0 break-words">{TEXTO_ENLACE_SUSTENTA}</span>
+      <ExternalLink aria-hidden size={14} className="shrink-0" />
+    </a>
   )
 }
 
