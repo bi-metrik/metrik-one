@@ -2,7 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { calcularIndicadores, type Indicadores } from './indicadores'
-import { costoVigente, gananciaPorVenta } from './reglas'
+import { costoVigente, gananciaPorVenta, margenPorVenta } from './reglas'
 import type {
   ConversacionFila,
   CostoFila,
@@ -36,7 +36,11 @@ export interface FilaTablero {
   marca: string | null
   precio: number | null
   ganancia: number | null
+  /** Ganancia por venta / precio (fracción). `null` sin precio o sin costo. */
+  margen: number | null
   costoF: number | null
+  /** Primera foto del producto (miniatura de la fila). */
+  foto: string | null
   estado: PublicacionFila['estado']
   linea: PublicacionFila['linea']
   link: string | null
@@ -58,7 +62,7 @@ export interface Tablero {
 export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tablero> {
   const [pubsR, prodsR, costosR, convs, ventasR, meds] = await Promise.all([
     db.from('ferreteria_publicaciones').select('*').eq('workspace_id', ws).order('codigo'),
-    db.from('ferreteria_productos').select('id, sku, nombre, marca').eq('workspace_id', ws),
+    db.from('ferreteria_productos').select('id, sku, nombre, marca, fotos').eq('workspace_id', ws),
     db.from('ferreteria_costos').select('producto_id, fecha_lista, costo_f, costo_d').eq('workspace_id', ws),
     traerTodo<{ publicacion_id: string; resultado: string }>(
       (desde, hasta) =>
@@ -83,7 +87,7 @@ export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tabl
   lanzar('ventas', ventasR.error)
 
   const pubs = ((pubsR.data ?? []) as PublicacionFila[]).map((p) => ({ ...p, precio: num(p.precio) }))
-  const productos = new Map(((prodsR.data ?? []) as Pick<ProductoFila, 'id' | 'sku' | 'nombre' | 'marca'>[]).map((p) => [p.id, p]))
+  const productos = new Map(((prodsR.data ?? []) as Pick<ProductoFila, 'id' | 'sku' | 'nombre' | 'marca' | 'fotos'>[]).map((p) => [p.id, p]))
   const costosPorProducto = new Map<string, { fecha_lista: string; costo_f: number; costo_d: number | null }[]>()
   for (const c of (costosR.data ?? []) as CostoFila[]) {
     const l = costosPorProducto.get(c.producto_id) ?? []
@@ -104,6 +108,8 @@ export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tabl
     const prod = productos.get(p.producto_id)
     const costo = costoVigente(costosPorProducto.get(p.producto_id) ?? [])
     const m = indicadores.porPublicacion[p.id]
+    const ganancia = p.precio != null && costo ? gananciaPorVenta(p.precio, costo.costo_f) : null
+    const fotos = Array.isArray(prod?.fotos) ? prod.fotos : []
     return {
       id: p.id,
       codigo: p.codigo,
@@ -112,7 +118,9 @@ export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tabl
       marca: prod?.marca ?? null,
       precio: p.precio,
       costoF: costo?.costo_f ?? null,
-      ganancia: p.precio != null && costo ? gananciaPorVenta(p.precio, costo.costo_f) : null,
+      ganancia,
+      margen: margenPorVenta(ganancia, p.precio),
+      foto: typeof fotos[0] === 'string' ? fotos[0] : null,
       estado: p.estado,
       linea: p.linea,
       link: p.link,

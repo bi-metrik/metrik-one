@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   costoEnFecha,
   costoVigente,
+  formatoMargen,
   gananciaPorVenta,
+  margenPorVenta,
   precioPiso,
   precioRegla,
   semaforoPendiente,
@@ -24,6 +26,32 @@ describe('ganancia por venta', () => {
 
   it('la regla del piloto es 1,25 x costo F', () => {
     expect(precioRegla(80_000)).toBe(100_000)
+  })
+})
+
+describe('margen por venta', () => {
+  it('es la ganancia por venta sobre el precio', () => {
+    // 27.373 / 100.000 = 0,27373
+    expect(margenPorVenta(gananciaPorVenta(100_000, 60_000), 100_000)).toBeCloseTo(0.27373, 10)
+  })
+
+  it('sin precio o sin ganancia (sin costo) no hay margen', () => {
+    expect(margenPorVenta(null, 100_000)).toBeNull()
+    expect(margenPorVenta(10_000, null)).toBeNull()
+    expect(margenPorVenta(10_000, 0)).toBeNull()
+  })
+
+  it('con pérdida el margen es negativo', () => {
+    expect(margenPorVenta(-5_000, 100_000)).toBeCloseTo(-0.05, 10)
+  })
+
+  it('se escribe con un decimal fijo y coma', () => {
+    expect(formatoMargen(0.10625)).toBe('10,6 %')
+    expect(formatoMargen(0.27373)).toBe('27,4 %')
+    expect(formatoMargen(0.2)).toBe('20,0 %')
+    expect(formatoMargen(-0.052)).toBe('-5,2 %')
+    expect(formatoMargen(-0.0004)).toBe('0,0 %')
+    expect(formatoMargen(null)).toBe('—')
   })
 })
 

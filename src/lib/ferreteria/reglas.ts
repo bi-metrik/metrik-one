@@ -74,6 +74,25 @@ export function gananciaPorVenta(precio: number, costoF: number): number {
   return aPeso(precio * FACTOR_PRECIO - costoF * FACTOR_COSTO)
 }
 
+/**
+ * Margen por venta = ganancia por venta / precio (fracción: 0,106 = 10,6 %). Parte de la misma
+ * ganancia que muestra la pantalla, así que margen y ganancia nunca se contradicen.
+ * `null` si falta el precio (o no es positivo) o falta la ganancia (sin costo vigente).
+ */
+export function margenPorVenta(ganancia: number | null | undefined, precio: number | null | undefined): number | null {
+  if (ganancia == null || !Number.isFinite(ganancia)) return null
+  if (precio == null || !Number.isFinite(precio) || precio <= 0) return null
+  return ganancia / precio
+}
+
+/** Margen en porcentaje con un decimal fijo, estilo colombiano: 0,1062 → «10,6 %». `null` → «—». */
+export function formatoMargen(margen: number | null): string {
+  if (margen == null) return '—'
+  const texto = (margen * 100).toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  // -0,04 % redondea a «-0,0»: se pinta «0,0 %» para no sugerir una pérdida que no se ve.
+  return `${texto === '-0,0' ? '0,0' : texto} %`
+}
+
 /** Precio al que la ganancia es cero (redondeado hacia arriba a peso). */
 export function precioPiso(costoF: number): number {
   return Math.ceil((costoF * FACTOR_COSTO) / FACTOR_PRECIO - 1e-9)
