@@ -8,10 +8,10 @@ import {
 } from '@/lib/valida-cda/plazos'
 
 /**
- * Los avisos de `/valida` de un CDA. La pausa por mora (sin montos) la ven TODOS los usuarios del
- * espacio; el plazo de los términos, la mora dentro de los 30 días y la franja de una línea que lleva
- * a Suscripción, solo la persona designada del contrato (`puedeVerSuscripcion`), que es quien la
- * maneja.
+ * Los avisos de `/valida` de un CDA. La pausa por mora (sin montos) y el plazo de los términos los
+ * ven TODOS los usuarios del espacio (el plazo, para que quien no es la persona designada le pida
+ * aceptar a tiempo); la mora dentro de los 30 días y la franja de una línea que lleva a Suscripción,
+ * solo la persona designada del contrato (`puedeVerSuscripcion`), que es quien la maneja.
  *
  * Los textos salen de `plazos.ts`, los mismos que devuelven las acciones del servidor: la pantalla y
  * el rechazo no pueden decir fechas distintas.
@@ -39,7 +39,13 @@ export function AvisoPlazoTerminos({
         <CalendarClock className="mt-0.5 hidden h-5 w-5 shrink-0 sm:block" />
         <div className="space-y-1">
           <p className="font-semibold">{textoAvisoPlazo(plazoHasta)}</p>
-          {!puedeAceptar && designadoNombre && <p>La persona designada es {designadoNombre}.</p>}
+          {!puedeAceptar && (
+            <p>
+              {designadoNombre
+                ? `La persona designada es ${designadoNombre}. Pídele que ingrese a Valida y los acepte.`
+                : 'Pídele a la persona designada que ingrese a Valida y los acepte.'}
+            </p>
+          )}
         </div>
       </div>
       {puedeAceptar && (

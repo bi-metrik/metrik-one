@@ -71,11 +71,14 @@ export function fechaDiaMes(iso: string): string {
   return mes ? `${Number(m[3])}-${mes}` : iso
 }
 
-/** El texto del aviso del plazo, para todos los usuarios del espacio. */
+/**
+ * El texto del aviso del plazo, para todos los usuarios del espacio. `plazoHasta` es el último día en
+ * que Valida opera sin la aceptación (inclusive): al terminar ese día se suspende.
+ */
 export function textoAvisoPlazo(plazoHasta: string): string {
   return (
-    `La persona designada por tu empresa debe aceptar los Términos a más tardar el ${fechaDiaMes(plazoHasta)}; ` +
-    `desde el ${fechaDiaMes(sumarDias(plazoHasta, 1))}, sin esa aceptación, Valida se pausa.`
+    `El servicio de Valida se suspenderá al terminar el ${fechaDiaMes(plazoHasta)} ` +
+    `si la persona designada por tu empresa no ha aceptado los Términos.`
   )
 }
 

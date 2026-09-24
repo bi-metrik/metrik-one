@@ -135,15 +135,16 @@ export default async function ValidaPage({ searchParams }: Props) {
           suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
         )
       : null;
-  // Términos, cuota y plata son de la persona designada del contrato (la misma regla que
-  // `/suscripcion`, `puedeVerPagosCda`). A los demás solo les llega el aviso obligatorio de servicio
-  // pausado por mora, sin montos ni botones (`PausaPorMora`), y la puerta de términos sin plazo.
-  const avisoPlazoVisible = vePagos ? avisoPlazo : null;
+  // El aviso del plazo de los Términos lo ven TODOS los usuarios del espacio: quien no es la persona
+  // designada ve su nombre y no el botón, y así puede pedirle que acepte antes de la suspensión.
+  // Cuota y plata son solo de la persona designada del contrato (la misma regla que `/suscripcion`,
+  // `puedeVerPagosCda`): a los demás solo les llega el aviso obligatorio de servicio pausado por mora,
+  // sin montos ni botones (`PausaPorMora`).
   const moraVisible = vePagos && estadoMora?.estado === 'en_mora' ? estadoMora : null;
   const encabezado =
-    avisoPlazoVisible || franja || moraVisible ? (
+    avisoPlazo || franja || moraVisible ? (
       <div className="space-y-3">
-        {avisoPlazoVisible}
+        {avisoPlazo}
         {moraVisible && <AvisoMora mora={moraVisible} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
