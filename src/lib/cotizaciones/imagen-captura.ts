@@ -96,6 +96,23 @@ export async function borrarImagenesDeCaptura(workspaceId: string | null | undef
   }
 }
 
+/**
+ * Un pantallazo guardado, como data URL: lo que necesita la bandeja para mostrarlo y volver a
+ * guardarlo cuando una opción eliminada devuelve sus pantallazos. `null` si no se puede leer.
+ */
+export async function imagenComoDataUrl(workspaceId: string | null | undefined, ref: string | null | undefined): Promise<string | null> {
+  if (!workspaceId || !ref || !ref.startsWith('sbext://')) return null
+  try {
+    const almacen = await almacenamientoExternoDe(workspaceId)
+    if (!almacen) return null
+    const { buffer, mime } = await almacen.descargar(ref)
+    return `data:${mime && mime.startsWith('image/') ? mime : 'image/png'};base64,${buffer.toString('base64')}`
+  } catch (e) {
+    console.warn('[imagen-captura] no se pudo leer un pantallazo guardado:', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
 /** Todas las imágenes guardadas de una tarifa: sus casillas y sus habitaciones. */
 export function imagenesDeTarifa(t: TarifaPax): string[] {
   const refs = new Set<string>()

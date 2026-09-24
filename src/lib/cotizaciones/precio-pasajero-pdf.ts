@@ -52,7 +52,7 @@ export function precioPorPasajeroDeItem(
     .reduce((a, r) => a + (Number(r.valor_total) || 0), 0)
   if (!confirmadaVigente(confirmada, costoUnitario)) return null
   if (confirmacionDesactualizada(tarifa, composicionDeLinea(tarifa, composicionViaje ?? null))) return null
-  return precioPorPasajero(confirmada, Number(item.precio_venta) || 0)
+  return precioPorPasajero(confirmada, Number(item.precio_venta) || 0, tarifa.preciosAMano)
 }
 
 /**
@@ -74,7 +74,7 @@ export function precioPorHabitacionDeItem(
     .reduce((a, r) => a + (Number(r.valor_total) || 0), 0)
   if (!confirmadaVigente(confirmada, costoUnitario)) return null
   if (confirmacionDesactualizada(tarifa, composicionDeLinea(tarifa, composicionViaje ?? null))) return null
-  return precioPorHabitacion(confirmada.porHabitacion, Number(item.precio_venta) || 0)
+  return precioPorHabitacion(confirmada.porHabitacion, Number(item.precio_venta) || 0, tarifa.preciosAMano)
     .map(h => ({ ...h, ocupacionTexto: describirOcupacion(h.ocupacion, 'y') }))
 }
 

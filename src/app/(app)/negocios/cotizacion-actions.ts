@@ -24,7 +24,8 @@ import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-des
 import { createServiceClient } from '@/lib/supabase/server'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import { borrarImagenesDeCaptura, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
-import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { confirmadaVigente, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { precioDeLineaConManuales } from '@/lib/cotizaciones/tarjeta-opcion'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -1046,9 +1047,38 @@ export async function recalcularTotales(cotizacionId: string) {
     const fila = filasAdicionales.find(f => f.id === id)
     if (fila) fila.precio = precio
   }
+  const params = {
+    administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
+    // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
+    margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
+    descuentoComercialPct: cot?.descuento_porcentaje,
+    convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
+  }
+  // Tarjeta de la opción (prototipo del 2026-09-24) · una línea con precios de fila escritos
+  // a mano lleva el precio que suman esas filas más las demás con su margen
+  // (`precioDeLineaConManuales`). Se recalcula AQUÍ, en cada recálculo, para que un cambio del
+  // margen, de los administrativos o del costo no deje el precio viejo. Solo si la confirmación
+  // sigue siendo el costo de la línea: con un costo editado después, las filas ya no existen.
+  const precioConManuales = new Map<string, number>()
+  for (const item of filas) {
+    if (item.es_ajuste) continue
+    const tarifa = leerTarifaPax(item.tarifa_pax)
+    if (!tarifa.preciosAMano || !tarifa.confirmada) continue
+    const { costoDeRubros } = costoDeRubrosConfirmados(item.rubros)
+    if (!confirmadaVigente(tarifa.confirmada, costoDeRubros)) continue
+    const precio = precioDeLineaConManuales({
+      confirmada: tarifa.confirmada,
+      preciosAMano: tarifa.preciosAMano,
+      margenPct: Number(item.margen_porcentaje ?? params.margenPct) || 0,
+      convencion: params.convencionMargen ?? undefined,
+      administrativosPct: params.administrativosPct,
+    })
+    if (precio !== null) precioConManuales.set(item.id as string, precio)
+  }
   const paraCascadaSinAdic = filas.map(item => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
     const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(item.rubros)
+    const conManuales = precioConManuales.get(item.id as string)
     return {
       id: item.id as string,
       es_ajuste: item.es_ajuste,
@@ -1058,20 +1088,13 @@ export async function recalcularTotales(cotizacionId: string) {
       costoDeRubros,
       descuento_porcentaje: item.descuento_porcentaje,
       margen_porcentaje: item.margen_porcentaje,
-      precio_venta: item.precio_venta,
-      precio_manual: item.precio_manual,
+      precio_venta: conManuales !== undefined ? conManuales / (Number(item.cantidad) || 1) : item.precio_venta,
+      precio_manual: conManuales !== undefined ? true : item.precio_manual,
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito
   // dos veces, la pantalla y el recálculo podrían cobrarle la maleta a líneas distintas.
   const paraCascada = adjuntarAdicionales(paraCascadaSinAdic, filasAdicionales)
-  const params = {
-    administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
-    // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
-    margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
-    descuentoComercialPct: cot?.descuento_porcentaje,
-    convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
-  }
 
   // ⚠️ DOS cascadas, y la diferencia es deliberada.
   //
@@ -1093,6 +1116,11 @@ export async function recalcularTotales(cotizacionId: string) {
     const patch: Record<string, unknown> = { subtotal: linea.costoUnitario }
     if (linea.costoLinea > 0 && fila.precio_manual !== true) {
       patch.precio_venta = Math.round(linea.precioLinea / cantidad)
+    }
+    // Precios de fila a mano: el precio de la línea es el que acaba de calcularse arriba.
+    if (linea.id && precioConManuales.has(linea.id)) {
+      patch.precio_venta = Math.round(linea.precioLinea / cantidad)
+      patch.precio_manual = true
     }
     await supabase.from('items').update(patch as never).eq('id', fila.id)
   }

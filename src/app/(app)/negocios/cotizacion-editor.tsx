@@ -1333,13 +1333,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         const precioPorPax = tarifaDelItem.confirmada
           && confirmadaVigente(tarifaDelItem.confirmada, costoUnitario)
           && !confirmacionDesactualizada(tarifaDelItem, composicionDeLinea(tarifaDelItem, composicionViaje))
-          ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad)
+          ? precioPorPasajero(tarifaDelItem.confirmada, precioLinea / itemCantidad, tarifaDelItem.preciosAMano)
           : null
         // R8 · regla 8: una opción de hotel cobrada por habitación (no hubo par para sacar
         // el precio de cada pasajero) dice el precio de cada habitación, con las mismas
         // salvaguardas que el de cada pasajero.
         const precioPorHab = precioPorPax && precioPorPax.length === 0 && tarifaDelItem.confirmada?.porHabitacion?.length
-          ? precioPorHabitacion(tarifaDelItem.confirmada.porHabitacion, precioLinea / itemCantidad)
+          ? precioPorHabitacion(tarifaDelItem.confirmada.porHabitacion, precioLinea / itemCantidad, tarifaDelItem.preciosAMano)
           : null
         const textoPorHabitacion = precioPorHab && precioPorHab.length > 0
           ? precioPorHab.map(h => `Habitación ${h.numero} (${describirOcupacion(h.ocupacion, 'y')}) ${formatoMonto(h.precio, 'COP')}`).join(' · ')
