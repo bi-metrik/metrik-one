@@ -68,6 +68,13 @@ export interface CampoResultado {
   confidence: number  // 0.0 - 1.0
   manual: boolean     // true si confidence < 0.70
   edicion?: CampoEdicion  // presente solo si un humano editó el campo a mano
+  /**
+   * Lo que LEYÓ la IA cuando una normalización determinista lo reemplazó (hoy: el DV
+   * del RUT, que se recalcula desde el NIT). Es el testigo: si el DV impreso no valida
+   * con el NIT leído, uno de los dos está mal leído, y sin guardarlo esa evidencia se
+   * perdía al recalcular. Ver `normalizarNitYDv` y `votos.ts`.
+   */
+  leido?: string
 }
 
 // ── Supported MIME types ─────────────────────────────────────────────────────

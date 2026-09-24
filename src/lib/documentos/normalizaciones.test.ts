@@ -115,6 +115,19 @@ describe('normalizarNitYDv — el DV', () => {
     expect(r.dv.confidence).toBe(CONFIANZA_REVISAR)
     expect(r.dv.manual).toBe(false)
     expect(cambios.map((c) => c.motivo)).toEqual(['dv_leido_no_coincide'])
+    // El DV impreso se conserva como testigo: sin él, el voto entre fuentes no podría
+    // saber que la casilla 5 y la 6 no cuadran (`votos.ts`).
+    expect(r.dv.leido).toBe('2')
+  })
+
+  it('DV leído que coincide con el calculado: no deja testigo (no hay nada que contradecir)', () => {
+    const r: Record<string, CampoResultado> = {
+      nit: leido('34545752'),
+      dv: leido('3', 0.98),
+      numero_identificacion: leido('34545752'),
+    }
+    normalizarNitYDv(RUT_SOLICITANTE_2, r)
+    expect(r.dv.leido).toBeUndefined()
   })
 
   it('DV que la extracción no pudo leer: se completa con confianza plena', () => {

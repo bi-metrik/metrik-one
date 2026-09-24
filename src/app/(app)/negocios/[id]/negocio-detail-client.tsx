@@ -95,7 +95,9 @@ import { formatBogotaFechaCorta, formatBogotaFechaCortaAno } from '@/lib/dates/b
 import { checklistConSoporte } from '@/lib/negocios/cierre-bloque'
 import { rolGestionaAprobacion } from '@/lib/negocios/aprobacion-bloque'
 import { AlmacenamientoExternoProvider } from '@/lib/almacenamiento/contexto'
+import { LecturasProvider } from '@/lib/negocios/lecturas-contexto'
 import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
+import { corregirLecturaDudosa } from '@/lib/actions/lectura-dudosa-actions'
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -2309,6 +2311,10 @@ export default function NegocioDetailClient({
   // cierre real de esta linea.
   const negocioCerrado = estaCerrado(negocio.estado)
 
+  // Corregir una lectura dudosa al valor de la mayoría. El servidor revalida la ruta, así
+  // que la tarjeta se vuelve a pintar con el voto ya resuelto.
+  const corregirLectura = (votoSlug: string, clave: string) => corregirLecturaDudosa(negocio.id, votoSlug, clave)
+
   const precio = negocio.precio_aprobado ?? negocio.precio_estimado
   const estaAprobado = negocio.precio_aprobado !== null && negocio.precio_aprobado !== undefined
 
@@ -2388,6 +2394,7 @@ export default function NegocioDetailClient({
        (no cabe) y el panel entra como tarjeta plegable dentro de la misma
        columna, justo debajo del header. */
     <AlmacenamientoExternoProvider externo={almacenamientoExterno}>
+    <LecturasProvider lecturas={datosClave?.lecturas ?? []}>
     <div
       className="mx-auto max-w-2xl lg:max-w-5xl px-4 py-4"
       style={conCentro ? ({ [VAR_ALTO_ENCABEZADO]: `${altoEncabezado}px` } as React.CSSProperties) : undefined}
@@ -2612,7 +2619,7 @@ export default function NegocioDetailClient({
             obligatorio ahí desde que el header dejó de pintarlo—; el resto va
             detrás del toggle. */}
         <div className="space-y-3 lg:hidden">
-          <PanelDatosClave vista={datosClave} />
+          <PanelDatosClave vista={datosClave} corregirLectura={corregirLectura} />
           <PanelContacto
             variant="movil"
             contacto={negocio.contactos}
@@ -2731,7 +2738,7 @@ export default function NegocioDetailClient({
         <aside className="hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:space-y-3">
           {/* Datos clave ARRIBA del contacto: es lo que cambia el trámite, y en esta
               columna es lo primero que se lee sin bajar. */}
-          <PanelDatosClave vista={datosClave} />
+          <PanelDatosClave vista={datosClave} corregirLectura={corregirLectura} />
           <PanelContacto
             variant="rail"
             contacto={negocio.contactos}
@@ -2743,6 +2750,7 @@ export default function NegocioDetailClient({
         </aside>
       </div>
     </div>
+    </LecturasProvider>
     </AlmacenamientoExternoProvider>
   )
 }

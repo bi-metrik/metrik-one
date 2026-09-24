@@ -117,6 +117,10 @@ export function normalizarNitYDv(
   } else if (leido !== dvCalc) {
     cambios.push({ campo: 'dv', antes: dvC.value, despues: dvCalc, motivo: 'dv_leido_no_coincide' })
     dvC.value = dvCalc
+    // El DV impreso se conserva como testigo: que no valide con el NIT leído dice que
+    // una de las dos casillas se leyó mal, y el voto entre fuentes lo usa (`votos.ts`).
+    // Recalcularlo sin guardarlo borraba justo esa evidencia.
+    dvC.leido = leido
     bajarConfianza(dvC)
   }
   return cambios

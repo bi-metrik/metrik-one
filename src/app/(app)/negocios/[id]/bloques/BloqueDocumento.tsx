@@ -25,6 +25,8 @@ import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/alm
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
 import { BUCKET_DOCUMENTOS_ONE, esReferenciaExterna, hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { lecturaDeCampo, useLecturas } from '@/lib/negocios/lecturas-contexto'
+import type { LecturaFuente, ResultadoVoto } from '@/lib/negocios/votos'
 import { useFileDrop } from '@/hooks/use-file-drop'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { puedeCorregirDocumentos } from '@/lib/roles'
@@ -101,12 +103,15 @@ const BUCKET = BUCKET_DOCUMENTOS_ONE
 
 // ── Confidence badge ─────────────────────────────────────────────────────────
 
+// La confianza que devuelve la IA NO es una verificación: V0142 (SOENA) salió con 0.98 y
+// la cédula estaba mal leída. Por eso la franja alta ya no pinta un chulo verde con su
+// porcentaje, que se lee como «comprobado», sino un rótulo neutro. Lo que sí comprueba un
+// dato es que otro documento diga lo mismo: eso lo pinta `ConcordanciaBadge`.
 function ConfidenceBadge({ confidence }: { confidence: number }) {
   if (confidence >= 0.90) {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] text-green-600">
-        <CheckCircle2 className="h-3 w-3" />
-        {Math.round(confidence * 100)}%
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground" title="Leído por IA; no se ha contrastado con otro documento">
+        Leído por IA
       </span>
     )
   }
@@ -124,6 +129,63 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
       Manual
     </span>
   )
+}
+
+// La confianza que se muestra, cuando el campo participa en un voto entre documentos,
+// sale de la concordancia: coincide con otros, es una lectura dudosa, o espera revisión.
+function ConcordanciaBadge({ voto, fuente }: { voto: ResultadoVoto; fuente: LecturaFuente }) {
+  if (fuente.estado === 'coincide') {
+    const otros = [...new Set(voto.fuentes.filter(f => f.estado === 'coincide' && f.clave !== fuente.clave).map(f => f.etiqueta))]
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-green-600" title={otros.length ? `Coincide con ${otros.join(', ')}` : undefined}>
+        <CheckCircle2 className="h-3 w-3" />
+        {otros.length ? `Coincide con ${otros.join(' y ')}` : 'Coincide'}
+      </span>
+    )
+  }
+  if (fuente.estado === 'dudosa' || fuente.estado === 'en_disputa') {
+    const texto = fuente.estado === 'dudosa'
+      ? `Lectura dudosa${voto.valor ? ` · los otros documentos dicen ${voto.valor}` : ''}`
+      : 'No coincide con los otros documentos · revisión manual'
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700" title="Corrígelo desde «Datos clave» en la ficha del negocio">
+        <AlertTriangle className="h-3 w-3" />
+        {texto}
+      </span>
+    )
+  }
+  if (fuente.estado === 'confirmada') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        Confirmado a mano · los otros documentos dicen {voto.valor}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground" title="Ningún otro documento trae este dato todavía">
+      Sin otro documento con qué contrastarlo
+    </span>
+  )
+}
+
+/** El rótulo de un campo: concordancia si un voto lo usa; si no, la marca de edición o la confianza. */
+function RotuloCampo({ campo, lectura, ocultarConfianzaManual }: {
+  campo: CampoResultado | undefined
+  lectura: { voto: ResultadoVoto; fuente: LecturaFuente } | null
+  ocultarConfianzaManual?: boolean
+}) {
+  if (lectura) {
+    return (
+      <>
+        {campo?.edicion && <EdicionBadge edicion={campo.edicion} />}
+        <ConcordanciaBadge voto={lectura.voto} fuente={lectura.fuente} />
+      </>
+    )
+  }
+  if (campo?.edicion) return <EdicionBadge edicion={campo.edicion} />
+  if (!campo) return null
+  if (ocultarConfianzaManual && campo.manual) return null
+  return <ConfidenceBadge confidence={campo.confidence} />
 }
 
 // ── El archivo no es el documento que este bloque espera ─────────────────────
@@ -300,14 +362,18 @@ function CamposExtraidos({
   campos,
   camposConfig,
   onUpdate,
+  archivo,
 }: {
   negocioBloqueId: string
   negocioId: string
   campos: Record<string, CampoResultado>
   camposConfig: CampoExtraccion[]
   onUpdate: (slug: string, value: string) => void
+  /** El archivo del documento: con él se reconoce qué campos usa un voto entre fuentes. */
+  archivo?: string | null
 }) {
   const [saving, setSaving] = useState(false)
+  const lecturas = useLecturas()
 
   const handleCommit = async (slug: string, value: string) => {
     onUpdate(slug, value)
@@ -359,9 +425,7 @@ function CamposExtraidos({
                       Revisar
                     </span>
                   )}
-                  {campo?.edicion
-                    ? <EdicionBadge edicion={campo.edicion} />
-                    : campo && <ConfidenceBadge confidence={campo.confidence} />}
+                  <RotuloCampo campo={campo} lectura={lecturaDeCampo(lecturas, archivo, config.slug)} />
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
@@ -596,6 +660,8 @@ export default function BloqueDocumento({
   const router = useRouter()
   // Workspace con almacenamiento externo: la subida va directo al proyecto del cliente.
   const almacenamientoExterno = useAlmacenamientoExterno()
+  // Los votos entre documentos del negocio: dicen si otro documento respalda cada campo.
+  const lecturas = useLecturas()
   const fileRef = useRef<HTMLInputElement>(null)
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
 
@@ -1115,9 +1181,7 @@ export default function BloqueDocumento({
                             Revisar
                           </span>
                         )}
-                        {campo?.edicion
-                          ? <EdicionBadge edicion={campo.edicion} />
-                          : campo && !campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
+                        <RotuloCampo campo={campo} lectura={lecturaDeCampo(lecturas, saved.drive_url, config.slug)} ocultarConfianzaManual />
                       </div>
                     </div>
                     {editable ? (
@@ -1157,7 +1221,7 @@ export default function BloqueDocumento({
                     <label className="block text-xs font-medium text-muted-foreground">
                       {displayLabel}
                     </label>
-                    {!campo.manual && <ConfidenceBadge confidence={campo.confidence} />}
+                    <RotuloCampo campo={campo} lectura={lecturaDeCampo(lecturas, saved.drive_url, slug)} ocultarConfianzaManual />
                   </div>
                   <div className="flex items-center gap-1.5">
                     <div className="flex-1 min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-base text-foreground break-words">
@@ -1432,6 +1496,7 @@ export default function BloqueDocumento({
           campos={campos}
           camposConfig={camposConfig}
           onUpdate={handleCampoUpdate}
+          archivo={driveUrl}
         />
       )}
 
