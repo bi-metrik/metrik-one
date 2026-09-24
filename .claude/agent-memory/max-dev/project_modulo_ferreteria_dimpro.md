@@ -40,7 +40,7 @@ es un negocio de ONE en la línea Ferretería de dimpro (Vendido→Entregado→P
 `config_extra.ferreteria_paso`). El negocio sale por las acciones de la app vía `negocios-puerto.ts`
 (crearNegocio, cambiarEtapaNegocioConGate, completarNegocio, registrarPagoEnNegocio, agregarResponsable).
 La parte de MeTRIK es MENSUAL, no por venta (Mauricio: 50/50 con signo, sin piso, sin arrastre; negativa =
-MeTRIK aporta a Dimpro) — `liquidacion.ts`. Abierto con Mauricio: el mes sale de `fecha_venta`, no del pago.
+MeTRIK aporta a Dimpro) — `liquidacion.ts`. El mes sale del PAGO (`fecha_primer_pago`, decidido por Mauricio); contra entrega sin pagar va aparte como «por cobrar».
 - dimpro tiene `business` (= Clarity) pero no `clarity` como llave: `REQUISITO.clarity` mira `business`.
 - `cambiarEtapaNegocioConGate` solo escribe `activity_log` si hay `staffId`; el soporte de MeTRIK en dimpro
   no tiene staff activo, así que sus avances no dejan fila (un UPDATE por SQL tampoco: no hay trigger).
