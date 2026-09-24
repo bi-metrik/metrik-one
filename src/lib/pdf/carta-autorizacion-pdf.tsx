@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { PALETA } from '@/lib/marca/paleta'
+import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
 
 /**
  * Carta de autorización para devolución de IVA con DOS solicitantes.
@@ -42,6 +43,17 @@ interface CartaAutorizacionProps {
   codigoNegocio: string
 }
 
+/**
+ * Sin partición con guion al final de línea (salía «domi-ciliado(a)»): la palabra
+ * va entera salvo que no quepa en la línea (regla de `partirPalabraLarga`).
+ *
+ * Va como PROP de cada `<Text>`, no con `Font.registerHyphenationCallback`: esa
+ * llamada es global del proceso y cambiaría los demás PDF de la aplicación. Mismo
+ * patrón que la Declaración Juramentada y las cotizaciones. En @react-pdf manda la
+ * prop del `<Text>` exterior del párrafo; se pone en todos por uniformidad.
+ */
+const SIN_GUION = partirPalabraLarga
+
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
 
 const s = StyleSheet.create({
@@ -52,12 +64,18 @@ const s = StyleSheet.create({
   destinatario: { marginBottom: 4 },
   destLine: { fontSize: 10 },
   destBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  asunto: { marginBottom: 12, marginTop: 10, textAlign: 'justify' },
-  asuntoBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
+  // El renglón completo del asunto va en negrita, como la versión que pidió la clienta.
+  asunto: { marginBottom: 12, marginTop: 10, textAlign: 'justify', fontFamily: 'Helvetica-Bold' },
   intro: { marginBottom: 8, textAlign: 'justify' },
   comparec: { marginBottom: 6, marginLeft: 14, textAlign: 'justify' },
   clause: { marginBottom: 8, textAlign: 'justify' },
   facultad: { marginBottom: 4, marginLeft: 20, textAlign: 'justify' },
+  // ⚠️ Una corrida NUNCA empieza con puntuación: @react-pdf toma el límite entre
+  // «65747197» y «, domiciliado» como una palabra partida e IMPRIME un guion
+  // (medido: «No. 65747197-» / «, domiciliado(a)»). `hyphenationCallback` no lo
+  // evita. Por eso la coma va dentro de la negrita y cada tramo con datos
+  // interpolados es UNA sola plantilla (`{`...${x}, ...`}`), no varios hijos.
+  // Mismo mecanismo que documenta `B` en la Declaración Juramentada.
   bold: { fontFamily: 'Helvetica-Bold' },
   cierre: { marginTop: 10, marginBottom: 10, textAlign: 'justify' },
   // Espacio en blanco para firmar, y las dos firmas en UNA fila (pedido de Deisy,
@@ -88,93 +106,89 @@ export default function CartaAutorizacionPDF({ datos, fechaGeneracion, codigoNeg
   return (
     <Document>
       <Page size="LETTER" style={s.page}>
-        <Text style={s.ciudad}>{ciudad}, {dia} de {mes} de {anio}</Text>
+        <Text hyphenationCallback={SIN_GUION} style={s.ciudad}>{`${ciudad}, ${dia} de ${mes} de ${anio}`}</Text>
 
         <View style={s.destinatario}>
-          <Text style={s.destLine}>Señores</Text>
-          <Text style={s.destBold}>DIRECCIÓN DE IMPUESTOS Y ADUANAS NACIONALES – DIAN</Text>
-          <Text style={s.destLine}>Ciudad</Text>
+          <Text hyphenationCallback={SIN_GUION} style={s.destLine}>Señores</Text>
+          <Text hyphenationCallback={SIN_GUION} style={s.destBold}>DIRECCIÓN DE IMPUESTOS Y ADUANAS NACIONALES – DIAN</Text>
+          <Text hyphenationCallback={SIN_GUION} style={s.destLine}>Ciudad</Text>
         </View>
 
-        <Text style={s.asunto}>
-          <Text style={s.asuntoBold}>Asunto: </Text>
-          Autorización para que la devolución del IVA sea solicitada y recibida por {beneficiario}
+        <Text hyphenationCallback={SIN_GUION} style={s.asunto}>
+          {`Asunto: Autorización para que la devolución del IVA sea solicitada y recibida por ${beneficiario}`}
         </Text>
 
-        <Text style={s.intro}>Nosotros, los suscritos:</Text>
+        <Text hyphenationCallback={SIN_GUION} style={s.intro}>Nosotros, los suscritos:</Text>
 
-        <Text style={s.comparec}>
-          1. <Text style={s.bold}>{autorizante}</Text>, mayor de edad, identificado(a) con cédula de
-          ciudadanía No. {autorizanteCC}, domiciliado(a) en {autorizanteDom}.
+        <Text hyphenationCallback={SIN_GUION} style={s.comparec}>
+          1. <Text style={s.bold}>{`${autorizante},`}</Text>
+          {` mayor de edad, identificado(a) con cédula de ciudadanía No. ${autorizanteCC}, domiciliado(a) en ${autorizanteDom}.`}
         </Text>
-        <Text style={s.comparec}>
-          2. <Text style={s.bold}>{beneficiario}</Text>, mayor de edad, identificado(a) con cédula de
-          ciudadanía No. {beneficiarioCC}, domiciliado(a) en {beneficiarioDom}.
-        </Text>
-
-        <Text style={s.clause}>
-          Por medio de la presente manifestamos a la DIRECCIÓN DE IMPUESTOS Y ADUANAS NACIONALES – DIAN
-          que la factura de compra No. {factura}, relacionada con la solicitud de devolución del Impuesto
-          sobre las Ventas (IVA), se encuentra expedida a nombre de ambos comparecientes.
+        <Text hyphenationCallback={SIN_GUION} style={s.comparec}>
+          2. <Text style={s.bold}>{`${beneficiario},`}</Text>
+          {` mayor de edad, identificado(a) con cédula de ciudadanía No. ${beneficiarioCC}, domiciliado(a) en ${beneficiarioDom}.`}
         </Text>
 
-        <Text style={s.clause}>
-          En consecuencia, <Text style={s.bold}>{autorizante}</Text>, de manera libre, voluntaria, expresa
+        <Text hyphenationCallback={SIN_GUION} style={s.clause}>
+          {`Por medio de la presente manifestamos a la DIRECCIÓN DE IMPUESTOS Y ADUANAS NACIONALES – DIAN que la factura de compra No. ${factura}, relacionada con la solicitud de devolución del Impuesto sobre las Ventas (IVA), se encuentra expedida a nombre de ambos comparecientes.`}
+        </Text>
+
+        <Text hyphenationCallback={SIN_GUION} style={s.clause}>
+          En consecuencia, <Text style={s.bold}>{`${autorizante},`}</Text> de manera libre, voluntaria, expresa
           e irrevocable, <Text style={s.bold}>AUTORIZA</Text> a <Text style={s.bold}>{beneficiario}</Text> para
           que sea la única persona facultada para:
         </Text>
 
-        <Text style={s.facultad}>
-          • Presentar ante la DIAN la solicitud de devolución del IVA correspondiente a la factura No. {factura}.
+        <Text hyphenationCallback={SIN_GUION} style={s.facultad}>
+          {`• Presentar ante la DIAN la solicitud de devolución del IVA correspondiente a la factura No. ${factura}.`}
         </Text>
-        <Text style={s.facultad}>
+        <Text hyphenationCallback={SIN_GUION} style={s.facultad}>
           • Adelantar todos los trámites administrativos relacionados con dicha devolución.
         </Text>
-        <Text style={s.facultad}>
+        <Text hyphenationCallback={SIN_GUION} style={s.facultad}>
           • Recibir, cobrar y disponer del valor que la DIAN reconozca y otorgue por concepto de devolución del IVA.
         </Text>
 
-        <Text style={[s.clause, { marginTop: 10 }]}>
+        <Text hyphenationCallback={SIN_GUION} style={[s.clause, { marginTop: 10 }]}>
           Así mismo, <Text style={s.bold}>{beneficiario}</Text> manifiesta que acepta acogerse a dicha
           devolución y asume la calidad de beneficiario(a) y receptor(a) de la misma ante la DIAN.
         </Text>
 
-        <Text style={s.clause}>
-          <Text style={s.bold}>{autorizante}</Text> declara que no presentará solicitud independiente ni
-          reclamación posterior respecto de la devolución del IVA derivada de la factura No. {factura} antes
-          mencionada, y que renuncia a cualquier derecho de cobro individual sobre dicho valor frente a la DIAN.
+        <Text hyphenationCallback={SIN_GUION} style={s.clause}>
+          <Text style={s.bold}>{autorizante}</Text>
+          {` declara que no presentará solicitud independiente ni reclamación posterior respecto de la devolución del IVA derivada de la factura No. ${factura} antes mencionada, y que renuncia a cualquier derecho de cobro individual sobre dicho valor frente a la DIAN.`}
         </Text>
 
-        <Text style={s.clause}>
+        <Text hyphenationCallback={SIN_GUION} style={s.clause}>
           La presente autorización se otorga para todos los efectos legales pertinentes y con destino
           exclusivo a la DIRECCIÓN DE IMPUESTOS Y ADUANAS NACIONALES – DIAN.
         </Text>
 
-        <Text style={s.cierre}>
+        <Text hyphenationCallback={SIN_GUION} style={s.cierre}>
           Solicitamos respetuosamente que esta comunicación sea tenida en cuenta dentro del trámite correspondiente.
         </Text>
 
-        <Text style={s.intro}>Atentamente,</Text>
+        <Text hyphenationCallback={SIN_GUION} style={s.intro}>Atentamente,</Text>
 
         <View style={s.firmasRow} wrap={false}>
           <View style={s.signatureBlock}>
             <View style={s.signatureLine}>
-              <Text style={s.signatureName}>{autorizante}</Text>
-              <Text style={s.signatureDetail}>C.C. No. {autorizanteCC}</Text>
-              <Text style={s.signatureDetail}>Firma</Text>
+              <Text hyphenationCallback={SIN_GUION} style={s.signatureName}>{autorizante}</Text>
+              <Text hyphenationCallback={SIN_GUION} style={s.signatureDetail}>C.C. No. {autorizanteCC}</Text>
+              <Text hyphenationCallback={SIN_GUION} style={s.signatureDetail}>Firma</Text>
             </View>
           </View>
 
           <View style={s.signatureBlock}>
             <View style={s.signatureLine}>
-              <Text style={s.signatureName}>{beneficiario}</Text>
-              <Text style={s.signatureDetail}>C.C. No. {beneficiarioCC}</Text>
-              <Text style={s.signatureDetail}>Firma</Text>
+              <Text hyphenationCallback={SIN_GUION} style={s.signatureName}>{beneficiario}</Text>
+              <Text hyphenationCallback={SIN_GUION} style={s.signatureDetail}>C.C. No. {beneficiarioCC}</Text>
+              <Text hyphenationCallback={SIN_GUION} style={s.signatureDetail}>Firma</Text>
             </View>
           </View>
         </View>
 
-        <Text style={s.codigo}>{codigoNegocio}</Text>
+        <Text hyphenationCallback={SIN_GUION} style={s.codigo}>{codigoNegocio}</Text>
       </Page>
     </Document>
   )
