@@ -5,11 +5,7 @@ import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { getServerKey } from '@/lib/server-keys'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
-import { extraerRanuraDesdeImagen } from '@/lib/ai/extraer-ranura'
-import { evaluarLectura } from '@/lib/cotizaciones/lectura-pantallazo'
-import { construirLecturaCasilla } from '@/lib/cotizaciones/lectura-casilla'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import {
@@ -62,7 +58,13 @@ import {
   tarifaConHabitaciones,
 } from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
-import { huellaDeImagen } from '@/lib/cotizaciones/captura-repetida'
+import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
+import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
+import { ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
+import { definicionDeTipo, esTipoRanura, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
+import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -310,56 +312,23 @@ export async function leerCasillaDeItem(
     }
   }
 
-  const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl)
-  if (!m) return { ok: false, codigo: 'RX5', mensaje: 'La imagen no llegó en un formato legible. Vuelve a pegarla.' }
-
-  const apiKey = getServerKey('gemini')
-  if (!apiKey) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la lectura de capturas. Avísale a MeTRIK.' }
-
-  // Lo que llega del navegador se acota: es texto que va al prompt.
-  const enfoqueLimpio = enfoque && typeof enfoque.nombre === 'string' && enfoque.nombre.trim() !== ''
-    ? { nombre: enfoque.nombre.trim().slice(0, 160), precio: typeof enfoque.precio === 'string' ? enfoque.precio.trim().slice(0, 40) || null : null }
-    : null
-  const lectura = await extraerRanuraDesdeImagen(Buffer.from(m[2], 'base64'), m[1], ranura, apiKey, enfoqueLimpio)
-  if (!lectura.data) {
-    return {
-      ok: false,
-      codigo: 'RX6',
-      mensaje: 'No se pudo leer el pantallazo. Vuelve a intentarlo.',
-      detalle: lectura.error,
-    }
-  }
-
-  const veredicto = evaluarLectura(ranura, lectura.data, {
-    fechasViaje: viaje.fechas,
-    monedaIndicada: monedaIndicada ?? null,
-    soloMinimosDeCosto: true,
-    // RX3 deja de ser un rechazo aquí: sin moneda visible se preselecciona COP, marcada
-    // como supuesta, y `confirmarTarifaPorPasajero` no deja pasar el costo hasta que una
-    // persona la acepte o la cambie. Este es el único camino con ese freno.
-    monedaSiFalta: 'COP',
-  })
-  if (!veredicto.ok) {
-    const opciones = veredicto.opciones ?? []
-    return {
-      ok: false,
-      codigo: veredicto.codigo,
-      // P8 · con opciones legibles no se manda a la persona de vuelta al proveedor: se le
-      // pregunta cuál de las que se leyeron es.
-      mensaje: opciones.length > 0 ? '¿Cuál de estas? La captura trae varias opciones: toca la que vas a cotizar.' : veredicto.instruccion,
-      detalle: veredicto.motivo,
-      ...(opciones.length > 0 ? { opciones } : {}),
-    }
-  }
-
-  const leida = construirLecturaCasilla(ranura, veredicto, new Date().toISOString())
-  // La huella del archivo, para que la bandeja no procese dos veces el mismo pantallazo (P10).
-  const huella = await huellaDeImagen(dataUrl)
-  if (huella) leida.huellaImagen = huella
+  const leidaR = await leerImagenDeCaptura({ ranura, dataUrl, viaje, monedaIndicada, enfoque })
+  if (!leidaR.ok) return leidaR
+  const leida = leidaR.leida
 
   if (modo?.comoHabitacion) {
     return agregarHabitacionLeida({ supabase, item, itemId, ranura, viaje, tarifa, leida })
   }
+  return guardarLecturaEnItem(ctx, itemId, clave, leida)
+}
+
+/**
+ * Guarda en su casilla una lectura ya hecha: la ocupación que manda, la validación contra la
+ * línea, el nombre leído y el mensaje. Lo usan la casilla de la opción (después de leer) y el
+ * «Aceptar» de la bandeja (con la lectura del borrador): las dos terminan igual.
+ */
+async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: ClaveCasilla, leida: LecturaCasilla): Promise<ResultadoCasilla> {
+  const { supabase, item, ranura, tarifa, composicion } = ctx
 
   // ── Quién decide a cuántos cubre la línea (§2.4) ──────────────────────────
   //
@@ -485,6 +454,187 @@ export async function quitarCasillaDeItem(
   if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
+}
+
+// ── La bandeja: leer como borrador y aceptar (H1-H3 de la prueba del 2026-09-24) ──
+//
+// Regla de Mauricio: lo que sigue en la bandeja NO toca Componentes; solo «Aceptar» lo lleva.
+// Leer devuelve la lectura firmada y no escribe nada; aceptar verifica la firma, decide dónde
+// va CONTRA LA COTIZACIÓN DE ESE MOMENTO (`ubicarLectura`) y recién ahí crea la ranura, la
+// opción o la habitación, guarda la lectura y confirma el costo.
+
+async function contextoDeCotizacion(cotizacionId: string) {
+  const { supabase, error } = await getWorkspace()
+  if (error) return { error: 'No autenticado' as const }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  const { data: cot } = await sb.from('cotizaciones').select('id, estado, negocio_id').eq('id', cotizacionId).maybeSingle()
+  if (!cot) return { error: 'Cotización no encontrada' as const }
+  if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
+    return { error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' as const }
+  }
+  const { viaje, error: errViaje } = await leerViajeDelNegocio(supabase, cot.negocio_id ?? null)
+  if (errViaje) return { error: `No se pudo leer quiénes viajan: ${errViaje}` as const }
+  return { supabase, negocioId: (cot.negocio_id ?? null) as string | null, viaje }
+}
+
+async function lineasDeCotizacion(supabase: unknown, cotizacionId: string): Promise<Record<string, unknown>[] | { error: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).from('items').select('*').eq('cotizacion_id', cotizacionId).order('orden')
+  if (error) return { error: error.message as string }
+  return (data ?? []) as Record<string, unknown>[]
+}
+
+export type ResultadoBorrador =
+  | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
+  | { ok: false; codigo: string; mensaje: string; detalle?: string; opciones?: { nombre: string; precio: string | null }[] }
+
+/**
+ * Lee un pantallazo de la bandeja SIN escribir nada: ni ranura, ni opción, ni habitación.
+ * Devuelve la lectura firmada (`firma-borrador.ts`) para que «Aceptar» la use tal cual.
+ */
+export async function leerCapturaEnBorrador(
+  cotizacionId: string,
+  tipo: TipoRanura,
+  dataUrl: string,
+  enfoque?: { nombre: string; precio: string | null } | null,
+): Promise<ResultadoBorrador> {
+  if (!esTipoRanura(tipo)) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) {
+    return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
+  }
+  const ctx = await contextoDeCotizacion(cotizacionId)
+  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  const ranura = definicionDeTipo(tipo)
+  const r = await leerImagenDeCaptura({ ranura, dataUrl, viaje: ctx.viaje, enfoque })
+  if (!r.ok) return r
+  const leida = r.leida
+  // La misma validación que tenía la captura al leerse sobre su opción vacía: contra la
+  // ocupación que ella misma dice, o la del viaje si no la dice. El rechazo sale AHORA, no
+  // al aceptar.
+  const propia = composicionDeLectura(leida) ?? ctx.viaje.composicion
+  const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug: ranura.slug })
+  if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
+  leida.alertas = [...leida.alertas, ...v.alertas]
+  const lecturaJson = JSON.stringify(leida)
+  const firma = firmarBorrador(cotizacionId, tipo, lecturaJson)
+  if (!firma) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
+  return { ok: true, lectura: leida, lecturaJson, firma, alertas: leida.alertas }
+}
+
+export interface BorradorParaAceptar {
+  tipo: TipoRanura
+  lecturaJson: string
+  firma: string
+  /** Lo que dijo el detector del lugar: nombra la ranura si hay que abrirla. */
+  pistas: { lugar: string | null; origen: string | null; destino: string | null }
+  /**
+   * `auto`: donde diga `ubicarLectura`. `opcion`: otra opción, nunca habitación («Agregar
+   * igual»). `habitacion`: habitación de `destinoId` aunque el grupo ya esté cubierto.
+   * `reemplazar`: la lectura reemplaza la de `destinoId` («Reemplazar el precio»).
+   */
+  decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar'
+  destinoId?: string | null
+}
+
+export type ResultadoAceptarCaptura =
+  | {
+      ok: true
+      itemId: string
+      /** «Hotel en Providencia · Opción 2» (· «Habitación 3»). */
+      donde: string
+      /** Faltante de la tarifa que queda en su bloque (moneda, tasa…): se acepta igual. */
+      pendiente: string | null
+    }
+  /** El grupo ya estaba cubierto al aceptar (regla 6): la bandeja pregunta. */
+  | { ok: false; codigo: 'SOBRA'; mensaje: string; conItemId: string }
+  | { ok: false; codigo: string; mensaje: string }
+
+/** «Hotel en Providencia · Opción 2»: dónde quedó una opción, como se ve en Componentes. */
+function nombreDeUbicacion(lineas: Record<string, unknown>[], itemId: string): string {
+  const linea = lineas.find(l => l.id === itemId)
+  const grupo = normalizarGrupo((linea?.grupo ?? null) as string | null)
+  if (!linea || !grupo) return 'Componentes'
+  const hermanas = lineas.filter(l => l.es_ajuste !== true && normalizarGrupo((l.grupo ?? null) as string | null) === grupo)
+  const n = hermanas.findIndex(l => l.id === itemId) + 1
+  return `${etiquetaDeRanura(grupo)} · Opción ${n}`
+}
+
+export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorParaAceptar): Promise<ResultadoAceptarCaptura> {
+  if (!b || !esTipoRanura(b.tipo)) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
+  if (!borradorValido(cotizacionId, b.tipo, b.lecturaJson, b.firma)) {
+    return { ok: false, codigo: 'FIRMA', mensaje: 'La lectura de esta captura venció o no es de esta cotización. Vuelve a pegarla.' }
+  }
+  const lectura = JSON.parse(b.lecturaJson) as LecturaCasilla
+  const ctx = await contextoDeCotizacion(cotizacionId)
+  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  const lineas = await lineasDeCotizacion(ctx.supabase, cotizacionId)
+  if ('error' in lineas) return { ok: false, codigo: 'CONTEXTO', mensaje: lineas.error }
+  const pistas = {
+    lugar: typeof b.pistas?.lugar === 'string' ? b.pistas.lugar.slice(0, 120) : null,
+    origen: typeof b.pistas?.origen === 'string' ? b.pistas.origen.slice(0, 120) : null,
+    destino: typeof b.pistas?.destino === 'string' ? b.pistas.destino.slice(0, 120) : null,
+  }
+  const delaCotizacion = (id: string | null | undefined) => !!id && lineas.some(l => l.id === id)
+
+  // ── Reemplazar el precio de una opción que ya estaba ──
+  if (b.decision === 'reemplazar') {
+    if (!delaCotizacion(b.destinoId)) return { ok: false, codigo: 'DESTINO', mensaje: 'Esa opción ya no está en la cotización. Recarga la página.' }
+    const ctxItem = await contexto(b.destinoId!)
+    if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura)
+    if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
+    return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, null)
+  }
+
+  // ── Dónde va, contra la cotización de ESTE momento ──
+  const destino = b.decision === 'habitacion'
+    ? (delaCotizacion(b.destinoId) ? { como: 'habitacion' as const, itemId: b.destinoId!, grupo: '', sobra: false } : null)
+    : ubicarLectura({ tipo: b.tipo, lectura, pistas, lineas: lineas as unknown as LineaParaUbicar[], grupoViaje: ctx.viaje.composicion, sinHabitacion: b.decision === 'opcion' })
+  if (!destino) return { ok: false, codigo: 'DESTINO', mensaje: 'Esa opción ya no está en la cotización. Recarga la página.' }
+
+  if (destino.como === 'habitacion') {
+    if (destino.sobra) {
+      return { ok: false, codigo: 'SOBRA', mensaje: 'Las habitaciones de esa opción ya cubren a todo el grupo.', conItemId: destino.itemId }
+    }
+    const ctxItem = await contexto(destino.itemId)
+    if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    const r = await agregarHabitacionLeida({ ...ctxItem, itemId: destino.itemId, leida: lectura })
+    if (!r.ok) return { ok: false, codigo: r.codigo, mensaje: r.mensaje }
+    const habitacionId = r.tarifa.habitaciones?.at(-1)?.id ?? null
+    const { numero } = habitacionId ? dondeQuedo(r.tarifa, habitacionId, ctx.viaje.composicion, null) : { numero: null }
+    return terminarAceptacion(ctx.supabase, cotizacionId, destino.itemId, numero ? `Habitación ${numero}` : 'Solo para restar')
+  }
+
+  // ── Opción nueva: en la ranura que ya estaba o en una ranura nueva ──
+  const creada = destino.como === 'hermana'
+    ? await agregarOpcionARanura(cotizacionId, destino.grupo)
+    : await crearRanuraConOpcion(cotizacionId, b.tipo, pistas)
+  if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error }
+  const ctxItem = await contexto(creada.itemId)
+  const g = 'error' in ctxItem
+    ? { ok: false as const, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    : await guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura)
+  if (!g.ok) {
+    // Nada a medias en Componentes: si la lectura no entra, la opción recién creada se va.
+    await deleteItem(creada.itemId)
+    return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
+  }
+  return terminarAceptacion(ctx.supabase, cotizacionId, creada.itemId, null)
+}
+
+/** Confirma el costo (un faltante queda pendiente en su bloque, R1) y dice dónde quedó. */
+async function terminarAceptacion(
+  supabase: unknown,
+  cotizacionId: string,
+  itemId: string,
+  sufijo: string | null,
+): Promise<ResultadoAceptarCaptura> {
+  const c = await confirmarTarifaPorPasajero(itemId, null)
+  const pendiente = c.success ? null : (c.error ?? 'falta un dato de la tarifa')
+  const lineas = await lineasDeCotizacion(supabase, cotizacionId)
+  const lugar = 'error' in lineas ? 'Componentes' : nombreDeUbicacion(lineas, itemId)
+  return { ok: true, itemId, donde: sufijo ? `${lugar} · ${sufijo}` : lugar, pendiente }
 }
 
 // ── R8 · Habitaciones de una opción de hotel ─────────────────────────────────
