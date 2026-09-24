@@ -45,25 +45,29 @@ interface CartaAutorizacionProps {
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
 
 const s = StyleSheet.create({
-  page: { paddingTop: 50, paddingBottom: 60, paddingHorizontal: 50, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.6 },
-  ciudad: { fontSize: 10, marginBottom: 14 },
+  // Espaciado y márgenes ajustados (fuente intacta en 10) para que la carta,
+  // con sus dos firmas, quepa en UNA hoja carta.
+  page: { paddingTop: 40, paddingBottom: 40, paddingHorizontal: 50, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.5 },
+  ciudad: { fontSize: 10, marginBottom: 10 },
   destinatario: { marginBottom: 4 },
   destLine: { fontSize: 10 },
   destBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  asunto: { marginBottom: 16, marginTop: 14, textAlign: 'justify' },
+  asunto: { marginBottom: 12, marginTop: 10, textAlign: 'justify' },
   asuntoBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  intro: { marginBottom: 10, textAlign: 'justify' },
-  comparec: { marginBottom: 8, marginLeft: 14, textAlign: 'justify' },
-  clause: { marginBottom: 10, textAlign: 'justify' },
-  facultad: { marginBottom: 5, marginLeft: 20, textAlign: 'justify' },
+  intro: { marginBottom: 8, textAlign: 'justify' },
+  comparec: { marginBottom: 6, marginLeft: 14, textAlign: 'justify' },
+  clause: { marginBottom: 8, textAlign: 'justify' },
+  facultad: { marginBottom: 4, marginLeft: 20, textAlign: 'justify' },
   bold: { fontFamily: 'Helvetica-Bold' },
-  cierre: { marginTop: 14, marginBottom: 26, textAlign: 'justify' },
-  firmasWrap: { marginTop: 10 },
-  signatureBlock: { width: '65%', marginBottom: 34 },
-  signatureLine: { borderTop: '1 solid #111827', marginTop: 46, paddingTop: 6 },
+  cierre: { marginTop: 10, marginBottom: 10, textAlign: 'justify' },
+  // Espacio en blanco para firmar, y las dos firmas en UNA fila (pedido de Deisy,
+  // 2026-09-24): apiladas alargaban la carta y la partían en dos páginas.
+  firmasRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 54 },
+  signatureBlock: { width: '44%' },
+  signatureLine: { borderTop: '1 solid #111827', paddingTop: 6 },
   signatureName: { fontSize: 10, fontFamily: 'Helvetica-Bold' },
   signatureDetail: { fontSize: 9, color: '#374151', marginTop: 2 },
-  nota: { marginTop: 16, fontSize: 8, fontFamily: 'Helvetica-Oblique', color: PALETA.tintaSuave },
+  codigo: { marginTop: 18, fontSize: 8, color: PALETA.tintaSuave },
 })
 
 export default function CartaAutorizacionPDF({ datos, fechaGeneracion, codigoNegocio }: CartaAutorizacionProps) {
@@ -152,7 +156,7 @@ export default function CartaAutorizacionPDF({ datos, fechaGeneracion, codigoNeg
 
         <Text style={s.intro}>Atentamente,</Text>
 
-        <View style={s.firmasWrap}>
+        <View style={s.firmasRow} wrap={false}>
           <View style={s.signatureBlock}>
             <View style={s.signatureLine}>
               <Text style={s.signatureName}>{autorizante}</Text>
@@ -170,9 +174,7 @@ export default function CartaAutorizacionPDF({ datos, fechaGeneracion, codigoNeg
           </View>
         </View>
 
-        <Text style={s.nota}>
-          Este documento debe autenticarse en notaría por ambos firmantes antes de radicarse ante la DIAN. {codigoNegocio}
-        </Text>
+        <Text style={s.codigo}>{codigoNegocio}</Text>
       </Page>
     </Document>
   )
