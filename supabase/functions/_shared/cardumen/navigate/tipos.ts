@@ -101,11 +101,19 @@ export interface TurnoHistorial { role: "bot" | "persona"; text: string }
  * analisis decide con ellas segun los criterios pre-registrados. Nunca borran nada en silencio.
  */
 export interface Integridad {
-  /** Hubo al menos un mensaje de riesgo (o el filtro fallo y se trato como riesgo posible). */
+  /** Hubo al menos un mensaje de riesgo detectado por el filtro (palabras o modelo). */
   sensible: boolean;
-  /** Mensajes tratados como riesgo, y cuantos de ellos por error del filtro (no por contenido). */
+  /** Mensajes de riesgo detectados. */
   mensajes_riesgo: number;
-  riesgo_por_error: number;
+  /**
+   * Veces que el filtro no respondio (caida o salida invalida del modelo). No son riesgo: se pidio
+   * repetir con un texto neutro y no se ubico nada. Con una o mas, `revision_humana` queda en true.
+   */
+  fallos_filtro: number;
+  /** Alguien tiene que revisar esta sesion a mano (hoy: el filtro fallo al menos una vez). */
+  revision_humana: boolean;
+  /** Autocorrecciones de la persona (CO): retiro su mensaje anterior. No cuentan al tope. */
+  correcciones: number;
   /** Las preguntas estan en pausa esperando "seguir" o "salir" tras un mensaje de riesgo. */
   pausa_cuidado: boolean;
   /** Pedidos ajenos al estudio y intentos de manipulacion, en total. */
@@ -197,7 +205,7 @@ export interface Interprete {
    * Filtro de cada mensaje antes del lector (`filtro.ts`). En produccion lo da siempre
    * `interpreteConModelo`; es opcional en el tipo para que un lector de prueba no tenga que
    * implementarlo (el motor aplica igual la capa de palabras, que no depende del modelo).
-   * Nunca lanza: si el modelo falla, devuelve SEN con `fuente: "error"`.
+   * Nunca lanza: si el modelo falla, devuelve `SIN_CLASIFICAR` con `fuente: "error"`.
    */
   clasificar?(texto: string): Promise<ClasificacionMensaje>;
   triada(t: TriadaNav, respuesta: string): Promise<InterpretacionTriada>;

@@ -101,6 +101,21 @@ export function mencionaAmbosPolos(polos: [string, string], respuesta: string): 
   return [...a].some((r) => resp.has(r)) && [...b].some((r) => resp.has(r));
 }
 
+/** Marcas de punto medio de verdad: tibieza o reparto, no dos afirmaciones fuertes. */
+const MARCA_MEDIO = /\b(medio|mitad|intermedi\w*|un poco|un tanto|algo de|mas o menos|ni lo uno ni lo otro|ni (una|uno|la una|el uno) ni (la )?otr[ao]|equilibri\w*|balance|balancead\w*|depende|regular|parej[oa]s?)\b/;
+
+/**
+ * El modelo leyo punto medio (middle o ancla 3) pero la respuesta afirma LOS DOS polos sin ninguna
+ * marca de tibieza: eso es "both_intense" (Saga, 2026-09-25, G15 con 3.5-flash-lite). Sin polos no
+ * se corrige nada.
+ */
+export function medioQueEsAmbas(respuesta: string, polos?: [string, string]): boolean {
+  if (!polos) return false;
+  const t = normalizarTexto(respuesta);
+  if (MARCA_MEDIO.test(t)) return false;
+  return /\b(las dos|los dos|ambas|ambos|a la vez|al mismo tiempo|las dos cosas)\b/.test(t) || mencionaAmbosPolos(polos, respuesta);
+}
+
 /**
  * Un "especial" (no sabe / no aplica / las dos con fuerza) solo se acepta si la respuesta trae
  * evidencia de ESO. Sin esta guarda, un modelo chico usa "not_applicable" como cajon para lo que
@@ -199,7 +214,7 @@ export const ESQUEMAS = {
     lado: enumDe("izq", "der", null),
   },
   clasificacion: {
-    categoria: enumDe("R", "SEN", "INJ", "FT"),
+    categoria: enumDe("R", "SEN", "INJ", "FT", "CO"),
   },
 } satisfies Record<string, Record<string, Validador>>;
 
@@ -238,12 +253,12 @@ const noLeidoDiada = (): InterpretacionDiada => ({ claro: false, ancla: null, es
 async function clasificarConModelo(model: ModelAdapter, texto: string): Promise<ClasificacionMensaje> {
   try {
     const r = await pedirValidado<{ categoria: CategoriaMensaje }>(model, SISTEMA_CLASIFICADOR, mensajeParaClasificar(texto), ESQUEMAS.clasificacion);
-    if (!r) return { categoria: "SEN", fuente: "error" };
+    if (!r) return { categoria: "SIN_CLASIFICAR", fuente: "error" };
     return { categoria: r.categoria, fuente: "modelo" };
   } catch (e) {
-    // Falla hacia el lado seguro: sin clasificacion no se ubica nada.
-    console.error("[navigate] el filtro de riesgo fallo; se trata como riesgo posible:", (e as Error).message ?? "");
-    return { categoria: "SEN", fuente: "error" };
+    // Sin clasificacion no se ubica nada; el motor pide repetir y marca la sesion para revision.
+    console.error("[navigate] el filtro de riesgo no respondio:", (e as Error).message ?? "");
+    return { categoria: "SIN_CLASIFICAR", fuente: "error" };
   }
 }
 
@@ -339,10 +354,11 @@ Devuelve: {"claro": bool, "ancla": 1|2|3|4|5|null, "especial": "middle"|"both_in
 Anclas:
 1 = claramente A, sin matiz
 2 = mas cerca de A, pero con matices ("A, aunque...", "A, pero ahora...")
-3 = punto medio genuino: dice que esta en el medio o que es un poco de cada una, sin afirmar ninguna con fuerza (tambien "especial": "middle")
+3 = punto medio genuino: "ni lo uno ni lo otro", "en el medio", "un poco de cada una", SIN afirmar ninguna con fuerza (tambien "especial": "middle")
 4 = mas cerca de B, pero con matices
 5 = claramente B, sin matiz
-- "both_intense": afirma LAS DOS con fuerza, aunque sea en planos distintos ("hace falta A, pero tambien B"; "A para una cosa y B para otra"). NO es punto medio: no la pongas en 3. ancla null.
+- "both_intense": afirma LAS DOS con fuerza, aunque sea en planos distintos ("hace falta A, pero tambien B"; "A para una cosa y B para otra"). NO es punto medio: no la pongas en 3 ni en "middle". ancla null.
+- La diferencia entre "middle" y "both_intense" es la FUERZA, no la cantidad de polos que nombra. "Un poco de flexibilidad y un poco de estructura" es "middle". "Deben existir objetivos claros y directrices firmes, pero con total libertad para explorar como llegar" es "both_intense": pide las dos con fuerza, cada una para algo.
 - Si afirma una con fuerza y la otra solo como matiz, condicion o detalle, es 2 o 4, no "both_intense".
 - "not_applicable": dice que ninguna de las dos le aplica. ancla null.
 - "dont_know": dice que no sabe. ancla null.
@@ -352,7 +368,10 @@ Anclas:
 - Un orden de otras opciones, un peso ("casi parejos") o una historia sin postura sobre A y B NO es un ancla: "claro": false, "lado": null.`;
       const r = await pedirValidado<InterpretacionDiada>(model, system, mensajeDelLector(respuesta), ESQUEMAS.diada);
       if (!r) return noLeidoDiada();
-      const especial = evidenciaEspecial(r.especial, respuesta, [d.izq, d.der]) ? r.especial : null;
+      const polos: [string, string] = [d.izq, d.der];
+      let especial = evidenciaEspecial(r.especial, respuesta, polos) ? r.especial : null;
+      const leyoMedio = especial === "middle" || (especial === null && r.ancla === 3);
+      if (leyoMedio && medioQueEsAmbas(respuesta, polos)) especial = "both_intense";
       const a = especial && especial !== "middle" ? null : (especial === "middle" ? 3 : r.ancla);
       // Un especial es una lectura aunque el modelo marque claro:false (no habia ancla que leer).
       return { claro: especial !== null || (r.claro && a !== null), ancla: a, especial, lado: r.lado };

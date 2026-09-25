@@ -367,7 +367,9 @@ function integridadDe(state: NavigateState): Integridad {
   return (state.integridad ??= {
     sensible: false,
     mensajes_riesgo: 0,
-    riesgo_por_error: 0,
+    fallos_filtro: 0,
+    revision_humana: false,
+    correcciones: 0,
     pausa_cuidado: false,
     fuera_de_tema: 0,
     intento_manipulacion: 0,
@@ -396,8 +398,8 @@ async function clasificarEntrada(
   try {
     return await interprete.clasificar(t);
   } catch {
-    // `clasificar` no lanza por contrato; si un adaptador lo hiciera, el lado seguro es el riesgo.
-    return { categoria: "SEN", fuente: "error" };
+    // `clasificar` no lanza por contrato; si un adaptador lo hiciera, es un fallo del filtro.
+    return { categoria: "SIN_CLASIFICAR", fuente: "error" };
   }
 }
 
@@ -415,31 +417,53 @@ async function filtrarEntrada(
   if (boton && !enPausa) return null;
 
   const cls = await clasificarEntrada(state, t, n, boton, interprete);
-  if (cls.categoria === "SEN") return contener(state, cls);
+  if (cls.fuente === "error") return filtroCaido(state, enPausa);
+  if (cls.categoria === "SEN") return contener(state);
   // En pausa nada avanza: solo "seguir" retoma y "salir" termina (atendido arriba en `procesar`).
   if (enPausa) return resultado(state, [texto(BANCO.pausaSigue)]);
+  if (cls.categoria === "CO") return correccion(state);
   if (cls.categoria === "INJ" || cls.categoria === "FT") return fueraDeTema(state, cls.categoria);
   if (state.integridad) state.integridad.seguidos = 0;
   return null;
 }
 
 /**
- * Mensaje de riesgo (o filtro caido): no se lee, no se ubica, se responde con el texto de
- * contencion del banco y las preguntas quedan en pausa. El mensaje no se guarda en el historial:
+ * El filtro no respondio (caida o salida invalida del modelo). No sabemos nada del mensaje: no se
+ * lee, no se ubica, y NO se manda la contencion (a quien no esta en crisis tambien le hace dano).
+ * Texto neutro para que lo repita, y la sesion queda marcada para revision humana. No cuenta al
+ * tope de fuera de tema ni toca la pausa: si ya estaba en pausa, sigue igual.
+ */
+function filtroCaido(state: NavigateState, enPausa: boolean): Resultado {
+  const integ = integridadDe(state);
+  integ.fallos_filtro += 1;
+  integ.revision_humana = true;
+  nota(state, "el filtro de riesgo no respondio: no se ubico el mensaje, se pidio repetir y la sesion queda para revision humana");
+  if (state.en_curso) state.en_curso.notas.push("el filtro no respondio en esta dimension: se pidio repetir");
+  return resultado(state, [texto(enPausa ? BANCO.pausaSigue : BANCO.errorTecnico)]);
+}
+
+/** Autocorreccion (CO): se toma nota, no se lee, no cuenta al tope y se repite la pregunta vigente. */
+function correccion(state: NavigateState): Resultado {
+  const integ = integridadDe(state);
+  integ.correcciones += 1;
+  nota(state, "la persona retiro su mensaje anterior: no se ubico y se repitio la pregunta");
+  return resultado(state, [prefijar(BANCO.correccion, preguntaPendiente(state))]);
+}
+
+/**
+ * Mensaje de riesgo (detectado por palabras o por el modelo): no se lee, no se ubica, se responde
+ * con el texto de contencion del banco y las preguntas quedan en pausa. El mensaje no se guarda en el historial:
  * no es un dato del estudio, y su lugar es una persona, no un registro de demostracion.
  */
-function contener(state: NavigateState, cls: ClasificacionMensaje): Resultado {
+function contener(state: NavigateState): Resultado {
   const integ = integridadDe(state);
   integ.sensible = true;
   integ.mensajes_riesgo += 1;
-  if (cls.fuente === "error") integ.riesgo_por_error += 1;
   integ.pausa_cuidado = true;
   integ.seguidos = 0;
   const ultimo = state.historial[state.historial.length - 1];
   if (ultimo?.role === "persona") ultimo.text = "[mensaje retenido por el filtro de riesgo]";
-  nota(state, cls.fuente === "error"
-    ? "el filtro de riesgo no respondio: el mensaje se trato como riesgo posible y no se ubico"
-    : "mensaje de riesgo: no se ubico, se envio el texto de contencion y se pausaron las preguntas");
+  nota(state, "mensaje de riesgo: no se ubico, se envio el texto de contencion y se pausaron las preguntas");
   if (state.en_curso) state.en_curso.notas.push("hubo un mensaje de riesgo en esta dimension: no se ubico");
   return resultado(state, [texto(textoContencion())]);
 }
