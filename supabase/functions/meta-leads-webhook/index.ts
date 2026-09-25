@@ -41,6 +41,7 @@ import {
   type BuscarCandidatos,
   type CandidatoContacto,
 } from '../_shared/meta-leads/dedup-lead.ts';
+import { verificarFirmaMeta } from '../_shared/wa-firma.ts';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -205,31 +206,13 @@ async function marcarEvento(
   if (error) console.error('[meta-leads] error marcando evento %s: %s', eventoId, error.message);
 }
 
-// ── Firma HMAC-SHA256 (x-hub-signature-256), mismo patrón que wa-webhook ──
-async function verifySignature(body: string, signature: string | null): Promise<boolean> {
-  const appSecret = Deno.env.get('META_LEADS_APP_SECRET');
-  if (!appSecret) {
-    const isProduction = !!Deno.env.get('DENO_DEPLOYMENT_ID') || Deno.env.get('NODE_ENV') === 'production';
-    if (isProduction) {
-      console.error('[meta-leads] META_LEADS_APP_SECRET not set in production — rejecting request');
-      return false;
-    }
-    console.warn('[meta-leads] META_LEADS_APP_SECRET not set — skipping verification (dev only)');
-    return true;
-  }
-  if (!signature) return false;
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(appSecret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
-  const computed = 'sha256=' + Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  return computed === signature;
+// ── Firma HMAC-SHA256 (x-hub-signature-256), mismo modulo que wa-webhook ──
+// La logica vive en `_shared/wa-firma.ts` (pura y probada): falla cerrado sin secreto y compara en
+// tiempo constante. Aqui solo se leen las variables.
+function verifySignature(body: string, signature: string | null): Promise<boolean> {
+  return verificarFirmaMeta(body, signature, Deno.env.get('META_LEADS_APP_SECRET'), {
+    saltarFirma: Deno.env.get('META_LEADS_SKIP_FIRMA') === '1',
+  });
 }
 
 type LeadgenChange = {

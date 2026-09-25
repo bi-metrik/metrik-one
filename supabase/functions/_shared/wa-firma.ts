@@ -32,10 +32,10 @@ export async function verificarFirmaMeta(
 ): Promise<boolean> {
   if (!appSecret) {
     if (opciones.saltarFirma) {
-      console.warn('[wa-firma] WHATSAPP_APP_SECRET ausente y WA_WEBHOOK_SKIP_FIRMA=1: firma NO verificada (solo desarrollo local)');
+      console.warn('[wa-firma] secreto de la app de Meta ausente y bypass de firma activo: firma NO verificada (solo desarrollo local)');
       return true;
     }
-    console.error('[wa-firma] WHATSAPP_APP_SECRET ausente: se rechaza la peticion');
+    console.error('[wa-firma] secreto de la app de Meta ausente: se rechaza la peticion');
     return false;
   }
 
