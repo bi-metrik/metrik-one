@@ -164,6 +164,10 @@ export interface IncomingMessage {
   flow_response?: string; // JSON string del Flow completado (nfm_reply.response_json)
   location?: { latitude: number; longitude: number; name?: string; address?: string };
   wa_message_id?: string; // wamid del mensaje entrante (marcar leido / indicador "escribiendo")
+  /** `context.forwarded` de Meta: el usuario reenvio este mensaje. Ausente = no reenviado. */
+  reenviado?: boolean;
+  /** `context.frequently_forwarded` de Meta (reenviado muchas veces en cadena). */
+  reenviado_muchas_veces?: boolean;
   bot_phone?: string; // display_phone_number del webhook = numero del bot (para compartir su contacto)
   timestamp: string;
   /**

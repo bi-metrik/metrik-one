@@ -34,10 +34,28 @@ export interface TranscribeResult {
 }
 
 /**
+ * Opciones para quien no es el flujo de gastos. Sin ellas, todo queda como siempre.
+ *
+ * La bandeja de solicitudes las usa porque una nota de voz de un comercial describiendo un
+ * viaje es larga: con 512 tokens de salida se cortaba, y un corte con `finishReason` distinto
+ * de STOP solo se registraba como aviso. Media transcripcion aceptada en silencio es un falso
+ * verde (motor-solicitud-viaje.md, §3): con `exigirFinCompleto` se rechaza.
+ */
+export interface OpcionesTranscripcion {
+  prompt?: string;
+  maxOutputTokens?: number;
+  exigirFinCompleto?: boolean;
+}
+
+/** Prompt neutro: no presupone gastos ni ningun tema. */
+export const PROMPT_TRANSCRIPCION_LITERAL =
+  'Transcribe este audio de WhatsApp en espanol, palabra por palabra. Responde SOLO con la transcripcion textual, sin explicaciones, sin comillas, sin resumir y sin formato adicional. Si el audio es inaudible o vacio, responde INAUDIBLE.';
+
+/**
  * Download WhatsApp audio message and transcribe with Gemini.
  * Returns transcribed text or null if transcription fails, with error detail.
  */
-export async function transcribeAudio(audioId: string): Promise<TranscribeResult> {
+export async function transcribeAudio(audioId: string, opciones: OpcionesTranscripcion = {}): Promise<TranscribeResult> {
   try {
     console.log(`[wa-transcribe] Starting transcription for audio: ${audioId}`);
 
@@ -58,7 +76,7 @@ export async function transcribeAudio(audioId: string): Promise<TranscribeResult
     console.log(`[wa-transcribe] Downloaded ${audioData.sizeKB}KB, raw mime: "${audioData.rawMimeType}", normalized: "${mimeType}"`);
 
     // 3. Transcribe with Gemini
-    const result = await geminiTranscribe(base64, mimeType);
+    const result = await geminiTranscribe(base64, mimeType, opciones);
     if (!result.text) {
       return { text: null, error: result.error || 'GEMINI_EMPTY: Gemini no devolvió texto' };
     }
@@ -89,6 +107,7 @@ function uint8ToBase64(buffer: Uint8Array): string {
 async function geminiTranscribe(
   base64Audio: string,
   mimeType: string,
+  opciones: OpcionesTranscripcion = {},
 ): Promise<TranscribeResult> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) {
@@ -108,7 +127,7 @@ async function geminiTranscribe(
         {
           parts: [
             {
-              text: 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.',
+              text: opciones.prompt ?? 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.',
             },
             {
               inline_data: { mime_type: mimeType, data: base64Audio },
@@ -118,7 +137,7 @@ async function geminiTranscribe(
       ],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 512,
+        maxOutputTokens: opciones.maxOutputTokens ?? 512,
       },
     }),
   });
@@ -141,6 +160,12 @@ async function geminiTranscribe(
   const finishReason = data.candidates?.[0]?.finishReason;
   if (finishReason && finishReason !== 'STOP') {
     console.warn(`[wa-transcribe] Gemini finishReason: ${finishReason}`);
+    if (opciones.exigirFinCompleto) {
+      return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason}` };
+    }
+  }
+  if (opciones.exigirFinCompleto && finishReason !== 'STOP') {
+    return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();

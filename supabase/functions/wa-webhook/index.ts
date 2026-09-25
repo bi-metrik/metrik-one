@@ -32,6 +32,7 @@ import { handleActividad } from '../_shared/handlers/actividad.ts';
 import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
+import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -409,6 +410,18 @@ async function processMessage(message: IncomingMessage): Promise<void> {
 
   if (!user) {
     await atenderDesconocido(supabase, message);
+    return;
+  }
+
+  // 1a-bandeja. Bandeja de solicitudes (opt-in por workspace: `modules.bandeja_solicitudes_wa`).
+  //     Lo que un comercial reenvia o dicta queda guardado COMPLETO y agrupado por entrega, y NO
+  //     pasa por Gemini ni por el flujo de gastos. Va antes de la puerta de Clarity porque es su
+  //     propia llave, y antes del tope de 30 mensajes por hora porque una sola conversacion
+  //     reenviada puede pasar de 30 y la bandeja no gasta parser. Con la llave apagada no hace
+  //     ni una consulta: todo sigue exactamente como antes. Reglas en `_shared/wa-bandeja-reglas.ts`.
+  const bandeja = await rutaDelMensaje(supabase, user, message);
+  if (bandeja.ruta === 'bandeja' && bandeja.config) {
+    await atenderEnBandeja(supabase, user, message, bandeja.config);
     return;
   }
 

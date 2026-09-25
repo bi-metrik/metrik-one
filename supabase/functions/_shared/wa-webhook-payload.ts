@@ -41,7 +41,9 @@ export type MetaMensaje = {
     list_reply?: { id?: string; title?: string };
   };
   // wamid del mensaje nuestro al que responde (en toques de boton, el mensaje con los botones).
-  context?: { from?: string; id?: string };
+  // `forwarded` / `frequently_forwarded`: Meta los pone cuando el usuario REENVIA un mensaje.
+  // Hasta la bandeja de solicitudes nadie los leia y un reenvio llegaba como texto suelto.
+  context?: { from?: string; id?: string; forwarded?: boolean; frequently_forwarded?: boolean };
   location?: { latitude: number; longitude: number; name?: string; address?: string };
   // Tarjeta de contacto compartida (o el boton REQUEST_CONTACT_INFO).
   contacts?: Array<{ phones?: Array<{ phone?: string; wa_id?: string }> }>;
@@ -216,6 +218,12 @@ export function extraerEntrante(
 
     const mensaje = mensajeConTelefono(msg, telefono, value?.metadata?.display_phone_number);
     if (!mensaje) return null;
+    // El wamid va en TODOS los tipos: la bandeja lo usa para no guardar dos veces lo que Meta
+    // reintenta, y la foto y el toque de boton no lo traian.
+    if (msg.id && !mensaje.wa_message_id) mensaje.wa_message_id = msg.id;
+    // Solo cuando es cierto: asi un mensaje normal sale identico a como salia antes.
+    if (msg.context?.forwarded === true || msg.context?.frequently_forwarded === true) mensaje.reenviado = true;
+    if (msg.context?.frequently_forwarded === true) mensaje.reenviado_muchas_veces = true;
     if (bsuid) mensaje.user_id = bsuid;
     if (username) mensaje.username = username;
     return { tipo: 'con_telefono', mensaje };

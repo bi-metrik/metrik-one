@@ -11,6 +11,7 @@ import {
 } from '../_shared/wa-format.ts';
 import { STREAK_MILESTONES } from '../_shared/types.ts';
 import { COLUMNAS_CARTERA, deudasDeCartera } from '../_shared/cartera.ts';
+import { cerrarEntregasVencidas } from '../_shared/wa-bandeja.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
 // `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
@@ -30,7 +31,7 @@ type ContactoDelNegocio = { nombre?: string | null } | null;
 
 Deno.serve(async (req) => {
   // This function is triggered by Supabase pg_cron or external cron
-  // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' }
+  // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' | 'bandeja_cierre' }
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
@@ -82,6 +83,13 @@ Deno.serve(async (req) => {
       case 'recaudo_check':
         await runRecaudoCheck(supabase);
         break;
+      case 'bandeja_cierre': {
+        // Cada minuto (cron `wa-bandeja-cierre`, solo si hay entregas abiertas): cierra las
+        // entregas de la bandeja de solicitudes que llevan la ventana sin mensajes y hace la
+        // pregunta. Ver `_shared/wa-bandeja.ts`.
+        const r = await cerrarEntregasVencidas(supabase);
+        return new Response(JSON.stringify({ ok: true, action, ...r }), { status: 200 });
+      }
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { status: 400 });
     }
