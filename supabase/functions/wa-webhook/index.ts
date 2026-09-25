@@ -8,6 +8,7 @@ import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendTextMessageABsuid, sendButtons, sendCtaUrl, sendFlow, enBackground } from '../_shared/wa-respond.ts';
 import { extraerEntrante, extraerStatuses } from '../_shared/wa-webhook-payload.ts';
+import { verificarFirmaMeta } from '../_shared/wa-firma.ts';
 import type { MensajeSinTelefono } from '../_shared/wa-webhook-payload.ts';
 import {
   INTENT_SIN_TELEFONO,
@@ -55,7 +56,8 @@ Deno.serve(async (req) => {
       // Verify HMAC signature
       const body = await req.text();
       const signature = req.headers.get('x-hub-signature-256');
-      if (!verifySignature(body, signature)) {
+      // `await` obligatorio: sin el, la Promise es truthy y el chequeo no rechaza nada.
+      if (!(await verifySignature(body, signature))) {
         console.error('[wa-webhook] Invalid signature');
         return new Response('Invalid signature', { status: 401 });
       }
@@ -810,33 +812,9 @@ async function procesarStatuses(statuses: StatusEntrega[]): Promise<void> {
   await aplicarStatuses(getServiceClient(), statuses);
 }
 
-async function verifySignature(body: string, signature: string | null): Promise<boolean> {
-  const appSecret = Deno.env.get('WHATSAPP_APP_SECRET');
-  if (!appSecret) {
-    // In production, missing secret is a security error — reject the request
-    const isProduction = !!Deno.env.get('DENO_DEPLOYMENT_ID') || Deno.env.get('NODE_ENV') === 'production';
-    if (isProduction) {
-      console.error('[wa-webhook] WHATSAPP_APP_SECRET not set in production — rejecting request');
-      return false;
-    }
-    // In local dev, allow without verification (for testing)
-    console.warn('[wa-webhook] WHATSAPP_APP_SECRET not set — skipping verification (dev only)');
-    return true;
-  }
-  if (!signature) return false;
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(appSecret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
-  const computed = 'sha256=' + Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  return computed === signature;
+// La logica vive en `_shared/wa-firma.ts` (pura y probada). Aqui solo se leen las variables.
+function verifySignature(body: string, signature: string | null): Promise<boolean> {
+  return verificarFirmaMeta(body, signature, Deno.env.get('WHATSAPP_APP_SECRET'), {
+    saltarFirma: Deno.env.get('WA_WEBHOOK_SKIP_FIRMA') === '1',
+  });
 }
