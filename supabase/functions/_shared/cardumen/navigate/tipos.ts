@@ -4,6 +4,7 @@
 import type {
   AnchorLabel, DimensionId, DiadaNav, IntensityLabel, Poblacion, SpecialCase, TriadaNav,
 } from "./instrumento.ts";
+import type { ClasificacionMensaje } from "./filtro.ts";
 
 export type Idioma = "es" | "en" | "pt" | "desconocido";
 /** Lo que la persona puede elegir en el primer mensaje. */
@@ -95,6 +96,35 @@ export interface DiadaEnCurso {
 
 export interface TurnoHistorial { role: "bot" | "persona"; text: string }
 
+/**
+ * Banderas de integridad de la sesion (REGLAS-CONVERSACION §9). Se guardan en el payload; el
+ * analisis decide con ellas segun los criterios pre-registrados. Nunca borran nada en silencio.
+ */
+export interface Integridad {
+  /** Hubo al menos un mensaje de riesgo detectado por el filtro (palabras o modelo). */
+  sensible: boolean;
+  /** Mensajes de riesgo detectados. */
+  mensajes_riesgo: number;
+  /**
+   * Veces que el filtro no respondio (caida o salida invalida del modelo). No son riesgo: se pidio
+   * repetir con un texto neutro y no se ubico nada. Con una o mas, `revision_humana` queda en true.
+   */
+  fallos_filtro: number;
+  /** Alguien tiene que revisar esta sesion a mano (hoy: el filtro fallo al menos una vez). */
+  revision_humana: boolean;
+  /** Autocorrecciones de la persona (CO): retiro su mensaje anterior. No cuentan al tope. */
+  correcciones: number;
+  /** Las preguntas estan en pausa esperando "seguir" o "salir" tras un mensaje de riesgo. */
+  pausa_cuidado: boolean;
+  /** Pedidos ajenos al estudio y intentos de manipulacion, en total. */
+  fuera_de_tema: number;
+  intento_manipulacion: number;
+  /** Fuera de tema o manipulacion SEGUIDOS (se reinicia con una respuesta); al tope, se cierra. */
+  seguidos: number;
+  /** La sesion se cerro por el tope de fuera de tema seguidos. */
+  cerrada_por_fuera_de_tema: boolean;
+}
+
 export interface NavigateState {
   motor: "navigate";
   study_id: string;
@@ -115,6 +145,7 @@ export interface NavigateState {
   reintentos: number;           // del paso actual (turno cero)
   turnos: number;               // mensajes de la persona, en total
   notas?: string[];             // lo que paso en el turno cero y no cabe en una dimension (declino decir sector, etc.)
+  integridad?: Integridad;      // banderas del filtro (riesgo, fuera de tema, manipulacion); ausente = nada que reportar
   historial: TurnoHistorial[];
   started_at: string;
   closed: boolean;
@@ -170,6 +201,13 @@ export interface InterpretacionDiada {
 }
 
 export interface Interprete {
+  /**
+   * Filtro de cada mensaje antes del lector (`filtro.ts`). En produccion lo da siempre
+   * `interpreteConModelo`; es opcional en el tipo para que un lector de prueba no tenga que
+   * implementarlo (el motor aplica igual la capa de palabras, que no depende del modelo).
+   * Nunca lanza: si el modelo falla, devuelve `SIN_CLASIFICAR` con `fuente: "error"`.
+   */
+  clasificar?(texto: string): Promise<ClasificacionMensaje>;
   triada(t: TriadaNav, respuesta: string): Promise<InterpretacionTriada>;
   segundo(t: TriadaNav, dominante: number, respuesta: string): Promise<InterpretacionSegundo>;
   intensidad(dominante: string, segundo: string, respuesta: string): Promise<InterpretacionIntensidad>;

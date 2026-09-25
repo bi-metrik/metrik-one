@@ -25,10 +25,12 @@ import {
 } from "./instrumento.ts";
 import type { Ancla, DiadaNav, DimensionId, Poblacion, TriadaNav } from "./instrumento.ts";
 import { detectarIdioma, leerIdiomaElegido } from "./idioma.ts";
+import { BANCO, TOPE_FUERA_DE_TEMA, clasificarPorPalabras, textoContencion, variante } from "./filtro.ts";
+import type { ClasificacionMensaje } from "./filtro.ts";
 import { normalizarTexto } from "./interprete.ts";
 import { leerMeta, sinPalabras } from "./meta.ts";
 import type {
-  Accion, DiadaEnCurso, Entrada, FuenteLectura, IdiomaElegible, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida,
+  Accion, DiadaEnCurso, Entrada, FuenteLectura, IdiomaElegible, Integridad, Interprete, NavigateState, Paso, RegistroDiada, RegistroTriada, Resultado, Salida,
   TriadaEnCurso,
 } from "./tipos.ts";
 
@@ -351,6 +353,141 @@ function nota(state: NavigateState, n: string): void {
   (state.notas ??= []).push(n);
 }
 
+// ---- Filtro de cada mensaje: riesgo, manipulacion y fuera de tema ----------------------------
+//
+// Corre sobre TODO mensaje de texto, en cualquier paso, antes del lector y de la capa de
+// meta-respuestas. Dos capas: palabras (siempre, no depende del modelo) y el clasificador del
+// modelo (`interprete.clasificar`) para el texto libre. Lo que es una eleccion cerrada (si/no, un
+// numero, un idioma de la lista, una pregunta de vuelta que ya reconoce meta.ts) no se manda al
+// modelo: no hay nada en esas palabras que clasificar, y cada llamada suma latencia al turno.
+
+const SEGUIR = new Set(["seguir", "sigamos", "seguimos", "continuar", "continuemos", "quiero seguir", "si seguir", "si sigamos"]);
+
+function integridadDe(state: NavigateState): Integridad {
+  return (state.integridad ??= {
+    sensible: false,
+    mensajes_riesgo: 0,
+    fallos_filtro: 0,
+    revision_humana: false,
+    correcciones: 0,
+    pausa_cuidado: false,
+    fuera_de_tema: 0,
+    intento_manipulacion: 0,
+    seguidos: 0,
+    cerrada_por_fuera_de_tema: false,
+  });
+}
+
+/** Texto que es una eleccion cerrada del paso: no hay contenido que el modelo tenga que clasificar. */
+function esEleccionCerrada(state: NavigateState, t: string, n: string): boolean {
+  if (SI.has(n) || NO.has(n) || SEGUIR.has(n) || n === PALABRA_CLAVE) return true;
+  if (/^\d{1,2}$/.test(n) || leerNumerosTriada(n) !== null) return true;
+  if (state.paso === "idioma" && leerIdiomaElegido(t) !== null) return true;
+  if (state.paso === "sector" && leerSector(n) !== null) return true;
+  return leerMeta(t) !== null;
+}
+
+async function clasificarEntrada(
+  state: NavigateState, t: string, n: string, boton: string | undefined, interprete: Interprete,
+): Promise<ClasificacionMensaje> {
+  const R: ClasificacionMensaje = { categoria: "R", fuente: "palabras" };
+  if (boton || sinPalabras(t)) return R;
+  const porPalabras = clasificarPorPalabras(t);
+  if (porPalabras) return { categoria: porPalabras, fuente: "palabras" };
+  if (esEleccionCerrada(state, t, n) || !interprete.clasificar) return R;
+  try {
+    return await interprete.clasificar(t);
+  } catch {
+    // `clasificar` no lanza por contrato; si un adaptador lo hiciera, es un fallo del filtro.
+    return { categoria: "SIN_CLASIFICAR", fuente: "error" };
+  }
+}
+
+/** Devuelve la respuesta del filtro, o null si el mensaje sigue su camino normal. */
+async function filtrarEntrada(
+  state: NavigateState, t: string, n: string, boton: string | undefined, interprete: Interprete,
+): Promise<Resultado | null> {
+  const enPausa = !!state.integridad?.pausa_cuidado;
+  if (enPausa && !boton && (SEGUIR.has(n) || SI.has(n))) {
+    state.integridad!.pausa_cuidado = false;
+    state.integridad!.seguidos = 0;
+    nota(state, "retomo las preguntas despues de la pausa por riesgo");
+    return resultado(state, [prefijar(BANCO.retomar, preguntaPendiente(state))]);
+  }
+  if (boton && !enPausa) return null;
+
+  const cls = await clasificarEntrada(state, t, n, boton, interprete);
+  if (cls.fuente === "error") return filtroCaido(state, enPausa);
+  if (cls.categoria === "SEN") return contener(state);
+  // En pausa nada avanza: solo "seguir" retoma y "salir" termina (atendido arriba en `procesar`).
+  if (enPausa) return resultado(state, [texto(BANCO.pausaSigue)]);
+  if (cls.categoria === "CO") return correccion(state);
+  if (cls.categoria === "INJ" || cls.categoria === "FT") return fueraDeTema(state, cls.categoria);
+  if (state.integridad) state.integridad.seguidos = 0;
+  return null;
+}
+
+/**
+ * El filtro no respondio (caida o salida invalida del modelo). No sabemos nada del mensaje: no se
+ * lee, no se ubica, y NO se manda la contencion (a quien no esta en crisis tambien le hace dano).
+ * Texto neutro para que lo repita, y la sesion queda marcada para revision humana. No cuenta al
+ * tope de fuera de tema ni toca la pausa: si ya estaba en pausa, sigue igual.
+ */
+function filtroCaido(state: NavigateState, enPausa: boolean): Resultado {
+  const integ = integridadDe(state);
+  integ.fallos_filtro += 1;
+  integ.revision_humana = true;
+  nota(state, "el filtro de riesgo no respondio: no se ubico el mensaje, se pidio repetir y la sesion queda para revision humana");
+  if (state.en_curso) state.en_curso.notas.push("el filtro no respondio en esta dimension: se pidio repetir");
+  return resultado(state, [texto(enPausa ? BANCO.pausaSigue : BANCO.errorTecnico)]);
+}
+
+/** Autocorreccion (CO): se toma nota, no se lee, no cuenta al tope y se repite la pregunta vigente. */
+function correccion(state: NavigateState): Resultado {
+  const integ = integridadDe(state);
+  integ.correcciones += 1;
+  nota(state, "la persona retiro su mensaje anterior: no se ubico y se repitio la pregunta");
+  return resultado(state, [prefijar(BANCO.correccion, preguntaPendiente(state))]);
+}
+
+/**
+ * Mensaje de riesgo (detectado por palabras o por el modelo): no se lee, no se ubica, se responde
+ * con el texto de contencion del banco y las preguntas quedan en pausa. El mensaje no se guarda en el historial:
+ * no es un dato del estudio, y su lugar es una persona, no un registro de demostracion.
+ */
+function contener(state: NavigateState): Resultado {
+  const integ = integridadDe(state);
+  integ.sensible = true;
+  integ.mensajes_riesgo += 1;
+  integ.pausa_cuidado = true;
+  integ.seguidos = 0;
+  const ultimo = state.historial[state.historial.length - 1];
+  if (ultimo?.role === "persona") ultimo.text = "[mensaje retenido por el filtro de riesgo]";
+  nota(state, "mensaje de riesgo: no se ubico, se envio el texto de contencion y se pausaron las preguntas");
+  if (state.en_curso) state.en_curso.notas.push("hubo un mensaje de riesgo en esta dimension: no se ubico");
+  return resultado(state, [texto(textoContencion())]);
+}
+
+/** Pedido ajeno al estudio o manipulacion: reencauce fijo y la pregunta vigente. Al tope, cierre. */
+function fueraDeTema(state: NavigateState, cat: "FT" | "INJ"): Resultado {
+  const integ = integridadDe(state);
+  integ.seguidos += 1;
+  if (cat === "INJ") integ.intento_manipulacion += 1;
+  else integ.fuera_de_tema += 1;
+  if (integ.seguidos >= TOPE_FUERA_DE_TEMA) {
+    integ.cerrada_por_fuera_de_tema = true;
+    nota(state, `se cerro tras ${TOPE_FUERA_DE_TEMA} mensajes seguidos fuera de tema o de manipulacion`);
+    const hayDatos = !!state.consent && (!!state.historia || Object.keys(state.dimensiones).length > 0);
+    state.closed = true;
+    state.paso = "cerrado";
+    return resultado(state, [texto(BANCO.cierreFueraDeTema)], hayDatos ? "guardar_y_cerrar" : "cerrar_sin_guardar");
+  }
+  const reencauce = cat === "INJ"
+    ? variante(BANCO.manipulacion, integ.intento_manipulacion - 1)
+    : variante(BANCO.fueraDeTema, integ.fuera_de_tema - 1);
+  return resultado(state, [prefijar(reencauce, preguntaPendiente(state))]);
+}
+
 // ---- Procesar un mensaje de la persona -------------------------------------------------
 
 export async function procesar(state: NavigateState, entrada: Entrada, interprete: Interprete): Promise<Resultado> {
@@ -370,6 +507,12 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
     return resultado(state, [texto(TXT.alBorrar)], "borrar");
   }
   if (EXIT.has(n)) return salir(state);
+
+  // Filtro ANTES de cualquier lectura (filtro.ts): riesgo, manipulacion y fuera de tema. Un
+  // mensaje de riesgo no llega al lector ni ubica nada; uno fuera de tema se reencauza con un
+  // texto fijo. Nada de lo que responde el filtro lo redacta el modelo.
+  const filtrado = await filtrarEntrada(state, t, n, boton, interprete);
+  if (filtrado) return filtrado;
 
   // La palabra clave a mitad de conversacion NO reinicia nada: se recuerda donde ibamos.
   // Antes del consentimiento no hay nada que recordar: se repite la pregunta a secas.
@@ -1151,6 +1294,7 @@ export function armarPayload(state: NavigateState, salida: "completa" | "salir" 
     consent: state.consent ?? null,
     narrative: { historia: state.historia ?? null },
     capaA,
+    integridad: state.integridad ?? null,
     provenance: {
       turns: state.turnos,
       started_at: state.started_at,

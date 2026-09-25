@@ -12,6 +12,7 @@ import { sendCtaUrl, sendTextWithRhythm, sendTypingIndicator, enBackground } fro
 import { esEstadoNavigate, startNavigate, continueNavigate } from "./navigate/index.ts";
 import type { ConversationState, StudySpec, Encuadre, ModelAdapter } from "./types.ts";
 import { conTelemetria, ctxCardumen, registrarLlamadaModelo } from "./telemetria.ts";
+import { TEXTO_ESTUDIO_NO_DISPONIBLE, entrevistadorLibreHabilitado } from "./entrevistador-libre.ts";
 
 // deno-lint-ignore no-explicit-any
 type Supa = any;
@@ -77,6 +78,13 @@ export async function startCardumenChat(
   // Estudios con motor determinista (Navigate): otro modulo, misma tabla de sesiones.
   if (spec.motor === "navigate") {
     await startNavigate(supabase, phone, slug, waMessageId);
+    return;
+  }
+  // El entrevistador R1/R2 redacta con un modelo lo que ve la persona: solo corre si el estudio
+  // lo tiene habilitado (bandera apagada por defecto, ver entrevistador-libre.ts).
+  if (!entrevistadorLibreHabilitado(slug, spec)) {
+    await sendTextMessage(phone, TEXTO_ESTUDIO_NO_DISPONIBLE, ctxCardumen(slug, TEXTO_ESTUDIO_NO_DISPONIBLE));
+    console.warn(`[cardumen-chat] estudio ${slug} sin entrevistador habilitado: no se abrio conversacion`);
     return;
   }
   const state = initState(spec);
@@ -257,6 +265,15 @@ export async function continueCardumenChat(
   // El spec sale del estudio de ESTA sesion, no de un import global: es lo que permite que
   // dos estudios corran a la vez sin pisarse.
   const spec = await specDeSesion(supabase, state.study_id);
+
+  // Misma bandera que al abrir: una sesion de un estudio sin el entrevistador habilitado se cierra
+  // sin pasar por el modelo.
+  if (!entrevistadorLibreHabilitado(state.study_id, spec)) {
+    await supabase.from("cardumen_chat_sessions").update({ closed: true }).eq("phone", phone);
+    await enviarTexto(TEXTO_ESTUDIO_NO_DISPONIBLE);
+    console.warn(`[cardumen-chat] sesion de ${state.study_id} cerrada: estudio sin entrevistador habilitado`);
+    return;
+  }
 
   // Salida explicita del participante.
   if (EXIT_WORDS.includes(exit)) {

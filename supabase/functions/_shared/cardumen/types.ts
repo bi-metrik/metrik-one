@@ -37,6 +37,10 @@ export interface StudySpec {
   // resto del spec no se usa). Vive en el spec del catalogo para que el estudio siga
   // siendo una fila, no una constante.
   motor?: "navigate";
+  // Permiso explicito para el entrevistador R1/R2, que usa un modelo que REDACTA lo que ve la
+  // persona. Apagado por defecto: un estudio nuevo sin esta bandera no abre el entrevistador
+  // (ver `entrevistadorLibreHabilitado` en `index.ts`). Los estudios de Navigate no lo usan.
+  entrevistador_libre?: boolean;
   lang_default: Lang;
   collection_mode: "study_async" | "event_live" | "panel_recurrente";
   context_note?: string;                  // contexto del despliegue (pais, sector). NUNCA hardcodear en el prompt.
