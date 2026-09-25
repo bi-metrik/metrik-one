@@ -50,7 +50,7 @@
 - ⚠️⚠️ [Cardumen independiente y Meta del 1-oct](project_cardumen_infra_independiente.md) — servicio se cobra pasadas 1.000/numero; sin pago en WABA el bot calla
 - ⚠️ [Medicion de Cardumen en el numero de ONE](project_cardumen_medicion_wa.md) — intent `cardumen:<estudio>`; origen='cardumen' pide migracion; inerte sin deploy
 - ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — deploy ANTES del SQL; idioma PRIMERO
-- ⚠️⚠️ [Filtro de riesgo y blindaje de Navigate (#924)](project_cardumen_filtro_blindaje.md) — SIN mergear: benchmark primero; banco pendiente Saga/Emilio
+- ⚠️⚠️ [Filtro de riesgo y blindaje de Navigate (#924)](project_cardumen_filtro_blindaje.md) — SIN mergear; filtro caido NO es contencion; CO no es INJ
 - ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` para lecturas por lote
 - ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — FV-2-244 con la cédula truncada NO se toca
 - ⚠️ [El día: itinerario y sugeridos](project_dia_relativo_sugeridos.md) — una línea SIN grupo nunca cae a «no incluidas»
