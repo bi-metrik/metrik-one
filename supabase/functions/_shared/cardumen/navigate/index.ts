@@ -58,8 +58,13 @@ export async function continueNavigate(
     conTelemetria(geminiFlashLite(), (uso) => enBackground(registrarLlamadaModelo(supabase, state.study_id, uso))),
   );
   let r;
+  const riesgoAntes = state.integridad?.mensajes_riesgo ?? 0;
   try {
     r = await procesar(state, { texto: text, botonId }, interprete);
+    // Aviso operativo sin el contenido del mensaje: el texto no se registra en ningun log.
+    if ((r.state.integridad?.mensajes_riesgo ?? 0) > riesgoAntes) {
+      console.warn(`[navigate] mensaje de riesgo en estudio ${state.study_id}: contencion enviada, preguntas en pausa`);
+    }
   } catch (e) {
     // El modelo no leyo (o el estado esta incoherente). No se persiste nada: la persona
     // reenvia y seguimos justo donde quedamos.

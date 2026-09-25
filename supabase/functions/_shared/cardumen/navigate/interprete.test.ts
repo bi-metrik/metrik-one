@@ -5,14 +5,25 @@
 import { describe, expect, it } from 'vitest';
 import { contradiccionPorPalabras, evidenciaEspecial, interpreteConModelo, intensidadPorPalabras, normalizarTexto } from './interprete';
 import { DIADAS, TRIADAS } from './instrumento';
-import type { ModelAdapter } from '../types';
+import type { ModelAdapter, ModelCallOpts } from '../types';
+import { SISTEMA_CLASIFICADOR } from './filtro';
 
-function modeloQueDevuelve(respuestas: string[]): ModelAdapter & { llamadas: number } {
+/**
+ * Modelo falso. El filtro (`filtro.ts`) corre antes del lector y tambien llama al modelo: a esa
+ * llamada se le contesta `categoria` (R por defecto) y se cuenta aparte, para que `llamadas`
+ * siga contando solo las lecturas.
+ */
+function modeloQueDevuelve(respuestas: string[], categoria = 'R'): ModelAdapter & { llamadas: number; clasificaciones: number } {
   const m = {
     id: 'falso',
     pricing: { in: 0, out: 0 },
     llamadas: 0,
-    async call() {
+    clasificaciones: 0,
+    async call(opts: ModelCallOpts) {
+      if (opts.system === SISTEMA_CLASIFICADOR) {
+        m.clasificaciones += 1;
+        return { text: JSON.stringify({ categoria }) };
+      }
       const text = respuestas[Math.min(m.llamadas, respuestas.length - 1)];
       m.llamadas += 1;
       return { text };

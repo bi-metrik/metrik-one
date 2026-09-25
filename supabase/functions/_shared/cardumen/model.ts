@@ -67,17 +67,21 @@ export function claudeHaiku(): ModelAdapter {
 
 /** Modelo del lector de Navigate en produccion. Es el que corre el eval por defecto
  *  (`scripts/navigate-lector-eval.ts`): si cambia aqui, el eval lo sigue solo.
- *  Elegido por el golden set del 2026-09-08 (dos corridas por modelo, identicas): 3.1 deja 1 falsa
- *  ubicacion y 0 no lecturas en 84 casos; 2.5 deja 2 y 2. Cuesta ~3x, y son USD 0,015 por los 84
- *  casos. Detalle en `docs/specs/2026-09-07_cardumen-navigate-demo.md` §8. */
-export const GEMINI_LECTOR_MODELO = "gemini-3.1-flash-lite";
+ *  2026-09-24: pasa de `gemini-3.1-flash-lite` a `gemini-3.5-flash-lite` (decision de Yuto y Saga
+ *  sobre el golden v0 de 30 casos validados, `proyectos/metrik/cardumen/evals/golden-lector/
+ *  resultados-v0.md`): el 3.5 no ubica el mensaje de crisis (G28, 3 de 3) y el 3.1 si; cuesta
+ *  USD 0,0022 por conversacion frente a 0,0018. Codigo verificado ese dia en
+ *  ai.google.dev/gemini-api/docs/models (estable; salida hasta 65.536 tokens; soporta pensamiento).
+ *  Antes: golden del 2026-09-08, `docs/specs/2026-09-07_cardumen-navigate-demo.md` §8. */
+export const GEMINI_LECTOR_MODELO = "gemini-3.5-flash-lite";
 
 // Precio oficial, USD por 1M tokens de TEXTO (ai.google.dev/gemini-api/docs/pricing, consultado
-// el 2026-09-08). Un modelo sin fila aqui no se puede instanciar: el precio se mira en la doc,
-// no se adivina.
+// el 2026-09-08; la fila del 3.5 el 2026-09-24, citada en resultados-v0.md). Un modelo sin fila
+// aqui no se puede instanciar: el precio se mira en la doc, no se adivina.
 const PRECIOS_GEMINI: Record<string, { in: number; out: number }> = {
   "gemini-2.5-flash-lite": { in: 0.10, out: 0.40 },
   "gemini-3.1-flash-lite": { in: 0.25, out: 1.50 },
+  "gemini-3.5-flash-lite": { in: 0.30, out: 2.50 },
 };
 
 /**
@@ -107,7 +111,7 @@ export function geminiFlashLite(modelId: string = GEMINI_LECTOR_MODELO): ModelAd
         maxOutputTokens: opts.maxTokens ?? 1024,
         // Pensamiento apagado en la familia 2.5 (`thinkingBudget: 0`, la sintaxis de esa familia).
         // En la 3.x ese parametro se ignora en silencio y el control es `thinking_level`; la doc
-        // oficial no lo lista para `gemini-3.1-flash-lite`, asi que no se manda nada, igual que
+        // oficial no lo lista para los flash-lite 3.x, asi que no se manda nada, igual que
         // en `meta-leads/entender-formulario.ts`.
         ...(modelId.startsWith("gemini-2.5") ? { thinkingBudget: 0 } : {}),
         jsonMime: !opts.plainText,
