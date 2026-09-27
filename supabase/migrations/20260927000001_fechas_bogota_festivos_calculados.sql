@@ -216,6 +216,10 @@ BEGIN
 END;
 $function$;
 
+-- CREATE OR REPLACE conserva la ACL (hoy: postgres, authenticated, service_role).
+-- El revoke es idempotente y deja la decision escrita.
+REVOKE EXECUTE ON FUNCTION public.horas_habiles_entre(TIMESTAMPTZ, TIMESTAMPTZ) FROM PUBLIC, anon;
+
 COMMENT ON FUNCTION public.horas_habiles_entre(TIMESTAMPTZ, TIMESTAMPTZ) IS
   'Horas habiles entre dos timestamps. Un dia (de Bogota) sabado/domingo/festivo cuenta 0h, un dia L-V no-festivo cuenta 24h. Usado para calcular SLA por etapa. Espejo: src/lib/negocios/horas-habiles.ts.';
 
