@@ -1,7 +1,7 @@
 // Espejo Deno de `src/lib/dates/bogota.ts`. Prueba el borde 19:00-23:59 de Bogota, que es
 // donde `new Date().getDate()` en UTC ya da el dia (o el mes) siguiente.
 import { describe, expect, it } from 'vitest';
-import { bogotaParts, bogotaYearMonth, diasDelMes, todayBogotaISO } from './bogota';
+import { bogotaParts, bogotaRangoMes, bogotaYearMonth, diasCalendarioDesde, diasDelMes, todayBogotaISO } from './bogota';
 
 describe('bogota (edge)', () => {
   it('30-sep 20:00 Bogota sigue siendo 30-sep y periodo 2026-09', () => {
@@ -23,5 +23,23 @@ describe('bogota (edge)', () => {
     expect(diasDelMes(2026, 9)).toBe(30);
     expect(diasDelMes(2028, 2)).toBe(29);
     expect(diasDelMes(2026, 12)).toBe(31);
+  });
+});
+
+describe('bogota (edge) — mes y dias de calendario (remate #929)', () => {
+  it('bogotaRangoMes: el 30-sep a las 20:00 sigue filtrando septiembre', () => {
+    expect(bogotaRangoMes(new Date('2026-10-01T01:00:00Z'))).toEqual({ desde: '2026-09-01', hasta: '2026-10-01' });
+    expect(bogotaRangoMes(new Date('2026-10-01T05:00:00Z'))).toEqual({ desde: '2026-10-01', hasta: '2026-11-01' });
+  });
+
+  it('bogotaRangoMes: diciembre cierra en enero del anio siguiente', () => {
+    expect(bogotaRangoMes(new Date('2027-01-01T04:00:00Z'))).toEqual({ desde: '2026-12-01', hasta: '2027-01-01' });
+  });
+
+  it('diasCalendarioDesde: lo de hoy es 0 tambien a las 20:00', () => {
+    const noche = new Date('2026-10-01T01:00:00Z'); // 30-sep 20:00 Bogota
+    expect(diasCalendarioDesde('2026-09-30', noche)).toBe(0);
+    expect(diasCalendarioDesde('2026-09-29', noche)).toBe(1);
+    expect(diasCalendarioDesde('2026-02-28', new Date('2026-03-01T15:00:00Z'))).toBe(1);
   });
 });

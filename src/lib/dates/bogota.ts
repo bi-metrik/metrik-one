@@ -77,6 +77,15 @@ export function todayBogotaISO(d?: Date): string {
   return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
 }
 
+/**
+ * Medianoche de Bogota del dia de `d`, como instante (00:00 Bogota = 05:00 UTC).
+ * Para filtros de `timestamptz` tipo "desde hoy": `new Date(y, m, d)` es la
+ * medianoche del RUNTIME, que en Vercel (UTC) cae a las 19:00 del dia anterior.
+ */
+export function inicioDelDiaBogota(d?: Date): Date {
+  return new Date(`${todayBogotaISO(d)}T00:00:00-05:00`)
+}
+
 /** Ano calendario en Bogota — util para consecutivos COT-YYYY-XXX. */
 export function bogotaYear(d?: Date): number {
   return partsOf(d ?? new Date()).year
@@ -105,6 +114,25 @@ export function bogotaMesCalendario(d?: Date): {
     desde: { year, month, day: 1 },
     hasta: { year, month, day: ultimo },
   }
+}
+
+/**
+ * 'YYYY-MM-DD' de hoy en Bogota mas `meses` meses de calendario. Si el dia no existe en
+ * el mes destino se recorta al ultimo (31-ene + 1 = 28-feb), en vez de desbordar al mes
+ * siguiente como hace `Date#setMonth` (31-ene + 1 = 3-mar).
+ *
+ * Para plazos "dentro de N meses" que se guardan en una columna `date`: con
+ * `new Date().setMonth(...)` + `toISOString()` el plazo se calculaba desde el dia de UTC,
+ * que desde las 19:00 de Bogota ya es mañana.
+ */
+export function sumarMesesBogota(meses: number, d?: Date): string {
+  const p = partsOf(d ?? new Date())
+  const total = p.year * 12 + (p.month - 1) + meses
+  const anio = Math.floor(total / 12)
+  const mes = (total % 12) + 1 // 1-12
+  const ultimo = new Date(Date.UTC(anio, mes, 0)).getUTCDate()
+  const dia = Math.min(p.day, ultimo)
+  return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
 }
 
 /** Fecha humana en espanol: "12 de mayo de 2026". */

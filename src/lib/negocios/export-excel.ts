@@ -292,6 +292,48 @@ export function fechaExcel(v: string | null | undefined): Date | null {
   return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
 }
 
+/** 1899-12-30: el cero del sistema de fechas 1900 de Excel (con su 29-feb-1900 ficticio). */
+const EPOCH_EXCEL_MS = Date.UTC(1899, 11, 30)
+
+/**
+ * Serial de Excel de un `Date` armado por `fechaExcel`, sin pasar por la zona del runtime.
+ *
+ * ⚠️ No basta con entregarle el `Date` a SheetJS. Su conversion resta los
+ * `getTimezoneOffset` del dia y del cero de 1899, y en `America/Bogota` el cero cae en
+ * la hora local media de la epoca (UTC-4:56:16), no en UTC-5. Medido el 2026-09-27 con
+ * `xlsx@0.18.5` y `TZ=America/Bogota`: el 15-ene-2026 salia como `46036.99981…`, o sea
+ * 14-ene a las 23:59:44 — Excel pintaba el dia ANTERIOR. En Vercel (UTC) no se ve, en
+ * cualquier maquina con la zona de Colombia si.
+ *
+ * Aqui el serial se calcula con los componentes locales del `Date` (que `fechaExcel`
+ * pone iguales a la hora de pared de Bogota) proyectados a UTC, asi que sale igual
+ * corra donde corra: 2026-01-15 es `46037` en UTC, en Bogota y en Tokio.
+ */
+export function serialExcel(d: Date): number {
+  const pared = Date.UTC(
+    d.getFullYear(), d.getMonth(), d.getDate(),
+    d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds(),
+  )
+  return (pared - EPOCH_EXCEL_MS) / 86_400_000
+}
+
+/**
+ * Pasa una celda de fecha de SheetJS (`t: 'd'`, `v: Date`) a serial numerico con su
+ * formato. La celda vacia (`null`, `t: 'z'`) se deja como esta: el `write` no la emite.
+ * Tipo estructural a proposito, para no importar XLSX en este modulo puro.
+ */
+export function celdaFechaASerial(
+  celda: { t?: string; v?: unknown; z?: unknown } | undefined,
+  formato: string,
+): void {
+  if (!celda) return
+  if (celda.v instanceof Date) {
+    celda.t = 'n'
+    celda.v = serialExcel(celda.v)
+  }
+  celda.z = formato
+}
+
 /**
  * Fase de la fila. Un negocio cerrado (completado, perdido, cancelado) va como
  * «Cerrado» aunque su etapa siga apuntando a la última fase por la que pasó; el resto

@@ -32,6 +32,8 @@ import {
   recibosDelUltimoPago,
   textoDeRecibos,
 } from '../_shared/recibos-del-aviso.ts';
+import { todayBogotaISO } from '../_shared/bogota.ts';
+import { esDiaHabil, paisDelWorkspace, siguienteDiaHabil } from '../_shared/dias-habiles.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -67,6 +69,12 @@ type Payload = {
    */
   bloque_config_id?: string;
   prueba?: { to: string[]; etapa_id?: string; bloque_config_id?: string };
+  /**
+   * Lo manda el cron `avisos-cliente-diferidos` (8:00 de Bogota, todos los dias): saca
+   * los avisos al cliente que quedaron en `estado = 'diferido'` porque su evento cayo en
+   * dia no habil del pais del cliente. Ver `liberarDiferidos`.
+   */
+  liberar_diferidos?: boolean;
 };
 
 // Las edge functions no tienen el `Database` generado, y sin el supabase-js
@@ -204,6 +212,14 @@ Deno.serve(async (req: Request) => {
   } catch {
     return json({ error: 'bad_request' }, 400);
   }
+  if (body?.liberar_diferidos === true) {
+    const svc = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+    return json(await liberarDiferidos(svc, resendKey));
+  }
+
   if (!body?.negocio_id) return json({ error: 'negocio_id requerido' }, 400);
 
   // El modo prueba manda correo de verdad, asi que su destinatario se valida aqui y no
@@ -311,55 +327,57 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, skipped: 'sin_aviso_email' });
   }
 
+  // ── Dia habil del cliente ──────────────────────────────────────────────────
+  // Decision de Mauricio (2026-09-27): todo aviso automatico al cliente sale solo en dia
+  // habil de SU pais (hoy: `workspaces.pais`, default Colombia) y, si el evento cae en
+  // dia no habil, se corre al siguiente habil — no se pierde. Aqui el evento ya paso (el
+  // negocio entro a la etapa, llego el documento), asi que correrlo es GUARDARLO: queda
+  // una fila `diferido` por canal con su `programado_para`, y el cron
+  // `avisos-cliente-diferidos` lo manda ese dia (`liberarDiferidos`).
+  //
+  // El aviso INTERNO al equipo del workspace no pasa por aqui: lo dispara una persona de
+  // ese equipo trabajando en ese momento.
+  let clienteDiferidoPara: string | null = null;
+  if (quiereCliente || quiereClienteWa) {
+    const hoy = todayBogotaISO();
+    const pais = await paisDelWorkspace(supabase, negocio.workspace_id);
+    if (!esDiaHabil(hoy, pais)) {
+      clienteDiferidoPara = siguienteDiaHabil(hoy, pais);
+      const canales: Array<'email' | 'whatsapp'> = [];
+      if (quiereCliente) canales.push('email');
+      if (quiereClienteWa) canales.push('whatsapp');
+      for (const canal of canales) {
+        await registrarAviso(supabase, negocio, etapa, bloqueId, {
+          canal,
+          estado: 'diferido',
+          destino: null,
+          copia_a: null,
+          motivo: `dia_no_habil_${pais}`,
+          titulo: null,
+          proveedor_id: null,
+          programado_para: clienteDiferidoPara,
+        });
+      }
+    }
+  }
+
   // ── El aviso al CLIENTE ────────────────────────────────────────────────────
   // Se despacha antes que el interno porque es el que el cliente está esperando, y
   // porque un fallo del interno no puede dejarlo sin su aviso.
-  let clienteEnviado: string | null = null;
-  let clienteOmitido: string | null = null;
-  // A dónde contesta el cliente. Se reporta para poder verificarlo sin abrir el correo.
-  let clienteRespondeA: string | null = null;
-  // A quién se le copió el correo (el comercial del negocio).
-  let clienteCopiaA: string | null = null;
-  if (quiereCliente) {
-    const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente!);
-    clienteEnviado = r.enviadoA;
-    clienteOmitido = r.omitidoPor;
-    clienteRespondeA = r.respondeA;
-    clienteCopiaA = r.copiaA;
-    await registrarAviso(supabase, negocio, etapa, bloqueId, {
-      canal: 'email',
-      estado: r.estado,
-      destino: r.enviadoA ?? r.destinatarioReal,
-      copia_a: r.copiaA,
-      motivo: r.omitidoPor,
-      titulo: r.titulo,
-      proveedor_id: r.proveedorId,
+  const alCliente = clienteDiferidoPara
+    ? SIN_AVISO_AL_CLIENTE
+    : await avisarAlCliente(supabase, resendKey, negocio, etapa, bloqueId, avisoCliente ?? {}, {
+      email: quiereCliente,
+      whatsapp: quiereClienteWa,
     });
-  }
-
-  // ── El aviso al cliente por WHATSAPP ───────────────────────────────────────
-  // Canal aparte y con su propio try: los dos van al mismo cliente, así que un fallo
-  // de FunnelChat no puede dejarlo sin el correo que sí salió, ni al revés.
-  let waDisparado: string | null = null;
-  let waOmitido: string | null = null;
-  if (quiereClienteWa) {
-    // Le pasa si el correo SALIO de verdad (no si la etapa lo pedia): es lo que decide
-    // si el WhatsApp puede remitir al correo o tiene que contar la novedad el mismo.
-    const r = await enviarWhatsAppAlCliente(
-      supabase, negocio, etapa?.nombre ?? '', avisoCliente!, clienteEnviado !== null,
-    );
-    waDisparado = r.disparadoA;
-    waOmitido = r.omitidoPor;
-    await registrarAviso(supabase, negocio, etapa, bloqueId, {
-      canal: 'whatsapp',
-      estado: r.estado,
-      destino: r.disparadoA,
-      copia_a: null,
-      motivo: r.omitidoPor,
-      titulo: null,
-      proveedor_id: null,
-    });
-  }
+  const {
+    clienteEnviado,
+    clienteOmitido,
+    clienteRespondeA,
+    clienteCopiaA,
+    waDisparado,
+    waOmitido,
+  } = alCliente;
 
   if (!quiereInterno) {
     return json({
@@ -370,6 +388,7 @@ Deno.serve(async (req: Request) => {
       copia_a: clienteCopiaA,
       whatsapp_disparado: waDisparado,
       whatsapp_omitido: waOmitido,
+      cliente_diferido_para: clienteDiferidoPara,
     });
   }
 
@@ -467,8 +486,211 @@ Deno.serve(async (req: Request) => {
     copia_a: clienteCopiaA,
     whatsapp_disparado: waDisparado,
     whatsapp_omitido: waOmitido,
+    cliente_diferido_para: clienteDiferidoPara,
   });
 });
+
+
+// ── El envio al cliente, por canal ───────────────────────────────────────────
+
+/** Lo que salio (o no) hacia el cliente, en la forma que devuelve el POST. */
+type ResultadoAlCliente = {
+  clienteEnviado: string | null;
+  clienteOmitido: string | null;
+  // A dónde contesta el cliente. Se reporta para poder verificarlo sin abrir el correo.
+  clienteRespondeA: string | null;
+  // A quién se le copió el correo (el comercial del negocio).
+  clienteCopiaA: string | null;
+  waDisparado: string | null;
+  waOmitido: string | null;
+};
+
+const SIN_AVISO_AL_CLIENTE: ResultadoAlCliente = {
+  clienteEnviado: null,
+  clienteOmitido: null,
+  clienteRespondeA: null,
+  clienteCopiaA: null,
+  waDisparado: null,
+  waOmitido: null,
+};
+
+/**
+ * Manda el aviso al cliente por los canales pedidos y deja la traza de cada uno.
+ *
+ * Lo usan el disparo normal (el trigger, en dia habil) y `liberarDiferidos` (el cron,
+ * el primer dia habil despues de un evento en dia no habil): los dos tienen que mandar
+ * exactamente lo mismo, asi que el envio vive en un solo sitio.
+ */
+async function avisarAlCliente(
+  supabase: Supabase,
+  resendKey: string,
+  negocio: Negocio,
+  etapa: { id?: string; nombre?: string } | null,
+  bloqueId: string | null,
+  avisoCliente: AvisoCliente,
+  canales: { email: boolean; whatsapp: boolean },
+): Promise<ResultadoAlCliente> {
+  const out: ResultadoAlCliente = { ...SIN_AVISO_AL_CLIENTE };
+
+  if (canales.email) {
+    const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente);
+    out.clienteEnviado = r.enviadoA;
+    out.clienteOmitido = r.omitidoPor;
+    out.clienteRespondeA = r.respondeA;
+    out.clienteCopiaA = r.copiaA;
+    await registrarAviso(supabase, negocio, etapa, bloqueId, {
+      canal: 'email',
+      estado: r.estado,
+      destino: r.enviadoA ?? r.destinatarioReal,
+      copia_a: r.copiaA,
+      motivo: r.omitidoPor,
+      titulo: r.titulo,
+      proveedor_id: r.proveedorId,
+    });
+  }
+
+  // ── El aviso al cliente por WHATSAPP ───────────────────────────────────────
+  // Canal aparte y con su propio try: los dos van al mismo cliente, así que un fallo
+  // de FunnelChat no puede dejarlo sin el correo que sí salió, ni al revés.
+  if (canales.whatsapp) {
+    // Le pasa si el correo SALIO de verdad (no si la etapa lo pedia): es lo que decide
+    // si el WhatsApp puede remitir al correo o tiene que contar la novedad el mismo.
+    const r = await enviarWhatsAppAlCliente(
+      supabase, negocio, etapa?.nombre ?? '', avisoCliente, out.clienteEnviado !== null,
+    );
+    out.waDisparado = r.disparadoA;
+    out.waOmitido = r.omitidoPor;
+    await registrarAviso(supabase, negocio, etapa, bloqueId, {
+      canal: 'whatsapp',
+      estado: r.estado,
+      destino: r.disparadoA,
+      copia_a: null,
+      motivo: r.omitidoPor,
+      titulo: null,
+      proveedor_id: null,
+    });
+  }
+
+  return out;
+}
+
+type FilaDiferida = {
+  id: string;
+  workspace_id: string;
+  negocio_id: string;
+  etapa_id: string | null;
+  bloque_config_id: string | null;
+  canal: 'email' | 'whatsapp';
+};
+
+/**
+ * Saca los avisos al cliente que quedaron diferidos por dia no habil.
+ *
+ * Reglas, en orden:
+ *   1. Solo filas `diferido`, sin `liberado_at` y con `programado_para <= hoy` (Bogota).
+ *   2. Si hoy tampoco es dia habil en el pais de ese workspace, esperan (el cron corre
+ *      todos los dias y no hay nada que perder esperando).
+ *   3. Se RECLAMAN antes de mandar (`liberado_at`, con `is null` en el update): si dos
+ *      corridas se cruzan, solo una manda. Un aviso que se manda dos veces al cliente no
+ *      se deshace; uno que falla despues de reclamado queda con su traza de `fallido`.
+ *   4. El copy es el que la etapa o el bloque declaran HOY. Si ya no declaran el canal,
+ *      no se manda (`aviso_retirado`): alguien lo apago a proposito.
+ *   5. Un negocio perdido o cancelado mientras tanto no recibe el aviso de un avance que
+ *      ya no va a ocurrir (`negocio_cerrado`).
+ *   La fila `diferido` se queda como estaba (con su `liberado_at`) y el envio real deja
+ *   su propia fila, como cualquier aviso: la traza cuenta las dos cosas.
+ */
+async function liberarDiferidos(supabase: Supabase, resendKey: string): Promise<unknown> {
+  const hoy = todayBogotaISO();
+  const { data, error } = await supabase
+    .from('avisos_cliente')
+    .select('id, workspace_id, negocio_id, etapa_id, bloque_config_id, canal')
+    .eq('estado', 'diferido')
+    .is('liberado_at', null)
+    .lte('programado_para', hoy)
+    .order('created_at')
+    .limit(500);
+  if (error) {
+    console.error('[notificar-etapa] no se pudieron leer los diferidos:', error.message);
+    return { ok: false, error: error.message };
+  }
+
+  const grupos = new Map<string, FilaDiferida[]>();
+  for (const f of (data ?? []) as FilaDiferida[]) {
+    const k = `${f.negocio_id}|${f.etapa_id ?? ''}|${f.bloque_config_id ?? ''}`;
+    grupos.set(k, [...(grupos.get(k) ?? []), f]);
+  }
+
+  const reporte: unknown[] = [];
+  for (const filas of grupos.values()) {
+    const f0 = filas[0];
+    const pais = await paisDelWorkspace(supabase, f0.workspace_id);
+    if (!esDiaHabil(hoy, pais)) {
+      reporte.push({ negocio_id: f0.negocio_id, espera: `dia_no_habil_${pais}` });
+      continue;
+    }
+
+    const { data: reclamadas, error: errReclamo } = await supabase
+      .from('avisos_cliente')
+      .update({ liberado_at: new Date().toISOString() })
+      .in('id', filas.map((f) => f.id))
+      .is('liberado_at', null)
+      .select('id, canal');
+    if (errReclamo) {
+      reporte.push({ negocio_id: f0.negocio_id, error: errReclamo.message });
+      continue;
+    }
+    const canales = new Set(((reclamadas ?? []) as Array<{ canal: string }>).map((r) => r.canal));
+    if (canales.size === 0) continue; // otra corrida lo reclamo primero
+
+    const { data: negocio } = await supabase
+      .from('negocios')
+      .select('id, codigo, nombre, workspace_id, estado, etapa_actual_id, workspaces(slug)')
+      .eq('id', f0.negocio_id)
+      .maybeSingle();
+    if (!negocio) continue; // borrado: la fila diferida ya se fue en cascada
+
+    const { data: etapa } = f0.etapa_id
+      ? await supabase.from('etapas_negocio').select('id, nombre, config_extra').eq('id', f0.etapa_id).maybeSingle()
+      : { data: null };
+    const { data: bloque } = f0.bloque_config_id
+      ? await supabase.from('bloque_configs').select('id, nombre, config_extra').eq('id', f0.bloque_config_id).maybeSingle()
+      : { data: null };
+
+    const cfg = (f0.bloque_config_id
+      ? (bloque?.config_extra as Record<string, unknown> | null)?.avisar_al_cliente
+      : (etapa?.config_extra as Record<string, unknown> | null)?.avisar_al_cliente) as AvisoCliente | undefined;
+
+    const cerrado = ['perdido', 'cancelado'].includes(String(negocio.estado ?? ''));
+    const pide = { email: canales.has('email'), whatsapp: canales.has('whatsapp') };
+    const vigente = { email: pide.email && cfg?.email === true, whatsapp: pide.whatsapp && cfg?.whatsapp === true };
+
+    // Lo que ya no corresponde mandar deja su traza de omitido, con el motivo.
+    for (const canal of ['email', 'whatsapp'] as const) {
+      if (!pide[canal]) continue;
+      const motivo = cerrado ? 'negocio_cerrado' : (!vigente[canal] ? 'aviso_retirado' : null);
+      if (!motivo) continue;
+      await registrarAviso(supabase, negocio, etapa, f0.bloque_config_id, {
+        canal,
+        estado: 'omitido',
+        destino: null,
+        copia_a: null,
+        motivo,
+        titulo: null,
+        proveedor_id: null,
+      });
+    }
+    if (cerrado || (!vigente.email && !vigente.whatsapp)) {
+      reporte.push({ negocio_id: f0.negocio_id, omitido: cerrado ? 'negocio_cerrado' : 'aviso_retirado' });
+      continue;
+    }
+
+    const r = await avisarAlCliente(supabase, resendKey, negocio, etapa, f0.bloque_config_id, cfg!, vigente);
+    reporte.push({ negocio_id: f0.negocio_id, ...r });
+  }
+
+  return { ok: true, hoy, diferidos: (data ?? []).length, grupos: grupos.size, reporte };
+}
 
 
 // ── La traza ─────────────────────────────────────────────────────────────────
@@ -497,12 +719,14 @@ async function registrarAviso(
   bloqueConfigId: string | null,
   fila: {
     canal: 'email' | 'whatsapp';
-    estado: 'enviado' | 'disparado' | 'omitido' | 'fallido';
+    estado: 'enviado' | 'disparado' | 'omitido' | 'fallido' | 'diferido';
     destino: string | null;
     copia_a: string | null;
     motivo: string | null;
     titulo: string | null;
     proveedor_id: string | null;
+    /** Solo en `diferido`: el dia habil en que el cron lo va a mandar. */
+    programado_para?: string | null;
   },
 ): Promise<void> {
   const { error } = await supabase.from('avisos_cliente').insert({

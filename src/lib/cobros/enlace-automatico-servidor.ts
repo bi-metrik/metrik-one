@@ -2,6 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { traerTodo } from '@/lib/supabase/paginar'
+import { esDiaHabil, normalizarPais, PAIS_POR_DEFECTO } from '@/lib/dates/dias-habiles'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { asuntoAvisoEnlace, htmlAvisoEnlace, textoAvisoEnlace, type DatosAvisoEnlace } from './aviso-enlace-cuota'
@@ -220,8 +221,23 @@ export async function generarEnlacesAutomaticos(
   for (const d of seleccion.descartadas) resumen.descartadas[d.motivo] += 1
   resumen.candidatas = seleccion.candidatas.length
 
+  // 3b. Solo en día hábil del país del cliente que paga (decisión de Mauricio, 2026-09-27).
+  // Se corta ANTES de generar, no antes de avisar: generar el enlace y callar el correo lo
+  // perdería para siempre, porque mañana la cuota ya tiene enlace vigente y el correo solo
+  // sale con un enlace nuevo. Sin generar, la cuota sigue candidata y el primer día hábil
+  // se genera y se avisa. El país es el del espacio que paga (`workspace_pagador_id`).
+  const paisPorWorkspace = await paisesDeWorkspaces(
+    db,
+    seleccion.candidatas.map((c) => pagadorDe(contratos, c.workspaceId, c.negocioId)),
+  )
+
   // 4. Una por una: la pasarela no se llama en paralelo y un fallo no tumba las demás.
   for (const cand of seleccion.candidatas) {
+    const pais = paisPorWorkspace.get(pagadorDe(contratos, cand.workspaceId, cand.negocioId)) ?? PAIS_POR_DEFECTO
+    if (!esDiaHabil(p.hoy, pais)) {
+      resumen.omitidas.push({ cuotaId: cand.cuotaId, motivo: `dia_no_habil_${pais}` })
+      continue
+    }
     let r: ResultadoEnlaceCuota
     try {
       r = await generarEnlacePagoCuota({ workspaceId: cand.workspaceId, cuotaId: cand.cuotaId, ahoraMs: p.ahoraMs }, { db: deps.db, adapterPara: resolver })
@@ -260,6 +276,29 @@ export async function generarEnlacesAutomaticos(
 }
 
 const TEXTO_AVISO: Record<EstadoAviso, string> = { enviado: 'enviado', omitido: 'no se envió', fallido: 'falló' }
+
+/** El espacio que paga la cuota: el pagador del contrato, o el dueño del plan si no lo declara. */
+function pagadorDe(contratos: readonly FilaContrato[], workspaceId: string, negocioId: string): string {
+  return contratoDelNegocio(contratos, workspaceId, negocioId)?.workspace_pagador_id ?? workspaceId
+}
+
+/**
+ * `workspaces.pais` de cada espacio. Si la columna no se puede leer (el código llegó antes
+ * que la migración), todos son Colombia: frenar un cobro por no poder leer el país sería
+ * peor que avisarlo con el calendario colombiano, que es el de todos los clientes de hoy.
+ */
+async function paisesDeWorkspaces(db: Db, ids: string[]): Promise<Map<string, string>> {
+  const unicos = [...new Set(ids)]
+  const out = new Map<string, string>()
+  if (unicos.length === 0) return out
+  const r = await db.from('workspaces').select('id, pais').in('id', unicos)
+  if (r.error) {
+    console.error('[enlace-automatico] no se pudo leer el país de los espacios, se asume Colombia:', r.error.message)
+    return out
+  }
+  for (const w of (r.data ?? []) as { id: string; pais?: string | null }[]) out.set(w.id, normalizarPais(w.pais))
+  return out
+}
 
 /** El contrato del negocio que manda: el activo, y entre varios el de vigencia más reciente. */
 function contratoDelNegocio(contratos: readonly FilaContrato[], workspaceId: string, negocioId: string): FilaContrato | null {

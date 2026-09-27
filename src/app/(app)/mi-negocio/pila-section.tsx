@@ -5,6 +5,7 @@ import { Upload, FileText, AlertTriangle, CheckCircle2, ExternalLink, Loader2, X
 import { toast } from 'sonner'
 import { uploadPlanillaPila, deletePlanillaPila, listPlanillasPila, type PlanillaPilaRow } from './pila-actions'
 import { useFileDrop } from '@/hooks/use-file-drop'
+import { bogotaParts, bogotaYear, todayBogotaISO } from '@/lib/dates/bogota'
 
 const MESES_NOMBRES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -19,19 +20,19 @@ type EstadoMes = 'vacio' | 'cargado' | 'vencido' | 'mes_futuro'
 
 function estadoDelMes(anio: number, mes: number, planilla: PlanillaPilaRow | undefined): EstadoMes {
   if (planilla) return 'cargado'
-  const hoy = new Date()
-  const anio_hoy = hoy.getFullYear()
-  const mes_hoy = hoy.getMonth() + 1 // 1-12
+  // Calendario de Bogota, no el del navegador ni el de UTC: el mes y el dia limite son
+  // dias civiles de Colombia, y el componente se pinta tambien en el servidor (UTC).
+  const { year: anio_hoy, month: mes_hoy } = bogotaParts()
   if (anio > anio_hoy) return 'mes_futuro'
   if (anio === anio_hoy && mes > mes_hoy) return 'mes_futuro'
-  // Mes pasado o actual sin planilla → vencido si pasó día 15 + 30 días, sino vacio
-  const fechaLimite = new Date(anio, mes - 1, 15)
-  fechaLimite.setDate(fechaLimite.getDate() + 30)
-  if (hoy > fechaLimite) return 'vencido'
+  // Mes pasado o actual sin planilla → vencido si pasó día 15 + 30 días, sino vacio.
+  // Se compara como 'YYYY-MM-DD': el limite es un dia, no un instante.
+  const limite = new Date(Date.UTC(anio, mes - 1, 15 + 30)).toISOString().slice(0, 10)
+  if (todayBogotaISO() >= limite) return 'vencido'
   return 'vacio'
 }
 
-export default function PilaSection({ anioActual = new Date().getFullYear() }: PilaSectionProps) {
+export default function PilaSection({ anioActual = bogotaYear() }: PilaSectionProps) {
   const [anio, setAnio] = useState(anioActual)
   const [planillas, setPlanillas] = useState<PlanillaPilaRow[]>([])
   const [loading, setLoading] = useState(true)

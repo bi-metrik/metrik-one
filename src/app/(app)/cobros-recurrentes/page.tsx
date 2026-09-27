@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import CobrosRecurrentesClient from './cobros-recurrentes-client'
 import type { CobroDeCuentaUI } from './registrar-pago-dialog'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { bogotaYear } from '@/lib/dates/bogota'
 
 export const runtime = 'nodejs'
 
@@ -33,7 +34,8 @@ export default async function CobrosRecurrentesPage() {
   }
 
   // Cargar cuentas emitidas del workspace (anio actual + previos para historial)
-  const anioActual = new Date().getFullYear()
+  // Anio de Bogota: el 31-dic a las 20:00 (UTC ya en enero) no puede saltar al anio siguiente.
+  const anioActual = bogotaYear()
   const { data: cuentas } = await supabase
     .from('cuentas_cobro_emitidas')
     .select(`

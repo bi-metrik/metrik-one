@@ -28,6 +28,8 @@
 // ============================================================
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
+import { todayBogotaISO } from '../_shared/bogota.ts';
+import { esDiaHabil, paisDelWorkspace } from '../_shared/dias-habiles.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -96,8 +98,18 @@ Deno.serve(async (req: Request) => {
 
   const lineas = (lineasRaw ?? []) as Linea[];
   const reporte: unknown[] = [];
+  const hoy = todayBogotaISO();
 
   for (const linea of lineas) {
+    // Solo en dia habil del pais del workspace (decision de Mauricio, 2026-09-27). No se
+    // pierde nada: el log se escribe solo despues de que el correo sale, asi que el primer
+    // dia habil siguiente `plazos_pendientes` vuelve a traer los mismos casos.
+    const pais = await paisDelWorkspace(supabase, linea.workspace_id);
+    if (!esDiaHabil(hoy, pais)) {
+      reporte.push({ linea: linea.nombre, omitido: 'dia_no_habil', hoy, pais });
+      continue;
+    }
+
     const { data: filasRaw, error } = await supabase.rpc('plazos_pendientes', { p_linea_id: linea.id });
     if (error) {
       console.error(`[alertas-plazo] ${linea.nombre}: ${error.message}`);

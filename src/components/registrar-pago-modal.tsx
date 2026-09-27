@@ -11,6 +11,7 @@ import ModalConfirmarAvance from '@/components/modal-confirmar-avance'
 import { MENSAJE_HONORARIO_PENDIENTE } from '@/lib/negocios/honorario-confirmado'
 import { consultarEpayco } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
+import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
 import { createClient } from '@/lib/supabase/client'
 import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
 import {
@@ -147,10 +148,12 @@ export default function RegistrarPagoModal({
         setEpaycoStatus('success')
         setEpaycoData(res.data)
         setMonto(String(res.data.monto_bruto))
-        const fechaIso = res.data.fecha
-          ? new Date(res.data.fecha).toISOString().slice(0, 10)
-          : ''
-        setFecha(fechaIso)
+        // `transactionDate` de ePayco llega SIN zona y en hora de Bogota
+        // ('2026-09-14 14:36:20', verificado el 2026-09-27 contra sus movimientos en UTC).
+        // `new Date(...)` lo leia en la zona del navegador y `toISOString()` lo pasaba a
+        // UTC: un pago de las 20:00 se proponia con fecha de mañana. Es el mismo helper
+        // con el que el servidor fecha el cobro, asi que el formulario ya no discrepa.
+        setFecha(fechaTransaccionBogota(res.data.fecha) ?? '')
       } else {
         setEpaycoStatus('error')
         setEpaycoError(res.error)

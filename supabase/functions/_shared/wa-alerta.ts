@@ -8,6 +8,8 @@
 // nueva nace con el cupo respetado y con plantilla, sin que su autor lo recuerde.
 // ============================================================
 
+import { esDiaHabil, paisDelWorkspace } from './dias-habiles.ts';
+import { todayBogotaISO } from './bogota.ts';
 import { sendTemplate, sendTextMessage } from './wa-respond.ts';
 import { leerRegistro, resolverAviso } from './wa-plantillas.ts';
 import type { RegistroPlantillas } from './wa-plantillas.ts';
@@ -71,9 +73,9 @@ export async function hayCupoDeAlerta(supabase: SupabaseClient, phone: string): 
 }
 
 export interface AlertaSalida {
-  /** Falso si el cupo la freno. No es un error: es el tope funcionando. */
+  /** Falso si el cupo o el calendario la frenaron. No es un error: es la regla funcionando. */
   enviada: boolean;
-  via: 'plantilla' | 'texto' | 'sin_cupo';
+  via: 'plantilla' | 'texto' | 'sin_cupo' | 'dia_no_habil';
 }
 
 export interface AlertaEntrada {
@@ -99,6 +101,20 @@ export async function enviarAlerta(
   supabase: SupabaseClient,
   a: AlertaEntrada,
 ): Promise<AlertaSalida> {
+  // Dia habil del pais del cliente (decision de Mauricio, 2026-09-27). Va ANTES del cupo:
+  // una alerta que no sale por calendario no puede gastar el cupo del dia.
+  //
+  // No se pierde: las alertas de este canal son de ESTADO (saldo vencido, saldo sin
+  // actualizar, recaudo) y el cron las vuelve a calcular el proximo dia que corra. Las
+  // periodicas (resumen de los lunes, saldo martes/viernes) se corren con `debeSalirHoy`
+  // en `wa-alerts`, que es donde se sabe que dia tocaban.
+  const hoy = todayBogotaISO();
+  const pais = await paisDelWorkspace(supabase, a.workspaceId);
+  if (!esDiaHabil(hoy, pais)) {
+    console.log(`[wa-alerta] ${a.intent}: ${hoy} no es dia habil en ${pais}, no sale hoy`);
+    return { enviada: false, via: 'dia_no_habil' };
+  }
+
   if (!(await hayCupoDeAlerta(supabase, a.phone))) {
     console.log(`[wa-alerta] ${a.intent}: tope diario alcanzado para ${a.phone}`);
     return { enviada: false, via: 'sin_cupo' };
