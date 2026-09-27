@@ -106,6 +106,7 @@
 - ⚠️⚠️ [El correo del recibo](project_correo_recibo_dos_documentos.md) — #804 sin mergear; SQL de copy DESPUÉS de `notificar-etapa`
 - ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — config SOENA sin aplicar; caso V0497
 - ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — config SOENA sin aplicar
+- ⚠️ [Firma de webhooks de Meta (#925, #927)](project_firma_wa_webhook.md) — wa-firma.ts compartido; meta-leads SIN redesplegar
 - ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — wa-webhook sin redesplegar
 - ⚠️ [Duplicados: solo facturas libres](project_duplicado_hermanos_siigo.md) — #561 sin mergear; el vínculo es la marca
 - ⚠️ [Icono de app Pino](project_icono_app_pino.md) — #602 sin mergear: el `.ico` gana sobre el `.svg`
