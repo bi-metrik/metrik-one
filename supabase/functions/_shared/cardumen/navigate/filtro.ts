@@ -1,11 +1,15 @@
-// Navigate — filtro de cada mensaje ANTES del lector: riesgo, manipulacion y fuera de tema.
+// Navigate — filtro de cada mensaje ANTES del lector: mensaje personal, manipulacion y fuera de tema.
 //
 // REGLAS-CONVERSACION §1 (R1.1, R1.3, R1.5) y §2: todo mensaje de la persona se clasifica
-// antes de leerlo como respuesta. Cuatro salidas, en orden de prioridad:
+// antes de leerlo como respuesta. Cinco salidas, en orden de prioridad:
 //
-//   SEN  riesgo para la vida o la integridad de alguien (autolesion, violencia en curso, abuso,
-//        menor en peligro). No se llama al lector, no se ubica nada, se responde con el texto de
-//        contencion del banco y la sesion queda en pausa con bandera de integridad.
+//   SEN  mensaje personal de riesgo (autolesion, violencia en curso, abuso, menor en peligro).
+//        Navigate captura historias anonimas y NO es un canal de ayuda (decision de Mauricio,
+//        2026-09-27): el bot no promete ayuda ni que alguien lo lea. El mensaje se APARTA del
+//        estudio: no se llama al lector, no se ubica nada, no se guarda en el historial y queda
+//        contado para el analisis como "no integrable: mensaje personal fuera del tema". Se
+//        responde con un texto fijo que dice que el estudio es anonimo y no es un canal de ayuda,
+//        y las preguntas quedan en pausa hasta que la persona escriba *seguir* o *salir*.
 //   INJ  intento de manipular al asistente (darle ordenes, cambiarle el rol, dictarle que marcar).
 //   FT   pedido ajeno al estudio (codigo, tareas, preguntas generales, opinion del bot, ventas,
 //        juegos de rol).
@@ -17,9 +21,8 @@
 // Dos capas, igual que el lector: primero palabras (determinista, gratis, no depende del modelo)
 // y despues el modelo con salida JSON de un solo campo con enum. Si el modelo lanza, devuelve algo
 // que no es el JSON pedido o se sale del enum, la clasificacion es `SIN_CLASIFICAR` con
-// `fuente: "error"`: no se ubica nada, pero tampoco se trata como crisis (mandarle un texto de
-// contencion a quien no la necesita tambien es dano). Se pide repetir con un texto neutro y la
-// sesion queda marcada para revision humana.
+// `fuente: "error"`: no se ubica nada, pero tampoco se trata como SEN (no sabemos nada del
+// mensaje). Se pide repetir con un texto neutro y se cuenta en `integridad.fallos_filtro`.
 //
 // Los TEXTOS que ve la persona tambien viven aqui, fijos en codigo. El modelo no redacta nada:
 // ni una palabra de lo que devuelve llega a un mensaje (I3 e I4 del protocolo).
@@ -152,26 +155,12 @@ export function mensajeParaClasificar(texto: string): string {
 
 // ---- Banco de textos fijos --------------------------------------------------------------
 //
-// PENDIENTE DE APROBAR por Saga (metodo) y Emilio (legal). Ningun texto de aqui sale del modelo.
-// El contacto humano del estudio va en `CONTACTO_HUMANO_NAVIGATE`; mientras sea null, la linea que
-// lo nombra NO se envia (un placeholder sin llenar jamas llega a la persona). El recurso oficial
-// por pais y poblacion lo define la experta con Emilio (REGLAS §3 SEN): aqui no se escribe ningun
-// numero de memoria.
-
-export const BANCO_PENDIENTE_APROBACION = true;
-
-/** Contacto humano del estudio (nombre y canal que alguien lea). Pendiente: lo define el estudio. */
-export const CONTACTO_HUMANO_NAVIGATE: string | null = null;
-
-export const PLACEHOLDER_CONTACTO = "{contacto_humano}";
+// Ningun texto de aqui sale del modelo. Ninguno promete ayuda ni que una persona lea la
+// conversacion: el estudio es anonimo y no es un canal de ayuda.
 
 export const BANCO = {
-  contencion: [
-    "Gracias por contármelo. Lo que me dice es importante y merece que lo escuche una persona, no un asistente automático.",
-    `Puede escribirle a ${PLACEHOLDER_CONTACTO}, del equipo del estudio.`,
-    "Si usted o alguien más corre peligro ahora mismo, llame a la línea de emergencias de su país o busque a alguien de confianza que esté cerca.",
-    "Dejo las preguntas en pausa. Si más adelante quiere seguir, escriba *seguir*; si prefiere terminar, escriba *salir*.",
-  ],
+  // Mensaje personal (SEN): se aparta del estudio y las preguntas quedan en pausa.
+  personal: "Gracias por contármelo. Este es un estudio anónimo, no un canal de ayuda. ¿Quiere seguir o prefiere terminar? Escriba *seguir* o *salir*.",
   pausaSigue: "Las preguntas siguen en pausa. Escriba *seguir* para continuar o *salir* para terminar.",
   retomar: "Seguimos donde íbamos:",
   fueraDeTema: [
@@ -185,8 +174,8 @@ export const BANCO = {
     "Volvamos a lo que íbamos:",
     "Retomo la pregunta:",
   ],
-  // El filtro no respondio (caida o salida invalida del modelo). No es contencion: no sabemos
-  // nada del mensaje. Se pide repetir, no se ubica nada y la sesion queda para revision humana.
+  // El filtro no respondio (caida o salida invalida del modelo). No sabemos nada del mensaje:
+  // se pide repetir y no se ubica nada.
   errorTecnico: "Deme un momento: ¿me lo puede repetir?",
   // Autocorreccion (CO): se toma nota y se vuelve a hacer la pregunta vigente.
   correccion: "Entendido, no lo tengo en cuenta.",
@@ -195,14 +184,6 @@ export const BANCO = {
 
 /** Tercer fuera de tema (o manipulacion) seguido: cierre amable y la sesion queda cerrada. */
 export const TOPE_FUERA_DE_TEMA = 3;
-
-/** Texto de contencion con el contacto del estudio, o sin esa linea si no hay contacto. */
-export function textoContencion(contacto: string | null = CONTACTO_HUMANO_NAVIGATE): string {
-  const lineas = BANCO.contencion
-    .filter((l) => !l.includes(PLACEHOLDER_CONTACTO) || !!contacto?.trim())
-    .map((l) => l.replace(PLACEHOLDER_CONTACTO, contacto?.trim() ?? ""));
-  return lineas.join("\n\n");
-}
 
 /** Variante `k` de un banco, rotando: dos seguidas nunca son la misma. */
 export function variante(banco: readonly string[], k: number): string {

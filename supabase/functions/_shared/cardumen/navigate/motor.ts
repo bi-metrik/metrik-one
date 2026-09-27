@@ -18,6 +18,12 @@
 // queda `unresolved` y se avanza. La sesion no se cuelga, no se reinicia sola y no salta pasos.
 // Antes del modelo hay una capa determinista (`meta.ts`): vacio, pregunta de vuelta y
 // negativa nunca llegan al lector como si fueran una respuesta.
+//
+// Y antes de todo eso, el filtro (`filtro.ts`). Navigate captura historias anonimas; no es un canal
+// de ayuda y ningun texto promete ayuda ni que una persona lea la conversacion. Un mensaje personal
+// de riesgo (SEN) se aparta del estudio: no se ubica, no queda en el historial, se cuenta en
+// `integridad` como "no integrable: mensaje personal fuera del tema" y las preguntas quedan en
+// pausa hasta *seguir* o *salir*. Si el filtro se cae, texto neutro para que repita y no se ubica.
 
 import {
   APERTURA, DIADAS, ESPECIALES_FUERA_DEL_EJE, INTENSIDADES, REPARTO_SOLO_UNO, SECTORES, SECUENCIA, TRIADAS,
@@ -25,7 +31,7 @@ import {
 } from "./instrumento.ts";
 import type { Ancla, DiadaNav, DimensionId, Poblacion, TriadaNav } from "./instrumento.ts";
 import { detectarIdioma, leerIdiomaElegido } from "./idioma.ts";
-import { BANCO, TOPE_FUERA_DE_TEMA, clasificarPorPalabras, textoContencion, variante } from "./filtro.ts";
+import { BANCO, TOPE_FUERA_DE_TEMA, clasificarPorPalabras, variante } from "./filtro.ts";
 import type { ClasificacionMensaje } from "./filtro.ts";
 import { normalizarTexto } from "./interprete.ts";
 import { leerMeta, sinPalabras } from "./meta.ts";
@@ -353,7 +359,7 @@ function nota(state: NavigateState, n: string): void {
   (state.notas ??= []).push(n);
 }
 
-// ---- Filtro de cada mensaje: riesgo, manipulacion y fuera de tema ----------------------------
+// ---- Filtro de cada mensaje: mensaje personal, manipulacion y fuera de tema ----------------------------
 //
 // Corre sobre TODO mensaje de texto, en cualquier paso, antes del lector y de la capa de
 // meta-respuestas. Dos capas: palabras (siempre, no depende del modelo) y el clasificador del
@@ -368,7 +374,6 @@ function integridadDe(state: NavigateState): Integridad {
     sensible: false,
     mensajes_riesgo: 0,
     fallos_filtro: 0,
-    revision_humana: false,
     correcciones: 0,
     pausa_cuidado: false,
     fuera_de_tema: 0,
@@ -411,14 +416,14 @@ async function filtrarEntrada(
   if (enPausa && !boton && (SEGUIR.has(n) || SI.has(n))) {
     state.integridad!.pausa_cuidado = false;
     state.integridad!.seguidos = 0;
-    nota(state, "retomo las preguntas despues de la pausa por riesgo");
+    nota(state, "retomo las preguntas despues de la pausa por un mensaje personal");
     return resultado(state, [prefijar(BANCO.retomar, preguntaPendiente(state))]);
   }
   if (boton && !enPausa) return null;
 
   const cls = await clasificarEntrada(state, t, n, boton, interprete);
   if (cls.fuente === "error") return filtroCaido(state, enPausa);
-  if (cls.categoria === "SEN") return contener(state);
+  if (cls.categoria === "SEN") return apartarPersonal(state);
   // En pausa nada avanza: solo "seguir" retoma y "salir" termina (atendido arriba en `procesar`).
   if (enPausa) return resultado(state, [texto(BANCO.pausaSigue)]);
   if (cls.categoria === "CO") return correccion(state);
@@ -429,15 +434,14 @@ async function filtrarEntrada(
 
 /**
  * El filtro no respondio (caida o salida invalida del modelo). No sabemos nada del mensaje: no se
- * lee, no se ubica, y NO se manda la contencion (a quien no esta en crisis tambien le hace dano).
- * Texto neutro para que lo repita, y la sesion queda marcada para revision humana. No cuenta al
- * tope de fuera de tema ni toca la pausa: si ya estaba en pausa, sigue igual.
+ * lee, no se ubica y NO se trata como mensaje personal. Texto neutro para que lo repita y se cuenta
+ * en `fallos_filtro`. No cuenta al tope de fuera de tema ni toca la pausa: si ya estaba en pausa,
+ * sigue igual.
  */
 function filtroCaido(state: NavigateState, enPausa: boolean): Resultado {
   const integ = integridadDe(state);
   integ.fallos_filtro += 1;
-  integ.revision_humana = true;
-  nota(state, "el filtro de riesgo no respondio: no se ubico el mensaje, se pidio repetir y la sesion queda para revision humana");
+  nota(state, "el filtro no respondio: no se ubico el mensaje y se pidio repetir");
   if (state.en_curso) state.en_curso.notas.push("el filtro no respondio en esta dimension: se pidio repetir");
   return resultado(state, [texto(enPausa ? BANCO.pausaSigue : BANCO.errorTecnico)]);
 }
@@ -450,22 +454,28 @@ function correccion(state: NavigateState): Resultado {
   return resultado(state, [prefijar(BANCO.correccion, preguntaPendiente(state))]);
 }
 
+/** Etiqueta con la que el analisis reporta los mensajes apartados por SEN. */
+export const MOTIVO_NO_INTEGRABLE_PERSONAL = "no integrable: mensaje personal fuera del tema";
+
 /**
- * Mensaje de riesgo (detectado por palabras o por el modelo): no se lee, no se ubica, se responde
- * con el texto de contencion del banco y las preguntas quedan en pausa. El mensaje no se guarda en el historial:
- * no es un dato del estudio, y su lugar es una persona, no un registro de demostracion.
+ * Mensaje personal de riesgo (SEN, por palabras o por el modelo). Navigate no es un canal de ayuda:
+ * el mensaje se aparta del estudio. No se lee, no se ubica, no se guarda en el historial y se
+ * cuenta en `integridad.sensible` / `mensajes_riesgo` (el analisis lo reporta como
+ * "no integrable: mensaje personal fuera del tema", aparte de las respuestas sin sentido, que son
+ * `unresolved`). Se responde con el texto fijo del banco y las preguntas quedan en pausa hasta
+ * *seguir* o *salir*.
  */
-function contener(state: NavigateState): Resultado {
+function apartarPersonal(state: NavigateState): Resultado {
   const integ = integridadDe(state);
   integ.sensible = true;
   integ.mensajes_riesgo += 1;
   integ.pausa_cuidado = true;
   integ.seguidos = 0;
   const ultimo = state.historial[state.historial.length - 1];
-  if (ultimo?.role === "persona") ultimo.text = "[mensaje retenido por el filtro de riesgo]";
-  nota(state, "mensaje de riesgo: no se ubico, se envio el texto de contencion y se pausaron las preguntas");
-  if (state.en_curso) state.en_curso.notas.push("hubo un mensaje de riesgo en esta dimension: no se ubico");
-  return resultado(state, [texto(textoContencion())]);
+  if (ultimo?.role === "persona") ultimo.text = "[mensaje personal fuera del tema: no se guarda]";
+  nota(state, `${MOTIVO_NO_INTEGRABLE_PERSONAL}: no se ubico y se pausaron las preguntas`);
+  if (state.en_curso) state.en_curso.notas.push(`${MOTIVO_NO_INTEGRABLE_PERSONAL}: no se ubico en esta dimension`);
+  return resultado(state, [texto(BANCO.personal)]);
 }
 
 /** Pedido ajeno al estudio o manipulacion: reencauce fijo y la pregunta vigente. Al tope, cierre. */
@@ -508,8 +518,8 @@ export async function procesar(state: NavigateState, entrada: Entrada, interpret
   }
   if (EXIT.has(n)) return salir(state);
 
-  // Filtro ANTES de cualquier lectura (filtro.ts): riesgo, manipulacion y fuera de tema. Un
-  // mensaje de riesgo no llega al lector ni ubica nada; uno fuera de tema se reencauza con un
+  // Filtro ANTES de cualquier lectura (filtro.ts): mensaje personal, manipulacion y fuera de tema.
+  // Un mensaje personal (SEN) no llega al lector ni ubica nada; uno fuera de tema se reencauza con un
   // texto fijo. Nada de lo que responde el filtro lo redacta el modelo.
   const filtrado = await filtrarEntrada(state, t, n, boton, interprete);
   if (filtrado) return filtrado;
