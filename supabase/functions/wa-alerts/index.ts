@@ -11,7 +11,8 @@ import {
 } from '../_shared/wa-format.ts';
 import { STREAK_MILESTONES } from '../_shared/types.ts';
 import { COLUMNAS_CARTERA, deudasDeCartera, TOLERANCIA_SALDO_COP } from '../_shared/cartera.ts';
-import { bogotaParts, diasDelMes } from '../_shared/bogota.ts';
+import { bogotaParts, diasDelMes, todayBogotaISO } from '../_shared/bogota.ts';
+import { debeSalirHoy, diaSemanaISO, paisDelWorkspace } from '../_shared/dias-habiles.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
 // `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
@@ -69,10 +70,16 @@ Deno.serve(async (req) => {
         await runW25FacturaVencida(supabase);
         break;
       case 'w29':
-        await runW29ResumenSemanal(supabase);
+        await runW29ResumenSemanal(supabase, 'programado');
         break;
       case 'w33':
-        await runW33PushSaldo(supabase);
+        await runW33PushSaldo(supabase, 'programado');
+        break;
+      // Cron diario: saca el resumen o el aviso de saldo que cayo en dia no habil, el
+      // primer dia habil despues. El dia programado lo sigue sacando su propio cron.
+      case 'corridas':
+        await runW29ResumenSemanal(supabase, 'corrido');
+        await runW33PushSaldo(supabase, 'corrido');
         break;
       case 'streak_eval':
         await runStreakEvaluation(supabase);
@@ -172,11 +179,43 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
 }
 
 // ============================================================
+// Avisos periodicos y dia habil
+// ============================================================
+//
+// Un aviso periodico al cliente sale solo en dia habil de su pais y, si el dia que
+// tocaba no lo es, se corre al siguiente habil (decision de Mauricio, 2026-09-27). Lo
+// resuelven dos crons que se reparten el trabajo sin pisarse:
+//   · el del dia programado (`w29` los lunes, `w33` martes y viernes) saca el aviso si
+//     ese dia es habil;
+//   · `corridas`, diario, saca el que cayo en dia no habil el primer dia habil despues.
+// Entre los dos `debeSalirHoy` se cumple una sola vez por fecha programada. `corridas`
+// es un cron aparte (y no volver diarios los otros dos) para que el orden de despliegue
+// no importe: el codigo viejo contesta 400 a una accion que no conoce y no manda nada.
+
+type Turno = 'programado' | 'corrido';
+
+const DIAS_W29 = [1] as const; // lunes
+const DIAS_W33 = [2, 5] as const; // martes y viernes
+
+async function tocaHoy(
+  supabase: ReturnType<typeof getServiceClient>,
+  workspaceId: string,
+  dias: readonly number[],
+  turno: Turno,
+): Promise<boolean> {
+  const hoy = todayBogotaISO();
+  const pais = await paisDelWorkspace(supabase, workspaceId);
+  if (!debeSalirHoy(hoy, dias, pais)) return false;
+  const esDiaProgramado = dias.includes(diaSemanaISO(hoy));
+  return turno === 'programado' ? esDiaProgramado : !esDiaProgramado;
+}
+
+// ============================================================
 // W29 — Resumen Semanal (lunes 7am)
 // ============================================================
 
-async function runW29ResumenSemanal(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
-  console.log('[wa-alerts] Running W29 — Resumen Semanal');
+async function runW29ResumenSemanal(supabase: ReturnType<typeof getServiceClient>, turno: Turno): Promise<void> {
+  console.log(`[wa-alerts] Running W29 — Resumen Semanal (${turno})`);
 
   // Get all active workspaces with Pro+ subscription
   const { data: workspaces } = await supabase
@@ -187,6 +226,7 @@ async function runW29ResumenSemanal(supabase: ReturnType<typeof getServiceClient
   if (!workspaces || workspaces.length === 0) return;
 
   for (const ws of workspaces) {
+    if (!(await tocaHoy(supabase, ws.id, DIAS_W29, turno))) continue;
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
 
@@ -374,8 +414,8 @@ async function buildWeeklySummary(
 // W33 — Push Saldo (martes/viernes, si >7 días sin actualizar)
 // ============================================================
 
-async function runW33PushSaldo(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
-  console.log('[wa-alerts] Running W33 — Push Saldo');
+async function runW33PushSaldo(supabase: ReturnType<typeof getServiceClient>, turno: Turno): Promise<void> {
+  console.log(`[wa-alerts] Running W33 — Push Saldo (${turno})`);
 
   const { data: workspaces } = await supabase
     .from('workspaces')
@@ -385,6 +425,7 @@ async function runW33PushSaldo(supabase: ReturnType<typeof getServiceClient>): P
   if (!workspaces || workspaces.length === 0) return;
 
   for (const ws of workspaces) {
+    if (!(await tocaHoy(supabase, ws.id, DIAS_W33, turno))) continue;
     // Check if saldo was updated in the last 7 days
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 

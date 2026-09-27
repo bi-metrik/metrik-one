@@ -56,12 +56,12 @@ function correoFalso(r: ResultadoEnvio = { ok: true, id: 'resend-1' }) {
   return vi.fn(async (_m: CorreoSaliente) => r)
 }
 
-async function correr(tablas: Tablas, opts: { enviar?: ReturnType<typeof correoFalso>; correo?: string | null; ahoraMs?: number } = {}) {
+async function correr(tablas: Tablas, opts: { enviar?: ReturnType<typeof correoFalso>; correo?: string | null; ahoraMs?: number; hoy?: string } = {}) {
   const d = crearDoble(tablas)
   const pasarela = pasarelaFalsa()
   const enviar = opts.enviar ?? correoFalso()
   const resumen = await generarEnlacesAutomaticos(
-    { hoy: HOY, ahoraMs: opts.ahoraMs ?? AHORA },
+    { hoy: opts.hoy ?? HOY, ahoraMs: opts.ahoraMs ?? AHORA },
     {
       db: d.db,
       adapterPara: pasarela.adapterPara,
@@ -217,5 +217,35 @@ describe('generarEnlacesAutomaticos', () => {
     expect(resumen.errores).toHaveLength(2)
     expect(enviar).not.toHaveBeenCalled()
     expect(programado(tablas, 1)!.enlace_pago_url).toBe('https://checkout.test/del-boton')
+  })
+
+  describe('día hábil del país del cliente que paga (decisión 2026-09-27)', () => {
+    it('un sábado no genera enlace ni manda correo, y el lunes sale todo lo que quedó', async () => {
+      const tablas = tablasBase()
+      const sabado = await correr(tablas, { hoy: '2026-09-26', ahoraMs: Date.parse('2026-09-26T15:00:00Z') })
+      expect(sabado.pasarela.crear).not.toHaveBeenCalled()
+      expect(sabado.enviar).not.toHaveBeenCalled()
+      expect(sabado.resumen.omitidas.map((o) => o.motivo)).toEqual(['dia_no_habil_CO', 'dia_no_habil_CO'])
+      expect(tablas.avisos_cliente).toHaveLength(0)
+      // No se pierde: el lunes habil la misma cuota sigue candidata y se genera y avisa.
+      const lunes = await correr(tablas, { hoy: '2026-09-28', ahoraMs: Date.parse('2026-09-28T13:00:00Z') })
+      expect(lunes.pasarela.crear).toHaveBeenCalled()
+      expect(lunes.enviar).toHaveBeenCalled()
+      expect(lunes.resumen.omitidas).toEqual([])
+    })
+
+    it('un festivo colombiano frena al cliente colombiano', async () => {
+      const r = await correr(tablasBase(), { hoy: '2026-10-12', ahoraMs: Date.parse('2026-10-12T13:00:00Z') })
+      expect(r.pasarela.crear).not.toHaveBeenCalled()
+      expect(r.resumen.omitidas.every((o) => o.motivo === 'dia_no_habil_CO')).toBe(true)
+    })
+
+    it('el país es el del espacio que PAGA: un pagador de otro país no se frena por un festivo colombiano', async () => {
+      const tablas = tablasBase()
+      tablas.workspaces = (tablas.workspaces as Fila[]).map((w) => (w.id === 'wsC' ? { ...w, pais: 'MX' } : { ...w, pais: 'CO' }))
+      const r = await correr(tablas, { hoy: '2026-10-12', ahoraMs: Date.parse('2026-10-12T13:00:00Z') })
+      expect(r.pasarela.crear).toHaveBeenCalled()
+      expect(r.resumen.omitidas.filter((o) => o.motivo.startsWith('dia_no_habil'))).toEqual([])
+    })
   })
 })
