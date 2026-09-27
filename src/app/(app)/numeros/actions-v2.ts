@@ -295,7 +295,7 @@ export async function getNumeros(mesRef?: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('v_cartera_negocio')
-      .select('negocio_id, codigo, nombre, honorario, honorario_recaudado, saldo, dias')
+      .select('negocio_id, codigo, nombre, honorario, honorario_recaudado, saldo, dias, con_cronograma, saldo_vencido, dias_mora')
       .eq('workspace_id', workspaceId),
 
     // Metas del mes

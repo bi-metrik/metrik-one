@@ -10,7 +10,7 @@ import {
   formatCOP, formatCOPShort, bold, formatDate, daysSince, formatAgo,
 } from '../_shared/wa-format.ts';
 import { STREAK_MILESTONES } from '../_shared/types.ts';
-import { COLUMNAS_CARTERA, deudasDeCartera } from '../_shared/cartera.ts';
+import { COLUMNAS_CARTERA, deudasDeCartera, TOLERANCIA_SALDO_COP } from '../_shared/cartera.ts';
 import { bogotaParts, diasDelMes } from '../_shared/bogota.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
@@ -104,6 +104,12 @@ Deno.serve(async (req) => {
 // lee `v_cartera_negocio`, la misma fuente de /numeros y del tablero. El nombre
 // cambio con la fuente: lo que vence es el saldo del negocio, no una factura,
 // y los dias se cuentan desde que nacio el negocio (no hay fecha de emision).
+//
+// Con cronograma de cuotas (2026-09-27) eso era falso: anunciaba como vencido
+// TODO lo que faltaba del contrato, con los dias desde la creacion. ALMA salia
+// con $3.600.000 a 159 dias debiendo una cuota de $400.000 con 12 dias de mora.
+// Ahora el monto es `d.vencido` (solo cuotas que pasaron su fecha) y los dias
+// son de mora; sin cronograma, todo sigue igual. Ver `_shared/cartera.ts`.
 
 async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
   console.log('[wa-alerts] Running W25 — Saldo Vencido');
@@ -144,14 +150,18 @@ async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient
     for (const d of deudas.slice(0, 3)) {
       let msg = `⚠️ Saldo vencido:\n`;
       msg += `📄 ${d.codigo} — ${bold(d.nombre)}\n`;
-      msg += `💰 Saldo: ${formatCOP(d.saldo)} · ${d.dias}d`;
+      msg += `💰 Vencido: ${formatCOP(d.vencido)} · ${d.dias}d`;
+      if (d.saldo - d.vencido > TOLERANCIA_SALDO_COP) {
+        msg += `\n🗓️ Por vencer: ${formatCOP(d.saldo - d.vencido)}`;
+      }
 
       const { enviada } = await enviarAlerta(supabase, {
         phone, intent: 'W25', texto: msg, workspaceId,
         variables: {
           codigo: d.codigo,
           negocio: d.nombre,
-          saldo: formatCOP(d.saldo),
+          // La plantilla dice "saldo vencido de {{3}}": va lo vencido, no el saldo total.
+          saldo: formatCOP(d.vencido),
           dias: d.dias,
         },
       });

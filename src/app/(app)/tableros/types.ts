@@ -152,7 +152,11 @@ export interface ProyectoCartera {
   honorario: number
   recaudado: number
   saldo: number
-  /** Dias desde que nacio el negocio, no vencimiento de factura: no hay factura. */
+  /**
+   * Antiguedad de la deuda. Con cronograma de cuotas: dias de mora de la cuota
+   * vencida mas antigua (0 = al dia). Sin cronograma: dias desde que nacio el
+   * negocio. Ver `vencimientoDeFila` en `lib/negocios/cartera.ts`.
+   */
   dias: number
 }
 

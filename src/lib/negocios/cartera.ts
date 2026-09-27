@@ -16,6 +16,15 @@ import { compararPorAntiguedad } from './antiguedad'
  * venta, asi que no es deuda. El filtro lo aplica la vista, no esta funcion.
  *
  * La fuente es `v_cartera_negocio`; aca solo se agrega y se ordena.
+ *
+ * Que es "vencido" depende de si el negocio tiene cronograma de cuotas
+ * (migracion 20260927120000). Con cronograma, lo vencido es la suma de las
+ * cuotas que ya debieron pagarse y no se pagaron (`saldo_vencido`), y la
+ * antiguedad es la mora de la mas vieja (`dias_mora`); las cuotas futuras son
+ * saldo por vencer, nunca vencido. Sin cronograma no hay fecha de vencimiento,
+ * asi que sigue la regla de siempre: todo el saldo vence pasados
+ * `DIAS_CARTERA_VENCIDA` desde que nacio el negocio. Detonante: ALMA figuraba
+ * con $3.600.000 vencidos a 159 dias cuando debia una sola cuota de $400.000.
  */
 
 /** Una fila de `v_cartera_negocio`. Los numericos de Postgres llegan como string. */
@@ -26,6 +35,12 @@ export interface FilaCartera {
   honorario_recaudado: number | string
   saldo: number | string
   dias: number | null
+  /** Tiene cuotas programadas. Ausente o null = sin cronograma. */
+  con_cronograma?: boolean | null
+  /** Con cronograma: cuotas esperadas hasta hoy sin pagar, topadas en `saldo`. */
+  saldo_vencido?: number | string | null
+  /** Con cronograma: dias desde la cuota vencida sin pagar mas antigua. */
+  dias_mora?: number | null
 }
 
 export interface ItemCartera {
@@ -35,7 +50,16 @@ export interface ItemCartera {
   honorario: number
   recaudado: number
   saldo: number
-  /** Dias desde que nacio el negocio, no vencimiento de factura: no hay factura. */
+  /** Parte del saldo que ya vencio. Con cronograma, solo las cuotas vencidas. */
+  vencido: number
+  /** Parte del saldo que todavia no vence (cuotas futuras). Nunca es vencido. */
+  porVencer: number
+  conCronograma: boolean
+  /**
+   * Antiguedad de la deuda. Con cronograma: dias de mora de la cuota vencida mas
+   * antigua (0 si esta al dia). Sin cronograma: dias desde que nacio el negocio,
+   * porque no hay fecha de vencimiento (no hay factura).
+   */
   dias: number
 }
 
@@ -48,8 +72,33 @@ export interface ResumenCartera {
   detalle: ItemCartera[]
 }
 
-/** Un saldo se considera vencido pasados estos dias desde que nacio el negocio. */
+/**
+ * Sin cronograma de cuotas, un saldo se considera vencido pasados estos dias
+ * desde que nacio el negocio. Con cronograma no aplica: vence cada cuota en su fecha.
+ */
 export const DIAS_CARTERA_VENCIDA = 30
+
+/** Cuanto del saldo de una fila esta vencido, cuanto no, y desde hace cuanto. */
+export function vencimientoDeFila(f: FilaCartera): {
+  conCronograma: boolean
+  vencido: number
+  porVencer: number
+  dias: number
+} {
+  const saldo = Number(f.saldo)
+  if (f.con_cronograma) {
+    const vencido = Math.min(saldo, Math.max(0, Number(f.saldo_vencido ?? 0)))
+    return {
+      conCronograma: true,
+      vencido,
+      porVencer: saldo - vencido,
+      dias: vencido > 0 ? (f.dias_mora ?? 0) : 0,
+    }
+  }
+  const dias = f.dias ?? 0
+  const vencido = dias > DIAS_CARTERA_VENCIDA ? saldo : 0
+  return { conCronograma: false, vencido, porVencer: saldo - vencido, dias }
+}
 
 /**
  * El universo son TODAS las filas (incluidas las de saldo cero): son las que dan
@@ -73,7 +122,7 @@ export function resumirCartera(filas: FilaCartera[]): ResumenCartera {
       honorario: Number(f.honorario),
       recaudado: Number(f.honorario_recaudado),
       saldo: Number(f.saldo),
-      dias: f.dias ?? 0,
+      ...vencimientoDeFila(f),
     }))
     .sort((a, b) => compararPorAntiguedad(
       { dias_desde_creacion: a.dias, saldo: a.saldo },
@@ -85,9 +134,7 @@ export function resumirCartera(filas: FilaCartera[]): ResumenCartera {
     honorarioAprobado: filas.reduce((s, f) => s + Number(f.honorario), 0),
     honorarioRecaudado: filas.reduce((s, f) => s + Number(f.honorario_recaudado), 0),
     carteraNegocios: conSaldo.length,
-    carteraVencida: conSaldo
-      .filter(f => (f.dias ?? 0) > DIAS_CARTERA_VENCIDA)
-      .reduce((s, f) => s + Number(f.saldo), 0),
+    carteraVencida: detalle.reduce((s, d) => s + d.vencido, 0),
     detalle,
   }
 }

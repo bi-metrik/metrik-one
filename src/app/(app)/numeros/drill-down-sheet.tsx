@@ -366,7 +366,13 @@ function DrillP3({ data }: { data: NumerosData; monthType: string }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium truncate">{item.negocioNombre}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    {item.negocioCodigo}{item.dias > 0 ? ` · ${item.dias} días` : ' · Hoy'}
+                    {item.negocioCodigo}
+                    {item.conCronograma
+                      // Con cuotas, lo que falta no es todo vencido: se separa.
+                      ? item.vencido > 0
+                        ? ` · Vencido ${formatCOP(item.vencido)} hace ${item.dias} días`
+                        : ' · Al día'
+                      : item.dias > 0 ? ` · ${item.dias} días` : ' · Hoy'}
                   </p>
                 </div>
                 <span className="text-xs font-semibold tabular-nums text-red-600 dark:text-red-400 shrink-0 ml-2">
@@ -384,7 +390,9 @@ function DrillP3({ data }: { data: NumerosData; monthType: string }) {
         Solo el honorario es cartera. La tarifa UPME es plata de terceros que se recauda y se
         gira, así que no entra acá. Entran los negocios <strong>ya vendidos</strong>, es decir
         los que recibieron al menos un pago: un precio aprobado sin un peso encima todavía no es
-        una venta. Los días se cuentan desde que nació el negocio.
+        una venta. En un negocio con cuotas, vencido es solo lo que ya pasó su fecha y los días
+        se cuentan desde la cuota vencida más antigua; las cuotas futuras no están vencidas. Sin
+        cuotas, los días se cuentan desde que nació el negocio.
       </p>
       <p className="px-1 pt-1 text-[10px] leading-relaxed text-muted-foreground">
         Por eso esta cifra es menor que el <strong>Faltante</strong> de Conciliación, que sí
