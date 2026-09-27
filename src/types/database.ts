@@ -15720,12 +15720,16 @@ export type Database = {
       v_cartera_negocio: {
         Row: {
           codigo: string | null
+          con_cronograma: boolean | null
           dias: number | null
+          dias_mora: number | null
           honorario: number | null
           honorario_recaudado: number | null
           negocio_id: string | null
           nombre: string | null
           saldo: number | null
+          saldo_por_vencer: number | null
+          saldo_vencido: number | null
           workspace_id: string | null
         }
         Relationships: [

@@ -151,7 +151,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('v_cartera_negocio')
-      .select('codigo, nombre, honorario, honorario_recaudado, saldo, dias')
+      .select('codigo, nombre, honorario, honorario_recaudado, saldo, dias, con_cronograma, saldo_vencido, dias_mora')
       .eq('workspace_id', workspaceId),
 
     // Gastos por pagar (post-refactor 2026-04-27: todos los gastos son reales)

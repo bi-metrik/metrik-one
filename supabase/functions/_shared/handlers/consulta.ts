@@ -298,12 +298,17 @@ async function handleCartera(ctx: HandlerContext): Promise<void> {
 
   // El nombre viene en la misma fila: ya no hay una consulta por deuda.
   for (const [i, d] of deudas.slice(0, 5).entries()) {
-    msg += `\n${i + 1}️⃣ ${bold(d.nombre)} — ${formatCOP(d.saldo)} (${d.codigo}, ${d.dias} días)${d.vencida ? ' ⚠️' : ''}`;
+    // Con cuotas, lo que falta no es todo vencido: se dice cuanto vencio y hace cuanto.
+    const cuando = d.conCronograma
+      ? (d.vencida ? `vencido ${formatCOP(d.vencido)} hace ${d.dias} días` : 'al día')
+      : `${d.dias} días`;
+    msg += `\n${i + 1}️⃣ ${bold(d.nombre)} — ${formatCOP(d.saldo)} (${d.codigo}, ${cuando})${d.vencida ? ' ⚠️' : ''}`;
   }
 
   msg += `\n\n💰 Total cartera: ${formatCOP(totalCartera)}`;
   if (vencidas.length > 0) {
-    msg += `\n⚠️ ${vencidas.length} negocio${vencidas.length > 1 ? 's' : ''} con más de 30 días.`;
+    const totalVencido = vencidas.reduce((s, d) => s + d.vencido, 0);
+    msg += `\n⚠️ Vencido: ${formatCOP(totalVencido)} en ${vencidas.length} negocio${vencidas.length > 1 ? 's' : ''}.`;
   }
 
   await ctx.sendMessage(msg);

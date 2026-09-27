@@ -85,7 +85,7 @@ const base: NumerosData = {
   carteraNegocios: 3,
   carteraMesAnterior: 8_000_000,
   carteraDetalle: [
-    { negocioNombre: 'Caso de prueba', negocioCodigo: 'V0001', honorario: 5_000_000, recaudado: 1_000_000, saldo: 4_000_000, dias: 42 },
+    { negocioNombre: 'Caso de prueba', negocioCodigo: 'V0001', honorario: 5_000_000, recaudado: 1_000_000, saldo: 4_000_000, vencido: 4_000_000, porVencer: 0, conCronograma: false, dias: 42 },
   ],
 
   ventasMes: 12_000_000,

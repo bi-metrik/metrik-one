@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resumirCartera, type FilaCartera } from './cartera'
+import { resumirCartera, vencimientoDeFila, type FilaCartera } from './cartera'
 
 function fila(over: Partial<FilaCartera> = {}): FilaCartera {
   return {
@@ -129,6 +129,52 @@ describe('resumirCartera', () => {
       carteraNegocios: 0,
       carteraVencida: 0,
       detalle: [],
+    })
+  })
+
+  describe('con cronograma de cuotas', () => {
+    // ALMA (A1 26 1), medido el 2026-09-27: 12 cuotas de $400.000, pagadas 3,
+    // la 4 vencida el 15-sep. La vista vieja la daba como $3.600.000 vencidos a
+    // 159 dias; lo vencido era una cuota de $400.000 con 12 dias de mora.
+    const alma = fila({
+      codigo: 'A1 26 1', honorario: '4800000', honorario_recaudado: '1200000', saldo: '3600000',
+      dias: 159, con_cronograma: true, saldo_vencido: '400000', dias_mora: 12,
+    })
+
+    it('vencido es solo la cuota que ya paso su fecha, no todo el contrato', () => {
+      expect(vencimientoDeFila(alma)).toEqual({
+        conCronograma: true, vencido: 400_000, porVencer: 3_200_000, dias: 12,
+      })
+      const r = resumirCartera([alma])
+      expect(r.carteraVencida).toBe(400_000)
+      expect(r.carteraPendiente).toBe(3_600_000)
+      expect(r.detalle[0]).toMatchObject({ saldo: 3_600_000, vencido: 400_000, porVencer: 3_200_000, dias: 12 })
+    })
+
+    it('al dia: nada vencido aunque el negocio tenga meses, y va al final de la lista', () => {
+      const alDia = fila({ codigo: 'X', saldo: 3_200_000, dias: 200, con_cronograma: true, saldo_vencido: 0, dias_mora: null })
+      const viejo = fila({ codigo: 'V', saldo: 100_000, dias: 40 })
+      const r = resumirCartera([alDia, viejo])
+      expect(r.carteraVencida).toBe(100_000)
+      expect(r.detalle.map(d => d.negocioCodigo)).toEqual(['V', 'X'])
+      expect(r.detalle[1]).toMatchObject({ vencido: 0, porVencer: 3_200_000, dias: 0 })
+    })
+
+    it('la regla de 30 dias no aplica: una cuota vencida hace 5 dias ya es vencida', () => {
+      const r = resumirCartera([fila({ saldo: 800_000, dias: 10, con_cronograma: true, saldo_vencido: 100_000, dias_mora: 5 })])
+      expect(r.carteraVencida).toBe(100_000)
+    })
+
+    it('lo vencido nunca pasa del saldo', () => {
+      const v = vencimientoDeFila(fila({ saldo: 50_000, con_cronograma: true, saldo_vencido: 90_000, dias_mora: 3 }))
+      expect(v).toMatchObject({ vencido: 50_000, porVencer: 0 })
+    })
+
+    it('sin las columnas nuevas (fila vieja) se comporta como antes', () => {
+      expect(vencimientoDeFila(fila({ saldo: 300_000, dias: 31 }))).toEqual({
+        conCronograma: false, vencido: 300_000, porVencer: 0, dias: 31,
+      })
+      expect(vencimientoDeFila(fila({ saldo: 300_000, dias: 30 })).vencido).toBe(0)
     })
   })
 })

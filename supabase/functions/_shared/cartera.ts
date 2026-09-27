@@ -19,7 +19,11 @@
 /** Espejo de TOLERANCIA_SALDO_COP en `src/lib/negocios/tolerancia-saldo.ts`. */
 export const TOLERANCIA_SALDO_COP = 1000;
 
-/** Un saldo se considera vencido pasados estos dias desde que nacio el negocio. */
+/**
+ * Sin cronograma de cuotas, un saldo se considera vencido pasados estos dias desde
+ * que nacio el negocio. Con cronograma no aplica: vence cada cuota en su fecha.
+ * Espejo de `DIAS_CARTERA_VENCIDA` en `src/lib/negocios/cartera.ts`.
+ */
 export const DIAS_CARTERA_VENCIDA = 30;
 
 /** Fila de `v_cartera_negocio`. Los numericos de Postgres llegan como string. */
@@ -29,6 +33,12 @@ export type FilaCartera = {
   saldo: number | string;
   dias: number | null;
   workspace_id?: string;
+  /** Tiene cuotas programadas (migracion 20260927120000). Ausente = sin cronograma. */
+  con_cronograma?: boolean | null;
+  /** Con cronograma: cuotas esperadas hasta hoy sin pagar, topadas en `saldo`. */
+  saldo_vencido?: number | string | null;
+  /** Con cronograma: dias desde la cuota vencida sin pagar mas antigua. */
+  dias_mora?: number | null;
 };
 
 export type DeudaCartera = {
@@ -36,11 +46,37 @@ export type DeudaCartera = {
   workspaceId: string | null;
   nombre: string;
   codigo: string;
+  /** Todo lo que falta por cobrar, vencido o no. */
   saldo: number;
-  /** Dias desde que nacio el negocio, no vencimiento de factura: no hay factura. */
+  /**
+   * Lo que de ese saldo ya vencio. Con cronograma: solo las cuotas que pasaron su
+   * fecha sin pagarse — las futuras NO. Sin cronograma: todo el saldo pasados 30 dias.
+   * Es la cifra que va en "saldo vencido"; `saldo` no se anuncia como vencido.
+   */
+  vencido: number;
+  conCronograma: boolean;
+  /**
+   * Antiguedad de lo vencido. Con cronograma: dias de mora de la cuota vencida mas
+   * antigua (0 si esta al dia). Sin cronograma: dias desde que nacio el negocio.
+   */
   dias: number;
   vencida: boolean;
 };
+
+/**
+ * Cuanto de una fila esta vencido y desde hace cuanto. Detonante (2026-09-27): la
+ * alerta W25 anunciaba a ALMA con "$3.600.000 vencidos, 159 dias" cuando debia una
+ * sola cuota de $400.000 con 12 dias de mora; el resto eran cuotas futuras.
+ */
+export function vencimientoDeFila(f: FilaCartera): { conCronograma: boolean; vencido: number; dias: number } {
+  const saldo = Number(f.saldo);
+  if (f.con_cronograma) {
+    const vencido = Math.min(saldo, Math.max(0, Number(f.saldo_vencido ?? 0)));
+    return { conCronograma: true, vencido, dias: vencido > 0 ? (f.dias_mora ?? 0) : 0 };
+  }
+  const dias = f.dias ?? 0;
+  return { conCronograma: false, vencido: dias > DIAS_CARTERA_VENCIDA ? saldo : 0, dias };
+}
 
 /**
  * Las deudas que valen la pena perseguir, de la mas vieja a la mas nueva.
@@ -55,16 +91,26 @@ export function deudasDeCartera(filas: FilaCartera[] | null): DeudaCartera[] {
   if (!filas) return [];
   return filas
     .filter((f) => Number(f.saldo) > TOLERANCIA_SALDO_COP)
-    .map((f) => ({
-      workspaceId: f.workspace_id ?? null,
-      nombre: f.nombre ?? 'Sin nombre',
-      codigo: f.codigo ?? 'S/C',
-      saldo: Number(f.saldo),
-      dias: f.dias ?? 0,
-      vencida: (f.dias ?? 0) > DIAS_CARTERA_VENCIDA,
-    }))
+    .map((f) => {
+      const v = vencimientoDeFila(f);
+      return {
+        workspaceId: f.workspace_id ?? null,
+        nombre: f.nombre ?? 'Sin nombre',
+        codigo: f.codigo ?? 'S/C',
+        saldo: Number(f.saldo),
+        vencido: v.vencido,
+        conCronograma: v.conCronograma,
+        dias: v.dias,
+        // Mismo piso de materialidad: un residuo vencido de redondeo no dispara alertas.
+        vencida: v.vencido > TOLERANCIA_SALDO_COP,
+      };
+    })
     .sort((a, b) => b.dias - a.dias || b.saldo - a.saldo);
 }
 
 /** Las columnas que las tres superficies leen de `v_cartera_negocio`. */
-export const COLUMNAS_CARTERA = 'workspace_id, codigo, nombre, saldo, dias';
+//
+// ⚠️ Las tres ultimas existen desde la migracion 20260927120000. Si esta funcion se
+// despliega antes que la migracion, PostgREST responde 42703 y la cartera sale vacia.
+export const COLUMNAS_CARTERA =
+  'workspace_id, codigo, nombre, saldo, dias, con_cronograma, saldo_vencido, dias_mora';
