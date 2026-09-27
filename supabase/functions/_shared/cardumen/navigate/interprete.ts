@@ -92,11 +92,17 @@ function raicesDe(texto: string): Set<string> {
   return out;
 }
 
-/** true si la respuesta toca contenido propio de LOS DOS polos (no solo de uno). */
-export function mencionaAmbosPolos(polos: [string, string], respuesta: string): boolean {
+/** Raices propias de cada polo: sin las que comparten los dos ("sector" en publico/privado). */
+function raicesPropias(polos: [string, string]): [Set<string>, Set<string>] {
   const a = raicesDe(polos[0]);
   const b = raicesDe(polos[1]);
   for (const r of [...a]) if (b.has(r)) { a.delete(r); b.delete(r); }
+  return [a, b];
+}
+
+/** true si la respuesta toca contenido propio de LOS DOS polos (no solo de uno). */
+export function mencionaAmbosPolos(polos: [string, string], respuesta: string): boolean {
+  const [a, b] = raicesPropias(polos);
   const resp = raicesDe(respuesta);
   return [...a].some((r) => resp.has(r)) && [...b].some((r) => resp.has(r));
 }
@@ -104,16 +110,97 @@ export function mencionaAmbosPolos(polos: [string, string], respuesta: string): 
 /** Marcas de punto medio de verdad: tibieza o reparto, no dos afirmaciones fuertes. */
 const MARCA_MEDIO = /\b(medio|mitad|intermedi\w*|un poco|un tanto|algo de|mas o menos|ni lo uno ni lo otro|ni (una|uno|la una|el uno) ni (la )?otr[ao]|equilibri\w*|balance|balancead\w*|depende|regular|parej[oa]s?)\b/;
 
+/** Las palabras literales de "las dos a la vez". */
+const LITERAL_AMBAS = /\b(las dos|los dos|ambas|ambos|a la vez|al mismo tiempo|las dos cosas)\b/;
+
+/**
+ * Marca de matiz: lo que sigue CONDICIONA lo que se afirmo antes ("A, pero con B", "A, aunque B").
+ * "pero tambien" NO es matiz: es sumar el otro polo con fuerza.
+ */
+const MARCA_MATIZ = /\b(pero con|aunque|salvo|excepto|con (el )?(apoyo|ayuda|participacion|acompanamiento) de)\b/;
+
+/** Fuerza en el tramo del matiz: si la trae, el segundo polo pesa tanto como el primero. */
+const MARCA_FUERZA = /\b(total|totalmente|toda|todo|plena|plenamente|complet[ao]|completamente|much[oa]s?|muchisim[oa]s?|absolut[ao]|absolutamente|fundamental|esencial|imprescindible|indispensable|clave|deben?|deberia\w*|tiene que|tienen que|hace falta|necesari[oa]|obligatori[oa]|firme|firmes)\b/;
+
+/**
+ * Un polo DOMINANTE con un matiz del otro (G13 del golden v1: "liderados del sector publico pero con
+ * agentes privados"). Devuelve el lado del polo principal (el que se afirma ANTES de la marca de
+ * matiz; null si no se distingue), o `null` si la respuesta no tiene esa forma: sin los dos polos,
+ * con marca de tibieza (eso es punto medio) o con un matiz que trae tanta fuerza como lo principal
+ * ("objetivos claros, pero con TOTAL libertad": eso si es both_intense).
+ */
+export function matizDeUnPolo(respuesta: string, polos?: [string, string]): { lado: "izq" | "der" | null } | null {
+  if (!polos || !mencionaAmbosPolos(polos, respuesta)) return null;
+  const t = normalizarTexto(respuesta);
+  if (MARCA_MEDIO.test(t)) return null;
+  // Por frase: el matiz se lee en la frase donde aparece, no en todo el mensaje.
+  for (const frase of frasesDe(respuesta)) {
+    const m = MARCA_MATIZ.exec(frase);
+    if (!m) continue;
+    const antes = frase.slice(0, m.index);
+    const despues = frase.slice(m.index + m[0].length);
+    if (MARCA_FUERZA.test(despues)) return null;
+    const [a, b] = raicesPropias(polos);
+    const r = raicesDe(antes);
+    const enA = [...a].some((x) => r.has(x));
+    const enB = [...b].some((x) => r.has(x));
+    return { lado: enA && !enB ? "izq" : enB && !enA ? "der" : null };
+  }
+  return null;
+}
+
 /**
  * El modelo leyo punto medio (middle o ancla 3) pero la respuesta afirma LOS DOS polos sin ninguna
  * marca de tibieza: eso es "both_intense" (Saga, 2026-09-25, G15 con 3.5-flash-lite). Sin polos no
- * se corrige nada.
+ * se corrige nada. Solo dispara con fuerza COMPARABLE en los dos polos: un polo dominante con un
+ * matiz del otro (G13) no es both_intense.
  */
 export function medioQueEsAmbas(respuesta: string, polos?: [string, string]): boolean {
   if (!polos) return false;
   const t = normalizarTexto(respuesta);
   if (MARCA_MEDIO.test(t)) return false;
-  return /\b(las dos|los dos|ambas|ambos|a la vez|al mismo tiempo|las dos cosas)\b/.test(t) || mencionaAmbosPolos(polos, respuesta);
+  if (matizDeUnPolo(respuesta, polos)) return false;
+  return LITERAL_AMBAS.test(t) || mencionaAmbosPolos(polos, respuesta);
+}
+
+/** Frases normalizadas: se corta en la puntuacion ANTES de que `normalizarTexto` la borre. */
+function frasesDe(respuesta: string): string[] {
+  return (respuesta || "")
+    .split(/[.,;:!?¡¿\n()]+|\s[-–—]\s/)
+    .map(normalizarTexto)
+    .filter(Boolean);
+}
+
+const NEGADORES = new Set([
+  "no", "nada", "ni", "nunca", "jamas", "tampoco",
+  "not", "nothing", "never", "isnt", "wasnt", "arent", "werent", "dont", "doesnt", "didnt", "aint",
+]);
+/** "no solo X" y "not only X" afirman X. */
+const NO_NIEGA = new Set(["solo", "solamente", "unicamente", "only", "just"]);
+/** Cuantas palabras despues del negador se busca el polo ("no es completamente nuevo", "no creo que sea nuevo"). */
+const VENTANA_NEGACION = 4;
+
+/**
+ * true si la respuesta NIEGA de forma explicita el polo `lado` ("nada nuevo", "no es nuevo" contra
+ * "Esto es completamente nuevo"). Guarda de polaridad (G22 del golden v1): 3.5-flash-lite leyo
+ * "It's been happening for years, nada nuevo" en el polo contrario porque "nuevo" es la unica
+ * palabra de contenido en espanol y es literal del polo B. Ubicar al reves es peor que no ubicar:
+ * con esta marca la lectura se descarta y se repregunta. Mira solo las palabras propias del polo
+ * y dentro de la misma frase, asi que "No, es completamente nuevo" no cuenta como negacion.
+ */
+export function niegaPolo(respuesta: string, polos: [string, string], lado: "izq" | "der"): boolean {
+  const propias = raicesPropias(polos)[lado === "izq" ? 0 : 1];
+  if (propias.size === 0) return false;
+  for (const frase of frasesDe(respuesta)) {
+    const w = frase.split(" ");
+    for (let i = 0; i < w.length; i++) {
+      if (!NEGADORES.has(w[i]) || NO_NIEGA.has(w[i + 1] ?? "")) continue;
+      for (let j = i + 1; j <= i + VENTANA_NEGACION && j < w.length; j++) {
+        if (w[j].length >= 4 && !VACIAS.has(w[j]) && propias.has(w[j].slice(0, 4))) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -143,8 +230,10 @@ export function evidenciaEspecial(especial: string | null, respuesta: string, po
       || /\bno es (mi |el |ese |este )?caso\b/.test(t) || /\bno va con\b/.test(t);
   }
   if (especial === "both_intense") {
-    if (/\b(las dos|los dos|ambas|ambos|a la vez|al mismo tiempo|las dos cosas)\b/.test(t)) return true;
-    return !!polos && mencionaAmbosPolos(polos, respuesta);
+    if (LITERAL_AMBAS.test(t)) return true;
+    // Sin las palabras literales, los dos polos tienen que venir con fuerza comparable: un polo
+    // dominante con un matiz del otro (G13) no es evidencia de both_intense.
+    return !!polos && mencionaAmbosPolos(polos, respuesta) && !matizDeUnPolo(respuesta, polos);
   }
   return true;
 }
@@ -360,6 +449,7 @@ Anclas:
 - "both_intense": afirma LAS DOS con fuerza, aunque sea en planos distintos ("hace falta A, pero tambien B"; "A para una cosa y B para otra"). NO es punto medio: no la pongas en 3 ni en "middle". ancla null.
 - La diferencia entre "middle" y "both_intense" es la FUERZA, no la cantidad de polos que nombra. "Un poco de flexibilidad y un poco de estructura" es "middle". "Deben existir objetivos claros y directrices firmes, pero con total libertad para explorar como llegar" es "both_intense": pide las dos con fuerza, cada una para algo.
 - Si afirma una con fuerza y la otra solo como matiz, condicion o detalle, es 2 o 4, no "both_intense".
+- Mira la NEGACION: una palabra de un polo precedida de "no", "nada", "nunca", "not" o "nothing" NIEGA ese polo ("nada nuevo" no es "completamente nuevo"). Nunca ubiques en un polo que la persona niega; si no estas seguro de hacia que lado va, "claro": false.
 - "not_applicable": dice que ninguna de las dos le aplica. ancla null.
 - "dont_know": dice que no sabe. ancla null.
 - Si hay especial, "claro" es true.
@@ -369,12 +459,25 @@ Anclas:
       const r = await pedirValidado<InterpretacionDiada>(model, system, mensajeDelLector(respuesta), ESQUEMAS.diada);
       if (!r) return noLeidoDiada();
       const polos: [string, string] = [d.izq, d.der];
+      const matiz = matizDeUnPolo(respuesta, polos);
+      const dijoAmbas = r.especial === "both_intense";
       let especial = evidenciaEspecial(r.especial, respuesta, polos) ? r.especial : null;
       const leyoMedio = especial === "middle" || (especial === null && r.ancla === 3);
+      // Un polo dominante con un matiz del otro (G13) no es punto medio ni "las dos con fuerza": es
+      // 2 o 4, y cual de los dos no lo decide la guarda. Se repregunta con las anclas del lado
+      // principal, si se distingue.
+      if (matiz && (leyoMedio || (dijoAmbas && especial === null))) {
+        return { ...noLeidoDiada(), lado: matiz.lado ?? r.lado };
+      }
       if (leyoMedio && medioQueEsAmbas(respuesta, polos)) especial = "both_intense";
       const a = especial && especial !== "middle" ? null : (especial === "middle" ? 3 : r.ancla);
+      // Guarda de polaridad (G22): si la respuesta niega de forma explicita el polo elegido, no se
+      // ubica. Tampoco se ofrece ese lado en la repregunta.
+      const ladoAncla = a === 1 || a === 2 ? "izq" : a === 4 || a === 5 ? "der" : null;
+      if (ladoAncla && niegaPolo(respuesta, polos, ladoAncla)) return noLeidoDiada();
+      const lado = r.lado && niegaPolo(respuesta, polos, r.lado) ? null : r.lado;
       // Un especial es una lectura aunque el modelo marque claro:false (no habia ancla que leer).
-      return { claro: especial !== null || (r.claro && a !== null), ancla: a, especial, lado: r.lado };
+      return { claro: especial !== null || (r.claro && a !== null), ancla: a, especial, lado };
     },
   };
 }
