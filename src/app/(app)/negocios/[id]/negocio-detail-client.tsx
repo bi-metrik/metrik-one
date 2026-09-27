@@ -91,7 +91,7 @@ import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
 import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { GuiaEtapaCard } from './GuiaEtapaCard'
-import { formatBogotaFechaCorta, formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import { formatBogotaFechaCorta, formatBogotaFechaCortaAno, todayBogotaISO } from '@/lib/dates/bogota'
 import { checklistConSoporte } from '@/lib/negocios/cierre-bloque'
 import { rolGestionaAprobacion } from '@/lib/negocios/aprobacion-bloque'
 import { AlmacenamientoExternoProvider } from '@/lib/almacenamiento/contexto'
@@ -1050,10 +1050,11 @@ function PausaNegocioDialog({
 }) {
   const [motivo, setMotivo] = useState<string>('')
   const [detalle, setDetalle] = useState('')
-  const today = new Date().toISOString().slice(0, 10)
+  // Dia de Bogota, no de UTC: despues de las 19:00 el minimo ya saltaba a mañana.
+  const today = todayBogotaISO()
   const maxDate = (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + MAX_DIAS_PAUSA)
+    const d = new Date(`${today}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + MAX_DIAS_PAUSA)
     return d.toISOString().slice(0, 10)
   })()
   const [fecha, setFecha] = useState(maxDate)

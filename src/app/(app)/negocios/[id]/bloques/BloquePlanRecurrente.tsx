@@ -6,7 +6,7 @@ import { Calendar, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
 import { crearPlanRecurrente, cancelarPlan } from './plan-recurrente-actions'
-import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import { formatBogotaFechaCortaAno, todayBogotaISO } from '@/lib/dates/bogota'
 
 type Frecuencia = 'mensual' | 'trimestral' | 'anual'
 type Pasarela = 'wompi' | 'manual' | 'mixto'
@@ -88,7 +88,7 @@ export default function BloquePlanRecurrente({
   // Form state
   const [monto, setMonto] = useState('')
   const [frecuencia, setFrecuencia] = useState<Frecuencia>(configExtra.frecuencia_default ?? 'mensual')
-  const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().split('T')[0])
+  const [fechaInicio, setFechaInicio] = useState(() => todayBogotaISO())
   const [totalCuotas, setTotalCuotas] = useState('12')
   const [pasarela, setPasarela] = useState<Pasarela>(configExtra.pasarela_default ?? 'manual')
   const [autoRenovar, setAutoRenovar] = useState(false)

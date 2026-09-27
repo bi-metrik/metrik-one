@@ -27,6 +27,7 @@ import { createSubfolderPath, uploadFileToDrive } from '@/lib/google-drive'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { calcularTarifaUpmeDetalle, type TarifaUpmeDetalle } from '@/lib/upme/tarifa'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { bogotaMesCalendario, type BogotaParts } from '@/lib/dates/bogota'
 import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
 import { fuenteDeLaTarifa, faltaConfirmarTarifa } from '@/lib/upme/tarifa-propuesta'
 import { descuentoImplicito, motivoDescuentoRechazado } from '@/lib/propuesta/gate-descuento'
@@ -133,19 +134,21 @@ function formatCOP(n: number): string {
   }).format(n)
 }
 
-function fechaCorta(d: Date): string {
-  const dd = String(d.getDate()).padStart(2, '0')
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  return `${dd}/${mm}/${yyyy}`
+// Las fechas del PDF son dias civiles de Bogota. `getDate()`/`getMonth()` a secas leen
+// la zona del servidor (UTC en Vercel): una propuesta emitida el 30-sep a las 20:00
+// salia fechada 1-oct y con validez de octubre.
+type DiaCivil = Pick<BogotaParts, 'year' | 'month' | 'day'>
+
+function fechaCorta(d: DiaCivil): string {
+  return `${String(d.day).padStart(2, '0')}/${String(d.month).padStart(2, '0')}/${d.year}`
 }
 
-function fechaEnLetras(d: Date): string {
+function fechaEnLetras(d: DiaCivil): string {
   const meses = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
   ]
-  return `${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`
+  return `${d.day} de ${meses[d.month - 1]} de ${d.year}`
 }
 
 // Descuento mostrado (PDF): redondeado a 2 decimales. El descuento ALMACENADO
@@ -596,8 +599,7 @@ export async function generarVersionPropuesta(
     : 1
 
   const ahora = new Date()
-  const validezDesde = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
-  const validezHasta = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0)
+  const { hoy, desde: validezDesde, hasta: validezHasta } = bogotaMesCalendario(ahora)
 
   // Renderizar PDF (graceful: si falla, version queda registrada sin PDF)
   let pdfBuffer: Buffer | null = null
@@ -610,7 +612,7 @@ export async function generarVersionPropuesta(
     pdfBuffer = await renderPropuestaEconomica(ctx.templateSlug, {
       cliente_nombre: clienteNombre,
       cliente_documento: clienteDoc,
-      fecha_emision: fechaCorta(ahora),
+      fecha_emision: fechaCorta(hoy),
       validez_desde: fechaEnLetras(validezDesde),
       validez_hasta: fechaEnLetras(validezHasta),
       base_valor: formatCOP(calc.base),
@@ -670,7 +672,7 @@ export async function generarVersionPropuesta(
       const guardado = await almacenamiento.subirArchivo({
         negocioId: ctx.negocioId,
         subcarpeta: (ctx.driveSubfolder ?? '1. Legal/Propuestas') as string,
-        nombre: `Propuesta Economica v${nuevaN} - ${fechaCorta(ahora)}.pdf`,
+        nombre: `Propuesta Economica v${nuevaN} - ${fechaCorta(hoy)}.pdf`,
         buffer: pdfBuffer,
         mime: 'application/pdf',
         tipoBloque: 'propuesta_economica',
@@ -689,7 +691,7 @@ export async function generarVersionPropuesta(
         if (negocioFolderId) {
           const subfolderPath = (ctx.driveSubfolder ?? '1. Legal/Propuestas') as string
           const targetFolderId = await createSubfolderPath(subfolderPath, negocioFolderId, workspaceId)
-          const fileName = `Propuesta Economica v${nuevaN} - ${fechaCorta(ahora)}.pdf`
+          const fileName = `Propuesta Economica v${nuevaN} - ${fechaCorta(hoy)}.pdf`
           const up = await uploadFileToDrive(
             pdfBuffer,
             fileName,

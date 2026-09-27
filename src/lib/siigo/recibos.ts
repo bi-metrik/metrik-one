@@ -96,11 +96,13 @@ import {
   type Vencimiento,
   type VoucherSiigoLeido,
 } from './abono'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
 const ESPERA_429_EMISION_MS = 30_000
 
-const hoyISO = () => new Date().toISOString().slice(0, 10)
+/** Dia civil de Bogota, no de UTC: el recibo de las 20:00 no puede salir con fecha de mañana. */
+const hoyISO = () => todayBogotaISO()
 
 /**
  * ¿Siigo rechazó esto porque el periodo contable está cerrado?

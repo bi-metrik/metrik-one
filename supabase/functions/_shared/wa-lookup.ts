@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { SupabaseClient } from './types.ts';
+import { bogotaYearMonth } from './bogota.ts';
 
 // ── Row shapes ────────────────────────────────────────────────
 // Only the columns these lookups and their callers actually read. The `*`
@@ -300,7 +301,7 @@ export async function findMatchingBorrador(
   category: string | null,
   amount: number,
 ) {
-  const currentPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const currentPeriod = bogotaYearMonth(); // YYYY-MM de Bogota: el 30 a las 20:00 no es el mes siguiente
 
   const { data } = await supabase
     .from('gastos_fijos_borradores')
