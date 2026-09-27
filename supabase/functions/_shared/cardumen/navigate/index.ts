@@ -64,10 +64,10 @@ export async function continueNavigate(
     r = await procesar(state, { texto: text, botonId }, interprete);
     // Avisos operativos sin el contenido del mensaje: el texto no se registra en ningun log.
     if ((r.state.integridad?.mensajes_riesgo ?? 0) > riesgoAntes) {
-      console.warn(`[navigate] mensaje de riesgo en estudio ${state.study_id}: contencion enviada, preguntas en pausa`);
+      console.warn(`[navigate] mensaje personal apartado en estudio ${state.study_id}: no integrable, preguntas en pausa`);
     }
     if ((r.state.integridad?.fallos_filtro ?? 0) > fallosAntes) {
-      console.warn(`[navigate] el filtro de riesgo no respondio en estudio ${state.study_id}: se pidio repetir; sesion para revision humana`);
+      console.warn(`[navigate] el filtro no respondio en estudio ${state.study_id}: se pidio repetir`);
     }
   } catch (e) {
     // El modelo no leyo (o el estado esta incoherente). No se persiste nada: la persona

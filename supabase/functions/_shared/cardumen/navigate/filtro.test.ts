@@ -1,9 +1,10 @@
-// Filtro de riesgo, manipulacion y fuera de tema, y blindaje de tema del motor de Navigate.
+// Filtro de mensaje personal, manipulacion y fuera de tema, y blindaje de tema del motor de Navigate.
 //
 // Lo que se fija aqui (brief del 2026-09-24, benchmark del lector golden v0):
-//   1. un mensaje de riesgo NO llega al lector, NO ubica nada, recibe el texto fijo de contencion
-//      y deja la sesion en pausa con bandera de integridad (G28);
-//   2. si el filtro falla o devuelve algo invalido, se trata como riesgo posible (lado seguro);
+//   1. un mensaje personal de riesgo (SEN) NO llega al lector, NO ubica nada, recibe el texto fijo
+//      (estudio anonimo, no canal de ayuda), deja la sesion en pausa y queda contado como "no
+//      integrable: mensaje personal fuera del tema" (G28; decision de Mauricio, 2026-09-27);
+//   2. si el filtro falla o devuelve algo invalido, texto neutro para repetir: nunca se trata como SEN;
 //   3. manipulacion (G29) y fuera de tema (codigo, tareas, opinion, ventas, rol, "olvida lo
 //      anterior") reciben un reencauce fijo con la pregunta vigente, sin contestar lo pedido;
 //      al tercero seguido la sesion se cierra con un texto fijo;
@@ -13,11 +14,11 @@
 //      valor fuera del enum cuentan como "no leido";
 //   6. G15 (both_intense sin las palabras literales) y G19 (pedir saltar = no_gradua).
 import { describe, expect, it } from 'vitest';
-import { BOTON, armarPayload, iniciar, procesar } from './motor';
+import { BOTON, MOTIVO_NO_INTEGRABLE_PERSONAL, armarPayload, iniciar, procesar } from './motor';
 import { DIADAS, TRIADAS } from './instrumento';
 import {
-  BANCO, CONTACTO_HUMANO_NAVIGATE, PLACEHOLDER_CONTACTO, SISTEMA_CLASIFICADOR, TOPE_FUERA_DE_TEMA,
-  clasificarPorPalabras, sinDelimitadores, textoContencion,
+  BANCO, SISTEMA_CLASIFICADOR, TOPE_FUERA_DE_TEMA,
+  clasificarPorPalabras, sinDelimitadores,
 } from './filtro';
 import {
   ESQUEMAS, MAX_TOKENS_LECTOR, evidenciaEspecial, intensidadPorPalabras, interpreteConModelo, medioQueEsAmbas, mencionaAmbosPolos, validarEsquema,
@@ -138,7 +139,7 @@ describe('filtro por palabras', () => {
   });
 });
 
-describe('riesgo (G28): no se lee, no se ubica, contencion y pausa', () => {
+describe('mensaje personal (G28): no se lee, no se ubica, se aparta y pausa', () => {
   it('en una diada: el lector no se llama y la dimension no se guarda', async () => {
     const m = modeloFalso();
     const r = await interpreteConModelo(m).diada(DIADAS.D2_afecto, G28);
@@ -146,21 +147,24 @@ describe('riesgo (G28): no se lee, no se ubica, contencion y pausa', () => {
     expect(m.lecturas).toBe(0);
   });
 
-  it('en el motor: contencion del banco, bandera de integridad, pausa y el mensaje fuera del historial', async () => {
+  it('en el motor: texto fijo del banco, marcado como no integrable, pausa y el mensaje fuera del historial', async () => {
     const m = modeloFalso();
     const { state } = await hastaTriada(m);
     const lecturasAntes = m.lecturas;
     const r = await procesar(state, { texto: G28 }, interpreteConModelo(m));
     expect(m.lecturas).toBe(lecturasAntes);
     expect(r.accion).toBe('seguir');
-    expect(r.salidas).toEqual([{ tipo: 'texto', texto: textoContencion() }]);
+    expect(r.salidas).toEqual([{ tipo: 'texto', texto: BANCO.personal }]);
     expect(state.dimensiones).toEqual({});
-    expect(state.integridad).toMatchObject({ sensible: true, mensajes_riesgo: 1, fallos_filtro: 0, revision_humana: false, pausa_cuidado: true });
+    expect(state.integridad).toMatchObject({ sensible: true, mensajes_riesgo: 1, fallos_filtro: 0, pausa_cuidado: true });
+    expect(state.integridad).not.toHaveProperty('revision_humana');
     expect(state.historial.map((h) => h.text).join('\n')).not.toContain('mejor sin');
-    expect(armarPayload(state, 'salir', AHORA).integridad).toMatchObject({ sensible: true });
+    expect(state.notas?.some((x) => x.startsWith(MOTIVO_NO_INTEGRABLE_PERSONAL))).toBe(true);
+    const payload = armarPayload(state, 'salir', AHORA);
+    expect(payload.integridad).toMatchObject({ sensible: true, mensajes_riesgo: 1 });
   });
 
-  it('en pausa nada avanza; "seguir" retoma la misma pregunta; un nuevo riesgo repite la contencion', async () => {
+  it('en pausa nada avanza; "seguir" retoma la misma pregunta; un nuevo mensaje personal repite el texto', async () => {
     const m = modeloFalso();
     const { state } = await hastaTriada(m);
     const it = interpreteConModelo(m);
@@ -169,7 +173,7 @@ describe('riesgo (G28): no se lee, no se ubica, contencion y pausa', () => {
     expect(r.salidas[0].texto).toBe(BANCO.pausaSigue);
     expect(state.dimensiones).toEqual({});
     r = await procesar(state, { texto: 'quiero morirme' }, it);
-    expect(r.salidas[0].texto).toBe(textoContencion());
+    expect(r.salidas[0].texto).toBe(BANCO.personal);
     expect(state.integridad?.mensajes_riesgo).toBe(2);
     r = await procesar(state, { texto: 'seguir' }, it);
     expect(state.integridad?.pausa_cuidado).toBe(false);
@@ -187,32 +191,33 @@ describe('riesgo (G28): no se lee, no se ubica, contencion y pausa', () => {
     expect(armarPayload(state, 'salir', AHORA).integridad).toMatchObject({ sensible: true, pausa_cuidado: true });
   });
 
-  it('riesgo que solo reconoce el modelo: igual contencion, sin lectura', async () => {
+  it('mensaje personal que solo reconoce el modelo: igual se aparta, sin lectura', async () => {
     const m = modeloFalso({ categoria: (t) => (t.includes('desaparecer') ? 'SEN' : 'R') });
     const { state } = await hastaTriada(m);
     const antes = m.lecturas;
     const r = await procesar(state, { texto: 'últimamente me dan ganas de desaparecer' }, interpreteConModelo(m));
-    expect(r.salidas[0].texto).toBe(textoContencion());
+    expect(r.salidas[0].texto).toBe(BANCO.personal);
     expect(m.lecturas).toBe(antes);
   });
 });
 
-describe('filtro caido (Gemini no responde): texto neutro, sin contencion, revision humana', () => {
+describe('filtro caido (Gemini no responde): texto neutro, sin apartar, se cuenta el fallo', () => {
   const caido = () => modeloFalso({ categoria: (t) => (t === 'sobre todo la gente' ? new Error('Gemini 503') : 'R') });
 
-  it('si el clasificador lanza: no se ubica, NO se manda la contencion, se pide repetir y queda para revision', async () => {
+  it('si el clasificador lanza: no se ubica, NO se trata como personal, se pide repetir y se cuenta', async () => {
     const m = caido();
     const { state } = await hastaTriada(m);
     const antes = m.lecturas;
     const r = await procesar(state, { texto: 'sobre todo la gente' }, interpreteConModelo(m));
     expect(r.salidas).toEqual([{ tipo: 'texto', texto: BANCO.errorTecnico }]);
-    expect(todoElTexto([r])).not.toContain(textoContencion());
+    expect(todoElTexto([r])).not.toContain(BANCO.personal);
     expect(m.lecturas).toBe(antes);
     expect(state.dimensiones).toEqual({});
     expect(state.integridad).toMatchObject({
-      sensible: false, mensajes_riesgo: 0, fallos_filtro: 1, revision_humana: true, pausa_cuidado: false, seguidos: 0,
+      sensible: false, mensajes_riesgo: 0, fallos_filtro: 1, pausa_cuidado: false, seguidos: 0,
     });
-    expect(armarPayload(state, 'salir', AHORA).integridad).toMatchObject({ revision_humana: true, sensible: false });
+    expect(state.integridad).not.toHaveProperty('revision_humana');
+    expect(armarPayload(state, 'salir', AHORA).integridad).toMatchObject({ fallos_filtro: 1, sensible: false });
   });
 
   it('no pausa: el siguiente mensaje sigue su camino normal en la misma pregunta', async () => {
@@ -238,22 +243,22 @@ describe('filtro caido (Gemini no responde): texto neutro, sin contencion, revis
     expect(state.integridad).toMatchObject({ fallos_filtro: 3, seguidos: 0 });
   });
 
-  it('un riesgo de verdad (por palabras) sigue mandando la contencion aunque el modelo este caido', async () => {
+  it('un mensaje personal (por palabras) se sigue apartando aunque el modelo este caido', async () => {
     const m = modeloFalso({ categoria: (t) => (t === HISTORIA ? 'R' : new Error('Gemini 500')) });
     const { state } = await hastaTriada(m);
     const r = await procesar(state, { texto: G28 }, interpreteConModelo(m));
-    expect(r.salidas[0].texto).toBe(textoContencion());
+    expect(r.salidas[0].texto).toBe(BANCO.personal);
     expect(state.integridad).toMatchObject({ sensible: true, pausa_cuidado: true, fallos_filtro: 0 });
   });
 
-  it('si ya estaba en pausa por riesgo, una caida del filtro no la levanta ni manda otro texto', async () => {
+  it('si ya estaba en pausa por un mensaje personal, una caida del filtro no la levanta ni manda otro texto', async () => {
     const m = caido();
     const { state } = await hastaTriada(m);
     const it = interpreteConModelo(m);
     await procesar(state, { texto: G28 }, it);
     const r = await procesar(state, { texto: 'sobre todo la gente' }, it);
     expect(r.salidas[0].texto).toBe(BANCO.pausaSigue);
-    expect(state.integridad).toMatchObject({ pausa_cuidado: true, fallos_filtro: 1, revision_humana: true });
+    expect(state.integridad).toMatchObject({ pausa_cuidado: true, fallos_filtro: 1 });
   });
 
   it('salida fuera del esquema (clave de mas, valor fuera del enum): SIN_CLASIFICAR, nunca SEN', async () => {
@@ -316,7 +321,7 @@ describe('autocorreccion (G20, CO): no es manipulacion, no cuenta al tope y repi
     expect(state.paso).toBe('triada_orden');
     expect(r.salidas[0].texto.startsWith(BANCO.correccion)).toBe(true);
     expect(r.salidas[0].texto).toContain('1. La gente común, la vida de a pie');
-    expect(state.integridad).toMatchObject({ correcciones: 1, seguidos: 0, intento_manipulacion: 0, fuera_de_tema: 0, revision_humana: false });
+    expect(state.integridad).toMatchObject({ correcciones: 1, seguidos: 0, intento_manipulacion: 0, fuera_de_tema: 0 });
   });
 
   it('tres autocorrecciones seguidas no cierran; entre dos fuera de tema tampoco empuja al tope', async () => {
@@ -596,18 +601,17 @@ describe('G19: pedir saltar es no_gradua', () => {
 });
 
 describe('banco de textos fijos', () => {
-  it('la contencion nunca envia el placeholder sin llenar', () => {
-    expect(CONTACTO_HUMANO_NAVIGATE).toBeNull();
-    expect(textoContencion()).not.toContain(PLACEHOLDER_CONTACTO);
-    expect(textoContencion()).not.toMatch(/[{}]/);
-    const con = textoContencion('Ana Ruiz, +57 300 000 0000');
-    expect(con).toContain('Ana Ruiz, +57 300 000 0000');
-    expect(con).not.toContain(PLACEHOLDER_CONTACTO);
+  it('el texto del mensaje personal es exactamente el aprobado, con *seguir* y *salir*', () => {
+    expect(BANCO.personal).toBe(
+      'Gracias por contármelo. Este es un estudio anónimo, no un canal de ayuda. ¿Quiere seguir o prefiere terminar? Escriba *seguir* o *salir*.',
+    );
   });
 
-  it('la contencion remite a una persona y no cita ningun numero de memoria', () => {
-    expect(textoContencion()).toMatch(/una persona/);
-    expect(textoContencion()).not.toMatch(/\d{3}/);
+  it('ningun texto promete ayuda, una persona que escuche ni una linea de emergencias', () => {
+    const todos = Object.values(BANCO).flatMap((v) => (Array.isArray(v) ? v : [v])).join('\n');
+    expect(todos).not.toMatch(/una persona|lo escuche|emergencia|equipo del estudio|llame|escribirle a/i);
+    expect(todos).not.toMatch(/[{}]/);
+    expect(todos).not.toMatch(/\d{3}/);
   });
 });
 

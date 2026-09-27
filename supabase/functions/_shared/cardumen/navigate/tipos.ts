@@ -101,20 +101,23 @@ export interface TurnoHistorial { role: "bot" | "persona"; text: string }
  * analisis decide con ellas segun los criterios pre-registrados. Nunca borran nada en silencio.
  */
 export interface Integridad {
-  /** Hubo al menos un mensaje de riesgo detectado por el filtro (palabras o modelo). */
+  /**
+   * Hubo al menos un mensaje personal de riesgo (SEN) que se aparto del estudio. El analisis lo
+   * reporta como "no integrable: mensaje personal fuera del tema" (`MOTIVO_NO_INTEGRABLE_PERSONAL`
+   * en motor.ts), aparte de las respuestas sin sentido (que quedan `unresolved` en su dimension).
+   * Los nombres se conservan para que los payloads ya guardados sigan leyendose igual.
+   */
   sensible: boolean;
-  /** Mensajes de riesgo detectados. */
+  /** Cuantos mensajes personales (SEN) se apartaron: el conteo de "no integrable". */
   mensajes_riesgo: number;
   /**
-   * Veces que el filtro no respondio (caida o salida invalida del modelo). No son riesgo: se pidio
-   * repetir con un texto neutro y no se ubico nada. Con una o mas, `revision_humana` queda en true.
+   * Veces que el filtro no respondio (caida o salida invalida del modelo). No son mensajes
+   * personales: se pidio repetir con un texto neutro y no se ubico nada.
    */
   fallos_filtro: number;
-  /** Alguien tiene que revisar esta sesion a mano (hoy: el filtro fallo al menos una vez). */
-  revision_humana: boolean;
   /** Autocorrecciones de la persona (CO): retiro su mensaje anterior. No cuentan al tope. */
   correcciones: number;
-  /** Las preguntas estan en pausa esperando "seguir" o "salir" tras un mensaje de riesgo. */
+  /** Las preguntas estan en pausa esperando "seguir" o "salir" tras un mensaje personal (SEN). */
   pausa_cuidado: boolean;
   /** Pedidos ajenos al estudio y intentos de manipulacion, en total. */
   fuera_de_tema: number;
