@@ -34,6 +34,16 @@ jobs:
         run: npx tsc --noEmit
       - name: Pruebas
         run: npm test
+      # Las mismas pruebas con el reloj de Colombia. CI corre en UTC igual que Vercel, y
+      # asi una dependencia de la zona del proceso no se ve nunca: el Excel de negocios y
+      # el de revision escribian el dia ANTERIOR con `TZ=America/Bogota` (SheetJS y el
+      # offset LMT de 1899) y la suite pasaba en verde. La regla del sistema es que el
+      # resultado no dependa de donde corre (decision 2026-09-27: la referencia es
+      # Bogota), asi que la suite entera tiene que pasar en las dos zonas.
+      - name: Pruebas en hora de Bogota
+        run: npm test
+        env:
+          TZ: America/Bogota
 
   build:
     name: Build
