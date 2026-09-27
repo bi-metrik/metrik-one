@@ -15,7 +15,7 @@
  * capa que serializa, que es la unica que la necesita.
  */
 import * as XLSX from 'xlsx'
-import { fechaExcel } from '@/lib/negocios/export-excel'
+import { celdaFechaASerial, fechaExcel } from '@/lib/negocios/export-excel'
 
 export const NOMBRE_HOJA_RESUMEN = 'Resumen'
 export const NOMBRE_HOJA_COBROS = 'Cobros'
@@ -148,13 +148,14 @@ function hojaDeMovimientos<T extends { fecha: string; revisado_at: string | null
   for (let r = 1; r <= filas.length; r++) {
     for (const [c, formato] of formatoPorColumna) {
       if (c < 0) continue
-      const celda = ws[XLSX.utils.encode_cell({ c, r })]
       // Una fecha ausente (`fechaExcel` devuelve `null`) tiene que quedar como celda
       // VACIA, nunca como el epoch de 1970. Sale gratis y esta medido: `json_to_sheet`
       // le deja un hueco (`t: 'z'`, `v: null`) y el `write` NO lo emite al XML, tenga o
-      // no formato. Por eso no hace falta saltarsela aqui — se probo quitando esta linea
-      // y ninguna prueba cambio. Lo que fija esa garantia es la prueba, no esta guarda.
-      if (celda) celda.z = formato
+      // no formato. Lo que fija esa garantia es la prueba, no esta linea.
+      //
+      // El serial lo calcula `celdaFechaASerial` y no SheetJS: su conversion depende de
+      // la zona del runtime y con `TZ=America/Bogota` corria el dia (ver `serialExcel`).
+      celdaFechaASerial(ws[XLSX.utils.encode_cell({ c, r })], formato)
     }
   }
 

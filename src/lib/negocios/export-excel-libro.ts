@@ -14,6 +14,7 @@ import {
   COLUMNAS_FECHA_HORA,
   COLUMNA_LINK,
   ENCABEZADOS,
+  celdaFechaASerial,
   type Encabezado,
   type FilaExcel,
 } from './export-excel'
@@ -52,13 +53,13 @@ export function construirLibroNegocios(
   const colsFecha = COLUMNAS_FECHA.map(colDe)
   const colsFechaHora = COLUMNAS_FECHA_HORA.map(colDe)
   for (let r = 1; r <= filas.length; r++) {
+    // El serial lo calcula `celdaFechaASerial`, no SheetJS: su conversion depende de la
+    // zona del runtime y en Bogota corria el dia (ver `serialExcel`).
     for (const c of colsFecha) {
-      const celda = ws[XLSX.utils.encode_cell({ c, r })]
-      if (celda) celda.z = 'yyyy-mm-dd'
+      celdaFechaASerial(ws[XLSX.utils.encode_cell({ c, r })], 'yyyy-mm-dd')
     }
     for (const c of colsFechaHora) {
-      const celda = ws[XLSX.utils.encode_cell({ c, r })]
-      if (celda) celda.z = 'yyyy-mm-dd hh:mm'
+      celdaFechaASerial(ws[XLSX.utils.encode_cell({ c, r })], 'yyyy-mm-dd hh:mm')
     }
     const link = ws[XLSX.utils.encode_cell({ c: colLink, r })]
     if (link && typeof link.v === 'string') link.l = { Target: link.v, Tooltip: 'Abrir en ONE' }

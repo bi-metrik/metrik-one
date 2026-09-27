@@ -40,6 +40,29 @@ export function bogotaYearMonth(d?: Date): string {
   return `${p.year}-${pad(p.month)}`;
 }
 
+/**
+ * Rango [desde, hasta) del mes de Bogota, para filtrar columnas `date`:
+ * `.gte('fecha', desde).lt('fecha', hasta)`. El 30-sep a las 20:00 sigue siendo
+ * septiembre; con `new Date().getMonth()` en UTC ya era octubre.
+ */
+export function bogotaRangoMes(d?: Date): { desde: string; hasta: string } {
+  const { year, month } = bogotaParts(d);
+  const sigAnio = month === 12 ? year + 1 : year;
+  const sigMes = month === 12 ? 1 : month + 1;
+  return { desde: `${year}-${pad(month)}-01`, hasta: `${sigAnio}-${pad(sigMes)}-01` };
+}
+
+/**
+ * Dias de calendario entre un dia civil ('YYYY-MM-DD') y hoy en Bogota. Para columnas
+ * `date` ("hace 3 dias"): contar horas desde la medianoche UTC sumaba un dia desde las
+ * 19:00 de Bogota.
+ */
+export function diasCalendarioDesde(fechaISO: string, d?: Date): number {
+  const [y, m, dd] = fechaISO.slice(0, 10).split('-').map(Number);
+  const hoy = bogotaParts(d);
+  return Math.round((Date.UTC(hoy.year, hoy.month - 1, hoy.day) - Date.UTC(y, m - 1, dd)) / 86_400_000);
+}
+
 /** Dias que tiene el mes (1-12) del anio. */
 export function diasDelMes(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();

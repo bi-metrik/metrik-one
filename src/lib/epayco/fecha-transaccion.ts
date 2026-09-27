@@ -12,12 +12,13 @@
  *   ePayco si entrega ese dato (`EpaycoTransaction.transactionDate`); llegaba y
  *   se descartaba al guardar. Este modulo lo convierte al dia civil de Bogota.
  *
- * ⚠️ SUPUESTO DECLARADO, pendiente de confirmar con ePayco:
- *   una marca de tiempo SIN zona (`2026-08-03 15:36:12`) se interpreta como hora
- *   de **Bogota**, porque es lo que muestra su panel y ePayco es colombiana. El
- *   supuesto solo cambia el resultado para transacciones entre las 00:00 y las
- *   05:00, que en UTC caen el dia anterior. Si se confirma que el campo viaja en
- *   UTC, se cambia `ZONA_DEL_CRUDO` y los casos afectados son solo esos.
+ * Formato CONFIRMADO el 2026-09-27 contra la API (dos pagos reales de SOENA, solo
+ *   lectura): `transactionDate` llega SIN zona y en hora de **Bogota**
+ *   (`'2026-09-14 14:36:20'`), mientras los movimientos de la misma transaccion traen
+ *   el instante en UTC (`'2026-09-14T19:38:09.000000Z'`, dos minutos despues). O sea
+ *   que el supuesto que dejaba escrito este modulo (sin zona = Bogota) era el correcto.
+ *   Leerlo con `new Date(raw)` lo interpreta en la zona de quien corre el codigo: en
+ *   Vercel (UTC) el pago de las 20:00 queda del dia siguiente.
  *
  * Regla de diseno: **nunca inventar la fecha**. Si el crudo no se puede leer,
  * devuelve null y quien llama decide, dejando rastro. Caer de vuelta en "hoy" en

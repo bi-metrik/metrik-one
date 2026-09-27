@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server';
+import { sumarMesesBogota } from '@/lib/dates/bogota';
 import {
   type ConfigPersistida,
   type SeveridadValida,
@@ -239,8 +240,9 @@ export async function calcularScoreNegocio(input: {
 
   const nivel = nivelDesdePuntaje(puntaje, umbrales);
   const frecMeses = frecuenciaMesesDesdeNivel(nivel, umbrales);
-  const proxima = new Date();
-  proxima.setMonth(proxima.getMonth() + frecMeses);
+  // Desde el dia de Bogota y recortando al fin de mes (ver `sumarMesesBogota`): con
+  // `setMonth` + `toISOString()` la revision de las 20:00 quedaba fechada desde mañana.
+  const proxima = sumarMesesBogota(frecMeses);
 
   return {
     ok: true,
@@ -248,7 +250,7 @@ export async function calcularScoreNegocio(input: {
       puntaje: Number(puntaje.toFixed(2)),
       nivel,
       frecuencia_meses: frecMeses,
-      proxima_revision: proxima.toISOString().slice(0, 10),
+      proxima_revision: proxima,
       factores_aplicados: factores,
       valida_consulta_id_ultima: consulta?.id ?? null,
     },

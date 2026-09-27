@@ -7,6 +7,7 @@ import { STREAK_MILESTONES } from '../types.ts';
 import { formatCOP, formatCOPShort, bold, formatAgo, daysSince, currentMonthName, currentYear } from '../wa-format.ts';
 import { completeSession, saveLastContext } from '../wa-session.ts';
 import { COLUMNAS_CARTERA, deudasDeCartera } from '../cartera.ts';
+import { bogotaRangoMes } from '../bogota.ts';
 
 export async function handleConsulta(ctx: HandlerContext): Promise<void> {
   const { parsed } = ctx;
@@ -189,8 +190,10 @@ type MontoRow = { monto: number };
 
 async function handleMisNumeros(ctx: HandlerContext): Promise<void> {
   const { user, supabase } = ctx;
-  const mesInicio = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
-  const mesFin = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().slice(0, 10);
+  // Mes de Bogota. Antes era `new Date(anio, mes, 1).toISOString()`: el mes de UTC (desde
+  // las 19:00 del ultimo dia ya era el siguiente) y, en un runtime con zona negativa, el
+  // primer dia salia corrido al ultimo del mes anterior.
+  const { desde: mesInicio, hasta: mesFin } = bogotaRangoMes();
 
   // Cobros del mes
   const { data: cobros } = (await supabase

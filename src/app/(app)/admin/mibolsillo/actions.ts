@@ -3,6 +3,7 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createMiBolsilloClient } from '@/lib/supabase/mibolsillo'
 import type { MiBolsilloMetrics } from '@/types/mibolsillo'
+import { inicioDelDiaBogota, todayBogotaISO } from '@/lib/dates/bogota'
 
 export async function getMiBolsilloMetrics(): Promise<MiBolsilloMetrics | null> {
   // Auth guard: only owner of MéTRIK workspace can access
@@ -13,7 +14,9 @@ export async function getMiBolsilloMetrics(): Promise<MiBolsilloMetrics | null> 
   const mb = createMiBolsilloClient()
 
   const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+  // Medianoche de BOGOTA como instante. `new Date(y, m, d)` es la medianoche del runtime:
+  // en Vercel (UTC) "hoy" empezaba a las 19:00 del dia anterior de Colombia.
+  const todayStart = inicioDelDiaBogota(now).toISOString()
   const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString()
   const monthAgo = new Date(now.getTime() - 30 * 86400000).toISOString()
   const twoWeeksAgo = new Date(now.getTime() - 14 * 86400000).toISOString()
@@ -80,7 +83,8 @@ export async function getMiBolsilloMetrics(): Promise<MiBolsilloMetrics | null> 
   })
 
   // New users
-  const newUsersToday = allUsers.filter(u => u.created_at >= todayStart).length
+  // Por instante y no por texto: `created_at` llega como '...+00:00' y `todayStart` como '...Z'.
+  const newUsersToday = allUsers.filter(u => new Date(u.created_at) >= new Date(todayStart)).length
   const newUsersWeek = allUsers.filter(u => u.created_at >= weekAgo).length
 
   // Onboarding rate
@@ -145,12 +149,13 @@ export async function getMiBolsilloMetrics(): Promise<MiBolsilloMetrics | null> 
     const counts = new Map<string, number>()
     // Initialize all 14 days
     for (let i = 13; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 86400000)
-      const key = d.toISOString().split('T')[0]
+      // Dia de Bogota, igual que la llave de cada fila: con `toISOString()` los eventos
+      // de las 19:00 a la medianoche se contaban en el dia siguiente.
+      const key = todayBogotaISO(new Date(now.getTime() - i * 86400000))
       counts.set(key, 0)
     }
     rows.forEach(r => {
-      const key = r.created_at.split('T')[0]
+      const key = todayBogotaISO(new Date(r.created_at))
       if (counts.has(key)) counts.set(key, counts.get(key)! + 1)
     })
     return [...counts.entries()].map(([date, count]) => ({ date, count }))

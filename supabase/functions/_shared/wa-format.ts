@@ -2,6 +2,8 @@
 // WhatsApp Message Formatting (D100)
 // ============================================================
 
+import { bogotaParts, diasCalendarioDesde } from './bogota.ts';
+
 /** Format number as Colombian pesos: $2.350.000 */
 export function formatCOP(amount: number): string {
   const abs = Math.abs(Math.round(amount));
@@ -34,15 +36,33 @@ export function bold(text: string): string {
   return `*${text}*`;
 }
 
-/** Format date as "15 ene 2026" */
+const SOLO_DIA = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Format date as "15 ene 2026".
+ *
+ * Un dia civil ('YYYY-MM-DD', columna `date`) se pinta tal cual; un instante se lee en
+ * Bogota. Con `getDate()` a secas Deno (UTC) pintaba el dia siguiente desde las 19:00.
+ */
 export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
   const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  if (typeof date === 'string' && SOLO_DIA.test(date)) {
+    const [y, m, d] = date.split('-').map(Number);
+    return `${d} ${months[m - 1]} ${y}`;
+  }
+  const p = bogotaParts(typeof date === 'string' ? new Date(date) : date);
+  return `${p.day} ${months[p.month - 1]} ${p.year}`;
 }
 
-/** Days since a date */
+/**
+ * Days since a date.
+ *
+ * Un dia civil ('YYYY-MM-DD') cuenta dias de calendario de Bogota: el saldo registrado
+ * hoy es "hoy" tambien a las 20:00. Un instante (`updated_at`) sigue contando periodos
+ * de 24 h transcurridos.
+ */
 export function daysSince(date: Date | string): number {
+  if (typeof date === 'string' && SOLO_DIA.test(date)) return diasCalendarioDesde(date);
   const d = typeof date === 'string' ? new Date(date) : date;
   return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
 }
@@ -79,12 +99,13 @@ export function currentMonthName(): string {
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
   ];
-  return months[new Date().getMonth()];
+  // Mes de Bogota: con `new Date().getMonth()` (UTC) el 30 a las 20:00 ya era el siguiente.
+  return months[bogotaParts().month - 1];
 }
 
-/** Current year */
+/** Current year (de Bogota: el 31-dic a las 20:00 no es el anio siguiente) */
 export function currentYear(): number {
-  return new Date().getFullYear();
+  return bogotaParts().year;
 }
 
 /** Format "hace X días" */

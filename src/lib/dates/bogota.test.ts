@@ -8,6 +8,9 @@ import {
   todayBogotaISO,
   bogotaYearMonth,
   bogotaMesCalendario,
+  bogotaYear,
+  inicioDelDiaBogota,
+  sumarMesesBogota,
 } from './bogota'
 
 // El proceso de prueba corre en la zona de quien lo ejecute (en CI, UTC; en el
@@ -112,5 +115,32 @@ describe('borde 19:00-23:59 Bogota y fin de mes', () => {
   it('bogotaMesCalendario: febrero bisiesto y diciembre', () => {
     expect(bogotaMesCalendario(new Date('2028-03-01T02:00:00Z')).hasta).toEqual({ year: 2028, month: 2, day: 29 })
     expect(bogotaMesCalendario(new Date('2027-01-01T04:00:00Z')).hasta).toEqual({ year: 2026, month: 12, day: 31 })
+  })
+})
+
+describe('borde 19:00-23:59 y fin de mes (remate #929)', () => {
+  it('sumarMesesBogota cuenta desde el dia de Bogota, no desde el de UTC', () => {
+    // 30-sep 20:00 Bogota = 1-oct 01:00 UTC: tres meses desde el 30-sep, no desde el 1-oct.
+    expect(sumarMesesBogota(3, new Date('2026-10-01T01:00:00Z'))).toBe('2026-12-30')
+    expect(sumarMesesBogota(0, new Date('2026-10-01T01:00:00Z'))).toBe('2026-09-30')
+  })
+
+  it('sumarMesesBogota recorta al fin de mes en vez de desbordar', () => {
+    expect(sumarMesesBogota(1, new Date('2026-01-31T15:00:00Z'))).toBe('2026-02-28')
+    expect(sumarMesesBogota(1, new Date('2028-01-31T15:00:00Z'))).toBe('2028-02-29')
+    expect(sumarMesesBogota(12, new Date('2028-02-29T15:00:00Z'))).toBe('2029-02-28')
+    // 31-dic 20:00 Bogota (1-ene UTC): un mes despues es el 31-ene, no el 1-feb.
+    expect(sumarMesesBogota(1, new Date('2027-01-01T01:00:00Z'))).toBe('2027-01-31')
+    expect(sumarMesesBogota(-1, new Date('2026-03-31T15:00:00Z'))).toBe('2026-02-28')
+  })
+
+  it('inicioDelDiaBogota es las 05:00 UTC del dia de Bogota, tambien a las 20:00', () => {
+    expect(inicioDelDiaBogota(new Date('2026-10-01T01:00:00Z')).toISOString()).toBe('2026-09-30T05:00:00.000Z')
+    expect(inicioDelDiaBogota(new Date('2026-10-01T05:00:00Z')).toISOString()).toBe('2026-10-01T05:00:00.000Z')
+  })
+
+  it('bogotaYear: el 31-dic a las 23:59 de Bogota sigue en el anio viejo', () => {
+    expect(bogotaYear(new Date('2027-01-01T04:59:00Z'))).toBe(2026)
+    expect(bogotaYear(new Date('2027-01-01T05:00:00Z'))).toBe(2027)
   })
 })
