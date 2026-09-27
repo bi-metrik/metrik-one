@@ -449,7 +449,6 @@ Anclas:
 - "both_intense": afirma LAS DOS con fuerza, aunque sea en planos distintos ("hace falta A, pero tambien B"; "A para una cosa y B para otra"). NO es punto medio: no la pongas en 3 ni en "middle". ancla null.
 - La diferencia entre "middle" y "both_intense" es la FUERZA, no la cantidad de polos que nombra. "Un poco de flexibilidad y un poco de estructura" es "middle". "Deben existir objetivos claros y directrices firmes, pero con total libertad para explorar como llegar" es "both_intense": pide las dos con fuerza, cada una para algo.
 - Si afirma una con fuerza y la otra solo como matiz, condicion o detalle, es 2 o 4, no "both_intense".
-- Mira la NEGACION: una palabra de un polo precedida de "no", "nada", "nunca", "not" o "nothing" NIEGA ese polo ("nada nuevo" no es "completamente nuevo"). Nunca ubiques en un polo que la persona niega; si no estas seguro de hacia que lado va, "claro": false.
 - "not_applicable": dice que ninguna de las dos le aplica. ancla null.
 - "dont_know": dice que no sabe. ancla null.
 - Si hay especial, "claro" es true.

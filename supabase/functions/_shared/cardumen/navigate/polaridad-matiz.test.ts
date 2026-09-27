@@ -82,12 +82,15 @@ describe('G22: guarda de polaridad (negacion explicita del polo elegido)', () =>
     expect(r).toEqual({ claro: true, ancla: 5, especial: null, lado: 'der' });
   });
 
-  it('el prompt de la diada le dice al modelo que mire la negacion', async () => {
+  it('la polaridad la cuida el codigo, no el prompt: la linea de negacion se retiro', async () => {
+    // Benchmark v3 (2026-09-27): con esa linea en el prompt, 3.5-flash-lite ubico G10 ("la decision
+    // la tome en el momento") en ancla 1 en 4 de 5 corridas; sin ella sale "no leido" 5 de 5. La
+    // guarda niegaPolo ya resuelve G22 sola.
     const m = modelo('{"claro":true,"ancla":1,"especial":null,"lado":"izq"}');
     await interpreteConModelo(m).diada(D1, G22);
     const system = m.ultimas.find((o) => o.system !== SISTEMA_CLASIFICADOR)!.system;
-    expect(system).toMatch(/Mira la NEGACION/);
-    expect(system).toMatch(/"nada nuevo" no es "completamente nuevo"/);
+    expect(system).not.toMatch(/NEGACION/);
+    expect(system).not.toMatch(/"nada nuevo"/);
   });
 });
 
