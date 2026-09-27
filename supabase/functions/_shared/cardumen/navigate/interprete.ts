@@ -204,6 +204,47 @@ export function niegaPolo(respuesta: string, polos: [string, string], lado: "izq
 }
 
 /**
+ * Marcas de ELEGIR u ORDENAR en una respuesta de triada: primero, sobre todo, lo que mas pesa,
+ * "solo X" (no "no solo X", que afirma varias cosas a la vez), y sus equivalentes en ingles.
+ * La lista es generosa a proposito: una marca de mas deja pasar una lectura que el modelo ya hizo;
+ * una de menos borra una eleccion real.
+ */
+const MARCA_ELECCION = new RegExp([
+  String.raw`\b(primer[oa]?|1ro|1ra|principal(es|mente)?|mayormente|predomin\w*|prevalec\w*|domin\w*)\b`,
+  String.raw`\b(sobre todo|ante todo|mas que nada|lo que mas|el que mas|la que mas|los que mas|mas|menos)\b`,
+  String.raw`\b(pes[oa]\w*|pesaron|pesan|pesaba|cuenta|conto|contaba|importa\w*|manda\w*|gana\w*|decide\w*)\b`,
+  String.raw`\b(sin duda|definitivamente|claramente|obvio|obviamente|seguro|de lejos|me quedo con|elijo|escojo|diria|yo diria|es (el|la|lo))\b`,
+  String.raw`\b(despues|luego|segundo|tercero|en segundo lugar)\b`,
+  String.raw`(?<!\bno )\b(solo|solamente|unicamente|nada mas)\b`,
+  String.raw`\b(first|mostly|mainly|above all|most|more|definitely|clearly|only|then|second|i (d|would) say|i pick|i choose)\b`,
+].join("|"));
+
+/** Hasta cuantas palabras una respuesta cuenta como "nombrar" un polo y no como un relato. */
+const MAX_PALABRAS_NOMBRAR = 5;
+
+/**
+ * Guarda de sustento en la TRIADA (G03 del golden v1): el modelo leyo UN solo polo como dominante,
+ * sin segundo y sin "solo ese", pero la respuesta no elige ni ordena nada: describe. "La Araucania
+ * es una region con bastantes necesidades y oportunidades..." frente al polo "Las necesidades de la
+ * region" salio dominante 1 en 3 de 3 con 3.5-flash-lite (benchmark v4): la palabra del polo dentro
+ * de una descripcion no es una eleccion. El prompt ya lo pide y no alcanza.
+ *
+ * Dispara solo en esa forma de lectura (dominante sin segundo ni solo_uno), cuando la respuesta pasa
+ * de unas pocas palabras (nombrar un polo a secas, "el poder", sigue siendo una respuesta) y no trae
+ * ninguna marca de elegir u ordenar. Una lectura con dominante Y segundo no se toca: ahi el modelo
+ * ya encontro un orden (G01, "liderados del sector publico pero con agentes privados").
+ */
+export function dominanteSinSustento(
+  respuesta: string,
+  r: { dominante: number | null; segundo: number | null; solo_uno: boolean; especial: string | null },
+): boolean {
+  if (r.dominante === null || r.segundo !== null || r.solo_uno || r.especial) return false;
+  const t = normalizarTexto(respuesta);
+  if (t.split(" ").filter(Boolean).length <= MAX_PALABRAS_NOMBRAR) return false;
+  return !MARCA_ELECCION.test(t);
+}
+
+/**
  * Un "especial" (no sabe / no aplica / las dos con fuerza) solo se acepta si la respuesta trae
  * evidencia de ESO. Sin esta guarda, un modelo chico usa "not_applicable" como cajon para lo que
  * esta fuera de tema, y una historia de futbol terminaria registrada como "no aplica".
@@ -391,6 +432,9 @@ Devuelve: {"claro": bool, "dominante": 0|1|2|null, "segundo": 0|1|2|null, "solo_
       const r = await pedirValidado<InterpretacionTriada>(model, system, mensajeDelLector(respuesta), ESQUEMAS.triada);
       if (!r) return noLeidoTriada();
       const especial = evidenciaEspecial(r.especial, respuesta) ? r.especial : null;
+      // Guarda de sustento (G03): un polo leido de una descripcion, sin elegir ni ordenar, no se
+      // ubica; el motor repregunta con los botones de la triada.
+      if (!especial && dominanteSinSustento(respuesta, { ...r, especial })) return noLeidoTriada();
       return {
         // Un especial es una lectura aunque el modelo marque claro:false (no habia dominante que leer).
         claro: especial !== null || (r.claro && r.dominante !== null),
