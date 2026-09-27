@@ -384,6 +384,15 @@ Solo owner/admin. Cada accion en `causaciones_log`. Seccion "Contabilidad" en si
 
 ## Ultimo avance
 
+### El dia de hoy es el de Bogota y los festivos se calculan - PR #929 `ba2e7155` (2026-09-27)
+
+- **Todo "hoy" pasa por `src/lib/dates/bogota.ts`** (`todayBogotaISO`, `bogotaParts`, `bogotaMesCalendario` nuevo), tambien en client components: `toISOString()` es UTC en el navegador igual que en Vercel. Corregidos Siigo (factura y recibo), 8 formularios, propuesta, cotizacion, `fecha_certificacion`, cuota explicita y dialogo de pausa. Edge: espejo `supabase/functions/_shared/bogota.ts` (Deno no alcanza `src/`).
+- **En SQL, `hoy_bogota()` reemplaza `CURRENT_DATE`** (migracion `20260927000001`): 9 funciones reescritas sobre `pg_get_functiondef` de la version viva, y el DEFAULT de 13 columnas `date` con `((now() AT TIME ZONE 'America/Bogota'))::date`. La migracion aborta si queda una funcion de `public` con `CURRENT_DATE`: **no escribir `CURRENT_DATE` en funciones nuevas**.
+- **Festivos calculados:** `pascua_gregoriana(anio)` + `festivos_colombia_de(anio)` (Ley 51/1983), espejo TS `src/lib/dates/festivos-colombia.ts`. `festivos_colombia` queda como cache sembrada 2025-2100; no se escribe a mano. Dos festivos pueden caer el mismo lunes (2025-06-30).
+- **`horas_habiles_entre` corta los dias en Bogota** (SQL y TS), como `horas_habiles_jornada`.
+- **Metodo:** migracion ensayada completa en produccion mandando el ARCHIVO por la Management API dentro de un `DO` que termina en `RAISE EXCEPTION` (nada queda escrito, y se prueba el archivo, no una copia transcrita). Contraste SQL↔TS por md5 de las 1354 fechas.
+- **Fuera de alcance:** `v_cartera_negocio` y `v_facturas_estado` siguen con `CURRENT_DATE` (reescribir la vista borra `security_invoker`).
+
 ### Documento de Trappvel: fotos encuadradas y menos páginas (2026-09-23)
 
 - **Cada foto del banco trae su foco** (`fotos-ciudad.ts`: `foco`, `ancho`, `alto`), fijado MIRANDO cada foto; `encuadreDeFoto` saca de ese punto el `objectPosition` de cada marco (portada 2,7:1, miniatura 3:2). Una prueba compara las medidas declaradas contra el archivo.
