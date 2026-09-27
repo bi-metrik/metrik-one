@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { registrarPagoCuentaCobro } from '@/lib/actions/cuentas-cobro-actions'
 import { EVIDENCIA_MIN_CARACTERES } from '@/lib/cobros/registrar-pago-cuenta'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 export type CobroDeCuentaUI = {
   id: string
@@ -52,7 +53,7 @@ export default function RegistrarPagoDialog({ cuentaId, numero, cobros }: Props)
   const [seleccion, setSeleccion] = useState<string[]>([])
   const [cobroParcial, setCobroParcial] = useState<string>('')
   const [montoParcial, setMontoParcial] = useState<string>('')
-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState(() => todayBogotaISO())
   const [evidencia, setEvidencia] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [, startTransition] = useTransition()

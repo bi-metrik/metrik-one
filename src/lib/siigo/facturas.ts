@@ -40,6 +40,7 @@ import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 // como "esa factura está libre". Ver el módulo.
 import { traerTodo } from '@/lib/supabase/paginar'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 /**
  * Emitir SÍ aguanta la pausa del límite de peticiones de Siigo (pide ~19 s).
@@ -517,7 +518,9 @@ export async function emitirFacturaNegocio(
     }
 
     // ── 5. Emitir ────────────────────────────────────────────────────────────
-    const hoy = new Date().toISOString().slice(0, 10)
+    // Dia civil de Bogota: a las 20:00 del 30-sep, UTC ya es 1-oct y la factura
+    // caeria en otro periodo de IVA.
+    const hoy = todayBogotaISO()
     const { payload, faltantes } = borradorFactura(
       cfg, identificacion, honorario, hoy, contexto.ivaPct ?? 19,
       {

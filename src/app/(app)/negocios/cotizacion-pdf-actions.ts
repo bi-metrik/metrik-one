@@ -2,7 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
-import { todayBogotaISO } from '@/lib/dates/bogota'
+import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
@@ -655,7 +655,10 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const fechaEnvio = cot.fecha_envio
       ? new Date(cot.fecha_envio as string)
       : new Date()
-    const fechaStr = `${fechaEnvio.getDate()}/${fechaEnvio.getMonth() + 1}/${fechaEnvio.getFullYear()}`
+    // `fecha_envio` es timestamptz: el dia que ve el cliente es el de Bogota, no el de
+    // la zona del servidor (UTC), que a partir de las 19:00 ya va en el dia siguiente.
+    const envioBogota = bogotaParts(fechaEnvio)
+    const fechaStr = `${envioBogota.day}/${envioBogota.month}/${envioBogota.year}`
 
     // validez_dias: derivada de las fechas; sin ellas, el default historico de 30.
     const validezDias =

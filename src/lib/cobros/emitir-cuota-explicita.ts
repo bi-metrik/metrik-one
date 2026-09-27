@@ -21,6 +21,7 @@ import { createDriveFolder, uploadFileToDrive } from '@/lib/google-drive'
 import { EMISOR_MAURICIO, getAnioGravableDeclaracion } from './emisor-mauricio'
 import { formatCOP, formatFechaLetras, montoEnLetrasCOP } from './format'
 import { siguienteNumeroCuenta } from './numero-cuenta'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 const SUBFOLDER_CUENTAS = '4. Cuentas de cobro'
 const TEMPLATE_SLUG = 'metrik'
@@ -170,7 +171,7 @@ export async function emitirCuentaDesdeCuota(
   const [anio, mes] = cuota.fecha_vencimiento.split('-').map(Number)
   const fechaVencimiento = cuota.fecha_vencimiento
   const fechaEmision = fechaEmisionSegura(
-    options.fechaEmisionOverride ?? new Date().toISOString().slice(0, 10),
+    options.fechaEmisionOverride ?? todayBogotaISO(),
     fechaVencimiento,
   )
 

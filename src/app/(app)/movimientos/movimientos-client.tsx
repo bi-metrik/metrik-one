@@ -18,6 +18,7 @@ import {
   nombreDeComprobantePegado,
 } from '@/lib/cobros/comprobante-pegado'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 /** El soporte de un gasto admite más peso que el comprobante de un pago: aquí entran
  *  facturas escaneadas de varias páginas. */
@@ -111,7 +112,7 @@ export default function MovimientosClient({
 
   // Marcar como pagado dialog
   const [pagoModal, setPagoModal] = useState<{ id: string; descripcion: string; monto: number; fecha: string } | null>(null)
-  const [fechaPago, setFechaPago] = useState(new Date().toISOString().split('T')[0])
+  const [fechaPago, setFechaPago] = useState(() => todayBogotaISO())
 
   // D246: Rechazo dialog
   const [rechazoModal, setRechazoModal] = useState<{ tabla: 'gastos' | 'cobros'; id: string; descripcion: string } | null>(null)
@@ -802,7 +803,7 @@ export default function MovimientosClient({
                                 <button
                                   onClick={() => {
                                     setPagoModal({ id: mov.id, descripcion: mov.descripcion, monto: mov.monto, fecha: mov.fecha })
-                                    setFechaPago(new Date().toISOString().split('T')[0])
+                                    setFechaPago(todayBogotaISO())
                                   }}
                                   className="inline-flex items-center gap-1 rounded-md border border-green-300 bg-green-50 px-2.5 py-1 text-[11px] font-medium text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50 transition-colors"
                                   title="Marcar como pagado"

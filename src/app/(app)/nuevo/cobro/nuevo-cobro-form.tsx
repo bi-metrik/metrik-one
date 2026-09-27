@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { addCobro } from '@/lib/actions/cobros-horas-rapidos'
 import { formatCOP } from '@/lib/contacts/constants'
 import { FiscalDisclaimer } from '@/components/fiscal-disclaimer'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 interface FacturaPendiente {
   id: string
@@ -27,7 +28,7 @@ export default function NuevoCobroForm({ facturas }: Props) {
   const [facturaId, setFacturaId] = useState(facturas.length === 1 ? facturas[0].id : '')
   const [monto, setMonto] = useState('')
   const [retencion, setRetencion] = useState('')
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(() => todayBogotaISO())
   const [notas, setNotas] = useState('')
 
   const selected = facturas.find(f => f.id === facturaId)

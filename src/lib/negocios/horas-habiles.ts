@@ -1,6 +1,6 @@
 /**
  * Horas hábiles Colombia — espejo en TypeScript de la función SQL
- * `horas_habiles_entre(start, end)` (migración 20260519000001).
+ * `horas_habiles_entre(start, end)` (migraciones 20260519000001 y 20260927000001).
  *
  * ¿Por qué existe un espejo y no se llama al SQL? Porque el cálculo por negocio
  * no tiene hoy una vista ni un RPC que lo exponga: `v_negocios_etapa_vencimiento`
@@ -14,13 +14,25 @@
  */
 
 const DIA_MS = 86_400_000
+const OFFSET_BOGOTA_MS = 5 * 60 * 60 * 1000
+
+/** Número de día calendario en Bogotá (días enteros desde epoch). */
+function diaBogota(ms: number): number {
+  return Math.floor((ms - OFFSET_BOGOTA_MS) / DIA_MS)
+}
+
+/** 'YYYY-MM-DD' del día calendario en Bogotá. */
+function isoDeDiaBogota(dia: number): string {
+  return new Date(dia * DIA_MS).toISOString().slice(0, 10)
+}
 
 /**
  * Algoritmo idéntico al SQL: horas calendario menos 24h por cada día
  * sábado/domingo/festivo en el rango [día(inicio), día(fin)).
  *
- * Los días se truncan en UTC para replicar `date_trunc('day', ts)` con la zona
- * horaria de la instancia Postgres (UTC).
+ * Los días se cortan en **hora de Bogotá** (UTC-5 fijo), igual que el SQL desde la
+ * migración 20260927000001. Antes se cortaban en UTC y, entre las 19:00 y la
+ * medianoche de Colombia, el sábado "empezaba" el viernes a las 7 p.m.
  *
  * @param startIso instante inicial (timestamptz serializado)
  * @param endMs    instante final en epoch ms (un único "ahora" por request)
@@ -31,14 +43,14 @@ export function horasHabilesEntre(startIso: string, endMs: number, festivos: Set
   if (!Number.isFinite(startMs) || endMs <= startMs) return 0
 
   const totalHoras = (endMs - startMs) / 3_600_000
-  const diaInicio = Math.floor(startMs / DIA_MS) * DIA_MS
-  const diaFin = Math.floor(endMs / DIA_MS) * DIA_MS
+  const diaInicio = diaBogota(startMs)
+  const diaFin = diaBogota(endMs)
 
   let noHabiles = 0
-  for (let d = diaInicio; d < diaFin; d += DIA_MS) {
-    const fecha = new Date(d)
+  for (let d = diaInicio; d < diaFin; d++) {
+    const fecha = new Date(d * DIA_MS)
     const dow = fecha.getUTCDay() // 0 = domingo, 6 = sábado
-    if (dow === 0 || dow === 6 || festivos.has(fecha.toISOString().slice(0, 10))) {
+    if (dow === 0 || dow === 6 || festivos.has(isoDeDiaBogota(d))) {
       noHabiles += 1
     }
   }
@@ -66,8 +78,6 @@ export function horasHabilesEntre(startIso: string, endMs: number, festivos: Set
 // UTC: a las 7 p.m. de un viernes, UTC ya está en sábado, y ese corrimiento de
 // cinco horas mueve el fin de semana entero dentro de una ventana de 72 h.
 
-const OFFSET_BOGOTA_MS = 5 * 60 * 60 * 1000
-
 export interface JornadaHabil {
   /** Hora de Bogotá en que arranca la jornada. 0 = medianoche. */
   inicioHora: number
@@ -82,16 +92,6 @@ export const JORNADA_DIA_COMPLETO: JornadaHabil = {
   inicioHora: 0,
   finHora: 24,
   sabadoHabil: false,
-}
-
-/** Número de día calendario en Bogotá (días enteros desde epoch). */
-function diaBogota(ms: number): number {
-  return Math.floor((ms - OFFSET_BOGOTA_MS) / DIA_MS)
-}
-
-/** 'YYYY-MM-DD' del día calendario en Bogotá. */
-function isoDeDiaBogota(dia: number): string {
-  return new Date(dia * DIA_MS).toISOString().slice(0, 10)
 }
 
 function esDiaHabil(dia: number, jornada: JornadaHabil, festivos: Set<string>): boolean {

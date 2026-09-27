@@ -14,8 +14,12 @@
 //     usar `bogotaYear()` / `formatBogotaEs()` / `bogotaYearMonth()`.
 //   - NO usar este helper para columnas `timestamptz` (`created_at`, `updated_at`,
 //     etc.) — esas se guardan en UTC con `new Date().toISOString()` puro.
-//   - NO usar para math interno de `Date.now() + ms` ni para defaults de inputs
-//     `<input type="date">` en client components (corren en el browser del usuario).
+//   - NO usar para math interno de `Date.now() + ms`.
+//   - SI usar para el default de un `<input type="date">`, tambien en client
+//     components: `new Date().toISOString()` es UTC en el navegador igual que en
+//     el servidor, y despues de las 19:00 el formulario proponia la fecha de
+//     mañana. La referencia del sistema es Bogota (decision 2026-09-27), no la
+//     zona del equipo del usuario.
 
 export const TZ = 'America/Bogota'
 
@@ -82,6 +86,25 @@ export function bogotaYear(d?: Date): number {
 export function bogotaYearMonth(d?: Date): string {
   const p = partsOf(d ?? new Date())
   return `${p.year}-${String(p.month).padStart(2, '0')}`
+}
+
+/**
+ * Mes calendario de Bogota que contiene `d`: el dia de hoy y el primer y ultimo dia
+ * del mes. Para validez "del mes en curso" de propuestas y para periodos mensuales.
+ */
+export function bogotaMesCalendario(d?: Date): {
+  hoy: { year: number; month: number; day: number }
+  desde: { year: number; month: number; day: number }
+  hasta: { year: number; month: number; day: number }
+} {
+  const { year, month, day } = partsOf(d ?? new Date())
+  // Date.UTC con dia 0 del mes siguiente = ultimo dia de este mes (bisiestos incluidos).
+  const ultimo = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return {
+    hoy: { year, month, day },
+    desde: { year, month, day: 1 },
+    hasta: { year, month, day: ultimo },
+  }
 }
 
 /** Fecha humana en espanol: "12 de mayo de 2026". */

@@ -11,6 +11,7 @@ import {
 } from '../_shared/wa-format.ts';
 import { STREAK_MILESTONES } from '../_shared/types.ts';
 import { COLUMNAS_CARTERA, deudasDeCartera } from '../_shared/cartera.ts';
+import { bogotaParts, diasDelMes } from '../_shared/bogota.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
 // `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
@@ -548,8 +549,10 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
 async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
   console.log('[wa-alerts] Running Recaudo Check');
 
-  const now = new Date();
-  if (now.getDate() < 20) {
+  // Dia, mes y anio de Bogota: en UTC, el 19 a las 20:00 ya es 20 y el 30 a las 20:00
+  // ya es el mes siguiente (con meta y cobros de un mes vacio).
+  const hoy = bogotaParts();
+  if (hoy.day < 20) {
     console.log('[wa-alerts] Recaudo check: not day 20+ yet, skipping');
     return;
   }
@@ -561,9 +564,11 @@ async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): P
 
   if (!workspaces || workspaces.length === 0) return;
 
-  const mesActual = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  const mesFin = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0, 10);
+  const mesActual = `${hoy.year}-${String(hoy.month).padStart(2, '0')}`;
+  const mesInicio = `${mesActual}-01`;
+  const mesFin = hoy.month === 12
+    ? `${hoy.year + 1}-01-01`
+    : `${hoy.year}-${String(hoy.month + 1).padStart(2, '0')}-01`;
 
   for (const ws of workspaces) {
     // Get meta_recaudo from config_metas for this month
@@ -593,7 +598,7 @@ async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): P
     const phone = await getOwnerPhone(supabase, ws.id);
     if (!phone) continue;
 
-    const msg = `⚠️ Recaudo del mes al ${pctMeta.toFixed(0)}% de la meta\n\n💰 Cobrado: ${formatCOP(totalCobros)} de ${formatCOP(metaRecaudo)}\n📅 Quedan ${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate()} días del mes\n\nRevisa tu cartera con "¿quién me debe?"`;
+    const msg = `⚠️ Recaudo del mes al ${pctMeta.toFixed(0)}% de la meta\n\n💰 Cobrado: ${formatCOP(totalCobros)} de ${formatCOP(metaRecaudo)}\n📅 Quedan ${diasDelMes(hoy.year, hoy.month) - hoy.day} días del mes\n\nRevisa tu cartera con "¿quién me debe?"`;
 
 
     await enviarAlerta(supabase, {

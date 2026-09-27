@@ -45,6 +45,18 @@ describe('horasHabilesEntre', () => {
     expect(h).toBe(24)
   })
 
+  it('corta los dias en hora de Bogota, no en UTC (borde 19:00-23:59)', () => {
+    // Viernes 24 jul 12:00 Bogota → domingo 26 jul 20:00 Bogota (= lunes 27 01:00Z): 56h.
+    // En Bogota el rango de dias es [vie, sab, dom) → solo el sabado no es habil → 32h.
+    // Cortando en UTC el fin caia el lunes y descontaba sabado Y domingo → 8h.
+    const h = horasHabilesEntre(
+      '2026-07-24T17:00:00Z',
+      new Date('2026-07-27T01:00:00Z').getTime(),
+      FESTIVOS_2026,
+    )
+    expect(h).toBe(32)
+  })
+
   it('nunca devuelve negativo ni cuenta rangos invertidos', () => {
     const fin = new Date('2026-07-27T12:00:00Z').getTime()
     expect(horasHabilesEntre('2026-07-28T12:00:00Z', fin, FESTIVOS_2026)).toBe(0)

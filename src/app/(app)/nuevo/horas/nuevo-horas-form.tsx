@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { addHorasDestino } from './horas-action'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 const VINCULO_LABEL: Record<string, string> = {
   empleado: 'Empleado',
@@ -42,7 +43,7 @@ export default function NuevoHorasForm({ destinos, staff, defaultProyectoId, def
     staff.find(s => s.es_principal)?.id ?? staff[0]?.id ?? ''
   )
   const [horas, setHoras] = useState('1')
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(() => todayBogotaISO())
   const [descripcion, setDescripcion] = useState('')
 
   // Parse destinoKey

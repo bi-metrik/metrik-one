@@ -5,6 +5,7 @@ import QRCode from 'qrcode'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 // Las tablas cert_* aun no estan en database.ts. Usamos el cliente autenticado
 // (RLS aplica por la sesion del usuario) casteado a sin-tipo para esas tablas.
@@ -163,7 +164,7 @@ export async function enviarAprobacion(id: string) {
 export async function aprobarPublicar(id: string) {
   const { db, workspaceId, userId, esCertificador } = await ctx()
   requireCertificador(esCertificador)
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = todayBogotaISO()
   const { data: lote, error } = await db.from('cert_lotes')
     .update({
       estado: 'publicado',
@@ -210,7 +211,7 @@ export async function revocar(id: string) {
 export async function recertificar(id: string) {
   const { db, workspaceId, userId, esCertificador } = await ctx()
   requireCertificador(esCertificador)
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = todayBogotaISO()
   const { data: lote, error } = await db.from('cert_lotes')
     .update({
       estado: 'publicado',

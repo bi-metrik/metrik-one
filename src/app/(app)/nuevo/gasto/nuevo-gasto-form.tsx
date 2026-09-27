@@ -27,6 +27,7 @@ import type {
   CentroCostos,
   OrigenAsignacion,
 } from '@/lib/actions/centro-costos-asignar'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 type Clasificacion = ClasificacionGasto
 
@@ -96,7 +97,7 @@ export default function NuevoGastoForm({
   const [categoria, setCategoria] = useState('arriendo')
   const [clasificacion, setClasificacion] = useState<Clasificacion>(CATEGORIA_TO_CLASIF['arriendo'] ?? 'fijo')
   const [retencion, setRetencion] = useState('')
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(() => todayBogotaISO())
   const [descripcion, setDescripcion] = useState('')
   const [yaPagado, setYaPagado] = useState(true)
   const [soporteFile, setSoporteFile] = useState<File | null>(null)
