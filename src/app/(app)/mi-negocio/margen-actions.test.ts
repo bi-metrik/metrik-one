@@ -59,7 +59,7 @@ function doble(quien: 'sesion' | 'servicio') {
           const borrar = new Set(coinciden())
           tablas[tabla] = (tablas[tabla] ?? []).filter(f => !borrar.has(f))
           escrituras.push({ cliente: quien, tabla, op, filas: borrar.size })
-          return { data: null, error: null }
+          return { data: [...borrar].map(f => ({ id: f.id })), error: null }
         }
         return { data: coinciden(), error: null }
       }
@@ -188,8 +188,10 @@ describe('lo que no se guarda', () => {
     expect(r).toEqual({ error: expect.stringContaining('No se guardó nada') })
     // Se alcanzó a registrar y se retiró.
     expect(escrituras.filter(e => e.tabla === 'activity_log' && e.op === 'insert')).toHaveLength(2)
+    // Lo retira el cliente de SERVICIO: la RLS de DELETE de `activity_log` solo deja
+    // borrar comentarios, y con el de la sesión este borrado daría 0 filas sin error.
     expect(escrituras.filter(e => e.tabla === 'activity_log' && e.op === 'delete')).toEqual([
-      expect.objectContaining({ filas: 2 }),
+      expect.objectContaining({ cliente: 'servicio', filas: 2 }),
     ])
     expect(logs()).toEqual([])
     expect(linea().margen).toMatchObject({ piso_pct: 5, provisional: true })
