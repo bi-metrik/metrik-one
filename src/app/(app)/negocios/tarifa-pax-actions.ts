@@ -62,6 +62,7 @@ import {
 } from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
+import { leerHotelManual, leerTrasladoManual, lecturaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -532,6 +533,45 @@ export async function leerCapturaEnBorrador(
   // La misma validación que tenía la captura al leerse sobre su opción vacía: contra la
   // ocupación que ella misma dice, o la del viaje si no la dice. El rechazo sale AHORA, no
   // al aceptar.
+  const propia = composicionDeLectura(leida) ?? ctx.viaje.composicion
+  const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug: ranura.slug })
+  if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
+  leida.alertas = [...leida.alertas, ...v.alertas]
+  const lecturaJson = JSON.stringify(leida)
+  const firma = firmarBorrador(cotizacionId, tipo, lecturaJson)
+  if (!firma) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
+  return { ok: true, lectura: leida, lecturaJson, firma, alertas: leida.alertas }
+}
+
+/**
+ * Ingreso manual (brief del 2026-09-28): lo que llenó la persona en el formulario, convertido
+ * en la MISMA lectura que da un pantallazo (`ingreso-manual.ts`) y firmado igual. No escribe
+ * nada: entra a Componentes por «Aceptar», como cualquier captura de la bandeja.
+ */
+export type ResultadoManualEnBorrador =
+  | Extract<ResultadoBorrador, { ok: true }>
+  | { ok: false; codigo: string; mensaje: string; errores?: ErroresManual }
+
+export async function lecturaManualEnBorrador(
+  cotizacionId: string,
+  tipo: 'hotel' | 'traslado',
+  datos: unknown,
+): Promise<ResultadoManualEnBorrador> {
+  if (tipo !== 'hotel' && tipo !== 'traslado') return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) {
+    return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
+  }
+  const ctx = await contextoDeCotizacion(cotizacionId)
+  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  const ranura = definicionDeTipo(tipo)
+  const r = lecturaManual({
+    ranura,
+    entrada: tipo === 'hotel' ? { tipo, datos: leerHotelManual(datos) } : { tipo, datos: leerTrasladoManual(datos) },
+    leidaEn: new Date().toISOString(),
+  })
+  if (!r.ok) return { ok: false, codigo: 'CAMPOS', mensaje: r.errores._ ?? 'Revisa los campos marcados.', errores: r.errores }
+  const leida = r.lectura
+  // La misma validación que una captura: contra la ocupación que ella misma dice.
   const propia = composicionDeLectura(leida) ?? ctx.viaje.composicion
   const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug: ranura.slug })
   if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }

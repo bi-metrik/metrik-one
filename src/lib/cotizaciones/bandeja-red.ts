@@ -13,12 +13,12 @@
  * Un fallo de red LANZA: `procesarCaptura` ya lo convierte en su mensaje de siempre.
  */
 import type { ResultadoDeteccion } from '@/app/(app)/negocios/ranura-actions'
-import type { BorradorParaAceptar, ResultadoAceptarCaptura, ResultadoBorrador } from '@/app/(app)/negocios/tarifa-pax-actions'
+import type { BorradorParaAceptar, ResultadoAceptarCaptura, ResultadoBorrador, ResultadoManualEnBorrador } from '@/app/(app)/negocios/tarifa-pax-actions'
 import type { TipoRanura } from './ranuras-cotizacion'
 
 type Fetch = typeof fetch
 
-function rutaDe(cotizacionId: string, accion: 'detectar-captura' | 'leer-captura' | 'aceptar-captura'): string {
+function rutaDe(cotizacionId: string, accion: 'detectar-captura' | 'leer-captura' | 'aceptar-captura' | 'lectura-manual'): string {
   return `/api/cotizaciones/${encodeURIComponent(cotizacionId)}/${accion}`
 }
 
@@ -51,6 +51,20 @@ export function leerPorRuta(
 export async function aceptarPorRuta(cotizacionId: string, cuerpo: BorradorParaAceptar, f: Fetch = fetch): Promise<ResultadoAceptarCaptura | null> {
   try {
     return await enviar<ResultadoAceptarCaptura>(rutaDe(cotizacionId, 'aceptar-captura'), cuerpo, f)
+  } catch {
+    return null
+  }
+}
+
+/** La lectura firmada de un ingreso manual (`lecturaManualEnBorrador`, por la ruta). `null` sin respuesta. */
+export async function lecturaManualPorRuta(
+  cotizacionId: string,
+  tipo: 'hotel' | 'traslado',
+  datos: unknown,
+  f: Fetch = fetch,
+): Promise<ResultadoManualEnBorrador | null> {
+  try {
+    return await enviar<ResultadoManualEnBorrador>(rutaDe(cotizacionId, 'lectura-manual'), { tipo, datos }, f)
   } catch {
     return null
   }
