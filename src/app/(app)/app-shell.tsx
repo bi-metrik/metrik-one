@@ -309,9 +309,10 @@ const SHARED_NAV_ITEMS = [
 
 // Workflows (visible si workspace tiene lineas activas — controlado por hasLineas prop)
 // Posicion: zona inferior del sidebar, en seccion propia "Workflows" antes de Admin.
-// Una sola entrada → /flujo (Kanban del workspace actual). En el workspace admin NO se ofrece
-// (2026-09-27): ahí resolvía a /admin/workflows, que nació cuando no se podía cambiar de
-// workspace; ahora se cambia y se abre el /flujo del cliente. La ruta /admin/workflows queda.
+// Una sola entrada → /flujo, el flujo del workspace actual por línea de negocio. Tambien en el
+// workspace admin (2026-09-27): antes ahí resolvía a /admin/workflows, que nació cuando no se
+// podía cambiar de workspace; ahora metrik ve su propio flujo como cualquier cliente. La ruta
+// /admin/workflows queda, sin entrada de menú.
 const WORKFLOWS_NAV_ITEMS = [
   { href: '/flujo', label: 'Workflows', icon: Workflow, roles: ['owner', 'admin', 'supervisor'] },
 ]
@@ -500,8 +501,8 @@ export default function AppShell({
         (i) => !(soloCalidad && i.href === '/tableros' && role !== 'owner'),
       ))
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
-  // En el workspace admin no se ofrece (ver WORKFLOWS_NAV_ITEMS); en los demás, el Kanban del workspace.
-  const workflowsItems = moduloGate(vitrinaGate(hasLineas && !isAdminWorkspace
+  // Siempre /flujo, tambien en el workspace admin (ver WORKFLOWS_NAV_ITEMS).
+  const workflowsItems = moduloGate(vitrinaGate(hasLineas
     ? filterByRole(applyOverride(WORKFLOWS_NAV_ITEMS), role)
     : []))
   // En modo vitrina, Valida se muestra aunque el flag valida_consulta no esté (el
