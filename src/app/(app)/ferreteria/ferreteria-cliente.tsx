@@ -15,7 +15,9 @@ import {
   type EstadoPublicacion,
   type Linea,
 } from '@/lib/ferreteria/reglas'
+import type { FilaPagoWompi } from '@/lib/ferreteria/wompi-pagos'
 import { LiquidacionTabla } from './liquidacion-tabla'
+import { PagosWompi, pagoPorAsignar } from './pagos-wompi'
 import { Th, aplicarOrden, useOrden } from './orden-tabla'
 
 function pct(n: number | null): string {
@@ -73,21 +75,34 @@ export function PuntoPendiente({ tono, titulo }: { tono: 'rojo' | 'ambar' | null
   )
 }
 
+type Pestana = 'publicaciones' | 'indicadores' | 'liquidacion' | 'pagos'
+const ETIQUETA_PESTANA: Record<Pestana, string> = {
+  publicaciones: 'Publicaciones',
+  indicadores: 'Indicadores',
+  liquidacion: 'Liquidación mensual',
+  pagos: 'Pagos Wompi',
+}
+
 export function FerreteriaCliente({
   tablero,
   liquidacion,
+  pagosWompi,
+  pestanaInicial,
   hoy,
   ahoraIso,
   puedeEditar,
 }: {
   tablero: Tablero
   liquidacion: Liquidacion
+  pagosWompi: FilaPagoWompi[]
+  pestanaInicial: Pestana
   hoy: string
   /** Lo fija el servidor: el semáforo no llama al reloj durante el render. */
   ahoraIso: string
   puedeEditar: boolean
 }) {
-  const [pestana, setPestana] = useState<'publicaciones' | 'indicadores' | 'liquidacion'>('publicaciones')
+  const [pestana, setPestana] = useState<Pestana>(pestanaInicial)
+  const pagosPorAsignar = pagosWompi.filter(pagoPorAsignar).length
   const [estado, setEstado] = useState<'' | EstadoPublicacion>('')
   const [linea, setLinea] = useState<'' | Linea>('')
   const [marca, setMarca] = useState('')
@@ -131,19 +146,26 @@ export function FerreteriaCliente({
       </header>
 
       <div className="flex gap-1 border-b">
-        {(['publicaciones', 'indicadores', 'liquidacion'] as const).map((p) => (
+        {(['publicaciones', 'indicadores', 'liquidacion', 'pagos'] as const).map((p) => (
           <button
             key={p}
             type="button"
             onClick={() => setPestana(p)}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${pestana === p ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
           >
-            {p === 'publicaciones' ? 'Publicaciones' : p === 'indicadores' ? 'Indicadores' : 'Liquidación mensual'}
+            {ETIQUETA_PESTANA[p]}
+            {p === 'pagos' && pagosPorAsignar > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 text-xs text-white" title="Pagos aprobados sin venta">
+                {pagosPorAsignar}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
-      {pestana === 'liquidacion' ? (
+      {pestana === 'pagos' ? (
+        <PagosWompi pagos={pagosWompi} puedeEditar={puedeEditar} />
+      ) : pestana === 'liquidacion' ? (
         <LiquidacionTabla meses={liquidacion.meses} porCobrar={liquidacion.porCobrar} />
       ) : pestana === 'publicaciones' ? (
         <>

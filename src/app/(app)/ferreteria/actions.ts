@@ -11,6 +11,8 @@ import { repoSupabase } from '@/lib/ferreteria/repo-supabase'
 import { esEstado, esLinea, puedeEditarFerreteria } from '@/lib/ferreteria/reglas'
 import type { Autor, CambiosPublicacion } from '@/lib/ferreteria/tipos'
 import { alinearNegocio, marcarVentaEntregada, registrarPagoDeVenta, registrarVenta } from '@/lib/ferreteria/ventas'
+import { RECLAMABLES_ASIGNAR, registrarVentaDePago } from '@/lib/ferreteria/wompi-pagos'
+import { repoPagosWompi } from '@/lib/ferreteria/wompi-servidor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 
 type Resultado = { ok: true; mensaje?: string } | { ok: false; error: string }
@@ -218,4 +220,36 @@ export async function agregarNotaAction(codigo: string, texto: string): Promise<
   if (!r.ok) return { ok: false, error: r.mensaje }
   revalidatePath('/ferreteria')
   return { ok: true }
+}
+
+/**
+ * Asigna a una publicación un pago aprobado de Wompi que ONE no pudo amarrar solo (el link no traía
+ * código, o el código no era una publicación) o cuyo registro falló. Registra la venta por la misma
+ * vía que el webhook: anticipada, con el monto, la fecha y el comprador del pago.
+ */
+export async function asignarPagoWompiAction(pagoId: string, codigo: string): Promise<Resultado> {
+  const p = await puerta()
+  if (!p.ok) return p
+  const repo = repoSupabase()
+  const pagos = repoPagosWompi()
+  const fila = await pagos.pagoPorId(p.ws, pagoId)
+  if (!fila) return { ok: false, error: 'El pago no existe.' }
+  if (fila.estado_wompi !== 'APPROVED' || fila.entorno !== 'prod') {
+    return { ok: false, error: 'Solo un pago aprobado de producción se vuelve venta.' }
+  }
+  if (!RECLAMABLES_ASIGNAR.includes(fila.registro)) return { ok: false, error: 'Este pago ya no está pendiente.' }
+  const pub = await repo.publicacionPorCodigo(p.ws, codigo.trim().toUpperCase())
+  if (!pub) return { ok: false, error: `No existe la publicación ${codigo.trim().toUpperCase()}.` }
+  const negocios = await puertoNegocios()
+  if ('error' in negocios) return { ok: false, error: negocios.error }
+  if (!(await pagos.reclamar(fila.id, RECLAMABLES_ASIGNAR))) return { ok: false, error: 'Otro proceso está registrando este pago.' }
+  const ahora = new Date()
+  const r = await registrarVentaDePago(repo, pagos, negocios, p.ws, fila, pub, p.autor, ahora.toISOString(), todayBogotaISO(ahora))
+  revalidatePath('/ferreteria')
+  if (!r.ok) return { ok: false, error: r.mensaje }
+  revalidatePath('/negocios')
+  return {
+    ok: true,
+    mensaje: r.avisos.length > 0 ? `Venta registrada. ${r.avisos.join(' ')}` : `Venta registrada en ${pub.codigo}.`,
+  }
 }
