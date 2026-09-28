@@ -52,3 +52,5 @@ MeTRIK aporta a Dimpro) — `liquidacion.ts`. El mes sale del PAGO (`fecha_prime
   reinicio (cuenta lo nuevo), los días sin medición no se reparten, se marcan.
 - Ferretería NO entra en `tieneTablerosPropios`: dimpro conserva las pestañas genéricas.
 - Sin QA en pantalla con datos reales al cerrar; las metas solo se ven desde octubre.
+
+**Fotos y títulos (2026-09-28):** la publicación NO tiene fotos; la foto sale de `ferreteria_productos.fotos` (jsonb array, se usa `fotos[0]`). El nombre visible del aviso es `ferreteria_publicaciones.titulo` (default `''`), con respaldo al `nombre` del producto → `FilaTablero.titulo`. La tabla «Conversaciones por publicación» (pestaña Indicadores) lo muestra con `<Miniatura>`.

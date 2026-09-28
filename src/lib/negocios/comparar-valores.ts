@@ -13,6 +13,7 @@
  *   BARRIOS» contra «AFANADOR BARRIOS MAURICIO») daba NO coincide. Aquí son conjuntos.
  */
 
+import { direccionesCoinciden } from './direccion-predio'
 import { montosCoinciden } from './monto-cop'
 import { TOLERANCIA_SALDO_COP } from './tolerancia-saldo'
 
@@ -26,10 +27,13 @@ import { TOLERANCIA_SALDO_COP } from './tolerancia-saldo'
  *   dirección (el certificado de V0210 dice «hotmaiol.com»). Lo único que se tolera son los
  *   pares que la lectura de un PDF confunde: «1» con «l» y «0» con «o». Medido el 24-sep
  *   en 315 certificados: la IA leyó «diegotamayol» donde el PDF dice «diegotamayo1» (V0208).
+ * - `direccion`: el mismo predio en una dirección colombiana. Ver `./direccion-predio`.
  */
-export type ModoComparacion = 'tokens' | 'contenido' | 'palabra_comun' | 'compacto' | 'monto' | 'correo'
+export type ModoComparacion = 'tokens' | 'contenido' | 'palabra_comun' | 'compacto' | 'monto' | 'correo' | 'direccion'
 
-export const MODOS_COMPARACION: ModoComparacion[] = ['tokens', 'contenido', 'palabra_comun', 'compacto', 'monto', 'correo']
+export const MODOS_COMPARACION: ModoComparacion[] = [
+  'tokens', 'contenido', 'palabra_comun', 'compacto', 'monto', 'correo', 'direccion',
+]
 
 /** «1»→«l» y «0»→«o»: los caracteres que una lectura por imagen confunde en un correo. */
 function plegarConfusiones(correo: string): string {
@@ -85,6 +89,7 @@ export function coinciden(a: unknown, b: unknown, modo: ModoComparacion, opts: O
     const x = normalizarCorreo(a)
     return x.includes('@') && plegarConfusiones(x) === plegarConfusiones(normalizarCorreo(b))
   }
+  if (modo === 'direccion') return direccionesCoinciden(a, b)
   if (modo === 'compacto') {
     const x = normalizar(a).replace(/\s/g, '')
     const y = normalizar(b).replace(/\s/g, '')

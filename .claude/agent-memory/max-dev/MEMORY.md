@@ -11,6 +11,7 @@
 - ⚠️ [«13» pegado a la casilla 26 del RUT (#908, #909)](project_rut_prefijo_tipo_documento.md) — tolerar ≠ proponer; #909 migración SIN aplicar
 - ⚠️⚠️ [Casilla 5 testigo de la 26 (#918)](project_casilla26_testigo_casilla5.md) — migración SIN aplicar; dígitos de más ≠ mismo número; V0012 solo avisa
 - ⚠️⚠️ [Voto entre fuentes (#895, #896)](project_voto_entre_fuentes.md) — #896 SIN mergear (migración); plantillas NO unificadas a propósito; V0012 frena
+- ⚠️⚠️ [Certificado: departamento, ciudad y dirección](project_certificado_ubicacion.md) — migración SIN aplicar; pruebas con datos inventados (push negado)
 - ⚠️ [Certificado UPME por correo, sin VIN](project_certificado_correo_contacto.md) — migración SIN aplicar; solo avisa; @contacto como fuente; sin celular
 - ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
 - ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — backfill de 21 SIN aplicar; se mide por FLUJO, no por `orden`
@@ -120,6 +121,7 @@
 - ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — mergeado, wa-webhook SIN redesplegar
 - ⚠️⚠️ [WhatsApp sin teléfono (BSUID)](project_wa_bsuid_sin_telefono.md) — #724 sin redesplegar
 - ⚠️⚠️ [Términos por WhatsApp](project_aceptacion_terminos_wa.md) — #722 sin redesplegar; HMAC NO se valida
+- ⚠️ [Fixture de producción bloquea el push](project_fixture_de_produccion_bloquea_push.md) — fixtures sintéticos a mano; SQL de config se prueba en PGlite
 - [Frentes ya cerrados](indice_frentes_cerrados.md) — memorias de trabajo terminado, fuera del índice caliente
 
 ## Referencias

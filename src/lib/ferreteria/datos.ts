@@ -34,6 +34,8 @@ export interface FilaTablero {
   codigo: string
   sku: string
   producto: string
+  /** Título con el que sale el aviso; si la publicación no lo trae, el nombre del producto. */
+  titulo: string
   marca: string | null
   precio: number | null
   ganancia: number | null
@@ -116,6 +118,7 @@ export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tabl
       codigo: p.codigo,
       sku: prod?.sku ?? '',
       producto: prod?.nombre ?? '',
+      titulo: p.titulo?.trim() || prod?.nombre || '',
       marca: prod?.marca ?? null,
       precio: p.precio,
       costoF: costo?.costo_f ?? null,
