@@ -93,6 +93,7 @@ import {
   rangoCompacto,
   renglonesDeFotos,
   siglaAerolinea,
+  sinCancelacionDelProveedor,
   sinTildes,
   tablaDeVuelosVaEntera,
   textosDeTarjetaHotel,
@@ -1231,13 +1232,15 @@ export default function CotizacionTrappvelPDF({
   for (const d of bloquesDia) {
     const [primero, ...resto] = d.items
     const fecha = fechaDelDia(v.fechaInicio, d.dia)
+    // La condición de cancelación del proveedor no sale al cliente (`sinCancelacionDelProveedor`).
+    const nota = (it: { descripcion?: string | null }) => sinCancelacionDelProveedor(it.descripcion)
     entradas.push({
       fecha,
       dia: d.dia,
       titulo: { texto: primero.nombre },
       subtitulo: fecha ? (diaDeLaSemana(fecha) ? { texto: diaDeLaSemana(fecha) as string } : null) : null,
-      notas: detallada && primero.descripcion ? [primero.descripcion] : [],
-      vinetas: resto.map(it => (detallada && it.descripcion ? `${it.nombre} — ${it.descripcion}` : it.nombre)),
+      notas: detallada && nota(primero) ? [nota(primero) as string] : [],
+      vinetas: resto.map(it => (detallada && nota(it) ? `${it.nombre} — ${nota(it)}` : it.nombre)),
       orden: entradas.length,
     })
   }
@@ -1732,6 +1735,7 @@ export default function CotizacionTrappvelPDF({
           {opcionales.length > 0 && (() => {
             const tarjetas = opcionales.map((o, i) => {
                 const valor = Math.round((o.precio_venta || 0) * (o.cantidad ?? 1))
+                const descripcion = sinCancelacionDelProveedor(o.descripcion)
                 return (
                   <View
                     key={`opcional-${i}`}
@@ -1741,8 +1745,8 @@ export default function CotizacionTrappvelPDF({
                   >
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{o.nombre}</Text>
-                      {!general && o.descripcion && (
-                        <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 2 }}>{o.descripcion}</Text>
+                      {!general && descripcion && (
+                        <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 2 }}>{descripcion}</Text>
                       )}
                     </View>
                     {valor > 0 && (

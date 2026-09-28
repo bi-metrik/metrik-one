@@ -188,6 +188,18 @@ describe('así lo ve el cliente', () => {
     expect(html).not.toContain('Acomodación:')
   })
 
+  // 2026-09-28 · La cancelación leída («Cancelación gratuita hasta 21/11/2026» en Posada Enilda)
+  // es la condición del proveedor con la agencia: la ve el equipo en la ficha, no el cliente.
+  it('la cancelación leída sigue en la ficha interna y no sale en la hoja del cliente', () => {
+    for (const general of [false, true]) {
+      const html = pintar(tarifa(), { general })
+      const ficha = html.slice(html.indexOf('data-ficha'), html.indexOf('</dl>', html.indexOf('data-ficha')))
+      expect(texto(ficha)).toContain('Cancelación gratuita hasta 21/11/2026')
+      const hoja = html.slice(html.indexOf('data-hoja-cliente'))
+      expect(hoja).not.toMatch(/Cancelaci[oó]n/)
+    }
+  })
+
   it('la nota escrita por una persona se imprime en la hoja y se edita tocándola', () => {
     const html = pintar(tarifa(), { item: { nombre: 'POSADA ENILDA', grupo: 'hotel', tarifa_pax: tarifa(), descripcion: 'INCLUYE TRASLADO' } })
     expect(html).toContain('aria-label="Editar la nota para el cliente"')
