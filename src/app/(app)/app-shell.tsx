@@ -65,6 +65,8 @@ interface WorkspaceModules {
   cert_qr?: boolean
   /** Catálogo publicado del piloto Marketplace (/ferreteria). Ver `src/lib/ferreteria/`. */
   ferreteria?: boolean
+  /** Radar SECOP: convocatorias públicas cruzadas contra los temas del cliente (/radar). */
+  radar_secop?: boolean
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
   fab_registrar_pago?: boolean
@@ -300,6 +302,12 @@ const FERRETERIA_NAV_ITEMS = [
   { href: '/ferreteria', label: 'Ferretería', icon: Wrench, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
+// Radar SECOP: módulo con licencia propia (extra inferior, activable por flag). Todos los roles lo
+// ven; la pantalla decide por dentro quién guarda los temas.
+const RADAR_NAV_ITEMS = [
+  { href: '/radar', label: 'Radar SECOP', icon: Radar, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+]
+
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor'] },
@@ -524,8 +532,9 @@ export default function AppShell({
   const validaApiItems = moduloGate(vitrinaGate(mod.valida_api ? filterByRole(VALIDA_API_NAV_ITEMS, role) : []))
   const certItems = moduloGate(vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []))
   const ferreteriaItems = moduloGate(vitrinaGate(mod.ferreteria ? filterByRole(FERRETERIA_NAV_ITEMS, role) : []))
+  const radarItems = moduloGate(vitrinaGate(mod.radar_secop ? filterByRole(RADAR_NAV_ITEMS, role) : []))
   const solicitudesItems = moduloGate(vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : []))
-  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems]
+  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = moduloGate(vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -542,10 +551,10 @@ export default function AppShell({
       ? '/numeros'
       : (mod.compliance
         ? '/riesgos'
-        : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : (mod.ferreteria ? '/ferreteria' : '/mi-negocio')))))
+        : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : (mod.ferreteria ? '/ferreteria' : (mod.radar_secop ? '/radar' : '/mi-negocio'))))))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     // Valida más las vitrinas que abre ESTE espacio (un CDA, ninguna): la misma regla del menú.
     ? ['/valida', ...vitrinasDelEspacio(mod)]
@@ -557,6 +566,9 @@ export default function AppShell({
     // Workspace cuyo único módulo es el catálogo publicado.
     : (!mod.business && mod.ferreteria)
     ? ['/ferreteria']
+    // Workspace cuyo único módulo es el Radar (el caso de Fabri: una sola pantalla, la suya).
+    : (!mod.business && mod.radar_secop)
+    ? ['/radar']
     // Workspace de solo calidad (call center): sus tres rutas son las primarias.
     // Son las mismas del sidebar — la operacion, las personas y los indicadores.
     : (!mod.business && mod.calidad_llamadas)

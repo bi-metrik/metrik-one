@@ -51,6 +51,10 @@
     {
       "path": "/api/crons/compliance-monitoreo",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/crons/radar-secop-sync",
+      "schedule": "0 9 * * *"
     }
   ]
 }

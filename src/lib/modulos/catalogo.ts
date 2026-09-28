@@ -132,6 +132,16 @@ export const MODULOS = {
     rutas: ['/ferreteria'],
     funciones: [],
   },
+  // Radar SECOP: convocatorias públicas de SECOP II cruzadas contra los temas del cliente. Módulo
+  // con licencia propia ($20.000/mes de lista), no una función de Clarity: se contrata y se cobra
+  // solo. Primer cliente: Fabri (spec del 2026-09-28).
+  radar_secop: {
+    nombre: 'Radar SECOP',
+    clave: 'radar_secop',
+    inicio: '/radar',
+    rutas: ['/radar'],
+    funciones: [],
+  },
 } as const satisfies Record<string, Modulo>
 
 export type IdModulo = keyof typeof MODULOS

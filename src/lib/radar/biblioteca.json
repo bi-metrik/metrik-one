@@ -1,0 +1,1494 @@
+{
+ "version": 2,
+ "actualizado": "2026-09-28",
+ "nota": "Biblioteca MULTISECTOR del Radar SECOP. No es la lista de MeTRIK: MeTRIK es uno de los perfiles. Un tema es un concepto con sus sinonimos y un peso. Las exclusiones ya NO son globales: viven en el perfil, porque lo que para MeTRIK es ruido (OBRA, ASEO, VIAL) para otra empresa es exactamente su negocio.",
+ "grupos": [
+  {
+   "id": "tic",
+   "nombre": "Tecnologia, datos e IA"
+  },
+  {
+   "id": "mobiliario",
+   "nombre": "Mobiliario, carpinteria y acrilicos"
+  },
+  {
+   "id": "grafico",
+   "nombre": "Senalizacion, impresion y artes graficas"
+  },
+  {
+   "id": "dotacion",
+   "nombre": "Dotacion, textiles y calzado"
+  },
+  {
+   "id": "alimentos",
+   "nombre": "Alimentos y servicio de alimentacion"
+  },
+  {
+   "id": "suministros",
+   "nombre": "Aseo, papeleria y suministros generales"
+  },
+  {
+   "id": "construccion",
+   "nombre": "Construccion y mantenimiento de infraestructura"
+  },
+  {
+   "id": "salud",
+   "nombre": "Salud, dispositivos y laboratorio"
+  },
+  {
+   "id": "educacion",
+   "nombre": "Educacion, formacion y bienestar"
+  },
+  {
+   "id": "transporte",
+   "nombre": "Transporte, vehiculos y maquinaria"
+  },
+  {
+   "id": "ambiental",
+   "nombre": "Ambiental, agricola y forestal"
+  },
+  {
+   "id": "profesionales",
+   "nombre": "Servicios profesionales y administrativos"
+  },
+  {
+   "id": "energia",
+   "nombre": "Telecomunicaciones y energia"
+  },
+  {
+   "id": "compra",
+   "nombre": "Como contrata la entidad (resta)"
+  }
+ ],
+ "temas": [
+  {
+   "id": "ia-nucleo",
+   "grupo": "tic",
+   "nombre": "Inteligencia artificial",
+   "peso": 10,
+   "terminos": [
+    "INTELIGENCIA ARTIFICIAL",
+    "IA APLICADA"
+   ]
+  },
+  {
+   "id": "ml",
+   "grupo": "tic",
+   "nombre": "Machine learning y modelos predictivos",
+   "peso": 9,
+   "terminos": [
+    "APRENDIZAJE AUTOMATICO",
+    "MACHINE LEARNING",
+    "MODELO PREDICTIVO",
+    "APRENDIZAJE PROFUNDO",
+    "VISION POR COMPUTADOR"
+   ]
+  },
+  {
+   "id": "llm",
+   "grupo": "tic",
+   "nombre": "LLM, NLP e IA generativa",
+   "peso": 9,
+   "terminos": [
+    "MODELO DE LENGUAJE",
+    "PROCESAMIENTO DE LENGUAJE NATURAL",
+    "IA GENERATIVA",
+    "INTELIGENCIA ARTIFICIAL GENERATIVA"
+   ]
+  },
+  {
+   "id": "conversacional",
+   "grupo": "tic",
+   "nombre": "Chatbot y asistentes conversacionales",
+   "peso": 6,
+   "terminos": [
+    "CHATBOT",
+    "ASISTENTE VIRTUAL",
+    "AGENTE CONVERSACIONAL"
+   ]
+  },
+  {
+   "id": "ciencia-datos",
+   "grupo": "tic",
+   "nombre": "Ciencia y analitica de datos",
+   "peso": 9,
+   "terminos": [
+    "CIENCIA DE DATOS",
+    "ANALITICA DE DATOS",
+    "ANALITICA AVANZADA",
+    "ANALISIS DE DATOS"
+   ]
+  },
+  {
+   "id": "bi",
+   "grupo": "tic",
+   "nombre": "BI, tableros y visualizacion",
+   "peso": 8,
+   "terminos": [
+    "TABLERO DE CONTROL",
+    "DASHBOARD",
+    "POWER BI",
+    "VISUALIZACION DE DATOS",
+    "INTELIGENCIA DE NEGOCIOS",
+    "BUSINESS INTELLIGENCE"
+   ]
+  },
+  {
+   "id": "ingenieria-datos",
+   "grupo": "tic",
+   "nombre": "Ingenieria y arquitectura de datos",
+   "peso": 9,
+   "terminos": [
+    "INGENIERIA DE DATOS",
+    "ARQUITECTURA DE DATOS",
+    "BODEGA DE DATOS",
+    "DATA WAREHOUSE",
+    "LAGO DE DATOS",
+    "DATA LAKE",
+    "ETL"
+   ]
+  },
+  {
+   "id": "gobierno-datos",
+   "grupo": "tic",
+   "nombre": "Gobierno y calidad de datos",
+   "peso": 7,
+   "terminos": [
+    "GOBIERNO DE DATOS",
+    "GOBERNANZA DE DATOS",
+    "CALIDAD DE DATOS",
+    "GESTION DEL DATO"
+   ]
+  },
+  {
+   "id": "datos-abiertos",
+   "grupo": "tic",
+   "nombre": "Datos abiertos y estadistica",
+   "peso": 8,
+   "terminos": [
+    "DATOS ABIERTOS",
+    "OPERACION ESTADISTICA",
+    "ENCUESTA ESTADISTICA"
+   ]
+  },
+  {
+   "id": "fabrica-software",
+   "grupo": "tic",
+   "nombre": "Fabrica de software",
+   "peso": 9,
+   "terminos": [
+    "FABRICA DE SOFTWARE",
+    "CELULA DE DESARROLLO"
+   ],
+   "nota": "Termino de arte que costo SDP-LP-003-2026 ($5.528M) mientras no estuvo en la lista."
+  },
+  {
+   "id": "software-medida",
+   "grupo": "tic",
+   "nombre": "Software a la medida",
+   "peso": 9,
+   "terminos": [
+    "SOFTWARE A LA MEDIDA",
+    "DESARROLLO A LA MEDIDA"
+   ]
+  },
+  {
+   "id": "desarrollo",
+   "grupo": "tic",
+   "nombre": "Desarrollo de software y aplicativos",
+   "peso": 8,
+   "terminos": [
+    "DESARROLLO DE SOFTWARE",
+    "DESARROLLO DE APLICATIVO",
+    "CONSTRUCCION DE SOFTWARE"
+   ]
+  },
+  {
+   "id": "web",
+   "grupo": "tic",
+   "nombre": "Aplicaciones y desarrollo web",
+   "peso": 6,
+   "terminos": [
+    "APLICACION WEB",
+    "DESARROLLO WEB",
+    "PORTAL WEB",
+    "SITIO WEB"
+   ]
+  },
+  {
+   "id": "sistemas-informacion",
+   "grupo": "tic",
+   "nombre": "Sistemas de informacion y evolutivos",
+   "peso": 5,
+   "terminos": [
+    "SISTEMA DE INFORMACION",
+    "EVOLUTIVO"
+   ]
+  },
+  {
+   "id": "automatizacion",
+   "grupo": "tic",
+   "nombre": "Automatizacion de procesos",
+   "peso": 8,
+   "terminos": [
+    "AUTOMATIZACION DE PROCESOS",
+    "RPA",
+    "AUTOMATIZACION ROBOTICA"
+   ]
+  },
+  {
+   "id": "interoperabilidad",
+   "grupo": "tic",
+   "nombre": "Interoperabilidad e integracion",
+   "peso": 6,
+   "terminos": [
+    "INTEROPERABILIDAD",
+    "INTEGRACION DE SISTEMAS",
+    "SERVICIOS WEB",
+    "API"
+   ]
+  },
+  {
+   "id": "transformacion-digital",
+   "grupo": "tic",
+   "nombre": "Transformacion digital y gobierno digital",
+   "peso": 6,
+   "terminos": [
+    "TRANSFORMACION DIGITAL",
+    "GOBIERNO DIGITAL"
+   ]
+  },
+  {
+   "id": "ciberseguridad",
+   "grupo": "tic",
+   "nombre": "Ciberseguridad",
+   "peso": 7,
+   "terminos": [
+    "CIBERSEGURIDAD",
+    "SEGURIDAD DE LA INFORMACION",
+    "SEGURIDAD INFORMATICA",
+    "ETHICAL HACKING",
+    "SGSI"
+   ]
+  },
+  {
+   "id": "nube",
+   "grupo": "tic",
+   "nombre": "Nube e infraestructura TI",
+   "peso": 6,
+   "terminos": [
+    "SERVICIO DE NUBE",
+    "COMPUTACION EN LA NUBE",
+    "DATACENTER",
+    "CENTRO DE DATOS",
+    "SERVIDOR",
+    "HOSTING"
+   ]
+  },
+  {
+   "id": "hardware",
+   "grupo": "tic",
+   "nombre": "Equipos de computo y periferico",
+   "peso": 5,
+   "terminos": [
+    "COMPUTADOR",
+    "PORTATIL",
+    "IMPRESORA",
+    "ESCANER",
+    "TONER",
+    "SERVIDOR DE COMPUTO"
+   ]
+  },
+  {
+   "id": "licenciamiento",
+   "grupo": "tic",
+   "nombre": "Licenciamiento de software",
+   "peso": 5,
+   "terminos": [
+    "LICENCIA DE SOFTWARE",
+    "LICENCIAMIENTO",
+    "SUSCRIPCION DE SOFTWARE",
+    "OFFICE",
+    "ANTIVIRUS"
+   ]
+  },
+  {
+   "id": "soporte-ti",
+   "grupo": "tic",
+   "nombre": "Mesa de ayuda y soporte TI",
+   "peso": 5,
+   "terminos": [
+    "MESA DE AYUDA",
+    "SOPORTE TECNICO",
+    "MESA DE SERVICIO",
+    "HELP DESK"
+   ]
+  },
+  {
+   "id": "catastro",
+   "grupo": "tic",
+   "nombre": "Catastro, SIG y geomatica",
+   "peso": 7,
+   "terminos": [
+    "SISTEMA DE INFORMACION GEOGRAFICA",
+    "CATASTRO MULTIPROPOSITO",
+    "GEOMATICA",
+    "CARTOGRAFIA",
+    "FOTOGRAMETRIA",
+    "LIDAR"
+   ]
+  },
+  {
+   "id": "mobiliario-oficina",
+   "grupo": "mobiliario",
+   "nombre": "Mobiliario de oficina",
+   "peso": 9,
+   "terminos": [
+    "MOBILIARIO DE OFICINA",
+    "MUEBLE DE OFICINA",
+    "PUESTO DE TRABAJO",
+    "SILLA ERGONOMICA",
+    "ARCHIVADOR",
+    "ESCRITORIOS",
+    "ESCRITORIO GERENCIAL",
+    "ESCRITORIO EJECUTIVO"
+   ]
+  },
+  {
+   "id": "mobiliario-escolar",
+   "grupo": "mobiliario",
+   "nombre": "Mobiliario escolar",
+   "peso": 9,
+   "terminos": [
+    "MOBILIARIO ESCOLAR",
+    "PUPITRE",
+    "MESA ESCOLAR",
+    "SILLA UNIVERSITARIA",
+    "TABLERO ACRILICO"
+   ]
+  },
+  {
+   "id": "acrilico",
+   "grupo": "mobiliario",
+   "nombre": "Acrilico y polimeros",
+   "peso": 10,
+   "terminos": [
+    "ACRILICO",
+    "POLICARBONATO",
+    "PMMA",
+    "LAMINA ACRILICA"
+   ]
+  },
+  {
+   "id": "carpinteria",
+   "grupo": "mobiliario",
+   "nombre": "Carpinteria y madera",
+   "peso": 8,
+   "terminos": [
+    "CARPINTERIA",
+    "MADERA",
+    "DIVISION MODULAR",
+    "ENCHAPE EN MADERA",
+    "MUEBLE EN MADERA"
+   ]
+  },
+  {
+   "id": "metalmecanica",
+   "grupo": "mobiliario",
+   "nombre": "Metalmecanica y estructuras metalicas",
+   "peso": 8,
+   "terminos": [
+    "METALMECANICA",
+    "ESTRUCTURA METALICA",
+    "ESTANTERIA METALICA",
+    "LOCKER",
+    "CASILLERO",
+    "SOLDADURA"
+   ]
+  },
+  {
+   "id": "dotacion-mobiliario",
+   "grupo": "mobiliario",
+   "nombre": "Dotacion de espacios y adecuacion",
+   "peso": 7,
+   "terminos": [
+    "DOTACION DE MOBILIARIO",
+    "ADECUACION DE ESPACIOS",
+    "AMOBLAMIENTO",
+    "AMOBLAMIENTO URBANO"
+   ]
+  },
+  {
+   "id": "vitrinas",
+   "grupo": "mobiliario",
+   "nombre": "Vitrinas, exhibidores y displays",
+   "peso": 8,
+   "terminos": [
+    "VITRINA",
+    "EXHIBIDOR",
+    "DISPLAY",
+    "PORTAFOLLETO",
+    "URNA",
+    "ATRIL"
+   ]
+  },
+  {
+   "id": "senalizacion",
+   "grupo": "grafico",
+   "nombre": "Senalizacion y avisos",
+   "peso": 9,
+   "terminos": [
+    "SENALIZACION",
+    "AVISO",
+    "SENAL INFORMATIVA",
+    "VALLA",
+    "PENDON",
+    "SENALETICA"
+   ]
+  },
+  {
+   "id": "impresion",
+   "grupo": "grafico",
+   "nombre": "Impresion y litografia",
+   "peso": 8,
+   "terminos": [
+    "IMPRESION",
+    "LITOGRAFIA",
+    "PLOTTER",
+    "IMPRESION DIGITAL",
+    "ENCUADERNACION"
+   ]
+  },
+  {
+   "id": "material-pop",
+   "grupo": "grafico",
+   "nombre": "Material POP y promocional",
+   "peso": 7,
+   "terminos": [
+    "MATERIAL POP",
+    "MATERIAL PROMOCIONAL",
+    "SOUVENIR",
+    "ESCARAPELA",
+    "BOTON PUBLICITARIO"
+   ]
+  },
+  {
+   "id": "diseno-grafico",
+   "grupo": "grafico",
+   "nombre": "Diseno grafico y editorial",
+   "peso": 7,
+   "terminos": [
+    "DISENO GRAFICO",
+    "DIAGRAMACION",
+    "DISENO EDITORIAL",
+    "IDENTIDAD VISUAL"
+   ]
+  },
+  {
+   "id": "audiovisual",
+   "grupo": "grafico",
+   "nombre": "Produccion audiovisual",
+   "peso": 8,
+   "terminos": [
+    "PRODUCCION AUDIOVISUAL",
+    "CONTENIDO AUDIOVISUAL",
+    "POSPRODUCCION",
+    "PRODUCCION DE VIDEO",
+    "PIEZA AUDIOVISUAL",
+    "REALIZACION AUDIOVISUAL"
+   ]
+  },
+  {
+   "id": "publicidad",
+   "grupo": "grafico",
+   "nombre": "Publicidad y pauta",
+   "peso": 7,
+   "terminos": [
+    "PAUTA PUBLICITARIA",
+    "ESTRATEGIA DE COMUNICACION",
+    "CAMPANA PUBLICITARIA",
+    "FREE PRESS",
+    "COMUNITY MANAGER"
+   ]
+  },
+  {
+   "id": "dotacion-personal",
+   "grupo": "dotacion",
+   "nombre": "Dotacion de personal y uniformes",
+   "peso": 9,
+   "terminos": [
+    "DOTACION DE PERSONAL",
+    "UNIFORME",
+    "VESTUARIO",
+    "PRENDA DE VESTIR"
+   ]
+  },
+  {
+   "id": "calzado",
+   "grupo": "dotacion",
+   "nombre": "Calzado",
+   "peso": 8,
+   "terminos": [
+    "CALZADO",
+    "BOTA",
+    "ZAPATO"
+   ]
+  },
+  {
+   "id": "epp",
+   "grupo": "dotacion",
+   "nombre": "Elementos de proteccion personal",
+   "peso": 9,
+   "terminos": [
+    "ELEMENTO DE PROTECCION PERSONAL",
+    "EPP",
+    "CASCO DE SEGURIDAD",
+    "GUANTE DE SEGURIDAD",
+    "ARNES"
+   ]
+  },
+  {
+   "id": "textil",
+   "grupo": "dotacion",
+   "nombre": "Textiles y confeccion",
+   "peso": 8,
+   "terminos": [
+    "CONFECCION",
+    "TEXTIL",
+    "TELA",
+    "BORDADO",
+    "LENCERIA"
+   ]
+  },
+  {
+   "id": "deportivo",
+   "grupo": "dotacion",
+   "nombre": "Implementos deportivos y recreativos",
+   "peso": 7,
+   "terminos": [
+    "IMPLEMENTO DEPORTIVO",
+    "ELEMENTO DEPORTIVO",
+    "GIMNASIO",
+    "PARQUE BIOSALUDABLE",
+    "JUEGO INFANTIL"
+   ]
+  },
+  {
+   "id": "alimentos-suministro",
+   "grupo": "alimentos",
+   "nombre": "Suministro de alimentos",
+   "peso": 9,
+   "terminos": [
+    "SUMINISTRO DE ALIMENTO",
+    "VIVERES",
+    "MERCADO",
+    "PAQUETE ALIMENTARIO",
+    "CANASTA ALIMENTARIA"
+   ]
+  },
+  {
+   "id": "pae",
+   "grupo": "alimentos",
+   "nombre": "Alimentacion escolar (PAE)",
+   "peso": 10,
+   "terminos": [
+    "PROGRAMA DE ALIMENTACION ESCOLAR",
+    "PAE",
+    "RACION ESCOLAR",
+    "COMPLEMENTO ALIMENTARIO"
+   ]
+  },
+  {
+   "id": "catering",
+   "grupo": "alimentos",
+   "nombre": "Catering, refrigerios y eventos",
+   "peso": 8,
+   "terminos": [
+    "REFRIGERIO",
+    "CATERING",
+    "ALMUERZO",
+    "ESTACION DE CAFE",
+    "SERVICIO DE ALIMENTACION"
+   ]
+  },
+  {
+   "id": "cafeteria",
+   "grupo": "alimentos",
+   "nombre": "Cafeteria y restaurante",
+   "peso": 7,
+   "terminos": [
+    "CAFETERIA",
+    "RESTAURANTE",
+    "MENAJE",
+    "DOTACION DE COCINA"
+   ]
+  },
+  {
+   "id": "aseo",
+   "grupo": "suministros",
+   "nombre": "Aseo y cafeteria (insumos)",
+   "peso": 8,
+   "terminos": [
+    "ELEMENTO DE ASEO",
+    "INSUMO DE ASEO",
+    "PRODUCTO DE ASEO",
+    "DESINFECTANTE",
+    "PAPEL HIGIENICO"
+   ]
+  },
+  {
+   "id": "servicio-aseo",
+   "grupo": "suministros",
+   "nombre": "Servicio de aseo y limpieza",
+   "peso": 8,
+   "terminos": [
+    "SERVICIO DE ASEO",
+    "LIMPIEZA Y DESINFECCION",
+    "SERVICIO DE LIMPIEZA",
+    "MANTENIMIENTO LOCATIVO"
+   ]
+  },
+  {
+   "id": "papeleria",
+   "grupo": "suministros",
+   "nombre": "Papeleria y utiles de oficina",
+   "peso": 8,
+   "terminos": [
+    "PAPELERIA",
+    "UTIL DE OFICINA",
+    "UTIL ESCOLAR",
+    "KIT ESCOLAR",
+    "RESMA"
+   ]
+  },
+  {
+   "id": "ferreteria",
+   "grupo": "suministros",
+   "nombre": "Ferreteria",
+   "peso": 8,
+   "terminos": [
+    "FERRETERIA",
+    "MATERIAL DE FERRETERIA",
+    "HERRAMIENTA MENOR",
+    "INSUMO DE FERRETERIA"
+   ]
+  },
+  {
+   "id": "fumigacion",
+   "grupo": "suministros",
+   "nombre": "Fumigacion y control de plagas",
+   "peso": 8,
+   "terminos": [
+    "FUMIGACION",
+    "CONTROL DE PLAGA",
+    "DESRATIZACION",
+    "LAVADO DE TANQUE"
+   ]
+  },
+  {
+   "id": "obra-civil",
+   "grupo": "construccion",
+   "nombre": "Obra civil y edificaciones",
+   "peso": 9,
+   "terminos": [
+    "OBRA CIVIL",
+    "CONSTRUCCION DE",
+    "AMPLIACION Y ADECUACION",
+    "EDIFICACION",
+    "REFORZAMIENTO ESTRUCTURAL"
+   ]
+  },
+  {
+   "id": "mantenimiento-inmueble",
+   "grupo": "construccion",
+   "nombre": "Mantenimiento de infraestructura",
+   "peso": 8,
+   "terminos": [
+    "MANTENIMIENTO DE INFRAESTRUCTURA",
+    "MANTENIMIENTO LOCATIVO",
+    "REPARACION LOCATIVA",
+    "IMPERMEABILIZACION",
+    "CUBIERTA"
+   ]
+  },
+  {
+   "id": "vias",
+   "grupo": "construccion",
+   "nombre": "Vias y pavimentacion",
+   "peso": 9,
+   "terminos": [
+    "MEJORAMIENTO DE VIA",
+    "PAVIMENTACION",
+    "PLACA HUELLA",
+    "MANTENIMIENTO VIAL",
+    "PUENTE"
+   ]
+  },
+  {
+   "id": "acueducto",
+   "grupo": "construccion",
+   "nombre": "Acueducto, alcantarillado y PTAR",
+   "peso": 9,
+   "terminos": [
+    "ACUEDUCTO",
+    "ALCANTARILLADO",
+    "PTAR",
+    "AGUA POTABLE",
+    "AGUA RESIDUAL",
+    "POZO PROFUNDO"
+   ]
+  },
+  {
+   "id": "electrico",
+   "grupo": "construccion",
+   "nombre": "Redes electricas e iluminacion",
+   "peso": 8,
+   "terminos": [
+    "RED ELECTRICA",
+    "ALUMBRADO PUBLICO",
+    "SUBESTACION ELECTRICA",
+    "ILUMINACION",
+    "PLANTA ELECTRICA"
+   ]
+  },
+  {
+   "id": "interventoria",
+   "grupo": "construccion",
+   "nombre": "Interventoria y consultoria de obra",
+   "peso": 8,
+   "terminos": [
+    "INTERVENTORIA",
+    "ESTUDIO Y DISENO",
+    "CONSULTORIA DE OBRA",
+    "SUPERVISION TECNICA"
+   ]
+  },
+  {
+   "id": "vivienda",
+   "grupo": "construccion",
+   "nombre": "Vivienda y mejoramiento",
+   "peso": 8,
+   "terminos": [
+    "MEJORAMIENTO DE VIVIENDA",
+    "VIVIENDA DE INTERES SOCIAL",
+    "VIS",
+    "SUBSIDIO DE VIVIENDA"
+   ]
+  },
+  {
+   "id": "medicamentos",
+   "grupo": "salud",
+   "nombre": "Medicamentos",
+   "peso": 9,
+   "terminos": [
+    "MEDICAMENTO",
+    "FARMACEUTICO",
+    "INSUMO MEDICO"
+   ]
+  },
+  {
+   "id": "dispositivo-medico",
+   "grupo": "salud",
+   "nombre": "Dispositivos y equipo biomedico",
+   "peso": 9,
+   "terminos": [
+    "DISPOSITIVO MEDICO",
+    "EQUIPO BIOMEDICO",
+    "BIOMEDICO",
+    "MONITOR DE SIGNOS"
+   ]
+  },
+  {
+   "id": "servicio-salud",
+   "grupo": "salud",
+   "nombre": "Prestacion de servicios de salud",
+   "peso": 8,
+   "terminos": [
+    "SERVICIO DE SALUD",
+    "ATENCION EN SALUD",
+    "BRIGADA DE SALUD",
+    "PERSONAL ASISTENCIAL"
+   ]
+  },
+  {
+   "id": "laboratorio",
+   "grupo": "salud",
+   "nombre": "Laboratorio y reactivos",
+   "peso": 8,
+   "terminos": [
+    "REACTIVO",
+    "LABORATORIO CLINICO",
+    "TOMA DE MUESTRA",
+    "ANALISIS DE LABORATORIO"
+   ]
+  },
+  {
+   "id": "vacunacion",
+   "grupo": "salud",
+   "nombre": "Vacunacion y salud publica",
+   "peso": 8,
+   "terminos": [
+    "VACUNACION",
+    "VACUNA",
+    "SALUD PUBLICA",
+    "JORNADA DE SALUD"
+   ]
+  },
+  {
+   "id": "veterinaria",
+   "grupo": "salud",
+   "nombre": "Veterinaria y sanidad animal",
+   "peso": 7,
+   "terminos": [
+    "VETERINARIA",
+    "SANIDAD ANIMAL",
+    "ESTERILIZACION DE CANINO",
+    "BIENESTAR ANIMAL"
+   ]
+  },
+  {
+   "id": "capacitacion",
+   "grupo": "educacion",
+   "nombre": "Capacitacion y formacion",
+   "peso": 8,
+   "terminos": [
+    "CAPACITACION",
+    "CURSO DE FORMACION",
+    "DIPLOMADO",
+    "EDUCACION CONTINUA",
+    "TALLER DE FORMACION"
+   ]
+  },
+  {
+   "id": "apoyo-pedagogico",
+   "grupo": "educacion",
+   "nombre": "Apoyo pedagogico y docente",
+   "peso": 7,
+   "terminos": [
+    "APOYO PEDAGOGICO",
+    "DOCENTE",
+    "MATERIAL DIDACTICO",
+    "REFUERZO ESCOLAR"
+   ]
+  },
+  {
+   "id": "cultura",
+   "grupo": "educacion",
+   "nombre": "Cultura, arte y patrimonio",
+   "peso": 7,
+   "terminos": [
+    "ACTIVIDAD CULTURAL",
+    "EVENTO CULTURAL",
+    "PATRIMONIO CULTURAL",
+    "ARTISTICO",
+    "BIBLIOTECA"
+   ]
+  },
+  {
+   "id": "primera-infancia",
+   "grupo": "educacion",
+   "nombre": "Primera infancia y adulto mayor",
+   "peso": 7,
+   "terminos": [
+    "PRIMERA INFANCIA",
+    "ADULTO MAYOR",
+    "POBLACION VULNERABLE",
+    "DISCAPACIDAD"
+   ]
+  },
+  {
+   "id": "deporte",
+   "grupo": "educacion",
+   "nombre": "Deporte y recreacion",
+   "peso": 7,
+   "terminos": [
+    "ACTIVIDAD DEPORTIVA",
+    "ESCUELA DE FORMACION DEPORTIVA",
+    "RECREACION",
+    "JUEGOS DEPORTIVOS"
+   ]
+  },
+  {
+   "id": "transporte-servicio",
+   "grupo": "transporte",
+   "nombre": "Servicio de transporte",
+   "peso": 8,
+   "terminos": [
+    "SERVICIO DE TRANSPORTE",
+    "TRANSPORTE ESCOLAR",
+    "TRANSPORTE DE PERSONAL",
+    "ALQUILER DE VEHICULO"
+   ]
+  },
+  {
+   "id": "vehiculos",
+   "grupo": "transporte",
+   "nombre": "Compra de vehiculos",
+   "peso": 8,
+   "terminos": [
+    "ADQUISICION DE VEHICULO",
+    "CAMIONETA",
+    "MOTOCICLETA",
+    "AMBULANCIA",
+    "VOLQUETA"
+   ]
+  },
+  {
+   "id": "mantenimiento-vehicular",
+   "grupo": "transporte",
+   "nombre": "Mantenimiento automotor",
+   "peso": 8,
+   "terminos": [
+    "MANTENIMIENTO DE VEHICULO",
+    "MANTENIMIENTO AUTOMOTOR",
+    "LLANTA",
+    "REPUESTO AUTOMOTOR"
+   ]
+  },
+  {
+   "id": "combustible",
+   "grupo": "transporte",
+   "nombre": "Combustible",
+   "peso": 8,
+   "terminos": [
+    "COMBUSTIBLE",
+    "GASOLINA",
+    "ACPM",
+    "DIESEL"
+   ]
+  },
+  {
+   "id": "maquinaria",
+   "grupo": "transporte",
+   "nombre": "Maquinaria amarilla y agricola",
+   "peso": 8,
+   "terminos": [
+    "MAQUINARIA AMARILLA",
+    "RETROEXCAVADORA",
+    "MOTONIVELADORA",
+    "MAQUINARIA AGRICOLA",
+    "TRACTOR"
+   ]
+  },
+  {
+   "id": "ferroviario",
+   "grupo": "transporte",
+   "nombre": "Ferroviario",
+   "peso": 7,
+   "terminos": [
+    "FERROVIARIO",
+    "FERREO",
+    "FERREA",
+    "VIA FERREA",
+    "MATERIAL RODANTE"
+   ]
+  },
+  {
+   "id": "residuos",
+   "grupo": "ambiental",
+   "nombre": "Residuos y reciclaje",
+   "peso": 8,
+   "terminos": [
+    "RESIDUO SOLIDO",
+    "MANEJO DE RESIDUO",
+    "RECICLAJE",
+    "RELLENO SANITARIO",
+    "RESIDUO PELIGROSO"
+   ]
+  },
+  {
+   "id": "forestal",
+   "grupo": "ambiental",
+   "nombre": "Forestal y reforestacion",
+   "peso": 8,
+   "terminos": [
+    "REFORESTACION",
+    "FORESTAL",
+    "SILVICULTURA",
+    "TALA",
+    "PODA",
+    "MANTENIMIENTO DE ZONA VERDE"
+   ]
+  },
+  {
+   "id": "agricola",
+   "grupo": "ambiental",
+   "nombre": "Insumos y fomento agricola",
+   "peso": 8,
+   "terminos": [
+    "INSUMO AGRICOLA",
+    "FERTILIZANTE",
+    "SEMILLA",
+    "FOMENTO AGROPECUARIO",
+    "RIEGO"
+   ]
+  },
+  {
+   "id": "gestion-riesgo",
+   "grupo": "ambiental",
+   "nombre": "Gestion del riesgo y desastres",
+   "peso": 8,
+   "terminos": [
+    "GESTION DEL RIESGO",
+    "ATENCION DE DESASTRE",
+    "AYUDA HUMANITARIA",
+    "BOMBERO"
+   ]
+  },
+  {
+   "id": "monitoreo-ambiental",
+   "grupo": "ambiental",
+   "nombre": "Monitoreo y estudios ambientales",
+   "peso": 8,
+   "terminos": [
+    "MONITOREO AMBIENTAL",
+    "ESTUDIO AMBIENTAL",
+    "LICENCIA AMBIENTAL",
+    "CALIDAD DEL AIRE"
+   ]
+  },
+  {
+   "id": "juridico",
+   "grupo": "profesionales",
+   "nombre": "Juridico y contratacion",
+   "peso": 7,
+   "terminos": [
+    "APOYO JURIDICO",
+    "ASESORIA JURIDICA",
+    "DEFENSA JUDICIAL",
+    "CONTRATACION ESTATAL"
+   ]
+  },
+  {
+   "id": "contable",
+   "grupo": "profesionales",
+   "nombre": "Contable, financiero y tributario",
+   "peso": 7,
+   "terminos": [
+    "APOYO CONTABLE",
+    "REVISORIA FISCAL",
+    "ASESORIA TRIBUTARIA",
+    "ESTADO FINANCIERO"
+   ]
+  },
+  {
+   "id": "consultoria",
+   "grupo": "profesionales",
+   "nombre": "Consultoria y estudios",
+   "peso": 7,
+   "terminos": [
+    "CONSULTORIA",
+    "ESTUDIO TECNICO",
+    "DIAGNOSTICO INSTITUCIONAL",
+    "FORMULACION DE PROYECTO"
+   ]
+  },
+  {
+   "id": "talento",
+   "grupo": "profesionales",
+   "nombre": "Talento humano y nomina",
+   "peso": 7,
+   "terminos": [
+    "TALENTO HUMANO",
+    "SELECCION DE PERSONAL",
+    "NOMINA",
+    "TEMPORAL DE SERVICIOS",
+    "SST",
+    "SEGURIDAD Y SALUD EN EL TRABAJO"
+   ]
+  },
+  {
+   "id": "archivo",
+   "grupo": "profesionales",
+   "nombre": "Gestion documental y archivo",
+   "peso": 7,
+   "terminos": [
+    "GESTION DOCUMENTAL",
+    "ARCHIVO HISTORICO",
+    "DIGITALIZACION DE EXPEDIENTE",
+    "TABLA DE RETENCION DOCUMENTAL",
+    "FONDO DOCUMENTAL"
+   ]
+  },
+  {
+   "id": "logistica-eventos",
+   "grupo": "profesionales",
+   "nombre": "Logistica de eventos",
+   "peso": 7,
+   "terminos": [
+    "LOGISTICA DE EVENTO",
+    "ORGANIZACION DE EVENTO",
+    "MONTAJE DE EVENTO",
+    "SONIDO Y TARIMA"
+   ]
+  },
+  {
+   "id": "seguros",
+   "grupo": "profesionales",
+   "nombre": "Seguros",
+   "peso": 7,
+   "terminos": [
+    "SEGURO",
+    "POLIZA",
+    "CORREDOR DE SEGUROS",
+    "ASEGURAMIENTO"
+   ]
+  },
+  {
+   "id": "vigilancia",
+   "grupo": "profesionales",
+   "nombre": "Vigilancia y seguridad privada",
+   "peso": 8,
+   "terminos": [
+    "VIGILANCIA",
+    "SEGURIDAD PRIVADA",
+    "CIRCUITO CERRADO DE TELEVISION",
+    "CCTV",
+    "CONTROL DE ACCESO"
+   ]
+  },
+  {
+   "id": "call-center",
+   "grupo": "profesionales",
+   "nombre": "Call center y omnicanalidad",
+   "peso": 6,
+   "terminos": [
+    "OMNICANAL",
+    "CALL CENTER",
+    "CONTACT CENTER",
+    "CENTRO DE CONTACTO"
+   ]
+  },
+  {
+   "id": "conectividad",
+   "grupo": "energia",
+   "nombre": "Conectividad e internet",
+   "peso": 8,
+   "terminos": [
+    "SERVICIO DE INTERNET",
+    "CONECTIVIDAD",
+    "FIBRA OPTICA",
+    "ENLACE DEDICADO",
+    "CANAL DE DATOS"
+   ]
+  },
+  {
+   "id": "telefonia",
+   "grupo": "energia",
+   "nombre": "Telefonia y radiocomunicacion",
+   "peso": 7,
+   "terminos": [
+    "TELEFONIA",
+    "PLAN DE DATOS",
+    "RADIOCOMUNICACION",
+    "RADIO DE COMUNICACION"
+   ]
+  },
+  {
+   "id": "cableado",
+   "grupo": "energia",
+   "nombre": "Cableado estructurado y redes",
+   "peso": 7,
+   "terminos": [
+    "CABLEADO ESTRUCTURADO",
+    "RED LAN",
+    "SWITCH",
+    "ACCESS POINT"
+   ]
+  },
+  {
+   "id": "energia-renovable",
+   "grupo": "energia",
+   "nombre": "Energia solar y renovable",
+   "peso": 8,
+   "terminos": [
+    "PANEL SOLAR",
+    "ENERGIA SOLAR",
+    "ENERGIA RENOVABLE",
+    "FOTOVOLTAICO"
+   ]
+  },
+  {
+   "id": "aire",
+   "grupo": "energia",
+   "nombre": "Aire acondicionado y refrigeracion",
+   "peso": 7,
+   "terminos": [
+    "AIRE ACONDICIONADO",
+    "REFRIGERACION",
+    "SISTEMA DE VENTILACION",
+    "CUARTO FRIO"
+   ]
+  },
+  {
+   "id": "mantenimiento",
+   "grupo": "compra",
+   "nombre": "Mantenimiento y soporte",
+   "peso": -6,
+   "terminos": [
+    "MANTENIMIENTO",
+    "SOPORTE",
+    "OPERATIVIDAD",
+    "OPERACION",
+    "RENOVACION"
+   ]
+  },
+  {
+   "id": "suministro",
+   "grupo": "compra",
+   "nombre": "Suministro y compra de producto",
+   "peso": -7,
+   "terminos": [
+    "SUMINISTRO",
+    "ADQUISICION",
+    "COMPRA",
+    "COMPRAVENTA"
+   ]
+  },
+  {
+   "id": "arrendamiento",
+   "grupo": "compra",
+   "nombre": "Arrendamiento",
+   "peso": -6,
+   "terminos": [
+    "ARRENDAMIENTO",
+    "ALQUILER"
+   ]
+  },
+  {
+   "id": "licencia-compra",
+   "grupo": "compra",
+   "nombre": "Licencia y suscripcion",
+   "peso": -4,
+   "terminos": [
+    "LICENCIA",
+    "SUSCRIPCION"
+   ]
+  }
+ ],
+ "senal_fuerte": 8,
+ "perfiles": {
+  "metrik": {
+   "nombre": "MeTRIK — tecnologia, datos e IA",
+   "temas": [
+    "ia-nucleo",
+    "ml",
+    "llm",
+    "ciencia-datos",
+    "bi",
+    "ingenieria-datos",
+    "gobierno-datos",
+    "datos-abiertos",
+    "fabrica-software",
+    "software-medida",
+    "desarrollo",
+    "automatizacion",
+    "interoperabilidad",
+    "transformacion-digital",
+    "audiovisual",
+    "ferroviario",
+    "call-center",
+    "capacitacion",
+    "archivo",
+    "mantenimiento",
+    "suministro",
+    "sistemas-informacion",
+    "ciberseguridad",
+    "catastro"
+   ],
+   "pesos": {
+    "audiovisual": -8,
+    "ferroviario": -8,
+    "call-center": -5,
+    "capacitacion": -4,
+    "archivo": -4,
+    "ciberseguridad": 7
+   },
+   "exclusiones": {
+    "stems": [
+     "VACUN",
+     "FUMIGAC",
+     "AGUA RESIDUAL",
+     "AGUA POTABLE",
+     "MEDICINAL",
+     "BIOMEDICO",
+     "ACUEDUCTO",
+     "CAPTACION"
+    ],
+    "palabras": [
+     "EXAMEN",
+     "VIAL",
+     "OBRA",
+     "MURO",
+     "PTAR",
+     "ASEO",
+     "CAFETERIA",
+     "PARQUEADERO",
+     "COMBUSTIBLE",
+     "ALIMENTACION",
+     "REFRIGERIO",
+     "DOTACION",
+     "PAPELERIA",
+     "SENALIZACION",
+     "PINTURA",
+     "JARDIN",
+     "BOMBEO",
+     "POZO",
+     "RIEGO",
+     "ELECTRICO"
+    ]
+   }
+  },
+  "mobiliario": {
+   "nombre": "Mobiliario, acrilicos y metalmecanica",
+   "temas": [
+    "acrilico",
+    "mobiliario-oficina",
+    "mobiliario-escolar",
+    "carpinteria",
+    "metalmecanica",
+    "dotacion-mobiliario",
+    "vitrinas",
+    "senalizacion",
+    "ferreteria",
+    "mantenimiento"
+   ],
+   "pesos": {},
+   "exclusiones": {
+    "stems": [],
+    "palabras": []
+   }
+  },
+  "fabri": {
+   "nombre": "Fabri — acrilicos, exhibicion y mobiliario",
+   "temas": [
+    "acrilico",
+    "vitrinas",
+    "mobiliario-oficina",
+    "mobiliario-escolar",
+    "dotacion-mobiliario",
+    "carpinteria",
+    "metalmecanica",
+    "senalizacion",
+    "impresion",
+    "material-pop"
+   ],
+   "pesos": {
+    "acrilico": 10,
+    "vitrinas": 9,
+    "dotacion-mobiliario": 8,
+    "senalizacion": 7,
+    "material-pop": 6,
+    "impresion": 5
+   },
+   "exclusiones": {
+    "stems": [
+     "SENALIZACION VIAL",
+     "DEMARCACION VIAL",
+     "SENALIZACION HORIZONTAL",
+     "INTERVENTORIA",
+     "ACUEDUCTO",
+     "ALCANTARILLADO",
+     "MEDICAMENTO"
+    ],
+    "palabras": [
+     "PAVIMENTACION",
+     "COMBUSTIBLE",
+     "VIGILANCIA",
+     "ASEO",
+     "CAFETERIA",
+     "ALIMENTACION",
+     "VACUNACION"
+    ]
+   }
+  },
+  "construccion": {
+   "nombre": "Construccion e infraestructura",
+   "temas": [
+    "obra-civil",
+    "mantenimiento-inmueble",
+    "vias",
+    "acueducto",
+    "electrico",
+    "interventoria",
+    "vivienda"
+   ],
+   "pesos": {},
+   "exclusiones": {
+    "stems": [],
+    "palabras": []
+   }
+  },
+  "dotacion": {
+   "nombre": "Dotacion, textiles y EPP",
+   "temas": [
+    "dotacion-personal",
+    "calzado",
+    "epp",
+    "textil",
+    "deportivo",
+    "suministro"
+   ],
+   "pesos": {},
+   "exclusiones": {
+    "stems": [],
+    "palabras": []
+   }
+  },
+  "alimentos": {
+   "nombre": "Alimentos y alimentacion institucional",
+   "temas": [
+    "alimentos-suministro",
+    "pae",
+    "catering",
+    "cafeteria"
+   ],
+   "pesos": {},
+   "exclusiones": {
+    "stems": [],
+    "palabras": []
+   }
+  },
+  "salud": {
+   "nombre": "Salud y dispositivos medicos",
+   "temas": [
+    "medicamentos",
+    "dispositivo-medico",
+    "servicio-salud",
+    "laboratorio",
+    "vacunacion"
+   ],
+   "pesos": {},
+   "exclusiones": {
+    "stems": [],
+    "palabras": []
+   }
+  },
+  "vacio": {
+   "nombre": "Empezar en blanco",
+   "temas": [],
+   "pesos": {},
+   "exclusiones": {
+    "stems": [],
+    "palabras": []
+   }
+  }
+ },
+ "descartes_de_pliego": [
+  "pago unico al final",
+  "multiples perfiles certificados",
+  "stack propietario ajeno al core",
+  "financiar costos variables",
+  "oferentes diciendo presupuesto insuficiente",
+  "experiencia habilitante ~ 100% del presupuesto",
+  "ejecucion presencial con horario de oficina"
+ ],
+ "sin_rup": [
+  "Mínima cuantía",
+  "Solicitud de información a los Proveedores"
+ ],
+ "tipos_compra": [
+  "Compraventa",
+  "Suministro"
+ ]
+}
