@@ -39,6 +39,7 @@ import {
   KeyRound,
   CreditCard,
   Wrench,
+  Brain,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
@@ -322,6 +323,7 @@ const WORKFLOWS_NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { href: '/admin/proceso',   label: 'Proceso',    icon: GitFork,  roles: ['owner'] },
   { href: '/admin/skills',    label: 'Skills',     icon: Blocks,   roles: ['owner'] },
+  { href: '/admin/cerebro',   label: 'Cerebro',    icon: Brain,    roles: ['owner'] },
   { href: '/admin/mibolsillo',label: 'Mi Bolsillo',icon: Activity, roles: ['owner'] },
 ]
 
