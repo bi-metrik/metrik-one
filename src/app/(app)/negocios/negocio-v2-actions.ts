@@ -52,6 +52,7 @@ import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itiner
 import { cascadaDeItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itinerarios'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplanarBloques, calcularNiveles, mensajeMinimoIncompleto } from '@/lib/negocios/niveles-solicitud'
+import { confirmarSugeridoEnData, soltarSugeridosEditados } from '@/lib/negocios/sugeridos'
 import {
   modoCierre,
   MENSAJE_ACCION_PROPIA,
@@ -4320,6 +4321,8 @@ export async function marcarBloqueCompleto(
   // exportada es un endpoint alcanzable aunque ningún botón la invoque. No hace nada en
   // un bloque que no declare la composición del viaje (ver `mayusculas.ts`).
   mergedData = mayusculasDeBloqueDeViaje(configExtraBloque.fields, mergedData)
+  // Un valor sugerido desde WhatsApp que la persona cambió deja de ser sugerido (ver `sugeridos.ts`).
+  mergedData = soltarSugeridosEditados(currentData, mergedData)
 
   // ── Tarifa UPME confirmada ────────────────────────────────────────────────
   // Barrera real del número que se guarda: la pantalla ya avisa mientras se escribe,
@@ -5071,7 +5074,8 @@ export async function actualizarBloqueData(
   // una corrección: exige el opt-in `corregir_campos_gerencial` del bloque y deja
   // marca de quién y cuándo. El área ya la validó el guard de arriba.
   const corr = await contextoCorreccion(supabase, negocioBloqueId)
-  let dataFinal = dataSaneada
+  // Un valor sugerido desde WhatsApp que la persona cambió deja de ser sugerido (ver `sugeridos.ts`).
+  let dataFinal = soltarSugeridosEditados(dataDestino ?? {}, dataSaneada)
   let cambiosCorreccion: CampoCorregido[] = []
   let nombreCorrector: string | null = null
   if (corr?.esPostAvance) {
@@ -5086,7 +5090,7 @@ export async function actualizarBloqueData(
     if (!esCausaValida(causa) || !sesionId) {
       return { error: 'Indica por qué se corrige antes de guardar' }
     }
-    const estampado = await estamparEdiciones(supabase, userId, corr.dataPrevia, dataSaneada)
+    const estampado = await estamparEdiciones(supabase, userId, corr.dataPrevia, dataFinal)
     dataFinal = estampado.data
     cambiosCorreccion = estampado.cambios
     nombreCorrector = estampado.nombre
@@ -9043,3 +9047,31 @@ export async function quitarResponsable(
 
 // Constantes de cierre movidas a src/lib/negocios/constants.ts para evitar
 // error "use server file can only export async functions"
+
+/**
+ * La persona confirma un valor sugerido desde WhatsApp tal cual: se quita la marca y el valor
+ * se queda. Mismo guard que cualquier escritura del bloque. Ver `lib/negocios/sugeridos.ts`.
+ */
+export async function confirmarSugerido(negocioBloqueId: string, slug: string): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
+  const { data: fila, error: errLeer } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data')
+    .eq('id', destinoId)
+    .single()
+  if (errLeer) return { error: `No se pudo leer el bloque: ${errLeer.message}` }
+  const actual = ((fila as { data: Record<string, unknown> | null } | null)?.data ?? {})
+  const nueva = confirmarSugeridoEnData(actual, slug)
+  if (nueva === actual) return { error: null }
+  const { error: errEsc } = await db(supabase)
+    .from('negocio_bloques')
+    .update({ data: nueva, updated_at: new Date().toISOString() })
+    .eq('id', destinoId)
+  if (errEsc) return { error: (errEsc as { message: string }).message }
+  return { error: null }
+}

@@ -8,6 +8,7 @@ import {
   huecos,
   interpretarRespuestaContacto,
   instruccionesEntendimiento,
+  mayusculasDeViaje,
   mensajeAlComercial,
   resumenEntendido,
   aplicarSumas,
@@ -214,5 +215,13 @@ describe('el contacto: exacto o se pregunta', () => {
     expect(interpretarRespuestaContacto('Nuevo', [])).toEqual({ tipo: 'nuevo' });
     expect(interpretarRespuestaContacto('300 999 8877', [])).toEqual({ tipo: 'telefono', telefono: '3009998877' });
     expect(interpretarRespuestaContacto('la de siempre', [ana])).toEqual({ tipo: 'no_entendida' });
+  });
+});
+
+describe('mayúsculas del bloque de viaje', () => {
+  it('el texto sugerido entra en mayúscula, como lo guarda la pantalla; los correos no', () => {
+    const r = mayusculasDeViaje(FIELDS, { destino: 'Punta Cana', edades_menores: 'a@b.co', adultos: 2 });
+    expect(r).toEqual({ destino: 'PUNTA CANA', edades_menores: 'a@b.co', adultos: 2 });
+    expect(mayusculasDeViaje([{ slug: 'destino', tipo: 'texto' }], { destino: 'x' })).toEqual({ destino: 'x' });
   });
 });

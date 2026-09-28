@@ -257,6 +257,22 @@ export function fusionarSugeridos(
   return { data: out, escritos, respetados };
 }
 
+/**
+ * El texto libre del bloque que captura el viaje se guarda en MAYÚSCULA (misma regla que
+ * `src/lib/negocios/mayusculas.ts`: bloque con adultos/niños/infantes, campos `texto`, salvo
+ * lo que lleve «@»). Si el sugerido entrara en minúscula, el primer guardado de la pantalla lo
+ * cambiaría y parecería editado por una persona.
+ */
+export function mayusculasDeViaje(fields: ReadonlyArray<CampoEntendible>, data: Record<string, unknown>): Record<string, unknown> {
+  if (!fields.some(f => ['adultos', 'ninos', 'infantes'].includes(f.slug))) return data;
+  const out = { ...data };
+  for (const f of fields) {
+    const v = out[f.slug];
+    if (f.tipo === 'texto' && typeof v === 'string' && !v.includes('@')) out[f.slug] = v.toLocaleUpperCase('es-CO');
+  }
+  return out;
+}
+
 /** `suma_de` recalculado (misma regla que `campo-suma.ts`: sin ninguna fuente, no se toca). */
 export function aplicarSumas(fields: ReadonlyArray<CampoEntendible>, valores: Record<string, unknown>): Record<string, unknown> {
   let r = valores;

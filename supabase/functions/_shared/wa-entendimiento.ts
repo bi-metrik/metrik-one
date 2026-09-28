@@ -24,6 +24,7 @@ import {
   huecos,
   instruccionesEntendimiento,
   interpretarRespuestaContacto,
+  mayusculasDeViaje,
   mensajeAlComercial,
   palabrasDeBusqueda,
   resumenEntendido,
@@ -213,7 +214,7 @@ async function crearNegocio(
     for (const f of fields) if (f.default !== undefined) data[f.slug] = f.default;
     if (b.tipo === 'datos') {
       data = fusionarSugeridos(data, fields, p.salida.sugeridos, { entrega_id: p.entregaId, en }).data;
-      data = aplicarSumas(fields, data);
+      data = mayusculasDeViaje(fields, aplicarSumas(fields, data));
       valores = { ...data, ...valores };
     }
     return { negocio_id: negocioId, bloque_config_id: b.id, estado: 'pendiente', data };
@@ -270,7 +271,8 @@ async function cerrarConNegocio(
   }
   const h = huecos(cfg.fields, r.valores);
   const msg = mensajeAlComercial({
-    resumen: resumenEntendido(cfg.fields, r.valores),
+    // El resumen con lo que el comercial dijo, no con la mayúscula del bloque.
+    resumen: resumenEntendido(cfg.fields, { ...r.valores, ...Object.fromEntries(Object.entries(salida.sugeridos).map(([k, v]) => [k, v.valor])) }),
     faltanMinimo: h.minimo.faltan,
     enlace: enlaceNegocio(cfg.slug, r.negocioId),
   });
