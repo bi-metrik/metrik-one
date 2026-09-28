@@ -233,12 +233,7 @@ export function FerreteriaCliente({
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
-                            {f.foto ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={f.foto} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded border bg-muted object-contain" />
-                            ) : (
-                              <div className="h-10 w-10 shrink-0 rounded border bg-muted" aria-hidden />
-                            )}
+                            <Miniatura foto={f.foto} />
                             <div className="min-w-0">
                               <div>{f.producto}</div>
                               <div className="text-xs text-muted-foreground">{f.sku}{f.marca ? ` · ${f.marca}` : ''}{f.linea ? ` · ${etiquetaLinea(f.linea)}` : ''}</div>
@@ -331,7 +326,19 @@ export function FerreteriaCliente({
                     COLUMNAS_CONV,
                   ).map((f) => (
                       <tr key={f.id} className="border-t">
-                        <td className="whitespace-nowrap px-3 py-1.5">{f.codigo}</td>
+                        <td className="px-3 py-1.5">
+                          <div className="flex min-w-[11rem] max-w-xs items-center gap-2.5">
+                            <Miniatura foto={f.foto} />
+                            <div className="min-w-0">
+                              <Link href={`/ferreteria/${encodeURIComponent(f.codigo)}`} className="block whitespace-nowrap text-xs text-muted-foreground hover:underline">
+                                {f.codigo}
+                              </Link>
+                              <div className="line-clamp-2 break-words leading-snug" title={f.titulo || undefined}>
+                                {f.titulo || <span className="text-muted-foreground">Sin título</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{f.clics ?? '—'}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{f.conversaciones}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{f.clics ? pct(f.conversaciones / f.clics) : '—'}</td>
@@ -345,6 +352,13 @@ export function FerreteriaCliente({
       )}
     </div>
   )
+}
+
+/** Miniatura cuadrada de 40 px: la primera foto del producto o un recuadro neutro si no tiene. */
+function Miniatura({ foto }: { foto: string | null }) {
+  if (!foto) return <div className="h-10 w-10 shrink-0 rounded-md border bg-muted" aria-hidden />
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={foto} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded-md border bg-muted object-contain" />
 }
 
 function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detalle?: string }) {
