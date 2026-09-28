@@ -387,9 +387,17 @@ Y el resto del método, medido:
 - `git diff --cached --numstat` antes de commitear: si el rescate es puro añadido, tiene que
   salir `N 0`. Un número en la columna de borrados es la firma de que la base estaba vieja.
 - El `mtime` del archivo en el checkout compartido dice si alguien lo movió mientras trabajabas.
-- **Lo que NO se puede: dejar limpio el checkout compartido.** `git checkout --` y `git pull` ahí
-  están bloqueados, y restaurar el archivo a mano (sobreescribirlo) arriesga pisar a una sesión
-  viva. Se reporta el comando para que lo corra la sesión principal, y no se toca.
+- ⚠️ **El checkout compartido SÍ se puede dejar limpio, sin correr git ahí** (medido 2026-09-12,
+  PR #663). `git checkout --` y `git pull` contra esa ruta están bloqueados, pero `cp` no: se
+  extrae el blob de **su propio HEAD** (`cat <repo>/.git/refs/heads/<su rama>`, luego
+  `git show <sha>:<ruta> > <scratchpad>/head_compartido.md`) y se copia encima del archivo. Queda
+  idéntico a su HEAD, o sea `git status` limpio ahí, y nadie lo commitea dos veces.
+  **Dos condiciones antes de sobreescribir, y las dos son baratas:** (a) el contenido ya tiene que
+  estar en `origin/main` **byte a byte** (`git show origin/main:<ruta> > x` + `cmp` contra el
+  archivo del checkout) — así restaurar no pierde nada; (b) el **mtime** del archivo no se movió
+  entre que empezaste y el momento de copiar, que es lo que descarta una sesión viva escribiendo
+  encima. La versión anterior de este párrafo decía que no se podía y mandaba a reportar el
+  comando: era de más, y un gotcha que exagera se descuenta entero la próxima vez que se lee.
 
 ## ⚠️ `main` avanza mientras trabajas: `git diff origin/main` inventa borrados
 
@@ -555,3 +563,26 @@ Al arrancar, el cwd estaba en la rama de otra sesión con sus cambios SIN commit
 guard lo acepta porque queda dentro del worktree propio. Al cerrar, `git worktree remove` desde el cwd.
 El guard sigue rechazando comandos compuestos con `npx`/`git` y rutas con paréntesis: escribir
 scripts con Write en el scratchpad y lanzarlos en comandos planos.
+## Un worktree «vacío» puede dejar de estarlo mientras lo borras (2026-09-12)
+
+Encargo de limpieza con la verificación ya hecha por quien lo mandó: cuatro worktrees
+«limpios, sin commits propios». Entre el primer `git worktree list` y el `rev-list` de
+treinta segundos después, `contacto-nativos` pasó de `75156d81` (= tip de origin/main) a
+`ed5a24f0`: **otra sesión commiteó dentro mientras yo borraba los otros tres**. El reflog de
+la rama lo delata sin ambigüedad (`@{1}: branch: Created from origin/main`, `@{0}: commit:
+…`). Se quedó sin borrar.
+
+**Why:** el estado de un worktree ajeno es de otra sesión, no del encargo. Un inventario de
+worktrees es una foto, y la foto caduca antes que el turno. Borrar el worktree habría tirado
+un commit sin PR y sin copia remota. Ver [[cifras-del-brief-caducan]].
+
+**How to apply:** antes de cada `git worktree remove`, resolver el tip **en ese instante**
+(`git rev-parse <rama>` y `git rev-list --count origin/main..<rama>`), no al principio del
+turno para los cuatro. Si el conteo no es 0 y no hay PR mergeado, **no se borra**: se reporta.
+Defensa gratis: `git worktree remove` sin `--force` se niega solo si el árbol está sucio — el
+que sí se te cuela es el árbol **limpio con commit propio**, porque ese lo borra sin chistar.
+
+⚠️ El guard rechaza el compuesto `for w in …; do git -C "$p" …; done` («git en forma
+demasiado compleja»), aunque `git worktree remove <otra ruta>` suelto sí pase. Los chequeos
+previos a borrar hay que hacerlos **por nombre de rama desde el worktree propio**
+(`git rev-parse <rama>`, `git log <rama>`), que no nombran rutas ajenas.

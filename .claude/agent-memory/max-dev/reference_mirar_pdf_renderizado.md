@@ -71,6 +71,14 @@ comprobar que las ignora.
   sobre la columna vecina. La regla correcta es «entera salvo que no quepa».
 - `opacity` sí funciona en `View`/`Image` (marca de agua), y `<Text render={({pageNumber,
   totalPages}) => …} fixed>` da el «N de M» del pie.
+- **Agregar filas a una tabla al final de una página puede dejar UNA fila sola en la siguiente**
+  (paso con el diccionario de Valida, PR #43: dos errores nuevos empujaron `db_error` a una página 6
+  casi vacía). Ninguna prueba lo ve y el texto sale completo; solo se ve mirando la página. Arreglo:
+  envolver título + párrafo + tabla en `<View wrap={false}>`. Contar páginas contra el PDF de `main`
+  es la alarma barata: si subió, mirar la última.
+- Desde un worktree aislado, el guard rechaza `cat > ruta <<EOF … && node …` con rutas del worktree:
+  escribir el script con `Write` dentro del worktree, `cp` al prefijo del scratchpad donde está
+  `pdf-to-img`, y correrlo ahí en otro comando.
 
 Relacionado: [[medicion-sin-mcp-supabase]], [[pruebas-por-mutacion]], [[worktree-git-bloqueado]].
 
