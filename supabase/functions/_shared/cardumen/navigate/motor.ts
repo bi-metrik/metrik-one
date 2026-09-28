@@ -19,7 +19,7 @@
 // Antes del modelo hay una capa determinista (`meta.ts`): vacio, pregunta de vuelta y
 // negativa nunca llegan al lector como si fueran una respuesta.
 //
-// Y antes de todo eso, el filtro (`filtro.ts`). Navigate captura historias anonimas; no es un canal
+// Y antes de todo eso, el filtro (`filtro.ts`). Navigate captura historias confidenciales; no es un canal
 // de ayuda y ningun texto promete ayuda ni que una persona lea la conversacion. Un mensaje personal
 // de riesgo (SEN) se aparta del estudio: no se ubica, no queda en el historial, se cuenta en
 // `integridad` como "no integrable: mensaje personal fuera del tema" y las preguntas quedan en

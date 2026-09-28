@@ -2,7 +2,7 @@
 //
 // Lo que se fija aqui (brief del 2026-09-24, benchmark del lector golden v0):
 //   1. un mensaje personal de riesgo (SEN) NO llega al lector, NO ubica nada, recibe el texto fijo
-//      (estudio anonimo, no canal de ayuda), deja la sesion en pausa y queda contado como "no
+//      (estudio confidencial, no canal de ayuda), deja la sesion en pausa y queda contado como "no
 //      integrable: mensaje personal fuera del tema" (G28; decision de Mauricio, 2026-09-27);
 //   2. si el filtro falla o devuelve algo invalido, texto neutro para repetir: nunca se trata como SEN;
 //   3. manipulacion (G29) y fuera de tema (codigo, tareas, opinion, ventas, rol, "olvida lo
@@ -603,7 +603,7 @@ describe('G19: pedir saltar es no_gradua', () => {
 describe('banco de textos fijos', () => {
   it('el texto del mensaje personal es exactamente el aprobado, con *seguir* y *salir*', () => {
     expect(BANCO.personal).toBe(
-      'Gracias por contármelo. Este es un estudio anónimo, no un canal de ayuda. ¿Quiere seguir o prefiere terminar? Escriba *seguir* o *salir*.',
+      'Gracias por contármelo. Este es un estudio confidencial, no un canal de ayuda. ¿Quiere seguir o prefiere terminar? Escriba *seguir* o *salir*.',
     );
   });
 

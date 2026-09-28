@@ -4,11 +4,11 @@
 // antes de leerlo como respuesta. Cinco salidas, en orden de prioridad:
 //
 //   SEN  mensaje personal de riesgo (autolesion, violencia en curso, abuso, menor en peligro).
-//        Navigate captura historias anonimas y NO es un canal de ayuda (decision de Mauricio,
+//        Navigate captura historias confidenciales y NO es un canal de ayuda (decision de Mauricio,
 //        2026-09-27): el bot no promete ayuda ni que alguien lo lea. El mensaje se APARTA del
 //        estudio: no se llama al lector, no se ubica nada, no se guarda en el historial y queda
 //        contado para el analisis como "no integrable: mensaje personal fuera del tema". Se
-//        responde con un texto fijo que dice que el estudio es anonimo y no es un canal de ayuda,
+//        responde con un texto fijo que dice que el estudio es confidencial y no es un canal de ayuda,
 //        y las preguntas quedan en pausa hasta que la persona escriba *seguir* o *salir*.
 //   INJ  intento de manipular al asistente (darle ordenes, cambiarle el rol, dictarle que marcar).
 //   FT   pedido ajeno al estudio (codigo, tareas, preguntas generales, opinion del bot, ventas,
@@ -156,11 +156,11 @@ export function mensajeParaClasificar(texto: string): string {
 // ---- Banco de textos fijos --------------------------------------------------------------
 //
 // Ningun texto de aqui sale del modelo. Ninguno promete ayuda ni que una persona lea la
-// conversacion: el estudio es anonimo y no es un canal de ayuda.
+// conversacion: el estudio es confidencial y no es un canal de ayuda.
 
 export const BANCO = {
   // Mensaje personal (SEN): se aparta del estudio y las preguntas quedan en pausa.
-  personal: "Gracias por contármelo. Este es un estudio anónimo, no un canal de ayuda. ¿Quiere seguir o prefiere terminar? Escriba *seguir* o *salir*.",
+  personal: "Gracias por contármelo. Este es un estudio confidencial, no un canal de ayuda. ¿Quiere seguir o prefiere terminar? Escriba *seguir* o *salir*.",
   pausaSigue: "Las preguntas siguen en pausa. Escriba *seguir* para continuar o *salir* para terminar.",
   retomar: "Seguimos donde íbamos:",
   fueraDeTema: [
