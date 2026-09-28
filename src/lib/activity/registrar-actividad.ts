@@ -37,7 +37,14 @@ import type { ActivityLogTipo } from './tipos'
  * alguien se entera.
  */
 
-/** Los datos de una entrada. Espeja las columnas de `activity_log`. */
+/**
+ * Los datos de una entrada. Espeja las columnas de `activity_log`.
+ *
+ * Con el cliente de SESIÓN la base exige (migración 20260928140000) que `autor_id` sea
+ * el staff de quien actúa en ese workspace —el `staffId` de getWorkspace—, o null solo
+ * si no tiene staff ahí; y que `tipo` sea uno de los que la app escribe con sesión. Para
+ * firmar por otro o escribir un tipo del sistema, usar el cliente de servicio.
+ */
 export type FilaActividad = {
   workspace_id: string
   entidad_tipo: string
