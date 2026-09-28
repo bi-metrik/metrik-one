@@ -125,3 +125,7 @@ de la copia (ver [[pglite-version-de-ci]]).
 en orden sobre PGlite.** Una migracion nueva que no corra sobre una base limpia tumba de
 paso todas las pruebas del portal. Es la comprobacion mas barata de que el SQL esta bien:
 `npx tsx --test lib/portal/superficie-authenticated.test.ts`.
+⚠️ **CADUCO (2026-09-15):** decia que `metrik-valida` no tenia workflows. Ya tiene el check
+`Tipos y pruebas` (workflow `Pruebas`, ~1 min) ademas del build de Vercel. **No** corre lint
+ni `next build`: esos siguen a mano. Y para git sobre este repo, ver la via del clon en
+[[publicar-otro-repo-desde-worktree-aislado]].

@@ -5,6 +5,12 @@ metadata:
   type: project
 ---
 
+**⚠️ CADUCO lo de "sin mergear / sin aplicar / pasarela abierta" (medido 2026-09-15):** #577 y #599
+estan en main, `suscripciones` existe en produccion con **0 filas**, el CHECK con `wompi` esta aplicado y
+la pasarela es Wompi (decision del 2026-09-09); el adaptador `wompi.ts` no cobra a proposito. La extension
+a disparador por consumo y suscripcion por servicio contratado esta especificada en
+[[spec-modulos-servicios-cobro]].
+
 El PR #577 (`feat/suscripciones-cobro-automatico`) construye la Fase 1 del cobro automático
 de licencias ONE y queda **sin mergear** por decisión del encargo: trae la migración
 `20260908120000_suscripciones.sql` (DDL puro, **no aplicada**) y la decisión de pasarela sigue
