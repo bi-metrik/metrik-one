@@ -141,4 +141,14 @@ describe('la base usa las mismas llaves de módulo que el catálogo', () => {
     expect(lista, `${archivo}: no se encontró la lista del CHECK`).not.toBeNull()
     expect(literales(lista![1]), archivo).toEqual(esperadas)
   })
+
+  // Cuarta copia, de `20260929030000`: un documento contractual genérico (alcance 'plantilla')
+  // declara el módulo cuyos clientes lo ven y lo aceptan. Si nombrara un módulo que no existe, el
+  // documento quedaría invisible y la puerta de ese módulo no abriría nunca.
+  it('CHECK documentos_versiones_modulo', () => {
+    const { archivo, sql } = ultimaQueDefine(/constraint\s+documentos_versiones_modulo\s+check/i)
+    const lista = sql.match(/constraint\s+documentos_versiones_modulo\s+check\s*\(\s*modulo\s+in\s*\(([^)]*)\)/i)
+    expect(lista, `${archivo}: no se encontró la lista del CHECK`).not.toBeNull()
+    expect(literales(lista![1]), archivo).toEqual(esperadas)
+  })
 })

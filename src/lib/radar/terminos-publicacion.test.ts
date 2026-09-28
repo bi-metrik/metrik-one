@@ -46,6 +46,10 @@ describe('la fila de terminos-uso-radar v1.0', () => {
     expect(VALORES).toContain('terminos-uso-radar')
     expect(VALORES).toContain('1.0')
     expect(VALORES).toContain('plantilla')
+    // Un genérico se ve por el módulo que declara (migración 20260929030000): sin esto la fila no
+    // entra (CHECK `documentos_versiones_modulo_coherente`) y, con otro módulo, no la vería nadie.
+    expect(SQL).toMatch(/alcance,\s*empresa_id,\s*modulo,/)
+    expect(VALORES).toContain('radar_secop')
     expect(VALORES).toContain('2026-09-28')
     expect(VALORES).toContain('aceptaciones-documentos')
     expect(VALORES).toContain('metrik/terminos-uso-radar-v1.0.pdf')

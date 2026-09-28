@@ -17,35 +17,38 @@
 -- (`aceptaciones_terminos.documento_sha256 = pdf_sha256`) y la pestaña de términos entrega ESE
 -- archivo. Una fila que apunte a un objeto que no está deja al cliente sin su copia.
 --
--- ## ⚠️⚠️ Con esta fila SOLA el gate del Radar todavía NO abre
+-- ## ⚠️ Esta fila depende de la migración 20260929030000: aplícala ANTES
 --
--- Medido el 2026-09-28 contra origin/main (b0ee9074): el mecanismo de Valida solo sabe de
--- documentos de alcance 'cliente', o sea con `empresa_id`. Un documento 'plantilla' —y este lo es,
--- porque su texto no lleva datos de ningún cliente— queda invisible y no se puede aceptar, en
--- TRES lugares:
+-- El documento es GENÉRICO (su texto no lleva datos de ningún cliente), o sea de alcance
+-- 'plantilla', y hasta `20260929030000_documentos_alcance_plantilla.sql` el mecanismo de Valida solo
+-- sabía de documentos de alcance 'cliente' (con `empresa_id`): un 'plantilla' quedaba invisible y no
+-- se podía aceptar. Esa migración le enseña el alcance a los dos puntos de la base
+-- (`mis_documentos_de_servicio` y `aceptaciones_terminos_modulo`) y agrega la columna `modulo` que
+-- esta fila llena; el tercero, `versionContratada()`, va en el mismo PR.
 --
---   1. `mis_documentos_de_servicio()` (20260916213000): `join mios m on m.empresa_id = d.empresa_id`
---      es un join interno; con `empresa_id` nulo el documento nunca sale.
---   2. `aceptaciones_terminos_modulo()` (20260923220000, paso 2): exige un contrato con
---      `sc.empresa_id = v_doc.empresa_id`; con nulo levanta excepción.
---   3. `versionContratada()` (src/lib/valida-api/terminos-servidor.ts): `if (!v?.empresa_id) return null`.
+-- Corrida antes de esa migración, esta fila FALLA (la columna `modulo` no existe). Corrida después,
+-- el documento lo ve —y lo acepta— el espacio que tenga contratado un servicio del módulo
+-- `radar_secop`, y nadie más.
 --
--- Registrar la fila igual es correcto y es inocuo (la tabla es server-only, sin grants, y la
--- versión es inmutable por trigger: se registra una vez y no se reescribe). Lo que falta es que
--- esos tres puntos aprendan el alcance 'plantilla', que hoy no tiene NI UNA fila en producción.
 -- Ir por el otro camino —registrarlo como 'cliente' por empresa— no sirve: `pdf_sha256` es UNIQUE
 -- y el PDF es el mismo para todos, así que el segundo cliente del Radar no podría registrarse.
 --
+-- ## ⚠️ Con esta fila el gate del Radar todavía no abre para nadie
+--
+-- No hay ficha de Radar en `catalogo_servicios` ni contrato de Radar en `servicios_contratados`
+-- (medido el 2026-09-28), así que hoy ningún espacio ve este documento. Eso es lo correcto: cuando
+-- se cargue el contrato de su primer cliente, el documento aparece solo.
+--
 -- ## Verificación después de aplicar (solo lectura)
 --
---   select slug, version, alcance, empresa_id, vigente_desde, pdf_sha256,
+--   select slug, version, alcance, empresa_id, modulo, vigente_desde, pdf_sha256,
 --          encode(sha256(convert_to(texto_md, 'UTF8')), 'hex') = texto_sha256 as texto_cuadra
 --     from public.documentos_contractuales_versiones where slug = 'terminos-uso-radar';
---     -> 1 fila, alcance 'plantilla', empresa_id null, texto_cuadra = true
+--     -> 1 fila, alcance 'plantilla', empresa_id null, modulo 'radar_secop', texto_cuadra = true
 -- ============================================================
 
 insert into public.documentos_contractuales_versiones (
-  workspace_id, linea_id, slug, alcance, empresa_id, titulo, version,
+  workspace_id, linea_id, slug, alcance, empresa_id, modulo, titulo, version,
   texto_md, texto_sha256, pdf_bucket, pdf_path, pdf_sha256, vigente_desde, registrado_por
 ) values (
   'a21bfc88-1a60-48c3-afcd-144226aa2392',   -- workspace metrik (el cobrador; el documento es de MeTRIK)
@@ -53,6 +56,7 @@ insert into public.documentos_contractuales_versiones (
   'terminos-uso-radar',
   'plantilla',                               -- el texto no lleva datos de ningun cliente
   null,
+  'radar_secop',                             -- quien lo ve: el que tenga contratado ese modulo
   'Términos de Uso — Radar SECOP',
   '1.0',
   '# Términos de Uso — Radar SECOP

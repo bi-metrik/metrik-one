@@ -39,11 +39,14 @@ export const PRODUCTOS_ENTRADA = {
   //     qué convocatoria se presenta, así que cada usuario lee los términos. Si fuera false, un
   //     operador vería los puntajes sin haber leído nunca que el fit no es un concepto jurídico,
   //     que es justo la advertencia que el documento existe para dejar por escrito.
-  //   - `exigeDesignado: false`: la regla del dueño alcanza. El designado se exige en los CDA
-  //     porque su dueño es, en tres de cuatro, una cuenta genérica («Oficial de Cumplimiento») y
-  //     la cláusula 16.1 de SUS términos pide representante legal o apoderado. El Radar no tiene
-  //     esa cláusula y su primer cliente (Fabri) tiene dueño persona: exigirlo dejaría el módulo
-  //     cerrado esperando un dato que nadie pidió.
+  //   - `exigeDesignado: false`: la regla del dueño alcanza. La cláusula 11 del documento cerrado
+  //     por el CLO SÍ pide representante legal o apoderado, igual que la 16.1 de los CDA, y aquí se
+  //     cumple sin designación: quien acepta declara en qué calidad lo hace y `CALIDADES_ACEPTANTE`
+  //     son justo esas dos. Lo que obliga a designar en los CDA es que su dueño es, en tres de
+  //     cuatro, una cuenta genérica («Oficial de Cumplimiento»); el primer cliente del Radar (Fabri)
+  //     tiene dueño persona, así que exigirlo dejaría el módulo cerrado esperando un dato que nadie
+  //     cargó. Si un cliente del Radar llega con dueño genérico, se designa en su contrato y esta
+  //     bandera no cambia (la designación manda cuando existe).
   radar_secop: {
     nombre: 'Radar SECOP',
     ruta: '/radar',
