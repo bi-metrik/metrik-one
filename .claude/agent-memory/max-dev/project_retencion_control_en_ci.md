@@ -97,3 +97,13 @@ regex (el del script y el de las pruebas) aceptan ahora `a[ñn]os`.
 
 Relacionado: [[valida-privacidad-v13]], [[cambio-solo-de-tildes]],
 [[publicar-otro-repo-desde-worktree-aislado]], [[medir-antes-de-construir]].
+
+## Gotcha: cualquier «N años» en copy cae en esta prueba (2026-09-28, #951)
+
+`retencion.test.ts` barre TODO el repo buscando cifras de años. Una EDAD en un texto
+visible («Tarifa niño de 2 a 11 años…» en `ingreso-manual-form.tsx`) tumbó «Tipos y pruebas»
+en CI; local no se vio porque solo corrí las suites tocadas.
+
+**How to apply:** al escribir copy con «N años» (edades de Trappvel, antigüedades), agregar
+el archivo a `CLASIFICACION` como `no-es-plazo` con su razón en el mismo PR, y correr
+`retencion.test.ts` antes de pushear.
