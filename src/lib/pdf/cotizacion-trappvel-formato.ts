@@ -315,6 +315,7 @@ export function rangoCompacto(desde: string | null, hasta: string | null): strin
  */
 export function textoTarifaNino(e: { desde: number; hasta: number } | null | undefined): string | null {
   if (!e) return null
+  if (e.desde === e.hasta) return `Tarifa niño de ${e.desde} años cumplidos a la fecha del viaje`
   return `Tarifa niño de ${e.desde} a ${e.hasta} años cumplidos a la fecha del viaje`
 }
 

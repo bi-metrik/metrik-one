@@ -228,13 +228,14 @@ describe('lo que se valida antes de firmar', () => {
 
   it('hotel: el rango de edad va entero y en orden, o no va', () => {
     expect(validarHotelManual(verdemar({ edadHasta: null }))).toHaveProperty('edadHasta')
-    expect(validarHotelManual(verdemar({ edadDesde: 12, edadHasta: 2 }))).toHaveProperty('edadHasta')
+    expect(validarHotelManual(verdemar({ edadDesde: 12, edadHasta: 2 })).edadHasta).toBe('No puede ser menor que «Desde».')
     expect(validarHotelManual(verdemar({ edadDesde: null, edadHasta: null }))).toEqual({})
   })
 
   it('traslado: ruta, neto, pasajeros y fuente', () => {
     const e = validarTrasladoManual(inOut({ ruta: '', neto: 0, adultos: 0, ninos: 0, infantes: 0, fuente: '' }))
     expect(Object.keys(e).sort()).toEqual(['adultos', 'fuente', 'neto', 'ruta'])
+    expect(e.fuente).toBe('Escribe de dónde sale la tarifa.')
   })
 
   it('lo que llega del navegador se lee sin confiar en su forma', () => {

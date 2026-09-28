@@ -47,7 +47,7 @@ import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasa
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, INPUT_DUDOSO, LINK, SPIN } from '@/components/viaje/estilo'
-import { Miniatura, useVistaAmpliada } from '@/components/viaje/pantallazo'
+import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 
 /**
  * La bandeja de pantallazos (P7 del caso Providencia; forma y textos del prototipo de la
@@ -464,7 +464,7 @@ export default function BandejaCapturas({
   const [manualAbierto, setManualAbierto] = useState(false)
   const enviarManual = useCallback(async (tipo: TipoManual, datos: Record<string, unknown>): Promise<RespuestaManual> => {
     const r = await lecturaManualPorRuta(cotizacionId, tipo, datos)
-    if (!r) return { ok: false, mensaje: 'No se pudo enviar. Revisa tu conexión e inténtalo otra vez.' }
+    if (!r) return { ok: false, mensaje: 'No se pudo enviar. Tus datos siguen aquí: inténtalo otra vez.' }
     if (!r.ok) return { ok: false, mensaje: r.mensaje, errores: r.errores }
     const id = nuevoId()
     const ciudad = typeof datos.ciudad === 'string' && datos.ciudad.trim() !== '' ? datos.ciudad.trim() : null
@@ -843,16 +843,13 @@ export function FilaCaptura({
   const titulo = (tipo && tituloDeCaptura(tipo, lectura, sobra)) || c.etiqueta || 'Pantallazo pegado'
   const caption = titulo === 'Pantallazo pegado' ? titulo : `Pantallazo · ${titulo}`
   // Lo ingresado a mano no tiene imagen: la miniatura lo dice.
-  const miniatura = esManual(lectura)
-    ? (
-      <span className="grid aspect-[1920/735] w-[76px] shrink-0 place-items-center rounded-[5px] border border-[#E2DED5] bg-[#EEEBE4] text-[11px] font-semibold text-[#6E6A62] max-sm:w-16" data-miniatura-manual>
-        A mano
-      </span>
-    )
+  const manual = esManual(lectura)
+  const miniatura = manual
+    ? <MiniaturaManual dato="data-miniatura-manual" />
     : <Miniatura src={c.preview} caption={caption} onAmpliar={onAmpliar} />
   const vacia = <Miniatura src={null} caption="" />
   const quitar = (
-    <button type="button" onClick={onBorrar} aria-label="Quitar este pantallazo" className={BTN_X} data-quitar-captura>
+    <button type="button" onClick={onBorrar} aria-label={manual ? 'Quitar esta tarifa' : 'Quitar este pantallazo'} className={BTN_X} data-quitar-captura>
       <X className="h-4 w-4" aria-hidden />
     </button>
   )
@@ -883,7 +880,7 @@ export function FilaCaptura({
     if (e.motivo === 'descartada') {
       return fila(miniatura, <>{tituloFila}{estado('Descartada. No entró a la cotización.')}</>, deshacer)
     }
-    return fila(vacia, estado('Quitaste este pantallazo. No entró a la cotización.'), deshacer)
+    return fila(vacia, estado(manual ? 'Quitaste esta tarifa. No entró a la cotización.' : 'Quitaste este pantallazo. No entró a la cotización.'), deshacer)
   }
   if (e.fase === 'repetida') {
     return fila(miniatura, estado(`${e.mensaje} · no se volvió a procesar`), deshacer, { 'data-captura-repetida': '' })

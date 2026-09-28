@@ -18,7 +18,7 @@ import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
-import { Miniatura, useVistaAmpliada } from '@/components/viaje/pantallazo'
+import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { cargoDeItem, hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
@@ -676,9 +676,7 @@ function FilaHabitacionTarjeta({
       data-habitacion={h.id}
     >
       {manual ? (
-        <span className="grid aspect-[1920/735] w-[120px] shrink-0 place-items-center rounded-[5px] border border-[#E2DED5] bg-[#EEEBE4] text-xs font-semibold text-[#6E6A62] max-sm:w-[84px]" data-habitacion-manual>
-          A mano
-        </span>
+        <MiniaturaManual ancho="w-[120px] max-sm:w-[84px]" dato="data-habitacion-manual" />
       ) : (
         <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
       )}

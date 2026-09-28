@@ -180,6 +180,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'EDAD de un pasajero leída del pantallazo («1 niño (0 años)» es un infante, R8 regla 7). ' +
       'No hay plazo de conservación en este archivo.',
   },
+  'src/app/(app)/negocios/ingreso-manual-form.tsx': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un niño en la ayuda del ingreso manual de Trappvel («Tarifa niño de 2 a 11 años ' +
+      'cumplidos a la fecha del viaje»). No hay plazo de conservación en este archivo.',
+  },
   'src/lib/cotizaciones/ranuras-pantallazo.ts': {
     tipo: 'no-es-plazo',
     razon:

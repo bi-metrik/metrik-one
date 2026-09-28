@@ -21,7 +21,7 @@ vi.mock('@/app/(app)/negocios/adicional-actions', () => ({}))
 vi.mock('@/app/(app)/negocios/ranura-actions', () => ({}))
 
 const { default: BandejaCapturas, FilaCaptura } = await import('./bandeja-capturas')
-const { default: IngresoManualForm, AYUDA_NETO } = await import('./ingreso-manual-form')
+const { default: IngresoManualForm, AYUDA_NETO, AYUDA_FUENTE, AYUDA_EDAD_NINO } = await import('./ingreso-manual-form')
 const { default: TarjetaOpcion } = await import('./tarjeta-opcion')
 
 const HOTEL = ranuraPorSlug('hotel_detalle')!
@@ -63,17 +63,46 @@ describe('el formulario', () => {
 
   it('hotel por habitación: los campos del brief, con el régimen siempre a la vista', () => {
     const t = texto(pintar())
-    for (const r of ['Hotel', 'Ciudad', 'Fuente de la tarifa', 'Entrada', 'Salida', 'Acomodación', 'Régimen', 'Qué más incluye',
+    for (const r of ['Hotel', 'Ciudad', 'Fuente de la tarifa', 'Check-in', 'Check-out', 'Habitación', 'Régimen', 'Qué más incluye',
       'Adultos', 'Niños', 'Infantes', 'Adulto', 'Niño', 'Infante', 'Desde (años)', 'Hasta (años)']) {
       expect(t).toContain(r)
     }
     expect(t).toContain('Pasajeros de la habitación')
     expect(t).toContain('Costo neto por persona por noche')
     expect(t).toContain('Una habitación a la vez. ONE multiplica por noches y pasajeros.')
+    // «Acomodación» en el documento es la ocupación («Acomodación: 2 adultos»): aquí no.
+    expect(t).not.toContain('Acomodación')
+  })
+
+  it('la fuente va al final y dice que es interna; lo que incluye dice que sale al cliente', () => {
+    const t = texto(pintar())
+    expect(t.indexOf('Fuente de la tarifa')).toBeGreaterThan(t.indexOf('Hasta (años)'))
+    expect(t).toContain(AYUDA_FUENTE)
+    expect(t).toContain('Sale en la cotización del cliente.')
+    expect(t).toContain('Edad de niño según el hotel (opcional)')
+    expect(t).toContain(AYUDA_EDAD_NINO)
+  })
+
+  it('montos y pasajeros: texto con teclado numérico, sin type=number ni cifras de ejemplo', () => {
+    const html = pintar()
+    expect(html).not.toContain('type="number"')
+    for (const k of ['adultos', 'ninos', 'infantes', 'netoAdulto', 'netoNino', 'netoInfante', 'edadDesde', 'edadHasta']) {
+      const input = html.match(new RegExp(`<input[^>]*data-campo-manual="${k}"[^>]*>`))?.[0] ?? ''
+      expect(input, k).toContain('inputMode="numeric"')
+      expect(input, k).toContain('tabular-nums')
+    }
+    expect(html).not.toContain('279.000')
+    expect(html).not.toContain('223.000')
+  })
+
+  it('un solo botón negro: el tipo elegido va con el acento, no con el primario', () => {
+    const html = pintar()
+    expect(html.match(/bg-\[#191713\]/g)?.length).toBe(1)
+    expect(html).toMatch(/aria-pressed="true"[^>]*bg-\[#EAF1EE\]|bg-\[#EAF1EE\][^>]*aria-pressed="true"/)
   })
 
   it('⚠️ el rótulo del costo dice que es lo que cobra el proveedor: el margen lo pone ONE', () => {
-    expect(AYUDA_NETO).toBe('Lo que te cobra el proveedor, sin tu ganancia. El margen lo pone ONE.')
+    expect(AYUDA_NETO).toBe('Lo que te cobra el proveedor, sin sumarle nada. El margen lo pone ONE.')
     expect(texto(pintar())).toContain(AYUDA_NETO)
   })
 
@@ -93,11 +122,32 @@ describe('la fila que deja en la bandeja', () => {
       },
     }))
     expect(html).toContain('data-miniatura-manual')
+    expect(html).toContain('aria-label="Ingresado a mano, sin pantallazo"')
+    expect(texto(html)).not.toMatch(/pantallazo/i)
     expect(html).not.toContain('data-miniatura=')
     expect(texto(html)).toContain('Hotel Verdemar · Doble estándar · 2 adultos')
     expect(html).toMatch(/>Aceptar</)
     // Sin alertas de «la captura no muestra…».
     expect(html).not.toContain('data-alerta-decision')
+  })
+})
+
+describe('la fila manual no habla de «pantallazo»', () => {
+  const l = habitacion()
+  const borrador = { tipo: 'hotel', lectura: l, lecturaJson: JSON.stringify(l), firma: 'f', pistas: { lugar: 'San Andrés', origen: null, destino: null } } as unknown as Borrador
+  const fila = (estado: Record<string, unknown>) => renderToStaticMarkup(React.createElement(FilaCaptura, {
+    captura: {
+      id: 'cap-m', preview: '', dataUrl: '', estado, tipo: 'hotel', pistas: borrador.pistas,
+      borrador, itemId: null, donde: null, leida: null, error: null,
+    },
+  } as unknown as Parameters<typeof FilaCaptura>[0]))
+
+  it('la × dice «Quitar esta tarifa»', () => {
+    expect(fila({ fase: 'leyendo' })).toContain('aria-label="Quitar esta tarifa"')
+  })
+
+  it('quitada: «Quitaste esta tarifa»', () => {
+    expect(texto(fila({ fase: 'borrada', antes: { fase: 'lista', alertas: [] } }))).toContain('Quitaste esta tarifa. No entró a la cotización.')
   })
 })
 
