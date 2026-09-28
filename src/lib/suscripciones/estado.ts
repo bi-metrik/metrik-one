@@ -52,12 +52,23 @@ export interface PoliticaSuspension {
 }
 
 /**
- * Fase 1: la gracia de hoy (3 días, la misma del cron que marca `vencido`), tres
+ * Fase 1: la gracia de hoy (5 días, la misma del cron que marca `vencido`), tres
  * intentos, y NADIE se suspende solo. Es la decisión que queda abierta para Mauricio;
  * mientras tanto el sistema informa (`pendiente_pago`) y no cierra puertas.
+ *
+ * **Cinco, no tres, desde el 2026-09-28.** Lo que se alineó fue el código: los términos que firma
+ * el cliente (`terminos-uso-radar@1.0`) y la regla `pago-anticipado-habilita-acceso` del cerebro
+ * (2026-09-15) prometen cinco días de gracia y después solo lectura. Con la gracia en 3, ONE
+ * declaraba la cuota vencida dos días antes de lo pactado.
+ *
+ * ⚠️ La segunda mitad de esa promesa —«desde el día 6, solo lectura»— **no la cumple ningún
+ * producto todavía**: `suspenderAutomaticamente` sigue en `false` y en ONE no existe un régimen de
+ * solo lectura (lo más cerca es `pendiente_pago`, que no cierra nada). Es un motor aparte y lo
+ * decide Mauricio. Lo que sí existe es el cierre del módulo Radar al vencer su TRIAL, que es otro
+ * régimen: ahí el primer pago es condición de entrega (`src/lib/radar/acceso.ts`).
  */
 export const POLITICA_FASE_1: PoliticaSuspension = {
-  diasGracia: 3,
+  diasGracia: 5,
   maxIntentos: 3,
   suspenderAutomaticamente: false,
 }

@@ -6,7 +6,10 @@ metadata:
 ---
 
 Spec `proyectos/metrik/one/2026-09-28_spec-radar-secop-en-one.md`, bloques D → E → B.
-**PR #952**, 8 checks en verde, **sin mergear**: trae migración que altera tablas de producción.
+**PR #952 MERGEADO** el 2026-09-28 (`ec1bab8e` en `main`); su migración `20260928180000` es DDL puro.
+⚠️ **CADUCÓ lo de «sin mergear»** y también el hallazgo del eslabón que sigue: Mauricio autorizó
+construirlo el mismo día y vive en [[radar-trial-y-cobro]] (trial de 5 días anclado a la aceptación,
+paso 6a del cron, cierre del módulo al día 6).
 
 **Why:** el Radar dejó de ser un HTML empaquetado y entra a ONE como módulo con licencia propia
 ($20.000/mes de lista; Fabri paga $15.000 como descuento de fundador, que vive en el contrato y no

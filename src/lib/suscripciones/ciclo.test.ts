@@ -200,8 +200,8 @@ describe('ciclo con pasarela manual (Fase 1)', () => {
     const sus = suscripcion()
     const { db, tablas } = fakeDb(tablasBase(sus))
 
-    // hoy = fecha esperada + gracia + 1
-    const r = await correrCicloSuscripcion(sus, plan, deps(db, { hoy: '2026-09-09' }))
+    // hoy = fecha esperada (5-sep) + gracia (5 días) + 1 = 11-sep
+    const r = await correrCicloSuscripcion(sus, plan, deps(db, { hoy: '2026-09-11' }))
 
     expect(r).toMatchObject({ accion: 'cargo_pendiente', estadoAntes: 'activa', estadoDespues: 'pendiente_pago' })
     expect(tablas.suscripciones[0].estado).toBe('pendiente_pago')
@@ -214,12 +214,31 @@ describe('ciclo con pasarela manual (Fase 1)', () => {
     expect(tablas.workspaces[0].subscription_status).toBe('pendiente_pago')
   })
 
-  it('dentro de la gracia no pasa nada: el día 3 después del vencimiento todavía es activa', async () => {
+  // La frontera de la gracia, explícita. Son CINCO días desde el 2026-09-28 porque es lo que
+  // prometen los términos que firma el cliente; con 3, el día 4 ya declaraba vencido lo que el
+  // documento dice que todavía está en plazo.
+  it('dentro de la gracia no pasa nada: el día 5 después del vencimiento todavía es activa', async () => {
+    const { db, tablas } = fakeDb(tablasBase(suscripcion()))
+    // Vence el 5-sep: los días 6, 7, 8, 9 y 10 son de gracia.
+    for (const hoy of ['2026-09-06', '2026-09-08', '2026-09-10']) {
+      const r = await correrCicloSuscripcion(suscripcion(), plan, deps(db, { hoy }))
+      expect(r.estadoDespues, hoy).toBe('activa')
+    }
+    expect(tablas.suscripciones[0].estado).toBe('activa')
+  })
+
+  it('el día 6 después del vencimiento se declara impaga: un día más de gracia no lo da nadie', async () => {
     const sus = suscripcion()
     const { db, tablas } = fakeDb(tablasBase(sus))
-    const r = await correrCicloSuscripcion(sus, plan, deps(db, { hoy: '2026-09-08' }))
-    expect(r.estadoDespues).toBe('activa')
-    expect(tablas.suscripciones[0].estado).toBe('activa')
+    const r = await correrCicloSuscripcion(sus, plan, deps(db, { hoy: '2026-09-11' }))
+    expect(r.estadoDespues).toBe('pendiente_pago')
+    expect(tablas.suscripciones[0].estado).toBe('pendiente_pago')
+  })
+
+  it('la política de Fase 1 declara los 5 días de gracia que prometen los términos', () => {
+    expect(POLITICA_FASE_1.diasGracia).toBe(5)
+    // Y sigue sin suspender a nadie sola: el «solo lectura» del día 6 no existe todavía en ONE.
+    expect(POLITICA_FASE_1.suspenderAutomaticamente).toBe(false)
   })
 
   it('con suspensión automática (decisión de Mauricio, Fase 2) la cuota vencida suspende en la misma corrida', async () => {

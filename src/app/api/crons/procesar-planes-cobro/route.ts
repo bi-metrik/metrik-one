@@ -16,17 +16,23 @@ import {
 import { POLITICA_FASE_1 } from '@/lib/suscripciones/estado'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib/cobros/enlace-automatico-servidor'
+import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
 //      (solo planes SIN cronograma explicito — los que lo tienen los cubre el paso 4)
-//   2. Marca como vencido cobros programados pasados con 3+ dias de gracia sin confirmar
+//   2. Marca como vencido cobros programados pasados con 5+ dias de gracia sin confirmar
 //   3. Genera notificaciones cobro_vencido a responsable + dueno + staff del area financiera (staff_areas)
 //   4. Emite las cuentas del mes: agrupadas por empresa (planes uniformes) + una por
 //      cuota (planes con cronograma explicito en plan_cobro_cuotas)
 //   5. Suscripciones de licencia (`suscripciones`): corre el ciclo de cobro de las que
 //      tienen `proximo_cobro <= hoy`. Fase 1 = pasarela `manual`, que no cobra: el
 //      efecto sobre los planes de hoy es cero (ver el bloque del paso 5).
+//   6a. Enrolamiento al cobro por ciclo: el contrato de servicio con los terminos aceptados recibe
+//      su plan de cobro y sus cuotas SOLO, con la primera cuota el dia en que termina su trial
+//      (`dias_trial` contado desde la aceptacion). Hoy ese paso lo hacia una persona a mano. Corre
+//      ANTES del paso 6 para que el contrato enrolado hoy reciba su enlace en esta misma corrida.
+//      Alcance: solo el modulo `radar_secop` (ver `enrolar-ciclo.ts`).
 //   6. Enlaces de pago en linea de los contratos de servicio (CDA): la cuota que vence en 7 dias
 //      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
 //      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
@@ -37,7 +43,13 @@ import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib
 // Schedule: 0 12 * * * (vercel.json)
 
 const DIAS_ANTICIPACION = 3
-const DIAS_GRACIA = 3
+// Dias de gracia antes de declarar vencida una cuota. CINCO desde el 2026-09-28: es lo que
+// prometen los terminos que firma el cliente (`terminos-uso-radar@1.0`) y la regla del cerebro
+// `pago-anticipado-habilita-acceso` (actualizacion del 2026-09-15). Estaba en 3, o sea que el
+// sistema declaraba vencido dos dias antes de lo pactado. El documento manda; el codigo se alinea.
+// OJO: esto es la gracia de la MORA, no el trial. El trial del Radar (`lib/radar/acceso.ts`) no
+// tiene gracia: la primera cuota es condicion de entrega y vence el dia en que el trial termina.
+const DIAS_GRACIA = 5
 // Dia del mes en que se ABRE la ventana de emision de cuentas. La ventana no se
 // cierra: ver el comentario del paso 4.
 const DIA_APERTURA_EMISION = 10
@@ -415,6 +427,18 @@ export async function GET(req: NextRequest) {
     suscripcionesErrores.push({ suscripcion_id: '*', error: err instanceof Error ? err.message : String(err) })
   }
 
+  // ── 6a. Enrolar al cobro por ciclo lo que todavia no tiene plan ──
+  // Antes del paso 6, para que el plan que nace hoy reciba su enlace hoy: con un trial de 5 dias,
+  // esperar a manana es un dia menos para pagar. Idempotente por la llave primaria del acta
+  // (`servicio_cobro_enrolamiento`), no por lo que este paso recuerde.
+  let enrolamiento: ResumenEnrolamiento | null = null
+  let enrolamientoError: string | null = null
+  try {
+    enrolamiento = await enrolarContratosPorCiclo({ db: supabase })
+  } catch (err) {
+    enrolamientoError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 6. Enlaces de pago en linea de los contratos de servicio ──
   // Va de ultimo a proposito: no cambia nada de lo que hacen los pasos 1 a 5, y si falla no los
   // tumba. Mira el CONTRATO (`servicios_contratados` activo o pausado) y la pasarela en linea del
@@ -449,6 +473,8 @@ export async function GET(req: NextRequest) {
       detalle: r.detalle ?? null,
     })),
     suscripciones_errores: suscripcionesErrores,
+    enrolamiento_por_ciclo: enrolamiento,
+    enrolamiento_por_ciclo_error: enrolamientoError,
     enlaces_automaticos: enlacesAutomaticos,
     enlaces_automaticos_error: enlacesAutomaticosError,
   })

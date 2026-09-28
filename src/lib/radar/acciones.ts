@@ -8,6 +8,7 @@ import {
   type EntradaAprobacion,
 } from '@/lib/valida-api/entrada-aprobacion'
 import type { EstadoEntradaPagina, ResultadoAprobarEntrada } from '@/lib/valida-api/resultados'
+import { radarPermiteOperar } from './acceso-servidor'
 import { contextoRadar } from './contexto'
 import { entradaDelUsuarioRadar, entradaRadarAprobada } from './entrada-servidor'
 
@@ -18,10 +19,11 @@ import { entradaDelUsuarioRadar, entradaRadarAprobada } from './entrada-servidor
  *     (`entrada-aprobacion.ts`) con `producto: 'radar_secop'`.
  *   · Guardar lo que el cliente decidió mirar y seguir.
  *
- * **Toda acción comprueba el módulo Y la entrada aprobada**, no solo la primera. Lo que la pantalla
- * no muestra también se niega por POST: sin esto, un cliente que no aceptó los términos podría
- * marcar procesos como seguidos llamando la acción a mano, y la cláusula del documento («el fit es
- * priorización, no un concepto jurídico») nunca se le habría mostrado.
+ * **Toda acción comprueba el módulo, la entrada aprobada Y el pago**, no solo la primera. Lo que la
+ * pantalla no muestra también se niega por POST: sin esto, un cliente que no aceptó los términos
+ * podría marcar procesos como seguidos llamando la acción a mano, y la cláusula del documento («el
+ * fit es priorización, no un concepto jurídico») nunca se le habría mostrado. Lo mismo con el trial
+ * vencido: la pantalla cerrada sin la puerta en las acciones sería una pantalla, no un cierre.
  */
 
 const SIN_ACCESO = 'No tienes acceso al Radar en este espacio.'
@@ -52,6 +54,10 @@ async function puerta(): Promise<{ ok: true; workspaceId: string; usuarioId: str
   const ctx = await contextoRadar()
   if (ctx.tipo !== 'ok') return { ok: false, error: SIN_ACCESO }
   if (!(await entradaRadarAprobada())) return { ok: false, error: SIN_TERMINOS }
+  // El trial vencido sin pago cierra el módulo: la pantalla no muestra nada y las acciones tampoco
+  // escriben. No poder leer el estado de pago NO cierra (ver `acceso.ts`).
+  const pago = await radarPermiteOperar()
+  if (!pago.ok) return { ok: false, error: pago.error }
   return { ok: true, workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId }
 }
 
