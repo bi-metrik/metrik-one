@@ -76,7 +76,8 @@ export async function middleware(request: NextRequest) {
   // El endpoint del módulo Ferretería lo llaman escritores SIN sesión (el agente de MeTRIK y el
   // cron del Mac) con `Authorization: Bearer fer_...`. No tiene cookies que refrescar, y en un
   // subdominio el `!user` de abajo lo mandaría a `/login` con un 307 que un cliente de JSON no
-  // entiende. La ruta autentica sola (ver `lib/ferreteria/api.ts`).
+  // entiende. La ruta autentica sola (ver `lib/ferreteria/api.ts`). Lo mismo el webhook de Wompi
+  // (`/api/ferreteria/wompi/eventos`), que se autentica por la firma del evento.
   if (pathname.startsWith('/api/ferreteria/')) return NextResponse.next()
 
   // Refresh Supabase session

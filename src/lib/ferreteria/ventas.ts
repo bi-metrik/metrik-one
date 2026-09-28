@@ -6,7 +6,8 @@
  *   contra entrega:  Vendido → Entregado → (entra el pago) → Pagado, cierra
  *   anticipado:      Vendido, con el pago registrado al nacer → (se entrega) → Pagado, cierra
  *
- * El registro es a mano (Dietmar o MeTRIK): nada en el cron crea ventas.
+ * El registro es a mano (Dietmar o MeTRIK) o, para un pago aprobado de un link de Wompi con código
+ * de publicación, lo hace el webhook (`wompi-pagos.ts`) por esta misma función. El cron no crea ventas.
  *
  * ── Orden de las escrituras ─────────────────────────────────────────────────────────
  * La venta nace primero (sin negocio) y el negocio después. Si el negocio no se puede crear, la
@@ -44,7 +45,14 @@ export interface EntradaVenta {
   ruta: string
   forma_pago: string
   comprador_nombre?: string | null
+  /** Solo lo trae un pago de Wompi: ayuda a no duplicar el contacto del negocio. */
+  comprador_telefono?: string | null
   conversacion_id?: string | null
+  /**
+   * Referencia del cobro anticipado. Sin ella, `referenciaPago` (FER-MP-xx-…). Un pago de Wompi
+   * trae la suya (`WOMPI-<id de transacción>`), que además impide cobrarlo dos veces.
+   */
+  referencia_pago?: string | null
 }
 
 type Fallo = { ok: false; mensaje: string }
@@ -107,7 +115,12 @@ export async function registrarVenta(
     registrado_por: autor.tipo === 'persona' ? autor.id : null,
   })
 
-  const creado = await negocios.crear({ nombre: nombreNegocioVenta(pub), precio, compradorNombre: comprador })
+  const creado = await negocios.crear({
+    nombre: nombreNegocioVenta(pub),
+    precio,
+    compradorNombre: comprador,
+    compradorTelefono: entrada.comprador_telefono?.trim() || null,
+  })
   if (!creado.ok) {
     await repo.borrarVenta(ws, venta.id)
     return { ok: false, mensaje: `No se pudo crear el negocio de la venta: ${creado.error}` }
@@ -124,7 +137,7 @@ export async function registrarVenta(
     const errPago = await negocios.registrarPago(negocioId, {
       monto: precio,
       fecha: entrada.fecha_venta,
-      referencia: referenciaPago(pub.codigo, venta.id),
+      referencia: entrada.referencia_pago?.trim() || referenciaPago(pub.codigo, venta.id),
     })
     if (errPago) avisos.push(`El pago anticipado no quedó en el negocio: ${errPago}. Regístralo desde el negocio.`)
   }

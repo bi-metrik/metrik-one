@@ -168,6 +168,8 @@ export interface PuertoNegocios {
     nombre: string
     precio: number
     compradorNombre: string | null
+    /** Si viene, el contacto se busca por teléfono antes de crear otro (pagos de Wompi). */
+    compradorTelefono?: string | null
   }): Promise<{ ok: true; negocioId: string } | { ok: false; error: string }>
   /** El precio final de la venta queda como precio aprobado del negocio. */
   fijarPrecioAprobado(negocioId: string, precio: number): Promise<string | null>

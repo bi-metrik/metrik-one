@@ -310,3 +310,48 @@ del 29-sep pagada el 2-oct cuenta en octubre. Una contra entrega sin pagar no en
 muestra aparte como "Por cobrar" (cuantas y su valor). Positiva: "MeTRIK cobra a Dimpro". Negativa:
 "MeTRIK aporta a Dimpro" el valor absoluto. Cada mes se liquida solo; el mes en curso sale abierto.
 Pestaña "Liquidacion mensual" en `/ferreteria`.
+
+## Pagos de Wompi entran solos (Max, 2026-09-28, tercer encargo)
+
+Pedido de Mauricio: "llevar el control por ONE". Dimpro cobra por links de pago de Wompi creados desde
+la torre (`proyectos/dimpro/piloto-marketplace/scripts/wompi-link.py`: uso unico, precio fijo,
+`collect_shipping`, `sku` = codigo MP de la publicacion). Migracion `20260928170500_ferreteria_pagos_wompi.sql`
+(solo esquema).
+
+**Endpoint.** `POST https://metrikone.co/api/ferreteria/wompi/eventos` = "URL de eventos" del comercio en el
+panel de Wompi. Publico (el middleware corta `/api/ferreteria/`); se autentica por la firma: SHA256 de los
+valores de `signature.properties` (leidos en `data`, en el orden del evento) + `timestamp` + secreto de
+eventos, contra `signature.checksum` / cabecera `X-Event-Checksum` (doc oficial, transcrita en
+`src/lib/ferreteria/wompi.ts`). Firma mala 401; sin `WOMPI_DIMPRO_EVENTS_SECRET` 503.
+
+**Que se hace con cada evento** (`src/lib/ferreteria/wompi-pagos.ts`). Todo `transaction.updated` deja una
+fila en `ferreteria_pagos_wompi` (server-only, llave unica transaccion+estado; Wompi reintenta hasta 3
+veces). Solo un pago `APPROVED`, de `environment = prod`, con `payment_link_id`, con el modulo encendido,
+se intenta volver venta:
+- Se lee el link (`GET /v1/payment_links/<id>`, sin autenticacion segun la doc) y su `sku` es el codigo
+  de la publicacion. El evento no trae el sku.
+- Con publicacion: `registrarVenta` (la accion de "Registrar venta"), anticipada, precio = lo pagado,
+  fecha = dia del pago en Bogota (`finalized_at`), ruta despacho si trae `shipping_address`, comprador del
+  evento, cobro con referencia `WOMPI-<id de transaccion>` (fuente Wompi). El negocio sale por
+  `puertoNegociosSistema`: `crearNegocioEnWorkspace` (el cuerpo de `crearNegocio`, extraido a
+  `src/lib/negocios/crear-negocio.ts` para correr sin sesion), responsable = dueño, historial `sistema`.
+  Autor en la bitacora: `cron` / "Pago Wompi".
+- Sin sku, link inexistente o sku que no es publicacion: `pendiente_asignar`. ONE no inventa publicacion;
+  avisa y el pago espera en la pestaña **Pagos Wompi** de `/ferreteria`, donde "Asignar" (codigo MP)
+  registra la venta por la misma via con la sesion de quien asigna.
+- DECLINED / VOIDED / ERROR / PENDING, sandbox, pago sin link: solo se guardan.
+- Wompi caido al leer el link: fila en `error` y 500 (Wompi reintenta). Error de negocio (sin lista de
+  costos, sin linea Ferreteria): `error` visible, aviso, 200.
+
+**Conversacion de origen.** No se llena: `ferreteria_ventas.conversacion_id` es FK a una conversacion de
+Messenger/WhatsApp. El link y la transaccion quedan en `ferreteria_pagos_wompi` (con `venta_id`).
+Documento, telefono, correo y direccion del comprador viven solo ahi (server-only), no en la venta.
+
+**Aviso.** Campana de ONE (tipo nuevo `ferreteria_pago`) para los perfiles owner/admin/supervisor del
+espacio (hoy Dietmar): "Pago aprobado MP-26 $321.900, <comprador>, despachar a <direccion>". No hay correo
+ni WhatsApp al staff de dimpro. La pestaña marca en ambar los aprobados sin venta.
+
+**Variables de entorno (Vercel, las carga Mauricio).** `WOMPI_DIMPRO_EVENTS_SECRET` (obligatoria,
+`prod_events_...`). `WOMPI_DIMPRO_PRIVATE_KEY` (opcional, `prv_prod_...`): solo para completar con
+`GET /v1/transactions/<id>` el comprador o el envio si el evento no los trae. Distintas de `WOMPI_*`
+(reservadas al comercio propio de METRIK IA para el cobro recurrente).
