@@ -30,6 +30,8 @@ import {
   vueloDesdeNombre,
   yaEstaEnElTitulo,
   yaLoDiceLaPortada,
+  sinCancelacionDelProveedor,
+  textosDeTarjetaHotel,
   type FilaPorPasajeroDoc,
 } from './cotizacion-trappvel-formato'
 import type { HotelPDF } from '@/lib/cotizaciones/detalle-viaje'
@@ -512,5 +514,24 @@ describe('la tabla de vuelos, entera o partida con su encabezado', () => {
     const resto = ALTO_MAXIMO_COLUMNA - 60 - ALTO_ENCABEZADO_VUELOS
     expect(tablaDeVuelosVaEntera([resto])).toBe(true)
     expect(tablaDeVuelosVaEntera([resto + 0.5])).toBe(false)
+  })
+})
+
+describe('la cancelación del proveedor no sale al cliente (2026-09-28)', () => {
+  const conCancelacion = hotel({ habitacion: 'Doble', regimen: 'Todo incluido', ocupacion: '2 adultos', cancelacion: 'Cancelación gratuita hasta 18/11/2026' })
+
+  it('la tarjeta del hotel no la nombra en ningún nivel, y lo demás sigue', () => {
+    for (const general of [false, true]) {
+      const t = textosDeTarjetaHotel(conCancelacion, general)
+      expect(JSON.stringify(t)).not.toMatch(/Cancelaci[oó]n/)
+    }
+    expect(textosDeTarjetaHotel(conCancelacion, false).condiciones).toBe('Acomodación: 2 adultos')
+  })
+
+  it('se quita de la descripción que escribió la lectura, sin tocar el resto', () => {
+    expect(sinCancelacionDelProveedor('Habitación: Doble · Cancelación: No reembolsable · Ocupación: 2')).toBe('Habitación: Doble · Ocupación: 2')
+    expect(sinCancelacionDelProveedor('Cancelación: gratuita hasta 18/11/2026')).toBeNull()
+    expect(sinCancelacionDelProveedor('Privado, con guía')).toBe('Privado, con guía')
+    expect(sinCancelacionDelProveedor(null)).toBeNull()
   })
 })

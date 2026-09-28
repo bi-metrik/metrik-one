@@ -621,18 +621,12 @@ describe('los tres niveles de detalle', () => {
   it('«muy detallada» agrega la descripción del día y el precio por pasajero de cada línea', async () => {
     const t = await texto(props({ viaje: viaje({ nivelDetalle: 'muy_detallada' }) }))
     expect(t).toContain('guia en espanol')
-    expect(t).toContain('Cancelacion gratuita')
   })
 
   it('«normal» describe el viaje sin la letra chica', async () => {
     const t = await texto(props({ viaje: viaje({ nivelDetalle: 'normal' }) }))
     expect(t).toContain('Standard Double')
     expect(t).not.toContain('guia en espanol')
-    // ⚠️ La política de cancelación SÍ sale en «normal» desde el 2026-09-22. Estaba
-    // condicionada a «muy detallada», y ese nivel es inerte (su bloque sigue oculto), así
-    // que no se imprimía NUNCA — y §2.4 de la referencia la lista en la ficha del hotel.
-    // Una tarifa no reembolsable es una condición, no letra chica.
-    expect(t).toContain('Cancelacion gratuita')
   })
 
   it('«general» recorta la descripción y el detalle de precios por línea', async () => {
@@ -640,9 +634,31 @@ describe('los tres niveles de detalle', () => {
     expect(t).not.toContain('Standard Double')
     expect(t).not.toContain('BASIC Standard economy')
     expect(t).not.toContain('articulo personal')
-    expect(t).not.toContain('Cancelacion gratuita')
     // Las horas NO se recortan en ningún nivel: son el itinerario, no la letra chica.
     expect(t).toContain('05:50')
+  })
+
+  // 2026-09-28 · La cancelación leída de la captura es la condición del proveedor con la
+  // AGENCIA, no una promesa al viajero: no sale en ningún nivel, ni en la tarjeta del hotel ni
+  // pegada en la descripción de un día o de un opcional.
+  it('⚠️ la cancelación leída de la captura no sale al cliente en ningún nivel', async () => {
+    const conCaptura = 'Todo incluido · Cancelación: Cancelacion gratuita hasta 30/11/2026 · Medio dia'
+    for (const nivel of ['muy_detallada', 'normal', 'general'] as const) {
+      const t = await texto(props({
+        viaje: viaje({ nivelDetalle: nivel }),
+        dias: [{ dia: 1, items: [
+          { nombre: 'HOTEL DEL DIA', descripcion: conCaptura, precio_venta: 0, descuento_porcentaje: 0, cantidad: 1, unidad: null },
+          { nombre: 'OTRA LINEA DEL DIA', descripcion: conCaptura, precio_venta: 0, descuento_porcentaje: 0, cantidad: 1, unidad: null },
+        ] }],
+        sugeridos: [{ nombre: 'HOTEL OPCIONAL', descripcion: conCaptura, precio_venta: 260_000, cantidad: 1, unidad: null }],
+      }))
+      expect(t, nivel).not.toContain('Cancelacion gratuita')
+      expect(t, nivel).not.toMatch(/Cancelaci.n:/)
+      expect(t, nivel).toContain('Crown Paradise')
+      expect(t, nivel).toContain('HOTEL OPCIONAL')
+      // Lo demás de la descripción sigue saliendo donde salía.
+      if (nivel !== 'general') expect(t, nivel).toContain('Medio dia')
+    }
   })
 
   it('⚠️ lo que el cliente TIENE que pagar no se recorta en ningún nivel', async () => {

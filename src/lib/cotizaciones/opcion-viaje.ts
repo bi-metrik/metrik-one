@@ -103,6 +103,10 @@ function tramoEnTexto(t: TramoVuelo, directoPorDefecto: boolean): string | null 
  * ```
  *
  * Solo lo leído: un renglón sin dato no sale. Vacío = la opción no tiene lectura.
+ *
+ * ⚠️ Es texto INTERNO de la tarjeta (lo ve el equipo, no el cliente): por eso lleva la
+ * cancelación del proveedor. Lo que ve el cliente sale de `textosDeTarjetaHotel`, que no la
+ * lleva (2026-09-28).
  */
 export function fichaDeOpcion(item: ItemConLectura, composicion: Composicion | null): string[] {
   const ranura = ranuraDelItem(item)
@@ -151,7 +155,8 @@ export function fichaDeOpcion(item: ItemConLectura, composicion: Composicion | n
 /**
  * Lo que sirve para COMPARAR opciones en la fila contraída (P6):
  * «AV 8520 · ida 06:05 → 08:20 · regreso 17:40 · bodega 23 kg». En el hotel, habitación,
- * régimen y cancelación. `null` sin lectura: la fila muestra solo el nombre.
+ * régimen y cancelación. `null` sin lectura: la fila muestra solo el nombre. Interno, como
+ * `fichaDeOpcion`: la cancelación del proveedor no sale al cliente.
  */
 export function resumenDeOpcion(item: ItemConLectura): string | null {
   const ranura = ranuraDelItem(item)

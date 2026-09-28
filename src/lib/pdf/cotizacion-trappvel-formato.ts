@@ -319,8 +319,11 @@ export function rangoCompacto(desde: string | null, hasta: string | null): strin
  * cliente» en la tarjeta de la opción. Escritos dos veces, la vista previa y el documento
  * dirían cosas distintas.
  *
- * ⚠️ La política de cancelación sale en «normal»: una tarifa no reembolsable es una condición
- * que el cliente tiene que conocer ANTES de pagar, no letra chica.
+ * ⚠️ La política de cancelación leída de la captura NO sale en ningún nivel (2026-09-28): es la
+ * condición que el proveedor le da a la AGENCIA, no la que Trappvel le promete al viajero. Se
+ * sigue leyendo y guardando, y se ve en la ficha interna de la tarjeta (el equipo la necesita
+ * para saber hasta cuándo puede soltar la reserva). Lo que se le promete al cliente va en los
+ * términos y condiciones. Entre el 2026-09-22 y el 2026-09-28 salía en «normal».
  */
 export function textosDeTarjetaHotel(h: HotelPDF, general: boolean): {
   nombre: string
@@ -338,7 +341,6 @@ export function textosDeTarjetaHotel(h: HotelPDF, general: boolean): {
   ].filter(Boolean).join(' · ')
   const condiciones = [
     !general && h.ocupacion ? `Acomodación: ${h.ocupacion}` : null,
-    !general && h.cancelacion ? `Cancelación: ${h.cancelacion}` : null,
     h.localizador ? `Localizador: ${h.localizador}` : null,
   ].filter(Boolean).join(' · ')
   return {
@@ -349,6 +351,21 @@ export function textosDeTarjetaHotel(h: HotelPDF, general: boolean): {
     adicionales: h.adicionales.length > 0 ? `Adicionales: ${h.adicionales.join(' · ')}` : null,
     nota: h.nota ? h.nota : null,
   }
+}
+
+/**
+ * Una descripción de línea sin la condición de cancelación del proveedor.
+ *
+ * La lectura de una captura escribe en la descripción del ítem «… · Cancelación: gratuita hasta
+ * 18/11/2026 · …» (`lectura-pantallazo.ts`), y el documento imprime esa descripción en los días
+ * y en los opcionales. Esa condición es de la agencia con el proveedor (ver
+ * `textosDeTarjetaHotel`): se quita el segmento, lo demás queda igual. `null` si no queda nada.
+ */
+export function sinCancelacionDelProveedor(descripcion: string | null | undefined): string | null {
+  if (!descripcion) return null
+  const partes = descripcion.split(' · ').filter(p => !/^\s*Cancelaci[oó]n:/i.test(p))
+  const t = partes.join(' · ').trim()
+  return t === '' ? null : t
 }
 
 // ── Tarifas de un vuelo o un hotel ────────────────────────────────────────────
