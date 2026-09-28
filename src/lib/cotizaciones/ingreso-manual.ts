@@ -125,12 +125,6 @@ export function nochesEntre(entrada: string, salida: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
-/** «Tarifa niño de 2 a 11 años cumplidos a la fecha del viaje.» */
-export function textoTarifaNino(e: EdadNino | null | undefined): string | null {
-  if (!e) return null
-  return `Tarifa niño de ${e.desde} a ${e.hasta} años cumplidos a la fecha del viaje`
-}
-
 /** Lo que llega del navegador, sin confiar en su forma. */
 export function leerHotelManual(raw: unknown): HotelManual {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>

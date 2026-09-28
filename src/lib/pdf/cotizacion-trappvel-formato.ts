@@ -308,6 +308,16 @@ export function rangoCompacto(desde: string | null, hasta: string | null): strin
   return desde ?? hasta ?? null
 }
 
+/**
+ * «Tarifa niño de 2 a 11 años cumplidos a la fecha del viaje»: el rango que da el hotel, escrito
+ * en el ingreso manual (`ingreso-manual.ts`). Rige la edad A LA FECHA DEL VIAJE, no la de la
+ * cotización (llamada con Alejandra, 2026-09-28). Sin rango, nada.
+ */
+export function textoTarifaNino(e: { desde: number; hasta: number } | null | undefined): string | null {
+  if (!e) return null
+  return `Tarifa niño de ${e.desde} a ${e.hasta} años cumplidos a la fecha del viaje`
+}
+
 // ── La tarjeta de un hotel (§4.3) ─────────────────────────────────────────────
 
 /**
@@ -341,6 +351,9 @@ export function textosDeTarjetaHotel(h: HotelPDF, general: boolean): {
   ].filter(Boolean).join(' · ')
   const condiciones = [
     !general && h.ocupacion ? `Acomodación: ${h.ocupacion}` : null,
+    !general && h.incluye ? `Incluye: ${h.incluye}` : null,
+    // Condición del PRECIO, no letra chica: sale en los tres niveles (ingreso manual).
+    textoTarifaNino(h.edadNino),
     h.localizador ? `Localizador: ${h.localizador}` : null,
   ].filter(Boolean).join(' · ')
   return {
