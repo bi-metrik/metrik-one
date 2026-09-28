@@ -10,6 +10,7 @@ import {
   FORMA_DE_FOTO_EN_TERCIO,
   TOKENS,
   absorberRedondeo,
+  textoTarifaNino,
   altoEstimadoDeGrupoDeVuelos,
   altoEstimadoDeLista,
   capitulosDelViaje,
@@ -533,5 +534,13 @@ describe('la cancelación del proveedor no sale al cliente (2026-09-28)', () => 
     expect(sinCancelacionDelProveedor('Cancelación: gratuita hasta 18/11/2026')).toBeNull()
     expect(sinCancelacionDelProveedor('Privado, con guía')).toBe('Privado, con guía')
     expect(sinCancelacionDelProveedor(null)).toBeNull()
+  })
+})
+
+describe('textoTarifaNino', () => {
+  it('un rango dice «de X a Y»; una sola edad no se repite', () => {
+    expect(textoTarifaNino({ desde: 2, hasta: 11 })).toBe('Tarifa niño de 2 a 11 años cumplidos a la fecha del viaje')
+    expect(textoTarifaNino({ desde: 5, hasta: 5 })).toBe('Tarifa niño de 5 años cumplidos a la fecha del viaje')
+    expect(textoTarifaNino(null)).toBeNull()
   })
 })
