@@ -19,7 +19,6 @@ import {
   ChevronRight,
   ArrowLeftRight,
   BookOpen,
-  Activity,
   UserCheck,
   MoreHorizontal,
   ShieldAlert,
@@ -324,7 +323,6 @@ const ADMIN_NAV_ITEMS = [
   { href: '/admin/proceso',   label: 'Proceso',    icon: GitFork,  roles: ['owner'] },
   { href: '/admin/skills',    label: 'Skills',     icon: Blocks,   roles: ['owner'] },
   { href: '/admin/cerebro',   label: 'Cerebro',    icon: Brain,    roles: ['owner'] },
-  { href: '/admin/mibolsillo',label: 'Mi Bolsillo',icon: Activity, roles: ['owner'] },
 ]
 
 // Mobile: 4 primary tabs per role, rest goes to "Mas" panel
