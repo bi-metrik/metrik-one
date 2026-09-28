@@ -59,6 +59,7 @@ import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } fr
 import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
 import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
+import { datosManuales } from './ingreso-manual'
 import { habitacionesDeTarifa, repartirHabitaciones } from './habitaciones'
 import { acomodacionDeHabitaciones } from './tarjeta-opcion'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
@@ -166,6 +167,16 @@ export interface HotelPDF {
   localizador: string | null
   /** Ver `VueloPDF.adicionales`: van dentro de la ficha, sin cifra. */
   adicionales: string[]
+  /**
+   * Lo que incluye la tarifa además del régimen, escrito en el ingreso manual
+   * (`ingreso-manual.ts`). Ausente = la opción salió de un pantallazo o no se escribió.
+   */
+  incluye?: string | null
+  /**
+   * El rango de edad del niño que da el hotel, del ingreso manual. Con él el documento dice
+   * «Tarifa niño de X a Y años cumplidos a la fecha del viaje»; ausente, no dice nada.
+   */
+  edadNino?: { desde: number; hasta: number } | null
   /** Ver `VueloPDF.tarifas`. */
   tarifas?: number[]
   /** Ver `VueloPDF.nota`. */
@@ -592,6 +603,8 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     const tarifa = leerTarifaPax(item.tarifa_pax)
     const habs = habitacionesDeTarifa(tarifa)
     const acomodacion = habs.length > 1 ? acomodacionDeHabitaciones(repartirHabitaciones(habs, tarifa.composicion ?? null)) : null
+    // Ingreso manual: lo que incluye y la edad del niño viven fuera de los campos de la ranura.
+    const manual = datosManuales(casillaDelItem(item) ?? habs[0]?.lectura ?? null)
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: texto(d, 'hotel'),
@@ -606,6 +619,9 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,
       adicionales: item.adicionales ?? [],
+      // Sin ingreso manual las llaves no aparecen: la ficha de siempre se arma igual que antes.
+      ...(manual?.incluye ? { incluye: manual.incluye } : {}),
+      ...(manual?.edadNino ? { edadNino: manual.edadNino } : {}),
       nota: notaDeLaLinea(item),
       // Sin foto del hotel la llave no aparece: la ficha de siempre se arma igual que antes.
       ...(tarifa.fotoHotel ? { fotoRef: tarifa.fotoHotel.ref, fotoProporcion: tarifa.fotoHotel.proporcion } : {}),

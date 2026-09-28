@@ -296,6 +296,13 @@ export interface LecturaCasilla {
    * workspaces que no guardan fuera de Drive.
    */
   imagenRef?: string | null
+  /**
+   * `manual` = la escribió una persona en el formulario de ingreso manual
+   * (`ingreso-manual.ts`): no hay imagen detrás. Ausente = salió de un pantallazo.
+   */
+  origen?: 'manual'
+  /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
+  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null }
 }
 
 /**

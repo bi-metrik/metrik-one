@@ -176,6 +176,13 @@ export interface ContextoLectura {
    * descriptivos que falten se avisan. Ver el comentario de `MINIMOS_DE_COSTO`.
    */
   soloMinimosDeCosto?: boolean
+  /**
+   * La «lectura» la escribió una persona en el formulario de ingreso manual
+   * (`ingreso-manual.ts`), no salió de una imagen. Los avisos que hablan de lo que la
+   * CAPTURA no muestra no aplican: el formulario pide lo que hace falta y lo demás lo dejó
+   * vacío una persona, a propósito.
+   */
+  manual?: boolean
 }
 
 /**
@@ -421,7 +428,7 @@ export function evaluarLectura(
         // multiplica nada y exigirlo rechazaría una captura que ya se puede costear.
         && !(tieneTablaPorTipo && def.slug === 'base_precio'))
     : todosFaltantes
-  if (contexto.soloMinimosDeCosto) {
+  if (contexto.soloMinimosDeCosto && !contexto.manual) {
     const descriptivos = todosFaltantes.filter(def => !faltantes.includes(def))
     if (descriptivos.length > 0) {
       avisosDelItem.push(
@@ -444,7 +451,7 @@ export function evaluarLectura(
     ranura: ranura.slug,
     campos,
     desglose: cruda.desglose,
-    avisos: [...avisosDelItem, ...avisosDeLectura(ranura, porSlug, cruda.desglose)],
+    avisos: [...avisosDelItem, ...avisosDeLectura(ranura, porSlug, cruda.desglose, contexto.manual === true)],
     porTipoPax: cruda.porTipoPax ?? [],
     totalGeneral: cruda.totalGeneral ?? null,
   }
@@ -479,6 +486,7 @@ function avisosDeLectura(
   ranura: DefinicionRanura,
   porSlug: Map<string, CampoLeido>,
   desglose: FilaDesglose[],
+  manual = false,
 ): string[] {
   const avisos: string[] = []
 
@@ -505,7 +513,7 @@ function avisosDeLectura(
       'La captura dice que los impuestos NO están incluidos. El costo que se cargue no los tiene: ' +
       'agrégalos como rubro aparte si van por cuenta del pasajero.',
     )
-  } else if (ranura.slug === 'hotel_detalle' && porSlug.get('impuestos_incluidos')?.valor == null) {
+  } else if (ranura.slug === 'hotel_detalle' && !manual && porSlug.get('impuestos_incluidos')?.valor == null) {
     // No es mínimo (la tarjeta del listado no lo dice), pero tampoco se supone.
     avisos.push(
       'La captura no dice si el precio incluye impuestos y tasas. Confírmalo con el proveedor antes de ' +

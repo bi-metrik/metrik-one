@@ -31,3 +31,4 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️ [Habitaciones por opción de hotel (R8)](project_habitaciones_hotel_r8.md) — unión en fila tras leer; sin QA en pantalla (prod se escribe al abrir)
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`
 - ⚠️⚠️ [Captura de cotización, Parte B (#847)](project_captura_cotizacion_parte_b.md) — SIN mergear: migración de ranuras ANTES del merge
+- ⚠️ [Cancelación interna e ingreso manual (#949 + PR 2)](project_cancelacion_interna_ingreso_manual.md) — el neto manual NO va a `aPagarAgencia`; la fuente nunca en `proveedor`

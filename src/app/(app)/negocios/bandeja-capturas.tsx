@@ -21,7 +21,9 @@ import {
   type EstadoDeProceso,
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
-import { aceptarPorRuta, detectarPorRuta, leerPorRuta } from '@/lib/cotizaciones/bandeja-red'
+import { aceptarPorRuta, detectarPorRuta, lecturaManualPorRuta, leerPorRuta } from '@/lib/cotizaciones/bandeja-red'
+import { esManual } from '@/lib/cotizaciones/ingreso-manual'
+import IngresoManualForm, { type RespuestaManual, type TipoManual } from './ingreso-manual-form'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
 import { pantallazosEnCotizacion, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import {
@@ -77,6 +79,13 @@ import { Miniatura, useVistaAmpliada } from '@/components/viaje/pantallazo'
  * La misma imagen no se procesa. Otra imagen con el mismo servicio y precio se pregunta; la
  * habitación de un hotel cuyo grupo ya está cubierto también («Esta habitación sobra… ¿La
  * descarto?»). Nunca se decide en silencio (`captura-repetida.ts`).
+ *
+ * ## Lo que no viene en pantallazo (ingreso manual, 2026-09-28)
+ *
+ * «Ingresar a mano» abre un formulario (hotel por habitación, o traslado) para el portafolio en
+ * PDF del proveedor o la tarifa por teléfono. El servidor lo convierte en la MISMA lectura
+ * firmada que da un pantallazo (`ingreso-manual.ts`), y entra aquí como una fila más: se revisa
+ * y se acepta igual.
  *
  * Solo el flujo de viaje (Trappvel) la monta.
  */
@@ -451,6 +460,35 @@ export default function BandejaCapturas({
   }, [])
   useImperativeHandle(receptor, () => ({ recibir: recibirDevolucion }), [recibirDevolucion])
 
+  // Ingreso manual: la lectura firmada entra como recién leída, igual que una devuelta.
+  const [manualAbierto, setManualAbierto] = useState(false)
+  const enviarManual = useCallback(async (tipo: TipoManual, datos: Record<string, unknown>): Promise<RespuestaManual> => {
+    const r = await lecturaManualPorRuta(cotizacionId, tipo, datos)
+    if (!r) return { ok: false, mensaje: 'No se pudo enviar. Revisa tu conexión e inténtalo otra vez.' }
+    if (!r.ok) return { ok: false, mensaje: r.mensaje, errores: r.errores }
+    const id = nuevoId()
+    const ciudad = typeof datos.ciudad === 'string' && datos.ciudad.trim() !== '' ? datos.ciudad.trim() : null
+    const pistas: Pistas = { lugar: ciudad, origen: null, destino: null }
+    const borrador: Borrador = { tipo, lectura: r.lectura, lecturaJson: r.lecturaJson, firma: r.firma, pistas }
+    const rev = revisarBorrador({
+      capId: id,
+      borrador,
+      lineas: itemsVivos.current,
+      comparables: opcionesParaComparar(itemsVivos.current, vigentes.current, id),
+      composicion: composicionViva.current,
+      ubicaciones: ubicacionesVivas.current,
+      comparar: true,
+    })
+    const alertas = r.alertas ?? []
+    setCapturas(cs => [{
+      id, preview: '', dataUrl: '',
+      estado: rev.pregunta ? { ...rev.pregunta, alertas } : { fase: 'lista', alertas },
+      tipo, pistas, borrador, itemId: null, donde: rev.donde, como: rev.como ?? null,
+      leida: rev.leida, error: null, huella: null, ...(rev.pregunta ? { abierta: true } : {}),
+    }, ...cs])
+    return { ok: true }
+  }, [cotizacionId])
+
   // La tarjeta de cada opción de hotel pinta su ⚠ cuando aquí hay una habitación que sobra.
   const ultimosPendientes = useRef('')
   useEffect(() => {
@@ -721,6 +759,14 @@ export default function BandejaCapturas({
           }}
         />
       </label>
+      {manualAbierto ? (
+        <IngresoManualForm composicion={composicion} onEnviar={enviarManual} onCerrar={() => setManualAbierto(false)} />
+      ) : (
+        <p className="m-0 text-[13px] text-[#6E6A62]">
+          ¿La tarifa viene de un portafolio o por teléfono?{' '}
+          <button type="button" onClick={() => setManualAbierto(true)} className={LINK} data-abrir-ingreso-manual>Ingresar a mano</button>
+        </p>
+      )}
       {visibles.length > 0 && (
         <ul className="m-0 flex list-none flex-col p-0" aria-label="Pantallazos pegados" data-lista-capturas>
           {visibles.map(c => {
@@ -796,7 +842,14 @@ export function FilaCaptura({
   const sobra = e.fase === 'parecida' && e.habitacion === true
   const titulo = (tipo && tituloDeCaptura(tipo, lectura, sobra)) || c.etiqueta || 'Pantallazo pegado'
   const caption = titulo === 'Pantallazo pegado' ? titulo : `Pantallazo · ${titulo}`
-  const miniatura = <Miniatura src={c.preview} caption={caption} onAmpliar={onAmpliar} />
+  // Lo ingresado a mano no tiene imagen: la miniatura lo dice.
+  const miniatura = esManual(lectura)
+    ? (
+      <span className="grid aspect-[1920/735] w-[76px] shrink-0 place-items-center rounded-[5px] border border-[#E2DED5] bg-[#EEEBE4] text-[11px] font-semibold text-[#6E6A62] max-sm:w-16" data-miniatura-manual>
+        A mano
+      </span>
+    )
+    : <Miniatura src={c.preview} caption={caption} onAmpliar={onAmpliar} />
   const vacia = <Miniatura src={null} caption="" />
   const quitar = (
     <button type="button" onClick={onBorrar} aria-label="Quitar este pantallazo" className={BTN_X} data-quitar-captura>
