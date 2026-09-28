@@ -111,6 +111,11 @@ export async function registrarActividad(
  * Actualiza una entrada ya escrita. La usa la traza de correcciones, que refresca el
  * mismo evento mientras dure la corrección en vez de duplicarlo por cada pulsación
  * del autosave.
+ *
+ * Es el ÚNICO UPDATE de usuario sobre `activity_log`, y la base lo espeja: solo el
+ * evento `tipo='cambio'` propio, y solo `contenido`, `valor_nuevo` y `valor_anterior`
+ * (migración 20260928130000). Ampliar lo que se actualiza aquí exige ampliar esa
+ * migración, o el UPDATE dará 42501.
  */
 export async function actualizarActividad(
   supabase: ClienteSupabase,
@@ -120,16 +125,28 @@ export async function actualizarActividad(
 ): Promise<{ ok: boolean; motivo?: string }> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = (await (supabase as any)
+    const { data, error } = (await (supabase as any)
       .from('activity_log')
       .update(cambios)
-      .eq('id', activityLogId)) as { error: { message: string } | null }
+      .eq('id', activityLogId)
+      .select('id')) as { data: { id: string }[] | null; error: { message: string } | null }
 
     if (error) {
       console.error(
         `[activity_log] ${origen}: no se pudo actualizar el evento ${activityLogId} — ${error.message}`,
       )
       return { ok: false, motivo: error.message }
+    }
+    // RLS no rechaza un UPDATE: filtra. La politica de UPDATE solo alcanza el evento
+    // `cambio` cuyo autor es el staff de la sesion (migracion 20260928130000), y en
+    // "Ver como" el evento lleva el staff del impersonado. Sin esta lectura el refresco
+    // fallaria en silencio, que es justo lo que este helper existe para evitar.
+    if (!data || data.length === 0) {
+      const motivo = 'el UPDATE no alcanzo ninguna fila (RLS o id inexistente)'
+      console.error(
+        `[activity_log] ${origen}: no se pudo actualizar el evento ${activityLogId} — ${motivo}`,
+      )
+      return { ok: false, motivo }
     }
     return { ok: true }
   } catch (err) {
