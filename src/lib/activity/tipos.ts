@@ -20,6 +20,10 @@
  * 2. Escribir una migración que vuelva a escribir el CHECK con la lista completa.
  * 3. Desplegar la migración ANTES o junto al código que lo inserta — al revés, el
  *    insert nuevo rebota contra el CHECK viejo (y ahora sí se ve, pero no se guarda).
+ * 4. Si el tipo se inserta con el cliente de SESIÓN (no con service_role), agregarlo
+ *    también a la lista de la política `activity_log_insert_propio`
+ *    (`supabase/migrations/20260928140000_activity_log_insert_autor_y_tipo.sql`).
+ *    Sin eso la RLS lo rechaza y `registrarActividad` solo lo reporta en consola.
  *
  * ## Cómo quitar un tipo
  *
