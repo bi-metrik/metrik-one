@@ -1,0 +1,104 @@
+# Pendientes de producto ONE
+
+> Movido literal desde `CLAUDE.md` el 2026-09-28.
+
+## Pendientes
+
+- [x] Dashboard Admin Mi Bolsillo (`/admin/mibolsillo`) — completado 2026-03-13
+- [x] Modulo /equipo con gestion de horas — completado 2026-03-18
+- [x] Costos ejecutados por categoria en proyecto — completado 2026-03-18
+- [x] Costo horas por tarifa individual de staff — completado 2026-03-18
+- [x] Sistema de roles [98G]: 5 niveles, proteccion paginas, filtrado operador, dual responsables — completado 2026-03-22
+- [x] Mi Negocio rediseno: sidebar + acordeon mobile + Mi Plan card — completado 2026-03-22
+- [x] Tab bar mobile: 4 tabs + "Mas" overflow — completado 2026-03-22
+- [x] Activity Log / Comentarios: timeline con menciones, links, cambios automaticos — completado 2026-03-22
+- [x] [98H] Custom Fields + Labels + Herencia nivel 1 — completado 2026-03-22
+- [x] Notificaciones in-app N1-N8b + D170-D176 — completado 2026-03-24
+- [x] Rol supervisor (5°) con routing por area — completado 2026-03-24
+- [x] Rol contador (6°, solo causacion) — completado 2026-03-24
+- [x] WhatsApp bot 3-wave overhaul (nuevos intents, UNCLEAR, alertas proactivas) — completado 2026-03-22
+- [x] WhatsApp bot: titulo limpio de gastos — completado 2026-03-25
+- [x] Deducible toggle en modulo causacion — completado 2026-03-25
+- [x] Workflow engine: workspace_stages + stage_transition_rules + evaluate_stage_rules — completado 2026-03-26
+- [x] Commit residuales WA sprint: execute.ts + gasto-directo.ts — incluidos en 2ca4980
+- [x] Rediseno completo `/tableros` — Sprint 1+2+3 implementados, build limpio — completado 2026-03-31
+- [x] Merge PR #1 `feat/tenant-rules-motor` — mergeado 2026-04-01
+- [x] Aplicar migracion `tenant_rules` en produccion — aplicada 2026-04-01
+- [x] Deploy Edge Function `evaluar-reglas` — deployada 2026-04-01
+- [x] Configurar workspace SOENA — campos, modulos financieros y valor_anticipo aplicados 2026-04-05
+- [x] Bloques renderers completos (11 tipos) — sesion C 2026-04-05
+- [x] Configuración SOENA VE en DB — sesion C 2026-04-05
+- [x] BloqueCotizacion funcional con flujo completo (crear/aprobar/rechazar/PDF/duplicar) — sesion D 2026-04-05
+- [x] ActivityLog en negocios — menciones, link, 280 chars — sesion D 2026-04-05
+- [x] Header negocio rediseñado — volver, ID, precio, carpeta editable, links empresa/contacto — sesion D 2026-04-05
+- [x] Migraciones 008-010 aplicadas en produccion — sesion D 2026-04-05
+- [x] Cobros automaticos desde bloques datos — anticipo + multi-pago ePayco — sesion G 2026-04-07
+- [x] BloqueCobros visible todo el ciclo como solo lectura — sesion G 2026-04-07
+- [x] Boton confirmar anticipo (require_confirm pattern) — sesion G 2026-04-07
+- [x] BloqueDocumentos auto-complete fix (React setState timing) — sesion G 2026-04-08
+- [x] Migraciones 011-015 aplicadas en produccion — sesion G 2026-04-07
+- [x] BloqueHistorial (visualizacion gastos/horas/cobros con tabs) — sesion H 2026-04-09
+- [x] KPI numeros: filtro estado 'abierto' + renombrar Pipeline → En venta — sesion H 2026-04-09
+- [x] Limpieza completa workspace metrik para demo — sesion H 2026-04-09
+- [x] Mejorar flujo WhatsApp: FOLLOWUP, ESTADO_NEGOCIOS, last_context, anáfora — completado 2026-04-12
+- [x] Fix cronograma fechas no persistian — INSERT atomico en agregarBloqueItem — completado 2026-04-17
+- [x] Cotizacion: cantidad por item + AIU manual sobre costos + costo unitario visible — completado 2026-04-17
+- [x] Cotizacion: 5 ajustes UX (Carmen/Hana/Noor) — AIU oculto, ajuste invisible, grid responsive — completado 2026-04-17
+- [x] Modulo compliance: riesgos + causas + controles + matriz — UI completa con CRUD, import/export, permisos por rol — completado 2026-04-17
+- [x] Controles reestructurados: entidad independiente M:N con causas via control_causa junction — completado 2026-04-17
+- [x] Matriz 5x5 compacta: max-w-lg, celdas h-9, labels 8-10px — completado 2026-04-17
+- [x] Header /negocios/[id] sticky al scrollear — completado 2026-04-18
+- [x] Fix BloqueAprobacion no refrescaba UI tras decision — completado 2026-04-18
+- [x] Security linter Fase 1: 4 fixes criticos (RLS, SECURITY DEFINER, bucket listing, policy permisiva) — completado 2026-04-18
+- [x] Security linter Fase 2: 46 funciones con search_path mutable fixed — completado 2026-04-18
+- [x] Docs wa-templates.md: 10 templates listos para Meta Business Manager — completado 2026-04-18
+- [x] **Fix flujo invitaciones equipo** — completado 2026-05-13 (commit 35ed64a). Email real via auth.admin.inviteUserByEmail + branch token_hash + roles owner/supervisor/read_only + toggle "Transferir ownership"
+- [x] **Activity log toggle eventos sistema** — completado 2026-05-13 (commits bc6378e + 60ca389). Default solo comentarios, localStorage persist
+- [x] **Extirpar pipeline/proyectos/nuevo-oportunidad** — completado 2026-05-14 (commits 5abd9c2 + 3016d1a). -8319 lineas, todo apunta a /negocios
+- [ ] **QA online invitaciones equipo:** 3 escenarios — (1) invitar nuevo admin → email Supabase → /accept-invite → /numeros, (2) re-invite cambiando rol antes de aceptar, (3) toggle "Transferir ownership" → confirm → invitado acepta como owner
+- [ ] **Pre-fill `/negocios/nuevo`:** leer searchParams empresa_id/contacto_id en page.tsx + pasar como initial props al form. Query params ya llegan desde Directorio empresas/contactos
+- [ ] **Verificar legacy /nuevo/cobro y /nuevo/horas (FAB):** apuntan a tablas facturas y proyectos que pueden estar dormidas. Si no hay UI activa que renderice esos registros, sumar a extirpacion
+- [ ] **Hana:** actualizar mapa de procesos — el flujo "crear oportunidad" se elimino del catalogo. Todo entra como Negocio
+- [x] **WA notificaciones:** liberar Vercel SSO en metrik.com.co/privacidad — completado 2026-04-28
+- [ ] **WA notificaciones:** validar que politica tratamiento menciona WhatsApp + telefono + opt-out (Emilio)
+- [ ] **WA notificaciones:** cargar los 10 templates a Meta Business Manager (Yuto, post bloqueadores)
+- [ ] **WA notificaciones:** construir edge function `wa-notify` + trigger SQL en tabla notificaciones + flow opt-in en primera interaccion (Max, post aprobacion Meta)
+- [x] **Refactor MC + EBITDA + capa fiscal Fase A backend** — completado 2026-04-27 (commit 535a31e)
+- [x] **Refactor Fase B UI completa** (5 sub-fases) — completado 2026-04-27 (commits a214f8b → f83f09a)
+- [x] **Fix bug revisado en calculos operativos** — completado 2026-04-27 (commit c749daa)
+- [x] **Planes recurrentes Fase 1 datos + cron** — completado 2026-05-04 (commit 9b9499e)
+- [x] **Planes recurrentes Fase 2 BloquePlanRecurrente + UI cobros programados** — completado 2026-05-04 (commit 3afe283)
+- [x] **Planes recurrentes Fase 3 lineas MeTRIK ONE + Resident** — completado 2026-05-04 (commit 6391525)
+- [x] **MC por linea (decision Carmen + Mauricio)** — completado 2026-05-04 (commit c56f9e7)
+- [x] **Cleanup config_financiera.margen_* legacy** — completado 2026-04-28 (commit f83f09a)
+- [ ] **Planes recurrentes Fase 4 — webhook Wompi:** pendiente activacion cuenta empresarial Wompi (Mauricio investigando si se puede como persona natural transitoria). Edge function `wompi-webhook` para suscripciones recurrentes + mapeo `referencia_wompi` → `plan_cobro` (Max + Yuto)
+- [ ] **Carmen (cerebro):** actualizar `cerebro/reglas/modelo-financiero-mrr-one.md` con regla hibrida 3 buckets revenue (Service / ARR ONE / ARR Resident) + excepcion Clarity-financiado + 3 decisiones MC por linea (Sin linea visible, MC global+linea coexisten, Resident variable a linea)
+- [ ] **Mateo:** pieza de comunicacion para diferenciar Resident de ONE en pitch comercial
+- [ ] **Santiago:** validar pricing y permanencia minima al cerrar primer contrato Resident
+- [ ] **Auditoria SOENA:** validar que el saldo del flujo VE muestra correcto el cobrado real con cobros pre-refactor (`revisado=false` en historicos pero el fix c749daa ignora ese filtro). Revisar BloqueCobros y BloqueHistorial en negocio activo
+- [ ] **Auditoria DIMPRO:** validar `/movimientos` con badge clasificacion + filtro nuevo en 55 gastos historicos
+- [ ] **Security low:** mover extensions unaccent, pg_trgm, pg_net fuera de public
+- [ ] **Security low:** policy explicita para wa_message_log o documentar como service-role-only
+- [ ] **Security low:** activar Leaked Password Protection en Supabase Auth dashboard
+- [ ] **DevOps:** supabase migration repair + db pull para realinear 13 migraciones remotas
+- [ ] **CRITICO:** Persona natural debe crear empresa automaticamente en `crearNegocio` (ver workspaces/soena/CONTEXT.md para detalle)
+- [ ] **SOENA:** Pendientes criticos en `workspaces/soena/CONTEXT.md` — incluye bloque `devolucion_dian` + storage + generacion docs
+- [ ] **INTEGRAR (sesión SOENA 2026-04-12):** Commit `c51d246` agrega 2 features genéricos al producto que deben validarse: (1) `source_etapa_orden` en routing eval de `cambiarEtapaNegocioConGate` — permite leer campos de bloques datos de una etapa distinta a la actual, backward compatible (si no se pasa, lee etapa actual como antes); (2) `DatosField.default` en `BloqueDatos.tsx` — permite inicializar toggles con valor distinto de false. Ambos ya están en producción via SOENA. Revisar y documentar como features de producto si se validan correctos
+- [x] **PENDIENTE:** Regenerar `database.ts` types tras migraciones 011-015 y quitar `as any` casts de cobros — completado 2026-04-18
+- [ ] **Lint Fase 4:** 28 issues de react-hooks pendientes (set-state-in-effect, purity, exhaustive-deps, static-components, immutability, refs) — requieren análisis por feature
+- [ ] **PENDIENTE:** /negocios no muestra cerrados — agregar pill "Cerrados" con filtro server-side en getNegociosV2
+- [ ] **PENDIENTE:** Commitear 34 archivos uncommitted (WA bot + AFI compliance + SOENA) — split por tema
+- [x] ID negocio formato `S1 26 3` — triggers auto-generan codigos, documentado en seccion "Sistema de codigos" — completado 2026-04-09
+- [x] Responsable en header de etapa — selector con avatar+nombre, dropdown filtrable, permisos owner/admin/supervisor — completado 2026-04-17
+- [ ] **PENDIENTE:** Header negocio refinado segun spec Noor (jerarquia 4 filas: nav / titulo+accion / empresa+contacto+precio / carpeta+linea / progreso)
+- [ ] Verificar tableros en browser real (desktop + mobile viewport)
+- [ ] Verificar cards condicionales en ambiente real (F6, C6, O7, O2 emptyMessage)
+- [ ] Piloto workflow engine con primer cliente Clarity — configurar via `/configure-workflow [slug]`
+- [ ] Activar programa referidos (/promotores): UI incentivos + deep links + tracking — pendiente sprint go-to-market
+- [ ] Wizard fiscal en WhatsApp para OPP_GANADA (hard gate actual rompe flujo end-to-end)
+- [ ] Templates + media en wa-respond.ts (facturas por WhatsApp, compliance Meta)
+- [ ] Google OAuth (codigo listo, faltan credenciales en Supabase)
+- [ ] AI-suggested deducibility para gastos
+- [ ] Verificar que registro de horas desde proyecto pasa created_by correctamente
+- [ ] Custom fields en contactos/empresas detail (cuando se creen esas vistas)
+
