@@ -43,7 +43,7 @@ function inicial(tipo: TipoManual, grupo: Composicion | null): Valores {
   }
   return tipo === 'hotel'
     ? { hotel: '', ciudad: '', entrada: '', salida: '', habitacion: '', regimen: '', incluye: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', edadDesde: '', edadHasta: '', fuente: '' }
-    : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', neto: '', idaYRegreso: 'si', fuente: '' }
+    : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', neto: '', netoNino: '', netoInfante: '', idaYRegreso: 'si', fuente: '' }
 }
 
 export default function IngresoManualForm({
@@ -183,7 +183,16 @@ export default function IngresoManualForm({
             {opcion('cobro', 'por_persona', 'Por persona')}
             {opcion('cobro', 'por_vehiculo', 'Por vehículo')}
           </div>
-          {campo('neto', v.cobro === 'por_vehiculo' ? 'Costo por vehículo' : 'Costo por persona', { numerico: true })}
+          {/* Por persona, como el hotel: adulto, niño e infante (el infante vacío es 0). */}
+          {v.cobro === 'por_vehiculo' ? (
+            campo('neto', 'Costo por vehículo', { numerico: true })
+          ) : (
+            <>
+              {campo('neto', 'Adulto', { numerico: true })}
+              {campo('netoNino', 'Niño', { numerico: true })}
+              {campo('netoInfante', 'Infante', { numerico: true, placeholder: '0' })}
+            </>
+          )}
           <div className="col-span-2 flex flex-wrap items-end gap-x-4 gap-y-1 pb-1.5" role="radiogroup" aria-label="Trayectos">
             {opcion('idaYRegreso', 'no', 'Solo ida')}
             {opcion('idaYRegreso', 'si', 'Ida y regreso')}
