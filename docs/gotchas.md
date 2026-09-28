@@ -131,3 +131,26 @@
   6. Ruta bajo `/admin/[modulo]` — seccion "Admin" en sidebar
   7. Env vars en Vercel con `printf` (no `echo`) para evitar trailing `\n`
 
+- **El trial de un servicio se ancla a la aceptacion de los terminos, y la base lo hace cumplir.**
+  `servicio_cobro_enrolamiento` (migracion `20260929010000`) tiene el CHECK
+  `fin_trial = (ancla_at at time zone 'America/Bogota')::date + dias_trial`, y
+  `enrolar_cobro_por_ciclo` rechaza un calendario cuya cuota 1 no venza ese dia exacto. Dos
+  consecuencias que no se deducen del codigo:
+  1. **El ancla es un MIN, no un MAX**: `aceptaciones_terminos.respondido_at` de la aceptacion mas
+     VIEJA del negocio del contrato. Con un MAX, aceptar una version nueva de los terminos correria
+     el trial hacia adelante y regalaria dias.
+  2. **El acta es inmutable por trigger**, asi que el trial no se estira con un UPDATE. Corregir un
+     enrolamiento equivocado es anular el cobro y decidirlo a mano. En pruebas con PGlite, limpiar
+     entre casos exige `alter table ... disable trigger`.
+- **Un plan de cobro nuevo nace `activo = false` cuando el servicio se cobra por ENLACE.** `activo`
+  es el interruptor del emisor de cuentas de cobro (paso 4 del cron, desde el dia 10 en los espacios
+  con `modules.cobros_recurrentes`); el paso 6, que genera el enlace, no lo mira. Un plan activo le
+  emitiria al cliente una cuenta de cobro que nadie pidio.
+- **`timezone(text, timestamptz)` es IMMUTABLE**, asi que `(ancla_at at time zone 'America/Bogota')::date`
+  SI puede vivir en un CHECK. Lo que no se puede es una subconsulta (eso lo destapo #952).
+- **La gracia de mora son 5 dias desde el 2026-09-28** (`DIAS_GRACIA` del cron,
+  `POLITICA_FASE_1.diasGracia`). La otra mitad de lo que prometen los terminos —«desde el dia 6, solo
+  lectura»— **no la cumple ningun producto**: `accesoWorkspace` solo cierra con `suspendida`,
+  `suspenderAutomaticamente` sigue en `false` y el unico `soloLectura` del repo es el de casillas de
+  negocios (`editable-si-vacio.ts`). El cierre del Radar al vencer su TRIAL es otro regimen: ahi el
+  primer pago es condicion de entrega.

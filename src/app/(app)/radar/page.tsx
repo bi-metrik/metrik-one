@@ -4,9 +4,12 @@ import { EntradaTerminos } from '@/components/terminos/entrada-terminos'
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { estadoEntradaRadar } from '@/lib/radar/acciones'
+import { accesoRadar } from '@/lib/radar/acceso-servidor'
 import { contextoRadar } from '@/lib/radar/contexto'
 import { bibliotecaParaPantalla, leerPerfilActivo, leerProcesosVigentes } from '@/lib/radar/datos-servidor'
 import { RadarCliente } from './radar-cliente'
+import { RadarCerrado } from './radar-cerrado'
+import { BannerTrial } from './banner-trial'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +28,14 @@ export const dynamic = 'force-dynamic'
  * el usuario cambia el peso de un tema y ve el orden moverse sin esperar un round-trip, que es la
  * forma en que la biblioteca se calibra. Es la MISMA implementación que usaría el servidor: hay una
  * sola, y sus pruebas de caso la fijan.
+ *
+ * ## El trial y el cierre por pago
+ *
+ * Después del gate de términos hay un segundo gate: el PAGO (`lib/radar/acceso.ts`). El trial son 5
+ * días contados desde la aceptación de los términos y, al vencer sin pago confirmado, esta página no
+ * pinta ni una convocatoria: solo el enlace de pago. Es lo que decidió Mauricio el 2026-09-28, y en
+ * `acceso.ts` está por qué a este módulo no le sirve el «solo lectura» con que Clarity y Valida
+ * manejan la mora.
  *
  * ## Qué queda fuera de esta entrega, a propósito
  *
@@ -98,6 +109,18 @@ export default async function RadarPage() {
     )
   }
 
+  // El segundo gate: el pago. Va DESPUÉS de los términos porque el trial se cuenta desde que se
+  // aceptaron: sin aceptación no hay trial que medir.
+  const { acceso, pago } = await accesoRadar()
+  if (acceso.estado === 'cerrado') {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
+        {encabezado}
+        <RadarCerrado acceso={acceso} pago={pago} />
+      </div>
+    )
+  }
+
   const hoy = todayBogotaISO()
   // Las dos lecturas en paralelo, y cada una lanza si no puede garantizar el resultado completo:
   // media lista de procesos se leería como «esta semana hay menos convocatorias».
@@ -106,6 +129,9 @@ export default async function RadarPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       {encabezado}
+      {/* El contador de la prueba lo calcula el servidor (`accesoRadar`); la pantalla recibe el
+          número de días, nunca la fecha para restarla en el navegador. */}
+      {acceso.estado === 'en_trial' && <BannerTrial diasRestantes={acceso.diasRestantes} pago={pago} />}
       <RadarCliente
         procesos={procesos}
         perfil={perfil}

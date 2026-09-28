@@ -18,12 +18,19 @@ import { CLAVES_DE_MODULO } from '@/lib/modulos/catalogo'
 const RAIZ = path.resolve(__dirname, '../../..')
 const DIR = path.join(RAIZ, 'docs/catalogo-servicios/cerebro/catalogo/servicios')
 
-const ESPERADOS = ['licencia-clarity', 'licencia-sustenta', 'valida-api-bolsa', 'valida-cda-licencia']
+const ESPERADOS = [
+  'licencia-clarity',
+  'licencia-sustenta',
+  // La ficha del Radar entra el 2026-09-28 (spec `2026-09-28_spec-radar-secop-en-one.md`, bloque A).
+  'radar-secop-licencia',
+  'valida-api-bolsa',
+  'valida-cda-licencia',
+]
 
 const archivos = readdirSync(DIR).filter((f) => f.endsWith('.md')).sort()
 
 describe('los archivos de A2', () => {
-  it('están los cuatro que pide la entrega (guard: sin esto la suite pasaría vacía)', () => {
+  it('están todos los que se han publicado (guard: sin esto la suite pasaría vacía)', () => {
     expect(archivos.map((f) => f.replace(/\.md$/, ''))).toEqual(ESPERADOS)
   })
 
@@ -105,6 +112,20 @@ describe('lo que cada archivo tiene que decir de su negocio', () => {
     for (const slug of ['licencia-clarity', 'licencia-sustenta', 'valida-cda-licencia']) {
       expect(def(slug).parametros.dia_cobro.max, slug).toBe(28)
     }
+  })
+
+  it('el Radar se cobra por ciclo, vale $20.000 de lista y su trial son 5 días', () => {
+    // El precio de LISTA. El descuento de fundador de Fabri ($15.000) vive en su contrato, no
+    // aquí: un precio distinto en la ficha sería el precio de todos.
+    const d = def('radar-secop-licencia')
+    expect(d.disparador_cobro).toBe('ciclo')
+    expect(d.modulo).toBe('radar_secop')
+    expect(d.parametros.precio_mensual.por_defecto).toBe(20_000)
+    // 5, no 15: decisión de Mauricio del 2026-09-28. El trial se ancla a la aceptación de los
+    // términos (`src/lib/cobros/enrolar-ciclo.ts`) y este número es el que lo mide.
+    expect(d.parametros.dias_trial.por_defecto).toBe(5)
+    // Lo que no está contratado no se muestra: el Radar no abre las vitrinas de Clarity.
+    expect(d.parametros.modo_vitrina.por_defecto).toBe(false)
   })
 
   it('cada archivo declara los documentos contractuales que lo cubren', () => {
