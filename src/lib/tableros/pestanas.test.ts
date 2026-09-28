@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  necesitaBandejas,
   necesitaDatosGenericos,
   pestanasDeTableros,
   tieneTablerosPropios,
@@ -202,5 +203,44 @@ describe('tieneTablerosPropios / necesitaDatosGenericos', () => {
   it('un workspace sin business no consulta las genericas aunque tenga modulos propios', () => {
     expect(necesitaDatosGenericos({ proceso_semanal: true })).toBe(false)
     expect(tieneTablerosPropios({ proceso_semanal: true })).toBe(true)
+  })
+})
+
+describe('tableros operativos (config_extra.tableros_operativos)', () => {
+  /** `modules` real de metrik, medido en la base el 2026-09-28. */
+  const METRIK: ModulosWorkspace = {
+    business: true,
+    centro_costos: true,
+    pausa_enabled: false,
+    valida_consulta: true,
+    compliance_audit: false,
+    cobros_recurrentes: true,
+    fab_registrar_cobro: true,
+    pausa_sla_auto_enabled: false,
+  }
+
+  it('sin el flag metrik sigue viendo las tres genericas', () => {
+    expect(claves(METRIK)).toEqual(['financiero', 'comercial', 'operativo'])
+    expect(necesitaDatosGenericos(METRIK)).toBe(true)
+    expect(necesitaBandejas(METRIK)).toBe(false)
+  })
+
+  it('con el flag son las mismas llaves, en el orden del flujo y con Operaciones', () => {
+    const tabs = pestanasDeTableros(METRIK, CON_DATOS, { bandejasOperativas: true })
+    expect(tabs).toEqual([
+      { key: 'comercial', label: 'Comercial' },
+      { key: 'operativo', label: 'Operaciones' },
+      { key: 'financiero', label: 'Financiero' },
+    ])
+    // Y no se piden las tres rondas de reporte que ya nadie pinta.
+    expect(necesitaDatosGenericos(METRIK, { bandejasOperativas: true })).toBe(false)
+    expect(necesitaBandejas(METRIK, { bandejasOperativas: true })).toBe(true)
+  })
+
+  it('el flag no toca a un workspace con tableros propios (SOENA)', () => {
+    expect(claves(SOENA)).toEqual(
+      pestanasDeTableros(SOENA, CON_DATOS, { bandejasOperativas: true }).map((p) => p.key),
+    )
+    expect(necesitaBandejas(SOENA, { bandejasOperativas: true })).toBe(false)
   })
 })

@@ -13,7 +13,9 @@ import {
 import { getOperacionesBono } from './operaciones-actions'
 import { getDatosDueno } from '../calidad/actions'
 import { bogotaYearMonth, bogotaParts } from '@/lib/dates/bogota'
-import { necesitaDatosGenericos } from '@/lib/tableros/pestanas'
+import { necesitaBandejas, necesitaDatosGenericos, type OpcionesTableros } from '@/lib/tableros/pestanas'
+import { tablerosOperativosActivos } from '@/lib/tableros/bandejas'
+import { getBandejasOperativas } from './bandejas-actions'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
 import { getVitrinaCopy } from '@/lib/workspace/vitrina'
@@ -38,13 +40,17 @@ export default async function TablerosPage() {
 
   // Load workspace modules
   let modules: Record<string, boolean> = { business: true }
+  // `config_extra.tableros_operativos` convierte las tres genericas en bandejas por fase.
+  // Se lee en la MISMA consulta que los modulos: cero idas y vueltas nuevas.
+  let opciones: OpcionesTableros = {}
   if (workspaceId && supabase) {
     const { data: ws } = await supabase
       .from('workspaces')
-      .select('modules')
+      .select('modules, config_extra')
       .eq('id', workspaceId)
       .single()
     modules = (ws?.modules as Record<string, boolean> | null) ?? { business: true }
+    opciones = { bandejasOperativas: tablerosOperativosActivos(ws?.config_extra) }
   }
 
   // Gate del tablero comercial sobre negocios y de la pestaña Direccion: el modulo
@@ -72,12 +78,13 @@ export default async function TablerosPage() {
     procesoSeccional,
     operaciones,
     ferreteria,
+    bandejas,
   ] = await Promise.all([
     // Las tres genericas (Financiero/Comercial/Operativo) solo se consultan cuando
     // se van a pintar: son tres rondas de consultas y un workspace con tableros
     // propios no muestra ninguna. La condicion es la MISMA que usa la pantalla
     // para dibujarlas (`@/lib/tableros/pestanas`), escrita una sola vez.
-    necesitaDatosGenericos(modules)
+    necesitaDatosGenericos(modules, opciones)
       ? Promise.all([
           getComercialData('mes'),
           getOperativoData('mes'),
@@ -147,6 +154,17 @@ export default async function TablerosPage() {
           return null
         })
       : null,
+
+    // Tableros operativos: las tres genericas pasan a bandejas de pendientes por fase.
+    // Mismo gate que las pinta (`@/lib/tableros/pestanas`). Si la lectura falla, cada
+    // pestana dice "Sin datos suficientes": nunca una bandeja vacia que diga "todo al dia"
+    // sin serlo.
+    necesitaBandejas(modules, opciones)
+      ? getBandejasOperativas().catch((e) => {
+          console.error('[tableros] bandejas operativas:', e)
+          return null
+        })
+      : null,
   ])
 
   const [comercial, operativo, financiero] = genericas
@@ -164,6 +182,7 @@ export default async function TablerosPage() {
       initialComercialNegocios={comercialNegocios}
       initialCalidad={calidad}
       initialFerreteria={ferreteria}
+      initialBandejas={bandejas}
       modules={modules}
     />
   )

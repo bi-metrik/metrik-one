@@ -5,6 +5,8 @@ import {
   RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts'
 import type { OperativoData } from '../types'
+import type { Bandeja } from '@/lib/tableros/bandejas'
+import { BandejaFase } from './bandeja-fase'
 import { ChartCard } from './chart-card'
 import { ProgressGauge } from './progress-gauge'
 import { AlertCard } from './alert-card'
@@ -37,7 +39,17 @@ function getSaludColor(pct: number): string {
   return RED
 }
 
-export function TabOperativo({ data }: { data: OperativoData }) {
+/**
+ * Con `bandeja` la pestana pasa al modo operativo (`config_extra.tableros_operativos`):
+ * pendientes de la fase en vez del reporte. Sin ella, el reporte de siempre.
+ */
+export function TabOperativo({ data, bandeja }: { data?: OperativoData | null; bandeja?: Bandeja | null }) {
+  if (bandeja) return <BandejaFase bandeja={bandeja} titulo="Pendientes de operaciones" />
+  if (!data) return null
+  return <TabOperativoReporte data={data} />
+}
+
+function TabOperativoReporte({ data }: { data: OperativoData }) {
   const saludColor = getSaludColor(data.saludPct)
 
   return (
