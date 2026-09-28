@@ -35,6 +35,7 @@ import { esNombreDeOpcion } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import {
   formatoMonto,
+  leerTarifaPax,
   monedaDeTarifa,
   type Composicion,
   type TarifaConfirmada,
@@ -50,6 +51,7 @@ import {
   resumenDeAlojamiento,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -435,7 +437,14 @@ export default function TarjetaOpcion({
 
 // ── La ficha ─────────────────────────────────────────────────────────────────
 
+/** La fuente de una opción ingresada a mano («Portafolio Verdemar 2026»). Interna. */
+function fuenteManual(item: ItemConLectura): string | null {
+  const t = leerTarifaPax(item.tarifa_pax)
+  return datosManuales(t.casillas?.grupo_completo ?? t.habitaciones?.[0]?.lectura ?? null)?.fuente || null
+}
+
 function Ficha({ item, esHotel, composicion }: { item: ItemConLectura; esHotel: boolean; composicion: Composicion | null }) {
+  const fuente = fuenteManual(item)
   if (esHotel) {
     const [h] = hotelesDeItems([item])
     const cargo = cargoDeItem(item)
@@ -446,6 +455,7 @@ function Ficha({ item, esHotel, composicion }: { item: ItemConLectura; esHotel: 
     if (h?.regimen) filas.push({ dt: 'Régimen', dd: h.regimen })
     if (fechas) filas.push({ dt: 'Fechas', dd: <>{fechas}{noches && <small className="text-xs font-normal text-[#6E6A62]"> · {noches}</small>}</> })
     if (h?.cancelacion) filas.push({ dt: 'Cancelación', dd: h.cancelacion })
+    if (fuente) filas.push({ dt: 'Ingresado a mano', dd: fuente })
     if (cargo) {
       filas.push({
         dt: 'Se paga en el destino',
@@ -464,7 +474,7 @@ function Ficha({ item, esHotel, composicion }: { item: ItemConLectura; esHotel: 
       </dl>
     )
   }
-  const renglones = fichaDeOpcion(item, composicion)
+  const renglones = [...fichaDeOpcion(item, composicion), ...(fuente ? [`Ingresado a mano · ${fuente}`] : [])]
   if (renglones.length === 0) return null
   return (
     <ul className="m-0 flex list-none flex-col gap-1 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] p-3" data-ficha>
@@ -648,6 +658,7 @@ function FilaHabitacionTarjeta({
   const titulo = h.numero ? `Habitación ${h.numero}` : null
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
+  const manual = datosManuales(h.lectura)
 
   function cambiarPantallazo(archivo: File) {
     startTransition(async () => {
@@ -664,10 +675,17 @@ function FilaHabitacionTarjeta({
       className="grid grid-cols-[120px_1fr_auto_auto] items-center gap-3 border-t border-[#E2DED5] py-2.5 pl-2.5 pr-2 first:border-t-0 max-sm:grid-cols-[84px_1fr_auto] max-sm:gap-2.5 max-sm:pl-2 max-sm:pr-1.5"
       data-habitacion={h.id}
     >
-      <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
+      {manual ? (
+        <span className="grid aspect-[1920/735] w-[120px] shrink-0 place-items-center rounded-[5px] border border-[#E2DED5] bg-[#EEEBE4] text-xs font-semibold text-[#6E6A62] max-sm:w-[84px]" data-habitacion-manual>
+          A mano
+        </span>
+      ) : (
+        <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
+      )}
       <div className="min-w-0">
         {titulo && <b className="block font-semibold">{titulo}</b>}
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
+        {manual?.fuente && <span className="block text-xs text-[#6E6A62]">{manual.fuente}</span>}
         {notaReferencia && (
           <div className="mt-[3px] flex items-start gap-[5px] text-xs text-[#6E6A62]">
             <svg className="mt-0.5 shrink-0 text-[#0E5C43]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg>
