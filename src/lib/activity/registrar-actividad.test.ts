@@ -17,6 +17,8 @@ function clienteFalso(opts: {
   errorForzado?: { code: string; message: string }
   /** Simula un cliente que revienta en vez de devolver `{ error }`. */
   lanza?: boolean
+  /** El UPDATE no alcanza ninguna fila (RLS la filtra o el id no existe). */
+  sinFilas?: boolean
 }) {
   const registro = {
     tablas: [] as string[],
@@ -55,9 +57,16 @@ function clienteFalso(opts: {
         },
         update(cambios: Record<string, unknown>) {
           return {
-            async eq(_col: string, id: string) {
-              registro.actualizaciones.push({ id, cambios })
-              return { error: opts.errorForzado ?? null }
+            eq(_col: string, id: string) {
+              return {
+                async select() {
+                  registro.actualizaciones.push({ id, cambios })
+                  if (opts.errorForzado) return { data: null, error: opts.errorForzado }
+                  // RLS no rechaza un UPDATE: la fila que no pasa el USING
+                  // simplemente no se toca, y la respuesta es 0 filas sin error.
+                  return { data: opts.sinFilas ? [] : [{ id }], error: null }
+                },
+              }
             },
           }
         },
@@ -225,5 +234,15 @@ describe('actualizarActividad', () => {
     expect(r.ok).toBe(false)
     expect(errores[0]).toContain('log-9')
     expect(errores[0]).toContain('permission denied')
+  })
+
+  it('0 filas sin error tampoco se calla: RLS filtro la fila o el id no existe', async () => {
+    // Pasa en "Ver como": el evento lleva el staff del impersonado y la sesion es la del
+    // admin, asi que la politica de UPDATE (autor = staff de la sesion) no lo alcanza.
+    const vacio = clienteFalso({ sinFilas: true })
+    const r = await actualizarActividad(vacio.cliente, 'log-9', { valor_nuevo: '300' }, 'correcciones')
+    expect(r.ok).toBe(false)
+    expect(errores[0]).toContain('log-9')
+    expect(errores[0]).toContain('ninguna fila')
   })
 })
