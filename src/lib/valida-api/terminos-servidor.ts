@@ -126,7 +126,9 @@ export async function designacionDelEspacio(workspaceId: string): Promise<Design
 interface FilaVersion {
   id: string
   workspace_id: string
+  alcance: string
   empresa_id: string | null
+  modulo: string | null
   titulo: string
   version: string
   texto_sha256: string
@@ -138,15 +140,29 @@ interface FilaContrato {
   negocio_id: string
   estado: string
   vigente_desde: string
+  empresa_id: string
+  servicio_slug: string
 }
+
+const CAMPOS_CONTRATO = 'id, negocio_id, estado, vigente_desde, empresa_id, servicio_slug'
 
 /**
  * La versión con el contrato del cliente que la respalda y los datos de la empresa, leídos con el
  * cliente de servicio y ACOTADOS al espacio de la sesión: el contrato tiene que tener a ese espacio
  * como pagador o como beneficiario, el mismo criterio de `mis_documentos_de_servicio`.
  *
- * Con varios contratos de la misma empresa gana el activo más reciente. La base acepta cualquiera
- * de ellos, porque la constancia se muestra en todos.
+ * ## Qué contrato respalda al documento, según su alcance
+ *
+ * - `cliente` (los términos de 4D SOFT y de los CDA, que llevan los datos de la empresa): un
+ *   contrato de ESA empresa. Es lo que hubo desde C2.
+ * - `plantilla` (los términos del Radar SECOP, genéricos y sin empresa): un contrato de un servicio
+ *   del MÓDULO que el documento declara (`documentos_contractuales_versiones.modulo` contra
+ *   `catalogo_servicios.modulo`, migración `20260929030000`). La empresa que firma sale del
+ *   contrato, no del documento: un genérico no nombra a nadie, y la declaración sí tiene que
+ *   nombrar a quién obliga.
+ *
+ * En los dos casos, con varios contratos gana el activo más reciente, el mismo orden que usa la
+ * guarda de la base. Sin contrato que lo respalde, `null`: ese documento no es de este espacio.
  */
 export async function versionContratada(
   workspaceId: string,
@@ -158,7 +174,7 @@ export async function versionContratada(
 
   const version = await svc
     .from('documentos_contractuales_versiones')
-    .select('id, workspace_id, empresa_id, titulo, version, texto_sha256, pdf_sha256')
+    .select('id, workspace_id, alcance, empresa_id, modulo, titulo, version, texto_sha256, pdf_sha256')
     .eq('id', documentoId)
     .maybeSingle()
   if (version.error) {
@@ -166,22 +182,41 @@ export async function versionContratada(
     return 'error'
   }
   const v = version.data as FilaVersion | null
-  if (!v?.empresa_id) return null
+  if (!v) return null
+  // El CHECK `documentos_versiones_empresa_coherente` y `documentos_versiones_modulo_coherente` ya
+  // exigen esta correspondencia; si faltara el dato, el documento no se puede atar a nada.
+  if (v.alcance === 'cliente' && !v.empresa_id) return null
+  if (v.alcance === 'plantilla' && !v.modulo) return null
+  if (v.alcance !== 'cliente' && v.alcance !== 'plantilla') return null
 
-  const [empresa, pagados, beneficiario] = await Promise.all([
-    svc.from('empresas').select('nombre, razon_social, numero_documento').eq('id', v.empresa_id).maybeSingle(),
-    svc
-      .from('servicios_contratados')
-      .select('id, negocio_id, estado, vigente_desde')
-      .eq('workspace_id', v.workspace_id)
-      .eq('empresa_id', v.empresa_id)
-      .eq('workspace_pagador_id', workspaceId),
+  // Los servicios del catálogo que encienden el módulo del documento genérico. Sin ninguno, nadie
+  // puede tenerlo contratado.
+  let slugsDelModulo: string[] = []
+  if (v.alcance === 'plantilla') {
+    const servicios = await svc.from('catalogo_servicios').select('slug').eq('modulo', v.modulo)
+    if (servicios.error) {
+      console.error('[valida-api] servicios del módulo del documento:', servicios.error.message)
+      return 'error'
+    }
+    slugsDelModulo = ((servicios.data ?? []) as { slug: string }[]).map((s) => s.slug)
+    if (slugsDelModulo.length === 0) return null
+  }
+
+  /** Los contratos del cobrador que corresponden al documento, sin decidir todavía quién los cubre. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const delDocumento = (q: any) =>
+    v.alcance === 'cliente' ? q.eq('empresa_id', v.empresa_id) : q.in('servicio_slug', slugsDelModulo)
+
+  const [pagados, beneficiario] = await Promise.all([
+    delDocumento(
+      svc.from('servicios_contratados').select(CAMPOS_CONTRATO).eq('workspace_id', v.workspace_id),
+    ).eq('workspace_pagador_id', workspaceId),
     svc.from('servicio_contratado_beneficiarios').select('servicio_contratado_id').eq('workspace_id', workspaceId),
   ])
-  if (empresa.error || pagados.error || beneficiario.error) {
+  if (pagados.error || beneficiario.error) {
     console.error(
       '[valida-api] contrato del documento:',
-      empresa.error?.message ?? pagados.error?.message ?? beneficiario.error?.message,
+      pagados.error?.message ?? beneficiario.error?.message,
     )
     return 'error'
   }
@@ -191,12 +226,9 @@ export async function versionContratada(
     (b) => b.servicio_contratado_id,
   )
   if (idsBeneficiario.length > 0) {
-    const cubiertos = await svc
-      .from('servicios_contratados')
-      .select('id, negocio_id, estado, vigente_desde')
-      .eq('workspace_id', v.workspace_id)
-      .eq('empresa_id', v.empresa_id)
-      .in('id', idsBeneficiario)
+    const cubiertos = await delDocumento(
+      svc.from('servicios_contratados').select(CAMPOS_CONTRATO).eq('workspace_id', v.workspace_id),
+    ).in('id', idsBeneficiario)
     if (cubiertos.error) {
       console.error('[valida-api] contratos como beneficiario:', cubiertos.error.message)
       return 'error'
@@ -212,11 +244,24 @@ export async function versionContratada(
       Number(b.estado === 'activo') - Number(a.estado === 'activo') || b.vigente_desde.localeCompare(a.vigente_desde),
   )
 
+  // La empresa que firma es la del contrato elegido. En un documento 'cliente' es la misma que el
+  // documento nombra (el filtro de arriba lo garantiza); en un 'plantilla' es la única que hay.
+  const empresaId = contratos[0].empresa_id
+  const empresa = await svc
+    .from('empresas')
+    .select('nombre, razon_social, numero_documento')
+    .eq('id', empresaId)
+    .maybeSingle()
+  if (empresa.error) {
+    console.error('[valida-api] empresa del contrato:', empresa.error.message)
+    return 'error'
+  }
+
   const e = empresa.data as { nombre: string | null; razon_social: string | null; numero_documento: string | null } | null
   const empresaNombre = (e?.razon_social || e?.nombre || '').trim()
   const empresaNit = (e?.numero_documento || '').trim()
   if (!empresaNombre || !empresaNit) {
-    console.error('[valida-api] la empresa del contrato no tiene razón social o NIT:', v.empresa_id)
+    console.error('[valida-api] la empresa del contrato no tiene razón social o NIT:', empresaId)
     return null
   }
 

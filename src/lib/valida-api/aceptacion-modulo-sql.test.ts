@@ -22,6 +22,12 @@ import { PGlite } from '@electric-sql/pglite'
  * Desde `20260923220000` (los CDA) todo lo anterior corre contra el cuerpo NUEVO de la guarda, que
  * además aprende la persona designada por el contrato, y se prueba `mis_cuotas_de_servicio`. Que
  * los casos viejos sigan pasando es la prueba de que 4D SOFT (sin designación) no cambia.
+ *
+ * Desde `20260929030000` corren además contra el cuerpo que entiende el alcance 'plantilla' (un
+ * documento genérico, como los términos del Radar SECOP, que no lleva datos de ninguna empresa), y
+ * se fija lo que decide quién lo ve ahora que no hay empresa a la que unirlo: tener contratado un
+ * servicio de SU módulo. Que los casos de 4D SOFT y de los CDA sigan pasando es la prueba de que
+ * para un documento 'cliente' nada cambió.
  */
 
 const MIGRACIONES = join(process.cwd(), 'supabase/migrations')
@@ -47,6 +53,22 @@ const DOC_V11 = '00000000-0000-4000-8000-0000000000e2'
 const DOC_FUTURA = '00000000-0000-4000-8000-0000000000e3'
 const DOC_AJENA = '00000000-0000-4000-8000-0000000000e4'
 const ACE_WA = 'def579c7-2eed-4fd9-bbee-2803d1f6293f'
+
+// El documento GENÉRICO (alcance 'plantilla') y los espacios con los que se prueba desde
+// `20260929030000`: uno con contrato de Radar, otro con contrato de otro módulo (WS_CLIENTE, que
+// tiene Valida API) y otro sin ningún contrato.
+const DOC_RADAR = '00000000-0000-4000-8000-0000000000e5'
+const WS_RADAR = '00000000-0000-4000-8000-000000000004'
+const WS_RADAR_2 = '00000000-0000-4000-8000-000000000005'
+const WS_SIN_CONTRATO = '00000000-0000-4000-8000-000000000006'
+const OWNER_RADAR = '00000000-0000-4000-8000-0000000000d6'
+const OWNER_RADAR_2 = '00000000-0000-4000-8000-0000000000d7'
+const EMP_RADAR = '00000000-0000-4000-8000-0000000000a3'
+const EMP_RADAR_2 = '00000000-0000-4000-8000-0000000000a4'
+const NEG_RADAR = '00000000-0000-4000-8000-0000000000b5'
+const NEG_RADAR_2 = '00000000-0000-4000-8000-0000000000b6'
+const SC_RADAR = '00000000-0000-4000-8000-0000000000c5'
+const SC_RADAR_2 = '00000000-0000-4000-8000-0000000000c6'
 
 const SHA = (c: string) => c.repeat(64)
 const sha256 = (texto: string) => createHash('sha256').update(texto, 'utf8').digest('hex')
@@ -220,6 +242,39 @@ const VERSIONES = `
      '# Términos de otro', '${SHA('3')}', 'ajena/v1.pdf', '${SHA('4')}', date '2026-09-01');
 `
 
+/**
+ * Lo que agrega `20260929030000`: un documento GENÉRICO del módulo Radar SECOP y tres espacios para
+ * medir quién lo ve. Va después de esa migración porque la columna `modulo` nace ahí.
+ *
+ * Dos clientes de Radar (no uno): el PDF es byte a byte el mismo para los dos y `pdf_sha256` es
+ * UNIQUE, así que la constancia de uno no puede aparecer como constancia del otro.
+ */
+const FIXTURES_PLANTILLA = `
+  insert into public.workspaces (id, slug) values
+    ('${WS_RADAR}', 'fabri'), ('${WS_RADAR_2}', 'otro-radar'), ('${WS_SIN_CONTRATO}', 'sin-contrato');
+  insert into public.profiles (id, workspace_id, role, platform_admin) values
+    ('${OWNER_RADAR}', '${WS_RADAR}', 'owner', false),
+    ('${OWNER_RADAR_2}', '${WS_RADAR_2}', 'owner', false);
+  insert into public.empresas (id, nombre) values
+    ('${EMP_RADAR}', 'I + D FABRIACRYLICOS S.A.S'), ('${EMP_RADAR_2}', 'Otro Radar SAS');
+  insert into public.negocios (id, workspace_id, nombre) values
+    ('${NEG_RADAR}', '${WS_METRIK}', 'F1 26 1 Radar SECOP'),
+    ('${NEG_RADAR_2}', '${WS_METRIK}', 'O1 26 1 Radar SECOP');
+  insert into public.catalogo_servicios values
+    ('radar-secop-suscripcion', 'Suscripción Radar SECOP', 'radar_secop', 'ciclo');
+  insert into public.servicios_contratados
+    (id, workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, workspace_pagador_id, vigente_desde)
+  values
+    ('${SC_RADAR}', '${WS_METRIK}', '${EMP_RADAR}', '${NEG_RADAR}', 'radar-secop-suscripcion', 1, '${WS_RADAR}', date '2026-09-28'),
+    ('${SC_RADAR_2}', '${WS_METRIK}', '${EMP_RADAR_2}', '${NEG_RADAR_2}', 'radar-secop-suscripcion', 1, '${WS_RADAR_2}', date '2026-09-28');
+  insert into public.documentos_contractuales_versiones
+    (id, workspace_id, slug, alcance, empresa_id, modulo, titulo, version, texto_md, texto_sha256, pdf_path, pdf_sha256, vigente_desde)
+  values
+    ('${DOC_RADAR}', '${WS_METRIK}', 'terminos-uso-radar', 'plantilla', null, 'radar_secop',
+     'Términos de Uso — Radar SECOP', '1.0', '# Términos de Uso — Radar SECOP', '${SHA('5')}',
+     'metrik/terminos-uso-radar-v1.0.pdf', '${SHA('6')}', date '2026-09-28');
+`
+
 function declaracion(o: { nombre?: string; cedula?: string; pdf?: string } = {}) {
   const nombre = o.nombre ?? 'Johann Manuel Valbuena Alfonso'
   const cedula = o.cedula ?? '79123456'
@@ -282,6 +337,11 @@ beforeAll(async () => {
   await db.exec(VERSIONES)
   await db.exec(leer('20260917014500_aceptacion_terminos_en_modulo.sql'))
   await db.exec(leer('20260923220000_terminos_cda_designado_y_enlace_pago.sql'))
+  // El alcance 'plantilla': un documento genérico se ve y se acepta por el MÓDULO contratado.
+  // Reemplaza las dos funciones de arriba, así que todo lo anterior se prueba contra el cuerpo
+  // NUEVO: que los casos de 4D SOFT y de los CDA sigan pasando es la prueba de que no cambian.
+  await db.exec(leer('20260929030000_documentos_alcance_plantilla.sql'))
+  await db.exec(FIXTURES_PLANTILLA)
 }, 60_000)
 
 afterAll(async () => {
@@ -560,6 +620,169 @@ describe('mis_cuotas_de_servicio: las cuotas y su enlace, solo para quien paga',
               has_function_privilege('authenticated', 'public.mis_cuotas_de_servicio(uuid)', 'execute') as auth`,
     )
     expect(r.rows[0]).toEqual({ anon: false, auth: true })
+  })
+})
+
+describe('un documento genérico se ve por el módulo contratado', () => {
+  const declaracionRadar = (pdf = SHA('6')) =>
+    `Yo, Fabián Ruiz Gómez, identificado(a) con cédula 80123456, actúo como REPRESENTANTE LEGAL de ` +
+    `I + D FABRIACRYLICOS S.A.S (NIT 900123456-1). ACEPTO los Términos de Uso — Radar SECOP 1.0 ` +
+    `(huella SHA-256 del PDF: ${pdf}).`
+
+  function insertRadar(extra: Record<string, string> = {}) {
+    const cols: Record<string, string> = {
+      workspace_id: `'${WS_METRIK}'`,
+      negocio_id: `'${NEG_RADAR}'`,
+      canal: `'modulo'`,
+      estado: `'aceptado'`,
+      nombre_aceptante: `'Fabián Ruiz Gómez'`,
+      cedula_aceptante: `'80123456'`,
+      calidad: `'representante_legal'`,
+      empresa_nombre: `'I + D FABRIACRYLICOS S.A.S'`,
+      empresa_nit: `'900123456-1'`,
+      usuario_id: `'${OWNER_RADAR}'`,
+      workspace_cliente_id: `'${WS_RADAR}'`,
+      documento_version_id: `'${DOC_RADAR}'`,
+      documento_titulo: `'Términos de Uso — Radar SECOP'`,
+      documento_version: `'1.0'`,
+      documento_sha256: `'${SHA('6')}'`,
+      texto_documento_sha256: `'${SHA('5')}'`,
+      texto_aceptacion: `'${declaracionRadar()}'`,
+      ip: `'190.24.1.10'`,
+      user_agent: `'Mozilla/5.0'`,
+      ...extra,
+    }
+    return `insert into public.aceptaciones_terminos (${Object.keys(cols).join(', ')})
+            values (${Object.values(cols).join(', ')})`
+  }
+
+  /** Los slugs que ve un espacio, con la RPC de sesión. */
+  async function slugsQueVe(ws: string): Promise<string[]> {
+    await db.exec(`set prueba.ws = '${ws}'`)
+    const r = await db.query<{ slug: string }>(`select slug from public.mis_documentos_de_servicio()`)
+    await db.exec(`set prueba.ws = ''`)
+    return r.rows.map((f) => f.slug)
+  }
+
+  it('el espacio con contrato de Radar lo ve, todavía sin constancia', async () => {
+    await db.exec(`set prueba.ws = '${WS_RADAR}'`)
+    const r = await db.query<{ slug: string; alcance: string; version: string; aceptado_at: string | null }>(
+      `select slug, alcance, version, aceptado_at from public.mis_documentos_de_servicio()`,
+    )
+    await db.exec(`set prueba.ws = ''`)
+    expect(r.rows).toEqual([
+      { slug: 'terminos-uso-radar', alcance: 'plantilla', version: '1.0', aceptado_at: null },
+    ])
+  })
+
+  it('un espacio con contrato de OTRO módulo NO lo ve', async () => {
+    // WS_CLIENTE tiene Valida API: ve sus términos, nunca los del Radar. Si los viera, su entrada
+    // de módulo le pediría aceptarlos para entrar a Valida.
+    const slugs = await slugsQueVe(WS_CLIENTE)
+    expect(slugs.length).toBeGreaterThan(0)
+    expect(slugs).not.toContain('terminos-uso-radar')
+  })
+
+  it('un espacio sin ningún contrato no ve nada, y sin sesión tampoco', async () => {
+    expect(await slugsQueVe(WS_SIN_CONTRATO)).toEqual([])
+    expect(await slugsQueVe('')).toEqual([])
+  })
+
+  it('el dueño del espacio con Radar lo acepta, y la constancia no se le cuelga al otro cliente', async () => {
+    await db.exec('begin')
+    try {
+      await db.exec(`${insertRadar()};`)
+
+      await db.exec(`set prueba.ws = '${WS_RADAR}'`)
+      const suyo = await db.query<{ aceptado_por: string | null; aceptado_canal: string | null }>(
+        `select aceptado_por, case when aceptado_at is null then null else aceptado_canal end as aceptado_canal
+           from public.mis_documentos_de_servicio()`,
+      )
+      expect(suyo.rows).toEqual([{ aceptado_por: 'Fabián Ruiz Gómez', aceptado_canal: 'modulo' }])
+
+      // El otro cliente de Radar lee el MISMO PDF (misma huella): tiene que verlo sin constancia.
+      await db.exec(`set prueba.ws = '${WS_RADAR_2}'`)
+      const ajeno = await db.query<{ slug: string; aceptado_at: string | null }>(
+        `select slug, aceptado_at from public.mis_documentos_de_servicio()`,
+      )
+      expect(ajeno.rows).toEqual([{ slug: 'terminos-uso-radar', aceptado_at: null }])
+    } finally {
+      await db.exec('rollback')
+      await db.exec(`set prueba.ws = ''`)
+    }
+  })
+
+  it('un cliente de otro módulo no puede aceptarlo, ni sobre su propio negocio', async () => {
+    const otroModulo = insertRadar({
+      negocio_id: `'${NEG_CLIENTE}'`,
+      usuario_id: `'${OWNER}'`,
+      workspace_cliente_id: `'${WS_CLIENTE}'`,
+    })
+    expect(await ensayo(`${otroModulo};`)).toMatch(/no es de un contrato/)
+  })
+
+  it('el dueño de un cliente de Radar no acepta sobre el negocio del otro', async () => {
+    const negocioAjeno = insertRadar({ negocio_id: `'${NEG_RADAR_2}'` })
+    expect(await ensayo(`${negocioAjeno};`)).toMatch(/no es de un contrato/)
+  })
+
+  it('una constancia colgada del contrato de OTRO módulo no cuenta como aceptado', async () => {
+    // El canal WhatsApp no pasa por la guarda del módulo, así que una constancia puede llegar
+    // sobre el negocio equivocado. Si contara, la puerta del Radar se abriría con la firma de otro
+    // contrato. El espacio aquí tiene los DOS servicios: Valida API y Radar.
+    await db.exec('begin')
+    try {
+      await db.exec(`
+        insert into public.servicios_contratados
+          (id, workspace_id, empresa_id, negocio_id, servicio_slug, servicio_version, workspace_pagador_id, vigente_desde)
+        values ('00000000-0000-4000-8000-0000000000c7', '${WS_METRIK}', '${EMP_CLIENTE}', '${NEG_AJENO}',
+                'radar-secop-suscripcion', 1, '${WS_CLIENTE}', date '2026-09-28');
+        insert into public.aceptaciones_terminos
+          (workspace_id, negocio_id, telefono, nombre_aceptante, calidad, empresa_nombre, empresa_nit,
+           documento_titulo, documento_version, documento_url, documento_sha256, texto_aceptacion,
+           estado, respondido_at, prompt_wamid, reply_wamid, button_id, payload_respuesta)
+        values ('${WS_METRIK}', '${NEG_CLIENTE}', '+573000000001', 'Quien sea', 'apoderado',
+                '4D SOFT S.A.S.', '901220269-6', 'Términos de Uso — Radar SECOP', '1.0',
+                'https://x.supabase.co/storage/v1/object/sign/aceptaciones-documentos/radar.pdf?token=x',
+                '${SHA('6')}', 'ACEPTO.', 'aceptado', now(), 'wamid.p2', 'wamid.r2',
+                'terminos:acepto', '{}'::jsonb);
+      `)
+      await db.exec(`set prueba.ws = '${WS_CLIENTE}'`)
+      const r = await db.query<{ aceptado_at: string | null }>(
+        `select aceptado_at from public.mis_documentos_de_servicio() where slug = 'terminos-uso-radar'`,
+      )
+      // Lo ve (ya tiene Radar contratado) y le falta aceptarlo: la constancia es del otro contrato.
+      expect(r.rows).toEqual([{ aceptado_at: null }])
+    } finally {
+      await db.exec('rollback')
+      await db.exec(`set prueba.ws = ''`)
+    }
+  })
+
+  it('el alcance y el módulo son inmutables: no se convierte un documento en el de todo un módulo', async () => {
+    expect(
+      await ensayo(`update public.documentos_contractuales_versiones set modulo = 'business' where id = '${DOC_RADAR}'`),
+    ).toMatch(/es inmutable/)
+    expect(
+      await ensayo(`update public.documentos_contractuales_versiones
+                       set alcance = 'plantilla', empresa_id = null, modulo = 'radar_secop'
+                     where id = '${DOC_V10}'`),
+    ).toMatch(/es inmutable/)
+  })
+
+  it('el alcance y el módulo se corresponden, y el módulo tiene que existir', async () => {
+    const fila = (alcance: string, empresa: string, modulo: string) =>
+      `insert into public.documentos_contractuales_versiones
+         (workspace_id, slug, alcance, empresa_id, modulo, titulo, version, texto_md, texto_sha256,
+          pdf_path, pdf_sha256, vigente_desde)
+       values ('${WS_METRIK}', 'otro-doc', '${alcance}', ${empresa}, ${modulo}, 'Otro', '1.0', '# Otro',
+               '${SHA('7')}', 'x/otro.pdf', '${SHA('8')}', date '2026-09-28')`
+    // Un genérico sin módulo no se puede mostrar a nadie.
+    expect(await ensayo(fila('plantilla', 'null', 'null'))).toMatch(/modulo_coherente/)
+    // Un documento de una empresa con módulo se contradice: ese se ve por su empresa.
+    expect(await ensayo(fila('cliente', `'${EMP_CLIENTE}'`, `'radar_secop'`))).toMatch(/modulo_coherente/)
+    // Un módulo que no existe dejaría el documento invisible en silencio.
+    expect(await ensayo(fila('plantilla', 'null', `'radar-secop'`))).toMatch(/documentos_versiones_modulo/)
   })
 })
 

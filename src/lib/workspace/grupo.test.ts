@@ -25,16 +25,17 @@ function resumen(grupos: ReturnType<typeof agruparWorkspaces<{ slug: string; nam
 }
 
 describe('grupoDeWorkspace', () => {
-  it('reconoce las cinco claves', () => {
+  it('reconoce las seis claves', () => {
     expect(grupoDeWorkspace('metrik')).toBe('metrik')
     expect(grupoDeWorkspace('valida')).toBe('valida')
     expect(grupoDeWorkspace('clarity')).toBe('clarity')
+    expect(grupoDeWorkspace('secop')).toBe('secop')
     expect(grupoDeWorkspace('sustenta')).toBe('sustenta')
     expect(grupoDeWorkspace('demo')).toBe('demo')
   })
 
   it('ausente, vacío, mal escrito o de otro tipo cae en sin clasificar', () => {
-    for (const v of [undefined, null, '', 'Valida', ' valida', 'Sustenta', 'nativo', 'otro', true, 1, {}]) {
+    for (const v of [undefined, null, '', 'Valida', ' valida', 'Sustenta', 'SECOP', 'Secop', 'nativo', 'otro', true, 1, {}]) {
       expect(grupoDeWorkspace(v)).toBe('sin_clasificar')
     }
   })
@@ -79,6 +80,18 @@ describe('agruparWorkspaces', () => {
       ['Clarity', ['soena']],
       ['Sin clasificar', ['typo', 'nuevo']],
     ])
+  })
+
+  it('SECOP va después de Clarity y antes de Sustenta (el orden es curado, no alfabético)', () => {
+    // El primer workspace de SECOP es el del Radar (Fabri). Hasta que exista, el grupo no
+    // aparece: un encabezado vacío no se pinta.
+    const r = agruparWorkspaces([
+      ...PRODUCCION_2026_09_16,
+      { slug: 'fabri', name: 'I + D FABRIACRYLICOS S.A.S', grupo: 'secop' },
+    ])
+    expect(r.map(g => g.etiqueta)).toEqual(['MéTRIK', 'Valida', 'Clarity', 'SECOP', 'Sustenta', 'Demo'])
+    expect(r.find(g => g.clave === 'secop')!.workspaces.map(w => w.slug)).toEqual(['fabri'])
+    expect(agruparWorkspaces(PRODUCCION_2026_09_16).map(g => g.clave)).not.toContain('secop')
   })
 
   it('no pierde ni duplica workspaces', () => {

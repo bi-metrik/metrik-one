@@ -40,3 +40,4 @@ indice caliente para que quepa. Consultar antes de montar un arnes o medir produ
 - ⚠️⚠️ [Landing en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — `all_except_custom_domains` abre PRODUCCIÓN
 - ⚠️ [Otro repo desde el worktree](reference_publicar_otro_repo_desde_worktree.md) — git y `gh api` de escritura bloqueados
 - ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — `node_modules/node_modules` rompe el build
+- ⚠️⚠️ [Un PR en conflicto no encola checks](reference_pr_en_conflicto_no_encola_ci.md) — `mergeable: CONFLICTING` = el merge ref no existe
