@@ -30,6 +30,26 @@ export const PRODUCTOS_ENTRADA = {
     exigeAprobacionPorUsuario: false,
     exigeDesignado: true,
   },
+  // Radar SECOP (spec del 2026-09-28, bloque B). Documento propio `terminos-uso-radar@1.0`, que
+  // dice lo que protege a MeTRIK: la fuente es pública y puede estar incompleta, el fit es
+  // priorización y no un concepto jurídico, presentar la oferta y cumplir los habilitantes es del
+  // cliente, y no hay garantía de adjudicación ni comisión sobre lo que se gane.
+  //
+  //   - `exigeAprobacionPorUsuario: true`, como Valida API: quien mira el Radar decide con él a
+  //     qué convocatoria se presenta, así que cada usuario lee los términos. Si fuera false, un
+  //     operador vería los puntajes sin haber leído nunca que el fit no es un concepto jurídico,
+  //     que es justo la advertencia que el documento existe para dejar por escrito.
+  //   - `exigeDesignado: false`: la regla del dueño alcanza. El designado se exige en los CDA
+  //     porque su dueño es, en tres de cuatro, una cuenta genérica («Oficial de Cumplimiento») y
+  //     la cláusula 16.1 de SUS términos pide representante legal o apoderado. El Radar no tiene
+  //     esa cláusula y su primer cliente (Fabri) tiene dueño persona: exigirlo dejaría el módulo
+  //     cerrado esperando un dato que nadie pidió.
+  radar_secop: {
+    nombre: 'Radar SECOP',
+    ruta: '/radar',
+    exigeAprobacionPorUsuario: true,
+    exigeDesignado: false,
+  },
 } as const
 
 export type ProductoEntrada = keyof typeof PRODUCTOS_ENTRADA

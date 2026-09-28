@@ -12,10 +12,30 @@ import type { EstadoEntradaPagina } from '@/lib/valida-api/resultados'
 import { CALIDADES_ACEPTANTE, textoDeclaracionTerminos, validarDatosAceptante } from '@/lib/valida-api/terminos'
 import { bloquesDeTexto, type Tramo } from '@/lib/valida-api/texto-documento'
 import { aprobarEntradaValidaCda } from '@/lib/valida-cda/acciones'
+import { aprobarEntradaRadar } from '@/lib/radar/acciones'
 
 // ── La entrada: términos vivos, Política y una sola aprobación ──────────────
 
 type EntradaPendiente = Extract<EstadoEntradaPagina, { estado: 'pendiente' }>
+
+/**
+ * Qué acción registra el «Acepto» de cada producto.
+ *
+ * Es un mapa `Record<ProductoEntrada, …>` y no un ternario a propósito: hasta el 2026-09-28 era
+ * `producto === 'valida_cda' ? cda : api`, y con eso un producto NUEVO caía en la acción de Valida
+ * API sin que nada avisara. El servidor lo habría rechazado (rearma la casilla con SU producto y
+ * los textos no coinciden), pero el usuario habría visto «los términos cambiaron mientras los
+ * leías», que manda a buscar el problema lejos. Con el mapa, agregar un producto a `producto.ts`
+ * sin agregarlo aquí es un error de tipos.
+ */
+const APROBAR_POR_PRODUCTO: Record<
+  ProductoEntrada,
+  (input: Parameters<typeof aprobarEntradaValidaApi>[0]) => ReturnType<typeof aprobarEntradaValidaApi>
+> = {
+  valida_api: aprobarEntradaValidaApi,
+  valida_cda: aprobarEntradaValidaCda,
+  radar_secop: aprobarEntradaRadar,
+}
 
 /**
  * La única puerta del módulo. En la misma vista, en este orden: los términos vigentes del contrato
@@ -26,9 +46,10 @@ type EntradaPendiente = Extract<EstadoEntradaPagina, { estado: 'pendiente' }>
  * un centinela al pie del texto observado con IntersectionObserver sobre el propio contenedor: si
  * el texto cabe sin scroll, el centinela se ve desde el principio y cuenta como leído.
  *
- * La usan Valida API (`/valida-api`) y Valida de los CDA (`/valida`); lo que cambia entre ellos
- * está en `producto.ts`. Los textos que se firman salen de las MISMAS funciones que usa el
- * servidor, con el mismo producto: si no coincidieran, el servidor rechaza la aprobación.
+ * La usan Valida API (`/valida-api`), Valida de los CDA (`/valida`) y el Radar SECOP (`/radar`); lo
+ * que cambia entre ellos está en `producto.ts`. Los textos que se firman salen de las MISMAS
+ * funciones que usa el servidor, con el mismo producto: si no coincidieran, el servidor rechaza la
+ * aprobación.
  */
 export function EntradaTerminos({
   entrada,
@@ -111,8 +132,7 @@ export function EntradaTerminos({
   function aprobar() {
     if (!casillaHabilitada || !marcada) return
     iniciar(async () => {
-      const aprobarEntrada = producto === 'valida_cda' ? aprobarEntradaValidaCda : aprobarEntradaValidaApi
-      const r = await aprobarEntrada({
+      const r = await APROBAR_POR_PRODUCTO[producto]({
         leyoHastaElFinal: leido,
         casillaMostrada: casilla,
         firma: firmaDisponible && declaraciones ? { nombre, cedula, calidad, declaraciones } : null,
