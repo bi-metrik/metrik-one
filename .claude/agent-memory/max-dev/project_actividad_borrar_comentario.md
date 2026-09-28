@@ -1,21 +1,31 @@
 ---
 name: actividad-borrar-comentario
-description: Regla de quien borra en la Actividad (autor u owner/admin, solo comentarios) vive en app; la RLS de activity_log sigue dejando borrar a cualquiera del workspace por PostgREST
+description: Borrar en la Actividad = solo comentarios, autor u owner/admin; regla en app (#943) y RLS de DELETE en migracion 20260928120000 SIN aplicar; UPDATE sigue abierto y la puentea
 metadata:
   type: project
 ---
 
-Desde 2026-09-28 (PR "Actividad: borrar solo comentarios propios", diseño "ONE como capa
-visual") `deleteActivity` solo borra `tipo='comentario'` y solo si quien actua es el autor
-(`activity_log.autor_id` = `staff.id`) o `owner`/`admin`. La regla es una sola:
+Desde 2026-09-28 (#943) `deleteActivity` solo borra `tipo='comentario'` y solo si quien actua
+es el autor (`activity_log.autor_id` = `staff.id`) o `owner`/`admin`. La regla es una sola:
 `src/lib/activity/borrar-comentario.ts`, usada por el servidor y por `getActivityLog`
-(campo `puede_borrar` que decide si se dibuja el boton).
+(`puede_borrar`). La Actividad arranca mostrando todo (`activity-log:show-system:v2`).
 
-**Why:** antes bastaba conocer el id para borrar el comentario de otro. Se cerro en la capa
-de aplicacion, sin migracion, porque el brief prohibia migrar.
+La base lo alcanza con `20260928120000_activity_log_borrar_solo_comentarios.sql`
+(PR `fix/rls-delete-activity-log`, **SIN aplicar al 2026-09-28**): parte la policy FOR ALL
+`activity_log_workspace_isolation` en SELECT/INSERT/UPDATE identicas (TO public) + DELETE
+`TO authenticated` con tipo='comentario' y (`current_user_profile_role()` in owner/admin o
+autor_id = `current_user_staff_id()`). Dry-run del archivo real dio a=0 b=1 c=1 d=0 e=0.
 
-**How to apply:** la policy `activity_log_workspace_isolation` es ALL por workspace, asi que
-con la anon key + JWT propio un usuario aun puede borrar por PostgREST (mismo hallazgo abierto
-de "segmentacion por rol es de aplicacion"). Si se pide cerrarlo de verdad, es una policy de
-DELETE por autor/rol: migracion aparte, con autorizacion. La Actividad arranca mostrando todo
-(clave localStorage `activity-log:show-system:v2`); no volver al default "solo comentarios".
+**Why:** con la anon key + JWT propio cualquiera del workspace borraba comentarios ajenos y
+cambios de etapa por PostgREST (medido: 1 y 1 antes de la migracion).
+
+**How to apply:**
+- La migracion va ANTES del merge. Tras aplicarla, `retirarRegistro` de
+  `mi-negocio/margen-actions.ts` depende del cliente de servicio (borra filas `cambio`); si
+  alguien lo regresa al cliente de sesion, el borrado da 0 filas sin error.
+- ⚠️ La policy de UPDATE sigue siendo solo por workspace: medido en el dry-run, un operador
+  reescribe un `cambio_etapa` ajeno a `tipo='comentario'` con su `autor_id` (1 fila) y luego
+  lo borra (1 fila). Tambien reescribe comentarios ajenos. Cerrar DELETE sin UPDATE deja la
+  historia editable; es el siguiente frente, con autorizacion.
+- INSERT tampoco valida autor ni tipo (se puede forjar autoria); mismo hallazgo abierto de
+  "la segmentacion por rol es de aplicacion".

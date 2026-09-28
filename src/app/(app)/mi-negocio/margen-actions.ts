@@ -404,10 +404,21 @@ async function registrarYGuardar(
 /** Deshace el registro de un cambio que al final no se guardó. */
 async function retirarRegistro(ctx: ContextoEdicion, ids: string[]) {
   if (ids.length === 0) return
-  const { error } = await ctx.supabase
+  // Con el cliente de servicio: la RLS de DELETE de `activity_log` solo deja borrar
+  // comentarios (migración 20260928120000), y estas filas son `cambio` que esta misma
+  // petición acaba de escribir. Con el cliente del usuario el borrado daría 0 filas sin
+  // error y el historial mostraría un cambio que nunca se guardó. El alcance lo acotan
+  // los `ids` propios y el workspace.
+  const svc = createServiceClient()
+  const { data: retiradas, error } = await svc
     .from('activity_log')
     .delete()
     .in('id', ids)
     .eq('workspace_id', ctx.workspaceId)
+    .eq('autor_id', ctx.staffId)
+    .select('id')
   if (error) console.error('[margen] no se pudo retirar el registro de un cambio no guardado:', error.message, ids)
+  else if ((retiradas ?? []).length !== ids.length) {
+    console.error('[margen] el registro de un cambio no guardado quedó a medias:', ids, retiradas)
+  }
 }
