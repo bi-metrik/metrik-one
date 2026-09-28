@@ -13,10 +13,30 @@ import { Image as ImageIcon } from 'lucide-react'
  * `backdrop-blur` (el encabezado fijo del negocio) un `fixed inset-0` queda atrapado en él.
  */
 
+const ANCHO_MINIATURA = 'w-[76px] max-sm:w-16'
+const cajaMiniatura = (ancho: string) => `${ancho} aspect-[1920/735] shrink-0 rounded-[5px] border border-[#E2DED5] bg-[#EEEBE4] p-0`
+
+/**
+ * La miniatura de una tarifa ingresada a mano: no hay imagen, la caja lo dice. La misma caja
+ * de `Miniatura`, en la bandeja y en la tarjeta. `dato` = el atributo `data-*` que la marca.
+ */
+export function MiniaturaManual({ ancho = ANCHO_MINIATURA, dato }: { ancho?: string; dato?: string }) {
+  return (
+    <span
+      className={`${cajaMiniatura(ancho)} grid place-items-center text-[11px] font-semibold text-[#6E6A62]`}
+      role="img"
+      aria-label="Ingresado a mano, sin pantallazo"
+      {...(dato ? { [dato]: '' } : {})}
+    >
+      A mano
+    </span>
+  )
+}
+
 export function Miniatura({
   src,
   caption,
-  ancho = 'w-[76px] max-sm:w-16',
+  ancho = ANCHO_MINIATURA,
   onAmpliar,
 }: {
   /** URL de la imagen (data URL de la bandeja o el enlace firmado del archivo guardado). */
@@ -25,7 +45,7 @@ export function Miniatura({
   ancho?: string
   onAmpliar?: (src: string, caption: string) => void
 }) {
-  const base = `${ancho} aspect-[1920/735] shrink-0 rounded-[5px] border border-[#E2DED5] bg-[#EEEBE4] p-0`
+  const base = cajaMiniatura(ancho)
   if (!src) {
     return (
       <span className={`${base} grid place-items-center text-[#6E6A62]`} aria-hidden>

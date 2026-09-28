@@ -189,9 +189,9 @@ export function validarHotelManual(h: HotelManual): ErroresManual {
   if (h.edadHasta === -1) e.edadHasta = 'Una edad de 0 a 17.'
   if (!e.edadDesde && !e.edadHasta && conDesde !== conHasta) e[conDesde ? 'edadHasta' : 'edadDesde'] = 'Escribe las dos edades, o ninguna.'
   if (!e.edadDesde && !e.edadHasta && conDesde && conHasta && (h.edadDesde as number) > (h.edadHasta as number)) {
-    e.edadHasta = 'La edad hasta va después de la edad desde.'
+    e.edadHasta = 'No puede ser menor que «Desde».'
   }
-  if (!h.fuente) e.fuente = 'Di de dónde sale la tarifa.'
+  if (!h.fuente) e.fuente = 'Escribe de dónde sale la tarifa.'
   return e
 }
 
@@ -201,7 +201,7 @@ export function validarTrasladoManual(t: TrasladoManual): ErroresManual {
   if (t.fecha !== '' && !FECHA.test(t.fecha)) e.fecha = 'Escoge la fecha.'
   erroresDePasajeros(t, e)
   if (!(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor.'
-  if (!t.fuente) e.fuente = 'Di de dónde sale la tarifa.'
+  if (!t.fuente) e.fuente = 'Escribe de dónde sale la tarifa.'
   return e
 }
 
