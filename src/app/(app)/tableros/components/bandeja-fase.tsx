@@ -17,7 +17,7 @@ export function BandejaFase({ bandeja, titulo }: { bandeja: Bandeja; titulo: str
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3 rounded-2xl border border-gray-100 bg-white p-4 sm:p-6">
         {bandeja.contexto.slice(0, 3).map((c) => (
-          <StatHero key={c.etiqueta} label={c.etiqueta} value={formatear(c)} note={c.nota} compact />
+          <StatHero key={c.etiqueta} label={c.etiqueta} value={c.texto ?? formatear(c)} note={c.nota} compact muted={Boolean(c.texto)} />
         ))}
       </div>
       <AlertCard

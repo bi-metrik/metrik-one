@@ -7,6 +7,7 @@ import {
   diasSinMovimiento,
   tablerosOperativosActivos,
   tasaDeCierre,
+  MIN_CIERRES_CON_HISTORIAL,
   type HistorialComercial,
   type EntradaBandejas,
   type NegocioBandeja,
@@ -147,10 +148,7 @@ describe('bandejaComercial', () => {
         { negocioId: 'ganadoViejo', anterior: 'Propuesta', nuevo: 'Cobro', fecha: hace(150) },
       ],
     }
-    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 1, perdidos: 1 })
-    const tasa = bandejaComercial(negocios, HOY, historial).contexto[2]
-    expect(tasa.valor).toBe(50)
-    expect(tasa.nota).toBe('1 de 2 decididos')
+    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 1, perdidos: 1, conHistorial: 1 })
   })
 
   it('una suscripcion nacida directo en Cobro NUNCA cuenta como ganada', () => {
@@ -164,8 +162,7 @@ describe('bandejaComercial', () => {
       ...HISTORIAL_BASE,
       cambios: [{ negocioId: 'cda', anterior: 'Cobro', nuevo: 'Cobro', fecha: hace(3) }],
     }
-    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 0, perdidos: 1 })
-    expect(bandejaComercial(negocios, HOY, historial).contexto[2].valor).toBe(0)
+    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 0, perdidos: 1, conHistorial: 0 })
   })
 
   it('el nombre del historial se lee contra las etapas de LA linea del negocio, y acepta el id', () => {
@@ -181,7 +178,42 @@ describe('bandejaComercial', () => {
         { negocioId: 'otraLinea', anterior: 'Venta', nuevo: 'Cobro', fecha: hace(4) },
       ],
     }
-    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 1, perdidos: 0 })
+    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 1, perdidos: 0, conHistorial: 1 })
+  })
+
+  /** `g` ganados con historial y `p` perdidos, de los cuales `pReg` quedaron escritos en la app. */
+  function escenario(g: number, p: number, pReg: number) {
+    const negocios: NegocioBandeja[] = []
+    const cambios: HistorialComercial['cambios'] = []
+    for (let i = 0; i < g; i++) {
+      negocios.push(neg({ id: `g${i}`, lineaId: 'clarity', fase: 'ejecucion' }))
+      cambios.push({ negocioId: `g${i}`, anterior: 'Propuesta', nuevo: 'Ejecucion', fecha: hace(10) })
+    }
+    const perdidosRegistrados: string[] = []
+    for (let i = 0; i < p; i++) {
+      negocios.push(neg({ id: `p${i}`, lineaId: 'clarity', estado: 'perdido', cerradoEn: hace(10) }))
+      if (i < pReg) perdidosRegistrados.push(`p${i}`)
+    }
+    return bandejaComercial(negocios, HOY, { ...HISTORIAL_BASE, cambios, perdidosRegistrados }).contexto[2]
+  }
+
+  it(`el umbral es ${MIN_CIERRES_CON_HISTORIAL}`, () => expect(MIN_CIERRES_CON_HISTORIAL).toBe(5))
+
+  it('con menos de 5 cierres con historial dice "Sin historial suficiente", no un porcentaje', () => {
+    // El caso real de metrik: 12 perdidos cargados por SQL, 0 ganados. Antes pintaba 0 %.
+    const metrik = escenario(0, 12, 0)
+    expect(metrik.valor).toBeNull()
+    expect(metrik.texto).toBe('Sin historial suficiente')
+    expect(metrik.nota).toMatch(/fuera de la app/)
+    // 4 con historial (2 ganados + 2 perdidos registrados) sigue sin alcanzar.
+    expect(escenario(2, 3, 2).texto).toBe('Sin historial suficiente')
+  })
+
+  it('desde 5 cierres con historial muestra la tasa sobre todos los decididos', () => {
+    const t = escenario(2, 4, 3)
+    expect(t.texto).toBeUndefined()
+    expect(t.valor).toBeCloseTo((2 / 6) * 100)
+    expect(t.nota).toBe('2 de 6 decididos')
   })
 
   it('sin nada decidido la tasa es null, no un 0% que se lee como fracaso', () => {

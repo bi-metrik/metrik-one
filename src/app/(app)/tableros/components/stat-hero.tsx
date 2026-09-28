@@ -13,9 +13,11 @@ interface StatHeroProps {
   compact?: boolean
   /** Linea gris bajo el valor (p.ej. "3 propuestas"). */
   note?: string
+  /** El valor es una frase (no hay cifra): se pinta pequeno y gris. */
+  muted?: boolean
 }
 
-export function StatHero({ label, value, delta, deltaLabel, suffix, invertDelta, compact, note }: StatHeroProps) {
+export function StatHero({ label, value, delta, deltaLabel, suffix, invertDelta, compact, note, muted }: StatHeroProps) {
   const isPositive = invertDelta ? (delta ?? 0) < 0 : (delta ?? 0) > 0
   const isNeutral = delta === undefined || delta === 0
 
@@ -23,7 +25,7 @@ export function StatHero({ label, value, delta, deltaLabel, suffix, invertDelta,
     <div>
       <p className={compact ? 'text-[11px] sm:text-sm font-medium text-gray-500 leading-tight' : 'text-sm font-medium text-gray-500'}>{label}</p>
       <div className="flex items-baseline gap-2 mt-1">
-        <span className={compact ? 'text-lg sm:text-3xl font-bold text-gray-900' : 'text-4xl font-bold text-gray-900'}>{value}</span>
+        <span className={muted ? 'text-xs sm:text-sm font-semibold text-gray-500' : compact ? 'text-lg sm:text-3xl font-bold text-gray-900' : 'text-4xl font-bold text-gray-900'}>{value}</span>
         {suffix && <span className="text-lg font-medium text-gray-500">{suffix}</span>}
       </div>
       {note && <p className="text-[11px] sm:text-xs text-gray-400 mt-0.5">{note}</p>}

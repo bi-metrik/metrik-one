@@ -98,7 +98,18 @@ export interface CambioEtapa {
 export interface HistorialComercial {
   etapas: EtapaLinea[]
   cambios: CambioEtapa[]
+  /** Negocios con una fila `cambio_estado` a `perdido` en `activity_log` (se perdieron en la app). */
+  perdidosRegistrados?: string[]
 }
+
+/**
+ * Por debajo de estos cierres CON HISTORIAL en la ventana, la tasa no se muestra.
+ * Un cierre tiene historial si la aplicación lo dejó escrito en `activity_log`: el ganado,
+ * por su `cambio_etapa` fuera de venta; el perdido, por su `cambio_estado` a `perdido`.
+ * Motivo (Mauricio, 2026-09-28): en metrik las ventas se cargaron o movieron por SQL y la
+ * tasa salía 0 % (0 de 12). Ese 0 no mide ventas, mide que no hay rastro: se dice eso.
+ */
+export const MIN_CIERRES_CON_HISTORIAL = 5
 
 export interface CuotaPendiente {
   negocioId: string
@@ -140,6 +151,8 @@ export interface NumeroContexto {
   valor: number | null
   formato: FormatoNumero
   nota?: string
+  /** Texto que reemplaza la cifra cuando no hay con qué sostenerla ("Sin historial suficiente"). */
+  texto?: string
 }
 
 export interface FilaBandeja {
@@ -235,7 +248,7 @@ export function tasaDeCierre(
   negocios: NegocioBandeja[],
   historial: HistorialComercial,
   hoy: string,
-): { ganados: number; perdidos: number } {
+): { ganados: number; perdidos: number; conHistorial: number } {
   const enVentana = (fecha: string | null | undefined) => {
     if (!fecha) return false
     const d = diasEntre(diaBogota(fecha), hoy)
@@ -266,7 +279,11 @@ export function tasaDeCierre(
   const perdidos = negocios.filter(
     (n) => n.estado === 'perdido' && n.fase === 'venta' && enVentana(n.cerradoEn),
   ).length
-  return { ganados: ganados.size, perdidos }
+  const registrados = new Set(historial.perdidosRegistrados ?? [])
+  const perdidosConHistorial = negocios.filter(
+    (n) => n.estado === 'perdido' && n.fase === 'venta' && enVentana(n.cerradoEn) && registrados.has(n.id),
+  ).length
+  return { ganados: ganados.size, perdidos, conHistorial: ganados.size + perdidosConHistorial }
 }
 
 export function bandejaComercial(
@@ -285,9 +302,10 @@ export function bandejaComercial(
   const valorPropuestas = propuestas.reduce((s, n) => s + (n.valor ?? 0), 0)
 
   // Criterio completo en `tasaDeCierre`.
-  const { ganados, perdidos } = tasaDeCierre(negocios, historial, hoy)
+  const { ganados, perdidos, conHistorial } = tasaDeCierre(negocios, historial, hoy)
   const decididos = ganados + perdidos
-  const tasa = decididos > 0 ? (ganados / decididos) * 100 : null
+  const sinHistorial = conHistorial < MIN_CIERRES_CON_HISTORIAL
+  const tasa = !sinHistorial && decididos > 0 ? (ganados / decididos) * 100 : null
 
   const filas = enVenta
     .map((n) => ({ n, d: diasSinMovimiento(n, hoy) }))
@@ -318,7 +336,12 @@ export function bandejaComercial(
         etiqueta: 'Tasa de cierre a 90 días',
         valor: tasa,
         formato: 'pct',
-        nota: decididos > 0 ? `${ganados} de ${decididos} decididos` : 'Ninguno decidido',
+        ...(sinHistorial
+          ? {
+              texto: 'Sin historial suficiente',
+              nota: 'Las ventas se movieron fuera de la app: no quedó registro de cómo cerraron',
+            }
+          : { nota: `${ganados} de ${decididos} decididos` }),
       },
     ],
     filas,

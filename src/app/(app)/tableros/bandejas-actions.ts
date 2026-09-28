@@ -65,7 +65,7 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
   const hoy = todayBogotaISO()
   const mesInicio = `${bogotaYearMonth()}-01`
 
-  const [negociosRaw, actividad, carteraR, cuotas, gastosR, pylR, cobrosMes, cambiosEtapa] = await Promise.all([
+  const [negociosRaw, actividad, carteraR, cuotas, gastosR, pylR, cobrosMes, cambiosEtapa, perdidosLog] = await Promise.all([
     traerTodo<NegocioRow>(
       (desde, hasta) =>
         db
@@ -139,6 +139,20 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
           .order('id')
           .range(desde, hasta),
       { etiqueta: 'cambios de etapa' },
+    ),
+    // Perdidos que la aplicacion dejo escritos: cuentan como cierre con historial.
+    traerTodo<{ entidad_id: string }>(
+      (desde, hasta) =>
+        db
+          .from('activity_log')
+          .select('entidad_id')
+          .eq('workspace_id', ws)
+          .eq('entidad_tipo', 'negocio')
+          .eq('tipo', 'cambio_estado')
+          .eq('valor_nuevo', 'perdido')
+          .order('id')
+          .range(desde, hasta),
+      { etiqueta: 'perdidos registrados' },
     ),
   ])
   lanzar('cartera', carteraR.error)
@@ -219,6 +233,7 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
             nuevo: c.valor_nuevo,
             fecha: c.created_at,
           })),
+          perdidosRegistrados: perdidosLog.map((p) => p.entidad_id),
         },
       },
       hoy,
