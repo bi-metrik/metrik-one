@@ -154,3 +154,15 @@
   `suspenderAutomaticamente` sigue en `false` y el unico `soloLectura` del repo es el de casillas de
   negocios (`editable-si-vacio.ts`). El cierre del Radar al vencer su TRIAL es otro regimen: ahi el
   primer pago es condicion de entrega.
+- **Un documento contractual de alcance `plantilla` hoy no lo ve nadie.** El CHECK de
+  `documentos_contractuales_versiones` admite `plantilla` (sin `empresa_id`), pero sus tres
+  consumidores lo unen por empresa: `mis_documentos_de_servicio()` (join interno),
+  `aceptaciones_terminos_modulo()` paso 2 y `versionContratada()`. En produccion no hay NI UNA fila
+  `plantilla`: el camino nunca se ha ejercitado. Un documento generico —como los terminos del Radar—
+  no se puede publicar por empresa, porque `pdf_sha256` es UNIQUE y el PDF seria el mismo.
+- **El lector de terminos de la pantalla no pinta tablas.** `texto-documento.ts` entiende titulos,
+  parrafos, listas con guion y negritas, y deja tal cual lo que no entiende: una tabla de Markdown
+  sale con sus barras a la vista sobre un texto que alguien va a aceptar. El texto canonico de un
+  documento nuevo se genera convirtiendo la tabla en lista (ver el `_generador` de los terminos del
+  Radar), no pegando el Markdown de la fuente.
+

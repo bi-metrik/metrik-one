@@ -19,6 +19,7 @@
 - ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza)
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
 - ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
+- ⚠️⚠️ [Publicar los términos del Radar](project_publicacion_terminos_radar.md) — fila SIN aplicar; un documento «plantilla» no lo ve nadie; cláusula 8 vs acceso.ts
 - ⚠️⚠️ [Radar SECOP como módulo (#952)](project_radar_secop_modulo.md) — SIN mergear; el cron NO lee disparador_cobro: enrolar el contrato no cobra
 - [Términos de un módulo nuevo](project_terminos_modulo_radar.md) — el gate de Valida ya es genérico; el ternario mandaba todo producto nuevo a Valida API
 - ⚠️ [Vencido por cuota en la cartera (#934)](project_cartera_vencido_por_cuota.md) — migración ANTES del merge; luego redesplegar wa-alerts y wa-webhook

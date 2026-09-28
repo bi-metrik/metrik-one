@@ -26,6 +26,10 @@
  * Opciones:
  *   --nombre <texto>        Nombre visible. Obligatorio al crear.
  *   --tipo <clarity|nativo> Default: clarity (todo workspace de cliente).
+ *   --grupo <clave>         Encabezado del selector del platform admin
+ *                           (`config_extra.grupo`). Una de las claves de
+ *                           `src/lib/workspace/grupo.ts`. Sin esto el workspace
+ *                           nace en "Sin clasificar" y alguien se acuerda despues.
  *   --seats <n>             max_seats. Default: 10.
  *   --equipo <n>            equipo_declarado. Default: 1.
  *   --color <#RRGGBB>       color_primario. Default: el de MeTRIK.
@@ -55,6 +59,7 @@ import { resolve } from 'path'
 
 import { createDriveFolder } from '@/lib/google-drive'
 import { RESERVED_SLUGS } from '@/lib/tenant/extract-slug'
+import { GRUPOS_DE_WORKSPACE, grupoDeWorkspace } from '@/lib/workspace/grupo'
 
 config({ path: resolve(process.cwd(), '.env.local') })
 
@@ -108,7 +113,16 @@ const equipo = Number(flag('equipo') ?? 1)
 const color = flag('color') ?? '#10B981'
 const modulos = (flag('modules') ?? 'business').split(',').map(m => m.trim()).filter(Boolean)
 const driveParent = flag('drive-parent') ?? process.env.WS_DRIVE_PARENT_ID ?? DRIVE_PARENT_METRIK
+const grupo = flag('grupo')
 
+// El grupo se valida contra las claves conocidas y NO se normaliza en silencio: un
+// "SECOP" en mayuscula cae en "Sin clasificar" (grupo.ts es estricto a proposito), asi
+// que aceptarlo aqui crearia el workspace con una marca que el selector ignora.
+if (grupo !== undefined && grupoDeWorkspace(grupo) !== grupo) {
+  const claves = GRUPOS_DE_WORKSPACE.map(g => g.clave).filter(c => c !== 'sin_clasificar')
+  console.error(`--grupo invalido: "${grupo}". Claves validas: ${claves.join(', ')}.`)
+  process.exit(1)
+}
 if (tipo !== 'clarity' && tipo !== 'nativo') {
   console.error(`--tipo invalido: "${tipo}". La base solo acepta clarity o nativo.`)
   process.exit(1)
@@ -155,7 +169,11 @@ async function main() {
     console.log(`  workspace ya existe → ${workspaceId} ("${existente.name}", tipo ${existente.tipo})`)
     console.log(`  drive_folder_id actual: ${driveFolderActual ?? '(null)'}`)
     // No se sobreescribe nada del workspace existente: un rerun no puede
-    // pisarle los modulos ni el nombre a un workspace vivo.
+    // pisarle los modulos, el nombre ni el grupo a un workspace vivo.
+    if (grupo) {
+      console.log(`  --grupo ${grupo} IGNORADO: el workspace ya existe. Cambiar el grupo de uno vivo`)
+      console.log('  es un UPDATE aparte sobre config_extra, con su propia decision.')
+    }
   } else {
     if (!nombre) {
       console.error('\nEl workspace no existe y falta --nombre "<Nombre visible>".')
@@ -171,6 +189,9 @@ async function main() {
       equipo_declarado: equipo,
       color_primario: color,
       modules: Object.fromEntries(modulos.map(m => [m, true])),
+      // `grupo` solo decide el encabezado del selector del platform admin; `tipo` decide
+      // comportamiento del producto. Ejes distintos (ver grupo.ts).
+      ...(grupo ? { config_extra: { grupo } } : {}),
     }
     paso(`crear fila: ${JSON.stringify(fila)}`)
     if (APPLY) {
