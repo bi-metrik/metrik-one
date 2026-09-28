@@ -196,6 +196,7 @@ export default function TarjetaOpcion({
 }) {
   const ranura = ranuraDeGrupo(item.grupo)
   const esHotel = ranura?.slug === 'hotel_detalle'
+  const esTraslado = ranura?.slug === 'traslado_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
   const nombre = (esHotel ? hotel?.hotel : null) || item.nombre || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
@@ -408,25 +409,24 @@ export default function TarjetaOpcion({
 
           {!confirmada && respaldo}
 
-          {esHotel ? (
-            <HojaCliente
-              item={item}
-              numero={numero}
-              bloqueTitulo={bloqueTitulo}
-              general={general}
-              adicionales={adicionales}
-              confirmada={confirmada}
-              preciosAMano={tarifa.preciosAMano}
-              precioLinea={precioLinea}
-              precioOpcion={precioOpcion}
-              editable={editable}
-              onGuardarNota={onGuardarNota}
-              fotoRef={fotoRef}
-              subiendoFoto={subiendoFoto}
-              onPonerFoto={ponerFoto}
-              onQuitarFoto={quitarFoto}
-            />
-          ) : nota}
+          {/* El traslado también tiene su hoja: la línea de «Inversión» del documento. Su nota se
+              sigue escribiendo aparte, encima. El vuelo NO: al cliente le llega sobre todo como
+              su fila de la tabla «Vuelos», que esta hoja no pinta. */}
+          {!esHotel && nota}
+          {(esHotel || esTraslado) && <HojaCliente
+            item={item}
+            numero={numero}
+            bloqueTitulo={bloqueTitulo}
+            general={general}
+            adicionales={adicionales}
+            confirmada={confirmada}
+            preciosAMano={tarifa.preciosAMano}
+            precioLinea={precioLinea}
+            precioOpcion={precioOpcion}
+            editable={editable}
+            onGuardarNota={onGuardarNota}
+            {...(esHotel ? { fotoRef, subiendoFoto, onPonerFoto: ponerFoto, onQuitarFoto: quitarFoto } : {})}
+          />}
         </div>
       )}
       {isPending && <span className="sr-only" role="status">Guardando…</span>}

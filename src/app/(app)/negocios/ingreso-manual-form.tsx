@@ -50,16 +50,19 @@ export default function IngresoManualForm({
   composicion,
   onEnviar,
   onCerrar,
+  tipoInicial = 'hotel',
 }: {
   /** El grupo del viaje: los pasajeros arrancan con él. */
   composicion: Composicion | null
   /** Pide la lectura firmada y la pone en la bandeja. */
   onEnviar: (tipo: TipoManual, datos: Record<string, unknown>) => Promise<RespuestaManual>
   onCerrar: () => void
+  /** Con qué arranca. La bandeja no lo pasa: empieza en hotel. */
+  tipoInicial?: TipoManual
 }) {
   const id = useId()
-  const [tipo, setTipo] = useState<TipoManual>('hotel')
-  const [v, setV] = useState<Valores>(() => inicial('hotel', composicion))
+  const [tipo, setTipo] = useState<TipoManual>(tipoInicial)
+  const [v, setV] = useState<Valores>(() => inicial(tipoInicial, composicion))
   const [errores, setErrores] = useState<ErroresManual>({})
   const [mensaje, setMensaje] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)

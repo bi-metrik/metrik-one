@@ -832,7 +832,7 @@ function MonedaDeLaTarifa({
 
   const origen = info.origen === 'persona' && info.decision
     ? `la eligió ${info.decision.por ?? 'una persona'}${info.decision.en ? ` · ${formatBogotaFechaCorta(info.decision.en)}` : ''}`
-    : 'leída del pantallazo'
+    : info.manual ? 'ingresada a mano' : 'leída del pantallazo'
   // Lo que dijo la IA, cuando la persona eligió otra: se enseña al lado, nunca en su lugar.
   const leidaDistinta = info.origen === 'persona' && info.leida && info.leida !== info.moneda ? info.leida : null
 

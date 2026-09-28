@@ -211,7 +211,7 @@ export function validarTrasladoManual(t: TrasladoManual): ErroresManual {
   if (t.cobro === 'por_vehiculo') {
     if (!(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor.'
   } else {
-    if (t.adultos > 0 && !(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor por adulto.'
+    if ((t.adultos > 0 || t.ninos + t.infantes <= 0) && !(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor por adulto.'
     if (t.ninos > 0 && !(t.netoNino !== null && t.netoNino >= 0)) e.netoNino = 'Escribe lo que cobra por niño (0 si no paga).'
     if (t.adultos === 0 && t.ninos === 0 && t.infantes > 0 && !(t.netoInfante && t.netoInfante > 0)) {
       e.netoInfante = 'Escribe lo que cobra el proveedor por infante.'

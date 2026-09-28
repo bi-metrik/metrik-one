@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useState, type ClipboardEvent, type DragEvent } from 'react'
+import { useId, useState, type ClipboardEvent, type DragEvent, type ReactNode } from 'react'
 
 import { adicionalEnLaFicha, aAdicional, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
@@ -13,6 +13,11 @@ import { TEXTO_AGREGAR_FOTO_HOTEL, urlDeFotoHotel } from '@/lib/cotizaciones/fot
  * «Así lo ve el cliente» (prototipo de la tarjeta, 2026-09-24): la opción de hotel como sale en
  * la hoja de la cotización de Trappvel, con los colores y la letra del documento, y la nota
  * para el cliente escrita encima de la hoja.
+ *
+ * Un traslado sale en el documento como su línea de «Inversión»: el nombre de la línea,
+ * «Incluye: …» con sus adicionales, el precio de cada pasajero y el total (`LineaPrecio` del
+ * PDF). Esa es su hoja (`LineaDelCliente`). Hasta el 2026-09-28 solo el hotel tenía hoja. El
+ * vuelo sigue sin ella: al cliente le llega sobre todo como su fila de la tabla «Vuelos».
  *
  * ⚠️ Los textos NO se arman aquí: la tarjeta del hotel sale de `textosDeTarjetaHotel` (la misma
  * función que pinta el PDF) y el precio de cada pasajero de `filasDeCosto`, que reparte con la
@@ -61,29 +66,20 @@ export default function HojaCliente({
   onPonerFoto?: (archivo: File) => void
   onQuitarFoto?: () => void
 }) {
-  const [h] = hotelesDeItems([{ ...item, adicionales: adicionales.map(f => adicionalEnLaFicha(aAdicional(f))) }])
+  const enLaFicha = adicionales.map(f => adicionalEnLaFicha(aAdicional(f)))
+  const [h] = hotelesDeItems([{ ...item, adicionales: enLaFicha }])
   const [editando, setEditando] = useState(false)
-  if (!h) return null
-  const t = textosDeTarjetaHotel(h, general)
   const porPasajero = filasDeCosto({ confirmada, precioLinea, preciosAMano })
     .map(f => `${f.nombre}${f.det ? ` (${f.det})` : ''} ${pesos(f.precioUnitario)}`)
     .join('  ·  ')
+  const hoja = (tarjeta: ReactNode) => (
+    <Hoja bloqueTitulo={bloqueTitulo} porPasajero={porPasajero} precioOpcion={precioOpcion}>{tarjeta}</Hoja>
+  )
+  if (!h) return hoja(<LineaDelCliente numero={numero} nombre={(item.nombre ?? '').trim()} adicionales={enLaFicha} />)
+  const t = textosDeTarjetaHotel(h, general)
 
-  return (
-    <section aria-label="Así lo ve el cliente" className="flex flex-col gap-2.5" data-hoja-cliente>
-      <p className="m-0 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">
-        Así lo ve el cliente<span className="h-px flex-1 bg-[#E2DED5]" />
-      </p>
-      <div className="rounded-[10px] bg-[#EEEBE4] p-[18px] max-sm:p-2.5">
-        <div
-          className="mx-auto flex max-w-[600px] flex-col gap-3 rounded-[2px] bg-white px-7 pb-[22px] pt-[26px] shadow-[0_1px_1px_rgba(22,26,51,.06),0_8px_24px_rgba(22,26,51,.14)] max-sm:px-4 max-sm:pb-4 max-sm:pt-[18px]"
-          style={{ fontFamily: HELVETICA, color: TOKENS.texto, colorScheme: 'light' }}
-          data-hoja
-        >
-          <span className="flex items-center gap-1.5 text-[10px] font-bold tracking-[.14em]" style={{ color: TOKENS.magenta }}>
-            <i className="h-1.5 w-1.5 rounded-full" style={{ background: TOKENS.magenta }} />
-            {bloqueTitulo.toUpperCase()}
-          </span>
+  return hoja(
+    <>
           {/* La foto va al lado de la tarjeta, como en el documento (la miniatura del capítulo). */}
           <div className="flex items-start gap-3 max-sm:flex-col">
           <div className="flex min-w-0 flex-1 flex-col gap-1 self-stretch rounded-lg px-3.5 py-3 max-sm:w-full" style={{ background: TOKENS.tarjeta }}>
@@ -146,6 +142,36 @@ export default function HojaCliente({
             />
           )}
           </div>
+    </>,
+  )
+}
+
+/**
+ * La hoja: el renglón del bloque arriba, la tarjeta de la opción y la franja de «Inversión»
+ * con el precio de cada pasajero y el total. La misma para el hotel y para lo que no es hotel.
+ */
+function Hoja({ bloqueTitulo, porPasajero, precioOpcion, children }: {
+  bloqueTitulo: string
+  porPasajero: string
+  precioOpcion: number
+  children: ReactNode
+}) {
+  return (
+    <section aria-label="Así lo ve el cliente" className="flex flex-col gap-2.5" data-hoja-cliente>
+      <p className="m-0 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">
+        Así lo ve el cliente<span className="h-px flex-1 bg-[#E2DED5]" />
+      </p>
+      <div className="rounded-[10px] bg-[#EEEBE4] p-[18px] max-sm:p-2.5">
+        <div
+          className="mx-auto flex max-w-[600px] flex-col gap-3 rounded-[2px] bg-white px-7 pb-[22px] pt-[26px] shadow-[0_1px_1px_rgba(22,26,51,.06),0_8px_24px_rgba(22,26,51,.14)] max-sm:px-4 max-sm:pb-4 max-sm:pt-[18px]"
+          style={{ fontFamily: HELVETICA, color: TOKENS.texto, colorScheme: 'light' }}
+          data-hoja
+        >
+          <span className="flex items-center gap-1.5 text-[10px] font-bold tracking-[.14em]" style={{ color: TOKENS.magenta }}>
+            <i className="h-1.5 w-1.5 rounded-full" style={{ background: TOKENS.magenta }} />
+            {bloqueTitulo.toUpperCase()}
+          </span>
+          {children}
           <div className="flex flex-wrap items-end justify-between gap-3 border-t pt-2.5" style={{ borderColor: TOKENS.linea }}>
             <div>
               <small className="block text-[9.5px] font-bold tracking-[.12em]" style={{ color: TOKENS.gris }}>INVERSIÓN</small>
@@ -157,6 +183,22 @@ export default function HojaCliente({
         <p className="m-0 mt-2.5 text-center text-xs text-[#6E6A62]">Así sale esta opción en la cotización que recibe el cliente.</p>
       </div>
     </section>
+  )
+}
+
+/**
+ * El traslado, como lo imprime la línea de «Inversión» del documento (`LineaPrecio`):
+ * el nombre de la línea tal cual y «Incluye: …» con los adicionales, sin cifra propia.
+ */
+function LineaDelCliente({ numero, nombre, adicionales }: { numero: number; nombre: string; adicionales: string[] }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-lg px-3.5 py-3" style={{ background: TOKENS.tarjeta }} data-linea-cliente>
+      <span className="self-start rounded-full px-[7px] py-0.5 text-[8.5px] font-bold tracking-[.08em] text-white" style={{ background: TOKENS.magenta }}>
+        OPCIÓN {numero}
+      </span>
+      <h5 className="m-0 mt-0.5 text-base font-bold" style={{ color: TOKENS.tinta }}>{nombre || `Opción ${numero}`}</h5>
+      {adicionales.length > 0 && <span className="text-[11.5px]" style={{ color: TOKENS.gris }}>{`Incluye: ${adicionales.join(' · ')}`}</span>}
+    </div>
   )
 }
 

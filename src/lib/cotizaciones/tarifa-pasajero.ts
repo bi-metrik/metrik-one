@@ -853,6 +853,11 @@ export interface MonedaDeTarifa {
   /** La que leyó la IA, si alguna captura la mostraba. Se enseña al lado de la elegida. */
   leida: string | null
   decision: DecisionMoneda | null
+  /**
+   * La lectura la escribió una persona en el ingreso manual, no salió de un pantallazo. Solo
+   * cambia lo que se dice del origen («ingresada a mano»); la moneda y `asumida` no cambian.
+   */
+  manual?: boolean
 }
 
 /**
@@ -869,9 +874,22 @@ export function monedaDeTarifa(tarifa: TarifaPax): MonedaDeTarifa {
   const leida = lecturas.find(l => !l.monedaAsumida)?.moneda.toUpperCase() ?? null
   const decision = tarifa.moneda ?? null
   if (decision) return { moneda: decision.valor, asumida: false, origen: 'persona', leida, decision }
-  if (leida) return { moneda: leida, asumida: false, origen: 'captura', leida, decision: null }
-  if (lecturas.length > 0) return { moneda: 'COP', asumida: true, origen: 'supuesta', leida: null, decision: null }
-  return { moneda: 'COP', asumida: false, origen: 'sin_lectura', leida: null, decision: null }
+  // Solo para decir el origen. Con habitaciones (R8) la lectura vive en la habitación.
+  const manual = [...lecturas, ...(tarifa.habitaciones ?? []).map(h => h.lectura)].some(l => l?.origen === 'manual')
+  const deMano = manual ? { manual } : {}
+  if (leida) return { moneda: leida, asumida: false, origen: 'captura', leida, decision: null, ...deMano }
+  if (lecturas.length > 0) return { moneda: 'COP', asumida: true, origen: 'supuesta', leida: null, decision: null, ...deMano }
+  return { moneda: 'COP', asumida: false, origen: 'sin_lectura', leida: null, decision: null, ...deMano }
+}
+
+/**
+ * De dónde salió la moneda, como se dice junto al código («COP · leída del pantallazo»).
+ * `null` cuando se asumió: eso lo dice la alerta, no esta línea.
+ */
+export function origenDeMoneda(m: MonedaDeTarifa): string | null {
+  if (m.asumida) return null
+  if (m.origen === 'persona') return 'la elegiste tú'
+  return m.manual ? 'ingresada a mano' : 'leída del pantallazo'
 }
 
 /**
