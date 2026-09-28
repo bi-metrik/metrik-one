@@ -14,6 +14,7 @@ import { COLUMNAS_CARTERA, deudasDeCartera, TOLERANCIA_SALDO_COP } from '../_sha
 import { bogotaParts, diasDelMes, todayBogotaISO } from '../_shared/bogota.ts';
 import { debeSalirHoy, diaSemanaISO, paisDelWorkspace } from '../_shared/dias-habiles.ts';
 import { cerrarEntregasVencidas } from '../_shared/wa-bandeja.ts';
+import { procesarEntendimientos } from '../_shared/wa-entendimiento.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
 // `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
@@ -33,7 +34,7 @@ type ContactoDelNegocio = { nombre?: string | null } | null;
 
 Deno.serve(async (req) => {
   // This function is triggered by Supabase pg_cron or external cron
-  // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' | 'bandeja_cierre' }
+  // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' | 'bandeja_cierre' | 'bandeja_entendimiento' }
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
@@ -96,6 +97,14 @@ Deno.serve(async (req) => {
         // entregas de la bandeja de solicitudes que llevan la ventana sin mensajes y hace la
         // pregunta. Ver `_shared/wa-bandeja.ts`.
         const r = await cerrarEntregasVencidas(supabase);
+        return new Response(JSON.stringify({ ok: true, action, ...r }), { status: 200 });
+      }
+      case 'bandeja_entendimiento': {
+        // Cada minuto (cron `wa-bandeja-entendimiento`, solo si hay trabajo): entiende las
+        // entregas ya respondidas, crea el negocio con valores sugeridos y resuelve las
+        // respuestas a «¿cuál contacto?». Nada corre sin `modules.bandeja_solicitudes_wa`.
+        // Ver `_shared/wa-entendimiento.ts`.
+        const r = await procesarEntendimientos(supabase);
         return new Response(JSON.stringify({ ok: true, action, ...r }), { status: 200 });
       }
       default:

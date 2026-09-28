@@ -80,7 +80,7 @@ async function leerConModelo(instrucciones: string, texto: string, esquema: unkn
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
-        contents: [{ role: 'user', parts: [{ text }] }],
+        contents: [{ role: 'user', parts: [{ text: texto }] }],
         generationConfig: {
           temperature: 0.1,
           maxOutputTokens: 8192,

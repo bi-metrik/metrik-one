@@ -11,6 +11,7 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
+import { tomarRespuestaContacto } from './wa-entendimiento.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -110,6 +111,17 @@ export async function atenderEnBandeja(
     console.warn(`[wa-bandeja] mensaje sin wamid de ${message.phone} (${message.type})`);
   }
   const wamid = message.wa_message_id ?? `sin-wamid:${message.phone}:${message.timestamp}:${message.type}`;
+
+  // ¿Es la respuesta a «¿cuál de estos contactos es?» del paso de entendimiento? Se mira
+  // ANTES de registrar: como contenido abriría una entrega nueva y la pregunta quedaría sin
+  // respuesta. Solo un texto escrito (no reenviado) puede serlo.
+  if (message.type === 'text' && message.reenviado !== true && (message.text || '').trim()) {
+    const tomada = await tomarRespuestaContacto(supabase, {
+      workspaceId: user.workspace_id, phone: message.phone, texto: message.text.trim(),
+      wamid, enviadoAt: fechaDeMeta(message.timestamp),
+    });
+    if (tomada) return;
+  }
 
   let { cuerpo, origen } = cuerpoDelMensaje(message);
   let errorTranscripcion: string | null = null;
