@@ -15,6 +15,7 @@ import {
   textoPreguntaContacto,
   validarSalida,
   type CampoEntendible,
+  type DecisionContacto,
 } from './wa-entendimiento-reglas.ts';
 
 // Config sintética con la forma de la solicitud de viaje (slugs y tipos, sin textos del cliente).
@@ -35,6 +36,10 @@ const FIELDS: CampoEntendible[] = [
   { slug: 'foto', tipo: 'imagen_clipboard', label: 'Foto' },
 ];
 
+type PropValor = { properties: { valor: { enum?: string[] } } };
+type Esquema = { properties: { valores: { properties: Record<string, PropValor>; required: string[] } } };
+type Preguntar = Extract<DecisionContacto, { tipo: 'preguntar' }>;
+
 const pd = { valor: POR_DEFINIR, frase: '' };
 /** Salida del modelo con todo por definir salvo lo que se pase. */
 function salida(valores: Record<string, { valor: string; frase: string }>, historia = 'Historia.') {
@@ -53,7 +58,7 @@ function procesar(texto: string, raw: unknown) {
 
 describe('el esquema sale de la config', () => {
   it('un objeto por campo entendible, vocabulario cerrado donde hay opciones', () => {
-    const e = esquemaDeSalida(FIELDS) as { properties: { valores: { properties: Record<string, any>; required: string[] } } };
+    const e = esquemaDeSalida(FIELDS) as Esquema;
     const props = e.properties.valores.properties;
     expect(Object.keys(props)).not.toContain('numero_pasajeros'); // derivado
     expect(Object.keys(props)).not.toContain('foto'); // no captura un dato del cliente
@@ -64,7 +69,7 @@ describe('el esquema sale de la config', () => {
 
   it('un campo nuevo en la config entra al esquema y a las instrucciones sin tocar código', () => {
     const con = [...FIELDS, { slug: 'motivo', tipo: 'texto', label: 'Motivo del viaje', nivel: 'deseable' } as CampoEntendible];
-    expect(Object.keys((esquemaDeSalida(con) as any).properties.valores.properties)).toContain('motivo');
+    expect(Object.keys((esquemaDeSalida(con) as Esquema).properties.valores.properties)).toContain('motivo');
     expect(instruccionesEntendimiento(con, '2026-09-28')).toContain('- motivo: Motivo del viaje');
   });
 
@@ -164,7 +169,7 @@ describe('fusionar sin pisar a una persona', () => {
     const r = fusionarSugeridos({ ninos: 0 }, f, sug, meta);
     expect(r.escritos).toEqual(['destino', 'adultos', 'ninos']);
     expect(r.data.ninos).toBe(1);
-    expect((r.data._sugeridos as any).destino).toEqual({ fuente: 'whatsapp', entrega_id: 'e1', frase: 'Punta Cana', en: meta.en });
+    expect((r.data._sugeridos as Record<string, unknown>).destino).toEqual({ fuente: 'whatsapp', entrega_id: 'e1', frase: 'Punta Cana', en: meta.en });
   });
 
   it('nunca pisa un valor escrito ni una corrección registrada', () => {
@@ -200,13 +205,13 @@ describe('el contacto: exacto o se pregunta', () => {
     const d = decidirContacto({ clienteTexto: 'Ana Pérez', extraido: { nombre: null, telefono: null }, candidatos: [ana, anaG] });
     expect(d).toMatchObject({ tipo: 'preguntar', motivo: 'ninguno' });
     expect(d.tipo === 'preguntar' && d.opciones.map(o => o.id)).toEqual(['a', 'c']);
-    expect(textoPreguntaContacto(d as any)).toContain('Responde con el número, o escribe NUEVO');
+    expect(textoPreguntaContacto(d as Preguntar)).toContain('Responde con el número, o escribe NUEVO');
   });
 
   it('ninguno: pregunta sin lista', () => {
     const d = decidirContacto({ clienteTexto: 'Luis Gómez', extraido: { nombre: null, telefono: null }, candidatos: [] });
     expect(d).toMatchObject({ tipo: 'preguntar', motivo: 'ninguno', opciones: [] });
-    expect(textoPreguntaContacto(d as any)).toContain('No encontré a «Luis Gómez» en el directorio.');
+    expect(textoPreguntaContacto(d as Preguntar)).toContain('No encontré a «Luis Gómez» en el directorio.');
   });
 
   it('la respuesta: número de la lista, NUEVO, un celular, o no se entiende', () => {
