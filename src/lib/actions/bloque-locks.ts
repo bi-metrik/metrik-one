@@ -99,7 +99,7 @@ export async function heartbeatBloqueLock(
 export async function forceUnlockBloque(
   bloqueInstanciaId: string
 ): Promise<LockResult> {
-  const { workspaceId, userId, error } = await getWorkspace()
+  const { workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId || !userId) {
     return { ok: false, error: 'unauthenticated' }
   }
@@ -119,7 +119,10 @@ export async function forceUnlockBloque(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error: rpcErr } = await (sb as any).rpc('force_unlock_bloque', {
     p_bloque_instancia_id: bloqueInstanciaId,
-    p_forced_by: userId,
+    // Es un staff.id (la FK de activity_log.autor_id), no el profile. La base lo
+    // valida (20260928150000): solo vale el staff propio o, en "Ver como", el del
+    // impersonado; cualquier otro se ignora y firma el staff de la sesion.
+    p_forced_by: staffId,
   })
 
   if (rpcErr) return { ok: false, error: rpcErr.message }
