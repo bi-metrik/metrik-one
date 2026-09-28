@@ -1,0 +1,115 @@
+# Frentes secundarios — índice
+
+Entradas que vivían en la sección «Referencias» de MEMORY.md (proyectos viejos y recetas), sacadas el 2026-09-28 por tamaño. Las recetas vigentes están también en indice_referencias.md.
+
+- [Formato 010 DIAN](project_formulario_010_dian.md) — Overlay AcroForm, aplanado (flatten), seccional casilla 12 con código auto, presets config-driven
+- [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — Solo corre en producción (credenciales sensibles en Vercel)
+- ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — un PR que cambie qué emite el cron dispara cuentas reales horas después
+- ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — #694: por cobros; anular la única viva = el cron la re-emite
+- ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — #577/#599 en main, tabla aplicada con 0 filas, Wompi elegida; nadie se suspende solo
+- ⚠️⚠️ [Spec módulos, servicios y cobro Wompi](project_spec_modulos_servicios_cobro.md) — rev 2 sin construir: impago = solo lectura en 4 capas (nunca bloqueo); AFI pasa a comisión
+- ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada; hueco abierto, el backfill de 297 no lo cubrió
+- ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el módulo YA está encendido (caducó lo contrario), el sync sigue sin correr
+- ⚠️⚠️ [Ventas por ciudad en Marketing](project_marketing_ventas_por_ciudad.md) — PR #689 sin mergear: la migración va ANTES del merge
+- [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — PRs #357 y #366: 4 migraciones sin aplicar, las tres definiciones de "venta", y los huecos que deciden plata
+- ⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #597 YA en main, #626 sin mergear (falta QA): el 4925%, el corte de la tabla
+- ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra a AFI; probar solo con fixtures, validar antes del fetch
+- ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer (el switch cambia los archivos bajo tus pies)
+- ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — PR #18 sin mergear: 2 menciones de INTERPOL son de Lucía; pie AFI del lote
+- [Verificar el deploy sin el CLI de Vercel](project_verificar_deploy_sin_vercel_cli.md) — el CLI se cuelga en un worktree aislado; las fechas absolutas salen del commit status de GitHub
+- ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate toda escritura en metrik-one se bloquea
+- ⚠️ [Vistas server-only](project_vistas_server_only.md) — `v_venta_mes_comercial` revocada a `authenticated` devuelve vacío sin error
+- ⚠️ [staff es 1 fila por persona en TODA la base](project_staff_unique_global.md) — UNIQUE global de `profile_id`: el platform_admin en workspace ajeno opera con `staffId` null a propósito
+- [La empresa espejo se sigue creando](project_empresa_espejo_se_sigue_creando.md) — decisión cerrada de Mauricio; solo el directorio dejó de listarla
+- [Canal WhatsApp propio](project_canal_wa_propio.md) — webhook construido (#448) y sin desplegar; Gate 0 prohíbe persistir contenido y no se suscribe `history`
+- ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — motor determinista aparte del R1; deploy ANTES del SQL; idioma PRIMERO (#574)
+- [R4 liberación de contrapartes](project_r4_liberaciones.md) — PR #343: la regla de cobertura, por qué cuelga de la contraparte, y qué quedó para R3/R5
+- ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` es la única vía para lecturas por lote; cuáles filas se pierden cambia entre corridas
+- ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — 11 corregidas; FV-2-244 salió con la cédula truncada y NO se toca; 15 terceros basura para Diana
+- ⚠️ [Plantilla de cotización Termotech](project_plantilla_cotizacion_termotech.md) — PR #522: reusa `cotizacion_template_slug`, sin migración de esquema
+- [Formulario de Meta de SOENA](project_formulario_meta_soena.md) — #540 la ficha, #543 el rol del contacto; los cuatro valores ya medidos y la copia gemela en Deno
+- [Vocabulario de activity_log](project_activity_log_vocabulario.md) — 754 son filas de bloque heredado; los eventos de aprobación son 311. CHECK y backfill aplicados
+- ⚠️⚠️ [Aporte al total y rubros sugeridos](project_aporte_al_total_y_sugeridos.md) — #709 mergeado y migración APLICADA: el defecto del brief que ya estaba cerrado
+- ⚠️⚠️ [El día: itinerario y sugeridos, un solo interruptor](project_dia_relativo_sugeridos.md) — #718 SIN mergear: una línea SIN grupo nunca cae a «no incluidas»
+- ⚠️⚠️ [Pantallazo por ranura (paso 3, Trappvel)](project_pantallazo_ranuras.md) — #700 mergeado: RX1 solo probado contra capturas SINTÉTICAS
+- ⚠️ [Opciones e itinerarios de cotización](project_itinerarios_cotizacion.md) — #684 mergeado; CADUCÓ lo de las migraciones sin aplicar
+- ⚠️ [Margen visible en la cotización (Trappvel)](project_margen_visible_trappvel.md) — #682 mergeado; la migración de umbrales YA está aplicada; vigente: el rastro de margen VACÍO
+- ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — #712 mergeado y las tres INERTES: falta la config de datos
+- ⚠️⚠️ [Archivos de trappvel en su propio Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: config YA aplicada, corte de Drive DESPUÉS del merge, `archivos_one` sin crear
+- ⚠️ [Cotizar por rubros: margen y precio manual](project_cotizacion_margen_rubros.md) — PR #514 sin mergear; el backfill decide si 11 ítems pierden $7,17M
+- ⚠️ [Nombre de la variante de cotización](project_nombre_cotizacion_variantes.md) — #668 mergeado: el `??` no atrapaba la cadena vacía
+- [Descarga a Excel de /negocios](project_descarga_excel_negocios.md) — PR #525: el recaudado sale de los tramos BRUTOS de `v_cobro_valor`, no de la vista (bajó a base)
+- ⚠️⚠️ [/negocios se publica como hoja de Google](project_export_negocios_a_drive.md) — PR #625 sin mergear: el `jsonb_set` que no creaba el contenedor ya está corregido, pero la migración sigue SIN aplicar, Drive nunca se ejercitó y el share está apagado
+- ⚠️⚠️ ["Todos" incluye cerrados](project_todos_incluye_cerrados.md) — PR #607 mergeado: escribir `cierre_motivo` habría roto TODO cierre (CHECK contra `stage_actual`)
+- ⚠️ [El cierre se deriva de `estado`](project_cierre_desde_estado.md) — PR #609 sin mergear: el mapa es lista CERRADA (hay 2 `activo` reales)
+- ⚠️⚠️ [Un cerrado sale de circulación](project_negocio_cerrado_solo_lectura.md) — PR #610 sin mergear: el recibo de caja NO se corta (7 de 53 alcanzables)
+- ⚠️ [El buscador avisa de otras pestañas](project_aviso_otras_pestanas.md) — PR #611 sin mergear: por qué NO se ignora el chip de fase
+- ⚠️ [Línea de flujo en /negocios](project_linea_de_flujo_negocios.md) — #711 mergeado: la regla de color la elegí midiendo (no validada)
+- ⚠️ [Presupuesto vs Ejecutado](project_presupuesto_vs_ejecutado.md) — PRs #529 y #532: el bloque solo existe en 7 negocios de 4 workspaces (SOENA no lo tiene)
+- ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — #550 en main: las 252 marcas se autocorrigen solas; los 6 candidatos NO son lista para aplicar; guardián superado por #561
+- ⚠️⚠️ [Factura: herencia sin copias y soporte en Tesorería](project_factura_soporte_tesoreria.md) — #704/#706 desplegados; limpieza 1B SIN aplicar
+- [Gate de recaudo en facturación](project_gate_recaudo_facturacion.md) — #578 mergeado + enmienda #581: la banda del 1%
+- ⚠️⚠️ [PQR rechazado: el desenlace que devuelve el caso](project_pqr_rechazado_desenlace.md) — #603 mergeado, config SOENA SIN aplicar
+- ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — #598 mergeado, config SOENA SIN aplicar; el `solo_si` que evitó el único falso positivo
+- ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — PR #570 mergeado, wa-webhook SIN redesplegar; D-20 abierto
+- ⚠️ [Declaración juramentada de SOENA](project_declaracion_juramentada_soena.md) — PR #545: un campo no opcional BLOQUEA el PDF (282→307 casos)
+- ⚠️ [Duplicados: solo las facturas libres](project_duplicado_hermanos_siigo.md) — PR #561 sin mergear; el vínculo es la marca, NO el contacto (V0321/V0323 lo prueba)
+- [Certificado UPME en Anexos](project_certificado_upme_anexos.md) — PR #548 mergeado y aplicado: cómo se verifica una migración del MCP sin leer el ledger
+- ⚠️ [Tokens Pino Profundo](project_tokens_pino_profundo.md) — #601 ya mergeado: el acento es invisible sobre carbón
+- ⚠️ [Icono de app Pino](project_icono_app_pino.md) — PR #602 sin mergear: el `.ico` gana precedencia sobre el `.svg`, y la geometría hay que fitearla contra el PNG
+- ⚠️ [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS; el lockup «MéTRIK sustenta» sigue solo en la foto
+- ⚠️ [QA en pantalla de las tildes de compliance](project_qa_tildes_compliance.md) — #613 quedó bien; el badge muestra el valor crudo («Automatico») y quedan 7 erratas
+- ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — ya soltó el sector y tiene la franja de normas (ejemplos, NUNCA cobertura)
+- ⚠️ ["Plata" está vetada en copy público](project_lexico_plata_vetada.md) — #614 (rótulo P1) y #616 (banner de alcance) cerrados; quedan ~19 visibles
+
+- ⚠️⚠️ [Dedup de contactos: nombre y usuario de WhatsApp](project_dedup_contactos_webhook.md) — PR #565 sin mergear: migración ANTES del deploy o Meta reintenta
+- ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — el reproceso puede BORRAR datos y no es idempotente
+- ⚠️ [Routing respeta el `condition` del bloque](project_routing_condition_bloque.md) — PR #586 mergeado: el radio real es UN routing de todo el sistema
+- ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — PR #569 sin mergear: por qué el listón es `valorARecaudar` y no la etapa
+- ⚠️⚠️ [Avanzar tras registrar el pago](project_avance_tras_pago_fab.md) — PR #707 sin mergear: el motor CIERRA gates antes de su propio chequeo (falso «retenido»)
+- ⚠️⚠️ [Acuses de Resend en avisos_cliente](project_acuses_resend_avisos_cliente.md) — PR #596 sin mergear: el orden de despliegue no es negociable
+- ⚠️ [FTO del State Dept en Valida](project_valida_fto_state_dept.md) — #33, #34 y #35 mergeados y la lista YA activa (6 fuentes); la privacidad NO enumera la FTO
+- ⚠️⚠️ [El plazo de retencion ya se vigila en CI](project_retencion_control_en_ci.md) — #634 y #38 mergeados; el expediente KYC sigue en CINCO anios (abierto)
+- ⚠️⚠️ [Cierre del frente de datos personales KYC](project_valida_privacidad_v13.md) — diez (10) años; el control cruzado son 5 superficies (#629). ⚠️ Su parte de «ningún CI lo vigila» CADUCÓ
+- ⚠️⚠️ [Valida Diligencia v2: SIRI + SECOP II](project_valida_diligencia_v2.md) — entregado como patch SIN commit ni PR (`../metrik-valida-wt-diligencia-v2-pendiente/`)
+- ⚠️⚠️ [Bolsa prepagada de Valida (4D SOFT)](project_valida_bolsa_prepagada.md) — #43 en main y 0032 en prod; con bolsa `plan` y `periodo` llegan null
+- ⚠️⚠️ [Portal de llaves de Valida](project_valida_portal_autoservicio.md) — #42 YA en main (`725a5f9`); caducó lo de 0033 sin aplicar; vigencia fija 15-sep en 5 sitios
+- ⚠️ [Spec portal Valida v2 + panel ONE](project_valida_portal_v2_spec.md) — SUPERADA el 15-sep (portal pasa a ONE); vigente `bold-TXRRP7Q95ZJ` como aplicada
+- ⚠️⚠️ [Purga de registros del bot](project_purga_registros_bot.md) — #726 SIN mergear ni aplicar: la Politica v1.4 espera; el wamid es el telefono
+- [Soporte de listas para el operador](project_soporte_listas_operator.md) — #631 mergeado: `/compliance/listas` NO tiene gate por rol (la ruta era el único candado)
+- ⚠️ [Guards de items, cierre por tipo y aprobación](project_guard_bloque_items.md) — #676-#687 mergeados: la regla de quién aprueba es `puedeSerAprobador`
+- ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — #696 mergeado: `omitir_gate.staff_ids` inerte hasta que SOENA lo cargue
+- ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — activo en metrik; #702 la captura en ficha y modal SIN QA en pantalla
+- ⚠️⚠️ [Soporte foto del bot: "Si" ya no expulsa](project_wa_soporte_reencauza.md) — #658 mergeado y SIN desplegar (inerte); un PDF no llega nunca al handler
+- ⚠️⚠️ [WhatsApp sin teléfono (nombre de usuario, BSUID)](project_wa_bsuid_sin_telefono.md) — #724 mergeado SIN redesplegar; envío por `recipient` no verificado en vivo
+- ⚠️⚠️ [Aceptación de términos por WhatsApp](project_aceptacion_terminos_wa.md) — #720 en prod, #722 mergeado SIN redesplegar; dominios de Valida en conflicto; HMAC de wa-webhook NO se valida
+
+
+- [Medir una server action contra prod con vitest](reference_medicion_con_vitest.md) — arnés temporal en `src/`, sin reimplementar el criterio
+- [Medir sin MCP desde un worktree aislado](reference_medicion_sin_mcp_supabase.md) — el acceso varía por sesión: probar primero `.env.local`+PostgREST
+- ⚠️ [Llave sb_secret_ de un Supabase ajeno](reference_llaves_nuevas_supabase_proyecto_ajeno.md) — sin DDL; un HEAD con conteo sobre tabla inexistente da 204 sin error; Storage rechaza tildes
+- [Medir contraste AA en el render, no en el CSS](reference_medir_contraste_render.md) — chromium por CDP, fondo efectivo subiendo el árbol
+- [QA de una pantalla VIVA, con efectos y estado](reference_qa_pantalla_viva_cdp.md) — vite + http.server + chromium por CDP; el setter nativo o React no se entera
+- [Capturas de pantallas reales sin servidor ni base](reference_capturas_ui_sin_servidor.md) — vitest renderiza, vite compila el CSS y chromium fotografía
+- ⚠️ [Cambio SOLO de tildes, y la eñe aparte](reference_cambio_solo_de_tildes.md) — la eñe NO es tilde (se corrige sola); hay `anos` que rompen código si los tocas
+- [Verificar un asset visual contra el oficial](reference_verificar_assets_visuales.md) — `sharp` ya está y rasteriza SVG
+- ⚠️ [Leer el texto de un PDF de @react-pdf](reference_leer_texto_de_un_pdf_de_react_pdf.md) — el texto va en HEX y no en `(...)`
+- [Mirar de verdad un PDF renderizado](reference_mirar_pdf_renderizado.md) — sin poppler ni sudo: vitest + `pdf-to-img` en prefijo aparte
+- [Renderizar client components en aislamiento](reference_render_appshell_aislado.md) — el AppShell solo pide `usePathname`+`useRouter`
+- [Renderizar la tarjeta de negocio en aislamiento](reference_render_tarjeta_negocio_aislada.md) — 4 dobles y `await import`; encontró el «26 de sept» que ninguna prueba pura veía
+- [SQL y publicacion en metrik-valida](reference_sql_y_publicacion_metrik_valida.md) — sin credenciales, el catálogo vivo se lee en las páginas públicas; PR por `gh api`
+- [SQL contra prod de ONE](reference_sql_prod_one.md) — comprobar el acceso al empezar (varía por sesión); ensayo con rollback y ledger
+- [Probar SQL con PGlite](reference_pglite_pruebas_sql.md) — Postgres en wasm dentro de la suite; una conexión (sin concurrencia) y reloj en ms
+- ⚠️⚠️ [Fechas e hipervínculos con SheetJS](reference_sheetjs_fechas_excel.md) — `cellDates` SOLO en `json_to_sheet`, y ahí no sirve de nada si la fila trae texto
+- ⚠️ [El guion inventado de @react-pdf](reference_react_pdf_guion_entre_corridas.md) — negrita + puntuación pegada imprime un guion en el TEXTO
+- [Probar un componente sin DOM](reference_probar_render_sin_dom.md) — vitest corre en `node` y solo recoge `.test.ts`: `renderToStaticMarkup` + `React.createElement`
+- ⚠️ [`\b` de JS es ASCII](reference_regex_js_b_ascii.md) — "qué" con tilde no cierra palabra y el regex salta al siguiente "que"; lookarounds `\p{L}` con `u`
+- [Probar un route handler con vitest](reference_probar_route_handler_vitest.md) — el doble de Supabase debe APLICAR los `.eq()`
+- ⚠️ [Probar un handler del bot de WhatsApp](reference_probar_handler_wa_bot.md) — NO se colecta (`wa-parse.ts` lee `Deno.env` al importarse); la sonda de un minuto
+- ⚠️ [Verificar contra el CSS compilado](reference_verificar_css_compilado.md) — un `@theme` mal declarado deja cada clase sin efecto y los cuatro checks salen verdes
+- [Fecha y hora en es-CO](reference_formato_fecha_hora_es_co.md) — el CLDR mete "de" y no se quita con opciones
+- ⚠️ [La firma Svix de Resend no es el HMAC de Meta](reference_firma_svix_resend.md) — firma `id.timestamp.body` con el secreto decodificado y en base64
+- ⚠️⚠️ [Landing estática en un subdominio de metrik.com.co](reference_landing_estatica_en_metrik.md) — el DNS ya está (wildcard); `all_except_custom_domains` abre PRODUCCIÓN (dominio propio **y** alias `.vercel.app`) y solo cierra la URL por deploy; y git sí corre en el scratchpad
+- ⚠️⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — `gh repo clone` DENTRO del worktree da git completo; «git» en cualquier palabra tumba el guard
+- ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — el checkout compartido puede ir BEHIND main y mentir en silencio
+- ⚠️ [Docs de Wompi verificadas](reference_wompi_docs_verificado.md) — ya responden (no 403); referencia duplicada = 422; sin reembolso por API; `/merchants/:llave` muere 31-oct

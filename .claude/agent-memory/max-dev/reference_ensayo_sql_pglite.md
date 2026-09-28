@@ -29,3 +29,12 @@ justo lo que no se pudo verificar leyendo `pg_proc`.
 ⚠️ Límites: las vistas son tablas (no se prueba la vista en sí) y no hay RLS. Sirve para la
 lógica de la función, no para permisos. Y el clasificador bloquea a veces un GET idéntico a
 otro que pasó: reintentarlo solo, sin cambiar nada, pasó.
+
+**RLS también se ensaya en PGlite (2026-09-28, `fix/rls-update-activity-log`).** Roles
+`anon`/`authenticated`/`service_role bypassrls`, `auth.uid()` leyendo `request.jwt.claims`, los
+helpers como SECURITY DEFINER, y por caso una `db.transaction` con `set local role authenticated`
++ `set_config('request.jwt.claims', …, true)`. Los grants por columna dan 42501 igual que en
+Postgres. Sirvió además para **pre-validar el bloque `DO $dry$ … RAISE EXCEPTION` de producción**
+cuando el subagente no tiene MCP de Supabase: se corre el mismo archivo contra la base PGlite y
+se confirma que revierte (pg_policies queda como antes). Ojo: sin el grant por columnas, un
+ataque a fila ajena da 0 (RLS filtra), no error; el test debe esperar lo que da la migración real.
