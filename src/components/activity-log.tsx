@@ -34,6 +34,8 @@ interface ActivityEntry {
   created_at: string | null
   autor: { id: string; full_name: string } | null
   mencion: { id: string; full_name: string } | null
+  /** Lo calcula el servidor con la misma regla que aplica al borrar. */
+  puede_borrar?: boolean
 }
 
 interface ActivityLogProps {
@@ -97,22 +99,23 @@ function timeAgo(dateStr: string) {
   return formatBogotaFechaCorta(date) ?? ''
 }
 
-const SHOW_SYSTEM_KEY = 'activity-log:show-system'
+// `:v2` desde 2026-09-28: el default pasó de «solo comentarios» a «todo», y la
+// preferencia vieja guardada casi siempre reflejaba el default de antes, no una
+// elección. Cambiar la clave aplica el default nuevo una vez y vuelve a recordar.
+const SHOW_SYSTEM_KEY = 'activity-log:show-system:v2'
 
 /**
- * El default de "ver eventos del sistema" depende de la entidad.
+ * "Ver eventos del sistema" arranca ENCENDIDO en toda entidad (2026-09-28).
  *
- * En negocio el bloque es sobre todo conversacion, y esconder los automaticos es
- * lo que lo hace legible. En contacto pasa lo contrario: hoy TODO lo que registra
- * es sistema (quien movio el segmento y cuando), asi que con el default heredado
- * la funcion nacia invisible —el historial existia y la pantalla decia "sin
- * actividad"—. Ademas guarda su preferencia en su propia clave: compartirla hacia
- * que apagar el ruido en un negocio apagara el historial del contacto, que es
- * justo lo que se pidio ver.
+ * En negocio el default era "solo comentarios", y eso escondia los cambios de etapa:
+ * la ficha no contaba por donde habia pasado el caso. Ahora comentarios y cambios van
+ * juntos, del mas reciente al mas viejo, y el filtro queda para quien lo quiera.
+ * Contacto guarda su preferencia en su propia clave: compartirla hacia que apagar el
+ * ruido en un negocio apagara el historial del contacto.
  */
 const claveShowSystem = (tipo: string) =>
-  tipo === 'contacto' ? `${SHOW_SYSTEM_KEY}:contacto` : SHOW_SYSTEM_KEY
-const showSystemPorDefecto = (tipo: string) => tipo === 'contacto'
+  tipo === 'contacto' ? 'activity-log:show-system:contacto' : SHOW_SYSTEM_KEY
+const showSystemPorDefecto = () => true
 
 export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
@@ -131,13 +134,13 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Filtro: mostrar/ocultar eventos automaticos del sistema (persistido en localStorage).
-  // Default: ocultos — solo comentarios visibles. El toggle los revela bajo demanda.
+  // Default: todo visible. El toggle deja solo los comentarios para quien lo prefiera.
   // Lazy init seguro porque el toggle solo se renderiza tras cargar entries.
   const [showSystem, setShowSystem] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return showSystemPorDefecto(entidadTipo)
+    if (typeof window === 'undefined') return showSystemPorDefecto()
     const guardado = window.localStorage.getItem(claveShowSystem(entidadTipo))
     // `null` = nunca lo tocaron: manda el default de la entidad, no el "apagado".
-    return guardado === null ? showSystemPorDefecto(entidadTipo) : guardado === '1'
+    return guardado === null ? showSystemPorDefecto() : guardado === '1'
   })
   const toggleShowSystem = () => {
     setShowSystem(prev => {
@@ -197,6 +200,8 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
       if (res.success) {
         setEntries(prev => prev.filter(e => e.id !== id))
         toast.success('Comentario eliminado')
+      } else {
+        toast.error(res.error ?? 'No se pudo borrar el comentario')
       }
     })
   }
@@ -425,7 +430,7 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
 
 function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id: string) => void }) {
   return (
-    <div className="rounded-lg border p-3">
+    <div className="group rounded-lg border p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {entry.autor && (
@@ -440,12 +445,19 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
             </span>
           </div>
         </div>
-        <button
-          onClick={() => onDelete(entry.id)}
-          className="shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
-        >
-          <Trash2 className="h-3 w-3 text-red-500" />
-        </button>
+        {entry.puede_borrar && (
+          // Escritorio: aparece al pasar el mouse (o al enfocarlo con teclado).
+          // Celular no tiene hover: ahi queda siempre visible, atenuado.
+          <button
+            type="button"
+            onClick={() => onDelete(entry.id)}
+            aria-label="Borrar comentario"
+            title="Borrar comentario"
+            className="shrink-0 rounded p-0.5 opacity-60 transition-opacity hover:bg-accent focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:opacity-0"
+          >
+            <Trash2 className="h-3 w-3 text-red-500" />
+          </button>
+        )}
       </div>
 
       <p className="mt-1.5 text-sm whitespace-pre-wrap">{entry.contenido}</p>
