@@ -1,0 +1,13 @@
+[
+  { "slug": "destino", "tipo": "texto", "label": "destino", "required": true },
+  { "slug": "destino_tipo", "tipo": "select", "label": "destino_tipo", "required": true },
+  { "slug": "fechas_tipo", "tipo": "select", "label": "fechas_tipo", "required": true },
+  { "slug": "fecha_salida", "tipo": "fecha", "label": "fecha_salida" },
+  { "slug": "fecha_regreso", "tipo": "fecha", "label": "fecha_regreso" },
+  { "slug": "adultos", "tipo": "numero", "label": "adultos", "required": true, "no_cero": true },
+  { "slug": "ninos", "tipo": "numero", "label": "ninos", "default": 0 },
+  { "slug": "infantes", "tipo": "numero", "label": "infantes", "default": 0 },
+  { "slug": "numero_pasajeros", "tipo": "numero", "label": "numero_pasajeros", "suma_de": ["adultos", "ninos", "infantes"] },
+  { "slug": "composicion", "tipo": "select", "label": "composicion", "required": true },
+  { "slug": "requisitos_especiales", "tipo": "texto", "label": "requisitos_especiales" }
+]

@@ -51,6 +51,7 @@ import {
 import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
 import { cascadaDeItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itinerarios'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
+import { aplanarBloques, calcularNiveles, mensajeMinimoIncompleto } from '@/lib/negocios/niveles-solicitud'
 import {
   modoCierre,
   MENSAJE_ACCION_PROPIA,
@@ -3625,6 +3626,38 @@ export async function cambiarEtapaNegocioConGate(
           const nombre = gateMessagesAlguno['campos_alguno']
             ?? `Al menos uno de estos campos debe ser "${esperado}": ${camposExigidos.join(', ')}`
           return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        }
+      }
+    }
+
+    // Gate custom: solicitud_minimo — el mínimo de la solicitud (campos con
+    // `nivel: 'minimo'` de los bloques `datos` de la etapa, con su `pedir_si`) tiene que
+    // estar completo. Es el modo «bloquea»; sin el gate en la etapa, el mínimo solo avisa
+    // en pantalla (`IndicadoresSolicitud`). La cuenta es la misma función pura que pinta la
+    // barra: si la pantalla dice «7 de 7», este gate deja pasar. Cede al override como
+    // cualquier gate de etapa (está dentro de `!motivoOverride`).
+    if (etapaGates.includes('solicitud_minimo')) {
+      const { data: bloquesSol, error: errSol } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(etapa_id, orden, config_extra, bloque_definitions!inner(tipo))')
+        .eq('negocio_id', negocioId)
+        .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
+      if (errSol) {
+        // Sin poder leer no se puede afirmar que el mínimo está: el lado seguro es retener.
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'No se pudo revisar el mínimo de la solicitud', es_gate: true }] }
+      }
+      type FilaSol = { data: unknown; bloque_configs: { orden: number | null; config_extra: { fields?: unknown } | null; bloque_definitions: { tipo?: string } | null } | null }
+      const filas = ((bloquesSol ?? []) as FilaSol[])
+        .filter(b => b.bloque_configs?.bloque_definitions?.tipo === 'datos')
+        .sort((a, b) => (a.bloque_configs?.orden ?? 0) - (b.bloque_configs?.orden ?? 0))
+      const { fields, valores } = aplanarBloques(filas.map(b => ({ fields: b.bloque_configs?.config_extra?.fields, data: b.data })))
+      const niveles = calcularNiveles(fields, valores)
+      if (niveles.errores.length > 0) console.warn('[cambiarEtapa] solicitud_minimo con config dudosa:', niveles.errores)
+      if (niveles.minimo.faltan.length > 0) {
+        const msgs = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
+        return {
+          error: 'gate_bloqueado',
+          bloquesPendientes: [{ nombre: mensajeMinimoIncompleto(niveles.minimo, msgs['solicitud_minimo']), es_gate: true }],
         }
       }
     }
