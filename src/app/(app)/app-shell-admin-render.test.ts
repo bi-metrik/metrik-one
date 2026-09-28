@@ -1,7 +1,8 @@
 /**
- * El workspace admin ya no ofrece la sección Admin, y su Workflows abre /flujo (2026-09-27).
+ * Del menú Admin salieron Mi Bolsillo, Proceso y Skills (queda Cerebro), y el Workflows del
+ * workspace admin abre /flujo (2026-09-27).
  *
- * Proceso, Skills y Mi Bolsillo salieron del menú. Workflows en el workspace admin resolvía a
+ * Las rutas viejas no se borran. Workflows en el workspace admin resolvía a
  * /admin/workflows, que nació cuando no se podía cambiar de workspace; ahora metrik ve su propio
  * flujo por línea de negocio, igual que un cliente. Las rutas /admin/* quedan: solo dejan de
  * ofrecerse.
@@ -43,8 +44,14 @@ const encabezado = (texto: string) => new RegExp(`uppercase tracking-wider"[^>]*
 const hrefs = (html: string) => [...html.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1])
 
 describe('sidebar del workspace admin', () => {
-  it('no ofrece /admin/* ni pinta el encabezado Admin vacío', () => {
-    for (const role of ['owner', 'admin', 'supervisor']) {
+  it('Admin solo ofrece Cerebro: fuera Mi Bolsillo, Proceso, Skills y /admin/workflows', () => {
+    const html = render(true, 'owner')
+    expect(hrefs(html).filter((h) => h.startsWith('/admin/'))).toEqual(['/admin/cerebro'])
+    expect(html).toMatch(encabezado('Admin'))
+  })
+
+  it('sin ítems visibles para su rol, el encabezado Admin no se pinta vacío', () => {
+    for (const role of ['admin', 'supervisor']) {
       const html = render(true, role)
       expect(hrefs(html).filter((h) => h.startsWith('/admin/'))).toEqual([])
       expect(html).not.toMatch(encabezado('Admin'))
