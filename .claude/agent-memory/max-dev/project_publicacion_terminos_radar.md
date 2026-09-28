@@ -1,6 +1,6 @@
 ---
 name: publicacion-terminos-radar
-description: Publicar terminos-uso-radar@1.0 destapó que el mecanismo de Valida SOLO sirve para documentos de alcance 'cliente' (con empresa_id); un documento genérico ('plantilla') es invisible y no se puede aceptar en tres lugares, y la fila propuesta sigue SIN aplicar
+description: terminos-uso-radar@1.0 ya está publicado en producción (PDF + fila, verificados) y el alcance 'plantilla' estrenado: un documento genérico se ve por el MÓDULO contratado, no por la empresa; lo que sigue sin ejercitarse es la aceptación real
 metadata:
   type: project
 ---
@@ -10,29 +10,48 @@ Documento cerrado por Emilio Castañeda (CLO) el 2026-09-28:
 del Radar no abre; sin aceptación, el trial de 5 días de #955 no arranca (ancla:
 `aceptaciones_terminos.respondido_at`).
 
-## ⚠️⚠️ Registrar un documento es una FILA de datos, y la del Radar queda inerte
+## Aplicado en producción el 2026-09-28 (autorizado por Mauricio)
 
-`sql/radar/2026-09-28_terminos-uso-radar-v1.0.sql` — **SIN aplicar**. No es migración: la tabla
-`documentos_contractuales_versiones` ya existe desde `20260916180000`.
+- `20260929030000_documentos_alcance_plantilla.sql` — **APLICADA**.
+- PDF en `aceptaciones-documentos/metrik/terminos-uso-radar-v1.0.pdf` (60.912 bytes; huella
+  verificada bajándolo de vuelta, no solo por el 200 de la subida).
+- La fila de `sql/radar/2026-09-28_terminos-uso-radar-v1.0.sql` — **REGISTRADA**
+  (`alcance` plantilla, `modulo` radar_secop, `empresa_id` null, `texto_cuadra` true). Versión
+  **`1.0` sin la `v`**, y la fila es inmutable por trigger: eso no se corrige después.
+- Workspace `fabri` creado (`ed9840b9-…`, grupo `secop`, Drive OK, solo `business`, 0 usuarios,
+  0 contratos, `radar_secop` apagado).
 
-**El mecanismo de Valida NO sirve tal cual para un documento genérico.** El texto del Radar no
-lleva datos de ningún cliente, así que su alcance es `plantilla` (sin `empresa_id`) — y ese camino
-**nunca se ha ejercitado**: en producción no hay ni una fila `plantilla` (medido 2026-09-28). Tres
-puntos lo unen por empresa y lo dejan fuera:
+## ⚠️⚠️ Un documento «plantilla» se ve por el MÓDULO contratado
 
-1. `mis_documentos_de_servicio()` (`20260916213000`): `join mios m on m.empresa_id = d.empresa_id`
-   es un join INTERNO → el documento nunca sale.
-2. `aceptaciones_terminos_modulo()` (`20260923220000`, paso 2): exige contrato con
-   `sc.empresa_id = v_doc.empresa_id` → con nulo levanta excepción.
-3. `versionContratada()` (`src/lib/valida-api/terminos-servidor.ts`): `if (!v?.empresa_id) return null`.
+El alcance `plantilla` existía desde C2 y **nunca se había ejercitado** (las 10 filas de producción
+eran `cliente`). Tres puntos unían documento y cliente solo por `empresa_id`, y un genérico quedaba
+invisible. La decisión que cerró eso: **el documento declara su módulo**
+(`documentos_contractuales_versiones.modulo`, cuarta copia de la lista de llaves, ya guardada por
+`catalogo.test.ts`) y **lo ve solo quien tenga contratado un servicio de ese módulo**
+(`catalogo_servicios.modulo`).
 
-**Registrarlo como `cliente` por empresa tampoco sirve:** `pdf_sha256` es UNIQUE global y el PDF es
-byte a byte el mismo para todos → el segundo cliente del Radar no podría registrarse. Y hoy no hay
-a qué empresa colgarlo: **no existe contrato de Radar ni workspace de Fabri** (medido).
+Aflojar el join por empresa sin poner nada en su lugar habría mostrado el documento a TODO espacio
+con cualquier contrato — y peor: su entrada de módulo le habría pedido aceptarlo para entrar a
+Valida, porque `estadoTerminos` exige aceptados **todos** los documentos vigentes visibles.
 
-**How to apply:** antes de prometer que «publicar el documento abre el gate», mirar si el documento
-es genérico. Si lo es, falta un PR que le enseñe `plantilla` a esos tres puntos (migración de dos
-funciones + una línea de TS). Hermano de [[terminos-modulo-radar]], [[entrada-unica-valida-api]].
+`alcance` y `modulo` entraron a la inmutabilidad de la tabla: sin eso un UPDATE convertía el
+documento de una empresa en el de todo un módulo. `titulo` y `linea_id` siguen mutables (hueco de
+C2, sin cerrar).
+
+**How to apply:** al publicar otro documento genérico (no de un cliente), la pregunta no es «¿es
+plantilla?» sino «¿de qué módulo es?». Sin `modulo` el CHECK lo rechaza; con el módulo equivocado no
+lo ve nadie.
+
+## Qué NO está ejercitado, y por qué
+
+La aceptación real. No hay ficha de Radar en `catalogo_servicios` ni contrato en
+`servicios_contratados`, así que **hoy ningún espacio ve el documento** (medido: los 6 espacios con
+contrato ven 0). El camino completo —ver → aceptar → constancia— está probado **ejecutado en PGlite**
+con dos clientes de Radar (`src/lib/valida-api/aceptacion-modulo-sql.test.ts`, bloque «un documento
+genérico se ve por el módulo contratado»), incluido que la constancia de un cliente no se le cuelgue
+al otro aunque el PDF sea el mismo archivo. Contra producción solo se midió lo que no exige datos
+nuevos: que los 10 documentos `cliente` se vean exactamente igual que antes (0 de diferencia en las
+dos direcciones).
 
 ## Cuál huella es la canónica
 
@@ -42,24 +61,17 @@ PDF es lo que el cliente recibe. `texto_sha256` es el segundo sello, y sigue sie
 
 PDF y texto canónico se generan juntos con
 `proyectos/metrik/legal/terminos-radar-v1.0/_generador/generar.py` (WeasyPrint, mismo CSS y logos
-que 4D SOFT y los CDA; 4 páginas, nada cortado, verificado extrayendo el texto del PDF). **El
-lector de la pantalla no pinta tablas**: la tabla de la cláusula 8 va a lista de guiones, y por eso
-el texto que se firma no es el Markdown de la fuente.
+que 4D SOFT y los CDA; 4 páginas). **El lector de la pantalla no pinta tablas**: la tabla de la
+cláusula 8 va a lista de guiones, y por eso el texto que se firma no es el Markdown de la fuente.
 
-## ⚠️ Dónde el documento aprobado y el producto no calzan
+## ⚠️ Dónde el documento aprobado y el producto todavía no calzan
 
 - **Cláusula 8 vs `src/lib/radar/acceso.ts`:** el documento dice que, pagada la primera cuota, el
-  impago posterior **NUNCA bloquea** (gracia a 5 días, luego solo lectura). El código mergeado en
-  #955 **cierra el módulo entero** (`motivo: 'cuota_vencida'`) y lo cierra **el mismo día del
-  vencimiento**, sin gracia. Las dos diferencias las tiene que cerrar el motor de solo lectura
-  (`proyectos/metrik/one/2026-09-28_spec-motor-solo-lectura.md`), antes de la primera mora posible.
-  El argumento viejo de que «solo lectura no restringiría nada en el Radar» quedó superado: se ven
-  todos los procesos pero no se filtra.
-- **Cláusula 11 pide representante legal o apoderado.** `producto.ts` justifica
-  `exigeDesignado: false` diciendo que «el Radar no tiene esa cláusula»: esa razón ya es falsa.
-  Funciona igual (el dueño declara su calidad, y `CALIDADES_ACEPTANTE` son justo esas dos), pero el
-  comentario miente y hay que corregirlo si se vuelve a tocar.
-- **Versión `1.0` sin la `v`:** las 10 filas de Valida usan `v1.0`/`v1.3`. Se siguió el propio
-  documento (`Versión: 1.0`) y el comentario de `producto.ts` (`terminos-uso-radar@1.0`).
+  impago posterior **nunca bloquea** (gracia a 5 días, luego solo lectura). El código cierra el
+  módulo entero y lo cierra **el mismo día** del vencimiento. Los dos huecos los cierra el motor de
+  solo lectura (`proyectos/metrik/one/2026-09-28_spec-motor-solo-lectura.md`).
+- **Cláusula 11:** el comentario de `producto.ts` que decía «el Radar no tiene esa cláusula» quedó
+  corregido: la cláusula existe y se cumple sin designación porque quien acepta declara su calidad.
 
-Relacionado: [[radar-secop-modulo]], [[terminos-modulo-radar]], [[razon-social-metrik-ia]].
+Relacionado: [[radar-secop-modulo]], [[terminos-modulo-radar]], [[entrada-unica-valida-api]],
+[[razon-social-metrik-ia]].

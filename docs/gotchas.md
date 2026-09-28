@@ -154,15 +154,24 @@
   `suspenderAutomaticamente` sigue en `false` y el unico `soloLectura` del repo es el de casillas de
   negocios (`editable-si-vacio.ts`). El cierre del Radar al vencer su TRIAL es otro regimen: ahi el
   primer pago es condicion de entrega.
-- **Un documento contractual de alcance `plantilla` hoy no lo ve nadie.** El CHECK de
-  `documentos_contractuales_versiones` admite `plantilla` (sin `empresa_id`), pero sus tres
-  consumidores lo unen por empresa: `mis_documentos_de_servicio()` (join interno),
-  `aceptaciones_terminos_modulo()` paso 2 y `versionContratada()`. En produccion no hay NI UNA fila
-  `plantilla`: el camino nunca se ha ejercitado. Un documento generico —como los terminos del Radar—
-  no se puede publicar por empresa, porque `pdf_sha256` es UNIQUE y el PDF seria el mismo.
+- **Un documento contractual de alcance `plantilla` se ve por el MODULO contratado, no por la
+  empresa** (desde `20260929030000`). Hasta esa migracion el `plantilla` no lo veia nadie: sus tres
+  consumidores lo unian por `empresa_id` (`mis_documentos_de_servicio()` con join interno,
+  `aceptaciones_terminos_modulo()` paso 2 y `versionContratada()`), y publicarlo por empresa tampoco
+  servia porque `pdf_sha256` es UNIQUE y el PDF es el mismo para todos. Ahora el documento declara su
+  `modulo` y lo ve quien tenga contratado un servicio de ese modulo (`catalogo_servicios.modulo`).
+  **Ser generico no lo hace visible para todos**, y es a proposito: `estadoTerminos` exige aceptados
+  TODOS los documentos vigentes visibles, asi que un generico suelto le pediria a un CDA aceptar los
+  terminos del Radar para entrar a Valida.
 - **El lector de terminos de la pantalla no pinta tablas.** `texto-documento.ts` entiende titulos,
   parrafos, listas con guion y negritas, y deja tal cual lo que no entiende: una tabla de Markdown
   sale con sus barras a la vista sobre un texto que alguien va a aceptar. El texto canonico de un
   documento nuevo se genera convirtiendo la tabla en lista (ver el `_generador` de los terminos del
   Radar), no pegando el Markdown de la fuente.
-
+- **Un PR en conflicto con `main` no dispara NINGUN workflow.** GitHub construye el evento
+  `pull_request` sobre el merge ref (`refs/pull/N/merge`); si el merge no se puede calcular
+  (`mergeable: CONFLICTING`), el ref no existe y los checks **nunca encolan** — no fallan, no
+  aparecen, y el PR se queda con solo los checks de Vercel, que si corren porque van por `push`.
+  Paso con #957: conflicto en `docs/bitacora/2026-09.md`, el archivo al que todas las sesiones
+  agregan arriba. Diagnostico: `gh pr view <n> --json mergeable,mergeStateStatus`; si dice DIRTY,
+  el CI no esta caido, el PR esta en conflicto.
