@@ -25,8 +25,6 @@ import {
   ShieldCheck,
   Grid3X3,
   Workflow,
-  GitFork,
-  Blocks,
   ListChecks,
   Scale,
   Sliders,
@@ -311,17 +309,17 @@ const SHARED_NAV_ITEMS = [
 
 // Workflows (visible si workspace tiene lineas activas — controlado por hasLineas prop)
 // Posicion: zona inferior del sidebar, en seccion propia "Workflows" antes de Admin.
-// Una sola entrada — el href se resuelve en runtime:
-//   - owner del ADMIN_WORKSPACE_ID → /admin/workflows (biblioteca cross-workspace)
-//   - resto (owner/admin/supervisor de cualquier otro workspace) → /flujo (Kanban del workspace actual)
+// Una sola entrada → /flujo (Kanban del workspace actual). En el workspace admin NO se ofrece
+// (2026-09-27): ahí resolvía a /admin/workflows, que nació cuando no se podía cambiar de
+// workspace; ahora se cambia y se abre el /flujo del cliente. La ruta /admin/workflows queda.
 const WORKFLOWS_NAV_ITEMS = [
   { href: '/flujo', label: 'Workflows', icon: Workflow, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
-// Admin section — solo owner.
+// Admin section — solo owner. Desde 2026-09-27 salieron Proceso, Skills y Mi Bolsillo del menú
+// (sus rutas /admin/proceso, /admin/skills y /admin/mibolsillo quedan). Si queda vacía, el
+// encabezado "Admin" no se pinta (`adminItems.length > 0`).
 const ADMIN_NAV_ITEMS = [
-  { href: '/admin/proceso',   label: 'Proceso',    icon: GitFork,  roles: ['owner'] },
-  { href: '/admin/skills',    label: 'Skills',     icon: Blocks,   roles: ['owner'] },
   { href: '/admin/cerebro',   label: 'Cerebro',    icon: Brain,    roles: ['owner'] },
 ]
 
@@ -502,11 +500,9 @@ export default function AppShell({
         (i) => !(soloCalidad && i.href === '/tableros' && role !== 'owner'),
       ))
   // Workflows ahora vive en seccion propia al final del nav (no merged en compartidos)
-  // Href dinamico: owner del workspace admin global ve la biblioteca cross-workspace, el resto ve el Kanban del workspace actual
-  const workflowsItems = moduloGate(vitrinaGate(hasLineas
-    ? filterByRole(applyOverride(WORKFLOWS_NAV_ITEMS), role).map(item =>
-        isAdminWorkspace && role === 'owner' ? { ...item, href: '/admin/workflows' } : item
-      )
+  // En el workspace admin no se ofrece (ver WORKFLOWS_NAV_ITEMS); en los demás, el Kanban del workspace.
+  const workflowsItems = moduloGate(vitrinaGate(hasLineas && !isAdminWorkspace
+    ? filterByRole(applyOverride(WORKFLOWS_NAV_ITEMS), role)
     : []))
   // En modo vitrina, Valida se muestra aunque el flag valida_consulta no esté (el
   // shell vitrina ES para clientes Valida-only). Fuera de vitrina, opt-in normal.
