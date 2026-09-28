@@ -1,6 +1,6 @@
 ---
 name: actividad-borrar-comentario
-description: Borrar, editar y escribir en la Actividad; DELETE solo comentarios (#944) y UPDATE solo el 'cambio' propio (#946), aplicadas; INSERT firmado por uno mismo (20260928140000, SIN aplicar al 2026-09-28)
+description: Borrar, editar y escribir en la Actividad; DELETE (#944), UPDATE (#946) e INSERT (#947) aplicadas; force_unlock_bloque firma con la sesion (20260928150000, SIN aplicar al 2026-09-28)
 metadata:
   type: project
 ---
@@ -30,7 +30,7 @@ historia editable.
 - Ensayo: `src/lib/activity/update-activity-log-sql.test.ts` (PGlite, corre en CI) carga los
   dos archivos tal cual y actua como `authenticated` con JWT.
 
-**INSERT (PR `fix/rls-insert-activity-log`, migracion `20260928140000`, SIN aplicar al
+**INSERT (#947, migracion `20260928140000`, aplicada el
 2026-09-28).** Politica `activity_log_insert_propio` (TO authenticated): mismo workspace, tipo
 en lista cerrada de sesion (comentario, cambio, sistema, cambio_etapa, cambio_estado,
 cambio_sistema, propuesta_aprobada, drive_folder_skipped/failed) y
@@ -47,5 +47,18 @@ service_role.
 - Firmar por otro staff (fuera de "Ver como") o escribir un tipo de sistema: cliente de servicio.
 - `current_user_staff_id()` NO filtra workspace: un platform_admin con staff en su ws de origen
   lo devuelve aunque este en el de un cliente. Por eso el helper nuevo mira `workspace_id`.
-- `force_unlock_bloque` (SECURITY DEFINER) firma con `p_forced_by` sin validarlo: residual.
+- `force_unlock_bloque`: ver abajo (20260928150000).
 - Ensayo: `src/lib/activity/insert-activity-log-sql.test.ts` (PGlite, CI).
+
+**force_unlock_bloque (rama `fix/force-unlock-bloque-autor`, migracion `20260928150000`, SIN
+aplicar al 2026-09-28).** Misma firma (uuid, uuid). `p_forced_by` solo vale si pasa
+`activity_log_autor_coherente(ws, p_forced_by, 'sistema')`; si no, firma el staff propio de
+auth.uid() en el ws del bloque (null si no tiene). Sin sesion: p_forced_by solo si es staff del
+ws. Hallazgo: el UNICO llamador (`forceUnlockBloque`, sin pantalla que lo importe) pasaba
+`userId` = profiles.id contra la FK autor_id -> staff(id): el desbloqueo forzado nunca pudo
+funcionar desde la app (23503 revierte todo). Ahora pasa `staffId`.
+
+**How to apply (force_unlock):** `activity_log_autor_coherente` ya tiene un segundo consumidor;
+cambiarla cambia tambien quien firma el desbloqueo. Ensayo:
+`src/lib/actions/force-unlock-bloque-sql.test.ts` (recorta la version anterior de
+20260901000002 para el control).

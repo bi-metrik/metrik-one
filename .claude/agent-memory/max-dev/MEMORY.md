@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE aplicadas; INSERT 20260928140000 SIN aplicar; tipo nuevo de sesion = ampliar la politica
+- ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE/INSERT aplicadas; force_unlock 20260928150000 SIN aplicar
 - ⚠️⚠️ [Avisos al cliente en día hábil (#935)](project_avisos_dia_habil.md) — migración SIN aplicar; 4 funciones a desplegar; evento se guarda, estado se salta
 - ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
 - ⚠️⚠️ [Módulo Ferretería dimpro (#905, #917, #920)](project_modulo_ferreteria_dimpro.md) — #917 migración SIN aplicar (escribe datos); #920 tablero Marketplace
