@@ -5,6 +5,8 @@ import {
   CartesianGrid, ComposedChart, ReferenceLine,
 } from 'recharts'
 import type { FinancieroData } from '../types'
+import type { Bandeja } from '@/lib/tableros/bandejas'
+import { BandejaFase } from './bandeja-fase'
 import { StatHero } from './stat-hero'
 import { ChartCard } from './chart-card'
 import { MiniTable } from './mini-table'
@@ -21,7 +23,17 @@ function formatCOP(n: number): string {
   return `$${n.toFixed(0)}`
 }
 
-export function TabFinanciero({ data }: { data: FinancieroData }) {
+/**
+ * Con `bandeja` la pestana pasa al modo operativo (`config_extra.tableros_operativos`):
+ * pendientes de la fase en vez del reporte. Sin ella, el reporte de siempre.
+ */
+export function TabFinanciero({ data, bandeja }: { data?: FinancieroData | null; bandeja?: Bandeja | null }) {
+  if (bandeja) return <BandejaFase bandeja={bandeja} titulo="Pendientes financieros" />
+  if (!data) return null
+  return <TabFinancieroReporte data={data} />
+}
+
+function TabFinancieroReporte({ data }: { data: FinancieroData }) {
   const flujoColor = data.flujoNeto >= 0 ? 'text-acento' : 'text-red-600'
   const runwayColor = data.runwayMeses >= 6 ? 'text-acento' : data.runwayMeses >= 3 ? 'text-amber-600' : 'text-red-600'
 

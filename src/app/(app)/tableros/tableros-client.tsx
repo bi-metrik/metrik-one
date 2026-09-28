@@ -17,6 +17,7 @@ import TabDireccion from './components/tab-direccion'
 import TabMarketing from './components/tab-marketing'
 import TabFerreteria from './components/tab-ferreteria'
 import type { PilotoMarketplaceData } from './ferreteria-actions'
+import type { BandejasData } from './bandejas-actions'
 import type { DirectivoData } from './directivo-actions'
 import type { MarketingData } from './marketing-actions'
 import { ShieldCheck, LayoutDashboard } from 'lucide-react'
@@ -84,6 +85,11 @@ interface TablerosClientProps {
   initialCalidad?: DuenoData | null
   /** Null si el workspace no tiene el modulo Ferreteria o si la lectura no llego. */
   initialFerreteria?: PilotoMarketplaceData | null
+  /**
+   * Bandejas operativas por fase (`config_extra.tableros_operativos`). Con ellas, las
+   * pestanas Comercial / Operaciones / Financiero muestran pendientes en vez del reporte.
+   */
+  initialBandejas?: BandejasData | null
   modules?: Record<string, boolean>
 }
 
@@ -99,6 +105,7 @@ export default function TablerosClient({
   initialOperaciones,
   initialCalidad,
   initialFerreteria,
+  initialBandejas,
   modules,
 }: TablerosClientProps) {
   const mod = modules ?? { business: true }
@@ -112,7 +119,8 @@ export default function TablerosClient({
     operacionesBono: Boolean(initialOperaciones),
     calidad: Boolean(initialCalidad),
     ferreteria: Boolean(initialFerreteria),
-  })
+  }, { bandejasOperativas: Boolean(initialBandejas) })
+  const bandejas = initialBandejas?.bandejas ?? null
 
   // Sin `?? 'cumplimiento'`: cuando no hay ninguna pestaña, caer en la de
   // Cumplimiento hacia que la pantalla mostrara su vacio — un escudo verde y
@@ -149,7 +157,9 @@ export default function TablerosClient({
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Tableros</h1>
-        <p className="text-sm text-gray-500 mt-1">Indicadores de gestion en tiempo real</p>
+        <p className="text-sm text-gray-500 mt-1">
+          {bandejas ? 'Lo que falta por hacer hoy en cada fase' : 'Indicadores de gestion en tiempo real'}
+        </p>
       </div>
 
       {/* Sticky tab bar + periodo */}
@@ -174,7 +184,7 @@ export default function TablerosClient({
         {/* Selector de periodo: SOLO para las tres genericas. Las demas pestanas
             traen su propio control de tiempo (o son una foto de hoy), y un
             segundo reloj arriba diria que manda sobre lo que se ve debajo. */}
-        {activeTab !== null && PESTANAS_CON_PERIODO.includes(activeTab) && (
+        {activeTab !== null && !bandejas && PESTANAS_CON_PERIODO.includes(activeTab) && (
           <div className="flex gap-1">
             {PERIODOS.map(p => (
               <button
@@ -227,16 +237,19 @@ export default function TablerosClient({
           />
         )}
         {activeTab === 'ferreteria' && initialFerreteria && <TabFerreteria inicial={initialFerreteria} />}
-        {activeTab === 'financiero' && financiero && <TabFinanciero data={financiero} />}
-        {activeTab === 'comercial' && comercial && <TabComercial data={comercial} />}
-        {activeTab === 'operativo' && operativo && <TabOperativo data={operativo} />}
+        {activeTab === 'financiero' && bandejas && <TabFinanciero bandeja={bandejas.financiero} />}
+        {activeTab === 'comercial' && bandejas && <TabComercial bandeja={bandejas.comercial} />}
+        {activeTab === 'operativo' && bandejas && <TabOperativo bandeja={bandejas.operaciones} />}
+        {activeTab === 'financiero' && !bandejas && financiero && <TabFinanciero data={financiero} />}
+        {activeTab === 'comercial' && !bandejas && comercial && <TabComercial data={comercial} />}
+        {activeTab === 'operativo' && !bandejas && operativo && <TabOperativo data={operativo} />}
         {activeTab === 'cumplimiento' && <CumplimientoPlaceholder />}
 
         {/* Empty state */}
         {activeTab === 'rentabilidad_comercial' && !rentabilidad && <EmptyState />}
-        {activeTab === 'financiero' && !financiero && <EmptyState />}
-        {activeTab === 'comercial' && !comercial && <EmptyState />}
-        {activeTab === 'operativo' && !operativo && <EmptyState />}
+        {activeTab === 'financiero' && !bandejas && !financiero && <EmptyState />}
+        {activeTab === 'comercial' && !bandejas && !comercial && <EmptyState />}
+        {activeTab === 'operativo' && !bandejas && !operativo && <EmptyState />}
       </div>
     </div>
   )

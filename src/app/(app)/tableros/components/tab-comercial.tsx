@@ -5,6 +5,8 @@ import {
   CartesianGrid, Cell,
 } from 'recharts'
 import type { ComercialData } from '../types'
+import type { Bandeja } from '@/lib/tableros/bandejas'
+import { BandejaFase } from './bandeja-fase'
 import { StatHero } from './stat-hero'
 import { ChartCard } from './chart-card'
 import { ProgressGauge } from './progress-gauge'
@@ -31,7 +33,17 @@ function formatCOP(n: number): string {
   return `$${n.toFixed(0)}`
 }
 
-export function TabComercial({ data }: { data: ComercialData }) {
+/**
+ * Con `bandeja` la pestana pasa al modo operativo (`config_extra.tableros_operativos`):
+ * pendientes de la fase en vez del reporte. Sin ella, el reporte de siempre.
+ */
+export function TabComercial({ data, bandeja }: { data?: ComercialData | null; bandeja?: Bandeja | null }) {
+  if (bandeja) return <BandejaFase bandeja={bandeja} titulo="Pendientes comerciales" />
+  if (!data) return null
+  return <TabComercialReporte data={data} />
+}
+
+function TabComercialReporte({ data }: { data: ComercialData }) {
   const metaPct = data.metaRecaudo && data.metaRecaudo > 0
     ? (data.recaudoMes / data.metaRecaudo) * 100
     : null

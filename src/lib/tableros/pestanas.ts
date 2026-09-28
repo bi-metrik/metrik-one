@@ -83,6 +83,23 @@ const GENERICAS: PestanaTablero[] = [
 ]
 
 /**
+ * Las mismas tres pestanas en modo operativo (`config_extra.tableros_operativos`): una
+ * bandeja de pendientes por fase del flujo, en el orden del flujo. Reusan las llaves de
+ * las genericas porque son las mismas pestanas con otro contenido.
+ */
+const OPERATIVAS: PestanaTablero[] = [
+  { key: 'comercial', label: 'Comercial' },
+  { key: 'operativo', label: 'Operaciones' },
+  { key: 'financiero', label: 'Financiero' },
+]
+
+/** Opciones del workspace que no son modulos (viven en `config_extra`). */
+export interface OpcionesTableros {
+  /** `config_extra.tableros_operativos`: las genericas pasan a bandejas por fase. */
+  bandejasOperativas?: boolean
+}
+
+/**
  * El workspace tiene tableros disenados para su operacion.
  *
  * Por que importa: las tres genericas leen `oportunidades`, `proyectos`,
@@ -135,6 +152,7 @@ export function vistasDeOperaciones(
 export function pestanasDeTableros(
   mod: ModulosWorkspace,
   datos: DatosTableros,
+  opciones: OpcionesTableros = {},
 ): PestanaTablero[] {
   const tabs: PestanaTablero[] = []
 
@@ -147,7 +165,9 @@ export function pestanasDeTableros(
   if (mod.marketing_campanas && datos.marketing) tabs.push(MARKETING_TAB)
   if (vistasDeOperaciones(mod, datos).length > 0) tabs.push(OPERACIONES_TAB)
   if (mod.ferreteria && datos.ferreteria) tabs.push(FERRETERIA_TAB)
-  if (mod.business && !tieneTablerosPropios(mod)) tabs.push(...GENERICAS)
+  if (mod.business && !tieneTablerosPropios(mod)) {
+    tabs.push(...(opciones.bandejasOperativas ? OPERATIVAS : GENERICAS))
+  }
   if (mod.compliance) tabs.push(COMPLIANCE_TAB)
   if (mod.calidad_llamadas && datos.calidad) tabs.push(CALIDAD_TAB)
 
@@ -160,6 +180,20 @@ export function pestanasDeTableros(
  * Misma condicion que las dibuja. Sin esto se disparan tres rondas de consultas
  * cuyo resultado nadie pinta.
  */
-export function necesitaDatosGenericos(mod: ModulosWorkspace): boolean {
-  return Boolean(mod.business) && !tieneTablerosPropios(mod)
+export function necesitaDatosGenericos(
+  mod: ModulosWorkspace,
+  opciones: OpcionesTableros = {},
+): boolean {
+  return Boolean(mod.business) && !tieneTablerosPropios(mod) && !opciones.bandejasOperativas
+}
+
+/**
+ * Si `page.tsx` debe consultar las bandejas operativas. Misma condicion que pinta las
+ * pestanas en modo operativo.
+ */
+export function necesitaBandejas(
+  mod: ModulosWorkspace,
+  opciones: OpcionesTableros = {},
+): boolean {
+  return Boolean(mod.business) && !tieneTablerosPropios(mod) && Boolean(opciones.bandejasOperativas)
 }
