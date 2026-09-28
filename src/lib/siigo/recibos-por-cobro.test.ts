@@ -18,6 +18,8 @@
  *   - "cada cobro lleva su propia clave de idempotencia" → la clave se repetía
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+// El recibo se fecha con el dia civil de Bogota: comparar contra UTC fallaba de 19:00 a 24:00.
+import { todayBogotaISO } from '@/lib/dates/bogota'
 
 const WS = 'ws-soena'
 const NEG = 'neg-v0412'
@@ -313,7 +315,7 @@ describe('emitirReciboDeCobro — la fecha es la del pago, no la de emisión', (
     await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
 
     expect(fechasUsadas).toEqual(['2026-02-17'])
-    expect(fechasUsadas[0]).not.toBe(new Date().toISOString().slice(0, 10))
+    expect(fechasUsadas[0]).not.toBe(todayBogotaISO())
   })
 
   it('dos cobros de fechas distintas producen recibos de fechas distintas', async () => {
@@ -327,7 +329,7 @@ describe('emitirReciboDeCobro — la fecha es la del pago, no la de emisión', (
     cobros[COBRO_1].fecha = null
     await emitirReciboDeCobro(WS, COBRO_1, null, OPC)
 
-    expect(fechasUsadas).toEqual([new Date().toISOString().slice(0, 10)])
+    expect(fechasUsadas).toEqual([todayBogotaISO()])
   })
 })
 
@@ -349,7 +351,7 @@ describe('emitirReciboDeCobro — Siigo rechaza la fecha por periodo cerrado', (
 
     expect(r.ok).toBe(true)
     // Dos intentos: el del pago (febrero) y el de hoy.
-    expect(fechasUsadas).toEqual(['2026-02-17', new Date().toISOString().slice(0, 10)])
+    expect(fechasUsadas).toEqual(['2026-02-17', todayBogotaISO()])
   })
 
   it('el PDF sigue mostrando la fecha del pago, que es la que el cliente reconoce', async () => {
