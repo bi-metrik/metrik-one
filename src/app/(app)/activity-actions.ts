@@ -6,9 +6,10 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 // `export type { X }` de un símbolo importado revienta en producción y no en dev
 // (ver el gotcha del PR #452 en CLAUDE.md).
 import type { ActivityLogTipo } from '@/lib/activity/tipos'
+import { puedeBorrarEntrada } from '@/lib/activity/borrar-comentario'
 
 export async function getActivityLog(entidadTipo: string, entidadId: string, oportunidadId?: string | null) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
   // Si hay oportunidad vinculada, traer el log de ambas entidades
@@ -22,7 +23,9 @@ export async function getActivityLog(entidadTipo: string, entidadId: string, opo
     .order('created_at', { ascending: false })
     .limit(50)
 
-  return data ?? []
+  // `puede_borrar` lo decide la misma regla que aplica `deleteActivity`: la pantalla
+  // solo dibuja el botón donde el servidor va a dejar borrar.
+  return (data ?? []).map(e => ({ ...e, puede_borrar: puedeBorrarEntrada(e, { staffId, role }) }))
 }
 
 /** Equipos que se pueden etiquetar en un comentario. */
@@ -104,17 +107,36 @@ export async function addComment(
 }
 
 export async function deleteActivity(activityId: string) {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const { error: deleteError } = await supabase
+  // Se lee antes de borrar: el DELETE por PostgREST no dice POR QUÉ no borró, y la
+  // regla (autor u owner/admin, solo comentarios) necesita la fila.
+  const { data: entrada, error: lecturaError } = await supabase
+    .from('activity_log')
+    .select('id, tipo, autor_id')
+    .eq('id', activityId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+
+  if (lecturaError) return { error: lecturaError.message }
+  if (!entrada) return { error: 'La entrada no existe' }
+  if (entrada.tipo !== 'comentario') return { error: 'Solo se pueden borrar comentarios' }
+  if (!puedeBorrarEntrada(entrada, { staffId, role })) {
+    return { error: 'Solo quien escribió el comentario o un administrador puede borrarlo' }
+  }
+
+  const { data: borradas, error: deleteError } = await supabase
     .from('activity_log')
     .delete()
     .eq('id', activityId)
     .eq('workspace_id', workspaceId)
-    .eq('tipo', 'comentario') // solo comentarios se pueden borrar
+    .eq('tipo', 'comentario')
+    .select('id')
 
   if (deleteError) return { error: deleteError.message }
+  // Cero filas sin error es un borrado que no ocurrió: no se anuncia como hecho.
+  if (!borradas || borradas.length === 0) return { error: 'No se pudo borrar el comentario' }
   return { success: true }
 }
 
