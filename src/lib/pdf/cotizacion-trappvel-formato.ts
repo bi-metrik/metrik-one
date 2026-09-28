@@ -309,7 +309,7 @@ export function rangoCompacto(desde: string | null, hasta: string | null): strin
 }
 
 /**
- * «Tarifa niño de 2 a 11 años cumplidos a la fecha del viaje»: el rango que da el hotel, escrito
+ * «Tarifa niño de X a Y años cumplidos a la fecha del viaje»: el rango que da el hotel, escrito
  * en el ingreso manual (`ingreso-manual.ts`). Rige la edad A LA FECHA DEL VIAJE, no la de la
  * cotización (llamada con Alejandra, 2026-09-28). Sin rango, nada.
  */

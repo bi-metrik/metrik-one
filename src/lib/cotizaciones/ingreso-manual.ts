@@ -35,7 +35,7 @@ import { evaluarLectura, type FilaTipoPaxCruda, type LecturaCruda, type ValorLei
 import type { DefinicionRanura } from './ranuras-pantallazo'
 import { describirOcupacion, type Composicion, type LecturaCasilla } from './tarifa-pasajero'
 
-/** La edad del niño que da el hotel: «de 2 a 11 años». */
+/** El rango de edad del niño que da el hotel (Verdemar: desde 2, hasta 11). */
 export interface EdadNino {
   desde: number
   hasta: number
