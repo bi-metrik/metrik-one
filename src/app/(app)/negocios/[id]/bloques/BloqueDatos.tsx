@@ -32,6 +32,7 @@ import {
 import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negocios/numero-colombiano'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
+import IndicadoresSolicitud from './indicadores-solicitud'
 
 export interface DatosField {
   slug: string
@@ -84,6 +85,12 @@ export interface DatosField {
   // digita: se calcula al escribir las fuentes y el servidor lo vuelve a calcular al
   // guardar. Ej.: numero_pasajeros = adultos + ninos + infantes. Ver `campo-suma.ts`.
   suma_de?: string[]
+  // Mínimo y deseable de una solicitud (opt-in). `nivel` dice a qué barra suma el campo,
+  // `pedir_si` cuándo cuenta y `pregunta` cómo se pide el dato. No es `required`: no
+  // cambia la completitud del bloque. Ver `lib/negocios/niveles-solicitud.ts`.
+  nivel?: 'minimo' | 'deseable'
+  pedir_si?: unknown
+  pregunta?: string
   // doc_link: enlace de solo lectura a un archivo cargado en otro bloque
   doc_link?: {
     source_bloque_slug?: string // referencia estable (preferida sobre nombre/orden)
@@ -718,6 +725,7 @@ export default function BloqueDatos({
     const effective: Record<string, unknown> = { ...fieldDefaults, ...autoFillDefaults, ...saved }
     return (
       <div className="space-y-2">
+        <IndicadoresSolicitud fields={fields} valores={effective} />
         {fields.filter(f => visible(f, effective)).map(f => {
           const v = saved[f.slug] ?? autoFillDefaults?.[f.slug] ?? f.default
           if (f.tipo === 'documentos_preview') {
@@ -895,6 +903,7 @@ export default function BloqueDatos({
           <span className="inline-flex items-center gap-0.5 text-[10px] text-acento"><Check className="h-3 w-3" />Guardado</span>
         )}
       </div>
+      <IndicadoresSolicitud fields={fields} valores={values} />
       {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
           {f.tipo !== 'documentos_preview' && f.tipo !== 'plantilla' && (
