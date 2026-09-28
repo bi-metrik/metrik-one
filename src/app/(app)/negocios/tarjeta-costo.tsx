@@ -10,7 +10,7 @@ import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, LINK } from '@/components/viaje/estilo'
 import { precioDerivadoDeAdicional, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { precioConMargen, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
-import { MENSAJE_MONEDA_ASUMIDA, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
+import { MENSAJE_MONEDA_ASUMIDA, origenDeMoneda, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   filasDeCosto,
   mil,
@@ -386,7 +386,7 @@ export default function TarjetaCosto({
           </select>
         ) : (
           <>
-            <span>{moneda.moneda}{moneda.asumida ? '' : ` · ${moneda.origen === 'persona' ? 'la elegiste tú' : 'leída del pantallazo'}`}</span>
+            <span>{moneda.moneda}{origenDeMoneda(moneda) ? ` · ${origenDeMoneda(moneda)}` : ''}</span>
             {moneda.asumida && (
               <AlertaDecision tip={MENSAJE_MONEDA_ASUMIDA} izquierda>
                 <p className="m-0">{MENSAJE_MONEDA_ASUMIDA}</p>

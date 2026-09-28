@@ -82,8 +82,14 @@ export interface TrasladoManual {
   ninos: number
   infantes: number
   cobro: CobroTraslado
-  /** Costo NETO por persona por trayecto, o por vehículo por trayecto. */
+  /** Costo NETO por trayecto: por ADULTO si se cobra por persona, o por vehículo. */
   neto: number | null
+  /**
+   * Por persona, el niño y el infante tienen su propio costo, como en el hotel. El infante
+   * vacío es 0: va en brazos, sin silla, y lo habitual es que no pague. Por vehículo no aplican.
+   */
+  netoNino: number | null
+  netoInfante: number | null
   idaYRegreso: boolean
   fuente: string
 }
@@ -158,6 +164,8 @@ export function leerTrasladoManual(raw: unknown): TrasladoManual {
     infantes: entero(r.infantes),
     cobro: r.cobro === 'por_vehiculo' ? 'por_vehiculo' : 'por_persona',
     neto: montoManual(r.neto),
+    netoNino: montoManual(r.netoNino),
+    netoInfante: montoManual(r.netoInfante),
     idaYRegreso: r.idaYRegreso === true,
     fuente: texto(r.fuente),
   }
@@ -200,7 +208,15 @@ export function validarTrasladoManual(t: TrasladoManual): ErroresManual {
   if (!t.ruta) e.ruta = OBLIGATORIO
   if (t.fecha !== '' && !FECHA.test(t.fecha)) e.fecha = 'Escoge la fecha.'
   erroresDePasajeros(t, e)
-  if (!(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor.'
+  if (t.cobro === 'por_vehiculo') {
+    if (!(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor.'
+  } else {
+    if ((t.adultos > 0 || t.ninos + t.infantes <= 0) && !(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor por adulto.'
+    if (t.ninos > 0 && !(t.netoNino !== null && t.netoNino >= 0)) e.netoNino = 'Escribe lo que cobra por niño (0 si no paga).'
+    if (t.adultos === 0 && t.ninos === 0 && t.infantes > 0 && !(t.netoInfante && t.netoInfante > 0)) {
+      e.netoInfante = 'Escribe lo que cobra el proveedor por infante.'
+    }
+  }
   if (!t.fuente) e.fuente = 'Escribe de dónde sale la tarifa.'
   return e
 }
@@ -257,7 +273,10 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
   const trayectos = t.idaYRegreso ? 2 : 1
   const pax: Composicion = { adultos: t.adultos, ninos: t.ninos, infantes: t.infantes }
   const personas = t.adultos + t.ninos + t.infantes
-  const porTipo = t.cobro === 'por_persona' ? filas(pax, () => t.neto ?? 0, trayectos) : []
+  // El mismo reparto del hotel: cada tipo con su costo, y el infante sin costo escrito en 0.
+  const porTipo = t.cobro === 'por_persona'
+    ? filas(pax, tipo => (tipo === 'adulto' ? t.neto : tipo === 'nino' ? t.netoNino : t.netoInfante) ?? 0, trayectos)
+    : []
   const total = t.cobro === 'por_persona' ? porTipo.reduce((a, f) => a + f.subtotal_tipo, 0) : Math.round((t.neto ?? 0) * trayectos)
   return crudaDe({
     trayecto: `${t.ruta} (${t.idaYRegreso ? 'ida y regreso' : 'solo ida'})`,

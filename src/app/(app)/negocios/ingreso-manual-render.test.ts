@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { lecturaManual, type HotelManual } from '@/lib/cotizaciones/ingreso-manual'
+import { lecturaManual, type HotelManual, type TrasladoManual } from '@/lib/cotizaciones/ingreso-manual'
 import { ranuraPorSlug } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { tarifaConHabitaciones } from '@/lib/cotizaciones/habitaciones'
 import type { Borrador } from '@/lib/cotizaciones/proceso-captura'
@@ -25,6 +25,7 @@ const { default: IngresoManualForm, AYUDA_NETO, AYUDA_FUENTE, AYUDA_EDAD_NINO } 
 const { default: TarjetaOpcion } = await import('./tarjeta-opcion')
 
 const HOTEL = ranuraPorSlug('hotel_detalle')!
+const TRASLADO = ranuraPorSlug('traslado_detalle')!
 const GRUPO = { adultos: 4, ninos: 1, infantes: 0 }
 
 function habitacion(over: Partial<HotelManual> = {}): LecturaCasilla {
@@ -37,6 +38,24 @@ function habitacion(over: Partial<HotelManual> = {}): LecturaCasilla {
         habitacion: 'Doble estándar', regimen: 'Desayuno y cena', incluye: 'Traslado aeropuerto – hotel',
         adultos: 2, ninos: 0, infantes: 0, netoAdulto: 279_000, netoNino: 223_000, netoInfante: 0,
         edadDesde: 2, edadHasta: 11, fuente: 'Portafolio Verdemar 2026', ...over,
+      },
+    },
+    leidaEn: '2026-09-28T15:00:00Z',
+    hoy: '2026-09-28',
+  })
+  if (!r.ok) throw new Error(JSON.stringify(r.errores))
+  return r.lectura
+}
+
+/** El traslado de la prueba del 2026-09-28 (COT-2026-0017): 2 adultos + 1 infante. */
+function trasladoManual(over: Partial<TrasladoManual> = {}): LecturaCasilla {
+  const r = lecturaManual({
+    ranura: TRASLADO,
+    entrada: {
+      tipo: 'traslado',
+      datos: {
+        ruta: 'Aeropuerto – hotel', fecha: '2026-11-09', adultos: 2, ninos: 0, infantes: 1, cobro: 'por_persona',
+        neto: 45_000, netoNino: null, netoInfante: null, idaYRegreso: true, fuente: 'Portafolio Dolphins 2026', ...over,
       },
     },
     leidaEn: '2026-09-28T15:00:00Z',
@@ -104,6 +123,18 @@ describe('el formulario', () => {
   it('⚠️ el rótulo del costo dice que es lo que cobra el proveedor: el margen lo pone ONE', () => {
     expect(AYUDA_NETO).toBe('Lo que te cobra el proveedor, sin sumarle nada. El margen lo pone ONE.')
     expect(texto(pintar())).toContain(AYUDA_NETO)
+  })
+
+  it('traslado por persona: adulto, niño e infante, como el hotel (el infante vacío es 0)', () => {
+    const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+      composicion: { adultos: 2, ninos: 0, infantes: 1 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial: 'traslado',
+    }))
+    expect(texto(html)).toContain('Costo neto por trayecto')
+    for (const k of ['neto', 'netoNino', 'netoInfante']) {
+      const input = html.match(new RegExp(`<input[^>]*data-campo-manual="${k}"[^>]*>`))?.[0] ?? ''
+      expect(input, k).toContain('inputMode="numeric"')
+    }
+    expect(html.match(/<input[^>]*data-campo-manual="netoInfante"[^>]*>/)?.[0]).toContain('placeholder="0"')
   })
 
   it('no pide cancelación: esa es la condición del proveedor y el cliente no la ve', () => {
@@ -175,6 +206,12 @@ describe('la opción aceptada, en su tarjeta', () => {
     expect(texto(ficha)).toContain('Ingresado a mano Portafolio Verdemar 2026')
   })
 
+  it('la moneda del hotel a mano dice «ingresada a mano» (las lecturas viven en las habitaciones)', () => {
+    const t = texto(pintar(tarifa()))
+    expect(t).toContain('COP · ingresada a mano')
+    expect(t).not.toContain('leída del pantallazo')
+  })
+
   it('«Así lo ve el cliente»: la tarifa niño y lo que incluye, nunca la fuente', () => {
     const html = pintar(tarifa())
     const hoja = texto(html.slice(html.indexOf('data-hoja-cliente')))
@@ -182,5 +219,48 @@ describe('la opción aceptada, en su tarjeta', () => {
     expect(hoja).toContain('Incluye: Traslado aeropuerto – hotel')
     expect(hoja).toContain('Desayuno y cena')
     expect(hoja).not.toContain('Portafolio')
+  })
+})
+
+describe('el traslado a mano, en su tarjeta', () => {
+  function pintar(lectura: LecturaCasilla, extra: Record<string, unknown> = {}) {
+    const tarifa: TarifaPax = { casillas: { grupo_completo: lectura }, composicion: { adultos: 2, ninos: 0, infantes: 1 } }
+    return renderToStaticMarkup(React.createElement(TarjetaOpcion, {
+      itemId: 'item-t', numero: 1, item: { nombre: 'Traslado aeropuerto – hotel', grupo: 'traslado', tarifa_pax: tarifa }, tarifa,
+      composicionViaje: { adultos: 2, ninos: 0, infantes: 1 }, editable: true, abierta: true, onAlternar: () => {},
+      precioOpcion: 211_765, precioLinea: 211_765, costoLinea: 180_000, confirmada: null, margenAplicado: 15,
+      convencion: 'sobre_venta', administrativosPct: 0, pisoPct: 5, adicionales: [], adicionalesDisponible: true,
+      margenCotizacion: { margenPct: 15, convencion: 'sobre_venta' }, pendiente: null, onIrABandeja: () => {},
+      onEliminar: () => {}, onMover: () => {}, mover: null, respaldo: null, nota: 'NOTA-DEL-TRASLADO',
+      bloqueTitulo: 'Traslados', onGuardarNota: () => {}, onCambio: () => {}, ...extra,
+    }))
+  }
+
+  it('tiene «Así lo ve el cliente», como el hotel: la línea de «Inversión» del documento', () => {
+    const html = pintar(trasladoManual())
+    expect(html).toContain('data-hoja-cliente')
+    expect(html.indexOf('data-hoja-cliente')).toBeGreaterThan(html.indexOf('aria-label="Costo y precio"'))
+    const hoja = texto(html.slice(html.indexOf('data-hoja-cliente')))
+    expect(hoja).toContain('TRASLADOS')
+    expect(hoja).toContain('OPCIÓN 1')
+    expect(hoja).toContain('Traslado aeropuerto – hotel')
+    expect(hoja).toContain('INVERSIÓN')
+    expect(hoja).toContain('Así sale esta opción en la cotización que recibe el cliente.')
+    // La fuente es interna; la nota del traslado se sigue escribiendo aparte.
+    expect(hoja).not.toContain('Dolphins')
+    expect(texto(html)).toContain('NOTA-DEL-TRASLADO')
+  })
+
+  it('los adicionales salen como «Incluye: …», igual que en la línea del PDF', () => {
+    const html = pintar(trasladoManual(), {
+      adicionales: [{ id: 'a1', item_id: 'item-t', codigo: 'otro', nombre: 'Silla de bebé', cantidad: 1, costo: 10_000, precio: 12_000, moneda: 'COP' }],
+    })
+    expect(texto(html.slice(html.indexOf('data-hoja-cliente')))).toContain('Incluye: Silla de bebé')
+  })
+
+  it('bajo «Costo y precio» la moneda dice que se ingresó a mano, no que se leyó del pantallazo', () => {
+    const t = texto(pintar(trasladoManual()))
+    expect(t).toContain('COP · ingresada a mano')
+    expect(t).not.toContain('leída del pantallazo')
   })
 })

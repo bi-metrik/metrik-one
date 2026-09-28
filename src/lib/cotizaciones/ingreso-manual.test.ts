@@ -60,6 +60,8 @@ const inOut = (over: Partial<TrasladoManual> = {}): TrasladoManual => ({
   infantes: 0,
   cobro: 'por_persona',
   neto: 45_000,
+  netoNino: 45_000,
+  netoInfante: null,
   idaYRegreso: true,
   fuente: 'Portafolio Dolphins',
   ...over,
@@ -207,6 +209,29 @@ describe('traslado a mano', () => {
     expect(l.porTipo).toEqual([])
     expect(leidosPorSlug(TRASLADO, l.campos).trayecto).toBe('Aeropuerto – hotel (solo ida)')
     expect(composicionDeLectura(l)).toEqual({ adultos: 2, ninos: 1, infantes: 0 })
+  })
+
+  // Prueba del 2026-09-28 (COT-2026-0017): 2 adultos + 1 infante, 45.000 ida y regreso daba
+  // 270.000 y el PDF le ponía precio al infante. El infante va sin silla: vacío es 0.
+  it('por persona, el infante sin costo escrito no paga: 2 adultos + 1 infante = 180.000', () => {
+    const l = traslado({ adultos: 2, ninos: 0, infantes: 1, netoNino: null, netoInfante: null })
+    expect(l.total).toBe(45_000 * 2 * 2)
+    expect(l.porTipo).toEqual([
+      { tipo: 'adulto', cantidad: 2, subtotal: 180_000 },
+      { tipo: 'infante', cantidad: 1, subtotal: 0 },
+    ])
+    const e = resolverTarifa({ adultos: 2, ninos: 0, infantes: 1 }, { grupo_completo: l }, TRASLADO.slug)
+    expect(e.estado === 'resuelta' ? e.costoTotal : JSON.stringify(e)).toBe(180_000)
+  })
+
+  it('por persona, cada tipo con su costo, como el hotel', () => {
+    const l = traslado({ adultos: 2, ninos: 1, infantes: 1, netoNino: 30_000, netoInfante: 10_000, idaYRegreso: false })
+    expect(l.total).toBe(45_000 * 2 + 30_000 + 10_000)
+    expect(validarTrasladoManual(inOut({ netoNino: null }))).toHaveProperty('netoNino')
+    expect(validarTrasladoManual(inOut({ netoInfante: null, infantes: 1 }))).toEqual({})
+    // Por vehículo el niño y el infante no se piden: es un solo total.
+    expect(validarTrasladoManual(inOut({ cobro: 'por_vehiculo', netoNino: null }))).toEqual({})
+    expect(leerTrasladoManual({ netoNino: '30.000', netoInfante: '' })).toMatchObject({ netoNino: 30_000, netoInfante: null })
   })
 
   it('sin alertas de captura', () => {

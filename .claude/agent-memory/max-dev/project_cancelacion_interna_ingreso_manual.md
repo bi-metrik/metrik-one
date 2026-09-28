@@ -29,5 +29,14 @@ segunda vía. Alejandra armaba «pantallazos» en Excel por habitación.
 - `retencion.test.ts` salta con «N años» en comentarios de código (no en tests): reescribir.
 - Solo COP. Nada se vio en pantalla: formulario, fila «A mano» y tarjeta solo por render estático.
 
+**#954 (2026-09-28, fallas de la prueba COT-2026-0017):**
+- Traslado por persona pide Adulto/Niño/Infante (`neto` = adulto o vehículo; `netoNino`,
+  `netoInfante`); infante vacío = 0. Antes cobraba el neto a cada pasajero, infante incluido.
+- La hoja «Así lo ve el cliente» del traslado = su línea de «Inversión» del PDF
+  (`LineaDelCliente` en `hoja-cliente.tsx`). ⚠️ El vuelo sigue SIN hoja a propósito: al cliente
+  le llega como fila de la tabla «Vuelos»; pintar solo la línea engañaría. Pendiente de diseño.
+- Origen de la moneda: `MonedaDeTarifa.manual` + `origenDeMoneda()` → «ingresada a mano».
+  Detecta lo manual también en `habitaciones[].lectura` (el hotel R8 no tiene casilla).
+
 Relacionado: [[project-habitaciones-hotel-r8]], [[project-bandeja-borrador-firmado]],
 [[margen-por-item-proveedor]], [[project-tarjeta-opcion-trappvel]].
