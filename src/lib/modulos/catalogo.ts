@@ -68,6 +68,9 @@ export const MODULOS = {
       'centro_costos', 'operaciones_bonos', 'marketing_campanas', 'proceso_semanal',
       'rentabilidad_comercial', 'pausa_enabled', 'pausa_sla_auto_enabled',
       'fab_registrar_cobro', 'fab_registrar_horas', 'fab_registrar_pago', 'fab_pago_epayco',
+      // Bot de WhatsApp: lo que el comercial reenvía va a la bandeja de solicitudes y no al
+      // flujo de gastos. La lee `supabase/functions/_shared/wa-bandeja-reglas.ts` (LLAVE_BANDEJA).
+      'bandeja_solicitudes_wa',
     ],
   },
   valida: {
