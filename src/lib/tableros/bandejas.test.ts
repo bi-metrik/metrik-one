@@ -6,6 +6,8 @@ import {
   bandejaOperaciones,
   diasSinMovimiento,
   tablerosOperativosActivos,
+  tasaDeCierre,
+  type HistorialComercial,
   type EntradaBandejas,
   type NegocioBandeja,
 } from './bandejas'
@@ -99,25 +101,87 @@ describe('bandejaComercial', () => {
     expect(b.filas).toHaveLength(1)
   })
 
-  it('contexto: entradas de 7 dias, propuestas abiertas con su valor y tasa de cierre de la cohorte', () => {
+  it('contexto: entradas de 7 dias y propuestas abiertas con su valor', () => {
     const b = bandejaComercial(
       [
         neg({ id: 'nuevo', creadoEn: hace(2) }),
         neg({ id: 'prop', creadoEn: hace(20), etapa: 'Propuesta', valor: 7_500_000 }),
-        neg({ id: 'ganado', creadoEn: hace(40), fase: 'ejecucion' }),
-        neg({ id: 'cerrado', creadoEn: hace(50), fase: null, estado: 'completado' }),
-        neg({ id: 'perdido', creadoEn: hace(60), estado: 'perdido' }),
-        neg({ id: 'viejo', creadoEn: hace(120), estado: 'perdido' }),
       ],
       HOY,
     )
-    const [entradas, propuestas, tasa] = b.contexto
+    const [entradas, propuestas] = b.contexto
     expect(entradas.valor).toBe(1)
     expect(propuestas.valor).toBe(7_500_000)
     expect(propuestas.nota).toBe('1 propuesta')
-    // Ganados: ejecucion + completado = 2; perdidos en la ventana: 1. El de 120 dias no cuenta.
-    expect(tasa.valor).toBeCloseTo((2 / 3) * 100)
-    expect(tasa.nota).toBe('2 de 3 decididos')
+  })
+
+  // Etapas de dos lineas: una comercial (Contacto/Propuesta/Ejecucion/Cobro) y la de las
+  // suscripciones, que solo tiene Venta/Cobro y cuyos negocios nacen directo en Cobro.
+  const HISTORIAL_BASE: HistorialComercial = {
+    etapas: [
+      { id: 'e-contacto', lineaId: 'clarity', nombre: 'Contacto', stage: 'venta' },
+      { id: 'e-propuesta', lineaId: 'clarity', nombre: 'Propuesta', stage: 'venta' },
+      { id: 'e-ejecucion', lineaId: 'clarity', nombre: 'Ejecucion', stage: 'ejecucion' },
+      { id: 'e-cobro', lineaId: 'clarity', nombre: 'Cobro', stage: 'cobro' },
+      { id: 'v-venta', lineaId: 'valida', nombre: 'Venta', stage: 'venta' },
+      { id: 'v-cobro', lineaId: 'valida', nombre: 'Cobro', stage: 'cobro' },
+    ],
+    cambios: [],
+  }
+
+  it('tasa: ganado solo si el historial lo muestra saliendo de venta; perdido solo desde venta', () => {
+    const negocios = [
+      neg({ id: 'ganado', lineaId: 'clarity', fase: 'ejecucion', creadoEn: hace(60) }),
+      neg({ id: 'ganadoViejo', lineaId: 'clarity', fase: 'cobro', creadoEn: hace(200) }),
+      neg({ id: 'movidoPorSql', lineaId: 'clarity', fase: 'ejecucion', creadoEn: hace(30) }),
+      neg({ id: 'perdido', lineaId: 'clarity', estado: 'perdido', cerradoEn: hace(10) }),
+      neg({ id: 'perdidoViejo', lineaId: 'clarity', estado: 'perdido', cerradoEn: hace(120) }),
+      neg({ id: 'perdidoEnEjecucion', lineaId: 'clarity', fase: 'ejecucion', estado: 'perdido', cerradoEn: hace(5) }),
+    ]
+    const historial: HistorialComercial = {
+      ...HISTORIAL_BASE,
+      cambios: [
+        { negocioId: 'ganado', anterior: 'Contacto', nuevo: 'Propuesta', fecha: hace(50) },
+        { negocioId: 'ganado', anterior: 'Propuesta', nuevo: 'Ejecucion', fecha: hace(40) },
+        // Salio de venta hace 150 dias: fuera de la ventana de 90.
+        { negocioId: 'ganadoViejo', anterior: 'Propuesta', nuevo: 'Cobro', fecha: hace(150) },
+      ],
+    }
+    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 1, perdidos: 1 })
+    const tasa = bandejaComercial(negocios, HOY, historial).contexto[2]
+    expect(tasa.valor).toBe(50)
+    expect(tasa.nota).toBe('1 de 2 decididos')
+  })
+
+  it('una suscripcion nacida directo en Cobro NUNCA cuenta como ganada', () => {
+    const negocios = [
+      neg({ id: 'cda', lineaId: 'valida', fase: 'cobro', etapa: 'Cobro', creadoEn: hace(5) }),
+      neg({ id: 'cdaCerrada', lineaId: 'valida', fase: null, estado: 'completado', creadoEn: hace(20) }),
+      neg({ id: 'perdido', lineaId: 'clarity', estado: 'perdido', cerradoEn: hace(10) }),
+    ]
+    // Hasta un cambio Cobro -> Cobro (o de cualquier etapa que no sea venta) se ignora.
+    const historial: HistorialComercial = {
+      ...HISTORIAL_BASE,
+      cambios: [{ negocioId: 'cda', anterior: 'Cobro', nuevo: 'Cobro', fecha: hace(3) }],
+    }
+    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 0, perdidos: 1 })
+    expect(bandejaComercial(negocios, HOY, historial).contexto[2].valor).toBe(0)
+  })
+
+  it('el nombre del historial se lee contra las etapas de LA linea del negocio, y acepta el id', () => {
+    const negocios = [
+      neg({ id: 'porId', lineaId: 'clarity', fase: 'ejecucion' }),
+      // "Venta" no existe en la linea clarity: el cambio no prueba nada.
+      neg({ id: 'otraLinea', lineaId: 'clarity', fase: 'cobro' }),
+    ]
+    const historial: HistorialComercial = {
+      ...HISTORIAL_BASE,
+      cambios: [
+        { negocioId: 'porId', anterior: 'e-propuesta', nuevo: 'e-ejecucion', fecha: hace(4) },
+        { negocioId: 'otraLinea', anterior: 'Venta', nuevo: 'Cobro', fecha: hace(4) },
+      ],
+    }
+    expect(tasaDeCierre(negocios, historial, HOY)).toEqual({ ganados: 1, perdidos: 0 })
   })
 
   it('sin nada decidido la tasa es null, no un 0% que se lee como fracaso', () => {

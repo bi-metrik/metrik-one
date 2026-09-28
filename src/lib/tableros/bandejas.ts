@@ -70,6 +70,34 @@ export interface NegocioBandeja {
   etapaCambiadaEn: string | null
   /** Última fila de `activity_log` con autor. `null` si nunca hubo. */
   ultimaActividad: string | null
+  /** Línea del negocio: las etapas de un cambio se leen contra las de SU línea. */
+  lineaId?: string | null
+  /** `negocios.closed_at`: fecha en que se marcó perdido (o se cerró). */
+  cerradoEn?: string | null
+}
+
+/** Una etapa del workspace, para saber de qué fase era un nombre guardado en el historial. */
+export interface EtapaLinea {
+  id: string
+  lineaId: string | null
+  nombre: string
+  stage: string | null
+}
+
+/**
+ * Una fila `cambio_etapa` de `activity_log`. Guarda NOMBRES de etapa (a veces el id, en
+ * los cambios por `etapa_actual_id`), por eso se resuelven contra las etapas de la línea.
+ */
+export interface CambioEtapa {
+  negocioId: string
+  anterior: string | null
+  nuevo: string | null
+  fecha: string
+}
+
+export interface HistorialComercial {
+  etapas: EtapaLinea[]
+  cambios: CambioEtapa[]
 }
 
 export interface CuotaPendiente {
@@ -98,6 +126,8 @@ export interface EntradaBandejas {
   gastosSinSoporte: GastoSinSoporte[]
   /** Recaudo propio del mes, la misma cifra de /numeros. */
   cobradoMes: number
+  /** Para la tasa de cierre. Ausente = sin historial (ningún ganado demostrable). */
+  historial?: HistorialComercial
 }
 
 // ── Salida ──────────────────────────────────────────────────────────────
@@ -183,7 +213,67 @@ const perdido = (n: NegocioBandeja) => n.estado === 'perdido' || n.estado === 'c
 
 // ── Comercial: Contacto + Propuesta ────────────────────────────────────
 
-export function bandejaComercial(negocios: NegocioBandeja[], hoy: string): Bandeja {
+/**
+ * Tasa de cierre a 90 días: de los negocios que PASARON por la fase comercial (etapas con
+ * `stage = 'venta'`: Contacto, Propuesta), cuántos se ganaron.
+ *
+ * Criterio (decidido con los datos de metrik el 2026-09-28, aprobado por Mauricio):
+ *  - GANADO = hay una fila `cambio_etapa` en `activity_log` que sale de una etapa de venta de
+ *    SU línea hacia una etapa que no es de venta (Ejecución, Cobro), fechada en la ventana.
+ *    El historial es la única prueba de haber pasado por la fase comercial: `negocios` no
+ *    guarda la etapa inicial, y `etapa_cambiada_at` solo dice la última entrada.
+ *  - PERDIDO = estado `perdido` con la etapa actual en venta (se perdió DESDE la fase
+ *    comercial), con `closed_at` en la ventana. Un perdido en Ejecución no cuenta.
+ *  - Todo lo demás no cuenta. En particular un negocio que nació directo en Cobro (las
+ *    suscripciones CDA/Valida) no tiene cambio desde venta: no es ganado. Antes contaba
+ *    como ganado por estar fuera de venta, y la tasa de metrik salía 65 % con 7 de esos.
+ *  - Consecuencia medida: los negocios que metrik movió por SQL o cargó ya cerrados no
+ *    dejaron `cambio_etapa`, así que tampoco cuentan como ganados. La tasa crece a medida
+ *    que las ventas se muevan desde la aplicación, que sí escribe el historial.
+ */
+export function tasaDeCierre(
+  negocios: NegocioBandeja[],
+  historial: HistorialComercial,
+  hoy: string,
+): { ganados: number; perdidos: number } {
+  const enVentana = (fecha: string | null | undefined) => {
+    if (!fecha) return false
+    const d = diasEntre(diaBogota(fecha), hoy)
+    return d >= 0 && d < DIAS_TASA_CIERRE
+  }
+  const etapasPorLinea = new Map<string, EtapaLinea[]>()
+  for (const e of historial.etapas) {
+    const k = e.lineaId ?? ''
+    etapasPorLinea.set(k, [...(etapasPorLinea.get(k) ?? []), e])
+  }
+  const faseDe = (lineaId: string | null | undefined, valor: string | null) => {
+    if (!valor) return null
+    const e = (etapasPorLinea.get(lineaId ?? '') ?? []).find(
+      (x) => x.id === valor || normalizar(x.nombre) === normalizar(valor),
+    )
+    return e?.stage ?? null
+  }
+  const porId = new Map(negocios.map((n) => [n.id, n]))
+
+  const ganados = new Set<string>()
+  for (const c of historial.cambios) {
+    const n = porId.get(c.negocioId)
+    if (!n || perdido(n) || !enVentana(c.fecha)) continue
+    const desde = faseDe(n.lineaId, c.anterior)
+    const hacia = faseDe(n.lineaId, c.nuevo)
+    if (desde === 'venta' && hacia !== null && hacia !== 'venta') ganados.add(n.id)
+  }
+  const perdidos = negocios.filter(
+    (n) => n.estado === 'perdido' && n.fase === 'venta' && enVentana(n.cerradoEn),
+  ).length
+  return { ganados: ganados.size, perdidos }
+}
+
+export function bandejaComercial(
+  negocios: NegocioBandeja[],
+  hoy: string,
+  historial: HistorialComercial = { etapas: [], cambios: [] },
+): Bandeja {
   const enVenta = negocios.filter((n) => abierto(n) && n.fase === 'venta' && !estaPausado(n, hoy))
 
   const entradasSemana = negocios.filter((n) => {
@@ -194,15 +284,8 @@ export function bandejaComercial(negocios: NegocioBandeja[], hoy: string): Bande
   const propuestas = enVenta.filter((n) => normalizar(n.etapa) === 'propuesta')
   const valorPropuestas = propuestas.reduce((s, n) => s + (n.valor ?? 0), 0)
 
-  // Cohorte de los creados en la ventana que ya se decidieron: ganado es el que hoy está
-  // fuera de venta sin haberse perdido; perdido, el que se perdió. Los que siguen en venta
-  // no cuentan todavía, porque no se sabe cómo terminan.
-  const cohorte = negocios.filter((n) => {
-    const d = diasEntre(diaBogota(n.creadoEn), hoy)
-    return d >= 0 && d < DIAS_TASA_CIERRE
-  })
-  const perdidos = cohorte.filter(perdido).length
-  const ganados = cohorte.filter((n) => !perdido(n) && (n.fase !== 'venta' || n.estado === 'completado')).length
+  // Criterio completo en `tasaDeCierre`.
+  const { ganados, perdidos } = tasaDeCierre(negocios, historial, hoy)
   const decididos = ganados + perdidos
   const tasa = decididos > 0 ? (ganados / decididos) * 100 : null
 
@@ -370,7 +453,7 @@ export function bandejaFinanciera(entrada: EntradaBandejas, hoy: string): Bandej
 
 export function armarBandejas(entrada: EntradaBandejas, hoy: string): Bandejas {
   return {
-    comercial: bandejaComercial(entrada.negocios, hoy),
+    comercial: bandejaComercial(entrada.negocios, hoy, entrada.historial),
     operaciones: bandejaOperaciones(entrada.negocios, hoy),
     financiero: bandejaFinanciera(entrada, hoy),
   }

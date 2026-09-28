@@ -51,6 +51,8 @@ interface NegocioRow {
   pausado_hasta: string | null
   created_at: string
   etapa_cambiada_at: string | null
+  linea_id: string | null
+  closed_at: string | null
 }
 
 const num = (v: number | string | null | undefined) => (v == null ? null : Number(v))
@@ -63,13 +65,13 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
   const hoy = todayBogotaISO()
   const mesInicio = `${bogotaYearMonth()}-01`
 
-  const [negociosRaw, actividad, carteraR, cuotas, gastosR, pylR, cobrosMes] = await Promise.all([
+  const [negociosRaw, actividad, carteraR, cuotas, gastosR, pylR, cobrosMes, cambiosEtapa] = await Promise.all([
     traerTodo<NegocioRow>(
       (desde, hasta) =>
         db
           .from('negocios')
           .select(
-            'id, codigo, nombre, estado, etapa_actual_id, precio_aprobado, precio_estimado, pausado, is_paused, pausado_hasta, created_at, etapa_cambiada_at',
+            'id, codigo, nombre, estado, etapa_actual_id, precio_aprobado, precio_estimado, pausado, is_paused, pausado_hasta, created_at, etapa_cambiada_at, linea_id, closed_at',
           )
           .eq('workspace_id', ws)
           .order('id')
@@ -125,20 +127,39 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
       .gte('fecha', mesInicio)
       .lte('fecha', hoy)
       .or('tipo_cobro.is.null,tipo_cobro.neq.pasante'),
+    // Historial de etapas para la tasa de cierre (con o sin autor: un avance es un avance).
+    traerTodo<{ entidad_id: string; valor_anterior: string | null; valor_nuevo: string | null; created_at: string }>(
+      (desde, hasta) =>
+        db
+          .from('activity_log')
+          .select('entidad_id, valor_anterior, valor_nuevo, created_at')
+          .eq('workspace_id', ws)
+          .eq('entidad_tipo', 'negocio')
+          .eq('tipo', 'cambio_etapa')
+          .order('id')
+          .range(desde, hasta),
+      { etiqueta: 'cambios de etapa' },
+    ),
   ])
   lanzar('cartera', carteraR.error)
   lanzar('gastos', gastosR.error)
   lanzar('cobros del mes', cobrosMes.error)
   if (pylR.error) console.error('[tableros operativos] v_pyl_mes:', pylR.error)
 
+  // Todas las etapas de las lineas del workspace: la actual de cada negocio y, para la tasa
+  // de cierre, la fase de los nombres guardados en el historial.
+  const lineaIds = [...new Set(negociosRaw.map((n) => n.linea_id).filter((x): x is string => !!x))]
   const etapaIds = [...new Set(negociosRaw.map((n) => n.etapa_actual_id).filter((x): x is string => !!x))]
-  const etapasR = etapaIds.length
-    ? await db.from('etapas_negocio').select('id, stage, nombre').in('id', etapaIds)
+  const filtro = [
+    lineaIds.length ? `linea_id.in.(${lineaIds.join(',')})` : null,
+    etapaIds.length ? `id.in.(${etapaIds.join(',')})` : null,
+  ].filter(Boolean).join(',')
+  const etapasR = filtro
+    ? await db.from('etapas_negocio').select('id, linea_id, stage, nombre').or(filtro)
     : { data: [], error: null }
   lanzar('etapas', etapasR.error)
-  const etapas = new Map(
-    ((etapasR.data ?? []) as { id: string; stage: string | null; nombre: string | null }[]).map((e) => [e.id, e]),
-  )
+  const listaEtapas = (etapasR.data ?? []) as { id: string; linea_id: string | null; stage: string | null; nombre: string | null }[]
+  const etapas = new Map(listaEtapas.map((e) => [e.id, e]))
 
   const ultima = new Map<string, string>()
   for (const a of actividad) {
@@ -161,6 +182,8 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
       creadoEn: n.created_at,
       etapaCambiadaEn: n.etapa_cambiada_at,
       ultimaActividad: ultima.get(n.id) ?? null,
+      lineaId: n.linea_id,
+      cerradoEn: n.closed_at,
     }
   })
 
@@ -188,6 +211,15 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
           categoria: string | null
         }[]).map((g) => ({ ...g, monto: Number(g.monto) })),
         cobradoMes,
+        historial: {
+          etapas: listaEtapas.map((e) => ({ id: e.id, lineaId: e.linea_id, nombre: e.nombre ?? '', stage: e.stage })),
+          cambios: cambiosEtapa.map((c) => ({
+            negocioId: c.entidad_id,
+            anterior: c.valor_anterior,
+            nuevo: c.valor_nuevo,
+            fecha: c.created_at,
+          })),
+        },
       },
       hoy,
     ),
