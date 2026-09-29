@@ -31,6 +31,11 @@
 --     ventana de tiempo, que se cuenta en el servidor sobre TODAS las filas (intentos incluidos):
 --     lo que hay que frenar es el script que reintenta, no solo el que logra crear.
 
+-- server-only: la escribe y la lee SOLO la ruta de servidor del registro, con el cliente de
+-- servicio. Es pre-tenant (existe antes de que haya workspace y sobrevive al intento rechazado), así
+-- que no hay policy por workspace que escribirle, y las llaves antiabuso —qué NIT y qué correo están
+-- tomados, cuántos intentos por IP— no se le muestran a nadie con sesión: enseñárselas le diría al
+-- que sondea cuál es el tope y qué NIT es cliente nuestro.
 create table if not exists public.secop_registros (
   id uuid primary key default gen_random_uuid(),
   -- Tal como lo verificó Auth (el OTP del magic link ya probó que el correo existe).
