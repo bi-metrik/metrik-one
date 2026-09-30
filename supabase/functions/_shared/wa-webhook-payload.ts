@@ -40,6 +40,14 @@ export type MetaMensaje = {
     button_reply?: { id?: string; title?: string };
     list_reply?: { id?: string; title?: string };
   };
+  /**
+   * Respuesta rápida de una PLANTILLA. No es lo mismo que `interactive.button_reply`: un botón
+   * de plantilla llega con `type: 'button'` y el payload que se declaró al crearla, no con un
+   * `id`. Hasta ahora ningún envío de MeTRIK usaba plantillas con botón, así que este tipo
+   * caía en el `return null` de "tipo no soportado" y la respuesta de la persona se perdía.
+   * Fuente: Cloud API, "Received Callback from a Quick Reply Button".
+   */
+  button?: { payload?: string; text?: string };
   // wamid del mensaje nuestro al que responde (en toques de boton, el mensaje con los botones).
   // `forwarded` / `frequently_forwarded`: Meta los pone cuando el usuario REENVIA un mensaje.
   // Hasta la bandeja de solicitudes nadie los leia y un reenvio llegaba como texto suelto.
@@ -251,7 +259,8 @@ export function textoLegible(msg: MetaMensaje): string {
   const texto = presente(msg.text?.body)
     ?? presente(msg.image?.caption)
     ?? presente(msg.interactive?.button_reply?.title)
-    ?? presente(msg.interactive?.list_reply?.title);
+    ?? presente(msg.interactive?.list_reply?.title)
+    ?? presente(msg.button?.text);
   if (texto) return texto;
   if (msg.type === 'contacts') {
     const numeros = (msg.contacts ?? [])
@@ -300,6 +309,22 @@ function mensajeConTelefono(msg: MetaMensaje, phone: string, botPhone: string | 
       wa_message_id: msg.id,
       bot_phone: botPhone,
       timestamp,
+    };
+  }
+
+  // Respuesta rápida de una plantilla. `interactive_reply` lleva el PAYLOAD (no un `id`, que
+  // aquí no existe): es lo que permite resolver a qué mensaje contestó la persona sin adivinar
+  // intención a partir del texto del botón.
+  if (msg.type === 'button') {
+    return {
+      phone,
+      text: msg.button?.text || '',
+      type: 'button',
+      interactive_reply: presente(msg.button?.payload),
+      wa_message_id: msg.id,
+      bot_phone: botPhone,
+      timestamp,
+      meta_mensaje: msg as unknown as Record<string, unknown>,
     };
   }
 

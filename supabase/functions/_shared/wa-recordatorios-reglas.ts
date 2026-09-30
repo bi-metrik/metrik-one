@@ -140,8 +140,12 @@ export function horaLocalDe(instanteISO: string): string {
 // sin adivinar intención. "Ya", "listo", "creo que sí" y un emoji son la misma cosa para
 // una persona y tres cosas distintas para un parser.
 
-/** Prefijo del payload. Lo que va detrás es el id del evento que se confirma. */
-export const PREFIJO_CONFIRMACION = 'rec_ok';
+/**
+ * Prefijo del payload del botón. Lo que va detrás es el id de la dosis que se confirma.
+ * Es el contrato con la plantilla que se somete a Meta: si el botón se crea con payload
+ * estático, ese payload tiene que ser exactamente `rec_ok`.
+ */
+const PREFIJO_CONFIRMACION = 'rec_ok';
 
 export function payloadConfirmacion(eventoId: string): string {
   return `${PREFIJO_CONFIRMACION}:${eventoId}`;
