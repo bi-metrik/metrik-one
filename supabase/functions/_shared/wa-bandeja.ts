@@ -11,7 +11,7 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { tomarRespuestaContacto } from './wa-entendimiento.ts';
+import { armarPreguntaNegocio, tomarRespuestaContacto } from './wa-entendimiento.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -225,7 +225,14 @@ async function enviar(phone: string, texto: string, workspaceId: string): Promis
   }
 }
 
-/** Hace la pregunta y deja anotado si salió. La entrega ya está cerrada cuando se llama. */
+/**
+ * Hace la pregunta y deja anotado si salió. La entrega ya está cerrada cuando se llama.
+ *
+ * La pregunta es «¿A qué viaje van?» con la lista corta de negocios abiertos y NUEVO; la lista
+ * ofrecida se guarda en la entrega para que «2» signifique lo mismo al contestar. Si la lista
+ * no se puede armar (sin línea, error de lectura), sale la pregunta vieja «¿De qué cliente
+ * es?» y la entrega sigue el camino de antes (negocio nuevo).
+ */
 export async function preguntarCliente(
   supabase: SupabaseClient,
   entregaId: string,
@@ -233,10 +240,14 @@ export async function preguntarCliente(
   nMensajes: number,
   workspaceId: string,
 ): Promise<void> {
-  const ok = await enviar(phone, textoPreguntaCliente(nMensajes), workspaceId);
+  const viaje = await armarPreguntaNegocio(supabase, entregaId, workspaceId, nMensajes);
+  const ok = await enviar(phone, viaje?.texto ?? textoPreguntaCliente(nMensajes), workspaceId);
+  const lista = viaje ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')
-    .update(ok ? { pregunta_enviada_at: new Date().toISOString(), pregunta_error: null } : { pregunta_error: 'envio fallido' })
+    .update(ok
+      ? { pregunta_enviada_at: new Date().toISOString(), pregunta_error: null, ...lista }
+      : { pregunta_error: 'envio fallido', ...lista })
     .eq('id', entregaId);
   if (error) console.error(`[wa-bandeja] no se pudo anotar la pregunta de ${entregaId}:`, error.message);
 }

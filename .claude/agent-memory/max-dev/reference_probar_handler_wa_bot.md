@@ -5,7 +5,10 @@ metadata:
   type: reference
 ---
 
-**Ningún handler de `supabase/functions/_shared/handlers/` se puede probar con vitest.**
+> Matiz 2026-09-30: si el ÚNICO obstáculo es `Deno.env` al cargarse, basta definir `globalThis.Deno`
+> antes de un `await import(...)` (ver `wa-carga-ejecucion.test.ts` y [[bandeja-negocio-existente]]).
+
+**Ningún handler de `supabase/functions/_shared/handlers/` se puede probar con vitest** (importado de forma estática).
 Comprobado el 2026-09-12 con una prueba sonda de dos líneas que importaba `resume.ts`:
 
 ```

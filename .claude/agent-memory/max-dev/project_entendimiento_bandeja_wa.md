@@ -1,6 +1,6 @@
 ---
 name: entendimiento-bandeja-wa
-description: Mínimo/deseable configurable (#958, mergeado) y paso de entendimiento sobre la bandeja WA (#960, SIN mergear, trae migración) — orden de aplicación y decisiones que chocaban con el brief
+description: Mínimo/deseable configurable (#958) y paso de entendimiento sobre la bandeja WA (#960, mergeado y migrado) — orden de aplicación y decisiones que chocaban con el brief
 metadata:
   type: project
 ---
@@ -9,7 +9,7 @@ metadata:
 bloque y gate de etapa `solicitud_minimo`. El SQL provisional de Trappvel (`sql/trappvel/...PROVISIONAL.sql`)
 NO está aplicado y quita el `default: 0` de niños e infantes (decisión de Mauricio).
 
-**#960 (SIN mergear)**: entendimiento en `wa-alerts` (acción `bandeja_entendimiento`).
+**#960 (mergeado; migraciones aplicadas al 2026-09-30)**: entendimiento en `wa-alerts` (acción `bandeja_entendimiento`).
 Orden: migración `20260929100000` → merge + deploy `wa-alerts` y `wa-webhook` → cron `20260929100100`.
 La llave `modules.bandeja_solicitudes_wa` sigue apagada (Emilio).
 

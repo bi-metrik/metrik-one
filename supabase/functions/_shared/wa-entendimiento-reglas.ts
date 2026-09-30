@@ -88,11 +88,33 @@ function formatoDe(f: CampoEntendible): string {
 }
 
 /** Las instrucciones para el modelo. La lista de campos también sale de la config. */
-export function instruccionesEntendimiento(fields: ReadonlyArray<CampoEntendible>, hoyISO: string): string {
-  const lineas = camposEntendibles(fields).map(f => {
+export function instruccionesEntendimiento(
+  fields: ReadonlyArray<CampoEntendible>,
+  hoyISO: string,
+  /**
+   * Lo que el negocio YA tiene, cuando la entrega se carga en uno existente. El modelo lo ve
+   * para saber qué se sabe y qué falta; la decisión de no pisarlo es de `cargarEnExistente`.
+   */
+  conocidos?: Record<string, unknown>,
+): string {
+  const campos = camposEntendibles(fields);
+  const lineas = campos.map(f => {
     const ayuda = f.ayuda ? ` — ${f.ayuda}` : '';
     return `- ${f.slug}: ${f.label ?? f.slug}${ayuda}. Formato: ${formatoDe(f)}.`;
   });
+  const sabidos = conocidos
+    ? campos.filter(f => !vacio(conocidos[f.slug])).map(f => `- ${f.slug}: ${String(conocidos[f.slug])}`)
+    : [];
+  const bloqueSabidos = sabidos.length === 0 ? [] : [
+    '',
+    'Este viaje YA existe. Lo que ya se sabe de conversaciones anteriores:',
+    ...sabidos,
+    'Estos mensajes son una conversación nueva con el mismo cliente:',
+    '   - Si el mensaje repite lo que ya se sabe, devuelve el mismo valor con su frase.',
+    '   - Si el mensaje dice OTRA cosa, devuelve lo que dice el mensaje con su frase: una persona decidirá.',
+    `   - Si el mensaje no lo menciona, valor = "${POR_DEFINIR}": no copies lo que ya se sabe.`,
+    '   - La historia cuenta solo lo nuevo de estos mensajes.',
+  ];
   return [
     'Eres el asistente de una agencia. Un comercial te reenvió por WhatsApp lo que habló con un cliente',
     '(textos, transcripciones de notas de voz). Tu trabajo es entender la solicitud, no inventarla.',
@@ -111,6 +133,7 @@ export function instruccionesEntendimiento(fields: ReadonlyArray<CampoEntendible
     '',
     'Campos:',
     ...lineas,
+    ...bloqueSabidos,
   ].join('\n');
 }
 

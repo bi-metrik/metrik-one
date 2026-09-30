@@ -84,6 +84,7 @@ beforeAll(async () => {
   await db.exec(leer('20260925200000_bandeja_wa_solicitudes.sql'))
   await db.exec(leer('20260929100000_bandeja_wa_entendimiento.sql'))
   await db.exec(leer('20260929100100_cron_bandeja_wa_entendimiento.sql'))
+  await db.exec(leer('20260930100000_bandeja_wa_negocio_existente.sql'))
 }, 30_000)
 
 afterAll(async () => { await db.close() })
@@ -164,6 +165,47 @@ describe('el cron solo llama cuando hay trabajo', () => {
     await db.query(`insert into public.wa_bandeja_entendimientos (workspace_id, entrega_id, remitente_phone, estado, intentos) values ($1, $2, $3, 'error', 2)`, [WS, e, TEL])
     expect(await correrCron()).toBe(1)
     await db.exec(`update public.wa_bandeja_entendimientos set intentos = 3`)
+    expect(await correrCron()).toBe(0)
+  })
+})
+
+describe('carga en un negocio existente (20260930100000)', () => {
+  it('la entrega guarda la lista ofrecida', async () => {
+    const e = await entrega('esperando_cliente')
+    await db.query(`update public.wa_bandeja_entregas set negocio_opciones = $2 where id = $1`, [e, JSON.stringify([{ id: 'x', codigo: 'T1 26 14' }])])
+    const r = await db.query<{ n: number }>(`select jsonb_array_length(negocio_opciones) as n from public.wa_bandeja_entregas where id = $1`, [e])
+    expect(r.rows[0].n).toBe(1)
+  })
+
+  it('estados nuevos esperando_negocio y negocio_actualizado; destino es vocabulario cerrado', async () => {
+    const e1 = await entrega('con_cliente')
+    const e2 = await entrega('con_cliente')
+    const ins = `insert into public.wa_bandeja_entendimientos (workspace_id, entrega_id, remitente_phone, estado, destino) values ($1, $2, $3, $4, $5)`
+    await db.query(ins, [WS, e1, TEL, 'esperando_negocio', null])
+    await db.query(ins, [WS, e2, TEL, 'negocio_actualizado', 'existente'])
+    const e3 = await entrega('con_cliente')
+    await expect(db.query(ins, [WS, e3, TEL, 'procesando', 'otro'])).rejects.toThrow(/wa_bandeja_entendimientos_destino/)
+    await expect(db.query(ins, [WS, e3, TEL, 'listo', null])).rejects.toThrow(/wa_bandeja_entendimientos_estado/)
+  })
+
+  it('el mensaje admite el papel respuesta_negocio', async () => {
+    const e = await entrega('con_cliente')
+    await db.query(
+      `insert into public.wa_bandeja_mensajes (workspace_id, entrega_id, wa_message_id, remitente_phone, tipo, papel, cuerpo)
+       values ($1, $2, 'w9', $3, 'text', 'respuesta_negocio', '2')`, [WS, e, TEL])
+  })
+
+  it('el cron llama cuando llegó la respuesta a la re-pregunta, no antes', async () => {
+    const e = await entrega('con_cliente')
+    await db.query(`insert into public.wa_bandeja_entendimientos (workspace_id, entrega_id, remitente_phone, estado) values ($1, $2, $3, 'esperando_negocio')`, [WS, e, TEL])
+    expect(await correrCron()).toBe(0)
+    await db.exec(`update public.wa_bandeja_entendimientos set respuesta_negocio = '2'`)
+    expect(await correrCron()).toBe(1)
+  })
+
+  it('un negocio ya actualizado no es trabajo del cron', async () => {
+    const e = await entrega('con_cliente')
+    await db.query(`insert into public.wa_bandeja_entendimientos (workspace_id, entrega_id, remitente_phone, estado) values ($1, $2, $3, 'negocio_actualizado')`, [WS, e, TEL])
     expect(await correrCron()).toBe(0)
   })
 })
