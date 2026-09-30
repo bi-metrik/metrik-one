@@ -15,6 +15,7 @@ import { bogotaParts, diasDelMes, todayBogotaISO } from '../_shared/bogota.ts';
 import { debeSalirHoy, diaSemanaISO, paisDelWorkspace } from '../_shared/dias-habiles.ts';
 import { cerrarEntregasVencidas } from '../_shared/wa-bandeja.ts';
 import { procesarEntendimientos } from '../_shared/wa-entendimiento.ts';
+import { procesarRecordatorios } from '../_shared/wa-recordatorios.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
 // `supabase-client.ts` se crea SIN el generico `Database`, asi que lo que
@@ -34,7 +35,7 @@ type ContactoDelNegocio = { nombre?: string | null } | null;
 
 Deno.serve(async (req) => {
   // This function is triggered by Supabase pg_cron or external cron
-  // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' | 'bandeja_cierre' | 'bandeja_entendimiento' }
+  // Accept POST with { action: 'w25' | 'w29' | 'w33' | 'streak_eval' | 'stale_opps' | 'recaudo_check' | 'bandeja_cierre' | 'bandeja_entendimiento' | 'recordatorios' }
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
@@ -106,6 +107,20 @@ Deno.serve(async (req) => {
         // Ver `_shared/wa-entendimiento.ts`.
         const r = await procesarEntendimientos(supabase);
         return new Response(JSON.stringify({ ok: true, action, ...r }), { status: 200 });
+      }
+      case 'recordatorios': {
+        // Cada 15 minutos (pg_cron `wa-recordatorios`, migracion 20260930140100, y solo si hay
+        // algun recordatorio activo): manda las dosis vencidas del dia de Bogota y escala las
+        // que llevan su plazo sin confirmacion.
+        //
+        // ⚠️ NO pasa por `enviarAlerta`: este tipo corre los 365 dias (festivo y domingo
+        // incluidos) y varias veces al dia, asi que no le aplican ni la regla de dia habil
+        // del 2026-09-27 ni el tope de 2 por persona. Ver `_shared/wa-recordatorios.ts`.
+        //
+        // Con `WA_RECORDATORIOS` apagado (el default) devuelve `apagado: true` sin mandar nada
+        // ni tocar la base.
+        const r = await procesarRecordatorios(supabase);
+        return new Response(JSON.stringify({ action, ...r }), { status: r.ok ? 200 : 500 });
       }
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { status: 400 });

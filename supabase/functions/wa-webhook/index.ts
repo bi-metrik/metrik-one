@@ -33,6 +33,8 @@ import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/hand
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
+import { confirmarRecordatorio } from '../_shared/wa-recordatorios.ts';
+import { esConfirmacionDeRecordatorio } from '../_shared/wa-recordatorios-reglas.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -101,6 +103,24 @@ Deno.serve(async (req) => {
         return new Response('OK', { status: 200 });
       }
       const message = entrante.mensaje;
+
+      // La confirmacion de un recordatorio: boton de respuesta rapida de una PLANTILLA, que
+      // llega como `type: 'button'` con su payload. Sale aqui y NO pasa por `processMessage`:
+      // no es una conversacion con el bot, no abre sesion y no depende de que el numero este
+      // registrado en `staff`. Que el payload sea nuestro se decide sin tocar la base
+      // (`esConfirmacionDeRecordatorio` es puro), asi que un boton ajeno sigue su camino.
+      if (message.type === 'button' && esConfirmacionDeRecordatorio(message.interactive_reply)) {
+        enBackground(
+          confirmarRecordatorio(getServiceClient(), message.phone, message.interactive_reply)
+            .then((r) => {
+              if (!r.confirmado) {
+                console.warn(`[wa-webhook] confirmacion de recordatorio sin efecto: ${r.motivo}`);
+              }
+            })
+            .catch((err) => console.error('[wa-webhook] Recordatorio error:', err)),
+        );
+        return new Response('OK', { status: 200 });
+      }
 
       // Un toque de boton puede ser la aceptacion de un documento: se guarda el cuerpo tal cual
       // llego y su firma, que es lo unico que permite demostrar despues que lo mando Meta.
