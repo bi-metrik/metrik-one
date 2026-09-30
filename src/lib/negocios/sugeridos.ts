@@ -52,6 +52,77 @@ export function soltarSugeridosEditados(
   return out
 }
 
+// ── Conflictos: lo que el mensaje dijo distinto a lo que el negocio ya tenía ──────────────
+//
+// Cuando la bandeja carga en un negocio que YA existe, un campo con valor no se pisa. Si el
+// mensaje dice otra cosa, el valor se queda y lo dicho va a
+// `negocio_bloques.data._conflictos[slug] = { fuente, entrega_id, valor, frase, en, origen }`.
+// Lo escribe `supabase/functions/_shared/wa-carga-reglas.ts` (`cargarEnExistente`); la prueba
+// de paridad compara la clave. La persona decide en la pantalla:
+//   · «Usar» escribe el valor del mensaje como cualquier edición → al guardar, la marca se va
+//     (`soltarConflictosEditados`);
+//   · «Dejar» conserva el valor actual y quita la marca (`descartarConflictoEnData`).
+
+export const CLAVE_CONFLICTOS = '_conflictos'
+
+export interface MarcaConflicto {
+  fuente: 'whatsapp'
+  entrega_id?: string
+  /** Lo que dijo el mensaje. */
+  valor: string | number
+  frase?: string
+  en?: string
+  origen?: 'audio' | 'mensaje'
+}
+
+export function conflictosDe(data: Record<string, unknown> | null | undefined): Record<string, MarcaConflicto> {
+  const m = data?.[CLAVE_CONFLICTOS]
+  return m && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, MarcaConflicto>) : {}
+}
+
+function conMarcas(data: Record<string, unknown>, clave: string, quedan: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...data }
+  if (Object.keys(quedan).length === 0) delete out[clave]
+  else out[clave] = quedan
+  return out
+}
+
+/** Quita el conflicto de los campos cuyo valor cambió al guardar: la persona ya decidió. */
+export function soltarConflictosEditados(
+  anterior: Record<string, unknown>,
+  nueva: Record<string, unknown>,
+): Record<string, unknown> {
+  const marcas = conflictosDe(nueva)
+  const slugs = Object.keys(marcas)
+  if (slugs.length === 0) return nueva
+  const quedan: Record<string, MarcaConflicto> = {}
+  for (const s of slugs) if (mismo(anterior[s], nueva[s])) quedan[s] = marcas[s]
+  if (Object.keys(quedan).length === slugs.length) return nueva
+  return conMarcas(nueva, CLAVE_CONFLICTOS, quedan)
+}
+
+/** La persona deja el valor actual: se quita el conflicto, el valor no se toca. */
+export function descartarConflictoEnData(data: Record<string, unknown>, slug: string): Record<string, unknown> {
+  const marcas = { ...conflictosDe(data) }
+  if (!(slug in marcas)) return data
+  delete marcas[slug]
+  return conMarcas(data, CLAVE_CONFLICTOS, marcas)
+}
+
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+/** «El cliente dijo 20 nov en el audio del 30-sep». El día es el de Bogotá (UTC-5, sin horario de verano). */
+export function textoConflicto(valorLegible: string, marca: MarcaConflicto): string {
+  const dondeDijo = marca.origen === 'audio' ? 'en el audio' : 'en el mensaje'
+  const t = marca.en ? Date.parse(marca.en) : NaN
+  let dia = ''
+  if (!Number.isNaN(t)) {
+    const b = new Date(t - 5 * 3600_000)
+    dia = ` del ${b.getUTCDate()}-${MESES_CORTOS[b.getUTCMonth()]}`
+  }
+  return `El cliente dijo ${valorLegible} ${dondeDijo}${dia}`
+}
+
 /** La persona confirma el valor sugerido tal cual: se quita la marca, el valor se queda. */
 export function confirmarSugeridoEnData(data: Record<string, unknown>, slug: string): Record<string, unknown> {
   const marcas = { ...sugeridosDe(data) }

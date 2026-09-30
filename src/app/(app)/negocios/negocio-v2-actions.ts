@@ -52,7 +52,7 @@ import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itiner
 import { cascadaDeItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itinerarios'
 import { camposRequeridosFaltantes, type CampoConfig } from '@/lib/negocios/campo-completo'
 import { aplanarBloques, calcularNiveles, mensajeMinimoIncompleto } from '@/lib/negocios/niveles-solicitud'
-import { confirmarSugeridoEnData, soltarSugeridosEditados } from '@/lib/negocios/sugeridos'
+import { confirmarSugeridoEnData, descartarConflictoEnData, soltarConflictosEditados, soltarSugeridosEditados } from '@/lib/negocios/sugeridos'
 import {
   modoCierre,
   MENSAJE_ACCION_PROPIA,
@@ -4323,6 +4323,8 @@ export async function marcarBloqueCompleto(
   mergedData = mayusculasDeBloqueDeViaje(configExtraBloque.fields, mergedData)
   // Un valor sugerido desde WhatsApp que la persona cambió deja de ser sugerido (ver `sugeridos.ts`).
   mergedData = soltarSugeridosEditados(currentData, mergedData)
+  // Y un conflicto (el mensaje decía otra cosa) se da por resuelto si la persona cambió el valor.
+  mergedData = soltarConflictosEditados(currentData, mergedData)
 
   // ── Tarifa UPME confirmada ────────────────────────────────────────────────
   // Barrera real del número que se guarda: la pantalla ya avisa mientras se escribe,
@@ -5076,6 +5078,8 @@ export async function actualizarBloqueData(
   const corr = await contextoCorreccion(supabase, negocioBloqueId)
   // Un valor sugerido desde WhatsApp que la persona cambió deja de ser sugerido (ver `sugeridos.ts`).
   let dataFinal = soltarSugeridosEditados(dataDestino ?? {}, dataSaneada)
+  // Y un conflicto (el mensaje decía otra cosa) se da por resuelto si la persona cambió el valor.
+  dataFinal = soltarConflictosEditados(dataDestino ?? {}, dataFinal)
   let cambiosCorreccion: CampoCorregido[] = []
   let nombreCorrector: string | null = null
   if (corr?.esPostAvance) {
@@ -9067,6 +9071,36 @@ export async function confirmarSugerido(negocioBloqueId: string, slug: string): 
   if (errLeer) return { error: `No se pudo leer el bloque: ${errLeer.message}` }
   const actual = ((fila as { data: Record<string, unknown> | null } | null)?.data ?? {})
   const nueva = confirmarSugeridoEnData(actual, slug)
+  if (nueva === actual) return { error: null }
+  const { error: errEsc } = await db(supabase)
+    .from('negocio_bloques')
+    .update({ data: nueva, updated_at: new Date().toISOString() })
+    .eq('id', destinoId)
+  if (errEsc) return { error: (errEsc as { message: string }).message }
+  return { error: null }
+}
+
+/**
+ * La persona deja el valor que ya tenía el campo y descarta lo que dijo el mensaje de WhatsApp:
+ * se quita el conflicto, el valor no se toca. Mismo guard que `confirmarSugerido`.
+ * Para USAR el valor del mensaje no hay acción aparte: se escribe como cualquier edición y al
+ * guardar la marca se va (`soltarConflictosEditados`). Ver `lib/negocios/sugeridos.ts`.
+ */
+export async function descartarConflicto(negocioBloqueId: string, slug: string): Promise<{ error: string | null }> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  const destinoId = await resolverDestinoCompartido(supabase, negocioBloqueId)
+  const { data: fila, error: errLeer } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data')
+    .eq('id', destinoId)
+    .single()
+  if (errLeer) return { error: `No se pudo leer el bloque: ${errLeer.message}` }
+  const actual = ((fila as { data: Record<string, unknown> | null } | null)?.data ?? {})
+  const nueva = descartarConflictoEnData(actual, slug)
   if (nueva === actual) return { error: null }
   const { error: errEsc } = await db(supabase)
     .from('negocio_bloques')

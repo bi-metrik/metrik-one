@@ -4,7 +4,7 @@ import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { resolverPlantillaCampo } from '@/lib/negocios/plantilla-campo'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
-import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion, confirmarSugerido } from '../../negocio-v2-actions'
+import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion, confirmarSugerido, descartarConflicto } from '../../negocio-v2-actions'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import { extraerCampoDesdeImagen, subirImagenClipboard } from '@/lib/actions/documento-actions'
@@ -34,7 +34,8 @@ import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
 import IndicadoresSolicitud from './indicadores-solicitud'
 import MarcaSugerido from './marca-sugerido'
-import { sugeridosDe } from '@/lib/negocios/sugeridos'
+import { sugeridosDe, conflictosDe } from '@/lib/negocios/sugeridos'
+import MarcaConflicto, { valorLegibleCampo } from './marca-conflicto'
 
 export interface DatosField {
   slug: string
@@ -261,6 +262,18 @@ export default function BloqueDatos({
     const r = await confirmarSugerido(negocioBloqueId, slug)
     if (r.error) toast.error(r.error)
     else setConfirmados(prev => new Set(prev).add(slug))
+  }
+  // Lo que un mensaje de WhatsApp dijo distinto a lo que el campo ya tenía (la bandeja no lo
+  // pisó). Se deja de mostrar si el valor en pantalla cambia: al guardar, el servidor lo quita.
+  const marcasConflicto = conflictosDe(saved)
+  const [descartados, setDescartados] = useState<Set<string>>(() => new Set())
+  const conflictoVigente = (slug: string, actual: unknown) =>
+    !!marcasConflicto[slug] && !descartados.has(slug)
+    && String(actual ?? '').trim().toLocaleUpperCase('es-CO') === String(saved[slug] ?? '').trim().toLocaleUpperCase('es-CO')
+  async function dejarActual(slug: string) {
+    const r = await descartarConflicto(negocioBloqueId, slug)
+    if (r.error) toast.error(r.error)
+    else setDescartados(prev => new Set(prev).add(slug))
   }
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {}
@@ -794,6 +807,9 @@ export default function BloqueDatos({
                   </span>
                 )}
                 {sugeridoVigente(f.slug, saved[f.slug]) && <MarcaSugerido frase={marcasSugerido[f.slug].frase} />}
+                {conflictoVigente(f.slug, saved[f.slug]) && (
+                  <MarcaConflicto marca={marcasConflicto[f.slug]} legible={valorLegibleCampo(f, marcasConflicto[f.slug].valor)} />
+                )}
                 {ediciones[f.slug] && (
                   <span
                     title={ediciones[f.slug].en ? `Corregido el ${formatFecha(ediciones[f.slug].en as string, { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : undefined}
@@ -933,6 +949,14 @@ export default function BloqueDatos({
               )}
               {sugeridoVigente(f.slug, values[f.slug]) && (
                 <MarcaSugerido frase={marcasSugerido[f.slug].frase} onConfirmar={() => { void confirmarMarca(f.slug) }} />
+              )}
+              {conflictoVigente(f.slug, values[f.slug]) && (
+                <MarcaConflicto
+                  marca={marcasConflicto[f.slug]}
+                  legible={valorLegibleCampo(f, marcasConflicto[f.slug].valor)}
+                  onUsar={() => handleTextChange(f.slug, marcasConflicto[f.slug].valor)}
+                  onDejar={() => { void dejarActual(f.slug) }}
+                />
               )}
               {/* Dato leído por IA de un pantallazo y aún sin verificar → badge "Revisar" */}
               {aiFilled[f.slug] && (
