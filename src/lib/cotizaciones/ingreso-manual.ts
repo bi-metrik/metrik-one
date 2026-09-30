@@ -74,6 +74,13 @@ export interface HotelManual {
 
 export type CobroTraslado = 'por_persona' | 'por_vehiculo'
 
+/**
+ * Cómo viene el precio del proveedor (brief del 2026-09-30). Los portafolios de San Andrés dan
+ * la tarifa in-out: 45.000 por persona YA es ida y regreso. Con «por trayecto» el neto se
+ * multiplica por los trayectos; con `in_out` es el de todo el recorrido y no se multiplica.
+ */
+export type PrecioTraslado = 'por_trayecto' | 'in_out'
+
 export interface TrasladoManual {
   ruta: string
   /** «AAAA-MM-DD», o vacío. */
@@ -82,7 +89,12 @@ export interface TrasladoManual {
   ninos: number
   infantes: number
   cobro: CobroTraslado
-  /** Costo NETO por trayecto: por ADULTO si se cobra por persona, o por vehículo. */
+  /** Sin elegir es `null`: el formulario lo pide, porque equivocarse cobra doble o la mitad. */
+  precio: PrecioTraslado | null
+  /**
+   * Costo NETO por ADULTO si se cobra por persona, o por vehículo: por trayecto, o de todo el
+   * recorrido si `precio` es `in_out`.
+   */
   neto: number | null
   /**
    * Por persona, el niño y el infante tienen su propio costo, como en el hotel. El infante
@@ -90,6 +102,7 @@ export interface TrasladoManual {
    */
   netoNino: number | null
   netoInfante: number | null
+  /** Solo cuenta con `precio: 'por_trayecto'`: in-out ya es ida y regreso. */
   idaYRegreso: boolean
   fuente: string
 }
@@ -163,6 +176,7 @@ export function leerTrasladoManual(raw: unknown): TrasladoManual {
     ninos: entero(r.ninos),
     infantes: entero(r.infantes),
     cobro: r.cobro === 'por_vehiculo' ? 'por_vehiculo' : 'por_persona',
+    precio: r.precio === 'in_out' || r.precio === 'por_trayecto' ? r.precio : null,
     neto: montoManual(r.neto),
     netoNino: montoManual(r.netoNino),
     netoInfante: montoManual(r.netoInfante),
@@ -208,6 +222,7 @@ export function validarTrasladoManual(t: TrasladoManual): ErroresManual {
   if (!t.ruta) e.ruta = OBLIGATORIO
   if (t.fecha !== '' && !FECHA.test(t.fecha)) e.fecha = 'Escoge la fecha.'
   erroresDePasajeros(t, e)
+  if (t.precio === null) e.precio = 'Elige cómo viene el precio.'
   if (t.cobro === 'por_vehiculo') {
     if (!(t.neto && t.neto > 0)) e.neto = 'Escribe lo que cobra el proveedor.'
   } else {
@@ -270,7 +285,9 @@ export function crudaDeHotelManual(h: HotelManual): LecturaCruda {
 
 /** Lo mismo para un traslado. Por vehículo no hay filas por pasajero: es un solo total. */
 export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
-  const trayectos = t.idaYRegreso ? 2 : 1
+  // In-out: el neto ya es el de ida y regreso. Por trayecto: se multiplica por los trayectos.
+  const idaYRegreso = t.precio === 'in_out' || t.idaYRegreso
+  const trayectos = t.precio === 'in_out' ? 1 : idaYRegreso ? 2 : 1
   const pax: Composicion = { adultos: t.adultos, ninos: t.ninos, infantes: t.infantes }
   const personas = t.adultos + t.ninos + t.infantes
   // El mismo reparto del hotel: cada tipo con su costo, y el infante sin costo escrito en 0.
@@ -279,7 +296,7 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
     : []
   const total = t.cobro === 'por_persona' ? porTipo.reduce((a, f) => a + f.subtotal_tipo, 0) : Math.round((t.neto ?? 0) * trayectos)
   return crudaDe({
-    trayecto: `${t.ruta} (${t.idaYRegreso ? 'ida y regreso' : 'solo ida'})`,
+    trayecto: `${t.ruta} (${idaYRegreso ? 'ida y regreso' : 'solo ida'})`,
     fecha_hora: t.fecha || null,
     pax: String(personas),
     ocupacion_adultos: String(t.adultos),
@@ -291,15 +308,42 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
   }, porTipo, porTipo.length > 0 ? total : null)
 }
 
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const fechaCorta = (f: string) => `${Number(f.slice(8, 10))} ${MESES[Number(f.slice(5, 7)) - 1]} ${f.slice(0, 4)}`
+
+/**
+ * El aviso cuando las fechas del hotel caen fuera de las del viaje (COT-2026-0018: la entrada
+ * se escribió en octubre y el viaje es en noviembre). Es un AVISO: la habitación entra igual,
+ * y quien la acepta decide. Sin fechas del viaje no se compara nada.
+ */
+export function avisoFechasFueraDelViaje(
+  entrada: string,
+  salida: string,
+  viaje: { inicio: string | null; fin: string | null } | null | undefined,
+): string | null {
+  if (!viaje || !FECHA.test(entrada) || !FECHA.test(salida)) return null
+  const inicio = viaje.inicio && FECHA.test(viaje.inicio) ? viaje.inicio : null
+  const fin = viaje.fin && FECHA.test(viaje.fin) ? viaje.fin : null
+  const antes = !!inicio && entrada < inicio
+  const despues = !!fin && salida > fin
+  if (!antes && !despues) return null
+  const delViaje = inicio && fin
+    ? `del ${fechaCorta(inicio)} al ${fechaCorta(fin)}`
+    : inicio ? `desde el ${fechaCorta(inicio)}` : `hasta el ${fechaCorta(fin as string)}`
+  return `El hotel va del ${fechaCorta(entrada)} al ${fechaCorta(salida)} y el viaje es ${delViaje}. Revisa las fechas.`
+}
+
 /**
  * De lo que llenó la persona a la lectura de una captura, por el mismo juez y el mismo
- * constructor. `leidaEn` y `hoy` entran por parámetro para poder probarlo.
+ * constructor. `leidaEn` y `hoy` entran por parámetro para poder probarlo. Con `viaje`, un
+ * hotel fuera de sus fechas lleva un aviso (`avisoFechasFueraDelViaje`).
  */
 export function lecturaManual(args: {
   ranura: DefinicionRanura
   entrada: { tipo: 'hotel'; datos: HotelManual } | { tipo: 'traslado'; datos: TrasladoManual }
   leidaEn: string
   hoy?: string
+  viaje?: { inicio: string | null; fin: string | null } | null
 }): ResultadoManual {
   const { ranura, entrada } = args
   const errores = entrada.tipo === 'hotel' ? validarHotelManual(entrada.datos) : validarTrasladoManual(entrada.datos)
@@ -310,6 +354,8 @@ export function lecturaManual(args: {
   const lectura = construirLecturaCasilla(ranura, veredicto, args.leidaEn)
   const h = entrada.tipo === 'hotel' ? entrada.datos : null
   lectura.origen = 'manual'
+  const aviso = h ? avisoFechasFueraDelViaje(h.entrada, h.salida, args.viaje) : null
+  if (aviso) lectura.alertas = [...lectura.alertas, aviso]
   lectura.manual = {
     fuente: entrada.datos.fuente,
     incluye: h?.incluye ? h.incluye : null,

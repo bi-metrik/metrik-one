@@ -79,3 +79,59 @@ describe('lugares compatibles', () => {
     expect(lugaresCompatibles('Cartagena', 'Cartago')).toBe(false)
   })
 })
+
+// ── COT-2026-0018 (brief del 2026-09-30) ──────────────────────────────────────
+
+const conIdentidad = (id: string, cambios: Record<string, string | null>, extra: Partial<LecturaCasilla> = {}): LecturaCasilla =>
+  ({ ...lectura(id), ...extra, identidad: { ...lectura(id).identidad, ...cambios } })
+
+describe('COT-2026-0018 · «Hotel Cabañas Agua Dulce» es el mismo hotel que «Cabañas Agua Dulce»', () => {
+  it('la tercera captura, con «Hotel» delante, entra como habitación y no como opción aparte', () => {
+    const { lineas } = aceptarEnOrden(['efb0a3c3', '5542356a'])
+    expect(lineas).toHaveLength(1)
+    const cuadruple = conIdentidad('efb0a3c3', { hotel: 'Hotel Cabañas Agua Dulce', tipo_habitacion: 'Cuádruple' }, { huellaImagen: 'cuadruple' })
+    const d = ubicarLectura({ tipo: 'hotel', lectura: cuadruple, pistas: SIN_PISTAS, lineas, grupoViaje: GRUPO })
+    expect(d).toMatchObject({ como: 'habitacion', itemId: 'efb0a3c3' })
+  })
+
+  it('otro hotel con las mismas fechas sigue siendo otra opción del bloque', () => {
+    const { lineas } = aceptarEnOrden(['efb0a3c3'])
+    const otro = conIdentidad('efb0a3c3', { hotel: 'Hotel Posada Enilda' })
+    expect(ubicarLectura({ tipo: 'hotel', lectura: otro, pistas: SIN_PISTAS, lineas, grupoViaje: GRUPO })).toEqual({ como: 'hermana', grupo: 'hotel' })
+  })
+})
+
+describe('COT-2026-0018 · la fecha corregida en la ficha es la que ubica (Lord Pierre)', () => {
+  const CORREGIDA = { check_in: { valor: '2026-11-25', por: 'Alejandra', porId: 'p1', en: '2026-09-29T20:00:00Z' } }
+  // La habitación 1 se escribió con entrada el 25 de OCTUBRE; la ficha la corrigió a noviembre.
+  const hab1 = conIdentidad('efb0a3c3', { hotel: 'Hotel Lord Pierre', check_in: '2026-10-25', check_out: '2026-11-28' }, { huellaImagen: 'lp-1' })
+  const hab2 = conIdentidad('5542356a', { hotel: 'Hotel Lord Pierre', check_in: '2026-11-25', check_out: '2026-11-28' }, { huellaImagen: 'lp-2' })
+
+  it('con la corrección, la habitación 2 cae como habitación de la opción corregida', () => {
+    const lineas = [{ id: 'lp', grupo: 'hotel', tarifa_pax: { casillas: { grupo_completo: hab1 }, correcciones: CORREGIDA } }]
+    expect(ubicarLectura({ tipo: 'hotel', lectura: hab2, pistas: SIN_PISTAS, lineas, grupoViaje: GRUPO })).toMatchObject({ como: 'habitacion', itemId: 'lp' })
+  })
+
+  it('sin la corrección (lo que pasaba): otras fechas, otra ranura', () => {
+    const lineas = [{ id: 'lp', grupo: 'hotel', tarifa_pax: { casillas: { grupo_completo: hab1 } } }]
+    expect(ubicarLectura({ tipo: 'hotel', lectura: hab2, pistas: SIN_PISTAS, lineas, grupoViaje: GRUPO })).toEqual({ como: 'nueva' })
+  })
+
+  it('otro hotel con las fechas corregidas va al mismo bloque, como otra opción', () => {
+    const lineas = [{ id: 'lp', grupo: 'hotel', tarifa_pax: { casillas: { grupo_completo: hab1 }, correcciones: CORREGIDA } }]
+    const otro = conIdentidad('2164b941', { check_in: '2026-11-25', check_out: '2026-11-28' })
+    expect(ubicarLectura({ tipo: 'hotel', lectura: otro, pistas: SIN_PISTAS, lineas, grupoViaje: GRUPO })).toEqual({ como: 'hermana', grupo: 'hotel' })
+  })
+
+  it('si la corrección deja dos opciones con la misma clave, no se fusionan: la captura siguiente cae en una', () => {
+    const lineas = [
+      { id: 'lp', grupo: 'hotel', tarifa_pax: { casillas: { grupo_completo: hab1 }, correcciones: CORREGIDA } },
+      { id: 'lp-2', grupo: 'hotel 2', tarifa_pax: { casillas: { grupo_completo: hab2 } } },
+    ]
+    const hab3 = conIdentidad('f9fbc4d5', { hotel: 'Hotel Lord Pierre', check_in: '2026-11-25', check_out: '2026-11-28' }, { huellaImagen: 'lp-3' })
+    const d = ubicarLectura({ tipo: 'hotel', lectura: hab3, pistas: SIN_PISTAS, lineas, grupoViaje: GRUPO })
+    // Empatadas en habitaciones: la primera de la cotización. Las dos siguen donde estaban.
+    expect(d).toMatchObject({ como: 'habitacion', itemId: 'lp' })
+    expect(lineas).toHaveLength(2)
+  })
+})

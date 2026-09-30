@@ -485,7 +485,7 @@ export function camposDeIdentidad(ranuraSlug: string): string[] {
 }
 
 /** Normaliza un texto para compararlo: sin tildes, sin mayúsculas ni signos. */
-function claveTexto(v: string): string {
+export function claveTexto(v: string): string {
   return v
     .toLowerCase()
     .normalize('NFD')

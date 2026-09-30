@@ -21,7 +21,10 @@ vi.mock('@/app/(app)/negocios/adicional-actions', () => ({}))
 vi.mock('@/app/(app)/negocios/ranura-actions', () => ({}))
 
 const { default: BandejaCapturas, FilaCaptura } = await import('./bandeja-capturas')
-const { default: IngresoManualForm, AYUDA_NETO, AYUDA_FUENTE, AYUDA_EDAD_NINO } = await import('./ingreso-manual-form')
+const {
+  default: IngresoManualForm, AYUDA_NETO, AYUDA_FUENTE, AYUDA_EDAD_NINO,
+  PREGUNTA_PRECIO_TRASLADO, OPCION_POR_TRAYECTO, OPCION_IN_OUT,
+} = await import('./ingreso-manual-form')
 const { default: TarjetaOpcion } = await import('./tarjeta-opcion')
 
 const HOTEL = ranuraPorSlug('hotel_detalle')!
@@ -54,7 +57,7 @@ function trasladoManual(over: Partial<TrasladoManual> = {}): LecturaCasilla {
     entrada: {
       tipo: 'traslado',
       datos: {
-        ruta: 'Aeropuerto – hotel', fecha: '2026-11-09', adultos: 2, ninos: 0, infantes: 1, cobro: 'por_persona',
+        ruta: 'Aeropuerto – hotel', fecha: '2026-11-09', adultos: 2, ninos: 0, infantes: 1, cobro: 'por_persona', precio: 'por_trayecto',
         neto: 45_000, netoNino: null, netoInfante: null, idaYRegreso: true, fuente: 'Portafolio Dolphins 2026', ...over,
       },
     },
@@ -135,6 +138,21 @@ describe('el formulario', () => {
       expect(input, k).toContain('inputMode="numeric"')
     }
     expect(html.match(/<input[^>]*data-campo-manual="netoInfante"[^>]*>/)?.[0]).toContain('placeholder="0"')
+  })
+
+  // Brief del 2026-09-30: «Ida y regreso» marcado por defecto convertía un in-out de 45.000
+  // en 90.000. Ahora se pregunta cómo viene el precio, sin respuesta marcada.
+  it('traslado: pregunta cómo viene el precio, sin opción marcada', () => {
+    const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+      composicion: { adultos: 2, ninos: 0, infantes: 0 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial: 'traslado',
+    }))
+    const t = texto(html)
+    expect(t).toContain(PREGUNTA_PRECIO_TRASLADO)
+    expect(t).toContain(OPCION_POR_TRAYECTO)
+    expect(t).toContain(OPCION_IN_OUT)
+    const bloque = html.match(/data-campo-manual="precio"[\s\S]*?<\/div>/)?.[0] ?? ''
+    expect(bloque).toContain('type="radio"')
+    expect(bloque).not.toContain('checked')
   })
 
   it('no pide cancelación: esa es la condición del proveedor y el cliente no la ve', () => {

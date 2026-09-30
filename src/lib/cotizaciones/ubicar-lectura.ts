@@ -24,6 +24,7 @@ import { lugarComparable, ubicarCaptura, type CapturaDetectada, type RanuraCandi
 import {
   claveOpcionHotel,
   habitacionesDeTarifa,
+  lecturaDeOpcion,
   mismaImagenEnHabitaciones,
   mismasFechasHotel,
   opcionDelMismoHotel,
@@ -121,9 +122,9 @@ export function ubicarLectura(args: {
       const clave = normalizarGrupo(r.grupo)
       const leidas = hoteles
         .filter(l => normalizarGrupo(l.grupo ?? null) === clave)
-        .flatMap(l => habitacionesDeTarifa(leerTarifaPax(l.tarifa_pax)).slice(0, 1))
-        .map(h => h.lectura)
-        .filter(l => !!claveOpcionHotel(l))
+        // Con las correcciones de la ficha encima: la fecha corregida es la que vale.
+        .map(l => lecturaDeOpcion(leerTarifaPax(l.tarifa_pax)))
+        .filter((l): l is LecturaCasilla => !!l && !!claveOpcionHotel(l))
       if (!conFechasEnCaptura || leidas.length === 0) {
         sinFechas.push(r.grupo)
         continue

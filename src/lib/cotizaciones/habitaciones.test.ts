@@ -6,10 +6,13 @@ import {
   claveOpcionHotel,
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
+  lecturaConCorrecciones,
+  lecturaDeOpcion,
   menoresDeDosAnios,
   mismaImagenEnHabitaciones,
   mismaOpcionHotel,
   mismasFechasHotel,
+  mismoNombreHotel,
   opcionDelMismoHotel,
   precioPorHabitacion,
   recibeHabitaciones,
@@ -357,5 +360,82 @@ describe('R8 · una sola puerta para el estado de la tarifa, y el precio por hab
     // Dos habitaciones del mismo costo quedan iguales, o a un peso por el redondeo.
     expect(Math.abs(precios[1].precio - precios[2].precio)).toBeLessThanOrEqual(1)
     expect(precioPorHabitacion([], 1_000)).toEqual([])
+  })
+})
+
+// ── COT-2026-0018 (brief del 2026-09-30) ──────────────────────────────────────
+
+describe('el nombre del hotel, sin palabras genéricas', () => {
+  it('«Hotel Cabañas Agua Dulce» es «Cabañas Agua Dulce»', () => {
+    expect(mismoNombreHotel('Hotel Cabañas Agua Dulce', 'Cabañas Agua Dulce')).toBe(true)
+    expect(mismoNombreHotel('CABANAS AGUA DULCE', 'Hotel Cabañas Agua Dulce')).toBe(true)
+    expect(mismoNombreHotel('Decameron Aquarium Resort', 'Decameron Aquarium')).toBe(true)
+    expect(mismoNombreHotel('Hostal Los Delfines', 'Los Delfines')).toBe(true)
+  })
+
+  it('dos hoteles distintos NO se unen', () => {
+    expect(mismoNombreHotel('Decameron Aquarium', 'Decameron San Luis')).toBe(false)
+    expect(mismoNombreHotel('Hotel Decameron Aquarium', 'Decameron San Luis Resort')).toBe(false)
+    expect(mismoNombreHotel('Posada Enilda', 'Cabañas Agua Dulce')).toBe(false)
+  })
+
+  it('«posada» y «cabañas» son parte del nombre: no se quitan', () => {
+    expect(mismoNombreHotel('Posada Los Delfines', 'Cabañas Los Delfines')).toBe(false)
+  })
+
+  it('solo palabras genéricas no dice qué hotel es', () => {
+    expect(mismoNombreHotel('Hotel', 'Hotel Cabañas Agua Dulce')).toBe(false)
+    expect(mismoNombreHotel('Hotel Resort', 'Cabañas Agua Dulce')).toBe(false)
+  })
+
+  it('la contención es palabra por palabra, no por letras', () => {
+    expect(mismoNombreHotel('Sol', 'Solar Inn')).toBe(false)
+  })
+
+  it('las tres capturas de Agua Dulce son una opción (mismas fechas)', () => {
+    const agua = porItem('efb0a3c3')
+    const cuadruple = { ...agua, identidad: { ...agua.identidad, hotel: 'Hotel Cabañas Agua Dulce', tipo_habitacion: 'Cuádruple' } }
+    expect(mismaOpcionHotel(agua, cuadruple)).toBe(true)
+    const otrasFechas = { ...cuadruple, identidad: { ...cuadruple.identidad, check_out: '2026-11-26' } }
+    expect(mismaOpcionHotel(agua, otrasFechas)).toBe(false)
+  })
+})
+
+describe('las correcciones de la ficha cuentan para agrupar', () => {
+  const EN = '2026-09-29T20:00:00Z'
+  const hab1: LecturaCasilla = { ...porItem('efb0a3c3'), identidad: { ...porItem('efb0a3c3').identidad, hotel: 'Lord Pierre', check_in: '2026-10-25', check_out: '2026-11-28' } }
+  const hab2: LecturaCasilla = { ...porItem('f9fbc4d5'), huellaImagen: 'otra', identidad: { ...porItem('f9fbc4d5').identidad, hotel: 'Lord Pierre', check_in: '2026-11-25', check_out: '2026-11-28' } }
+
+  it('la fecha corregida manda al comparar; lo leído queda intacto', () => {
+    const corregida = lecturaConCorrecciones(hab1, { check_in: { valor: '2026-11-25', por: 'Alejandra', porId: null, en: EN } })
+    expect(claveOpcionHotel(corregida)).toEqual({ hotel: 'Lord Pierre', entrada: '2026-11-25', salida: '2026-11-28' })
+    expect(hab1.identidad.check_in).toBe('2026-10-25')
+  })
+
+  it('una corrección vacía borra el dato: sin él no se afirma la opción', () => {
+    const sinHotel = lecturaConCorrecciones(hab1, { hotel: { valor: null, por: null, porId: null, en: EN } })
+    expect(claveOpcionHotel(sinHotel)).toBeNull()
+  })
+
+  it('las correcciones de otros campos no tocan la identidad', () => {
+    expect(lecturaConCorrecciones(hab1, { regimen: { valor: 'Todo incluido', por: null, porId: null, en: EN } })).toBe(hab1)
+    expect(lecturaConCorrecciones(hab1, undefined)).toBe(hab1)
+  })
+
+  it('la habitación 2 encuentra la opción de la habitación 1 corregida', () => {
+    const sinCorregir: TarifaPax = { casillas: { grupo_completo: hab1 } }
+    const corregida: TarifaPax = { ...sinCorregir, correcciones: { check_in: { valor: '2026-11-25', por: 'Alejandra', porId: null, en: EN } } }
+    expect(opcionDelMismoHotel(hab2, [{ id: 'lp', tarifa: sinCorregir }])).toBeNull()
+    expect(opcionDelMismoHotel(hab2, [{ id: 'lp', tarifa: corregida }])?.id).toBe('lp')
+    expect(lecturaDeOpcion(corregida)!.identidad.check_in).toBe('2026-11-25')
+    expect(lecturaDeOpcion({})).toBeNull()
+  })
+
+  it('el nombre corregido también cuenta', () => {
+    const tarifa: TarifaPax = {
+      casillas: { grupo_completo: { ...hab1, identidad: { ...hab1.identidad, hotel: 'Lord Pier', check_in: '2026-11-25' } } },
+      correcciones: { hotel: { valor: 'Lord Pierre', por: null, porId: null, en: EN } },
+    }
+    expect(opcionDelMismoHotel(hab2, [{ id: 'lp', tarifa }])?.id).toBe('lp')
   })
 })

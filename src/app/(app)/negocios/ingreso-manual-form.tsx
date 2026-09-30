@@ -27,6 +27,15 @@ export type RespuestaManual = { ok: true } | { ok: false; mensaje: string; error
 
 export const AYUDA_NETO = 'Lo que te cobra el proveedor, sin sumarle nada. El margen lo pone ONE.'
 
+/**
+ * Cómo viene el precio del traslado (brief del 2026-09-30). Sin opción marcada a propósito:
+ * con «Ida y regreso» por defecto, un portafolio in-out de 45.000 quedaba en 90.000.
+ */
+export const PREGUNTA_PRECIO_TRASLADO = '¿Cómo viene el precio?'
+export const OPCION_POR_TRAYECTO = 'Por trayecto'
+export const OPCION_IN_OUT = 'Ida y regreso (in-out)'
+export const AYUDA_IN_OUT = 'El precio ya incluye ida y regreso: ONE no lo multiplica.'
+
 /** Lo interno: la fuente no sale en la cotización. */
 export const AYUDA_FUENTE = 'Solo la ve tu equipo.'
 
@@ -43,7 +52,7 @@ function inicial(tipo: TipoManual, grupo: Composicion | null): Valores {
   }
   return tipo === 'hotel'
     ? { hotel: '', ciudad: '', entrada: '', salida: '', habitacion: '', regimen: '', incluye: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', edadDesde: '', edadHasta: '', fuente: '' }
-    : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', neto: '', netoNino: '', netoInfante: '', idaYRegreso: 'si', fuente: '' }
+    : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', precio: '', neto: '', netoNino: '', netoInfante: '', idaYRegreso: 'si', fuente: '' }
 }
 
 export default function IngresoManualForm({
@@ -180,8 +189,18 @@ export default function IngresoManualForm({
           {campo('adultos', 'Adultos', { numerico: true })}
           {campo('ninos', 'Niños', { numerico: true })}
           {campo('infantes', 'Infantes', { numerico: true })}
-          {titulo('Costo neto por trayecto')}
+          {titulo(v.precio === 'in_out' ? 'Costo neto ida y regreso' : 'Costo neto por trayecto')}
           <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+          <div className="col-span-full flex flex-col gap-0.5" data-campo-manual="precio">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1" role="radiogroup" aria-label={PREGUNTA_PRECIO_TRASLADO}>
+              <span className={`text-xs ${errores.precio ? 'text-[#9A5F0C]' : 'text-[#6E6A62]'}`}>{PREGUNTA_PRECIO_TRASLADO}</span>
+              {opcion('precio', 'por_trayecto', OPCION_POR_TRAYECTO)}
+              {opcion('precio', 'in_out', OPCION_IN_OUT)}
+            </div>
+            {errores.precio
+              ? <span className="text-xs text-[#B3382C]">{errores.precio}</span>
+              : v.precio === 'in_out' && <span className="text-[11px] text-[#6E6A62]">{AYUDA_IN_OUT}</span>}
+          </div>
           <div className="col-span-full flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label="Cómo cobra">
             {opcion('cobro', 'por_persona', 'Por persona')}
             {opcion('cobro', 'por_vehiculo', 'Por vehículo')}
@@ -196,10 +215,13 @@ export default function IngresoManualForm({
               {campo('netoInfante', 'Infante', { numerico: true, placeholder: '0' })}
             </>
           )}
-          <div className="col-span-2 flex flex-wrap items-end gap-x-4 gap-y-1 pb-1.5" role="radiogroup" aria-label="Trayectos">
-            {opcion('idaYRegreso', 'no', 'Solo ida')}
-            {opcion('idaYRegreso', 'si', 'Ida y regreso')}
-          </div>
+          {/* In-out ya es ida y regreso: los trayectos solo se preguntan con precio por trayecto. */}
+          {v.precio !== 'in_out' && (
+            <div className="col-span-2 flex flex-wrap items-end gap-x-4 gap-y-1 pb-1.5" role="radiogroup" aria-label="Trayectos">
+              {opcion('idaYRegreso', 'no', 'Solo ida')}
+              {opcion('idaYRegreso', 'si', 'Ida y regreso')}
+            </div>
+          )}
           {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio Dolphins 2026', ayuda: AYUDA_FUENTE })}
         </div>
       )}
