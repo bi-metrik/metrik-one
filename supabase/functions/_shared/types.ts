@@ -75,6 +75,13 @@ export interface SessionContext {
    * en vez de repetirse. Ver `handlers/registro/soporte-foto.ts`.
    */
   soporte_reintentos?: number;
+  /**
+   * Mensajes seguidos sin monto mientras el flujo guiado del gasto espera el monto
+   * (`collecting` de W01). Guarda de bucle. Ver `handlers/registro/monto-pendiente.ts`.
+   */
+  monto_reintentos?: number;
+  /** Confianza del parser en el primer mensaje del gasto, para retomarlo igual al llegar el monto. */
+  confianza_gasto?: number;
   unclear_count?: number;
   // Session memory
   last_project_id?: string;

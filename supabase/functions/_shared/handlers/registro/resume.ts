@@ -9,7 +9,9 @@ import { formatCOP, bold, formatProject } from '../../wa-format.ts';
 import { findActiveDestinos } from '../../wa-lookup.ts';
 import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
-import { showGastoConfirmation, proceedEmpresaGasto } from './gasto.ts';
+import type { ParsedFields } from '../../types.ts';
+import { showGastoConfirmation, proceedEmpresaGasto, handleGasto, categoriaDelGasto } from './gasto.ts';
+import { decidirConfirmacionGasto, decidirMontoPendiente } from './monto-pendiente.ts';
 import { executeRegistro } from './execute.ts';
 import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
 
@@ -37,7 +39,69 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Confirmation
+  // Flujo guiado del gasto: el primer mensaje no traia monto y se pidio. La decision
+  // (monto, cancelar, otra orden, repreguntar) vive en `monto-pendiente.ts`, pura y probada.
+  if (session.state === 'collecting' && context.pending_action === 'W01') {
+    const decision = decidirMontoPendiente(
+      message.text ?? '',
+      context.parsed_fields ?? {},
+      Number(context.monto_reintentos) || 0,
+    );
+    if (decision.accion === 'cerrar') {
+      await ctx.sendMessage(decision.mensaje);
+      await completeSession(supabase, session.id);
+      return;
+    }
+    if (decision.accion === 'repreguntar') {
+      await ctx.sendMessage(decision.mensaje);
+      await ctx.updateSession('collecting', {
+        monto_reintentos: decision.reintentos,
+        parsed_fields: decision.fields,
+      });
+      return;
+    }
+    // Con el monto, el gasto sigue EXACTAMENTE el camino de un mensaje completo, con los
+    // campos de los dos mensajes y la confianza del primero (que es el que traia el
+    // codigo del negocio, si lo traia).
+    await handleGasto({
+      ...ctx,
+      parsed: {
+        intent: 'GASTO',
+        confidence: Number(context.confianza_gasto) || 0,
+        fields: decision.fields,
+      },
+    });
+    return;
+  }
+
+  // Confirmacion de un gasto: el texto libre es la descripcion, no un error.
+  if (session.state === 'confirming' && context.pending_action === 'W01') {
+    const decision = decidirConfirmacionGasto(
+      { texto: message.text ?? '', botonId: message.interactive_reply },
+      context.parsed_fields ?? {},
+      context.amount,
+    );
+    switch (decision.accion) {
+      case 'confirmar':
+        await executeRegistro(ctx);
+        return;
+      case 'cancelar':
+        await ctx.sendMessage('❌ Cancelado.');
+        await completeSession(supabase, session.id);
+        return;
+      case 'describir':
+        await reconfirmarGasto(ctx, decision.fields);
+        return;
+      case 'botones':
+        await ctx.sendButtons('Presiona un botón para confirmar o cancelar.', [
+          { id: 'btn_confirm', title: '✅ Confirmar' },
+          { id: 'btn_cancel', title: '❌ Cancelar' },
+        ]);
+        return;
+    }
+  }
+
+  // Confirmation (W06)
   if (session.state === 'confirming') {
     const btnId = message.interactive_reply;
     if (btnId === 'btn_confirm' || ['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
@@ -145,6 +209,43 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     await completeSession(supabase, session.id);
     return;
   }
+}
+
+/**
+ * Vuelve a mostrar la confirmacion del gasto con la descripcion que el usuario acaba de
+ * escribir. Mismo destino, mismo monto; la categoria se recalcula porque la descripcion
+ * nueva puede decirla ("Peaje" -> transporte).
+ */
+async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields): Promise<void> {
+  const { session, supabase } = ctx;
+  const c = session.context;
+  // Si la descripcion nueva no dice categoria ("autopista norte"), se queda la que habia.
+  const deLaDescripcion = categoriaDelGasto(fields);
+  const categoria = deLaDescripcion !== 'otros' ? deLaDescripcion : c.categoria || 'otros';
+
+  if (c.destino_tipo === 'empresa') {
+    await proceedEmpresaGasto(ctx, c.amount!, fields, categoria);
+    return;
+  }
+
+  if (c.negocio_id) {
+    const { data: negocio } = await supabase
+      .from('negocios')
+      .select('id, nombre, codigo, estado')
+      .eq('id', c.negocio_id)
+      .single();
+    const entity = negocio
+      ? { ...negocio, proyecto_id: negocio.id, codigo: negocio.codigo ?? '' }
+      : { id: c.negocio_id, nombre: c.proyecto_nombre || 'negocio' };
+    await showGastoConfirmation(ctx, entity, c.amount!, categoria, fields, 'negocio');
+    return;
+  }
+
+  const { data: project } = c.proyecto_id
+    ? await supabase.from('v_proyecto_financiero').select('*').eq('proyecto_id', c.proyecto_id).single()
+    : { data: null };
+  const entity = project ?? { proyecto_id: c.proyecto_id, nombre: c.proyecto_nombre || 'negocio' };
+  await showGastoConfirmation(ctx, entity, c.amount!, categoria, fields, 'proyecto');
 }
 
 // --- Selection sub-handlers ---

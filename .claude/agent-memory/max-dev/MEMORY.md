@@ -122,7 +122,7 @@
 - ⚠️⚠️ [Bandeja WA a negocio existente](project_bandeja_negocio_existente.md) — migración SIN aplicar; conflicto en `_conflictos`; ejecutor Deno sí se prueba
 - ⚠️⚠️ [Entendimiento de la bandeja WA (#960)](project_entendimiento_bandeja_wa.md) — mergeado y migrado; gate de etapa, no llave por línea
 - ⚠️⚠️ [Bandeja de solicitudes WA (Trappvel)](project_bandeja_wa_solicitudes.md) — 2 migraciones SIN aplicar: tablas → deploy → cron; llave al final
-- ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — mergeado, wa-webhook SIN redesplegar
+- ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — flujo guiado recuerda el detalle (2026-09-30); wa-webhook se despliega aparte
 - ⚠️⚠️ [WhatsApp sin teléfono (BSUID)](project_wa_bsuid_sin_telefono.md) — #724 sin redesplegar
 - ⚠️⚠️ [Términos por WhatsApp](project_aceptacion_terminos_wa.md) — #722 sin redesplegar; HMAC NO se valida
 - ⚠️ [Fixture de producción bloquea el push](project_fixture_de_produccion_bloquea_push.md) — fixtures sintéticos a mano; SQL de config se prueba en PGlite
@@ -140,3 +140,4 @@
 - [Medir antes de construir](feedback_medir_antes_de_construir.md) — las premisas se comprueban
 - [La referencia manda sobre el diseño](feedback_la_referencia_manda_sobre_el_diseno.md) — si el brief cita un artefacto real, ábrelo
 - ⚠️ [Rebasar el PR de otra sesión](feedback_rebase_pr_ajeno_mirar_reflog.md) — mirar el reflog de la rama local antes del force-push
+- ⚠️ [Squash de WIP contra el merge-base](feedback_squash_wip_contra_sha_fijo.md) — `reset --soft origin/main` revirtió un PR ajeno

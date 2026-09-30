@@ -13,12 +13,15 @@ import type { HandlerContext, ParsedFields, SessionContext, SessionState } from 
 import { handleGasto } from './gasto';
 import { handleResumeRegistro } from './resume';
 import { MSG_PEDIR_MONTO } from './mensajes-gasto';
+import { MSG_MONTO } from './monto-pendiente';
+import { enrichFields, regexParse } from '../../wa-parse-reglas';
 
 type Fila = Record<string, unknown>;
 
 /** Doble minimo de PostgREST: filtra por igualdad cuando la columna existe y guarda los insert. */
 function supabaseFalso(tablas: Record<string, Fila[]>) {
   const insertados: Record<string, Fila[]> = {};
+  const actualizados: Record<string, Fila[]> = {};
   function builder(tabla: string) {
     const filtros: Array<[string, unknown]> = [];
     let pendienteInsert: Fila | null = null;
@@ -26,7 +29,8 @@ function supabaseFalso(tablas: Record<string, Fila[]>) {
       filtros.every(([c, v]) => !(c in f) || f[c] === v));
     const b: Record<string, unknown> = {};
     const encadenar = () => b;
-    for (const m of ['select', 'order', 'limit', 'ilike', 'neq', 'gt', 'in', 'not', 'update', 'delete']) b[m] = encadenar;
+    for (const m of ['select', 'order', 'limit', 'ilike', 'neq', 'gt', 'in', 'not', 'delete']) b[m] = encadenar;
+    b.update = (fila: Fila) => { (actualizados[tabla] ??= []).push(fila); return b; };
     b.eq = (c: string, v: unknown) => { filtros.push([c, v]); return b; };
     b.insert = (fila: Fila) => {
       pendienteInsert = { id: `id-${tabla}-${(insertados[tabla]?.length ?? 0) + 1}`, ...fila };
@@ -43,7 +47,7 @@ function supabaseFalso(tablas: Record<string, Fila[]>) {
     b.then = (ok: (r: unknown) => unknown) => Promise.resolve({ data: filas(), error: null }).then(ok);
     return b;
   }
-  return { client: { from: builder, rpc: async () => ({ data: null, error: null }) }, insertados };
+  return { client: { from: builder, rpc: async () => ({ data: null, error: null }) }, insertados, actualizados };
 }
 
 const NEGOCIO = { id: 'neg-1', nombre: 'Barandas Conjunto', codigo: 'B1 26 2', estado: 'abierto', workspace_id: 'ws-1' };
@@ -75,6 +79,10 @@ function escenario() {
   const responder = (texto: string) => handleResumeRegistro(ctxPara(texto, {}, 1));
   return { db, enviados, session, ctxPara, responder };
 }
+
+/** `completeSession` escribe en la base, no en la sesion en memoria: se mira la base. */
+const sesionCerrada = (db: ReturnType<typeof supabaseFalso>) =>
+  db.actualizados.bot_sessions?.at(-1)?.state === 'completed';
 
 const gastoGuardado = (db: ReturnType<typeof supabaseFalso>) => {
   const filas = db.insertados.gastos ?? [];
@@ -141,15 +149,195 @@ describe('gasto con codigo de negocio y confianza alta (se registra sin confirma
   });
 });
 
-describe('flujo guiado: el mensaje con el monto es solo "18900"', () => {
-  it('se guarda sin detalle y con lo que hubo como mensaje original, sin inventar', async () => {
+// Lo que el parser le entrega a `handleGasto` por un mensaje sin monto: las reglas
+// deterministas (sin Gemini) y el `mensaje_original` que inyecta el webhook.
+function primerMensaje(texto: string): ParsedFields {
+  const r = enrichFields(regexParse(texto), texto);
+  expect(r.intent).toBe('GASTO');
+  expect(r.fields.amount).toBeUndefined();
+  return { ...r.fields, mensaje_original: texto };
+}
+
+// Termotech, 2026-09-23: "Registrar gasto" (boton del menu) -> "18900" -> "1" -> "Peaje".
+// El detalle se perdia por dos lados: el primer mensaje no se recordaba, y el texto libre
+// sobre la confirmacion se rechazaba con "Presiona un botón...".
+describe('flujo guiado: el primer mensaje no trae monto', () => {
+  it('"Registrar gasto de peaje" -> "18900": se recuerda el detalle del primer mensaje', async () => {
     const e = escenario();
-    await handleGasto(e.ctxPara('18900', { amount: 18900, mensaje_original: '18900' }));
+    await handleGasto(e.ctxPara('Registrar gasto de peaje', primerMensaje('Registrar gasto de peaje'), 0.85));
+    expect(e.enviados).toEqual([MSG_PEDIR_MONTO]);
+    expect(e.session.state).toBe('collecting');
+    await e.responder('18900');
+    expect(e.session.state).toBe('awaiting_selection');
+    await e.responder('1');
+    expect(e.enviados.at(-1)).toContain('📝 peaje');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.descripcion).toBe('peaje');
+    expect(g.categoria).toBe('transporte');
+    expect(g.monto).toBe(18900);
+    expect(g.mensaje_original).toBe('Registrar gasto de peaje / 18900');
+    expect(g.negocio_id).toBe('neg-1');
+  });
+
+  it('"Registrar gasto" -> "18900 peaje": el detalle viene con el monto', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('18900 peaje');
+    await e.responder('1');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.descripcion).toBe('peaje');
+    expect(g.monto).toBe(18900);
+    expect(g.mensaje_original).toBe('Registrar gasto / 18900 peaje');
+  });
+
+  it('detalle en los dos mensajes: se une sin repetir', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto de peaje', primerMensaje('Registrar gasto de peaje'), 0.85));
+    await e.responder('18.900 peaje');
+    await e.responder('2'); // gasto de empresa
+    await e.responder('si');
+    expect(gastoGuardado(e.db).descripcion).toBe('peaje');
+  });
+
+  it('"Registrar gasto" -> "18900" -> "1" -> "si": sin detalle, sin inventar', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('18900');
     await e.responder('1');
     await e.responder('si');
     const g = gastoGuardado(e.db);
     expect(g.descripcion).toMatch(/^Otros gastos operativos — \$\s?18\.900$/);
-    expect(g.mensaje_original).toBe('18900');
+    expect(g.mensaje_original).toBe('Registrar gasto / 18900');
+  });
+
+  it('respuesta sin monto: vuelve a pedirlo sin expulsar, y guarda el detalle que traiga', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('peaje');
+    expect(e.session.state).toBe('collecting');
+    expect(e.enviados.at(-1)).toContain(MSG_PEDIR_MONTO);
+    expect(e.enviados.at(-1)).not.toContain('❌');
+    await e.responder('18900');
+    await e.responder('1');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.descripcion).toBe('peaje');
+    expect(g.mensaje_original).toBe('Registrar gasto / peaje / 18900');
+  });
+
+  it('tres respuestas seguidas sin monto: suelta la conversacion, sin registrar', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('mmm');
+    await e.responder('no recuerdo bien');
+    expect(e.session.state).toBe('collecting');
+    expect(sesionCerrada(e.db)).toBe(false);
+    await e.responder('déjame ver');
+    expect(sesionCerrada(e.db)).toBe(true);
+    expect(e.enviados.at(-1)).toBe(MSG_MONTO.rendicion);
+    expect(e.db.insertados.gastos).toBeUndefined();
+  });
+
+  it('"cancelar" cancela', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('cancelar');
+    expect(sesionCerrada(e.db)).toBe(true);
+    expect(e.enviados.at(-1)).toBe('❌ Cancelado.');
+  });
+
+  it('otra orden ("mis números"): suelta el gasto y pide repetirla, no la atrapa', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('mis números');
+    expect(sesionCerrada(e.db)).toBe(true);
+    expect(e.enviados.at(-1)).toBe(MSG_MONTO.otraOrden);
+    expect(e.db.insertados.gastos).toBeUndefined();
+  });
+});
+
+describe('texto libre sobre la confirmacion de un gasto', () => {
+  async function hastaConfirmar(e: ReturnType<typeof escenario>, primero = 'Registrar gasto') {
+    await handleGasto(e.ctxPara(primero, primerMensaje(primero), 0.85));
+    await e.responder('18900');
+    await e.responder('1');
+    expect(e.session.state).toBe('confirming');
+  }
+
+  it('"Peaje" es la descripcion: re-muestra la confirmacion con ella y se guarda', async () => {
+    const e = escenario();
+    await hastaConfirmar(e);
+    expect(e.enviados.at(-1)).not.toContain('📝');
+    await e.responder('Peaje');
+    expect(e.session.state).toBe('confirming');
+    const confirmacion = e.enviados.at(-1)!;
+    expect(confirmacion).toContain('📝 Peaje');
+    expect(confirmacion).toContain('Barandas Conjunto');
+    expect(confirmacion).not.toContain('Presiona un botón');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.descripcion).toBe('Peaje');
+    // La descripcion nueva dice la categoria.
+    expect(g.categoria).toBe('transporte');
+    expect(g.negocio_id).toBe('neg-1');
+    expect(g.mensaje_original).toBe('Registrar gasto / 18900 / Peaje');
+  });
+
+  it('corregir: la descripcion nueva REEMPLAZA a la anterior', async () => {
+    const e = escenario();
+    await hastaConfirmar(e, 'Registrar gasto de peaje');
+    expect(e.enviados.at(-1)).toContain('📝 peaje');
+    await e.responder('almuerzo del equipo');
+    expect(e.enviados.at(-1)).toContain('📝 almuerzo del equipo');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.descripcion).toBe('almuerzo del equipo');
+    expect(g.categoria).toBe('alimentacion');
+  });
+
+  it('en un gasto de empresa tambien', async () => {
+    const e = escenario();
+    await handleGasto(e.ctxPara('Registrar gasto', primerMensaje('Registrar gasto'), 0.85));
+    await e.responder('18900');
+    await e.responder('2');
+    await e.responder('parqueadero centro');
+    expect(e.enviados.at(-1)).toContain('💰 Gasto de empresa');
+    expect(e.enviados.at(-1)).toContain('📝 parqueadero centro');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.tipo).toBe('empresa');
+    expect(g.descripcion).toBe('parqueadero centro');
+  });
+
+  it('una respuesta corta sigue confirmando o cancelando', async () => {
+    const e = escenario();
+    await hastaConfirmar(e);
+    await e.responder('Sí, confirmo');
+    expect(gastoGuardado(e.db).monto).toBe(18900);
+
+    const f = escenario();
+    await hastaConfirmar(f);
+    await f.responder('No gracias');
+    expect(sesionCerrada(f.db)).toBe(true);
+    expect(f.enviados.at(-1)).toBe('❌ Cancelado.');
+    expect(f.db.insertados.gastos).toBeUndefined();
+  });
+
+  it('otro monto no se toma como descripcion: repite los botones', async () => {
+    const e = escenario();
+    await hastaConfirmar(e);
+    await e.responder('fueron 20000');
+    expect(e.enviados.at(-1)).toBe('Presiona un botón para confirmar o cancelar.');
+    expect(e.session.context.parsed_fields?.descripcion).toBeUndefined();
+  });
+
+  it('un texto que no deja detalle tras limpiarlo repite los botones', async () => {
+    const e = escenario();
+    await hastaConfirmar(e);
+    await e.responder('gasto');
+    expect(e.enviados.at(-1)).toBe('Presiona un botón para confirmar o cancelar.');
   });
 });
 
@@ -160,6 +348,10 @@ describe('sin monto', () => {
     expect(e.enviados).toEqual([MSG_PEDIR_MONTO]);
     expect(MSG_PEDIR_MONTO).not.toContain('❌');
     expect(e.db.insertados.gastos).toBeUndefined();
+    // Y se queda esperando la respuesta, con lo que traia el mensaje.
+    expect(e.session.state).toBe('collecting');
+    expect(e.session.context.pending_action).toBe('W01');
+    expect(e.session.context.parsed_fields?.mensaje_original).toBe('Registrar gasto');
   });
 });
 
