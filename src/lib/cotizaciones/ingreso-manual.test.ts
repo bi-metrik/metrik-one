@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  avisoFechasFueraDelViaje,
   crudaDeHotelManual,
   datosManuales,
   lecturaManual,
@@ -59,6 +60,7 @@ const inOut = (over: Partial<TrasladoManual> = {}): TrasladoManual => ({
   ninos: 1,
   infantes: 0,
   cobro: 'por_persona',
+  precio: 'por_trayecto',
   neto: 45_000,
   netoNino: 45_000,
   netoInfante: null,
@@ -236,6 +238,76 @@ describe('traslado a mano', () => {
 
   it('sin alertas de captura', () => {
     expect(traslado().alertas.filter(a => /captura|pantallazo/i.test(a))).toEqual([])
+  })
+
+  // Brief del 2026-09-30: los portafolios de San Andrés dan la tarifa in-out (45.000 por
+  // persona YA es ida y regreso). Con «Ida y regreso» por defecto, 45.000 cobraba 90.000.
+  describe('cómo viene el precio', () => {
+    const dosAdultos = { adultos: 2, ninos: 0, infantes: 0, netoNino: null, netoInfante: null }
+
+    it('in-out × 2 adultos = 90.000: el neto no se multiplica', () => {
+      const l = traslado({ ...dosAdultos, precio: 'in_out' })
+      expect(l.total).toBe(90_000)
+      expect(l.porTipo).toEqual([{ tipo: 'adulto', cantidad: 2, subtotal: 90_000 }])
+      expect(leidosPorSlug(TRASLADO, l.campos).trayecto).toBe('Aeropuerto – hotel (ida y regreso)')
+    })
+
+    it('por trayecto, ida y regreso × 2 adultos = 180.000', () => {
+      const l = traslado({ ...dosAdultos, precio: 'por_trayecto', idaYRegreso: true })
+      expect(l.total).toBe(180_000)
+    })
+
+    it('in-out manda sobre «Solo ida»: sigue siendo ida y regreso y no se multiplica', () => {
+      const l = traslado({ ...dosAdultos, precio: 'in_out', idaYRegreso: false })
+      expect(l.total).toBe(90_000)
+      expect(leidosPorSlug(TRASLADO, l.campos).trayecto).toBe('Aeropuerto – hotel (ida y regreso)')
+    })
+
+    it('por vehículo, igual: in-out es el total; por trayecto ida y regreso, el doble', () => {
+      expect(traslado({ cobro: 'por_vehiculo', neto: 120_000, precio: 'in_out' }).total).toBe(120_000)
+      expect(traslado({ cobro: 'por_vehiculo', neto: 120_000, precio: 'por_trayecto', idaYRegreso: true }).total).toBe(240_000)
+    })
+
+    it('sin elegir no se firma: equivocarse cobra el doble o la mitad', () => {
+      expect(validarTrasladoManual(inOut({ precio: null }))).toEqual({ precio: 'Elige cómo viene el precio.' })
+      expect(leerTrasladoManual({ precio: 'in_out' }).precio).toBe('in_out')
+      expect(leerTrasladoManual({ precio: 'por_trayecto' }).precio).toBe('por_trayecto')
+      expect(leerTrasladoManual({ precio: 'otro' }).precio).toBeNull()
+      expect(leerTrasladoManual({}).precio).toBeNull()
+    })
+  })
+})
+
+describe('hotel a mano fuera de las fechas del viaje (aviso, no bloqueo)', () => {
+  const VIAJE = { inicio: '2026-11-23', fin: '2026-11-28' }
+
+  // COT-2026-0018, Lord Pierre: la entrada se escribió el 25 de octubre y el viaje es en noviembre.
+  it('entrada en octubre con el viaje en noviembre: entra, con aviso', () => {
+    const r = lecturaManual({
+      ranura: HOTEL, entrada: { tipo: 'hotel', datos: verdemar({ entrada: '2026-10-25', salida: '2026-11-28' }) },
+      leidaEn: AHORA, hoy: '2026-09-28', viaje: VIAJE,
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.lectura.alertas).toContain('El hotel va del 25 oct 2026 al 28 nov 2026 y el viaje es del 23 nov 2026 al 28 nov 2026. Revisa las fechas.')
+  })
+
+  it('dentro del viaje, o sin fechas del viaje, no avisa', () => {
+    expect(avisoFechasFueraDelViaje('2026-11-25', '2026-11-28', VIAJE)).toBeNull()
+    expect(avisoFechasFueraDelViaje('2026-11-23', '2026-11-28', VIAJE)).toBeNull()
+    expect(avisoFechasFueraDelViaje('2026-10-25', '2026-11-28', { inicio: null, fin: null })).toBeNull()
+    expect(avisoFechasFueraDelViaje('2026-10-25', '2026-11-28', null)).toBeNull()
+  })
+
+  it('una sola punta del viaje también compara', () => {
+    expect(avisoFechasFueraDelViaje('2026-11-25', '2026-11-30', { inicio: null, fin: '2026-11-28' }))
+      .toBe('El hotel va del 25 nov 2026 al 30 nov 2026 y el viaje es hasta el 28 nov 2026. Revisa las fechas.')
+    expect(avisoFechasFueraDelViaje('2026-11-20', '2026-11-25', { inicio: '2026-11-23', fin: null }))
+      .toBe('El hotel va del 20 nov 2026 al 25 nov 2026 y el viaje es desde el 23 nov 2026. Revisa las fechas.')
+  })
+
+  it('sin `viaje` no hay aviso (el camino de siempre)', () => {
+    expect(hotel({ entrada: '2026-10-25' }).alertas.filter(a => /Revisa las fechas/.test(a))).toEqual([])
   })
 })
 

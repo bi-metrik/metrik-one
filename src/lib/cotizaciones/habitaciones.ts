@@ -18,7 +18,9 @@
  * Puro: el grupo del negocio entra por parámetro.
  */
 
+import type { Correcciones } from './correcciones'
 import {
+  claveTexto,
   describirOcupacion,
   composicionDeLectura,
   formatoMonto,
@@ -79,12 +81,78 @@ export function claveOpcionHotel(l: LecturaCasilla): ClaveOpcionHotel | null {
   return { hotel, entrada, salida }
 }
 
-/** ¿Mismo hotel y mismas fechas? Sin los tres datos en las dos, no se afirma. */
+/**
+ * Los campos que deciden a qué opción de hotel pertenece una captura. Son los que corrige la
+ * ficha de la línea (`correcciones.ts`), y ahí manda lo corregido (brief del 2026-09-30, caso
+ * Lord Pierre de COT-2026-0018: la entrada se leyó en octubre, se corrigió a noviembre, y la
+ * habitación siguiente no encontraba la opción).
+ */
+const CAMPOS_DE_OPCION = ['hotel', 'check_in', 'check_out'] as const
+
+/**
+ * La lectura con lo que una persona corrigió en la ficha encima de su hotel y sus fechas. Solo
+ * para COMPARAR: lo leído no se toca y no se guarda esto en ninguna parte. Una corrección
+ * vacía borra el dato (la persona dijo que no es cierto): sin él, la opción no se afirma.
+ */
+export function lecturaConCorrecciones(l: LecturaCasilla, correcciones: Correcciones | null | undefined): LecturaCasilla {
+  let identidad: Record<string, string | null> | null = null
+  for (const campo of CAMPOS_DE_OPCION) {
+    const c = correcciones?.[campo]
+    if (!c) continue
+    identidad ??= { ...l.identidad }
+    identidad[campo] = c.valor === null || c.valor.trim() === '' ? null : c.valor
+  }
+  return identidad ? { ...l, identidad } : l
+}
+
+/**
+ * Lo que identifica a una opción de hotel: su primera habitación (el pantallazo 1), con las
+ * correcciones de la ficha encima. `null` si la opción no tiene lectura.
+ */
+export function lecturaDeOpcion(tarifa: TarifaPax): LecturaCasilla | null {
+  const l = habitacionesDeTarifa(tarifa)[0]?.lectura
+  return l ? lecturaConCorrecciones(l, tarifa.correcciones) : null
+}
+
+/**
+ * Palabras que no distinguen a un hotel de otro: una plataforma dice «Hotel Cabañas Agua
+ * Dulce» y otra «Cabañas Agua Dulce» (COT-2026-0018). Lista CORTA y a propósito: «posada»,
+ * «cabañas» o «hotel boutique» sí son parte del nombre (Posada Enilda, Cabañas Agua Dulce).
+ */
+const PALABRAS_GENERICAS_HOTEL: ReadonlySet<string> = new Set(['hotel', 'hostal', 'resort'])
+
+function nucleoNombreHotel(v: string): string {
+  return claveTexto(v).split(' ').filter(p => p !== '' && !PALABRAS_GENERICAS_HOTEL.has(p)).join(' ')
+}
+
+/**
+ * ¿Dos nombres son el mismo hotel? Como `mismoTexto` y, además, sin las palabras genéricas:
+ * si uno contiene al otro COMPLETO, palabra por palabra, es el mismo.
+ *
+ * ⚠️ Sin similitud difusa: dos hoteles distintos en la misma opción cobran mal y en silencio.
+ * «Decameron Aquarium» y «Decameron San Luis» no se unen: ninguno contiene al otro.
+ */
+export function mismoNombreHotel(a: string, b: string): boolean {
+  if (mismoTexto(a, b)) return true
+  const x = nucleoNombreHotel(a)
+  const y = nucleoNombreHotel(b)
+  if (!x || !y) return false
+  if (x === y) return true
+  const contiene = (grande: string, chico: string) => ` ${grande} `.includes(` ${chico} `)
+  return contiene(x, y) || contiene(y, x)
+}
+
+/**
+ * ¿Mismo hotel y mismas fechas? Sin los tres datos en las dos, no se afirma.
+ *
+ * ⚠️ Compara lo que recibe: quien compara contra una opción le pasa `lecturaDeOpcion`, que ya
+ * trae las correcciones de la ficha.
+ */
 export function mismaOpcionHotel(a: LecturaCasilla, b: LecturaCasilla): boolean {
   const ka = claveOpcionHotel(a)
   const kb = claveOpcionHotel(b)
   if (!ka || !kb) return false
-  return ka.entrada === kb.entrada && ka.salida === kb.salida && mismoTexto(ka.hotel, kb.hotel)
+  return ka.entrada === kb.entrada && ka.salida === kb.salida && mismoNombreHotel(ka.hotel, kb.hotel)
 }
 
 /** ¿Mismas fechas? Es lo que decide si dos hoteles compiten en la misma ranura. */
@@ -425,6 +493,10 @@ export function recibeHabitaciones(tarifa: TarifaPax): boolean {
  * La opción del mismo hotel y las mismas fechas a la que se une la captura (regla 1), o `null`.
  * Con varias, la que más habitaciones tiene; empatadas, la primera de la lista (el orden de la
  * cotización). Sin hotel o sin fechas en la captura no se afirma nada.
+ *
+ * Cada candidata se compara con las correcciones de su ficha (`lecturaDeOpcion`). Si una
+ * corrección deja dos opciones con la misma clave, NO se fusionan: la captura siguiente cae
+ * en una de ellas y las dos siguen donde están.
  */
 export function opcionDelMismoHotel(
   propia: LecturaCasilla,
@@ -436,7 +508,8 @@ export function opcionDelMismoHotel(
   for (const c of candidatas) {
     if (!recibeHabitaciones(c.tarifa)) continue
     const habs = habitacionesDeTarifa(c.tarifa)
-    if (habs.length === 0 || !mismaOpcionHotel(habs[0].lectura, propia)) continue
+    const suya = lecturaDeOpcion(c.tarifa)
+    if (!suya || !mismaOpcionHotel(suya, propia)) continue
     if (habs.length > mejorN) {
       mejor = c
       mejorN = habs.length

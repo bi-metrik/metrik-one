@@ -51,6 +51,8 @@ import {
   conHabitaciones,
   habitacionesDeTarifa,
   mismaImagenEnHabitaciones,
+  lecturaConCorrecciones,
+  lecturaDeOpcion,
   mismaOpcionHotel,
   ocupacionDeHabitacion,
   opcionDelMismoHotel,
@@ -568,6 +570,7 @@ export async function lecturaManualEnBorrador(
     ranura,
     entrada: tipo === 'hotel' ? { tipo, datos: leerHotelManual(datos) } : { tipo, datos: leerTrasladoManual(datos) },
     leidaEn: new Date().toISOString(),
+    viaje: ctx.viaje.fechas,
   })
   if (!r.ok) return { ok: false, codigo: 'CAMPOS', mensaje: r.errores._ ?? 'Revisa los campos marcados.', errores: r.errores }
   const leida = r.lectura
@@ -863,7 +866,8 @@ async function agregarHabitacionLeida(a: {
       mensaje: 'Esta opción se cotiza restando capturas: quita la de «sin el infante» o «solo adultos» antes de sumarle habitaciones.',
     }
   }
-  if (!mismaOpcionHotel(habs[0].lectura, a.leida)) {
+  // La opción, con lo corregido en su ficha: una fecha mal leída y ya corregida no la esconde.
+  if (!mismaOpcionHotel(lecturaDeOpcion(a.tarifa) ?? habs[0].lectura, a.leida)) {
     return {
       ok: false,
       codigo: 'OTRO_HOTEL',
@@ -942,7 +946,8 @@ export async function unirHotelComoHabitacion(
     // El orden de la cotización: la opción más vieja gana un empate.
     .sort((x, y) => String(x.created_at ?? '').localeCompare(String(y.created_at ?? '')) || String(x.id).localeCompare(String(y.id)))
     .map(f => ({ id: f.id as string, tarifa: leerTarifaPax(f.tarifa_pax) }))
-  const destino = opcionDelMismoHotel(propia, hoteles)
+  // Las dos con las correcciones de su ficha; lo que se guarda como habitación es lo leído.
+  const destino = opcionDelMismoHotel(lecturaConCorrecciones(propia, tarifa.correcciones), hoteles)
   if (!destino) {
     return opciones.destinoId
       ? { ok: false, mensaje: 'Esa opción ya no es del mismo hotel con las mismas fechas. Recarga la cotización.' }
@@ -1230,7 +1235,7 @@ export async function cambiarPantallazoDeHabitacion(
   if (!leidaR.ok) return leidaR
   const leida = leidaR.leida
   const otra = habs.find(h => h.id !== habitacionId)
-  if (otra && !mismaOpcionHotel(otra.lectura, leida)) {
+  if (otra && !mismaOpcionHotel(lecturaConCorrecciones(otra.lectura, ctx.tarifa.correcciones), leida)) {
     return { ok: false, codigo: 'OTRO_HOTEL', mensaje: 'Esta captura es de otro hotel o de otras fechas: pégala en la bandeja para que quede como otra opción.' }
   }
   const v = validarHabitacion(ctx.ranura.slug, leida)
