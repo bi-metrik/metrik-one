@@ -109,8 +109,9 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ ok: true, action, ...r }), { status: 200 });
       }
       case 'recordatorios': {
-        // Cada 15 minutos (cron de Vercel `/api/crons/recordatorios-wa`): manda las dosis
-        // vencidas del dia de Bogota y escala las que llevan su plazo sin confirmacion.
+        // Cada 15 minutos (pg_cron `wa-recordatorios`, migracion 20260930140100, y solo si hay
+        // algun recordatorio activo): manda las dosis vencidas del dia de Bogota y escala las
+        // que llevan su plazo sin confirmacion.
         //
         // ⚠️ NO pasa por `enviarAlerta`: este tipo corre los 365 dias (festivo y domingo
         // incluidos) y varias veces al dia, asi que no le aplican ni la regla de dia habil

@@ -55,10 +55,6 @@
     {
       "path": "/api/crons/radar-secop-sync",
       "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/crons/recordatorios-wa",
-      "schedule": "*/15 * * * *"
     }
   ]
 }
