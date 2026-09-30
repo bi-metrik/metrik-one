@@ -28,9 +28,27 @@ ningún guardarraíl para eso porque él lo pidió explícitamente así.
 
 **How to apply:** si aparece un espacio raro en `workspaces`, la bitácora de cómo nació está en
 `secop_registros` (correo, IP, dominio, NIT, slug pedido vs. creado, estado). Un espacio de estos se
-limpia borrando `staff` → `profiles` → `fiscal_profiles` → `workspaces`, y la fila de
-`secop_registros` queda con `workspace_id` en `null` por el `on delete set null` — o sea que **borrar
-el espacio NO libera el NIT**, a propósito: liberarlo es una decisión, no un efecto secundario.
+limpia borrando `staff` → `profiles` → `fiscal_profiles` → `workspaces`.
+
+⚠️⚠️ **Pero el `delete` de `workspaces` FALLA si el registro sigue en `creado`**, y eso NO se diseñó:
+salió del choque entre el `on delete set null` de la FK y el CHECK `secop_registros_creado_tiene_espacio`.
+El borrado dispara el `set null`, el CHECK exige que un `creado` tenga espacio, y Postgres aborta con
+*«violates check constraint "secop_registros_creado_tiene_espacio"»*. **Comprobado en PGlite el
+2026-09-30**, después de haber escrito la receta equivocada en el PR #961.
+
+La receta que SÍ funciona, en este orden:
+
+```sql
+update secop_registros set estado = 'rechazado', motivo = 'espacio_limpiado' where workspace_id = '<ws>';
+-- y después sí: staff → profiles → fiscal_profiles → workspaces
+```
+
+**Y eso LIBERA el NIT** (también comprobado): los índices únicos son parciales sobre
+`estado = 'creado'`, así que sacar la fila de ese estado deja el número disponible otra vez. Es lo
+contrario de lo que afirmé al mergear. Visto de frente el efecto no es malo —obliga a decidir
+explícitamente sobre el registro antes de borrar el espacio, en vez de orfanar la fila en silencio—
+pero si se quiere conservar el NIT tomado después de limpiar, hace falta un estado nuevo
+(`limpiado`, dentro del índice único) y eso es otra migración.
 
 La migración `20260929090000_registro_secop_autogestion.sql` es DDL puro, idempotente
 (`if not exists`), no toca ninguna tabla existente y no enciende ningún módulo. **Ya aplicada: no
