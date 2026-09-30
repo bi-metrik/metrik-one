@@ -38,6 +38,8 @@ describe('leerPedirSi: el formato se valida al leer', () => {
     ['número como texto', { field: 'a', al_menos: '6' }],
     ['value sobre una suma', { suma_de: ['a'], value: '1' }],
     ['lista vacía', []],
+    ['vacio con otra comparación', { field: 'a', vacio: true, value: 'x' }],
+    ['vacio que no es booleano', { field: 'a', vacio: 'si' }],
   ])('rechaza: %s', (_nombre, raw) => {
     expect('error' in leerPedirSi(raw)).toBe(true)
   })
@@ -93,6 +95,19 @@ describe('calcularNiveles', () => {
     const r = calcularNiveles([campo('x', { nivel: 'obligatorio' })], {})
     expect(r.minimo.total + r.deseable.total).toBe(0)
     expect(r.errores[0]).toMatch(/nivel «obligatorio»/)
+  })
+
+  it('vacio: true cuenta mientras el dato NO está; false, cuando sí', () => {
+    const f = [campo('flex', { nivel: 'deseable', pedir_si: { field: 'fecha_salida', vacio: true } })]
+    expect(calcularNiveles(f, {}).deseable.total).toBe(1)
+    expect(calcularNiveles(f, { fecha_salida: '' }).deseable.total).toBe(1)
+    expect(calcularNiveles(f, { fecha_salida: '2026-11-15' }).deseable.total).toBe(0)
+    const g = [campo('x', { nivel: 'minimo', pedir_si: { field: 'fecha_salida', vacio: false } })]
+    expect(calcularNiveles(g, { fecha_salida: '2026-11-15' }).minimo.total).toBe(1)
+    expect(calcularNiveles(g, {}).minimo.total).toBe(0)
+    const h = [campo('x', { nivel: 'minimo', pedir_si: { suma_de: ['ninos', 'infantes'], vacio: true } })]
+    expect(calcularNiveles(h, { ninos: '' }).minimo.total).toBe(1)
+    expect(calcularNiveles(h, { ninos: 0 }).minimo.total).toBe(0)
   })
 
   it('distinto_de y value_in comparan como las condiciones de bloque (sin tildes ni mayúsculas)', () => {

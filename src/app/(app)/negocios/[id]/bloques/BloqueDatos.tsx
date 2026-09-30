@@ -4,7 +4,7 @@ import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
 import { resolverPlantillaCampo } from '@/lib/negocios/plantilla-campo'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
-import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion } from '../../negocio-v2-actions'
+import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion, confirmarSugerido } from '../../negocio-v2-actions'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
 import { extraerCampoDesdeImagen, subirImagenClipboard } from '@/lib/actions/documento-actions'
@@ -33,6 +33,8 @@ import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negoci
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
 import IndicadoresSolicitud from './indicadores-solicitud'
+import MarcaSugerido from './marca-sugerido'
+import { sugeridosDe } from '@/lib/negocios/sugeridos'
 
 export interface DatosField {
   slug: string
@@ -247,6 +249,19 @@ export default function BloqueDatos({
     : undefined
   const modoEfectivo: 'editable' | 'visible' = corrigiendo ? 'editable' : modo
   const ediciones = (saved._ediciones ?? {}) as Record<string, EdicionCampo>
+  // Valores sugeridos desde WhatsApp y sin confirmar (ver `lib/negocios/sugeridos.ts`). La
+  // marca se deja de mostrar en cuanto el valor en pantalla difiere del guardado: al guardar,
+  // el servidor la quita.
+  const marcasSugerido = sugeridosDe(saved)
+  const [confirmados, setConfirmados] = useState<Set<string>>(() => new Set())
+  const sugeridoVigente = (slug: string, actual: unknown) =>
+    !!marcasSugerido[slug] && !confirmados.has(slug)
+    && String(actual ?? '').trim().toLocaleUpperCase('es-CO') === String(saved[slug] ?? '').trim().toLocaleUpperCase('es-CO')
+  async function confirmarMarca(slug: string) {
+    const r = await confirmarSugerido(negocioBloqueId, slug)
+    if (r.error) toast.error(r.error)
+    else setConfirmados(prev => new Set(prev).add(slug))
+  }
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {}
     fields.forEach(f => {
@@ -778,6 +793,7 @@ export default function BloqueDatos({
                     ePayco verificado
                   </span>
                 )}
+                {sugeridoVigente(f.slug, saved[f.slug]) && <MarcaSugerido frase={marcasSugerido[f.slug].frase} />}
                 {ediciones[f.slug] && (
                   <span
                     title={ediciones[f.slug].en ? `Corregido el ${formatFecha(ediciones[f.slug].en as string, { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : undefined}
@@ -914,6 +930,9 @@ export default function BloqueDatos({
               {/* Dato traído de otra fuente y aún no editado a mano → badge "auto" */}
               {autoFillDefaults?.[f.slug] != null && saved[f.slug] === undefined && values[f.slug] === autoFillDefaults[f.slug] && (
                 <span className="rounded bg-papel px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
+              )}
+              {sugeridoVigente(f.slug, values[f.slug]) && (
+                <MarcaSugerido frase={marcasSugerido[f.slug].frase} onConfirmar={() => { void confirmarMarca(f.slug) }} />
               )}
               {/* Dato leído por IA de un pantallazo y aún sin verificar → badge "Revisar" */}
               {aiFilled[f.slug] && (

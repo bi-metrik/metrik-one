@@ -1,62 +1,96 @@
-/**
- * Mínimo y deseable de una solicitud: qué tanto de lo que hace falta ya está.
- *
- * Nació con Trappvel (2026-09-28). La solicitud de viaje se empieza a cotizar con un
- * MÍNIMO y se cierra la cotización final con un DESEABLE. Qué dato es cuál, y cuándo se
- * pide, todavía lo decide el cliente: por eso vive en la configuración de cada campo
- * (`config_extra.fields[i]` de un bloque `datos`) y no en código. Cuando cambie la
- * decisión se edita la config y no hay PR.
- *
- * Tres propiedades nuevas del campo, todas opcionales. Un campo sin ellas se comporta
- * exactamente como antes y NO suma a ninguna barra:
- *
- *   · `nivel`     'minimo' | 'deseable' — a qué barra suma.
- *   · `pedir_si`  condición sobre otros campos para que el campo cuente (ver abajo).
- *   · `pregunta`  cómo se le pide el dato a una persona («¿Qué edad tiene cada niño?»).
- *                 Es lo que se muestra en «lo que falta», en pantalla y en el bot.
- *                 Sin `pregunta`, se usa el `label`.
- *
- * ── `pedir_si` ──────────────────────────────────────────────────────────────────────
- *
- * Declarativo, sin evaluar texto como código. Reusa el vocabulario que ONE ya tiene en las
- * `condition` de los bloques (`field`, `value`, `value_in`, con la MISMA comparación de
- * `condicion-bloque.ts`) y en los campos suma (`suma_de`), y le agrega dos comparaciones
- * numéricas:
- *
- *     { "field": "destino_tipo", "value": "internacional" }
- *     { "field": "tipo_viaje", "value_in": ["playa", "crucero"] }
- *     { "field": "numero_pasajeros", "al_menos": 6 }
- *     { "suma_de": ["ninos", "infantes"], "mayor_que": 0 }
- *     { "field": "fecha_salida", "vacio": true }   ← cuenta mientras la fecha NO está
- *     [ {…}, {…} ]                       ← lista: tienen que cumplirse TODAS
- *
- * Cada condición lleva `field` o `suma_de` (uno solo) y al menos una comparación
- * (`value`, `value_in`, `distinto_de`, `al_menos`, `mayor_que`). Si trae varias, se
- * exigen todas.
- *
- * `vacio` es la única comparación que mira la AUSENCIA: `true` se cumple cuando el dato no
- * está (vacío, nulo; en una suma, ninguna parte con número) y `false` cuando sí está. Va
- * sola: combinada con otra comparación no significaría nada y se rechaza. Nació con
- * «flexibilidad de fechas»: solo se pregunta mientras no haya fecha de salida.
- *
- * ⚠️ Salvo `vacio`, un dato que todavía no está NO cumple la condición. «Permiso de salida de menores si
- * hay menores»: si nadie ha dicho cuántos niños viajan, el permiso no se pide todavía —
- * lo que falta es el número de niños, que es de su propia barra. Así la barra no cambia
- * de tamaño por adivinar, y la pregunta que sale primero es la de la fuente.
- *
- * ⚠️ Una condición mal escrita NO esconde el campo: se cuenta como si aplicara y se
- * reporta en `errores`. Ante la duda se pregunta; esconder un dato por un error de config
- * es la forma en que un campo deja de pedirse sin que nadie lo note.
- *
- * Qué pasa cuando el mínimo está incompleto NO se decide aquí: por defecto es un aviso, y
- * si la etapa declara el gate `solicitud_minimo` en `config_extra.gates` frena el avance
- * con el mismo mecanismo (y el mismo «omitir con motivo») que los demás gates de etapa.
- */
+// ⚠️ ESTO ES UNA COPIA. La fuente es `src/lib/negocios/niveles-solicitud.ts`: las edge
+// functions se despliegan solas y no alcanzan `src/`. Las dependencias de la fuente
+// (`campo-completo.ts`, `condicion-bloque.ts`, `numero-colombiano.ts`) van copiadas aquí,
+// solo lo que esta función usa. `src/lib/negocios/niveles-solicitud-paridad.test.ts` corre
+// las dos sobre los mismos casos: si se toca una sin la otra, la prueba cae.
+//
+// Qué hace: mínimo y deseable de una solicitud a partir de `nivel`, `pedir_si` y `pregunta`
+// de los campos de un bloque `datos`. El formato y las reglas están documentados en la fuente.
 
-import { campoRequeridoCumplido, campoVisible, type CampoConfig } from './campo-completo'
-import { valorCumpleCondicion } from './condicion-bloque'
-import { parsearNumeroColombiano } from './numero-colombiano'
+// ── Copiado de `campo-completo.ts` ──────────────────────────────────────────────
+export interface CampoConfig {
+  slug: string
+  tipo: string
+  required?: boolean
+  label?: string
+  showIf?: { field: string; equals: unknown }
+  no_cero?: boolean
+}
 
+const TIPOS_SIN_CAPTURA = new Set(['documentos_preview', 'doc_link', 'plantilla'])
+const TIPOS_CONFIRMACION = new Set(['toggle', 'checkbox'])
+
+function campoRequeridoCumplido(
+  campo: Pick<CampoConfig, 'tipo'> & Partial<Pick<CampoConfig, 'no_cero'>>,
+  valor: unknown,
+): boolean {
+  const { tipo } = campo
+  if (TIPOS_SIN_CAPTURA.has(tipo)) return true
+  if (TIPOS_CONFIRMACION.has(tipo)) return valor === true || valor === 'true'
+  if (valor === '' || valor === null || valor === undefined) return false
+  if (campo.no_cero) {
+    if (typeof valor === 'number') {
+      if (valor === 0) return false
+    } else {
+      const limpio = String(valor).replace(/[^\d.-]/g, '')
+      if (/\d/.test(limpio) && Number(limpio) === 0) return false
+    }
+  }
+  return true
+}
+
+function campoVisible(f: CampoConfig, valores: Record<string, unknown>): boolean {
+  if (!f.showIf) return true
+  return valores[f.showIf.field] === f.showIf.equals
+}
+
+// ── Copiado de `condicion-bloque.ts` ────────────────────────────────────────────
+const norm = (s: unknown) =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+
+function valorCumpleCondicion(valor: unknown, cond: { value?: string; value_in?: unknown[] }): boolean {
+  const raw = String(valor ?? '')
+  if (Array.isArray(cond.value_in)) {
+    const target = norm(raw)
+    return cond.value_in.some(v => norm(v) === target)
+  }
+  return raw === cond.value
+}
+
+// ── Copiado de `numero-colombiano.ts` ───────────────────────────────────────────
+const MILES_CON_PUNTO = /^\d{1,3}(\.\d{3})+$/
+const INVISIBLES = [0x00a0, 0x2007, 0x202f].map((c) => String.fromCharCode(c)).join('')
+const ADORNOS = new RegExp(`[\\s${INVISIBLES}$']`, 'g')
+
+export function parsearNumeroColombiano(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+  if (typeof raw !== 'string') return null
+  const limpio = raw.replace(ADORNOS, '')
+  if (limpio === '') return null
+  if (!/\d/.test(limpio)) return null
+  const signo = limpio.startsWith('-') ? -1 : 1
+  const cuerpo = limpio.replace(/^[+-]/, '')
+  if (!/^[\d.,]+$/.test(cuerpo)) return null
+  let canonico: string
+  if (cuerpo.includes(',')) {
+    const partes = cuerpo.split(',')
+    if (partes.length > 2) return null
+    canonico = `${partes[0].replace(/\./g, '')}.${partes[1]}`
+  } else if (MILES_CON_PUNTO.test(cuerpo)) {
+    canonico = cuerpo.replace(/\./g, '')
+  } else {
+    canonico = cuerpo
+  }
+  const n = Number(canonico)
+  if (!Number.isFinite(n)) return null
+  return signo * n
+}
+
+// ── Copia de `niveles-solicitud.ts` (desde aquí, idéntica a la fuente) ──────────
 export type NivelCampo = 'minimo' | 'deseable'
 
 export const NIVELES: readonly NivelCampo[] = ['minimo', 'deseable']
