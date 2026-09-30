@@ -118,7 +118,8 @@
 - ⚠️ [Bucket público cert-documentos](project_cerrar_bucket_cert_documentos.md) — migración SIN aplicar
 - ⚠️⚠️ [Soporte foto del bot](project_wa_soporte_reencauza.md) — #658 sin desplegar; un PDF no llega al handler
 - ⚠️⚠️ [Bot WA sin bandeja: premisas del motor Trappvel](project_wa_bot_sin_bandeja_trappvel.md) — un número, preview de 100, funnelchat es SOENA sin mensajes
-- ⚠️⚠️ [Entendimiento de la bandeja WA (#960)](project_entendimiento_bandeja_wa.md) — migración SIN aplicar; gate de etapa, no llave por línea
+- ⚠️⚠️ [Bandeja WA a negocio existente](project_bandeja_negocio_existente.md) — migración SIN aplicar; conflicto en `_conflictos`; ejecutor Deno sí se prueba
+- ⚠️⚠️ [Entendimiento de la bandeja WA (#960)](project_entendimiento_bandeja_wa.md) — mergeado y migrado; gate de etapa, no llave por línea
 - ⚠️⚠️ [Bandeja de solicitudes WA (Trappvel)](project_bandeja_wa_solicitudes.md) — 2 migraciones SIN aplicar: tablas → deploy → cron; llave al final
 - ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — mergeado, wa-webhook SIN redesplegar
 - ⚠️⚠️ [WhatsApp sin teléfono (BSUID)](project_wa_bsuid_sin_telefono.md) — #724 sin redesplegar
