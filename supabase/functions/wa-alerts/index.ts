@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
         // Con `WA_RECORDATORIOS` apagado (el default) devuelve `apagado: true` sin mandar nada
         // ni tocar la base.
         const r = await procesarRecordatorios(supabase);
-        return new Response(JSON.stringify({ ok: r.ok, action, ...r }), { status: r.ok ? 200 : 500 });
+        return new Response(JSON.stringify({ action, ...r }), { status: r.ok ? 200 : 500 });
       }
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { status: 400 });
