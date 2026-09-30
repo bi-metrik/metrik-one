@@ -52,10 +52,19 @@ type GastoOption = {
 
 export async function handleGasto(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase } = ctx;
-  const { amount, entity_hint, concept, category_hint, project_code } = parsed.fields;
+  const { amount, entity_hint, concept, project_code } = parsed.fields;
 
   if (!amount || amount <= 0) {
     await ctx.sendMessage(MSG_PEDIR_MONTO);
+    // Se RECUERDA lo que traia el mensaje ("Registrar gasto de peaje"): sin esta sesion
+    // la respuesta ("18900") se parseaba desde cero y el detalle se perdia. La respuesta
+    // la toma `resume.ts` (estado `collecting`) y vuelve aqui con los campos combinados.
+    await ctx.updateSession('collecting', {
+      intent: 'GASTO', pending_action: 'W01',
+      parsed_fields: parsed.fields,
+      confianza_gasto: parsed.confidence,
+      monto_reintentos: 0,
+    });
     return;
   }
 
@@ -64,10 +73,7 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
   // procesando; en los que pasan por la sesion (resume.ts), de la sesion.
   const fields = parsed.fields;
 
-  // Resolve category — trust Gemini's category_hint first, matchCategory() as fallback
-  const categoria = categoriaConocida(category_hint)
-    || matchCategory([concept, fields.descripcion].filter(Boolean).join(' '))
-    || 'otros';
+  const categoria = categoriaDelGasto(fields);
 
   const isHighConfidence = parsed.confidence >= CONFIDENCE_THRESHOLD;
 
@@ -180,6 +186,17 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
 }
 
 /**
+ * Categoria del gasto: la del parser si es valida, y si no, por palabras clave del
+ * concepto y la descripcion. La usa tambien `resume.ts` cuando el usuario escribe la
+ * descripcion sobre la confirmacion ("Peaje" -> transporte).
+ */
+export function categoriaDelGasto(fields: ParsedFields): string {
+  return categoriaConocida(fields.category_hint)
+    || matchCategory([fields.concept, fields.descripcion].filter(Boolean).join(' '))
+    || 'otros';
+}
+
+/**
  * Resuelve la propuesta de centro de costos para un gasto del bot WA.
  * Si tipo='negocio' o el motor sugiere directa_negocio con el mismo negocio,
  * aplica directa_negocio. Si motor sugiere algo con confianza ≥0.7, aplica.
@@ -286,8 +303,10 @@ export async function showGastoConfirmation(
     destino_tipo: tipo,
     amount, categoria,
     parsed_fields: fields,
-    ...(cc.centro ? { centro_costos: cc.centro } : {}),
-    ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
+    // Sin centro se BORRA el de una confirmacion anterior (la descripcion corregida
+    // puede cambiarlo): `undefined` quita la llave al fusionar el contexto.
+    centro_costos: cc.centro ?? undefined,
+    origen_asignacion: cc.origen ?? undefined,
   });
 }
 
@@ -363,7 +382,7 @@ export async function proceedEmpresaGasto(
     amount, categoria,
     destino_tipo: 'empresa',
     parsed_fields: fields,
-    ...(cc.centro ? { centro_costos: cc.centro } : {}),
-    ...(cc.origen ? { origen_asignacion: cc.origen } : {}),
+    centro_costos: cc.centro ?? undefined,
+    origen_asignacion: cc.origen ?? undefined,
   });
 }
