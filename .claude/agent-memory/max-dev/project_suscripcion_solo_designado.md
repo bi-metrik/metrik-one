@@ -12,7 +12,7 @@ PR #857 (mergeado `f4db56e0`, 2026-09-23, sin migración): reemplaza la regla de
 **How to apply:**
 - La comparación usa la persona EFECTIVA (`entrada.usuarioEfectivoId`, que sale de `getWorkspace().userId`). Un platform admin en «Ver como» la designada la VE en solo lectura (`ctx.soloLectura`, `ctxEscritura()` en acciones.ts); en «Ver como» un operador, NO la ve. Aceptar Términos sigue comparando contra la persona REAL.
 - ⚠️ En cda-pruebas el perfil propio de Mauricio (owner, platform admin) NO es el designado: le da 404 fuera de «Ver como». No es un bug; si pregunta, se explica así.
-- `/suscripcion` es ruta común: el middleware la deja pasar y el 404 lo da la página. No meter la regla en el middleware, porque necesita la designación (que es una lectura de base).
+- ⚠️ Corregido 2026-09-28: `/suscripcion` **NO es ruta común**. No está en `RUTAS_COMUNES`; está en `MODULOS.valida.rutas` (`src/lib/modulos/catalogo.ts`), así que el middleware la deja pasar solo si el espacio tiene `valida_consulta`. En un espacio sin Valida el gate la REDIRIGE al aterrizaje (no da 404). El 404 de la página es para quien sí tiene Valida y no es la designada. La regla de designación sigue fuera del middleware, porque necesita una lectura de base.
 - Pruebas: `suscripcion/quien-ve-suscripcion.test.ts` recorre la cadena real, y se validó por mutación.
 
 Reemplaza la regla de quién ve en [[project-seccion-suscripcion-cda]]. Relacionado: [[project-sustenta-tarjeta-marca]].

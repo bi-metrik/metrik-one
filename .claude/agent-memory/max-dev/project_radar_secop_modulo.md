@@ -1,6 +1,6 @@
 ---
 name: radar-secop-modulo
-description: PR #952 (Radar SECOP en ONE) SIN mergear: migración DDL sin aplicar; el cron de cobro NO lee disparador_cobro, así que enrolar el contrato no emite nada; el puntaje quedó con una sola implementación en src/lib/radar/puntuar.ts
+description: PR #952 (Radar SECOP en ONE) MERGEADO ec1bab8e con su migración aplicada; el cron de cobro NO lee disparador_cobro, así que enrolar el contrato no emite nada; el puntaje quedó con una sola implementación en src/lib/radar/puntuar.ts
 metadata:
   type: project
 ---
@@ -9,7 +9,9 @@ Spec `proyectos/metrik/one/2026-09-28_spec-radar-secop-en-one.md`, bloques D →
 **PR #952 MERGEADO** el 2026-09-28 (`ec1bab8e` en `main`); su migración `20260928180000` es DDL puro.
 ⚠️ **CADUCÓ lo de «sin mergear»** y también el hallazgo del eslabón que sigue: Mauricio autorizó
 construirlo el mismo día y vive en [[radar-trial-y-cobro]] (trial de 5 días anclado a la aceptación,
-paso 6a del cron, cierre del módulo al día 6).
+paso 6a del cron, cierre del módulo al día 6). El #957 (`terminos-uso-radar@1.0`) también está
+mergeado (`b23efc92`). El workspace `fabri` ya existe, medido en producción: `modules
+{radar_secop:true}`, `max_seats 2`, `drive_folder_id null`, `tipo nativo`, `trial`.
 
 **Why:** el Radar dejó de ser un HTML empaquetado y entra a ONE como módulo con licencia propia
 ($20.000/mes de lista; Fabri paga $15.000 como descuento de fundador, que vive en el contrato y no
@@ -66,7 +68,7 @@ mismos top-fit. **⚠️ `metrik-data/CONTEXT.md` dice 7/5 y NO reproduce a ning
 vez; el umbral del correo semanal ya bajó de 5 a 4 por eso. Antes de cambiar un peso, correr
 `puntuar.test.ts` y comparar contra `temas.py` sobre el barrido real.
 
-## La migración `20260928180000_modulo_radar_secop.sql` — SIN aplicar
+## La migración `20260928180000_modulo_radar_secop.sql` — YA aplicada
 
 **DDL puro: ni una fila de datos, y NINGÚN workspace queda con el módulo encendido** (a diferencia
 de la de Ferretería, que activaba `dimpro`). El workspace de Fabri no existe: su contrato depende
